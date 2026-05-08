@@ -9,6 +9,10 @@ from mcp_servers.performance.tools.top_queries import get_top_queries_impl
 from mcp_servers.performance.tools.pi_metrics import get_pi_metrics_impl
 from mcp_servers.performance.tools.slow_queries import get_slow_queries_impl
 from mcp_servers.performance.tools.compare_periods import compare_periods_impl
+from mcp_servers.performance.tools.detect_anomalies import detect_anomalies_impl
+from mcp_servers.performance.tools.detect_regressions import detect_regressions_impl
+from mcp_servers.performance.tools.forecast_capacity import forecast_capacity_impl
+from mcp_servers.performance.tools.performance_summary import get_performance_summary_impl
 
 cache = CacheClient()
 
@@ -71,6 +75,59 @@ TOOLS = {
                 "metric_type": {"type": "string", "default": "aas"},
             },
             "required": ["cluster_id", "period_a_start", "period_a_end", "period_b_start", "period_b_end"],
+        },
+    },
+    "detect_anomalies": {
+        "impl": detect_anomalies_impl,
+        "description": "Detect anomalous metrics using z-score analysis against a 7-day baseline",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "hours": {"type": "integer", "default": 4, "description": "Recent window in hours to compare against baseline"},
+                "threshold": {"type": "number", "default": 2.0, "description": "Z-score threshold for anomaly detection"},
+            },
+            "required": ["cluster_id"],
+        },
+    },
+    "detect_regressions": {
+        "impl": detect_regressions_impl,
+        "description": "Detect query performance regressions around a change point (deploy, config change)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "change_point": {"type": "string", "description": "ISO 8601 timestamp of the change event"},
+                "hours_before": {"type": "integer", "default": 24, "description": "Hours before change point for baseline"},
+                "hours_after": {"type": "integer", "default": 24, "description": "Hours after change point to analyze"},
+                "min_change_pct": {"type": "number", "default": 50.0, "description": "Minimum % increase to flag as regression"},
+            },
+            "required": ["cluster_id", "change_point"],
+        },
+    },
+    "forecast_capacity": {
+        "impl": forecast_capacity_impl,
+        "description": "Forecast when a metric (storage, connections, AAS) will reach its limit using linear regression",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "metric": {"type": "string", "enum": ["storage_gb", "connections", "aas"], "default": "storage_gb"},
+                "days_lookback": {"type": "integer", "default": 30, "description": "Days of historical data for trend calculation"},
+            },
+            "required": ["cluster_id"],
+        },
+    },
+    "get_performance_summary": {
+        "impl": get_performance_summary_impl,
+        "description": "Get a high-level performance summary with key KPIs (AAS, slow queries, connections)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "hours": {"type": "integer", "default": 24, "description": "Time window in hours"},
+            },
+            "required": ["cluster_id"],
         },
     },
 }
