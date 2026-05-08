@@ -1,0 +1,148 @@
+# DBOps — AI-Powered Database Operations Platform
+
+AI 기반 종합 데이터베이스 운영 플랫폼. 자연어 대화로 Amazon Aurora MySQL/PostgreSQL 클러스터의 성능 분석, 장애 진단, 운영 자동화, 시뮬레이션을 수행합니다.
+
+## Features
+
+- **AI Chat** — 자연어로 DB 성능 분석, 장애 진단, 운영 작업 요청
+- **Performance Analysis** — Slow query 분석, EXPLAIN 해석, 인덱스 추천, 이상 탐지
+- **Incident Diagnosis** — RCA(Root Cause Analysis), 시그널 상관 분석, 타임라인 재구성
+- **Operations Automation** — 파라미터 변경, DDL 실행, 스케일링 (Human-in-the-loop 승인)
+- **Simulation** — 버전 업그레이드 영향 분석, 파라미터 변경 시뮬레이션, DDL 영향도 예측
+- **Monitoring Dashboard** — 실시간 클러스터 상태, 메트릭 시각화, 프로액티브 알림
+- **Cross-Account** — Hub-Spoke IAM 패턴으로 여러 AWS 계정의 Aurora 클러스터 통합 관리
+
+## Architecture
+
+```
+Web UI (Next.js) ──SSE──▶ AgentCore Runtime (Strands Agent)
+                                    │
+                              AgentCore Gateway (Cedar Policy)
+                                    │
+                    ┌───────────────┼───────────────┐
+                    ▼               ▼               ▼
+              Custom MCP      Official AWS MCP   Bedrock KB
+              (Performance,   (Aurora PG/MySQL,  (S3 Vectors)
+               Incident,      CloudWatch,
+               Operations,    AWS API)
+               Simulation)
+                    │
+                    ▼
+             Aurora PG Cache ◀── Data Collection Pipeline
+```
+
+- **Single Agent + Gateway**: 단일 AgentCore Runtime + Gateway MCP로 지연/토큰 최적화
+- **CDK-First**: 모든 인프라는 CDK로만 관리. `cdk deploy --all`로 전체 배포
+- **Human-in-the-loop**: 조회는 자동, 변경은 DBA 승인 필수 (Cedar Policy 강제)
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Agent | Strands Agents SDK, AgentCore Runtime/Gateway |
+| LLM | Amazon Bedrock Claude |
+| Frontend | Next.js 15, React, shadcn/ui, Tailwind CSS |
+| IaC | AWS CDK (Python) |
+| Data | Aurora PostgreSQL (Cache), DynamoDB, S3, S3 Vectors |
+
+## Quick Start
+
+### Prerequisites
+
+- AWS Account with AdministratorAccess
+- Node.js 20+, Python 3.10+
+- AWS CDK CLI (`npm install -g aws-cdk`)
+- Bedrock model access enabled (Claude Sonnet)
+
+### Deployment
+
+```bash
+# 1. Clone
+git clone https://github.com/JinHyun-Park/dbops.git
+cd dbops
+
+# 2. Configure
+cp cdk/config/settings.example.py cdk/config/settings.py
+# Edit settings.py: ACCOUNT_ID, REGION, COGNITO_DOMAIN_PREFIX
+
+# 3. Install dependencies
+pip install -r requirements.txt
+cd frontend && npm install && npm run build && cd ..
+
+# 4. Deploy
+cd cdk
+cdk bootstrap
+cdk deploy --all
+
+# 5. Run schema migrations (via AWS Console or CLI)
+# Execute data-pipeline/sql/schema.sql, schema_v2.sql, schema_v3.sql
+# against the Aurora PG Cache cluster via RDS Data API
+
+# 6. Configure AgentCore (post-deploy)
+# npm install -g @aws/agentcore
+# agentcore create --defaults
+# agentcore deploy
+
+# 7. Register your first cluster
+# Open the Web UI → Clusters → + Register
+```
+
+### Cross-Account Setup
+
+To manage Aurora clusters in other AWS accounts:
+
+1. Deploy the spoke role in each target account:
+   ```bash
+   aws cloudformation deploy \
+     --template-file cdk/cross-account/spoke-role-template.yaml \
+     --stack-name dbops-spoke-role \
+     --parameter-overrides HubAccountId=<HUB_ACCOUNT_ID> \
+     --capabilities CAPABILITY_NAMED_IAM
+   ```
+
+2. Tag clusters for write access: `ManagedBy=dbops`
+
+3. Register in DBOps with the spoke role ARN
+
+See `cdk/cross-account/README.md` for details.
+
+## Project Structure
+
+```
+dbops/
+├── cdk/                  # CDK infrastructure (4 stacks)
+├── agent/                # Strands Agent + Dockerfile
+├── mcp-servers/          # 4 Custom MCP servers (30 tools)
+├── data-pipeline/        # ETL, Event Processor, Report Generator, Monitor
+├── api/                  # REST API Lambdas
+├── frontend/             # Next.js Web UI
+├── knowledge/            # Bedrock KB source documents
+├── tests/                # Unit tests
+├── .kiro/                # Kiro specs and steering
+└── docs/                 # Design specs and plans
+```
+
+## Development
+
+```bash
+# Run tests
+pytest tests/ -v
+
+# Frontend dev server
+cd frontend && npm run dev
+
+# CDK synth (validate templates)
+cd cdk && cdk synth --quiet
+```
+
+## Documentation
+
+- Design Spec: `docs/superpowers/specs/2026-05-08-dbops-design.md`
+- Implementation Plans: `docs/superpowers/plans/`
+- Kiro Specs: `.kiro/specs/`
+- Cedar Policies: `cdk/policies/`
+- Cross-Account: `cdk/cross-account/README.md`
+
+## License
+
+Private — All rights reserved
