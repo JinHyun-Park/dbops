@@ -83,3 +83,25 @@ class CacheClient:
             rows.append(row)
 
         return QueryResult(columns=columns, rows=rows, row_count=len(rows))
+
+
+class CrossAccountClient:
+    def __init__(self, spoke_role_arn: str, region: str):
+        sts = boto3.client("sts")
+        credentials = sts.assume_role(
+            RoleArn=spoke_role_arn,
+            RoleSessionName="dbops-cross-account",
+            DurationSeconds=3600,
+        )["Credentials"]
+
+        session = boto3.Session(
+            aws_access_key_id=credentials["AccessKeyId"],
+            aws_secret_access_key=credentials["SecretAccessKey"],
+            aws_session_token=credentials["SessionToken"],
+            region_name=region,
+        )
+        self.rds = session.client("rds")
+        self.pi = session.client("pi")
+        self.logs = session.client("logs")
+        self.rds_data = session.client("rds-data")
+        self.cloudwatch = session.client("cloudwatch")
