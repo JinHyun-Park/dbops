@@ -8,37 +8,28 @@ echo ""
 
 # Check prerequisites
 command -v cdk >/dev/null 2>&1 || { echo "❌ AWS CDK CLI required. Run: npm install -g aws-cdk"; exit 1; }
-command -v agentcore >/dev/null 2>&1 || { echo "❌ AgentCore CLI required. Run: npm install -g @aws/agentcore"; exit 1; }
 command -v aws >/dev/null 2>&1 || { echo "❌ AWS CLI required."; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Step 1: Build frontend
-echo "▶ [1/4] Building frontend..."
+echo "▶ [1/3] Building frontend..."
 cd "$SCRIPT_DIR/frontend"
 npm install --silent
 npm run build
 echo "✅ Frontend built"
 
-# Step 2: Deploy main CDK stacks (Foundation → Data → Agent → Frontend)
+# Step 2: Deploy all CDK stacks (Foundation → Data → Agent → Frontend)
 echo ""
-echo "▶ [2/4] Deploying CDK stacks..."
+echo "▶ [2/3] Deploying CDK stacks..."
 cd "$SCRIPT_DIR/cdk"
 pip install -r requirements.txt -q
 cdk deploy --all --require-approval never
-echo "✅ CDK stacks deployed"
+echo "✅ All stacks deployed (Foundation, Data, Agent + AgentCore, Frontend)"
 
-# Step 3: Deploy AgentCore Runtime
+# Step 3: Run schema migrations
 echo ""
-echo "▶ [3/4] Deploying AgentCore Runtime..."
-cd "$SCRIPT_DIR/agentcore-runtime/dbopsagent"
-cd agentcore/cdk && npm install --silent && cd ../..
-agentcore deploy --yes
-echo "✅ AgentCore Runtime deployed"
-
-# Step 4: Run schema migrations
-echo ""
-echo "▶ [4/4] Running schema migrations..."
+echo "▶ [3/3] Running schema migrations..."
 cd "$SCRIPT_DIR"
 
 CLUSTER_ARN=$(aws cloudformation describe-stacks \
@@ -88,8 +79,20 @@ API_URL=$(aws cloudformation describe-stacks \
   --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
   --output text 2>/dev/null || echo "N/A")
 
-echo "  Web UI:  $WEB_URL"
-echo "  API:     $API_URL"
+RUNTIME_ARN=$(aws cloudformation describe-stacks \
+  --stack-name dbops-dev-agent \
+  --query "Stacks[0].Outputs[?OutputKey=='RuntimeArn'].OutputValue" \
+  --output text 2>/dev/null || echo "N/A")
+
+GATEWAY_ID=$(aws cloudformation describe-stacks \
+  --stack-name dbops-dev-agent \
+  --query "Stacks[0].Outputs[?OutputKey=='GatewayId'].OutputValue" \
+  --output text 2>/dev/null || echo "N/A")
+
+echo "  Web UI:       $WEB_URL"
+echo "  API:          $API_URL"
+echo "  Runtime ARN:  $RUNTIME_ARN"
+echo "  Gateway ID:   $GATEWAY_ID"
 echo ""
 echo "  Next: Open Web UI and register your Aurora clusters"
 echo ""
