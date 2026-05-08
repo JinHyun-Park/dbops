@@ -39,7 +39,7 @@ DBA를 위한 AI 기반 종합 데이터베이스 운영 플랫폼. 자연어 �
 | Frontend | Next.js 15 (App Router) + React + shadcn/ui + Tailwind CSS |
 | IaC | AWS CDK (Python) |
 | Auth | Amazon Cognito |
-| Data Store | Aurora PostgreSQL (Cache), DynamoDB, S3, TimeStream (선택) |
+| Data Store | Aurora PostgreSQL (Cache), DynamoDB, S3, S3 Tables (Iceberg archive) |
 | Knowledge Base | Bedrock Knowledge Bases + S3 Vectors |
 
 ---
@@ -170,11 +170,8 @@ schema_snapshots (
   diff_from_previous_json
 )
 
--- 이벤트 이력
-event_history (
-  cluster_id, event_time, event_type, source,
-  message, severity
-)
+-- NOTE: event_history는 DynamoDB에 저장 (섹션 3.1 참조)
+-- Aurora PG Cache에는 메트릭/통계 데이터만 보관
 ```
 
 ### 3.3 Data Collection Pipeline
@@ -277,7 +274,7 @@ Tier 3: AWS Docs MCP (on-demand, 1-5초)
 - `explain_query` — Target Aurora에서 EXPLAIN ANALYZE 실행 + S3에 실행 계획 저장
 - `get_pi_metrics` — Aurora PG Cache에서 PI 메트릭 (AAS, wait events, counter metrics)
 - `recommend_index` — index_usage + query_stats 조합 분석으로 인덱스 추천
-- `get_slow_queries` — Aurora PG Cache에서 슬로우 쿼리 목록
+- `get_slow_queries` — Aurora PG Cache에서 슬로우 쿼리 목록 (MySQL: slow query log 파싱, PG: pg_stat_statements 기반)
 - `compare_periods` — 두 기간의 메트릭 비교 분석
 
 **분석 (4):**
@@ -334,8 +331,8 @@ Tier 3: AWS Docs MCP (on-demand, 1-5초)
 
 ### 5.6 Knowledge (Strands Native, 2 tools)
 
-- `retrieve` — Bedrock KB + S3 Vectors 검색 (Tier 2)
-- `aws_docs` — AWS Documentation MCP Server 조회 (Tier 3, Gateway 경유)
+- `retrieve` — Bedrock KB + S3 Vectors 검색 (Tier 2). Strands 네이티브 도구로 Agent에 직접 등록.
+- `aws_docs` — AWS Documentation MCP Server 조회 (Tier 3). Gateway에 외부 MCP Server 타겟으로 등록하여 연결.
 
 ---
 
