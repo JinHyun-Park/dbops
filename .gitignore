@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+venv/
+node_modules/
+.next/
+out/
+cdk.out/
+.env
+cdk/config/settings.py
+*.js.map
+.omc/

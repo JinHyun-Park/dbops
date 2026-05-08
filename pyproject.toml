@@ -1,0 +1,8 @@
+[project]
+name = "dbops"
+version = "0.1.0"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "mcp-servers", "data-pipeline"]
