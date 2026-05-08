@@ -15,10 +15,22 @@ cdk deploy dbops-dev-sample
 
 ### 정리
 
+Sample 스택은 메인 Data 스택의 VPC를 공유하므로, 전체 환경을 정리할 때 **반드시 Sample을 먼저 삭제**해야 합니다.
+
 ```bash
+# 1. Sample 먼저 삭제 (VPC 참조 해제)
 cd samples/cdk
 cdk destroy dbops-dev-sample
+
+# 2. 그 후 메인 스택 삭제
+cd ../../cdk
+cdk destroy dbops-dev-frontend
+cdk destroy dbops-dev-agent
+cdk destroy dbops-dev-data
+cdk destroy dbops-dev-foundation
 ```
+
+> **주의**: Sample 삭제 없이 Data 스택을 삭제하면 VPC Export 참조 충돌로 실패합니다.
 
 ### 포함 내용
 
