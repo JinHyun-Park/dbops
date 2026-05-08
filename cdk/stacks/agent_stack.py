@@ -2,11 +2,13 @@ import aws_cdk as cdk
 from aws_cdk import (
     aws_apigatewayv2 as apigwv2,
     aws_apigatewayv2_integrations as integrations,
+    aws_iam as iam,
     aws_lambda as lambda_,
 )
 import aws_cdk.aws_bedrock_agentcore_alpha as agentcore
 from constructs import Construct
 from config.settings import Settings
+from tool_definitions import performance_tools, incident_tools, operations_tools, simulation_tools
 
 
 class AgentStack(cdk.Stack):
@@ -90,26 +92,30 @@ class AgentStack(cdk.Stack):
             gateway_name=f"dbops-{Settings.ENV}-gateway",
         )
 
-        self.gateway.add_lambda_target("PerformanceTarget",
-            lambda_function=perf_mcp_lambda,
-            tool_schema=agentcore.ToolSchema.from_local_asset("../mcp-servers/schemas/performance.json"),
-            gateway_target_name=f"dbops-{Settings.ENV}-perf-target",
-        )
-        self.gateway.add_lambda_target("IncidentTarget",
-            lambda_function=incident_mcp_lambda,
-            tool_schema=agentcore.ToolSchema.from_local_asset("../mcp-servers/schemas/incident.json"),
-            gateway_target_name=f"dbops-{Settings.ENV}-incident-target",
-        )
-        self.gateway.add_lambda_target("OperationsTarget",
-            lambda_function=operations_mcp_lambda,
-            tool_schema=agentcore.ToolSchema.from_local_asset("../mcp-servers/schemas/operations.json"),
-            gateway_target_name=f"dbops-{Settings.ENV}-ops-target",
-        )
-        self.gateway.add_lambda_target("SimulationTarget",
-            lambda_function=simulation_mcp_lambda,
-            tool_schema=agentcore.ToolSchema.from_local_asset("../mcp-servers/schemas/simulation.json"),
-            gateway_target_name=f"dbops-{Settings.ENV}-sim-target",
-        )
+        mcp_lambdas = {
+            "Performance": (perf_mcp_lambda, performance_tools()),
+            "Incident": (incident_mcp_lambda, incident_tools()),
+            "Operations": (operations_mcp_lambda, operations_tools()),
+            "Simulation": (simulation_mcp_lambda, simulation_tools()),
+        }
+
+        for name, (fn, tools) in mcp_lambdas.items():
+            fn.grant_invoke(self.gateway.role)
+            fn.add_permission(
+                f"AgentCoreInvoke{name}",
+                principal=iam.ServicePrincipal("bedrock-agentcore.amazonaws.com"),
+                action="lambda:InvokeFunction",
+                source_arn=self.gateway.gateway_arn,
+            )
+
+            target = self.gateway.add_lambda_target(f"{name}Target",
+                lambda_function=fn,
+                tool_schema=agentcore.ToolSchema.from_inline(tools),
+                gateway_target_name=f"dbops-{Settings.ENV}-{name.lower()}-target",
+            )
+            target.node.add_dependency(self.gateway.role.node.default_child)
+            if self.gateway.role.node.try_find_child("DefaultPolicy"):
+                target.node.add_dependency(self.gateway.role.node.find_child("DefaultPolicy").node.default_child)
 
         # ===== AgentCore Memory =====
 
