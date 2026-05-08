@@ -56,6 +56,25 @@ class AgentStack(cdk.Stack):
         data.cache_db.secret.grant_read(perf_mcp_lambda)
         data.cache_db.grant_data_api_access(perf_mcp_lambda)
 
+        simulation_mcp_lambda = lambda_.Function(
+            self, "SimulationMCP",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../mcp-servers/mcp_servers/simulation"),
+            timeout=cdk.Duration.minutes(2),
+            memory_size=512,
+            vpc=data.vpc,
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+            },
+        )
+        data.cache_db.secret.grant_read(simulation_mcp_lambda)
+        data.cache_db.grant_data_api_access(simulation_mcp_lambda)
+
+        self.simulation_mcp_lambda = simulation_mcp_lambda
+
         self.api = apigwv2.HttpApi(
             self, "HttpApi",
             api_name=f"dbops-{Settings.ENV}-api",
@@ -130,3 +149,4 @@ class AgentStack(cdk.Stack):
 
         cdk.CfnOutput(self, "ApiUrl", value=self.api.url or "")
         cdk.CfnOutput(self, "PerfMcpLambdaArn", value=perf_mcp_lambda.function_arn)
+        cdk.CfnOutput(self, "SimulationMcpLambdaArn", value=simulation_mcp_lambda.function_arn)
