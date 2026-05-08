@@ -103,6 +103,29 @@ class AgentStack(cdk.Stack):
             integration=integrations.HttpLambdaIntegration("ReportDetailIntegration", reports_lambda),
         )
 
+        approvals_lambda = lambda_.Function(
+            self, "ApprovalsApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/approvals"),
+            timeout=cdk.Duration.seconds(30),
+            environment={
+                "APPROVALS_TABLE": foundation.approvals_table.table_name,
+            },
+        )
+        foundation.approvals_table.grant_read_write_data(approvals_lambda)
+
+        self.api.add_routes(
+            path="/api/approvals",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
+            integration=integrations.HttpLambdaIntegration("ApprovalsIntegration", approvals_lambda),
+        )
+        self.api.add_routes(
+            path="/api/approvals/{id}",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PUT],
+            integration=integrations.HttpLambdaIntegration("ApprovalDetailIntegration", approvals_lambda),
+        )
+
         self.perf_mcp_lambda = perf_mcp_lambda
 
         cdk.CfnOutput(self, "ApiUrl", value=self.api.url or "")
