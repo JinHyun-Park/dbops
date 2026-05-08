@@ -1,0 +1,22 @@
+{
+  "targets": {
+    "default": {
+      "resources": {
+        "runtimes": {
+          "dbops_agent": {
+            "runtimeId": "dbopsagent_dbops_agent-5IK5ko9NxY",
+            "runtimeArn": "arn:aws:bedrock-agentcore:ap-northeast-2:830858425797:runtime/dbopsagent_dbops_agent-5IK5ko9NxY",
+            "roleArn": "arn:aws:iam::830858425797:role/AgentCore-dbopsagent-defa-ApplicationAgentDbopsAgen-v8BIN63rWz2d"
+          }
+        },
+        "memories": {
+          "dbops_agentMemory": {
+            "memoryId": "dbopsagent_dbops_agentMemory-ihr39S72zF",
+            "memoryArn": "arn:aws:bedrock-agentcore:ap-northeast-2:830858425797:memory/dbopsagent_dbops_agentMemory-ihr39S72zF"
+          }
+        },
+        "stackName": "AgentCore-dbopsagent-default"
+      }
+    }
+  }
+}
