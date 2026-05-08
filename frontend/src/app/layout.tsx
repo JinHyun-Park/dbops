@@ -43,6 +43,12 @@ export default function RootLayout({
           <Link href="/reports" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">
             Reports
           </Link>
+          <Link href="/approvals" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">
+            Approvals
+          </Link>
+          <Link href="/clusters" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">
+            Clusters
+          </Link>
         </nav>
         {children}
       </body>
