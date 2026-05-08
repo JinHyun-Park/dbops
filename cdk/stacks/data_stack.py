@@ -125,5 +125,29 @@ class DataStack(cdk.Stack):
             targets=[targets.LambdaFunction(self.report_generator)],
         )
 
+        self.proactive_monitor = lambda_.Function(
+            self, "ProactiveMonitor",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../data-pipeline/proactive_monitor"),
+            timeout=cdk.Duration.minutes(2),
+            memory_size=256,
+            vpc=self.vpc,
+            environment={
+                "CACHE_DB_CLUSTER_ARN": self.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "ALERT_TOPIC_ARN": self.alert_topic.topic_arn,
+            },
+        )
+        self.cache_db.secret.grant_read(self.proactive_monitor)
+        self.cache_db.grant_data_api_access(self.proactive_monitor)
+        self.alert_topic.grant_publish(self.proactive_monitor)
+
+        events.Rule(self, "ProactiveMonitorSchedule",
+            schedule=events.Schedule.rate(cdk.Duration.minutes(5)),
+            targets=[targets.LambdaFunction(self.proactive_monitor)],
+        )
+
         cdk.CfnOutput(self, "CacheDbClusterArn", value=self.cache_db.cluster_arn)
         cdk.CfnOutput(self, "CacheDbEndpoint", value=self.cache_db.cluster_endpoint.hostname)
