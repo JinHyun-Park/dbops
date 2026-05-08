@@ -245,12 +245,15 @@ Tier 2: Bedrock KB + S3 Vectors (retrieve 도구, ~100ms)
   - Aurora 공식 문서
   - 내부 런북, best practice, 장애 보고서
 
-Tier 3: AWS Docs MCP (on-demand, 1-5초)
-  - 최신 릴리즈 노트, 신규 기능
+Tier 3: AWS Knowledge MCP (on-demand, 1-5초)
+  - 최신 릴리즈 노트, 신규 기능, What's New, 블로그
+  - Well-Architected 가이드
+  - Skills (단계별 절차 — 업그레이드, 마이그레이션 등)
+  - 리전별 서비스 가용성 정보
   - KB 결과 불충분 시 fallback
 ```
 
-에이전트 판단 기준: 기본 → Tier 2(retrieve), "최신"/"업데이트" 키워드 또는 KB 결과 부족 → Tier 3(AWS Docs MCP).
+에이전트 판단 기준: 기본 → Tier 2(retrieve), "최신"/"업데이트" 키워드 또는 KB 결과 부족 → Tier 3(AWS Knowledge MCP). `retrieve_skill`은 Simulation MCP의 업그레이드 계획 생성 시 단계별 절차 참조에 활용.
 
 ---
 
@@ -258,57 +261,84 @@ Tier 3: AWS Docs MCP (on-demand, 1-5초)
 
 ### 5.1 Overview
 
+MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하이브리드로 구성한다.
+공식 AWS MCP가 표준 DB/API 작업을 처리하고, Custom MCP는 캐시 기반 분석/시뮬레이션 등 부가가치 기능에 집중한다.
+
+**Custom MCP Servers (자체 구현, Lambda):**
+
 | MCP Server | 도구 수 | Cedar Policy | Gateway Target |
 |---|---|---|---|
-| Performance | 15 | READ-ONLY | Lambda |
-| Incident | 8 | READ-ONLY | Lambda |
-| Operations | 11 | MIXED (read auto / write approval) | Lambda |
+| Performance | 10 | READ-ONLY | Lambda |
+| Incident | 6 | READ-ONLY | Lambda |
+| Operations | 8 | MIXED (read auto / write approval) | Lambda |
 | Simulation | 6 | READ-ONLY | Lambda |
-| Knowledge | 2 | READ-ONLY | Strands native + MCP |
-| **Total** | **42** | | |
+| **Custom Total** | **30** | | |
 
-### 5.2 Performance MCP Server (15 tools)
+**Official AWS MCP Servers (awslabs 제공, 유지보수 불필요):**
 
-**데이터 조회 (6):**
+| MCP Server | 역할 | Gateway Target |
+|---|---|---|
+| Aurora PostgreSQL MCP | 표준 PG 작업 (스키마 조회, 쿼리 실행, EXPLAIN 등) | MCP Server target |
+| Aurora MySQL MCP | 표준 MySQL 작업 | MCP Server target |
+| CloudWatch MCP | 메트릭/알람 직접 조회 | MCP Server target |
+| AWS API MCP | 범용 AWS API 호출 (RDS, Cost Explorer 등) | MCP Server target |
+
+**Knowledge (Agent 직접 등록):**
+
+| 도구 | 역할 | 등록 방식 |
+|---|---|---|
+| retrieve | Bedrock KB + S3 Vectors (Tier 2) | Strands native |
+| aws_knowledge | AWS Knowledge MCP — 문서, Skills, 리전 가용성 (Tier 3) | Gateway MCP Server target |
+
+### 5.2 Performance MCP Server (10 tools, Custom)
+
+`explain_query`는 공식 Aurora MCP로 이관. 캐시 기반 분석과 사전 연산에 집중.
+
+**캐시 기반 조회 (4):**
 - `get_top_queries` — Aurora PG Cache에서 Top-N 쿼리 (총 시간/호출 수/평균 시간 기준)
-- `explain_query` — Target Aurora에서 EXPLAIN ANALYZE 실행 + S3에 실행 계획 저장
 - `get_pi_metrics` — Aurora PG Cache에서 PI 메트릭 (AAS, wait events, counter metrics)
-- `recommend_index` — index_usage + query_stats 조합 분석으로 인덱스 추천
 - `get_slow_queries` — Aurora PG Cache에서 슬로우 쿼리 목록 (MySQL: slow query log 파싱, PG: pg_stat_statements 기반)
 - `compare_periods` — 두 기간의 메트릭 비교 분석
 
-**분석 (4):**
+**사전 연산 분석 (4):**
 - `detect_anomalies` — 최근 N시간 메트릭을 7일 이동평균 baseline 대비 z-score로 이상 탐지
 - `detect_regressions` — 특정 시점 전후 쿼리 성능 비교 (배포 후 느려진 쿼리 탐지)
 - `forecast_capacity` — 스토리지/연결 수 선형 회귀 예측 (N일 후 한계 도달 예상)
 - `get_performance_summary` — 지정 기간 핵심 KPI 요약 (avg_aas, top_waits, slow_query_count 등)
 
-**상세 모니터링 (5):**
-- `get_lock_analysis` — blocking 세션 트리 구성 (innodb_lock_waits / pg_locks)
+**캐시 기반 상세 모니터링 (2):**
+- `recommend_index` — index_usage + query_stats 조합 분석으로 인덱스 추천
 - `get_vacuum_stats` — (PG) autovacuum 현황, dead tuples, bloat ratio
-- `get_replication_status` — Reader 지연, 복제 슬롯, Global DB 지연, failover 우선순위
-- `get_connection_analysis` — 연결 풀 상태, idle 연결, 앱별 분류, max_connections 대비 사용률
-- `get_cost_analysis` — 인스턴스 비용 추이, RI/SP 추천, I/O 비용 분석
 
-### 5.3 Incident MCP Server (8 tools)
+**공식 AWS MCP로 이관된 기능:**
+- EXPLAIN ANALYZE → 공식 Aurora PG/MySQL MCP
+- Lock/Blocking 분석 → 공식 Aurora PG/MySQL MCP (pg_locks, innodb_lock_waits 조회)
+- Connection 분석 → 공식 Aurora PG/MySQL MCP (pg_stat_activity, SHOW PROCESSLIST)
+- Replication 상태 → 공식 Aurora PG/MySQL MCP + AWS API MCP (DescribeDBClusters)
+- 비용 분석 → AWS API MCP (Cost Explorer API)
 
-- `get_health_status` — 클러스터 건강 상태 종합 (인스턴스 상태, 연결, 복제 지연)
-- `get_recent_events` — RDS Events, 알람, failover 이력
+### 5.3 Incident MCP Server (6 tools, Custom)
+
+`get_alarm_history`와 `get_connections`는 공식 CloudWatch/Aurora MCP로 이관.
+
+- `get_health_status` — 클러스터 건강 상태 종합 (캐시 기반 인스턴스 상태, 연결, 복제 지연)
+- `get_recent_events` — DynamoDB event_history에서 RDS Events, 알람, failover 이력
 - `search_logs` — CloudWatch Logs Insights로 Aurora error/audit log 검색
-- `get_alarm_history` — CloudWatch 알람 상태 변경 이력
 - `correlate_signals` — 메트릭 + 이벤트 + 로그를 시간축 정렬하여 장애 타임라인 구성
-- `get_connections` — 현재 활성 세션 목록 (SHOW PROCESSLIST / pg_stat_activity)
 - `get_incident_summary` — 최근 N일 장애/이벤트 통계 (MTTR, 빈도, 유형별 분류)
 - `find_similar_incidents` — Bedrock KB에서 현재 증상과 유사한 과거 장애 사례 검색
 
-### 5.4 Operations MCP Server (11 tools)
+**공식 AWS MCP로 이관된 기능:**
+- 알람 이력 → 공식 CloudWatch MCP
+- 활성 세션 목록 → 공식 Aurora PG/MySQL MCP
 
-**조회 (5, 자동 허용):**
-- `get_parameters` — Target Aurora의 현재 파라미터 값
-- `get_backup_status` — 백업 이력 및 상태
-- `get_scaling_info` — 현재 용량, ACU, 스토리지
-- `get_schema_diff` — 두 환경/시점 간 스키마 비교
-- `get_schema_history` — 스키마 변경 이력 추적
+### 5.4 Operations MCP Server (8 tools, Custom)
+
+`get_parameters`, `get_backup_status`, `get_scaling_info`는 공식 AWS API MCP로 이관.
+
+**캐시 기반 조회 (2, 자동 허용):**
+- `get_schema_diff` — 두 환경/시점 간 스키마 비교 (캐시된 schema_snapshots 사용)
+- `get_schema_history` — 스키마 변경 이력 추적 (캐시 기반)
 
 **실행 (4, 승인 필요):**
 - `execute_sql` — SQL 실행 (SELECT 자동 허용, DDL/DML 승인 필요)
@@ -320,6 +350,11 @@ Tier 3: AWS Docs MCP (on-demand, 1-5초)
 - `review_sql` — DDL/DML 실행 전 자동 리뷰 (위험도, 영향 행 수, 락 시간 추정, 롤백 SQL)
 - `audit_permissions` — DB 사용자/역할 권한 감사 (과도한 권한, 미사용 계정 탐지)
 
+**공식 AWS MCP로 이관된 기능:**
+- 현재 파라미터 값 조회 → 공식 Aurora PG/MySQL MCP
+- 백업 이력/상태 → AWS API MCP (DescribeDBClusterSnapshots)
+- 현재 용량/ACU/스토리지 → AWS API MCP (DescribeDBClusters)
+
 ### 5.5 Simulation MCP Server (6 tools)
 
 - `check_upgrade_compatibility` — 버전 업그레이드 호환성 체크 (deprecated 기능, 새 기능, 호환 SQL)
@@ -329,10 +364,10 @@ Tier 3: AWS Docs MCP (on-demand, 1-5초)
 - `simulate_scaling` — 스케일 업/다운 비용-성능 트레이드오프 분석
 - `simulate_ddl_impact` — DDL 영향도 분석 (테이블 크기, 예상 락 시간, 온라인 DDL 가능 여부)
 
-### 5.6 Knowledge (Strands Native, 2 tools)
+### 5.6 Knowledge (2 tools)
 
 - `retrieve` — Bedrock KB + S3 Vectors 검색 (Tier 2). Strands 네이티브 도구로 Agent에 직접 등록.
-- `aws_docs` — AWS Documentation MCP Server 조회 (Tier 3). Gateway에 외부 MCP Server 타겟으로 등록하여 연결.
+- `aws_knowledge` — AWS Knowledge MCP Server 조회 (Tier 3). Gateway에 외부 MCP Server 타겟으로 등록. Documentation MCP보다 넓은 범위: 공식 문서 + What's New + 블로그 + Well-Architected + Skills(단계별 절차) + 리전 가용성 포함.
 
 ---
 
@@ -726,13 +761,18 @@ dbops/
 
 ### Phase 도구 배포 현황
 
-| Phase | Perf | Incident | Ops | Sim | Knowledge | Total |
+**Custom MCP 도구:**
+
+| Phase | Perf | Incident | Ops | Sim | Knowledge | Custom Total |
 |---|---|---|---|---|---|---|
-| 1 | 6 | - | - | - | 2 | 8 |
-| 2 | 10 | 8 | - | - | 2 | 20 |
-| 3 | 10 | 8 | 11 | - | 2 | 31 |
-| 4 | 10 | 8 | 11 | 6 | 2 | 37 |
-| 5 | 15 | 8 | 11 | 6 | 2 | 42 |
+| 1 | 4 | - | - | - | 2 | 6 |
+| 2 | 8 | 6 | - | - | 2 | 16 |
+| 3 | 8 | 6 | 8 | - | 2 | 24 |
+| 4 | 8 | 6 | 8 | 6 | 2 | 30 |
+| 5 | 10 | 6 | 8 | 6 | 2 | 32 |
+
+**공식 AWS MCP (Phase 1부터 Gateway에 등록, 추가 구현 불필요):**
+- Aurora PostgreSQL MCP, Aurora MySQL MCP, CloudWatch MCP, AWS API MCP, AWS Knowledge MCP
 
 ---
 
@@ -747,7 +787,9 @@ dbops/
 | Streaming | SSE Direct to Runtime | Lambda proxy | Lambda proxy 시 SSE 스트리밍 불가 |
 | Metrics cache | Aurora PG | S3 Tables + Athena | Athena 레이턴시 2-10초, 대시보드 <500ms 불가. 비용도 10-50x 높음 |
 | Vector store | S3 Vectors | OpenSearch Serverless | OpenSearch 최소 $700/월 vs S3 Vectors $5-10/월 |
-| RAG strategy | 3-Tier Hybrid | Bedrock KB only | 최신성(AWS MCP) + 빠른 응답(치트시트) + 내부 문서(KB) 모두 필요 |
+| RAG strategy | 3-Tier Hybrid | Bedrock KB only | 최신성(AWS Knowledge MCP) + 빠른 응답(치트시트) + 내부 문서(KB) 모두 필요 |
+| MCP tool source | Custom + Official AWS MCP 하이브리드 | Custom only | 공식 AWS MCP가 표준 DB/API 작업 처리, Custom은 분석/시뮬레이션에 집중. 유지보수 부담 감소 |
+| Knowledge MCP | AWS Knowledge MCP | AWS Documentation MCP | Knowledge MCP가 Skills, Well-Architected, 블로그, 리전 가용성까지 포함하여 더 넓은 범위 |
 | Cross-account network | RDS Data API (초기) | VPC Peering | 네트워크 설정 없이 즉시 시작 가능 |
 | UI design | Claude Design → Claude Code | Code-only | AI 생성 느낌 방지, 제품다운 디자인 품질 확보 |
 
@@ -762,3 +804,7 @@ dbops/
 - [AWS PI Reporter](https://aws.amazon.com/blogs/database/ai-powered-tuning-tools-for-amazon-rds-for-postgresql-and-amazon-aurora-postgresql-databases-pi-reporter/)
 - [Anthropic Context Engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
 - [Introducing Claude Design](https://www.anthropic.com/news/claude-design-anthropic-labs)
+- [AWS MCP Server GA (May 2026)](https://aws.amazon.com/blogs/aws/the-aws-mcp-server-is-now-generally-available/)
+- [AWS Knowledge MCP Server](https://awslabs.github.io/mcp/servers/aws-knowledge-mcp-server)
+- [AWS MCP Servers Collection (awslabs)](https://awslabs.github.io/mcp/)
+- [AWS IaC MCP Server](https://awslabs.github.io/mcp/servers/aws-iac-mcp-server)
