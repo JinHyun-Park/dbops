@@ -13,6 +13,8 @@ from mcp_servers.performance.tools.detect_anomalies import detect_anomalies_impl
 from mcp_servers.performance.tools.detect_regressions import detect_regressions_impl
 from mcp_servers.performance.tools.forecast_capacity import forecast_capacity_impl
 from mcp_servers.performance.tools.performance_summary import get_performance_summary_impl
+from mcp_servers.performance.tools.recommend_index import recommend_index_impl
+from mcp_servers.performance.tools.vacuum_stats import get_vacuum_stats_impl
 
 cache = CacheClient()
 
@@ -126,6 +128,29 @@ TOOLS = {
             "properties": {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "hours": {"type": "integer", "default": 24, "description": "Time window in hours"},
+            },
+            "required": ["cluster_id"],
+        },
+    },
+    "recommend_index": {
+        "impl": recommend_index_impl,
+        "description": "Recommend indexes based on sequential scan ratio and query patterns",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string"},
+                "min_seq_scan_ratio": {"type": "number", "default": 0.5},
+            },
+            "required": ["cluster_id"],
+        },
+    },
+    "get_vacuum_stats": {
+        "impl": get_vacuum_stats_impl,
+        "description": "(PostgreSQL) Get autovacuum stats, dead tuples, and bloat ratio per table",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string"},
             },
             "required": ["cluster_id"],
         },
