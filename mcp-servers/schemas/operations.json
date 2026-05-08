@@ -1,0 +1,12 @@
+{
+  "tools": [
+    {"name": "get_schema_diff", "description": "Compare schemas between two time points", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}}, "required": ["cluster_id"]}},
+    {"name": "get_schema_history", "description": "Track schema change history", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "days": {"type": "integer", "default": 30}}, "required": ["cluster_id"]}},
+    {"name": "execute_sql", "description": "Execute SQL (SELECT auto, DDL/DML requires approval)", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "sql": {"type": "string"}, "approved": {"type": "boolean", "default": false}}, "required": ["cluster_id", "sql"]}},
+    {"name": "modify_parameter", "description": "Modify DB parameter (requires approval)", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "parameter_name": {"type": "string"}, "value": {"type": "string"}, "approved": {"type": "boolean", "default": false}}, "required": ["cluster_id", "parameter_name", "value"]}},
+    {"name": "modify_scaling", "description": "Scale instance (requires approval)", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "min_capacity": {"type": "number"}, "max_capacity": {"type": "number"}, "approved": {"type": "boolean", "default": false}}, "required": ["cluster_id"]}},
+    {"name": "manage_maintenance", "description": "View or modify maintenance window", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "action": {"type": "string", "default": "describe"}}, "required": ["cluster_id"]}},
+    {"name": "review_sql", "description": "Pre-execution SQL review with risk assessment", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "sql": {"type": "string"}}, "required": ["cluster_id", "sql"]}},
+    {"name": "audit_permissions", "description": "Audit DB user permissions", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}}, "required": ["cluster_id"]}}
+  ]
+}

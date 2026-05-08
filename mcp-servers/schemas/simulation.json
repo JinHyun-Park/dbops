@@ -1,0 +1,10 @@
+{
+  "tools": [
+    {"name": "check_upgrade_compatibility", "description": "Check version upgrade compatibility", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "target_version": {"type": "string"}}, "required": ["cluster_id", "target_version"]}},
+    {"name": "estimate_upgrade_impact", "description": "Estimate upgrade time, downtime, and risk", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "target_version": {"type": "string"}}, "required": ["cluster_id", "target_version"]}},
+    {"name": "generate_upgrade_plan", "description": "Generate step-by-step upgrade plan", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "target_version": {"type": "string"}, "method": {"type": "string", "default": "blue_green"}}, "required": ["cluster_id", "target_version"]}},
+    {"name": "simulate_parameter_change", "description": "Simulate parameter change impact", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "parameter_name": {"type": "string"}, "new_value": {"type": "string"}}, "required": ["cluster_id", "parameter_name", "new_value"]}},
+    {"name": "simulate_scaling", "description": "Simulate scaling cost-performance tradeoff", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "new_min_acu": {"type": "number"}, "new_max_acu": {"type": "number"}}, "required": ["cluster_id"]}},
+    {"name": "simulate_ddl_impact", "description": "Estimate DDL execution impact (lock time, duration)", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "ddl_sql": {"type": "string"}}, "required": ["cluster_id", "ddl_sql"]}}
+  ]
+}
