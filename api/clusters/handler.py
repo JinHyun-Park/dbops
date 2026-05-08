@@ -7,7 +7,7 @@ from datetime import datetime
 def lambda_handler(event, context):
     dynamodb = boto3.resource("dynamodb")
     table = dynamodb.Table(os.environ["CLUSTERS_TABLE"])
-    method = event.get("httpMethod", "GET")
+    method = event.get("requestContext", {}).get("http", {}).get("method", event.get("httpMethod", "GET"))
 
     if method == "GET":
         response = table.scan()

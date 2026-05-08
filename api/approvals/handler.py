@@ -8,7 +8,7 @@ import boto3
 def lambda_handler(event, context):
     dynamodb = boto3.resource("dynamodb")
     table = dynamodb.Table(os.environ["APPROVALS_TABLE"])
-    method = event.get("httpMethod", "GET")
+    method = event.get("requestContext", {}).get("http", {}).get("method", event.get("httpMethod", "GET"))
     path_params = event.get("pathParameters") or {}
     approval_id = path_params.get("id")
     qsp = event.get("queryStringParameters") or {}
