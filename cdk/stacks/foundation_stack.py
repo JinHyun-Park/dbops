@@ -55,6 +55,15 @@ class FoundationStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
+        self.approvals_table = dynamodb.Table(
+            self, "ApprovalsTable",
+            table_name=f"dbops-{Settings.ENV}-approvals",
+            partition_key=dynamodb.Attribute(name="approval_id", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="created_at", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
         self.hub_role = iam.Role(
             self, "HubRole",
             role_name=f"dbops-{Settings.ENV}-hub-role",
