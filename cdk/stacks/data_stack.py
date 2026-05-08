@@ -101,5 +101,29 @@ class DataStack(cdk.Stack):
             targets=[targets.LambdaFunction(self.event_processor)],
         )
 
+        self.report_generator = lambda_.Function(
+            self, "ReportGenerator",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../data-pipeline/report_generator"),
+            timeout=cdk.Duration.minutes(5),
+            memory_size=512,
+            vpc=self.vpc,
+            environment={
+                "CACHE_DB_CLUSTER_ARN": self.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "ARCHIVE_BUCKET": self.archive_bucket.bucket_name,
+            },
+        )
+        self.cache_db.secret.grant_read(self.report_generator)
+        self.cache_db.grant_data_api_access(self.report_generator)
+        self.archive_bucket.grant_write(self.report_generator)
+
+        events.Rule(self, "DailyReportSchedule",
+            schedule=events.Schedule.cron(hour="0", minute="0"),
+            targets=[targets.LambdaFunction(self.report_generator)],
+        )
+
         cdk.CfnOutput(self, "CacheDbClusterArn", value=self.cache_db.cluster_arn)
         cdk.CfnOutput(self, "CacheDbEndpoint", value=self.cache_db.cluster_endpoint.hostname)

@@ -77,6 +77,32 @@ class AgentStack(cdk.Stack):
             integration=integrations.HttpLambdaIntegration("ClustersIntegration", clusters_lambda),
         )
 
+        reports_lambda = lambda_.Function(
+            self, "ReportsApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/reports"),
+            timeout=cdk.Duration.seconds(30),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+            },
+        )
+        data.cache_db.secret.grant_read(reports_lambda)
+        data.cache_db.grant_data_api_access(reports_lambda)
+
+        self.api.add_routes(
+            path="/api/reports",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("ReportsIntegration", reports_lambda),
+        )
+        self.api.add_routes(
+            path="/api/reports/{id}",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("ReportDetailIntegration", reports_lambda),
+        )
+
         self.perf_mcp_lambda = perf_mcp_lambda
 
         cdk.CfnOutput(self, "ApiUrl", value=self.api.url or "")
