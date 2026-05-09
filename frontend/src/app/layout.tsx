@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { CommandPalette } from "@/components/design-system/command-palette";
 import { AuthButton } from "@/components/auth-button";
+import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -56,7 +57,7 @@ export default function RootLayout({
             <AuthButton />
           </div>
         </nav>
-        {children}
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );
