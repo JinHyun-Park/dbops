@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { CommandPalette } from "@/components/design-system/command-palette";
+import { AuthButton } from "@/components/auth-button";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -51,6 +52,9 @@ export default function RootLayout({
           <Link href="/clusters" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">
             Clusters
           </Link>
+          <div className="ml-auto">
+            <AuthButton />
+          </div>
         </nav>
         {children}
       </body>
