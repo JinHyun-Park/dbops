@@ -6,6 +6,7 @@ from aws_cdk import (
     aws_sns as sns,
     aws_events as events,
     aws_events_targets as targets,
+    aws_iam as iam,
     aws_lambda as lambda_,
 )
 from constructs import Construct
@@ -50,7 +51,6 @@ class DataStack(cdk.Stack):
             code=lambda_.Code.from_asset("../data-pipeline/etl_collector"),
             timeout=cdk.Duration.minutes(5),
             memory_size=512,
-            vpc=self.vpc,
             environment={
                 "CACHE_DB_CLUSTER_ARN": self.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
@@ -64,6 +64,14 @@ class DataStack(cdk.Stack):
         self.cache_db.grant_data_api_access(self.etl_lambda)
         foundation.clusters_table.grant_read_data(self.etl_lambda)
         foundation.hub_role.grant(self.etl_lambda.role, "sts:AssumeRole")
+
+        self.etl_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["rds:DescribeDBClusters", "rds:ListTagsForResource",
+                     "pi:GetResourceMetrics", "pi:DescribeDimensionKeys",
+                     "rds-data:ExecuteStatement", "rds-data:BatchExecuteStatement",
+                     "secretsmanager:GetSecretValue"],
+            resources=["*"],
+        ))
 
         events.Rule(
             self, "ETLSchedule",
