@@ -1,40 +1,28 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
 import { isLoggedIn, getLoginUrl, parseTokensFromHash, setTokens } from "@/lib/auth";
 
-const PUBLIC_PATHS = ["/callback"];
-
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
   const [checked, setChecked] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
 
   useEffect(() => {
-    if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
-      setAuthenticated(true);
-      setChecked(true);
-      return;
-    }
-
     const hashTokens = parseTokensFromHash();
     if (hashTokens) {
       setTokens(hashTokens.id_token, hashTokens.access_token);
-      window.location.hash = "";
-      setAuthenticated(true);
-      setChecked(true);
+      window.location.replace("/");
       return;
     }
 
     if (isLoggedIn()) {
       setAuthenticated(true);
-    } else {
-      window.location.href = getLoginUrl();
+      setChecked(true);
       return;
     }
-    setChecked(true);
-  }, [pathname]);
+
+    window.location.href = getLoginUrl();
+  }, []);
 
   if (!checked) {
     return (
