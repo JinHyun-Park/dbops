@@ -30,6 +30,11 @@ class FrontendStack(cdk.Stack):
             default_root_object="index.html",
             error_responses=[
                 cloudfront.ErrorResponse(
+                    http_status=403,
+                    response_http_status=200,
+                    response_page_path="/index.html",
+                ),
+                cloudfront.ErrorResponse(
                     http_status=404,
                     response_http_status=200,
                     response_page_path="/index.html",
