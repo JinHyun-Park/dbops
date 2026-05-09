@@ -6,9 +6,10 @@ from aws_cdk import (
     aws_lambda as lambda_,
 )
 import aws_cdk.aws_bedrock_agentcore_alpha as agentcore
+from aws_cdk import aws_bedrockagentcore as agentcore_cfn
 from constructs import Construct
 from config.settings import Settings
-from tool_definitions import performance_tools, incident_tools, operations_tools, simulation_tools
+from tool_definitions import performance_schema, incident_schema, operations_schema, simulation_schema
 
 
 class AgentStack(cdk.Stack):
@@ -93,29 +94,44 @@ class AgentStack(cdk.Stack):
         )
 
         mcp_lambdas = {
-            "Performance": (perf_mcp_lambda, performance_tools()),
-            "Incident": (incident_mcp_lambda, incident_tools()),
-            "Operations": (operations_mcp_lambda, operations_tools()),
-            "Simulation": (simulation_mcp_lambda, simulation_tools()),
+            "performance": (perf_mcp_lambda, performance_schema()),
+            "incident": (incident_mcp_lambda, incident_schema()),
+            "operations": (operations_mcp_lambda, operations_schema()),
+            "simulation": (simulation_mcp_lambda, simulation_schema()),
         }
 
-        for name, (fn, tools) in mcp_lambdas.items():
+        for name, (fn, schema) in mcp_lambdas.items():
             fn.grant_invoke(self.gateway.role)
             fn.add_permission(
-                f"AgentCoreInvoke{name}",
+                f"AgentCoreInvoke{name.title()}",
                 principal=iam.ServicePrincipal("bedrock-agentcore.amazonaws.com"),
                 action="lambda:InvokeFunction",
                 source_arn=self.gateway.gateway_arn,
             )
 
-            target = self.gateway.add_lambda_target(f"{name}Target",
-                lambda_function=fn,
-                tool_schema=agentcore.ToolSchema.from_inline(tools),
-                gateway_target_name=f"dbops-{Settings.ENV}-{name.lower()}-target",
+            target = agentcore_cfn.CfnGatewayTarget(
+                self, f"{name.title()}Target",
+                name=f"dbops-{Settings.ENV}-{name}-target",
+                gateway_identifier=self.gateway.gateway_id,
+                target_configuration=agentcore_cfn.CfnGatewayTarget.TargetConfigurationProperty(
+                    mcp=agentcore_cfn.CfnGatewayTarget.McpTargetConfigurationProperty(
+                        lambda_=agentcore_cfn.CfnGatewayTarget.McpLambdaTargetConfigurationProperty(
+                            lambda_arn=fn.function_arn,
+                            tool_schema=agentcore_cfn.CfnGatewayTarget.ToolSchemaProperty(
+                                inline_payload=schema,
+                            ),
+                        ),
+                    ),
+                ),
+                credential_provider_configurations=[
+                    agentcore_cfn.CfnGatewayTarget.CredentialProviderConfigurationProperty(
+                        credential_provider_type="GATEWAY_IAM_ROLE",
+                    ),
+                ],
             )
-            target.node.add_dependency(self.gateway.role.node.default_child)
+            target.add_dependency(self.gateway.role.node.default_child)
             if self.gateway.role.node.try_find_child("DefaultPolicy"):
-                target.node.add_dependency(self.gateway.role.node.find_child("DefaultPolicy").node.default_child)
+                target.add_dependency(self.gateway.role.node.find_child("DefaultPolicy").node.default_child)
 
         # ===== AgentCore Memory =====
 
