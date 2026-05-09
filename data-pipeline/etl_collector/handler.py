@@ -1,9 +1,9 @@
 import os
 import json
 import boto3
+import traceback
 from collectors.meta_collector import collect_cluster_meta
 from collectors.pi_collector import collect_pi_metrics
-from collectors.stats_collector import collect_query_stats
 
 
 def lambda_handler(event, context):
@@ -39,9 +39,29 @@ def lambda_handler(event, context):
         region = cluster.get("region", os.environ.get("AWS_REGION", "ap-northeast-2"))
         rds_client = boto3.client("rds", region_name=region)
         pi_client = boto3.client("pi", region_name=region)
+        result = {"cluster_id": cluster_id}
 
-        meta = collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, region)
-        pi = collect_pi_metrics(pi_client, cache_execute, cluster.get("resource_id", ""), cluster_id)
-        results.append({"cluster_id": cluster_id, "meta": meta, "pi": pi})
+        try:
+            meta = collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, region)
+            result["meta"] = meta
+        except Exception as e:
+            result["meta_error"] = str(e)
+            print(f"[{cluster_id}] meta_collector error: {e}")
 
-    return {"statusCode": 200, "body": json.dumps({"collected": len(results)})}
+        try:
+            resource_id = cluster.get("resource_id", "")
+            if not resource_id:
+                desc = rds_client.describe_db_clusters(DBClusterIdentifier=cluster_id)
+                resource_id = desc["DBClusters"][0].get("DbClusterResourceId", "")
+            if resource_id:
+                pi = collect_pi_metrics(pi_client, cache_execute, resource_id, cluster_id)
+                result["pi"] = pi
+            else:
+                result["pi"] = {"skipped": "no resource_id"}
+        except Exception as e:
+            result["pi_error"] = str(e)
+            print(f"[{cluster_id}] pi_collector error: {e}")
+
+        results.append(result)
+
+    return {"statusCode": 200, "body": json.dumps({"collected": len(results), "results": results}, default=str)}
