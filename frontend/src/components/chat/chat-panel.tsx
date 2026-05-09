@@ -1,15 +1,31 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { MessageList, type Message } from "./message-list";
 import { streamChat } from "@/lib/agentcore-sse";
+import { fetchClusters } from "@/lib/api-client";
+
+interface ClusterRow {
+  cluster_id: string;
+  engine?: string;
+}
 
 export function ChatPanel() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
-  const [clusterId, setClusterId] = useState("default-cluster");
+  const [clusterId, setClusterId] = useState("");
+  const [clusters, setClusters] = useState<ClusterRow[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    fetchClusters()
+      .then((rows: ClusterRow[]) => {
+        setClusters(rows);
+        if (rows.length > 0) setClusterId(rows[0].cluster_id);
+      })
+      .catch((e) => console.error("Failed to load clusters:", e));
+  }, []);
 
   const handleSend = useCallback(() => {
     if (!input.trim() || isStreaming) return;
@@ -78,7 +94,12 @@ export function ChatPanel() {
           onChange={(e) => setClusterId(e.target.value)}
           className="bg-zinc-800 text-zinc-300 border border-zinc-700 rounded px-3 py-1.5 text-sm"
         >
-          <option value="default-cluster">Select cluster...</option>
+          {clusters.length === 0 && <option value="">No clusters</option>}
+          {clusters.map((c) => (
+            <option key={c.cluster_id} value={c.cluster_id}>
+              {c.cluster_id} {c.engine ? `(${c.engine})` : ""}
+            </option>
+          ))}
         </select>
       </div>
 

@@ -159,6 +159,8 @@ class AgentStack(cdk.Stack):
 
         # ===== AgentCore Runtime =====
 
+        gateway_mcp_url = f"https://{self.gateway.gateway_id}.gateway.bedrock-agentcore.{Settings.REGION}.amazonaws.com/mcp"
+
         self.runtime = agentcore.Runtime(
             self, "Runtime",
             runtime_name=f"dbops_{Settings.ENV}_runtime",
@@ -167,6 +169,11 @@ class AgentStack(cdk.Stack):
                 path="../agent",
                 runtime=agentcore.AgentCoreRuntime.PYTHON_3_12,
             ),
+            environment_variables={
+                "AGENT_MODEL_ID": Settings.AGENT_MODEL_ID,
+                "AWS_REGION_OVERRIDE": Settings.REGION,
+                "GATEWAY_MCP_URL": gateway_mcp_url,
+            },
             network_configuration=agentcore.RuntimeNetworkConfiguration.using_public_network(),
             authorizer_configuration=agentcore.RuntimeAuthorizerConfiguration.using_cognito(
                 user_pool=foundation.user_pool,

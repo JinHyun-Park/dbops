@@ -21,11 +21,35 @@ class FrontendStack(cdk.Stack):
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
         )
 
+        rewrite_function = cloudfront.Function(
+            self, "PathRewrite",
+            code=cloudfront.FunctionCode.from_inline("""
+function handler(event) {
+    var request = event.request;
+    var uri = request.uri;
+    if (uri === '/' || uri === '') {
+        request.uri = '/index.html';
+    } else if (uri.endsWith('/')) {
+        request.uri = uri + 'index.html';
+    } else if (!uri.includes('.')) {
+        request.uri = uri + '.html';
+    }
+    return request;
+}
+"""),
+        )
+
         distribution = cloudfront.Distribution(
             self, "Distribution",
             default_behavior=cloudfront.BehaviorOptions(
                 origin=origins.S3BucketOrigin.with_origin_access_control(bucket),
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                function_associations=[
+                    cloudfront.FunctionAssociation(
+                        function=rewrite_function,
+                        event_type=cloudfront.FunctionEventType.VIEWER_REQUEST,
+                    ),
+                ],
             ),
             default_root_object="index.html",
             error_responses=[
