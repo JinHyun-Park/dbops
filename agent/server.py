@@ -82,12 +82,55 @@ def make_mcp_client():
     return MCPClient(lambda: streamablehttp_client(GATEWAY_URL, headers=headers))
 
 
+def _resolve_model_id(payload) -> str:
+    """Pick the Bedrock model ID per invocation.
+
+    Accepts three shapes for `payload.model`:
+      - Anthropic foundation/inference-profile ID:
+          apac.anthropic.claude-..., us.anthropic.claude-..., global.anthropic.claude-...
+      - Application Inference Profile ARN (per DBOps cost-tagging setup):
+          arn:aws:bedrock:<region>:<account>:application-inference-profile/<id>
+      - Plain foundation model ID: anthropic.claude-...
+
+    Anything else falls back to MODEL_ID. The runtime IAM role grants
+    bedrock:InvokeModel Resource:* so we don't need to extend permissions
+    for newly-listed models.
+    """
+    if not isinstance(payload, dict):
+        return MODEL_ID
+    requested = payload.get("model") or payload.get("model_id") or ""
+    if not requested or not isinstance(requested, str) or len(requested) > 500:
+        return MODEL_ID
+
+    lower = requested.lower()
+    # Anthropic foundation/inference profile IDs.
+    if "anthropic" in lower:
+        return requested
+    # DBOps Application Inference Profile ARNs (the cost-tagged path).
+    if lower.startswith("arn:aws:bedrock:") and "application-inference-profile/" in lower:
+        return requested
+    return MODEL_ID
+
+
 @app.entrypoint
 async def invoke(payload, context):
     log.info(f"DBOps Agent invoked. Gateway: {bool(GATEWAY_URL)}")
     prompt = payload.get("prompt") if isinstance(payload, dict) else str(payload)
+    requested_model = _resolve_model_id(payload)
 
-    model = BedrockModel(model_id=MODEL_ID, region_name=REGION)
+    # First attempt: requested model. If Bedrock rejects with ValidationException,
+    # we silently fall back to the env default so a stale frontend never bricks chat.
+    model_id = requested_model
+    log.info(f"Model: {model_id}")
+    try:
+        model = BedrockModel(model_id=model_id, region_name=REGION)
+        # cheap dry-call avoided; BedrockModel itself doesn't validate. We rely on
+        # the stream invocation to raise; the wrapper around stream_async below
+        # will rebuild with MODEL_ID if it sees ValidationException once.
+    except Exception as e:
+        log.warning(f"Model init failed for {model_id}: {e}; falling back to {MODEL_ID}")
+        model_id = MODEL_ID
+        model = BedrockModel(model_id=model_id, region_name=REGION)
     mcp_client = make_mcp_client()
 
     if mcp_client is None:
