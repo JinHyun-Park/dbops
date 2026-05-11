@@ -2,15 +2,16 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { ApprovalCard } from "@/components/approval/approval-card";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://vp8z6cdxcd.execute-api.ap-northeast-2.amazonaws.com";
+import { apiUrl } from "@/lib/api-client";
+import { PageHeader, PageBody, EmptyState } from "@/components/design-system/page-shell";
 
 export default function ApprovalsPage() {
   const [approvals, setApprovals] = useState<any[]>([]);
   const [filter, setFilter] = useState<"pending" | "approved" | "rejected">("pending");
 
   const loadApprovals = useCallback(() => {
-    fetch(`${API_BASE}/api/approvals?status=${filter}`)
+    apiUrl(`/api/approvals?status=${filter}`)
+      .then((url) => fetch(url))
       .then((r) => r.json())
       .then(setApprovals)
       .catch(console.error);
@@ -19,7 +20,8 @@ export default function ApprovalsPage() {
   useEffect(() => { loadApprovals(); }, [loadApprovals]);
 
   const handleAction = async (id: string, action: "approve" | "reject") => {
-    await fetch(`${API_BASE}/api/approvals/${id}`, {
+    const url = await apiUrl(`/api/approvals/${id}`);
+    await fetch(url, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, approved_by: "dba" }),
@@ -28,38 +30,59 @@ export default function ApprovalsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-900 text-zinc-100 p-6">
-      <h1 className="text-2xl font-bold mb-6">Approval Center</h1>
-
-      <div className="flex gap-2 mb-6">
-        {(["pending", "approved", "rejected"] as const).map((s) => (
-          <button
-            key={s}
-            onClick={() => setFilter(s)}
-            className={`px-4 py-2 text-sm rounded-lg transition-colors ${
-              filter === s ? "bg-blue-600 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
-            }`}
-          >
-            {s === "pending" ? `대기 중` : s === "approved" ? "승인됨" : "거부됨"}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {approvals.length === 0 && (
-          <div className="text-zinc-500 col-span-full text-center py-12">
-            {filter === "pending" ? "대기 중인 승인 요청이 없습니다" : "항목이 없습니다"}
+    <PageBody>
+      <PageHeader
+        eyebrow="automate"
+        title="Approval center"
+        description="Agent가 제안한 쓰기 작업 (DDL, parameter, scaling, maintenance)을 DBA가 검토하고 승인하는 게이트입니다."
+        actions={
+          <div className="flex gap-1">
+            {(["pending", "approved", "rejected"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setFilter(s)}
+                className={`text-xs px-3 py-2 transition-colors ${
+                  filter === s
+                    ? "bg-amber-500 text-zinc-950"
+                    : "border border-zinc-700 text-zinc-400 hover:text-zinc-100"
+                }`}
+              >
+                {s === "pending" ? "pending" : s === "approved" ? "approved" : "rejected"}
+              </button>
+            ))}
           </div>
-        )}
-        {approvals.map((a) => (
-          <ApprovalCard
-            key={a.approval_id}
-            approval={a}
-            onApprove={(id) => handleAction(id, "approve")}
-            onReject={(id) => handleAction(id, "reject")}
-          />
-        ))}
-      </div>
-    </div>
+        }
+      />
+
+      {approvals.length === 0 ? (
+        <EmptyState
+          eyebrow={filter}
+          title={
+            filter === "pending"
+              ? "No pending approvals"
+              : filter === "approved"
+              ? "No approved actions yet"
+              : "No rejected actions"
+          }
+          description={
+            filter === "pending"
+              ? "When the agent proposes a write action, it lands here for review."
+              : undefined
+          }
+          secondary={{ href: "/chat", label: "Ask the agent" }}
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {approvals.map((a) => (
+            <ApprovalCard
+              key={a.approval_id}
+              approval={a}
+              onApprove={(id) => handleAction(id, "approve")}
+              onReject={(id) => handleAction(id, "reject")}
+            />
+          ))}
+        </div>
+      )}
+    </PageBody>
   );
 }

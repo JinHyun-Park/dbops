@@ -1,13 +1,46 @@
 import { getAccessToken } from "./auth";
 
-const RUNTIME_ARN = process.env.NEXT_PUBLIC_AGENTCORE_RUNTIME_ARN
-  || "arn:aws:bedrock-agentcore:ap-northeast-2:830858425797:runtime/dbops_dev_runtime-fKdtxg4wAc";
-const REGION = process.env.NEXT_PUBLIC_AWS_REGION || "ap-northeast-2";
 const QUALIFIER = "DEFAULT";
 
-function buildInvokeUrl(): string {
-  const escapedArn = encodeURIComponent(RUNTIME_ARN);
-  return `https://bedrock-agentcore.${REGION}.amazonaws.com/runtimes/${escapedArn}/invocations?qualifier=${QUALIFIER}`;
+interface AgentRuntimeConfig {
+  runtimeArn: string;
+  region: string;
+}
+
+let runtimeConfigPromise: Promise<AgentRuntimeConfig> | null = null;
+
+function loadRuntimeConfig(): Promise<AgentRuntimeConfig> {
+  if (runtimeConfigPromise) return runtimeConfigPromise;
+  runtimeConfigPromise = (async () => {
+    const fallback: AgentRuntimeConfig = {
+      runtimeArn: process.env.NEXT_PUBLIC_AGENTCORE_RUNTIME_ARN || "",
+      region: process.env.NEXT_PUBLIC_AWS_REGION || "",
+    };
+    if (typeof window === "undefined") return fallback;
+    try {
+      const res = await fetch("/config.json", { cache: "no-store" });
+      if (res.ok) {
+        const cfg = await res.json();
+        return {
+          runtimeArn: cfg.agentRuntimeArn || fallback.runtimeArn,
+          region: cfg.region || fallback.region,
+        };
+      }
+    } catch {
+      // fall through
+    }
+    return fallback;
+  })();
+  return runtimeConfigPromise;
+}
+
+async function buildInvokeUrl(): Promise<string> {
+  const cfg = await loadRuntimeConfig();
+  if (!cfg.runtimeArn || !cfg.region) {
+    throw new Error("AgentCore runtime ARN/region not configured");
+  }
+  const escapedArn = encodeURIComponent(cfg.runtimeArn);
+  return `https://bedrock-agentcore.${cfg.region}.amazonaws.com/runtimes/${escapedArn}/invocations?qualifier=${QUALIFIER}`;
 }
 
 function genSessionId(): string {
@@ -31,31 +64,44 @@ export function streamChat(
   onToolCall: (name: string, status: string) => void,
   onDone: () => void,
   onError: (error: Error) => void,
+  explicitSessionId?: string,
+  modelId?: string,
 ): AbortController {
   const controller = new AbortController();
   const token = getAccessToken();
 
+  console.log("[streamChat] start", {
+    hasToken: !!token,
+    tokenLen: token?.length,
+    clusterId,
+    sessionIdProvided: !!explicitSessionId,
+  });
+
   if (!token) {
-    onError(new Error("Not authenticated"));
+    onError(new Error("Not authenticated — please log in again"));
     return controller;
   }
 
-  const sessionId = genSessionId();
+  const sessionId = explicitSessionId || genSessionId();
   const promptText = clusterId && clusterId !== "default-cluster"
     ? `[cluster: ${clusterId}]\n${message}`
     : message;
 
-  fetch(buildInvokeUrl(), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream, application/json",
-      Authorization: `Bearer ${token}`,
-      "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": sessionId,
-    },
-    body: JSON.stringify({ prompt: promptText }),
-    signal: controller.signal,
-  })
+  buildInvokeUrl()
+    .then((url) => {
+      console.log("[streamChat] invoke URL", url);
+      return fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream, application/json",
+          Authorization: `Bearer ${token}`,
+          "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": sessionId,
+        },
+        body: JSON.stringify(modelId ? { prompt: promptText, model: modelId } : { prompt: promptText }),
+        signal: controller.signal,
+      });
+    })
     .then(async (response) => {
       if (!response.ok) {
         const txt = await response.text().catch(() => "");

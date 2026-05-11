@@ -2,28 +2,42 @@
 
 import { useState, useEffect } from "react";
 import { ReportViewer } from "@/components/reports/report-viewer";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://vp8z6cdxcd.execute-api.ap-northeast-2.amazonaws.com";
+import { apiUrl } from "@/lib/api-client";
+import { PageHeader, PageBody, EmptyState } from "@/components/design-system/page-shell";
 
 export default function ReportsPage() {
   const [reports, setReports] = useState<any[]>([]);
   const [selectedReport, setSelectedReport] = useState<any>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/reports`)
+    apiUrl("/api/reports")
+      .then((url) => fetch(url))
       .then((r) => r.json())
       .then(setReports)
       .catch(console.error);
   }, []);
 
   return (
-    <div className="min-h-screen bg-zinc-900 text-zinc-100 p-6">
-      <h1 className="text-2xl font-bold mb-6">Reports</h1>
-      <ReportViewer
-        reports={reports}
-        selectedReport={selectedReport}
-        onSelect={setSelectedReport}
+    <PageBody>
+      <PageHeader
+        eyebrow="automate"
+        title="Reports"
+        description="Scheduled performance summaries 자동 생성. report_generator Lambda가 cron으로 작성한 보고서가 여기에 누적됩니다."
       />
-    </div>
+      {reports.length === 0 ? (
+        <EmptyState
+          eyebrow="no reports"
+          title="No reports yet"
+          description="ETL이 메트릭을 충분히 모으면 report_generator가 일/주간 요약을 생성합니다."
+          secondary={{ href: "/chat", label: "Generate on demand via chat" }}
+        />
+      ) : (
+        <ReportViewer
+          reports={reports}
+          selectedReport={selectedReport}
+          onSelect={setSelectedReport}
+        />
+      )}
+    </PageBody>
   );
 }

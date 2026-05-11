@@ -12,8 +12,14 @@ command -v aws >/dev/null 2>&1 || { echo "❌ AWS CLI required."; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Step 1: Build frontend
-echo "▶ [1/4] Building frontend..."
+# Step 1: Bundle SQL schemas into the schema_migrator lambda asset
+echo "▶ [1/4] Bundling SQL schemas..."
+mkdir -p "$SCRIPT_DIR/data-pipeline/schema_migrator/sql"
+cp "$SCRIPT_DIR/data-pipeline/sql/"schema*.sql "$SCRIPT_DIR/data-pipeline/schema_migrator/sql/"
+echo "✅ SQL bundled"
+
+# Step 1b: Build frontend
+echo "▶ [1b/4] Building frontend..."
 cd "$SCRIPT_DIR/frontend"
 npm install --silent
 npm run build
@@ -32,40 +38,8 @@ pip install -r requirements.txt -q
 cdk deploy --all --require-approval never
 echo "✅ All stacks deployed (Foundation, Data, Agent + AgentCore, Frontend)"
 
-# Step 4: Run schema migrations
-echo ""
-echo "▶ [3/3] Running schema migrations..."
-cd "$SCRIPT_DIR"
-
-CLUSTER_ARN=$(aws cloudformation describe-stacks \
-  --stack-name dbops-dev-data \
-  --query "Stacks[0].Outputs[?OutputKey=='CacheDbClusterArn'].OutputValue" \
-  --output text 2>/dev/null)
-
-SECRET_ARN=$(aws secretsmanager list-secrets \
-  --query "SecretList[?starts_with(Name,'CacheDBSecret')].ARN | [0]" \
-  --output text 2>/dev/null)
-
-if [ -n "$CLUSTER_ARN" ] && [ "$CLUSTER_ARN" != "None" ]; then
-  for schema_file in data-pipeline/sql/schema.sql data-pipeline/sql/schema_v2.sql data-pipeline/sql/schema_v3.sql; do
-    if [ -f "$schema_file" ]; then
-      while IFS= read -r line || [ -n "$line" ]; do
-        line=$(echo "$line" | sed 's/--.*$//' | xargs)
-        [ -z "$line" ] && continue
-        aws rds-data execute-statement \
-          --resource-arn "$CLUSTER_ARN" \
-          --secret-arn "$SECRET_ARN" \
-          --database "dbops" \
-          --sql "$line" \
-          --output text >/dev/null 2>&1 || true
-      done < "$schema_file"
-      echo "  ✅ $schema_file applied"
-    fi
-  done
-  echo "✅ Schema migrations complete"
-else
-  echo "⚠️  Could not find Cache DB. Run schema migrations manually."
-fi
+# Schema migrations now run automatically via the SchemaMigrator Custom Resource
+# inside dbops-dev-data stack. No manual SQL execution needed.
 
 # Summary
 echo ""
@@ -101,3 +75,9 @@ echo "  Gateway ID:   $GATEWAY_ID"
 echo ""
 echo "  Next: Open Web UI and register your Aurora clusters"
 echo ""
+
+# Step 4: Smoke test the deployment
+echo "▶ [4/4] Running smoke test..."
+if [ -x "$SCRIPT_DIR/smoke-test.sh" ]; then
+  "$SCRIPT_DIR/smoke-test.sh" || echo "  ⚠ Smoke test reported failures (some are expected before first cluster registration)"
+fi

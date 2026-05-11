@@ -1,21 +1,60 @@
-const COGNITO_DOMAIN = process.env.NEXT_PUBLIC_COGNITO_DOMAIN || "dbops-dev";
-const COGNITO_REGION = process.env.NEXT_PUBLIC_COGNITO_REGION || "ap-northeast-2";
-const CLIENT_ID = process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID || "h587q0bq8vtmd6fdpg76trapb";
+interface AuthConfig {
+  cognitoDomain: string;
+  cognitoClientId: string;
+  region: string;
+}
 
-function getRedirectUri(): string {
+let authConfigPromise: Promise<AuthConfig> | null = null;
+
+function loadAuthConfig(): Promise<AuthConfig> {
+  if (authConfigPromise) return authConfigPromise;
+  authConfigPromise = (async () => {
+    const fallback: AuthConfig = {
+      cognitoDomain:
+        process.env.NEXT_PUBLIC_COGNITO_DOMAIN_URL ||
+        `https://${process.env.NEXT_PUBLIC_COGNITO_DOMAIN || ""}.auth.${
+          process.env.NEXT_PUBLIC_COGNITO_REGION || ""
+        }.amazoncognito.com`,
+      cognitoClientId: process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID || "",
+      region: process.env.NEXT_PUBLIC_COGNITO_REGION || "",
+    };
+    if (typeof window === "undefined") return fallback;
+    try {
+      const res = await fetch("/config.json", { cache: "no-store" });
+      if (res.ok) {
+        const cfg = await res.json();
+        return {
+          cognitoDomain: cfg.cognitoDomain
+            ? cfg.cognitoDomain.startsWith("http")
+              ? cfg.cognitoDomain
+              : `https://${cfg.cognitoDomain}`
+            : fallback.cognitoDomain,
+          cognitoClientId: cfg.cognitoClientId || fallback.cognitoClientId,
+          region: cfg.region || fallback.region,
+        };
+      }
+    } catch {
+      // fall through
+    }
+    return fallback;
+  })();
+  return authConfigPromise;
+}
+
+function redirectUri(): string {
   if (typeof window !== "undefined") return `${window.location.origin}/callback`;
   return "http://localhost:3000/callback";
 }
 
-const AUTH_BASE = `https://${COGNITO_DOMAIN}.auth.${COGNITO_REGION}.amazoncognito.com`;
-
-export function getLoginUrl(): string {
-  return `${AUTH_BASE}/login?client_id=${CLIENT_ID}&response_type=token&scope=openid+profile&redirect_uri=${encodeURIComponent(getRedirectUri())}`;
+export async function getLoginUrl(): Promise<string> {
+  const cfg = await loadAuthConfig();
+  return `${cfg.cognitoDomain}/login?client_id=${cfg.cognitoClientId}&response_type=token&scope=openid+profile&redirect_uri=${encodeURIComponent(redirectUri())}`;
 }
 
-export function getLogoutUrl(): string {
+export async function getLogoutUrl(): Promise<string> {
+  const cfg = await loadAuthConfig();
   const origin = typeof window !== "undefined" ? window.location.origin : "/";
-  return `${AUTH_BASE}/logout?client_id=${CLIENT_ID}&logout_uri=${encodeURIComponent(origin)}`;
+  return `${cfg.cognitoDomain}/logout?client_id=${cfg.cognitoClientId}&logout_uri=${encodeURIComponent(origin)}`;
 }
 
 export function parseTokensFromHash(): { id_token: string; access_token: string } | null {
