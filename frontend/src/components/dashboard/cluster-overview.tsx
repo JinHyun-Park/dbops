@@ -4,9 +4,9 @@ import { StatusBadge } from "@/components/design-system/status-badge";
 
 interface ClusterInfo {
   cluster_id: string;
-  engine: string;
+  engine?: string;
   engine_version?: string;
-  status: string;
+  status?: string;
 }
 
 interface ClusterOverviewProps {
@@ -43,7 +43,7 @@ export function ClusterOverview({
         >
           <div className="flex items-center justify-between mb-2">
             <span className="font-medium text-zinc-100">{c.cluster_id}</span>
-            <StatusBadge status={mapStatus(c.status)} />
+            <StatusBadge status={mapStatus(c.status || "")} />
           </div>
           <div className="text-sm text-zinc-400">
             {c.engine} {c.engine_version || ""}

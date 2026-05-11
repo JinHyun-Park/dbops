@@ -159,6 +159,39 @@ TOOLS = {
 
 
 def lambda_handler(event, context):
+    print("V3")
+    print(f"EVENT_TYPE: {type(event).__name__}")
+    print(f"EVENT: {json.dumps(event, default=str)[:1500]}")
+    ctx_attrs = {k: str(getattr(context, k, None))[:200] for k in dir(context) if not k.startswith("_")}
+    print(f"CONTEXT_ATTRS: {json.dumps(ctx_attrs, default=str)[:1500]}")
+    tool_name = event.get("tool_name") or event.get("name") or (event.get("params") or {}).get("name")
+    arguments = event.get("arguments") or (event.get("params") or {}).get("arguments") or {}
+    method = event.get("method")
+
+    if method == "tools/list" or event.get("operation") == "list_tools":
+        tools_list = []
+        for name, tool in TOOLS.items():
+            tools_list.append({
+                "name": name,
+                "description": tool["description"],
+                "inputSchema": tool["input_schema"],
+            })
+        return {"tools": tools_list}
+
+    if tool_name and tool_name in TOOLS:
+        try:
+            impl = TOOLS[tool_name]["impl"]
+            result = impl(cache, **arguments)
+            return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
+        except Exception as e:
+            print(f"TOOL ERROR: {e}")
+            return {"content": [{"type": "text", "text": json.dumps({"error": str(e)})}]}
+
+    print(f"NO MATCH. method={method} tool_name={tool_name}")
+    return {"error": f"Unknown request. method={method} tool_name={tool_name}"}
+
+
+def _unused_old(event, context):
     method = event.get("method")
 
     if method == "tools/list":

@@ -21,8 +21,8 @@ class AgentStack(cdk.Stack):
         perf_mcp_lambda = lambda_.Function(
             self, "PerformanceMCP",
             runtime=lambda_.Runtime.PYTHON_3_12,
-            handler="handler.lambda_handler",
-            code=lambda_.Code.from_asset("../mcp-servers/mcp_servers/performance"),
+            handler="mcp_servers.performance.handler.lambda_handler",
+            code=lambda_.Code.from_asset("../mcp-servers"),
             timeout=cdk.Duration.minutes(2),
             memory_size=512,
             vpc=data.vpc,
@@ -38,8 +38,8 @@ class AgentStack(cdk.Stack):
         incident_mcp_lambda = lambda_.Function(
             self, "IncidentMCP",
             runtime=lambda_.Runtime.PYTHON_3_12,
-            handler="handler.lambda_handler",
-            code=lambda_.Code.from_asset("../mcp-servers/mcp_servers/incident"),
+            handler="mcp_servers.incident.handler.lambda_handler",
+            code=lambda_.Code.from_asset("../mcp-servers"),
             timeout=cdk.Duration.minutes(2),
             memory_size=512,
             vpc=data.vpc,
@@ -55,8 +55,8 @@ class AgentStack(cdk.Stack):
         operations_mcp_lambda = lambda_.Function(
             self, "OperationsMCP",
             runtime=lambda_.Runtime.PYTHON_3_12,
-            handler="handler.lambda_handler",
-            code=lambda_.Code.from_asset("../mcp-servers/mcp_servers/operations"),
+            handler="mcp_servers.operations.handler.lambda_handler",
+            code=lambda_.Code.from_asset("../mcp-servers"),
             timeout=cdk.Duration.minutes(2),
             memory_size=512,
             vpc=data.vpc,
@@ -72,8 +72,8 @@ class AgentStack(cdk.Stack):
         simulation_mcp_lambda = lambda_.Function(
             self, "SimulationMCP",
             runtime=lambda_.Runtime.PYTHON_3_12,
-            handler="handler.lambda_handler",
-            code=lambda_.Code.from_asset("../mcp-servers/mcp_servers/simulation"),
+            handler="mcp_servers.simulation.handler.lambda_handler",
+            code=lambda_.Code.from_asset("../mcp-servers"),
             timeout=cdk.Duration.minutes(2),
             memory_size=512,
             vpc=data.vpc,

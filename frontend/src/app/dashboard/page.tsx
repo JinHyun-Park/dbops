@@ -7,29 +7,49 @@ import { fetchClusters, fetchDashboard } from "@/lib/api-client";
 
 interface DashboardData {
   cluster?: { engine_version?: string; status?: string; storage_size_gb?: number | string };
-  metrics?: { metric_type: string; avg_val: number; max_val: number }[];
-  top_queries?: { query_hash: string; query_text: string; calls: number; total_time_ms: number; mean_time_ms: number }[];
+  metrics?: { metric_type: string; avg_val: number | string; max_val: number | string }[];
+  top_queries?: { query_hash: string; query_text: string; calls: number | string; total_time_ms: number | string; mean_time_ms: number | string }[];
+}
+
+function safeNum(v: unknown): number {
+  if (v === null || v === undefined) return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
 }
 
 export default function DashboardPage() {
   const [clusters, setClusters] = useState<{ cluster_id: string; engine?: string; status?: string }[]>([]);
   const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchClusters().then(setClusters).catch(console.error);
+    fetchClusters()
+      .then(setClusters)
+      .catch((e) => setError(`Failed to load clusters: ${e.message}`));
   }, []);
 
   useEffect(() => {
     if (!selectedCluster) return;
     setDashboardData(null);
-    const load = () =>
+    setError(null);
+    let cancelled = false;
+
+    const load = () => {
       fetchDashboard(selectedCluster)
-        .then(setDashboardData)
-        .catch((e) => console.error("Dashboard load failed:", e));
+        .then((d) => {
+          if (!cancelled) setDashboardData(d);
+        })
+        .catch((e) => {
+          if (!cancelled) setError(`Failed to load dashboard: ${e.message}`);
+        });
+    };
     load();
-    const interval = setInterval(load, 10000);
-    return () => clearInterval(interval);
+    const interval = setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [selectedCluster]);
 
   return (
@@ -42,7 +62,13 @@ export default function DashboardPage() {
         onSelect={setSelectedCluster}
       />
 
-      {selectedCluster && !dashboardData && (
+      {error && (
+        <div className="mt-6 bg-red-900/30 border border-red-700 rounded-lg p-4 text-red-300 text-sm">
+          {error}
+        </div>
+      )}
+
+      {selectedCluster && !dashboardData && !error && (
         <div className="mt-6 text-zinc-500">Loading metrics for {selectedCluster}...</div>
       )}
 
@@ -53,7 +79,7 @@ export default function DashboardPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div><span className="text-zinc-500">Engine Version:</span> <span className="text-zinc-200">{dashboardData.cluster?.engine_version || "-"}</span></div>
               <div><span className="text-zinc-500">Status:</span> <span className="text-emerald-400">{dashboardData.cluster?.status || "-"}</span></div>
-              <div><span className="text-zinc-500">Storage:</span> <span className="text-zinc-200">{dashboardData.cluster?.storage_size_gb || "-"} GB</span></div>
+              <div><span className="text-zinc-500">Storage:</span> <span className="text-zinc-200">{dashboardData.cluster?.storage_size_gb ?? "-"} GB</span></div>
             </div>
           </div>
 
@@ -65,7 +91,7 @@ export default function DashboardPage() {
                   <MetricCard
                     key={m.metric_type}
                     label={`${m.metric_type} (avg)`}
-                    value={Number(m.avg_val).toFixed(3)}
+                    value={safeNum(m.avg_val).toFixed(3)}
                   />
                 ))}
               </div>
@@ -90,14 +116,14 @@ export default function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-700">
-                    {dashboardData.top_queries.map((q) => (
-                      <tr key={q.query_hash} className="hover:bg-zinc-750">
-                        <td className="px-4 py-2 text-zinc-200 font-mono text-xs truncate max-w-md" title={q.query_text}>
-                          {q.query_text}
+                    {dashboardData.top_queries.slice(0, 20).map((q, i) => (
+                      <tr key={`${q.query_hash}-${i}`} className="hover:bg-zinc-750">
+                        <td className="px-4 py-2 text-zinc-200 font-mono text-xs truncate max-w-md" title={q.query_text || ""}>
+                          {q.query_text || "(unknown)"}
                         </td>
-                        <td className="px-4 py-2 text-right text-zinc-300">{q.calls.toLocaleString()}</td>
-                        <td className="px-4 py-2 text-right text-zinc-300">{Number(q.total_time_ms).toFixed(0)}</td>
-                        <td className="px-4 py-2 text-right text-zinc-300">{Number(q.mean_time_ms).toFixed(2)}</td>
+                        <td className="px-4 py-2 text-right text-zinc-300">{safeNum(q.calls).toLocaleString()}</td>
+                        <td className="px-4 py-2 text-right text-zinc-300">{safeNum(q.total_time_ms).toFixed(0)}</td>
+                        <td className="px-4 py-2 text-right text-zinc-300">{safeNum(q.mean_time_ms).toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
