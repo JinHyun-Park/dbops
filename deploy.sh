@@ -13,21 +13,26 @@ command -v aws >/dev/null 2>&1 || { echo "❌ AWS CLI required."; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Step 1: Build frontend
-echo "▶ [1/3] Building frontend..."
+echo "▶ [1/4] Building frontend..."
 cd "$SCRIPT_DIR/frontend"
 npm install --silent
 npm run build
 echo "✅ Frontend built"
 
-# Step 2: Deploy all CDK stacks (Foundation → Data → Agent → Frontend)
+# Step 2: Build agent ARM64 dependencies (for AgentCore Runtime)
 echo ""
-echo "▶ [2/3] Deploying CDK stacks..."
+echo "▶ [2/4] Building agent ARM64 dependencies..."
+bash "$SCRIPT_DIR/agent/build-deps.sh"
+
+# Step 3: Deploy all CDK stacks (Foundation → Data → Agent → Frontend)
+echo ""
+echo "▶ [3/4] Deploying CDK stacks..."
 cd "$SCRIPT_DIR/cdk"
 pip install -r requirements.txt -q
 cdk deploy --all --require-approval never
 echo "✅ All stacks deployed (Foundation, Data, Agent + AgentCore, Frontend)"
 
-# Step 3: Run schema migrations
+# Step 4: Run schema migrations
 echo ""
 echo "▶ [3/3] Running schema migrations..."
 cd "$SCRIPT_DIR"

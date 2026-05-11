@@ -12,3 +12,4 @@ cdk.out/
 cdk/config/settings.py
 *.js.map
 .omc/
+agent/_deps/

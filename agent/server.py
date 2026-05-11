@@ -1,4 +1,9 @@
 import os
+import sys
+
+_deps = os.path.join(os.path.dirname(__file__), "_deps")
+if os.path.isdir(_deps) and _deps not in sys.path:
+    sys.path.insert(0, _deps)
 
 try:
     from agent.prompts.system_prompt import build_system_prompt
