@@ -73,18 +73,61 @@ def lambda_handler(event, context):
             if field not in body:
                 return {"statusCode": 400, "body": json.dumps({"error": f"{field} required"})}
 
+        cluster_id = body["cluster_id"]
+        account_id = body["account_id"]
+        region = body["region"]
+        spoke_role_arn = body.get("spoke_role_arn", "")
+        connection_status = "untested"
+        connection_error = ""
+
+        # If a spoke role is provided, validate cross-account access by assuming it
+        # and calling rds:DescribeDBClusters. Otherwise, assume same-account access
+        # via the local Lambda role.
+        try:
+            if spoke_role_arn:
+                sts = boto3.client("sts")
+                creds = sts.assume_role(
+                    RoleArn=spoke_role_arn,
+                    RoleSessionName=f"dbops-register-{cluster_id[:32]}",
+                    DurationSeconds=900,
+                )["Credentials"]
+                rds = boto3.client(
+                    "rds",
+                    region_name=region,
+                    aws_access_key_id=creds["AccessKeyId"],
+                    aws_secret_access_key=creds["SecretAccessKey"],
+                    aws_session_token=creds["SessionToken"],
+                )
+            else:
+                rds = boto3.client("rds", region_name=region)
+            rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
+            connection_status = "ok"
+        except Exception as e:
+            connection_status = "failed"
+            connection_error = str(e)[:300]
+
         table.put_item(Item={
-            "cluster_id": body["cluster_id"],
-            "account_id": body["account_id"],
-            "region": body["region"],
+            "cluster_id": cluster_id,
+            "account_id": account_id,
+            "region": region,
             "engine": body.get("engine", "aurora-postgresql"),
-            "spoke_role_arn": body.get("spoke_role_arn", ""),
+            "spoke_role_arn": spoke_role_arn,
             "registered_at": datetime.utcnow().isoformat(),
+            "connection_status": connection_status,
+            "connection_error": connection_error,
+            "connection_validated_at": datetime.utcnow().isoformat() if connection_status != "untested" else "",
         })
+
+        status_code = 201 if connection_status != "failed" else 207
         return {
-            "statusCode": 201,
+            "statusCode": status_code,
             "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-            "body": json.dumps({"status": "registered", "cluster_id": body["cluster_id"]}),
+            "body": json.dumps({
+                "status": "registered" if connection_status != "failed" else "registered_with_warning",
+                "cluster_id": cluster_id,
+                "connection_status": connection_status,
+                "connection_error": connection_error,
+            }),
         }
 
     return {"statusCode": 405, "body": json.dumps({"error": "Method not allowed"})}

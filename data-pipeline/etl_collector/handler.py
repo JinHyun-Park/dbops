@@ -4,6 +4,21 @@ import boto3
 from collectors.meta_collector import collect_cluster_meta
 from collectors.pi_collector import collect_pi_metrics
 from collectors.stats_collector import collect_query_stats
+from collectors.cw_collector import collect_cw_metrics
+from collectors.pg_table_stats import collect_pg_table_stats
+from collectors.pg_activity import collect_pg_activity
+from collectors.pg_locks import collect_pg_locks
+
+
+def _scan_all(table):
+    items = []
+    kwargs = {}
+    while True:
+        resp = table.scan(**kwargs)
+        items.extend(resp.get("Items", []))
+        if "LastEvaluatedKey" not in resp:
+            return items
+        kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
 
 
 def lambda_handler(event, context):
@@ -18,7 +33,9 @@ def lambda_handler(event, context):
     def cache_execute(sql, params):
         sql_params = []
         for key, value in params.items():
-            if isinstance(value, int):
+            if isinstance(value, bool):
+                sql_params.append({"name": key, "value": {"booleanValue": value}})
+            elif isinstance(value, int):
                 sql_params.append({"name": key, "value": {"longValue": value}})
             elif isinstance(value, float):
                 sql_params.append({"name": key, "value": {"doubleValue": value}})
@@ -29,8 +46,15 @@ def lambda_handler(event, context):
             sql=f"/* source=dbops-etl */ {sql}", parameters=sql_params,
         )
 
-    response = clusters_table.scan()
-    clusters = response.get("Items", [])
+    client_cache = {}
+
+    def get_client(service, region):
+        key = (service, region)
+        if key not in client_cache:
+            client_cache[key] = boto3.client(service, region_name=region)
+        return client_cache[key]
+
+    clusters = _scan_all(clusters_table)
     results = []
 
     for cluster in clusters:
@@ -42,13 +66,13 @@ def lambda_handler(event, context):
         target_secret_arn = cluster.get("secret_arn", "")
         target_db = cluster.get("db_name", "sampledb")
 
-        rds_client = boto3.client("rds", region_name=region)
-        pi_client = boto3.client("pi", region_name=region)
+        rds_client = get_client("rds", region)
+        pi_client = get_client("pi", region)
+        cw_client = get_client("cloudwatch", region)
         result = {"cluster_id": cluster_id}
 
         try:
-            meta = collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, region)
-            result["meta"] = meta
+            result["meta"] = collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, region)
         except Exception as e:
             result["meta_error"] = str(e)
             print(f"[{cluster_id}] meta error: {e}")
@@ -59,21 +83,51 @@ def lambda_handler(event, context):
             )["DBInstances"]
             if instances:
                 resource_id = instances[0]["DbiResourceId"]
-                pi = collect_pi_metrics(pi_client, cache_execute, resource_id, cluster_id)
-                result["pi"] = pi
+                result["pi"] = collect_pi_metrics(pi_client, cache_execute, resource_id, cluster_id)
             else:
                 result["pi"] = {"skipped": "no instances"}
         except Exception as e:
             result["pi_error"] = str(e)
             print(f"[{cluster_id}] pi error: {e}")
 
+        try:
+            result["cw"] = collect_cw_metrics(cw_client, cache_execute, cluster_id)
+        except Exception as e:
+            result["cw_error"] = str(e)
+            print(f"[{cluster_id}] cw error: {e}")
+
         if target_cluster_arn and target_secret_arn and "postgresql" in engine:
             try:
-                stats = collect_query_stats(rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db)
-                result["stats"] = stats
+                result["stats"] = collect_query_stats(
+                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                )
             except Exception as e:
                 result["stats_error"] = str(e)
                 print(f"[{cluster_id}] stats error: {e}")
+
+            try:
+                result["table_stats"] = collect_pg_table_stats(
+                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                )
+            except Exception as e:
+                result["table_stats_error"] = str(e)
+                print(f"[{cluster_id}] table_stats error: {e}")
+
+            try:
+                result["activity"] = collect_pg_activity(
+                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                )
+            except Exception as e:
+                result["activity_error"] = str(e)
+                print(f"[{cluster_id}] activity error: {e}")
+
+            try:
+                result["locks"] = collect_pg_locks(
+                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                )
+            except Exception as e:
+                result["locks_error"] = str(e)
+                print(f"[{cluster_id}] locks error: {e}")
         else:
             result["stats"] = {"skipped": f"engine={engine} or no secret"}
 

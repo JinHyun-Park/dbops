@@ -8,6 +8,7 @@ from aws_cdk import (
     aws_events_targets as targets,
     aws_iam as iam,
     aws_lambda as lambda_,
+    custom_resources as cr,
 )
 from constructs import Construct
 from config.settings import Settings
@@ -44,6 +45,38 @@ class DataStack(cdk.Stack):
             auto_delete_objects=True,
         )
 
+        # Schema migrator — runs all schema_v*.sql on stack create/update via Custom Resource.
+        # This replaces the manual `aws rds-data execute-statement` loop from deploy.sh.
+        self.schema_migrator = lambda_.Function(
+            self, "SchemaMigrator",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../data-pipeline/schema_migrator"),
+            timeout=cdk.Duration.minutes(5),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": self.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+            },
+        )
+        self.cache_db.secret.grant_read(self.schema_migrator)
+        self.cache_db.grant_data_api_access(self.schema_migrator)
+        # Custom Resource: re-run migration on every stack deploy. Idempotent — all DDL
+        # uses IF NOT EXISTS so reruns are safe.
+        migrate_provider = cr.Provider(
+            self, "SchemaMigratorProvider",
+            on_event_handler=self.schema_migrator,
+        )
+        migrate_resource = cdk.CustomResource(
+            self, "SchemaMigratorRun",
+            service_token=migrate_provider.service_token,
+            properties={
+                # Bumping this string forces re-run on next deploy if you need to.
+                "schema_version": "v4",
+            },
+        )
+        migrate_resource.node.add_dependency(self.cache_db)
+
         self.etl_lambda = lambda_.Function(
             self, "ETLCollector",
             runtime=lambda_.Runtime.PYTHON_3_12,
@@ -66,9 +99,10 @@ class DataStack(cdk.Stack):
         foundation.hub_role.grant(self.etl_lambda.role, "sts:AssumeRole")
 
         self.etl_lambda.add_to_role_policy(iam.PolicyStatement(
-            actions=["rds:DescribeDBClusters", "rds:ListTagsForResource",
+            actions=["rds:DescribeDBClusters", "rds:DescribeDBInstances", "rds:ListTagsForResource",
                      "pi:GetResourceMetrics", "pi:DescribeDimensionKeys",
                      "rds-data:ExecuteStatement", "rds-data:BatchExecuteStatement",
+                     "cloudwatch:GetMetricStatistics", "cloudwatch:GetMetricData",
                      "secretsmanager:GetSecretValue"],
             resources=["*"],
         ))
@@ -82,6 +116,29 @@ class DataStack(cdk.Stack):
         )
 
         self.alert_topic = sns.Topic(self, "AlertTopic", topic_name=f"dbops-{Settings.ENV}-alerts")
+
+        self.alert_evaluator = lambda_.Function(
+            self, "AlertEvaluator",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../data-pipeline/alert_evaluator"),
+            timeout=cdk.Duration.seconds(60),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": self.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "ALERT_SNS_TOPIC_ARN": self.alert_topic.topic_arn,
+            },
+        )
+        self.cache_db.secret.grant_read(self.alert_evaluator)
+        self.cache_db.grant_data_api_access(self.alert_evaluator)
+        self.alert_topic.grant_publish(self.alert_evaluator)
+
+        events.Rule(
+            self, "AlertEvaluatorSchedule",
+            schedule=events.Schedule.rate(cdk.Duration.minutes(5)),
+            targets=[targets.LambdaFunction(self.alert_evaluator)],
+        )
 
         self.event_processor = lambda_.Function(
             self, "EventProcessor",

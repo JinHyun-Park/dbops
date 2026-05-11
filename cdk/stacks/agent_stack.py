@@ -64,10 +64,27 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
             },
         )
         data.cache_db.secret.grant_read(operations_mcp_lambda)
         data.cache_db.grant_data_api_access(operations_mcp_lambda)
+        foundation.clusters_table.grant_read_data(operations_mcp_lambda)
+        # Allow agent-driven SQL against ANY registered Aurora cluster + admin actions.
+        # All write paths still gate through approved=true in tool code.
+        operations_mcp_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "rds-data:ExecuteStatement",
+                "rds-data:BatchExecuteStatement",
+                "secretsmanager:GetSecretValue",
+                "rds:DescribeDBClusters",
+                "rds:DescribeDBClusterParameterGroups",
+                "rds:DescribeDBClusterParameters",
+                "rds:ModifyDBClusterParameterGroup",
+                "rds:ModifyDBCluster",
+            ],
+            resources=["*"],
+        ))
 
         simulation_mcp_lambda = lambda_.Function(
             self, "SimulationMCP",
@@ -189,11 +206,12 @@ class AgentStack(cdk.Stack):
             cors_preflight=apigwv2.CorsPreflightOptions(
                 allow_origins=["*"],
                 allow_methods=[apigwv2.CorsHttpMethod.ANY],
-                allow_headers=["*"],
+                allow_headers=["content-type", "authorization"],
+                allow_credentials=False,
             ),
         )
 
-        dashboard_lambda = lambda_.Function(
+        self.dashboard_lambda = dashboard_lambda = lambda_.Function(
             self, "DashboardApi",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="handler.lambda_handler",
@@ -216,9 +234,18 @@ class AgentStack(cdk.Stack):
             timeout=cdk.Duration.seconds(30),
             environment={
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
             },
         )
         foundation.clusters_table.grant_read_write_data(clusters_lambda)
+        data.cache_db.secret.grant_read(clusters_lambda)
+        data.cache_db.grant_data_api_access(clusters_lambda)
+        clusters_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["rds:DescribeDBClusters", "sts:AssumeRole"],
+            resources=["*"],
+        ))
 
         reports_lambda = lambda_.Function(
             self, "ReportsApi",
@@ -247,10 +274,207 @@ class AgentStack(cdk.Stack):
         )
         foundation.approvals_table.grant_read_write_data(approvals_lambda)
 
+        self.alerts_lambda = alerts_lambda = lambda_.Function(
+            self, "AlertsApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/alerts"),
+            timeout=cdk.Duration.seconds(30),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "ALERT_TOPIC_ARN": data.alert_topic.topic_arn,
+            },
+        )
+        data.cache_db.secret.grant_read(alerts_lambda)
+        data.cache_db.grant_data_api_access(alerts_lambda)
+        data.alert_topic.grant_publish(alerts_lambda)
+        alerts_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["sns:Subscribe", "sns:Unsubscribe", "sns:ListSubscriptionsByTopic"],
+            resources=[data.alert_topic.topic_arn, "*"],
+        ))
+
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/timeseries",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardTimeseriesIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/wait-events",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardWaitEventsIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/slow-queries",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardSlowQueriesIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/query-detail",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardQueryDetailIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/vacuum-stats",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardVacuumStatsIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/index-recommendations",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardIndexRecsIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/long-running",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardLongRunningIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/batch-timeseries",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardBatchTsIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/blocking-locks",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardBlockingLocksIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/settings",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardSettingsIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/schema-changes",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardSchemaChangesIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/anomalies",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardAnomaliesIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/audit-log",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardAuditLogIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/multi-cluster/overview",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("MultiClusterOverviewIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/table-sizes",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardTableSizesIntegration", dashboard_lambda),
+        )
+        # ===== Application Inference Profiles (cost-allocation tagging) =====
+        # One AIP per supported Claude generation, all tagged with Application=DBOps
+        # so Cost Explorer attributes Bedrock spend to this app.
+        aip_setup_lambda = lambda_.Function(
+            self, "InferenceProfileSetup",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../data-pipeline/inference_profile_setup"),
+            timeout=cdk.Duration.minutes(3),
+            memory_size=256,
+            environment={
+                "ENV": Settings.ENV,
+                "ACCOUNT_ID": Settings.ACCOUNT_ID,
+            },
+        )
+        aip_setup_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "bedrock:CreateInferenceProfile",
+                "bedrock:DeleteInferenceProfile",
+                "bedrock:ListInferenceProfiles",
+                "bedrock:GetInferenceProfile",
+                "bedrock:TagResource",
+                "bedrock:UntagResource",
+                "bedrock:ListTagsForResource",
+                "ssm:PutParameter",
+                "ssm:DeleteParameter",
+                "ssm:GetParameter",
+            ],
+            resources=["*"],
+        ))
+        from aws_cdk import custom_resources as cr
+        aip_provider = cr.Provider(self, "InferenceProfileProvider", on_event_handler=aip_setup_lambda)
+        cdk.CustomResource(
+            self, "InferenceProfileSetupRun",
+            service_token=aip_provider.service_token,
+            properties={"version": "v1"},
+        )
+
+        # ===== Cost API =====
+        cost_lambda = lambda_.Function(
+            self, "CostApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/cost"),
+            timeout=cdk.Duration.seconds(30),
+            environment={
+                "ENV": Settings.ENV,
+            },
+        )
+        cost_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "ce:GetCostAndUsage",
+                "ce:GetCostAndUsageWithResources",
+                "ce:GetTags",
+            ],
+            resources=["*"],
+        ))
+        self.api.add_routes(
+            path="/api/cost",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("CostIntegration", cost_lambda),
+        )
+
+        models_lambda = lambda_.Function(
+            self, "ModelsApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/models"),
+            # multi-region ListInferenceProfiles can take 8-12s × 4 regions on cold start
+            timeout=cdk.Duration.seconds(60),
+            memory_size=512,
+            environment={
+                "DEFAULT_MODEL_ID": Settings.AGENT_MODEL_ID,
+            },
+        )
+        models_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:ListInferenceProfiles", "bedrock:GetInferenceProfile"],
+            resources=["*"],
+        ))
+        self.api.add_routes(
+            path="/api/models",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("ModelsIntegration", models_lambda),
+        )
+
+        alerts_integration = integrations.HttpLambdaIntegration("AlertsIntegration", alerts_lambda)
+        self.api.add_routes(
+            path="/api/alert-rules",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
+            integration=alerts_integration,
+        )
+        self.api.add_routes(
+            path="/api/alert-rules/{id}",
+            methods=[apigwv2.HttpMethod.PATCH, apigwv2.HttpMethod.DELETE],
+            integration=alerts_integration,
+        )
+        self.api.add_routes(
+            path="/api/alert-subscriptions",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE],
+            integration=alerts_integration,
         )
         self.api.add_routes(
             path="/api/clusters",
