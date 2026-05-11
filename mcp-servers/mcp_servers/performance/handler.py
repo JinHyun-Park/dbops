@@ -158,37 +158,41 @@ TOOLS = {
 }
 
 
+def _extract_tool_name(context):
+    cc = getattr(context, "client_context", None)
+    if not cc:
+        return None
+    custom = getattr(cc, "custom", None) or {}
+    raw = custom.get("bedrockAgentCoreToolName") or custom.get("tool_name")
+    if not raw:
+        return None
+    delim = "___"
+    return raw.split(delim, 1)[1] if delim in raw else raw
+
+
 def lambda_handler(event, context):
-    print("V3")
-    print(f"EVENT_TYPE: {type(event).__name__}")
-    print(f"EVENT: {json.dumps(event, default=str)[:1500]}")
-    ctx_attrs = {k: str(getattr(context, k, None))[:200] for k in dir(context) if not k.startswith("_")}
-    print(f"CONTEXT_ATTRS: {json.dumps(ctx_attrs, default=str)[:1500]}")
-    tool_name = event.get("tool_name") or event.get("name") or (event.get("params") or {}).get("name")
-    arguments = event.get("arguments") or (event.get("params") or {}).get("arguments") or {}
-    method = event.get("method")
+    tool_name = _extract_tool_name(context)
+    method = event.get("method") if isinstance(event, dict) else None
+    print(f"INVOKE tool={tool_name} method={method}")
 
     if method == "tools/list" or event.get("operation") == "list_tools":
-        tools_list = []
-        for name, tool in TOOLS.items():
-            tools_list.append({
-                "name": name,
-                "description": tool["description"],
-                "inputSchema": tool["input_schema"],
-            })
-        return {"tools": tools_list}
+        return {
+            "tools": [
+                {"name": n, "description": t["description"], "inputSchema": t["input_schema"]}
+                for n, t in TOOLS.items()
+            ]
+        }
 
     if tool_name and tool_name in TOOLS:
         try:
-            impl = TOOLS[tool_name]["impl"]
-            result = impl(cache, **arguments)
+            result = TOOLS[tool_name]["impl"](cache, **(event or {}))
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
         except Exception as e:
-            print(f"TOOL ERROR: {e}")
+            print(f"TOOL ERROR ({tool_name}): {e}")
             return {"content": [{"type": "text", "text": json.dumps({"error": str(e)})}]}
 
-    print(f"NO MATCH. method={method} tool_name={tool_name}")
-    return {"error": f"Unknown request. method={method} tool_name={tool_name}"}
+    print(f"NO MATCH tool_name={tool_name} method={method}")
+    return {"error": f"Unknown tool: {tool_name}"}
 
 
 def _unused_old(event, context):

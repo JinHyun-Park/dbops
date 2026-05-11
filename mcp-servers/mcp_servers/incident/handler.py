@@ -93,28 +93,32 @@ TOOLS = {
 }
 
 
+def _extract_tool_name(context):
+    cc = getattr(context, "client_context", None)
+    if not cc:
+        return None
+    custom = getattr(cc, "custom", None) or {}
+    raw = custom.get("bedrockAgentCoreToolName") or custom.get("tool_name")
+    if not raw:
+        return None
+    return raw.split("___", 1)[1] if "___" in raw else raw
+
+
 def lambda_handler(event, context):
-    method = event.get("method")
+    tool_name = _extract_tool_name(context)
+    method = event.get("method") if isinstance(event, dict) else None
 
     if method == "tools/list":
-        tools_list = []
-        for name, tool in TOOLS.items():
-            tools_list.append({
-                "name": name,
-                "description": tool["description"],
-                "inputSchema": tool["input_schema"],
-            })
-        return {"tools": tools_list}
+        return {"tools": [
+            {"name": n, "description": t["description"], "inputSchema": t["input_schema"]}
+            for n, t in TOOLS.items()
+        ]}
 
-    if method == "tools/call":
-        tool_name = event.get("params", {}).get("name")
-        arguments = event.get("params", {}).get("arguments", {})
+    if tool_name and tool_name in TOOLS:
+        try:
+            result = TOOLS[tool_name]["impl"](cache, **(event or {}))
+            return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": json.dumps({"error": str(e)})}]}
 
-        if tool_name not in TOOLS:
-            return {"error": f"Unknown tool: {tool_name}"}
-
-        impl = TOOLS[tool_name]["impl"]
-        result = impl(cache, **arguments)
-        return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
-
-    return {"error": f"Unknown method: {method}"}
+    return {"error": f"Unknown tool: {tool_name}"}
