@@ -54,38 +54,67 @@ Web UI (Next.js) ──SSE──▶ AgentCore Runtime (Strands Agent)
 - AWS CDK CLI (`npm install -g aws-cdk`)
 - Bedrock model access enabled (Claude Sonnet)
 
-### Deployment
+### Deployment (Quickstart)
 
 ```bash
-# 1. Clone
+# 1. Clone + configure (two values: ACCOUNT_ID + REGION)
 git clone https://github.com/JinHyun-Park/dbops.git
 cd dbops
-
-# 2. Configure
 cp cdk/config/settings.example.py cdk/config/settings.py
-# Edit settings.py: ACCOUNT_ID, REGION, COGNITO_DOMAIN_PREFIX
+$EDITOR cdk/config/settings.py     # set ACCOUNT_ID, REGION (rest is optional)
 
-# 3. Install dependencies
-pip install -r requirements.txt
-cd frontend && npm install && npm run build && cd ..
+# 2. Bootstrap CDK once per account/region
+cd cdk && cdk bootstrap && cd ..
 
-# 4. Deploy
-cd cdk
-cdk bootstrap
-cdk deploy --all
+# 3. Run the all-in-one deployer
+./deploy.sh
+# Builds frontend → bundles SQL schemas → builds ARM64 agent deps →
+# deploys all CDK stacks (foundation, data, agent, frontend) →
+# SchemaMigrator Custom Resource creates 14+ tables idempotently →
+# Cognito Callback URLs auto-registered to your CloudFront domain →
+# /config.json deployed with your apiUrl, region, cognitoClientId, agentRuntimeArn.
+```
 
-# 5. Run schema migrations (via AWS Console or CLI)
-# Execute data-pipeline/sql/schema.sql, schema_v2.sql, schema_v3.sql
-# against the Aurora PG Cache cluster via RDS Data API
+The final output shows your Web UI URL. Open it, log in (Cognito Hosted UI),
+and register your Aurora cluster from the Clusters page (cross-account spoke
+roles are validated via STS AssumeRole at registration time).
 
-# 6. Configure AgentCore (post-deploy)
+#### One-time post-deploy: activate Bedrock cost-allocation tags
+
+CDK creates six Application Inference Profiles tagged with `Application=DBOps`,
+`Environment={env}`, `CostCategory=DBOps`. To populate the `/cost` page with
+real spend you must activate the tag in your billing preferences once:
+
+1. Open the [Cost allocation tags console](https://console.aws.amazon.com/billing/home#/preferences/tags)
+2. Find **Application** under "User-defined cost allocation tags"
+3. Select it → click **Activate**
+4. Wait ~24h. Cost Explorer is not retroactive, but new chat invocations are
+   immediately attributed to the profile from then on.
+
+#### Optional post-deploy hardening
+
+```bash
+# Tighten CORS — by default Lambdas echo request Origin (dev-safe).
+# Set ALLOWED_ORIGINS on dashboard/alerts Lambdas to your CloudFront domain
+# in production. (Auto-injection would create a cyclic CFN dependency.)
+
+# Configure AgentCore (post-deploy)
 # npm install -g @aws/agentcore
 # agentcore create --defaults
 # agentcore deploy
 
-# 7. Register your first cluster
+# 8. Register your first cluster
 # Open the Web UI → Clusters → + Register
 ```
+
+> **Cognito Callback URLs are auto-registered**: the frontend stack uses an
+> AWS Custom Resource to add `<DistributionUrl>/callback` (and localhost)
+> to the User Pool client at deploy time. No manual Cognito setup needed.
+>
+> **Runtime config**: the frontend fetches `/config.json` at boot, so the
+> built static bundle is portable. CDK writes `apiUrl`, `frontendUrl`,
+> `region`, `cognitoDomain`, `cognitoClientId`, and `agentRuntimeArn` into
+> the config object, resolved from the live stack outputs at deploy time.
 
 ### Cross-Account Setup
 
