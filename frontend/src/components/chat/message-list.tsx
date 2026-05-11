@@ -1,5 +1,7 @@
 "use client";
 
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { ToolStatus } from "./tool-status";
 
 export interface Message {
@@ -35,7 +37,24 @@ export function MessageList({ messages }: MessageListProps) {
                 ))}
               </div>
             )}
-            <div className="whitespace-pre-wrap">{msg.content}</div>
+            {msg.role === "user" ? (
+              <div className="whitespace-pre-wrap">{msg.content}</div>
+            ) : (
+              <div className="prose prose-invert prose-sm max-w-none
+                prose-headings:text-zinc-100 prose-headings:font-semibold prose-headings:mt-3 prose-headings:mb-2
+                prose-p:my-2 prose-p:leading-relaxed
+                prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5
+                prose-strong:text-zinc-100
+                prose-code:text-amber-300 prose-code:bg-zinc-900 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none
+                prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-700 prose-pre:my-3
+                prose-a:text-blue-400 hover:prose-a:text-blue-300
+                prose-table:my-3 prose-th:border prose-th:border-zinc-700 prose-th:bg-zinc-900 prose-th:px-3 prose-th:py-2
+                prose-td:border prose-td:border-zinc-700 prose-td:px-3 prose-td:py-2
+                prose-blockquote:border-l-blue-500 prose-blockquote:text-zinc-300
+                prose-hr:border-zinc-700">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+              </div>
+            )}
           </div>
         </div>
       ))}
