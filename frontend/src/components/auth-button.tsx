@@ -15,12 +15,14 @@ export function AuthButton() {
 
   if (!loggedIn) {
     return (
-      <a
-        href={getLoginUrl()}
+      <button
+        onClick={async () => {
+          window.location.href = await getLoginUrl();
+        }}
         className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-500 transition-colors"
       >
         Login
-      </a>
+      </button>
     );
   }
 
@@ -28,9 +30,9 @@ export function AuthButton() {
     <div className="flex items-center gap-3">
       <span className="text-xs text-zinc-400">{email}</span>
       <button
-        onClick={() => {
+        onClick={async () => {
           clearTokens();
-          window.location.href = getLogoutUrl();
+          window.location.href = await getLogoutUrl();
         }}
         className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors"
       >

@@ -1,7 +1,172 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { AuthGuard } from "@/components/auth-guard";
+import { AuthButton } from "@/components/auth-button";
+
+interface NavItem {
+  href: string;
+  label: string;
+  hint?: string;
+}
+
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+const NAV: NavGroup[] = [
+  {
+    label: "Monitor",
+    items: [
+      { href: "/fleet", label: "Fleet", hint: "all clusters at a glance" },
+      { href: "/dashboard", label: "Dashboard", hint: "single-cluster deep dive" },
+    ],
+  },
+  {
+    label: "Automate",
+    items: [
+      { href: "/chat", label: "Chat", hint: "natural-language ops" },
+      { href: "/query-lab", label: "Query Lab", hint: "SQL analysis + EXPLAIN" },
+      { href: "/approvals", label: "Approvals", hint: "DBA gate for writes" },
+    ],
+  },
+  {
+    label: "Configure",
+    items: [
+      { href: "/alerts", label: "Alerts", hint: "rules + SNS subscribers" },
+      { href: "/clusters", label: "Clusters", hint: "register + connection" },
+      { href: "/reports", label: "Reports", hint: "scheduled summaries" },
+      { href: "/cost", label: "Cost", hint: "Bedrock spend by model" },
+    ],
+  },
+];
+
+function humanize(segment: string): string {
+  const map: Record<string, string> = {
+    fleet: "Fleet",
+    dashboard: "Dashboard",
+    chat: "Chat",
+    "query-lab": "Query Lab",
+    approvals: "Approvals",
+    alerts: "Alerts",
+    clusters: "Clusters",
+    reports: "Reports",
+    cost: "Cost",
+    callback: "Login",
+  };
+  return map[segment] || segment;
+}
+
+function Breadcrumbs({ pathname }: { pathname: string }) {
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments.length === 0) return null;
+  const crumbs = segments.map((seg, i) => ({
+    label: humanize(seg),
+    href: "/" + segments.slice(0, i + 1).join("/"),
+  }));
+  return (
+    <nav className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.12em] text-zinc-500">
+      <Link href="/" className="hover:text-zinc-300 transition-colors">
+        home
+      </Link>
+      {crumbs.map((c, i) => (
+        <span key={c.href} className="flex items-center gap-1.5">
+          <span className="text-zinc-700">/</span>
+          {i === crumbs.length - 1 ? (
+            <span className="text-zinc-300">{c.label}</span>
+          ) : (
+            <Link href={c.href} className="hover:text-zinc-300 transition-colors">
+              {c.label}
+            </Link>
+          )}
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+function SidebarItem({ item, active }: { item: NavItem; active: boolean }) {
+  return (
+    <Link
+      href={item.href}
+      className={`group block px-3 py-2 -mx-2 rounded text-sm transition-colors ${
+        active
+          ? "bg-zinc-800/80 text-zinc-100"
+          : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/40"
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className={`w-1 h-3.5 rounded-sm transition-colors ${
+            active ? "bg-amber-400" : "bg-transparent group-hover:bg-zinc-700"
+          }`}
+        />
+        <span>{item.label}</span>
+      </div>
+      {item.hint && (
+        <div className="ml-3 mt-0.5 text-[10px] text-zinc-600 group-hover:text-zinc-500 leading-tight">
+          {item.hint}
+        </div>
+      )}
+    </Link>
+  );
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  return <AuthGuard>{children}</AuthGuard>;
+  const pathname = usePathname() || "/";
+
+  // Auth callback should not be wrapped in the chrome.
+  if (pathname.startsWith("/callback")) {
+    return <>{children}</>;
+  }
+
+  return (
+    <AuthGuard>
+      <div className="flex h-screen bg-zinc-950 text-zinc-100">
+        <aside className="hidden md:flex w-60 flex-col border-r border-zinc-800 bg-zinc-950">
+          <Link
+            href="/"
+            className="px-6 py-5 border-b border-zinc-800 hover:bg-zinc-900/50 transition-colors"
+          >
+            <div className="font-mono text-[10px] tracking-[0.25em] text-amber-400/80 uppercase">
+              dbops
+            </div>
+            <div className="font-semibold text-zinc-100 mt-0.5">Operations</div>
+          </Link>
+          <nav className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
+            {NAV.map((group) => (
+              <div key={group.label}>
+                <div className="px-3 mb-1.5 text-[10px] uppercase tracking-[0.18em] text-zinc-600 font-medium">
+                  {group.label}
+                </div>
+                <div className="space-y-0.5">
+                  {group.items.map((item) => {
+                    const active =
+                      pathname === item.href ||
+                      (item.href !== "/" && pathname.startsWith(item.href + "/"));
+                    return <SidebarItem key={item.href} item={item} active={active} />;
+                  })}
+                </div>
+              </div>
+            ))}
+          </nav>
+          <div className="border-t border-zinc-800 px-4 py-4">
+            <AuthButton />
+          </div>
+        </aside>
+
+        <div className="flex-1 flex flex-col min-w-0">
+          <header className="flex-shrink-0 border-b border-zinc-800 px-6 py-3 flex items-center justify-between bg-zinc-950/80 backdrop-blur">
+            <Breadcrumbs pathname={pathname} />
+            <div className="md:hidden">
+              <AuthButton />
+            </div>
+          </header>
+          <main className="flex-1 overflow-y-auto">{children}</main>
+        </div>
+      </div>
+    </AuthGuard>
+  );
 }

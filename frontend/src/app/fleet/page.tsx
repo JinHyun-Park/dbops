@@ -1,0 +1,187 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { fetchMultiClusterOverview } from "@/lib/api-client";
+import { PageHeader, PageBody, EmptyState } from "@/components/design-system/page-shell";
+
+interface ClusterRow {
+  cluster_id: string;
+  engine: string;
+  engine_version: string;
+  status: string;
+  storage_size_gb: number | string;
+  cpu: number | string | null;
+  aas: number | string | null;
+  conn_active: number | string | null;
+  conn_idle: number | string | null;
+  storage_bytes: number | string | null;
+  deadlocks: number | string | null;
+  blocking_count: number | string | null;
+}
+
+function n(v: unknown): number {
+  if (v === null || v === undefined) return 0;
+  const x = Number(v);
+  return Number.isFinite(x) ? x : 0;
+}
+
+function severityColor(value: number, warn: number, crit: number): string {
+  if (value >= crit) return "text-rose-400";
+  if (value >= warn) return "text-amber-400";
+  return "text-zinc-300";
+}
+
+function fmtBytes(b: number): string {
+  if (b > 1e12) return `${(b / 1e12).toFixed(2)} TB`;
+  if (b > 1e9) return `${(b / 1e9).toFixed(2)} GB`;
+  if (b > 1e6) return `${(b / 1e6).toFixed(1)} MB`;
+  return `${b} B`;
+}
+
+export default function FleetPage() {
+  const [rows, setRows] = useState<ClusterRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<keyof ClusterRow>("cluster_id");
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      fetchMultiClusterOverview()
+        .then((d) => !cancelled && setRows(d.clusters || []))
+        .catch((e) => !cancelled && setErr(e.message))
+        .finally(() => !cancelled && setLoading(false));
+    load();
+    const iv = setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, []);
+
+  const sorted = [...rows].sort((a, b) => {
+    const av = a[sortKey];
+    const bv = b[sortKey];
+    if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv);
+    return n(bv) - n(av);
+  });
+
+  return (
+    <PageBody>
+      <PageHeader
+        eyebrow="monitor"
+        title="Fleet overview"
+        description={`${rows.length} cluster${rows.length === 1 ? "" : "s"} · auto-refresh 30s · click any row for deep dive`}
+      />
+
+      {err && (
+        <div className="bg-rose-500/10 border border-rose-500/30 px-4 py-3 text-rose-300 text-sm mb-6">
+          {err}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-zinc-500 text-sm">loading…</div>
+      ) : sorted.length === 0 ? (
+        <EmptyState
+          eyebrow="no clusters"
+          title="No clusters registered yet"
+          description="Once you register an Aurora cluster, live CPU, AAS, connection and lock metrics will stream here every 30 seconds."
+          primary={{ href: "/clusters", label: "+ Register cluster" }}
+        />
+      ) : (
+        <div className="bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-zinc-900/50 border-b border-zinc-700">
+              <tr>
+                <ThSort label="Cluster" onClick={() => setSortKey("cluster_id")} />
+                <ThSort label="Engine" onClick={() => setSortKey("engine")} />
+                <ThSort label="Status" onClick={() => setSortKey("status")} />
+                <ThSort label="CPU %" align="right" onClick={() => setSortKey("cpu")} />
+                <ThSort label="AAS" align="right" onClick={() => setSortKey("aas")} />
+                <ThSort label="Conn" align="right" onClick={() => setSortKey("conn_active")} />
+                <ThSort label="Storage" align="right" onClick={() => setSortKey("storage_bytes")} />
+                <ThSort label="Deadlocks" align="right" onClick={() => setSortKey("deadlocks")} />
+                <ThSort label="Blocks" align="right" onClick={() => setSortKey("blocking_count")} />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-700">
+              {sorted.map((c) => {
+                const cpu = n(c.cpu);
+                const aas = n(c.aas);
+                const conn = n(c.conn_active) + n(c.conn_idle);
+                const dlk = n(c.deadlocks);
+                const blk = n(c.blocking_count);
+                return (
+                  <tr key={c.cluster_id} className="hover:bg-zinc-900/40">
+                    <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
+                      <Link
+                        href={`/dashboard?cluster=${encodeURIComponent(c.cluster_id)}`}
+                        className="hover:text-sky-400 underline-offset-2 hover:underline"
+                      >
+                        {c.cluster_id}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2 text-zinc-300 text-xs">
+                      {c.engine}{" "}
+                      <span className="text-zinc-500">{c.engine_version}</span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] ${
+                          c.status === "available"
+                            ? "bg-emerald-500/10 text-emerald-400"
+                            : "bg-rose-500/10 text-rose-400"
+                        }`}
+                      >
+                        {c.status}
+                      </span>
+                    </td>
+                    <td className={`px-3 py-2 text-right font-mono text-xs ${severityColor(cpu, 70, 90)}`}>
+                      {c.cpu === null ? "-" : cpu.toFixed(1)}
+                    </td>
+                    <td className={`px-3 py-2 text-right font-mono text-xs ${severityColor(aas, 2, 5)}`}>
+                      {c.aas === null ? "-" : aas.toFixed(2)}
+                    </td>
+                    <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
+                      {conn || "-"}
+                    </td>
+                    <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
+                      {c.storage_bytes ? fmtBytes(n(c.storage_bytes)) : "-"}
+                    </td>
+                    <td className={`px-3 py-2 text-right font-mono text-xs ${severityColor(dlk, 1, 5)}`}>
+                      {dlk || "-"}
+                    </td>
+                    <td className={`px-3 py-2 text-right font-mono text-xs ${severityColor(blk, 1, 3)}`}>
+                      {blk || "-"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </PageBody>
+  );
+}
+
+function ThSort({
+  label,
+  align = "left",
+  onClick,
+}: {
+  label: string;
+  align?: "left" | "right";
+  onClick: () => void;
+}) {
+  return (
+    <th
+      onClick={onClick}
+      className={`px-3 py-2 text-zinc-400 font-medium cursor-pointer hover:text-zinc-200 text-${align}`}
+    >
+      {label}
+    </th>
+  );
+}

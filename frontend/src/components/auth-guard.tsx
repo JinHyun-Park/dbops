@@ -21,7 +21,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    window.location.href = getLoginUrl();
+    getLoginUrl().then((url) => {
+      window.location.href = url;
+    });
   }, []);
 
   if (!checked) {

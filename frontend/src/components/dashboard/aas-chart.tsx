@@ -7,7 +7,7 @@ interface AasChartProps {
 export function AasChart({ data }: AasChartProps) {
   if (data.length === 0) {
     return (
-      <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-8 text-center text-zinc-500">
+      <div className="bg-zinc-900/50 border border-zinc-800 p-8 text-center text-zinc-500">
         No metrics data available
       </div>
     );
@@ -16,7 +16,7 @@ export function AasChart({ data }: AasChartProps) {
   const maxValue = Math.max(...data.map((d) => d.value), 1);
 
   return (
-    <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4">
+    <div className="bg-zinc-900/50 border border-zinc-800 p-4">
       <div className="text-sm text-zinc-400 mb-3">
         Active Average Sessions (AAS)
       </div>

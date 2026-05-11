@@ -1,24 +1,24 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
+import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import { CommandPalette } from "@/components/design-system/command-palette";
-import { AuthButton } from "@/components/auth-button";
 import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const plexSans = IBM_Plex_Sans({
+  variable: "--font-plex-sans",
   subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const plexMono = IBM_Plex_Mono({
+  variable: "--font-plex-mono",
   subsets: ["latin"],
+  weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
-  title: "DBOps",
-  description: "Database Operations Dashboard",
+  title: "DBOps · Aurora operations console",
+  description: "AI-powered DBA workflows for Aurora MySQL and PostgreSQL at fleet scale.",
 };
 
 export default function RootLayout({
@@ -29,34 +29,10 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${plexSans.variable} ${plexMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full">
         <CommandPalette />
-        <nav className="bg-zinc-800 border-b border-zinc-700 px-6 py-3 flex items-center gap-6">
-          <span className="text-zinc-100 font-semibold text-sm">DBOps</span>
-          <Link href="/chat" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">
-            Chat
-          </Link>
-          <Link href="/dashboard" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">
-            Dashboard
-          </Link>
-          <Link href="/query-lab" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">
-            Query Lab
-          </Link>
-          <Link href="/reports" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">
-            Reports
-          </Link>
-          <Link href="/approvals" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">
-            Approvals
-          </Link>
-          <Link href="/clusters" className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">
-            Clusters
-          </Link>
-          <div className="ml-auto">
-            <AuthButton />
-          </div>
-        </nav>
         <AppShell>{children}</AppShell>
       </body>
     </html>
