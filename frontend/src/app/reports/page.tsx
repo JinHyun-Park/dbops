@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { ReportViewer } from "@/components/reports/report-viewer";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://vp8z6cdxcd.execute-api.ap-northeast-2.amazonaws.com";
 
 export default function ReportsPage() {
   const [reports, setReports] = useState<any[]>([]);

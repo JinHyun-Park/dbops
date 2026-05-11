@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { StatusBadge } from "@/components/design-system/status-badge";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://vp8z6cdxcd.execute-api.ap-northeast-2.amazonaws.com";
 
 function mapStatus(status: string): "healthy" | "warning" | "critical" | "unknown" {
   if (status === "available") return "healthy";

@@ -15,7 +15,7 @@ def collect_pi_metrics(pi_client, cache_execute, cluster_resource_id, cluster_id
     for metric_result in response.get("MetricList", []):
         for point in metric_result.get("DataPoints", []):
             sql = """INSERT INTO metric_snapshots (cluster_id, ts, metric_type, value, dimensions)
-                     VALUES (:cluster_id, :ts, :metric_type, :value, :dimensions::jsonb)"""
+                     VALUES (:cluster_id, :ts::timestamptz, :metric_type, :value, :dimensions::jsonb)"""
             params = {
                 "cluster_id": cluster_id, "ts": point["Timestamp"].isoformat(),
                 "metric_type": "aas", "value": point.get("Value", 0.0), "dimensions": "{}",

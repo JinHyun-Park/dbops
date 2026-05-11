@@ -1,9 +1,9 @@
 import os
 import json
 import boto3
-import traceback
 from collectors.meta_collector import collect_cluster_meta
 from collectors.pi_collector import collect_pi_metrics
+from collectors.stats_collector import collect_query_stats
 
 
 def lambda_handler(event, context):
@@ -37,6 +37,11 @@ def lambda_handler(event, context):
         cluster_id = cluster["cluster_id"]
         account_id = cluster.get("account_id", "")
         region = cluster.get("region", os.environ.get("AWS_REGION", "ap-northeast-2"))
+        engine = cluster.get("engine", "aurora-postgresql")
+        target_cluster_arn = cluster.get("cluster_arn", "")
+        target_secret_arn = cluster.get("secret_arn", "")
+        target_db = cluster.get("db_name", "sampledb")
+
         rds_client = boto3.client("rds", region_name=region)
         pi_client = boto3.client("pi", region_name=region)
         result = {"cluster_id": cluster_id}
@@ -46,21 +51,31 @@ def lambda_handler(event, context):
             result["meta"] = meta
         except Exception as e:
             result["meta_error"] = str(e)
-            print(f"[{cluster_id}] meta_collector error: {e}")
+            print(f"[{cluster_id}] meta error: {e}")
 
         try:
-            resource_id = cluster.get("resource_id", "")
-            if not resource_id:
-                desc = rds_client.describe_db_clusters(DBClusterIdentifier=cluster_id)
-                resource_id = desc["DBClusters"][0].get("DbClusterResourceId", "")
-            if resource_id:
+            instances = rds_client.describe_db_instances(
+                Filters=[{"Name": "db-cluster-id", "Values": [cluster_id]}],
+            )["DBInstances"]
+            if instances:
+                resource_id = instances[0]["DbiResourceId"]
                 pi = collect_pi_metrics(pi_client, cache_execute, resource_id, cluster_id)
                 result["pi"] = pi
             else:
-                result["pi"] = {"skipped": "no resource_id"}
+                result["pi"] = {"skipped": "no instances"}
         except Exception as e:
             result["pi_error"] = str(e)
-            print(f"[{cluster_id}] pi_collector error: {e}")
+            print(f"[{cluster_id}] pi error: {e}")
+
+        if target_cluster_arn and target_secret_arn and "postgresql" in engine:
+            try:
+                stats = collect_query_stats(rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db)
+                result["stats"] = stats
+            except Exception as e:
+                result["stats_error"] = str(e)
+                print(f"[{cluster_id}] stats error: {e}")
+        else:
+            result["stats"] = {"skipped": f"engine={engine} or no secret"}
 
         results.append(result)
 
