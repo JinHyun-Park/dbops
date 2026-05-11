@@ -10,6 +10,83 @@ class CacheClient:
         self.cluster_arn = os.environ["CACHE_DB_CLUSTER_ARN"]
         self.secret_arn = os.environ["CACHE_DB_SECRET_ARN"]
         self.database = os.environ.get("CACHE_DB_NAME", "dbops")
+        self._clusters_table = os.environ.get("CLUSTERS_TABLE", "")
+        self._dynamodb = None
+        self._target_cache = {}
+
+    def _resolve_target(self, cluster_id: str) -> Optional[dict]:
+        """Return {cluster_arn, secret_arn, db_name} for a registered target cluster."""
+        if cluster_id in self._target_cache:
+            return self._target_cache[cluster_id]
+        if not self._clusters_table:
+            return None
+        if self._dynamodb is None:
+            self._dynamodb = boto3.resource("dynamodb")
+        try:
+            tbl = self._dynamodb.Table(self._clusters_table)
+            resp = tbl.get_item(Key={"cluster_id": cluster_id})
+            item = resp.get("Item")
+            if not item:
+                return None
+            target = {
+                "cluster_arn": item.get("cluster_arn", ""),
+                "secret_arn": item.get("secret_arn", ""),
+                "db_name": item.get("db_name", ""),
+            }
+            self._target_cache[cluster_id] = target
+            return target
+        except Exception as e:
+            print(f"[CacheClient] target lookup failed for {cluster_id}: {e}")
+            return None
+
+    def execute_on_target(self, cluster_id: str, sql: str, params: Optional[dict] = None) -> QueryResult:
+        """Execute SQL against the target Aurora cluster (NOT the cache DB).
+        Looks up cluster_arn/secret/db from the DynamoDB clusters registry."""
+        target = self._resolve_target(cluster_id)
+        if not target or not target.get("cluster_arn") or not target.get("secret_arn"):
+            return QueryResult(columns=[], rows=[], row_count=0)
+
+        sql_params = []
+        if params:
+            for key, value in params.items():
+                if isinstance(value, bool):
+                    sql_params.append({"name": key, "value": {"booleanValue": value}})
+                elif isinstance(value, int):
+                    sql_params.append({"name": key, "value": {"longValue": value}})
+                elif isinstance(value, float):
+                    sql_params.append({"name": key, "value": {"doubleValue": value}})
+                else:
+                    sql_params.append({"name": key, "value": {"stringValue": str(value)}})
+
+        response = self.rds_data.execute_statement(
+            resourceArn=target["cluster_arn"],
+            secretArn=target["secret_arn"],
+            database=target.get("db_name") or "postgres",
+            sql=f"/* source=dbops-agent */ {sql}",
+            parameters=sql_params,
+            includeResultMetadata=True,
+        )
+
+        columns = [col["name"] for col in response.get("columnMetadata", [])]
+        rows = []
+        for record in response.get("records", []):
+            row = {}
+            for i, field in enumerate(record):
+                col_name = columns[i] if i < len(columns) else f"col_{i}"
+                if "stringValue" in field:
+                    row[col_name] = field["stringValue"]
+                elif "longValue" in field:
+                    row[col_name] = field["longValue"]
+                elif "doubleValue" in field:
+                    row[col_name] = field["doubleValue"]
+                elif "booleanValue" in field:
+                    row[col_name] = field["booleanValue"]
+                elif "isNull" in field:
+                    row[col_name] = None
+                else:
+                    row[col_name] = str(field)
+            rows.append(row)
+        return QueryResult(columns=columns, rows=rows, row_count=len(rows))
 
     def _build_query(
         self,

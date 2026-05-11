@@ -6,6 +6,25 @@ from mcp_servers.shared.cache_client import CacheClient
 SAFE_PATTERNS = [r"^\s*SELECT\b", r"^\s*EXPLAIN\b", r"^\s*SHOW\b", r"^\s*DESCRIBE\b"]
 DANGEROUS_PATTERNS = [r"\bDROP\b", r"\bTRUNCATE\b", r"\bDELETE\s+FROM\b"]
 
+_CLUSTERS_TABLE_NAME = os.environ.get("CLUSTERS_TABLE", "")
+
+
+def _lookup_cluster(cluster_id: str) -> dict:
+    """Resolve cluster_arn / secret_arn / db_name from the DynamoDB clusters
+    registry. Returns {} if not found or if the table is not configured."""
+    if not cluster_id:
+        return {}
+    if not _CLUSTERS_TABLE_NAME:
+        return {}
+    try:
+        dynamodb = boto3.resource("dynamodb")
+        table = dynamodb.Table(_CLUSTERS_TABLE_NAME)
+        resp = table.get_item(Key={"cluster_id": cluster_id})
+        return resp.get("Item") or {}
+    except Exception as e:
+        print(f"[execute_sql] cluster lookup failed for {cluster_id}: {e}")
+        return {}
+
 
 def execute_sql_impl(cache: CacheClient, cluster_id: str, sql: str, approved: bool = False, force: bool = False) -> dict:
     sql_upper = sql.strip().upper()
@@ -18,15 +37,37 @@ def execute_sql_impl(cache: CacheClient, cluster_id: str, sql: str, approved: bo
     if not is_safe and not approved:
         return {"status": "approval_required", "reason": "Non-SELECT SQL requires DBA approval", "sql": sql}
 
-    rds_data = boto3.client("rds-data")
-    target_arn = os.environ.get("TARGET_CLUSTER_ARN", "")
-    target_secret = os.environ.get("TARGET_SECRET_ARN", "")
-    target_db = os.environ.get("TARGET_DB_NAME", "")
+    # Resolve target cluster ARN/Secret from the DynamoDB clusters registry.
+    # Falls back to env-var TARGET_* for legacy single-cluster deployments.
+    cluster = _lookup_cluster(cluster_id)
+    target_arn = cluster.get("cluster_arn") or os.environ.get("TARGET_CLUSTER_ARN", "")
+    target_secret = cluster.get("secret_arn") or os.environ.get("TARGET_SECRET_ARN", "")
+    target_db = cluster.get("db_name") or os.environ.get("TARGET_DB_NAME", "")
 
-    resp = rds_data.execute_statement(
-        resourceArn=target_arn, secretArn=target_secret, database=target_db,
-        sql=f"/* source=dbops-agent */ {sql}", includeResultMetadata=True,
-    )
+    if not target_arn or not target_secret:
+        return {
+            "status": "no_target",
+            "reason": f"cluster_id={cluster_id!r} not found in registry — register it via /clusters first",
+            "registry_table": _CLUSTERS_TABLE_NAME,
+        }
+
+    rds_data = boto3.client("rds-data")
+    try:
+        resp = rds_data.execute_statement(
+            resourceArn=target_arn,
+            secretArn=target_secret,
+            database=target_db,
+            sql=f"/* source=dbops-agent */ {sql}",
+            includeResultMetadata=True,
+        )
+    except Exception as e:
+        return {
+            "status": "execution_failed",
+            "error": str(e),
+            "cluster_id": cluster_id,
+            "target_arn": target_arn,
+        }
+
     cols = [c["name"] for c in resp.get("columnMetadata", [])]
     rows = []
     for rec in resp.get("records", []):
@@ -40,4 +81,10 @@ def execute_sql_impl(cache: CacheClient, cluster_id: str, sql: str, approved: bo
             else:
                 row[col] = None
         rows.append(row)
-    return {"status": "executed", "columns": cols, "rows": rows, "row_count": len(rows)}
+    return {
+        "status": "executed",
+        "cluster_id": cluster_id,
+        "columns": cols,
+        "rows": rows,
+        "row_count": len(rows),
+    }
