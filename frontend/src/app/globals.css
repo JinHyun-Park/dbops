@@ -76,3 +76,239 @@ body::before {
   background: oklch(0.74 0.18 65 / 0.35);
   color: var(--text-primary);
 }
+
+/* =========================================================================
+   Light theme.
+
+   The codebase uses Tailwind zinc-* utility classes directly (bg-zinc-950,
+   text-zinc-100, etc.) on hundreds of elements. Migrating every component
+   to dual `dark:` variants would touch ~500 lines. Instead, we keep the
+   tokens above as the dark default and override the specific utility
+   classes when [data-theme="light"] is on the document root. The grain
+   overlay and selection color also flip with the theme.
+   ========================================================================= */
+html[data-theme="light"] {
+  /* v3 — tuned for the chat panel specifically.
+     v2 collapsed the contrast ladder around the warm page tone, so the
+     conversation sidebar (bg-zinc-950/60) read flat against the main card.
+     We give the translucent surfaces a clearly different fill so the
+     side-panel separates from the white message canvas, and we strengthen
+     the text hierarchy (nav labels were too pale at #6e6e69). */
+  --surface-base: #f5f4ef;             /* page — warm off-white */
+  --surface-raised: #ffffff;           /* main content card */
+  --surface-inset: #ebe9e2;            /* input / code block / recessed strip */
+  --border-subtle: #d6d3c8;            /* clearly visible hairline on white */
+  --border-strong: #bdbaae;
+  --text-primary: #16161a;
+  --text-secondary: #2e2d29;
+  --text-muted: #4a4945;
+  --text-faint: #6b6a62;
+  --text-ghost: #99988e;
+  --accent: #b45309;
+  --accent-strong: #92400e;
+}
+
+html[data-theme="light"] body {
+  background: var(--surface-base);
+}
+
+html[data-theme="light"] body::before {
+  /* Mute the grain overlay on light — it reads as dirt otherwise. */
+  display: none;
+}
+
+/* =========================================================================
+   Tailwind utility overrides for light theme.
+
+   Mapping target:
+     bg-zinc-950   → page background (warm off-white)
+     bg-zinc-900   → card surface (white, slight shadow added via outline-style ring)
+     bg-zinc-800   → inset/recessed (input, code, recessed strip)
+     bg-zinc-700   → soft fill (selected tab inactive variant)
+
+   Text hierarchy (light → dark on white):
+     text-zinc-50/100 → near-black            #1a1a18 / #18181b
+     text-zinc-200    → primary body          #27272a
+     text-zinc-300    → strong secondary      #3f3f46
+     text-zinc-400    → secondary             #52525b
+     text-zinc-500    → muted                 #6e6e69
+     text-zinc-600    → faint                 #8a8a85
+     text-zinc-700    → ghost                 #adada6
+   ========================================================================= */
+/* Surfaces.
+   The dark theme uses bg-zinc-950 for both the page AND any side panels
+   that "float" on the page. In light we keep that pairing — page is the
+   warm tint, and a side panel using `bg-zinc-950/N` reads as a slightly
+   darker warm tone so it separates from the white main card sitting next
+   to it. */
+html[data-theme="light"] .bg-zinc-950 { background-color: #f5f4ef; }
+/* Translucent zinc-950 variants are used as side panels / sticky headers
+   sitting on the page. v2 missed these (only bg-zinc-900/N was mapped) so
+   dark zinc-950 leaked through, drowning side-panel text. We translate
+   each alpha step to a slightly darker warm tint so the side panel still
+   separates from the white main canvas. */
+html[data-theme="light"] .bg-zinc-950\/40 { background-color: rgba(225, 220, 200, 0.4); }
+html[data-theme="light"] .bg-zinc-950\/50 { background-color: rgba(220, 215, 195, 0.5); }
+html[data-theme="light"] .bg-zinc-950\/60 { background-color: #ebe9e1; }
+html[data-theme="light"] .bg-zinc-900 {
+  background-color: #ffffff;
+  box-shadow: 0 1px 2px rgba(20, 20, 18, 0.06), 0 0 0 1px rgba(20, 20, 18, 0.04);
+}
+/* Translucent card-on-dark variants — these are used for nested side panels
+   (e.g. chat conversation list). On light they need to be visibly distinct
+   from the white main canvas next to them, so we use the warm tint with a
+   small step down. */
+html[data-theme="light"] .bg-zinc-900\/40 { background-color: #efede6; }
+html[data-theme="light"] .bg-zinc-900\/50 { background-color: #edebe4; }
+html[data-theme="light"] .bg-zinc-900\/60 { background-color: #ebe9e1; }
+html[data-theme="light"] .bg-zinc-900\/95 { background-color: rgba(255, 255, 255, 0.95); }
+
+html[data-theme="light"] .bg-zinc-850 { background-color: #ebe9e2; }
+
+/* Recessed (input, code block, table header). Sits between page and card
+   so inputs are clearly delineated when surrounded by either. */
+html[data-theme="light"] .bg-zinc-800 { background-color: #ebe9e2; }
+
+/* Hover overlays — black-tinted alpha reads consistently whether the
+   underlying surface is white or warm-gray. */
+html[data-theme="light"] .bg-zinc-800\/40 { background-color: rgba(22, 22, 26, 0.06); }
+html[data-theme="light"] .bg-zinc-800\/50 { background-color: rgba(22, 22, 26, 0.08); }
+
+/* Active / selected. We use a warm tan a couple steps darker than the
+   sidebar background so a picked item clearly stands out from its
+   siblings while staying within the palette family. */
+html[data-theme="light"] .bg-zinc-800\/80 { background-color: #ddd9cc; }
+
+html[data-theme="light"] .bg-zinc-700 { background-color: #d6d3c5; }
+html[data-theme="light"] .bg-zinc-700\/40 { background-color: rgba(105, 102, 90, 0.22); }
+
+html[data-theme="light"] .text-zinc-50 { color: #16161a; }
+html[data-theme="light"] .text-zinc-100 { color: #16161a; }
+html[data-theme="light"] .text-zinc-200 { color: #1f1f23; }
+html[data-theme="light"] .text-zinc-300 { color: #2e2d29; }
+html[data-theme="light"] .text-zinc-400 { color: #44433f; }   /* nav item label */
+html[data-theme="light"] .text-zinc-500 { color: #5d5c55; }   /* nav hint, secondary */
+html[data-theme="light"] .text-zinc-600 { color: #7a7970; }   /* faint */
+html[data-theme="light"] .text-zinc-700 { color: #9d9b91; }   /* ghost */
+
+html[data-theme="light"] .border-zinc-700 { border-color: #c4c1b5; }
+html[data-theme="light"] .border-zinc-800 { border-color: #d6d3c8; }
+html[data-theme="light"] .border-zinc-900 { border-color: #e3e0d6; }
+
+html[data-theme="light"] .divide-zinc-700 > * + *,
+html[data-theme="light"] .divide-zinc-800 > * + * {
+  border-color: #d6d3c8;
+}
+
+/* Form placeholders should be visibly faint — not the same color as
+   input text. Without this they inherit the input's `color` which we mapped
+   to near-black above, making the placeholder look like a real value. */
+html[data-theme="light"] input::placeholder,
+html[data-theme="light"] textarea::placeholder {
+  color: #99988e;
+  opacity: 1;
+}
+
+/* Amber accent reads too bright on white — darken to amber-700 family for
+   primary fills, keep the lighter shades for fades/glows. The text color of
+   amber-on-light buttons stays zinc-950 (effectively near-black) which is
+   handled by the text-zinc-* mappings above. */
+html[data-theme="light"] .bg-amber-500 { background-color: #b45309; color: #fff; }
+html[data-theme="light"] .bg-amber-500:hover,
+html[data-theme="light"] .hover\:bg-amber-400:hover { background-color: #92400e; }
+html[data-theme="light"] .bg-amber-600 { background-color: #92400e; color: #fff; }
+html[data-theme="light"] .text-amber-300 { color: #b45309; }
+html[data-theme="light"] .text-amber-400 { color: #b45309; }
+html[data-theme="light"] .text-amber-400\/80 { color: rgba(180, 83, 9, 0.85); }
+html[data-theme="light"] .text-amber-400\/70 { color: rgba(180, 83, 9, 0.8); }
+html[data-theme="light"] .border-amber-500\/40 { border-color: rgba(180, 83, 9, 0.45); }
+html[data-theme="light"] .border-amber-500\/50 { border-color: rgba(180, 83, 9, 0.55); }
+html[data-theme="light"] .border-amber-500\/60 { border-color: #b45309; }
+html[data-theme="light"] .bg-amber-500\/10 { background-color: rgba(180, 83, 9, 0.08); }
+html[data-theme="light"] .bg-amber-500\/15 { background-color: rgba(180, 83, 9, 0.12); }
+html[data-theme="light"] .bg-amber-500\/20 { background-color: rgba(180, 83, 9, 0.16); }
+html[data-theme="light"] .bg-amber-500\/5 { background-color: rgba(180, 83, 9, 0.06); }
+
+/* `.bg-zinc-950/80` is used both as a sticky header backdrop AND as a
+   modal scrim. Default to the header treatment (light tint), then bump
+   modal scrims (anything inside `.fixed.inset-0`) back to dark for
+   focus. The .fixed.inset-0 selector is more specific so it wins. */
+html[data-theme="light"] .bg-zinc-950\/80 { background-color: rgba(245, 244, 239, 0.85); }
+html[data-theme="light"] .fixed.inset-0.bg-zinc-950\/80,
+html[data-theme="light"] .fixed.inset-0 .bg-zinc-950\/80 {
+  background-color: rgba(28, 28, 26, 0.4);
+}
+html[data-theme="light"] .bg-zinc-950\/95 { background-color: rgba(245, 244, 239, 0.95); }
+
+/* Prose (react-markdown w/ prose-invert) — repaint for white pages.
+
+   message-list.tsx and other ReactMarkdown containers stack lots of inline
+   modifiers like `prose-strong:text-zinc-100` and `prose-code:text-amber-300`.
+   Tailwind v4 compiles those to descendant rules that read
+   `color: var(--color-zinc-100)` etc. Our earlier `.text-zinc-100 { ... }`
+   override targets the utility class, not these inner rules, so headings and
+   bold text rendered as near-white on the light page.
+
+   Fix: redefine the relevant `--color-*` tokens INSIDE `.prose-invert` only.
+   Cascade scoping means non-prose elements (e.g. `bg-zinc-100` elsewhere)
+   keep their dark-theme value. */
+html[data-theme="light"] .prose-invert {
+  /* Tailwind v4 theme color tokens — only the ones we know modifiers use. */
+  --color-zinc-50: #16161a;
+  --color-zinc-100: #16161a;
+  --color-zinc-200: #1f1f23;
+  --color-zinc-300: #2e2d29;
+  --color-zinc-400: #44433f;
+  --color-zinc-500: #5d5c55;
+  --color-zinc-600: #7a7970;
+  --color-zinc-700: #c4c1b5;
+  --color-zinc-800: #d6d3c8;
+  --color-zinc-900: #ebe9e2;
+  --color-amber-300: #b45309;
+  --color-amber-400: #b45309;
+  --color-blue-300: #1d4ed8;
+  --color-blue-400: #1d4ed8;
+
+  /* typography plugin variables — body, lead, etc. */
+  --tw-prose-body: #2e2d29;
+  --tw-prose-headings: #16161a;
+  --tw-prose-lead: #44443f;
+  --tw-prose-links: #1d4ed8;
+  --tw-prose-bold: #16161a;
+  --tw-prose-counters: #5a5a55;
+  --tw-prose-bullets: #adada6;
+  --tw-prose-hr: #d6d3c8;
+  --tw-prose-quotes: #2e2d29;
+  --tw-prose-code: #16161a;
+  --tw-prose-pre-code: #f4f3ef;
+  --tw-prose-pre-bg: #1a1a18;
+  /* the plugin also references invert vars when prose-invert is in effect */
+  --tw-prose-invert-body: #2e2d29;
+  --tw-prose-invert-headings: #16161a;
+  --tw-prose-invert-lead: #44443f;
+  --tw-prose-invert-links: #1d4ed8;
+  --tw-prose-invert-bold: #16161a;
+  --tw-prose-invert-counters: #5a5a55;
+  --tw-prose-invert-bullets: #adada6;
+  --tw-prose-invert-hr: #d6d3c8;
+  --tw-prose-invert-quotes: #2e2d29;
+  --tw-prose-invert-code: #16161a;
+  --tw-prose-invert-pre-code: #f4f3ef;
+  --tw-prose-invert-pre-bg: #1a1a18;
+}
+
+/* Code blocks inside prose use bg-zinc-900 which we mapped to white above —
+   that gives white-on-white code. Force a slightly recessed background for
+   prose code/pre so it reads as a code surface. */
+html[data-theme="light"] .prose-invert code {
+  background-color: #ebe9e2 !important;
+}
+html[data-theme="light"] .prose-invert pre {
+  background-color: #1a1a18 !important;
+  color: #f4f3ef !important;
+  box-shadow: none;
+}
+html[data-theme="light"] .prose-invert pre code {
+  background-color: transparent !important;
+  color: inherit !important;
+}

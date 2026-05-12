@@ -85,6 +85,7 @@ function handler(event) {
                     "region": Settings.REGION,
                     "cognitoDomain": f"https://{Settings.COGNITO_DOMAIN_PREFIX}.auth.{Settings.REGION}.amazoncognito.com",
                     "cognitoClientId": foundation.user_pool_client.user_pool_client_id,
+                "cognitoUserPoolId": foundation.user_pool.user_pool_id,
                     "agentRuntimeArn": agent.runtime.agent_runtime_arn,
                 }),
             ],
@@ -117,12 +118,13 @@ function handler(event) {
                     "CallbackURLs": callback_urls,
                     "LogoutURLs": logout_urls,
                     "AllowedOAuthFlows": ["implicit"],
-                    "AllowedOAuthScopes": ["openid", "profile"],
+                    "AllowedOAuthScopes": ["openid", "profile", "email"],
                     "AllowedOAuthFlowsUserPoolClient": True,
                     "SupportedIdentityProviders": ["COGNITO"],
                     "ExplicitAuthFlows": [
                         "ALLOW_USER_SRP_AUTH",
                         "ALLOW_REFRESH_TOKEN_AUTH",
+                        "ALLOW_USER_PASSWORD_AUTH",
                     ],
                 },
                 physical_resource_id=cr.PhysicalResourceId.of(

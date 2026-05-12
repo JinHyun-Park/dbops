@@ -1,4 +1,4 @@
-import { getAccessToken } from "./auth";
+import { getValidAccessToken } from "./auth";
 
 const QUALIFIER = "DEFAULT";
 
@@ -68,27 +68,31 @@ export function streamChat(
   modelId?: string,
 ): AbortController {
   const controller = new AbortController();
-  const token = getAccessToken();
-
-  console.log("[streamChat] start", {
-    hasToken: !!token,
-    tokenLen: token?.length,
-    clusterId,
-    sessionIdProvided: !!explicitSessionId,
-  });
-
-  if (!token) {
-    onError(new Error("Not authenticated — please log in again"));
-    return controller;
-  }
 
   const sessionId = explicitSessionId || genSessionId();
   const promptText = clusterId && clusterId !== "default-cluster"
     ? `[cluster: ${clusterId}]\n${message}`
     : message;
 
-  buildInvokeUrl()
-    .then((url) => {
+  // Resolve a non-expired AccessToken (silent refresh if needed) before invoking.
+  getValidAccessToken()
+    .then((token) => {
+      if (!token) {
+        // Refresh token also expired or no current Cognito user — bounce to /login.
+        if (typeof window !== "undefined") {
+          const next = window.location.pathname + window.location.search;
+          window.location.replace(`/login?next=${encodeURIComponent(next)}`);
+        }
+        throw new Error("Session expired — please log in again");
+      }
+      console.log("[streamChat] start", {
+        tokenLen: token.length,
+        clusterId,
+        sessionIdProvided: !!explicitSessionId,
+      });
+      return buildInvokeUrl().then((url) => ({ url, token }));
+    })
+    .then(({ url, token }) => {
       console.log("[streamChat] invoke URL", url);
       return fetch(url, {
         method: "POST",

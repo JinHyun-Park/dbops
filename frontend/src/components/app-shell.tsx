@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AuthGuard } from "@/components/auth-guard";
 import { AuthButton } from "@/components/auth-button";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 interface NavItem {
   href: string;
@@ -114,17 +115,60 @@ function SidebarItem({ item, active }: { item: NavItem; active: boolean }) {
   );
 }
 
+// Bottom tab bar — visible only on mobile. Picks the 5 most-used routes so
+// it stays usable with one thumb. The full sidebar is still reachable via
+// /more (or by widening the window) — for now we just bias to the top use cases.
+const MOBILE_TABS: { href: string; label: string; icon: string }[] = [
+  { href: "/fleet", label: "Fleet", icon: "▦" },
+  { href: "/dashboard", label: "Dashboard", icon: "◉" },
+  { href: "/chat", label: "Chat", icon: "✦" },
+  { href: "/alerts", label: "Alerts", icon: "◬" },
+  { href: "/clusters", label: "Clusters", icon: "⊟" },
+];
+
+function MobileTabBar({ pathname }: { pathname: string }) {
+  return (
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 grid grid-cols-5">
+      {MOBILE_TABS.map((t) => {
+        const active = pathname === t.href || pathname.startsWith(t.href + "/");
+        return (
+          <Link
+            key={t.href}
+            href={t.href}
+            className={`flex flex-col items-center justify-center py-2 transition-colors ${
+              active ? "text-amber-300" : "text-zinc-500 hover:text-zinc-200"
+            }`}
+          >
+            <span className="text-base leading-none">{t.icon}</span>
+            <span className="text-[10px] mt-0.5 tracking-wide">{t.label}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "/";
 
-  // Auth callback should not be wrapped in the chrome.
-  if (pathname.startsWith("/callback")) {
-    return <>{children}</>;
+  // Auth pages should not be wrapped in the chrome.
+  if (
+    pathname.startsWith("/callback") ||
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/forgot") ||
+    pathname.startsWith("/reset")
+  ) {
+    return (
+      <AuthGuard>
+        <div className="min-h-screen bg-zinc-950">{children}</div>
+      </AuthGuard>
+    );
   }
 
   return (
     <AuthGuard>
       <div className="flex h-screen bg-zinc-950 text-zinc-100">
+        <MobileTabBar pathname={pathname} />
         <aside className="hidden md:flex w-60 flex-col border-r border-zinc-800 bg-zinc-950">
           <Link
             href="/"
@@ -160,11 +204,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="flex-1 flex flex-col min-w-0">
           <header className="flex-shrink-0 border-b border-zinc-800 px-6 py-3 flex items-center justify-between bg-zinc-950/80 backdrop-blur">
             <Breadcrumbs pathname={pathname} />
-            <div className="md:hidden">
-              <AuthButton />
+            <div className="flex items-center gap-3">
+              <ThemeToggle />
+              <div className="md:hidden">
+                <AuthButton />
+              </div>
             </div>
           </header>
-          <main className="flex-1 overflow-y-auto">{children}</main>
+          <main className="flex-1 overflow-y-auto pb-14 md:pb-0">{children}</main>
         </div>
       </div>
     </AuthGuard>

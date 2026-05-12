@@ -29,6 +29,10 @@ class FoundationStack(cdk.Stack):
                 callback_urls=Settings.CALLBACK_URLS,
             ),
             generate_secret=False,
+            # DBA shifts are long; a 1h access token forces too many silent
+            # refreshes. Refresh token (30d default) covers idle reopens.
+            access_token_validity=cdk.Duration.hours(12),
+            id_token_validity=cdk.Duration.hours(12),
         )
 
         self.user_pool.add_domain(
@@ -36,6 +40,26 @@ class FoundationStack(cdk.Stack):
             cognito_domain=cognito.CognitoDomainOptions(
                 domain_prefix=Settings.COGNITO_DOMAIN_PREFIX,
             ),
+        )
+
+        # RBAC groups. Default model: every user is admin UNLESS explicitly
+        # placed in dbops-viewer. This is the pragmatic stance for an
+        # ops-team product — opt-in restriction rather than opt-in privilege.
+        cognito.CfnUserPoolGroup(
+            self,
+            "AdminGroup",
+            user_pool_id=self.user_pool.user_pool_id,
+            group_name="dbops-admin",
+            description="Full read/write access to clusters, alerts, approvals.",
+            precedence=1,
+        )
+        cognito.CfnUserPoolGroup(
+            self,
+            "ViewerGroup",
+            user_pool_id=self.user_pool.user_pool_id,
+            group_name="dbops-viewer",
+            description="Read-only: can view dashboards and use chat, but cannot register clusters or modify alerts.",
+            precedence=10,
         )
 
         self.clusters_table = dynamodb.Table(

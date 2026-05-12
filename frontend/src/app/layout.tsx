@@ -31,6 +31,16 @@ export default function RootLayout({
       lang="en"
       className={`${plexSans.variable} ${plexMono.variable} h-full antialiased`}
     >
+      <head>
+        {/* Pre-hydration theme apply: avoids a flash when a user has
+            switched to light. Runs before React renders. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{var t=localStorage.getItem('dbops_theme')||'dark';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();",
+          }}
+        />
+      </head>
       <body className="min-h-full">
         <CommandPalette />
         <AppShell>{children}</AppShell>

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { isLoggedIn, getUserFromToken, getLoginUrl, getLogoutUrl, clearTokens } from "@/lib/auth";
+import Link from "next/link";
+import { isLoggedIn, getUserFromToken, clearTokens } from "@/lib/auth";
 
 export function AuthButton() {
   const [loggedIn, setLoggedIn] = useState(false);
@@ -15,26 +16,26 @@ export function AuthButton() {
 
   if (!loggedIn) {
     return (
-      <button
-        onClick={async () => {
-          window.location.href = await getLoginUrl();
-        }}
-        className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-500 transition-colors"
+      <Link
+        href="/login"
+        className="text-xs px-3 py-1.5 bg-amber-500 text-zinc-950 font-medium hover:bg-amber-400 transition-colors"
       >
-        Login
-      </button>
+        Sign in
+      </Link>
     );
   }
 
   return (
     <div className="flex items-center gap-3">
-      <span className="text-xs text-zinc-400">{email}</span>
+      <span className="text-xs text-zinc-400 truncate max-w-[140px]" title={email || ""}>
+        {email}
+      </span>
       <button
-        onClick={async () => {
+        onClick={() => {
           clearTokens();
-          window.location.href = await getLogoutUrl();
+          window.location.href = "/login";
         }}
-        className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors"
+        className="text-xs text-zinc-500 hover:text-zinc-200 transition-colors"
       >
         Logout
       </button>
