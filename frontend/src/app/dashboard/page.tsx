@@ -8,6 +8,8 @@ import { EventsPanel } from "@/components/dashboard/events-panel";
 import { QueriesPanel } from "@/components/dashboard/queries-panel";
 import { HealthScore } from "@/components/dashboard/health-score";
 import { VacuumPanel } from "@/components/dashboard/vacuum-panel";
+import { MaintenanceHealthPanel } from "@/components/dashboard/maintenance-health-panel";
+import { ExtensionsCard } from "@/components/dashboard/extensions-card";
 import { IndexRecsPanel } from "@/components/dashboard/index-recs-panel";
 import { LongRunningPanel } from "@/components/dashboard/long-running-panel";
 import { ConnectionBreakdown } from "@/components/dashboard/connection-breakdown";
@@ -208,6 +210,18 @@ export default function DashboardPage() {
             <HealthScore clusterId={selectedCluster} />
           </div>
 
+          <MaintenanceHealthPanel
+            clusterId={selectedCluster}
+            engine={dashboardData.cluster?.engine}
+          />
+
+          {(dashboardData.cluster?.engine || "").includes("postgresql") && (
+            <ExtensionsCard
+              clusterId={selectedCluster}
+              engine={dashboardData.cluster?.engine}
+            />
+          )}
+
           <BackupPanel cluster={dashboardData.cluster} />
 
           <TimeseriesChart
@@ -329,15 +343,20 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <WaitEventsPanel clusterId={selectedCluster} hours={hours} />
             <AnomaliesPanel clusterId={selectedCluster} />
-            <EventsPanel events={dashboardData.events || []} />
+            <EventsPanel events={dashboardData.events || []} clusterId={selectedCluster} />
           </div>
 
           <LocksPanel clusterId={selectedCluster} />
 
           <LongRunningPanel clusterId={selectedCluster} />
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <VacuumPanel clusterId={selectedCluster} />
+          {/* Vacuum is PG-only — MySQL InnoDB has no equivalent surface.
+              For MySQL clusters the column is collapsed and the right panel
+              takes the full width. */}
+          <div className={`grid grid-cols-1 ${(dashboardData.cluster?.engine || "").includes("postgresql") ? "lg:grid-cols-2" : ""} gap-4`}>
+            {(dashboardData.cluster?.engine || "").includes("postgresql") && (
+              <VacuumPanel clusterId={selectedCluster} />
+            )}
             <IndexRecsPanel clusterId={selectedCluster} />
           </div>
 
@@ -350,7 +369,7 @@ export default function DashboardPage() {
             topQueries={dashboardData.top_queries || []}
           />
 
-          <SettingsPanel clusterId={selectedCluster} />
+          <SettingsPanel clusterId={selectedCluster} engine={dashboardData.cluster?.engine} />
 
           <AuditLogPanel clusterId={selectedCluster} />
         </div>
