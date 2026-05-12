@@ -1,11 +1,7 @@
 "use client";
 
-interface Event {
-  ts: string;
-  event_type: string;
-  severity: string;
-  message: string;
-}
+import { useState } from "react";
+import { EventDetailModal, type DashboardEvent } from "./event-detail-modal";
 
 const SEVERITY_STYLES: Record<string, string> = {
   critical: "border-l-red-500 bg-red-950/30",
@@ -13,6 +9,31 @@ const SEVERITY_STYLES: Record<string, string> = {
   warning: "border-l-amber-500 bg-amber-950/20",
   info: "border-l-sky-500 bg-sky-950/10",
 };
+
+const SEVERITY_BADGES: Record<string, string> = {
+  critical: "bg-rose-500/20 text-rose-300 border border-rose-500/40",
+  error: "bg-rose-500/15 text-rose-300 border border-rose-500/30",
+  warning: "bg-amber-500/15 text-amber-300 border border-amber-500/40",
+  info: "bg-sky-500/15 text-sky-300 border border-sky-500/30",
+};
+
+// snake_case / CamelCase → "Title Case" — keeps event_type human-readable
+// without needing a back-end migration of historical rows.
+function prettifyEventType(raw: string | null | undefined): string {
+  if (!raw) return "Event";
+  let s = String(raw).trim();
+  if (!s || s === "unknown" || s === "empty") return "Other (RDS)";
+  if (s.startsWith("alarm_")) {
+    const v = s.slice("alarm_".length).toUpperCase();
+    return v === "OK" ? "CloudWatch alarm OK" : `CloudWatch alarm ${v}`;
+  }
+  // Split CamelCase ("CreateDBCluster" → "Create D B Cluster") then collapse the
+  // single-letter runs ("Create D B Cluster" → "Create DB Cluster").
+  s = s.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Z])([A-Z][a-z])/g, "$1 $2");
+  s = s.replace(/_/g, " ");
+  s = s.replace(/\b(\w) (\w)\b/g, "$1$2"); // collapse adjacent single letters back
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 function relTime(iso: string) {
   const ms = Date.now() - new Date(iso).getTime();
@@ -24,27 +45,59 @@ function relTime(iso: string) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-export function EventsPanel({ events }: { events: Event[] }) {
+export function EventsPanel({ events, clusterId }: { events: DashboardEvent[]; clusterId?: string }) {
+  const [active, setActive] = useState<DashboardEvent | null>(null);
+
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-4">
-      <div className="text-xs text-zinc-400 uppercase tracking-wider mb-3">Recent Events</div>
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-xs text-zinc-400 uppercase tracking-wider">Recent Events</div>
+        {events.length > 0 && (
+          <div className="text-[10px] text-zinc-600">click an event for detail · AI explain</div>
+        )}
+      </div>
       {events.length === 0 ? (
         <div className="text-xs text-zinc-500 py-2">no recent events</div>
       ) : (
         <div className="space-y-2 max-h-96 overflow-y-auto">
           {events.map((e, i) => {
-            const style = SEVERITY_STYLES[e.severity?.toLowerCase()] || "border-l-zinc-500 bg-zinc-900/30";
+            const sev = (e.severity || "info").toLowerCase();
+            const style = SEVERITY_STYLES[sev] || "border-l-zinc-500 bg-zinc-900/30";
+            const badge = SEVERITY_BADGES[sev] || SEVERITY_BADGES.info;
+            const label = prettifyEventType(e.event_type);
             return (
-              <div key={`${e.ts}-${i}`} className={`border-l-2 ${style} pl-3 py-2 pr-2 rounded-r`}>
-                <div className="flex justify-between items-baseline mb-0.5">
-                  <span className="text-xs font-medium text-zinc-300">{e.event_type}</span>
-                  <span className="text-[10px] text-zinc-500">{relTime(e.ts)}</span>
+              <button
+                key={`${e.ts}-${i}`}
+                onClick={() => setActive(e)}
+                className={`w-full text-left border-l-2 ${style} pl-3 py-2 pr-2 rounded-r hover:bg-zinc-800/50 transition-colors`}
+              >
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-xs font-medium text-zinc-200 truncate">{label}</span>
+                  <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${badge}`}>
+                    {sev}
+                  </span>
+                  {e.source && (
+                    <span className="text-[9px] text-zinc-600 font-mono ml-auto">{e.source}</span>
+                  )}
+                  <span className="text-[10px] text-zinc-500 whitespace-nowrap">{relTime(e.ts)}</span>
                 </div>
-                <div className="text-xs text-zinc-400 leading-snug">{e.message}</div>
-              </div>
+                <div className="text-xs text-zinc-400 leading-snug truncate">
+                  {e.message || (
+                    <span className="text-zinc-600 italic">no message — click for raw event</span>
+                  )}
+                </div>
+              </button>
             );
           })}
         </div>
+      )}
+      {active && (
+        <EventDetailModal
+          event={active}
+          clusterId={clusterId}
+          onClose={() => setActive(null)}
+          prettyLabel={prettifyEventType(active.event_type)}
+        />
       )}
     </div>
   );

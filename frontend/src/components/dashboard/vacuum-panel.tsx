@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fetchVacuumStats } from "@/lib/api-client";
+import { fmtExact, fmtNumber } from "@/lib/format";
 
 interface Table {
   schema_name: string;
@@ -68,10 +69,30 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
             <thead className="bg-zinc-900/50 border-b border-zinc-800 sticky top-0">
               <tr>
                 <th className="text-left px-4 py-2 text-zinc-400 font-medium">Table</th>
-                <th className="text-right px-4 py-2 text-zinc-400 font-medium">Live</th>
-                <th className="text-right px-4 py-2 text-zinc-400 font-medium">Dead</th>
-                <th className="text-right px-4 py-2 text-zinc-400 font-medium">Bloat</th>
-                <th className="text-right px-4 py-2 text-zinc-400 font-medium">Last Vacuum</th>
+                <th
+                  className="text-right px-4 py-2 text-zinc-400 font-medium"
+                  title="Live tuples (n_live_tup from pg_stat_user_tables)"
+                >
+                  Live rows
+                </th>
+                <th
+                  className="text-right px-4 py-2 text-zinc-400 font-medium"
+                  title="Dead tuples — unreclaimed row versions waiting for VACUUM"
+                >
+                  Dead rows
+                </th>
+                <th
+                  className="text-right px-4 py-2 text-zinc-400 font-medium"
+                  title="Dead ÷ (live + dead). >30% = significant bloat, schedule VACUUM"
+                >
+                  Dead / total
+                </th>
+                <th
+                  className="text-right px-4 py-2 text-zinc-400 font-medium"
+                  title="Time since last autovacuum or manual VACUUM"
+                >
+                  Last vacuum
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-700">
@@ -85,13 +106,22 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
                       <span className="text-zinc-500">{t.schema_name}.</span>
                       {t.table_name}
                     </td>
-                    <td className="px-4 py-2 text-right text-zinc-300 font-mono text-xs">
-                      {n(t.n_live_tup).toLocaleString()}
+                    <td
+                      className="px-4 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums"
+                      title={fmtExact(n(t.n_live_tup))}
+                    >
+                      {fmtNumber(n(t.n_live_tup))}
                     </td>
-                    <td className="px-4 py-2 text-right text-zinc-300 font-mono text-xs">
-                      {n(t.n_dead_tup).toLocaleString()}
+                    <td
+                      className="px-4 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums"
+                      title={fmtExact(n(t.n_dead_tup))}
+                    >
+                      {fmtNumber(n(t.n_dead_tup))}
                     </td>
-                    <td className={`px-4 py-2 text-right font-mono text-xs ${bloatColor}`}>
+                    <td
+                      className={`px-4 py-2 text-right font-mono text-xs tabular-nums ${bloatColor}`}
+                      title={`${n(t.n_dead_tup)} dead / ${n(t.n_live_tup) + n(t.n_dead_tup)} total`}
+                    >
                       {(bloat * 100).toFixed(1)}%
                     </td>
                     <td className="px-4 py-2 text-right text-zinc-400 font-mono text-xs">

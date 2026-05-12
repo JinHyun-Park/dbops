@@ -14,9 +14,13 @@ const TYPE_COLORS: Record<string, string> = {
   CPU: "bg-emerald-500",
   IO: "bg-amber-500",
   Lock: "bg-rose-500",
+  LWLock: "bg-rose-400",
   IPC: "bg-violet-500",
   Client: "bg-sky-500",
-  unknown: "bg-zinc-500",
+  Timeout: "bg-orange-500",
+  Sync: "bg-rose-400",   // MySQL: wait/synch/*
+  Idle: "bg-zinc-600",   // MySQL: wait/idle/* (foreground threads waiting for work)
+  Other: "bg-zinc-500",
 };
 
 export function WaitEventsPanel({ clusterId, hours = 1 }: { clusterId: string; hours?: number }) {

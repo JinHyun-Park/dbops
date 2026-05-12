@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { fetchSlowQueries } from "@/lib/api-client";
+import { fmtDuration, fmtExact, fmtNumber } from "@/lib/format";
 import { QueryDetailModal } from "./query-detail-modal";
 
 interface Query {
@@ -99,9 +100,24 @@ export function QueriesPanel({
             <thead className="bg-zinc-900/50 border-b border-zinc-800">
               <tr>
                 <th className="text-left px-4 py-2 text-zinc-400 font-medium">Query</th>
-                <th className="text-right px-4 py-2 text-zinc-400 font-medium w-24">Calls</th>
-                <th className="text-right px-4 py-2 text-zinc-400 font-medium w-28">Total (ms)</th>
-                <th className="text-right px-4 py-2 text-zinc-400 font-medium w-24">Mean (ms)</th>
+                <th
+                  className="text-right px-4 py-2 text-zinc-400 font-medium w-24"
+                  title="Number of times this normalized query was executed in the window"
+                >
+                  Calls
+                </th>
+                <th
+                  className="text-right px-4 py-2 text-zinc-400 font-medium w-28"
+                  title="Total wall-clock time spent across all calls"
+                >
+                  Total time
+                </th>
+                <th
+                  className="text-right px-4 py-2 text-zinc-400 font-medium w-24"
+                  title="Average time per call (total ÷ calls)"
+                >
+                  Mean / call
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-700">
@@ -117,22 +133,29 @@ export function QueriesPanel({
                   >
                     {q.query_text || "(unknown)"}
                   </td>
-                  <td className="px-4 py-2 text-right text-zinc-300 font-mono">
-                    {n(q.calls).toLocaleString()}
-                  </td>
-                  <td className="px-4 py-2 text-right text-zinc-300 font-mono">
-                    {n(q.total_time_ms).toFixed(0)}
+                  <td
+                    className="px-4 py-2 text-right text-zinc-300 font-mono tabular-nums"
+                    title={fmtExact(n(q.calls))}
+                  >
+                    {fmtNumber(n(q.calls))}
                   </td>
                   <td
-                    className={`px-4 py-2 text-right font-mono ${
+                    className="px-4 py-2 text-right text-zinc-300 font-mono tabular-nums"
+                    title={`${n(q.total_time_ms).toFixed(2)} ms total`}
+                  >
+                    {fmtDuration(n(q.total_time_ms))}
+                  </td>
+                  <td
+                    className={`px-4 py-2 text-right font-mono tabular-nums ${
                       n(q.mean_time_ms) > 1000
                         ? "text-rose-400"
                         : n(q.mean_time_ms) > 100
                         ? "text-amber-400"
                         : "text-zinc-300"
                     }`}
+                    title={`${n(q.mean_time_ms).toFixed(2)} ms per call`}
                   >
-                    {n(q.mean_time_ms).toFixed(2)}
+                    {fmtDuration(n(q.mean_time_ms))}
                   </td>
                 </tr>
               ))}
