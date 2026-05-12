@@ -221,10 +221,22 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
+                # New: /table-indexes endpoint runs pg_stat_user_indexes against
+                # the live target cluster (not the cache DB), so the handler
+                # needs to resolve cluster_arn/secret_arn from the registry.
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
             },
         )
         data.cache_db.secret.grant_read(dashboard_lambda)
         data.cache_db.grant_data_api_access(dashboard_lambda)
+        foundation.clusters_table.grant_read_data(dashboard_lambda)
+        dashboard_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "rds-data:ExecuteStatement",
+                "secretsmanager:GetSecretValue",
+            ],
+            resources=["*"],
+        ))
 
         clusters_lambda = lambda_.Function(
             self, "ClustersApi",
@@ -375,6 +387,21 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardTableSizesIntegration", dashboard_lambda),
         )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/table-indexes",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardTableIndexesIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/health-findings",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardHealthFindingsIntegration", dashboard_lambda),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/extensions",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardExtensionsIntegration", dashboard_lambda),
+        )
         # ===== Application Inference Profiles (cost-allocation tagging) =====
         # One AIP per supported Claude generation, all tagged with Application=DBOps
         # so Cost Explorer attributes Bedrock spend to this app.
@@ -460,6 +487,33 @@ class AgentStack(cdk.Stack):
             integration=integrations.HttpLambdaIntegration("ModelsIntegration", models_lambda),
         )
 
+        explain_lambda = lambda_.Function(
+            self, "ExplainApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/explain"),
+            # EXPLAIN ANALYZE on a heavy query can hit minutes; cap to 60s so a
+            # runaway plan doesn't pin the visualizer indefinitely.
+            timeout=cdk.Duration.seconds(60),
+            memory_size=512,
+            environment={
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+            },
+        )
+        foundation.clusters_table.grant_read_data(explain_lambda)
+        explain_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "rds-data:ExecuteStatement",
+                "secretsmanager:GetSecretValue",
+            ],
+            resources=["*"],
+        ))
+        self.api.add_routes(
+            path="/api/explain",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=integrations.HttpLambdaIntegration("ExplainIntegration", explain_lambda),
+        )
+
         alerts_integration = integrations.HttpLambdaIntegration("AlertsIntegration", alerts_lambda)
         self.api.add_routes(
             path="/api/alert-rules",
@@ -476,10 +530,22 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE],
             integration=alerts_integration,
         )
+        clusters_integration = integrations.HttpLambdaIntegration("ClustersIntegration", clusters_lambda)
         self.api.add_routes(
             path="/api/clusters",
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
-            integration=integrations.HttpLambdaIntegration("ClustersIntegration", clusters_lambda),
+            integration=clusters_integration,
+        )
+        # Discovery + bulk register share the same Lambda; handler dispatches on path.
+        self.api.add_routes(
+            path="/api/clusters/discover",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=clusters_integration,
+        )
+        self.api.add_routes(
+            path="/api/clusters/bulk-register",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=clusters_integration,
         )
         self.api.add_routes(
             path="/api/reports",

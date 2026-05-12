@@ -72,7 +72,7 @@ class DataStack(cdk.Stack):
             service_token=migrate_provider.service_token,
             properties={
                 # Bumping this string forces re-run on next deploy if you need to.
-                "schema_version": "v4",
+                "schema_version": "v8",
             },
         )
         migrate_resource.node.add_dependency(self.cache_db)

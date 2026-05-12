@@ -65,6 +65,115 @@ def _make_query(rds_data, cluster_arn, secret_arn, database):
     return query
 
 
+_CLUSTERS_TABLE_NAME = os.environ.get("CLUSTERS_TABLE", "")
+
+
+def _lookup_cluster(cluster_id: str) -> dict:
+    """Resolve cluster_arn / secret_arn / db_name from the DynamoDB clusters
+    registry — needed when an endpoint queries the live target cluster
+    (e.g. listing indexes) instead of the cache DB."""
+    if not cluster_id or not _CLUSTERS_TABLE_NAME:
+        return {}
+    try:
+        table = boto3.resource("dynamodb").Table(_CLUSTERS_TABLE_NAME)
+        return table.get_item(Key={"cluster_id": cluster_id}).get("Item") or {}
+    except Exception as e:
+        print(f"[dashboard] cluster lookup failed for {cluster_id}: {e}")
+        return {}
+
+
+def _table_indexes(cluster_id: str, schema: str, table_name: str) -> dict:
+    """List every index on a given table (definition, size, scan count,
+    uniqueness, primary-key flag). Engine-aware: PG queries pg_stat_user_indexes,
+    MySQL aggregates from information_schema.statistics + table_io_waits_summary."""
+    if not schema or not table_name:
+        return {"error": "schema and table required"}
+    cluster = _lookup_cluster(cluster_id)
+    if not cluster:
+        return {"error": f"cluster {cluster_id!r} not registered"}
+    cluster_arn = cluster.get("cluster_arn")
+    secret_arn = cluster.get("secret_arn")
+    db_name = cluster.get("db_name") or "postgres"
+    engine = (cluster.get("engine") or "").lower()
+    if not cluster_arn or not secret_arn:
+        return {"error": "cluster registry missing cluster_arn/secret_arn"}
+
+    if "mysql" in engine:
+        # MySQL: information_schema.statistics holds per-column index info;
+        # we collapse to one row per index (GROUP_CONCAT columns into the
+        # definition column) and join performance_schema.table_io_waits_summary_by_index_usage
+        # for usage counts.
+        sql = (
+            "SELECT "
+            "  s.INDEX_NAME AS index_name, "
+            "  CONCAT('USING ', MAX(s.INDEX_TYPE), ' (', GROUP_CONCAT(s.COLUMN_NAME ORDER BY s.SEQ_IN_INDEX), ')') AS definition, "
+            "  COALESCE(MAX(stat.STAT_VALUE * stat.STAT_VALUE), 0) AS bytes, "  # rough estimate
+            "  COALESCE(MAX(ios.COUNT_FETCH), 0) AS idx_scan, "
+            "  COALESCE(MAX(ios.COUNT_READ), 0) AS idx_tup_read, "
+            "  (MAX(s.NON_UNIQUE) = 0) AS is_unique, "
+            "  (MAX(s.INDEX_NAME) = 'PRIMARY') AS is_primary, "
+            "  TRUE AS is_valid "
+            "FROM information_schema.statistics s "
+            "LEFT JOIN performance_schema.table_io_waits_summary_by_index_usage ios "
+            "  ON ios.OBJECT_SCHEMA = s.TABLE_SCHEMA AND ios.OBJECT_NAME = s.TABLE_NAME AND ios.INDEX_NAME = s.INDEX_NAME "
+            "LEFT JOIN mysql.innodb_index_stats stat "
+            "  ON stat.database_name = s.TABLE_SCHEMA AND stat.table_name = s.TABLE_NAME AND stat.index_name = s.INDEX_NAME "
+            "  AND stat.stat_name = 'size' "
+            "WHERE s.TABLE_SCHEMA = :s AND s.TABLE_NAME = :t "
+            "GROUP BY s.INDEX_NAME "
+            "ORDER BY is_primary DESC, index_name"
+        )
+    else:
+        sql = (
+            "SELECT "
+            "  i.indexrelname AS index_name, "
+            "  pg_get_indexdef(i.indexrelid) AS definition, "
+            "  pg_relation_size(i.indexrelid)::bigint AS bytes, "
+            "  i.idx_scan, "
+            "  i.idx_tup_read, "
+            "  ix.indisunique AS is_unique, "
+            "  ix.indisprimary AS is_primary, "
+            "  ix.indisvalid AS is_valid "
+            "FROM pg_stat_user_indexes i "
+            "JOIN pg_index ix ON ix.indexrelid = i.indexrelid "
+            "WHERE i.schemaname = :s AND i.relname = :t "
+            "ORDER BY pg_relation_size(i.indexrelid) DESC"
+        )
+    rds_data = boto3.client("rds-data")
+    try:
+        resp = rds_data.execute_statement(
+            resourceArn=cluster_arn,
+            secretArn=secret_arn,
+            database=db_name,
+            sql=f"/* source=dbops-dashboard-indexes */ {sql}",
+            parameters=[
+                {"name": "s", "value": {"stringValue": schema}},
+                {"name": "t", "value": {"stringValue": table_name}},
+            ],
+            includeResultMetadata=True,
+        )
+    except Exception as e:
+        return {"error": "execution_failed", "message": str(e)[:300]}
+
+    # MySQL Data API leaves `name` blank for computed/aliased columns; the
+    # alias ends up in `label`. Prefer whichever is non-empty.
+    cols = [(c.get("name") or c.get("label") or "") for c in resp.get("columnMetadata", [])]
+    rows = []
+    for rec in resp.get("records", []):
+        row = {}
+        for i, f in enumerate(rec):
+            col = cols[i] if i < len(cols) and cols[i] else f"col_{i}"
+            if f.get("isNull"):
+                row[col] = None
+                continue
+            for typ in ("stringValue", "longValue", "doubleValue", "booleanValue"):
+                if typ in f:
+                    row[col] = f[typ]
+                    break
+        rows.append(row)
+    return {"schema": schema, "table": table_name, "indexes": rows}
+
+
 _ALLOWED_ORIGINS = {
     o.strip()
     for o in os.environ.get("ALLOWED_ORIGINS", "").split(",")
@@ -118,7 +227,7 @@ def _overview(query, cluster_id):
         {"cid": cluster_id},
     )
     recent_events = query(
-        "SELECT event_time as ts, event_type, severity, message "
+        "SELECT id, event_time as ts, event_type, severity, source, message, raw_event "
         "FROM event_log WHERE cluster_id = :cid "
         "ORDER BY event_time DESC LIMIT 10",
         {"cid": cluster_id},
@@ -258,33 +367,68 @@ def _audit_log(query, cluster_id, days, action_type):
 
 
 def _anomalies(query, cluster_id, hours, threshold):
+    """Seasonal anomaly detection.
+
+    For each metric we have a per-hour-of-week baseline (median + IQR) in
+    `metric_baselines`. Robust z-score = (recent_max - median) / IQR
+    (1.349×IQR ≈ 1 stddev for a normal distribution, but the IQR doesn't
+    blow up on outliers, so the score is stable on a cluster that has a
+    handful of legitimate spikes per day).
+
+    Falls back to the legacy flat-mean+stddev baseline when no seasonal
+    baseline exists for the current bucket (cold-start: less than ~14 days
+    of history). The fallback rows are tagged `mode='flat'` so the UI can
+    explain why a finding's confidence is lower."""
     rows = query(
-        "WITH baseline AS ("
-        "  SELECT metric_type, AVG(value) AS mean, STDDEV(value) AS stddev "
-        "  FROM metric_snapshots "
-        "  WHERE cluster_id = :cid "
-        "  AND ts BETWEEN NOW() - INTERVAL '7 days' AND NOW() - (:hours || ' hours')::interval "
-        "  GROUP BY metric_type "
-        "  HAVING STDDEV(value) > 0 AND COUNT(*) > 50"
+        "WITH "
+        "current_hour AS ( "
+        "  SELECT (EXTRACT(DOW FROM NOW())::int * 24 + EXTRACT(HOUR FROM NOW())::int) AS how "
         "), "
-        "recent AS ("
+        "recent AS ( "
         "  SELECT metric_type, MAX(value) AS recent_max, AVG(value) AS recent_avg "
         "  FROM metric_snapshots "
         "  WHERE cluster_id = :cid "
-        "  AND ts > NOW() - (:hours || ' hours')::interval "
-        "  GROUP BY metric_type"
+        "    AND ts > NOW() - (:hours || ' hours')::interval "
+        "    AND (dimensions IS NULL OR dimensions::text = '{}') "
+        "  GROUP BY metric_type "
+        "), "
+        "seasonal AS ( "
+        "  SELECT b.metric_type, b.median, b.iqr, b.sample_count "
+        "  FROM metric_baselines b, current_hour c "
+        "  WHERE b.cluster_id = :cid AND b.hour_of_week = c.how "
+        "), "
+        "flat AS ( "
+        "  SELECT metric_type, AVG(value) AS mean, STDDEV(value) AS stddev "
+        "  FROM metric_snapshots "
+        "  WHERE cluster_id = :cid "
+        "    AND ts BETWEEN NOW() - INTERVAL '7 days' AND NOW() - (:hours || ' hours')::interval "
+        "    AND (dimensions IS NULL OR dimensions::text = '{}') "
+        "  GROUP BY metric_type "
+        "  HAVING STDDEV(value) > 0 AND COUNT(*) > 50 "
         ") "
         "SELECT "
         "  r.metric_type, "
         "  r.recent_max, "
         "  r.recent_avg, "
-        "  b.mean AS baseline_mean, "
-        "  b.stddev AS baseline_stddev, "
-        "  (r.recent_max - b.mean) / NULLIF(b.stddev, 0) AS z_score "
+        "  COALESCE(s.median, f.mean) AS baseline_mean, "
+        "  COALESCE(s.iqr, f.stddev) AS baseline_stddev, "
+        "  CASE WHEN s.iqr IS NOT NULL "
+        "    THEN (r.recent_max - s.median) / NULLIF(s.iqr, 0) "
+        "    ELSE (r.recent_max - f.mean) / NULLIF(f.stddev, 0) "
+        "  END AS z_score, "
+        "  CASE WHEN s.iqr IS NOT NULL THEN 'seasonal' ELSE 'flat' END AS mode, "
+        "  s.sample_count "
         "FROM recent r "
-        "JOIN baseline b ON r.metric_type = b.metric_type "
-        "WHERE ABS((r.recent_max - b.mean) / NULLIF(b.stddev, 0)) >= :threshold "
-        "ORDER BY ABS((r.recent_max - b.mean) / NULLIF(b.stddev, 0)) DESC "
+        "LEFT JOIN seasonal s ON s.metric_type = r.metric_type "
+        "LEFT JOIN flat     f ON f.metric_type = r.metric_type "
+        "WHERE (s.iqr IS NOT NULL OR f.stddev IS NOT NULL) "
+        "  AND ABS( "
+        "    CASE WHEN s.iqr IS NOT NULL "
+        "      THEN (r.recent_max - s.median) / NULLIF(s.iqr, 0) "
+        "      ELSE (r.recent_max - f.mean) / NULLIF(f.stddev, 0) "
+        "    END "
+        "  ) >= :threshold "
+        "ORDER BY 6 DESC "  # ABS of z_score column
         "LIMIT 20",
         {"cid": cluster_id, "hours": str(hours), "threshold": float(threshold)},
     )
@@ -391,6 +535,76 @@ def _table_sizes(query, cluster_id):
     return {"cluster_id": cluster_id, "tables": rows}
 
 
+# DBOps' recommended extensions. Mirrors the static list in
+# pg_health_checks.RECOMMENDED_EXTENSIONS so frontend can render a single
+# matrix (installed vs recommended). Keep these two lists in sync.
+_RECOMMENDED_EXTENSIONS = [
+    {"extname": "pg_stat_statements", "severity": "warning",
+     "why": "Per-query latency aggregates feed slow-query panels + AI insight."},
+    {"extname": "auto_explain", "severity": "info",
+     "why": "Auto-captures EXPLAIN for slow queries — invaluable for post-mortem."},
+    {"extname": "pgstattuple", "severity": "warning",
+     "why": "Precise bloat measurement instead of the size-based estimate."},
+    {"extname": "pg_repack", "severity": "info",
+     "why": "VACUUM FULL alternative that doesn't take an exclusive lock."},
+    {"extname": "pg_hint_plan", "severity": "info",
+     "why": "Override planner choices when stats mislead it."},
+    {"extname": "pg_cron", "severity": "info",
+     "why": "Schedule VACUUM/ANALYZE jobs without an external scheduler."},
+]
+
+
+def _extensions(query, cluster_id):
+    """Return the installed extensions list for a cluster plus a recommended-
+    extensions matrix with per-row install status. UI shows them side-by-side."""
+    installed = query(
+        "SELECT extname, extversion, updated_at "
+        "FROM cluster_extensions WHERE cluster_id = :cid "
+        "ORDER BY extname",
+        {"cid": cluster_id},
+    )
+    installed_names = {r["extname"] for r in installed}
+    recommended = [
+        {**rec, "installed": rec["extname"] in installed_names}
+        for rec in _RECOMMENDED_EXTENSIONS
+    ]
+    return {
+        "cluster_id": cluster_id,
+        "installed": installed,
+        "recommended": recommended,
+    }
+
+
+def _health_findings(query, cluster_id):
+    """Return the *latest* snapshot of maintenance health findings for this
+    cluster. Older snapshots stay in the table for trend analysis but the
+    dashboard panel only ever shows the most recent one."""
+    rows = query(
+        "WITH latest AS ("
+        "  SELECT MAX(snapshot_time) AS ts FROM cluster_health_findings WHERE cluster_id = :cid"
+        ") "
+        "SELECT id, check_type, severity, subject, value_str, threshold_str, recommendation, details, snapshot_time "
+        "FROM cluster_health_findings, latest "
+        "WHERE cluster_id = :cid AND snapshot_time = latest.ts "
+        "ORDER BY "
+        "  CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, "
+        "  check_type, subject",
+        {"cid": cluster_id},
+    )
+    counts = {"critical": 0, "warning": 0, "info": 0}
+    for r in rows:
+        sev = r.get("severity", "info")
+        if sev in counts:
+            counts[sev] += 1
+    snapshot_time = rows[0]["snapshot_time"] if rows else None
+    return {
+        "cluster_id": cluster_id,
+        "snapshot_time": snapshot_time,
+        "counts": counts,
+        "findings": rows,
+    }
+
+
 def _vacuum_stats(query, cluster_id):
     rows = query(
         "WITH latest AS ("
@@ -440,16 +654,43 @@ def _index_recommendations(query, cluster_id, min_seq_ratio):
 
 
 def _wait_events(query, cluster_id, hours):
+    # Performance Insights emits one "total AAS" row per snapshot with no
+    # dimensions (the bucket that aggregates everything). Keeping it here
+    # would double-count and shows up as a noisy "unknown / unknown" row.
+    # We filter it out and derive wait_type from the event name prefix
+    # (`IO:DataFileRead` → `IO`) when PI didn't send a type explicitly.
     rows = query(
         "SELECT "
-        "  COALESCE(dimensions->>'db.wait_event.name', 'unknown') as wait_event, "
-        "  COALESCE(dimensions->>'db.wait_event.type', 'unknown') as wait_type, "
-        "  AVG(value) as avg_load, "
-        "  MAX(value) as max_load "
+        "  dimensions->>'db.wait_event.name' AS wait_event, "
+        "  COALESCE( "
+        "    NULLIF(dimensions->>'db.wait_event.type', ''), "
+        "    CASE "
+        "      WHEN dimensions->>'db.wait_event.name' = 'CPU' THEN 'CPU' "
+        "      WHEN dimensions->>'db.wait_event.name' LIKE 'IO:%' THEN 'IO' "
+        "      WHEN dimensions->>'db.wait_event.name' LIKE 'Lock:%' THEN 'Lock' "
+        "      WHEN dimensions->>'db.wait_event.name' LIKE 'LWLock:%' THEN 'LWLock' "
+        "      WHEN dimensions->>'db.wait_event.name' LIKE 'Client:%' THEN 'Client' "
+        "      WHEN dimensions->>'db.wait_event.name' LIKE 'IPC:%' THEN 'IPC' "
+        "      WHEN dimensions->>'db.wait_event.name' LIKE 'Timeout:%' THEN 'Timeout' "
+        # MySQL Performance Insights surfaces wait events as
+        # `wait/<type>/<subtype>/...` (e.g. `wait/io/file/innodb/innodb_data_file`).
+        # The second segment is the type bucket.
+        "      WHEN dimensions->>'db.wait_event.name' LIKE 'wait/io/%' THEN 'IO' "
+        "      WHEN dimensions->>'db.wait_event.name' LIKE 'wait/lock/%' THEN 'Lock' "
+        "      WHEN dimensions->>'db.wait_event.name' LIKE 'wait/synch/%' THEN 'Sync' "
+        "      WHEN dimensions->>'db.wait_event.name' LIKE 'wait/idle/%' THEN 'Idle' "
+        "      ELSE 'Other' "
+        "    END "
+        "  ) AS wait_type, "
+        "  AVG(value) AS avg_load, "
+        "  MAX(value) AS max_load "
         "FROM metric_snapshots "
         "WHERE cluster_id = :cid "
-        "AND metric_type = 'aas' "
-        "AND ts > NOW() - (:hours || ' hours')::interval "
+        "  AND metric_type = 'aas' "
+        "  AND ts > NOW() - (:hours || ' hours')::interval "
+        "  AND dimensions IS NOT NULL "
+        "  AND dimensions ? 'db.wait_event.name' "
+        "  AND dimensions->>'db.wait_event.name' <> '' "
         "GROUP BY wait_event, wait_type "
         "ORDER BY avg_load DESC",
         {"cid": cluster_id, "hours": str(hours)},
@@ -501,6 +742,19 @@ def lambda_handler(event, context):
             return _response(200, _vacuum_stats(query, cluster_id))
         if raw_path.endswith("/table-sizes"):
             return _response(200, _table_sizes(query, cluster_id))
+        if raw_path.endswith("/health-findings"):
+            return _response(200, _health_findings(query, cluster_id))
+        if raw_path.endswith("/extensions"):
+            return _response(200, _extensions(query, cluster_id))
+        if raw_path.endswith("/table-indexes"):
+            schema = (qs.get("schema") or "").strip()
+            table_name = (qs.get("table") or "").strip()
+            result = _table_indexes(cluster_id, schema, table_name)
+            status = 400 if "error" in result and result.get("error") in ("schema and table required",) else 200
+            if "error" in result and status == 200:
+                # cluster lookup / execution errors — surface as 502/404.
+                status = 404 if "not registered" in str(result.get("error")) else 502
+            return _response(status, result)
         if raw_path.endswith("/long-running"):
             return _response(200, _long_running(query, cluster_id))
         if raw_path.endswith("/blocking-locks"):

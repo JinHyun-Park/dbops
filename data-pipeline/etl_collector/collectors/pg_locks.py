@@ -35,9 +35,16 @@ LIMIT 50
 SETTINGS_SQL = """
 SELECT name, setting, unit
 FROM pg_settings
-WHERE name IN ('max_connections', 'shared_buffers', 'work_mem', 'maintenance_work_mem',
-               'effective_cache_size', 'wal_buffers', 'checkpoint_timeout',
-               'autovacuum_max_workers', 'max_worker_processes')
+WHERE name IN (
+  -- Capacity / planner
+  'max_connections', 'shared_buffers', 'work_mem', 'maintenance_work_mem',
+  'effective_cache_size', 'wal_buffers', 'checkpoint_timeout',
+  'autovacuum_max_workers', 'max_worker_processes',
+  -- Logging (pgBadger / Maintenance Health recommendations)
+  'log_checkpoints', 'log_connections', 'log_disconnections',
+  'log_lock_waits', 'log_autovacuum_min_duration',
+  'log_min_duration_statement', 'log_temp_files'
+)
 ORDER BY name
 """
 

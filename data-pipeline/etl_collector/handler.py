@@ -8,6 +8,14 @@ from collectors.cw_collector import collect_cw_metrics
 from collectors.pg_table_stats import collect_pg_table_stats
 from collectors.pg_activity import collect_pg_activity
 from collectors.pg_locks import collect_pg_locks
+from collectors.pg_health_checks import collect_pg_health_checks
+from collectors.pg_extensions import collect_pg_extensions
+from collectors.pg_baseline_trainer import collect_pg_baselines
+from collectors.cost_check import collect_cost_findings
+from collectors.mysql_query_stats import collect_mysql_query_stats
+from collectors.mysql_table_stats import collect_mysql_table_stats
+from collectors.mysql_locks import collect_mysql_locks
+from collectors.mysql_activity import collect_mysql_activity
 
 
 def _scan_all(table):
@@ -128,8 +136,71 @@ def lambda_handler(event, context):
             except Exception as e:
                 result["locks_error"] = str(e)
                 print(f"[{cluster_id}] locks error: {e}")
+
+            try:
+                result["health"] = collect_pg_health_checks(
+                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                )
+            except Exception as e:
+                result["health_error"] = str(e)
+                print(f"[{cluster_id}] health error: {e}")
+            try:
+                result["extensions"] = collect_pg_extensions(
+                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                )
+            except Exception as e:
+                result["extensions_error"] = str(e)
+                print(f"[{cluster_id}] extensions error: {e}")
+        elif target_cluster_arn and target_secret_arn and "mysql" in engine:
+            # MySQL counterparts — same cache tables, MySQL-flavored source queries.
+            try:
+                result["stats"] = collect_mysql_query_stats(
+                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                )
+            except Exception as e:
+                result["stats_error"] = str(e)
+                print(f"[{cluster_id}] mysql stats error: {e}")
+            try:
+                result["table_stats"] = collect_mysql_table_stats(
+                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                )
+            except Exception as e:
+                result["table_stats_error"] = str(e)
+                print(f"[{cluster_id}] mysql table_stats error: {e}")
+            try:
+                result["locks"] = collect_mysql_locks(
+                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                )
+            except Exception as e:
+                result["locks_error"] = str(e)
+                print(f"[{cluster_id}] mysql locks error: {e}")
+            try:
+                result["activity"] = collect_mysql_activity(
+                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                )
+            except Exception as e:
+                result["activity_error"] = str(e)
+                print(f"[{cluster_id}] mysql activity error: {e}")
         else:
             result["stats"] = {"skipped": f"engine={engine} or no secret"}
+
+        # Seasonal baseline trainer — engine-agnostic, only reads cache DB
+        # metric_snapshots. Time-gated to once per hour per cluster.
+        try:
+            result["baselines"] = collect_pg_baselines(
+                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+            )
+        except Exception as e:
+            result["baselines_error"] = str(e)
+            print(f"[{cluster_id}] baseline trainer error: {e}")
+
+        try:
+            result["cost"] = collect_cost_findings(
+                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+            )
+        except Exception as e:
+            result["cost_error"] = str(e)
+            print(f"[{cluster_id}] cost check error: {e}")
 
         results.append(result)
 
