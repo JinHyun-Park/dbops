@@ -1,7 +1,63 @@
+"""Clusters API.
+
+Routes:
+  GET  /api/clusters              — list registered clusters (existing)
+  POST /api/clusters              — register one cluster (existing)
+  POST /api/clusters/discover     — list candidate clusters in an account+region
+  POST /api/clusters/bulk-register — register multiple discovered clusters
+"""
+
+import base64
 import json
 import os
 import boto3
+from botocore.exceptions import ClientError
 from datetime import datetime
+
+
+def _decode_jwt_payload(token: str) -> dict:
+    """Decode a JWT payload (base64) — no signature verification.
+    Cognito-issued tokens originate from a trusted client we control, and a
+    follow-up task wires API Gateway JWT authorizer for proper verification.
+    Here we just want the `cognito:groups` claim for RBAC."""
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return {}
+
+
+def _is_admin(event: dict) -> bool:
+    """Return True if the caller's token does not place them in dbops-viewer.
+    Tokens without any group claim default to admin (one-admin deploys), matching
+    the frontend isAdmin() semantics. Anonymous (no token) requests are NOT
+    considered admin — they fall through to 403 in callers that gate writes."""
+    headers = event.get("headers") or {}
+    auth = headers.get("authorization") or headers.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        return False
+    claims = _decode_jwt_payload(auth.split(" ", 1)[1])
+    groups = claims.get("cognito:groups") or []
+    if not isinstance(groups, list):
+        return False
+    if "dbops-viewer" in groups and "dbops-admin" not in groups:
+        return False
+    # Token present + not explicitly viewer → admin.
+    return True
+
+
+def _forbid_viewer(event: dict):
+    """Return a 403 response if the caller is a viewer, else None."""
+    if _is_admin(event):
+        return None
+    return {
+        "statusCode": 403,
+        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        "body": json.dumps({"error": "forbidden", "reason": "admin role required"}),
+    }
 
 
 def _enrich_with_meta(clusters):
@@ -51,83 +107,238 @@ def _enrich_with_meta(clusters):
     return clusters
 
 
+def _cors():
+    return {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}
+
+
+def _resp(status, body):
+    return {"statusCode": status, "headers": _cors(), "body": json.dumps(body, default=str)}
+
+
+def _rds_client_for(region: str, role_arn: str = ""):
+    """Return an RDS client. If role_arn is given, assume it cross-account."""
+    if not role_arn:
+        return boto3.client("rds", region_name=region)
+    sts = boto3.client("sts")
+    creds = sts.assume_role(
+        RoleArn=role_arn,
+        RoleSessionName=f"dbops-discover-{datetime.utcnow().strftime('%H%M%S')}",
+        DurationSeconds=900,
+    )["Credentials"]
+    return boto3.client(
+        "rds",
+        region_name=region,
+        aws_access_key_id=creds["AccessKeyId"],
+        aws_secret_access_key=creds["SecretAccessKey"],
+        aws_session_token=creds["SessionToken"],
+    )
+
+
+def _list_clusters_in_region(region: str, role_arn: str = "") -> list[dict]:
+    """Enumerate Aurora clusters in a region. Returns one row per cluster."""
+    rds = _rds_client_for(region, role_arn)
+    out = []
+    paginator = rds.get_paginator("describe_db_clusters")
+    for page in paginator.paginate():
+        for c in page.get("DBClusters", []):
+            engine = c.get("Engine", "")
+            if not engine.startswith("aurora"):
+                # Skip non-Aurora RDS (we only support Aurora MySQL/PG today).
+                continue
+            master_secret = (c.get("MasterUserSecret") or {}).get("SecretArn", "")
+            out.append({
+                "cluster_id": c.get("DBClusterIdentifier", ""),
+                "cluster_arn": c.get("DBClusterArn", ""),
+                "engine": engine,
+                "engine_version": c.get("EngineVersion", ""),
+                "endpoint": c.get("Endpoint", ""),
+                "status": c.get("Status", ""),
+                "db_name": c.get("DatabaseName", "") or "postgres",
+                "secret_arn": master_secret,
+                "region": region,
+            })
+    return out
+
+
+def _handle_list(table):
+    response = table.scan()
+    items = response.get("Items", [])
+    items = _enrich_with_meta(items)
+    return _resp(200, items)
+
+
+def _handle_register(table, body: dict):
+    required = ["cluster_id", "account_id", "region"]
+    for field in required:
+        if field not in body:
+            return _resp(400, {"error": f"{field} required"})
+
+    cluster_id = body["cluster_id"]
+    account_id = body["account_id"]
+    region = body["region"]
+    spoke_role_arn = body.get("spoke_role_arn", "")
+    connection_status = "untested"
+    connection_error = ""
+
+    # Validate access by calling DescribeDBClusters via local or assumed role.
+    try:
+        rds = _rds_client_for(region, spoke_role_arn)
+        rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
+        connection_status = "ok"
+    except Exception as e:
+        connection_status = "failed"
+        connection_error = str(e)[:300]
+
+    item = {
+        "cluster_id": cluster_id,
+        "account_id": account_id,
+        "region": region,
+        "engine": body.get("engine", "aurora-postgresql"),
+        "spoke_role_arn": spoke_role_arn,
+        "registered_at": datetime.utcnow().isoformat(),
+        "connection_status": connection_status,
+        "connection_error": connection_error,
+        "connection_validated_at": datetime.utcnow().isoformat() if connection_status != "untested" else "",
+    }
+    # Carry over arn/secret/db_name when the caller already resolved them
+    # (bulk-register path provides these; single-cluster manual entry may not).
+    for k in ("cluster_arn", "secret_arn", "db_name"):
+        if body.get(k):
+            item[k] = body[k]
+
+    table.put_item(Item=item)
+
+    status_code = 201 if connection_status != "failed" else 207
+    return _resp(status_code, {
+        "status": "registered" if connection_status != "failed" else "registered_with_warning",
+        "cluster_id": cluster_id,
+        "connection_status": connection_status,
+        "connection_error": connection_error,
+    })
+
+
+def _handle_discover(table, body: dict):
+    region = body.get("region")
+    regions = body.get("regions") or ([region] if region else [])
+    if not regions:
+        return _resp(400, {"error": "region or regions required"})
+    role_arn = body.get("role_arn", "")
+    account_id = body.get("account_id", "")  # informational; only used in output
+
+    # Build a set of already-registered cluster_ids to flag duplicates.
+    existing_ids = set()
+    try:
+        scan = table.scan(ProjectionExpression="cluster_id")
+        existing_ids = {row["cluster_id"] for row in scan.get("Items", []) if row.get("cluster_id")}
+    except Exception as e:
+        print(f"[discover] dedupe scan failed: {e}")
+
+    all_clusters = []
+    errors_by_region = {}
+    for r in regions:
+        try:
+            rows = _list_clusters_in_region(r, role_arn)
+            for row in rows:
+                row["already_registered"] = row["cluster_id"] in existing_ids
+                row["account_id"] = account_id
+            all_clusters.extend(rows)
+        except ClientError as e:
+            errors_by_region[r] = e.response.get("Error", {}).get("Code", str(e))
+        except Exception as e:
+            errors_by_region[r] = str(e)[:200]
+
+    return _resp(200, {
+        "clusters": all_clusters,
+        "errors": errors_by_region,
+        "scanned_regions": regions,
+    })
+
+
+def _handle_bulk_register(table, body: dict):
+    clusters = body.get("clusters") or []
+    if not isinstance(clusters, list) or not clusters:
+        return _resp(400, {"error": "clusters[] required"})
+
+    registered, skipped, failed = [], [], []
+    for c in clusters:
+        try:
+            cluster_id = c.get("cluster_id")
+            if not cluster_id:
+                failed.append({"cluster_id": "(missing)", "error": "cluster_id missing"})
+                continue
+            # Skip already-registered unless caller passes force=true.
+            existing = table.get_item(Key={"cluster_id": cluster_id}).get("Item")
+            if existing and not c.get("force"):
+                skipped.append({"cluster_id": cluster_id, "reason": "already_registered"})
+                continue
+            sub_body = {
+                "cluster_id": cluster_id,
+                "account_id": c.get("account_id", ""),
+                "region": c.get("region"),
+                "engine": c.get("engine", "aurora-postgresql"),
+                "spoke_role_arn": c.get("spoke_role_arn", ""),
+                "cluster_arn": c.get("cluster_arn", ""),
+                "secret_arn": c.get("secret_arn", ""),
+                "db_name": c.get("db_name", ""),
+            }
+            resp = _handle_register(table, sub_body)
+            payload = json.loads(resp["body"])
+            registered.append({
+                "cluster_id": cluster_id,
+                "connection_status": payload.get("connection_status"),
+            })
+        except Exception as e:
+            failed.append({"cluster_id": c.get("cluster_id", "?"), "error": str(e)[:200]})
+
+    return _resp(200, {
+        "registered": registered,
+        "skipped": skipped,
+        "failed": failed,
+        "counts": {
+            "registered": len(registered),
+            "skipped": len(skipped),
+            "failed": len(failed),
+        },
+    })
+
+
 def lambda_handler(event, context):
     dynamodb = boto3.resource("dynamodb")
     table = dynamodb.Table(os.environ["CLUSTERS_TABLE"])
     method = event.get("requestContext", {}).get("http", {}).get("method", event.get("httpMethod", "GET"))
+    path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path", "")
+
+    # Sub-route: POST /api/clusters/discover (read-only enumeration, allow viewer)
+    if method == "POST" and path.endswith("/discover"):
+        try:
+            body = json.loads(event.get("body") or "{}")
+        except Exception:
+            return _resp(400, {"error": "invalid JSON"})
+        return _handle_discover(table, body)
+
+    # Sub-route: POST /api/clusters/bulk-register — write, admin only
+    if method == "POST" and path.endswith("/bulk-register"):
+        forbid = _forbid_viewer(event)
+        if forbid:
+            return forbid
+        try:
+            body = json.loads(event.get("body") or "{}")
+        except Exception:
+            return _resp(400, {"error": "invalid JSON"})
+        return _handle_bulk_register(table, body)
 
     if method == "GET":
-        response = table.scan()
-        items = response.get("Items", [])
-        items = _enrich_with_meta(items)
-        return {
-            "statusCode": 200,
-            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-            "body": json.dumps(items, default=str),
-        }
+        return _handle_list(table)
 
     if method == "POST":
-        body = json.loads(event.get("body", "{}"))
-        required = ["cluster_id", "account_id", "region"]
-        for field in required:
-            if field not in body:
-                return {"statusCode": 400, "body": json.dumps({"error": f"{field} required"})}
-
-        cluster_id = body["cluster_id"]
-        account_id = body["account_id"]
-        region = body["region"]
-        spoke_role_arn = body.get("spoke_role_arn", "")
-        connection_status = "untested"
-        connection_error = ""
-
-        # If a spoke role is provided, validate cross-account access by assuming it
-        # and calling rds:DescribeDBClusters. Otherwise, assume same-account access
-        # via the local Lambda role.
+        # Single-cluster registration — write, admin only.
+        forbid = _forbid_viewer(event)
+        if forbid:
+            return forbid
         try:
-            if spoke_role_arn:
-                sts = boto3.client("sts")
-                creds = sts.assume_role(
-                    RoleArn=spoke_role_arn,
-                    RoleSessionName=f"dbops-register-{cluster_id[:32]}",
-                    DurationSeconds=900,
-                )["Credentials"]
-                rds = boto3.client(
-                    "rds",
-                    region_name=region,
-                    aws_access_key_id=creds["AccessKeyId"],
-                    aws_secret_access_key=creds["SecretAccessKey"],
-                    aws_session_token=creds["SessionToken"],
-                )
-            else:
-                rds = boto3.client("rds", region_name=region)
-            rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
-            connection_status = "ok"
-        except Exception as e:
-            connection_status = "failed"
-            connection_error = str(e)[:300]
+            body = json.loads(event.get("body") or "{}")
+        except Exception:
+            return _resp(400, {"error": "invalid JSON"})
+        return _handle_register(table, body)
 
-        table.put_item(Item={
-            "cluster_id": cluster_id,
-            "account_id": account_id,
-            "region": region,
-            "engine": body.get("engine", "aurora-postgresql"),
-            "spoke_role_arn": spoke_role_arn,
-            "registered_at": datetime.utcnow().isoformat(),
-            "connection_status": connection_status,
-            "connection_error": connection_error,
-            "connection_validated_at": datetime.utcnow().isoformat() if connection_status != "untested" else "",
-        })
-
-        status_code = 201 if connection_status != "failed" else 207
-        return {
-            "statusCode": status_code,
-            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-            "body": json.dumps({
-                "status": "registered" if connection_status != "failed" else "registered_with_warning",
-                "cluster_id": cluster_id,
-                "connection_status": connection_status,
-                "connection_error": connection_error,
-            }),
-        }
-
-    return {"statusCode": 405, "body": json.dumps({"error": "Method not allowed"})}
+    return _resp(405, {"error": "method not allowed"})

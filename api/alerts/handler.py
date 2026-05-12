@@ -1,8 +1,46 @@
+import base64
 import json
 import os
 import re
 import traceback
 import boto3
+
+
+def _decode_jwt_payload(token: str) -> dict:
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return {}
+
+
+def _is_admin(event: dict) -> bool:
+    """True if caller is admin (or has no group at all — default admin).
+    False if explicitly in dbops-viewer or no token at all."""
+    headers = event.get("headers") or {}
+    auth = headers.get("authorization") or headers.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        return False
+    claims = _decode_jwt_payload(auth.split(" ", 1)[1])
+    groups = claims.get("cognito:groups") or []
+    if not isinstance(groups, list):
+        return False
+    if "dbops-viewer" in groups and "dbops-admin" not in groups:
+        return False
+    return True
+
+
+def _forbid_viewer(event: dict):
+    if _is_admin(event):
+        return None
+    return {
+        "statusCode": 403,
+        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        "body": json.dumps({"error": "forbidden", "reason": "admin role required"}),
+    }
 
 
 COMP_OPS = {">", ">=", "<", "<=", "==", "!="}
@@ -166,37 +204,85 @@ def _update_rule(query, rule_id, body):
     return _response(200, {"rule": rows[0]})
 
 
-def _list_subscriptions(sns_client, topic_arn):
-    if not topic_arn or not sns_client:
-        return {"subscriptions": [], "topic_arn": topic_arn or ""}
+_MANAGED_PROTOCOLS = {"slack-webhook", "pagerduty-events-v2"}
+
+
+def _list_subscriptions(sns_client, topic_arn, query):
+    """Combine SNS-native subscribers with DBOps-managed (Slack / PD) ones."""
     subs = []
-    next_token = None
-    while True:
-        kwargs = {"TopicArn": topic_arn}
-        if next_token:
-            kwargs["NextToken"] = next_token
-        resp = sns_client.list_subscriptions_by_topic(**kwargs)
-        for s in resp.get("Subscriptions", []):
+    if topic_arn and sns_client:
+        next_token = None
+        while True:
+            kwargs = {"TopicArn": topic_arn}
+            if next_token:
+                kwargs["NextToken"] = next_token
+            resp = sns_client.list_subscriptions_by_topic(**kwargs)
+            for s in resp.get("Subscriptions", []):
+                subs.append({
+                    "subscription_arn": s.get("SubscriptionArn"),
+                    "protocol": s.get("Protocol"),
+                    "endpoint": s.get("Endpoint"),
+                    "managed": False,
+                })
+            next_token = resp.get("NextToken")
+            if not next_token:
+                break
+
+    # Managed (RDS-backed) subscribers — Slack / PagerDuty.
+    try:
+        rows = query(
+            "SELECT id, protocol, endpoint, label, enabled FROM alert_subscribers_managed "
+            "ORDER BY id ASC",
+        )
+        for r in rows:
             subs.append({
-                "subscription_arn": s.get("SubscriptionArn"),
-                "protocol": s.get("Protocol"),
-                "endpoint": s.get("Endpoint"),
+                # Prefix with 'mgmt:' so the delete path can distinguish.
+                "subscription_arn": f"mgmt:{r['id']}",
+                "protocol": r["protocol"],
+                "endpoint": r["endpoint"],
+                "label": r.get("label"),
+                "enabled": r.get("enabled", True),
+                "managed": True,
             })
-        next_token = resp.get("NextToken")
-        if not next_token:
-            break
-    return {"subscriptions": subs, "topic_arn": topic_arn}
+    except Exception as e:
+        # Table may not exist yet on first deploy — fall through.
+        print(f"[alerts] list managed subscribers failed: {e}")
+
+    return {"subscriptions": subs, "topic_arn": topic_arn or ""}
 
 
-def _create_subscription(sns_client, topic_arn, body):
-    if not topic_arn or not sns_client:
-        return _response(503, {"error": "alert topic not configured"})
+def _create_subscription(sns_client, topic_arn, body, query):
     protocol = (body.get("protocol") or "").strip().lower()
     endpoint = (body.get("endpoint") or "").strip()
-    if protocol not in {"email", "email-json", "sms", "https"}:
-        return _response(400, {"error": "protocol must be email, email-json, sms, or https"})
     if not endpoint:
         return _response(400, {"error": "endpoint required"})
+
+    # Managed protocols (Slack / PD) — stored in RDS, posted by evaluator.
+    if protocol in _MANAGED_PROTOCOLS:
+        if protocol == "slack-webhook" and not endpoint.startswith("https://hooks.slack.com/"):
+            return _response(400, {"error": "slack-webhook endpoint must be https://hooks.slack.com/..."})
+        if protocol == "pagerduty-events-v2" and len(endpoint) < 20:
+            return _response(400, {"error": "pagerduty-events-v2 endpoint must be the integration key"})
+        label = (body.get("label") or "").strip() or None
+        rows = query(
+            "INSERT INTO alert_subscribers_managed (protocol, endpoint, label) "
+            "VALUES (:p, :e, :l) RETURNING id, protocol, endpoint, label, enabled",
+            {"p": protocol, "e": endpoint, "l": label},
+        )
+        r = rows[0]
+        return _response(201, {
+            "subscription_arn": f"mgmt:{r['id']}",
+            "protocol": r["protocol"],
+            "endpoint": r["endpoint"],
+            "label": r.get("label"),
+            "managed": True,
+        })
+
+    # SNS-native protocols.
+    if not topic_arn or not sns_client:
+        return _response(503, {"error": "alert topic not configured"})
+    if protocol not in {"email", "email-json", "sms", "https"}:
+        return _response(400, {"error": "protocol must be one of: email, email-json, sms, https, slack-webhook, pagerduty-events-v2"})
     if protocol == "https" and not endpoint.startswith("https://"):
         return _response(400, {"error": "https endpoint must start with https://"})
     resp = sns_client.subscribe(
@@ -209,14 +295,31 @@ def _create_subscription(sns_client, topic_arn, body):
         "subscription_arn": resp.get("SubscriptionArn"),
         "protocol": protocol,
         "endpoint": endpoint,
+        "managed": False,
         "note": "email/sms subscriptions need owner confirmation via the link AWS sends.",
     })
 
 
-def _delete_subscription(sns_client, sub_arn):
+def _delete_subscription(sns_client, sub_arn, query):
+    if not sub_arn:
+        return _response(400, {"error": "sub_arn required"})
+    # Managed subscriber path: "mgmt:<id>"
+    if sub_arn.startswith("mgmt:"):
+        try:
+            row_id = int(sub_arn.split(":", 1)[1])
+        except ValueError:
+            return _response(400, {"error": "invalid managed sub_arn"})
+        rows = query(
+            "DELETE FROM alert_subscribers_managed WHERE id = :id RETURNING id",
+            {"id": row_id},
+        )
+        if not rows:
+            return _response(404, {"error": "not found"})
+        return _response(200, {"unsubscribed": sub_arn})
+
     if not sns_client:
         return _response(503, {"error": "alert topic not configured"})
-    if not sub_arn or sub_arn == "PendingConfirmation":
+    if sub_arn == "PendingConfirmation":
         return _response(400, {"error": "subscription not yet confirmed; remove via AWS Console"})
     sns_client.unsubscribe(SubscriptionArn=sub_arn)
     return _response(200, {"unsubscribed": sub_arn})
@@ -261,20 +364,35 @@ def lambda_handler(event, context):
 
         if is_subscription_path:
             if method == "GET":
-                return _response(200, _list_subscriptions(sns_client, topic_arn))
+                return _response(200, _list_subscriptions(sns_client, topic_arn, query))
             if method == "POST":
-                return _create_subscription(sns_client, topic_arn, body)
+                forbid = _forbid_viewer(event)
+                if forbid:
+                    return forbid
+                return _create_subscription(sns_client, topic_arn, body, query)
             if method == "DELETE":
-                return _delete_subscription(sns_client, qs.get("sub_arn"))
+                forbid = _forbid_viewer(event)
+                if forbid:
+                    return forbid
+                return _delete_subscription(sns_client, qs.get("sub_arn"), query)
             return _response(405, {"error": f"method {method} not allowed"})
 
         if method == "GET":
             return _response(200, _list_rules(query, qs.get("cluster_id")))
         if method == "POST":
+            forbid = _forbid_viewer(event)
+            if forbid:
+                return forbid
             return _create_rule(query, body)
         if method == "PATCH":
+            forbid = _forbid_viewer(event)
+            if forbid:
+                return forbid
             return _update_rule(query, path_params.get("id"), body)
         if method == "DELETE":
+            forbid = _forbid_viewer(event)
+            if forbid:
+                return forbid
             return _delete_rule(query, path_params.get("id"))
         return _response(405, {"error": f"method {method} not allowed"})
     except Exception:

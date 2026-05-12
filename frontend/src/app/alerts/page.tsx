@@ -12,6 +12,7 @@ import {
   deleteAlertSubscription,
 } from "@/lib/api-client";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
+import { isAdmin } from "@/lib/auth";
 
 interface Rule {
   id: number;
@@ -45,6 +46,10 @@ export default function AlertsPage() {
   const [clusters, setClusters] = useState<{ cluster_id: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => {
+    setAdmin(isAdmin());
+  }, []);
 
   const [newRule, setNewRule] = useState({
     cluster_id: "",
@@ -136,7 +141,13 @@ export default function AlertsPage() {
         </div>
       )}
 
-      <form
+      {!admin && (
+        <div className="mb-6 px-3 py-2 border border-zinc-800 text-[11px] uppercase tracking-wider text-zinc-500">
+          read-only · viewer — write actions are hidden
+        </div>
+      )}
+
+      {admin && <form
         onSubmit={submit}
         className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 mb-6 grid grid-cols-1 md:grid-cols-6 gap-3 items-end"
       >
@@ -200,7 +211,7 @@ export default function AlertsPage() {
         >
           Add Rule
         </button>
-      </form>
+      </form>}
 
       <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 mb-6">
         <div className="flex items-baseline justify-between mb-3">
@@ -213,7 +224,7 @@ export default function AlertsPage() {
             </div>
           </div>
         </div>
-        <form onSubmit={submitSub} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end mb-3">
+        {admin && <form onSubmit={submitSub} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end mb-3">
           <div>
             <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Protocol</label>
             <select
@@ -224,6 +235,8 @@ export default function AlertsPage() {
               <option value="email">Email</option>
               <option value="sms">SMS</option>
               <option value="https">HTTPS webhook</option>
+              <option value="slack-webhook">Slack incoming webhook</option>
+              <option value="pagerduty-events-v2">PagerDuty events-v2</option>
             </select>
           </div>
           <div className="md:col-span-4">
@@ -236,7 +249,11 @@ export default function AlertsPage() {
                   ? "dba@example.com"
                   : newSub.protocol === "sms"
                   ? "+821012345678"
-                  : "https://hooks.slack.com/services/..."
+                  : newSub.protocol === "slack-webhook"
+                  ? "https://hooks.slack.com/services/T.../B.../..."
+                  : newSub.protocol === "pagerduty-events-v2"
+                  ? "PagerDuty integration key (32 hex chars)"
+                  : "https://example.com/webhook"
               }
               className="w-full bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm rounded px-2 py-1.5 mt-1"
             />
@@ -247,7 +264,7 @@ export default function AlertsPage() {
           >
             Subscribe
           </button>
-        </form>
+        </form>}
         {subs.length > 0 ? (
           <table className="w-full text-sm">
             <thead className="bg-zinc-900/50 border-y border-zinc-700">
@@ -280,7 +297,7 @@ export default function AlertsPage() {
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {!pending && (
+                      {!pending && admin && (
                         <button
                           onClick={() => removeSub(s.subscription_arn)}
                           className="text-rose-400 hover:text-rose-300 text-xs"
@@ -325,11 +342,12 @@ export default function AlertsPage() {
                   <td className="px-3 py-2">
                     <button
                       onClick={() => toggle(r.id, r.enabled)}
+                      disabled={!admin}
                       className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
                         r.enabled
                           ? "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"
                           : "bg-zinc-700 text-zinc-400 hover:bg-zinc-600"
-                      }`}
+                      } ${admin ? "" : "cursor-not-allowed opacity-70"}`}
                     >
                       {r.enabled ? "enabled" : "disabled"}
                     </button>
@@ -343,12 +361,14 @@ export default function AlertsPage() {
                     {r.last_triggered_at ? new Date(r.last_triggered_at).toLocaleString() : "never"}
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <button
-                      onClick={() => remove(r.id)}
-                      className="text-rose-400 hover:text-rose-300 text-xs"
-                    >
-                      delete
-                    </button>
+                    {admin && (
+                      <button
+                        onClick={() => remove(r.id)}
+                        className="text-rose-400 hover:text-rose-300 text-xs"
+                      >
+                        delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -2,7 +2,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { fetchClusters, registerCluster } from "@/lib/api-client";
+import {
+  fetchClusters,
+  registerCluster,
+  discoverClusters,
+  bulkRegisterClusters,
+  type DiscoveredCluster,
+} from "@/lib/api-client";
+import { isAdmin } from "@/lib/auth";
 import { PageHeader, PageBody, EmptyState, Section } from "@/components/design-system/page-shell";
 
 interface Cluster {
@@ -56,6 +63,25 @@ export default function ClustersPage() {
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: "ok" | "warn" | "err"; msg: string } | null>(null);
 
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => {
+    setAdmin(isAdmin());
+  }, []);
+
+  // --- Bulk discovery state (P2.5) ---
+  const [discoverOpen, setDiscoverOpen] = useState(false);
+  const [discoverForm, setDiscoverForm] = useState({
+    regions: "ap-northeast-2",
+    role_arn: "",
+    account_id: "",
+  });
+  const [discovering, setDiscovering] = useState(false);
+  const [discovered, setDiscovered] = useState<DiscoveredCluster[]>([]);
+  const [discoverErrors, setDiscoverErrors] = useState<Record<string, string>>({});
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [registering, setRegistering] = useState(false);
+
   const loadClusters = useCallback(() => {
     fetchClusters().then(setClusters).catch(console.error);
   }, []);
@@ -63,6 +89,93 @@ export default function ClustersPage() {
   useEffect(() => {
     loadClusters();
   }, [loadClusters]);
+
+  const handleDiscover = async () => {
+    const regions = discoverForm.regions
+      .split(",")
+      .map((r) => r.trim())
+      .filter(Boolean);
+    if (regions.length === 0) {
+      setFeedback({ kind: "err", msg: "최소 1개 region이 필요합니다." });
+      return;
+    }
+    setDiscovering(true);
+    setFeedback(null);
+    setDiscovered([]);
+    setDiscoverErrors({});
+    setSelectedIds(new Set());
+    try {
+      const res = await discoverClusters({
+        regions,
+        role_arn: discoverForm.role_arn.trim() || undefined,
+        account_id: discoverForm.account_id.trim() || undefined,
+      });
+      setDiscovered(res.clusters);
+      setDiscoverErrors(res.errors || {});
+      // Auto-select unregistered clusters.
+      setSelectedIds(new Set(res.clusters.filter((c) => !c.already_registered).map((c) => c.cluster_id)));
+      if (res.clusters.length === 0 && Object.keys(res.errors || {}).length === 0) {
+        setFeedback({ kind: "warn", msg: "검색된 Aurora 클러스터가 없습니다." });
+      }
+    } catch (e) {
+      setFeedback({ kind: "err", msg: e instanceof Error ? e.message : "Discover failed" });
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectedClusters = discovered.filter(
+    (c) => selectedIds.has(c.cluster_id) && !c.already_registered,
+  );
+
+  const handleBulkRegister = async () => {
+    if (selectedClusters.length === 0) return;
+    setRegistering(true);
+    setFeedback(null);
+    try {
+      const payload = selectedClusters.map((c) => ({
+        cluster_id: c.cluster_id,
+        cluster_arn: c.cluster_arn,
+        account_id: c.account_id || discoverForm.account_id,
+        region: c.region,
+        engine: c.engine,
+        engine_version: c.engine_version,
+        endpoint: c.endpoint,
+        secret_arn: c.secret_arn,
+        db_name: c.db_name,
+        spoke_role_arn: discoverForm.role_arn.trim() || undefined,
+      }));
+      const res = await bulkRegisterClusters(payload);
+      const ok = res.counts.registered;
+      const skip = res.counts.skipped;
+      const fail = res.counts.failed;
+      const tone = fail > 0 ? "warn" : "ok";
+      setFeedback({
+        kind: tone as "ok" | "warn",
+        msg: `등록 ${ok}개, 스킵 ${skip}개, 실패 ${fail}개${
+          fail > 0 ? ` — 실패: ${res.failed.map((f) => f.cluster_id).join(", ")}` : ""
+        }`,
+      });
+      setShowConfirm(false);
+      setDiscoverOpen(false);
+      setDiscovered([]);
+      setSelectedIds(new Set());
+      loadClusters();
+    } catch (e) {
+      setFeedback({ kind: "err", msg: e instanceof Error ? e.message : "Bulk register failed" });
+    } finally {
+      setRegistering(false);
+    }
+  };
 
   const handleRegister = async () => {
     if (!form.cluster_id || !form.account_id || !form.region) {
@@ -114,12 +227,33 @@ export default function ClustersPage() {
             >
               Fleet overview →
             </Link>
-            <button
-              onClick={() => setShowForm(!showForm)}
-              className="text-xs font-medium px-3 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
-            >
-              {showForm ? "취소" : "+ Register cluster"}
-            </button>
+            {admin && (
+              <button
+                onClick={() => {
+                  setDiscoverOpen((v) => !v);
+                  setShowForm(false);
+                }}
+                className="text-xs px-3 py-2 border border-sky-500/50 text-sky-300 hover:bg-sky-500/10 transition-colors"
+              >
+                {discoverOpen ? "Hide discovery" : "🔎 Discover clusters"}
+              </button>
+            )}
+            {admin && (
+              <button
+                onClick={() => {
+                  setShowForm(!showForm);
+                  setDiscoverOpen(false);
+                }}
+                className="text-xs font-medium px-3 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
+              >
+                {showForm ? "취소" : "+ Register cluster"}
+              </button>
+            )}
+            {!admin && (
+              <span className="text-[10px] uppercase tracking-wider text-zinc-500 px-2 py-1 border border-zinc-800">
+                read-only · viewer
+              </span>
+            )}
           </>
         }
       />
@@ -135,6 +269,210 @@ export default function ClustersPage() {
           }`}
         >
           {feedback.msg}
+        </div>
+      )}
+
+      {discoverOpen && (
+        <Section
+          eyebrow="bulk discovery"
+          title="Discover Aurora clusters"
+          description="현재 계정 또는 cross-account role을 통해 RDS에서 Aurora 클러스터를 자동 enumerate. 선택한 항목만 한 번에 등록합니다."
+        >
+          <div className="border border-zinc-800 bg-zinc-900/40 p-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field
+                label="Regions (comma-separated)"
+                value={discoverForm.regions}
+                onChange={(v) => setDiscoverForm({ ...discoverForm, regions: v })}
+                placeholder="ap-northeast-2,us-east-1"
+                mono
+              />
+              <Field
+                label="Cross-account role ARN (optional)"
+                value={discoverForm.role_arn}
+                onChange={(v) => setDiscoverForm({ ...discoverForm, role_arn: v })}
+                placeholder="arn:aws:iam::<account>:role/dbops-spoke-role"
+                mono
+              />
+              <Field
+                label="Account ID (label only)"
+                value={discoverForm.account_id}
+                onChange={(v) => setDiscoverForm({ ...discoverForm, account_id: v })}
+                placeholder="123456789012"
+                mono
+              />
+            </div>
+            <p className="text-[11px] text-zinc-500 mt-3 leading-relaxed">
+              role ARN을 비우면 DBOps Lambda의 IAM role로 same-account에서 직접 조회합니다.
+              cross-account의 경우 해당 role이 <span className="font-mono text-zinc-400">rds:DescribeDBClusters</span> 권한을 가져야 합니다.
+            </p>
+            <div className="mt-5 flex gap-2">
+              <button
+                onClick={handleDiscover}
+                disabled={discovering}
+                className="text-xs font-medium px-4 py-2 bg-sky-500 text-zinc-950 hover:bg-sky-400 disabled:opacity-50 transition-colors"
+              >
+                {discovering ? "검색 중…" : "🔍 Run discovery"}
+              </button>
+              {discovered.length > 0 && (
+                <button
+                  onClick={() => setShowConfirm(true)}
+                  disabled={selectedClusters.length === 0}
+                  className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:bg-zinc-700 disabled:text-zinc-500 transition-colors"
+                >
+                  Register selected ({selectedClusters.length})
+                </button>
+              )}
+            </div>
+
+            {Object.keys(discoverErrors).length > 0 && (
+              <div className="mt-3 text-xs text-rose-400 border border-rose-500/40 bg-rose-500/10 px-3 py-2 space-y-0.5">
+                {Object.entries(discoverErrors).map(([r, e]) => (
+                  <div key={r}>
+                    <span className="font-mono">{r}:</span> {e}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {discovered.length > 0 && (
+              <div className="mt-5 border border-zinc-800 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
+                    <tr>
+                      <th className="px-3 py-2 w-8">
+                        <input
+                          type="checkbox"
+                          checked={
+                            selectedClusters.length > 0 &&
+                            selectedClusters.length ===
+                              discovered.filter((c) => !c.already_registered).length
+                          }
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedIds(
+                                new Set(
+                                  discovered.filter((c) => !c.already_registered).map((c) => c.cluster_id),
+                                ),
+                              );
+                            } else {
+                              setSelectedIds(new Set());
+                            }
+                          }}
+                          className="accent-amber-500"
+                        />
+                      </th>
+                      <th className="text-left px-3 py-2 font-medium">cluster_id</th>
+                      <th className="text-left px-3 py-2 font-medium">engine</th>
+                      <th className="text-left px-3 py-2 font-medium">region</th>
+                      <th className="text-left px-3 py-2 font-medium">status</th>
+                      <th className="text-left px-3 py-2 font-medium">endpoint</th>
+                      <th className="text-left px-3 py-2 font-medium">secret</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {discovered.map((c) => (
+                      <tr
+                        key={`${c.region}:${c.cluster_id}`}
+                        className={`hover:bg-zinc-900/40 ${
+                          c.already_registered ? "opacity-50" : ""
+                        }`}
+                      >
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(c.cluster_id) && !c.already_registered}
+                            disabled={c.already_registered}
+                            onChange={() => toggleSelect(c.cluster_id)}
+                            className="accent-amber-500"
+                          />
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs text-zinc-100">
+                          {c.cluster_id}
+                          {c.already_registered && (
+                            <span className="ml-2 text-[10px] text-zinc-500">already registered</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-xs">
+                          <div className="text-zinc-300">{c.engine}</div>
+                          <div className="text-[10px] text-zinc-500 font-mono">{c.engine_version}</div>
+                        </td>
+                        <td className="px-3 py-2 text-xs font-mono text-zinc-400">{c.region}</td>
+                        <td
+                          className={`px-3 py-2 text-xs ${
+                            STATUS_STYLES[c.status] || "text-zinc-500"
+                          }`}
+                        >
+                          {c.status || "—"}
+                        </td>
+                        <td className="px-3 py-2 text-[10px] text-zinc-500 font-mono truncate max-w-xs">
+                          {c.endpoint || "—"}
+                        </td>
+                        <td className="px-3 py-2 text-[10px] text-zinc-500">
+                          {c.secret_arn ? "✓ managed" : "— manual"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </Section>
+      )}
+
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur flex items-center justify-center p-6">
+          <div className="w-full max-w-lg border border-amber-500/40 bg-zinc-900 p-6 shadow-2xl">
+            <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-amber-400 mb-2">
+              please review
+            </div>
+            <h2 className="text-xl font-semibold text-zinc-100 mb-3">
+              Register {selectedClusters.length} cluster
+              {selectedClusters.length === 1 ? "" : "s"}?
+            </h2>
+            <div className="text-sm text-zinc-400 space-y-2 mb-5 leading-relaxed">
+              <p>
+                DBOps는 등록된 클러스터에 대해 <span className="text-zinc-200">read-only 인스펙션 쿼리</span>(pg_stat_*, information_schema 등)를 실행하고
+                메트릭을 캐시 DB에 저장합니다.
+              </p>
+              <p>
+                채팅·AI insight를 사용할 때마다 <span className="text-zinc-200">Bedrock 토큰 비용</span>이 발생합니다.
+                Cost 탭에서 모니터링 가능합니다.
+              </p>
+              <p>
+                언제든 클러스터 행에서 등록을 해제할 수 있습니다.
+              </p>
+            </div>
+            <div className="border-t border-zinc-800 pt-3 max-h-40 overflow-y-auto text-xs font-mono text-zinc-400 space-y-1">
+              {selectedClusters.map((c) => (
+                <div key={c.cluster_id} className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 bg-amber-400 rounded-full" />
+                  <span className="text-zinc-300">{c.cluster_id}</span>
+                  <span className="text-zinc-600">·</span>
+                  <span>{c.region}</span>
+                  <span className="text-zinc-600">·</span>
+                  <span>{c.engine}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button
+                onClick={handleBulkRegister}
+                disabled={registering}
+                className="flex-1 text-sm font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
+              >
+                {registering ? "등록 중…" : `동의하고 ${selectedClusters.length}개 등록`}
+              </button>
+              <button
+                onClick={() => setShowConfirm(false)}
+                disabled={registering}
+                className="text-sm px-4 py-2 border border-zinc-700 text-zinc-400 hover:text-zinc-200"
+              >
+                취소
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
