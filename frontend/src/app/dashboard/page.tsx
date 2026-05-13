@@ -22,6 +22,7 @@ import { TableSizesPanel } from "@/components/dashboard/table-sizes-panel";
 import { BackupPanel } from "@/components/dashboard/backup-panel";
 import { fetchClusters, fetchDashboard, fetchBatchTimeseries } from "@/lib/api-client";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
+import { engineBadge, isPostgres, isMysql, eolFor, EOL_STATUS_CLASSES, eolHint } from "@/lib/engine";
 
 type TsPoint = { ts: string; value: number | string; dimensions?: string };
 
@@ -197,30 +198,60 @@ export default function DashboardPage() {
 
       {selectedCluster && dashboardData && (
         <div className="mt-6 space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">
-              <div className="text-xs text-zinc-400 uppercase tracking-wider mb-3">Cluster Info</div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div>
-                  <div className="text-zinc-500 text-xs mb-1">Engine</div>
-                  <div className="text-zinc-100">{dashboardData.cluster?.engine || "-"}</div>
+          {(() => {
+            const eng = dashboardData.cluster?.engine || "";
+            const ver = dashboardData.cluster?.engine_version || "";
+            const badge = engineBadge(eng);
+            const eol = eolFor(eng, ver);
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3 gap-3">
+                    <div className="text-xs text-zinc-400 uppercase tracking-wider">Cluster Info</div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 border text-[11px] font-mono uppercase tracking-wider ${badge.classes}`}
+                        title={`Engine: ${eng || "unknown"}`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${badge.accent}`} />
+                        {badge.label}
+                        {ver && <span className="text-zinc-300/80 normal-case font-normal">{ver}</span>}
+                      </span>
+                      {eol && (
+                        <span
+                          className={`px-2 py-1 border border-zinc-700 text-[10px] font-mono uppercase tracking-wider ${EOL_STATUS_CLASSES[eol.status]}`}
+                          title={eolHint(eol)}
+                        >
+                          {eol.status === "expired"
+                            ? `EOL · ${Math.abs(eol.days_remaining)}d past`
+                            : `EOL ${eol.eol} · ${eol.days_remaining}d`}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <div className="text-zinc-500 text-xs mb-1">Status</div>
+                      <div className="text-emerald-400">{dashboardData.cluster?.status || "-"}</div>
+                    </div>
+                    <div>
+                      <div className="text-zinc-500 text-xs mb-1">Instance</div>
+                      <div className="text-zinc-100 font-mono text-xs">{dashboardData.cluster?.instance_class || "-"}</div>
+                    </div>
+                    <div>
+                      <div className="text-zinc-500 text-xs mb-1">Storage</div>
+                      <div className="text-zinc-100">{dashboardData.cluster?.storage_size_gb ?? "-"} GB</div>
+                    </div>
+                    <div>
+                      <div className="text-zinc-500 text-xs mb-1">Multi-AZ</div>
+                      <div className="text-zinc-100">{dashboardData.cluster?.multi_az ? "yes" : "no"}</div>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-zinc-500 text-xs mb-1">Version</div>
-                  <div className="text-zinc-100">{dashboardData.cluster?.engine_version || "-"}</div>
-                </div>
-                <div>
-                  <div className="text-zinc-500 text-xs mb-1">Status</div>
-                  <div className="text-emerald-400">{dashboardData.cluster?.status || "-"}</div>
-                </div>
-                <div>
-                  <div className="text-zinc-500 text-xs mb-1">Storage</div>
-                  <div className="text-zinc-100">{dashboardData.cluster?.storage_size_gb ?? "-"} GB</div>
-                </div>
+                <HealthScore clusterId={selectedCluster} />
               </div>
-            </div>
-            <HealthScore clusterId={selectedCluster} />
-          </div>
+            );
+          })()}
 
           <MaintenanceHealthPanel
             clusterId={selectedCluster}
@@ -294,28 +325,32 @@ export default function DashboardPage() {
               externalPoints={tsBatch.connections || []}
               externalLoading={tsLoading}
             />
-            <TimeseriesChart
-              clusterId={selectedCluster}
-              metric="xact_commit"
-              title="Transactions / sec"
-              hours={hours}
-              color="#fbbf24"
-              type="line"
-              formatValue={(v) => v.toFixed(1)}
-              externalPoints={tsBatch.xact_commit || []}
-              externalLoading={tsLoading}
-            />
-            <TimeseriesChart
-              clusterId={selectedCluster}
-              metric="tup_returned"
-              title="Tuples Returned / sec"
-              hours={hours}
-              color="#a78bfa"
-              type="line"
-              formatValue={(v) => v.toFixed(0)}
-              externalPoints={tsBatch.tup_returned || []}
-              externalLoading={tsLoading}
-            />
+            {isPostgres(dashboardData.cluster?.engine) && (
+              <>
+                <TimeseriesChart
+                  clusterId={selectedCluster}
+                  metric="xact_commit"
+                  title="Transactions / sec (PG)"
+                  hours={hours}
+                  color="#fbbf24"
+                  type="line"
+                  formatValue={(v) => v.toFixed(1)}
+                  externalPoints={tsBatch.xact_commit || []}
+                  externalLoading={tsLoading}
+                />
+                <TimeseriesChart
+                  clusterId={selectedCluster}
+                  metric="tup_returned"
+                  title="Tuples Returned / sec (PG)"
+                  hours={hours}
+                  color="#a78bfa"
+                  type="line"
+                  formatValue={(v) => v.toFixed(0)}
+                  externalPoints={tsBatch.tup_returned || []}
+                  externalLoading={tsLoading}
+                />
+              </>
+            )}
             <TimeseriesChart
               clusterId={selectedCluster}
               metric="storage_bytes"

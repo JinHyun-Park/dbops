@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchMultiClusterOverview, fetchClusters } from "@/lib/api-client";
 import { PageHeader, PageBody, EmptyState } from "@/components/design-system/page-shell";
+import { engineBadge, eolFor, EOL_STATUS_CLASSES, eolHint } from "@/lib/engine";
 
 interface ClusterRow {
   cluster_id: string;
@@ -143,9 +144,33 @@ export default function FleetPage() {
                         )}
                       </div>
                     </td>
-                    <td className="px-3 py-2 text-zinc-300 text-xs">
-                      {c.engine}{" "}
-                      <span className="text-zinc-500">{c.engine_version}</span>
+                    <td className="px-3 py-2">
+                      {(() => {
+                        const badge = engineBadge(c.engine);
+                        const eol = eolFor(c.engine, c.engine_version);
+                        return (
+                          <div className="flex flex-col items-start gap-1">
+                            <span
+                              className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 border text-[10px] font-mono uppercase tracking-wider ${badge.classes}`}
+                              title={`${c.engine} ${c.engine_version}`}
+                            >
+                              <span className={`w-1 h-1 rounded-full ${badge.accent}`} />
+                              {badge.label}
+                              <span className="text-zinc-300/80 normal-case font-normal">{c.engine_version}</span>
+                            </span>
+                            {eol && (
+                              <span
+                                className={`text-[10px] font-mono ${EOL_STATUS_CLASSES[eol.status]}`}
+                                title={eolHint(eol)}
+                              >
+                                {eol.status === "expired"
+                                  ? `EOL · ${Math.abs(eol.days_remaining)}d past`
+                                  : `EOL ${eol.eol} · ${eol.days_remaining}d`}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-3 py-2">
                       <span
