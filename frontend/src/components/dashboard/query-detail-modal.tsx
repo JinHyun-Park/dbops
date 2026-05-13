@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { fetchQueryDetail } from "@/lib/api-client";
+import { fmtDuration, fmtExact, fmtNumber } from "@/lib/format";
 
 interface Snapshot {
   snapshot_time: string;
@@ -104,14 +105,14 @@ export function QueryDetailModal({
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Metric label="Calls" value={n(latest.calls).toLocaleString()} />
-                <Metric label="Mean (ms)" value={n(latest.mean_time_ms).toFixed(2)} />
-                <Metric label="Total (ms)" value={n(latest.total_time_ms).toFixed(0)} />
-                <Metric label="Rows" value={n(latest.rows_returned).toLocaleString()} />
-                <Metric label="Cache Hit" value={cacheHitRatio.toFixed(1) + "%"} />
-                <Metric label="Blks Hit" value={n(latest.shared_blks_hit).toLocaleString()} />
-                <Metric label="Blks Read" value={n(latest.shared_blks_read).toLocaleString()} />
-                <Metric label="Snapshots" value={snapshots.length.toString()} />
+                <Metric label="Calls" value={fmtNumber(n(latest.calls))} title={`${fmtExact(n(latest.calls))} calls`} />
+                <Metric label="Mean / call" value={fmtDuration(n(latest.mean_time_ms))} title={`${n(latest.mean_time_ms).toFixed(2)} ms per call`} />
+                <Metric label="Total time" value={fmtDuration(n(latest.total_time_ms))} title={`${n(latest.total_time_ms).toFixed(2)} ms total`} />
+                <Metric label="Rows returned" value={fmtNumber(n(latest.rows_returned))} title={`${fmtExact(n(latest.rows_returned))} rows`} />
+                <Metric label="Buffer cache hit" value={cacheHitRatio.toFixed(1) + "%"} title="shared_blks_hit / (shared_blks_hit + shared_blks_read)" />
+                <Metric label="Blocks hit" value={fmtNumber(n(latest.shared_blks_hit))} title={`${fmtExact(n(latest.shared_blks_hit))} pages served from cache`} />
+                <Metric label="Blocks read" value={fmtNumber(n(latest.shared_blks_read))} title={`${fmtExact(n(latest.shared_blks_read))} pages read from disk`} />
+                <Metric label="Snapshots" value={fmtNumber(snapshots.length)} title={`${snapshots.length} stat snapshots`} />
               </div>
 
               {chartData.length > 1 && (
@@ -143,11 +144,11 @@ export function QueryDetailModal({
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
-    <div className="bg-zinc-950 border border-zinc-800 rounded p-3">
+    <div className="bg-zinc-950 border border-zinc-800 rounded p-3" title={title}>
       <div className="text-xs text-zinc-500 mb-1">{label}</div>
-      <div className="text-zinc-100 font-mono text-sm">{value}</div>
+      <div className="text-zinc-100 font-mono text-sm tabular-nums">{value}</div>
     </div>
   );
 }

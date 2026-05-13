@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fetchSchemaChanges } from "@/lib/api-client";
+import { fmtExact, fmtNumber } from "@/lib/format";
 
 interface Change {
   schema_name: string;
@@ -89,19 +90,22 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
                       {c.table_name}
                     </span>
                   </div>
-                  <div className="text-xs font-mono text-zinc-400">
+                  <div className="text-xs font-mono text-zinc-400 tabular-nums">
                     {c.change_type === "created" && (
-                      <span className="text-emerald-400">{current.toLocaleString()} rows</span>
+                      <span className="text-emerald-400" title={`${fmtExact(current)} rows`}>{fmtNumber(current)} rows</span>
                     )}
                     {c.change_type === "dropped" && (
-                      <span className="text-rose-400">{baseline.toLocaleString()} rows lost</span>
+                      <span className="text-rose-400" title={`${fmtExact(baseline)} rows lost`}>{fmtNumber(baseline)} rows lost</span>
                     )}
                     {c.change_type === "changed" && (
                       <>
-                        <span>{baseline.toLocaleString()}</span>
+                        <span title={fmtExact(baseline)}>{fmtNumber(baseline)}</span>
                         <span className="text-zinc-600 mx-1.5">→</span>
-                        <span>{current.toLocaleString()}</span>
-                        <span className={`ml-2 ${delta > 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                        <span title={fmtExact(current)}>{fmtNumber(current)}</span>
+                        <span
+                          className={`ml-2 ${delta > 0 ? "text-emerald-400" : "text-rose-400"}`}
+                          title={`delta ${delta > 0 ? "+" : ""}${fmtExact(delta)}`}
+                        >
                           ({delta > 0 ? "+" : ""}
                           {deltaPct}%)
                         </span>

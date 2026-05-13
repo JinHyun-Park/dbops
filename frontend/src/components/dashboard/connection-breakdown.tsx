@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
 import { fetchBatchTimeseries, fetchClusterSettings } from "@/lib/api-client";
+import { fmtExact, fmtNumber } from "@/lib/format";
 
 interface Point {
   ts: string;
@@ -83,20 +84,21 @@ export function ConnectionBreakdown({ clusterId, hours = 1 }: { clusterId: strin
           Connection Activity Breakdown
         </div>
         <div className="text-xs text-zinc-500">
-          total: <span className="text-zinc-300 font-mono">{total}</span>
+          total: <span className="text-zinc-300 font-mono tabular-nums" title={fmtExact(total)}>{fmtExact(total)}</span>
           {maxConn !== null && (
             <>
               {" / "}
-              <span className="text-zinc-300 font-mono">{maxConn}</span>
+              <span className="text-zinc-300 font-mono tabular-nums" title={fmtExact(maxConn)}>{fmtExact(maxConn)}</span>
               {" ("}
               <span
                 className={
                   total / maxConn > 0.8
-                    ? "text-rose-400 font-mono"
+                    ? "text-rose-400 font-mono tabular-nums"
                     : total / maxConn > 0.6
-                    ? "text-amber-400 font-mono"
-                    : "text-emerald-400 font-mono"
+                    ? "text-amber-400 font-mono tabular-nums"
+                    : "text-emerald-400 font-mono tabular-nums"
                 }
+                title={`${total} of ${maxConn} max_connections`}
               >
                 {((total / maxConn) * 100).toFixed(0)}%
               </span>
@@ -106,13 +108,16 @@ export function ConnectionBreakdown({ clusterId, hours = 1 }: { clusterId: strin
         </div>
       </div>
       <div className="flex gap-4 mb-3 text-xs">
-        {STATES.map((s) => (
-          <div key={s.metric} className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-sm" style={{ background: s.color }} />
-            <span className="text-zinc-400">{s.label}:</span>
-            <span className="text-zinc-200 font-mono">{Number(latest[s.label]) || 0}</span>
-          </div>
-        ))}
+        {STATES.map((s) => {
+          const v = Number(latest[s.label]) || 0;
+          return (
+            <div key={s.metric} className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-sm" style={{ background: s.color }} />
+              <span className="text-zinc-400">{s.label}:</span>
+              <span className="text-zinc-200 font-mono tabular-nums" title={fmtExact(v)}>{fmtNumber(v)}</span>
+            </div>
+          );
+        })}
       </div>
       <div className="h-56">
         {loading ? (

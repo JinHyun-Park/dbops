@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fetchBatchTimeseries } from "@/lib/api-client";
+import { fmtExact, fmtNumber } from "@/lib/format";
 
 interface Props {
   clusterId: string;
@@ -94,7 +95,7 @@ export function HealthScore({ clusterId }: Props) {
                 <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
                 <span className="text-zinc-300">{s.label}</span>
               </div>
-              <span className="text-zinc-400 font-mono">{s.current.toFixed(2)}</span>
+              <span className="text-zinc-400 font-mono tabular-nums" title={`${fmtExact(s.current)} (warn ≥ ${s.threshold})`}>{fmtNumber(s.current)}</span>
             </div>
           );
         })}
