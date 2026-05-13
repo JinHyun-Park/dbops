@@ -228,6 +228,66 @@ html[data-theme="light"] .bg-amber-500\/10 { background-color: rgba(180, 83, 9, 
 html[data-theme="light"] .bg-amber-500\/15 { background-color: rgba(180, 83, 9, 0.12); }
 html[data-theme="light"] .bg-amber-500\/20 { background-color: rgba(180, 83, 9, 0.16); }
 html[data-theme="light"] .bg-amber-500\/5 { background-color: rgba(180, 83, 9, 0.06); }
+/* Light amber tints (100/200) used for emphasised text on amber-tinted bg —
+   without these overrides they remain near-white and disappear on the cream
+   page background. Match the rest of the amber family for light pages. */
+html[data-theme="light"] .text-amber-100 { color: #92400e; }
+html[data-theme="light"] .text-amber-200 { color: #b45309; }
+html[data-theme="light"] .text-amber-200\/70 { color: rgba(180, 83, 9, 0.72); }
+html[data-theme="light"] .text-amber-200\/80 { color: rgba(180, 83, 9, 0.82); }
+html[data-theme="light"] .text-amber-300\/80 { color: rgba(180, 83, 9, 0.82); }
+html[data-theme="light"] .text-amber-100\/90 { color: rgba(146, 64, 14, 0.92); }
+/* bg-amber-500/5 is too pale against the cream background — bump density */
+html[data-theme="light"] .bg-amber-500\/5 { background-color: rgba(180, 83, 9, 0.10); }
+/* amber-800 (used as solid badge bg in approval-card) — flip to a readable
+   dark-amber on light pages while keeping the dark theme's near-black look. */
+html[data-theme="light"] .bg-amber-800 { background-color: #d97706; color: #fff; }
+
+/* --- Sky accent (chat tool-call info, anomaly badges, hyperlinks) --- */
+html[data-theme="light"] .text-sky-200 { color: #1d4ed8; }
+html[data-theme="light"] .text-sky-300 { color: #1d4ed8; }
+html[data-theme="light"] .text-sky-300\/80 { color: rgba(29, 78, 216, 0.82); }
+html[data-theme="light"] .text-sky-400 { color: #1d4ed8; }
+html[data-theme="light"] .text-sky-400\/90 { color: rgba(29, 78, 216, 0.92); }
+html[data-theme="light"] .hover\:text-sky-200:hover { color: #1e40af; }
+html[data-theme="light"] .hover\:text-sky-300:hover { color: #1d4ed8; }
+html[data-theme="light"] .bg-sky-500\/10 { background-color: rgba(29, 78, 216, 0.10); }
+html[data-theme="light"] .bg-sky-500\/15 { background-color: rgba(29, 78, 216, 0.13); }
+html[data-theme="light"] .bg-sky-500\/20 { background-color: rgba(29, 78, 216, 0.16); }
+html[data-theme="light"] .border-sky-500\/30 { border-color: rgba(29, 78, 216, 0.4); }
+html[data-theme="light"] .border-sky-500\/40 { border-color: rgba(29, 78, 216, 0.5); }
+html[data-theme="light"] .border-sky-500\/50 { border-color: rgba(29, 78, 216, 0.6); }
+html[data-theme="light"] .border-sky-500\/60 { border-color: #1d4ed8; }
+
+/* --- Emerald accent (success states, healthy badges) --- */
+html[data-theme="light"] .text-emerald-200 { color: #047857; }
+html[data-theme="light"] .text-emerald-300 { color: #047857; }
+html[data-theme="light"] .text-emerald-400 { color: #047857; }
+html[data-theme="light"] .bg-emerald-500\/10 { background-color: rgba(4, 120, 87, 0.10); }
+html[data-theme="light"] .bg-emerald-500\/15 { background-color: rgba(4, 120, 87, 0.13); }
+html[data-theme="light"] .bg-emerald-500\/20 { background-color: rgba(4, 120, 87, 0.16); }
+html[data-theme="light"] .border-emerald-500\/30 { border-color: rgba(4, 120, 87, 0.4); }
+html[data-theme="light"] .border-emerald-500\/40 { border-color: rgba(4, 120, 87, 0.5); }
+
+/* --- Rose / red accents (errors, critical) --- */
+html[data-theme="light"] .text-rose-200 { color: #b91c1c; }
+html[data-theme="light"] .text-rose-300 { color: #b91c1c; }
+html[data-theme="light"] .text-rose-400 { color: #b91c1c; }
+html[data-theme="light"] .text-red-200 { color: #b91c1c; }
+html[data-theme="light"] .text-red-300 { color: #b91c1c; }
+html[data-theme="light"] .text-red-400 { color: #b91c1c; }
+html[data-theme="light"] .bg-rose-500\/10 { background-color: rgba(185, 28, 28, 0.10); }
+html[data-theme="light"] .bg-rose-500\/15 { background-color: rgba(185, 28, 28, 0.13); }
+html[data-theme="light"] .bg-rose-500\/20 { background-color: rgba(185, 28, 28, 0.16); }
+html[data-theme="light"] .border-rose-500\/30 { border-color: rgba(185, 28, 28, 0.4); }
+html[data-theme="light"] .border-rose-500\/40 { border-color: rgba(185, 28, 28, 0.5); }
+
+/* --- Purple (DEMO badge) --- */
+html[data-theme="light"] .text-purple-300 { color: #6d28d9; }
+html[data-theme="light"] .bg-purple-500\/10 { background-color: rgba(109, 40, 217, 0.10); }
+html[data-theme="light"] .bg-purple-500\/15 { background-color: rgba(109, 40, 217, 0.13); }
+html[data-theme="light"] .bg-purple-500\/25 { background-color: rgba(109, 40, 217, 0.22); }
+html[data-theme="light"] .border-purple-500\/40 { border-color: rgba(109, 40, 217, 0.5); }
 
 /* `.bg-zinc-950/80` is used both as a sticky header backdrop AND as a
    modal scrim. Default to the header treatment (light tint), then bump
@@ -268,6 +328,20 @@ html[data-theme="light"] .prose-invert {
   --color-amber-400: #b45309;
   --color-blue-300: #1d4ed8;
   --color-blue-400: #1d4ed8;
+  /* Sky/emerald/rose tones referenced by inline `prose-strong:text-*`
+     modifiers in chat & query-lab — without these, light-theme assistant
+     messages render colored text as near-white. */
+  --color-sky-200: #1d4ed8;
+  --color-sky-300: #1d4ed8;
+  --color-sky-400: #1d4ed8;
+  --color-emerald-200: #047857;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #047857;
+  --color-rose-200: #b91c1c;
+  --color-rose-300: #b91c1c;
+  --color-rose-400: #b91c1c;
+  --color-red-200: #b91c1c;
+  --color-red-300: #b91c1c;
 
   /* typography plugin variables — body, lead, etc. */
   --tw-prose-body: #2e2d29;

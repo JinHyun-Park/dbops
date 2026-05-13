@@ -31,10 +31,10 @@ export function ApprovalCard({ approval, onApprove, onReject }: ApprovalCardProp
     <div className={`border rounded-lg p-4 ${riskClass}`}>
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm font-mono text-zinc-300">{approval.tool_name}</span>
-        <span className={`text-xs px-2 py-0.5 rounded-full ${
-          approval.approval_status === "pending" ? "bg-amber-800 text-amber-200" :
-          approval.approval_status === "approved" ? "bg-emerald-800 text-emerald-200" :
-          "bg-red-800 text-red-200"
+        <span className={`text-xs px-2 py-0.5 rounded-full border ${
+          approval.approval_status === "pending" ? "bg-amber-500/15 text-amber-300 border-amber-500/40" :
+          approval.approval_status === "approved" ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/40" :
+          "bg-rose-500/15 text-rose-300 border-rose-500/40"
         }`}>
           {approval.approval_status}
         </span>
