@@ -57,6 +57,37 @@ export interface ChatMessage {
   toolCalls?: { name: string; status: "running" | "done"; result?: string }[];
 }
 
+// Tool-use marker patterns that occasionally leak from the model's raw
+// stream when Strands forwards text chunks during tool invocation. We
+// strip them at the SSE boundary so the user never sees `<invoke …>` or
+// `<parameter …>` in chat. Holdback retains a trailing partial tag
+// (e.g. "<inv") across chunk boundaries.
+const TOOL_TAG_PATTERN =
+  /<\/?(?:antml:)?(?:function_calls|invoke|parameter|tool_use|thinking)\b[^>]*>/gi;
+
+// Partial-tag detector — hold back chunks that end with a possibly-incomplete
+// marker tag. Matches: `<`, `</`, `<inv…`, `</invoke…`, etc. — bounded by
+// requiring no `>` between the trailing `<` and end-of-stream. Plain prose
+// like "if x < 5" doesn't match (`< 5` has a non-letter after `<` and isn't
+// at end-of-string after `<`); "<a href=…>link</a>" doesn't match because
+// every `<` is already closed by a `>` before end-of-stream.
+const PARTIAL_TAG_RE = /<\/?(?:[afiopt][^>]{0,200})?$/i;
+
+function makeSanitizer(): (chunk: string) => string {
+  let holdback = "";
+  return (chunk: string) => {
+    const text = holdback + chunk;
+    const stripped = text.replace(TOOL_TAG_PATTERN, "");
+    const tail = stripped.match(PARTIAL_TAG_RE);
+    if (tail) {
+      holdback = stripped.slice(tail.index!);
+      return stripped.slice(0, tail.index!);
+    }
+    holdback = "";
+    return stripped;
+  };
+}
+
 export function streamChat(
   message: string,
   clusterId: string,
@@ -68,6 +99,11 @@ export function streamChat(
   modelId?: string,
 ): AbortController {
   const controller = new AbortController();
+  const sanitize = makeSanitizer();
+  const emit = (raw: string) => {
+    const clean = sanitize(raw);
+    if (clean) onToken(clean);
+  };
 
   const sessionId = explicitSessionId || genSessionId();
   const promptText = clusterId && clusterId !== "default-cluster"
@@ -134,19 +170,19 @@ export function streamChat(
             try {
               const parsed = JSON.parse(data);
               if (typeof parsed === "string") {
-                onToken(parsed);
+                emit(parsed);
               } else if (parsed.type === "text" || parsed.type === "content_block_delta") {
-                onToken(parsed.content || parsed.delta?.text || "");
+                emit(parsed.content || parsed.delta?.text || "");
               } else if (parsed.type === "tool_use") {
                 onToolCall(parsed.name || "tool", parsed.status || "running");
               } else if (parsed.data) {
-                onToken(typeof parsed.data === "string" ? parsed.data : JSON.stringify(parsed.data));
+                emit(typeof parsed.data === "string" ? parsed.data : JSON.stringify(parsed.data));
               }
             } catch {
-              onToken(data);
+              emit(data);
             }
           } else {
-            onToken(line);
+            emit(line);
           }
         }
       }
