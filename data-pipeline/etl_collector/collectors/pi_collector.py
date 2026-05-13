@@ -1,7 +1,6 @@
 import json
 from datetime import datetime, timedelta
 
-
 PI_METRIC_QUERIES = [
     {"Metric": "db.load.avg", "GroupBy": {"Group": "db.wait_event"}, "metric_type": "aas"},
     {"Metric": "os.cpuUtilization.total.avg", "metric_type": "cpu"},

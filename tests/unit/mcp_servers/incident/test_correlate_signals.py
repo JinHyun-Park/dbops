@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.incident.tools.correlate_signals import correlate_signals_impl
 from mcp_servers.shared.models import QueryResult
 

@@ -10,6 +10,7 @@ import json
 import os
 import re
 import time
+
 import boto3
 
 _CLUSTERS_TABLE = os.environ.get("CLUSTERS_TABLE", "")

@@ -1,6 +1,8 @@
-import boto3
 import os
 import re
+
+import boto3
+
 from mcp_servers.shared.cache_client import CacheClient
 
 SAFE_PATTERNS = [r"^\s*SELECT\b", r"^\s*EXPLAIN\b", r"^\s*SHOW\b", r"^\s*DESCRIBE\b"]

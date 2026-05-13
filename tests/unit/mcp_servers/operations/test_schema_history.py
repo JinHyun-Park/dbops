@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.operations.tools.schema_history import get_schema_history_impl
 from mcp_servers.shared.models import QueryResult
 

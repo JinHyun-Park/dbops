@@ -8,8 +8,8 @@ re-tagged in place.
 
 import json
 import os
-import boto3
 
+import boto3
 
 _ENV = os.environ.get("ENV", "dev")
 _SSM_PARAM = os.environ.get("AIP_SSM_PARAM", f"/dbops/{_ENV}/inference-profile-map")

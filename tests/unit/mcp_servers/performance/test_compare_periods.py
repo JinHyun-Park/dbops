@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.performance.tools.compare_periods import compare_periods_impl
 from mcp_servers.shared.models import QueryResult
 

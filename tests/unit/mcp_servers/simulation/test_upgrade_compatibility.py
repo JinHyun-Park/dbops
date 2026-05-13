@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+
 from mcp_servers.shared.models import QueryResult
 from mcp_servers.simulation.tools.upgrade_compatibility import check_upgrade_compatibility_impl
 

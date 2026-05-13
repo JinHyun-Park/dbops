@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.shared.models import QueryResult
 from mcp_servers.simulation.tools.upgrade_impact import estimate_upgrade_impact_impl
 

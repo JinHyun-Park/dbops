@@ -1,6 +1,8 @@
 import os
-import boto3
 from typing import Optional
+
+import boto3
+
 from mcp_servers.shared.models import QueryResult
 
 

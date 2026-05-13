@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.shared.models import QueryResult
 from mcp_servers.simulation.tools.scaling_simulation import simulate_scaling_impl
 

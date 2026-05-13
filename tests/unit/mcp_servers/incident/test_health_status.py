@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.incident.tools.health_status import get_health_status_impl
 from mcp_servers.shared.models import QueryResult
 

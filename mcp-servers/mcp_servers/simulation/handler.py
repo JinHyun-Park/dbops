@@ -5,12 +5,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.simulation.tools.ddl_impact import simulate_ddl_impact_impl
+from mcp_servers.simulation.tools.parameter_simulation import simulate_parameter_change_impl
+from mcp_servers.simulation.tools.scaling_simulation import simulate_scaling_impl
 from mcp_servers.simulation.tools.upgrade_compatibility import check_upgrade_compatibility_impl
 from mcp_servers.simulation.tools.upgrade_impact import estimate_upgrade_impact_impl
 from mcp_servers.simulation.tools.upgrade_plan import generate_upgrade_plan_impl
-from mcp_servers.simulation.tools.parameter_simulation import simulate_parameter_change_impl
-from mcp_servers.simulation.tools.scaling_simulation import simulate_scaling_impl
-from mcp_servers.simulation.tools.ddl_impact import simulate_ddl_impact_impl
 
 cache = CacheClient()
 

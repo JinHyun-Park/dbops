@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+
 from mcp_servers.operations.tools.execute_sql import execute_sql_impl
 
 
@@ -49,6 +50,7 @@ def test_execute_sql_explain_is_safe():
     # EXPLAIN needs boto3, so we just verify it doesn't return approval_required or blocked
     # by checking that it attempts execution (which will fail without AWS, but the logic path is correct)
     # Instead, test the pattern matching indirectly
-    from mcp_servers.operations.tools.execute_sql import SAFE_PATTERNS
     import re
+
+    from mcp_servers.operations.tools.execute_sql import SAFE_PATTERNS
     assert any(re.match(p, "EXPLAIN SELECT * FROM users") for p in SAFE_PATTERNS)

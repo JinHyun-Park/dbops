@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+
 from mcp_servers.operations.tools.modify_scaling import modify_scaling_impl
 
 

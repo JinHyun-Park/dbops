@@ -24,31 +24,40 @@ CDK_DIR = ROOT / "cdk"
 @pytest.fixture(scope="module")
 def cdk_app():
     """Import the CDK app once and run synth. Falls back to settings.example
-    when the user's settings.py is gitignored and not present (CI path)."""
+    when the user's settings.py is gitignored and not present (CI path).
+
+    Stacks reference assets via relative paths like `../data-pipeline/...`,
+    which only resolve correctly when CWD is the cdk/ directory. We swap
+    CWD for the synth and restore it after — pytest runs from repo root
+    by default."""
     sys.path.insert(0, str(CDK_DIR))
 
     # CI copies settings.example.py → settings.py before invoking pytest.
     if not (CDK_DIR / "config" / "settings.py").exists():
         pytest.skip("cdk/config/settings.py missing — run `cp cdk/config/settings.example.py cdk/config/settings.py`")
 
-    import aws_cdk as cdk_lib
-    from config.settings import Settings  # type: ignore
-    from stacks.foundation_stack import FoundationStack
-    from stacks.data_stack import DataStack
-    from stacks.agent_stack import AgentStack
-    from stacks.frontend_stack import FrontendStack
+    original_cwd = os.getcwd()
+    os.chdir(CDK_DIR)
+    try:
+        import aws_cdk as cdk_lib
+        from config.settings import Settings  # type: ignore
+        from stacks.agent_stack import AgentStack
+        from stacks.data_stack import DataStack
+        from stacks.foundation_stack import FoundationStack
+        from stacks.frontend_stack import FrontendStack
 
-    app = cdk_lib.App()
-    env = cdk_lib.Environment(account=Settings.ACCOUNT_ID, region=Settings.REGION)
-    foundation = FoundationStack(app, f"dbops-{Settings.ENV}-foundation", env=env)
-    data = DataStack(app, f"dbops-{Settings.ENV}-data", env=env, foundation=foundation)
-    agent = AgentStack(app, f"dbops-{Settings.ENV}-agent", env=env, foundation=foundation, data=data)
-    FrontendStack(app, f"dbops-{Settings.ENV}-frontend", env=env, foundation=foundation, agent=agent)
+        app = cdk_lib.App()
+        env = cdk_lib.Environment(account=Settings.ACCOUNT_ID, region=Settings.REGION)
+        foundation = FoundationStack(app, f"dbops-{Settings.ENV}-foundation", env=env)
+        data = DataStack(app, f"dbops-{Settings.ENV}-data", env=env, foundation=foundation)
+        agent = AgentStack(app, f"dbops-{Settings.ENV}-agent", env=env, foundation=foundation, data=data)
+        FrontendStack(app, f"dbops-{Settings.ENV}-frontend", env=env, foundation=foundation, agent=agent)
 
-    cdk_lib.Tags.of(app).add("Application", "DBOps")
-    cdk_lib.Tags.of(app).add("Environment", Settings.ENV)
-
-    assembly = app.synth()
+        cdk_lib.Tags.of(app).add("Application", "DBOps")
+        cdk_lib.Tags.of(app).add("Environment", Settings.ENV)
+        assembly = app.synth()
+    finally:
+        os.chdir(original_cwd)
     return assembly
 
 

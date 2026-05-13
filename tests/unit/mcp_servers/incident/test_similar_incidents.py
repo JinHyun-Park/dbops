@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.incident.tools.similar_incidents import find_similar_incidents_impl
 
 

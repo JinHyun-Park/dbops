@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.incident.tools.incident_summary import get_incident_summary_impl
 from mcp_servers.shared.models import QueryResult
 

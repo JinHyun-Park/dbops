@@ -10,8 +10,8 @@ us.* or eu.* profile from an APAC runtime works as long as the profile exists.
 
 import json
 import os
-import boto3
 
+import boto3
 
 _REGION = os.environ.get("AWS_REGION", "ap-northeast-2")
 _DEFAULT_PROFILE = os.environ.get(

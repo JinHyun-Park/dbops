@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta
 
-
 CW_METRICS = [
     {"name": "VolumeBytesUsed", "metric_type": "storage_bytes", "stat": "Average"},
     {"name": "AuroraReplicaLag", "metric_type": "replica_lag_ms", "stat": "Average"},

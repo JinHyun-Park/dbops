@@ -1,21 +1,22 @@
-import os
 import json
+import os
+
 import boto3
-from collectors.meta_collector import collect_cluster_meta
-from collectors.pi_collector import collect_pi_metrics
-from collectors.stats_collector import collect_query_stats
-from collectors.cw_collector import collect_cw_metrics
-from collectors.pg_table_stats import collect_pg_table_stats
-from collectors.pg_activity import collect_pg_activity
-from collectors.pg_locks import collect_pg_locks
-from collectors.pg_health_checks import collect_pg_health_checks
-from collectors.pg_extensions import collect_pg_extensions
-from collectors.pg_baseline_trainer import collect_pg_baselines
 from collectors.cost_check import collect_cost_findings
+from collectors.cw_collector import collect_cw_metrics
+from collectors.meta_collector import collect_cluster_meta
+from collectors.mysql_activity import collect_mysql_activity
+from collectors.mysql_locks import collect_mysql_locks
 from collectors.mysql_query_stats import collect_mysql_query_stats
 from collectors.mysql_table_stats import collect_mysql_table_stats
-from collectors.mysql_locks import collect_mysql_locks
-from collectors.mysql_activity import collect_mysql_activity
+from collectors.pg_activity import collect_pg_activity
+from collectors.pg_baseline_trainer import collect_pg_baselines
+from collectors.pg_extensions import collect_pg_extensions
+from collectors.pg_health_checks import collect_pg_health_checks
+from collectors.pg_locks import collect_pg_locks
+from collectors.pg_table_stats import collect_pg_table_stats
+from collectors.pi_collector import collect_pi_metrics
+from collectors.stats_collector import collect_query_stats
 
 
 def _scan_all(table):

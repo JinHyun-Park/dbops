@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.performance.tools.recommend_index import recommend_index_impl
 from mcp_servers.shared.models import QueryResult
 

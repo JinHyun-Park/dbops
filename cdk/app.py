@@ -1,8 +1,8 @@
 import aws_cdk as cdk
 from config.settings import Settings
-from stacks.foundation_stack import FoundationStack
-from stacks.data_stack import DataStack
 from stacks.agent_stack import AgentStack
+from stacks.data_stack import DataStack
+from stacks.foundation_stack import FoundationStack
 from stacks.frontend_stack import FrontendStack
 
 app = cdk.App()

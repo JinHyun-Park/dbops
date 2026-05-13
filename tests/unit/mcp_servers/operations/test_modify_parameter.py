@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
 
 

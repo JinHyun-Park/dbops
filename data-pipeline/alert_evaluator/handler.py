@@ -1,11 +1,11 @@
 import json
 import os
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
-import urllib.error
-import boto3
 
+import boto3
 
 COMP_FN = {
     ">": lambda a, b: a > b,

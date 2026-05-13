@@ -1,9 +1,9 @@
-import os
 import json
+import os
+
 import boto3
 from collectors.meta_collector import collect_cluster_meta
 from collectors.pi_collector import collect_pi_metrics
-from collectors.stats_collector import collect_query_stats
 
 
 def lambda_handler(event, context):

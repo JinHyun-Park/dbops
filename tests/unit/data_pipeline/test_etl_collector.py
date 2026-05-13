@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from data_pipeline.etl_collector.collectors.meta_collector import collect_cluster_meta
 
 

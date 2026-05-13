@@ -17,7 +17,6 @@ Check types covered in this collector:
 
 import json
 
-
 # Thresholds. Surface in tooltips so a DBA can audit them.
 TXID_WARN = 150_000_000          # PG default freeze_age = 200M; warn at 150M
 TXID_CRITICAL = 180_000_000
@@ -118,12 +117,12 @@ def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target
             if age_val >= TXID_CRITICAL:
                 add("txid_age", "critical", f"db:{db_name}", f"age={age_val:,}",
                     f"< {TXID_CRITICAL:,}",
-                    f"Run VACUUM FREEZE on hot tables immediately — wraparound risk imminent.",
+                    "Run VACUUM FREEZE on hot tables immediately — wraparound risk imminent.",
                     {"db_name": db_name, "age": age_val})
             elif age_val >= TXID_WARN:
                 add("txid_age", "warning", f"db:{db_name}", f"age={age_val:,}",
                     f"< {TXID_WARN:,}",
-                    f"Schedule a manual VACUUM FREEZE pass during the next maintenance window.",
+                    "Schedule a manual VACUUM FREEZE pass during the next maintenance window.",
                     {"db_name": db_name, "age": age_val})
     except Exception as e:
         print(f"[health] txid db check failed: {e}")
@@ -207,7 +206,7 @@ def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target
             bytes_v = _long(rec[3])
             add("index_unused", "warning", f"{schema}.{relname} → {idx_name}",
                 f"never used since stats reset, size {bytes_v // (1024*1024)}MB",
-                f"> 0 scans",
+                "> 0 scans",
                 f"Consider DROP INDEX {idx_name}. Wastes disk + DML overhead, never used in queries.",
                 {"schema": schema, "table": relname, "index": idx_name, "bytes": bytes_v})
     except Exception as e:

@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.performance.tools.detect_anomalies import detect_anomalies_impl
 from mcp_servers.shared.models import QueryResult
 

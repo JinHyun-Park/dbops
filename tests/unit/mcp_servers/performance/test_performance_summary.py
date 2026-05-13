@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.performance.tools.performance_summary import get_performance_summary_impl
 from mcp_servers.shared.models import QueryResult
 

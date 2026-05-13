@@ -16,9 +16,9 @@ per Lambda invocation.
 
 import json
 import os
-import boto3
 from datetime import datetime, timedelta
 
+import boto3
 
 _ENV = os.environ.get("ENV", "dev")
 

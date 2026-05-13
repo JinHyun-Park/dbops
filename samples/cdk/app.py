@@ -1,5 +1,7 @@
-import aws_cdk as cdk
 import sys
+
+import aws_cdk as cdk
+
 sys.path.insert(0, "../../cdk")
 from config.settings import Settings
 from sample_stack import SampleStack

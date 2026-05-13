@@ -1,10 +1,10 @@
+import base64
+import json
 import os
 import sys
 import time
-import base64
-import urllib.request
 import urllib.parse
-import json
+import urllib.request
 
 _deps = os.path.join(os.path.dirname(__file__), "_deps")
 if os.path.isdir(_deps) and _deps not in sys.path:
@@ -16,10 +16,10 @@ except ImportError:
     from prompts.system_prompt import build_system_prompt
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
+from mcp.client.streamable_http import streamablehttp_client
 from strands import Agent
 from strands.models import BedrockModel
 from strands.tools.mcp.mcp_client import MCPClient
-from mcp.client.streamable_http import streamablehttp_client
 
 app = BedrockAgentCoreApp()
 log = app.logger

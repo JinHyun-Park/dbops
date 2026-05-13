@@ -1,13 +1,21 @@
 import aws_cdk as cdk
 from aws_cdk import (
-    aws_s3 as s3,
-    aws_s3_deployment as s3_deploy,
     aws_cloudfront as cloudfront,
+)
+from aws_cdk import (
     aws_cloudfront_origins as origins,
+)
+from aws_cdk import (
+    aws_s3 as s3,
+)
+from aws_cdk import (
+    aws_s3_deployment as s3_deploy,
+)
+from aws_cdk import (
     custom_resources as cr,
 )
-from constructs import Construct
 from config.settings import Settings
+from constructs import Construct
 
 
 class FrontendStack(cdk.Stack):

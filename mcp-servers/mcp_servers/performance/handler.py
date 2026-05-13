@@ -4,17 +4,17 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from mcp_servers.shared.cache_client import CacheClient
-from mcp_servers.performance.tools.top_queries import get_top_queries_impl
-from mcp_servers.performance.tools.pi_metrics import get_pi_metrics_impl
-from mcp_servers.performance.tools.slow_queries import get_slow_queries_impl
 from mcp_servers.performance.tools.compare_periods import compare_periods_impl
 from mcp_servers.performance.tools.detect_anomalies import detect_anomalies_impl
 from mcp_servers.performance.tools.detect_regressions import detect_regressions_impl
 from mcp_servers.performance.tools.forecast_capacity import forecast_capacity_impl
 from mcp_servers.performance.tools.performance_summary import get_performance_summary_impl
+from mcp_servers.performance.tools.pi_metrics import get_pi_metrics_impl
 from mcp_servers.performance.tools.recommend_index import recommend_index_impl
+from mcp_servers.performance.tools.slow_queries import get_slow_queries_impl
+from mcp_servers.performance.tools.top_queries import get_top_queries_impl
 from mcp_servers.performance.tools.vacuum_stats import get_vacuum_stats_impl
+from mcp_servers.shared.cache_client import CacheClient
 
 cache = CacheClient()
 

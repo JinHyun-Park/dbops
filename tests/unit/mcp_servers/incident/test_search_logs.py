@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+
 from mcp_servers.incident.tools.search_logs import search_logs_impl
 
 

@@ -33,5 +33,12 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["F401", "F811"]
+# Tests: unused imports / fixture re-binding / asserted-only-by-side-effect are common patterns
+"tests/**" = ["F401", "F811", "F841", "E402"]
 "**/conftest.py" = ["F401"]
+# agent/server.py prepends sys.path to load vendored _deps before any import
+"agent/server.py" = ["E402"]
+# Simulation tool stubs — variable kept for future use; collector loop var idx is intentional
+"mcp-servers/mcp_servers/simulation/tools/*.py" = ["F841"]
+"data-pipeline/etl_collector/collectors/pi_collector.py" = ["B007"]
+"api/models/handler.py" = ["F841"]

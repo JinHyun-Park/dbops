@@ -1,14 +1,17 @@
 import aws_cdk as cdk
 from aws_cdk import (
-    aws_rds as rds,
-    aws_ec2 as ec2,
-    aws_lambda as lambda_,
     aws_events as events,
+)
+from aws_cdk import (
     aws_events_targets as targets,
-    aws_secretsmanager as sm,
+)
+from aws_cdk import (
+    aws_lambda as lambda_,
+)
+from aws_cdk import (
+    aws_rds as rds,
 )
 from constructs import Construct
-from config.settings import Settings
 
 
 class SampleStack(cdk.Stack):

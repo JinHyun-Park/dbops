@@ -10,11 +10,11 @@ Routes:
 import base64
 import json
 import os
-import boto3
-from botocore.exceptions import ClientError
 from datetime import datetime
 
+import boto3
 import seeder
+from botocore.exceptions import ClientError
 
 
 def _decode_jwt_payload(token: str) -> dict:

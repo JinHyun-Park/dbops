@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.operations.tools.schema_diff import get_schema_diff_impl
 from mcp_servers.shared.models import QueryResult
 

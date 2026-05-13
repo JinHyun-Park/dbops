@@ -20,7 +20,6 @@ Skipped intentionally (would need extra metadata):
 import json
 from datetime import datetime, timezone
 
-
 CPU_AVG_THRESHOLD = 30.0
 CPU_P95_THRESHOLD = 60.0
 

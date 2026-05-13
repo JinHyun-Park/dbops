@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.incident.tools.recent_events import get_recent_events_impl
 from mcp_servers.shared.models import QueryResult
 

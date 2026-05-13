@@ -15,8 +15,8 @@ to detail-type as a last resort.
 
 import json
 import os
-import boto3
 
+import boto3
 
 # CloudTrail API names that change cluster state — we surface these as warnings
 # so an operator sees the destructive ones at a glance.

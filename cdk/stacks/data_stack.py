@@ -1,17 +1,33 @@
 import aws_cdk as cdk
 from aws_cdk import (
-    aws_rds as rds,
     aws_ec2 as ec2,
-    aws_s3 as s3,
-    aws_sns as sns,
+)
+from aws_cdk import (
     aws_events as events,
+)
+from aws_cdk import (
     aws_events_targets as targets,
+)
+from aws_cdk import (
     aws_iam as iam,
+)
+from aws_cdk import (
     aws_lambda as lambda_,
+)
+from aws_cdk import (
+    aws_rds as rds,
+)
+from aws_cdk import (
+    aws_s3 as s3,
+)
+from aws_cdk import (
+    aws_sns as sns,
+)
+from aws_cdk import (
     custom_resources as cr,
 )
-from constructs import Construct
 from config.settings import Settings
+from constructs import Construct
 
 
 class DataStack(cdk.Stack):

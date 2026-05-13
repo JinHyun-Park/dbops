@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 from mcp_servers.operations.tools.audit_permissions import audit_permissions_impl
 from mcp_servers.shared.models import QueryResult
 

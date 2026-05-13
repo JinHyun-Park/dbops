@@ -1,4 +1,5 @@
 import re
+
 from mcp_servers.shared.cache_client import CacheClient
 
 RISK_LEVELS = {"SELECT": "safe", "INSERT": "low", "UPDATE": "medium", "DELETE": "high", "ALTER": "high", "DROP": "critical", "TRUNCATE": "critical", "CREATE": "medium"}

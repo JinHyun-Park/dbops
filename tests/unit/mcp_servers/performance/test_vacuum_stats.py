@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 from mcp_servers.performance.tools.vacuum_stats import get_vacuum_stats_impl
 from mcp_servers.shared.models import QueryResult
 

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 
+
 def collect_pi_metrics(pi_client, cache_execute, cluster_resource_id, cluster_id):
     end_time = datetime.utcnow()
     start_time = end_time - timedelta(minutes=5)
