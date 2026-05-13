@@ -36,6 +36,16 @@ def cdk_app():
     if not (CDK_DIR / "config" / "settings.py").exists():
         pytest.skip("cdk/config/settings.py missing — run `cp cdk/config/settings.example.py cdk/config/settings.py`")
 
+    # FrontendStack's BucketDeployment requires `frontend/out/` to exist
+    # at synth time. CI hasn't run `npm run build` (frontend is a separate
+    # job that doesn't produce a CDK artifact) — stub a minimal directory
+    # so synth resolves the asset path. Local devs who already have a
+    # built `out/` keep their real artifact.
+    frontend_out = ROOT / "frontend" / "out"
+    if not frontend_out.exists():
+        frontend_out.mkdir(parents=True, exist_ok=True)
+        (frontend_out / "index.html").write_text("<!-- synth stub -->\n")
+
     original_cwd = os.getcwd()
     os.chdir(CDK_DIR)
     try:
