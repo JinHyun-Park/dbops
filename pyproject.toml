@@ -6,3 +6,32 @@ requires-python = ">=3.10"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "mcp-servers", "data-pipeline"]
+python_files = "test_*.py"
+addopts = "-ra --strict-markers"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = [
+    "cdk.out",
+    ".venv",
+    "**/__pycache__",
+    "**/cdk.out",
+    "agent/_deps",
+]
+
+[tool.ruff.lint]
+# Conservative starter — fail on unused imports / undefined names / obvious
+# mistakes. Style/docstring rules can come in a follow-up pass.
+select = ["E", "F", "I", "B", "W"]
+ignore = [
+    "E501",  # line length is mostly handled visually; don't fight it now
+    "B008",  # function call in default — common in handlers
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["F401", "F811"]
+"**/conftest.py" = ["F401"]

@@ -164,6 +164,35 @@ cd frontend && npm run dev
 cd cdk && cdk synth --quiet
 ```
 
+### One-time automation setup
+
+Install once per clone — afterwards every commit / push is auto-checked:
+
+```bash
+# Dev deps (pytest, ruff, pre-commit, CDK synth deps)
+pip install -r requirements-dev.txt
+
+# Install pre-commit hooks (ruff + prettier + tsc --noEmit on TS changes)
+pre-commit install
+```
+
+GitHub Actions (`.github/workflows/ci.yml`) re-runs the same checks on
+every push/PR — three parallel jobs:
+
+- **python** — `ruff check .` + `pytest tests/unit`
+- **cdk** — `cdk synth` smoke + 4-stack snapshot test
+- **frontend** — `tsc --noEmit` + `next build`
+
+Claude Code hooks (`.claude/hooks/`) add two structural gates while
+working with the assistant:
+
+- **`pre-commit-review.sh`** — blocks `git commit` until the code-reviewer
+  subagent runs. Bypass for trivial diffs by adding `[skip-review]` to the
+  commit message.
+- **`stop-session-memory.sh`** — at session end, surfaces commits since
+  the last checkpoint and reminds the assistant to persist a project
+  memory note so the next session resumes cleanly.
+
 ## Documentation
 
 - Design Spec: `docs/superpowers/specs/2026-05-08-dbops-design.md`

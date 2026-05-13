@@ -1,0 +1,17 @@
+# Dev-only dependencies — installed in CI and locally for tests/linting.
+# Production Lambda deployments do NOT pick these up (each Lambda's own
+# requirements.txt is what gets packaged).
+
+pytest>=8.0,<9
+pytest-cov>=5,<7
+
+# CDK synth tests
+aws-cdk-lib>=2.200,<3
+constructs>=10,<11
+aws-cdk.aws-bedrock-agentcore-alpha
+
+# Linting / formatting
+ruff>=0.6,<1
+
+# Pre-commit framework (local + CI)
+pre-commit>=3.7,<5

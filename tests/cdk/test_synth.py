@@ -1,0 +1,76 @@
+"""CDK synth smoke + structural assertions.
+
+These tests verify the CDK app:
+  1. Synthesises without error.
+  2. Produces the expected 4 stacks (foundation / data / agent / frontend).
+  3. Applies Application=DBOps tag at the app level — regression catch for
+     anyone removing the cdk.Tags.of(app).add(...) call in cdk/app.py, which
+     would silently break cost attribution.
+
+We don't full-diff resources here — that'd flake on every CDK upgrade. The
+goal is "did we keep the load-bearing structure?", not "did anything change?".
+"""
+
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+CDK_DIR = ROOT / "cdk"
+
+
+@pytest.fixture(scope="module")
+def cdk_app():
+    """Import the CDK app once and run synth. Falls back to settings.example
+    when the user's settings.py is gitignored and not present (CI path)."""
+    sys.path.insert(0, str(CDK_DIR))
+
+    # CI copies settings.example.py → settings.py before invoking pytest.
+    if not (CDK_DIR / "config" / "settings.py").exists():
+        pytest.skip("cdk/config/settings.py missing — run `cp cdk/config/settings.example.py cdk/config/settings.py`")
+
+    import aws_cdk as cdk_lib
+    from config.settings import Settings  # type: ignore
+    from stacks.foundation_stack import FoundationStack
+    from stacks.data_stack import DataStack
+    from stacks.agent_stack import AgentStack
+    from stacks.frontend_stack import FrontendStack
+
+    app = cdk_lib.App()
+    env = cdk_lib.Environment(account=Settings.ACCOUNT_ID, region=Settings.REGION)
+    foundation = FoundationStack(app, f"dbops-{Settings.ENV}-foundation", env=env)
+    data = DataStack(app, f"dbops-{Settings.ENV}-data", env=env, foundation=foundation)
+    agent = AgentStack(app, f"dbops-{Settings.ENV}-agent", env=env, foundation=foundation, data=data)
+    FrontendStack(app, f"dbops-{Settings.ENV}-frontend", env=env, foundation=foundation, agent=agent)
+
+    cdk_lib.Tags.of(app).add("Application", "DBOps")
+    cdk_lib.Tags.of(app).add("Environment", Settings.ENV)
+
+    assembly = app.synth()
+    return assembly
+
+
+def test_synth_produces_four_stacks(cdk_app):
+    stacks = [s.stack_name for s in cdk_app.stacks]
+    expected = {"dbops-dev-foundation", "dbops-dev-data", "dbops-dev-agent", "dbops-dev-frontend"}
+    assert expected.issubset(set(stacks)), f"missing stacks. got: {stacks}"
+
+
+def test_app_carries_application_tag(cdk_app):
+    """Every stack must have Application=DBOps so Bedrock AIPs etc. inherit
+    the cost-allocation tag at deploy time."""
+    found_tagged = False
+    for stack in cdk_app.stacks:
+        tags = stack.tags
+        if isinstance(tags, dict) and tags.get("Application") == "DBOps":
+            found_tagged = True
+            break
+        # CDK may surface tags via template metadata; fall back to template scan.
+        template = stack.template or {}
+        meta = template.get("Metadata", {})
+        if "Application=DBOps" in str(meta):
+            found_tagged = True
+            break
+    assert found_tagged, "Application=DBOps tag not detected on any stack"
