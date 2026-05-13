@@ -7,6 +7,8 @@ import {
   registerCluster,
   discoverClusters,
   bulkRegisterClusters,
+  generateSampleCluster,
+  deleteCluster,
   type DiscoveredCluster,
 } from "@/lib/api-client";
 import { isAdmin } from "@/lib/auth";
@@ -25,6 +27,7 @@ interface Cluster {
   connection_error?: string;
   connection_validated_at?: string;
   registered_at?: string;
+  is_demo?: boolean;
 }
 
 const CONN_STYLES: Record<string, { label: string; classes: string }> = {
@@ -62,6 +65,8 @@ export default function ClustersPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: "ok" | "warn" | "err"; msg: string } | null>(null);
+  const [seedingSample, setSeedingSample] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [admin, setAdmin] = useState(false);
   useEffect(() => {
@@ -213,6 +218,50 @@ export default function ClustersPage() {
     }
   };
 
+  const handleGenerateSample = async () => {
+    if (seedingSample) return;
+    const proceed = window.confirm(
+      "데모용 sample-cluster를 생성합니다. 24시간치 합성 메트릭/쿼리/이상 징후가 캐시 DB에 채워지고, 모든 페이지에서 DEMO 배지로 식별됩니다. 진행할까요?",
+    );
+    if (!proceed) return;
+    setSeedingSample(true);
+    setFeedback(null);
+    try {
+      const res = await generateSampleCluster();
+      const total = Object.values(res.rows || {}).reduce((s, n) => s + n, 0);
+      setFeedback({
+        kind: "ok",
+        msg: `Sample 클러스터가 준비됐습니다 (${total.toLocaleString()} 행 시드). Dashboard에서 sample-cluster를 선택해 확인하세요.`,
+      });
+      loadClusters();
+    } catch (e) {
+      setFeedback({ kind: "err", msg: e instanceof Error ? e.message : "Sample generation failed" });
+    } finally {
+      setSeedingSample(false);
+    }
+  };
+
+  const handleDelete = async (c: Cluster) => {
+    if (deletingId) return;
+    const ok = window.confirm(
+      c.is_demo
+        ? `데모 클러스터 ${c.cluster_id} 및 합성 데이터 전체를 삭제합니다.`
+        : `${c.cluster_id}를 레지스트리에서 해제합니다. 캐시 DB의 과거 메트릭은 그대로 남습니다.`,
+    );
+    if (!ok) return;
+    setDeletingId(c.cluster_id);
+    setFeedback(null);
+    try {
+      await deleteCluster(c.cluster_id);
+      setFeedback({ kind: "ok", msg: `${c.cluster_id} 삭제됨.` });
+      loadClusters();
+    } catch (e) {
+      setFeedback({ kind: "err", msg: e instanceof Error ? e.message : "Delete failed" });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <PageBody>
       <PageHeader
@@ -227,6 +276,16 @@ export default function ClustersPage() {
             >
               Fleet overview →
             </Link>
+            {admin && (
+              <button
+                onClick={handleGenerateSample}
+                disabled={seedingSample}
+                className="text-xs px-3 py-2 border border-purple-500/50 text-purple-300 hover:bg-purple-500/10 disabled:opacity-50 transition-colors"
+                title="합성 데이터로 sample-cluster 생성"
+              >
+                {seedingSample ? "생성 중…" : "🎲 Generate sample"}
+              </button>
+            )}
             {admin && (
               <button
                 onClick={() => {
@@ -582,7 +641,14 @@ export default function ClustersPage() {
                   return (
                     <tr key={c.cluster_id} className="hover:bg-zinc-900/40">
                       <td className="px-4 py-2.5">
-                        <div className="text-zinc-100 font-mono text-xs">{c.cluster_id}</div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-zinc-100 font-mono text-xs">{c.cluster_id}</div>
+                          {c.is_demo && (
+                            <span className="px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
+                              demo
+                            </span>
+                          )}
+                        </div>
                         {c.spoke_role_arn && (
                           <div
                             className="text-[10px] text-zinc-500 mt-0.5 font-mono truncate max-w-xs"
@@ -615,12 +681,24 @@ export default function ClustersPage() {
                         {relTime(c.registered_at)}
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        <Link
-                          href={`/dashboard?cluster=${encodeURIComponent(c.cluster_id)}`}
-                          className="text-xs text-amber-400/90 hover:text-amber-300"
-                        >
-                          dashboard →
-                        </Link>
+                        <div className="flex items-center justify-end gap-3">
+                          <Link
+                            href={`/dashboard?cluster=${encodeURIComponent(c.cluster_id)}`}
+                            className="text-xs text-amber-400/90 hover:text-amber-300"
+                          >
+                            dashboard →
+                          </Link>
+                          {admin && (
+                            <button
+                              onClick={() => handleDelete(c)}
+                              disabled={deletingId === c.cluster_id}
+                              className="text-[11px] text-zinc-500 hover:text-rose-300 disabled:opacity-50 transition-colors"
+                              title={c.is_demo ? "데모 클러스터 및 합성 데이터 삭제" : "레지스트리에서 해제"}
+                            >
+                              {deletingId === c.cluster_id ? "…" : "delete"}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

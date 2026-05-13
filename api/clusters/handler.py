@@ -14,6 +14,8 @@ import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime
 
+import seeder
+
 
 def _decode_jwt_payload(token: str) -> dict:
     """Decode a JWT payload (base64) — no signature verification.
@@ -302,6 +304,64 @@ def _handle_bulk_register(table, body: dict):
     })
 
 
+def _cache_db_env():
+    return (
+        os.environ.get("CACHE_DB_CLUSTER_ARN", ""),
+        os.environ.get("CACHE_DB_SECRET_ARN", ""),
+        os.environ.get("CACHE_DB_NAME", "dbops"),
+    )
+
+
+def _handle_seed_sample(table):
+    """P1.4 Sample data / demo mode. Idempotent — re-running upserts the demo cluster."""
+    cluster_arn, secret_arn, db_name = _cache_db_env()
+    if not (cluster_arn and secret_arn):
+        return _resp(500, {"error": "cache DB not configured"})
+
+    cluster_id = seeder.SAMPLE_CLUSTER_ID
+    rds_data = boto3.client("rds-data")
+    try:
+        counts = seeder.seed_demo_data(rds_data, cluster_arn, secret_arn, db_name, cluster_id)
+    except Exception as e:
+        return _resp(500, {"error": "seed_failed", "detail": str(e)[:300]})
+
+    item = {
+        "cluster_id": cluster_id,
+        "account_id": "000000000000",
+        "region": "ap-northeast-2",
+        "engine": seeder.SAMPLE_ENGINE,
+        "spoke_role_arn": "",
+        "registered_at": datetime.utcnow().isoformat(),
+        "connection_status": "ok",
+        "connection_error": "",
+        "connection_validated_at": datetime.utcnow().isoformat(),
+        "is_demo": True,
+    }
+    table.put_item(Item=item)
+    return _resp(201, {
+        "status": "seeded",
+        "cluster_id": cluster_id,
+        "is_demo": True,
+        "rows": counts,
+    })
+
+
+def _handle_delete(table, cluster_id: str):
+    """DELETE /api/clusters/{cluster_id}. For demo clusters, also wipes cache rows."""
+    existing = table.get_item(Key={"cluster_id": cluster_id}).get("Item")
+    if not existing:
+        return _resp(404, {"error": "not_found", "cluster_id": cluster_id})
+    if existing.get("is_demo"):
+        cluster_arn, secret_arn, db_name = _cache_db_env()
+        if cluster_arn and secret_arn:
+            try:
+                seeder.cleanup_demo_data(boto3.client("rds-data"), cluster_arn, secret_arn, db_name, cluster_id)
+            except Exception as e:
+                print(f"[delete] cleanup_demo_data failed: {e}")
+    table.delete_item(Key={"cluster_id": cluster_id})
+    return _resp(200, {"status": "deleted", "cluster_id": cluster_id, "was_demo": bool(existing.get("is_demo"))})
+
+
 def lambda_handler(event, context):
     dynamodb = boto3.resource("dynamodb")
     table = dynamodb.Table(os.environ["CLUSTERS_TABLE"])
@@ -315,6 +375,25 @@ def lambda_handler(event, context):
         except Exception:
             return _resp(400, {"error": "invalid JSON"})
         return _handle_discover(table, body)
+
+    # Sub-route: POST /api/clusters/sample — write, admin only
+    if method == "POST" and path.endswith("/sample"):
+        forbid = _forbid_viewer(event)
+        if forbid:
+            return forbid
+        return _handle_seed_sample(table)
+
+    # Sub-route: DELETE /api/clusters/{cluster_id} — write, admin only
+    if method == "DELETE":
+        forbid = _forbid_viewer(event)
+        if forbid:
+            return forbid
+        # cluster_id from path parameters (API Gateway v2 {id} variable) or query string fallback.
+        params = event.get("pathParameters") or {}
+        cluster_id = params.get("id") or (event.get("queryStringParameters") or {}).get("cluster_id")
+        if not cluster_id:
+            return _resp(400, {"error": "cluster_id required"})
+        return _handle_delete(table, cluster_id)
 
     # Sub-route: POST /api/clusters/bulk-register — write, admin only
     if method == "POST" and path.endswith("/bulk-register"):

@@ -77,7 +77,7 @@ const RANGES = [
 ];
 
 export default function DashboardPage() {
-  const [clusters, setClusters] = useState<{ cluster_id: string; engine?: string; status?: string }[]>([]);
+  const [clusters, setClusters] = useState<{ cluster_id: string; engine?: string; status?: string; is_demo?: boolean }[]>([]);
   const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -172,6 +172,18 @@ export default function DashboardPage() {
         selectedId={selectedCluster}
         onSelect={setSelectedCluster}
       />
+
+      {selectedCluster && clusters.find((c) => c.cluster_id === selectedCluster)?.is_demo && (
+        <div className="mt-4 flex items-center gap-3 px-4 py-2.5 border border-purple-500/40 bg-purple-500/10 text-purple-200 text-xs">
+          <span className="px-1.5 py-0.5 text-[10px] font-mono tracking-wider uppercase bg-purple-500/25 border border-purple-500/40">
+            demo
+          </span>
+          <span>
+            합성 데이터로 채워진 데모 클러스터입니다. 실제 Aurora가 아니라 평가용 24시간 시드 데이터를 보고 있습니다 —
+            Clusters 페이지에서 언제든 삭제 가능합니다.
+          </span>
+        </div>
+      )}
 
       {error && (
         <div className="mt-6 bg-red-900/30 border border-red-700 rounded-lg p-4 text-red-300 text-sm">

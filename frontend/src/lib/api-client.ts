@@ -363,6 +363,32 @@ export async function registerCluster(data: {
   return res.json();
 }
 
+export async function generateSampleCluster(): Promise<{
+  status: string;
+  cluster_id: string;
+  is_demo: boolean;
+  rows: Record<string, number>;
+}> {
+  const res = await fetch(await api(`/api/clusters/sample`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`Sample generation failed (${res.status}): ${txt.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+export async function deleteCluster(clusterId: string): Promise<{ status: string; was_demo: boolean }> {
+  const res = await fetch(await api(`/api/clusters/${enc(clusterId)}`), {
+    method: "DELETE",
+    headers: { ...(await authHeaders()) },
+  });
+  if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+  return res.json();
+}
+
 // --- Bulk cluster discovery & registration (P2.5) ---
 export interface DiscoveredCluster {
   cluster_id: string;

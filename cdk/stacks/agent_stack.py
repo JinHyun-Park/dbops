@@ -243,7 +243,9 @@ class AgentStack(cdk.Stack):
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="handler.lambda_handler",
             code=lambda_.Code.from_asset("../api/clusters"),
-            timeout=cdk.Duration.seconds(30),
+            # Sample seeder issues ~40 INSERTs over RDS Data API; 30s is too tight.
+            timeout=cdk.Duration.seconds(90),
+            memory_size=512,
             environment={
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
@@ -536,7 +538,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
             integration=clusters_integration,
         )
-        # Discovery + bulk register share the same Lambda; handler dispatches on path.
+        # Discovery + bulk register + sample seeder share the same Lambda; handler dispatches on path.
         self.api.add_routes(
             path="/api/clusters/discover",
             methods=[apigwv2.HttpMethod.POST],
@@ -545,6 +547,19 @@ class AgentStack(cdk.Stack):
         self.api.add_routes(
             path="/api/clusters/bulk-register",
             methods=[apigwv2.HttpMethod.POST],
+            integration=clusters_integration,
+        )
+        # Demo mode: synthesises 24h of cache data + a fake cluster row so an
+        # evaluator can see every panel before they connect a real cluster.
+        self.api.add_routes(
+            path="/api/clusters/sample",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=clusters_integration,
+        )
+        # DELETE /api/clusters/{id} — removes the DDB row + demo cache rows if is_demo.
+        self.api.add_routes(
+            path="/api/clusters/{id}",
+            methods=[apigwv2.HttpMethod.DELETE],
             integration=clusters_integration,
         )
         self.api.add_routes(

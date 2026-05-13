@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { fetchMultiClusterOverview } from "@/lib/api-client";
+import { fetchMultiClusterOverview, fetchClusters } from "@/lib/api-client";
 import { PageHeader, PageBody, EmptyState } from "@/components/design-system/page-shell";
 
 interface ClusterRow {
@@ -41,6 +41,7 @@ function fmtBytes(b: number): string {
 
 export default function FleetPage() {
   const [rows, setRows] = useState<ClusterRow[]>([]);
+  const [demoIds, setDemoIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<keyof ClusterRow>("cluster_id");
@@ -48,9 +49,21 @@ export default function FleetPage() {
   useEffect(() => {
     let cancelled = false;
     const load = () =>
-      fetchMultiClusterOverview()
-        .then((d) => !cancelled && setRows(d.clusters || []))
-        .catch((e) => !cancelled && setErr(e.message))
+      Promise.allSettled([fetchMultiClusterOverview(), fetchClusters()])
+        .then(([overview, registry]) => {
+          if (cancelled) return;
+          if (overview.status === "fulfilled") setRows(overview.value.clusters || []);
+          if (registry.status === "fulfilled") {
+            setDemoIds(
+              new Set(
+                (registry.value || [])
+                  .filter((c: { is_demo?: boolean }) => c.is_demo)
+                  .map((c: { cluster_id: string }) => c.cluster_id),
+              ),
+            );
+          }
+          if (overview.status === "rejected") setErr(overview.reason?.message || String(overview.reason));
+        })
         .finally(() => !cancelled && setLoading(false));
     load();
     const iv = setInterval(load, 30000);
@@ -116,12 +129,19 @@ export default function FleetPage() {
                 return (
                   <tr key={c.cluster_id} className="hover:bg-zinc-900/40">
                     <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
-                      <Link
-                        href={`/dashboard?cluster=${encodeURIComponent(c.cluster_id)}`}
-                        className="hover:text-sky-400 underline-offset-2 hover:underline"
-                      >
-                        {c.cluster_id}
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={`/dashboard?cluster=${encodeURIComponent(c.cluster_id)}`}
+                          className="hover:text-sky-400 underline-offset-2 hover:underline"
+                        >
+                          {c.cluster_id}
+                        </Link>
+                        {demoIds.has(c.cluster_id) && (
+                          <span className="px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
+                            demo
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-3 py-2 text-zinc-300 text-xs">
                       {c.engine}{" "}
