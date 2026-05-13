@@ -33,8 +33,12 @@ const CHECK_LABELS: Record<string, string> = {
   cost_serverless_max_too_high: "Cost",
 };
 
-const TABS = ["All", "VACUUM", "Bloat", "Indexes", "Config", "Extensions", "Cost"] as const;
-type Tab = (typeof TABS)[number];
+// Full PG tab set. MySQL exposes a trimmed list (VACUUM/Bloat/Extensions are
+// PG-only collectors today; Indexes/Config are PG-leaning but kept for
+// forward-compatibility once MySQL parity ships).
+const TABS_PG = ["All", "VACUUM", "Bloat", "Indexes", "Config", "Extensions", "Cost"] as const;
+const TABS_MYSQL = ["All", "Cost"] as const;
+type Tab = (typeof TABS_PG)[number] | (typeof TABS_MYSQL)[number];
 
 function tryParse(raw: HealthFinding["details"]): Record<string, unknown> | null {
   if (raw == null) return null;
@@ -82,9 +86,20 @@ export function MaintenanceHealthPanel({ clusterId, engine }: { clusterId: strin
     return findings.filter((f) => CHECK_LABELS[f.check_type] === tab);
   }, [findings, tab]);
 
+  // If a PG-only tab is selected and we switch to a MySQL cluster, snap back
+  // to "All" so the user isn't stuck on a tab that no longer exists.
+  useEffect(() => {
+    const allowed: string[] = ((engine || "").toLowerCase().includes("postgres")
+      ? TABS_PG
+      : TABS_MYSQL) as unknown as string[];
+    if (!allowed.includes(tab)) setTab("All");
+  }, [engine, tab]);
+
   // Bloat/extension/setting checks are PG-only — collector emits nothing for
-  // MySQL clusters today, so just degrade to a quiet empty state.
-  const pgOnly = !(engine || "").includes("postgresql");
+  // MySQL clusters today, so trim the tab strip and adjust empty-state copy.
+  const isPg = (engine || "").toLowerCase().includes("postgres");
+  const tabs: readonly Tab[] = isPg ? TABS_PG : TABS_MYSQL;
+  const pgOnly = !isPg;
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 overflow-hidden">
@@ -114,7 +129,7 @@ export function MaintenanceHealthPanel({ clusterId, engine }: { clusterId: strin
           </div>
         </div>
         <div className="flex items-center gap-1 mt-3">
-          {TABS.map((t) => {
+          {tabs.map((t) => {
             const isActive = tab === t;
             return (
               <button
