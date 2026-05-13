@@ -83,9 +83,9 @@ TABLES = [
 # Synthetic operational findings — varied severity so dashboard demonstrates filtering.
 FINDINGS = [
     ("txid_age", "warning", "public.audit_log",
-     "612000000", "200000000",
+     "age=612,000,000", "< 200,000,000",
      "Heaviest tables show transaction-id age > 200M. Run VACUUM (FREEZE) on public.audit_log before reaching wraparound.",
-     {"transactions_since_freeze": 612_000_000, "table": "public.audit_log"}),
+     {"schema": "public", "table": "audit_log", "age": 612_000_000}),
     ("dead_tuples", "warning", "analytics.events",
      "8400000", "5000000",
      "8.4M dead tuples on analytics.events (~6% of live rows). Consider lowering autovacuum_vacuum_scale_factor for this table.",

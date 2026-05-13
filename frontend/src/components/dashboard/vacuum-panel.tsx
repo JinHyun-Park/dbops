@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchVacuumStats } from "@/lib/api-client";
+import { fetchVacuumStats, fetchHealthFindings } from "@/lib/api-client";
 import { fmtExact, fmtNumber } from "@/lib/format";
 
 interface Table {
@@ -16,9 +16,23 @@ interface Table {
   last_analyze: string | null;
 }
 
+// 200M transactions = "warn ahead of wraparound", 1.5B = "fix immediately".
+// pg_health_checks emits findings above these; we color cells the same way.
+const TXID_WARN = 200_000_000;
+const TXID_CRITICAL = 1_500_000_000;
+
 function n(v: unknown) {
   const x = Number(v);
   return Number.isFinite(x) ? x : 0;
+}
+
+function safeJSON(s: string): Record<string, unknown> | null {
+  try {
+    const v = JSON.parse(s);
+    return v && typeof v === "object" ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }
 
 function relDays(iso: string | null) {
@@ -34,15 +48,42 @@ function relDays(iso: string | null) {
 
 export function VacuumPanel({ clusterId }: { clusterId: string }) {
   const [tables, setTables] = useState<Table[]>([]);
+  const [txidAgeByTable, setTxidAgeByTable] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    const load = () =>
-      fetchVacuumStats(clusterId)
-        .then((d) => !cancelled && setTables(d.tables || []))
-        .catch(() => !cancelled && setTables([]))
-        .finally(() => !cancelled && setLoading(false));
+    const load = async () => {
+      try {
+        const [stats, findings] = await Promise.allSettled([
+          fetchVacuumStats(clusterId),
+          fetchHealthFindings(clusterId),
+        ]);
+        if (cancelled) return;
+        if (stats.status === "fulfilled") {
+          setTables(stats.value.tables || []);
+        } else {
+          setTables([]);
+        }
+        if (findings.status === "fulfilled") {
+          const ageMap: Record<string, number> = {};
+          for (const f of findings.value.findings || []) {
+            if (f.check_type !== "txid_age") continue;
+            const d =
+              typeof f.details === "string"
+                ? safeJSON(f.details)
+                : (f.details as Record<string, unknown> | null) || null;
+            const schema = d && typeof d.schema === "string" ? d.schema : null;
+            const tbl = d && typeof d.table === "string" ? d.table : null;
+            const age = d && typeof d.age === "number" ? d.age : null;
+            if (schema && tbl && age != null) ageMap[`${schema}.${tbl}`] = age;
+          }
+          setTxidAgeByTable(ageMap);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
     load();
     const iv = setInterval(load, 60000);
     return () => {
@@ -89,6 +130,12 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
+                  title="age(relfrozenxid) — transactions since the table was last FREEZEd. 200M = warn, 1.5B = wraparound risk"
+                >
+                  TXID age
+                </th>
+                <th
+                  className="text-right px-4 py-2 text-zinc-400 font-medium"
                   title="Time since last autovacuum or manual VACUUM"
                 >
                   Last vacuum
@@ -100,6 +147,15 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
                 const bloat = n(t.bloat_ratio);
                 const bloatColor =
                   bloat > 0.3 ? "text-rose-400" : bloat > 0.1 ? "text-amber-400" : "text-zinc-300";
+                const txidAge = txidAgeByTable[`${t.schema_name}.${t.table_name}`] ?? null;
+                const txidColor =
+                  txidAge == null
+                    ? "text-zinc-600"
+                    : txidAge >= TXID_CRITICAL
+                    ? "text-rose-400"
+                    : txidAge >= TXID_WARN
+                    ? "text-amber-400"
+                    : "text-zinc-300";
                 return (
                   <tr key={`${t.schema_name}-${t.table_name}-${i}`} className="hover:bg-zinc-900/40">
                     <td className="px-4 py-2 text-zinc-200 font-mono text-xs">
@@ -123,6 +179,16 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
                       title={`${n(t.n_dead_tup)} dead / ${n(t.n_live_tup) + n(t.n_dead_tup)} total`}
                     >
                       {(bloat * 100).toFixed(1)}%
+                    </td>
+                    <td
+                      className={`px-4 py-2 text-right font-mono text-xs tabular-nums ${txidColor}`}
+                      title={
+                        txidAge != null
+                          ? `age(relfrozenxid) = ${fmtExact(txidAge)} transactions`
+                          : "below warn threshold or not yet observed"
+                      }
+                    >
+                      {txidAge != null ? fmtNumber(txidAge) : "—"}
                     </td>
                     <td className="px-4 py-2 text-right text-zinc-400 font-mono text-xs">
                       {relDays(t.last_vacuum)}
