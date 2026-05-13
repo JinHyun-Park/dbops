@@ -18,6 +18,12 @@ jobs:
   python:
     name: python (pytest + ruff)
     runs-on: ubuntu-latest
+    env:
+      # Several tests construct boto3 clients (without mocking) — they fail
+      # locally too on a machine without AWS_DEFAULT_REGION. Pin a value so
+      # CI doesn't hit `NoRegionError`. The region itself is meaningless
+      # because no real AWS calls fire — only client construction.
+      AWS_DEFAULT_REGION: us-east-1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
