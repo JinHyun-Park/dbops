@@ -13,3 +13,12 @@ cdk/config/settings.py
 *.js.map
 .omc/
 agent/_deps/
+
+# Claude Code — keep project-shared configs (settings.json, agents/,
+# commands/, skills/) versioned so collaborators get the same workflow,
+# but ignore per-user runtime state.
+.claude/*.lock
+.claude/*.local.json
+.claude/projects/
+.claude/state/
+.pytest_cache/
