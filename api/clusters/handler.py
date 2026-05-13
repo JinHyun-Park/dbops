@@ -181,11 +181,24 @@ def _handle_register(table, body: dict):
     spoke_role_arn = body.get("spoke_role_arn", "")
     connection_status = "untested"
     connection_error = ""
+    # Fields we resolve from RDS DescribeDBClusters so EXPLAIN / RDS Data API
+    # calls work without a manual backfill. Caller-supplied values win.
+    resolved_arn = ""
+    resolved_secret = ""
+    resolved_db = ""
+    resolved_engine = ""
 
-    # Validate access by calling DescribeDBClusters via local or assumed role.
+    # Validate access AND collect ARN/secret/db_name in one round trip.
     try:
         rds = _rds_client_for(region, spoke_role_arn)
-        rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
+        resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
+        clusters = resp.get("DBClusters") or []
+        if clusters:
+            c = clusters[0]
+            resolved_arn = c.get("DBClusterArn", "")
+            resolved_secret = (c.get("MasterUserSecret") or {}).get("SecretArn", "")
+            resolved_db = c.get("DatabaseName", "") or ""
+            resolved_engine = c.get("Engine", "")
         connection_status = "ok"
     except Exception as e:
         connection_status = "failed"
@@ -195,18 +208,24 @@ def _handle_register(table, body: dict):
         "cluster_id": cluster_id,
         "account_id": account_id,
         "region": region,
-        "engine": body.get("engine", "aurora-postgresql"),
+        "engine": body.get("engine") or resolved_engine or "aurora-postgresql",
         "spoke_role_arn": spoke_role_arn,
         "registered_at": datetime.utcnow().isoformat(),
         "connection_status": connection_status,
         "connection_error": connection_error,
         "connection_validated_at": datetime.utcnow().isoformat() if connection_status != "untested" else "",
     }
-    # Carry over arn/secret/db_name when the caller already resolved them
-    # (bulk-register path provides these; single-cluster manual entry may not).
-    for k in ("cluster_arn", "secret_arn", "db_name"):
-        if body.get(k):
-            item[k] = body[k]
+    # Auto-resolved ARN/secret/db_name from RDS describe go in unless the
+    # caller (bulk-register path) supplied explicit overrides.
+    cluster_arn = body.get("cluster_arn") or resolved_arn
+    secret_arn = body.get("secret_arn") or resolved_secret
+    db_name = body.get("db_name") or resolved_db
+    if cluster_arn:
+        item["cluster_arn"] = cluster_arn
+    if secret_arn:
+        item["secret_arn"] = secret_arn
+    if db_name:
+        item["db_name"] = db_name
 
     table.put_item(Item=item)
 
