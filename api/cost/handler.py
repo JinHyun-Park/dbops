@@ -108,29 +108,32 @@ def lambda_handler(event, context):
     tagged_daily, tagged_total, tagged_err = _query_total(ce, start, end, services, tag_filter)
     all_daily, all_total, all_err = _query_total(ce, start, end, services, None)
 
-    # If tag filter returns 0 but there IS Bedrock spend, the user needs to
-    # either activate the Application tag in Billing or add it to their
-    # Bedrock resources (AgentCore Runtime, Application Inference Profile,
-    # etc.). Surface this clearly instead of silently showing $0.
+    # DBOps Application Inference Profiles are already tagged
+    # Application=DBOps in CDK (inference_profile_setup Lambda). The only
+    # reason tagged_total is $0 is that the user hasn't activated the
+    # 'Application' cost allocation tag in the AWS Billing console —
+    # Cost Explorer ignores tags until they're explicitly activated, and
+    # activation does NOT retroactively tag past spend.
+    #
+    # We deliberately do NOT fall back to the untagged Bedrock-family
+    # total: the account may have other Bedrock workloads (Kiro,
+    # one-off experiments, other projects) that have nothing to do with
+    # DBOps. Mixing them in would misattribute spend.
     tag_warning = None
     if tagged_total == 0 and all_total > 0:
         tag_warning = (
-            "Tag-attributed Bedrock spend is $0 but the account shows "
-            f"${all_total:.2f} of Bedrock spend in this window. Either the "
-            "'Application' cost allocation tag is not activated in the AWS "
-            "Billing console (Cost allocation tags page — requires "
-            "management-account permissions in an AWS Organizations setup), "
-            "or your Bedrock-using resources are not tagged with "
-            "Application=DBOps. The chart below shows the untagged total so "
-            "you still see something — activate the tag for accurate "
-            "attribution."
+            "DBOps Bedrock calls are routed through tagged Application "
+            "Inference Profiles, but the 'Application' cost allocation tag "
+            "is not yet activated in the AWS Billing console. Activate it "
+            "now — Cost Explorer starts attributing DBOps spend within ~24h "
+            "of activation. (Note: activation does not back-fill past spend; "
+            "the headline below shows $0 until the tag is recognized.)"
         )
 
-    # The headline number is the tagged total when it's nonzero; otherwise
-    # we fall back to the untagged Bedrock-family total so the UI doesn't
-    # show $0 while the account is clearly spending on Bedrock.
-    headline_total = tagged_total if tagged_total > 0 else all_total
-    headline_daily = tagged_daily if tagged_total > 0 else all_daily
+    # Headline always = tag-attributed spend so the user only ever sees
+    # DBOps-specific cost. all_total is exposed separately as a diagnostic.
+    headline_total = tagged_total
+    headline_daily = tagged_daily
 
     # Per-model breakdown by USAGE_TYPE (e.g., "APN1-Bedrock:Tokens:Input:Anthropic:Claude-Sonnet-4-6").
     model_split = []

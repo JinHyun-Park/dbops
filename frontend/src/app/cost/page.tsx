@@ -61,7 +61,7 @@ export default function CostPage() {
       <PageHeader
         eyebrow="finance"
         title="Bedrock cost"
-        description="Application=DBOps 태그가 붙은 모든 Bedrock 호출의 비용. Cost Explorer 데이터는 약 24시간 지연됩니다."
+        description="DBOps에서 호출하는 모든 Bedrock 비용 — `Application=DBOps` 태그가 박힌 Application Inference Profile을 경유. 정확한 attribution을 위해 AWS Billing → Cost allocation tags에서 `Application` 태그를 활성화해야 합니다(활성화 후 ~24h 뒤부터 차트 반영, 과거 비용은 소급 안 됨)."
         actions={
           <div className="flex items-center gap-1">
             <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">range</span>
@@ -142,12 +142,20 @@ export default function CostPage() {
               hint="daily avg × 30"
               loading={loading}
             />
-            <Stat
-              label="Tagged calls"
-              value="DBOps"
-              hint="Application=DBOps via AIP"
-              loading={false}
-            />
+            {(() => {
+              const acct = data?.total_all_bedrock ?? 0;
+              const headline = data?.total ?? 0;
+              const attentionAccent: "amber" | "neutral" = acct > 0 && headline === 0 ? "amber" : "neutral";
+              return (
+                <Stat
+                  label="Account-wide Bedrock"
+                  value={loading ? "···" : `$${acct.toFixed(2)}`}
+                  hint="all Bedrock in account (not DBOps-only)"
+                  loading={loading}
+                  accent={attentionAccent}
+                />
+              );
+            })()}
           </StatRow>
 
           <Section eyebrow="trend" title="Daily Bedrock spend">
