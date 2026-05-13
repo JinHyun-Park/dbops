@@ -340,10 +340,14 @@ export async function fetchCost(days = 30) {
     start: string;
     end: string;
     total: number;
+    total_tagged?: number;
+    total_all_bedrock?: number;
     currency: string;
     daily: { date: string; amount: number }[];
     by_usage_type: { usage_type: string; amount: number; quantity: number }[];
     no_data_reason?: string | null;
+    tag_warning?: string | null;
+    discovered_services?: string[];
   }>;
 }
 

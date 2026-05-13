@@ -17,10 +17,14 @@ interface CostData {
   env: string;
   range_days: number;
   total: number;
+  total_tagged?: number;
+  total_all_bedrock?: number;
   currency: string;
   daily: { date: string; amount: number }[];
   by_usage_type: { usage_type: string; amount: number; quantity: number }[];
   no_data_reason?: string | null;
+  tag_warning?: string | null;
+  discovered_services?: string[];
 }
 
 const RANGES = [7, 14, 30, 60, 90];
@@ -84,7 +88,26 @@ export default function CostPage() {
         </div>
       )}
 
-      {data?.no_data_reason ? (
+      {data?.tag_warning && (
+        <div className="mb-6 px-4 py-3 border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm leading-relaxed">
+          <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-amber-300 mb-1">
+            tag attribution warning
+          </div>
+          {data.tag_warning}
+          <div className="mt-2">
+            <a
+              href="https://console.aws.amazon.com/billing/home#/preferences/tags"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs underline hover:text-amber-100"
+            >
+              Open Billing → Cost allocation tags
+            </a>
+          </div>
+        </div>
+      )}
+
+      {data?.no_data_reason && !data?.tag_warning ? (
         <EmptyState
           eyebrow="not yet tracked"
           title="Cost allocation tag is not activated"

@@ -458,6 +458,10 @@ class AgentStack(cdk.Stack):
                 "ce:GetCostAndUsage",
                 "ce:GetCostAndUsageWithResources",
                 "ce:GetTags",
+                # Needed to enumerate per-model Bedrock SERVICE entries that
+                # AWS adds over time (e.g. "Claude Sonnet 4.6 (Amazon Bedrock
+                # Edition)") so the cost filter doesn't go stale.
+                "ce:GetDimensionValues",
             ],
             resources=["*"],
         ))
