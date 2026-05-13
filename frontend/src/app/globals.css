@@ -312,3 +312,61 @@ html[data-theme="light"] .prose-invert pre code {
   background-color: transparent !important;
   color: inherit !important;
 }
+
+/* Print / save-as-PDF — chat conversation only.
+ * The user hits the "🖨 pdf" button in the chat header, which calls
+ * window.print(). We hide app chrome and force a clean light layout so
+ * the saved PDF reads like a plain document.
+ */
+@media print {
+  body, html {
+    background: white !important;
+    color: black !important;
+  }
+  /* Hide everything outside the chat message stream */
+  aside,
+  nav,
+  .no-print,
+  header[data-app-header],
+  .chat-input,
+  .chat-sidebar,
+  .chat-header {
+    display: none !important;
+  }
+  /* Force chat container to take the full page */
+  .chat-printable {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+    background: white !important;
+    color: black !important;
+  }
+  .chat-printable * {
+    color: #111 !important;
+    background-image: none !important;
+  }
+  .chat-printable .prose-invert,
+  .chat-printable .prose-invert * {
+    color: #111 !important;
+  }
+  .chat-printable .prose-invert pre,
+  .chat-printable .prose-invert code {
+    background: #f3f3f0 !important;
+    color: #111 !important;
+    border-color: #ccc !important;
+  }
+  /* User bubble — invert blue→light gray border */
+  .chat-printable [class*="bg-blue-600"] {
+    background: white !important;
+    border: 1px solid #888 !important;
+  }
+  /* Assistant bubble — clean light gray */
+  .chat-printable [class*="bg-zinc-800"] {
+    background: white !important;
+    border: 1px solid #ccc !important;
+  }
+  /* Followup chips have no place in print */
+  .chat-printable button {
+    display: none !important;
+  }
+}

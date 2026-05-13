@@ -77,6 +77,51 @@ function newConversation(clusterId: string): Conversation {
   };
 }
 
+function conversationToMarkdown(conv: Conversation): string {
+  const header = [
+    `# ${conv.title}`,
+    ``,
+    `- **Cluster**: ${conv.cluster_id || "n/a"}`,
+    `- **Exported**: ${new Date().toISOString()}`,
+    `- **Messages**: ${conv.messages.length}`,
+    ``,
+    `---`,
+    ``,
+  ].join("\n");
+  const body = conv.messages
+    .map((m) => {
+      const role = m.role === "user" ? "**User**" : "**Assistant**";
+      const tools =
+        m.toolCalls && m.toolCalls.length > 0
+          ? `\n_Tools_: ${m.toolCalls.map((t) => `\`${t.name}\` (${t.status})`).join(", ")}\n`
+          : "";
+      return `### ${role}\n${tools}\n${m.content || "(empty)"}\n`;
+    })
+    .join("\n---\n\n");
+  return header + body;
+}
+
+function downloadBlob(filename: string, mime: string, content: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function slugify(s: string): string {
+  return (s || "conversation")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .slice(0, 60)
+    || "conversation";
+}
+
 function relTime(ms: number): string {
   const diff = Date.now() - ms;
   if (diff < 60_000) return "now";
@@ -95,7 +140,9 @@ export function ChatPanel() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [modelId, setModelId] = useState<string>(DEFAULT_MODEL);
   const [availableModels, setAvailableModels] = useState<ModelOption[]>(FALLBACK_MODELS);
+  const [followupsLoading, setFollowupsLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const followupAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -182,90 +229,177 @@ export function ChatPanel() {
     [activeId, conversations, persist],
   );
 
-  const handleSend = useCallback(() => {
-    if (!input.trim() || isStreaming) return;
-
-    // Ensure there is an active conversation.
-    let convId = activeId;
-    if (!convId) {
-      const conv = newConversation(clusterId);
-      convId = conv.id;
-      persist((prev) => [conv, ...prev]);
-      setActiveId(conv.id);
-    }
-
-    const userText = input.trim();
-    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: userText };
-    const assistantMsg: Message = {
-      id: crypto.randomUUID(),
-      role: "assistant",
-      content: "",
-      toolCalls: [],
-    };
-
-    persist((prev) =>
-      prev.map((c) =>
-        c.id === convId
-          ? {
-              ...c,
-              cluster_id: clusterId || c.cluster_id,
-              title:
-                c.messages.length === 0 ? userText.slice(0, 50) : c.title,
-              updated_at: Date.now(),
-              messages: [...c.messages, userMsg, assistantMsg],
-            }
-          : c,
-      ),
-    );
-    setInput("");
-    setIsStreaming(true);
-
-    abortRef.current = streamChat(
-      userText,
-      clusterId,
-      (token) => {
-        persist((prev) =>
-          prev.map((c) => {
-            if (c.id !== convId) return c;
-            const msgs = [...c.messages];
-            const last = msgs[msgs.length - 1];
-            if (last && last.role === "assistant") {
-              msgs[msgs.length - 1] = { ...last, content: last.content + token };
-            }
-            return { ...c, messages: msgs, updated_at: Date.now() };
-          }),
-        );
-      },
-      (name, status) => {
-        persist((prev) =>
-          prev.map((c) => {
-            if (c.id !== convId) return c;
-            const msgs = [...c.messages];
-            const last = msgs[msgs.length - 1];
-            if (last && last.role === "assistant") {
-              const toolCalls = [...(last.toolCalls || [])];
-              const existing = toolCalls.findIndex((tc) => tc.name === name);
-              if (existing >= 0) {
-                toolCalls[existing] = { name, status: status as "running" | "done" };
-              } else {
-                toolCalls.push({ name, status: status as "running" | "done" });
+  // Generate 2-3 follow-up questions on a throwaway session so the main
+  // conversation memory isn't polluted. Best-effort — failures are silent.
+  const generateFollowups = useCallback(
+    (convId: string, userText: string, assistantText: string) => {
+      // Skip if the answer is short (likely an error or one-liner).
+      if (assistantText.trim().length < 80) return;
+      followupAbortRef.current?.abort();
+      setFollowupsLoading(true);
+      const prompt =
+        `Suggest 3 short, specific follow-up questions a DBA might ask next, based on the Q&A below. Return ONLY a JSON array of 3 strings — no other text, no markdown, no code fences. Example: ["q1","q2","q3"].\n\n` +
+        `Q: ${userText}\n\nA: ${assistantText.slice(0, 4000)}`;
+      let buffer = "";
+      followupAbortRef.current = streamChat(
+        prompt,
+        "",
+        (token) => {
+          buffer += token;
+        },
+        () => {},
+        () => {
+          setFollowupsLoading(false);
+          // Extract first JSON array in the buffer.
+          const match = buffer.match(/\[[\s\S]*?\]/);
+          if (!match) return;
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(match[0]);
+          } catch {
+            return;
+          }
+          if (!Array.isArray(parsed)) return;
+          const followups = parsed
+            .filter((q): q is string => typeof q === "string" && q.trim().length > 0)
+            .slice(0, 3)
+            .map((q) => q.trim());
+          if (followups.length === 0) return;
+          persist((prev) =>
+            prev.map((c) => {
+              if (c.id !== convId) return c;
+              const msgs = [...c.messages];
+              const last = msgs[msgs.length - 1];
+              if (last && last.role === "assistant") {
+                msgs[msgs.length - 1] = { ...last, followups };
               }
-              msgs[msgs.length - 1] = { ...last, toolCalls };
+              return { ...c, messages: msgs };
+            }),
+          );
+        },
+        () => {
+          setFollowupsLoading(false);
+        },
+        // Throwaway session id so the agent's memory stays clean.
+        `followup-${convId}-${Date.now()}`,
+        modelId,
+      );
+    },
+    [modelId, persist],
+  );
+
+  const sendText = useCallback(
+    (raw: string) => {
+      const userText = raw.trim();
+      if (!userText || isStreaming) return;
+
+      // Cancel any in-flight followup generation for the previous turn.
+      followupAbortRef.current?.abort();
+
+      // Ensure there is an active conversation.
+      let convId = activeId;
+      if (!convId) {
+        const conv = newConversation(clusterId);
+        convId = conv.id;
+        persist((prev) => [conv, ...prev]);
+        setActiveId(conv.id);
+      }
+
+      const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: userText };
+      const assistantMsg: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: "",
+        toolCalls: [],
+      };
+
+      persist((prev) =>
+        prev.map((c) => {
+          if (c.id !== convId) return c;
+          // Clear followups on the previous assistant message so chips don't
+          // linger above the new turn.
+          const cleared = c.messages.map((m, i) =>
+            i === c.messages.length - 1 && m.role === "assistant" && m.followups
+              ? { ...m, followups: undefined }
+              : m,
+          );
+          return {
+            ...c,
+            cluster_id: clusterId || c.cluster_id,
+            title: cleared.length === 0 ? userText.slice(0, 50) : c.title,
+            updated_at: Date.now(),
+            messages: [...cleared, userMsg, assistantMsg],
+          };
+        }),
+      );
+      setIsStreaming(true);
+
+      abortRef.current = streamChat(
+        userText,
+        clusterId,
+        (token) => {
+          persist((prev) =>
+            prev.map((c) => {
+              if (c.id !== convId) return c;
+              const msgs = [...c.messages];
+              const last = msgs[msgs.length - 1];
+              if (last && last.role === "assistant") {
+                msgs[msgs.length - 1] = { ...last, content: last.content + token };
+              }
+              return { ...c, messages: msgs, updated_at: Date.now() };
+            }),
+          );
+        },
+        (name, status) => {
+          persist((prev) =>
+            prev.map((c) => {
+              if (c.id !== convId) return c;
+              const msgs = [...c.messages];
+              const last = msgs[msgs.length - 1];
+              if (last && last.role === "assistant") {
+                const toolCalls = [...(last.toolCalls || [])];
+                const existing = toolCalls.findIndex((tc) => tc.name === name);
+                if (existing >= 0) {
+                  toolCalls[existing] = { name, status: status as "running" | "done" };
+                } else {
+                  toolCalls.push({ name, status: status as "running" | "done" });
+                }
+                msgs[msgs.length - 1] = { ...last, toolCalls };
+              }
+              return { ...c, messages: msgs };
+            }),
+          );
+        },
+        () => {
+          setIsStreaming(false);
+          // Pull the final assistant text from state at the moment we finished.
+          setConversations((prev) => {
+            const conv = prev.find((c) => c.id === convId);
+            const finalAssistant = conv?.messages[conv.messages.length - 1];
+            if (finalAssistant && finalAssistant.role === "assistant") {
+              generateFollowups(convId, userText, finalAssistant.content);
             }
-            return { ...c, messages: msgs };
-          }),
-        );
-      },
-      () => setIsStreaming(false),
-      (err) => {
-        console.error("Stream error:", err);
-        setStreamError(err?.message || "Unknown stream error");
-        setIsStreaming(false);
-      },
-      convId,
-      modelId,
-    );
-  }, [input, isStreaming, clusterId, activeId, modelId, persist]);
+            return prev;
+          });
+        },
+        (err) => {
+          console.error("Stream error:", err);
+          setStreamError(err?.message || "Unknown stream error");
+          setIsStreaming(false);
+        },
+        convId,
+        modelId,
+      );
+    },
+    [isStreaming, clusterId, activeId, modelId, persist, generateFollowups],
+  );
+
+  const handleSend = useCallback(() => {
+    if (!input.trim()) return;
+    const text = input;
+    setInput("");
+    sendText(text);
+  }, [input, sendText]);
 
   // clear stale error when the user starts typing
   useEffect(() => {
@@ -274,7 +408,7 @@ export function ChatPanel() {
 
   return (
     <div className="flex h-[calc(100vh-3.25rem)]">
-      <aside className="hidden lg:flex w-64 flex-col border-r border-zinc-800 bg-zinc-950/60">
+      <aside className="hidden lg:flex w-64 flex-col border-r border-zinc-800 bg-zinc-950/60 chat-sidebar">
         <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
           <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
             conversations
@@ -348,7 +482,7 @@ export function ChatPanel() {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800 gap-4 flex-wrap">
+        <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800 gap-4 flex-wrap chat-header">
           <div className="min-w-0">
             <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
               chat
@@ -389,23 +523,50 @@ export function ChatPanel() {
               ))}
             </select>
             {active && active.messages.length > 0 && (
-              <button
-                onClick={() => {
-                  if (!active) return;
-                  if (window.confirm("Clear all messages in this conversation?")) {
-                    persist((prev) =>
-                      prev.map((c) =>
-                        c.id === active.id
-                          ? { ...c, messages: [], title: "New conversation", updated_at: Date.now() }
-                          : c,
-                      ),
+              <>
+                <button
+                  onClick={() => {
+                    if (!active) return;
+                    const md = conversationToMarkdown(active);
+                    const stamp = new Date().toISOString().slice(0, 10);
+                    downloadBlob(
+                      `dbops-${slugify(active.title)}-${stamp}.md`,
+                      "text/markdown;charset=utf-8",
+                      md,
                     );
-                  }
-                }}
-                className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-rose-500/40 hover:text-rose-400 transition-colors"
-              >
-                clear messages
-              </button>
+                  }}
+                  className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-amber-500/40 hover:text-amber-300 transition-colors"
+                  title="Download conversation as Markdown (.md)"
+                >
+                  ⬇ md
+                </button>
+                <button
+                  onClick={() => {
+                    if (typeof window !== "undefined") window.print();
+                  }}
+                  className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-amber-500/40 hover:text-amber-300 transition-colors"
+                  title="Print or save as PDF via the browser print dialog"
+                >
+                  🖨 pdf
+                </button>
+                <button
+                  onClick={() => {
+                    if (!active) return;
+                    if (window.confirm("Clear all messages in this conversation?")) {
+                      persist((prev) =>
+                        prev.map((c) =>
+                          c.id === active.id
+                            ? { ...c, messages: [], title: "New conversation", updated_at: Date.now() }
+                            : c,
+                        ),
+                      );
+                    }
+                  }}
+                  className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-rose-500/40 hover:text-rose-400 transition-colors"
+                >
+                  clear messages
+                </button>
+              </>
             )}
             {active && (
               <button
@@ -429,7 +590,7 @@ export function ChatPanel() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto chat-printable">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center px-6">
               <div className="font-mono text-[10px] tracking-[0.2em] uppercase text-zinc-600 mb-3">
@@ -456,11 +617,15 @@ export function ChatPanel() {
               </div>
             </div>
           ) : (
-            <MessageList messages={messages} />
+            <MessageList
+              messages={messages}
+              onFollowupClick={(text) => sendText(text)}
+              followupsLoading={followupsLoading}
+            />
           )}
         </div>
 
-        <div className="border-t border-zinc-800 p-4">
+        <div className="border-t border-zinc-800 p-4 chat-input">
           {streamError && (
             <div className="mb-2 px-3 py-2 border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs">
               stream error: <span className="font-mono">{streamError}</span>
