@@ -282,22 +282,29 @@ def _query_detail(query, cluster_id, query_hash):
 METRIC_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,49}$")
 
 
-def _batch_timeseries(query, cluster_id, metric_names, hours):
+def _batch_timeseries(query, cluster_id, metric_names, hours, offset_hours=0):
+    """Returns metric series within the window [NOW - hours, NOW - offset_hours].
+    offset_hours=0 (default) keeps the legacy "last N hours" behavior; pass a
+    positive offset to query a past window — used by the compare page for
+    period-over-period overlays (e.g., this week vs last week)."""
     metric_names = [m for m in metric_names if METRIC_NAME_RE.match(m)][:20]
     if not metric_names:
-        return {"cluster_id": cluster_id, "hours": hours, "series": {}}
+        return {"cluster_id": cluster_id, "hours": hours, "offset_hours": offset_hours, "series": {}}
 
     placeholders = ", ".join(f":m{i}" for i in range(len(metric_names)))
-    params = {"cid": cluster_id, "hours": str(hours)}
+    params = {"cid": cluster_id, "hours": str(hours), "offset": str(offset_hours)}
     for i, m in enumerate(metric_names):
         params[f"m{i}"] = m
 
+    # Window: (NOW - hours, NOW - offset_hours]. When offset_hours=0 the upper
+    # bound collapses to NOW, matching the original "last N hours" semantics.
     rows = query(
         f"SELECT ts, metric_type, value, dimensions::text as dimensions "
         f"FROM metric_snapshots "
         f"WHERE cluster_id = :cid "
         f"AND metric_type IN ({placeholders}) "
         f"AND ts > NOW() - (:hours || ' hours')::interval "
+        f"AND ts <= NOW() - (:offset || ' hours')::interval "
         f"ORDER BY ts ASC",
         params,
     )
@@ -307,7 +314,7 @@ def _batch_timeseries(query, cluster_id, metric_names, hours):
         mt = r.get("metric_type")
         if mt in series:
             series[mt].append({"ts": r["ts"], "value": r["value"], "dimensions": r.get("dimensions")})
-    return {"cluster_id": cluster_id, "hours": hours, "series": series}
+    return {"cluster_id": cluster_id, "hours": hours, "offset_hours": offset_hours, "series": series}
 
 
 def _multi_cluster_overview(query):
@@ -776,7 +783,8 @@ def lambda_handler(event, context):
             metrics_csv = qs.get("metrics", "")
             metric_names = [m.strip() for m in metrics_csv.split(",") if m.strip()]
             hours = _parse_int(qs.get("hours"), 1)
-            return _response(200, _batch_timeseries(query, cluster_id, metric_names, hours))
+            offset_hours = _parse_int(qs.get("offset_hours"), 0, min_v=0)
+            return _response(200, _batch_timeseries(query, cluster_id, metric_names, hours, offset_hours))
         if raw_path.endswith("/index-recommendations"):
             min_ratio = _parse_float(qs.get("min_seq_ratio"), 0.5)
             return _response(200, _index_recommendations(query, cluster_id, min_ratio))

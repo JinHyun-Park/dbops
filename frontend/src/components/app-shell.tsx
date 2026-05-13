@@ -23,6 +23,7 @@ const NAV: NavGroup[] = [
     items: [
       { href: "/fleet", label: "Fleet", hint: "all clusters at a glance" },
       { href: "/dashboard", label: "Dashboard", hint: "single-cluster deep dive" },
+      { href: "/compare", label: "Compare", hint: "cluster vs cluster · period vs period" },
     ],
   },
   {
@@ -48,6 +49,7 @@ function humanize(segment: string): string {
   const map: Record<string, string> = {
     fleet: "Fleet",
     dashboard: "Dashboard",
+    compare: "Compare",
     chat: "Chat",
     "query-lab": "Query Lab",
     approvals: "Approvals",

@@ -76,13 +76,24 @@ export async function fetchTimeseries(clusterId: string, metric: string, hours =
   return res.json();
 }
 
-export async function fetchBatchTimeseries(clusterId: string, metrics: string[], hours = 1) {
+export async function fetchBatchTimeseries(
+  clusterId: string,
+  metrics: string[],
+  hours = 1,
+  offsetHours = 0,
+) {
   const csv = metrics.map(enc).join(",");
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/batch-timeseries?metrics=${csv}&hours=${hours}`));
+  const offsetQs = offsetHours > 0 ? `&offset_hours=${offsetHours}` : "";
+  const res = await fetch(
+    await api(
+      `/api/dashboard/${enc(clusterId)}/batch-timeseries?metrics=${csv}&hours=${hours}${offsetQs}`,
+    ),
+  );
   if (!res.ok) throw new Error(`Batch timeseries fetch failed: ${res.status}`);
   return res.json() as Promise<{
     cluster_id: string;
     hours: number;
+    offset_hours?: number;
     series: Record<string, Array<{ ts: string; value: number | string; dimensions?: string }>>;
   }>;
 }
