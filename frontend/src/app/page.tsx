@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { fetchMultiClusterOverview, fetchAlertRules, fetchCost } from "@/lib/api-client";
+import { OnboardingModal, useOnboarding } from "@/components/onboarding-modal";
 
 interface ClusterRow {
   cluster_id: string;
@@ -32,6 +33,7 @@ export default function HomePage() {
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [cost7d, setCost7d] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const onboarding = useOnboarding();
 
   useEffect(() => {
     Promise.allSettled([fetchMultiClusterOverview(), fetchAlertRules(), fetchCost(7)])
@@ -54,20 +56,30 @@ export default function HomePage() {
 
   return (
     <div className="max-w-7xl mx-auto p-8">
-      <header className="mb-10">
-        <div className="font-mono text-[11px] tracking-[0.25em] text-amber-400/70 uppercase mb-2">
-          ops console
+      <header className="mb-10 flex items-start justify-between gap-6">
+        <div>
+          <div className="font-mono text-[11px] tracking-[0.25em] text-amber-400/70 uppercase mb-2">
+            ops console
+          </div>
+          <h1 className="text-4xl font-semibold tracking-tight text-zinc-50">
+            Aurora at a glance.
+          </h1>
+          <p className="mt-3 text-zinc-400 max-w-2xl">
+            AI agent + live metrics + DBA-grade controls across every registered cluster. Press
+            <kbd className="mx-1.5 px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-[10px] font-mono">
+              ⌘K
+            </kbd>
+            for command palette.
+          </p>
         </div>
-        <h1 className="text-4xl font-semibold tracking-tight text-zinc-50">
-          Aurora at a glance.
-        </h1>
-        <p className="mt-3 text-zinc-400 max-w-2xl">
-          AI agent + live metrics + DBA-grade controls across every registered cluster. Press
-          <kbd className="mx-1.5 px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-[10px] font-mono">
-            ⌘K
-          </kbd>
-          for command palette.
-        </p>
+        <button
+          onClick={onboarding.reopen}
+          className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500/50 hover:text-amber-300 transition-colors"
+          title="튜토리얼 다시 보기"
+        >
+          <span className="text-sm leading-none">?</span>
+          <span>튜토리얼</span>
+        </button>
       </header>
 
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-zinc-800 border border-zinc-800 mb-10">
@@ -189,6 +201,7 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+      <OnboardingModal open={onboarding.open} onClose={onboarding.close} />
     </div>
   );
 }
