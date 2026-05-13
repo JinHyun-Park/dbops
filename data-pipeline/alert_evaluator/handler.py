@@ -1,5 +1,7 @@
 import json
 import os
+import time
+import urllib.parse
 import urllib.request
 import urllib.error
 import boto3
@@ -32,44 +34,98 @@ def _post_json(url: str, payload: dict, timeout: int = 5) -> tuple[int, str]:
         return 0, str(e)[:200]
 
 
+def _dashboard_url(rule: dict, path: str = "/dashboard") -> str:
+    """Build a deep link into the DBOps console. Returns empty if FRONTEND_URL
+    is not configured so callers can drop the link gracefully."""
+    base = os.environ.get("FRONTEND_URL", "").rstrip("/")
+    if not base:
+        return ""
+    qs = urllib.parse.urlencode({
+        "cluster": rule["cluster_id"],
+        "alert_id": rule["id"],
+    })
+    return f"{base}{path}?{qs}"
+
+
 def _build_slack_payload(rule: dict, latest: float) -> dict:
-    """Slack Block Kit — color-coded section with cluster, metric, threshold."""
-    return {
-        "blocks": [
-            {
-                "type": "header",
-                "text": {"type": "plain_text", "text": f"🚨 DBOps alert: {rule['cluster_id']}"},
-            },
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*Rule:*\n{rule['name']}"},
-                    {"type": "mrkdwn", "text": f"*Metric:*\n`{rule['metric_type']}`"},
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*Threshold:*\n`{rule['comparison']} {rule['threshold']}`",
-                    },
-                    {"type": "mrkdwn", "text": f"*Observed:*\n`{latest:.2f}`"},
-                ],
-            },
-            {
-                "type": "context",
-                "elements": [
-                    {"type": "mrkdwn", "text": f"rule_id `{rule['id']}` · evaluated by dbops-alert-evaluator"},
-                ],
-            },
+    """Slack Block Kit — color-coded section + dashboard/alerts buttons."""
+    dashboard = _dashboard_url(rule, "/dashboard")
+    alerts = _dashboard_url(rule, "/alerts")
+    blocks: list[dict] = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": f"🚨 DBOps alert: {rule['cluster_id']}"},
+        },
+        {
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"*Rule:*\n{rule['name']}"},
+                {"type": "mrkdwn", "text": f"*Metric:*\n`{rule['metric_type']}`"},
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Threshold:*\n`{rule['comparison']} {rule['threshold']}`",
+                },
+                {"type": "mrkdwn", "text": f"*Observed:*\n`{latest:.2f}`"},
+            ],
+        },
+    ]
+    # Deep-link buttons — only when FRONTEND_URL is set so users without a
+    # deployed CloudFront domain still get a usable message.
+    if dashboard:
+        blocks.append({
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Open dashboard"},
+                    "url": dashboard,
+                    "style": "primary",
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Open alerts"},
+                    "url": alerts,
+                },
+            ],
+        })
+    blocks.append({
+        "type": "context",
+        "elements": [
+            {"type": "mrkdwn", "text": f"rule_id `{rule['id']}` · evaluated by dbops-alert-evaluator"},
         ],
+    })
+    return {
+        "blocks": blocks,
         # Fallback for clients that don't render blocks (push notifications).
         "text": f"DBOps alert: {rule['name']} ({rule['metric_type']}={latest:.2f} {rule['comparison']} {rule['threshold']}) on {rule['cluster_id']}",
     }
 
 
+def _dedup_window_seconds() -> int:
+    """How many seconds make up one PagerDuty dedup bucket. Configurable via
+    env var so a deploy can tune flapping behavior without a code change."""
+    try:
+        minutes = int(os.environ.get("ALERT_DEDUP_WINDOW_MINUTES", "30"))
+    except ValueError:
+        minutes = 30
+    return max(60, minutes * 60)  # floor at 1 minute to avoid pathological values
+
+
 def _build_pagerduty_payload(rule: dict, latest: float, integration_key: str) -> dict:
-    """PagerDuty Events API v2 — dedup_key=rule_id so a flapping rule groups."""
+    """PagerDuty Events API v2 — dedup_key now uses a TTL bucket so a flapping
+    rule re-opens an incident every ALERT_DEDUP_WINDOW_MINUTES (default 30m)
+    instead of being silenced for the lifetime of a single incident."""
+    window = _dedup_window_seconds()
+    bucket = int(time.time()) // window
+    dashboard = _dashboard_url(rule, "/dashboard")
+    links = []
+    if dashboard:
+        links.append({"href": dashboard, "text": "Open dashboard"})
+        links.append({"href": _dashboard_url(rule, "/alerts"), "text": "Open alerts"})
     return {
         "routing_key": integration_key,
         "event_action": "trigger",
-        "dedup_key": f"dbops-rule-{rule['id']}",
+        "dedup_key": f"dbops-rule-{rule['id']}-w{bucket}",
         "payload": {
             "summary": f"{rule['name']}: {rule['metric_type']}={latest:.2f} {rule['comparison']} {rule['threshold']}",
             "source": rule["cluster_id"],
@@ -83,8 +139,10 @@ def _build_pagerduty_payload(rule: dict, latest: float, integration_key: str) ->
                 "comparison": rule["comparison"],
                 "threshold": rule["threshold"],
                 "observed_value": latest,
+                "dedup_window_minutes": window // 60,
             },
         },
+        "links": links,
     }
 
 

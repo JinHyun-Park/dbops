@@ -14,3 +14,13 @@ class Settings:
 
     CACHE_DB_MIN_ACU = 0.5
     CACHE_DB_MAX_ACU = 4
+
+    # Frontend deep-link base URL used by alert dispatchers (Slack button,
+    # PagerDuty links). Fill in your CloudFront domain after the first
+    # frontend stack deploy — leave empty to disable the deep-link.
+    FRONTEND_URL = ""
+
+    # PagerDuty dedup key bucket width. Same rule firing within the window
+    # groups into one incident; after the window elapses, a fresh incident
+    # opens so on-call sees the alert is still active.
+    ALERT_DEDUP_WINDOW_MINUTES = 30
