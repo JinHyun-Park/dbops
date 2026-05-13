@@ -61,7 +61,7 @@ export default function CostPage() {
       <PageHeader
         eyebrow="finance"
         title="Bedrock cost"
-        description="DBOps에서 호출하는 모든 Bedrock 비용 — `Application=DBOps` 태그가 박힌 Application Inference Profile을 경유. 정확한 attribution을 위해 AWS Billing → Cost allocation tags에서 `Application` 태그를 활성화해야 합니다(활성화 후 ~24h 뒤부터 차트 반영, 과거 비용은 소급 안 됨)."
+        description="DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다."
         actions={
           <div className="flex items-center gap-1">
             <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">range</span>
@@ -248,78 +248,122 @@ export default function CostPage() {
   );
 }
 
+const GUIDE_STORAGE_KEY = "dbops_cost_guide_open";
+
 function ActivationGuide() {
+  // Default collapsed — the headline + "Activate tag →" button already
+  // convey 80% of the message. localStorage carries the user's preference
+  // across page loads.
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = localStorage.getItem(GUIDE_STORAGE_KEY);
+      if (stored === "1") setOpen(true);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const toggle = () => {
+    setOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(GUIDE_STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="mb-6 border border-amber-500/40 bg-amber-500/5">
-      <div className="px-5 py-4 border-b border-amber-500/30 flex items-center justify-between gap-4">
-        <div>
-          <div className="font-mono text-[10px] tracking-[0.2em] uppercase text-amber-300 mb-1">
-            cost attribution — one-time activation needed
+      <div className="px-5 py-3 flex items-center justify-between gap-4">
+        <button
+          onClick={toggle}
+          className="flex items-center gap-3 min-w-0 text-left flex-1 group"
+          aria-expanded={open}
+        >
+          <span
+            className={`flex-shrink-0 text-amber-300 transition-transform ${open ? "rotate-90" : ""}`}
+            aria-hidden
+          >
+            ▸
+          </span>
+          <div className="min-w-0">
+            <div className="font-mono text-[10px] tracking-[0.2em] uppercase text-amber-300">
+              activation required for tagged attribution
+            </div>
+            <div className="text-xs text-amber-100/90 mt-0.5 truncate group-hover:text-amber-100">
+              Application=DBOps cost allocation tag 활성화 한 번이면 끝 — {open ? "위 단계를 따라가세요" : "클릭해서 단계 보기"}
+            </div>
           </div>
-          <div className="text-sm text-amber-100 leading-snug">
-            DBOps Bedrock 호출은 이미 <span className="font-mono text-amber-300">Application=DBOps</span> 태그가 박힌
-            Application Inference Profile을 경유합니다. AWS Billing 콘솔에서 그 태그를{" "}
-            <span className="text-amber-300">Cost allocation tag</span>으로 활성화하면 Cost Explorer가 DBOps 비용만 분리해서 attribute합니다.
-          </div>
-        </div>
+        </button>
         <a
           href="https://console.aws.amazon.com/billing/home#/tags"
           target="_blank"
           rel="noreferrer"
-          className="shrink-0 text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
+          className="shrink-0 text-xs font-medium px-3 py-1.5 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
+          onClick={(e) => e.stopPropagation()}
         >
-          Activate tag →
+          Activate →
         </a>
       </div>
 
-      <ol className="px-5 py-4 space-y-3 text-sm text-zinc-200">
-        <Step
-          n={1}
-          title="AWS Billing → Cost allocation tags 페이지 열기"
-          body={
-            <>
-              관리자 권한이 필요합니다(AWS Organizations 환경이면 management account).{" "}
-              <a
-                href="https://console.aws.amazon.com/billing/home#/tags"
-                target="_blank"
-                rel="noreferrer"
-                className="text-sky-300 hover:text-sky-200 underline"
-              >
-                직접 이동
-              </a>
-            </>
-          }
-        />
-        <Step
-          n={2}
-          title={
-            <>
-              <span className="font-mono">User-defined cost allocation tags</span> 탭에서{" "}
-              <span className="font-mono text-amber-300">Application</span> 찾고 체크 → <span className="text-amber-300">Activate</span>
-            </>
-          }
-          body={
-            <>
-              여유가 되면 <span className="font-mono">Environment</span>도 함께 체크해 env별(dev/prod) 분리도 활성화하세요.
-            </>
-          }
-        />
-        <Step
-          n={3}
-          title="~24시간 대기 후 이 페이지 새로고침"
-          body={
-            <>
-              AWS가 새 데이터를 인덱싱하면 차트와 모델별 분해표가 자동으로 채워집니다.{" "}
-              <span className="text-amber-300/80">활성화 시점 이전 비용은 소급 적용되지 않습니다</span>—
-              과거 spend는 영구히 untagged로 남습니다.
-            </>
-          }
-        />
-      </ol>
+      {open && (
+        <>
+          <ol className="px-5 py-4 space-y-3 text-sm text-zinc-200 border-t border-amber-500/20">
+            <Step
+              n={1}
+              title="AWS Billing → Cost allocation tags 페이지 열기"
+              body={
+                <>
+                  관리자 권한이 필요합니다(AWS Organizations 환경이면 management account).{" "}
+                  <a
+                    href="https://console.aws.amazon.com/billing/home#/tags"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sky-300 hover:text-sky-200 underline"
+                  >
+                    직접 이동
+                  </a>
+                </>
+              }
+            />
+            <Step
+              n={2}
+              title={
+                <>
+                  <span className="font-mono">User-defined cost allocation tags</span> 탭에서{" "}
+                  <span className="font-mono text-amber-300">Application</span> 찾고 체크 → <span className="text-amber-300">Activate</span>
+                </>
+              }
+              body={
+                <>
+                  여유가 되면 <span className="font-mono">Environment</span>도 함께 체크해 env별(dev/prod) 분리도 활성화하세요.
+                </>
+              }
+            />
+            <Step
+              n={3}
+              title="~24시간 대기 후 이 페이지 새로고침"
+              body={
+                <>
+                  AWS가 새 데이터를 인덱싱하면 차트와 모델별 분해표가 자동으로 채워집니다.{" "}
+                  <span className="text-amber-300/80">활성화 시점 이전 비용은 소급 적용되지 않습니다</span>—
+                  과거 spend는 영구히 untagged로 남습니다.
+                </>
+              }
+            />
+          </ol>
 
-      <div className="px-5 py-3 border-t border-amber-500/20 text-[11px] text-amber-200/70 leading-relaxed">
-        Why this isn't automatic: AWS는 보안상 cost allocation tag 활성화를 관리자 콘솔 액션으로만 허용합니다. CDK도 API도 활성화 자체는 못 합니다. 한 번 활성화하면 이후 모든 DBOps 비용이 자동 attribute 됩니다.
-      </div>
+          <div className="px-5 py-3 border-t border-amber-500/20 text-[11px] text-amber-200/70 leading-relaxed">
+            Why this isn't automatic: AWS는 보안상 cost allocation tag 활성화를 관리자 콘솔 액션으로만 허용합니다. CDK도 API도 활성화 자체는 못 합니다. 한 번 활성화하면 이후 모든 DBOps 비용이 자동 attribute 됩니다.
+          </div>
+        </>
+      )}
     </div>
   );
 }
