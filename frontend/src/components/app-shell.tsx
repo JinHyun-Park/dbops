@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { AuthGuard } from "@/components/auth-guard";
 import { AuthButton } from "@/components/auth-button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { OnboardingModal } from "@/components/onboarding-modal";
 
 interface NavItem {
   href: string;
@@ -213,6 +214,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </header>
           <main className="flex-1 overflow-y-auto pb-14 md:pb-0">{children}</main>
         </div>
+        <OnboardingModal />
       </div>
     </AuthGuard>
   );
