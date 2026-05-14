@@ -25,7 +25,6 @@ interface CostData {
   range_days: number;
   total: number;
   total_tagged?: number;
-  total_all_bedrock?: number;
   currency: string;
   daily: { date: string; amount: number }[];
   by_usage_type: { usage_type: string; amount: number; quantity: number }[];
@@ -128,7 +127,7 @@ export default function CostPage() {
         />
       ) : (
         <>
-          <StatRow cols={4}>
+          <StatRow cols={3}>
             <Stat
               label={`Total ${days}d`}
               value={loading ? "···" : `$${data?.total.toFixed(2) ?? "0.00"}`}
@@ -148,21 +147,6 @@ export default function CostPage() {
               hint="daily avg × 30"
               loading={loading}
             />
-            {(() => {
-              const acct = data?.total_all_bedrock ?? 0;
-              const headline = data?.total ?? 0;
-              const attentionAccent: "amber" | "neutral" =
-                acct > 0 && headline === 0 ? "amber" : "neutral";
-              return (
-                <Stat
-                  label="Account-wide Bedrock"
-                  value={loading ? "···" : `$${acct.toFixed(2)}`}
-                  hint="all Bedrock in account (not DBOps-only)"
-                  loading={loading}
-                  accent={attentionAccent}
-                />
-              );
-            })()}
           </StatRow>
 
           <Section eyebrow="trend" title="Daily Bedrock spend">

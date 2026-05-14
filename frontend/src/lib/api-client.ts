@@ -429,7 +429,6 @@ export async function fetchCost(days = 30) {
     end: string;
     total: number;
     total_tagged?: number;
-    total_all_bedrock?: number;
     currency: string;
     daily: { date: string; amount: number }[];
     by_usage_type: { usage_type: string; amount: number; quantity: number }[];

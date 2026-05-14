@@ -103,46 +103,39 @@ def lambda_handler(event, context):
 
     tag_filter = {"Tags": {"Key": "Application", "Values": ["DBOps"]}}
 
-    # Two parallel queries: tagged vs untagged. Both scoped to Bedrock-family
-    # SERVICE values so we don't include unrelated AWS spend.
+    # Single Cost Explorer query scoped to BOTH the Bedrock-family SERVICE
+    # values AND the Application=DBOps tag. We deliberately don't compute an
+    # untagged "account-wide Bedrock" total — the account may host other
+    # projects' Bedrock workloads (Kiro, ad-hoc experiments) that have nothing
+    # to do with DBOps, so mixing them in would misattribute spend.
     tagged_daily, tagged_total, tagged_err = _query_total(ce, start, end, services, tag_filter)
-    all_daily, all_total, all_err = _query_total(ce, start, end, services, None)
 
-    # DBOps Application Inference Profiles are already tagged
-    # Application=DBOps in CDK (inference_profile_setup Lambda). The only
-    # reason tagged_total is $0 is that the user hasn't activated the
-    # 'Application' cost allocation tag in the AWS Billing console —
-    # Cost Explorer ignores tags until they're explicitly activated, and
-    # activation does NOT retroactively tag past spend.
-    #
-    # We deliberately do NOT fall back to the untagged Bedrock-family
-    # total: the account may have other Bedrock workloads (Kiro,
-    # one-off experiments, other projects) that have nothing to do with
-    # DBOps. Mixing them in would misattribute spend.
+    # When tagged_total is 0, the most likely cause is that the user has not
+    # yet activated `Application` as a cost-allocation tag in AWS Billing —
+    # CDK already stamps the tag on every AIP/Lambda/RDS resource, but Cost
+    # Explorer ignores tags until they're explicitly activated, and activation
+    # does NOT back-fill past spend. Surface a one-time activation guide.
     tag_warning = None
-    if tagged_total == 0 and all_total > 0:
+    if tagged_total == 0:
         tag_warning = (
             "DBOps Bedrock calls are routed through tagged Application "
             "Inference Profiles, but the 'Application' cost allocation tag "
-            "is not yet activated in the AWS Billing console. Activate it "
-            "now — Cost Explorer starts attributing DBOps spend within ~24h "
-            "of activation. (Note: activation does not back-fill past spend; "
-            "the headline below shows $0 until the tag is recognized.)"
+            "is not yet activated in the AWS Billing console (or you haven't "
+            "used Bedrock yet in this window). Activate the tag once — Cost "
+            "Explorer starts attributing DBOps spend within ~24h. "
+            "(Note: activation does not back-fill past spend.)"
         )
 
-    # Headline always = tag-attributed spend so the user only ever sees
-    # DBOps-specific cost. all_total is exposed separately as a diagnostic.
     headline_total = tagged_total
     headline_daily = tagged_daily
 
-    # Per-model breakdown by USAGE_TYPE (e.g., "APN1-Bedrock:Tokens:Input:Anthropic:Claude-Sonnet-4-6").
+    # Per-model breakdown by USAGE_TYPE — scoped to the same Bedrock+tag
+    # filter so the table only shows DBOps spend.
     model_split = []
     try:
-        breakdown_filter = (
-            {"And": [{"Dimensions": {"Key": "SERVICE", "Values": services}}, tag_filter]}
-            if tagged_total > 0
-            else {"Dimensions": {"Key": "SERVICE", "Values": services}}
-        )
+        breakdown_filter = {
+            "And": [{"Dimensions": {"Key": "SERVICE", "Values": services}}, tag_filter]
+        }
         resp = ce.get_cost_and_usage(
             TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
             Granularity="DAILY",
@@ -164,12 +157,7 @@ def lambda_handler(event, context):
         print(f"model_split error: {e}")
 
     no_data_reason = None
-    if all_total == 0:
-        no_data_reason = (
-            "No Bedrock spend in this window — either you haven't invoked "
-            "Bedrock yet, or Cost Explorer hasn't caught up (24-48h lag)."
-        )
-    elif tagged_err == "cost_allocation_tag_not_activated":
+    if tagged_err == "cost_allocation_tag_not_activated":
         no_data_reason = (
             "The 'Application' cost allocation tag is not activated in the "
             "AWS Billing console — activate it, then re-check in 24h."
@@ -182,7 +170,6 @@ def lambda_handler(event, context):
         "end": end.isoformat(),
         "total": round(headline_total, 4),
         "total_tagged": round(tagged_total, 4),
-        "total_all_bedrock": round(all_total, 4),
         "currency": "USD",
         "daily": headline_daily,
         "by_usage_type": model_split,
