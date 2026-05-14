@@ -110,6 +110,16 @@ FINDINGS = [
      "off", "on",
      "Lock waits are not logged. Turn log_lock_waits on so contention shows up in the slow-query log.",
      {"current": "off", "recommended": "on"}),
+    # P3.3.2 demos — Serverless v2 over-provisioned ceiling + Compute Savings Plan
+    # opportunity. Surfaces the new cost check_types in the Maintenance Health panel.
+    ("cost_serverless_max_too_high", "info", "Serverless v2 (max 32.0 ACU)",
+     "7d p95 CPU 38.2% / max 88.0%", "< 40% p95 CPU → max ACU likely overprovisioned",
+     "Max ACU is 32.0 but observed p95 CPU is only 38.2%. Lower max ACU to ~16.0 for the same throughput at a fraction of the burst-cost exposure. (Serverless v2 bills per ACU-hour at peak.)",
+     {"current_min_acu": 0.5, "current_max_acu": 32.0, "suggested_max_acu": 16.0, "p95_cpu": 38.2, "max_cpu": 88.0}),
+    ("cost_savings_plan_opportunity", "info", "Account-level Compute Savings Plan",
+     "~$42.30/mo savings projected", "> $10/mo savings → worth committing",
+     "Commit $0.18/hr Compute Savings Plan (1-year, no upfront) — projected ~$42.30/mo savings. Cost Explorer → Savings Plans → Recommendations confirms the exact hourly commit.",
+     {"estimated_monthly_savings_usd": 42.30, "hourly_commitment_usd": 0.18, "term_years": 1, "payment_option": "NO_UPFRONT", "lookback_days": 30}),
 ]
 
 
@@ -157,16 +167,26 @@ def _wipe_demo_rows(rds_data, arn, secret, db, cluster_id):
 
 
 def _seed_cluster_meta(rds_data, arn, secret, db, cluster_id):
+    # The demo cluster is a Serverless v2 with a deliberately over-wide
+    # max ACU (32) so the cost_serverless_max_too_high finding can fire on
+    # the seeded CPU profile (low avg/p95). This gives the user a concrete
+    # example of every cost check type without needing real data.
     _exec(rds_data, arn, secret, db, """
         INSERT INTO cluster_meta
             (cluster_id, account_id, region, engine, engine_version,
-             instance_class, status, endpoint, max_connections, storage_size_gb, updated_at)
+             instance_class, status, endpoint, max_connections, storage_size_gb,
+             engine_mode, serverlessv2_min_acu, serverlessv2_max_acu, updated_at)
         VALUES (:cid, '000000000000', 'ap-northeast-2', :engine, '15.5',
-                'db.r6g.xlarge', 'available',
+                'db.serverless', 'available',
                 'sample-cluster.cluster-demo.ap-northeast-2.rds.amazonaws.com',
-                200, 4250, NOW())
+                200, 4250,
+                'serverless', 0.5, 32.0, NOW())
         ON CONFLICT (cluster_id) DO UPDATE
-            SET status = 'available', updated_at = NOW()
+            SET status = 'available',
+                engine_mode = EXCLUDED.engine_mode,
+                serverlessv2_min_acu = EXCLUDED.serverlessv2_min_acu,
+                serverlessv2_max_acu = EXCLUDED.serverlessv2_max_acu,
+                updated_at = NOW()
     """, [_str("cid", cluster_id), _str("engine", SAMPLE_ENGINE)])
 
 

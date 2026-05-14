@@ -88,7 +88,7 @@ class DataStack(cdk.Stack):
             service_token=migrate_provider.service_token,
             properties={
                 # Bumping this string forces re-run on next deploy if you need to.
-                "schema_version": "v8",
+                "schema_version": "v9",
             },
         )
         migrate_resource.node.add_dependency(self.cache_db)
@@ -119,7 +119,12 @@ class DataStack(cdk.Stack):
                      "pi:GetResourceMetrics", "pi:DescribeDimensionKeys",
                      "rds-data:ExecuteStatement", "rds-data:BatchExecuteStatement",
                      "cloudwatch:GetMetricStatistics", "cloudwatch:GetMetricData",
-                     "secretsmanager:GetSecretValue"],
+                     "secretsmanager:GetSecretValue",
+                     # Cost Explorer — Savings Plan / RI recommendations for the
+                     # cost_savings_plan_opportunity finding. Cached 23h on the
+                     # cache DB so the per-call $0.01 fee fires once per day at most.
+                     "ce:GetSavingsPlansPurchaseRecommendation",
+                     "ce:GetReservationPurchaseRecommendation"],
             resources=["*"],
         ))
 

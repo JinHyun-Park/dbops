@@ -31,6 +31,8 @@ const CHECK_LABELS: Record<string, string> = {
   setting_misconfigured: "Config",
   cost_oversized: "Cost",
   cost_serverless_max_too_high: "Cost",
+  cost_serverless_min_too_low: "Cost",
+  cost_savings_plan_opportunity: "Cost",
 };
 
 // Full PG tab set. MySQL exposes a trimmed list (VACUUM/Bloat/Extensions are
