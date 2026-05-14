@@ -58,12 +58,14 @@ export interface ChatMessage {
 }
 
 // Tool-use marker patterns that occasionally leak from the model's raw
-// stream when Strands forwards text chunks during tool invocation. We
-// strip them at the SSE boundary so the user never sees `<invoke …>` or
-// `<parameter …>` in chat. Holdback retains a trailing partial tag
-// (e.g. "<inv") across chunk boundaries.
+// stream when Strands forwards text chunks during tool invocation, plus
+// the `<result>` / `<output>` wrappers the model sometimes uses to
+// frame simulated tool responses. We strip them at the SSE boundary so
+// the user never sees `<invoke …>`, `<parameter …>`, or `<result>` in
+// chat. Holdback retains a trailing partial tag (e.g. "<inv") across
+// chunk boundaries.
 const TOOL_TAG_PATTERN =
-  /<\/?(?:antml:)?(?:function_calls|invoke|parameter|tool_use|thinking)\b[^>]*>/gi;
+  /<\/?(?:antml:)?(?:function_calls|function_results|invoke|parameter|tool_use|tool_result|thinking|result|output)\b[^>]*>/gi;
 
 // Partial-tag detector — hold back chunks that end with a possibly-incomplete
 // marker tag. Matches: `<`, `</`, `<inv…`, `</invoke…`, etc. — bounded by
@@ -71,7 +73,11 @@ const TOOL_TAG_PATTERN =
 // like "if x < 5" doesn't match (`< 5` has a non-letter after `<` and isn't
 // at end-of-string after `<`); "<a href=…>link</a>" doesn't match because
 // every `<` is already closed by a `>` before end-of-stream.
-const PARTIAL_TAG_RE = /<\/?(?:[afiopt][^>]{0,200})?$/i;
+//
+// First-letter set covers the prefixes of every tag in TOOL_TAG_PATTERN:
+//   a (antml:), f (function_calls/results), i (invoke), o (output),
+//   p (parameter), r (result), t (tool_use/result, thinking)
+const PARTIAL_TAG_RE = /<\/?(?:[afioprt][^>]{0,200})?$/i;
 
 function makeSanitizer(): (chunk: string) => string {
   let holdback = "";
