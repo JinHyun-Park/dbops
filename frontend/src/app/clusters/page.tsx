@@ -719,117 +719,213 @@ export default function ClustersPage() {
             secondary={{ href: "/chat", label: "Ask the agent first" }}
           />
         ) : (
-          <div className="border border-zinc-800 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
-                <tr>
-                  <th className="text-left px-4 py-2.5 font-medium">cluster</th>
-                  <th className="text-left px-4 py-2.5 font-medium">engine</th>
-                  <th className="text-left px-4 py-2.5 font-medium">
-                    account · region
-                  </th>
-                  <th className="text-left px-4 py-2.5 font-medium">status</th>
-                  <th className="text-left px-4 py-2.5 font-medium">
-                    connection
-                  </th>
-                  <th className="text-left px-4 py-2.5 font-medium">
-                    registered
-                  </th>
-                  <th className="text-right px-4 py-2.5 font-medium">
-                    actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800">
-                {clusters.map((c) => {
-                  const conn = c.connection_status || "untested";
-                  const connStyle = CONN_STYLES[conn] || CONN_STYLES.untested;
-                  const statusColor =
-                    STATUS_STYLES[c.status || ""] || "text-zinc-500";
-                  return (
-                    <tr key={c.cluster_id} className="hover:bg-zinc-900/40">
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className="text-zinc-100 font-mono text-xs">
+          <>
+            {/* Mobile card stack — narrow screens can't fit 7-column table. */}
+            <div className="md:hidden space-y-3">
+              {clusters.map((c) => {
+                const conn = c.connection_status || "untested";
+                const connStyle = CONN_STYLES[conn] || CONN_STYLES.untested;
+                const statusColor =
+                  STATUS_STYLES[c.status || ""] || "text-zinc-500";
+                return (
+                  <div
+                    key={c.cluster_id}
+                    className="border border-zinc-800 rounded-lg p-3 bg-zinc-900/40"
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-zinc-100 font-mono text-xs truncate">
                             {c.cluster_id}
-                          </div>
+                          </span>
                           {c.is_demo && (
-                            <span className="px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
+                            <span className="px-1.5 py-0.5 text-[9px] font-mono uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
                               demo
                             </span>
                           )}
                         </div>
-                        {c.spoke_role_arn && (
-                          <div
-                            className="text-[10px] text-zinc-500 mt-0.5 font-mono truncate max-w-xs"
-                            title={c.spoke_role_arn}
-                          >
-                            ⇢ {c.spoke_role_arn}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <div className="text-zinc-300 text-xs">
+                        <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
                           {c.engine || "—"}
+                          {c.engine_version ? ` ${c.engine_version}` : ""}
                         </div>
-                        {c.engine_version && (
-                          <div className="text-[10px] text-zinc-500 font-mono">
-                            {c.engine_version}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 text-zinc-300 text-xs font-mono">
-                        {c.account_id}
-                        <div className="text-zinc-500 text-[10px]">
-                          {c.region}
-                        </div>
-                      </td>
-                      <td className={`px-4 py-2.5 text-xs ${statusColor}`}>
+                      </div>
+                      <span
+                        className={`shrink-0 text-[10px] font-mono ${statusColor}`}
+                      >
                         {c.status || "—"}
-                      </td>
-                      <td className="px-4 py-2.5">
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5 text-[11px] mb-2">
+                      <div className="text-zinc-400">
+                        <span className="text-zinc-600">acct: </span>
+                        <span className="font-mono text-zinc-300">
+                          {c.account_id}
+                        </span>
+                      </div>
+                      <div className="text-zinc-400">
+                        <span className="text-zinc-600">region: </span>
+                        <span className="font-mono text-zinc-300">
+                          {c.region}
+                        </span>
+                      </div>
+                      <div className="text-zinc-400">
+                        <span className="text-zinc-600">conn: </span>
                         <span
-                          className={`px-1.5 py-0.5 border text-[10px] font-mono ${connStyle.classes}`}
-                          title={c.connection_error || ""}
+                          className={`px-1 py-px border text-[9px] font-mono ${connStyle.classes}`}
                         >
                           {connStyle.label}
                         </span>
-                      </td>
-                      <td className="px-4 py-2.5 text-zinc-500 text-xs">
-                        {relTime(c.registered_at)}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        <div className="flex items-center justify-end gap-3">
-                          <Link
-                            href={`/dashboard?cluster=${encodeURIComponent(
-                              c.cluster_id,
-                            )}`}
-                            className="text-xs text-amber-400/90 hover:text-amber-300"
-                          >
-                            dashboard →
-                          </Link>
-                          {admin && (
-                            <button
-                              onClick={() => handleDelete(c)}
-                              disabled={deletingId === c.cluster_id}
-                              className="text-[11px] text-zinc-500 hover:text-rose-300 disabled:opacity-50 transition-colors"
-                              title={
-                                c.is_demo
-                                  ? "데모 클러스터 및 합성 데이터 삭제"
-                                  : "레지스트리에서 해제"
-                              }
+                      </div>
+                      <div className="text-zinc-400">
+                        <span className="text-zinc-600">added: </span>
+                        <span className="text-zinc-300">
+                          {relTime(c.registered_at)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-1.5 border-t border-zinc-800">
+                      <Link
+                        href={`/dashboard?cluster=${encodeURIComponent(
+                          c.cluster_id,
+                        )}`}
+                        className="text-xs text-amber-400/90 hover:text-amber-300"
+                      >
+                        dashboard →
+                      </Link>
+                      {admin && (
+                        <button
+                          onClick={() => handleDelete(c)}
+                          disabled={deletingId === c.cluster_id}
+                          className="text-[11px] text-zinc-500 hover:text-rose-300 disabled:opacity-50"
+                        >
+                          {deletingId === c.cluster_id ? "…" : "delete"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop table — unchanged from the 7-column registry layout. */}
+            <div className="hidden md:block border border-zinc-800 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
+                  <tr>
+                    <th className="text-left px-4 py-2.5 font-medium">
+                      cluster
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium">
+                      engine
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium">
+                      account · region
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium">
+                      status
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium">
+                      connection
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium">
+                      registered
+                    </th>
+                    <th className="text-right px-4 py-2.5 font-medium">
+                      actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800">
+                  {clusters.map((c) => {
+                    const conn = c.connection_status || "untested";
+                    const connStyle = CONN_STYLES[conn] || CONN_STYLES.untested;
+                    const statusColor =
+                      STATUS_STYLES[c.status || ""] || "text-zinc-500";
+                    return (
+                      <tr key={c.cluster_id} className="hover:bg-zinc-900/40">
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <div className="text-zinc-100 font-mono text-xs">
+                              {c.cluster_id}
+                            </div>
+                            {c.is_demo && (
+                              <span className="px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
+                                demo
+                              </span>
+                            )}
+                          </div>
+                          {c.spoke_role_arn && (
+                            <div
+                              className="text-[10px] text-zinc-500 mt-0.5 font-mono truncate max-w-xs"
+                              title={c.spoke_role_arn}
                             >
-                              {deletingId === c.cluster_id ? "…" : "delete"}
-                            </button>
+                              ⇢ {c.spoke_role_arn}
+                            </div>
                           )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="text-zinc-300 text-xs">
+                            {c.engine || "—"}
+                          </div>
+                          {c.engine_version && (
+                            <div className="text-[10px] text-zinc-500 font-mono">
+                              {c.engine_version}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-zinc-300 text-xs font-mono">
+                          {c.account_id}
+                          <div className="text-zinc-500 text-[10px]">
+                            {c.region}
+                          </div>
+                        </td>
+                        <td className={`px-4 py-2.5 text-xs ${statusColor}`}>
+                          {c.status || "—"}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span
+                            className={`px-1.5 py-0.5 border text-[10px] font-mono ${connStyle.classes}`}
+                            title={c.connection_error || ""}
+                          >
+                            {connStyle.label}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-zinc-500 text-xs">
+                          {relTime(c.registered_at)}
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          <div className="flex items-center justify-end gap-3">
+                            <Link
+                              href={`/dashboard?cluster=${encodeURIComponent(
+                                c.cluster_id,
+                              )}`}
+                              className="text-xs text-amber-400/90 hover:text-amber-300"
+                            >
+                              dashboard →
+                            </Link>
+                            {admin && (
+                              <button
+                                onClick={() => handleDelete(c)}
+                                disabled={deletingId === c.cluster_id}
+                                className="text-[11px] text-zinc-500 hover:text-rose-300 disabled:opacity-50 transition-colors"
+                                title={
+                                  c.is_demo
+                                    ? "데모 클러스터 및 합성 데이터 삭제"
+                                    : "레지스트리에서 해제"
+                                }
+                              >
+                                {deletingId === c.cluster_id ? "…" : "delete"}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </Section>
     </PageBody>

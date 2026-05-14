@@ -114,169 +114,274 @@ export default function FleetPage() {
           primary={{ href: "/clusters", label: "+ Register cluster" }}
         />
       ) : (
-        <div className="bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-zinc-900/50 border-b border-zinc-700">
-              <tr>
-                <ThSort
-                  label="Cluster"
-                  onClick={() => setSortKey("cluster_id")}
-                />
-                <ThSort label="Engine" onClick={() => setSortKey("engine")} />
-                <ThSort label="Status" onClick={() => setSortKey("status")} />
-                <ThSort
-                  label="CPU %"
-                  align="right"
-                  onClick={() => setSortKey("cpu")}
-                />
-                <ThSort
-                  label="AAS"
-                  align="right"
-                  onClick={() => setSortKey("aas")}
-                />
-                <ThSort
-                  label="Conn"
-                  align="right"
-                  onClick={() => setSortKey("conn_active")}
-                />
-                <ThSort
-                  label="Storage"
-                  align="right"
-                  onClick={() => setSortKey("storage_bytes")}
-                />
-                <ThSort
-                  label="Deadlocks"
-                  align="right"
-                  onClick={() => setSortKey("deadlocks")}
-                />
-                <ThSort
-                  label="Blocks"
-                  align="right"
-                  onClick={() => setSortKey("blocking_count")}
-                />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-700">
-              {sorted.map((c) => {
-                const cpu = n(c.cpu);
-                const aas = n(c.aas);
-                const conn = n(c.conn_active) + n(c.conn_idle);
-                const dlk = n(c.deadlocks);
-                const blk = n(c.blocking_count);
-                return (
-                  <tr key={c.cluster_id} className="hover:bg-zinc-900/40">
-                    <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
-                      <div className="flex items-center gap-2">
-                        <Link
-                          href={`/dashboard?cluster=${encodeURIComponent(
-                            c.cluster_id,
-                          )}`}
-                          className="hover:text-sky-400 underline-offset-2 hover:underline"
+        <>
+          {/* Mobile card stack — narrow screens lose the table format entirely.
+              Sort controls aren't useful here (one card per row), so we just
+              render the already-sorted list. */}
+          <div className="md:hidden space-y-3">
+            {sorted.map((c) => {
+              const cpu = n(c.cpu);
+              const aas = n(c.aas);
+              const conn = n(c.conn_active) + n(c.conn_idle);
+              const dlk = n(c.deadlocks);
+              const blk = n(c.blocking_count);
+              const badge = engineBadge(c.engine);
+              const eol = eolFor(c.engine, c.engine_version);
+              return (
+                <Link
+                  key={c.cluster_id}
+                  href={`/dashboard?cluster=${encodeURIComponent(
+                    c.cluster_id,
+                  )}`}
+                  className="block bg-zinc-800 border border-zinc-700 rounded-lg p-3 hover:border-amber-500/40 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-3 mb-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-mono text-xs text-zinc-100 truncate">
+                        {c.cluster_id}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 border text-[10px] font-mono uppercase tracking-wider ${badge.classes}`}
                         >
-                          {c.cluster_id}
-                        </Link>
+                          <span
+                            className={`w-1 h-1 rounded-full ${badge.accent}`}
+                          />
+                          {badge.label}
+                          <span className="text-zinc-300/80 normal-case font-normal">
+                            {c.engine_version}
+                          </span>
+                        </span>
                         {demoIds.has(c.cluster_id) && (
-                          <span className="px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
+                          <span className="px-1.5 py-0.5 text-[9px] font-mono uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
                             demo
                           </span>
                         )}
                       </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      {(() => {
-                        const badge = engineBadge(c.engine);
-                        const eol = eolFor(c.engine, c.engine_version);
-                        return (
-                          <div className="flex flex-col items-start gap-1">
-                            <span
-                              className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 border text-[10px] font-mono uppercase tracking-wider ${badge.classes}`}
-                              title={`${c.engine} ${c.engine_version}`}
-                            >
-                              <span
-                                className={`w-1 h-1 rounded-full ${badge.accent}`}
-                              />
-                              {badge.label}
-                              <span className="text-zinc-300/80 normal-case font-normal">
-                                {c.engine_version}
-                              </span>
+                      {eol && (
+                        <div
+                          className={`text-[10px] font-mono mt-1 ${
+                            EOL_STATUS_CLASSES[eol.status]
+                          }`}
+                        >
+                          {eol.status === "expired"
+                            ? `EOL · ${Math.abs(eol.days_remaining)}d past`
+                            : `EOL ${eol.eol} · ${eol.days_remaining}d`}
+                        </div>
+                      )}
+                    </div>
+                    <span
+                      className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] ${
+                        c.status === "available"
+                          ? "bg-emerald-500/10 text-emerald-400"
+                          : "bg-rose-500/10 text-rose-400"
+                      }`}
+                    >
+                      {c.status || "—"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs font-mono tabular-nums">
+                    <MobileStat
+                      label="CPU"
+                      value={c.cpu === null ? "—" : cpu.toFixed(1)}
+                      tone={severityColor(cpu, 70, 90)}
+                    />
+                    <MobileStat
+                      label="AAS"
+                      value={c.aas === null ? "—" : aas.toFixed(2)}
+                      tone={severityColor(aas, 2, 5)}
+                    />
+                    <MobileStat
+                      label="Conn"
+                      value={conn ? String(conn) : "—"}
+                    />
+                    <MobileStat
+                      label="Storage"
+                      value={
+                        c.storage_bytes ? fmtBytes(n(c.storage_bytes)) : "—"
+                      }
+                    />
+                    <MobileStat
+                      label="Deadlocks"
+                      value={dlk ? String(dlk) : "—"}
+                      tone={dlk ? "text-rose-400" : "text-zinc-500"}
+                    />
+                    <MobileStat
+                      label="Blocks"
+                      value={blk ? String(blk) : "—"}
+                      tone={blk ? "text-rose-400" : "text-zinc-500"}
+                    />
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+
+          {/* Desktop table — unchanged from the original 9-column layout. */}
+          <div className="hidden md:block bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-900/50 border-b border-zinc-700">
+                <tr>
+                  <ThSort
+                    label="Cluster"
+                    onClick={() => setSortKey("cluster_id")}
+                  />
+                  <ThSort label="Engine" onClick={() => setSortKey("engine")} />
+                  <ThSort label="Status" onClick={() => setSortKey("status")} />
+                  <ThSort
+                    label="CPU %"
+                    align="right"
+                    onClick={() => setSortKey("cpu")}
+                  />
+                  <ThSort
+                    label="AAS"
+                    align="right"
+                    onClick={() => setSortKey("aas")}
+                  />
+                  <ThSort
+                    label="Conn"
+                    align="right"
+                    onClick={() => setSortKey("conn_active")}
+                  />
+                  <ThSort
+                    label="Storage"
+                    align="right"
+                    onClick={() => setSortKey("storage_bytes")}
+                  />
+                  <ThSort
+                    label="Deadlocks"
+                    align="right"
+                    onClick={() => setSortKey("deadlocks")}
+                  />
+                  <ThSort
+                    label="Blocks"
+                    align="right"
+                    onClick={() => setSortKey("blocking_count")}
+                  />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-700">
+                {sorted.map((c) => {
+                  const cpu = n(c.cpu);
+                  const aas = n(c.aas);
+                  const conn = n(c.conn_active) + n(c.conn_idle);
+                  const dlk = n(c.deadlocks);
+                  const blk = n(c.blocking_count);
+                  return (
+                    <tr key={c.cluster_id} className="hover:bg-zinc-900/40">
+                      <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/dashboard?cluster=${encodeURIComponent(
+                              c.cluster_id,
+                            )}`}
+                            className="hover:text-sky-400 underline-offset-2 hover:underline"
+                          >
+                            {c.cluster_id}
+                          </Link>
+                          {demoIds.has(c.cluster_id) && (
+                            <span className="px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
+                              demo
                             </span>
-                            {eol && (
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        {(() => {
+                          const badge = engineBadge(c.engine);
+                          const eol = eolFor(c.engine, c.engine_version);
+                          return (
+                            <div className="flex flex-col items-start gap-1">
                               <span
-                                className={`text-[10px] font-mono ${
-                                  EOL_STATUS_CLASSES[eol.status]
-                                }`}
-                                title={eolHint(eol)}
+                                className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 border text-[10px] font-mono uppercase tracking-wider ${badge.classes}`}
+                                title={`${c.engine} ${c.engine_version}`}
                               >
-                                {eol.status === "expired"
-                                  ? `EOL · ${Math.abs(
-                                      eol.days_remaining,
-                                    )}d past`
-                                  : `EOL ${eol.eol} · ${eol.days_remaining}d`}
+                                <span
+                                  className={`w-1 h-1 rounded-full ${badge.accent}`}
+                                />
+                                {badge.label}
+                                <span className="text-zinc-300/80 normal-case font-normal">
+                                  {c.engine_version}
+                                </span>
                               </span>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-3 py-2">
-                      <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] ${
-                          c.status === "available"
-                            ? "bg-emerald-500/10 text-emerald-400"
-                            : "bg-rose-500/10 text-rose-400"
-                        }`}
+                              {eol && (
+                                <span
+                                  className={`text-[10px] font-mono ${
+                                    EOL_STATUS_CLASSES[eol.status]
+                                  }`}
+                                  title={eolHint(eol)}
+                                >
+                                  {eol.status === "expired"
+                                    ? `EOL · ${Math.abs(
+                                        eol.days_remaining,
+                                      )}d past`
+                                    : `EOL ${eol.eol} · ${eol.days_remaining}d`}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] ${
+                            c.status === "available"
+                              ? "bg-emerald-500/10 text-emerald-400"
+                              : "bg-rose-500/10 text-rose-400"
+                          }`}
+                        >
+                          {c.status}
+                        </span>
+                      </td>
+                      <td
+                        className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
+                          cpu,
+                          70,
+                          90,
+                        )}`}
                       >
-                        {c.status}
-                      </span>
-                    </td>
-                    <td
-                      className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
-                        cpu,
-                        70,
-                        90,
-                      )}`}
-                    >
-                      {c.cpu === null ? "-" : cpu.toFixed(1)}
-                    </td>
-                    <td
-                      className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
-                        aas,
-                        2,
-                        5,
-                      )}`}
-                    >
-                      {c.aas === null ? "-" : aas.toFixed(2)}
-                    </td>
-                    <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
-                      {conn || "-"}
-                    </td>
-                    <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
-                      {c.storage_bytes ? fmtBytes(n(c.storage_bytes)) : "-"}
-                    </td>
-                    <td
-                      className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
-                        dlk,
-                        1,
-                        5,
-                      )}`}
-                    >
-                      {dlk || "-"}
-                    </td>
-                    <td
-                      className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
-                        blk,
-                        1,
-                        3,
-                      )}`}
-                    >
-                      {blk || "-"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                        {c.cpu === null ? "-" : cpu.toFixed(1)}
+                      </td>
+                      <td
+                        className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
+                          aas,
+                          2,
+                          5,
+                        )}`}
+                      >
+                        {c.aas === null ? "-" : aas.toFixed(2)}
+                      </td>
+                      <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
+                        {conn || "-"}
+                      </td>
+                      <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
+                        {c.storage_bytes ? fmtBytes(n(c.storage_bytes)) : "-"}
+                      </td>
+                      <td
+                        className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
+                          dlk,
+                          1,
+                          5,
+                        )}`}
+                      >
+                        {dlk || "-"}
+                      </td>
+                      <td
+                        className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
+                          blk,
+                          1,
+                          3,
+                        )}`}
+                      >
+                        {blk || "-"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </PageBody>
   );
@@ -298,5 +403,24 @@ function ThSort({
     >
       {label}
     </th>
+  );
+}
+
+function MobileStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: string;
+}) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-[9px] uppercase tracking-wider text-zinc-500">
+        {label}
+      </span>
+      <span className={tone || "text-zinc-200"}>{value}</span>
+    </div>
   );
 }

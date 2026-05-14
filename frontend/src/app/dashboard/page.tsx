@@ -273,7 +273,7 @@ export default function DashboardPage() {
                       )}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
                     <div>
                       <div className="text-zinc-500 text-xs mb-1">Status</div>
                       <div className="text-emerald-400">
@@ -439,7 +439,7 @@ export default function DashboardPage() {
             />
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <WaitEventsPanel clusterId={selectedCluster} hours={hours} />
             <AnomaliesPanel clusterId={selectedCluster} />
             <EventsPanel
@@ -458,7 +458,7 @@ export default function DashboardPage() {
           <div
             className={`grid grid-cols-1 ${
               (dashboardData.cluster?.engine || "").includes("postgresql")
-                ? "lg:grid-cols-2"
+                ? "md:grid-cols-2"
                 : ""
             } gap-4`}
           >
