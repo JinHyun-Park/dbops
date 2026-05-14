@@ -34,6 +34,7 @@ aws cloudformation deploy \
 ### 2. Tag Aurora Clusters for Write Access
 
 For clusters you want DBOps to be able to modify:
+
 ```bash
 aws rds add-tags-to-resource \
   --resource-name arn:aws:rds:<region>:<account>:cluster:<cluster-id> \
@@ -43,6 +44,7 @@ aws rds add-tags-to-resource \
 ### 3. Register Cluster in DBOps
 
 Use the Web UI (Clusters page) or API:
+
 ```bash
 curl -X POST https://<api-url>/api/clusters \
   -H "Content-Type: application/json" \

@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+} from "recharts";
 import { fetchQueryDetail } from "@/lib/api-client";
 import { fmtDuration, fmtExact, fmtNumber } from "@/lib/format";
 
@@ -48,41 +56,54 @@ export function QueryDetailModal({
   }, [clusterId, queryHash]);
 
   const latest = snapshots[0];
-  const chartData = [...snapshots]
-    .reverse()
-    .map((s) => ({
-      ts: new Date(s.snapshot_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      mean: n(s.mean_time_ms),
-      calls: n(s.calls),
-    }));
+  const chartData = [...snapshots].reverse().map((s) => ({
+    ts: new Date(s.snapshot_time).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    mean: n(s.mean_time_ms),
+    calls: n(s.calls),
+  }));
 
   const cacheHitRatio = latest
-    ? (n(latest.shared_blks_hit) / Math.max(1, n(latest.shared_blks_hit) + n(latest.shared_blks_read))) * 100
+    ? (n(latest.shared_blks_hit) /
+        Math.max(1, n(latest.shared_blks_hit) + n(latest.shared_blks_read))) *
+      100
     : 0;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
       <div
         className="bg-zinc-900 border border-zinc-800 max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center px-6 py-4 border-b border-zinc-800">
           <div>
-            <div className="text-xs text-zinc-500 uppercase tracking-wider">Query Detail</div>
-            <div className="text-sm text-zinc-300 font-mono">{queryHash.slice(0, 16)}…</div>
+            <div className="text-xs text-zinc-500 uppercase tracking-wider">
+              Query Detail
+            </div>
+            <div className="text-sm text-zinc-300 font-mono">
+              {queryHash.slice(0, 16)}…
+            </div>
           </div>
           <div className="flex items-center gap-3">
             {latest && (
               <Link
                 href={`/chat?prompt=${encodeURIComponent(
-                  `Run EXPLAIN (FORMAT JSON) on this query for cluster ${clusterId} and summarize the plan, highlight the most expensive node, and suggest improvements:\n\n${latest.query_text}`
+                  `Run EXPLAIN (FORMAT JSON) on this query for cluster ${clusterId} and summarize the plan, highlight the most expensive node, and suggest improvements:\n\n${latest.query_text}`,
                 )}`}
                 className="text-xs bg-sky-600 hover:bg-sky-500 text-white rounded px-3 py-1.5 transition"
               >
                 Analyze in Chat
               </Link>
             )}
-            <button onClick={onClose} className="text-zinc-400 hover:text-zinc-100 text-xl leading-none px-2">
+            <button
+              onClick={onClose}
+              className="text-zinc-400 hover:text-zinc-100 text-xl leading-none px-2"
+            >
               ×
             </button>
           </div>
@@ -98,21 +119,59 @@ export function QueryDetailModal({
           ) : (
             <>
               <div>
-                <div className="text-xs text-zinc-400 uppercase tracking-wider mb-2">SQL</div>
+                <div className="text-xs text-zinc-400 uppercase tracking-wider mb-2">
+                  SQL
+                </div>
                 <pre className="bg-zinc-950 border border-zinc-800 rounded p-3 text-xs text-zinc-200 font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
                   {latest.query_text}
                 </pre>
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Metric label="Calls" value={fmtNumber(n(latest.calls))} title={`${fmtExact(n(latest.calls))} calls`} />
-                <Metric label="Mean / call" value={fmtDuration(n(latest.mean_time_ms))} title={`${n(latest.mean_time_ms).toFixed(2)} ms per call`} />
-                <Metric label="Total time" value={fmtDuration(n(latest.total_time_ms))} title={`${n(latest.total_time_ms).toFixed(2)} ms total`} />
-                <Metric label="Rows returned" value={fmtNumber(n(latest.rows_returned))} title={`${fmtExact(n(latest.rows_returned))} rows`} />
-                <Metric label="Buffer cache hit" value={cacheHitRatio.toFixed(1) + "%"} title="shared_blks_hit / (shared_blks_hit + shared_blks_read)" />
-                <Metric label="Blocks hit" value={fmtNumber(n(latest.shared_blks_hit))} title={`${fmtExact(n(latest.shared_blks_hit))} pages served from cache`} />
-                <Metric label="Blocks read" value={fmtNumber(n(latest.shared_blks_read))} title={`${fmtExact(n(latest.shared_blks_read))} pages read from disk`} />
-                <Metric label="Snapshots" value={fmtNumber(snapshots.length)} title={`${snapshots.length} stat snapshots`} />
+                <Metric
+                  label="Calls"
+                  value={fmtNumber(n(latest.calls))}
+                  title={`${fmtExact(n(latest.calls))} calls`}
+                />
+                <Metric
+                  label="Mean / call"
+                  value={fmtDuration(n(latest.mean_time_ms))}
+                  title={`${n(latest.mean_time_ms).toFixed(2)} ms per call`}
+                />
+                <Metric
+                  label="Total time"
+                  value={fmtDuration(n(latest.total_time_ms))}
+                  title={`${n(latest.total_time_ms).toFixed(2)} ms total`}
+                />
+                <Metric
+                  label="Rows returned"
+                  value={fmtNumber(n(latest.rows_returned))}
+                  title={`${fmtExact(n(latest.rows_returned))} rows`}
+                />
+                <Metric
+                  label="Buffer cache hit"
+                  value={cacheHitRatio.toFixed(1) + "%"}
+                  title="shared_blks_hit / (shared_blks_hit + shared_blks_read)"
+                />
+                <Metric
+                  label="Blocks hit"
+                  value={fmtNumber(n(latest.shared_blks_hit))}
+                  title={`${fmtExact(
+                    n(latest.shared_blks_hit),
+                  )} pages served from cache`}
+                />
+                <Metric
+                  label="Blocks read"
+                  value={fmtNumber(n(latest.shared_blks_read))}
+                  title={`${fmtExact(
+                    n(latest.shared_blks_read),
+                  )} pages read from disk`}
+                />
+                <Metric
+                  label="Snapshots"
+                  value={fmtNumber(snapshots.length)}
+                  title={`${snapshots.length} stat snapshots`}
+                />
               </div>
 
               {chartData.length > 1 && (
@@ -122,15 +181,32 @@ export function QueryDetailModal({
                   </div>
                   <div className="h-48 bg-zinc-950 border border-zinc-800 rounded p-2">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 4, left: -20 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                      <LineChart
+                        data={chartData}
+                        margin={{ top: 8, right: 8, bottom: 4, left: -20 }}
+                      >
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="#27272a"
+                          vertical={false}
+                        />
                         <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
                         <YAxis stroke="#71717a" fontSize={10} />
                         <Tooltip
-                          contentStyle={{ background: "#18181b", border: "1px solid #3f3f46", fontSize: 12 }}
+                          contentStyle={{
+                            background: "#18181b",
+                            border: "1px solid #3f3f46",
+                            fontSize: 12,
+                          }}
                           labelStyle={{ color: "#a1a1aa" }}
                         />
-                        <Line type="monotone" dataKey="mean" stroke="#fbbf24" strokeWidth={2} dot={false} />
+                        <Line
+                          type="monotone"
+                          dataKey="mean"
+                          stroke="#fbbf24"
+                          strokeWidth={2}
+                          dot={false}
+                        />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -144,11 +220,24 @@ export function QueryDetailModal({
   );
 }
 
-function Metric({ label, value, title }: { label: string; value: string; title?: string }) {
+function Metric({
+  label,
+  value,
+  title,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+}) {
   return (
-    <div className="bg-zinc-950 border border-zinc-800 rounded p-3" title={title}>
+    <div
+      className="bg-zinc-950 border border-zinc-800 rounded p-3"
+      title={title}
+    >
       <div className="text-xs text-zinc-500 mb-1">{label}</div>
-      <div className="text-zinc-100 font-mono text-sm tabular-nums">{value}</div>
+      <div className="text-zinc-100 font-mono text-sm tabular-nums">
+        {value}
+      </div>
     </div>
   );
 }

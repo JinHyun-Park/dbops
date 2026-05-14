@@ -53,7 +53,10 @@ function extractKeyFacts(rawObj: unknown): { label: string; value: string }[] {
   push("Cluster ID", req.dBClusterIdentifier || resp.dBClusterIdentifier);
   push("Instance ID", req.dBInstanceIdentifier);
   push("Snapshot ID", req.dBSnapshotIdentifier);
-  push("Parameter group", req.dBClusterParameterGroupName || req.dBParameterGroupName);
+  push(
+    "Parameter group",
+    req.dBClusterParameterGroupName || req.dBParameterGroupName,
+  );
   push("Engine", resp.engine || req.engine);
   push("Engine version", resp.engineVersion || req.engineVersion);
   push("Error code", detail.errorCode);
@@ -65,7 +68,12 @@ function extractKeyFacts(rawObj: unknown): { label: string; value: string }[] {
   return facts;
 }
 
-export function EventDetailModal({ event, clusterId, prettyLabel, onClose }: Props) {
+export function EventDetailModal({
+  event,
+  clusterId,
+  prettyLabel,
+  onClose,
+}: Props) {
   const [insight, setInsight] = useState("");
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState<string | null>(null);
@@ -130,19 +138,25 @@ export function EventDetailModal({ event, clusterId, prettyLabel, onClose }: Pro
                   sev === "critical" || sev === "error"
                     ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
                     : sev === "warning"
-                    ? "bg-amber-500/15 text-amber-300 border border-amber-500/40"
-                    : "bg-sky-500/15 text-sky-300 border border-sky-500/30"
+                      ? "bg-amber-500/15 text-amber-300 border border-amber-500/40"
+                      : "bg-sky-500/15 text-sky-300 border border-sky-500/30"
                 }`}
               >
                 {sev}
               </span>
-              <span className="text-[10px] text-zinc-500 font-mono">{event.source || "—"}</span>
+              <span className="text-[10px] text-zinc-500 font-mono">
+                {event.source || "—"}
+              </span>
               <span className="text-[10px] text-zinc-600">·</span>
               <span className="text-[10px] text-zinc-500">{event.ts}</span>
             </div>
-            <h2 className="text-lg font-semibold text-zinc-100 truncate">{prettyLabel}</h2>
+            <h2 className="text-lg font-semibold text-zinc-100 truncate">
+              {prettyLabel}
+            </h2>
             {event.message && (
-              <div className="text-xs text-zinc-400 mt-1 leading-snug">{event.message}</div>
+              <div className="text-xs text-zinc-400 mt-1 leading-snug">
+                {event.message}
+              </div>
             )}
           </div>
           <button
@@ -189,7 +203,9 @@ export function EventDetailModal({ event, clusterId, prettyLabel, onClose }: Pro
                     {keyFacts.map((f, i) => (
                       <div key={i} className="contents">
                         <dt className="text-zinc-500">{f.label}</dt>
-                        <dd className="text-zinc-300 font-mono break-all">{f.value}</dd>
+                        <dd className="text-zinc-300 font-mono break-all">
+                          {f.value}
+                        </dd>
                       </div>
                     ))}
                   </dl>
@@ -206,7 +222,11 @@ export function EventDetailModal({ event, clusterId, prettyLabel, onClose }: Pro
                     disabled={insightLoading || !clusterId}
                     className="text-xs px-3 py-1 border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 disabled:opacity-50 transition-colors"
                   >
-                    {insightLoading ? "thinking…" : insight ? "Re-analyze" : "Explain + remediate"}
+                    {insightLoading
+                      ? "thinking…"
+                      : insight
+                        ? "Re-analyze"
+                        : "Explain + remediate"}
                   </button>
                 </div>
                 {insightError && (
@@ -216,13 +236,17 @@ export function EventDetailModal({ event, clusterId, prettyLabel, onClose }: Pro
                 )}
                 {!insight && !insightLoading && !insightError && (
                   <div className="text-xs text-zinc-500">
-                    Click <span className="text-sky-300">Explain + remediate</span> for what changed,
-                    impact, and a single recommended next step.
+                    Click{" "}
+                    <span className="text-sky-300">Explain + remediate</span>{" "}
+                    for what changed, impact, and a single recommended next
+                    step.
                   </div>
                 )}
                 {insight && (
                   <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 prose-code:text-sky-300">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{insight}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {insight}
+                    </ReactMarkdown>
                   </div>
                 )}
               </div>

@@ -42,29 +42,40 @@ function loadAuthConfig(): Promise<AuthConfig> {
 }
 
 function redirectUri(): string {
-  if (typeof window !== "undefined") return `${window.location.origin}/callback`;
+  if (typeof window !== "undefined")
+    return `${window.location.origin}/callback`;
   return "http://localhost:3000/callback";
 }
 
 export async function getLoginUrl(): Promise<string> {
   const cfg = await loadAuthConfig();
-  return `${cfg.cognitoDomain}/login?client_id=${cfg.cognitoClientId}&response_type=token&scope=openid+profile&redirect_uri=${encodeURIComponent(redirectUri())}`;
+  return `${cfg.cognitoDomain}/login?client_id=${
+    cfg.cognitoClientId
+  }&response_type=token&scope=openid+profile&redirect_uri=${encodeURIComponent(
+    redirectUri(),
+  )}`;
 }
 
 export async function getLogoutUrl(): Promise<string> {
   const cfg = await loadAuthConfig();
   const origin = typeof window !== "undefined" ? window.location.origin : "/";
-  return `${cfg.cognitoDomain}/logout?client_id=${cfg.cognitoClientId}&logout_uri=${encodeURIComponent(origin)}`;
+  return `${cfg.cognitoDomain}/logout?client_id=${
+    cfg.cognitoClientId
+  }&logout_uri=${encodeURIComponent(origin)}`;
 }
 
-export function parseTokensFromHash(): { id_token: string; access_token: string } | null {
+export function parseTokensFromHash(): {
+  id_token: string;
+  access_token: string;
+} | null {
   if (typeof window === "undefined") return null;
   const hash = window.location.hash.substring(1);
   if (!hash) return null;
   const params = new URLSearchParams(hash);
   const idToken = params.get("id_token");
   const accessToken = params.get("access_token");
-  if (idToken && accessToken) return { id_token: idToken, access_token: accessToken };
+  if (idToken && accessToken)
+    return { id_token: idToken, access_token: accessToken };
   return null;
 }
 
@@ -90,7 +101,9 @@ export function clearTokens(): void {
 
 // Decode a JWT (no signature verification — exp/iat only).
 // Returns null on malformed input.
-function decodeJwt(token: string | null): { exp?: number; iat?: number; email?: string } | null {
+function decodeJwt(
+  token: string | null,
+): { exp?: number; iat?: number; email?: string } | null {
   if (!token) return null;
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
@@ -136,7 +149,12 @@ interface PoolConfig {
 
 let poolPromise: Promise<CognitoUserPool> | null = null;
 
-function _poolConfigFromConfig(cfg: { cognitoClientId?: string; userPoolId?: string; cognitoDomain?: string; region?: string }): PoolConfig | null {
+function _poolConfigFromConfig(cfg: {
+  cognitoClientId?: string;
+  userPoolId?: string;
+  cognitoDomain?: string;
+  region?: string;
+}): PoolConfig | null {
   const clientId = cfg.cognitoClientId;
   let userPoolId = cfg.userPoolId;
   // Hosted-domain URLs don't carry pool id; fall back to env var if config.json
@@ -169,16 +187,28 @@ async function getPool(): Promise<CognitoUserPool> {
       cognitoDomain: cfg.cognitoDomain,
       region: cfg.region,
     });
-    if (!pc) throw new Error("Cognito client id / user pool id missing — check /config.json");
-    return new CognitoUserPool({ UserPoolId: pc.userPoolId, ClientId: pc.clientId });
+    if (!pc)
+      throw new Error(
+        "Cognito client id / user pool id missing — check /config.json",
+      );
+    return new CognitoUserPool({
+      UserPoolId: pc.userPoolId,
+      ClientId: pc.clientId,
+    });
   })();
   return poolPromise;
 }
 
-export async function signIn(email: string, password: string): Promise<{ id_token: string; access_token: string }> {
+export async function signIn(
+  email: string,
+  password: string,
+): Promise<{ id_token: string; access_token: string }> {
   const pool = await getPool();
   const user = new CognitoUser({ Username: email, Pool: pool });
-  const auth = new AuthenticationDetails({ Username: email, Password: password });
+  const auth = new AuthenticationDetails({
+    Username: email,
+    Password: password,
+  });
   return new Promise((resolve, reject) => {
     user.authenticateUser(auth, {
       onSuccess: (session) => {
@@ -189,7 +219,11 @@ export async function signIn(email: string, password: string): Promise<{ id_toke
       },
       onFailure: (err) => reject(err),
       newPasswordRequired: () => {
-        reject(new Error("New password required — check email or use forgot-password flow"));
+        reject(
+          new Error(
+            "New password required — check email or use forgot-password flow",
+          ),
+        );
       },
     });
   });
@@ -207,7 +241,11 @@ export async function requestPasswordReset(email: string): Promise<void> {
   });
 }
 
-export async function confirmPasswordReset(email: string, code: string, newPassword: string): Promise<void> {
+export async function confirmPasswordReset(
+  email: string,
+  code: string,
+  newPassword: string,
+): Promise<void> {
   const pool = await getPool();
   const user = new CognitoUser({ Username: email, Pool: pool });
   return new Promise((resolve, reject) => {
@@ -219,7 +257,10 @@ export async function confirmPasswordReset(email: string, code: string, newPassw
 }
 
 export function getUserFromToken(): { email?: string; sub?: string } | null {
-  const claims = decodeJwt(getToken()) as { email?: string; sub?: string } | null;
+  const claims = decodeJwt(getToken()) as {
+    email?: string;
+    sub?: string;
+  } | null;
   return claims ? { email: claims.email, sub: claims.sub } : null;
 }
 
@@ -228,7 +269,9 @@ export function getUserFromToken(): { email?: string; sub?: string } | null {
 // admin unless they're explicitly placed in the dbops-viewer group.
 // This keeps existing single-admin deployments working without a migration.
 export function getUserGroups(): string[] {
-  const claims = decodeJwt(getToken()) as { "cognito:groups"?: string[] } | null;
+  const claims = decodeJwt(getToken()) as {
+    "cognito:groups"?: string[];
+  } | null;
   const g = claims?.["cognito:groups"];
   return Array.isArray(g) ? g : [];
 }
@@ -236,7 +279,8 @@ export function getUserGroups(): string[] {
 export function isAdmin(): boolean {
   const groups = getUserGroups();
   // Explicit viewer override beats default admin.
-  if (groups.includes("dbops-viewer") && !groups.includes("dbops-admin")) return false;
+  if (groups.includes("dbops-viewer") && !groups.includes("dbops-admin"))
+    return false;
   return true;
 }
 
@@ -262,14 +306,26 @@ async function refreshSession(): Promise<boolean> {
       const user = pool.getCurrentUser();
       if (!user) return false;
       return await new Promise<boolean>((resolve) => {
-        user.getSession((err: Error | null, session: { getIdToken(): { getJwtToken(): string }; getAccessToken(): { getJwtToken(): string }; isValid(): boolean } | null) => {
-          if (err || !session || !session.isValid()) {
-            resolve(false);
-            return;
-          }
-          setTokens(session.getIdToken().getJwtToken(), session.getAccessToken().getJwtToken());
-          resolve(true);
-        });
+        user.getSession(
+          (
+            err: Error | null,
+            session: {
+              getIdToken(): { getJwtToken(): string };
+              getAccessToken(): { getJwtToken(): string };
+              isValid(): boolean;
+            } | null,
+          ) => {
+            if (err || !session || !session.isValid()) {
+              resolve(false);
+              return;
+            }
+            setTokens(
+              session.getIdToken().getJwtToken(),
+              session.getAccessToken().getJwtToken(),
+            );
+            resolve(true);
+          },
+        );
       });
     } catch {
       return false;

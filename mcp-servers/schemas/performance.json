@@ -1,14 +1,128 @@
 {
   "tools": [
-    {"name": "get_top_queries", "description": "Get top-N queries sorted by total time, calls, or mean time", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "sort_by": {"type": "string", "default": "total_time"}, "limit": {"type": "integer", "default": 10}}, "required": ["cluster_id"]}},
-    {"name": "get_pi_metrics", "description": "Get Performance Insights metrics (AAS, wait events) from cache", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "metric_type": {"type": "string", "default": "aas"}}, "required": ["cluster_id"]}},
-    {"name": "get_slow_queries", "description": "Get slow queries exceeding threshold from cache", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "threshold_ms": {"type": "number", "default": 1000}}, "required": ["cluster_id"]}},
-    {"name": "compare_periods", "description": "Compare metrics between two time periods", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "period_a_start": {"type": "string"}, "period_a_end": {"type": "string"}, "period_b_start": {"type": "string"}, "period_b_end": {"type": "string"}}, "required": ["cluster_id", "period_a_start", "period_a_end", "period_b_start", "period_b_end"]}},
-    {"name": "detect_anomalies", "description": "Detect metric anomalies using z-score against 7-day baseline", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "hours": {"type": "integer", "default": 4}}, "required": ["cluster_id"]}},
-    {"name": "detect_regressions", "description": "Detect query performance regressions after a change point", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "change_point": {"type": "string"}}, "required": ["cluster_id", "change_point"]}},
-    {"name": "forecast_capacity", "description": "Forecast storage/connection capacity limits", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "metric": {"type": "string", "default": "storage_gb"}}, "required": ["cluster_id"]}},
-    {"name": "get_performance_summary", "description": "Get KPI summary for a time period", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "hours": {"type": "integer", "default": 24}}, "required": ["cluster_id"]}},
-    {"name": "recommend_index", "description": "Recommend indexes based on sequential scan patterns", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}}, "required": ["cluster_id"]}},
-    {"name": "get_vacuum_stats", "description": "Get autovacuum stats and bloat ratio per table", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}}, "required": ["cluster_id"]}}
+    {
+      "name": "get_top_queries",
+      "description": "Get top-N queries sorted by total time, calls, or mean time",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cluster_id": { "type": "string" },
+          "sort_by": { "type": "string", "default": "total_time" },
+          "limit": { "type": "integer", "default": 10 }
+        },
+        "required": ["cluster_id"]
+      }
+    },
+    {
+      "name": "get_pi_metrics",
+      "description": "Get Performance Insights metrics (AAS, wait events) from cache",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cluster_id": { "type": "string" },
+          "metric_type": { "type": "string", "default": "aas" }
+        },
+        "required": ["cluster_id"]
+      }
+    },
+    {
+      "name": "get_slow_queries",
+      "description": "Get slow queries exceeding threshold from cache",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cluster_id": { "type": "string" },
+          "threshold_ms": { "type": "number", "default": 1000 }
+        },
+        "required": ["cluster_id"]
+      }
+    },
+    {
+      "name": "compare_periods",
+      "description": "Compare metrics between two time periods",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cluster_id": { "type": "string" },
+          "period_a_start": { "type": "string" },
+          "period_a_end": { "type": "string" },
+          "period_b_start": { "type": "string" },
+          "period_b_end": { "type": "string" }
+        },
+        "required": [
+          "cluster_id",
+          "period_a_start",
+          "period_a_end",
+          "period_b_start",
+          "period_b_end"
+        ]
+      }
+    },
+    {
+      "name": "detect_anomalies",
+      "description": "Detect metric anomalies using z-score against 7-day baseline",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cluster_id": { "type": "string" },
+          "hours": { "type": "integer", "default": 4 }
+        },
+        "required": ["cluster_id"]
+      }
+    },
+    {
+      "name": "detect_regressions",
+      "description": "Detect query performance regressions after a change point",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cluster_id": { "type": "string" },
+          "change_point": { "type": "string" }
+        },
+        "required": ["cluster_id", "change_point"]
+      }
+    },
+    {
+      "name": "forecast_capacity",
+      "description": "Forecast storage/connection capacity limits",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cluster_id": { "type": "string" },
+          "metric": { "type": "string", "default": "storage_gb" }
+        },
+        "required": ["cluster_id"]
+      }
+    },
+    {
+      "name": "get_performance_summary",
+      "description": "Get KPI summary for a time period",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cluster_id": { "type": "string" },
+          "hours": { "type": "integer", "default": 24 }
+        },
+        "required": ["cluster_id"]
+      }
+    },
+    {
+      "name": "recommend_index",
+      "description": "Recommend indexes based on sequential scan patterns",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "cluster_id": { "type": "string" } },
+        "required": ["cluster_id"]
+      }
+    },
+    {
+      "name": "get_vacuum_stats",
+      "description": "Get autovacuum stats and bloat ratio per table",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "cluster_id": { "type": "string" } },
+        "required": ["cluster_id"]
+      }
+    }
   ]
 }

@@ -13,14 +13,45 @@ interface Setting {
 // Recommended values per setting. Mirrors the list in
 // pg_health_checks.RECOMMENDED_SETTINGS — keep these in sync so the panel
 // diff matches the Maintenance Health findings.
-const PG_RECOMMENDED: Record<string, { value: string; why: string; severity: "warning" | "info" }> = {
-  log_checkpoints:                { value: "on",   severity: "warning", why: "Required for checkpoint timing analysis." },
-  log_connections:                { value: "on",   severity: "info",    why: "pgBadger session report needs this." },
-  log_disconnections:             { value: "on",   severity: "info",    why: "pgBadger session report needs this." },
-  log_lock_waits:                 { value: "on",   severity: "warning", why: "Lock contention diagnosis depends on this." },
-  log_autovacuum_min_duration:    { value: "0",    severity: "warning", why: "0 logs every autovacuum — pgBadger correlates with bloat." },
-  log_min_duration_statement:     { value: "1000", severity: "warning", why: "Below 1s queries shouldn't log; 1000ms is a reasonable floor." },
-  log_temp_files:                 { value: "0",    severity: "info",    why: "Catches queries that spill to disk." },
+const PG_RECOMMENDED: Record<
+  string,
+  { value: string; why: string; severity: "warning" | "info" }
+> = {
+  log_checkpoints: {
+    value: "on",
+    severity: "warning",
+    why: "Required for checkpoint timing analysis.",
+  },
+  log_connections: {
+    value: "on",
+    severity: "info",
+    why: "pgBadger session report needs this.",
+  },
+  log_disconnections: {
+    value: "on",
+    severity: "info",
+    why: "pgBadger session report needs this.",
+  },
+  log_lock_waits: {
+    value: "on",
+    severity: "warning",
+    why: "Lock contention diagnosis depends on this.",
+  },
+  log_autovacuum_min_duration: {
+    value: "0",
+    severity: "warning",
+    why: "0 logs every autovacuum — pgBadger correlates with bloat.",
+  },
+  log_min_duration_statement: {
+    value: "1000",
+    severity: "warning",
+    why: "Below 1s queries shouldn't log; 1000ms is a reasonable floor.",
+  },
+  log_temp_files: {
+    value: "0",
+    severity: "info",
+    why: "Catches queries that spill to disk.",
+  },
 };
 
 function fmtValue(s: Setting): string {
@@ -69,8 +100,8 @@ export function SettingsPanel({
   const engineLabel = (engine || "").includes("mysql")
     ? "MySQL"
     : (engine || "").includes("postgresql")
-    ? "PostgreSQL"
-    : "Engine";
+      ? "PostgreSQL"
+      : "Engine";
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-4">
@@ -90,10 +121,10 @@ export function SettingsPanel({
             const borderClass = !rec
               ? "border-zinc-800"
               : ok
-              ? "border-emerald-500/20"
-              : rec.severity === "warning"
-              ? "border-amber-500/40"
-              : "border-sky-500/30";
+                ? "border-emerald-500/20"
+                : rec.severity === "warning"
+                  ? "border-amber-500/40"
+                  : "border-sky-500/30";
             return (
               <div
                 key={s.name}
@@ -101,7 +132,10 @@ export function SettingsPanel({
                 title={rec ? rec.why : undefined}
               >
                 <div className="flex items-center justify-between mb-1 gap-1.5">
-                  <div className="text-[11px] text-zinc-500 font-mono truncate" title={s.name}>
+                  <div
+                    className="text-[11px] text-zinc-500 font-mono truncate"
+                    title={s.name}
+                  >
                     {s.name}
                   </div>
                   {rec && (
@@ -110,18 +144,23 @@ export function SettingsPanel({
                         ok
                           ? "border border-emerald-500/40 text-emerald-300"
                           : rec.severity === "warning"
-                          ? "border border-amber-500/40 text-amber-300"
-                          : "border border-sky-500/30 text-sky-300"
+                            ? "border border-amber-500/40 text-amber-300"
+                            : "border border-sky-500/30 text-sky-300"
                       }`}
                     >
                       {ok ? "✓" : "⚠"}
                     </span>
                   )}
                 </div>
-                <div className="text-sm text-zinc-100 font-mono">{fmtValue(s)}</div>
+                <div className="text-sm text-zinc-100 font-mono">
+                  {fmtValue(s)}
+                </div>
                 {rec && !ok && (
                   <div className="text-[10px] text-zinc-500 mt-1">
-                    recommended: <span className="text-amber-300 font-mono">{rec.value}</span>
+                    recommended:{" "}
+                    <span className="text-amber-300 font-mono">
+                      {rec.value}
+                    </span>
                   </div>
                 )}
               </div>

@@ -18,7 +18,8 @@ const plexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "DBOps · Aurora operations console",
-  description: "AI-powered DBA workflows for Aurora MySQL and PostgreSQL at fleet scale.",
+  description:
+    "AI-powered DBA workflows for Aurora MySQL and PostgreSQL at fleet scale.",
 };
 
 export default function RootLayout({

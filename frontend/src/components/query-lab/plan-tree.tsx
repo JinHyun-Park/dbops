@@ -12,7 +12,8 @@ interface Props {
 // times by the child's loop count because PG reports per-loop times for
 // nested-loop inner sides.
 export function selfTime(node: PgPlanNode): number {
-  const cumulative = (node["Actual Total Time"] ?? 0) * (node["Actual Loops"] ?? 1);
+  const cumulative =
+    (node["Actual Total Time"] ?? 0) * (node["Actual Loops"] ?? 1);
   const childTotal = (node.Plans ?? []).reduce(
     (acc, c) => acc + (c["Actual Total Time"] ?? 0) * (c["Actual Loops"] ?? 1),
     0,
@@ -26,18 +27,35 @@ export function selfTime(node: PgPlanNode): number {
 export function summarizePlanForLLM(root: PgPlanRoot): string {
   const total = totalSelfTime(root.Plan);
   const lines: string[] = [];
-  lines.push(`Execution: ${root["Execution Time"]?.toFixed(2) ?? "?"}ms · Planning: ${root["Planning Time"]?.toFixed(2) ?? "?"}ms`);
+  lines.push(
+    `Execution: ${root["Execution Time"]?.toFixed(2) ?? "?"}ms · Planning: ${
+      root["Planning Time"]?.toFixed(2) ?? "?"
+    }ms`,
+  );
 
   // Hot nodes by self-time
-  const ranked: { label: string; pct: number; ms: number; misest: number | null; details: string[] }[] = [];
+  const ranked: {
+    label: string;
+    pct: number;
+    ms: number;
+    misest: number | null;
+    details: string[];
+  }[] = [];
   const walk = (n: PgPlanNode) => {
     const self = selfTime(n);
     const pct = total > 0 ? (self / total) * 100 : 0;
     const planRows = n["Plan Rows"];
     const actualRows = (n["Actual Rows"] ?? 0) * (n["Actual Loops"] ?? 1);
-    const misest = planRows && planRows > 0 && actualRows > 0 ? actualRows / planRows : null;
+    const misest =
+      planRows && planRows > 0 && actualRows > 0 ? actualRows / planRows : null;
     const details: string[] = [];
-    for (const k of ["Filter", "Index Cond", "Hash Cond", "Join Filter", "Recheck Cond"] as const) {
+    for (const k of [
+      "Filter",
+      "Index Cond",
+      "Hash Cond",
+      "Join Filter",
+      "Recheck Cond",
+    ] as const) {
       const v = n[k as keyof PgPlanNode];
       if (v != null) details.push(`${k}: ${String(v)}`);
     }
@@ -52,10 +70,17 @@ export function summarizePlanForLLM(root: PgPlanRoot): string {
   const top = ranked.slice(0, 5);
   lines.push("\nHot nodes (self-time):");
   for (const r of top) {
-    const misest = r.misest != null && (r.misest > 10 || r.misest < 0.1)
-      ? ` [planner ${r.misest > 1 ? r.misest.toFixed(0) + "x under" : (1 / r.misest).toFixed(0) + "x over"}-estimate]`
-      : "";
-    lines.push(`  - ${r.label} — ${r.pct.toFixed(1)}% (${r.ms.toFixed(2)}ms)${misest}`);
+    const misest =
+      r.misest != null && (r.misest > 10 || r.misest < 0.1)
+        ? ` [planner ${
+            r.misest > 1
+              ? r.misest.toFixed(0) + "x under"
+              : (1 / r.misest).toFixed(0) + "x over"
+          }-estimate]`
+        : "";
+    lines.push(
+      `  - ${r.label} — ${r.pct.toFixed(1)}% (${r.ms.toFixed(2)}ms)${misest}`,
+    );
     for (const d of r.details) lines.push(`      ${d}`);
   }
 
@@ -64,7 +89,9 @@ export function summarizePlanForLLM(root: PgPlanRoot): string {
   const walkTree = (n: PgPlanNode, depth: number) => {
     const rel = (n["Relation Name"] || n["Index Name"]) as string | undefined;
     const loops = n["Actual Loops"] ?? 1;
-    const suffix = `${rel ? ` on ${rel}` : ""}${loops > 1 ? ` × ${loops} loops` : ""}`;
+    const suffix = `${rel ? ` on ${rel}` : ""}${
+      loops > 1 ? ` × ${loops} loops` : ""
+    }`;
     lines.push(`${"  ".repeat(depth)}${n["Node Type"]}${suffix}`);
     for (const c of n.Plans ?? []) walkTree(c, depth + 1);
   };
@@ -80,17 +107,33 @@ function totalSelfTime(root: PgPlanNode): number {
 }
 
 function colorFor(pct: number): { ring: string; dot: string; text: string } {
-  if (pct >= 50) return { ring: "border-rose-500/50", dot: "bg-rose-400", text: "text-rose-300" };
-  if (pct >= 20) return { ring: "border-amber-500/50", dot: "bg-amber-400", text: "text-amber-300" };
-  if (pct >= 5) return { ring: "border-zinc-700", dot: "bg-zinc-400", text: "text-zinc-300" };
+  if (pct >= 50)
+    return {
+      ring: "border-rose-500/50",
+      dot: "bg-rose-400",
+      text: "text-rose-300",
+    };
+  if (pct >= 20)
+    return {
+      ring: "border-amber-500/50",
+      dot: "bg-amber-400",
+      text: "text-amber-300",
+    };
+  if (pct >= 5)
+    return {
+      ring: "border-zinc-700",
+      dot: "bg-zinc-400",
+      text: "text-zinc-300",
+    };
   return { ring: "border-zinc-800", dot: "bg-zinc-600", text: "text-zinc-500" };
 }
 
 function nodeLabel(node: PgPlanNode): string {
   const t = node["Node Type"] || "?";
-  const rel = (node["Relation Name"] || node["Index Name"] || node["CTE Name"] || node["Subplan Name"]) as
-    | string
-    | undefined;
+  const rel = (node["Relation Name"] ||
+    node["Index Name"] ||
+    node["CTE Name"] ||
+    node["Subplan Name"]) as string | undefined;
   const alias = node["Alias"] as string | undefined;
   const strat = node["Strategy"] as string | undefined;
   const join = node["Join Type"] as string | undefined;
@@ -139,7 +182,9 @@ function NodeRow({
   const actualLoops = node["Actual Loops"] ?? 1;
   const totalActualRows = (actualRows ?? 0) * actualLoops;
   const misest =
-    planRows && planRows > 0 && totalActualRows > 0 ? totalActualRows / planRows : null;
+    planRows && planRows > 0 && totalActualRows > 0
+      ? totalActualRows / planRows
+      : null;
   const misestBad = misest !== null && (misest > 10 || misest < 0.1);
 
   const sharedHit = node["Shared Hit Blocks"] as number | undefined;
@@ -167,7 +212,9 @@ function NodeRow({
           <span className="w-3 flex-shrink-0" />
         )}
         <span className={`w-2 h-2 rounded-full ${c.dot} flex-shrink-0`} />
-        <span className={`text-sm font-medium ${c.text} truncate flex-1 min-w-0`}>
+        <span
+          className={`text-sm font-medium ${c.text} truncate flex-1 min-w-0`}
+        >
           {nodeLabel(node)}
         </span>
         <span className="text-[10px] text-zinc-600 tabular-nums flex-shrink-0">
@@ -181,10 +228,16 @@ function NodeRow({
         </span>
         {misestBad && (
           <span
-            title={`planner thought ${fmtRows(planRows ?? 0)} rows, got ${fmtRows(totalActualRows)} (${misest!.toFixed(1)}x off)`}
+            title={`planner thought ${fmtRows(
+              planRows ?? 0,
+            )} rows, got ${fmtRows(totalActualRows)} (${misest!.toFixed(
+              1,
+            )}x off)`}
             className="text-[10px] font-mono px-1.5 py-0.5 border border-rose-500/40 text-rose-300 flex-shrink-0"
           >
-            {misest! > 1 ? `${misest!.toFixed(0)}x↑` : `${(1 / misest!).toFixed(0)}x↓`}
+            {misest! > 1
+              ? `${misest!.toFixed(0)}x↑`
+              : `${(1 / misest!).toFixed(0)}x↓`}
           </span>
         )}
       </div>
@@ -194,31 +247,50 @@ function NodeRow({
           className="text-[11px] font-mono text-zinc-400 bg-zinc-950 border-l-2 border-zinc-800 py-2 pr-4 space-y-0.5"
           style={{ paddingLeft: `${1.5 + depth * 1.25}rem` }}
         >
-          {(["Filter", "Index Cond", "Hash Cond", "Recheck Cond", "Sort Key", "Group Key", "Join Filter", "Output"] as const).map(
-            (k) => {
-              const v = node[k as keyof PgPlanNode];
-              if (v == null) return null;
-              const text = Array.isArray(v) ? (v as unknown[]).join(", ") : String(v);
-              return (
-                <div key={k}>
-                  <span className="text-zinc-600">{k}:</span>{" "}
-                  <span className="text-zinc-300">{text}</span>
-                </div>
-              );
-            },
-          )}
+          {(
+            [
+              "Filter",
+              "Index Cond",
+              "Hash Cond",
+              "Recheck Cond",
+              "Sort Key",
+              "Group Key",
+              "Join Filter",
+              "Output",
+            ] as const
+          ).map((k) => {
+            const v = node[k as keyof PgPlanNode];
+            if (v == null) return null;
+            const text = Array.isArray(v)
+              ? (v as unknown[]).join(", ")
+              : String(v);
+            return (
+              <div key={k}>
+                <span className="text-zinc-600">{k}:</span>{" "}
+                <span className="text-zinc-300">{text}</span>
+              </div>
+            );
+          })}
           <div className="text-zinc-600 mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5">
             <div>
-              cost: <span className="text-zinc-400">{(node["Startup Cost"] ?? 0).toFixed(2)}..{(node["Total Cost"] ?? 0).toFixed(2)}</span>
+              cost:{" "}
+              <span className="text-zinc-400">
+                {(node["Startup Cost"] ?? 0).toFixed(2)}..
+                {(node["Total Cost"] ?? 0).toFixed(2)}
+              </span>
             </div>
             <div>
               loops: <span className="text-zinc-400">{actualLoops}</span>
             </div>
             <div>
-              cumulative: <span className="text-zinc-400">{fmtMs((node["Actual Total Time"] ?? 0) * actualLoops)}</span>
+              cumulative:{" "}
+              <span className="text-zinc-400">
+                {fmtMs((node["Actual Total Time"] ?? 0) * actualLoops)}
+              </span>
             </div>
             <div>
-              width: <span className="text-zinc-400">{node["Plan Width"] ?? "—"}</span>
+              width:{" "}
+              <span className="text-zinc-400">{node["Plan Width"] ?? "—"}</span>
             </div>
             {(sharedHit != null || sharedRead != null) && (
               <div className="col-span-2">
@@ -236,21 +308,40 @@ function NodeRow({
       {open &&
         hasChildren &&
         node.Plans!.map((child, i) => (
-          <NodeRow key={i} node={child} depth={depth + 1} totalTime={totalTime} />
+          <NodeRow
+            key={i}
+            node={child}
+            depth={depth + 1}
+            totalTime={totalTime}
+          />
         ))}
     </div>
   );
 }
 
-function HotNodes({ root, totalTime }: { root: PgPlanNode; totalTime: number }) {
+function HotNodes({
+  root,
+  totalTime,
+}: {
+  root: PgPlanNode;
+  totalTime: number;
+}) {
   const ranked = useMemo(() => {
-    const out: { label: string; pct: number; ms: number; misest: number | null }[] = [];
+    const out: {
+      label: string;
+      pct: number;
+      ms: number;
+      misest: number | null;
+    }[] = [];
     const walk = (n: PgPlanNode) => {
       const self = selfTime(n);
       const pct = totalTime > 0 ? (self / totalTime) * 100 : 0;
       const planRows = n["Plan Rows"];
       const actualRows = (n["Actual Rows"] ?? 0) * (n["Actual Loops"] ?? 1);
-      const misest = planRows && planRows > 0 && actualRows > 0 ? actualRows / planRows : null;
+      const misest =
+        planRows && planRows > 0 && actualRows > 0
+          ? actualRows / planRows
+          : null;
       out.push({ label: nodeLabel(n), pct, ms: self, misest });
       for (const c of n.Plans ?? []) walk(c);
     };
@@ -272,11 +363,17 @@ function HotNodes({ root, totalTime }: { root: PgPlanNode; totalTime: number }) 
             <div key={i} className="flex items-center gap-2 text-xs">
               <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
               <span className={`${c.text} flex-1 truncate`}>{r.label}</span>
-              <span className="text-zinc-500 tabular-nums">{r.pct.toFixed(1)}%</span>
-              <span className="text-zinc-600 tabular-nums w-16 text-right">{fmtMs(r.ms)}</span>
+              <span className="text-zinc-500 tabular-nums">
+                {r.pct.toFixed(1)}%
+              </span>
+              <span className="text-zinc-600 tabular-nums w-16 text-right">
+                {fmtMs(r.ms)}
+              </span>
               {r.misest != null && (r.misest > 10 || r.misest < 0.1) && (
                 <span className="text-rose-400 text-[10px] tabular-nums w-12 text-right">
-                  {r.misest > 1 ? `${r.misest.toFixed(0)}x↑` : `${(1 / r.misest).toFixed(0)}x↓`}
+                  {r.misest > 1
+                    ? `${r.misest.toFixed(0)}x↑`
+                    : `${(1 / r.misest).toFixed(0)}x↓`}
                 </span>
               )}
             </div>
@@ -298,7 +395,11 @@ export function PlanTree({ plan }: Props) {
 
   // PG returns a top-level array of one element.
   const isPgPlan =
-    Array.isArray(plan) && plan.length > 0 && typeof plan[0] === "object" && plan[0] !== null && "Plan" in (plan[0] as object);
+    Array.isArray(plan) &&
+    plan.length > 0 &&
+    typeof plan[0] === "object" &&
+    plan[0] !== null &&
+    "Plan" in (plan[0] as object);
 
   if (!isPgPlan) {
     return (
@@ -322,16 +423,28 @@ export function PlanTree({ plan }: Props) {
     <div>
       <div className="grid grid-cols-3 gap-3 mb-3">
         <div className="border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500">execution</div>
-          <div className="text-base text-zinc-100 mt-0.5 tabular-nums">{fmtMs(execMs)}</div>
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+            execution
+          </div>
+          <div className="text-base text-zinc-100 mt-0.5 tabular-nums">
+            {fmtMs(execMs)}
+          </div>
         </div>
         <div className="border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500">planning</div>
-          <div className="text-base text-zinc-100 mt-0.5 tabular-nums">{fmtMs(planningMs)}</div>
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+            planning
+          </div>
+          <div className="text-base text-zinc-100 mt-0.5 tabular-nums">
+            {fmtMs(planningMs)}
+          </div>
         </div>
         <div className="border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500">root node</div>
-          <div className="text-base text-zinc-100 mt-0.5 truncate">{nodeLabel(root.Plan)}</div>
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+            root node
+          </div>
+          <div className="text-base text-zinc-100 mt-0.5 truncate">
+            {nodeLabel(root.Plan)}
+          </div>
         </div>
       </div>
 

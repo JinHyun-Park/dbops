@@ -106,9 +106,10 @@ export function streamChat(
   };
 
   const sessionId = explicitSessionId || genSessionId();
-  const promptText = clusterId && clusterId !== "default-cluster"
-    ? `[cluster: ${clusterId}]\n${message}`
-    : message;
+  const promptText =
+    clusterId && clusterId !== "default-cluster"
+      ? `[cluster: ${clusterId}]\n${message}`
+      : message;
 
   // Resolve a non-expired AccessToken (silent refresh if needed) before invoking.
   getValidAccessToken()
@@ -138,7 +139,11 @@ export function streamChat(
           Authorization: `Bearer ${token}`,
           "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": sessionId,
         },
-        body: JSON.stringify(modelId ? { prompt: promptText, model: modelId } : { prompt: promptText }),
+        body: JSON.stringify(
+          modelId
+            ? { prompt: promptText, model: modelId }
+            : { prompt: promptText },
+        ),
         signal: controller.signal,
       });
     })
@@ -166,17 +171,27 @@ export function streamChat(
           if (!line.trim()) continue;
           if (line.startsWith("data: ")) {
             const data = line.slice(6).trim();
-            if (data === "[DONE]") { onDone(); return; }
+            if (data === "[DONE]") {
+              onDone();
+              return;
+            }
             try {
               const parsed = JSON.parse(data);
               if (typeof parsed === "string") {
                 emit(parsed);
-              } else if (parsed.type === "text" || parsed.type === "content_block_delta") {
+              } else if (
+                parsed.type === "text" ||
+                parsed.type === "content_block_delta"
+              ) {
                 emit(parsed.content || parsed.delta?.text || "");
               } else if (parsed.type === "tool_use") {
                 onToolCall(parsed.name || "tool", parsed.status || "running");
               } else if (parsed.data) {
-                emit(typeof parsed.data === "string" ? parsed.data : JSON.stringify(parsed.data));
+                emit(
+                  typeof parsed.data === "string"
+                    ? parsed.data
+                    : JSON.stringify(parsed.data),
+                );
               }
             } catch {
               emit(data);

@@ -36,9 +36,7 @@ export function ClusterOverview({
           key={c.cluster_id}
           onClick={() => onSelect(c.cluster_id)}
           className={`text-left bg-zinc-800 border p-4 transition-colors hover:border-blue-500 ${
-            selectedId === c.cluster_id
-              ? "border-blue-500"
-              : "border-zinc-800"
+            selectedId === c.cluster_id ? "border-blue-500" : "border-zinc-800"
           }`}
         >
           <div className="flex items-center justify-between mb-2">

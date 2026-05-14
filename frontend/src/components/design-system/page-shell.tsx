@@ -9,7 +9,12 @@ interface PageHeaderProps {
   actions?: React.ReactNode;
 }
 
-export function PageHeader({ eyebrow, title, description, actions }: PageHeaderProps) {
+export function PageHeader({
+  eyebrow,
+  title,
+  description,
+  actions,
+}: PageHeaderProps) {
   return (
     <header className="flex items-end justify-between gap-6 mb-8 pb-6 border-b border-zinc-800/80">
       <div>
@@ -18,12 +23,16 @@ export function PageHeader({ eyebrow, title, description, actions }: PageHeaderP
             {eyebrow}
           </div>
         )}
-        <h1 className="text-3xl font-semibold tracking-tight text-zinc-50">{title}</h1>
+        <h1 className="text-3xl font-semibold tracking-tight text-zinc-50">
+          {title}
+        </h1>
         {description && (
           <p className="mt-2 text-sm text-zinc-400 max-w-2xl">{description}</p>
         )}
       </div>
-      {actions && <div className="flex items-center gap-2 flex-shrink-0">{actions}</div>}
+      {actions && (
+        <div className="flex items-center gap-2 flex-shrink-0">{actions}</div>
+      )}
     </header>
   );
 }
@@ -44,7 +53,13 @@ interface EmptyStateProps {
   secondary?: { href?: string; onClick?: () => void; label: string };
 }
 
-export function EmptyState({ eyebrow, title, description, primary, secondary }: EmptyStateProps) {
+export function EmptyState({
+  eyebrow,
+  title,
+  description,
+  primary,
+  secondary,
+}: EmptyStateProps) {
   return (
     <div className="border border-dashed border-zinc-800 bg-zinc-900/30 py-16 px-8 text-center">
       {eyebrow && (
@@ -52,9 +67,13 @@ export function EmptyState({ eyebrow, title, description, primary, secondary }: 
           {eyebrow}
         </div>
       )}
-      <div className="text-zinc-200 text-lg font-medium tracking-tight mb-2">{title}</div>
+      <div className="text-zinc-200 text-lg font-medium tracking-tight mb-2">
+        {title}
+      </div>
       {description && (
-        <div className="text-sm text-zinc-500 max-w-md mx-auto mb-6">{description}</div>
+        <div className="text-sm text-zinc-500 max-w-md mx-auto mb-6">
+          {description}
+        </div>
       )}
       <div className="flex items-center justify-center gap-3">
         {primary &&
@@ -112,7 +131,13 @@ interface StatProps {
   loading?: boolean;
 }
 
-export function Stat({ label, value, hint, accent = "neutral", loading }: StatProps) {
+export function Stat({
+  label,
+  value,
+  hint,
+  accent = "neutral",
+  loading,
+}: StatProps) {
   return (
     <div className="bg-zinc-950 px-6 py-5 border-zinc-800">
       <div className="font-mono text-[10px] tracking-[0.2em] uppercase text-zinc-500 mb-2">
@@ -138,12 +163,14 @@ export function StatRow({ children, cols = 4 }: StatRowProps) {
     cols === 2
       ? "md:grid-cols-2"
       : cols === 3
-      ? "md:grid-cols-3"
-      : cols === 5
-      ? "md:grid-cols-3 lg:grid-cols-5"
-      : "md:grid-cols-2 lg:grid-cols-4";
+        ? "md:grid-cols-3"
+        : cols === 5
+          ? "md:grid-cols-3 lg:grid-cols-5"
+          : "md:grid-cols-2 lg:grid-cols-4";
   return (
-    <div className={`grid grid-cols-1 ${grid} gap-px bg-zinc-800 border border-zinc-800`}>
+    <div
+      className={`grid grid-cols-1 ${grid} gap-px bg-zinc-800 border border-zinc-800`}
+    >
       {children}
     </div>
   );
@@ -157,7 +184,13 @@ interface SectionProps {
   children: React.ReactNode;
 }
 
-export function Section({ eyebrow, title, description, actions, children }: SectionProps) {
+export function Section({
+  eyebrow,
+  title,
+  description,
+  actions,
+  children,
+}: SectionProps) {
   return (
     <section className="mb-10">
       {(eyebrow || title || actions) && (
@@ -169,13 +202,19 @@ export function Section({ eyebrow, title, description, actions, children }: Sect
               </div>
             )}
             {title && (
-              <h2 className="text-base font-medium text-zinc-200 tracking-tight">{title}</h2>
+              <h2 className="text-base font-medium text-zinc-200 tracking-tight">
+                {title}
+              </h2>
             )}
             {description && (
               <div className="text-xs text-zinc-500 mt-0.5">{description}</div>
             )}
           </div>
-          {actions && <div className="flex items-center gap-2 flex-shrink-0">{actions}</div>}
+          {actions && (
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {actions}
+            </div>
+          )}
         </div>
       )}
       {children}

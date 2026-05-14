@@ -1,10 +1,75 @@
 {
   "tools": [
-    {"name": "get_health_status", "description": "Get cluster health status overview", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}}, "required": ["cluster_id"]}},
-    {"name": "get_recent_events", "description": "Get recent RDS events and alarms", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "hours": {"type": "integer", "default": 24}}, "required": ["cluster_id"]}},
-    {"name": "search_logs", "description": "Search CloudWatch Logs via Insights", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "query": {"type": "string"}, "hours": {"type": "integer", "default": 6}}, "required": ["cluster_id"]}},
-    {"name": "correlate_signals", "description": "Correlate metrics and events on timeline", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "start_time": {"type": "string"}, "end_time": {"type": "string"}}, "required": ["cluster_id", "start_time", "end_time"]}},
-    {"name": "get_incident_summary", "description": "Get incident statistics (MTTR, frequency)", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "days": {"type": "integer", "default": 30}}, "required": ["cluster_id"]}},
-    {"name": "find_similar_incidents", "description": "Find similar past incidents from knowledge base", "inputSchema": {"type": "object", "properties": {"cluster_id": {"type": "string"}, "symptoms": {"type": "string"}}, "required": ["cluster_id", "symptoms"]}}
+    {
+      "name": "get_health_status",
+      "description": "Get cluster health status overview",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "cluster_id": { "type": "string" } },
+        "required": ["cluster_id"]
+      }
+    },
+    {
+      "name": "get_recent_events",
+      "description": "Get recent RDS events and alarms",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cluster_id": { "type": "string" },
+          "hours": { "type": "integer", "default": 24 }
+        },
+        "required": ["cluster_id"]
+      }
+    },
+    {
+      "name": "search_logs",
+      "description": "Search CloudWatch Logs via Insights",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cluster_id": { "type": "string" },
+          "query": { "type": "string" },
+          "hours": { "type": "integer", "default": 6 }
+        },
+        "required": ["cluster_id"]
+      }
+    },
+    {
+      "name": "correlate_signals",
+      "description": "Correlate metrics and events on timeline",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cluster_id": { "type": "string" },
+          "start_time": { "type": "string" },
+          "end_time": { "type": "string" }
+        },
+        "required": ["cluster_id", "start_time", "end_time"]
+      }
+    },
+    {
+      "name": "get_incident_summary",
+      "description": "Get incident statistics (MTTR, frequency)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cluster_id": { "type": "string" },
+          "days": { "type": "integer", "default": 30 }
+        },
+        "required": ["cluster_id"]
+      }
+    },
+    {
+      "name": "find_similar_incidents",
+      "description": "Find similar past incidents from knowledge base",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cluster_id": { "type": "string" },
+          "symptoms": { "type": "string" }
+        },
+        "required": ["cluster_id", "symptoms"]
+      }
+    }
   ]
 }

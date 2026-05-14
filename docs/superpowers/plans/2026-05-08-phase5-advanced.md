@@ -9,7 +9,11 @@
 ---
 
 ## Task 1: Performance MCP — Remaining 2 tools (recommend_index, vacuum_stats)
+
 ## Task 2: EventBridge Proactive Monitoring
+
 ## Task 3: Frontend — Command Palette + Home Page + Polish
+
 ## Task 4: README + Deployment Guide
+
 ## Task 5: Final Verification + Push

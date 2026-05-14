@@ -72,8 +72,10 @@ function buildChains(locks: Lock[]): {
     if (!children[e.holder]) children[e.holder] = [];
     children[e.holder].push(e);
     blockedSet.add(e.waiter);
-    if (!pidMeta[e.holder]) pidMeta[e.holder] = { user: e.blocking_user, query: e.blocking_query };
-    if (!pidMeta[e.waiter]) pidMeta[e.waiter] = { user: e.blocked_user, query: e.blocked_query };
+    if (!pidMeta[e.holder])
+      pidMeta[e.holder] = { user: e.blocking_user, query: e.blocking_query };
+    if (!pidMeta[e.waiter])
+      pidMeta[e.waiter] = { user: e.blocked_user, query: e.blocked_query };
   }
 
   // Root holders = PIDs that are blocking somebody but never appear as a waiter.
@@ -105,25 +107,42 @@ function ChainNode({
   nextVisited.add(pid);
   const kids = children[pid] || [];
   const meta = pidMeta[pid] || {};
-  const sev = edge ? (edge.blocked_duration_sec > 60 ? "rose" : edge.blocked_duration_sec > 10 ? "amber" : "zinc") : "amber";
+  const sev = edge
+    ? edge.blocked_duration_sec > 60
+      ? "rose"
+      : edge.blocked_duration_sec > 10
+        ? "amber"
+        : "zinc"
+    : "amber";
   const dotColor = isRoot
     ? "bg-amber-400"
     : sev === "rose"
-    ? "bg-rose-400"
-    : sev === "amber"
-    ? "bg-amber-300"
-    : "bg-zinc-400";
+      ? "bg-rose-400"
+      : sev === "amber"
+        ? "bg-amber-300"
+        : "bg-zinc-400";
 
   return (
     <div className="leading-snug">
-      <div className="flex items-start gap-2 py-1 pr-2" style={{ paddingLeft: `${depth * 1.5 + 0.25}rem` }}>
-        <span className={`w-2 h-2 rounded-full ${dotColor} mt-1.5 flex-shrink-0`} />
+      <div
+        className="flex items-start gap-2 py-1 pr-2"
+        style={{ paddingLeft: `${depth * 1.5 + 0.25}rem` }}
+      >
+        <span
+          className={`w-2 h-2 rounded-full ${dotColor} mt-1.5 flex-shrink-0`}
+        />
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2 flex-wrap">
-            <span className={`font-mono text-xs ${isRoot ? "text-amber-300" : "text-rose-300"}`}>
+            <span
+              className={`font-mono text-xs ${
+                isRoot ? "text-amber-300" : "text-rose-300"
+              }`}
+            >
               PID {pid}
             </span>
-            <span className="text-[10px] text-zinc-500">{meta.user || "?"}</span>
+            <span className="text-[10px] text-zinc-500">
+              {meta.user || "?"}
+            </span>
             {isRoot && (
               <span className="text-[9px] px-1 py-0.5 border border-amber-500/40 text-amber-300 rounded-sm">
                 root holder
@@ -133,8 +152,8 @@ function ChainNode({
               <>
                 <span className="text-[10px] text-zinc-600">·</span>
                 <span className="text-[10px] text-zinc-400">
-                  waiting <span className="font-mono">{edge.blocked_mode}</span> on{" "}
-                  <span className="font-mono">{edge.relation || "?"}</span>
+                  waiting <span className="font-mono">{edge.blocked_mode}</span>{" "}
+                  on <span className="font-mono">{edge.relation || "?"}</span>
                 </span>
                 <span className={`text-[10px] font-mono text-${sev}-400`}>
                   {fmtDuration(edge.blocked_duration_sec)}
@@ -216,7 +235,9 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
             <button
               onClick={() => setView("list")}
               className={`text-[10px] uppercase tracking-wider px-2 py-1 transition-colors ${
-                view === "list" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-200"
+                view === "list"
+                  ? "bg-zinc-800 text-zinc-100"
+                  : "text-zinc-500 hover:text-zinc-200"
               }`}
               title="Flat list — one row per (blocked, blocker) pair"
             >
@@ -225,7 +246,9 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
             <button
               onClick={() => setView("chain")}
               className={`text-[10px] uppercase tracking-wider px-2 py-1 transition-colors ${
-                view === "chain" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-200"
+                view === "chain"
+                  ? "bg-zinc-800 text-zinc-100"
+                  : "text-zinc-500 hover:text-zinc-200"
               }`}
               title="Dependency chain — root holders → waiters, recursive"
             >
@@ -245,11 +268,15 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
         <div className="max-h-[28rem] overflow-y-auto py-2">
           {graph.roots.length === 0 ? (
             <div className="p-6 text-zinc-500 text-sm">
-              cyclic deadlock detected — no clear root holder. See list view for raw edges.
+              cyclic deadlock detected — no clear root holder. See list view for
+              raw edges.
             </div>
           ) : (
             graph.roots.map((rootPid) => (
-              <div key={rootPid} className="border-l-2 border-amber-500/40 my-1">
+              <div
+                key={rootPid}
+                className="border-l-2 border-amber-500/40 my-1"
+              >
                 <ChainNode
                   pid={rootPid}
                   depth={0}
@@ -261,7 +288,8 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
             ))
           )}
           <div className="px-4 py-2 mt-1 text-[10px] text-zinc-600 border-t border-zinc-800">
-            🟠 amber dot = root holder · 🔴 rose dot = blocked transaction (longer = worse) · indent = depth in the chain
+            🟠 amber dot = root holder · 🔴 rose dot = blocked transaction
+            (longer = worse) · indent = depth in the chain
           </div>
         </div>
       ) : (
@@ -270,18 +298,34 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
             {locks.map((l, i) => {
               const dur = n(l.blocked_duration_sec);
               const sev = dur > 60 ? "rose" : dur > 10 ? "amber" : "zinc";
-              const bg = sev === "rose" ? "bg-rose-950/20" : sev === "amber" ? "bg-amber-950/10" : "";
+              const bg =
+                sev === "rose"
+                  ? "bg-rose-950/20"
+                  : sev === "amber"
+                    ? "bg-amber-950/10"
+                    : "";
               return (
-                <div key={`${l.blocked_pid}-${l.blocking_pid}-${i}`} className={`p-3 ${bg}`}>
+                <div
+                  key={`${l.blocked_pid}-${l.blocking_pid}-${i}`}
+                  className={`p-3 ${bg}`}
+                >
                   <div className="flex items-baseline justify-between mb-2">
                     <div className="text-xs">
-                      <span className="text-rose-400 font-mono">PID {n(l.blocked_pid)}</span>
+                      <span className="text-rose-400 font-mono">
+                        PID {n(l.blocked_pid)}
+                      </span>
                       <span className="text-zinc-500"> blocked by </span>
-                      <span className="text-amber-400 font-mono">PID {n(l.blocking_pid)}</span>
+                      <span className="text-amber-400 font-mono">
+                        PID {n(l.blocking_pid)}
+                      </span>
                       <span className="text-zinc-500"> on </span>
-                      <span className="text-zinc-300 font-mono">{l.relation}</span>
+                      <span className="text-zinc-300 font-mono">
+                        {l.relation}
+                      </span>
                     </div>
-                    <div className={`text-xs font-mono text-${sev}-400`}>{fmtDuration(dur)}</div>
+                    <div className={`text-xs font-mono text-${sev}-400`}>
+                      {fmtDuration(dur)}
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-[11px]">
                     <div>

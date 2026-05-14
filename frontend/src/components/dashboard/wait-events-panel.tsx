@@ -18,12 +18,18 @@ const TYPE_COLORS: Record<string, string> = {
   IPC: "bg-violet-500",
   Client: "bg-sky-500",
   Timeout: "bg-orange-500",
-  Sync: "bg-rose-400",   // MySQL: wait/synch/*
-  Idle: "bg-zinc-600",   // MySQL: wait/idle/* (foreground threads waiting for work)
+  Sync: "bg-rose-400", // MySQL: wait/synch/*
+  Idle: "bg-zinc-600", // MySQL: wait/idle/* (foreground threads waiting for work)
   Other: "bg-zinc-500",
 };
 
-export function WaitEventsPanel({ clusterId, hours = 1 }: { clusterId: string; hours?: number }) {
+export function WaitEventsPanel({
+  clusterId,
+  hours = 1,
+}: {
+  clusterId: string;
+  hours?: number;
+}) {
   const [events, setEvents] = useState<WaitEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -66,16 +72,23 @@ export function WaitEventsPanel({ clusterId, hours = 1 }: { clusterId: string; h
             return (
               <div key={`${e.wait_event}-${e.wait_type}`}>
                 <div className="flex justify-between text-xs mb-1">
-                  <span className="text-zinc-300 truncate max-w-[60%]" title={e.wait_event}>
+                  <span
+                    className="text-zinc-300 truncate max-w-[60%]"
+                    title={e.wait_event}
+                  >
                     <span className="text-zinc-500 mr-1">[{e.wait_type}]</span>
                     {e.wait_event}
                   </span>
                   <span className="text-zinc-400 font-mono">
-                    {avg.toFixed(2)} <span className="text-zinc-600">({pct.toFixed(1)}%)</span>
+                    {avg.toFixed(2)}{" "}
+                    <span className="text-zinc-600">({pct.toFixed(1)}%)</span>
                   </span>
                 </div>
                 <div className="h-1.5 bg-zinc-900 rounded-full overflow-hidden">
-                  <div className={`h-full ${colorClass}`} style={{ width: `${pct}%` }} />
+                  <div
+                    className={`h-full ${colorClass}`}
+                    style={{ width: `${pct}%` }}
+                  />
                 </div>
               </div>
             );

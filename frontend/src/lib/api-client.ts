@@ -70,8 +70,18 @@ export async function fetchDashboard(clusterId: string) {
   return res.json();
 }
 
-export async function fetchTimeseries(clusterId: string, metric: string, hours = 1) {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/timeseries?metric=${enc(metric)}&hours=${hours}`));
+export async function fetchTimeseries(
+  clusterId: string,
+  metric: string,
+  hours = 1,
+) {
+  const res = await fetch(
+    await api(
+      `/api/dashboard/${enc(clusterId)}/timeseries?metric=${enc(
+        metric,
+      )}&hours=${hours}`,
+    ),
+  );
   if (!res.ok) throw new Error(`Timeseries fetch failed: ${res.status}`);
   return res.json();
 }
@@ -86,7 +96,9 @@ export async function fetchBatchTimeseries(
   const offsetQs = offsetHours > 0 ? `&offset_hours=${offsetHours}` : "";
   const res = await fetch(
     await api(
-      `/api/dashboard/${enc(clusterId)}/batch-timeseries?metrics=${csv}&hours=${hours}${offsetQs}`,
+      `/api/dashboard/${enc(
+        clusterId,
+      )}/batch-timeseries?metrics=${csv}&hours=${hours}${offsetQs}`,
     ),
   );
   if (!res.ok) throw new Error(`Batch timeseries fetch failed: ${res.status}`);
@@ -94,24 +106,45 @@ export async function fetchBatchTimeseries(
     cluster_id: string;
     hours: number;
     offset_hours?: number;
-    series: Record<string, Array<{ ts: string; value: number | string; dimensions?: string }>>;
+    series: Record<
+      string,
+      Array<{ ts: string; value: number | string; dimensions?: string }>
+    >;
   }>;
 }
 
 export async function fetchWaitEvents(clusterId: string, hours = 1) {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/wait-events?hours=${hours}`));
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/wait-events?hours=${hours}`),
+  );
   if (!res.ok) throw new Error(`Wait events fetch failed: ${res.status}`);
   return res.json();
 }
 
-export async function fetchSlowQueries(clusterId: string, hours = 1, thresholdMs = 100) {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/slow-queries?hours=${hours}&threshold_ms=${thresholdMs}`));
+export async function fetchSlowQueries(
+  clusterId: string,
+  hours = 1,
+  thresholdMs = 100,
+) {
+  const res = await fetch(
+    await api(
+      `/api/dashboard/${enc(
+        clusterId,
+      )}/slow-queries?hours=${hours}&threshold_ms=${thresholdMs}`,
+    ),
+  );
   if (!res.ok) throw new Error(`Slow queries fetch failed: ${res.status}`);
   return res.json();
 }
 
 export async function fetchQueryDetail(clusterId: string, queryHash: string) {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/query-detail?query_hash=${enc(queryHash)}`));
+  const res = await fetch(
+    await api(
+      `/api/dashboard/${enc(clusterId)}/query-detail?query_hash=${enc(
+        queryHash,
+      )}`,
+    ),
+  );
   if (!res.ok) throw new Error(`Query detail fetch failed: ${res.status}`);
   return res.json();
 }
@@ -152,23 +185,27 @@ export interface RecommendedExtension {
   installed: boolean;
 }
 
-export async function fetchExtensions(
-  clusterId: string,
-): Promise<{ cluster_id: string; installed: InstalledExtension[]; recommended: RecommendedExtension[] }> {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/extensions`));
+export async function fetchExtensions(clusterId: string): Promise<{
+  cluster_id: string;
+  installed: InstalledExtension[];
+  recommended: RecommendedExtension[];
+}> {
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/extensions`),
+  );
   if (!res.ok) throw new Error(`Extensions fetch failed: ${res.status}`);
   return res.json();
 }
 
-export async function fetchHealthFindings(
-  clusterId: string,
-): Promise<{
+export async function fetchHealthFindings(clusterId: string): Promise<{
   cluster_id: string;
   snapshot_time: string | null;
   counts: { critical: number; warning: number; info: number };
   findings: HealthFinding[];
 }> {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/health-findings`));
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/health-findings`),
+  );
   if (!res.ok) throw new Error(`Health findings fetch failed: ${res.status}`);
   return res.json();
 }
@@ -180,7 +217,9 @@ export async function fetchTableIndexes(
 ): Promise<{ schema: string; table: string; indexes: TableIndex[] }> {
   const res = await fetch(
     await api(
-      `/api/dashboard/${enc(clusterId)}/table-indexes?schema=${enc(schema)}&table=${enc(table)}`,
+      `/api/dashboard/${enc(clusterId)}/table-indexes?schema=${enc(
+        schema,
+      )}&table=${enc(table)}`,
     ),
   );
   if (!res.ok) throw new Error(`Indexes fetch failed: ${res.status}`);
@@ -188,62 +227,100 @@ export async function fetchTableIndexes(
 }
 
 export async function fetchVacuumStats(clusterId: string) {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/vacuum-stats`));
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/vacuum-stats`),
+  );
   if (!res.ok) throw new Error(`Vacuum stats fetch failed: ${res.status}`);
   return res.json();
 }
 
-export async function fetchIndexRecommendations(clusterId: string, minSeqRatio = 0.5) {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/index-recommendations?min_seq_ratio=${minSeqRatio}`));
+export async function fetchIndexRecommendations(
+  clusterId: string,
+  minSeqRatio = 0.5,
+) {
+  const res = await fetch(
+    await api(
+      `/api/dashboard/${enc(
+        clusterId,
+      )}/index-recommendations?min_seq_ratio=${minSeqRatio}`,
+    ),
+  );
   if (!res.ok) throw new Error(`Index recs fetch failed: ${res.status}`);
   return res.json();
 }
 
 export async function fetchLongRunningQueries(clusterId: string) {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/long-running`));
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/long-running`),
+  );
   if (!res.ok) throw new Error(`Long running fetch failed: ${res.status}`);
   return res.json();
 }
 
 export async function fetchBlockingLocks(clusterId: string) {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/blocking-locks`));
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/blocking-locks`),
+  );
   if (!res.ok) throw new Error(`Locks fetch failed: ${res.status}`);
   return res.json();
 }
 
 export async function fetchClusterSettings(clusterId: string) {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/settings`));
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/settings`),
+  );
   if (!res.ok) throw new Error(`Settings fetch failed: ${res.status}`);
   return res.json();
 }
 
 export async function fetchSchemaChanges(clusterId: string, days = 7) {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/schema-changes?days=${days}`));
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/schema-changes?days=${days}`),
+  );
   if (!res.ok) throw new Error(`Schema changes fetch failed: ${res.status}`);
   return res.json();
 }
 
-export async function fetchAnomalies(clusterId: string, hours = 4, threshold = 2.5) {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/anomalies?hours=${hours}&threshold=${threshold}`));
+export async function fetchAnomalies(
+  clusterId: string,
+  hours = 4,
+  threshold = 2.5,
+) {
+  const res = await fetch(
+    await api(
+      `/api/dashboard/${enc(
+        clusterId,
+      )}/anomalies?hours=${hours}&threshold=${threshold}`,
+    ),
+  );
   if (!res.ok) throw new Error(`Anomalies fetch failed: ${res.status}`);
   return res.json();
 }
 
-export async function fetchAuditLog(clusterId: string, days = 7, actionType?: string) {
+export async function fetchAuditLog(
+  clusterId: string,
+  days = 7,
+  actionType?: string,
+) {
   const at = actionType ? `&action_type=${enc(actionType)}` : "";
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/audit-log?days=${days}${at}`));
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/audit-log?days=${days}${at}`),
+  );
   if (!res.ok) throw new Error(`Audit log fetch failed: ${res.status}`);
   return res.json();
 }
 
 export async function fetchMultiClusterOverview() {
   const res = await fetch(await api(`/api/multi-cluster/overview`));
-  if (!res.ok) throw new Error(`Multi-cluster overview fetch failed: ${res.status}`);
+  if (!res.ok)
+    throw new Error(`Multi-cluster overview fetch failed: ${res.status}`);
   return res.json();
 }
 
 export async function fetchTableSizes(clusterId: string) {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}/table-sizes`));
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/table-sizes`),
+  );
   if (!res.ok) throw new Error(`Table sizes fetch failed: ${res.status}`);
   return res.json();
 }
@@ -274,11 +351,14 @@ export async function createAlertRule(rule: {
   return res.json();
 }
 
-export async function updateAlertRule(id: number, updates: Partial<{
-  enabled: boolean;
-  threshold: number;
-  name: string;
-}>) {
+export async function updateAlertRule(
+  id: number,
+  updates: Partial<{
+    enabled: boolean;
+    threshold: number;
+    name: string;
+  }>,
+) {
   const res = await fetch(await api(`/api/alert-rules/${id}`), {
     method: "PATCH",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
@@ -299,14 +379,22 @@ export async function deleteAlertRule(id: number) {
 
 export async function fetchAlertSubscriptions() {
   const res = await fetch(await api(`/api/alert-subscriptions`));
-  if (!res.ok) throw new Error(`Alert subscriptions fetch failed: ${res.status}`);
+  if (!res.ok)
+    throw new Error(`Alert subscriptions fetch failed: ${res.status}`);
   return res.json() as Promise<{
     topic_arn: string;
-    subscriptions: { subscription_arn: string; protocol: string; endpoint: string }[];
+    subscriptions: {
+      subscription_arn: string;
+      protocol: string;
+      endpoint: string;
+    }[];
   }>;
 }
 
-export async function createAlertSubscription(protocol: string, endpoint: string) {
+export async function createAlertSubscription(
+  protocol: string,
+  endpoint: string,
+) {
   const res = await fetch(await api(`/api/alert-subscriptions`), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
@@ -390,12 +478,16 @@ export async function generateSampleCluster(): Promise<{
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`Sample generation failed (${res.status}): ${txt.slice(0, 200)}`);
+    throw new Error(
+      `Sample generation failed (${res.status}): ${txt.slice(0, 200)}`,
+    );
   }
   return res.json();
 }
 
-export async function deleteCluster(clusterId: string): Promise<{ status: string; was_demo: boolean }> {
+export async function deleteCluster(
+  clusterId: string,
+): Promise<{ status: string; was_demo: boolean }> {
   const res = await fetch(await api(`/api/clusters/${enc(clusterId)}`), {
     method: "DELETE",
     headers: { ...(await authHeaders()) },
@@ -449,9 +541,15 @@ export interface BulkRegisterResult {
   counts: { registered: number; skipped: number; failed: number };
 }
 
-export async function bulkRegisterClusters(clusters: Array<
-  Partial<DiscoveredCluster> & { account_id: string; spoke_role_arn?: string; force?: boolean }
->): Promise<BulkRegisterResult> {
+export async function bulkRegisterClusters(
+  clusters: Array<
+    Partial<DiscoveredCluster> & {
+      account_id: string;
+      spoke_role_arn?: string;
+      force?: boolean;
+    }
+  >,
+): Promise<BulkRegisterResult> {
   const res = await fetch(await api(`/api/clusters/bulk-register`), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
@@ -459,7 +557,9 @@ export async function bulkRegisterClusters(clusters: Array<
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`Bulk register failed (${res.status}): ${txt.slice(0, 200)}`);
+    throw new Error(
+      `Bulk register failed (${res.status}): ${txt.slice(0, 200)}`,
+    );
   }
   return res.json();
 }
@@ -473,7 +573,7 @@ export async function bulkRegisterClusters(clusters: Array<
 // visualizer treats anything non-PG as raw for now.
 export type PgPlanNode = {
   "Node Type": string;
-  "Plans"?: PgPlanNode[];
+  Plans?: PgPlanNode[];
   "Plan Rows"?: number;
   "Plan Width"?: number;
   "Actual Rows"?: number;
@@ -488,11 +588,11 @@ export type PgPlanNode = {
   "Shared Written Blocks"?: number;
   "Relation Name"?: string;
   "Index Name"?: string;
-  "Alias"?: string;
+  Alias?: string;
   "Join Type"?: string;
-  "Strategy"?: string;
+  Strategy?: string;
   "Sort Key"?: string[];
-  "Filter"?: string;
+  Filter?: string;
   "Index Cond"?: string;
   "Hash Cond"?: string;
   [k: string]: unknown;
@@ -502,7 +602,7 @@ export type PgPlanRoot = {
   Plan: PgPlanNode;
   "Planning Time"?: number;
   "Execution Time"?: number;
-  "Triggers"?: unknown[];
+  Triggers?: unknown[];
 };
 
 export interface ExplainResponse {
@@ -526,7 +626,10 @@ export class ExplainSqlError extends Error {
   }
 }
 
-export async function runExplain(clusterId: string, sql: string): Promise<ExplainResponse> {
+export async function runExplain(
+  clusterId: string,
+  sql: string,
+): Promise<ExplainResponse> {
   const res = await fetch(await api(`/api/explain`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -542,7 +645,10 @@ export async function runExplain(clusterId: string, sql: string): Promise<Explai
     if (res.status === 400 && parsed.error === "sql_error") {
       throw new ExplainSqlError(parsed.message || "SQL error", parsed.engine);
     }
-    const detail = parsed.message || (await res.text().catch(() => "")) || `HTTP ${res.status}`;
+    const detail =
+      parsed.message ||
+      (await res.text().catch(() => "")) ||
+      `HTTP ${res.status}`;
     throw new Error(`EXPLAIN failed: ${detail.slice(0, 300)}`);
   }
   return res.json();

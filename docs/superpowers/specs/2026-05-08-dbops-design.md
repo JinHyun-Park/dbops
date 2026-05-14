@@ -30,17 +30,17 @@ DBA를 위한 AI 기반 종합 데이터베이스 운영 플랫폼. 자연어 �
 
 ### 1.5 Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Agent Framework | Strands Agents SDK (Python) |
-| Agent Runtime | Amazon Bedrock AgentCore Runtime |
-| Tool Integration | AgentCore Gateway (MCP Protocol) |
-| LLM | Amazon Bedrock Claude (기본), 모델 교체 가능 |
-| Frontend | Next.js 15 (App Router) + React + shadcn/ui + Tailwind CSS |
-| IaC | AWS CDK (Python) |
-| Auth | Amazon Cognito |
-| Data Store | Aurora PostgreSQL (Cache), DynamoDB, S3, S3 Tables (Iceberg archive) |
-| Knowledge Base | Bedrock Knowledge Bases + S3 Vectors |
+| Layer            | Technology                                                           |
+| ---------------- | -------------------------------------------------------------------- |
+| Agent Framework  | Strands Agents SDK (Python)                                          |
+| Agent Runtime    | Amazon Bedrock AgentCore Runtime                                     |
+| Tool Integration | AgentCore Gateway (MCP Protocol)                                     |
+| LLM              | Amazon Bedrock Claude (기본), 모델 교체 가능                         |
+| Frontend         | Next.js 15 (App Router) + React + shadcn/ui + Tailwind CSS           |
+| IaC              | AWS CDK (Python)                                                     |
+| Auth             | Amazon Cognito                                                       |
+| Data Store       | Aurora PostgreSQL (Cache), DynamoDB, S3, S3 Tables (Iceberg archive) |
+| Knowledge Base   | Bedrock Knowledge Bases + S3 Vectors                                 |
 
 ---
 
@@ -89,11 +89,11 @@ DBA를 위한 AI 기반 종합 데이터베이스 운영 플랫폼. 자연어 �
 
 ### 2.2 Three-Path Communication
 
-| Path | Protocol | 용도 | 중간 레이어 |
-|---|---|---|---|
-| **A: SSE Direct** | SSE over HTTP | AI 대화, 쿼리 분석, 장애 진단 | 없음 (AgentCore Runtime 직접) |
-| **B: REST API** | HTTP REST | 대시보드, 메트릭 조회, 클러스터 목록 | API Gateway + Lambda |
-| **C: REST + Async** | HTTP REST → Async | 승인 워크플로, DDL/DML 실행 | API Gateway + Lambda → AgentCore |
+| Path                | Protocol          | 용도                                 | 중간 레이어                      |
+| ------------------- | ----------------- | ------------------------------------ | -------------------------------- |
+| **A: SSE Direct**   | SSE over HTTP     | AI 대화, 쿼리 분석, 장애 진단        | 없음 (AgentCore Runtime 직접)    |
+| **B: REST API**     | HTTP REST         | 대시보드, 메트릭 조회, 클러스터 목록 | API Gateway + Lambda             |
+| **C: REST + Async** | HTTP REST → Async | 승인 워크플로, DDL/DML 실행          | API Gateway + Lambda → AgentCore |
 
 Path A에서 브라우저가 AgentCore Runtime에 직접 SSE 연결한다. Cognito JWT로 인증하며 중간에 Lambda/API Gateway를 두지 않는다. 이는 ChatGPT, Claude.ai 등 업계 표준 패턴과 동일하다.
 
@@ -112,13 +112,13 @@ Path A에서 브라우저가 AgentCore Runtime에 직접 SSE 연결한다. Cogni
 
 ### 3.1 Data Store Architecture
 
-| Store | 용도 | 데이터 | 보존 |
-|---|---|---|---|
-| **Aurora PG (Cache)** | Hot tier, 실시간 대시보드 + AI 조회 | 메트릭 스냅샷, 쿼리 통계, 클러스터 메타, 인덱스 사용률, 슬로우 쿼리 | 7일 (1분 해상도) |
-| **DynamoDB** | 세션, 승인, 이벤트 | 대화 세션, 승인 이력, RDS 이벤트, 알림 이력 | 90일 |
-| **S3** | 장기 보관, 아카이브 | EXPLAIN Plan, 리포트, 집계 데이터 | 1년+ |
-| **S3 Tables (Iceberg)** | Cold tier, 장기 분석 | 7일 지난 메트릭 (5분/1시간 집계) | 1년 |
-| **Bedrock KB + S3 Vectors** | RAG 지식 베이스 | Aurora 문서, 런북, best practice | 상시 |
+| Store                       | 용도                                | 데이터                                                              | 보존             |
+| --------------------------- | ----------------------------------- | ------------------------------------------------------------------- | ---------------- |
+| **Aurora PG (Cache)**       | Hot tier, 실시간 대시보드 + AI 조회 | 메트릭 스냅샷, 쿼리 통계, 클러스터 메타, 인덱스 사용률, 슬로우 쿼리 | 7일 (1분 해상도) |
+| **DynamoDB**                | 세션, 승인, 이벤트                  | 대화 세션, 승인 이력, RDS 이벤트, 알림 이력                         | 90일             |
+| **S3**                      | 장기 보관, 아카이브                 | EXPLAIN Plan, 리포트, 집계 데이터                                   | 1년+             |
+| **S3 Tables (Iceberg)**     | Cold tier, 장기 분석                | 7일 지난 메트릭 (5분/1시간 집계)                                    | 1년              |
+| **Bedrock KB + S3 Vectors** | RAG 지식 베이스                     | Aurora 문서, 런북, best practice                                    | 상시             |
 
 ### 3.2 Aurora PG Cache Schema (핵심 테이블)
 
@@ -176,14 +176,14 @@ schema_snapshots (
 
 ### 3.3 Data Collection Pipeline
 
-| Collector | 주기 | 수집 대상 | 저장소 |
-|---|---|---|---|
-| **PI Collector** | 1분 | AAS, wait events, counter metrics | Aurora PG (metric_snapshots) |
-| **Stats Collector** | 5분 | pg_stat_statements, connection stats, replication lag | Aurora PG (query_stats, connection_stats) |
-| **Meta Collector** | 5분 | 클러스터 메타데이터, 인스턴스 상태 | Aurora PG (cluster_meta) |
-| **Structure Collector** | 1시간 | 인덱스 사용률, 테이블 bloat, 스키마 스냅샷, 파라미터 | Aurora PG (index_usage, schema_snapshots) |
-| **Event Processor** | 실시간 | RDS Events, CloudWatch Alarms, Aurora 이벤트 | DynamoDB (event_history) + SNS |
-| **Archive Job** | 1일 | 7일 지난 고해상도 데이터 → 집계 | S3 Tables (Iceberg) |
+| Collector               | 주기   | 수집 대상                                             | 저장소                                    |
+| ----------------------- | ------ | ----------------------------------------------------- | ----------------------------------------- |
+| **PI Collector**        | 1분    | AAS, wait events, counter metrics                     | Aurora PG (metric_snapshots)              |
+| **Stats Collector**     | 5분    | pg_stat_statements, connection stats, replication lag | Aurora PG (query_stats, connection_stats) |
+| **Meta Collector**      | 5분    | 클러스터 메타데이터, 인스턴스 상태                    | Aurora PG (cluster_meta)                  |
+| **Structure Collector** | 1시간  | 인덱스 사용률, 테이블 bloat, 스키마 스냅샷, 파라미터  | Aurora PG (index_usage, schema_snapshots) |
+| **Event Processor**     | 실시간 | RDS Events, CloudWatch Alarms, Aurora 이벤트          | DynamoDB (event_history) + SNS            |
+| **Archive Job**         | 1일    | 7일 지난 고해상도 데이터 → 집계                       | S3 Tables (Iceberg)                       |
 
 보존 정책: 1분 해상도 7일 → 5분 집계 90일 → 1시간 집계 1년 → S3 장기보관.
 
@@ -220,6 +220,7 @@ with gateway_client:
 ```
 
 Runtime 설정:
+
 - Auth: `RuntimeAuthorizerConfiguration.using_cognito(user_pool, [pkce_client])`
 - Protocol: HTTP (SSE streaming)
 - Memory: AgentCore Memory (semantic + preference + summary)
@@ -229,6 +230,7 @@ Runtime 설정:
 Gateway는 5개 MCP Server를 단일 MCP 엔드포인트로 통합한다.
 
 기능:
+
 - **Semantic Tool Search**: `x_amz_bedrock_agentcore_search`로 자연어 기반 도구 검색
 - **Cedar Policy Engine**: 도구별/사용자별/입력값별 세밀한 권한 제어
 - **MCP Sessions**: 세션 기반 연결로 후속 호출 레이턴시 감소
@@ -266,28 +268,28 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 
 **Custom MCP Servers (자체 구현, Lambda):**
 
-| MCP Server | 도구 수 | Cedar Policy | Gateway Target |
-|---|---|---|---|
-| Performance | 10 | READ-ONLY | Lambda |
-| Incident | 6 | READ-ONLY | Lambda |
-| Operations | 8 | MIXED (read auto / write approval) | Lambda |
-| Simulation | 6 | READ-ONLY | Lambda |
-| **Custom Total** | **30** | | |
+| MCP Server       | 도구 수 | Cedar Policy                       | Gateway Target |
+| ---------------- | ------- | ---------------------------------- | -------------- |
+| Performance      | 10      | READ-ONLY                          | Lambda         |
+| Incident         | 6       | READ-ONLY                          | Lambda         |
+| Operations       | 8       | MIXED (read auto / write approval) | Lambda         |
+| Simulation       | 6       | READ-ONLY                          | Lambda         |
+| **Custom Total** | **30**  |                                    |                |
 
 **Official AWS MCP Servers (awslabs 제공, 유지보수 불필요):**
 
-| MCP Server | 역할 | Gateway Target |
-|---|---|---|
+| MCP Server            | 역할                                              | Gateway Target    |
+| --------------------- | ------------------------------------------------- | ----------------- |
 | Aurora PostgreSQL MCP | 표준 PG 작업 (스키마 조회, 쿼리 실행, EXPLAIN 등) | MCP Server target |
-| Aurora MySQL MCP | 표준 MySQL 작업 | MCP Server target |
-| CloudWatch MCP | 메트릭/알람 직접 조회 | MCP Server target |
-| AWS API MCP | 범용 AWS API 호출 (RDS, Cost Explorer 등) | MCP Server target |
+| Aurora MySQL MCP      | 표준 MySQL 작업                                   | MCP Server target |
+| CloudWatch MCP        | 메트릭/알람 직접 조회                             | MCP Server target |
+| AWS API MCP           | 범용 AWS API 호출 (RDS, Cost Explorer 등)         | MCP Server target |
 
 **Knowledge (Agent 직접 등록):**
 
-| 도구 | 역할 | 등록 방식 |
-|---|---|---|
-| retrieve | Bedrock KB + S3 Vectors (Tier 2) | Strands native |
+| 도구          | 역할                                                   | 등록 방식                 |
+| ------------- | ------------------------------------------------------ | ------------------------- |
+| retrieve      | Bedrock KB + S3 Vectors (Tier 2)                       | Strands native            |
 | aws_knowledge | AWS Knowledge MCP — 문서, Skills, 리전 가용성 (Tier 3) | Gateway MCP Server target |
 
 ### 5.2 Performance MCP Server (10 tools, Custom)
@@ -295,22 +297,26 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 `explain_query`는 공식 Aurora MCP로 이관. 캐시 기반 분석과 사전 연산에 집중.
 
 **캐시 기반 조회 (4):**
+
 - `get_top_queries` — Aurora PG Cache에서 Top-N 쿼리 (총 시간/호출 수/평균 시간 기준)
 - `get_pi_metrics` — Aurora PG Cache에서 PI 메트릭 (AAS, wait events, counter metrics)
 - `get_slow_queries` — Aurora PG Cache에서 슬로우 쿼리 목록 (MySQL: slow query log 파싱, PG: pg_stat_statements 기반)
 - `compare_periods` — 두 기간의 메트릭 비교 분석
 
 **사전 연산 분석 (4):**
+
 - `detect_anomalies` — 최근 N시간 메트릭을 7일 이동평균 baseline 대비 z-score로 이상 탐지
 - `detect_regressions` — 특정 시점 전후 쿼리 성능 비교 (배포 후 느려진 쿼리 탐지)
 - `forecast_capacity` — 스토리지/연결 수 선형 회귀 예측 (N일 후 한계 도달 예상)
 - `get_performance_summary` — 지정 기간 핵심 KPI 요약 (avg_aas, top_waits, slow_query_count 등)
 
 **캐시 기반 상세 모니터링 (2):**
+
 - `recommend_index` — index_usage + query_stats 조합 분석으로 인덱스 추천
 - `get_vacuum_stats` — (PG) autovacuum 현황, dead tuples, bloat ratio
 
 **공식 AWS MCP로 이관된 기능:**
+
 - EXPLAIN ANALYZE → 공식 Aurora PG/MySQL MCP
 - Lock/Blocking 분석 → 공식 Aurora PG/MySQL MCP (pg_locks, innodb_lock_waits 조회)
 - Connection 분석 → 공식 Aurora PG/MySQL MCP (pg_stat_activity, SHOW PROCESSLIST)
@@ -329,6 +335,7 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 - `find_similar_incidents` — Bedrock KB에서 현재 증상과 유사한 과거 장애 사례 검색
 
 **공식 AWS MCP로 이관된 기능:**
+
 - 알람 이력 → 공식 CloudWatch MCP
 - 활성 세션 목록 → 공식 Aurora PG/MySQL MCP
 
@@ -337,20 +344,24 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 `get_parameters`, `get_backup_status`, `get_scaling_info`는 공식 AWS API MCP로 이관.
 
 **캐시 기반 조회 (2, 자동 허용):**
+
 - `get_schema_diff` — 두 환경/시점 간 스키마 비교 (캐시된 schema_snapshots 사용)
 - `get_schema_history` — 스키마 변경 이력 추적 (캐시 기반)
 
 **실행 (4, 승인 필요):**
+
 - `execute_sql` — SQL 실행 (SELECT 자동 허용, DDL/DML 승인 필요)
 - `modify_parameter` — DB 파라미터 변경
 - `modify_scaling` — 인스턴스 스케일링
 - `manage_maintenance` — 유지보수 윈도우 관리
 
 **분석 (2, 자동 허용):**
+
 - `review_sql` — DDL/DML 실행 전 자동 리뷰 (위험도, 영향 행 수, 락 시간 추정, 롤백 SQL)
 - `audit_permissions` — DB 사용자/역할 권한 감사 (과도한 권한, 미사용 계정 탐지)
 
 **공식 AWS MCP로 이관된 기능:**
+
 - 현재 파라미터 값 조회 → 공식 Aurora PG/MySQL MCP
 - 백업 이력/상태 → AWS API MCP (DescribeDBClusterSnapshots)
 - 현재 용량/ACU/스토리지 → AWS API MCP (DescribeDBClusters)
@@ -375,13 +386,13 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 
 ### 6.1 5-Layer Safety Model
 
-| Layer | 구현 | 역할 |
-|---|---|---|
-| **L1: Query Sandbox** | MCP Server 내 read-only DB 연결 기본 | 의도치 않은 쓰기 방지 |
-| **L2: SQL Audit Trail** | 모든 에이전트 쿼리에 `/* source=dbops-agent */` 주석 | 추적성 |
-| **L3: Cedar Policy** | AgentCore Policy Engine | 도구/사용자/입력값 레벨 제어 |
-| **L4: Human-in-the-loop** | 승인 워크플로 (DynamoDB + Web UI) | 변경 작업 DBA 승인 |
-| **L5: Dry-run Mode** | EXPLAIN만 실행, 결과 미리보기 | 실행 전 영향 확인 |
+| Layer                     | 구현                                                 | 역할                         |
+| ------------------------- | ---------------------------------------------------- | ---------------------------- |
+| **L1: Query Sandbox**     | MCP Server 내 read-only DB 연결 기본                 | 의도치 않은 쓰기 방지        |
+| **L2: SQL Audit Trail**   | 모든 에이전트 쿼리에 `/* source=dbops-agent */` 주석 | 추적성                       |
+| **L3: Cedar Policy**      | AgentCore Policy Engine                              | 도구/사용자/입력값 레벨 제어 |
+| **L4: Human-in-the-loop** | 승인 워크플로 (DynamoDB + Web UI)                    | 변경 작업 DBA 승인           |
+| **L5: Dry-run Mode**      | EXPLAIN만 실행, 결과 미리보기                        | 실행 전 영향 확인            |
 
 ### 6.2 Cedar Policy Examples
 
@@ -444,12 +455,14 @@ forbid(
 ### 7.2 Design Strategy
 
 **Claude Design → Claude Code 워크플로:**
+
 1. Claude Design(claude.ai)에서 디자인 시스템 + 핵심 페이지 목업 생성
 2. Handoff bundle export
 3. Claude Code에서 frontend-design 스킬로 구현
 4. 브라우저 검증 반복
 
 **디자인 원칙:**
+
 - Dark Mode First (DBA의 터미널 작업 환경에 맞춤)
 - Information Density > White Space (한 화면에 필요한 정보 최대 표시)
 - Command Palette (Cmd+K) — 모든 기능에 키보드 접근
@@ -460,14 +473,14 @@ forbid(
 
 ### 7.3 Pages
 
-| Page | 데이터 소스 | 통신 경로 |
-|---|---|---|
-| **Chat** | AgentCore Runtime | Path A (SSE Direct) |
-| **Dashboard** | Aurora PG Cache | Path B (REST API) |
-| **Clusters** | Aurora PG Cache + DynamoDB | Path B (REST API) |
-| **Query Lab** | AgentCore Runtime | Path A (SSE Direct) |
-| **Approval Center** | DynamoDB | Path B + C (REST + Async) |
-| **Reports** | S3 + DynamoDB | Path B (REST API) |
+| Page                | 데이터 소스                | 통신 경로                 |
+| ------------------- | -------------------------- | ------------------------- |
+| **Chat**            | AgentCore Runtime          | Path A (SSE Direct)       |
+| **Dashboard**       | Aurora PG Cache            | Path B (REST API)         |
+| **Clusters**        | Aurora PG Cache + DynamoDB | Path B (REST API)         |
+| **Query Lab**       | AgentCore Runtime          | Path A (SSE Direct)       |
+| **Approval Center** | DynamoDB                   | Path B + C (REST + Async) |
+| **Reports**         | S3 + DynamoDB              | Path B (REST API)         |
 
 ---
 
@@ -492,14 +505,15 @@ Central Account (Hub)          Target Account (Spoke)
 
 ### 8.2 Network Connectivity
 
-| Phase | 방식 | 용도 |
-|---|---|---|
-| Phase 1-3 | **RDS Data API** | 네트워크 설정 없이 HTTPS로 SQL 실행 |
-| Phase 4+ | **Transit Gateway** (선택) | 직접 TCP 연결 필요 시 (고성능, 다수 계정) |
+| Phase     | 방식                       | 용도                                      |
+| --------- | -------------------------- | ----------------------------------------- |
+| Phase 1-3 | **RDS Data API**           | 네트워크 설정 없이 HTTPS로 SQL 실행       |
+| Phase 4+  | **Transit Gateway** (선택) | 직접 TCP 연결 필요 시 (고성능, 다수 계정) |
 
 ### 8.3 Cluster Registration
 
 DBA가 Web UI에서 클러스터를 등록하면:
+
 1. Account ID, Region, Cluster ID, Spoke Role ARN 입력
 2. 연결 테스트 (Hub → AssumeRole → Spoke → rds:DescribeDBClusters)
 3. DynamoDB cluster_registry 테이블에 저장
@@ -531,11 +545,13 @@ cdk/
 이 프로젝트는 다른 사용자가 자신의 AWS 계정에 배포할 수 있도록 설계한다.
 
 **배포 전제 조건:**
+
 - AWS 계정 + AdministratorAccess (또는 동등 권한)
 - Node.js 20+, Python 3.10+, AWS CDK CLI
 - Bedrock model access 활성화 (Claude Sonnet)
 
 **배포 절차:**
+
 ```bash
 # 1. 프로젝트 클론
 git clone <repo-url>
@@ -559,6 +575,7 @@ cdk deploy --all
 ```
 
 **Configuration-as-Code 원칙:**
+
 - 모든 환경 차이는 `config/settings.py`에서 관리
 - 기능 토글, 리전, 인스턴스 크기 등을 config로 제어
 - AWS CLI로 직접 리소스 수정 금지 — 항상 CDK를 통해 변경
@@ -687,6 +704,7 @@ dbops/
 **목표:** 하나의 Aurora 클러스터에 대해 AI 대화로 성능 분석
 
 **범위:**
+
 - CDK Foundation + Data Stack (기본)
 - AgentCore Runtime + Gateway
 - Performance MCP Server (6개 핵심 도구)
@@ -703,6 +721,7 @@ dbops/
 **목표:** 장애 발생 시 AI RCA + 분석 리포트 자동 생성
 
 **범위:**
+
 - Incident MCP Server (8개 도구)
 - Performance 분석 도구 추가 (+4)
 - Event Processor Lambda
@@ -719,6 +738,7 @@ dbops/
 **목표:** DBA 승인 기반 파라미터 변경, DDL 실행
 
 **범위:**
+
 - Operations MCP Server (11개 도구)
 - Cedar Policy 고도화
 - Human-in-the-loop 승인 흐름 완성
@@ -734,6 +754,7 @@ dbops/
 **목표:** 버전 업그레이드 시뮬레이션 + 타 계정 DB 통합 관리
 
 **범위:**
+
 - Simulation MCP Server (6개 도구)
 - Cross-Account IAM (Hub-Spoke)
 - 클러스터 등록/관리 UI
@@ -748,6 +769,7 @@ dbops/
 **목표:** 기존 SaaS 상위 호환 수준
 
 **범위:**
+
 - EventBridge proactive 모니터링
 - Lock/Blocking, VACUUM, 비용 분석
 - S3 Tables 아카이브
@@ -764,14 +786,15 @@ dbops/
 **Custom MCP 도구:**
 
 | Phase | Perf | Incident | Ops | Sim | Knowledge | Custom Total |
-|---|---|---|---|---|---|---|
-| 1 | 4 | - | - | - | 2 | 6 |
-| 2 | 8 | 6 | - | - | 2 | 16 |
-| 3 | 8 | 6 | 8 | - | 2 | 24 |
-| 4 | 8 | 6 | 8 | 6 | 2 | 30 |
-| 5 | 10 | 6 | 8 | 6 | 2 | 32 |
+| ----- | ---- | -------- | --- | --- | --------- | ------------ |
+| 1     | 4    | -        | -   | -   | 2         | 6            |
+| 2     | 8    | 6        | -   | -   | 2         | 16           |
+| 3     | 8    | 6        | 8   | -   | 2         | 24           |
+| 4     | 8    | 6        | 8   | 6   | 2         | 30           |
+| 5     | 10   | 6        | 8   | 6   | 2         | 32           |
 
 **공식 AWS MCP (Phase 1부터 Gateway에 등록, 추가 구현 불필요):**
+
 - Aurora PostgreSQL MCP, Aurora MySQL MCP, CloudWatch MCP, AWS API MCP, AWS Knowledge MCP
 
 ---
@@ -780,18 +803,18 @@ dbops/
 
 ### Architecture Decisions
 
-| Decision | Chosen | Rejected | Reason |
-|---|---|---|---|
-| Agent topology | Single Agent + Gateway | Multi-Agent Runtime | Multi-Runtime 호출 시 지연/토큰 문제 (이전 AIOps 실전 경험) |
-| Tool routing | Gateway Semantic Search | Custom Haiku Classifier | Gateway 내장 기능으로 별도 구현 불필요 |
-| Streaming | SSE Direct to Runtime | Lambda proxy | Lambda proxy 시 SSE 스트리밍 불가 |
-| Metrics cache | Aurora PG | S3 Tables + Athena | Athena 레이턴시 2-10초, 대시보드 <500ms 불가. 비용도 10-50x 높음 |
-| Vector store | S3 Vectors | OpenSearch Serverless | OpenSearch 최소 $700/월 vs S3 Vectors $5-10/월 |
-| RAG strategy | 3-Tier Hybrid | Bedrock KB only | 최신성(AWS Knowledge MCP) + 빠른 응답(치트시트) + 내부 문서(KB) 모두 필요 |
-| MCP tool source | Custom + Official AWS MCP 하이브리드 | Custom only | 공식 AWS MCP가 표준 DB/API 작업 처리, Custom은 분석/시뮬레이션에 집중. 유지보수 부담 감소 |
-| Knowledge MCP | AWS Knowledge MCP | AWS Documentation MCP | Knowledge MCP가 Skills, Well-Architected, 블로그, 리전 가용성까지 포함하여 더 넓은 범위 |
-| Cross-account network | RDS Data API (초기) | VPC Peering | 네트워크 설정 없이 즉시 시작 가능 |
-| UI design | Claude Design → Claude Code | Code-only | AI 생성 느낌 방지, 제품다운 디자인 품질 확보 |
+| Decision              | Chosen                               | Rejected                | Reason                                                                                    |
+| --------------------- | ------------------------------------ | ----------------------- | ----------------------------------------------------------------------------------------- |
+| Agent topology        | Single Agent + Gateway               | Multi-Agent Runtime     | Multi-Runtime 호출 시 지연/토큰 문제 (이전 AIOps 실전 경험)                               |
+| Tool routing          | Gateway Semantic Search              | Custom Haiku Classifier | Gateway 내장 기능으로 별도 구현 불필요                                                    |
+| Streaming             | SSE Direct to Runtime                | Lambda proxy            | Lambda proxy 시 SSE 스트리밍 불가                                                         |
+| Metrics cache         | Aurora PG                            | S3 Tables + Athena      | Athena 레이턴시 2-10초, 대시보드 <500ms 불가. 비용도 10-50x 높음                          |
+| Vector store          | S3 Vectors                           | OpenSearch Serverless   | OpenSearch 최소 $700/월 vs S3 Vectors $5-10/월                                            |
+| RAG strategy          | 3-Tier Hybrid                        | Bedrock KB only         | 최신성(AWS Knowledge MCP) + 빠른 응답(치트시트) + 내부 문서(KB) 모두 필요                 |
+| MCP tool source       | Custom + Official AWS MCP 하이브리드 | Custom only             | 공식 AWS MCP가 표준 DB/API 작업 처리, Custom은 분석/시뮬레이션에 집중. 유지보수 부담 감소 |
+| Knowledge MCP         | AWS Knowledge MCP                    | AWS Documentation MCP   | Knowledge MCP가 Skills, Well-Architected, 블로그, 리전 가용성까지 포함하여 더 넓은 범위   |
+| Cross-account network | RDS Data API (초기)                  | VPC Peering             | 네트워크 설정 없이 즉시 시작 가능                                                         |
+| UI design             | Claude Design → Claude Code          | Code-only               | AI 생성 느낌 방지, 제품다운 디자인 품질 확보                                              |
 
 ### External References
 

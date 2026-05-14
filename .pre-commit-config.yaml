@@ -19,6 +19,10 @@ repos:
         exclude: \.md$
       - id: end-of-file-fixer
       - id: check-yaml
+        # CloudFormation templates use !GetAtt / !Ref / !Sub tags that vanilla
+        # PyYAML can't resolve. Skip them — `cfn-lint` would be the right tool
+        # if we wanted real validation on those files.
+        exclude: ^cdk/cross-account/.*\.yaml$
       - id: check-json
       - id: check-added-large-files
         args: ["--maxkb=512"]

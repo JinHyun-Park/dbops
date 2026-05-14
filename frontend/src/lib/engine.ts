@@ -25,7 +25,7 @@ export interface EngineBadge {
   label: string;
   short: string;
   classes: string; // tailwind classes for bg/text/border
-  accent: string;  // for accent dots / pills
+  accent: string; // for accent dots / pills
 }
 
 export function engineBadge(engine: string | null | undefined): EngineBadge {
@@ -76,18 +76,71 @@ interface EolEntry {
 
 const EOL_TABLE: EolEntry[] = [
   // --- Aurora PostgreSQL — standard support end-of-life ---
-  { engine: "postgres", version_prefix: "11.", display_name: "PostgreSQL 11", eol: "2024-02-29", note: "Extended Support charges apply" },
-  { engine: "postgres", version_prefix: "12.", display_name: "PostgreSQL 12", eol: "2025-02-28", note: "Extended Support charges apply" },
-  { engine: "postgres", version_prefix: "13.", display_name: "PostgreSQL 13", eol: "2026-02-28" },
-  { engine: "postgres", version_prefix: "14.", display_name: "PostgreSQL 14", eol: "2026-11-12" },
-  { engine: "postgres", version_prefix: "15.", display_name: "PostgreSQL 15", eol: "2027-11-11" },
-  { engine: "postgres", version_prefix: "16.", display_name: "PostgreSQL 16", eol: "2028-11-09" },
-  { engine: "postgres", version_prefix: "17.", display_name: "PostgreSQL 17", eol: "2029-11-08" },
+  {
+    engine: "postgres",
+    version_prefix: "11.",
+    display_name: "PostgreSQL 11",
+    eol: "2024-02-29",
+    note: "Extended Support charges apply",
+  },
+  {
+    engine: "postgres",
+    version_prefix: "12.",
+    display_name: "PostgreSQL 12",
+    eol: "2025-02-28",
+    note: "Extended Support charges apply",
+  },
+  {
+    engine: "postgres",
+    version_prefix: "13.",
+    display_name: "PostgreSQL 13",
+    eol: "2026-02-28",
+  },
+  {
+    engine: "postgres",
+    version_prefix: "14.",
+    display_name: "PostgreSQL 14",
+    eol: "2026-11-12",
+  },
+  {
+    engine: "postgres",
+    version_prefix: "15.",
+    display_name: "PostgreSQL 15",
+    eol: "2027-11-11",
+  },
+  {
+    engine: "postgres",
+    version_prefix: "16.",
+    display_name: "PostgreSQL 16",
+    eol: "2028-11-09",
+  },
+  {
+    engine: "postgres",
+    version_prefix: "17.",
+    display_name: "PostgreSQL 17",
+    eol: "2029-11-08",
+  },
 
   // --- Aurora MySQL — version strings look like "5.7.mysql_aurora.2.x" or "8.0.mysql_aurora.3.x" ---
-  { engine: "mysql", version_prefix: "5.7", display_name: "MySQL 5.7 (Aurora v2)", eol: "2024-10-31", note: "Aurora MySQL v2 — Extended Support active" },
-  { engine: "mysql", version_prefix: "8.0", display_name: "MySQL 8.0 (Aurora v3)", eol: "2027-04-30" },
-  { engine: "mysql", version_prefix: "8.4", display_name: "MySQL 8.4 (Aurora v4)", eol: "2032-04-30" },
+  {
+    engine: "mysql",
+    version_prefix: "5.7",
+    display_name: "MySQL 5.7 (Aurora v2)",
+    eol: "2024-10-31",
+    note: "Aurora MySQL v2 — Extended Support active",
+  },
+  {
+    engine: "mysql",
+    version_prefix: "8.0",
+    display_name: "MySQL 8.0 (Aurora v3)",
+    eol: "2027-04-30",
+  },
+  {
+    engine: "mysql",
+    version_prefix: "8.4",
+    display_name: "MySQL 8.4 (Aurora v4)",
+    eol: "2032-04-30",
+  },
 ];
 
 export interface EolInfo {
@@ -98,7 +151,11 @@ export interface EolInfo {
   note?: string;
 }
 
-export function eolFor(engine: string | null | undefined, version: string | null | undefined, now: Date = new Date()): EolInfo | null {
+export function eolFor(
+  engine: string | null | undefined,
+  version: string | null | undefined,
+  now: Date = new Date(),
+): EolInfo | null {
   const kind = engineKind(engine);
   if (kind === "unknown" || !version) return null;
   const v = version.toLowerCase();
@@ -114,13 +171,21 @@ export function eolFor(engine: string | null | undefined, version: string | null
   }
   if (!match) return null;
   const eolDate = new Date(match.eol + "T00:00:00Z");
-  const days = Math.floor((eolDate.getTime() - now.getTime()) / (24 * 3600 * 1000));
+  const days = Math.floor(
+    (eolDate.getTime() - now.getTime()) / (24 * 3600 * 1000),
+  );
   let status: EolInfo["status"];
   if (days < 0) status = "expired";
   else if (days < 90) status = "imminent";
   else if (days < 365) status = "soon";
   else status = "safe";
-  return { display_name: match.display_name, eol: match.eol, days_remaining: days, status, note: match.note };
+  return {
+    display_name: match.display_name,
+    eol: match.eol,
+    days_remaining: days,
+    status,
+    note: match.note,
+  };
 }
 
 export const EOL_STATUS_CLASSES: Record<EolInfo["status"], string> = {
@@ -132,7 +197,11 @@ export const EOL_STATUS_CLASSES: Record<EolInfo["status"], string> = {
 
 export function eolHint(info: EolInfo): string {
   if (info.status === "expired") {
-    return `${info.display_name} reached EOL ${Math.abs(info.days_remaining)} days ago (${info.eol})${info.note ? " — " + info.note : ""}`;
+    return `${info.display_name} reached EOL ${Math.abs(
+      info.days_remaining,
+    )} days ago (${info.eol})${info.note ? " — " + info.note : ""}`;
   }
-  return `${info.display_name} EOL on ${info.eol} (${info.days_remaining} days remaining)${info.note ? " — " + info.note : ""}`;
+  return `${info.display_name} EOL on ${info.eol} (${
+    info.days_remaining
+  } days remaining)${info.note ? " — " + info.note : ""}`;
 }

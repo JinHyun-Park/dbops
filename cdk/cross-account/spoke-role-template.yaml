@@ -1,4 +1,4 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Description: DBOps Spoke Role - Deploy in target accounts to enable cross-account DB management
 
 Parameters:
@@ -16,73 +16,73 @@ Resources:
     Properties:
       RoleName: dbops-spoke-role
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub 'arn:aws:iam::${HubAccountId}:role/${HubRoleName}'
-            Action: 'sts:AssumeRole'
+              AWS: !Sub "arn:aws:iam::${HubAccountId}:role/${HubRoleName}"
+            Action: "sts:AssumeRole"
       Policies:
         - PolicyName: DBOpsReadOnly
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Sid: RDSReadOnly
                 Effect: Allow
                 Action:
-                  - 'rds:Describe*'
-                  - 'rds:ListTagsForResource'
-                  - 'rds:DownloadDBLogFilePortion'
-                Resource: '*'
+                  - "rds:Describe*"
+                  - "rds:ListTagsForResource"
+                  - "rds:DownloadDBLogFilePortion"
+                Resource: "*"
               - Sid: PerformanceInsights
                 Effect: Allow
                 Action:
-                  - 'pi:GetResourceMetrics'
-                  - 'pi:DescribeDimensionKeys'
-                  - 'pi:GetResourceMetadata'
-                Resource: '*'
+                  - "pi:GetResourceMetrics"
+                  - "pi:DescribeDimensionKeys"
+                  - "pi:GetResourceMetadata"
+                Resource: "*"
               - Sid: CloudWatch
                 Effect: Allow
                 Action:
-                  - 'cloudwatch:GetMetricData'
-                  - 'cloudwatch:DescribeAlarms'
-                  - 'cloudwatch:GetMetricStatistics'
-                Resource: '*'
+                  - "cloudwatch:GetMetricData"
+                  - "cloudwatch:DescribeAlarms"
+                  - "cloudwatch:GetMetricStatistics"
+                Resource: "*"
               - Sid: CloudWatchLogs
                 Effect: Allow
                 Action:
-                  - 'logs:StartQuery'
-                  - 'logs:GetQueryResults'
-                  - 'logs:DescribeLogGroups'
-                Resource: '*'
+                  - "logs:StartQuery"
+                  - "logs:GetQueryResults"
+                  - "logs:DescribeLogGroups"
+                Resource: "*"
               - Sid: RDSDataAPI
                 Effect: Allow
                 Action:
-                  - 'rds-data:ExecuteStatement'
-                  - 'rds-data:BatchExecuteStatement'
-                Resource: '*'
+                  - "rds-data:ExecuteStatement"
+                  - "rds-data:BatchExecuteStatement"
+                Resource: "*"
               - Sid: SecretsManager
                 Effect: Allow
                 Action:
-                  - 'secretsmanager:GetSecretValue'
-                Resource: '*'
+                  - "secretsmanager:GetSecretValue"
+                Resource: "*"
                 Condition:
                   StringLike:
-                    'secretsmanager:ResourceTag/ManagedBy': 'rds'
+                    "secretsmanager:ResourceTag/ManagedBy": "rds"
         - PolicyName: DBOpsWriteConditional
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Sid: RDSModify
                 Effect: Allow
                 Action:
-                  - 'rds:ModifyDBCluster'
-                  - 'rds:ModifyDBClusterParameterGroup'
-                  - 'rds:CreateDBClusterSnapshot'
-                Resource: '*'
+                  - "rds:ModifyDBCluster"
+                  - "rds:ModifyDBClusterParameterGroup"
+                  - "rds:CreateDBClusterSnapshot"
+                Resource: "*"
                 Condition:
                   StringEquals:
-                    'aws:ResourceTag/ManagedBy': 'dbops'
+                    "aws:ResourceTag/ManagedBy": "dbops"
 
 Outputs:
   SpokeRoleArn:

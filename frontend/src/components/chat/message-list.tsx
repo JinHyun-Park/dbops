@@ -18,21 +18,32 @@ interface MessageListProps {
   followupsLoading?: boolean;
 }
 
-export function MessageList({ messages, onFollowupClick, followupsLoading }: MessageListProps) {
+export function MessageList({
+  messages,
+  onFollowupClick,
+  followupsLoading,
+}: MessageListProps) {
   const lastIdx = messages.length - 1;
   return (
     <div className="flex flex-col gap-4 p-4">
       {messages.map((msg, idx) => {
         const isLast = idx === lastIdx;
-        const showFollowups = msg.role === "assistant" && (msg.followups?.length || followupsLoading) && isLast;
+        const showFollowups =
+          msg.role === "assistant" &&
+          (msg.followups?.length || followupsLoading) &&
+          isLast;
         return (
           <div
             key={msg.id}
-            className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
+            className={`flex flex-col ${
+              msg.role === "user" ? "items-end" : "items-start"
+            }`}
           >
             <div
               className={`max-w-[80%] rounded-lg px-4 py-3 ${
-                msg.role === "user" ? "bg-blue-600 text-white" : "bg-zinc-800 text-zinc-100"
+                msg.role === "user"
+                  ? "bg-blue-600 text-white"
+                  : "bg-zinc-800 text-zinc-100"
               }`}
             >
               {msg.toolCalls && msg.toolCalls.length > 0 && (
@@ -59,7 +70,9 @@ export function MessageList({ messages, onFollowupClick, followupsLoading }: Mes
                   prose-blockquote:border-l-blue-500 prose-blockquote:text-zinc-300
                   prose-hr:border-zinc-700"
                 >
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {msg.content}
+                  </ReactMarkdown>
                 </div>
               )}
             </div>

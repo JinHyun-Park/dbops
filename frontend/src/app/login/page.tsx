@@ -105,16 +105,26 @@ export function AuthLayout({
           <div className="font-mono text-[10px] tracking-[0.25em] text-amber-400/70 uppercase">
             {eyebrow}
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-50 mt-1">{title}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-50 mt-1">
+            {title}
+          </h1>
           <div className="text-sm text-zinc-500 mt-1">{subtitle}</div>
         </div>
-        <div className="border border-zinc-800 bg-zinc-900/50 p-6">{children}</div>
+        <div className="border border-zinc-800 bg-zinc-900/50 p-6">
+          {children}
+        </div>
       </div>
     </div>
   );
 }
 
-export function Field({ label, children }: { label: string; children: React.ReactNode }) {
+export function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div>
       <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">

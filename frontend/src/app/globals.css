@@ -94,10 +94,10 @@ html[data-theme="light"] {
      We give the translucent surfaces a clearly different fill so the
      side-panel separates from the white message canvas, and we strengthen
      the text hierarchy (nav labels were too pale at #6e6e69). */
-  --surface-base: #f5f4ef;             /* page — warm off-white */
-  --surface-raised: #ffffff;           /* main content card */
-  --surface-inset: #ebe9e2;            /* input / code block / recessed strip */
-  --border-subtle: #d6d3c8;            /* clearly visible hairline on white */
+  --surface-base: #f5f4ef; /* page — warm off-white */
+  --surface-raised: #ffffff; /* main content card */
+  --surface-inset: #ebe9e2; /* input / code block / recessed strip */
+  --border-subtle: #d6d3c8; /* clearly visible hairline on white */
   --border-strong: #bdbaae;
   --text-primary: #16161a;
   --text-secondary: #2e2d29;
@@ -141,59 +141,113 @@ html[data-theme="light"] body::before {
    warm tint, and a side panel using `bg-zinc-950/N` reads as a slightly
    darker warm tone so it separates from the white main card sitting next
    to it. */
-html[data-theme="light"] .bg-zinc-950 { background-color: #f5f4ef; }
+html[data-theme="light"] .bg-zinc-950 {
+  background-color: #f5f4ef;
+}
 /* Translucent zinc-950 variants are used as side panels / sticky headers
    sitting on the page. v2 missed these (only bg-zinc-900/N was mapped) so
    dark zinc-950 leaked through, drowning side-panel text. We translate
    each alpha step to a slightly darker warm tint so the side panel still
    separates from the white main canvas. */
-html[data-theme="light"] .bg-zinc-950\/40 { background-color: rgba(225, 220, 200, 0.4); }
-html[data-theme="light"] .bg-zinc-950\/50 { background-color: rgba(220, 215, 195, 0.5); }
-html[data-theme="light"] .bg-zinc-950\/60 { background-color: #ebe9e1; }
+html[data-theme="light"] .bg-zinc-950\/40 {
+  background-color: rgba(225, 220, 200, 0.4);
+}
+html[data-theme="light"] .bg-zinc-950\/50 {
+  background-color: rgba(220, 215, 195, 0.5);
+}
+html[data-theme="light"] .bg-zinc-950\/60 {
+  background-color: #ebe9e1;
+}
 html[data-theme="light"] .bg-zinc-900 {
   background-color: #ffffff;
-  box-shadow: 0 1px 2px rgba(20, 20, 18, 0.06), 0 0 0 1px rgba(20, 20, 18, 0.04);
+  box-shadow:
+    0 1px 2px rgba(20, 20, 18, 0.06),
+    0 0 0 1px rgba(20, 20, 18, 0.04);
 }
 /* Translucent card-on-dark variants — these are used for nested side panels
    (e.g. chat conversation list). On light they need to be visibly distinct
    from the white main canvas next to them, so we use the warm tint with a
    small step down. */
-html[data-theme="light"] .bg-zinc-900\/40 { background-color: #efede6; }
-html[data-theme="light"] .bg-zinc-900\/50 { background-color: #edebe4; }
-html[data-theme="light"] .bg-zinc-900\/60 { background-color: #ebe9e1; }
-html[data-theme="light"] .bg-zinc-900\/95 { background-color: rgba(255, 255, 255, 0.95); }
+html[data-theme="light"] .bg-zinc-900\/40 {
+  background-color: #efede6;
+}
+html[data-theme="light"] .bg-zinc-900\/50 {
+  background-color: #edebe4;
+}
+html[data-theme="light"] .bg-zinc-900\/60 {
+  background-color: #ebe9e1;
+}
+html[data-theme="light"] .bg-zinc-900\/95 {
+  background-color: rgba(255, 255, 255, 0.95);
+}
 
-html[data-theme="light"] .bg-zinc-850 { background-color: #ebe9e2; }
+html[data-theme="light"] .bg-zinc-850 {
+  background-color: #ebe9e2;
+}
 
 /* Recessed (input, code block, table header). Sits between page and card
    so inputs are clearly delineated when surrounded by either. */
-html[data-theme="light"] .bg-zinc-800 { background-color: #ebe9e2; }
+html[data-theme="light"] .bg-zinc-800 {
+  background-color: #ebe9e2;
+}
 
 /* Hover overlays — black-tinted alpha reads consistently whether the
    underlying surface is white or warm-gray. */
-html[data-theme="light"] .bg-zinc-800\/40 { background-color: rgba(22, 22, 26, 0.06); }
-html[data-theme="light"] .bg-zinc-800\/50 { background-color: rgba(22, 22, 26, 0.08); }
+html[data-theme="light"] .bg-zinc-800\/40 {
+  background-color: rgba(22, 22, 26, 0.06);
+}
+html[data-theme="light"] .bg-zinc-800\/50 {
+  background-color: rgba(22, 22, 26, 0.08);
+}
 
 /* Active / selected. We use a warm tan a couple steps darker than the
    sidebar background so a picked item clearly stands out from its
    siblings while staying within the palette family. */
-html[data-theme="light"] .bg-zinc-800\/80 { background-color: #ddd9cc; }
+html[data-theme="light"] .bg-zinc-800\/80 {
+  background-color: #ddd9cc;
+}
 
-html[data-theme="light"] .bg-zinc-700 { background-color: #d6d3c5; }
-html[data-theme="light"] .bg-zinc-700\/40 { background-color: rgba(105, 102, 90, 0.22); }
+html[data-theme="light"] .bg-zinc-700 {
+  background-color: #d6d3c5;
+}
+html[data-theme="light"] .bg-zinc-700\/40 {
+  background-color: rgba(105, 102, 90, 0.22);
+}
 
-html[data-theme="light"] .text-zinc-50 { color: #16161a; }
-html[data-theme="light"] .text-zinc-100 { color: #16161a; }
-html[data-theme="light"] .text-zinc-200 { color: #1f1f23; }
-html[data-theme="light"] .text-zinc-300 { color: #2e2d29; }
-html[data-theme="light"] .text-zinc-400 { color: #44433f; }   /* nav item label */
-html[data-theme="light"] .text-zinc-500 { color: #5d5c55; }   /* nav hint, secondary */
-html[data-theme="light"] .text-zinc-600 { color: #7a7970; }   /* faint */
-html[data-theme="light"] .text-zinc-700 { color: #9d9b91; }   /* ghost */
+html[data-theme="light"] .text-zinc-50 {
+  color: #16161a;
+}
+html[data-theme="light"] .text-zinc-100 {
+  color: #16161a;
+}
+html[data-theme="light"] .text-zinc-200 {
+  color: #1f1f23;
+}
+html[data-theme="light"] .text-zinc-300 {
+  color: #2e2d29;
+}
+html[data-theme="light"] .text-zinc-400 {
+  color: #44433f;
+} /* nav item label */
+html[data-theme="light"] .text-zinc-500 {
+  color: #5d5c55;
+} /* nav hint, secondary */
+html[data-theme="light"] .text-zinc-600 {
+  color: #7a7970;
+} /* faint */
+html[data-theme="light"] .text-zinc-700 {
+  color: #9d9b91;
+} /* ghost */
 
-html[data-theme="light"] .border-zinc-700 { border-color: #c4c1b5; }
-html[data-theme="light"] .border-zinc-800 { border-color: #d6d3c8; }
-html[data-theme="light"] .border-zinc-900 { border-color: #e3e0d6; }
+html[data-theme="light"] .border-zinc-700 {
+  border-color: #c4c1b5;
+}
+html[data-theme="light"] .border-zinc-800 {
+  border-color: #d6d3c8;
+}
+html[data-theme="light"] .border-zinc-900 {
+  border-color: #e3e0d6;
+}
 
 html[data-theme="light"] .divide-zinc-700 > * + *,
 html[data-theme="light"] .divide-zinc-800 > * + * {
@@ -213,92 +267,219 @@ html[data-theme="light"] textarea::placeholder {
    primary fills, keep the lighter shades for fades/glows. The text color of
    amber-on-light buttons stays zinc-950 (effectively near-black) which is
    handled by the text-zinc-* mappings above. */
-html[data-theme="light"] .bg-amber-500 { background-color: #b45309; color: #fff; }
+html[data-theme="light"] .bg-amber-500 {
+  background-color: #b45309;
+  color: #fff;
+}
 html[data-theme="light"] .bg-amber-500:hover,
-html[data-theme="light"] .hover\:bg-amber-400:hover { background-color: #92400e; }
-html[data-theme="light"] .bg-amber-600 { background-color: #92400e; color: #fff; }
-html[data-theme="light"] .text-amber-300 { color: #b45309; }
-html[data-theme="light"] .text-amber-400 { color: #b45309; }
-html[data-theme="light"] .text-amber-400\/80 { color: rgba(180, 83, 9, 0.85); }
-html[data-theme="light"] .text-amber-400\/70 { color: rgba(180, 83, 9, 0.8); }
-html[data-theme="light"] .border-amber-500\/40 { border-color: rgba(180, 83, 9, 0.45); }
-html[data-theme="light"] .border-amber-500\/50 { border-color: rgba(180, 83, 9, 0.55); }
-html[data-theme="light"] .border-amber-500\/60 { border-color: #b45309; }
-html[data-theme="light"] .bg-amber-500\/10 { background-color: rgba(180, 83, 9, 0.08); }
-html[data-theme="light"] .bg-amber-500\/15 { background-color: rgba(180, 83, 9, 0.12); }
-html[data-theme="light"] .bg-amber-500\/20 { background-color: rgba(180, 83, 9, 0.16); }
-html[data-theme="light"] .bg-amber-500\/5 { background-color: rgba(180, 83, 9, 0.06); }
+html[data-theme="light"] .hover\:bg-amber-400:hover {
+  background-color: #92400e;
+}
+html[data-theme="light"] .bg-amber-600 {
+  background-color: #92400e;
+  color: #fff;
+}
+html[data-theme="light"] .text-amber-300 {
+  color: #b45309;
+}
+html[data-theme="light"] .text-amber-400 {
+  color: #b45309;
+}
+html[data-theme="light"] .text-amber-400\/80 {
+  color: rgba(180, 83, 9, 0.85);
+}
+html[data-theme="light"] .text-amber-400\/70 {
+  color: rgba(180, 83, 9, 0.8);
+}
+html[data-theme="light"] .border-amber-500\/40 {
+  border-color: rgba(180, 83, 9, 0.45);
+}
+html[data-theme="light"] .border-amber-500\/50 {
+  border-color: rgba(180, 83, 9, 0.55);
+}
+html[data-theme="light"] .border-amber-500\/60 {
+  border-color: #b45309;
+}
+html[data-theme="light"] .bg-amber-500\/10 {
+  background-color: rgba(180, 83, 9, 0.08);
+}
+html[data-theme="light"] .bg-amber-500\/15 {
+  background-color: rgba(180, 83, 9, 0.12);
+}
+html[data-theme="light"] .bg-amber-500\/20 {
+  background-color: rgba(180, 83, 9, 0.16);
+}
+html[data-theme="light"] .bg-amber-500\/5 {
+  background-color: rgba(180, 83, 9, 0.06);
+}
 /* Light amber tints (100/200) used for emphasised text on amber-tinted bg —
    without these overrides they remain near-white and disappear on the cream
    page background. Match the rest of the amber family for light pages. */
-html[data-theme="light"] .text-amber-100 { color: #92400e; }
-html[data-theme="light"] .text-amber-200 { color: #b45309; }
-html[data-theme="light"] .text-amber-200\/70 { color: rgba(180, 83, 9, 0.72); }
-html[data-theme="light"] .text-amber-200\/80 { color: rgba(180, 83, 9, 0.82); }
-html[data-theme="light"] .text-amber-300\/80 { color: rgba(180, 83, 9, 0.82); }
-html[data-theme="light"] .text-amber-100\/90 { color: rgba(146, 64, 14, 0.92); }
+html[data-theme="light"] .text-amber-100 {
+  color: #92400e;
+}
+html[data-theme="light"] .text-amber-200 {
+  color: #b45309;
+}
+html[data-theme="light"] .text-amber-200\/70 {
+  color: rgba(180, 83, 9, 0.72);
+}
+html[data-theme="light"] .text-amber-200\/80 {
+  color: rgba(180, 83, 9, 0.82);
+}
+html[data-theme="light"] .text-amber-300\/80 {
+  color: rgba(180, 83, 9, 0.82);
+}
+html[data-theme="light"] .text-amber-100\/90 {
+  color: rgba(146, 64, 14, 0.92);
+}
 /* bg-amber-500/5 is too pale against the cream background — bump density */
-html[data-theme="light"] .bg-amber-500\/5 { background-color: rgba(180, 83, 9, 0.10); }
+html[data-theme="light"] .bg-amber-500\/5 {
+  background-color: rgba(180, 83, 9, 0.1);
+}
 /* amber-800 (used as solid badge bg in approval-card) — flip to a readable
    dark-amber on light pages while keeping the dark theme's near-black look. */
-html[data-theme="light"] .bg-amber-800 { background-color: #d97706; color: #fff; }
+html[data-theme="light"] .bg-amber-800 {
+  background-color: #d97706;
+  color: #fff;
+}
 
 /* --- Sky accent (chat tool-call info, anomaly badges, hyperlinks) --- */
-html[data-theme="light"] .text-sky-200 { color: #1d4ed8; }
-html[data-theme="light"] .text-sky-300 { color: #1d4ed8; }
-html[data-theme="light"] .text-sky-300\/80 { color: rgba(29, 78, 216, 0.82); }
-html[data-theme="light"] .text-sky-400 { color: #1d4ed8; }
-html[data-theme="light"] .text-sky-400\/90 { color: rgba(29, 78, 216, 0.92); }
-html[data-theme="light"] .hover\:text-sky-200:hover { color: #1e40af; }
-html[data-theme="light"] .hover\:text-sky-300:hover { color: #1d4ed8; }
-html[data-theme="light"] .bg-sky-500\/10 { background-color: rgba(29, 78, 216, 0.10); }
-html[data-theme="light"] .bg-sky-500\/15 { background-color: rgba(29, 78, 216, 0.13); }
-html[data-theme="light"] .bg-sky-500\/20 { background-color: rgba(29, 78, 216, 0.16); }
-html[data-theme="light"] .border-sky-500\/30 { border-color: rgba(29, 78, 216, 0.4); }
-html[data-theme="light"] .border-sky-500\/40 { border-color: rgba(29, 78, 216, 0.5); }
-html[data-theme="light"] .border-sky-500\/50 { border-color: rgba(29, 78, 216, 0.6); }
-html[data-theme="light"] .border-sky-500\/60 { border-color: #1d4ed8; }
+html[data-theme="light"] .text-sky-200 {
+  color: #1d4ed8;
+}
+html[data-theme="light"] .text-sky-300 {
+  color: #1d4ed8;
+}
+html[data-theme="light"] .text-sky-300\/80 {
+  color: rgba(29, 78, 216, 0.82);
+}
+html[data-theme="light"] .text-sky-400 {
+  color: #1d4ed8;
+}
+html[data-theme="light"] .text-sky-400\/90 {
+  color: rgba(29, 78, 216, 0.92);
+}
+html[data-theme="light"] .hover\:text-sky-200:hover {
+  color: #1e40af;
+}
+html[data-theme="light"] .hover\:text-sky-300:hover {
+  color: #1d4ed8;
+}
+html[data-theme="light"] .bg-sky-500\/10 {
+  background-color: rgba(29, 78, 216, 0.1);
+}
+html[data-theme="light"] .bg-sky-500\/15 {
+  background-color: rgba(29, 78, 216, 0.13);
+}
+html[data-theme="light"] .bg-sky-500\/20 {
+  background-color: rgba(29, 78, 216, 0.16);
+}
+html[data-theme="light"] .border-sky-500\/30 {
+  border-color: rgba(29, 78, 216, 0.4);
+}
+html[data-theme="light"] .border-sky-500\/40 {
+  border-color: rgba(29, 78, 216, 0.5);
+}
+html[data-theme="light"] .border-sky-500\/50 {
+  border-color: rgba(29, 78, 216, 0.6);
+}
+html[data-theme="light"] .border-sky-500\/60 {
+  border-color: #1d4ed8;
+}
 
 /* --- Emerald accent (success states, healthy badges) --- */
-html[data-theme="light"] .text-emerald-200 { color: #047857; }
-html[data-theme="light"] .text-emerald-300 { color: #047857; }
-html[data-theme="light"] .text-emerald-400 { color: #047857; }
-html[data-theme="light"] .bg-emerald-500\/10 { background-color: rgba(4, 120, 87, 0.10); }
-html[data-theme="light"] .bg-emerald-500\/15 { background-color: rgba(4, 120, 87, 0.13); }
-html[data-theme="light"] .bg-emerald-500\/20 { background-color: rgba(4, 120, 87, 0.16); }
-html[data-theme="light"] .border-emerald-500\/30 { border-color: rgba(4, 120, 87, 0.4); }
-html[data-theme="light"] .border-emerald-500\/40 { border-color: rgba(4, 120, 87, 0.5); }
+html[data-theme="light"] .text-emerald-200 {
+  color: #047857;
+}
+html[data-theme="light"] .text-emerald-300 {
+  color: #047857;
+}
+html[data-theme="light"] .text-emerald-400 {
+  color: #047857;
+}
+html[data-theme="light"] .bg-emerald-500\/10 {
+  background-color: rgba(4, 120, 87, 0.1);
+}
+html[data-theme="light"] .bg-emerald-500\/15 {
+  background-color: rgba(4, 120, 87, 0.13);
+}
+html[data-theme="light"] .bg-emerald-500\/20 {
+  background-color: rgba(4, 120, 87, 0.16);
+}
+html[data-theme="light"] .border-emerald-500\/30 {
+  border-color: rgba(4, 120, 87, 0.4);
+}
+html[data-theme="light"] .border-emerald-500\/40 {
+  border-color: rgba(4, 120, 87, 0.5);
+}
 
 /* --- Rose / red accents (errors, critical) --- */
-html[data-theme="light"] .text-rose-200 { color: #b91c1c; }
-html[data-theme="light"] .text-rose-300 { color: #b91c1c; }
-html[data-theme="light"] .text-rose-400 { color: #b91c1c; }
-html[data-theme="light"] .text-red-200 { color: #b91c1c; }
-html[data-theme="light"] .text-red-300 { color: #b91c1c; }
-html[data-theme="light"] .text-red-400 { color: #b91c1c; }
-html[data-theme="light"] .bg-rose-500\/10 { background-color: rgba(185, 28, 28, 0.10); }
-html[data-theme="light"] .bg-rose-500\/15 { background-color: rgba(185, 28, 28, 0.13); }
-html[data-theme="light"] .bg-rose-500\/20 { background-color: rgba(185, 28, 28, 0.16); }
-html[data-theme="light"] .border-rose-500\/30 { border-color: rgba(185, 28, 28, 0.4); }
-html[data-theme="light"] .border-rose-500\/40 { border-color: rgba(185, 28, 28, 0.5); }
+html[data-theme="light"] .text-rose-200 {
+  color: #b91c1c;
+}
+html[data-theme="light"] .text-rose-300 {
+  color: #b91c1c;
+}
+html[data-theme="light"] .text-rose-400 {
+  color: #b91c1c;
+}
+html[data-theme="light"] .text-red-200 {
+  color: #b91c1c;
+}
+html[data-theme="light"] .text-red-300 {
+  color: #b91c1c;
+}
+html[data-theme="light"] .text-red-400 {
+  color: #b91c1c;
+}
+html[data-theme="light"] .bg-rose-500\/10 {
+  background-color: rgba(185, 28, 28, 0.1);
+}
+html[data-theme="light"] .bg-rose-500\/15 {
+  background-color: rgba(185, 28, 28, 0.13);
+}
+html[data-theme="light"] .bg-rose-500\/20 {
+  background-color: rgba(185, 28, 28, 0.16);
+}
+html[data-theme="light"] .border-rose-500\/30 {
+  border-color: rgba(185, 28, 28, 0.4);
+}
+html[data-theme="light"] .border-rose-500\/40 {
+  border-color: rgba(185, 28, 28, 0.5);
+}
 
 /* --- Purple (DEMO badge) --- */
-html[data-theme="light"] .text-purple-300 { color: #6d28d9; }
-html[data-theme="light"] .bg-purple-500\/10 { background-color: rgba(109, 40, 217, 0.10); }
-html[data-theme="light"] .bg-purple-500\/15 { background-color: rgba(109, 40, 217, 0.13); }
-html[data-theme="light"] .bg-purple-500\/25 { background-color: rgba(109, 40, 217, 0.22); }
-html[data-theme="light"] .border-purple-500\/40 { border-color: rgba(109, 40, 217, 0.5); }
+html[data-theme="light"] .text-purple-300 {
+  color: #6d28d9;
+}
+html[data-theme="light"] .bg-purple-500\/10 {
+  background-color: rgba(109, 40, 217, 0.1);
+}
+html[data-theme="light"] .bg-purple-500\/15 {
+  background-color: rgba(109, 40, 217, 0.13);
+}
+html[data-theme="light"] .bg-purple-500\/25 {
+  background-color: rgba(109, 40, 217, 0.22);
+}
+html[data-theme="light"] .border-purple-500\/40 {
+  border-color: rgba(109, 40, 217, 0.5);
+}
 
 /* `.bg-zinc-950/80` is used both as a sticky header backdrop AND as a
    modal scrim. Default to the header treatment (light tint), then bump
    modal scrims (anything inside `.fixed.inset-0`) back to dark for
    focus. The .fixed.inset-0 selector is more specific so it wins. */
-html[data-theme="light"] .bg-zinc-950\/80 { background-color: rgba(245, 244, 239, 0.85); }
+html[data-theme="light"] .bg-zinc-950\/80 {
+  background-color: rgba(245, 244, 239, 0.85);
+}
 html[data-theme="light"] .fixed.inset-0.bg-zinc-950\/80,
 html[data-theme="light"] .fixed.inset-0 .bg-zinc-950\/80 {
   background-color: rgba(28, 28, 26, 0.4);
 }
-html[data-theme="light"] .bg-zinc-950\/95 { background-color: rgba(245, 244, 239, 0.95); }
+html[data-theme="light"] .bg-zinc-950\/95 {
+  background-color: rgba(245, 244, 239, 0.95);
+}
 
 /* Prose (react-markdown w/ prose-invert) — repaint for white pages.
 
@@ -393,7 +574,8 @@ html[data-theme="light"] .prose-invert pre code {
  * the saved PDF reads like a plain document.
  */
 @media print {
-  body, html {
+  body,
+  html {
     background: white !important;
     color: black !important;
   }

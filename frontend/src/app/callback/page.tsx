@@ -25,7 +25,9 @@ export default function CallbackPage() {
         <div className="text-center">
           <div className="text-red-400 text-lg mb-2">Login Failed</div>
           <div className="text-zinc-400 text-sm mb-4">{error}</div>
-          <a href="/" className="text-blue-400 hover:text-blue-300 text-sm">Try again</a>
+          <a href="/" className="text-blue-400 hover:text-blue-300 text-sm">
+            Try again
+          </a>
         </div>
       </div>
     );

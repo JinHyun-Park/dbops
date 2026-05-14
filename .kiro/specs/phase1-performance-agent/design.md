@@ -1,6 +1,7 @@
 # Technical Design: Phase 1 — Performance Analysis Agent
 
 ## Overview
+
 Single Strands Agent on AgentCore Runtime, connected to Performance MCP Server (6 tools) via AgentCore Gateway. Data collected by ETL Lambda into Aurora PG Cache. Next.js frontend with SSE direct connection for chat + REST API for dashboard.
 
 ## Architecture
@@ -23,6 +24,7 @@ graph TB
 ## Components and Interfaces
 
 ### AgentCore Runtime
+
 - Single Strands Agent with BedrockModel (Claude Sonnet)
 - System prompt with Aurora cheatsheet (~2,000 tokens)
 - Connected to Gateway via MCPClient + streamable_http
@@ -30,12 +32,15 @@ graph TB
 - AgentCore Memory for session persistence
 
 ### AgentCore Gateway
+
 - One Lambda target: Performance MCP Server
 - Semantic search enabled for tool discovery
 - Cedar Policy: READ-ONLY (EXPLAIN/SELECT only)
 
 ### Performance MCP Server (Lambda)
+
 Six tools, each a Python function:
+
 - `get_top_queries(cluster_id, sort_by, limit)` → query Aurora PG Cache
 - `explain_query(cluster_id, sql)` → EXPLAIN ANALYZE on target Aurora via RDS Data API
 - `get_pi_metrics(cluster_id, metric_type, start_time, end_time)` → query Aurora PG Cache
@@ -44,6 +49,7 @@ Six tools, each a Python function:
 - `compare_periods(cluster_id, period_a, period_b, metrics)` → two-period diff query
 
 ### Data Pipeline
+
 - **ETL Collector Lambda**: triggered by EventBridge every 5 minutes
   - Calls PI GetResourceMetrics for AAS + wait events (1-min resolution)
   - Queries pg_stat_statements via RDS Data API
@@ -51,11 +57,13 @@ Six tools, each a Python function:
 - Tables: cluster_meta, metric_snapshots, query_stats, slow_queries, index_usage
 
 ### REST API (Lambda)
+
 - `GET /api/dashboard/{cluster_id}` → aggregated metrics from Aurora PG Cache
 - `GET /api/clusters` → list registered clusters
 - `GET /api/metrics/{cluster_id}` → time-series data for charts
 
 ### Frontend (Next.js)
+
 - `/chat` — SSE connection to AgentCore Runtime, message rendering with rich cards
 - `/dashboard` — REST API polling via TanStack Query (5-second refresh)
 - `/clusters` — cluster list and registration form
@@ -64,6 +72,7 @@ Six tools, each a Python function:
 ## Data Models
 
 ### Aurora PG Cache Tables
+
 ```sql
 CREATE TABLE cluster_meta (
     cluster_id VARCHAR(255) PRIMARY KEY,
@@ -126,6 +135,7 @@ Indexes: composite on `(cluster_id, timestamp)` for all time-series tables.
 ## Sequence Diagrams
 
 ### Chat Flow
+
 ```mermaid
 sequenceDiagram
     actor DBA
@@ -158,12 +168,14 @@ sequenceDiagram
 ```
 
 ## Error Handling
+
 - RDS Data API timeout: retry once with exponential backoff, then return partial results with warning
 - Aurora PG Cache connection failure: dashboard shows stale data banner with last-updated timestamp
 - AgentCore Runtime SSE disconnect: frontend auto-reconnects, displays reconnecting indicator
 - Tool execution failure: agent informs DBA of the specific failure and suggests alternative approach
 
 ## Testing Strategy
+
 - **Unit**: Each MCP tool function tested with mocked DB responses
 - **Integration**: MCP Server → Aurora PG Cache → verify query results
 - **E2E**: Chat UI → AgentCore Runtime → Gateway → MCP → verify streamed response

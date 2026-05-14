@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { clearTokens, isLoggedIn, parseTokensFromHash, refreshSession, setTokens } from "@/lib/auth";
+import {
+  clearTokens,
+  isLoggedIn,
+  parseTokensFromHash,
+  refreshSession,
+  setTokens,
+} from "@/lib/auth";
 
 const PUBLIC_PATHS = ["/login", "/forgot", "/reset", "/callback"];
 

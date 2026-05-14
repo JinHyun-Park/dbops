@@ -2,7 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { fetchMultiClusterOverview, fetchAlertRules, fetchCost } from "@/lib/api-client";
+import {
+  fetchMultiClusterOverview,
+  fetchAlertRules,
+  fetchCost,
+} from "@/lib/api-client";
 import { OnboardingModal, useOnboarding } from "@/components/onboarding-modal";
 
 interface ClusterRow {
@@ -36,7 +40,11 @@ export default function HomePage() {
   const onboarding = useOnboarding();
 
   useEffect(() => {
-    Promise.allSettled([fetchMultiClusterOverview(), fetchAlertRules(), fetchCost(7)])
+    Promise.allSettled([
+      fetchMultiClusterOverview(),
+      fetchAlertRules(),
+      fetchCost(7),
+    ])
       .then(([cs, rs, costRes]) => {
         if (cs.status === "fulfilled") setClusters(cs.value.clusters || []);
         if (rs.status === "fulfilled") setRules(rs.value.rules || []);
@@ -50,7 +58,9 @@ export default function HomePage() {
   const blockingCount = clusters.reduce((s, c) => s + n(c.blocking_count), 0);
   const recentTriggered = rules.filter((r) => {
     if (!r.last_triggered_at) return false;
-    return Date.now() - new Date(r.last_triggered_at).getTime() < 24 * 3600 * 1000;
+    return (
+      Date.now() - new Date(r.last_triggered_at).getTime() < 24 * 3600 * 1000
+    );
   }).length;
   const enabledRules = rules.filter((r) => r.enabled).length;
 
@@ -65,7 +75,8 @@ export default function HomePage() {
             Aurora at a glance.
           </h1>
           <p className="mt-3 text-zinc-400 max-w-2xl">
-            AI agent + live metrics + DBA-grade controls across every registered cluster. Press
+            AI agent + live metrics + DBA-grade controls across every registered
+            cluster. Press
             <kbd className="mx-1.5 px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-[10px] font-mono">
               ⌘K
             </kbd>
@@ -83,11 +94,20 @@ export default function HomePage() {
       </header>
 
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-zinc-800 border border-zinc-800 mb-10">
-        <Stat label="Clusters" value={total} hint={`${healthy}/${total} available`} loading={loading} />
+        <Stat
+          label="Clusters"
+          value={total}
+          hint={`${healthy}/${total} available`}
+          loading={loading}
+        />
         <Stat
           label="Active alert rules"
           value={enabledRules}
-          hint={recentTriggered > 0 ? `${recentTriggered} triggered (24h)` : "no recent triggers"}
+          hint={
+            recentTriggered > 0
+              ? `${recentTriggered} triggered (24h)`
+              : "no recent triggers"
+          }
           loading={loading}
           accent={recentTriggered > 0 ? "amber" : "zinc"}
         />
@@ -101,7 +121,9 @@ export default function HomePage() {
         <Stat
           label="Bedrock 7d"
           value={cost7d === null ? "—" : `$${cost7d.toFixed(2)}`}
-          hint={cost7d === null ? "tag not yet activated" : "tag-attributed spend"}
+          hint={
+            cost7d === null ? "tag not yet activated" : "tag-attributed spend"
+          }
           loading={loading}
           accent={cost7d && cost7d > 50 ? "amber" : "zinc"}
         />
@@ -114,7 +136,9 @@ export default function HomePage() {
               <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
                 fleet
               </div>
-              <div className="text-sm text-zinc-200 mt-0.5">Registered clusters</div>
+              <div className="text-sm text-zinc-200 mt-0.5">
+                Registered clusters
+              </div>
             </div>
             <Link
               href="/fleet"
@@ -145,19 +169,30 @@ export default function HomePage() {
                   const conn = n(c.conn_active) + n(c.conn_idle);
                   const blk = n(c.blocking_count);
                   return (
-                    <tr key={c.cluster_id} className="hover:bg-zinc-900/80 transition-colors">
+                    <tr
+                      key={c.cluster_id}
+                      className="hover:bg-zinc-900/80 transition-colors"
+                    >
                       <td className="px-5 py-2 text-zinc-200 font-mono text-xs">
                         <Link
-                          href={`/dashboard?cluster=${encodeURIComponent(c.cluster_id)}`}
+                          href={`/dashboard?cluster=${encodeURIComponent(
+                            c.cluster_id,
+                          )}`}
                           className="hover:text-amber-300"
                         >
                           {c.cluster_id}
                         </Link>
-                        <div className="text-[10px] text-zinc-500 mt-0.5">{c.engine}</div>
+                        <div className="text-[10px] text-zinc-500 mt-0.5">
+                          {c.engine}
+                        </div>
                       </td>
                       <td
                         className={`px-5 py-2 text-right font-mono text-xs ${
-                          cpu > 80 ? "text-rose-400" : cpu > 60 ? "text-amber-400" : "text-zinc-300"
+                          cpu > 80
+                            ? "text-rose-400"
+                            : cpu > 60
+                              ? "text-amber-400"
+                              : "text-zinc-300"
                         }`}
                       >
                         {c.cpu === null ? "—" : `${cpu.toFixed(1)}%`}
@@ -193,11 +228,31 @@ export default function HomePage() {
           </div>
           <div className="text-sm text-zinc-200 mb-5">Common entry points</div>
           <div className="space-y-2.5">
-            <QuickLink href="/chat" title="Ask the agent" hint="natural-language analysis" />
-            <QuickLink href="/query-lab" title="Analyze SQL" hint="EXPLAIN + index recs" />
-            <QuickLink href="/alerts" title="Manage alerts" hint="rules + subscribers" />
-            <QuickLink href="/clusters" title="Register cluster" hint="cross-account aware" />
-            <QuickLink href="/approvals" title="Pending approvals" hint="review writes" />
+            <QuickLink
+              href="/chat"
+              title="Ask the agent"
+              hint="natural-language analysis"
+            />
+            <QuickLink
+              href="/query-lab"
+              title="Analyze SQL"
+              hint="EXPLAIN + index recs"
+            />
+            <QuickLink
+              href="/alerts"
+              title="Manage alerts"
+              hint="rules + subscribers"
+            />
+            <QuickLink
+              href="/clusters"
+              title="Register cluster"
+              hint="cross-account aware"
+            />
+            <QuickLink
+              href="/approvals"
+              title="Pending approvals"
+              hint="review writes"
+            />
           </div>
         </div>
       </section>
@@ -230,7 +285,9 @@ function Stat({
       <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 mb-2">
         {label}
       </div>
-      <div className={`text-3xl font-semibold tracking-tight tabular-nums ${tone}`}>
+      <div
+        className={`text-3xl font-semibold tracking-tight tabular-nums ${tone}`}
+      >
         {loading ? <span className="text-zinc-600">···</span> : value}
       </div>
       {hint && <div className="text-[11px] text-zinc-500 mt-1">{hint}</div>}
@@ -238,7 +295,15 @@ function Stat({
   );
 }
 
-function QuickLink({ href, title, hint }: { href: string; title: string; hint: string }) {
+function QuickLink({
+  href,
+  title,
+  hint,
+}: {
+  href: string;
+  title: string;
+  hint: string;
+}) {
   return (
     <Link
       href={href}
@@ -246,10 +311,14 @@ function QuickLink({ href, title, hint }: { href: string; title: string; hint: s
     >
       <span className="w-1 h-3.5 mt-1 bg-zinc-800 group-hover:bg-amber-400 transition-colors" />
       <div className="flex-1">
-        <div className="text-sm text-zinc-200 group-hover:text-zinc-50">{title}</div>
+        <div className="text-sm text-zinc-200 group-hover:text-zinc-50">
+          {title}
+        </div>
         <div className="text-[11px] text-zinc-500">{hint}</div>
       </div>
-      <span className="text-zinc-700 group-hover:text-amber-400 transition-colors">→</span>
+      <span className="text-zinc-700 group-hover:text-amber-400 transition-colors">
+        →
+      </span>
     </Link>
   );
 }

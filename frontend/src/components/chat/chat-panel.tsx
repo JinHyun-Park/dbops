@@ -31,7 +31,10 @@ const FALLBACK_MODELS: ModelOption[] = [
   { id: "global.anthropic.claude-opus-4-6-v1", label: "Opus 4.6" },
   { id: "global.anthropic.claude-opus-4-5-20251101-v1:0", label: "Opus 4.5" },
   { id: "global.anthropic.claude-sonnet-4-6", label: "Sonnet 4.6" },
-  { id: "global.anthropic.claude-sonnet-4-5-20250929-v1:0", label: "Sonnet 4.5" },
+  {
+    id: "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    label: "Sonnet 4.5",
+  },
   { id: "global.anthropic.claude-haiku-4-5-20251001-v1:0", label: "Haiku 4.5" },
 ];
 
@@ -59,7 +62,9 @@ function saveConversations(conversations: Conversation[]): void {
   } catch {
     // quota exceeded; trim oldest
     try {
-      const trimmed = [...conversations].sort((a, b) => b.updated_at - a.updated_at).slice(0, 30);
+      const trimmed = [...conversations]
+        .sort((a, b) => b.updated_at - a.updated_at)
+        .slice(0, 30);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
     } catch {
       // ignore
@@ -93,7 +98,9 @@ function conversationToMarkdown(conv: Conversation): string {
       const role = m.role === "user" ? "**User**" : "**Assistant**";
       const tools =
         m.toolCalls && m.toolCalls.length > 0
-          ? `\n_Tools_: ${m.toolCalls.map((t) => `\`${t.name}\` (${t.status})`).join(", ")}\n`
+          ? `\n_Tools_: ${m.toolCalls
+              .map((t) => `\`${t.name}\` (${t.status})`)
+              .join(", ")}\n`
           : "";
       return `### ${role}\n${tools}\n${m.content || "(empty)"}\n`;
     })
@@ -114,12 +121,13 @@ function downloadBlob(filename: string, mime: string, content: string) {
 }
 
 function slugify(s: string): string {
-  return (s || "conversation")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .slice(0, 60)
-    || "conversation";
+  return (
+    (s || "conversation")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .slice(0, 60) || "conversation"
+  );
 }
 
 function relTime(ms: number): string {
@@ -139,7 +147,8 @@ export function ChatPanel() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [modelId, setModelId] = useState<string>(DEFAULT_MODEL);
-  const [availableModels, setAvailableModels] = useState<ModelOption[]>(FALLBACK_MODELS);
+  const [availableModels, setAvailableModels] =
+    useState<ModelOption[]>(FALLBACK_MODELS);
   const [followupsLoading, setFollowupsLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const followupAbortRef = useRef<AbortController | null>(null);
@@ -148,7 +157,10 @@ export function ChatPanel() {
     if (typeof window === "undefined") return;
     fetchModels()
       .then((d) => {
-        const live = (d.models || []).map((m) => ({ id: m.id, label: m.label }));
+        const live = (d.models || []).map((m) => ({
+          id: m.id,
+          label: m.label,
+        }));
         if (live.length > 0) setAvailableModels(live);
         // Validate stored model against live list.
         const stored = localStorage.getItem(MODEL_STORAGE_KEY);
@@ -162,12 +174,14 @@ export function ChatPanel() {
       .catch((e) => {
         console.warn("models fetch failed; using fallback", e);
         const stored = localStorage.getItem(MODEL_STORAGE_KEY);
-        if (stored && FALLBACK_MODELS.find((m) => m.id === stored)) setModelId(stored);
+        if (stored && FALLBACK_MODELS.find((m) => m.id === stored))
+          setModelId(stored);
       });
   }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined") localStorage.setItem(MODEL_STORAGE_KEY, modelId);
+    if (typeof window !== "undefined")
+      localStorage.setItem(MODEL_STORAGE_KEY, modelId);
   }, [modelId]);
 
   useEffect(() => {
@@ -201,13 +215,16 @@ export function ChatPanel() {
   const active = conversations.find((c) => c.id === activeId);
   const messages = active?.messages || [];
 
-  const persist = useCallback((updater: (prev: Conversation[]) => Conversation[]) => {
-    setConversations((prev) => {
-      const next = updater(prev);
-      saveConversations(next);
-      return next;
-    });
-  }, []);
+  const persist = useCallback(
+    (updater: (prev: Conversation[]) => Conversation[]) => {
+      setConversations((prev) => {
+        const next = updater(prev);
+        saveConversations(next);
+        return next;
+      });
+    },
+    [],
+  );
 
   const startNewConversation = useCallback(() => {
     const conv = newConversation(clusterId);
@@ -261,7 +278,9 @@ export function ChatPanel() {
           }
           if (!Array.isArray(parsed)) return;
           const followups = parsed
-            .filter((q): q is string => typeof q === "string" && q.trim().length > 0)
+            .filter(
+              (q): q is string => typeof q === "string" && q.trim().length > 0,
+            )
             .slice(0, 3)
             .map((q) => q.trim());
           if (followups.length === 0) return;
@@ -305,7 +324,11 @@ export function ChatPanel() {
         setActiveId(conv.id);
       }
 
-      const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: userText };
+      const userMsg: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: userText,
+      };
       const assistantMsg: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
@@ -344,7 +367,10 @@ export function ChatPanel() {
               const msgs = [...c.messages];
               const last = msgs[msgs.length - 1];
               if (last && last.role === "assistant") {
-                msgs[msgs.length - 1] = { ...last, content: last.content + token };
+                msgs[msgs.length - 1] = {
+                  ...last,
+                  content: last.content + token,
+                };
               }
               return { ...c, messages: msgs, updated_at: Date.now() };
             }),
@@ -360,9 +386,15 @@ export function ChatPanel() {
                 const toolCalls = [...(last.toolCalls || [])];
                 const existing = toolCalls.findIndex((tc) => tc.name === name);
                 if (existing >= 0) {
-                  toolCalls[existing] = { name, status: status as "running" | "done" };
+                  toolCalls[existing] = {
+                    name,
+                    status: status as "running" | "done",
+                  };
                 } else {
-                  toolCalls.push({ name, status: status as "running" | "done" });
+                  toolCalls.push({
+                    name,
+                    status: status as "running" | "done",
+                  });
                 }
                 msgs[msgs.length - 1] = { ...last, toolCalls };
               }
@@ -417,7 +449,11 @@ export function ChatPanel() {
             {conversations.length > 0 && (
               <button
                 onClick={() => {
-                  if (window.confirm(`Delete all ${conversations.length} conversations? This cannot be undone.`)) {
+                  if (
+                    window.confirm(
+                      `Delete all ${conversations.length} conversations? This cannot be undone.`,
+                    )
+                  ) {
                     persist(() => []);
                     setActiveId("");
                   }
@@ -462,7 +498,9 @@ export function ChatPanel() {
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-1">
-                      <span className="text-[10px] text-zinc-600">{relTime(c.updated_at)}</span>
+                      <span className="text-[10px] text-zinc-600">
+                        {relTime(c.updated_at)}
+                      </span>
                       <span
                         onClick={(e) => {
                           e.stopPropagation();
@@ -488,7 +526,9 @@ export function ChatPanel() {
               chat
               <span className="ml-2 text-zinc-700">·</span>
               <span className="ml-2 normal-case tracking-normal">
-                Claude {availableModels.find((m) => m.id === modelId)?.label || "(custom)"}
+                Claude{" "}
+                {availableModels.find((m) => m.id === modelId)?.label ||
+                  "(custom)"}
               </span>
             </div>
             <div className="text-sm text-zinc-200 mt-0.5 truncate">
@@ -496,7 +536,9 @@ export function ChatPanel() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-[10px] uppercase tracking-wider text-zinc-500">model</label>
+            <label className="text-[10px] uppercase tracking-wider text-zinc-500">
+              model
+            </label>
             <select
               value={modelId}
               onChange={(e) => setModelId(e.target.value)}
@@ -509,7 +551,9 @@ export function ChatPanel() {
                 </option>
               ))}
             </select>
-            <label className="text-[10px] uppercase tracking-wider text-zinc-500">cluster</label>
+            <label className="text-[10px] uppercase tracking-wider text-zinc-500">
+              cluster
+            </label>
             <select
               value={clusterId}
               onChange={(e) => setClusterId(e.target.value)}
@@ -552,11 +596,18 @@ export function ChatPanel() {
                 <button
                   onClick={() => {
                     if (!active) return;
-                    if (window.confirm("Clear all messages in this conversation?")) {
+                    if (
+                      window.confirm("Clear all messages in this conversation?")
+                    ) {
                       persist((prev) =>
                         prev.map((c) =>
                           c.id === active.id
-                            ? { ...c, messages: [], title: "New conversation", updated_at: Date.now() }
+                            ? {
+                                ...c,
+                                messages: [],
+                                title: "New conversation",
+                                updated_at: Date.now(),
+                              }
                             : c,
                         ),
                       );
@@ -597,7 +648,8 @@ export function ChatPanel() {
                 conversation primer
               </div>
               <div className="text-zinc-300 text-lg max-w-md mb-6">
-                자연어로 Aurora 운영을 위임하세요. agent가 MCP 툴로 메트릭/스키마/EXPLAIN을 호출합니다.
+                자연어로 Aurora 운영을 위임하세요. agent가 MCP 툴로
+                메트릭/스키마/EXPLAIN을 호출합니다.
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-w-2xl w-full">
                 {[
@@ -636,7 +688,9 @@ export function ChatPanel() {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+              onKeyDown={(e) =>
+                e.key === "Enter" && !e.shiftKey && handleSend()
+              }
               placeholder="예: prod-cluster의 slow query를 분석해줘"
               className="flex-1 bg-zinc-900 text-zinc-100 border border-zinc-800 rounded px-4 py-3 focus:outline-none focus:border-amber-500/60 transition-colors"
               disabled={isStreaming}

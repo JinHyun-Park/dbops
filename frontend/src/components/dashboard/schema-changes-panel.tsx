@@ -20,11 +20,12 @@ function n(v: unknown): number {
   return Number.isFinite(x) ? x : 0;
 }
 
-const TYPE_STYLES: Record<string, { color: string; bg: string; icon: string }> = {
-  created: { color: "text-emerald-400", bg: "bg-emerald-500/10", icon: "＋" },
-  dropped: { color: "text-rose-400", bg: "bg-rose-500/10", icon: "－" },
-  changed: { color: "text-amber-400", bg: "bg-amber-500/10", icon: "Δ" },
-};
+const TYPE_STYLES: Record<string, { color: string; bg: string; icon: string }> =
+  {
+    created: { color: "text-emerald-400", bg: "bg-emerald-500/10", icon: "＋" },
+    dropped: { color: "text-rose-400", bg: "bg-rose-500/10", icon: "－" },
+    changed: { color: "text-amber-400", bg: "bg-amber-500/10", icon: "Δ" },
+  };
 
 export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
   const [changes, setChanges] = useState<Change[]>([]);
@@ -68,7 +69,9 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
       {loading ? (
         <div className="p-6 text-zinc-500 text-sm">Loading...</div>
       ) : changes.length === 0 ? (
-        <div className="p-6 text-zinc-500 text-sm">no schema changes detected</div>
+        <div className="p-6 text-zinc-500 text-sm">
+          no schema changes detected
+        </div>
       ) : (
         <div className="divide-y divide-zinc-700">
           {changes.map((c, i) => {
@@ -76,13 +79,21 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
             const baseline = n(c.baseline_rows);
             const current = n(c.current_rows);
             const delta = current - baseline;
-            const deltaPct = baseline > 0 ? ((delta / baseline) * 100).toFixed(0) : "∞";
+            const deltaPct =
+              baseline > 0 ? ((delta / baseline) * 100).toFixed(0) : "∞";
             return (
-              <div key={`${c.schema_name}-${c.table_name}-${i}`} className={`px-4 py-2.5 ${style.bg}`}>
+              <div
+                key={`${c.schema_name}-${c.table_name}-${i}`}
+                className={`px-4 py-2.5 ${style.bg}`}
+              >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <span className={`text-lg font-mono ${style.color}`}>{style.icon}</span>
-                    <span className={`text-[10px] uppercase ${style.color} font-medium`}>
+                    <span className={`text-lg font-mono ${style.color}`}>
+                      {style.icon}
+                    </span>
+                    <span
+                      className={`text-[10px] uppercase ${style.color} font-medium`}
+                    >
                       {c.change_type}
                     </span>
                     <span className="text-sm font-mono text-zinc-200">
@@ -92,19 +103,37 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
                   </div>
                   <div className="text-xs font-mono text-zinc-400 tabular-nums">
                     {c.change_type === "created" && (
-                      <span className="text-emerald-400" title={`${fmtExact(current)} rows`}>{fmtNumber(current)} rows</span>
+                      <span
+                        className="text-emerald-400"
+                        title={`${fmtExact(current)} rows`}
+                      >
+                        {fmtNumber(current)} rows
+                      </span>
                     )}
                     {c.change_type === "dropped" && (
-                      <span className="text-rose-400" title={`${fmtExact(baseline)} rows lost`}>{fmtNumber(baseline)} rows lost</span>
+                      <span
+                        className="text-rose-400"
+                        title={`${fmtExact(baseline)} rows lost`}
+                      >
+                        {fmtNumber(baseline)} rows lost
+                      </span>
                     )}
                     {c.change_type === "changed" && (
                       <>
-                        <span title={fmtExact(baseline)}>{fmtNumber(baseline)}</span>
+                        <span title={fmtExact(baseline)}>
+                          {fmtNumber(baseline)}
+                        </span>
                         <span className="text-zinc-600 mx-1.5">→</span>
-                        <span title={fmtExact(current)}>{fmtNumber(current)}</span>
+                        <span title={fmtExact(current)}>
+                          {fmtNumber(current)}
+                        </span>
                         <span
-                          className={`ml-2 ${delta > 0 ? "text-emerald-400" : "text-rose-400"}`}
-                          title={`delta ${delta > 0 ? "+" : ""}${fmtExact(delta)}`}
+                          className={`ml-2 ${
+                            delta > 0 ? "text-emerald-400" : "text-rose-400"
+                          }`}
+                          title={`delta ${delta > 0 ? "+" : ""}${fmtExact(
+                            delta,
+                          )}`}
                         >
                           ({delta > 0 ? "+" : ""}
                           {deltaPct}%)

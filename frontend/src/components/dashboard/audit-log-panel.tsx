@@ -15,7 +15,13 @@ interface Entry {
   resolved_at: string | null;
 }
 
-const ACTION_TYPES = ["", "execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance"];
+const ACTION_TYPES = [
+  "",
+  "execute_sql",
+  "modify_parameter",
+  "modify_scaling",
+  "manage_maintenance",
+];
 
 const STATUS_STYLES: Record<string, string> = {
   approved: "text-emerald-400 bg-emerald-500/10",
@@ -53,7 +59,9 @@ export function AuditLogPanel({ clusterId }: { clusterId: string }) {
     <div className="bg-zinc-900/50 border border-zinc-800 overflow-hidden">
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <div className="text-xs text-zinc-400 uppercase tracking-wider">Audit Log</div>
+          <div className="text-xs text-zinc-400 uppercase tracking-wider">
+            Audit Log
+          </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
             DBA-approved actions and changes
           </div>
@@ -90,17 +98,30 @@ export function AuditLogPanel({ clusterId }: { clusterId: string }) {
           <table className="w-full text-sm">
             <thead className="bg-zinc-900/50 border-b border-zinc-800 sticky top-0">
               <tr>
-                <th className="text-left px-3 py-2 text-zinc-400 font-medium">When</th>
-                <th className="text-left px-3 py-2 text-zinc-400 font-medium">Action</th>
-                <th className="text-left px-3 py-2 text-zinc-400 font-medium">Requested</th>
-                <th className="text-left px-3 py-2 text-zinc-400 font-medium">Approved</th>
-                <th className="text-left px-3 py-2 text-zinc-400 font-medium">Status</th>
-                <th className="text-left px-3 py-2 text-zinc-400 font-medium">SQL</th>
+                <th className="text-left px-3 py-2 text-zinc-400 font-medium">
+                  When
+                </th>
+                <th className="text-left px-3 py-2 text-zinc-400 font-medium">
+                  Action
+                </th>
+                <th className="text-left px-3 py-2 text-zinc-400 font-medium">
+                  Requested
+                </th>
+                <th className="text-left px-3 py-2 text-zinc-400 font-medium">
+                  Approved
+                </th>
+                <th className="text-left px-3 py-2 text-zinc-400 font-medium">
+                  Status
+                </th>
+                <th className="text-left px-3 py-2 text-zinc-400 font-medium">
+                  SQL
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-700">
               {entries.map((e) => {
-                const sty = STATUS_STYLES[e.status] || "text-zinc-400 bg-zinc-700/50";
+                const sty =
+                  STATUS_STYLES[e.status] || "text-zinc-400 bg-zinc-700/50";
                 return (
                   <tr key={e.id} className="hover:bg-zinc-900/40">
                     <td className="px-3 py-2 text-zinc-400 font-mono text-xs whitespace-nowrap">
@@ -109,13 +130,21 @@ export function AuditLogPanel({ clusterId }: { clusterId: string }) {
                     <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
                       {e.action_type}
                       {e.tool_name && (
-                        <div className="text-[10px] text-zinc-500">{e.tool_name}</div>
+                        <div className="text-[10px] text-zinc-500">
+                          {e.tool_name}
+                        </div>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-zinc-300 text-xs">{e.requested_by || "-"}</td>
-                    <td className="px-3 py-2 text-zinc-300 text-xs">{e.approved_by || "-"}</td>
+                    <td className="px-3 py-2 text-zinc-300 text-xs">
+                      {e.requested_by || "-"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-300 text-xs">
+                      {e.approved_by || "-"}
+                    </td>
                     <td className="px-3 py-2">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${sty}`}>
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${sty}`}
+                      >
                         {e.status}
                       </span>
                     </td>

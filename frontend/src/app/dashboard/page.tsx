@@ -20,9 +20,20 @@ import { AnomaliesPanel } from "@/components/dashboard/anomalies-panel";
 import { AuditLogPanel } from "@/components/dashboard/audit-log-panel";
 import { TableSizesPanel } from "@/components/dashboard/table-sizes-panel";
 import { BackupPanel } from "@/components/dashboard/backup-panel";
-import { fetchClusters, fetchDashboard, fetchBatchTimeseries } from "@/lib/api-client";
+import {
+  fetchClusters,
+  fetchDashboard,
+  fetchBatchTimeseries,
+} from "@/lib/api-client";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
-import { engineBadge, isPostgres, isMysql, eolFor, EOL_STATUS_CLASSES, eolHint } from "@/lib/engine";
+import {
+  engineBadge,
+  isPostgres,
+  isMysql,
+  eolFor,
+  EOL_STATUS_CLASSES,
+  eolHint,
+} from "@/lib/engine";
 
 type TsPoint = { ts: string; value: number | string; dimensions?: string };
 
@@ -78,9 +89,18 @@ const RANGES = [
 ];
 
 export default function DashboardPage() {
-  const [clusters, setClusters] = useState<{ cluster_id: string; engine?: string; status?: string; is_demo?: boolean }[]>([]);
+  const [clusters, setClusters] = useState<
+    {
+      cluster_id: string;
+      engine?: string;
+      status?: string;
+      is_demo?: boolean;
+    }[]
+  >([]);
   const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
-  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [hours, setHours] = useState<number>(1);
   const [tsBatch, setTsBatch] = useState<Record<string, TsPoint[]>>({});
@@ -91,9 +111,14 @@ export default function DashboardPage() {
       .then((cs) => {
         setClusters(cs);
         if (cs.length === 0) return;
-        const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+        const params =
+          typeof window !== "undefined"
+            ? new URLSearchParams(window.location.search)
+            : null;
         const wanted = params?.get("cluster");
-        const match = wanted && cs.find((c: { cluster_id: string }) => c.cluster_id === wanted);
+        const match =
+          wanted &&
+          cs.find((c: { cluster_id: string }) => c.cluster_id === wanted);
         setSelectedCluster(match ? wanted : cs[0].cluster_id);
       })
       .catch((e) => setError(`Failed to load clusters: ${e.message}`));
@@ -132,7 +157,10 @@ export default function DashboardPage() {
     const load = () => {
       fetchDashboard(selectedCluster)
         .then((d) => !cancelled && setDashboardData(d))
-        .catch((e) => !cancelled && setError(`Failed to load dashboard: ${e.message}`));
+        .catch(
+          (e) =>
+            !cancelled && setError(`Failed to load dashboard: ${e.message}`),
+        );
     };
     load();
     const interval = setInterval(load, 15000);
@@ -150,7 +178,9 @@ export default function DashboardPage() {
         description="단일 클러스터 deep dive — 시계열, wait events, locks, vacuum, schema changes 등 17개 패널."
         actions={
           <div className="flex items-center gap-1">
-            <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">range</span>
+            <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
+              range
+            </span>
             {RANGES.map((r) => (
               <button
                 key={r.hours}
@@ -174,17 +204,19 @@ export default function DashboardPage() {
         onSelect={setSelectedCluster}
       />
 
-      {selectedCluster && clusters.find((c) => c.cluster_id === selectedCluster)?.is_demo && (
-        <div className="mt-4 flex items-center gap-3 px-4 py-2.5 border border-purple-500/40 bg-purple-500/10 text-purple-200 text-xs">
-          <span className="px-1.5 py-0.5 text-[10px] font-mono tracking-wider uppercase bg-purple-500/25 border border-purple-500/40">
-            demo
-          </span>
-          <span>
-            합성 데이터로 채워진 데모 클러스터입니다. 실제 Aurora가 아니라 평가용 24시간 시드 데이터를 보고 있습니다 —
-            Clusters 페이지에서 언제든 삭제 가능합니다.
-          </span>
-        </div>
-      )}
+      {selectedCluster &&
+        clusters.find((c) => c.cluster_id === selectedCluster)?.is_demo && (
+          <div className="mt-4 flex items-center gap-3 px-4 py-2.5 border border-purple-500/40 bg-purple-500/10 text-purple-200 text-xs">
+            <span className="px-1.5 py-0.5 text-[10px] font-mono tracking-wider uppercase bg-purple-500/25 border border-purple-500/40">
+              demo
+            </span>
+            <span>
+              합성 데이터로 채워진 데모 클러스터입니다. 실제 Aurora가 아니라
+              평가용 24시간 시드 데이터를 보고 있습니다 — Clusters 페이지에서
+              언제든 삭제 가능합니다.
+            </span>
+          </div>
+        )}
 
       {error && (
         <div className="mt-6 bg-red-900/30 border border-red-700 rounded-lg p-4 text-red-300 text-sm">
@@ -193,7 +225,9 @@ export default function DashboardPage() {
       )}
 
       {selectedCluster && !dashboardData && !error && (
-        <div className="mt-6 text-zinc-500">Loading metrics for {selectedCluster}...</div>
+        <div className="mt-6 text-zinc-500">
+          Loading metrics for {selectedCluster}...
+        </div>
       )}
 
       {selectedCluster && dashboardData && (
@@ -207,19 +241,29 @@ export default function DashboardPage() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3 gap-3">
-                    <div className="text-xs text-zinc-400 uppercase tracking-wider">Cluster Info</div>
+                    <div className="text-xs text-zinc-400 uppercase tracking-wider">
+                      Cluster Info
+                    </div>
                     <div className="flex items-center gap-2">
                       <span
                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 border text-[11px] font-mono uppercase tracking-wider ${badge.classes}`}
                         title={`Engine: ${eng || "unknown"}`}
                       >
-                        <span className={`w-1.5 h-1.5 rounded-full ${badge.accent}`} />
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${badge.accent}`}
+                        />
                         {badge.label}
-                        {ver && <span className="text-zinc-300/80 normal-case font-normal">{ver}</span>}
+                        {ver && (
+                          <span className="text-zinc-300/80 normal-case font-normal">
+                            {ver}
+                          </span>
+                        )}
                       </span>
                       {eol && (
                         <span
-                          className={`px-2 py-1 border border-zinc-700 text-[10px] font-mono uppercase tracking-wider ${EOL_STATUS_CLASSES[eol.status]}`}
+                          className={`px-2 py-1 border border-zinc-700 text-[10px] font-mono uppercase tracking-wider ${
+                            EOL_STATUS_CLASSES[eol.status]
+                          }`}
                           title={eolHint(eol)}
                         >
                           {eol.status === "expired"
@@ -232,19 +276,27 @@ export default function DashboardPage() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
                       <div className="text-zinc-500 text-xs mb-1">Status</div>
-                      <div className="text-emerald-400">{dashboardData.cluster?.status || "-"}</div>
+                      <div className="text-emerald-400">
+                        {dashboardData.cluster?.status || "-"}
+                      </div>
                     </div>
                     <div>
                       <div className="text-zinc-500 text-xs mb-1">Instance</div>
-                      <div className="text-zinc-100 font-mono text-xs">{dashboardData.cluster?.instance_class || "-"}</div>
+                      <div className="text-zinc-100 font-mono text-xs">
+                        {dashboardData.cluster?.instance_class || "-"}
+                      </div>
                     </div>
                     <div>
                       <div className="text-zinc-500 text-xs mb-1">Storage</div>
-                      <div className="text-zinc-100">{dashboardData.cluster?.storage_size_gb ?? "-"} GB</div>
+                      <div className="text-zinc-100">
+                        {dashboardData.cluster?.storage_size_gb ?? "-"} GB
+                      </div>
                     </div>
                     <div>
                       <div className="text-zinc-500 text-xs mb-1">Multi-AZ</div>
-                      <div className="text-zinc-100">{dashboardData.cluster?.multi_az ? "yes" : "no"}</div>
+                      <div className="text-zinc-100">
+                        {dashboardData.cluster?.multi_az ? "yes" : "no"}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -390,7 +442,10 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <WaitEventsPanel clusterId={selectedCluster} hours={hours} />
             <AnomaliesPanel clusterId={selectedCluster} />
-            <EventsPanel events={dashboardData.events || []} clusterId={selectedCluster} />
+            <EventsPanel
+              events={dashboardData.events || []}
+              clusterId={selectedCluster}
+            />
           </div>
 
           <LocksPanel clusterId={selectedCluster} />
@@ -400,7 +455,13 @@ export default function DashboardPage() {
           {/* Vacuum is PG-only — MySQL InnoDB has no equivalent surface.
               For MySQL clusters the column is collapsed and the right panel
               takes the full width. */}
-          <div className={`grid grid-cols-1 ${(dashboardData.cluster?.engine || "").includes("postgresql") ? "lg:grid-cols-2" : ""} gap-4`}>
+          <div
+            className={`grid grid-cols-1 ${
+              (dashboardData.cluster?.engine || "").includes("postgresql")
+                ? "lg:grid-cols-2"
+                : ""
+            } gap-4`}
+          >
             {(dashboardData.cluster?.engine || "").includes("postgresql") && (
               <VacuumPanel clusterId={selectedCluster} />
             )}
@@ -416,7 +477,10 @@ export default function DashboardPage() {
             topQueries={dashboardData.top_queries || []}
           />
 
-          <SettingsPanel clusterId={selectedCluster} engine={dashboardData.cluster?.engine} />
+          <SettingsPanel
+            clusterId={selectedCluster}
+            engine={dashboardData.cluster?.engine}
+          />
 
           <AuditLogPanel clusterId={selectedCluster} />
         </div>

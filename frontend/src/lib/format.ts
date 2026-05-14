@@ -19,7 +19,8 @@ export function fmtNumber(v: number | string | null | undefined): string {
   const abs = Math.abs(n);
   if (abs < 1_000) return NUMBER_FORMATTER.format(Math.round(n * 100) / 100);
   if (abs < 1_000_000) return `${(n / 1_000).toFixed(abs < 10_000 ? 2 : 1)}k`;
-  if (abs < 1_000_000_000) return `${(n / 1_000_000).toFixed(abs < 10_000_000 ? 2 : 1)}M`;
+  if (abs < 1_000_000_000)
+    return `${(n / 1_000_000).toFixed(abs < 10_000_000 ? 2 : 1)}M`;
   if (abs < 1_000_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
   return `${(n / 1_000_000_000_000).toFixed(2)}T`;
 }

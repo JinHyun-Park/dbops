@@ -67,6 +67,7 @@ tests/unit/mcp_servers/
 ## Task 1: Schema V2 + Event History Tables
 
 **Files:**
+
 - Create: `data-pipeline/sql/schema_v2.sql`
 
 - [ ] **Step 1: Create additional schema**
@@ -116,6 +117,7 @@ git commit -m "feat: add schema v2 with event_log and reports tables"
 ## Task 2: Performance Analysis Tools (4 tools, TDD)
 
 **Files:**
+
 - Create: `mcp-servers/mcp_servers/performance/tools/detect_anomalies.py`
 - Create: `mcp-servers/mcp_servers/performance/tools/detect_regressions.py`
 - Create: `mcp-servers/mcp_servers/performance/tools/forecast_capacity.py`
@@ -154,6 +156,7 @@ git commit -m "feat: add performance analysis tools (anomaly, regression, foreca
 ## Task 3: Incident MCP Server (6 tools, TDD)
 
 **Files:**
+
 - Create: `mcp-servers/mcp_servers/incident/` directory with handler + 6 tools
 - Test: 6 test files
 
@@ -187,6 +190,7 @@ git commit -m "feat: add Incident MCP Server with 6 tools (health, events, logs,
 ## Task 4: Event Processor Lambda
 
 **Files:**
+
 - Create: `data-pipeline/event_processor/handler.py`
 - Create: `data-pipeline/event_processor/requirements.txt`
 - Modify: `cdk/stacks/data_stack.py` (add event processor Lambda + EventBridge rules)
@@ -194,6 +198,7 @@ git commit -m "feat: add Incident MCP Server with 6 tools (health, events, logs,
 - [ ] **Step 1: Implement event processor**
 
 Lambda triggered by EventBridge rules for:
+
 - RDS events (failover, maintenance, error)
 - CloudWatch Alarm state changes
 - Aurora cluster events
@@ -215,6 +220,7 @@ git commit -m "feat: add Event Processor Lambda with EventBridge rules for RDS/C
 ## Task 5: Report Generator Lambda
 
 **Files:**
+
 - Create: `data-pipeline/report_generator/handler.py`
 - Create: `data-pipeline/report_generator/requirements.txt`
 - Create: `api/reports/handler.py`
@@ -222,6 +228,7 @@ git commit -m "feat: add Event Processor Lambda with EventBridge rules for RDS/C
 - [ ] **Step 1: Implement report generator**
 
 Lambda triggered by EventBridge schedule (daily 9am KST):
+
 1. Calls Performance MCP tools (summary, anomalies, regressions)
 2. Calls AgentCore Runtime to generate natural language report
 3. Stores in `reports` table + S3
@@ -247,6 +254,7 @@ git commit -m "feat: add Report Generator Lambda and Reports API"
 ## Task 6: Frontend — Query Lab + Reports Pages
 
 **Files:**
+
 - Create: `frontend/src/app/query-lab/page.tsx`
 - Create: `frontend/src/components/query-lab/query-editor.tsx`
 - Create: `frontend/src/app/reports/page.tsx`

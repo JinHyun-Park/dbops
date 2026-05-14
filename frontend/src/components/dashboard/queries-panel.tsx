@@ -45,7 +45,9 @@ export function QueriesPanel({
   const rows = useMemo(() => {
     const src = tab === "top" ? topQueries : slow;
     const filtered = filter
-      ? src.filter((q) => (q.query_text || "").toLowerCase().includes(filter.toLowerCase()))
+      ? src.filter((q) =>
+          (q.query_text || "").toLowerCase().includes(filter.toLowerCase()),
+        )
       : src;
     return [...filtered].sort((a, b) => n(b[sort]) - n(a[sort]));
   }, [tab, topQueries, slow, sort, filter]);
@@ -94,12 +96,16 @@ export function QueriesPanel({
           </div>
         </div>
         {rows.length === 0 ? (
-          <div className="p-6 text-center text-zinc-500 text-sm">no queries</div>
+          <div className="p-6 text-center text-zinc-500 text-sm">
+            no queries
+          </div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-zinc-900/50 border-b border-zinc-800">
               <tr>
-                <th className="text-left px-4 py-2 text-zinc-400 font-medium">Query</th>
+                <th className="text-left px-4 py-2 text-zinc-400 font-medium">
+                  Query
+                </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium w-24"
                   title="Number of times this normalized query was executed in the window"
@@ -150,8 +156,8 @@ export function QueriesPanel({
                       n(q.mean_time_ms) > 1000
                         ? "text-rose-400"
                         : n(q.mean_time_ms) > 100
-                        ? "text-amber-400"
-                        : "text-zinc-300"
+                          ? "text-amber-400"
+                          : "text-zinc-300"
                     }`}
                     title={`${n(q.mean_time_ms).toFixed(2)} ms per call`}
                   >

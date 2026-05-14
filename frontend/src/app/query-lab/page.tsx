@@ -4,9 +4,18 @@ import { useState, useCallback, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { QueryEditor } from "@/components/query-lab/query-editor";
-import { PlanTree, summarizePlanForLLM } from "@/components/query-lab/plan-tree";
+import {
+  PlanTree,
+  summarizePlanForLLM,
+} from "@/components/query-lab/plan-tree";
 import { streamChat } from "@/lib/agentcore-sse";
-import { fetchClusters, runExplain, ExplainSqlError, type ExplainResponse, type PgPlanRoot } from "@/lib/api-client";
+import {
+  fetchClusters,
+  runExplain,
+  ExplainSqlError,
+  type ExplainResponse,
+  type PgPlanRoot,
+} from "@/lib/api-client";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
 
 interface ClusterRow {
@@ -70,7 +79,10 @@ function loadPlanHistory(): SavedPlan[] {
 function savePlanHistory(next: SavedPlan[]): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(PLAN_HISTORY_KEY, JSON.stringify(next.slice(0, PLAN_HISTORY_LIMIT)));
+    localStorage.setItem(
+      PLAN_HISTORY_KEY,
+      JSON.stringify(next.slice(0, PLAN_HISTORY_LIMIT)),
+    );
   } catch {
     // quota — drop oldest and retry once
     try {
@@ -94,7 +106,10 @@ export default function QueryLabPage() {
   const [clusterId, setClusterId] = useState<string>("");
   const [analysis, setAnalysis] = useState("");
   const [explain, setExplain] = useState<ExplainResponse | null>(null);
-  const [explainError, setExplainError] = useState<{ message: string; kind: "sql" | "infra" } | null>(null);
+  const [explainError, setExplainError] = useState<{
+    message: string;
+    kind: "sql" | "infra";
+  } | null>(null);
   const [loadingKind, setLoadingKind] = useState<LoadingKind>(null);
   const [tab, setTab] = useState<Tab>("plan");
   const [presetPrompt, setPresetPrompt] = useState<string>("");
@@ -160,7 +175,9 @@ export default function QueryLabPage() {
         setExplain(res);
         // Save to history (dedupe on identical sql+cluster — keep newest).
         setHistory((prev) => {
-          const filtered = prev.filter((h) => !(h.sql === sql && h.cluster_id === clusterId));
+          const filtered = prev.filter(
+            (h) => !(h.sql === sql && h.cluster_id === clusterId),
+          );
           const entry: SavedPlan = {
             id: `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             sql,
@@ -200,7 +217,9 @@ export default function QueryLabPage() {
       return;
     }
     const summary = summarizePlanForLLM(arr[0]);
-    const sqlBlock = lastSql ? `\n\nSQL:\n\`\`\`sql\n${lastSql.trim()}\n\`\`\`` : "";
+    const sqlBlock = lastSql
+      ? `\n\nSQL:\n\`\`\`sql\n${lastSql.trim()}\n\`\`\``
+      : "";
     const message =
       `You are a Postgres performance expert. Below is a structured EXPLAIN ANALYZE summary. ` +
       `Identify the single biggest bottleneck and recommend 2–3 concrete fixes ` +
@@ -308,13 +327,17 @@ export default function QueryLabPage() {
         description="EXPLAIN button renders a plan tree directly. AI 분석 sends the SQL to the agent for natural-language commentary."
         actions={
           <div className="flex items-center gap-2">
-            <label className="text-[10px] uppercase tracking-wider text-zinc-500">cluster</label>
+            <label className="text-[10px] uppercase tracking-wider text-zinc-500">
+              cluster
+            </label>
             <select
               value={clusterId}
               onChange={(e) => setClusterId(e.target.value)}
               className="bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-1.5 focus:outline-none focus:border-amber-500/60"
             >
-              {clusters.length === 0 && <option value="">(no clusters registered)</option>}
+              {clusters.length === 0 && (
+                <option value="">(no clusters registered)</option>
+              )}
               {clusters.map((c) => (
                 <option key={c.cluster_id} value={c.cluster_id}>
                   {c.cluster_id}
@@ -327,7 +350,8 @@ export default function QueryLabPage() {
 
       <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-3 mb-4">
         <div className="text-[11px] text-zinc-500 uppercase tracking-wider mb-2">
-          quick presets — copies a template to clipboard and primes the AI analysis prompt
+          quick presets — copies a template to clipboard and primes the AI
+          analysis prompt
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           {PRESETS.map((p) => (
@@ -349,7 +373,9 @@ export default function QueryLabPage() {
           )}
         </div>
         {presetPrompt && (
-          <div className="mt-2 text-[11px] text-sky-400 font-mono">prompt: {presetPrompt}</div>
+          <div className="mt-2 text-[11px] text-sky-400 font-mono">
+            prompt: {presetPrompt}
+          </div>
         )}
       </div>
 
@@ -381,15 +407,22 @@ export default function QueryLabPage() {
               </div>
               <div className="divide-y divide-zinc-800 max-h-[28rem] overflow-y-auto">
                 {history.map((h) => (
-                  <div key={h.id} className="px-3 py-2 hover:bg-zinc-800/40 group">
+                  <div
+                    key={h.id}
+                    className="px-3 py-2 hover:bg-zinc-800/40 group"
+                  >
                     <div className="flex items-center gap-2 text-[10px] text-zinc-500 mb-1">
-                      <span className="font-mono">{h.engine.replace("aurora-", "")}</span>
+                      <span className="font-mono">
+                        {h.engine.replace("aurora-", "")}
+                      </span>
                       <span>·</span>
                       <span className="tabular-nums">{h.elapsed_ms}ms</span>
                       <span>·</span>
                       <span>{relTime(h.saved_at)}</span>
                       <span className="text-zinc-700">·</span>
-                      <span className="truncate font-mono opacity-70">{h.cluster_id}</span>
+                      <span className="truncate font-mono opacity-70">
+                        {h.cluster_id}
+                      </span>
                     </div>
                     <button
                       onClick={() => {
@@ -418,7 +451,9 @@ export default function QueryLabPage() {
                       <button
                         onClick={async () => {
                           try {
-                            await navigator.clipboard.writeText(JSON.stringify(h.plan, null, 2));
+                            await navigator.clipboard.writeText(
+                              JSON.stringify(h.plan, null, 2),
+                            );
                           } catch {
                             /* ignore */
                           }
@@ -429,7 +464,9 @@ export default function QueryLabPage() {
                       </button>
                       <button
                         onClick={async () => {
-                          const url = `${window.location.origin}/query-lab#sql=${btoa(
+                          const url = `${
+                            window.location.origin
+                          }/query-lab#sql=${btoa(
                             unescape(encodeURIComponent(h.sql)),
                           )}&cluster=${encodeURIComponent(h.cluster_id)}`;
                           try {
@@ -486,7 +523,9 @@ export default function QueryLabPage() {
             {clusterId && (
               <>
                 <span className="text-zinc-700">·</span>
-                <span className="text-[10px] text-zinc-500 font-mono truncate">{clusterId}</span>
+                <span className="text-[10px] text-zinc-500 font-mono truncate">
+                  {clusterId}
+                </span>
               </>
             )}
             {tab === "plan" && explain && (
@@ -510,14 +549,19 @@ export default function QueryLabPage() {
                   }`}
                 >
                   <div className="font-mono text-[10px] uppercase tracking-wider mb-1 opacity-70">
-                    {explainError.kind === "sql" ? "SQL error" : "Execution failed"}
+                    {explainError.kind === "sql"
+                      ? "SQL error"
+                      : "Execution failed"}
                   </div>
-                  <div className="font-mono break-words">{explainError.message}</div>
+                  <div className="font-mono break-words">
+                    {explainError.message}
+                  </div>
                 </div>
               )}
               {!loadingKind && !explainError && !hasPlan && (
                 <div className="text-sm text-zinc-500">
-                  Paste a SELECT into the editor and click <span className="text-amber-300">EXPLAIN</span>.
+                  Paste a SELECT into the editor and click{" "}
+                  <span className="text-amber-300">EXPLAIN</span>.
                 </div>
               )}
               {hasPlan && (
@@ -533,19 +577,28 @@ export default function QueryLabPage() {
                         disabled={insightLoading}
                         className="text-xs px-3 py-1 border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 disabled:opacity-50 transition-colors"
                       >
-                        {insightLoading ? "thinking…" : insight ? "Re-analyze" : "Get AI insight"}
+                        {insightLoading
+                          ? "thinking…"
+                          : insight
+                            ? "Re-analyze"
+                            : "Get AI insight"}
                       </button>
                     </div>
                     <div className="p-3">
                       {!insight && !insightLoading && (
                         <div className="text-xs text-zinc-500">
-                          Click <span className="text-sky-300">Get AI insight</span> for a 2–3 step recommendation
-                          tailored to this plan (sends the structured summary, not the raw plan, so the cost is small).
+                          Click{" "}
+                          <span className="text-sky-300">Get AI insight</span>{" "}
+                          for a 2–3 step recommendation tailored to this plan
+                          (sends the structured summary, not the raw plan, so
+                          the cost is small).
                         </div>
                       )}
                       {insight && (
                         <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 prose-code:text-sky-300">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{insight}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {insight}
+                          </ReactMarkdown>
                         </div>
                       )}
                     </div>
@@ -557,11 +610,14 @@ export default function QueryLabPage() {
             <>
               {hasAnalysis ? (
                 <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 prose-code:text-sky-300">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysis}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {analysis}
+                  </ReactMarkdown>
                 </div>
               ) : (
                 <div className="text-sm text-zinc-500">
-                  Pick a preset (template copied to clipboard), paste SQL in the editor, then click
+                  Pick a preset (template copied to clipboard), paste SQL in the
+                  editor, then click
                   <span className="text-sky-400"> AI 분석</span>.
                 </div>
               )}

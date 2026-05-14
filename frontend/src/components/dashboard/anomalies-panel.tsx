@@ -72,7 +72,9 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
             </span>
           )}
         </div>
-        <div className="text-[10px] text-zinc-500">z-score ≥ 2.5 vs 7d baseline</div>
+        <div className="text-[10px] text-zinc-500">
+          z-score ≥ 2.5 vs 7d baseline
+        </div>
       </div>
       {loading ? (
         <div className="text-zinc-500 text-sm">Loading...</div>
@@ -87,10 +89,19 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
             const z = Math.abs(n(a.z_score));
             const styles =
               z > 5
-                ? { box: "border-rose-500/30 bg-rose-500/5 hover:bg-rose-500/10", text: "text-rose-400" }
+                ? {
+                    box: "border-rose-500/30 bg-rose-500/5 hover:bg-rose-500/10",
+                    text: "text-rose-400",
+                  }
                 : z > 3
-                ? { box: "border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10", text: "text-amber-400" }
-                : { box: "border-sky-500/30 bg-sky-500/5 hover:bg-sky-500/10", text: "text-sky-400" };
+                  ? {
+                      box: "border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10",
+                      text: "text-amber-400",
+                    }
+                  : {
+                      box: "border-sky-500/30 bg-sky-500/5 hover:bg-sky-500/10",
+                      text: "text-sky-400",
+                    };
             return (
               <button
                 key={a.metric_type}
@@ -118,7 +129,9 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
                   </div>
                   <div className="text-[11px] text-zinc-500">
                     baseline {n(a.baseline_mean).toFixed(2)} · current max{" "}
-                    <span className="text-zinc-300">{n(a.recent_max).toFixed(2)}</span>
+                    <span className="text-zinc-300">
+                      {n(a.recent_max).toFixed(2)}
+                    </span>
                   </div>
                 </div>
                 <div className={`text-sm font-mono font-medium ${styles.text}`}>
@@ -194,14 +207,13 @@ function AnomalyDetailModal({
     );
   };
 
-  const sevTone =
-    z > 5 ? "rose" : z > 3 ? "amber" : "sky";
+  const sevTone = z > 5 ? "rose" : z > 3 ? "amber" : "sky";
   const sevBadge =
     sevTone === "rose"
       ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
       : sevTone === "amber"
-      ? "bg-amber-500/15 text-amber-300 border border-amber-500/40"
-      : "bg-sky-500/15 text-sky-300 border border-sky-500/30";
+        ? "bg-amber-500/15 text-amber-300 border border-amber-500/40"
+        : "bg-sky-500/15 text-sky-300 border border-sky-500/30";
 
   return (
     <div
@@ -215,12 +227,18 @@ function AnomalyDetailModal({
         <header className="flex items-start justify-between px-5 py-4 border-b border-zinc-800">
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${sevBadge}`}>
+              <span
+                className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${sevBadge}`}
+              >
                 anomaly · σ{z.toFixed(1)}
               </span>
-              <span className="text-[10px] text-zinc-500 font-mono">{anomaly.metric_type}</span>
+              <span className="text-[10px] text-zinc-500 font-mono">
+                {anomaly.metric_type}
+              </span>
             </div>
-            <h2 className="text-lg font-semibold text-zinc-100">{prettyLabel}</h2>
+            <h2 className="text-lg font-semibold text-zinc-100">
+              {prettyLabel}
+            </h2>
             <div className="text-xs text-zinc-400 mt-1">
               baseline {baseline.toFixed(2)} ± {stddev.toFixed(2)} · current max{" "}
               <span className="text-zinc-200">{recentMax.toFixed(2)}</span>
@@ -237,7 +255,11 @@ function AnomalyDetailModal({
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
           <div className="grid grid-cols-2 gap-3 mb-4">
-            <Stat label="Recent max" value={recentMax.toFixed(2)} tone={sevTone} />
+            <Stat
+              label="Recent max"
+              value={recentMax.toFixed(2)}
+              tone={sevTone}
+            />
             <Stat label="Recent avg" value={recentAvg.toFixed(2)} />
             <Stat label="Baseline mean" value={baseline.toFixed(2)} />
             <Stat label="Baseline σ" value={stddev.toFixed(2)} />
@@ -253,7 +275,11 @@ function AnomalyDetailModal({
                 disabled={insightLoading}
                 className="text-xs px-3 py-1 border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 disabled:opacity-50 transition-colors"
               >
-                {insightLoading ? "thinking…" : insight ? "Re-analyze" : "Diagnose + suggest probe"}
+                {insightLoading
+                  ? "thinking…"
+                  : insight
+                    ? "Re-analyze"
+                    : "Diagnose + suggest probe"}
               </button>
             </div>
             {insightError && (
@@ -263,13 +289,16 @@ function AnomalyDetailModal({
             )}
             {!insight && !insightLoading && !insightError && (
               <div className="text-xs text-zinc-500">
-                Click <span className="text-sky-300">Diagnose + suggest probe</span> for likely cause,
-                impact, and a specific next check.
+                Click{" "}
+                <span className="text-sky-300">Diagnose + suggest probe</span>{" "}
+                for likely cause, impact, and a specific next check.
               </div>
             )}
             {insight && (
               <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 prose-code:text-sky-300">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{insight}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {insight}
+                </ReactMarkdown>
               </div>
             )}
           </div>
@@ -279,16 +308,26 @@ function AnomalyDetailModal({
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "rose" | "amber" | "sky" }) {
+function Stat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "rose" | "amber" | "sky";
+}) {
   const color =
     tone === "rose"
       ? "text-rose-300"
       : tone === "amber"
-      ? "text-amber-300"
-      : "text-zinc-100";
+        ? "text-amber-300"
+        : "text-zinc-100";
   return (
     <div className="border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+        {label}
+      </div>
       <div className={`text-base mt-0.5 tabular-nums ${color}`}>{value}</div>
     </div>
   );

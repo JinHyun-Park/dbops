@@ -15,12 +15,18 @@ interface ReportViewerProps {
   onSelect: (report: Report) => void;
 }
 
-export function ReportViewer({ reports, selectedReport, onSelect }: ReportViewerProps) {
+export function ReportViewer({
+  reports,
+  selectedReport,
+  onSelect,
+}: ReportViewerProps) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div className="lg:col-span-1">
         <div className="bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden">
-          <div className="px-4 py-3 border-b border-zinc-700 text-sm text-zinc-400">Reports</div>
+          <div className="px-4 py-3 border-b border-zinc-700 text-sm text-zinc-400">
+            Reports
+          </div>
           <div className="divide-y divide-zinc-700">
             {reports.length === 0 && (
               <div className="p-4 text-sm text-zinc-500">리포트가 없습니다</div>
@@ -33,7 +39,9 @@ export function ReportViewer({ reports, selectedReport, onSelect }: ReportViewer
                   selectedReport?.id === r.id ? "bg-zinc-700" : ""
                 }`}
               >
-                <div className="text-sm text-zinc-200">{r.report_date} — {r.report_type}</div>
+                <div className="text-sm text-zinc-200">
+                  {r.report_date} — {r.report_type}
+                </div>
                 <div className="text-xs text-zinc-400 mt-1">{r.cluster_id}</div>
               </button>
             ))}
@@ -48,11 +56,17 @@ export function ReportViewer({ reports, selectedReport, onSelect }: ReportViewer
               <h2 className="text-lg font-semibold text-zinc-100 mb-2">
                 {selectedReport.report_date} — {selectedReport.report_type}
               </h2>
-              <p className="text-sm text-zinc-400 mb-4">{selectedReport.cluster_id}</p>
-              <div className="text-sm text-zinc-200 whitespace-pre-wrap">{selectedReport.summary}</div>
+              <p className="text-sm text-zinc-400 mb-4">
+                {selectedReport.cluster_id}
+              </p>
+              <div className="text-sm text-zinc-200 whitespace-pre-wrap">
+                {selectedReport.summary}
+              </div>
             </>
           ) : (
-            <div className="text-center text-zinc-500 py-12">리포트를 선택해주세요</div>
+            <div className="text-center text-zinc-500 py-12">
+              리포트를 선택해주세요
+            </div>
           )}
         </div>
       </div>

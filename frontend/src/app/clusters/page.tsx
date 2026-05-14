@@ -12,7 +12,12 @@ import {
   type DiscoveredCluster,
 } from "@/lib/api-client";
 import { isAdmin } from "@/lib/auth";
-import { PageHeader, PageBody, EmptyState, Section } from "@/components/design-system/page-shell";
+import {
+  PageHeader,
+  PageBody,
+  EmptyState,
+  Section,
+} from "@/components/design-system/page-shell";
 
 interface Cluster {
   cluster_id: string;
@@ -31,9 +36,18 @@ interface Cluster {
 }
 
 const CONN_STYLES: Record<string, { label: string; classes: string }> = {
-  ok: { label: "ok", classes: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" },
-  failed: { label: "failed", classes: "bg-rose-500/10 text-rose-400 border-rose-500/30" },
-  untested: { label: "untested", classes: "bg-zinc-700/40 text-zinc-400 border-zinc-700" },
+  ok: {
+    label: "ok",
+    classes: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+  },
+  failed: {
+    label: "failed",
+    classes: "bg-rose-500/10 text-rose-400 border-rose-500/30",
+  },
+  untested: {
+    label: "untested",
+    classes: "bg-zinc-700/40 text-zinc-400 border-zinc-700",
+  },
 };
 
 const STATUS_STYLES: Record<string, string> = {
@@ -64,7 +78,10 @@ export default function ClustersPage() {
     spoke_role_arn: "",
   });
   const [submitting, setSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState<{ kind: "ok" | "warn" | "err"; msg: string } | null>(null);
+  const [feedback, setFeedback] = useState<{
+    kind: "ok" | "warn" | "err";
+    msg: string;
+  } | null>(null);
   const [seedingSample, setSeedingSample] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -82,7 +99,9 @@ export default function ClustersPage() {
   });
   const [discovering, setDiscovering] = useState(false);
   const [discovered, setDiscovered] = useState<DiscoveredCluster[]>([]);
-  const [discoverErrors, setDiscoverErrors] = useState<Record<string, string>>({});
+  const [discoverErrors, setDiscoverErrors] = useState<Record<string, string>>(
+    {},
+  );
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showConfirm, setShowConfirm] = useState(false);
   const [registering, setRegistering] = useState(false);
@@ -118,12 +137,27 @@ export default function ClustersPage() {
       setDiscovered(res.clusters);
       setDiscoverErrors(res.errors || {});
       // Auto-select unregistered clusters.
-      setSelectedIds(new Set(res.clusters.filter((c) => !c.already_registered).map((c) => c.cluster_id)));
-      if (res.clusters.length === 0 && Object.keys(res.errors || {}).length === 0) {
-        setFeedback({ kind: "warn", msg: "검색된 Aurora 클러스터가 없습니다." });
+      setSelectedIds(
+        new Set(
+          res.clusters
+            .filter((c) => !c.already_registered)
+            .map((c) => c.cluster_id),
+        ),
+      );
+      if (
+        res.clusters.length === 0 &&
+        Object.keys(res.errors || {}).length === 0
+      ) {
+        setFeedback({
+          kind: "warn",
+          msg: "검색된 Aurora 클러스터가 없습니다.",
+        });
       }
     } catch (e) {
-      setFeedback({ kind: "err", msg: e instanceof Error ? e.message : "Discover failed" });
+      setFeedback({
+        kind: "err",
+        msg: e instanceof Error ? e.message : "Discover failed",
+      });
     } finally {
       setDiscovering(false);
     }
@@ -167,7 +201,9 @@ export default function ClustersPage() {
       setFeedback({
         kind: tone as "ok" | "warn",
         msg: `등록 ${ok}개, 스킵 ${skip}개, 실패 ${fail}개${
-          fail > 0 ? ` — 실패: ${res.failed.map((f) => f.cluster_id).join(", ")}` : ""
+          fail > 0
+            ? ` — 실패: ${res.failed.map((f) => f.cluster_id).join(", ")}`
+            : ""
         }`,
       });
       setShowConfirm(false);
@@ -176,7 +212,10 @@ export default function ClustersPage() {
       setSelectedIds(new Set());
       loadClusters();
     } catch (e) {
-      setFeedback({ kind: "err", msg: e instanceof Error ? e.message : "Bulk register failed" });
+      setFeedback({
+        kind: "err",
+        msg: e instanceof Error ? e.message : "Bulk register failed",
+      });
     } finally {
       setRegistering(false);
     }
@@ -184,7 +223,10 @@ export default function ClustersPage() {
 
   const handleRegister = async () => {
     if (!form.cluster_id || !form.account_id || !form.region) {
-      setFeedback({ kind: "err", msg: "cluster_id / account_id / region 모두 필요합니다." });
+      setFeedback({
+        kind: "err",
+        msg: "cluster_id / account_id / region 모두 필요합니다.",
+      });
       return;
     }
     setSubmitting(true);
@@ -193,11 +235,16 @@ export default function ClustersPage() {
       const result = await registerCluster(form);
       const status = result?.connection_status;
       if (status === "ok") {
-        setFeedback({ kind: "ok", msg: `등록됨: ${form.cluster_id} · 연결 검증 통과` });
+        setFeedback({
+          kind: "ok",
+          msg: `등록됨: ${form.cluster_id} · 연결 검증 통과`,
+        });
       } else if (status === "failed") {
         setFeedback({
           kind: "warn",
-          msg: `등록은 됐지만 연결 검증 실패: ${result?.connection_error || "AWS console 확인"}`,
+          msg: `등록은 됐지만 연결 검증 실패: ${
+            result?.connection_error || "AWS console 확인"
+          }`,
         });
       } else {
         setFeedback({ kind: "ok", msg: `등록됨: ${form.cluster_id}` });
@@ -212,7 +259,10 @@ export default function ClustersPage() {
       });
       loadClusters();
     } catch (e) {
-      setFeedback({ kind: "err", msg: e instanceof Error ? e.message : "Failed" });
+      setFeedback({
+        kind: "err",
+        msg: e instanceof Error ? e.message : "Failed",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -235,7 +285,10 @@ export default function ClustersPage() {
       });
       loadClusters();
     } catch (e) {
-      setFeedback({ kind: "err", msg: e instanceof Error ? e.message : "Sample generation failed" });
+      setFeedback({
+        kind: "err",
+        msg: e instanceof Error ? e.message : "Sample generation failed",
+      });
     } finally {
       setSeedingSample(false);
     }
@@ -256,7 +309,10 @@ export default function ClustersPage() {
       setFeedback({ kind: "ok", msg: `${c.cluster_id} 삭제됨.` });
       loadClusters();
     } catch (e) {
-      setFeedback({ kind: "err", msg: e instanceof Error ? e.message : "Delete failed" });
+      setFeedback({
+        kind: "err",
+        msg: e instanceof Error ? e.message : "Delete failed",
+      });
     } finally {
       setDeletingId(null);
     }
@@ -323,8 +379,8 @@ export default function ClustersPage() {
             feedback.kind === "ok"
               ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"
               : feedback.kind === "warn"
-              ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
-              : "bg-rose-500/10 text-rose-300 border-rose-500/30"
+                ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
+                : "bg-rose-500/10 text-rose-300 border-rose-500/30"
           }`}
         >
           {feedback.msg}
@@ -342,28 +398,38 @@ export default function ClustersPage() {
               <Field
                 label="Regions (comma-separated)"
                 value={discoverForm.regions}
-                onChange={(v) => setDiscoverForm({ ...discoverForm, regions: v })}
+                onChange={(v) =>
+                  setDiscoverForm({ ...discoverForm, regions: v })
+                }
                 placeholder="ap-northeast-2,us-east-1"
                 mono
               />
               <Field
                 label="Cross-account role ARN (optional)"
                 value={discoverForm.role_arn}
-                onChange={(v) => setDiscoverForm({ ...discoverForm, role_arn: v })}
+                onChange={(v) =>
+                  setDiscoverForm({ ...discoverForm, role_arn: v })
+                }
                 placeholder="arn:aws:iam::<account>:role/dbops-spoke-role"
                 mono
               />
               <Field
                 label="Account ID (label only)"
                 value={discoverForm.account_id}
-                onChange={(v) => setDiscoverForm({ ...discoverForm, account_id: v })}
+                onChange={(v) =>
+                  setDiscoverForm({ ...discoverForm, account_id: v })
+                }
                 placeholder="123456789012"
                 mono
               />
             </div>
             <p className="text-[11px] text-zinc-500 mt-3 leading-relaxed">
-              role ARN을 비우면 DBOps Lambda의 IAM role로 same-account에서 직접 조회합니다.
-              cross-account의 경우 해당 role이 <span className="font-mono text-zinc-400">rds:DescribeDBClusters</span> 권한을 가져야 합니다.
+              role ARN을 비우면 DBOps Lambda의 IAM role로 same-account에서 직접
+              조회합니다. cross-account의 경우 해당 role이{" "}
+              <span className="font-mono text-zinc-400">
+                rds:DescribeDBClusters
+              </span>{" "}
+              권한을 가져야 합니다.
             </p>
             <div className="mt-5 flex gap-2">
               <button
@@ -405,13 +471,16 @@ export default function ClustersPage() {
                           checked={
                             selectedClusters.length > 0 &&
                             selectedClusters.length ===
-                              discovered.filter((c) => !c.already_registered).length
+                              discovered.filter((c) => !c.already_registered)
+                                .length
                           }
                           onChange={(e) => {
                             if (e.target.checked) {
                               setSelectedIds(
                                 new Set(
-                                  discovered.filter((c) => !c.already_registered).map((c) => c.cluster_id),
+                                  discovered
+                                    .filter((c) => !c.already_registered)
+                                    .map((c) => c.cluster_id),
                                 ),
                               );
                             } else {
@@ -421,12 +490,24 @@ export default function ClustersPage() {
                           className="accent-amber-500"
                         />
                       </th>
-                      <th className="text-left px-3 py-2 font-medium">cluster_id</th>
-                      <th className="text-left px-3 py-2 font-medium">engine</th>
-                      <th className="text-left px-3 py-2 font-medium">region</th>
-                      <th className="text-left px-3 py-2 font-medium">status</th>
-                      <th className="text-left px-3 py-2 font-medium">endpoint</th>
-                      <th className="text-left px-3 py-2 font-medium">secret</th>
+                      <th className="text-left px-3 py-2 font-medium">
+                        cluster_id
+                      </th>
+                      <th className="text-left px-3 py-2 font-medium">
+                        engine
+                      </th>
+                      <th className="text-left px-3 py-2 font-medium">
+                        region
+                      </th>
+                      <th className="text-left px-3 py-2 font-medium">
+                        status
+                      </th>
+                      <th className="text-left px-3 py-2 font-medium">
+                        endpoint
+                      </th>
+                      <th className="text-left px-3 py-2 font-medium">
+                        secret
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
@@ -440,7 +521,10 @@ export default function ClustersPage() {
                         <td className="px-3 py-2 text-center">
                           <input
                             type="checkbox"
-                            checked={selectedIds.has(c.cluster_id) && !c.already_registered}
+                            checked={
+                              selectedIds.has(c.cluster_id) &&
+                              !c.already_registered
+                            }
                             disabled={c.already_registered}
                             onChange={() => toggleSelect(c.cluster_id)}
                             className="accent-amber-500"
@@ -449,14 +533,20 @@ export default function ClustersPage() {
                         <td className="px-3 py-2 font-mono text-xs text-zinc-100">
                           {c.cluster_id}
                           {c.already_registered && (
-                            <span className="ml-2 text-[10px] text-zinc-500">already registered</span>
+                            <span className="ml-2 text-[10px] text-zinc-500">
+                              already registered
+                            </span>
                           )}
                         </td>
                         <td className="px-3 py-2 text-xs">
                           <div className="text-zinc-300">{c.engine}</div>
-                          <div className="text-[10px] text-zinc-500 font-mono">{c.engine_version}</div>
+                          <div className="text-[10px] text-zinc-500 font-mono">
+                            {c.engine_version}
+                          </div>
                         </td>
-                        <td className="px-3 py-2 text-xs font-mono text-zinc-400">{c.region}</td>
+                        <td className="px-3 py-2 text-xs font-mono text-zinc-400">
+                          {c.region}
+                        </td>
                         <td
                           className={`px-3 py-2 text-xs ${
                             STATUS_STYLES[c.status] || "text-zinc-500"
@@ -492,16 +582,17 @@ export default function ClustersPage() {
             </h2>
             <div className="text-sm text-zinc-400 space-y-2 mb-5 leading-relaxed">
               <p>
-                DBOps는 등록된 클러스터에 대해 <span className="text-zinc-200">read-only 인스펙션 쿼리</span>(pg_stat_*, information_schema 등)를 실행하고
-                메트릭을 캐시 DB에 저장합니다.
+                DBOps는 등록된 클러스터에 대해{" "}
+                <span className="text-zinc-200">read-only 인스펙션 쿼리</span>
+                (pg_stat_*, information_schema 등)를 실행하고 메트릭을 캐시 DB에
+                저장합니다.
               </p>
               <p>
-                채팅·AI insight를 사용할 때마다 <span className="text-zinc-200">Bedrock 토큰 비용</span>이 발생합니다.
-                Cost 탭에서 모니터링 가능합니다.
+                채팅·AI insight를 사용할 때마다{" "}
+                <span className="text-zinc-200">Bedrock 토큰 비용</span>이
+                발생합니다. Cost 탭에서 모니터링 가능합니다.
               </p>
-              <p>
-                언제든 클러스터 행에서 등록을 해제할 수 있습니다.
-              </p>
+              <p>언제든 클러스터 행에서 등록을 해제할 수 있습니다.</p>
             </div>
             <div className="border-t border-zinc-800 pt-3 max-h-40 overflow-y-auto text-xs font-mono text-zinc-400 space-y-1">
               {selectedClusters.map((c) => (
@@ -521,7 +612,9 @@ export default function ClustersPage() {
                 disabled={registering}
                 className="flex-1 text-sm font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
               >
-                {registering ? "등록 중…" : `동의하고 ${selectedClusters.length}개 등록`}
+                {registering
+                  ? "등록 중…"
+                  : `동의하고 ${selectedClusters.length}개 등록`}
               </button>
               <button
                 onClick={() => setShowConfirm(false)}
@@ -583,9 +676,12 @@ export default function ClustersPage() {
               />
             </div>
             <p className="text-[11px] text-zinc-500 mt-4 leading-relaxed">
-              same-account 클러스터는 spoke role을 비워 두세요. cross-account 등록 시 STS
-              AssumeRole + <span className="font-mono text-zinc-400">rds:DescribeDBClusters</span>로
-              연결을 검증한 뒤 저장합니다.
+              same-account 클러스터는 spoke role을 비워 두세요. cross-account
+              등록 시 STS AssumeRole +{" "}
+              <span className="font-mono text-zinc-400">
+                rds:DescribeDBClusters
+              </span>
+              로 연결을 검증한 뒤 저장합니다.
             </p>
             <div className="flex gap-2 mt-5">
               <button
@@ -616,7 +712,10 @@ export default function ClustersPage() {
             eyebrow="no clusters"
             title="Register your first Aurora cluster"
             description="Cluster ID, account, region을 입력하면 RDS Data API 기반 메트릭 수집이 시작됩니다."
-            primary={{ onClick: () => setShowForm(true), label: "+ Register cluster" }}
+            primary={{
+              onClick: () => setShowForm(true),
+              label: "+ Register cluster",
+            }}
             secondary={{ href: "/chat", label: "Ask the agent first" }}
           />
         ) : (
@@ -626,23 +725,34 @@ export default function ClustersPage() {
                 <tr>
                   <th className="text-left px-4 py-2.5 font-medium">cluster</th>
                   <th className="text-left px-4 py-2.5 font-medium">engine</th>
-                  <th className="text-left px-4 py-2.5 font-medium">account · region</th>
+                  <th className="text-left px-4 py-2.5 font-medium">
+                    account · region
+                  </th>
                   <th className="text-left px-4 py-2.5 font-medium">status</th>
-                  <th className="text-left px-4 py-2.5 font-medium">connection</th>
-                  <th className="text-left px-4 py-2.5 font-medium">registered</th>
-                  <th className="text-right px-4 py-2.5 font-medium">actions</th>
+                  <th className="text-left px-4 py-2.5 font-medium">
+                    connection
+                  </th>
+                  <th className="text-left px-4 py-2.5 font-medium">
+                    registered
+                  </th>
+                  <th className="text-right px-4 py-2.5 font-medium">
+                    actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800">
                 {clusters.map((c) => {
                   const conn = c.connection_status || "untested";
                   const connStyle = CONN_STYLES[conn] || CONN_STYLES.untested;
-                  const statusColor = STATUS_STYLES[c.status || ""] || "text-zinc-500";
+                  const statusColor =
+                    STATUS_STYLES[c.status || ""] || "text-zinc-500";
                   return (
                     <tr key={c.cluster_id} className="hover:bg-zinc-900/40">
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-2">
-                          <div className="text-zinc-100 font-mono text-xs">{c.cluster_id}</div>
+                          <div className="text-zinc-100 font-mono text-xs">
+                            {c.cluster_id}
+                          </div>
                           {c.is_demo && (
                             <span className="px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
                               demo
@@ -659,16 +769,24 @@ export default function ClustersPage() {
                         )}
                       </td>
                       <td className="px-4 py-2.5">
-                        <div className="text-zinc-300 text-xs">{c.engine || "—"}</div>
+                        <div className="text-zinc-300 text-xs">
+                          {c.engine || "—"}
+                        </div>
                         {c.engine_version && (
-                          <div className="text-[10px] text-zinc-500 font-mono">{c.engine_version}</div>
+                          <div className="text-[10px] text-zinc-500 font-mono">
+                            {c.engine_version}
+                          </div>
                         )}
                       </td>
                       <td className="px-4 py-2.5 text-zinc-300 text-xs font-mono">
                         {c.account_id}
-                        <div className="text-zinc-500 text-[10px]">{c.region}</div>
+                        <div className="text-zinc-500 text-[10px]">
+                          {c.region}
+                        </div>
                       </td>
-                      <td className={`px-4 py-2.5 text-xs ${statusColor}`}>{c.status || "—"}</td>
+                      <td className={`px-4 py-2.5 text-xs ${statusColor}`}>
+                        {c.status || "—"}
+                      </td>
                       <td className="px-4 py-2.5">
                         <span
                           className={`px-1.5 py-0.5 border text-[10px] font-mono ${connStyle.classes}`}
@@ -683,7 +801,9 @@ export default function ClustersPage() {
                       <td className="px-4 py-2.5 text-right">
                         <div className="flex items-center justify-end gap-3">
                           <Link
-                            href={`/dashboard?cluster=${encodeURIComponent(c.cluster_id)}`}
+                            href={`/dashboard?cluster=${encodeURIComponent(
+                              c.cluster_id,
+                            )}`}
                             className="text-xs text-amber-400/90 hover:text-amber-300"
                           >
                             dashboard →
@@ -693,7 +813,11 @@ export default function ClustersPage() {
                               onClick={() => handleDelete(c)}
                               disabled={deletingId === c.cluster_id}
                               className="text-[11px] text-zinc-500 hover:text-rose-300 disabled:opacity-50 transition-colors"
-                              title={c.is_demo ? "데모 클러스터 및 합성 데이터 삭제" : "레지스트리에서 해제"}
+                              title={
+                                c.is_demo
+                                  ? "데모 클러스터 및 합성 데이터 삭제"
+                                  : "레지스트리에서 해제"
+                              }
                             >
                               {deletingId === c.cluster_id ? "…" : "delete"}
                             </button>

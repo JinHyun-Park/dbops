@@ -37,13 +37,13 @@ Web UI (Next.js) ──SSE──▶ AgentCore Runtime (Strands Agent)
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Agent | Strands Agents SDK, AgentCore Runtime/Gateway |
-| LLM | Amazon Bedrock Claude |
-| Frontend | Next.js 15, React, shadcn/ui, Tailwind CSS |
-| IaC | AWS CDK (Python) |
-| Data | Aurora PostgreSQL (Cache), DynamoDB, S3, S3 Vectors |
+| Layer    | Technology                                          |
+| -------- | --------------------------------------------------- |
+| Agent    | Strands Agents SDK, AgentCore Runtime/Gateway       |
+| LLM      | Amazon Bedrock Claude                               |
+| Frontend | Next.js 15, React, shadcn/ui, Tailwind CSS          |
+| IaC      | AWS CDK (Python)                                    |
+| Data     | Aurora PostgreSQL (Cache), DynamoDB, S3, S3 Vectors |
 
 ## Quick Start
 
@@ -121,6 +121,7 @@ real spend you must activate the tag in your billing preferences once:
 To manage Aurora clusters in other AWS accounts:
 
 1. Deploy the spoke role in each target account:
+
    ```bash
    aws cloudformation deploy \
      --template-file cdk/cross-account/spoke-role-template.yaml \

@@ -53,7 +53,8 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
 
   useEffect(() => {
     const stored =
-      (typeof window !== "undefined" && (localStorage.getItem(STORAGE_KEY) as Theme | null)) ||
+      (typeof window !== "undefined" &&
+        (localStorage.getItem(STORAGE_KEY) as Theme | null)) ||
       "dark";
     setTheme(stored);
     applyTheme(stored);
@@ -76,7 +77,9 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
     return (
       <button
         onClick={() => flip(theme === "dark" ? "light" : "dark")}
-        aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+        aria-label={
+          theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+        }
         title={theme === "dark" ? "Light mode" : "Dark mode"}
         className="w-8 h-8 flex items-center justify-center border border-zinc-800 hover:border-zinc-600 text-zinc-300 hover:text-zinc-100 transition-colors"
       >

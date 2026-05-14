@@ -11,7 +11,14 @@ import {
   CartesianGrid,
 } from "recharts";
 import { fetchCost } from "@/lib/api-client";
-import { PageBody, PageHeader, EmptyState, Stat, StatRow, Section } from "@/components/design-system/page-shell";
+import {
+  PageBody,
+  PageHeader,
+  EmptyState,
+  Stat,
+  StatRow,
+  Section,
+} from "@/components/design-system/page-shell";
 
 interface CostData {
   env: string;
@@ -33,8 +40,15 @@ function shortLabel(ut: string): string {
   // "APN1-Bedrock:Tokens:Input:Anthropic:Claude-Sonnet-4-6" -> "Sonnet 4.6 in"
   const parts = ut.split(":");
   const dir = parts[2] || ""; // Input | Output
-  const model = (parts.slice(3).join(":") || ut).replace(/^Anthropic[:.-]?/, "").trim();
-  const direction = dir.toLowerCase() === "input" ? "in" : dir.toLowerCase() === "output" ? "out" : dir.toLowerCase();
+  const model = (parts.slice(3).join(":") || ut)
+    .replace(/^Anthropic[:.-]?/, "")
+    .trim();
+  const direction =
+    dir.toLowerCase() === "input"
+      ? "in"
+      : dir.toLowerCase() === "output"
+        ? "out"
+        : dir.toLowerCase();
   return direction ? `${model} ${direction}` : model;
 }
 
@@ -53,7 +67,8 @@ export default function CostPage() {
       .finally(() => setLoading(false));
   }, [days]);
 
-  const dailyAvg = data && data.daily.length > 0 ? data.total / data.daily.length : 0;
+  const dailyAvg =
+    data && data.daily.length > 0 ? data.total / data.daily.length : 0;
   const monthlyProjection = dailyAvg * 30;
 
   return (
@@ -64,7 +79,9 @@ export default function CostPage() {
         description="DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다."
         actions={
           <div className="flex items-center gap-1">
-            <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">range</span>
+            <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
+              range
+            </span>
             {RANGES.map((r) => (
               <button
                 key={r}
@@ -99,11 +116,15 @@ export default function CostPage() {
               {data.no_data_reason}.
               <br />
               <span className="text-zinc-600">
-                Activate the tag, then wait ~24h. (Past spend is not back-filled — only post-activation calls get attributed.)
+                Activate the tag, then wait ~24h. (Past spend is not back-filled
+                — only post-activation calls get attributed.)
               </span>
             </>
           }
-          primary={{ href: "https://console.aws.amazon.com/billing/home#/preferences/tags", label: "Open Billing console" }}
+          primary={{
+            href: "https://console.aws.amazon.com/billing/home#/preferences/tags",
+            label: "Open Billing console",
+          }}
         />
       ) : (
         <>
@@ -130,7 +151,8 @@ export default function CostPage() {
             {(() => {
               const acct = data?.total_all_bedrock ?? 0;
               const headline = data?.total ?? 0;
-              const attentionAccent: "amber" | "neutral" = acct > 0 && headline === 0 ? "amber" : "neutral";
+              const attentionAccent: "amber" | "neutral" =
+                acct > 0 && headline === 0 ? "amber" : "neutral";
               return (
                 <Stat
                   label="Account-wide Bedrock"
@@ -148,11 +170,20 @@ export default function CostPage() {
               {loading ? (
                 <div className="text-zinc-500 text-sm">loading…</div>
               ) : !data || data.daily.length === 0 ? (
-                <div className="text-zinc-500 text-sm">no spend recorded yet</div>
+                <div className="text-zinc-500 text-sm">
+                  no spend recorded yet
+                </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={data.daily} margin={{ top: 4, right: 12, bottom: 0, left: -10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" vertical={false} />
+                  <AreaChart
+                    data={data.daily}
+                    margin={{ top: 4, right: 12, bottom: 0, left: -10 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="#3f3f46"
+                      vertical={false}
+                    />
                     <XAxis dataKey="date" stroke="#71717a" fontSize={10} />
                     <YAxis
                       stroke="#71717a"
@@ -166,7 +197,10 @@ export default function CostPage() {
                         fontSize: 12,
                       }}
                       labelStyle={{ color: "#a1a1aa" }}
-                      formatter={(v) => [`$${(Number(v) || 0).toFixed(4)}`, "spend"]}
+                      formatter={(v) => [
+                        `$${(Number(v) || 0).toFixed(4)}`,
+                        "spend",
+                      ]}
                     />
                     <Area
                       type="monotone"
@@ -193,23 +227,39 @@ export default function CostPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
                     <tr>
-                      <th className="text-left px-4 py-2.5 font-medium">model · direction</th>
-                      <th className="text-right px-4 py-2.5 font-medium">tokens</th>
-                      <th className="text-right px-4 py-2.5 font-medium">cost</th>
-                      <th className="text-right px-4 py-2.5 font-medium">share</th>
+                      <th className="text-left px-4 py-2.5 font-medium">
+                        model · direction
+                      </th>
+                      <th className="text-right px-4 py-2.5 font-medium">
+                        tokens
+                      </th>
+                      <th className="text-right px-4 py-2.5 font-medium">
+                        cost
+                      </th>
+                      <th className="text-right px-4 py-2.5 font-medium">
+                        share
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
                     {data.by_usage_type.map((row, i) => {
-                      const share = data.total > 0 ? (row.amount / data.total) * 100 : 0;
+                      const share =
+                        data.total > 0 ? (row.amount / data.total) * 100 : 0;
                       return (
-                        <tr key={`${row.usage_type}-${i}`} className="hover:bg-zinc-900/40">
+                        <tr
+                          key={`${row.usage_type}-${i}`}
+                          className="hover:bg-zinc-900/40"
+                        >
                           <td className="px-4 py-2 text-zinc-200 font-mono text-xs">
                             {shortLabel(row.usage_type)}
-                            <div className="text-[10px] text-zinc-600">{row.usage_type}</div>
+                            <div className="text-[10px] text-zinc-600">
+                              {row.usage_type}
+                            </div>
                           </td>
                           <td className="px-4 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums">
-                            {row.quantity.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            {row.quantity.toLocaleString(undefined, {
+                              maximumFractionDigits: 0,
+                            })}
                           </td>
                           <td className="px-4 py-2 text-right text-zinc-100 font-mono text-xs tabular-nums">
                             ${row.amount.toFixed(4)}
@@ -231,16 +281,18 @@ export default function CostPage() {
       <Section eyebrow="how it works">
         <div className="border border-zinc-800 bg-zinc-900/30 p-5 text-sm text-zinc-400 leading-relaxed">
           <p>
-            CDK가 deploy 시점에 각 Claude 모델별로 Application Inference Profile (AIP) 6종을 만들고
+            CDK가 deploy 시점에 각 Claude 모델별로 Application Inference Profile
+            (AIP) 6종을 만들고
             <code className="mx-1 px-1 py-0.5 bg-zinc-800 text-zinc-300 text-[11px] font-mono">
               Application=DBOps, Environment={data?.env || "..."}, ManagedBy=cdk
             </code>
             태그를 부여합니다.
           </p>
           <p className="mt-2">
-            AgentCore Runtime이 base model 대신 AIP ARN으로 invoke하면 모든 토큰 비용이 자동으로
-            태그에 attributed됩니다. AWS Billing console에서 cost allocation tag로
-            "Application"을 활성화한 뒤 24시간 후부터 이 대시보드가 실 비용을 보여줍니다.
+            AgentCore Runtime이 base model 대신 AIP ARN으로 invoke하면 모든 토큰
+            비용이 자동으로 태그에 attributed됩니다. AWS Billing console에서
+            cost allocation tag로 "Application"을 활성화한 뒤 24시간 후부터 이
+            대시보드가 실 비용을 보여줍니다.
           </p>
         </div>
       </Section>
@@ -287,7 +339,9 @@ function ActivationGuide() {
           aria-expanded={open}
         >
           <span
-            className={`flex-shrink-0 text-amber-300 transition-transform ${open ? "rotate-90" : ""}`}
+            className={`flex-shrink-0 text-amber-300 transition-transform ${
+              open ? "rotate-90" : ""
+            }`}
             aria-hidden
           >
             ▸
@@ -297,7 +351,8 @@ function ActivationGuide() {
               activation required for tagged attribution
             </div>
             <div className="text-xs text-amber-100/90 mt-0.5 truncate group-hover:text-amber-100">
-              Application=DBOps cost allocation tag 활성화 한 번이면 끝 — {open ? "위 단계를 따라가세요" : "클릭해서 단계 보기"}
+              Application=DBOps cost allocation tag 활성화 한 번이면 끝 —{" "}
+              {open ? "위 단계를 따라가세요" : "클릭해서 단계 보기"}
             </div>
           </div>
         </button>
@@ -320,7 +375,8 @@ function ActivationGuide() {
               title="AWS Billing → Cost allocation tags 페이지 열기"
               body={
                 <>
-                  관리자 권한이 필요합니다(AWS Organizations 환경이면 management account).{" "}
+                  관리자 권한이 필요합니다(AWS Organizations 환경이면 management
+                  account).{" "}
                   <a
                     href="https://console.aws.amazon.com/billing/home#/tags"
                     target="_blank"
@@ -336,13 +392,18 @@ function ActivationGuide() {
               n={2}
               title={
                 <>
-                  <span className="font-mono">User-defined cost allocation tags</span> 탭에서{" "}
-                  <span className="font-mono text-amber-300">Application</span> 찾고 체크 → <span className="text-amber-300">Activate</span>
+                  <span className="font-mono">
+                    User-defined cost allocation tags
+                  </span>{" "}
+                  탭에서{" "}
+                  <span className="font-mono text-amber-300">Application</span>{" "}
+                  찾고 체크 → <span className="text-amber-300">Activate</span>
                 </>
               }
               body={
                 <>
-                  여유가 되면 <span className="font-mono">Environment</span>도 함께 체크해 env별(dev/prod) 분리도 활성화하세요.
+                  여유가 되면 <span className="font-mono">Environment</span>도
+                  함께 체크해 env별(dev/prod) 분리도 활성화하세요.
                 </>
               }
             />
@@ -351,16 +412,22 @@ function ActivationGuide() {
               title="~24시간 대기 후 이 페이지 새로고침"
               body={
                 <>
-                  AWS가 새 데이터를 인덱싱하면 차트와 모델별 분해표가 자동으로 채워집니다.{" "}
-                  <span className="text-amber-300/80">활성화 시점 이전 비용은 소급 적용되지 않습니다</span>—
-                  과거 spend는 영구히 untagged로 남습니다.
+                  AWS가 새 데이터를 인덱싱하면 차트와 모델별 분해표가 자동으로
+                  채워집니다.{" "}
+                  <span className="text-amber-300/80">
+                    활성화 시점 이전 비용은 소급 적용되지 않습니다
+                  </span>
+                  — 과거 spend는 영구히 untagged로 남습니다.
                 </>
               }
             />
           </ol>
 
           <div className="px-5 py-3 border-t border-amber-500/20 text-[11px] text-amber-200/70 leading-relaxed">
-            Why this isn't automatic: AWS는 보안상 cost allocation tag 활성화를 관리자 콘솔 액션으로만 허용합니다. CDK도 API도 활성화 자체는 못 합니다. 한 번 활성화하면 이후 모든 DBOps 비용이 자동 attribute 됩니다.
+            Why this isn't automatic: AWS는 보안상 cost allocation tag 활성화를
+            관리자 콘솔 액션으로만 허용합니다. CDK도 API도 활성화 자체는 못
+            합니다. 한 번 활성화하면 이후 모든 DBOps 비용이 자동 attribute
+            됩니다.
           </div>
         </>
       )}
@@ -368,7 +435,15 @@ function ActivationGuide() {
   );
 }
 
-function Step({ n, title, body }: { n: number; title: React.ReactNode; body: React.ReactNode }) {
+function Step({
+  n,
+  title,
+  body,
+}: {
+  n: number;
+  title: React.ReactNode;
+  body: React.ReactNode;
+}) {
   return (
     <li className="flex items-start gap-3">
       <span className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-mono flex items-center justify-center mt-0.5">

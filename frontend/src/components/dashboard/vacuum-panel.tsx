@@ -48,7 +48,9 @@ function relDays(iso: string | null) {
 
 export function VacuumPanel({ clusterId }: { clusterId: string }) {
   const [tables, setTables] = useState<Table[]>([]);
-  const [txidAgeByTable, setTxidAgeByTable] = useState<Record<string, number>>({});
+  const [txidAgeByTable, setTxidAgeByTable] = useState<Record<string, number>>(
+    {},
+  );
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -95,7 +97,9 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 overflow-hidden">
       <div className="px-4 py-3 border-b border-zinc-800">
-        <div className="text-xs text-zinc-400 uppercase tracking-wider">Vacuum & Bloat</div>
+        <div className="text-xs text-zinc-400 uppercase tracking-wider">
+          Vacuum & Bloat
+        </div>
         <div className="text-[11px] text-zinc-500 mt-0.5">
           tables sorted by bloat ratio (dead / total tuples)
         </div>
@@ -103,13 +107,17 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
       {loading ? (
         <div className="p-6 text-zinc-500 text-sm">Loading...</div>
       ) : tables.length === 0 ? (
-        <div className="p-6 text-zinc-500 text-sm">no table stats (PG only, runs every 5min)</div>
+        <div className="p-6 text-zinc-500 text-sm">
+          no table stats (PG only, runs every 5min)
+        </div>
       ) : (
         <div className="max-h-96 overflow-y-auto">
           <table className="w-full text-sm">
             <thead className="bg-zinc-900/50 border-b border-zinc-800 sticky top-0">
               <tr>
-                <th className="text-left px-4 py-2 text-zinc-400 font-medium">Table</th>
+                <th className="text-left px-4 py-2 text-zinc-400 font-medium">
+                  Table
+                </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
                   title="Live tuples (n_live_tup from pg_stat_user_tables)"
@@ -146,18 +154,26 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
               {tables.map((t, i) => {
                 const bloat = n(t.bloat_ratio);
                 const bloatColor =
-                  bloat > 0.3 ? "text-rose-400" : bloat > 0.1 ? "text-amber-400" : "text-zinc-300";
-                const txidAge = txidAgeByTable[`${t.schema_name}.${t.table_name}`] ?? null;
+                  bloat > 0.3
+                    ? "text-rose-400"
+                    : bloat > 0.1
+                      ? "text-amber-400"
+                      : "text-zinc-300";
+                const txidAge =
+                  txidAgeByTable[`${t.schema_name}.${t.table_name}`] ?? null;
                 const txidColor =
                   txidAge == null
                     ? "text-zinc-600"
                     : txidAge >= TXID_CRITICAL
-                    ? "text-rose-400"
-                    : txidAge >= TXID_WARN
-                    ? "text-amber-400"
-                    : "text-zinc-300";
+                      ? "text-rose-400"
+                      : txidAge >= TXID_WARN
+                        ? "text-amber-400"
+                        : "text-zinc-300";
                 return (
-                  <tr key={`${t.schema_name}-${t.table_name}-${i}`} className="hover:bg-zinc-900/40">
+                  <tr
+                    key={`${t.schema_name}-${t.table_name}-${i}`}
+                    className="hover:bg-zinc-900/40"
+                  >
                     <td className="px-4 py-2 text-zinc-200 font-mono text-xs">
                       <span className="text-zinc-500">{t.schema_name}.</span>
                       {t.table_name}
@@ -176,7 +192,9 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
                     </td>
                     <td
                       className={`px-4 py-2 text-right font-mono text-xs tabular-nums ${bloatColor}`}
-                      title={`${n(t.n_dead_tup)} dead / ${n(t.n_live_tup) + n(t.n_dead_tup)} total`}
+                      title={`${n(t.n_dead_tup)} dead / ${
+                        n(t.n_live_tup) + n(t.n_dead_tup)
+                      } total`}
                     >
                       {(bloat * 100).toFixed(1)}%
                     </td>
@@ -184,7 +202,9 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
                       className={`px-4 py-2 text-right font-mono text-xs tabular-nums ${txidColor}`}
                       title={
                         txidAge != null
-                          ? `age(relfrozenxid) = ${fmtExact(txidAge)} transactions`
+                          ? `age(relfrozenxid) = ${fmtExact(
+                              txidAge,
+                            )} transactions`
                           : "below warn threshold or not yet observed"
                       }
                     >

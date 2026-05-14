@@ -3,11 +3,17 @@
 import { useState, useEffect, useCallback } from "react";
 import { ApprovalCard } from "@/components/approval/approval-card";
 import { apiUrl } from "@/lib/api-client";
-import { PageHeader, PageBody, EmptyState } from "@/components/design-system/page-shell";
+import {
+  PageHeader,
+  PageBody,
+  EmptyState,
+} from "@/components/design-system/page-shell";
 
 export default function ApprovalsPage() {
   const [approvals, setApprovals] = useState<any[]>([]);
-  const [filter, setFilter] = useState<"pending" | "approved" | "rejected">("pending");
+  const [filter, setFilter] = useState<"pending" | "approved" | "rejected">(
+    "pending",
+  );
 
   const loadApprovals = useCallback(() => {
     apiUrl(`/api/approvals?status=${filter}`)
@@ -17,7 +23,9 @@ export default function ApprovalsPage() {
       .catch(console.error);
   }, [filter]);
 
-  useEffect(() => { loadApprovals(); }, [loadApprovals]);
+  useEffect(() => {
+    loadApprovals();
+  }, [loadApprovals]);
 
   const handleAction = async (id: string, action: "approve" | "reject") => {
     const url = await apiUrl(`/api/approvals/${id}`);
@@ -47,7 +55,11 @@ export default function ApprovalsPage() {
                     : "border border-zinc-700 text-zinc-400 hover:text-zinc-100"
                 }`}
               >
-                {s === "pending" ? "pending" : s === "approved" ? "approved" : "rejected"}
+                {s === "pending"
+                  ? "pending"
+                  : s === "approved"
+                    ? "approved"
+                    : "rejected"}
               </button>
             ))}
           </div>
@@ -61,8 +73,8 @@ export default function ApprovalsPage() {
             filter === "pending"
               ? "No pending approvals"
               : filter === "approved"
-              ? "No approved actions yet"
-              : "No rejected actions"
+                ? "No approved actions yet"
+                : "No rejected actions"
           }
           description={
             filter === "pending"

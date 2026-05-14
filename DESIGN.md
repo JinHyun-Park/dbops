@@ -31,16 +31,16 @@ consumer SaaS.
 
 **Hierarchy**
 
-| Role        | Class                                                | Note                       |
-|-------------|------------------------------------------------------|----------------------------|
-| Page title  | `text-3xl font-semibold tracking-tight`              | Plex Sans                  |
-| Section H   | `text-base font-medium`                              | Plex Sans                  |
-| Eyebrow     | `font-mono text-[10px] tracking-[0.22em] uppercase`  | Plex Mono                  |
-| Body        | `text-sm text-zinc-300`                              | Plex Sans                  |
-| Hint        | `text-[11px] text-zinc-500`                          | Plex Sans                  |
-| Data/ID     | `font-mono text-xs tabular-nums`                     | Plex Mono                  |
-| Big number  | `text-3xl font-semibold tracking-tight tabular-nums` | Plex Mono looks brittle    |
-| `<kbd>`     | `font-mono text-[10px]` in bordered chip             |                            |
+| Role       | Class                                                | Note                    |
+| ---------- | ---------------------------------------------------- | ----------------------- |
+| Page title | `text-3xl font-semibold tracking-tight`              | Plex Sans               |
+| Section H  | `text-base font-medium`                              | Plex Sans               |
+| Eyebrow    | `font-mono text-[10px] tracking-[0.22em] uppercase`  | Plex Mono               |
+| Body       | `text-sm text-zinc-300`                              | Plex Sans               |
+| Hint       | `text-[11px] text-zinc-500`                          | Plex Sans               |
+| Data/ID    | `font-mono text-xs tabular-nums`                     | Plex Mono               |
+| Big number | `text-3xl font-semibold tracking-tight tabular-nums` | Plex Mono looks brittle |
+| `<kbd>`    | `font-mono text-[10px]` in bordered chip             |                         |
 
 ## Color
 
@@ -77,6 +77,7 @@ hue/value).
 ```
 
 **Rules**
+
 - One accent color. Don't use amber and emerald-400 next to each other
   for "primary action vs success" — pick one role.
 - Signal colors are reserved for data state, not decoration.
@@ -93,7 +94,7 @@ hue/value).
 
 - Pages always wrap content in `<PageBody>` for consistent gutter.
 - Every page starts with `<PageHeader>` (eyebrow + title + description
-  + actions).
+  - actions).
 - Sections use `<Section>` with eyebrow.
 - Empty states use `<EmptyState>` with primary/secondary CTA — never
   inline "no data" text.

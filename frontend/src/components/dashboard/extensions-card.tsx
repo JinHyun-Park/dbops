@@ -1,9 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchExtensions, type InstalledExtension, type RecommendedExtension } from "@/lib/api-client";
+import {
+  fetchExtensions,
+  type InstalledExtension,
+  type RecommendedExtension,
+} from "@/lib/api-client";
 
-export function ExtensionsCard({ clusterId, engine }: { clusterId: string; engine?: string }) {
+export function ExtensionsCard({
+  clusterId,
+  engine,
+}: {
+  clusterId: string;
+  engine?: string;
+}) {
   const [installed, setInstalled] = useState<InstalledExtension[]>([]);
   const [recommended, setRecommended] = useState<RecommendedExtension[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,7 +44,9 @@ export function ExtensionsCard({ clusterId, engine }: { clusterId: string; engin
   if (!isPg) {
     return (
       <div className="bg-zinc-900/50 border border-zinc-800 p-4">
-        <div className="text-xs text-zinc-400 uppercase tracking-wider mb-2">Extensions</div>
+        <div className="text-xs text-zinc-400 uppercase tracking-wider mb-2">
+          Extensions
+        </div>
         <div className="text-xs text-zinc-500">PostgreSQL-only.</div>
       </div>
     );
@@ -51,11 +63,13 @@ export function ExtensionsCard({ clusterId, engine }: { clusterId: string; engin
           <div className="text-xs text-zinc-400 uppercase tracking-wider">
             Recommended Extensions
             <span className="ml-2 text-[10px] text-zinc-600">
-              {recommended.filter((r) => r.installed).length} / {recommended.length} installed
+              {recommended.filter((r) => r.installed).length} /{" "}
+              {recommended.length} installed
             </span>
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            DBOps가 PG 클러스터에 권장하는 모듈 — 미설치 항목은 hover로 이유 확인.
+            DBOps가 PG 클러스터에 권장하는 모듈 — 미설치 항목은 hover로 이유
+            확인.
           </div>
         </div>
       </div>
@@ -72,19 +86,25 @@ export function ExtensionsCard({ clusterId, engine }: { clusterId: string; engin
                   r.installed
                     ? "border-emerald-500/30 bg-emerald-500/5"
                     : r.severity === "warning"
-                    ? "border-amber-500/30 bg-amber-500/5"
-                    : "border-zinc-800 bg-zinc-900/30"
+                      ? "border-amber-500/30 bg-amber-500/5"
+                      : "border-zinc-800 bg-zinc-900/30"
                 }`}
                 title={r.why}
               >
                 <span
                   className={`text-xs ${
-                    r.installed ? "text-emerald-400" : r.severity === "warning" ? "text-amber-400" : "text-zinc-500"
+                    r.installed
+                      ? "text-emerald-400"
+                      : r.severity === "warning"
+                        ? "text-amber-400"
+                        : "text-zinc-500"
                   }`}
                 >
                   {r.installed ? "✓" : "✗"}
                 </span>
-                <span className="text-xs font-mono text-zinc-200 flex-1 truncate">{r.extname}</span>
+                <span className="text-xs font-mono text-zinc-200 flex-1 truncate">
+                  {r.extname}
+                </span>
                 {!r.installed && (
                   <span
                     className={`text-[9px] uppercase tracking-wider px-1 py-0.5 ${
@@ -106,7 +126,8 @@ export function ExtensionsCard({ clusterId, engine }: { clusterId: string; engin
                 onClick={() => setShowAll((v) => !v)}
                 className="text-[10px] uppercase tracking-wider text-zinc-500 hover:text-zinc-300 transition-colors"
               >
-                other installed extensions ({otherInstalled.length}) {showAll ? "▾" : "▸"}
+                other installed extensions ({otherInstalled.length}){" "}
+                {showAll ? "▾" : "▸"}
               </button>
               {showAll && (
                 <div className="mt-2 flex flex-wrap gap-1.5">

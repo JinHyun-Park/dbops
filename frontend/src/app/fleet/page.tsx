@@ -3,7 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchMultiClusterOverview, fetchClusters } from "@/lib/api-client";
-import { PageHeader, PageBody, EmptyState } from "@/components/design-system/page-shell";
+import {
+  PageHeader,
+  PageBody,
+  EmptyState,
+} from "@/components/design-system/page-shell";
 import { engineBadge, eolFor, EOL_STATUS_CLASSES, eolHint } from "@/lib/engine";
 
 interface ClusterRow {
@@ -53,7 +57,8 @@ export default function FleetPage() {
       Promise.allSettled([fetchMultiClusterOverview(), fetchClusters()])
         .then(([overview, registry]) => {
           if (cancelled) return;
-          if (overview.status === "fulfilled") setRows(overview.value.clusters || []);
+          if (overview.status === "fulfilled")
+            setRows(overview.value.clusters || []);
           if (registry.status === "fulfilled") {
             setDemoIds(
               new Set(
@@ -63,7 +68,8 @@ export default function FleetPage() {
               ),
             );
           }
-          if (overview.status === "rejected") setErr(overview.reason?.message || String(overview.reason));
+          if (overview.status === "rejected")
+            setErr(overview.reason?.message || String(overview.reason));
         })
         .finally(() => !cancelled && setLoading(false));
     load();
@@ -77,7 +83,8 @@ export default function FleetPage() {
   const sorted = [...rows].sort((a, b) => {
     const av = a[sortKey];
     const bv = b[sortKey];
-    if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv);
+    if (typeof av === "string" && typeof bv === "string")
+      return av.localeCompare(bv);
     return n(bv) - n(av);
   });
 
@@ -86,7 +93,9 @@ export default function FleetPage() {
       <PageHeader
         eyebrow="monitor"
         title="Fleet overview"
-        description={`${rows.length} cluster${rows.length === 1 ? "" : "s"} · auto-refresh 30s · click any row for deep dive`}
+        description={`${rows.length} cluster${
+          rows.length === 1 ? "" : "s"
+        } · auto-refresh 30s · click any row for deep dive`}
       />
 
       {err && (
@@ -109,15 +118,42 @@ export default function FleetPage() {
           <table className="w-full text-sm">
             <thead className="bg-zinc-900/50 border-b border-zinc-700">
               <tr>
-                <ThSort label="Cluster" onClick={() => setSortKey("cluster_id")} />
+                <ThSort
+                  label="Cluster"
+                  onClick={() => setSortKey("cluster_id")}
+                />
                 <ThSort label="Engine" onClick={() => setSortKey("engine")} />
                 <ThSort label="Status" onClick={() => setSortKey("status")} />
-                <ThSort label="CPU %" align="right" onClick={() => setSortKey("cpu")} />
-                <ThSort label="AAS" align="right" onClick={() => setSortKey("aas")} />
-                <ThSort label="Conn" align="right" onClick={() => setSortKey("conn_active")} />
-                <ThSort label="Storage" align="right" onClick={() => setSortKey("storage_bytes")} />
-                <ThSort label="Deadlocks" align="right" onClick={() => setSortKey("deadlocks")} />
-                <ThSort label="Blocks" align="right" onClick={() => setSortKey("blocking_count")} />
+                <ThSort
+                  label="CPU %"
+                  align="right"
+                  onClick={() => setSortKey("cpu")}
+                />
+                <ThSort
+                  label="AAS"
+                  align="right"
+                  onClick={() => setSortKey("aas")}
+                />
+                <ThSort
+                  label="Conn"
+                  align="right"
+                  onClick={() => setSortKey("conn_active")}
+                />
+                <ThSort
+                  label="Storage"
+                  align="right"
+                  onClick={() => setSortKey("storage_bytes")}
+                />
+                <ThSort
+                  label="Deadlocks"
+                  align="right"
+                  onClick={() => setSortKey("deadlocks")}
+                />
+                <ThSort
+                  label="Blocks"
+                  align="right"
+                  onClick={() => setSortKey("blocking_count")}
+                />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-700">
@@ -132,7 +168,9 @@ export default function FleetPage() {
                     <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
                       <div className="flex items-center gap-2">
                         <Link
-                          href={`/dashboard?cluster=${encodeURIComponent(c.cluster_id)}`}
+                          href={`/dashboard?cluster=${encodeURIComponent(
+                            c.cluster_id,
+                          )}`}
                           className="hover:text-sky-400 underline-offset-2 hover:underline"
                         >
                           {c.cluster_id}
@@ -154,17 +192,25 @@ export default function FleetPage() {
                               className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 border text-[10px] font-mono uppercase tracking-wider ${badge.classes}`}
                               title={`${c.engine} ${c.engine_version}`}
                             >
-                              <span className={`w-1 h-1 rounded-full ${badge.accent}`} />
+                              <span
+                                className={`w-1 h-1 rounded-full ${badge.accent}`}
+                              />
                               {badge.label}
-                              <span className="text-zinc-300/80 normal-case font-normal">{c.engine_version}</span>
+                              <span className="text-zinc-300/80 normal-case font-normal">
+                                {c.engine_version}
+                              </span>
                             </span>
                             {eol && (
                               <span
-                                className={`text-[10px] font-mono ${EOL_STATUS_CLASSES[eol.status]}`}
+                                className={`text-[10px] font-mono ${
+                                  EOL_STATUS_CLASSES[eol.status]
+                                }`}
                                 title={eolHint(eol)}
                               >
                                 {eol.status === "expired"
-                                  ? `EOL · ${Math.abs(eol.days_remaining)}d past`
+                                  ? `EOL · ${Math.abs(
+                                      eol.days_remaining,
+                                    )}d past`
                                   : `EOL ${eol.eol} · ${eol.days_remaining}d`}
                               </span>
                             )}
@@ -183,10 +229,22 @@ export default function FleetPage() {
                         {c.status}
                       </span>
                     </td>
-                    <td className={`px-3 py-2 text-right font-mono text-xs ${severityColor(cpu, 70, 90)}`}>
+                    <td
+                      className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
+                        cpu,
+                        70,
+                        90,
+                      )}`}
+                    >
                       {c.cpu === null ? "-" : cpu.toFixed(1)}
                     </td>
-                    <td className={`px-3 py-2 text-right font-mono text-xs ${severityColor(aas, 2, 5)}`}>
+                    <td
+                      className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
+                        aas,
+                        2,
+                        5,
+                      )}`}
+                    >
                       {c.aas === null ? "-" : aas.toFixed(2)}
                     </td>
                     <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
@@ -195,10 +253,22 @@ export default function FleetPage() {
                     <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
                       {c.storage_bytes ? fmtBytes(n(c.storage_bytes)) : "-"}
                     </td>
-                    <td className={`px-3 py-2 text-right font-mono text-xs ${severityColor(dlk, 1, 5)}`}>
+                    <td
+                      className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
+                        dlk,
+                        1,
+                        5,
+                      )}`}
+                    >
                       {dlk || "-"}
                     </td>
-                    <td className={`px-3 py-2 text-right font-mono text-xs ${severityColor(blk, 1, 3)}`}>
+                    <td
+                      className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
+                        blk,
+                        1,
+                        3,
+                      )}`}
+                    >
                       {blk || "-"}
                     </td>
                   </tr>

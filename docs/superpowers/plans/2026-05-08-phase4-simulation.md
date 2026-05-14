@@ -9,6 +9,9 @@
 ---
 
 ## Task 1: Simulation MCP Server (6 tools, TDD)
+
 ## Task 2: Cross-Account Spoke Role Template + DB Connector
+
 ## Task 3: Update CDK Stacks (Simulation Lambda + cross-account support)
+
 ## Task 4: Final Verification + Push

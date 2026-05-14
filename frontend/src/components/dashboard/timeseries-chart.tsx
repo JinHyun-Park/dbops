@@ -33,13 +33,23 @@ interface Props {
 }
 
 const WAIT_COLORS = [
-  "#60a5fa", "#f472b6", "#fbbf24", "#34d399", "#a78bfa",
-  "#fb7185", "#22d3ee", "#facc15", "#fb923c", "#94a3b8",
+  "#60a5fa",
+  "#f472b6",
+  "#fbbf24",
+  "#34d399",
+  "#a78bfa",
+  "#fb7185",
+  "#22d3ee",
+  "#facc15",
+  "#fb923c",
+  "#94a3b8",
 ];
 
 function fmtTime(iso: string) {
   const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return `${String(d.getHours()).padStart(2, "0")}:${String(
+    d.getMinutes(),
+  ).padStart(2, "0")}`;
 }
 
 export function TimeseriesChart({
@@ -113,8 +123,13 @@ export function TimeseriesChart({
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-4">
       <div className="flex items-baseline justify-between mb-3">
-        <div className="text-xs text-zinc-400 uppercase tracking-wider">{title}</div>
-        <div className="text-xs text-zinc-500">peak: {displayMax}{unit ? ` ${unit}` : ""}</div>
+        <div className="text-xs text-zinc-400 uppercase tracking-wider">
+          {title}
+        </div>
+        <div className="text-xs text-zinc-500">
+          peak: {displayMax}
+          {unit ? ` ${unit}` : ""}
+        </div>
       </div>
       <div className="text-2xl font-semibold text-zinc-100 mb-3">
         {display}
@@ -122,34 +137,74 @@ export function TimeseriesChart({
       </div>
       <div className="h-32">
         {loading ? (
-          <div className="text-xs text-zinc-500 flex items-center h-full">Loading...</div>
+          <div className="text-xs text-zinc-500 flex items-center h-full">
+            Loading...
+          </div>
         ) : err ? (
-          <div className="text-xs text-red-400 flex items-center h-full">{err}</div>
+          <div className="text-xs text-red-400 flex items-center h-full">
+            {err}
+          </div>
         ) : data.length === 0 ? (
-          <div className="text-xs text-zinc-500 flex items-center h-full">no data</div>
+          <div className="text-xs text-zinc-500 flex items-center h-full">
+            no data
+          </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             {type === "area" ? (
-              <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" vertical={false} />
+              <AreaChart
+                data={data}
+                margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="#3f3f46"
+                  vertical={false}
+                />
                 <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
                 <YAxis stroke="#71717a" fontSize={10} />
                 <Tooltip
-                  contentStyle={{ background: "#18181b", border: "1px solid #3f3f46", fontSize: 12 }}
+                  contentStyle={{
+                    background: "#18181b",
+                    border: "1px solid #3f3f46",
+                    fontSize: 12,
+                  }}
                   labelStyle={{ color: "#a1a1aa" }}
                 />
-                <Area type="monotone" dataKey="value" stroke={color} fill={color} fillOpacity={0.2} />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke={color}
+                  fill={color}
+                  fillOpacity={0.2}
+                />
               </AreaChart>
             ) : (
-              <LineChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" vertical={false} />
+              <LineChart
+                data={data}
+                margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="#3f3f46"
+                  vertical={false}
+                />
                 <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
                 <YAxis stroke="#71717a" fontSize={10} />
                 <Tooltip
-                  contentStyle={{ background: "#18181b", border: "1px solid #3f3f46", fontSize: 12 }}
+                  contentStyle={{
+                    background: "#18181b",
+                    border: "1px solid #3f3f46",
+                    fontSize: 12,
+                  }}
                   labelStyle={{ color: "#a1a1aa" }}
                 />
-                <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2} dot={false} />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  stroke={color}
+                  strokeWidth={2}
+                  dot={false}
+                />
               </LineChart>
             )}
           </ResponsiveContainer>
@@ -180,7 +235,10 @@ function StackedAreaChart({
     let ev = "total";
     if (p.dimensions) {
       try {
-        const d = typeof p.dimensions === "string" ? JSON.parse(p.dimensions) : p.dimensions;
+        const d =
+          typeof p.dimensions === "string"
+            ? JSON.parse(p.dimensions)
+            : p.dimensions;
         ev = d["db.wait_event.name"] || "CPU";
       } catch {
         ev = "CPU";
@@ -189,22 +247,23 @@ function StackedAreaChart({
     eventSet.add(ev);
     const tsKey = fmtTime(p.ts);
     if (!grouped.has(tsKey)) grouped.set(tsKey, new Map());
-    grouped.get(tsKey)!.set(ev, (grouped.get(tsKey)!.get(ev) || 0) + (Number(p.value) || 0));
+    grouped
+      .get(tsKey)!
+      .set(ev, (grouped.get(tsKey)!.get(ev) || 0) + (Number(p.value) || 0));
   }
 
   const events = Array.from(eventSet).slice(0, 10);
-  const data = Array.from(grouped.entries())
-    .map(([ts, vals]) => {
-      const row: Record<string, string | number> = { ts };
-      let sum = 0;
-      for (const ev of events) {
-        const v = vals.get(ev) || 0;
-        row[ev] = v;
-        sum += v;
-      }
-      row._total = sum;
-      return row;
-    });
+  const data = Array.from(grouped.entries()).map(([ts, vals]) => {
+    const row: Record<string, string | number> = { ts };
+    let sum = 0;
+    for (const ev of events) {
+      const v = vals.get(ev) || 0;
+      row[ev] = v;
+      sum += v;
+    }
+    row._total = sum;
+    return row;
+  });
 
   const current = data.length ? Number(data[data.length - 1]._total) : 0;
   const max = data.reduce((m, d) => Math.max(m, Number(d._total) || 0), 0);
@@ -212,8 +271,13 @@ function StackedAreaChart({
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-4 col-span-full">
       <div className="flex items-baseline justify-between mb-3">
-        <div className="text-xs text-zinc-400 uppercase tracking-wider">{title}</div>
-        <div className="text-xs text-zinc-500">peak: {max.toFixed(2)}{unit ? ` ${unit}` : ""}</div>
+        <div className="text-xs text-zinc-400 uppercase tracking-wider">
+          {title}
+        </div>
+        <div className="text-xs text-zinc-500">
+          peak: {max.toFixed(2)}
+          {unit ? ` ${unit}` : ""}
+        </div>
       </div>
       <div className="text-2xl font-semibold text-zinc-100 mb-3">
         {current.toFixed(2)}
@@ -221,19 +285,36 @@ function StackedAreaChart({
       </div>
       <div className="h-64">
         {loading ? (
-          <div className="text-xs text-zinc-500 flex items-center h-full">Loading...</div>
+          <div className="text-xs text-zinc-500 flex items-center h-full">
+            Loading...
+          </div>
         ) : err ? (
-          <div className="text-xs text-red-400 flex items-center h-full">{err}</div>
+          <div className="text-xs text-red-400 flex items-center h-full">
+            {err}
+          </div>
         ) : data.length === 0 ? (
-          <div className="text-xs text-zinc-500 flex items-center h-full">no data</div>
+          <div className="text-xs text-zinc-500 flex items-center h-full">
+            no data
+          </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" vertical={false} />
+            <AreaChart
+              data={data}
+              margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
+            >
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="#3f3f46"
+                vertical={false}
+              />
               <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
               <YAxis stroke="#71717a" fontSize={10} />
               <Tooltip
-                contentStyle={{ background: "#18181b", border: "1px solid #3f3f46", fontSize: 12 }}
+                contentStyle={{
+                  background: "#18181b",
+                  border: "1px solid #3f3f46",
+                  fontSize: 12,
+                }}
                 labelStyle={{ color: "#a1a1aa" }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} />

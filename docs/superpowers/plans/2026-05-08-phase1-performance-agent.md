@@ -125,6 +125,7 @@ dbops/
 ## Task 1: Project Initialization
 
 **Files:**
+
 - Create: `requirements.txt`, `pyproject.toml`, `.gitignore`, `CLAUDE.md`
 - Create: `cdk/requirements.txt`, `cdk/cdk.json`, `cdk/app.py`
 - Create: `cdk/config/settings.example.py`, `cdk/config/settings.py`
@@ -177,20 +178,24 @@ cdk/config/settings.py
 
 ```markdown
 # CLAUDE.md
+
 # DBOps — AI-Powered Database Operations Platform
 
 ## Quick Reference
+
 - Spec: docs/superpowers/specs/2026-05-08-dbops-design.md
 - Plans: docs/superpowers/plans/
 - Kiro specs: .kiro/specs/
 
 ## Commands
+
 - CDK deploy: `cd cdk && cdk deploy --all`
 - Tests: `pytest tests/ -v`
 - Frontend dev: `cd frontend && npm run dev`
 - Frontend build: `cd frontend && npm run build`
 
 ## Rules
+
 - All infrastructure changes via CDK only. Never use AWS CLI to modify resources.
 - All agent SQL queries must include `/* source=dbops-agent */` comment.
 - DB write operations require human approval (Cedar Policy enforced).
@@ -305,6 +310,7 @@ git commit -m "chore: initialize project structure with CDK app"
 ## Task 2: Foundation CDK Stack
 
 **Files:**
+
 - Create: `cdk/stacks/foundation_stack.py`
 - Test: CDK synth validation
 
@@ -403,6 +409,7 @@ git commit -m "feat(cdk): add Foundation stack with Cognito, DynamoDB, IAM hub r
 ## Task 3: Data CDK Stack + Schema
 
 **Files:**
+
 - Create: `cdk/stacks/data_stack.py`
 - Create: `data-pipeline/sql/schema.sql`
 
@@ -570,6 +577,7 @@ git commit -m "feat(cdk): add Data stack with Aurora PG Cache, S3, ETL Lambda"
 ## Task 4: Shared MCP Utilities
 
 **Files:**
+
 - Create: `mcp-servers/shared/__init__.py`
 - Create: `mcp-servers/shared/cache_client.py`
 - Create: `mcp-servers/shared/models.py`
@@ -751,6 +759,7 @@ class CacheClient:
 - [ ] **Step 4: Add mcp-servers to Python path and run tests**
 
 Add to `pyproject.toml`:
+
 ```toml
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -772,6 +781,7 @@ git commit -m "feat: add shared MCP cache client with Data API integration"
 ## Task 5: Performance MCP Server — get_top_queries
 
 **Files:**
+
 - Create: `mcp-servers/performance/tools/__init__.py`
 - Create: `mcp-servers/performance/tools/top_queries.py`
 - Test: `tests/unit/mcp_servers/performance/test_top_queries.py`
@@ -881,6 +891,7 @@ git commit -m "feat: add get_top_queries tool for Performance MCP Server"
 ## Task 6: Performance MCP Server — remaining tools
 
 **Files:**
+
 - Create: `mcp-servers/performance/tools/pi_metrics.py`
 - Create: `mcp-servers/performance/tools/slow_queries.py`
 - Create: `mcp-servers/performance/tools/compare_periods.py`
@@ -889,6 +900,7 @@ git commit -m "feat: add get_top_queries tool for Performance MCP Server"
 - Test: `tests/unit/mcp_servers/performance/test_compare_periods.py`
 
 This task follows the same TDD pattern as Task 5 for each tool. Each tool:
+
 1. Write failing test with mocked CacheClient
 2. Implement the `_impl` function
 3. Run tests to verify pass
@@ -1080,6 +1092,7 @@ git commit -m "feat: add pi_metrics, slow_queries, compare_periods tools"
 ## Task 7: Performance MCP Server — Lambda Handler
 
 **Files:**
+
 - Create: `mcp-servers/performance/handler.py`
 - Create: `mcp-servers/performance/requirements.txt`
 
@@ -1210,6 +1223,7 @@ git commit -m "feat: add Performance MCP Server Lambda handler with 4 tools"
 ## Task 8: ETL Collector Lambda
 
 **Files:**
+
 - Create: `data-pipeline/etl_collector/handler.py`
 - Create: `data-pipeline/etl_collector/collectors/__init__.py`
 - Create: `data-pipeline/etl_collector/collectors/pi_collector.py`
@@ -1262,6 +1276,7 @@ def test_collect_cluster_meta_stores_in_cache():
 Run: `PYTHONPATH=. pytest tests/unit/data_pipeline/test_etl_collector.py -v`
 
 Add `data-pipeline` to pythonpath in pyproject.toml:
+
 ```toml
 pythonpath = [".", "mcp-servers", "data-pipeline"]
 ```
@@ -1474,6 +1489,7 @@ git commit -m "feat: add ETL collector Lambda with PI, stats, and meta collector
 ## Task 9: Strands Agent + Dockerfile
 
 **Files:**
+
 - Create: `agent/server.py`
 - Create: `agent/prompts/__init__.py`
 - Create: `agent/prompts/system_prompt.py`
@@ -1635,6 +1651,7 @@ git commit -m "feat: add Strands Agent with system prompt, cheatsheet, and Docke
 ## Task 10: Agent + Frontend CDK Stacks (Skeleton)
 
 **Files:**
+
 - Create: `cdk/stacks/agent_stack.py`
 - Create: `cdk/stacks/frontend_stack.py`
 
@@ -1773,6 +1790,7 @@ git commit -m "feat(cdk): add Agent stack (REST API) and Frontend stack (CloudFr
 ## Task 11: REST API Lambdas
 
 **Files:**
+
 - Create: `api/dashboard/handler.py`
 - Create: `api/clusters/handler.py`
 
@@ -1904,6 +1922,7 @@ git commit -m "feat: add REST API Lambdas for dashboard and cluster management"
 ## Task 12: Frontend Initialization
 
 **Files:**
+
 - Create: `frontend/` (Next.js project)
 
 - [ ] **Step 1: Initialize Next.js project**
@@ -1923,6 +1942,7 @@ npm install @tanstack/react-query class-variance-authority clsx tailwind-merge l
 - [ ] **Step 3: Configure static export**
 
 Edit `frontend/next.config.ts`:
+
 ```typescript
 import type { NextConfig } from "next";
 
@@ -1940,10 +1960,13 @@ export default nextConfig;
 // frontend/src/lib/auth.ts
 const COGNITO_DOMAIN = process.env.NEXT_PUBLIC_COGNITO_DOMAIN || "";
 const CLIENT_ID = process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID || "";
-const REDIRECT_URI = process.env.NEXT_PUBLIC_REDIRECT_URI || "http://localhost:3000/callback";
+const REDIRECT_URI =
+  process.env.NEXT_PUBLIC_REDIRECT_URI || "http://localhost:3000/callback";
 
 export function getLoginUrl(): string {
-  return `https://${COGNITO_DOMAIN}.auth.ap-northeast-2.amazoncognito.com/login?client_id=${CLIENT_ID}&response_type=code&scope=openid+profile&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
+  return `https://${COGNITO_DOMAIN}.auth.ap-northeast-2.amazoncognito.com/login?client_id=${CLIENT_ID}&response_type=code&scope=openid+profile&redirect_uri=${encodeURIComponent(
+    REDIRECT_URI,
+  )}`;
 }
 
 export function getToken(): string | null {
@@ -2050,7 +2073,8 @@ export function streamChat(
             try {
               const parsed = JSON.parse(data);
               if (parsed.type === "text") onToken(parsed.content);
-              if (parsed.type === "tool_use") onToolCall(parsed.name, parsed.status);
+              if (parsed.type === "tool_use")
+                onToolCall(parsed.name, parsed.status);
             } catch {
               onToken(data);
             }
@@ -2079,6 +2103,7 @@ git commit -m "feat: initialize Next.js frontend with auth, API client, and SSE 
 ## Task 13: Frontend — Chat Page
 
 **Files:**
+
 - Create: `frontend/src/components/chat/chat-panel.tsx`
 - Create: `frontend/src/components/chat/message-list.tsx`
 - Create: `frontend/src/components/chat/tool-status.tsx`
@@ -2112,6 +2137,7 @@ git commit -m "feat: add Chat page with SSE streaming and tool status display"
 ## Task 14: Frontend — Dashboard Page
 
 **Files:**
+
 - Create: `frontend/src/components/design-system/metric-card.tsx`
 - Create: `frontend/src/components/design-system/status-badge.tsx`
 - Create: `frontend/src/components/dashboard/cluster-overview.tsx`
@@ -2151,18 +2177,21 @@ git commit -m "feat: add Dashboard page with cluster overview and metric charts"
 ## Task 15: Knowledge Base Setup
 
 **Files:**
+
 - Create: `knowledge/aurora-docs/README.md`
 
 - [ ] **Step 1: Create knowledge base placeholder**
 
 ```markdown
 <!-- knowledge/aurora-docs/README.md -->
+
 # Aurora Documentation for Bedrock KB
 
 Place Aurora MySQL and PostgreSQL documentation files here.
 These will be indexed by Bedrock Knowledge Bases with S3 Vectors backend.
 
 ## Recommended documents:
+
 - Aurora PostgreSQL User Guide (key sections)
 - Aurora MySQL User Guide (key sections)
 - Parameter group reference
@@ -2171,6 +2200,7 @@ These will be indexed by Bedrock Knowledge Bases with S3 Vectors backend.
 - Best practices guide
 
 ## Format
+
 - PDF or Markdown files
 - One document per file for better chunking
 ```
@@ -2228,6 +2258,7 @@ Not-tested: End-to-end SSE streaming with real AgentCore Runtime"
 ## Post-Implementation Notes
 
 ### CDK Deploy Sequence
+
 ```bash
 cd cdk
 cdk bootstrap
@@ -2240,7 +2271,9 @@ cdk deploy dbops-dev-frontend
 ```
 
 ### AgentCore Setup (Manual, via CLI)
+
 AgentCore Runtime and Gateway are not yet available as CDK L2 constructs. After deploying the Agent stack:
+
 ```bash
 npm install -g @aws/agentcore
 agentcore create --defaults
@@ -2248,6 +2281,7 @@ agentcore deploy
 ```
 
 ### What's Not Covered in Phase 1
+
 - AgentCore Memory integration (Phase 2)
 - Incident/Operations/Simulation MCP Servers (Phase 2-4)
 - Approval workflow (Phase 3)

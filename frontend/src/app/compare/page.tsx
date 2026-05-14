@@ -38,9 +38,24 @@ const METRICS: MetricSpec[] = [
   { id: "connections", label: "Connections", fmt: (v) => v.toFixed(0) },
   { id: "read_iops", label: "Read IOPS", fmt: (v) => v.toFixed(0) },
   { id: "write_iops", label: "Write IOPS", fmt: (v) => v.toFixed(0) },
-  { id: "replica_lag_ms", label: "Replica Lag", unit: "ms", fmt: (v) => v.toFixed(0) },
-  { id: "xact_commit", label: "Tx / sec (PG)", pgOnly: true, fmt: (v) => v.toFixed(1) },
-  { id: "tup_returned", label: "Tuples / sec (PG)", pgOnly: true, fmt: (v) => v.toFixed(0) },
+  {
+    id: "replica_lag_ms",
+    label: "Replica Lag",
+    unit: "ms",
+    fmt: (v) => v.toFixed(0),
+  },
+  {
+    id: "xact_commit",
+    label: "Tx / sec (PG)",
+    pgOnly: true,
+    fmt: (v) => v.toFixed(1),
+  },
+  {
+    id: "tup_returned",
+    label: "Tuples / sec (PG)",
+    pgOnly: true,
+    fmt: (v) => v.toFixed(0),
+  },
 ];
 
 const RANGE_OPTIONS = [
@@ -137,11 +152,14 @@ export default function ComparePage() {
 
   // Decide which engines we're comparing so we can hide PG-only metrics
   // when at least one side is MySQL.
-  const engineA = clusters.find((c) => c.cluster_id === (mode === "cluster" ? clusterA : periodCluster))?.engine;
+  const engineA = clusters.find(
+    (c) => c.cluster_id === (mode === "cluster" ? clusterA : periodCluster),
+  )?.engine;
   const engineB = clusters.find((c) => c.cluster_id === clusterB)?.engine;
-  const showPgOnly = mode === "cluster"
-    ? isPostgres(engineA) && isPostgres(engineB)
-    : isPostgres(engineA);
+  const showPgOnly =
+    mode === "cluster"
+      ? isPostgres(engineA) && isPostgres(engineB)
+      : isPostgres(engineA);
 
   const visibleMetrics = useMemo(
     () => METRICS.filter((m) => !m.pgOnly || showPgOnly),
@@ -153,7 +171,8 @@ export default function ComparePage() {
 
   // Cluster mode — fetch both clusters in parallel.
   useEffect(() => {
-    if (mode !== "cluster" || !clusterA || !clusterB || metricIds.length === 0) return;
+    if (mode !== "cluster" || !clusterA || !clusterB || metricIds.length === 0)
+      return;
     let cancelled = false;
     setLoadingA(true);
     setLoadingB(true);
@@ -193,10 +212,11 @@ export default function ComparePage() {
     };
   }, [mode, periodCluster, hours, metricsKey]);
 
-  const labelA =
-    mode === "cluster" ? clusterA || "A" : "current";
+  const labelA = mode === "cluster" ? clusterA || "A" : "current";
   const labelB =
-    mode === "cluster" ? clusterB || "B" : PERIOD_SHIFT_LABEL[hours] || `−${hours}h`;
+    mode === "cluster"
+      ? clusterB || "B"
+      : PERIOD_SHIFT_LABEL[hours] || `−${hours}h`;
 
   const colorA = "#fbbf24"; // amber
   const colorB = "#38bdf8"; // sky
@@ -277,15 +297,22 @@ export default function ComparePage() {
           />
           <div className="text-xs text-zinc-500 leading-tight">
             <span className="text-amber-300">current</span> = last {hours}h ·{" "}
-            <span className="text-sky-300">{PERIOD_SHIFT_LABEL[hours] || `previous ${hours}h`}</span> = same length, shifted back
+            <span className="text-sky-300">
+              {PERIOD_SHIFT_LABEL[hours] || `previous ${hours}h`}
+            </span>{" "}
+            = same length, shifted back
           </div>
         </div>
       )}
 
       {clusters.length < 2 && mode === "cluster" ? (
         <div className="border border-amber-500/30 bg-amber-500/5 text-amber-300 text-sm px-4 py-3">
-          Cluster vs Cluster needs at least 2 registered clusters. Add another via{" "}
-          <a href="/clusters" className="underline">Clusters</a> or generate a sample cluster.
+          Cluster vs Cluster needs at least 2 registered clusters. Add another
+          via{" "}
+          <a href="/clusters" className="underline">
+            Clusters
+          </a>{" "}
+          or generate a sample cluster.
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -295,10 +322,15 @@ export default function ComparePage() {
             const data = mergeForChart(a, b, labelA, labelB);
             const loading = loadingA || loadingB;
             return (
-              <div key={m.id} className="bg-zinc-900/50 border border-zinc-800 p-3">
+              <div
+                key={m.id}
+                className="bg-zinc-900/50 border border-zinc-800 p-3"
+              >
                 <div className="flex items-baseline justify-between mb-2">
                   <div className="text-xs text-zinc-300">{m.label}</div>
-                  {m.unit && <div className="text-[10px] text-zinc-500">{m.unit}</div>}
+                  {m.unit && (
+                    <div className="text-[10px] text-zinc-500">{m.unit}</div>
+                  )}
                 </div>
                 <div className="h-40">
                   {loading ? (
@@ -311,22 +343,62 @@ export default function ComparePage() {
                     </div>
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                        <XAxis dataKey="ts" stroke="#71717a" fontSize={9} interval="preserveStartEnd" />
-                        <YAxis stroke="#71717a" fontSize={9} tickFormatter={(v) => m.fmt ? m.fmt(Number(v)) : String(v)} />
+                      <LineChart
+                        data={data}
+                        margin={{ top: 4, right: 8, bottom: 0, left: -20 }}
+                      >
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="#27272a"
+                          vertical={false}
+                        />
+                        <XAxis
+                          dataKey="ts"
+                          stroke="#71717a"
+                          fontSize={9}
+                          interval="preserveStartEnd"
+                        />
+                        <YAxis
+                          stroke="#71717a"
+                          fontSize={9}
+                          tickFormatter={(v) =>
+                            m.fmt ? m.fmt(Number(v)) : String(v)
+                          }
+                        />
                         <Tooltip
-                          contentStyle={{ background: "#18181b", border: "1px solid #3f3f46", fontSize: 11 }}
+                          contentStyle={{
+                            background: "#18181b",
+                            border: "1px solid #3f3f46",
+                            fontSize: 11,
+                          }}
                           labelStyle={{ color: "#a1a1aa" }}
                           formatter={(value: unknown) => {
                             const num = Number(value);
-                            if (!Number.isFinite(num)) return String(value ?? "—");
+                            if (!Number.isFinite(num))
+                              return String(value ?? "—");
                             return m.fmt ? m.fmt(num) : String(num);
                           }}
                         />
                         <Legend wrapperStyle={{ fontSize: 10 }} />
-                        <Line type="monotone" dataKey={labelA} stroke={colorA} strokeWidth={2} dot={false} isAnimationActive={false} />
-                        <Line type="monotone" dataKey={labelB} stroke={colorB} strokeWidth={2} dot={false} strokeDasharray={mode === "period" ? "4 3" : undefined} isAnimationActive={false} />
+                        <Line
+                          type="monotone"
+                          dataKey={labelA}
+                          stroke={colorA}
+                          strokeWidth={2}
+                          dot={false}
+                          isAnimationActive={false}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey={labelB}
+                          stroke={colorB}
+                          strokeWidth={2}
+                          dot={false}
+                          strokeDasharray={
+                            mode === "period" ? "4 3" : undefined
+                          }
+                          isAnimationActive={false}
+                        />
                       </LineChart>
                     </ResponsiveContainer>
                   )}
@@ -358,7 +430,9 @@ function ClusterPicker({
   return (
     <div className="flex items-center gap-2 bg-zinc-900/40 border border-zinc-800 px-3 py-2">
       <span className="w-2 h-2 rounded-full" style={{ background: color }} />
-      <div className="font-mono text-[10px] tracking-wider uppercase text-zinc-500 w-16">{label}</div>
+      <div className="font-mono text-[10px] tracking-wider uppercase text-zinc-500 w-16">
+        {label}
+      </div>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}

@@ -1,6 +1,7 @@
 ---
 inclusion: always
 ---
+
 # Project Structure
 
 ```
@@ -49,6 +50,7 @@ dbops/
 ```
 
 ## Naming Conventions
+
 - Python: snake_case for files and functions, PascalCase for classes
 - TypeScript: camelCase for files and functions, PascalCase for components
 - CDK stacks: PascalCase (e.g., `FoundationStack`)
@@ -56,6 +58,7 @@ dbops/
 - Lambda handlers: `handler.py` in each directory
 
 ## Architecture Rules
+
 - All infrastructure changes MUST go through CDK. Never modify AWS resources directly.
 - Each MCP server is an independent Lambda with its own `handler.py` and `tools/` directory.
 - Shared code lives in `mcp-servers/shared/` and is packaged as a Lambda layer.

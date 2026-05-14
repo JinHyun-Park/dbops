@@ -22,15 +22,27 @@ const NAV: NavGroup[] = [
     label: "Monitor",
     items: [
       { href: "/fleet", label: "Fleet", hint: "all clusters at a glance" },
-      { href: "/dashboard", label: "Dashboard", hint: "single-cluster deep dive" },
-      { href: "/compare", label: "Compare", hint: "cluster vs cluster · period vs period" },
+      {
+        href: "/dashboard",
+        label: "Dashboard",
+        hint: "single-cluster deep dive",
+      },
+      {
+        href: "/compare",
+        label: "Compare",
+        hint: "cluster vs cluster · period vs period",
+      },
     ],
   },
   {
     label: "Automate",
     items: [
       { href: "/chat", label: "Chat", hint: "natural-language ops" },
-      { href: "/query-lab", label: "Query Lab", hint: "SQL analysis + EXPLAIN" },
+      {
+        href: "/query-lab",
+        label: "Query Lab",
+        hint: "SQL analysis + EXPLAIN",
+      },
       { href: "/approvals", label: "Approvals", hint: "DBA gate for writes" },
     ],
   },
@@ -80,7 +92,10 @@ function Breadcrumbs({ pathname }: { pathname: string }) {
           {i === crumbs.length - 1 ? (
             <span className="text-zinc-300">{c.label}</span>
           ) : (
-            <Link href={c.href} className="hover:text-zinc-300 transition-colors">
+            <Link
+              href={c.href}
+              className="hover:text-zinc-300 transition-colors"
+            >
               {c.label}
             </Link>
           )}
@@ -191,8 +206,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   {group.items.map((item) => {
                     const active =
                       pathname === item.href ||
-                      (item.href !== "/" && pathname.startsWith(item.href + "/"));
-                    return <SidebarItem key={item.href} item={item} active={active} />;
+                      (item.href !== "/" &&
+                        pathname.startsWith(item.href + "/"));
+                    return (
+                      <SidebarItem
+                        key={item.href}
+                        item={item}
+                        active={active}
+                      />
+                    );
                   })}
                 </div>
               </div>
@@ -213,7 +235,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
           </header>
-          <main className="flex-1 overflow-y-auto pb-14 md:pb-0">{children}</main>
+          <main className="flex-1 overflow-y-auto pb-14 md:pb-0">
+            {children}
+          </main>
         </div>
       </div>
     </AuthGuard>

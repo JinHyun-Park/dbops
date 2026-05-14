@@ -29,7 +29,9 @@ function prettifyEventType(raw: string | null | undefined): string {
   }
   // Split CamelCase ("CreateDBCluster" → "Create D B Cluster") then collapse the
   // single-letter runs ("Create D B Cluster" → "Create DB Cluster").
-  s = s.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Z])([A-Z][a-z])/g, "$1 $2");
+  s = s
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2");
   s = s.replace(/_/g, " ");
   s = s.replace(/\b(\w) (\w)\b/g, "$1$2"); // collapse adjacent single letters back
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -45,15 +47,25 @@ function relTime(iso: string) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-export function EventsPanel({ events, clusterId }: { events: DashboardEvent[]; clusterId?: string }) {
+export function EventsPanel({
+  events,
+  clusterId,
+}: {
+  events: DashboardEvent[];
+  clusterId?: string;
+}) {
   const [active, setActive] = useState<DashboardEvent | null>(null);
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-4">
       <div className="flex items-center justify-between mb-3">
-        <div className="text-xs text-zinc-400 uppercase tracking-wider">Recent Events</div>
+        <div className="text-xs text-zinc-400 uppercase tracking-wider">
+          Recent Events
+        </div>
         {events.length > 0 && (
-          <div className="text-[10px] text-zinc-600">click an event for detail · AI explain</div>
+          <div className="text-[10px] text-zinc-600">
+            click an event for detail · AI explain
+          </div>
         )}
       </div>
       {events.length === 0 ? (
@@ -62,7 +74,8 @@ export function EventsPanel({ events, clusterId }: { events: DashboardEvent[]; c
         <div className="space-y-2 max-h-96 overflow-y-auto">
           {events.map((e, i) => {
             const sev = (e.severity || "info").toLowerCase();
-            const style = SEVERITY_STYLES[sev] || "border-l-zinc-500 bg-zinc-900/30";
+            const style =
+              SEVERITY_STYLES[sev] || "border-l-zinc-500 bg-zinc-900/30";
             const badge = SEVERITY_BADGES[sev] || SEVERITY_BADGES.info;
             const label = prettifyEventType(e.event_type);
             return (
@@ -72,18 +85,28 @@ export function EventsPanel({ events, clusterId }: { events: DashboardEvent[]; c
                 className={`w-full text-left border-l-2 ${style} pl-3 py-2 pr-2 rounded-r hover:bg-zinc-800/50 transition-colors`}
               >
                 <div className="flex items-center gap-2 mb-0.5">
-                  <span className="text-xs font-medium text-zinc-200 truncate">{label}</span>
-                  <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${badge}`}>
+                  <span className="text-xs font-medium text-zinc-200 truncate">
+                    {label}
+                  </span>
+                  <span
+                    className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${badge}`}
+                  >
                     {sev}
                   </span>
                   {e.source && (
-                    <span className="text-[9px] text-zinc-600 font-mono ml-auto">{e.source}</span>
+                    <span className="text-[9px] text-zinc-600 font-mono ml-auto">
+                      {e.source}
+                    </span>
                   )}
-                  <span className="text-[10px] text-zinc-500 whitespace-nowrap">{relTime(e.ts)}</span>
+                  <span className="text-[10px] text-zinc-500 whitespace-nowrap">
+                    {relTime(e.ts)}
+                  </span>
                 </div>
                 <div className="text-xs text-zinc-400 leading-snug truncate">
                   {e.message || (
-                    <span className="text-zinc-600 italic">no message — click for raw event</span>
+                    <span className="text-zinc-600 italic">
+                      no message — click for raw event
+                    </span>
                   )}
                 </div>
               </button>

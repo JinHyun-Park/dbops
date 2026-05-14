@@ -36,11 +36,21 @@ const CHECK_LABELS: Record<string, string> = {
 // Full PG tab set. MySQL exposes a trimmed list (VACUUM/Bloat/Extensions are
 // PG-only collectors today; Indexes/Config are PG-leaning but kept for
 // forward-compatibility once MySQL parity ships).
-const TABS_PG = ["All", "VACUUM", "Bloat", "Indexes", "Config", "Extensions", "Cost"] as const;
+const TABS_PG = [
+  "All",
+  "VACUUM",
+  "Bloat",
+  "Indexes",
+  "Config",
+  "Extensions",
+  "Cost",
+] as const;
 const TABS_MYSQL = ["All", "Cost"] as const;
 type Tab = (typeof TABS_PG)[number] | (typeof TABS_MYSQL)[number];
 
-function tryParse(raw: HealthFinding["details"]): Record<string, unknown> | null {
+function tryParse(
+  raw: HealthFinding["details"],
+): Record<string, unknown> | null {
   if (raw == null) return null;
   if (typeof raw === "object") return raw as Record<string, unknown>;
   try {
@@ -50,7 +60,13 @@ function tryParse(raw: HealthFinding["details"]): Record<string, unknown> | null
   }
 }
 
-export function MaintenanceHealthPanel({ clusterId, engine }: { clusterId: string; engine?: string }) {
+export function MaintenanceHealthPanel({
+  clusterId,
+  engine,
+}: {
+  clusterId: string;
+  engine?: string;
+}) {
   const [findings, setFindings] = useState<HealthFinding[]>([]);
   const [counts, setCounts] = useState({ critical: 0, warning: 0, info: 0 });
   const [snapshotTime, setSnapshotTime] = useState<string | null>(null);
@@ -106,24 +122,34 @@ export function MaintenanceHealthPanel({ clusterId, engine }: { clusterId: strin
       <div className="px-4 py-3 border-b border-zinc-800">
         <div className="flex items-baseline justify-between gap-3 flex-wrap">
           <div>
-            <div className="text-xs text-zinc-400 uppercase tracking-wider">Maintenance Health</div>
+            <div className="text-xs text-zinc-400 uppercase tracking-wider">
+              Maintenance Health
+            </div>
             <div className="text-[11px] text-zinc-500 mt-0.5">
               {pgOnly
                 ? "PostgreSQL-only signals. MySQL parity coming in a follow-up."
                 : "Ranked findings a DBA should act on. Click a row for AI-assisted remediation."}
               {snapshotTime && !pgOnly && (
-                <span className="ml-2 text-zinc-600">· refreshed {fmtRelative(snapshotTime)}</span>
+                <span className="ml-2 text-zinc-600">
+                  · refreshed {fmtRelative(snapshotTime)}
+                </span>
               )}
             </div>
           </div>
           <div className="flex items-center gap-2 text-[11px]">
-            <span className={`px-1.5 py-0.5 rounded font-mono ${SEV_BADGE.critical}`}>
+            <span
+              className={`px-1.5 py-0.5 rounded font-mono ${SEV_BADGE.critical}`}
+            >
               🔴 {counts.critical} critical
             </span>
-            <span className={`px-1.5 py-0.5 rounded font-mono ${SEV_BADGE.warning}`}>
+            <span
+              className={`px-1.5 py-0.5 rounded font-mono ${SEV_BADGE.warning}`}
+            >
               🟡 {counts.warning} warning
             </span>
-            <span className={`px-1.5 py-0.5 rounded font-mono ${SEV_BADGE.info}`}>
+            <span
+              className={`px-1.5 py-0.5 rounded font-mono ${SEV_BADGE.info}`}
+            >
               ℹ {counts.info} info
             </span>
           </div>
@@ -168,23 +194,35 @@ export function MaintenanceHealthPanel({ clusterId, engine }: { clusterId: strin
               className="w-full text-left px-4 py-2.5 hover:bg-zinc-800/40 transition-colors"
             >
               <div className="flex items-start gap-2.5">
-                <span className={`w-2 h-2 rounded-full ${SEV_DOT[f.severity]} mt-1.5 flex-shrink-0`} />
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    SEV_DOT[f.severity]
+                  } mt-1.5 flex-shrink-0`}
+                />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${SEV_BADGE[f.severity]}`}>
+                    <span
+                      className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                        SEV_BADGE[f.severity]
+                      }`}
+                    >
                       {f.severity}
                     </span>
                     <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-mono">
                       {f.check_type}
                     </span>
-                    <span className="text-sm text-zinc-200 font-mono truncate">{f.subject}</span>
+                    <span className="text-sm text-zinc-200 font-mono truncate">
+                      {f.subject}
+                    </span>
                   </div>
                   <div className="text-xs text-zinc-400 mt-1">
                     <span className="text-zinc-200">{f.value_str}</span>
                     <span className="text-zinc-600"> · target </span>
                     <span className="font-mono">{f.threshold_str}</span>
                   </div>
-                  <div className="text-xs text-zinc-300 mt-1 leading-snug">{f.recommendation}</div>
+                  <div className="text-xs text-zinc-300 mt-1 leading-snug">
+                    {f.recommendation}
+                  </div>
                 </div>
               </div>
             </button>
@@ -260,12 +298,20 @@ function FindingDetailModal({
         <header className="flex items-start justify-between px-5 py-4 border-b border-zinc-800">
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${SEV_BADGE[finding.severity]}`}>
+              <span
+                className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                  SEV_BADGE[finding.severity]
+                }`}
+              >
                 {finding.severity}
               </span>
-              <span className="text-[10px] text-zinc-500 font-mono">{finding.check_type}</span>
+              <span className="text-[10px] text-zinc-500 font-mono">
+                {finding.check_type}
+              </span>
             </div>
-            <h2 className="text-lg font-semibold text-zinc-100 font-mono truncate">{finding.subject}</h2>
+            <h2 className="text-lg font-semibold text-zinc-100 font-mono truncate">
+              {finding.subject}
+            </h2>
             <div className="text-xs text-zinc-400 mt-1">
               <span className="text-zinc-200">{finding.value_str}</span>
               <span className="text-zinc-600"> · target </span>
@@ -286,7 +332,9 @@ function FindingDetailModal({
             <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 mb-1">
               initial recommendation
             </div>
-            <div className="text-sm text-zinc-200">{finding.recommendation}</div>
+            <div className="text-sm text-zinc-200">
+              {finding.recommendation}
+            </div>
           </div>
 
           {details && Object.keys(details).length > 0 && (
@@ -310,7 +358,11 @@ function FindingDetailModal({
                 disabled={loading}
                 className="text-xs px-3 py-1 border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 disabled:opacity-50 transition-colors"
               >
-                {loading ? "thinking…" : insight ? "Re-analyze" : "Explain + fix"}
+                {loading
+                  ? "thinking…"
+                  : insight
+                    ? "Re-analyze"
+                    : "Explain + fix"}
               </button>
             </div>
             {error && (
@@ -320,12 +372,15 @@ function FindingDetailModal({
             )}
             {!insight && !loading && !error && (
               <div className="text-xs text-zinc-500">
-                Click <span className="text-sky-300">Explain + fix</span> for risk + exact command + verification check.
+                Click <span className="text-sky-300">Explain + fix</span> for
+                risk + exact command + verification check.
               </div>
             )}
             {insight && (
               <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 prose-code:text-sky-300">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{insight}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {insight}
+                </ReactMarkdown>
               </div>
             )}
           </div>

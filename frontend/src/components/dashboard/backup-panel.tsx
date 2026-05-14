@@ -35,7 +35,11 @@ export function BackupPanel({ cluster }: { cluster?: ClusterMeta }) {
 
   const retention = Number(cluster.backup_retention_days || 0);
   const retentionColor =
-    retention < 1 ? "text-rose-400" : retention < 7 ? "text-amber-400" : "text-emerald-400";
+    retention < 1
+      ? "text-rose-400"
+      : retention < 7
+        ? "text-amber-400"
+        : "text-emerald-400";
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-4">
@@ -50,12 +54,17 @@ export function BackupPanel({ cluster }: { cluster?: ClusterMeta }) {
         <div>
           <div className="text-zinc-500 text-xs mb-1">PITR Window</div>
           <div className="text-zinc-100 font-mono">
-            {pitrWindow(cluster.earliest_restorable_time, cluster.latest_restorable_time)}
+            {pitrWindow(
+              cluster.earliest_restorable_time,
+              cluster.latest_restorable_time,
+            )}
           </div>
         </div>
         <div>
           <div className="text-zinc-500 text-xs mb-1">Latest Restore</div>
-          <div className="text-zinc-300 text-xs">{relTime(cluster.latest_restorable_time)}</div>
+          <div className="text-zinc-300 text-xs">
+            {relTime(cluster.latest_restorable_time)}
+          </div>
         </div>
         <div>
           <div className="text-zinc-500 text-xs mb-1">Backup Window</div>
@@ -71,13 +80,19 @@ export function BackupPanel({ cluster }: { cluster?: ClusterMeta }) {
         </div>
         <div>
           <div className="text-zinc-500 text-xs mb-1">Multi-AZ</div>
-          <div className={cluster.multi_az ? "text-emerald-400" : "text-amber-400"}>
+          <div
+            className={cluster.multi_az ? "text-emerald-400" : "text-amber-400"}
+          >
             {cluster.multi_az ? "enabled" : "disabled"}
           </div>
         </div>
         <div>
           <div className="text-zinc-500 text-xs mb-1">Deletion Protection</div>
-          <div className={cluster.deletion_protection ? "text-emerald-400" : "text-rose-400"}>
+          <div
+            className={
+              cluster.deletion_protection ? "text-emerald-400" : "text-rose-400"
+            }
+          >
             {cluster.deletion_protection ? "enabled" : "disabled"}
           </div>
         </div>

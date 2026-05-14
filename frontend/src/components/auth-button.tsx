@@ -27,7 +27,10 @@ export function AuthButton() {
 
   return (
     <div className="flex items-center gap-3">
-      <span className="text-xs text-zinc-400 truncate max-w-[140px]" title={email || ""}>
+      <span
+        className="text-xs text-zinc-400 truncate max-w-[140px]"
+        title={email || ""}
+      >
         {email}
       </span>
       <button
