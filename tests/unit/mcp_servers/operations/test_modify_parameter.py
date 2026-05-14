@@ -1,24 +1,58 @@
 from unittest.mock import MagicMock, patch
 
-import pytest
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
 
 
 def test_modify_parameter_requires_approval():
+    """No approved=True → always returns approval_required, no RDS call."""
     mock_cache = MagicMock()
-    result = modify_parameter_impl(mock_cache, cluster_id="prod-pg-1", parameter_name="max_connections", value="200")
+    result = modify_parameter_impl(
+        mock_cache, cluster_id="prod-pg-1", parameter_name="max_connections", value="200"
+    )
     assert result["status"] == "approval_required"
     assert result["parameter"] == "max_connections"
     assert result["value"] == "200"
 
 
-@pytest.mark.skip(reason="impl now refuses to modify the default parameter group — test needs to pass a custom group name")
 @patch("mcp_servers.operations.tools.modify_parameter.boto3")
 def test_modify_parameter_with_approval(mock_boto3):
+    """Approved + cluster on a CUSTOM parameter group → impl applies the
+    change via modify_db_cluster_parameter_group."""
     mock_rds = MagicMock()
     mock_boto3.client.return_value = mock_rds
+    # The impl looks up the cluster's parameter group via DescribeDBClusters
+    # before mutating — stub that with a non-default group name so the
+    # default-group safety check passes.
+    mock_rds.describe_db_clusters.return_value = {
+        "DBClusters": [{"DBClusterParameterGroup": "prod-pg-1-custom-pg15"}],
+    }
     mock_cache = MagicMock()
-    result = modify_parameter_impl(mock_cache, cluster_id="prod-pg-1", parameter_name="max_connections", value="200", approved=True)
+    result = modify_parameter_impl(
+        mock_cache, cluster_id="prod-pg-1", parameter_name="max_connections", value="200", approved=True,
+    )
     assert result["status"] == "modified"
     assert result["parameter"] == "max_connections"
+    assert result["parameter_group"] == "prod-pg-1-custom-pg15"
     mock_rds.modify_db_cluster_parameter_group.assert_called_once()
+    call_kwargs = mock_rds.modify_db_cluster_parameter_group.call_args.kwargs
+    assert call_kwargs["DBClusterParameterGroupName"] == "prod-pg-1-custom-pg15"
+    assert call_kwargs["Parameters"][0]["ParameterName"] == "max_connections"
+    assert call_kwargs["Parameters"][0]["ParameterValue"] == "200"
+
+
+@patch("mcp_servers.operations.tools.modify_parameter.boto3")
+def test_modify_parameter_refuses_default_group(mock_boto3):
+    """Approved + cluster on the AWS-default parameter group → impl refuses
+    and returns default_group_refused without calling modify."""
+    mock_rds = MagicMock()
+    mock_boto3.client.return_value = mock_rds
+    mock_rds.describe_db_clusters.return_value = {
+        "DBClusters": [{"DBClusterParameterGroup": "default.aurora-postgresql15"}],
+    }
+    mock_cache = MagicMock()
+    result = modify_parameter_impl(
+        mock_cache, cluster_id="prod-pg-1", parameter_name="max_connections", value="200", approved=True,
+    )
+    assert result["status"] == "default_group_refused"
+    assert result["parameter_group"].startswith("default.")
+    mock_rds.modify_db_cluster_parameter_group.assert_not_called()
