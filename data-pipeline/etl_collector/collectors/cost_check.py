@@ -20,10 +20,11 @@ Current rules:
                                         that would save >$10/mo on Bedrock or RDS
                                         spend tagged to this DBOps deployment
 
-Storage rightsizing is intentionally not surfaced for Aurora — Aurora storage
-auto-scales and is billed per-GB used (not allocated), so "downsize" advice
-doesn't apply. Future: storage-IO findings (read-heavy workloads candidate
-for I/O-Optimized) would be more useful here.
+Storage rightsizing is scaffolded as a no-op for Aurora today (auto-scaled
+storage, per-GB-used billing). The `_check_storage_rightsize` entry point
+is ready for when the collector grows to cover RDS non-Aurora / DocumentDB
+/ DynamoDB — see its docstring for the per-engine plan + the multi-engine
+support epic in BACKLOG.md.
 """
 
 import json
@@ -197,6 +198,51 @@ def _check_serverless_v2_acu(rds_data, cache_arn, cache_secret, cache_db, cluste
     return emitted
 
 
+def _check_storage_rightsize(rds_data, cache_arn, cache_secret, cache_db, cluster_id, meta):
+    """Storage right-sizing — currently a no-op scaffold.
+
+    The DBOps collector today only handles Aurora MySQL/PostgreSQL, where
+    storage auto-scales and bills per-GB-used (not allocated) — there's no
+    "shrink the disk" advice to give. This function is the entry point for
+    when the collector grows to cover other engines:
+
+      • RDS non-Aurora (MySQL/PG/MariaDB): `AllocatedStorage` is fixed and
+        billed per allocated GB. Compare with actual used (information_schema
+        / pg_database_size) — if used << allocated and StorageType is gp2/gp3,
+        recommend shrinking via Modify-DBInstance.
+      • DocumentDB: same storage model as Aurora — skip.
+      • DynamoDB: storage itself is per-GB-used, so storage rightsize doesn't
+        apply. The equivalent finding is *provisioned-capacity rightsize* on
+        RCU/WCU (TableDescription.ProvisionedThroughput vs actual ConsumedCapacity).
+        Emit a different check_type — `cost_dynamodb_capacity_oversized` —
+        when the provisioned tier is adopted.
+
+    Plumbing this in requires:
+      1. meta_collector branching on the service (rds.describe_db_clusters
+         today; add docdb.describe_db_clusters, rds.describe_db_instances,
+         dynamodb.describe_table).
+      2. cluster_meta schema extension for `allocated_storage_gb`,
+         `actual_storage_used_gb`, `storage_type`, `provisioned_rcu`,
+         `provisioned_wcu`.
+      3. New `cost_storage_oversized` / `cost_dynamodb_capacity_oversized`
+         check_types in CHECK_LABELS (frontend) + this collector.
+
+    Tracked in BACKLOG: "Multi-engine support — DocumentDB / RDS non-Aurora /
+    DynamoDB" epic.
+    """
+    engine = (meta.get("engine") or "").lower()
+    # All currently-supported engines are Aurora — storage auto-scales.
+    if "aurora" in engine or not engine:
+        return 0
+    # Future engines hit this branch — for now we just log so it's obvious
+    # the scaffold ran. Real check goes here once the meta is collected.
+    print(
+        f"[cost] storage rightsize scaffold hit for {cluster_id} (engine={engine}) — "
+        "implement when multi-engine collector lands."
+    )
+    return 0
+
+
 def _check_savings_plan_opportunity(rds_data, cache_arn, cache_secret, cache_db, cluster_id):
     """Pull Cost Explorer's Savings Plans recommendation for the account.
     Cached daily in cost_recommendations_cache so we don't repay the
@@ -347,6 +393,9 @@ def collect_cost_findings(rds_data, cache_cluster_arn, cache_secret_arn, cache_d
     )
     emitted += _check_serverless_v2_acu(
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id, meta, cpu
+    )
+    emitted += _check_storage_rightsize(
+        rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id, meta
     )
     emitted += _check_savings_plan_opportunity(
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id

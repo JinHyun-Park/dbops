@@ -182,10 +182,55 @@ cluster is fine for 1-2 clusters; a fleet of 50+ makes onboarding painful.
 - 인덴트 트리 렌더링 (depth별 색상, lock mode + duration, cycle 감지, 쿼리 미리보기)
 - 별도 백엔드 변경 없이 기존 blocking_locks 데이터 재사용
 
-### P3.5 Comparative views
+### P3.5 Comparative views ✅
 
 - Multi-cluster diff page (pick A and B, see metric-by-metric side-by-side).
 - Time-period diff (e.g., this week vs last week) overlay.
+
+### P3.6 Multi-engine support — DocumentDB / RDS non-Aurora / DynamoDB
+
+**Why:** DBOps today only handles Aurora MySQL/PostgreSQL. Expanding to
+sibling AWS database services would let one console cover the same DBA's
+fleet end-to-end (transactional + document + key-value).
+
+**What — collectors:**
+
+- DocumentDB: `docdb.describe_db_clusters` (mirrors Aurora's API). Cluster
+  meta fits the existing `cluster_meta` schema; storage model is Aurora-like
+  (auto-scale, per-GB-used).
+- RDS non-Aurora (MySQL/PG/MariaDB): `rds.describe_db_instances`. `AllocatedStorage`
+  is fixed → **storage rightsize advice applies here** (allocated vs used
+  via `information_schema` / `pg_database_size`). Storage type (gp2/gp3/io1)
+  also affects rightsize recommendation.
+- DynamoDB: `dynamodb.list_tables` + `describe_table`. No traditional storage
+  knob, but `ProvisionedThroughput` (RCU/WCU) is the equivalent rightsize
+  target — emit `cost_dynamodb_capacity_oversized` when provisioned tier is
+  used and average consumed < 30% over 7 days.
+
+**What — schema additions to `cluster_meta`:**
+
+- `allocated_storage_gb`, `actual_storage_used_gb`, `storage_type` (RDS path)
+- `provisioned_rcu`, `provisioned_wcu`, `billing_mode` (DDB path)
+- `service` enum: `aurora` | `documentdb` | `rds` | `dynamodb` to dispatch
+  collector + cost checks per resource.
+
+**What — cost_check.py:**
+
+- `_check_storage_rightsize` is scaffolded today and short-circuits on Aurora.
+  Implement the RDS branch (compare allocated vs used) + the DDB capacity
+  branch when the meta fields land.
+- `cost_storage_oversized` and `cost_dynamodb_capacity_oversized` need labels
+  in `maintenance-health-panel.tsx` CHECK_LABELS map.
+
+**What — frontend:**
+
+- Engine badge component (`lib/engine.ts`) needs DocDB / DDB variants beyond
+  the current postgres/mysql split.
+- Dashboard panels that are engine-specific today (Vacuum, Extensions) need
+  to gracefully no-op for DDB.
+
+**Out of scope:** Redshift / OpenSearch / RDS Custom — different operational
+shapes (cluster-management vs DB-tuning).
 
 ---
 
