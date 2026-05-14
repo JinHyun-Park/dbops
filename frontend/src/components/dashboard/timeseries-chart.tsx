@@ -14,6 +14,7 @@ import {
   Legend,
 } from "recharts";
 import { fetchTimeseries } from "@/lib/api-client";
+import { Expandable } from "@/components/design-system/expandable";
 
 type Point = { ts: string; value: number | string; dimensions?: string };
 
@@ -121,96 +122,98 @@ export function TimeseriesChart({
   const displayMax = formatValue ? formatValue(max) : max.toFixed(2);
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 p-4">
-      <div className="flex items-baseline justify-between mb-3">
-        <div className="text-xs text-zinc-400 uppercase tracking-wider">
-          {title}
+    <Expandable title={title}>
+      <div className="bg-zinc-900/50 border border-zinc-800 p-4">
+        <div className="flex items-baseline justify-between mb-3 pr-8">
+          <div className="text-xs text-zinc-400 uppercase tracking-wider">
+            {title}
+          </div>
+          <div className="text-xs text-zinc-500">
+            peak: {displayMax}
+            {unit ? ` ${unit}` : ""}
+          </div>
         </div>
-        <div className="text-xs text-zinc-500">
-          peak: {displayMax}
-          {unit ? ` ${unit}` : ""}
+        <div className="text-2xl font-semibold text-zinc-100 mb-3">
+          {display}
+          {unit && <span className="text-sm text-zinc-500 ml-1">{unit}</span>}
+        </div>
+        <div className="h-32">
+          {loading ? (
+            <div className="text-xs text-zinc-500 flex items-center h-full">
+              Loading...
+            </div>
+          ) : err ? (
+            <div className="text-xs text-red-400 flex items-center h-full">
+              {err}
+            </div>
+          ) : data.length === 0 ? (
+            <div className="text-xs text-zinc-500 flex items-center h-full">
+              no data
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              {type === "area" ? (
+                <AreaChart
+                  data={data}
+                  margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#3f3f46"
+                    vertical={false}
+                  />
+                  <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
+                  <YAxis stroke="#71717a" fontSize={10} />
+                  <Tooltip
+                    contentStyle={{
+                      background: "#18181b",
+                      border: "1px solid #3f3f46",
+                      fontSize: 12,
+                    }}
+                    labelStyle={{ color: "#a1a1aa" }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke={color}
+                    fill={color}
+                    fillOpacity={0.2}
+                  />
+                </AreaChart>
+              ) : (
+                <LineChart
+                  data={data}
+                  margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#3f3f46"
+                    vertical={false}
+                  />
+                  <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
+                  <YAxis stroke="#71717a" fontSize={10} />
+                  <Tooltip
+                    contentStyle={{
+                      background: "#18181b",
+                      border: "1px solid #3f3f46",
+                      fontSize: 12,
+                    }}
+                    labelStyle={{ color: "#a1a1aa" }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="value"
+                    stroke={color}
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                </LineChart>
+              )}
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
-      <div className="text-2xl font-semibold text-zinc-100 mb-3">
-        {display}
-        {unit && <span className="text-sm text-zinc-500 ml-1">{unit}</span>}
-      </div>
-      <div className="h-32">
-        {loading ? (
-          <div className="text-xs text-zinc-500 flex items-center h-full">
-            Loading...
-          </div>
-        ) : err ? (
-          <div className="text-xs text-red-400 flex items-center h-full">
-            {err}
-          </div>
-        ) : data.length === 0 ? (
-          <div className="text-xs text-zinc-500 flex items-center h-full">
-            no data
-          </div>
-        ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            {type === "area" ? (
-              <AreaChart
-                data={data}
-                margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="#3f3f46"
-                  vertical={false}
-                />
-                <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
-                <YAxis stroke="#71717a" fontSize={10} />
-                <Tooltip
-                  contentStyle={{
-                    background: "#18181b",
-                    border: "1px solid #3f3f46",
-                    fontSize: 12,
-                  }}
-                  labelStyle={{ color: "#a1a1aa" }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke={color}
-                  fill={color}
-                  fillOpacity={0.2}
-                />
-              </AreaChart>
-            ) : (
-              <LineChart
-                data={data}
-                margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="#3f3f46"
-                  vertical={false}
-                />
-                <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
-                <YAxis stroke="#71717a" fontSize={10} />
-                <Tooltip
-                  contentStyle={{
-                    background: "#18181b",
-                    border: "1px solid #3f3f46",
-                    fontSize: 12,
-                  }}
-                  labelStyle={{ color: "#a1a1aa" }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="value"
-                  stroke={color}
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </LineChart>
-            )}
-          </ResponsiveContainer>
-        )}
-      </div>
-    </div>
+    </Expandable>
   );
 }
 
@@ -269,70 +272,72 @@ function StackedAreaChart({
   const max = data.reduce((m, d) => Math.max(m, Number(d._total) || 0), 0);
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 p-4 col-span-full">
-      <div className="flex items-baseline justify-between mb-3">
-        <div className="text-xs text-zinc-400 uppercase tracking-wider">
-          {title}
+    <Expandable title={title} className="col-span-full">
+      <div className="bg-zinc-900/50 border border-zinc-800 p-4">
+        <div className="flex items-baseline justify-between mb-3 pr-8">
+          <div className="text-xs text-zinc-400 uppercase tracking-wider">
+            {title}
+          </div>
+          <div className="text-xs text-zinc-500">
+            peak: {max.toFixed(2)}
+            {unit ? ` ${unit}` : ""}
+          </div>
         </div>
-        <div className="text-xs text-zinc-500">
-          peak: {max.toFixed(2)}
-          {unit ? ` ${unit}` : ""}
+        <div className="text-2xl font-semibold text-zinc-100 mb-3">
+          {current.toFixed(2)}
+          {unit && <span className="text-sm text-zinc-500 ml-1">{unit}</span>}
         </div>
-      </div>
-      <div className="text-2xl font-semibold text-zinc-100 mb-3">
-        {current.toFixed(2)}
-        {unit && <span className="text-sm text-zinc-500 ml-1">{unit}</span>}
-      </div>
-      <div className="h-64">
-        {loading ? (
-          <div className="text-xs text-zinc-500 flex items-center h-full">
-            Loading...
-          </div>
-        ) : err ? (
-          <div className="text-xs text-red-400 flex items-center h-full">
-            {err}
-          </div>
-        ) : data.length === 0 ? (
-          <div className="text-xs text-zinc-500 flex items-center h-full">
-            no data
-          </div>
-        ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart
-              data={data}
-              margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
-            >
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke="#3f3f46"
-                vertical={false}
-              />
-              <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
-              <YAxis stroke="#71717a" fontSize={10} />
-              <Tooltip
-                contentStyle={{
-                  background: "#18181b",
-                  border: "1px solid #3f3f46",
-                  fontSize: 12,
-                }}
-                labelStyle={{ color: "#a1a1aa" }}
-              />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
-              {events.map((ev, i) => (
-                <Area
-                  key={ev}
-                  type="monotone"
-                  dataKey={ev}
-                  stackId="1"
-                  stroke={WAIT_COLORS[i % WAIT_COLORS.length]}
-                  fill={WAIT_COLORS[i % WAIT_COLORS.length]}
-                  fillOpacity={0.7}
+        <div className="h-64">
+          {loading ? (
+            <div className="text-xs text-zinc-500 flex items-center h-full">
+              Loading...
+            </div>
+          ) : err ? (
+            <div className="text-xs text-red-400 flex items-center h-full">
+              {err}
+            </div>
+          ) : data.length === 0 ? (
+            <div className="text-xs text-zinc-500 flex items-center h-full">
+              no data
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart
+                data={data}
+                margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="#3f3f46"
+                  vertical={false}
                 />
-              ))}
-            </AreaChart>
-          </ResponsiveContainer>
-        )}
+                <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
+                <YAxis stroke="#71717a" fontSize={10} />
+                <Tooltip
+                  contentStyle={{
+                    background: "#18181b",
+                    border: "1px solid #3f3f46",
+                    fontSize: 12,
+                  }}
+                  labelStyle={{ color: "#a1a1aa" }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                {events.map((ev, i) => (
+                  <Area
+                    key={ev}
+                    type="monotone"
+                    dataKey={ev}
+                    stackId="1"
+                    stroke={WAIT_COLORS[i % WAIT_COLORS.length]}
+                    fill={WAIT_COLORS[i % WAIT_COLORS.length]}
+                    fillOpacity={0.7}
+                  />
+                ))}
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </div>
       </div>
-    </div>
+    </Expandable>
   );
 }

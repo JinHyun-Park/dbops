@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { fetchClusters, fetchBatchTimeseries } from "@/lib/api-client";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
+import { Expandable } from "@/components/design-system/expandable";
 import { engineBadge, isPostgres } from "@/lib/engine";
 
 interface ClusterRow {
@@ -322,88 +323,87 @@ export default function ComparePage() {
             const data = mergeForChart(a, b, labelA, labelB);
             const loading = loadingA || loadingB;
             return (
-              <div
-                key={m.id}
-                className="bg-zinc-900/50 border border-zinc-800 p-3"
-              >
-                <div className="flex items-baseline justify-between mb-2">
-                  <div className="text-xs text-zinc-300">{m.label}</div>
-                  {m.unit && (
-                    <div className="text-[10px] text-zinc-500">{m.unit}</div>
-                  )}
+              <Expandable key={m.id} title={m.label}>
+                <div className="bg-zinc-900/50 border border-zinc-800 p-3">
+                  <div className="flex items-baseline justify-between mb-2 pr-8">
+                    <div className="text-xs text-zinc-300">{m.label}</div>
+                    {m.unit && (
+                      <div className="text-[10px] text-zinc-500">{m.unit}</div>
+                    )}
+                  </div>
+                  <div className="h-40">
+                    {loading ? (
+                      <div className="h-full flex items-center justify-center text-xs text-zinc-500">
+                        loading…
+                      </div>
+                    ) : data.length === 0 ? (
+                      <div className="h-full flex items-center justify-center text-xs text-zinc-600">
+                        no data
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={data}
+                          margin={{ top: 4, right: 8, bottom: 0, left: -20 }}
+                        >
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            stroke="#27272a"
+                            vertical={false}
+                          />
+                          <XAxis
+                            dataKey="ts"
+                            stroke="#71717a"
+                            fontSize={9}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis
+                            stroke="#71717a"
+                            fontSize={9}
+                            tickFormatter={(v) =>
+                              m.fmt ? m.fmt(Number(v)) : String(v)
+                            }
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              background: "#18181b",
+                              border: "1px solid #3f3f46",
+                              fontSize: 11,
+                            }}
+                            labelStyle={{ color: "#a1a1aa" }}
+                            formatter={(value: unknown) => {
+                              const num = Number(value);
+                              if (!Number.isFinite(num))
+                                return String(value ?? "—");
+                              return m.fmt ? m.fmt(num) : String(num);
+                            }}
+                          />
+                          <Legend wrapperStyle={{ fontSize: 10 }} />
+                          <Line
+                            type="monotone"
+                            dataKey={labelA}
+                            stroke={colorA}
+                            strokeWidth={2}
+                            dot={false}
+                            isAnimationActive={false}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey={labelB}
+                            stroke={colorB}
+                            strokeWidth={2}
+                            dot={false}
+                            strokeDasharray={
+                              mode === "period" ? "4 3" : undefined
+                            }
+                            isAnimationActive={false}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
                 </div>
-                <div className="h-40">
-                  {loading ? (
-                    <div className="h-full flex items-center justify-center text-xs text-zinc-500">
-                      loading…
-                    </div>
-                  ) : data.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-xs text-zinc-600">
-                      no data
-                    </div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart
-                        data={data}
-                        margin={{ top: 4, right: 8, bottom: 0, left: -20 }}
-                      >
-                        <CartesianGrid
-                          strokeDasharray="3 3"
-                          stroke="#27272a"
-                          vertical={false}
-                        />
-                        <XAxis
-                          dataKey="ts"
-                          stroke="#71717a"
-                          fontSize={9}
-                          interval="preserveStartEnd"
-                        />
-                        <YAxis
-                          stroke="#71717a"
-                          fontSize={9}
-                          tickFormatter={(v) =>
-                            m.fmt ? m.fmt(Number(v)) : String(v)
-                          }
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            background: "#18181b",
-                            border: "1px solid #3f3f46",
-                            fontSize: 11,
-                          }}
-                          labelStyle={{ color: "#a1a1aa" }}
-                          formatter={(value: unknown) => {
-                            const num = Number(value);
-                            if (!Number.isFinite(num))
-                              return String(value ?? "—");
-                            return m.fmt ? m.fmt(num) : String(num);
-                          }}
-                        />
-                        <Legend wrapperStyle={{ fontSize: 10 }} />
-                        <Line
-                          type="monotone"
-                          dataKey={labelA}
-                          stroke={colorA}
-                          strokeWidth={2}
-                          dot={false}
-                          isAnimationActive={false}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey={labelB}
-                          stroke={colorB}
-                          strokeWidth={2}
-                          dot={false}
-                          strokeDasharray={
-                            mode === "period" ? "4 3" : undefined
-                          }
-                          isAnimationActive={false}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
-              </div>
+              </Expandable>
             );
           })}
         </div>
