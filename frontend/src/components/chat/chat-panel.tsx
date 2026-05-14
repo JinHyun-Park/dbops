@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { MessageList, type Message } from "./message-list";
 import { streamChat } from "@/lib/agentcore-sse";
 import { fetchClusters, fetchModels } from "@/lib/api-client";
@@ -128,6 +131,176 @@ function slugify(s: string): string {
       .replace(/\s+/g, "-")
       .slice(0, 60) || "conversation"
   );
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ]!,
+  );
+}
+
+function renderMarkdownToHtml(content: string): string {
+  // Reuse the same markdown stack as the chat bubble (react-markdown +
+  // remark-gfm) so the PDF rendering matches what the user sees on screen.
+  if (!content) return "<p><em>(empty)</em></p>";
+  return renderToStaticMarkup(
+    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>,
+  );
+}
+
+function buildConversationHtml(conv: Conversation): string {
+  const msgs = conv.messages
+    .map((m) => {
+      const role = m.role === "user" ? "User" : "Assistant";
+      const cls = m.role === "user" ? "msg msg-user" : "msg msg-assistant";
+      const tools =
+        m.toolCalls && m.toolCalls.length > 0
+          ? `<div class="tools">Tools: ${m.toolCalls
+              .map(
+                (t) =>
+                  `<code>${escapeHtml(
+                    t.name,
+                  )}</code> <span class="tool-status">(${escapeHtml(
+                    t.status,
+                  )})</span>`,
+              )
+              .join(", ")}</div>`
+          : "";
+      const body =
+        m.role === "user"
+          ? `<div class="content user-text">${escapeHtml(
+              m.content || "(empty)",
+            )}</div>`
+          : `<div class="content">${renderMarkdownToHtml(m.content)}</div>`;
+      return `<section class="${cls}"><div class="role">${role}</div>${tools}${body}</section>`;
+    })
+    .join("\n");
+
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(conv.title)} — DBOps Chat</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 28px;
+      color: #16161a;
+      line-height: 1.55;
+      background: #fff;
+    }
+    h1 { font-size: 1.55em; margin: 0 0 0.3em; }
+    .meta { color: #6b6a62; font-size: 0.82em; margin-bottom: 1.8em; padding-bottom: 1em; border-bottom: 1px solid #ddd; }
+    .meta strong { color: #16161a; }
+    .msg { margin: 1.3em 0; padding: 0.85em 1.05em; border-radius: 6px; page-break-inside: avoid; }
+    .msg-user { background: #eef3fb; border-left: 3px solid #1d4ed8; }
+    .msg-assistant { background: #faf9f4; border-left: 3px solid #d97706; }
+    .role { font-weight: 700; font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.1em; color: #555; margin-bottom: 0.4em; }
+    .tools { font-size: 0.78em; color: #555; margin-bottom: 0.55em; }
+    .tools code { background: #ebe9e2; padding: 0.08em 0.35em; border-radius: 3px; font-size: 0.9em; }
+    .tool-status { color: #777; }
+    .content > :first-child { margin-top: 0; }
+    .content > :last-child { margin-bottom: 0; }
+    .user-text { white-space: pre-wrap; }
+    pre {
+      background: #1a1a18; color: #f4f3ef;
+      padding: 0.85em 1em; border-radius: 5px;
+      overflow-x: auto; font-size: 0.83em; line-height: 1.45;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    :not(pre) > code { background: #ebe9e2; color: #b45309; padding: 0.08em 0.35em; border-radius: 3px; font-size: 0.9em; }
+    table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9em; }
+    th, td { border: 1px solid #ddd; padding: 0.45em 0.7em; text-align: left; }
+    th { background: #f3f3f0; font-weight: 600; }
+    blockquote { margin: 1em 0; padding: 0.4em 1em; border-left: 3px solid #d1d1c8; color: #444; background: #f7f6f1; }
+    a { color: #1d4ed8; }
+    h1, h2, h3, h4 { line-height: 1.3; margin-top: 0.9em; }
+    h2 { font-size: 1.2em; } h3 { font-size: 1.05em; } h4 { font-size: 0.95em; }
+    @media print {
+      body { padding: 0; max-width: none; }
+      .msg { break-inside: avoid; }
+      pre { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(conv.title)}</h1>
+  <div class="meta">
+    Cluster: <strong>${escapeHtml(conv.cluster_id || "n/a")}</strong>
+    &nbsp;·&nbsp; Exported: ${new Date().toLocaleString()}
+    &nbsp;·&nbsp; ${conv.messages.length} messages
+  </div>
+  ${msgs}
+</body>
+</html>`;
+}
+
+/**
+ * Render the conversation into an off-screen iframe and trigger its print
+ * dialog. The iframe contains ONLY the chat content (no app chrome, no
+ * scroll container), so the OS print preview shows every message across
+ * however many pages it needs — none of the "captures the whole webpage,
+ * one page only" issues that `window.print()` on the live page had.
+ */
+function exportConversationToPdf(conv: Conversation) {
+  if (typeof window === "undefined") return;
+  const html = buildConversationHtml(conv);
+
+  const iframe = document.createElement("iframe");
+  Object.assign(iframe.style, {
+    position: "fixed",
+    right: "0",
+    bottom: "0",
+    width: "0",
+    height: "0",
+    border: "0",
+    opacity: "0",
+    pointerEvents: "none",
+  } as Partial<CSSStyleDeclaration>);
+  iframe.setAttribute("aria-hidden", "true");
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) {
+    iframe.remove();
+    // Fall back to opening the HTML in a new tab if the iframe pathway fails.
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    window.open(URL.createObjectURL(blob), "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  const trigger = () => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } finally {
+      // Give the print dialog a moment to grab the document before we remove
+      // the iframe — Safari otherwise cancels the print on rapid removal.
+      window.setTimeout(() => iframe.remove(), 2000);
+    }
+  };
+
+  // If the document loaded synchronously, fire on the next tick; otherwise
+  // wait for the iframe's load event.
+  if (doc.readyState === "complete") {
+    window.setTimeout(trigger, 50);
+  } else {
+    iframe.addEventListener("load", () => window.setTimeout(trigger, 50), {
+      once: true,
+    });
+  }
 }
 
 function relTime(ms: number): string {
@@ -586,10 +759,11 @@ export function ChatPanel() {
                 </button>
                 <button
                   onClick={() => {
-                    if (typeof window !== "undefined") window.print();
+                    if (!active) return;
+                    exportConversationToPdf(active);
                   }}
                   className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-amber-500/40 hover:text-amber-300 transition-colors"
-                  title="Print or save as PDF via the browser print dialog"
+                  title="Save the entire conversation as PDF — opens the browser print dialog with only the chat content (no app chrome)."
                 >
                   🖨 pdf
                 </button>
