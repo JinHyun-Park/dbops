@@ -90,7 +90,11 @@ export function Expandable({
             aria-label={title || "Expanded panel"}
           >
             <div
-              className="w-full max-w-7xl h-full max-h-[92vh] bg-zinc-900 border border-zinc-700 shadow-2xl flex flex-col overflow-hidden"
+              // No fixed height — modal hugs the content. `max-h-[92vh]` caps
+              // long content so the body scrolls inside the modal. Wrapping
+              // with `overflow-hidden` keeps the rounded edge clean when the
+              // body scrollbar appears.
+              className="w-full max-w-7xl max-h-[92vh] bg-zinc-900 border border-zinc-700 shadow-2xl flex flex-col overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
               <header className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800 flex-shrink-0">
@@ -105,7 +109,7 @@ export function Expandable({
                   ×
                 </button>
               </header>
-              <div className="flex-1 overflow-auto p-4">{children}</div>
+              <div className="overflow-auto p-4 min-h-0">{children}</div>
             </div>
           </div>,
           document.body,
