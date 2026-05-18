@@ -24,6 +24,61 @@ interface Rule {
   enabled: boolean;
   last_triggered_at: string | null;
   created_at: string;
+  // Backend-computed health of the metric stream feeding this rule.
+  // Older API payloads (cached) may omit these — guard for undefined.
+  latest_metric_ts?: string | null;
+  data_status?: "fresh" | "stale" | "no_data";
+}
+
+function DataStatusBadge({
+  status,
+  latestTs,
+}: {
+  status?: Rule["data_status"];
+  latestTs?: string | null;
+}) {
+  // Fallback for API responses that pre-date the data_status field.
+  if (!status) {
+    return <span className="text-zinc-600 text-[10px] font-mono">—</span>;
+  }
+  if (status === "fresh") {
+    return (
+      <span
+        className="px-1.5 py-0.5 border text-[10px] font-mono bg-emerald-500/10 text-emerald-300 border-emerald-500/40"
+        title={
+          latestTs
+            ? `last metric: ${new Date(latestTs).toLocaleString()}`
+            : "metric stream within 10 minutes"
+        }
+      >
+        fresh
+      </span>
+    );
+  }
+  if (status === "stale") {
+    return (
+      <span
+        className="px-1.5 py-0.5 border text-[10px] font-mono bg-amber-500/10 text-amber-300 border-amber-500/40"
+        title={
+          latestTs
+            ? `last metric: ${new Date(
+                latestTs,
+              ).toLocaleString()} — evaluator skips this rule until newer data arrives`
+            : "metric stream stale — evaluator will skip this rule"
+        }
+      >
+        stale
+      </span>
+    );
+  }
+  return (
+    <span
+      className="px-1.5 py-0.5 border text-[10px] font-mono bg-rose-500/10 text-rose-300 border-rose-500/40"
+      title="no metric snapshots ever recorded for this cluster + metric — check the cluster registration or ETL pipeline"
+    >
+      no data
+    </span>
+  );
 }
 
 const METRIC_OPTIONS = [
@@ -389,6 +444,9 @@ export default function AlertsPage() {
                   Status
                 </th>
                 <th className="text-left px-3 py-2 text-zinc-400 font-medium">
+                  Data
+                </th>
+                <th className="text-left px-3 py-2 text-zinc-400 font-medium">
                   Cluster
                 </th>
                 <th className="text-left px-3 py-2 text-zinc-400 font-medium">
@@ -417,6 +475,12 @@ export default function AlertsPage() {
                     >
                       {r.enabled ? "enabled" : "disabled"}
                     </button>
+                  </td>
+                  <td className="px-3 py-2">
+                    <DataStatusBadge
+                      status={r.data_status}
+                      latestTs={r.latest_metric_ts}
+                    />
                   </td>
                   <td className="px-3 py-2 text-zinc-300 font-mono text-xs">
                     {r.cluster_id}

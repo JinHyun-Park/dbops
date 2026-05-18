@@ -126,19 +126,29 @@ def _make_query(rds_data, cluster_arn, secret_arn, database):
 
 
 def _list_rules(query, cluster_id):
+    # LATERAL JOIN mirrors the evaluator window (10 min). data_status:
+    #   fresh    — metric snapshot within 10 min, rule eligible to fire
+    #   stale    — metric snapshot exists but older than 10 min, rule will skip
+    #   no_data  — no snapshot at all, likely a misconfigured cluster_id/metric pair
+    base = (
+        "SELECT r.id, r.cluster_id, r.name, r.metric_type, r.comparison, r.threshold, r.enabled, "
+        "  r.last_triggered_at, r.created_at, "
+        "  m.latest_metric_ts, "
+        "  CASE "
+        "    WHEN m.latest_metric_ts IS NULL THEN 'no_data' "
+        "    WHEN m.latest_metric_ts > NOW() - INTERVAL '10 minutes' THEN 'fresh' "
+        "    ELSE 'stale' "
+        "  END AS data_status "
+        "FROM alert_rules r "
+        "LEFT JOIN LATERAL ("
+        "  SELECT MAX(ts) AS latest_metric_ts FROM metric_snapshots "
+        "  WHERE cluster_id = r.cluster_id AND metric_type = r.metric_type"
+        ") m ON true "
+    )
     if cluster_id:
-        rows = query(
-            "SELECT id, cluster_id, name, metric_type, comparison, threshold, enabled, "
-            "  last_triggered_at, created_at "
-            "FROM alert_rules WHERE cluster_id = :cid ORDER BY id DESC",
-            {"cid": cluster_id},
-        )
+        rows = query(base + "WHERE r.cluster_id = :cid ORDER BY r.id DESC", {"cid": cluster_id})
     else:
-        rows = query(
-            "SELECT id, cluster_id, name, metric_type, comparison, threshold, enabled, "
-            "  last_triggered_at, created_at "
-            "FROM alert_rules ORDER BY cluster_id, id DESC",
-        )
+        rows = query(base + "ORDER BY r.cluster_id, r.id DESC")
     return {"rules": rows}
 
 
