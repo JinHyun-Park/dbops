@@ -117,18 +117,19 @@ def _resp(status, body):
     return {"statusCode": status, "headers": _cors(), "body": json.dumps(body, default=str)}
 
 
-def _rds_client_for(region: str, role_arn: str = ""):
-    """Return an RDS client. If role_arn is given, assume it cross-account."""
+def _session_for(region: str, role_arn: str = "") -> boto3.session.Session:
+    """Return a boto3 Session for the target account+region. If role_arn is
+    given, assume it cross-account so the same session can spawn rds /
+    secretsmanager / etc. clients that all run as the spoke role."""
     if not role_arn:
-        return boto3.client("rds", region_name=region)
+        return boto3.session.Session(region_name=region)
     sts = boto3.client("sts")
     creds = sts.assume_role(
         RoleArn=role_arn,
         RoleSessionName=f"dbops-discover-{datetime.utcnow().strftime('%H%M%S')}",
         DurationSeconds=900,
     )["Credentials"]
-    return boto3.client(
-        "rds",
+    return boto3.session.Session(
         region_name=region,
         aws_access_key_id=creds["AccessKeyId"],
         aws_secret_access_key=creds["SecretAccessKey"],
@@ -136,9 +137,46 @@ def _rds_client_for(region: str, role_arn: str = ""):
     )
 
 
+def _rds_client_for(region: str, role_arn: str = ""):
+    """Convenience wrapper kept for callers that only need RDS access
+    (e.g. single-cluster register validation)."""
+    return _session_for(region, role_arn).client("rds")
+
+
+def _convention_secret_for(session: boto3.session.Session, cluster_id: str) -> str:
+    """Look up the dbops convention secret for a cluster.
+
+    Convention: `dbops/<cluster_id>/readonly`. If the secret exists in the
+    target account+region we return its ARN — that's the credential the
+    cluster will be registered with. If the secret is missing we return
+    empty so the caller can fall back to the master user secret (and warn
+    the user to run the dedicated-user setup).
+    """
+    secret_name = f"dbops/{cluster_id}/readonly"
+    sm = session.client("secretsmanager")
+    try:
+        resp = sm.describe_secret(SecretId=secret_name)
+        return resp.get("ARN", "")
+    except sm.exceptions.ResourceNotFoundException:
+        return ""
+    except Exception as e:
+        # Permission errors / throttling — log and fall back gracefully.
+        print(f"[discover] convention secret lookup failed for {cluster_id}: {e}")
+        return ""
+
+
 def _list_clusters_in_region(region: str, role_arn: str = "") -> list[dict]:
-    """Enumerate Aurora clusters in a region. Returns one row per cluster."""
-    rds = _rds_client_for(region, role_arn)
+    """Enumerate Aurora clusters in a region. For each cluster we attach:
+
+      - `secret_arn`: convention secret if available, else master fallback
+      - `secret_source`:
+          - "convention"      → `dbops/<cluster_id>/readonly` exists in SM
+          - "master_fallback" → no convention secret, using master user secret
+          - "missing"         → neither found; cluster needs manual setup
+      - `master_secret_arn`: kept for transparency (UI can show "currently using master")
+    """
+    session = _session_for(region, role_arn)
+    rds = session.client("rds")
     out = []
     paginator = rds.get_paginator("describe_db_clusters")
     for page in paginator.paginate():
@@ -147,16 +185,31 @@ def _list_clusters_in_region(region: str, role_arn: str = "") -> list[dict]:
             if not engine.startswith("aurora"):
                 # Skip non-Aurora RDS (we only support Aurora MySQL/PG today).
                 continue
+            cluster_id = c.get("DBClusterIdentifier", "")
             master_secret = (c.get("MasterUserSecret") or {}).get("SecretArn", "")
+
+            convention_secret = _convention_secret_for(session, cluster_id) if cluster_id else ""
+            if convention_secret:
+                resolved_secret = convention_secret
+                source = "convention"
+            elif master_secret:
+                resolved_secret = master_secret
+                source = "master_fallback"
+            else:
+                resolved_secret = ""
+                source = "missing"
+
             out.append({
-                "cluster_id": c.get("DBClusterIdentifier", ""),
+                "cluster_id": cluster_id,
                 "cluster_arn": c.get("DBClusterArn", ""),
                 "engine": engine,
                 "engine_version": c.get("EngineVersion", ""),
                 "endpoint": c.get("Endpoint", ""),
                 "status": c.get("Status", ""),
                 "db_name": c.get("DatabaseName", "") or "postgres",
-                "secret_arn": master_secret,
+                "secret_arn": resolved_secret,
+                "master_secret_arn": master_secret,
+                "secret_source": source,
                 "region": region,
             })
     return out

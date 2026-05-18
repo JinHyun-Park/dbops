@@ -505,6 +505,11 @@ export interface DiscoveredCluster {
   status: string;
   db_name: string;
   secret_arn: string;
+  master_secret_arn?: string;
+  // "convention" = dbops/<cluster_id>/readonly found (dedicated user, recommended)
+  // "master_fallback" = no convention secret, using master user (works but blast radius)
+  // "missing" = neither found, cluster cannot be registered without manual setup
+  secret_source?: "convention" | "master_fallback" | "missing";
   region: string;
   account_id: string;
   already_registered: boolean;

@@ -18,6 +18,7 @@ import {
   EmptyState,
   Section,
 } from "@/components/design-system/page-shell";
+import { SetupGuideModal } from "@/components/clusters/setup-guide-modal";
 
 interface Cluster {
   cluster_id: string;
@@ -84,6 +85,7 @@ export default function ClustersPage() {
   } | null>(null);
   const [seedingSample, setSeedingSample] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [setupGuideOpen, setSetupGuideOpen] = useState(false);
 
   const [admin, setAdmin] = useState(false);
   useEffect(() => {
@@ -332,6 +334,13 @@ export default function ClustersPage() {
             >
               Fleet overview →
             </Link>
+            <button
+              onClick={() => setSetupGuideOpen(true)}
+              className="text-xs px-3 py-2 border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 transition-colors"
+              title="DBOps 전용 read-only 계정 + Secrets Manager 등록 가이드"
+            >
+              📋 Setup guide
+            </button>
             {admin && (
               <button
                 onClick={handleGenerateSample}
@@ -557,8 +566,11 @@ export default function ClustersPage() {
                         <td className="px-3 py-2 text-[10px] text-zinc-500 font-mono truncate max-w-xs">
                           {c.endpoint || "—"}
                         </td>
-                        <td className="px-3 py-2 text-[10px] text-zinc-500">
-                          {c.secret_arn ? "✓ managed" : "— manual"}
+                        <td className="px-3 py-2 text-[10px]">
+                          <SecretSourceBadge
+                            source={c.secret_source}
+                            hasArn={!!c.secret_arn}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -928,7 +940,60 @@ export default function ClustersPage() {
           </>
         )}
       </Section>
+
+      <SetupGuideModal
+        open={setupGuideOpen}
+        onClose={() => setSetupGuideOpen(false)}
+        clusterId={form.cluster_id || undefined}
+        region={form.region || undefined}
+      />
     </PageBody>
+  );
+}
+
+function SecretSourceBadge({
+  source,
+  hasArn,
+}: {
+  source?: "convention" | "master_fallback" | "missing";
+  hasArn: boolean;
+}) {
+  // Server may not have emitted secret_source for cached or older payloads —
+  // fall back to the legacy "managed / manual" rendering so the column is never blank.
+  if (!source) {
+    return (
+      <span className="text-zinc-500 font-mono text-[10px]">
+        {hasArn ? "✓ managed" : "— manual"}
+      </span>
+    );
+  }
+  if (source === "convention") {
+    return (
+      <span
+        className="px-1.5 py-0.5 border text-[10px] font-mono bg-emerald-500/10 text-emerald-300 border-emerald-500/40"
+        title="dbops/<cluster_id>/readonly 컨벤션 시크릿 자동 연결 (권장)"
+      >
+        ✓ convention
+      </span>
+    );
+  }
+  if (source === "master_fallback") {
+    return (
+      <span
+        className="px-1.5 py-0.5 border text-[10px] font-mono bg-amber-500/10 text-amber-300 border-amber-500/40"
+        title="컨벤션 시크릿이 없어 master 시크릿으로 폴백. 프로덕션 사용 전 전용 계정 등록 권장."
+      >
+        ⚠ master fallback
+      </span>
+    );
+  }
+  return (
+    <span
+      className="px-1.5 py-0.5 border text-[10px] font-mono bg-rose-500/10 text-rose-300 border-rose-500/40"
+      title="사용 가능한 시크릿이 없습니다. Setup guide 참고."
+    >
+      ✗ missing
+    </span>
   );
 }
 

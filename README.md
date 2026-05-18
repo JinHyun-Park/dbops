@@ -116,6 +116,57 @@ real spend you must activate the tag in your billing preferences once:
 > `region`, `cognitoDomain`, `cognitoClientId`, and `agentRuntimeArn` into
 > the config object, resolved from the live stack outputs at deploy time.
 
+### Cluster Credential Setup (production-recommended)
+
+DBOps reads cluster monitoring data over the RDS Data API. By default the
+master secret discovered alongside each Aurora cluster is used, which works
+out-of-the-box but grants DBOps the same blast radius as the admin user.
+
+For production, create a dedicated `dbops_readonly` role on each cluster and
+register its credentials in Secrets Manager using the **DBOps naming
+convention** — bulk Discover finds and attaches it automatically, no manual
+ARN entry needed:
+
+```
+secret name: dbops/<cluster_id>/readonly
+secret JSON: {"username":"dbops_readonly","password":"..."}
+```
+
+The Clusters page has a **📋 Setup guide** button that walks through the
+SQL + AWS CLI snippets for both PostgreSQL and MySQL. In short:
+
+**PostgreSQL**
+
+```sql
+CREATE ROLE dbops_readonly LOGIN PASSWORD '...';
+GRANT pg_monitor, pg_read_all_settings, pg_read_all_stats TO dbops_readonly;
+```
+
+**MySQL**
+
+```sql
+CREATE USER 'dbops_readonly'@'%' IDENTIFIED BY '...';
+GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'dbops_readonly'@'%';
+GRANT SELECT ON performance_schema.* TO 'dbops_readonly'@'%';
+GRANT SELECT ON information_schema.* TO 'dbops_readonly'@'%';
+GRANT SELECT ON mysql.* TO 'dbops_readonly'@'%';
+```
+
+Then register the credentials:
+
+```bash
+aws secretsmanager create-secret \
+  --region <region> \
+  --name "dbops/<cluster_id>/readonly" \
+  --secret-string '{"username":"dbops_readonly","password":"<password>"}'
+```
+
+After this, the Discover table shows one of three badges per cluster:
+
+- `✓ convention` — dedicated user found and auto-attached (recommended)
+- `⚠ master fallback` — using master secret; works but should be tightened
+- `✗ missing` — no usable secret; needs setup before activation
+
 ### Cross-Account Setup
 
 To manage Aurora clusters in other AWS accounts:

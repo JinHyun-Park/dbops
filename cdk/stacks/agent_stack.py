@@ -266,6 +266,15 @@ class AgentStack(cdk.Stack):
             actions=["rds:DescribeDBClusters", "sts:AssumeRole"],
             resources=["*"],
         ))
+        # Convention-based credential discovery: probe Secrets Manager for
+        # `dbops/<cluster_id>/readonly` during bulk Discover. Scoped to the
+        # dbops/* name pattern in any region/account so cross-account
+        # discovery (via assumed spoke role) still works. Without this, the
+        # secret lookup quietly falls back to master.
+        clusters_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:DescribeSecret"],
+            resources=["arn:aws:secretsmanager:*:*:secret:dbops/*"],
+        ))
 
         reports_lambda = lambda_.Function(
             self, "ReportsApi",
