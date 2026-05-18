@@ -19,8 +19,13 @@ METRIC_PROFILES = {
     "cpu":            (40,   15,   5,    14,   88),
     "aas":            (0.6,  0.4,  0.15, 14,   4.2),
     "connections":    (45,   20,   6,    None, None),
+    "conn_active":    (12,   6,    2,    14,   45),
+    "conn_idle":      (28,   8,    4,    None, None),
     "read_iops":      (350,  200,  80,   9,    2400),
     "write_iops":     (180,  80,   40,   14,   1100),
+    "xact_commit":    (120,  60,   20,   14,   780),
+    "tup_returned":   (28_000, 12_000, 4_000, 14, 95_000),
+    "storage_bytes":  (25_000_000_000, 500_000_000, 10_000_000, None, None),
     "replica_lag_ms": (40,   20,   15,   14,   1200),
     "deadlocks":      (0,    0,    0.3,  14,   2),
 }
