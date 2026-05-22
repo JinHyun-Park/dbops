@@ -168,6 +168,13 @@ html[data-theme="light"] .bg-zinc-900 {
    (e.g. chat conversation list). On light they need to be visibly distinct
    from the white main canvas next to them, so we use the warm tint with a
    small step down. */
+/* EmptyState + maintenance-health row backgrounds use /30 — without the
+   override they fall back to the dark zinc-900 token and read as solid
+   black blocks on the warm page. Use a slightly warmer cream than /40 so
+   the dashed-border empty state still reads as "softer than a card". */
+html[data-theme="light"] .bg-zinc-900\/30 {
+  background-color: #f1efe9;
+}
 html[data-theme="light"] .bg-zinc-900\/40 {
   background-color: #efede6;
 }
@@ -311,6 +318,43 @@ html[data-theme="light"] .bg-amber-500\/20 {
 }
 html[data-theme="light"] .bg-amber-500\/5 {
   background-color: rgba(180, 83, 9, 0.06);
+}
+
+/* Orange family — used for the MySQL engine badge and the secondary tab in
+   the cluster setup guide. Without overrides text-orange-300 stays at the
+   default tailwind near-white-ish tint that washes out on the cream page.
+   We collapse the 200/300/400 stops to orange-700 (#c2410c) so the badge
+   has enough contrast against bg-orange-500/10, and convert the alpha
+   surfaces to the same warm-amber recipe used for amber/10–20. */
+html[data-theme="light"] .text-orange-200 {
+  color: #9a3412;
+}
+html[data-theme="light"] .text-orange-300 {
+  color: #c2410c;
+}
+html[data-theme="light"] .text-orange-400 {
+  color: #c2410c;
+}
+html[data-theme="light"] .text-orange-500 {
+  color: #b45309;
+}
+html[data-theme="light"] .border-orange-500\/30 {
+  border-color: rgba(194, 65, 12, 0.35);
+}
+html[data-theme="light"] .border-orange-500\/40 {
+  border-color: rgba(194, 65, 12, 0.45);
+}
+html[data-theme="light"] .border-orange-500\/50 {
+  border-color: rgba(194, 65, 12, 0.55);
+}
+html[data-theme="light"] .bg-orange-500\/10 {
+  background-color: rgba(194, 65, 12, 0.1);
+}
+html[data-theme="light"] .bg-orange-500\/15 {
+  background-color: rgba(194, 65, 12, 0.14);
+}
+html[data-theme="light"] .bg-orange-500\/20 {
+  background-color: rgba(194, 65, 12, 0.18);
 }
 /* Light amber tints (100/200) used for emphasised text on amber-tinted bg —
    without these overrides they remain near-white and disappear on the cream
