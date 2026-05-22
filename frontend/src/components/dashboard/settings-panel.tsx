@@ -54,11 +54,33 @@ const PG_RECOMMENDED: Record<
   },
 };
 
+// Postgres uses negative sentinels for "disabled" / "auto" on several settings.
+// Rendering them through the unit conversion produces nonsense like "-0.0 MB"
+// or "-1ms", so map them to readable labels before the formatter runs.
+const NEGATIVE_SENTINEL: Record<string, string> = {
+  log_min_duration_statement: "disabled",
+  log_autovacuum_min_duration: "disabled",
+  log_temp_files: "off",
+  log_duration: "off",
+  log_parser_stats: "off",
+  log_planner_stats: "off",
+  log_executor_stats: "off",
+  log_statement_stats: "off",
+  // wal_buffers default is -1 → auto-sized from shared_buffers/32
+  wal_buffers: "auto",
+  effective_io_concurrency: "default",
+  vacuum_cost_delay: "default",
+};
+
 function fmtValue(s: Setting): string {
   const v = s.value;
   const u = s.unit;
-  if (!u) return v;
   const num = Number(v);
+  // Sentinel handling — -1 has setting-specific semantics in PG.
+  if (Number.isFinite(num) && num < 0 && NEGATIVE_SENTINEL[s.name]) {
+    return `${NEGATIVE_SENTINEL[s.name]} (${v})`;
+  }
+  if (!u) return v;
   if (!Number.isFinite(num)) return `${v} ${u}`;
   // unit conversions
   if (u === "8kB") return `${((num * 8) / 1024).toFixed(1)} MB`;
