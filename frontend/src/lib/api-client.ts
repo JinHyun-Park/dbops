@@ -422,6 +422,54 @@ export async function fetchRedundantIndexes(
   return res.json();
 }
 
+export interface SloDayBucket {
+  day: string;
+  availability_pct: number;
+  avg_latency_ms: number;
+  availability_ok: boolean;
+  latency_ok: boolean;
+  no_data: boolean;
+}
+
+export interface SloResponse {
+  cluster_id: string;
+  window_days: number;
+  expected_minutes: number;
+  availability: {
+    target_pct: number;
+    actual_pct: number;
+    ok_minutes: number;
+    budget_consumed_pct: number | null;
+    allowed_downtime_minutes: number;
+    actual_downtime_minutes: number;
+  };
+  latency: {
+    target_ms: number;
+    compliance_pct: number | null;
+    overall_avg_ms: number;
+    budget_consumed_pct: number | null;
+    samples_minutes: number;
+  };
+  timeline: SloDayBucket[];
+}
+
+export async function fetchSlo(
+  clusterId: string,
+  days: number,
+  availabilityTargetPct: number,
+  latencyTargetMs: number,
+): Promise<SloResponse> {
+  const res = await fetch(
+    await api(
+      `/api/dashboard/${enc(
+        clusterId,
+      )}/slo?days=${days}&availability_target=${availabilityTargetPct}&latency_target_ms=${latencyTargetMs}`,
+    ),
+  );
+  if (!res.ok) throw new Error(`SLO fetch failed: ${res.status}`);
+  return res.json();
+}
+
 export interface TopologyMember {
   instance_id: string;
   is_writer: boolean;

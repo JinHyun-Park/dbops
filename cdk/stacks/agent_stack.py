@@ -465,6 +465,13 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardTopologyIntegration", dashboard_lambda),
         )
+        # SLO tracker — availability + latency SLI computed from the cache,
+        # error budget burn-down, per-day timeline.
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/slo",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardSloIntegration", dashboard_lambda),
+        )
         # Simulation API — REST mirror of Simulation MCP tools. All write-
         # like operations are simulations, never DDL execution, so POST is
         # safe without an approval flow.

@@ -32,6 +32,11 @@ const NAV: NavGroup[] = [
         label: "Compare",
         hint: "cluster vs cluster · period vs period",
       },
+      {
+        href: "/slo",
+        label: "SLO",
+        hint: "availability + latency · error budget",
+      },
     ],
   },
   {
@@ -71,6 +76,7 @@ function humanize(segment: string): string {
     "query-lab": "Query Lab",
     approvals: "Approvals",
     simulator: "Simulator",
+    slo: "SLO",
     alerts: "Alerts",
     clusters: "Clusters",
     reports: "Reports",

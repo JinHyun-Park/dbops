@@ -1238,6 +1238,187 @@ def _topology(cluster_id: str) -> dict:
     }
 
 
+def _slo(
+    query,
+    cluster_id: str,
+    days: int,
+    availability_target_pct: float,
+    latency_target_ms: float,
+) -> dict:
+    """Compute a minimal-but-honest SLO report from the cache.
+
+    Two SLIs:
+      • Availability — % of 1-minute windows in the lookback that had a
+        successful metric scrape with positive uptime. We use `uptime_sec`
+        because it's collected by every ETL run; absence = ETL outage OR
+        cluster unreachable, which is exactly what we want to flag.
+      • Latency    — % of 1-minute windows where the average
+        `query_stats.mean_time_ms` (across all tracked statements) was
+        below the target. This is a coarse proxy — true p95/p99 would
+        require per-query histograms.
+
+    Returns a flat shape ready for the UI: targets, actuals, error-budget
+    pct (consumed = 1 - actual/target normalised against the allowed
+    failure rate), plus a per-day timeline so the page can sparkline the
+    burn-down.
+    """
+    days = max(1, min(int(days), 90))
+    expected_minutes = days * 24 * 60
+
+    # Availability: distinct minute buckets that have any uptime_sec sample
+    # with a non-zero value in the window.
+    avail_sql = (
+        "SELECT COUNT(*)::bigint AS ok_minutes FROM ("
+        "  SELECT date_trunc('minute', ts) AS minute "
+        "  FROM metric_snapshots "
+        "  WHERE cluster_id = :cluster_id "
+        "    AND ts > NOW() - (:days || ' days')::interval "
+        "    AND metric_type = 'uptime_sec' "
+        "    AND value > 0 "
+        "  GROUP BY 1"
+        ") s"
+    )
+    avail_row = query(avail_sql, {"cluster_id": cluster_id, "days": str(days)})
+    ok_minutes = int((avail_row[0] or {}).get("ok_minutes", 0)) if avail_row else 0
+    availability_actual_pct = (
+        (ok_minutes / expected_minutes) * 100.0 if expected_minutes else 0.0
+    )
+
+    # Latency: per-minute average of mean_time_ms across all tracked
+    # queries. Compliance = % of minutes meeting target.
+    latency_sql = (
+        "WITH per_minute AS ("
+        "  SELECT date_trunc('minute', snapshot_time) AS minute, "
+        "         AVG(mean_time_ms) AS avg_ms "
+        "  FROM query_stats "
+        "  WHERE cluster_id = :cluster_id "
+        "    AND snapshot_time > NOW() - (:days || ' days')::interval "
+        "  GROUP BY 1"
+        ") "
+        "SELECT "
+        "  COUNT(*)::bigint AS total_minutes, "
+        "  SUM(CASE WHEN avg_ms <= :target THEN 1 ELSE 0 END)::bigint AS ok_minutes, "
+        "  COALESCE(AVG(avg_ms), 0)::float AS overall_avg_ms "
+        "FROM per_minute"
+    )
+    lat_row = query(
+        latency_sql,
+        {
+            "cluster_id": cluster_id,
+            "days": str(days),
+            "target": float(latency_target_ms),
+        },
+    )
+    lat = (lat_row[0] if lat_row else {}) or {}
+    lat_total = int(lat.get("total_minutes") or 0)
+    lat_ok = int(lat.get("ok_minutes") or 0)
+    latency_compliance_pct = (lat_ok / lat_total) * 100.0 if lat_total else None
+    overall_avg_ms = float(lat.get("overall_avg_ms") or 0)
+
+    # Error budget — "how much of the allowed failure rate is consumed?"
+    # If actual_ok >= target, consumed is 0%; if actual_ok = target's allowed
+    # floor (e.g. 99.9 target, 99.9 actual), consumed = 100%.
+    def _budget_consumed(actual: float | None, target: float) -> float | None:
+        if actual is None or target >= 100:
+            return None
+        allowed_fail = 100.0 - target
+        actual_fail = max(0.0, 100.0 - actual)
+        return min(100.0, (actual_fail / allowed_fail) * 100.0) if allowed_fail else 0.0
+
+    avail_budget_consumed = _budget_consumed(
+        availability_actual_pct, availability_target_pct
+    )
+    lat_budget_consumed = (
+        _budget_consumed(latency_compliance_pct, availability_target_pct)
+        if latency_compliance_pct is not None
+        else None
+    )
+
+    # Per-day timeline for sparkline. Bucket size = day to keep payload
+    # small even for 90-day windows.
+    timeline_sql = (
+        "WITH avail AS ("
+        "  SELECT date_trunc('day', ts) AS day, "
+        "         COUNT(DISTINCT date_trunc('minute', ts)) AS ok_minutes "
+        "  FROM metric_snapshots "
+        "  WHERE cluster_id = :cluster_id "
+        "    AND ts > NOW() - (:days || ' days')::interval "
+        "    AND metric_type = 'uptime_sec' "
+        "    AND value > 0 "
+        "  GROUP BY 1"
+        "), lat AS ("
+        "  SELECT date_trunc('day', snapshot_time) AS day, "
+        "         AVG(mean_time_ms) AS avg_ms "
+        "  FROM query_stats "
+        "  WHERE cluster_id = :cluster_id "
+        "    AND snapshot_time > NOW() - (:days || ' days')::interval "
+        "  GROUP BY 1"
+        ") "
+        "SELECT to_char(d.day, 'YYYY-MM-DD') AS day, "
+        "       COALESCE(a.ok_minutes, 0) AS ok_minutes, "
+        "       COALESCE(l.avg_ms, 0) AS avg_ms "
+        "FROM ("
+        "  SELECT generate_series("
+        "    date_trunc('day', NOW() - (:days || ' days')::interval), "
+        "    date_trunc('day', NOW()), '1 day') AS day"
+        ") d "
+        "LEFT JOIN avail a ON a.day = d.day "
+        "LEFT JOIN lat l ON l.day = d.day "
+        "ORDER BY d.day"
+    )
+    tl_rows = query(timeline_sql, {"cluster_id": cluster_id, "days": str(days)})
+    timeline = []
+    minutes_per_day = 24 * 60
+    for r in tl_rows or []:
+        ok_min = int(r.get("ok_minutes") or 0)
+        avg_ms = float(r.get("avg_ms") or 0)
+        day_avail_pct = min(100.0, (ok_min / minutes_per_day) * 100.0)
+        timeline.append(
+            {
+                "day": r.get("day"),
+                "availability_pct": round(day_avail_pct, 3),
+                "avg_latency_ms": round(avg_ms, 2),
+                "availability_ok": day_avail_pct >= availability_target_pct,
+                "latency_ok": avg_ms > 0 and avg_ms <= latency_target_ms,
+                "no_data": ok_min == 0 and avg_ms == 0,
+            }
+        )
+
+    return {
+        "cluster_id": cluster_id,
+        "window_days": days,
+        "expected_minutes": expected_minutes,
+        "availability": {
+            "target_pct": availability_target_pct,
+            "actual_pct": round(availability_actual_pct, 3),
+            "ok_minutes": ok_minutes,
+            "budget_consumed_pct": (
+                round(avail_budget_consumed, 1) if avail_budget_consumed is not None else None
+            ),
+            "allowed_downtime_minutes": round(
+                expected_minutes * (100.0 - availability_target_pct) / 100.0, 1
+            ),
+            "actual_downtime_minutes": max(0, expected_minutes - ok_minutes),
+        },
+        "latency": {
+            "target_ms": latency_target_ms,
+            "compliance_pct": (
+                round(latency_compliance_pct, 3)
+                if latency_compliance_pct is not None
+                else None
+            ),
+            "overall_avg_ms": round(overall_avg_ms, 2),
+            "budget_consumed_pct": (
+                round(lat_budget_consumed, 1)
+                if lat_budget_consumed is not None
+                else None
+            ),
+            "samples_minutes": lat_total,
+        },
+        "timeline": timeline,
+    }
+
+
 def lambda_handler(event, context):
     _set_origin(event)
     raw_path_early = event.get("rawPath") or event.get("path") or ""
@@ -1357,6 +1538,11 @@ def lambda_handler(event, context):
             return _response(200, _redundant_indexes(cluster_id))
         if raw_path.endswith("/topology"):
             return _response(200, _topology(cluster_id))
+        if raw_path.endswith("/slo"):
+            days = _parse_int(qs.get("days"), 30, min_v=1, max_v=90)
+            avail_t = _parse_float(qs.get("availability_target"), 99.9)
+            lat_t = _parse_float(qs.get("latency_target_ms"), 100)
+            return _response(200, _slo(query, cluster_id, days, avail_t, lat_t))
         return _response(200, _overview(query, cluster_id))
     except Exception:
         print(f"Dashboard error: {traceback.format_exc()}")
