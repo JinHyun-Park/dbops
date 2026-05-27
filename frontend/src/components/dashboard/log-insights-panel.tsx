@@ -193,13 +193,49 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
         {loading && (
           <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
         )}
-        {data?.error && (
-          <div className="p-4">
-            <div className="text-xs text-rose-300 border border-rose-500/40 bg-rose-500/10 px-3 py-2">
-              {data.error}
-            </div>
-          </div>
-        )}
+        {data?.error &&
+          (() => {
+            // "Log group not found" is a setup requirement, not a system
+            // error — render it as an amber info notice with a deep-link to
+            // the AWS docs page that explains how to enable PG log exports.
+            // Real failures (timeout, throttling, etc.) stay in rose.
+            const isSetup =
+              data.error.toLowerCase().includes("log group") &&
+              data.error.toLowerCase().includes("not found");
+            return (
+              <div className="p-4">
+                <div
+                  className={`text-xs px-3 py-2 border ${
+                    isSetup
+                      ? "text-amber-200 border-amber-500/40 bg-amber-500/10"
+                      : "text-rose-300 border-rose-500/40 bg-rose-500/10"
+                  }`}
+                >
+                  <div className="mb-1">{data.error}</div>
+                  {isSetup && (
+                    <div className="text-[11px] text-zinc-400 mt-2 leading-relaxed">
+                      <strong className="text-zinc-200">활성화 방법:</strong>{" "}
+                      RDS 콘솔 → Modify cluster → "Log exports" 섹션에서{" "}
+                      <code className="text-amber-300">postgresql</code> 체크 +
+                      적용. 또는 파라미터 그룹에서{" "}
+                      <code className="text-amber-300">
+                        log_statement / log_min_duration_statement
+                      </code>{" "}
+                      + 인스턴스 reboot.{" "}
+                      <a
+                        href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.Concepts.PostgreSQL.html"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sky-400 hover:text-sky-300"
+                      >
+                        AWS 문서 →
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         {data && !data.error && data.entries.length === 0 && (
           <div className="p-6 text-emerald-400 text-sm flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
