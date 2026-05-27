@@ -21,6 +21,7 @@ import { AuditLogPanel } from "@/components/dashboard/audit-log-panel";
 import { LogInsightsPanel } from "@/components/dashboard/log-insights-panel";
 import { TableSizesPanel } from "@/components/dashboard/table-sizes-panel";
 import { BackupPanel } from "@/components/dashboard/backup-panel";
+import { CapacityForecastPanel } from "@/components/dashboard/capacity-forecast-panel";
 import {
   fetchClusters,
   fetchDashboard,
@@ -546,6 +547,8 @@ export default function DashboardPage() {
           )}
 
           <BackupPanel cluster={dashboardData.cluster} />
+
+          <CapacityForecastPanel clusterId={selectedCluster} />
 
           <TimeseriesChart
             clusterId={selectedCluster}

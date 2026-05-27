@@ -368,6 +368,39 @@ export async function fetchLogInsights(
   return res.json();
 }
 
+export type CapacityMetric = "storage_bytes" | "connections" | "aas";
+
+export interface CapacityForecastResponse {
+  cluster_id: string;
+  metric: CapacityMetric;
+  label?: string;
+  current: number;
+  slope_per_day: number;
+  limit: number;
+  days_until_limit: number | null;
+  forecast: "growing" | "stable" | "shrinking";
+  samples: number;
+  days_lookback: number;
+  projections: { d30: number; d60: number; d90: number };
+  error?: string;
+}
+
+export async function fetchCapacityForecast(
+  clusterId: string,
+  metric: CapacityMetric = "storage_bytes",
+  daysLookback = 30,
+): Promise<CapacityForecastResponse> {
+  const res = await fetch(
+    await api(
+      `/api/dashboard/${enc(clusterId)}/capacity-forecast?metric=${enc(
+        metric,
+      )}&days_lookback=${daysLookback}`,
+    ),
+  );
+  if (!res.ok) throw new Error(`Capacity forecast fetch failed: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchMultiClusterOverview() {
   const res = await fetch(await api(`/api/multi-cluster/overview`));
   if (!res.ok)

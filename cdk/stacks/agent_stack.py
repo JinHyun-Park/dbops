@@ -395,6 +395,21 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardBlockingLocksIntegration", dashboard_lambda),
         )
+        # PG log analytics (CW Logs Insights pass-through). Distinct route
+        # from /dashboard/{id} catch-all so API Gateway resolves to the same
+        # Lambda but the path-suffix routing in handler.py picks it up.
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/log-insights",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardLogInsightsIntegration", dashboard_lambda),
+        )
+        # Capacity forecast (linear regression on metric_snapshots → 30/60/90d
+        # projections + days_until_limit).
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/capacity-forecast",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardCapacityForecastIntegration", dashboard_lambda),
+        )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/settings",
             methods=[apigwv2.HttpMethod.GET],

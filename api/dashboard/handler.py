@@ -768,6 +768,91 @@ def _wait_events(query, cluster_id, hours):
     return {"cluster_id": cluster_id, "hours": hours, "wait_events": rows}
 
 
+# Capacity forecasting: simple linear regression on the last N days of
+# metric_snapshots. The Performance MCP server has a `forecast_capacity`
+# tool already, but invoking it through the agent for a dashboard panel is
+# heavy + slow. We replicate the math directly against the cache DB so the
+# panel renders in one round trip.
+#
+# Limits are deliberately conservative defaults — Aurora autoscales
+# storage (cluster cap is 128 TB) so the storage value is a "well past
+# any sane operator" ceiling. Connections / AAS limits come from typical
+# saturation points for the popular instance classes; when cluster_settings
+# carries the actual max_connections we'll override below.
+_CAPACITY_METRICS = {
+    # metric_type, display unit, hard cap (in stored units)
+    "storage_bytes": {"limit": 128 * 1024**4, "label": "Storage"},  # 128 TiB
+    "connections": {"limit": 5000, "label": "Connections"},
+    "aas": {"limit": 64.0, "label": "Active Sessions"},
+}
+
+
+def _capacity_forecast(query, cluster_id, metric, days_lookback):
+    if metric not in _CAPACITY_METRICS:
+        return {"cluster_id": cluster_id, "metric": metric, "error": f"unknown metric {metric}"}
+    # RDS Data API params come through as strings — we cast to interval the
+    # same way the other lookback queries in this file do, instead of using
+    # MAKE_INTERVAL which would need an integer-typed param. Float-cast
+    # value to keep REGR_SLOPE happy when the metric is stored as integer.
+    rows = query(
+        "SELECT REGR_SLOPE(value::float, EXTRACT(EPOCH FROM ts) / 86400) AS slope, "
+        "       (array_agg(value ORDER BY ts DESC))[1]                 AS latest, "
+        "       MIN(ts)                                                 AS first_ts, "
+        "       MAX(ts)                                                 AS last_ts, "
+        "       COUNT(*)                                                AS samples "
+        "FROM metric_snapshots "
+        "WHERE cluster_id = :cid AND metric_type = :mt "
+        "AND ts > NOW() - (:days || ' days')::interval",
+        {"cid": cluster_id, "mt": metric, "days": str(days_lookback)},
+    )
+    row = rows[0] if rows else {}
+    slope = float(row.get("slope") or 0)
+    current = float(row.get("latest") or 0)
+    samples = int(row.get("samples") or 0)
+    spec = _CAPACITY_METRICS[metric]
+    limit = float(spec["limit"])
+
+    # Connection limit can be looked up dynamically from cluster_settings — when
+    # the cluster has a max_connections row, we trust that over our default
+    # ceiling.
+    if metric == "connections":
+        cfg = query(
+            "SELECT value FROM cluster_settings "
+            "WHERE cluster_id = :cid AND name = 'max_connections' "
+            "ORDER BY updated_at DESC LIMIT 1",
+            {"cid": cluster_id},
+        )
+        try:
+            mc = int(cfg[0]["value"]) if cfg else 0
+            if mc > 0:
+                limit = float(mc)
+        except (ValueError, KeyError, TypeError):
+            pass
+
+    days_until = None
+    if slope > 0 and current < limit:
+        days_until = max(0, int((limit - current) / slope))
+    forecast = "growing" if slope > 0.01 else "shrinking" if slope < -0.01 else "stable"
+
+    return {
+        "cluster_id": cluster_id,
+        "metric": metric,
+        "label": spec["label"],
+        "current": current,
+        "slope_per_day": slope,
+        "limit": limit,
+        "days_until_limit": days_until,
+        "forecast": forecast,
+        "samples": samples,
+        "days_lookback": days_lookback,
+        "projections": {
+            "d30": current + slope * 30,
+            "d60": current + slope * 60,
+            "d90": current + slope * 90,
+        },
+    }
+
+
 # PG log filter patterns per category. The model that drives the AI panel
 # can already query CloudWatch Logs through the search_logs MCP tool, but a
 # pre-categorized dashboard panel is what DBAs actually scan — pganalyze /
@@ -981,6 +1066,12 @@ def lambda_handler(event, context):
             hours = _parse_int(qs.get("hours"), 1, min_v=1, max_v=24)
             category = (qs.get("category") or "all").strip()
             return _response(200, _log_insights(cluster_id, hours, category))
+        if raw_path.endswith("/capacity-forecast"):
+            metric = (qs.get("metric") or "storage_bytes").strip()
+            days_lookback = _parse_int(qs.get("days_lookback"), 30, min_v=7, max_v=90)
+            return _response(
+                200, _capacity_forecast(query, cluster_id, metric, days_lookback)
+            )
         return _response(200, _overview(query, cluster_id))
     except Exception:
         print(f"Dashboard error: {traceback.format_exc()}")
