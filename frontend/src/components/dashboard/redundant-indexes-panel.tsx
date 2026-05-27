@@ -64,7 +64,7 @@ export function RedundantIndexesPanel({ clusterId }: { clusterId: string }) {
     <div className="bg-zinc-900/50 border border-zinc-800 overflow-hidden">
       <div className="px-4 py-3 border-b border-zinc-800 flex items-baseline justify-between gap-3 flex-wrap">
         <div>
-          <div className="text-xs text-zinc-400 uppercase tracking-wider">
+          <div className="text-sm text-zinc-200 font-medium">
             Redundant Indexes
             {data && data.candidates_count != null && (
               <span className="ml-2 px-1.5 py-0.5 bg-rose-500/15 text-rose-300 border border-rose-500/40 text-[10px]">

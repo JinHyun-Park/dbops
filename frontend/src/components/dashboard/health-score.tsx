@@ -147,7 +147,7 @@ export function HealthScore({ clusterId }: Props) {
           </span>
         </div>
         <div>
-          <div className="text-xs text-zinc-400 uppercase tracking-wider mb-1">
+          <div className="text-sm text-zinc-200 font-medium mb-1">
             Health Score
           </div>
           <div className={`text-lg font-semibold ${grade.color}`}>

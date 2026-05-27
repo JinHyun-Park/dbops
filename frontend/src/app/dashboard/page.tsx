@@ -474,7 +474,7 @@ export default function DashboardPage() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3 gap-3">
-                    <div className="text-xs text-zinc-400 uppercase tracking-wider">
+                    <div className="text-sm text-zinc-200 font-medium">
                       Cluster Info
                     </div>
                     <div className="flex items-center gap-2">

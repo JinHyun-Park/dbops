@@ -82,7 +82,7 @@ export function QueryDetailModal({
       >
         <div className="flex justify-between items-center px-6 py-4 border-b border-zinc-800">
           <div>
-            <div className="text-xs text-zinc-500 uppercase tracking-wider">
+            <div className="text-sm text-zinc-200 font-medium">
               Query Detail
             </div>
             <div className="text-sm text-zinc-300 font-mono">
@@ -119,7 +119,7 @@ export function QueryDetailModal({
           ) : (
             <>
               <div>
-                <div className="text-xs text-zinc-400 uppercase tracking-wider mb-2">
+                <div className="text-sm text-zinc-200 font-medium mb-2">
                   SQL
                 </div>
                 <pre className="bg-zinc-950 border border-zinc-800 rounded p-3 text-xs text-zinc-200 font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
@@ -176,7 +176,7 @@ export function QueryDetailModal({
 
               {chartData.length > 1 && (
                 <div>
-                  <div className="text-xs text-zinc-400 uppercase tracking-wider mb-2">
+                  <div className="text-sm text-zinc-200 font-medium mb-2">
                     Mean Time Trend ({snapshots.length} snapshots)
                   </div>
                   <div className="h-48 bg-zinc-950 border border-zinc-800 rounded p-2">

@@ -59,9 +59,7 @@ export function AuditLogPanel({ clusterId }: { clusterId: string }) {
     <div className="bg-zinc-900/50 border border-zinc-800 overflow-hidden">
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <div className="text-xs text-zinc-400 uppercase tracking-wider">
-            Audit Log
-          </div>
+          <div className="text-sm text-zinc-200 font-medium">Audit Log</div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
             DBA가 승인한 작업 및 변경 이력
           </div>

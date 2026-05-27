@@ -65,7 +65,7 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-4">
       <div className="flex items-center justify-between mb-3">
-        <div className="text-xs text-zinc-400 uppercase tracking-wider">
+        <div className="text-sm text-zinc-200 font-medium">
           Anomalies
           {items.length > 0 && (
             <span className="ml-2 px-1.5 py-0.5 bg-rose-500/20 text-rose-300 rounded text-[10px]">

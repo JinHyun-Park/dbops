@@ -127,7 +127,7 @@ export function SettingsPanel({
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-4">
-      <div className="text-xs text-zinc-400 uppercase tracking-wider mb-3">
+      <div className="text-sm text-zinc-200 font-medium mb-3">
         {engineLabel} Configuration
       </div>
       {loading ? (

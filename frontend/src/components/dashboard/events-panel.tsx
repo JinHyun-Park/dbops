@@ -59,9 +59,7 @@ export function EventsPanel({
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-4">
       <div className="flex items-center justify-between mb-3">
-        <div className="text-xs text-zinc-400 uppercase tracking-wider">
-          Recent Events
-        </div>
+        <div className="text-sm text-zinc-200 font-medium">Recent Events</div>
         {events.length > 0 && (
           <div className="text-[10px] text-zinc-600">
             이벤트 클릭 시 상세 + AI 설명

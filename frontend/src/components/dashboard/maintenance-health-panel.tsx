@@ -124,7 +124,7 @@ export function MaintenanceHealthPanel({
       <div className="px-4 py-3 border-b border-zinc-800">
         <div className="flex items-baseline justify-between gap-3 flex-wrap">
           <div>
-            <div className="text-xs text-zinc-400 uppercase tracking-wider">
+            <div className="text-sm text-zinc-200 font-medium">
               Maintenance Health
             </div>
             <div className="text-[11px] text-zinc-500 mt-0.5">

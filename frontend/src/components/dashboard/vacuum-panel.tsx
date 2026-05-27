@@ -97,9 +97,7 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 overflow-hidden">
       <div className="px-4 py-3 border-b border-zinc-800">
-        <div className="text-xs text-zinc-400 uppercase tracking-wider">
-          Vacuum & Bloat
-        </div>
+        <div className="text-sm text-zinc-200 font-medium">Vacuum & Bloat</div>
         <div className="text-[11px] text-zinc-500 mt-0.5">
           bloat 비율(dead / 전체 튜플) 내림차순 정렬
         </div>

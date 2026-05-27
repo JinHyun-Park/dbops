@@ -157,9 +157,7 @@ export function TimeseriesChart({
     <Expandable title={title}>
       <div className="bg-zinc-900/50 border border-zinc-800 p-4">
         <div className="flex items-baseline justify-between mb-3 pr-8">
-          <div className="text-xs text-zinc-400 uppercase tracking-wider">
-            {title}
-          </div>
+          <div className="text-sm text-zinc-200 font-medium">{title}</div>
           <div className="text-xs text-zinc-500">
             최대: {displayMax}
             {unit ? ` ${unit}` : ""}
@@ -308,9 +306,7 @@ function StackedAreaChart({
     <Expandable title={title} className="col-span-full">
       <div className="bg-zinc-900/50 border border-zinc-800 p-4">
         <div className="flex items-baseline justify-between mb-3 pr-8">
-          <div className="text-xs text-zinc-400 uppercase tracking-wider">
-            {title}
-          </div>
+          <div className="text-sm text-zinc-200 font-medium">{title}</div>
           <div className="text-xs text-zinc-500">
             최대: {fmtDecimal(max, 2)}
             {unit ? ` ${unit}` : ""}

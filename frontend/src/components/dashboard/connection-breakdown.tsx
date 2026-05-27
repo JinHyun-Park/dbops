@@ -137,7 +137,7 @@ export function ConnectionBreakdown({
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-4 col-span-full">
       <div className="flex items-baseline justify-between mb-3">
-        <div className="text-xs text-zinc-400 uppercase tracking-wider">
+        <div className="text-sm text-zinc-200 font-medium">
           Connection Activity Breakdown
         </div>
         <div className="text-xs text-zinc-500">
