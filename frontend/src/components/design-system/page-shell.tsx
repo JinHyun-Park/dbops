@@ -19,7 +19,7 @@ export function PageHeader({
     <header className="flex items-end justify-between gap-6 mb-8 pb-6 border-b border-zinc-800/80">
       <div>
         {eyebrow && (
-          <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-amber-400/70 mb-2">
+          <div className="text-[11px] font-medium text-zinc-500 mb-2">
             {eyebrow}
           </div>
         )}
@@ -63,7 +63,7 @@ export function EmptyState({
   return (
     <div className="border border-dashed border-zinc-800 bg-zinc-900/30 py-16 px-8 text-center">
       {eyebrow && (
-        <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-zinc-600 mb-3">
+        <div className="text-[11px] font-medium text-zinc-500 mb-3">
           {eyebrow}
         </div>
       )}
@@ -197,7 +197,7 @@ export function Section({
         <div className="flex items-end justify-between gap-4 mb-4">
           <div>
             {eyebrow && (
-              <div className="font-mono text-[10px] tracking-[0.2em] uppercase text-zinc-500 mb-1">
+              <div className="text-[11px] font-medium text-zinc-500 mb-1">
                 {eyebrow}
               </div>
             )}
