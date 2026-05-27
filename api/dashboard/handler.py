@@ -1119,6 +1119,125 @@ def _log_insights(cluster_id, hours, category):
     return {**base_result, "error": "query timed out — try a smaller hours window"}
 
 
+def _topology(cluster_id: str) -> dict:
+    """Return Aurora writer + readers with per-instance replica lag.
+
+    Live API call against RDS + CloudWatch (15-min window, latest
+    datapoint per instance). The Aurora cluster topology is too slow-
+    moving to warrant cache invalidation logic and the dashboard panel
+    is opt-in, so we accept the cold-call cost on button click."""
+    from datetime import datetime, timedelta
+
+    rds = boto3.client("rds")
+    cw = boto3.client("cloudwatch")
+
+    try:
+        resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
+    except Exception as e:
+        return {"cluster_id": cluster_id, "error": str(e), "members": []}
+
+    clusters = resp.get("DBClusters") or []
+    if not clusters:
+        return {
+            "cluster_id": cluster_id,
+            "error": "cluster not found",
+            "members": [],
+        }
+    cluster = clusters[0]
+    raw_members = cluster.get("DBClusterMembers") or []
+
+    end = datetime.utcnow()
+    start = end - timedelta(minutes=15)
+
+    # Batch one describe_db_instances call to avoid N round-trips for big
+    # clusters. RDS returns up to 100 results per call which covers any
+    # Aurora cluster (hard cap is 15 readers).
+    instance_meta: dict[str, dict] = {}
+    instance_ids = [
+        m.get("DBInstanceIdentifier") for m in raw_members if m.get("DBInstanceIdentifier")
+    ]
+    if instance_ids:
+        try:
+            inst_resp = rds.describe_db_instances(
+                Filters=[{"Name": "db-instance-id", "Values": instance_ids}]
+            )
+            for inst in inst_resp.get("DBInstances", []):
+                instance_meta[inst["DBInstanceIdentifier"]] = inst
+        except Exception:
+            pass
+
+    members = []
+    for m in raw_members:
+        instance_id = m.get("DBInstanceIdentifier") or ""
+        is_writer = bool(m.get("IsClusterWriter"))
+        meta = instance_meta.get(instance_id, {})
+
+        # Replica lag — writer is always 0 by definition (it's the
+        # source). Readers get the latest 1-min datapoint over the past
+        # 15 minutes; None means the metric has never been published
+        # (instance still warming up or just promoted).
+        lag_ms = 0.0 if is_writer else None
+        if not is_writer:
+            try:
+                lag_resp = cw.get_metric_statistics(
+                    Namespace="AWS/RDS",
+                    MetricName="AuroraReplicaLag",
+                    Dimensions=[
+                        {"Name": "DBInstanceIdentifier", "Value": instance_id}
+                    ],
+                    StartTime=start,
+                    EndTime=end,
+                    Period=60,
+                    Statistics=["Average"],
+                )
+                dps = sorted(
+                    lag_resp.get("Datapoints", []),
+                    key=lambda d: d["Timestamp"],
+                )
+                if dps:
+                    lag_ms = float(dps[-1]["Average"])
+            except Exception:
+                pass
+
+        members.append(
+            {
+                "instance_id": instance_id,
+                "is_writer": is_writer,
+                "promotion_tier": m.get("PromotionTier"),
+                "parameter_group_status": m.get(
+                    "DBClusterParameterGroupStatus", ""
+                ),
+                "instance_class": meta.get("DBInstanceClass", ""),
+                "instance_status": meta.get("DBInstanceStatus", ""),
+                "engine_version": meta.get("EngineVersion", ""),
+                "availability_zone": meta.get("AvailabilityZone", ""),
+                "replica_lag_ms": lag_ms,
+            }
+        )
+
+    # Sort: writer first, then readers by promotion_tier ascending
+    # (lower tier = higher failover priority, matches RDS console).
+    members.sort(
+        key=lambda x: (
+            0 if x["is_writer"] else 1,
+            x.get("promotion_tier") if x.get("promotion_tier") is not None else 99,
+            x["instance_id"],
+        )
+    )
+
+    return {
+        "cluster_id": cluster_id,
+        "engine": cluster.get("Engine", ""),
+        "engine_version": cluster.get("EngineVersion", ""),
+        "endpoint": cluster.get("Endpoint", ""),
+        "reader_endpoint": cluster.get("ReaderEndpoint", ""),
+        "multi_az": bool(cluster.get("MultiAZ")),
+        "status": cluster.get("Status", ""),
+        "members_count": len(members),
+        "members": members,
+    }
+
+
 def lambda_handler(event, context):
     _set_origin(event)
     raw_path_early = event.get("rawPath") or event.get("path") or ""
@@ -1236,6 +1355,8 @@ def lambda_handler(event, context):
             )
         if raw_path.endswith("/redundant-indexes"):
             return _response(200, _redundant_indexes(cluster_id))
+        if raw_path.endswith("/topology"):
+            return _response(200, _topology(cluster_id))
         return _response(200, _overview(query, cluster_id))
     except Exception:
         print(f"Dashboard error: {traceback.format_exc()}")

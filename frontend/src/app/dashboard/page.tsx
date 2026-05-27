@@ -12,6 +12,7 @@ import { MaintenanceHealthPanel } from "@/components/dashboard/maintenance-healt
 import { ExtensionsCard } from "@/components/dashboard/extensions-card";
 import { IndexRecsPanel } from "@/components/dashboard/index-recs-panel";
 import { RedundantIndexesPanel } from "@/components/dashboard/redundant-indexes-panel";
+import { ReplicationTopologyPanel } from "@/components/dashboard/replication-topology-panel";
 import { LongRunningPanel } from "@/components/dashboard/long-running-panel";
 import { ConnectionBreakdown } from "@/components/dashboard/connection-breakdown";
 import { LocksPanel } from "@/components/dashboard/locks-panel";
@@ -548,6 +549,8 @@ export default function DashboardPage() {
           )}
 
           <BackupPanel cluster={dashboardData.cluster} />
+
+          <ReplicationTopologyPanel clusterId={selectedCluster} />
 
           <CapacityForecastPanel clusterId={selectedCluster} />
 

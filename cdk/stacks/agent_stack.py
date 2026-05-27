@@ -264,6 +264,17 @@ class AgentStack(cdk.Stack):
             actions=["logs:DescribeLogGroups"],
             resources=["*"],
         ))
+        # Replication Topology panel reads cluster member list + per-instance
+        # AuroraReplicaLag from CloudWatch on demand. RDS Describe* APIs
+        # don't support resource ARN scoping, so both must be "*".
+        dashboard_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "rds:DescribeDBClusters",
+                "rds:DescribeDBInstances",
+                "cloudwatch:GetMetricStatistics",
+            ],
+            resources=["*"],
+        ))
 
         clusters_lambda = lambda_.Function(
             self, "ClustersApi",
@@ -416,6 +427,13 @@ class AgentStack(cdk.Stack):
             path="/api/dashboard/{cluster_id}/redundant-indexes",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardRedundantIndexesIntegration", dashboard_lambda),
+        )
+        # Replication topology (writer + readers + per-instance replica lag,
+        # live RDS Describe + CloudWatch).
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/topology",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardTopologyIntegration", dashboard_lambda),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/settings",

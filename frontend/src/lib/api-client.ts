@@ -422,6 +422,41 @@ export async function fetchRedundantIndexes(
   return res.json();
 }
 
+export interface TopologyMember {
+  instance_id: string;
+  is_writer: boolean;
+  promotion_tier: number | null;
+  parameter_group_status: string;
+  instance_class: string;
+  instance_status: string;
+  engine_version: string;
+  availability_zone: string;
+  replica_lag_ms: number | null;
+}
+
+export interface TopologyResponse {
+  cluster_id: string;
+  engine?: string;
+  engine_version?: string;
+  endpoint?: string;
+  reader_endpoint?: string;
+  multi_az?: boolean;
+  status?: string;
+  members_count?: number;
+  members: TopologyMember[];
+  error?: string;
+}
+
+export async function fetchTopology(
+  clusterId: string,
+): Promise<TopologyResponse> {
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/topology`),
+  );
+  if (!res.ok) throw new Error(`Topology fetch failed: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchCapacityForecast(
   clusterId: string,
   metric: CapacityMetric = "storage_bytes",
