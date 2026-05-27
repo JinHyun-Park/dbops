@@ -545,13 +545,30 @@ export async function fetchAlertRules(clusterId?: string) {
   return res.json();
 }
 
+export type AlertComparison = ">" | ">=" | "<" | "<=" | "==" | "!=";
+export type AlertAgg = "max" | "min" | "avg" | "last";
+
+export interface AlertOperand {
+  metric_type: string;
+  comparison: AlertComparison;
+  threshold: number;
+  window_minutes?: number;
+  agg?: AlertAgg;
+}
+
+export interface AlertConditions {
+  logic: "and" | "or";
+  operands: AlertOperand[];
+}
+
 export async function createAlertRule(rule: {
   cluster_id: string;
   name?: string;
-  metric_type: string;
-  comparison: ">" | ">=" | "<" | "<=" | "==" | "!=";
-  threshold: number;
+  metric_type?: string;
+  comparison?: AlertComparison;
+  threshold?: number;
   enabled?: boolean;
+  conditions?: AlertConditions;
 }) {
   const res = await fetch(await api(`/api/alert-rules`), {
     method: "POST",

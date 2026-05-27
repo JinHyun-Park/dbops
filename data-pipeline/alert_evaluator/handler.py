@@ -16,6 +16,59 @@ COMP_FN = {
     "!=": lambda a, b: a != b,
 }
 
+_AGG_FN = {"max": "MAX", "min": "MIN", "avg": "AVG", "last": "MAX"}  # 'last' approximates via MAX(ts)+value lookup; legacy = MAX
+
+
+def _evaluate_operand(query_fn, cluster_id: str, op: dict) -> tuple[bool, float | None, str]:
+    """Resolve a single operand to (matched, observed_value, summary_text).
+
+    Operand shape: {metric_type, comparison, threshold, window_minutes, agg}
+    """
+    metric = op.get("metric_type")
+    comp = op.get("comparison")
+    threshold = op.get("threshold")
+    window_min = int(op.get("window_minutes") or 10)
+    agg = (op.get("agg") or "max").lower()
+    if not metric or comp not in COMP_FN or threshold is None:
+        return False, None, f"invalid operand: {op}"
+    sql_agg = _AGG_FN.get(agg, "MAX")
+    rows = query_fn(
+        f"SELECT {sql_agg}(value) AS v "
+        "FROM metric_snapshots "
+        "WHERE cluster_id = :cid AND metric_type = :mt "
+        "AND ts > NOW() - (:win || ' minutes')::interval",
+        {"cid": cluster_id, "mt": metric, "win": str(window_min)},
+    )
+    if not rows or rows[0].get("v") is None:
+        return False, None, f"{metric}: no data"
+    obs = float(rows[0]["v"])
+    matched = COMP_FN[comp](obs, float(threshold))
+    summary = f"{metric}({agg},{window_min}m)={obs:.2f} {comp} {threshold}"
+    return matched, obs, summary
+
+
+def _evaluate_conditions(
+    query_fn, cluster_id: str, conditions: dict
+) -> tuple[bool, list[str]]:
+    """Evaluate the compound conditions DSL. Returns (overall_match, summaries)."""
+    logic = (conditions.get("logic") or "and").lower()
+    operands = conditions.get("operands") or []
+    if not operands:
+        return False, ["no operands"]
+
+    results: list[tuple[bool, str]] = []
+    for op in operands:
+        matched, _, summary = _evaluate_operand(query_fn, cluster_id, op)
+        results.append((matched, summary))
+
+    if logic == "or":
+        overall = any(r[0] for r in results)
+    else:
+        # default = and
+        overall = all(r[0] for r in results)
+    summaries = [s for _, s in results]
+    return overall, summaries
+
 
 def _post_json(url: str, payload: dict, timeout: int = 5) -> tuple[int, str]:
     """POST JSON to a webhook URL. Returns (status_code, body_excerpt)."""
@@ -237,7 +290,7 @@ def lambda_handler(event, context):
         return _query(rds_data, cluster_arn, secret_arn, database, sql, params)
 
     rules = q(
-        "SELECT id, cluster_id, name, metric_type, comparison, threshold "
+        "SELECT id, cluster_id, name, metric_type, comparison, threshold, conditions::text AS conditions_json "
         "FROM alert_rules WHERE enabled = true"
     )
 
@@ -248,29 +301,72 @@ def lambda_handler(event, context):
     skipped = 0
 
     for rule in rules:
-        metric_rows = q(
-            "SELECT MAX(value) AS latest_value "
-            "FROM metric_snapshots "
-            "WHERE cluster_id = :cid "
-            "AND metric_type = :mt "
-            "AND ts > NOW() - INTERVAL '10 minutes'",
-            {"cid": rule["cluster_id"], "mt": rule["metric_type"]},
-        )
-        if not metric_rows or metric_rows[0].get("latest_value") is None:
-            skipped += 1
-            continue
-
-        latest = float(metric_rows[0]["latest_value"])
-        threshold = float(rule["threshold"])
-        comp_fn = COMP_FN.get(rule["comparison"])
-        if not comp_fn or not comp_fn(latest, threshold):
-            continue
-
         rule_id = int(rule["id"])
-        message = (
-            f"{rule['name']}: {rule['metric_type']} = {latest:.2f} "
-            f"{rule['comparison']} {threshold}"
-        )
+        conditions_json = rule.get("conditions_json")
+        compound = None
+        if conditions_json:
+            try:
+                compound = json.loads(conditions_json)
+            except (TypeError, ValueError) as e:
+                print(f"[alert-eval] rule {rule_id} has malformed conditions: {e}")
+                compound = None
+
+        if compound:
+            # Compound DSL path. `latest` for downstream Slack/PD payloads is
+            # the observed value of the first operand (most rules only have
+            # one); legacy notifiers stay happy with a single scalar.
+            matched, summaries = _evaluate_conditions(q, rule["cluster_id"], compound)
+            if not matched:
+                if all("no data" in s for s in summaries):
+                    skipped += 1
+                continue
+            # Pull a representative observed value — re-resolve the first
+            # operand so we have a number to embed in the notification text.
+            first_op = (compound.get("operands") or [{}])[0]
+            _, latest, _ = _evaluate_operand(q, rule["cluster_id"], first_op)
+            latest = latest if latest is not None else 0.0
+            joiner = (
+                " AND " if (compound.get("logic") or "and").lower() == "and" else " OR "
+            )
+            message = f"{rule['name']}: {joiner.join(summaries)}"
+        else:
+            # Legacy single-threshold path — unchanged.
+            metric_rows = q(
+                "SELECT MAX(value) AS latest_value "
+                "FROM metric_snapshots "
+                "WHERE cluster_id = :cid "
+                "AND metric_type = :mt "
+                "AND ts > NOW() - INTERVAL '10 minutes'",
+                {"cid": rule["cluster_id"], "mt": rule["metric_type"]},
+            )
+            if not metric_rows or metric_rows[0].get("latest_value") is None:
+                skipped += 1
+                continue
+            latest = float(metric_rows[0]["latest_value"])
+            threshold = float(rule["threshold"])
+            comp_fn = COMP_FN.get(rule["comparison"])
+            if not comp_fn or not comp_fn(latest, threshold):
+                continue
+            message = (
+                f"{rule['name']}: {rule['metric_type']} = {latest:.2f} "
+                f"{rule['comparison']} {threshold}"
+            )
+
+        # Build the audit-log payload — compound rules carry their full DSL,
+        # legacy rules just the single threshold. Either way every alert keeps
+        # full reproducibility of what fired.
+        raw_event = {
+            "rule_id": rule_id,
+            "cluster_id": rule["cluster_id"],
+            "observed_value": latest,
+        }
+        if compound:
+            raw_event["conditions"] = compound
+            raw_event["operand_summaries"] = summaries
+        else:
+            raw_event["metric_type"] = rule["metric_type"]
+            raw_event["threshold"] = threshold
+            raw_event["comparison"] = rule["comparison"]
 
         q(
             "INSERT INTO event_log (cluster_id, event_time, event_type, source, severity, message, raw_event) "
@@ -278,13 +374,7 @@ def lambda_handler(event, context):
             {
                 "cid": rule["cluster_id"],
                 "msg": message,
-                "raw": json.dumps({
-                    "rule_id": rule_id,
-                    "metric_type": rule["metric_type"],
-                    "value": latest,
-                    "threshold": threshold,
-                    "comparison": rule["comparison"],
-                }),
+                "raw": json.dumps(raw_event),
             },
         )
 

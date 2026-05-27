@@ -132,7 +132,7 @@ def _list_rules(query, cluster_id):
     #   no_data  — no snapshot at all, likely a misconfigured cluster_id/metric pair
     base = (
         "SELECT r.id, r.cluster_id, r.name, r.metric_type, r.comparison, r.threshold, r.enabled, "
-        "  r.last_triggered_at, r.created_at, "
+        "  r.last_triggered_at, r.created_at, r.conditions::text AS conditions_json, "
         "  m.latest_metric_ts, "
         "  CASE "
         "    WHEN m.latest_metric_ts IS NULL THEN 'no_data' "
@@ -152,16 +152,90 @@ def _list_rules(query, cluster_id):
     return {"rules": rows}
 
 
+def _validate_conditions(conditions: dict) -> str | None:
+    """Return an error string if the compound DSL is malformed, else None."""
+    if not isinstance(conditions, dict):
+        return "conditions must be an object"
+    logic = (conditions.get("logic") or "and").lower()
+    if logic not in ("and", "or"):
+        return "conditions.logic must be 'and' or 'or'"
+    operands = conditions.get("operands")
+    if not isinstance(operands, list) or len(operands) == 0:
+        return "conditions.operands must be a non-empty array"
+    if len(operands) > 8:
+        return "conditions.operands capped at 8 entries for v1"
+    for i, op in enumerate(operands):
+        if not isinstance(op, dict):
+            return f"operand[{i}] must be an object"
+        if not METRIC_RE.match(str(op.get("metric_type") or "")):
+            return f"operand[{i}].metric_type invalid"
+        if op.get("comparison") not in COMP_OPS:
+            return f"operand[{i}].comparison must be one of {sorted(COMP_OPS)}"
+        try:
+            float(op.get("threshold"))
+        except (TypeError, ValueError):
+            return f"operand[{i}].threshold must be numeric"
+        win = op.get("window_minutes", 10)
+        try:
+            win_int = int(win)
+            if win_int < 1 or win_int > 1440:
+                return f"operand[{i}].window_minutes must be 1..1440"
+        except (TypeError, ValueError):
+            return f"operand[{i}].window_minutes must be an integer"
+        if op.get("agg", "max") not in ("max", "min", "avg", "last"):
+            return f"operand[{i}].agg must be max|min|avg|last"
+    return None
+
+
 def _create_rule(query, body):
     cluster_id = body.get("cluster_id", "")
-    metric_type = body.get("metric_type", "")
-    comparison = body.get("comparison", "")
-    threshold = body.get("threshold")
-    name = (body.get("name") or f"{metric_type} {comparison} {threshold}").strip()[:255]
+    name = (body.get("name") or "alert rule").strip()[:255]
     enabled = bool(body.get("enabled", True))
 
     if not CLUSTER_ID_RE.match(cluster_id):
         return _response(400, {"error": "invalid cluster_id"})
+
+    conditions = body.get("conditions")
+    if conditions is not None:
+        err = _validate_conditions(conditions)
+        if err:
+            return _response(400, {"error": err})
+        # Persist a denormalised "first operand" copy into the legacy columns
+        # so the data_status lookup join (which matches on metric_type) still
+        # works and old read paths don't need conditional logic.
+        first = conditions["operands"][0]
+        metric_type = str(first["metric_type"])
+        comparison = str(first["comparison"])
+        threshold = float(first["threshold"])
+        if not body.get("name"):
+            logic_text = (conditions.get("logic") or "and").upper()
+            name = (
+                f"{first['metric_type']} {first['comparison']} {first['threshold']} "
+                f"({logic_text}+{len(conditions['operands']) - 1})"
+            )[:255]
+        rows = query(
+            "INSERT INTO alert_rules (cluster_id, name, metric_type, comparison, threshold, enabled, conditions) "
+            "VALUES (:cid, :name, :metric, :comp, :threshold, :enabled, :conditions::jsonb) "
+            "RETURNING id, cluster_id, name, metric_type, comparison, threshold, enabled, "
+            "         conditions::text AS conditions_json, created_at",
+            {
+                "cid": cluster_id,
+                "name": name,
+                "metric": metric_type,
+                "comp": comparison,
+                "threshold": threshold,
+                "enabled": enabled,
+                "conditions": json.dumps(conditions),
+            },
+        )
+        return _response(201, {"rule": rows[0] if rows else None})
+
+    # Legacy single-threshold path — unchanged behaviour.
+    metric_type = body.get("metric_type", "")
+    comparison = body.get("comparison", "")
+    threshold = body.get("threshold")
+    if not body.get("name"):
+        name = f"{metric_type} {comparison} {threshold}".strip()[:255]
     if not METRIC_RE.match(metric_type):
         return _response(400, {"error": "invalid metric_type"})
     if comparison not in COMP_OPS:
@@ -175,8 +249,14 @@ def _create_rule(query, body):
         "INSERT INTO alert_rules (cluster_id, name, metric_type, comparison, threshold, enabled) "
         "VALUES (:cid, :name, :metric, :comp, :threshold, :enabled) "
         "RETURNING id, cluster_id, name, metric_type, comparison, threshold, enabled, created_at",
-        {"cid": cluster_id, "name": name, "metric": metric_type, "comp": comparison,
-         "threshold": threshold, "enabled": enabled},
+        {
+            "cid": cluster_id,
+            "name": name,
+            "metric": metric_type,
+            "comp": comparison,
+            "threshold": threshold,
+            "enabled": enabled,
+        },
     )
     return _response(201, {"rule": rows[0] if rows else None})
 

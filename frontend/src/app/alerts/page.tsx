@@ -33,6 +33,35 @@ interface Rule {
   // Older API payloads (cached) may omit these — guard for undefined.
   latest_metric_ts?: string | null;
   data_status?: "fresh" | "stale" | "no_data";
+  // Compound rules carry their JSON-encoded conditions DSL. Older payloads
+  // (and legacy single-threshold rules) omit it.
+  conditions_json?: string | null;
+}
+
+interface CompoundOperand {
+  metric_type: string;
+  comparison: string;
+  threshold: number;
+  window_minutes?: number;
+  agg?: string;
+}
+
+interface CompoundConditions {
+  logic: "and" | "or";
+  operands: CompoundOperand[];
+}
+
+function parseConditions(
+  raw: string | null | undefined,
+): CompoundConditions | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as CompoundConditions;
+    if (!parsed || !Array.isArray(parsed.operands)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 function DataStatusBadge({
@@ -119,6 +148,38 @@ export default function AlertsPage() {
     name: "",
   });
 
+  // Compound mode: build an AND/OR rule from N operands. State kept separate
+  // from the simple form so toggling back and forth doesn't clobber either.
+  const [compoundMode, setCompoundMode] = useState(false);
+  const [compound, setCompound] = useState<{
+    logic: "and" | "or";
+    operands: Array<{
+      metric_type: string;
+      comparison: (typeof COMP_OPS)[number];
+      threshold: number;
+      window_minutes: number;
+      agg: "max" | "min" | "avg" | "last";
+    }>;
+  }>({
+    logic: "and",
+    operands: [
+      {
+        metric_type: "cpu",
+        comparison: ">",
+        threshold: 80,
+        window_minutes: 10,
+        agg: "max",
+      },
+      {
+        metric_type: "db_connections",
+        comparison: ">",
+        threshold: 100,
+        window_minutes: 10,
+        agg: "max",
+      },
+    ],
+  });
+
   const [subs, setSubs] = useState<
     { subscription_arn: string; protocol: string; endpoint: string }[]
   >([]);
@@ -180,6 +241,54 @@ export default function AlertsPage() {
     }
   };
 
+  const submitCompound = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRule.cluster_id || compound.operands.length === 0) return;
+    try {
+      await createAlertRule({
+        cluster_id: newRule.cluster_id,
+        name: newRule.name || undefined,
+        conditions: compound,
+      });
+      setNewRule((r) => ({ ...r, name: "" }));
+      reload();
+    } catch (err) {
+      setErr(err instanceof Error ? err.message : "Failed");
+    }
+  };
+
+  const updateOperand = (
+    i: number,
+    patch: Partial<(typeof compound.operands)[number]>,
+  ) =>
+    setCompound((c) => ({
+      ...c,
+      operands: c.operands.map((o, idx) =>
+        idx === i ? { ...o, ...patch } : o,
+      ),
+    }));
+
+  const addOperand = () =>
+    setCompound((c) => ({
+      ...c,
+      operands: [
+        ...c.operands,
+        {
+          metric_type: "cpu",
+          comparison: ">" as (typeof COMP_OPS)[number],
+          threshold: 80,
+          window_minutes: 10,
+          agg: "max" as const,
+        },
+      ],
+    }));
+
+  const removeOperand = (i: number) =>
+    setCompound((c) => ({
+      ...c,
+      operands: c.operands.filter((_, idx) => idx !== i),
+    }));
+
   const toggle = async (id: number, enabled: boolean) => {
     await updateAlertRule(id, { enabled: !enabled });
     reload();
@@ -213,89 +322,335 @@ export default function AlertsPage() {
       )}
 
       {admin && (
-        <Section eyebrow="new rule" title="Define an alert threshold">
-          <form
-            onSubmit={submit}
-            className="border border-zinc-800 bg-zinc-900/40 p-6 grid grid-cols-1 md:grid-cols-6 gap-3 items-end"
-          >
-            <div className="md:col-span-2">
-              <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                Cluster
-              </label>
-              <select
-                value={newRule.cluster_id}
-                onChange={(e) =>
-                  setNewRule({ ...newRule, cluster_id: e.target.value })
-                }
-                className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60 transition-colors"
+        <Section
+          eyebrow="new rule"
+          title="Define an alert threshold"
+          actions={
+            <div className="flex border border-zinc-700 font-mono">
+              <button
+                type="button"
+                onClick={() => setCompoundMode(false)}
+                className={`text-[10px] px-3 py-1 uppercase tracking-wider transition-colors ${
+                  !compoundMode
+                    ? "bg-amber-500 text-zinc-950"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
               >
-                {clusters.map((c) => (
-                  <option key={c.cluster_id} value={c.cluster_id}>
-                    {c.cluster_id}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                Metric
-              </label>
-              <select
-                value={newRule.metric_type}
-                onChange={(e) =>
-                  setNewRule({ ...newRule, metric_type: e.target.value })
-                }
-                className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60 transition-colors"
+                Simple
+              </button>
+              <button
+                type="button"
+                onClick={() => setCompoundMode(true)}
+                className={`text-[10px] px-3 py-1 uppercase tracking-wider transition-colors ${
+                  compoundMode
+                    ? "bg-amber-500 text-zinc-950"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
               >
-                {METRIC_OPTIONS.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
+                Compound (AND/OR)
+              </button>
             </div>
-            <div>
-              <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                Op
-              </label>
-              <select
-                value={newRule.comparison}
-                onChange={(e) =>
-                  setNewRule({
-                    ...newRule,
-                    comparison: e.target.value as (typeof COMP_OPS)[number],
-                  })
-                }
-                className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60 transition-colors"
-              >
-                {COMP_OPS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                Threshold
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                value={newRule.threshold}
-                onChange={(e) =>
-                  setNewRule({ ...newRule, threshold: Number(e.target.value) })
-                }
-                className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60 transition-colors"
-              />
-            </div>
-            <button
-              type="submit"
-              className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
+          }
+        >
+          {!compoundMode && (
+            <form
+              onSubmit={submit}
+              className="border border-zinc-800 bg-zinc-900/40 p-6 grid grid-cols-1 md:grid-cols-6 gap-3 items-end"
             >
-              Add rule
-            </button>
-          </form>
+              <div className="md:col-span-2">
+                <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                  Cluster
+                </label>
+                <select
+                  value={newRule.cluster_id}
+                  onChange={(e) =>
+                    setNewRule({ ...newRule, cluster_id: e.target.value })
+                  }
+                  className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60 transition-colors"
+                >
+                  {clusters.map((c) => (
+                    <option key={c.cluster_id} value={c.cluster_id}>
+                      {c.cluster_id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                  Metric
+                </label>
+                <select
+                  value={newRule.metric_type}
+                  onChange={(e) =>
+                    setNewRule({ ...newRule, metric_type: e.target.value })
+                  }
+                  className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60 transition-colors"
+                >
+                  {METRIC_OPTIONS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                  Op
+                </label>
+                <select
+                  value={newRule.comparison}
+                  onChange={(e) =>
+                    setNewRule({
+                      ...newRule,
+                      comparison: e.target.value as (typeof COMP_OPS)[number],
+                    })
+                  }
+                  className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60 transition-colors"
+                >
+                  {COMP_OPS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                  Threshold
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={newRule.threshold}
+                  onChange={(e) =>
+                    setNewRule({
+                      ...newRule,
+                      threshold: Number(e.target.value),
+                    })
+                  }
+                  className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60 transition-colors"
+                />
+              </div>
+              <button
+                type="submit"
+                className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
+              >
+                Add rule
+              </button>
+            </form>
+          )}
+
+          {compoundMode && (
+            <form
+              onSubmit={submitCompound}
+              className="border border-zinc-800 bg-zinc-900/40 p-6 space-y-4"
+            >
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                    Cluster
+                  </label>
+                  <select
+                    value={newRule.cluster_id}
+                    onChange={(e) =>
+                      setNewRule({ ...newRule, cluster_id: e.target.value })
+                    }
+                    className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60 transition-colors"
+                  >
+                    {clusters.map((c) => (
+                      <option key={c.cluster_id} value={c.cluster_id}>
+                        {c.cluster_id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                    Logic
+                  </label>
+                  <div className="flex border border-zinc-800 mt-1 font-mono">
+                    {(["and", "or"] as const).map((l) => (
+                      <button
+                        key={l}
+                        type="button"
+                        onClick={() => setCompound({ ...compound, logic: l })}
+                        className={`text-xs px-4 py-2 uppercase tracking-wider transition-colors ${
+                          compound.logic === l
+                            ? "bg-zinc-100 text-zinc-950"
+                            : "text-zinc-400 hover:text-zinc-200 bg-zinc-950"
+                        }`}
+                      >
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  Operands · 모두{" "}
+                  <span className="text-amber-300 font-mono">
+                    {compound.logic.toUpperCase()}
+                  </span>{" "}
+                  로 결합
+                </div>
+                {compound.operands.map((op, i) => (
+                  <div
+                    key={i}
+                    className="border border-zinc-800 bg-zinc-950/60 p-3 grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_1fr_1fr_auto] gap-2 items-end"
+                  >
+                    <div>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                        Metric
+                      </label>
+                      <select
+                        value={op.metric_type}
+                        onChange={(e) =>
+                          updateOperand(i, { metric_type: e.target.value })
+                        }
+                        className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 mt-1 focus:outline-none focus:border-amber-500/60"
+                      >
+                        {METRIC_OPTIONS.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                        Agg
+                      </label>
+                      <select
+                        value={op.agg}
+                        onChange={(e) =>
+                          updateOperand(i, {
+                            agg: e.target.value as typeof op.agg,
+                          })
+                        }
+                        className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 mt-1 focus:outline-none focus:border-amber-500/60"
+                      >
+                        {(["max", "min", "avg", "last"] as const).map((a) => (
+                          <option key={a} value={a}>
+                            {a}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                        Op
+                      </label>
+                      <select
+                        value={op.comparison}
+                        onChange={(e) =>
+                          updateOperand(i, {
+                            comparison: e.target
+                              .value as (typeof COMP_OPS)[number],
+                          })
+                        }
+                        className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 mt-1 focus:outline-none focus:border-amber-500/60"
+                      >
+                        {COMP_OPS.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                        Threshold
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={op.threshold}
+                        onChange={(e) =>
+                          updateOperand(i, {
+                            threshold: Number(e.target.value),
+                          })
+                        }
+                        className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 mt-1 font-mono focus:outline-none focus:border-amber-500/60"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        className="text-[10px] text-zinc-500 uppercase tracking-wider"
+                        title="평가 윈도우 (분) — 이 시간 내 데이터로 agg 계산"
+                      >
+                        Window (m)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="1440"
+                        value={op.window_minutes}
+                        onChange={(e) =>
+                          updateOperand(i, {
+                            window_minutes: Number(e.target.value),
+                          })
+                        }
+                        className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 mt-1 font-mono focus:outline-none focus:border-amber-500/60"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeOperand(i)}
+                      disabled={compound.operands.length === 1}
+                      className="text-[10px] uppercase tracking-wider px-2 py-1.5 text-zinc-500 hover:text-rose-300 disabled:opacity-30"
+                      title="이 조건 삭제"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={addOperand}
+                  disabled={compound.operands.length >= 8}
+                  className="text-[10px] uppercase tracking-wider px-3 py-1 border border-zinc-700 text-zinc-300 hover:border-amber-500 hover:text-amber-300 transition-colors disabled:opacity-30"
+                >
+                  + add condition ({compound.operands.length}/8)
+                </button>
+              </div>
+
+              <div className="flex items-end justify-between gap-3 pt-2 border-t border-zinc-800">
+                <div className="flex-1">
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                    Rule name (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={newRule.name}
+                    onChange={(e) =>
+                      setNewRule({ ...newRule, name: e.target.value })
+                    }
+                    placeholder="자동 생성됨 — 첫 operand + AND/OR + N"
+                    className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
+                >
+                  Add compound rule
+                </button>
+              </div>
+
+              <div className="text-[11px] text-zinc-500 font-mono border-l-2 border-zinc-700 pl-2">
+                평가 시점:{" "}
+                {compound.operands
+                  .map(
+                    (o) =>
+                      `${o.metric_type}(${o.agg},${o.window_minutes}m) ${o.comparison} ${o.threshold}`,
+                  )
+                  .join(` ${compound.logic.toUpperCase()} `)}
+              </div>
+            </form>
+          )}
         </Section>
       )}
 
@@ -499,9 +854,47 @@ export default function AlertsPage() {
                       {r.cluster_id}
                     </td>
                     <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
-                      {r.metric_type}{" "}
-                      <span className="text-amber-400">{r.comparison}</span>{" "}
-                      {r.threshold}
+                      {(() => {
+                        const comp = parseConditions(r.conditions_json);
+                        if (!comp) {
+                          return (
+                            <>
+                              {r.metric_type}{" "}
+                              <span className="text-amber-400">
+                                {r.comparison}
+                              </span>{" "}
+                              {r.threshold}
+                            </>
+                          );
+                        }
+                        const join = ` ${comp.logic.toUpperCase()} `;
+                        return (
+                          <span
+                            title={comp.operands
+                              .map(
+                                (o) =>
+                                  `${o.metric_type}(${o.agg ?? "max"},${
+                                    o.window_minutes ?? 10
+                                  }m) ${o.comparison} ${o.threshold}`,
+                              )
+                              .join(join)}
+                          >
+                            <span className="px-1 py-0.5 mr-1.5 bg-amber-500/15 text-amber-300 border border-amber-500/40 text-[10px] uppercase tracking-wider">
+                              {comp.logic} · {comp.operands.length}
+                            </span>
+                            <span className="text-zinc-400">
+                              {comp.operands
+                                .slice(0, 2)
+                                .map(
+                                  (o) =>
+                                    `${o.metric_type} ${o.comparison} ${o.threshold}`,
+                                )
+                                .join(join)}
+                              {comp.operands.length > 2 && " …"}
+                            </span>
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-3 py-2 text-zinc-400 text-xs">
                       {r.last_triggered_at

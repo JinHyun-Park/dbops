@@ -39,8 +39,19 @@ def lambda_handler(event, context):
     rds_data = boto3.client("rds-data")
 
     sql_dir = os.path.join(os.path.dirname(__file__), "sql")
+
+    # Numeric-aware sort: schema.sql, schema_v2.sql, schema_v3.sql, ...,
+    # schema_v10.sql. Lexical sort would put v10 before v2 and break any
+    # fresh install where v10 depends on tables created in earlier versions.
+    def _ver_key(fname: str) -> tuple[int, int]:
+        m = re.match(r"^schema(?:_v(\d+))?\.sql$", fname)
+        if not m:
+            return (1, 0)  # unknown → last
+        return (0, int(m.group(1) or 0))
+
     schemas = sorted(
-        f for f in os.listdir(sql_dir) if f.startswith("schema") and f.endswith(".sql")
+        (f for f in os.listdir(sql_dir) if f.startswith("schema") and f.endswith(".sql")),
+        key=_ver_key,
     )
 
     results = []
