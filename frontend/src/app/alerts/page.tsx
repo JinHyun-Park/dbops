@@ -114,7 +114,7 @@ function DataStatusBadge({
   return (
     <span
       className="px-1.5 py-0.5 border text-[10px] font-mono bg-rose-500/10 text-rose-300 border-rose-500/40"
-      title="no metric snapshots ever recorded for this cluster + metric — check the cluster registration or ETL pipeline"
+      title="이 cluster + metric 조합으로 수집된 metric_snapshot이 없습니다 — 클러스터 등록 상태와 ETL 파이프라인을 확인하세요"
     >
       no data
     </span>
@@ -308,11 +308,9 @@ export default function AlertsPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="configure"
-        title="Alert rules"
-        description={`${rules.length} rule${
-          rules.length === 1 ? "" : "s"
-        } · evaluated every 5 minutes against metric_snapshots`}
+        eyebrow="설정"
+        title="알림 규칙"
+        description={`총 ${rules.length}개 · 5분마다 metric_snapshots를 평가해서 조건 충족 시 발화합니다.`}
       />
 
       {err && (
@@ -323,14 +321,14 @@ export default function AlertsPage() {
 
       {!admin && (
         <div className="mb-6 px-3 py-2 border border-zinc-800 text-[11px] uppercase tracking-wider text-zinc-500">
-          read-only · viewer — write actions are hidden
+          읽기 전용 · viewer 권한 — 쓰기 액션은 숨겨집니다
         </div>
       )}
 
       {admin && (
         <Section
-          eyebrow="new rule"
-          title="Define an alert threshold"
+          eyebrow="새 규칙"
+          title="알림 임계값 정의"
           actions={
             <div className="flex border border-zinc-700 font-mono">
               <button
@@ -342,7 +340,7 @@ export default function AlertsPage() {
                     : "text-zinc-400 hover:text-zinc-200"
                 }`}
               >
-                Simple
+                단순
               </button>
               <button
                 type="button"
@@ -353,7 +351,7 @@ export default function AlertsPage() {
                     : "text-zinc-400 hover:text-zinc-200"
                 }`}
               >
-                Compound (AND/OR)
+                복합 (AND/OR)
               </button>
             </div>
           }
@@ -441,7 +439,7 @@ export default function AlertsPage() {
                 type="submit"
                 className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
               >
-                Add rule
+                규칙 추가
               </button>
             </form>
           )}
@@ -472,7 +470,7 @@ export default function AlertsPage() {
                 </div>
                 <div>
                   <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                    Logic
+                    결합 logic
                   </label>
                   <div className="flex border border-zinc-800 mt-1 font-mono">
                     {(["and", "or"] as const).map((l) => (
@@ -619,14 +617,14 @@ export default function AlertsPage() {
                   disabled={compound.operands.length >= 8}
                   className="text-[10px] uppercase tracking-wider px-3 py-1 border border-zinc-700 text-zinc-300 hover:border-amber-500 hover:text-amber-300 transition-colors disabled:opacity-30"
                 >
-                  + add condition ({compound.operands.length}/8)
+                  + 조건 추가 ({compound.operands.length}/8)
                 </button>
               </div>
 
               <div className="flex items-end justify-between gap-3 pt-2 border-t border-zinc-800">
                 <div className="flex-1">
                   <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                    Rule name (optional)
+                    규칙 이름 (선택)
                   </label>
                   <input
                     type="text"
@@ -642,7 +640,7 @@ export default function AlertsPage() {
                   type="submit"
                   className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
                 >
-                  Add compound rule
+                  복합 규칙 추가
                 </button>
               </div>
 
@@ -661,12 +659,12 @@ export default function AlertsPage() {
       )}
 
       <Section
-        eyebrow="notifications"
-        title="Subscribers"
+        eyebrow="알림 채널"
+        title="구독자"
         description={
           topicArn
-            ? `Fan-out via SNS topic ${topicArn}`
-            : "SNS topic not configured"
+            ? `SNS 토픽 ${topicArn}을 통해 fan-out`
+            : "SNS 토픽이 설정되어 있지 않음"
         }
       >
         <div className="border border-zinc-800 bg-zinc-900/40 p-6">
@@ -722,7 +720,7 @@ export default function AlertsPage() {
                 type="submit"
                 className="text-xs font-medium px-4 py-2 bg-emerald-500 text-zinc-950 hover:bg-emerald-400 transition-colors"
               >
-                Subscribe
+                구독 추가
               </button>
             </form>
           )}
@@ -769,7 +767,7 @@ export default function AlertsPage() {
                               : "bg-emerald-500/10 text-emerald-300 border-emerald-500/40"
                           }`}
                         >
-                          {pending ? "pending confirmation" : "confirmed"}
+                          {pending ? "승인 대기" : "활성"}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-right">
@@ -778,7 +776,7 @@ export default function AlertsPage() {
                             onClick={() => removeSub(s.subscription_arn)}
                             className="text-rose-400 hover:text-rose-300 text-xs"
                           >
-                            unsubscribe
+                            구독 해지
                           </button>
                         )}
                       </td>
@@ -799,17 +797,17 @@ export default function AlertsPage() {
       <SlackAckSetupGuide />
 
       <Section
-        eyebrow="rules"
-        title={`${rules.length} alert rule${rules.length === 1 ? "" : "s"}`}
-        description="evaluator runs every 5 minutes; rules with stale or missing metrics are skipped."
+        eyebrow="규칙"
+        title={`등록된 알림 규칙 ${rules.length}개`}
+        description="evaluator는 5분마다 실행되며, metric 데이터가 stale이거나 없는 규칙은 건너뜁니다."
       >
         {loading ? (
           <div className="text-zinc-500 text-sm">Loading...</div>
         ) : rules.length === 0 ? (
           <EmptyState
-            eyebrow="no rules"
-            title="Add your first alert rule"
-            description="Pick a cluster + metric + threshold above. The evaluator runs every 5 minutes and fans out via SNS / Slack / PagerDuty subscribers."
+            eyebrow="규칙 없음"
+            title="첫 알림 규칙을 등록해보세요"
+            description="위 폼에서 cluster + metric + threshold를 고르면 됩니다. evaluator가 5분마다 실행되고 SNS / Slack / PagerDuty 구독자에게 fan-out 됩니다."
           />
         ) : (
           <div className="border border-zinc-800 overflow-hidden">
@@ -849,7 +847,7 @@ export default function AlertsPage() {
                             : "bg-zinc-700/40 text-zinc-400 border-zinc-700 hover:bg-zinc-700/60"
                         } ${admin ? "" : "cursor-not-allowed opacity-70"}`}
                       >
-                        {r.enabled ? "enabled" : "disabled"}
+                        {r.enabled ? "활성" : "중지"}
                       </button>
                     </td>
                     <td className="px-3 py-2">
@@ -907,7 +905,7 @@ export default function AlertsPage() {
                     <td className="px-3 py-2 text-zinc-400 text-xs">
                       {r.last_triggered_at
                         ? new Date(r.last_triggered_at).toLocaleString()
-                        : "never"}
+                        : "발화 이력 없음"}
                       {(() => {
                         // Ack badge: only when ack is newer than the latest
                         // trigger. If the rule has fired again since the ack
@@ -942,7 +940,7 @@ export default function AlertsPage() {
                           onClick={() => remove(r.id)}
                           className="text-rose-400 hover:text-rose-300 text-xs"
                         >
-                          delete
+                          삭제
                         </button>
                       )}
                     </td>
