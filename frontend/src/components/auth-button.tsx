@@ -20,7 +20,7 @@ export function AuthButton() {
         href="/login"
         className="text-xs px-3 py-1.5 bg-amber-500 text-zinc-950 font-medium hover:bg-amber-400 transition-colors"
       >
-        Sign in
+        로그인
       </Link>
     );
   }
@@ -40,7 +40,7 @@ export function AuthButton() {
         }}
         className="text-xs text-zinc-500 hover:text-zinc-200 transition-colors"
       >
-        Logout
+        로그아웃
       </button>
     </div>
   );

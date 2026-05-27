@@ -28,11 +28,11 @@ function ResetForm() {
     e.preventDefault();
     setErr(null);
     if (password !== confirm) {
-      setErr("Passwords don't match");
+      setErr("비밀번호가 일치하지 않습니다");
       return;
     }
     if (password.length < 8) {
-      setErr("Password must be at least 8 characters");
+      setErr("비밀번호는 최소 8자 이상이어야 합니다");
       return;
     }
     setBusy(true);
@@ -46,19 +46,19 @@ function ResetForm() {
         router.replace("/login");
       }
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "Reset failed");
+      setErr(e2 instanceof Error ? e2.message : "재설정 실패");
       setBusy(false);
     }
   };
 
   return (
     <AuthLayout
-      eyebrow="recover"
-      title="New password"
-      subtitle="Paste the code we emailed, then pick a new password"
+      eyebrow="복구"
+      title="새 비밀번호 설정"
+      subtitle="이메일로 받은 인증 코드를 입력하고 새 비밀번호를 설정하세요"
     >
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Email">
+        <Field label="이메일">
           <input
             type="email"
             value={email}
@@ -67,7 +67,7 @@ function ResetForm() {
             className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm focus:outline-none focus:border-amber-500/60"
           />
         </Field>
-        <Field label="Verification code">
+        <Field label="인증 코드">
           <input
             type="text"
             inputMode="numeric"
@@ -78,7 +78,7 @@ function ResetForm() {
             className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm font-mono focus:outline-none focus:border-amber-500/60"
           />
         </Field>
-        <Field label="New password">
+        <Field label="새 비밀번호">
           <input
             type="password"
             autoComplete="new-password"
@@ -88,7 +88,7 @@ function ResetForm() {
             className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm focus:outline-none focus:border-amber-500/60"
           />
         </Field>
-        <Field label="Confirm">
+        <Field label="비밀번호 확인">
           <input
             type="password"
             autoComplete="new-password"
@@ -108,15 +108,15 @@ function ResetForm() {
           disabled={busy}
           className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium py-2 disabled:opacity-50"
         >
-          {busy ? "resetting…" : "Reset password"}
+          {busy ? "재설정 중…" : "비밀번호 재설정"}
         </button>
       </form>
       <div className="flex items-center justify-between text-xs text-zinc-500 pt-4">
         <Link href="/forgot" className="hover:text-amber-300 transition-colors">
-          ← Resend code
+          ← 코드 재발송
         </Link>
         <Link href="/login" className="hover:text-amber-300 transition-colors">
-          Sign in
+          로그인
         </Link>
       </div>
     </AuthLayout>

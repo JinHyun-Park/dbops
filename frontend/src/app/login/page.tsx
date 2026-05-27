@@ -30,7 +30,7 @@ function LoginForm() {
       await signIn(email.trim(), password);
       router.replace(next);
     } catch (e2) {
-      const msg = e2 instanceof Error ? e2.message : "Login failed";
+      const msg = e2 instanceof Error ? e2.message : "로그인 실패";
       setErr(msg);
     } finally {
       setBusy(false);
@@ -40,11 +40,11 @@ function LoginForm() {
   return (
     <AuthLayout
       eyebrow="dbops"
-      title="Sign in"
+      title="로그인"
       subtitle="Aurora operations console"
     >
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Email">
+        <Field label="이메일">
           <input
             type="email"
             autoComplete="email"
@@ -54,7 +54,7 @@ function LoginForm() {
             className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm focus:outline-none focus:border-amber-500/60"
           />
         </Field>
-        <Field label="Password">
+        <Field label="비밀번호">
           <input
             type="password"
             autoComplete="current-password"
@@ -74,14 +74,14 @@ function LoginForm() {
           disabled={busy}
           className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium py-2 disabled:opacity-50"
         >
-          {busy ? "signing in…" : "Sign in"}
+          {busy ? "로그인 중…" : "로그인"}
         </button>
       </form>
       <div className="flex items-center justify-between text-xs text-zinc-500 pt-4">
         <Link href="/forgot" className="hover:text-amber-300 transition-colors">
-          Forgot password?
+          비밀번호 찾기
         </Link>
-        <span className="text-zinc-700">no public sign-up · admin only</span>
+        <span className="text-zinc-700">공개 가입 없음 · admin 전용</span>
       </div>
     </AuthLayout>
   );
