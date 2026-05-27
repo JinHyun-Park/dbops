@@ -134,6 +134,50 @@ function isoToLocal(iso: string): string {
   )}:${pad(d.getMinutes())}`;
 }
 
+// Saved views: persisted in localStorage so a DBA can return to a specific
+// cluster + range combo (e.g. "prod-write incident review", "weekend etl
+// window") with one click. We keep this client-side for v1; a DDB-backed
+// share-across-team sync can land in a follow-up without breaking this
+// shape (the URL bar is already a one-off share path via from/to params).
+interface SavedView {
+  id: string;
+  name: string;
+  cluster_id: string;
+  range: TimeRange;
+  saved_at: number;
+}
+
+const VIEWS_STORAGE_KEY = "dbops_dashboard_saved_views_v1";
+const VIEWS_LIMIT = 20;
+
+function loadViews(): SavedView[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(VIEWS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as SavedView[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistViews(next: SavedView[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(
+      VIEWS_STORAGE_KEY,
+      JSON.stringify(next.slice(0, VIEWS_LIMIT)),
+    );
+  } catch {
+    // Quota — drop oldest and retry. Saved views are nice-to-have, not
+    // load-bearing, so silent failure is acceptable.
+    try {
+      localStorage.setItem(VIEWS_STORAGE_KEY, JSON.stringify(next.slice(0, 5)));
+    } catch {
+      // give up
+    }
+  }
+}
+
 export default function DashboardPage() {
   const [clusters, setClusters] = useState<
     {
@@ -150,11 +194,46 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<TimeRange>(DEFAULT_RANGE);
   const [customOpen, setCustomOpen] = useState<boolean>(false);
+  const [views, setViews] = useState<SavedView[]>([]);
+  const [viewsOpen, setViewsOpen] = useState<boolean>(false);
   const [tsBatch, setTsBatch] = useState<Record<string, TsPoint[]>>({});
   const [tsLoading, setTsLoading] = useState<boolean>(true);
 
   // Legacy panels still take `hours: number`; derive it once per render.
   const hours = rangeToHours(range);
+
+  // Load persisted views on mount. We also write back through every mutation
+  // path below so the list is always in sync — there's no separate "save"
+  // step on top of the per-action persist.
+  useEffect(() => {
+    setViews(loadViews());
+  }, []);
+
+  const saveCurrentView = (name: string) => {
+    if (!name.trim() || !selectedCluster) return;
+    const entry: SavedView = {
+      id: `view-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: name.trim().slice(0, 60),
+      cluster_id: selectedCluster,
+      range,
+      saved_at: Date.now(),
+    };
+    const next = [entry, ...views].slice(0, VIEWS_LIMIT);
+    setViews(next);
+    persistViews(next);
+  };
+
+  const applyView = (v: SavedView) => {
+    setSelectedCluster(v.cluster_id);
+    setRange(v.range);
+    setViewsOpen(false);
+  };
+
+  const removeView = (id: string) => {
+    const next = views.filter((v) => v.id !== id);
+    setViews(next);
+    persistViews(next);
+  };
 
   useEffect(() => {
     fetchClusters()
@@ -309,6 +388,38 @@ export default function DashboardPage() {
                   setRange(r);
                   setCustomOpen(false);
                 }}
+              />
+            )}
+            <button
+              onClick={() => {
+                setViewsOpen((v) => !v);
+                setCustomOpen(false);
+              }}
+              className={`ml-2 text-xs px-3 py-1.5 transition-colors ${
+                viewsOpen
+                  ? "bg-amber-500 text-zinc-950"
+                  : "border border-zinc-700 text-zinc-400 hover:text-zinc-100"
+              }`}
+              title="자주 보는 클러스터 + range 조합을 핀으로 저장"
+            >
+              ★ Views
+              {views.length > 0 && (
+                <span className="ml-1 text-zinc-500">{views.length}</span>
+              )}
+            </button>
+            {viewsOpen && (
+              <SavedViewsPopover
+                views={views}
+                canSave={!!selectedCluster}
+                currentSummary={
+                  selectedCluster
+                    ? `${selectedCluster} · ${rangeLabel(range)}`
+                    : ""
+                }
+                onSave={saveCurrentView}
+                onApply={applyView}
+                onRemove={removeView}
+                onClose={() => setViewsOpen(false)}
               />
             )}
           </div>
@@ -605,6 +716,113 @@ export default function DashboardPage() {
         </div>
       )}
     </PageBody>
+  );
+}
+
+/** Saved-views popover — shown when the user clicks "★ Views" in the header.
+ *  Top row: name input + "save current" button (saves the active cluster +
+ *  range combo). Below: scrollable list of pinned views with click-to-apply
+ *  + delete (×). All persistence is localStorage-only for v1. */
+function SavedViewsPopover({
+  views,
+  canSave,
+  currentSummary,
+  onSave,
+  onApply,
+  onRemove,
+  onClose,
+}: {
+  views: SavedView[];
+  canSave: boolean;
+  currentSummary: string;
+  onSave: (name: string) => void;
+  onApply: (v: SavedView) => void;
+  onRemove: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState("");
+  const submit = () => {
+    if (!name.trim()) return;
+    onSave(name);
+    setName("");
+  };
+  return (
+    <div className="absolute top-full right-0 mt-2 z-30 w-96 border border-zinc-700 bg-zinc-900 shadow-2xl text-xs">
+      <div className="px-4 py-3 border-b border-zinc-800 flex items-baseline justify-between gap-3">
+        <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-amber-300">
+          saved views
+        </div>
+        <button
+          onClick={onClose}
+          className="text-zinc-500 hover:text-zinc-200 text-base leading-none"
+          aria-label="닫기"
+        >
+          ×
+        </button>
+      </div>
+      <div className="px-4 py-3 border-b border-zinc-800 space-y-2">
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+          현재 화면 저장
+        </div>
+        <div className="text-[11px] text-zinc-400 break-all">
+          {currentSummary || "클러스터 선택 후 저장 가능"}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit();
+            }}
+            placeholder="이름 (예: prod-write incident, weekend ETL window)"
+            className="flex-1 bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 focus:outline-none focus:border-amber-500/60"
+          />
+          <button
+            onClick={submit}
+            disabled={!canSave || !name.trim()}
+            className="text-xs font-medium px-3 py-1.5 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:bg-zinc-700 disabled:text-zinc-500 transition-colors"
+          >
+            핀
+          </button>
+        </div>
+      </div>
+      <div className="max-h-72 overflow-y-auto">
+        {views.length === 0 ? (
+          <div className="px-4 py-6 text-center text-zinc-500">
+            아직 저장된 view 없음 · 위 입력란에 이름을 적고 [핀]을 누르세요
+          </div>
+        ) : (
+          <ul className="divide-y divide-zinc-800">
+            {views.map((v) => (
+              <li
+                key={v.id}
+                className="px-4 py-2 hover:bg-zinc-800/40 transition-colors flex items-center justify-between gap-2"
+              >
+                <button
+                  onClick={() => onApply(v)}
+                  className="flex-1 text-left min-w-0"
+                >
+                  <div className="text-zinc-200 truncate">{v.name}</div>
+                  <div className="text-[10px] text-zinc-500 font-mono truncate">
+                    {v.cluster_id} ·{" "}
+                    {v.range.kind === "preset"
+                      ? `${v.range.hours}h`
+                      : `${new Date(v.range.from).toLocaleDateString()} 범위`}
+                  </div>
+                </button>
+                <button
+                  onClick={() => onRemove(v.id)}
+                  className="text-zinc-500 hover:text-rose-300 text-[11px] flex-shrink-0"
+                  title="이 view 삭제"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }
 
