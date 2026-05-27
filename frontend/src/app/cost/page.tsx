@@ -9,6 +9,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
+  ReferenceDot,
 } from "recharts";
 import { fetchCost } from "@/lib/api-client";
 import {
@@ -20,6 +21,16 @@ import {
   Section,
 } from "@/components/design-system/page-shell";
 
+interface CostAnomaly {
+  date: string;
+  amount: number;
+  baseline_mean: number;
+  baseline_stddev: number;
+  z_score: number;
+  delta_pct: number | null;
+  severity: "warning" | "critical";
+}
+
 interface CostData {
   env: string;
   range_days: number;
@@ -28,6 +39,7 @@ interface CostData {
   currency: string;
   daily: { date: string; amount: number }[];
   by_usage_type: { usage_type: string; amount: number; quantity: number }[];
+  anomalies?: CostAnomaly[];
   no_data_reason?: string | null;
   tag_warning?: string | null;
   discovered_services?: string[];
@@ -149,6 +161,10 @@ export default function CostPage() {
             />
           </StatRow>
 
+          {data?.anomalies && data.anomalies.length > 0 && (
+            <AnomalyPanel anomalies={data.anomalies} />
+          )}
+
           <Section eyebrow="trend" title="Daily Bedrock spend">
             <div className="border border-zinc-800 bg-zinc-900/50 p-4 h-72">
               {loading ? (
@@ -193,6 +209,17 @@ export default function CostPage() {
                       fill="#fbbf24"
                       fillOpacity={0.2}
                     />
+                    {(data?.anomalies ?? []).map((a) => (
+                      <ReferenceDot
+                        key={a.date}
+                        x={a.date}
+                        y={a.amount}
+                        r={5}
+                        fill={a.severity === "critical" ? "#f43f5e" : "#fb923c"}
+                        stroke="#0a0a0a"
+                        strokeWidth={1.5}
+                      />
+                    ))}
                   </AreaChart>
                 </ResponsiveContainer>
               )}
@@ -281,6 +308,69 @@ export default function CostPage() {
         </div>
       </Section>
     </PageBody>
+  );
+}
+
+function AnomalyPanel({ anomalies }: { anomalies: CostAnomaly[] }) {
+  const counts = {
+    critical: anomalies.filter((a) => a.severity === "critical").length,
+    warning: anomalies.filter((a) => a.severity === "warning").length,
+  };
+  return (
+    <Section
+      eyebrow="anomaly"
+      title="Daily spend spike detection"
+      description="7일 baseline 대비 z-score > 2 + relative 50%↑ + 절대 차이 $0.5↑ 모두 만족하는 날을 표시합니다."
+    >
+      <div className="border border-zinc-800 bg-zinc-900/40">
+        <div className="px-4 py-2 border-b border-zinc-800 flex items-center gap-3">
+          {counts.critical > 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 border border-rose-500/40 bg-rose-500/10 text-rose-300 font-mono">
+              {counts.critical} critical
+            </span>
+          )}
+          {counts.warning > 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 border border-orange-500/40 bg-orange-500/10 text-orange-300 font-mono">
+              {counts.warning} warning
+            </span>
+          )}
+          <span className="text-[10px] text-zinc-500 ml-auto">
+            대형 spike는 트렌드 차트의 점으로도 표시됩니다
+          </span>
+        </div>
+        <ul className="divide-y divide-zinc-800/60">
+          {anomalies.map((a) => {
+            const tone =
+              a.severity === "critical"
+                ? "border-l-rose-500 text-rose-200"
+                : "border-l-orange-500 text-orange-200";
+            return (
+              <li
+                key={a.date}
+                className={`px-4 py-2.5 border-l-2 ${tone} text-sm flex flex-wrap items-baseline gap-x-4 gap-y-1`}
+              >
+                <span className="font-mono text-xs text-zinc-400">
+                  {a.date}
+                </span>
+                <span className="font-mono">${a.amount.toFixed(4)}</span>
+                <span className="text-[11px] text-zinc-500 font-mono">
+                  vs baseline ${a.baseline_mean.toFixed(4)}
+                  {a.delta_pct !== null && (
+                    <span className="ml-1.5 text-zinc-400">
+                      ({a.delta_pct > 0 ? "+" : ""}
+                      {a.delta_pct.toFixed(1)}%)
+                    </span>
+                  )}
+                </span>
+                <span className="text-[11px] text-zinc-500 font-mono ml-auto">
+                  z={a.z_score.toFixed(2)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </Section>
   );
 }
 

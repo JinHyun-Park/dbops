@@ -163,6 +163,8 @@ def lambda_handler(event, context):
             "AWS Billing console — activate it, then re-check in 24h."
         )
 
+    anomalies = _detect_anomalies(headline_daily)
+
     return _response(200, {
         "env": _ENV,
         "range_days": days,
@@ -173,7 +175,73 @@ def lambda_handler(event, context):
         "currency": "USD",
         "daily": headline_daily,
         "by_usage_type": model_split,
+        "anomalies": anomalies,
         "no_data_reason": no_data_reason,
         "tag_warning": tag_warning,
         "discovered_services": services,
     })
+
+
+def _detect_anomalies(daily: list[dict]) -> list[dict]:
+    """Walk the daily series and flag spikes vs a trailing 7-day baseline.
+
+    Rule (intentionally permissive on small absolute values — finance teams
+    don't care about a $0.10 → $0.30 jump):
+
+      baseline = mean of the 7 days *preceding* this day
+      stddev   = population stddev over the same 7 days
+      z_score  = (x - mean) / max(stddev, mean * 0.15)
+      flag if  z_score > 2.0 AND (x > mean * 1.5) AND (x - mean) > 0.5
+
+    severity:
+      - critical : z_score >= 3.5 or (x > mean * 3.0 AND x - mean > 2.0)
+      - warning  : otherwise
+
+    Returns most-recent-first so the UI can highlight today/yesterday."""
+    import math
+
+    if len(daily) < 8:
+        # Need at least 7-day baseline + 1 day to evaluate.
+        return []
+
+    out: list[dict] = []
+    series = [(d.get("date"), float(d.get("amount") or 0)) for d in daily]
+    for i in range(7, len(series)):
+        date, amount = series[i]
+        window = [v for _, v in series[i - 7 : i]]
+        mean = sum(window) / 7.0
+        if mean <= 0 and amount <= 0:
+            continue
+        variance = sum((v - mean) ** 2 for v in window) / 7.0
+        stddev = math.sqrt(variance)
+        denom = max(stddev, mean * 0.15, 0.01)
+        z = (amount - mean) / denom
+        delta_pct = ((amount - mean) / mean * 100.0) if mean > 0 else None
+
+        threshold_z = 2.0
+        meets_z = z > threshold_z
+        meets_relative = amount > mean * 1.5 and (amount - mean) > 0.5
+        if not (meets_z and meets_relative):
+            continue
+
+        severity = (
+            "critical"
+            if z >= 3.5 or (mean > 0 and amount > mean * 3.0 and amount - mean > 2.0)
+            else "warning"
+        )
+        out.append(
+            {
+                "date": date,
+                "amount": round(amount, 4),
+                "baseline_mean": round(mean, 4),
+                "baseline_stddev": round(stddev, 4),
+                "z_score": round(z, 2),
+                "delta_pct": round(delta_pct, 1) if delta_pct is not None else None,
+                "severity": severity,
+            }
+        )
+
+    # Most recent first — the panel shows newest first so today/yesterday
+    # spikes are immediately visible without scrolling.
+    out.sort(key=lambda a: a["date"], reverse=True)
+    return out
