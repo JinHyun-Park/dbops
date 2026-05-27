@@ -60,18 +60,37 @@ def test_slack_payload_includes_actions_block(handler):
     block_types = [b.get("type") for b in payload["blocks"]]
     assert "actions" in block_types, "deep-link buttons should appear when FRONTEND_URL is set"
     actions = next(b for b in payload["blocks"] if b["type"] == "actions")
-    urls = [el["url"] for el in actions["elements"]]
+    # When FRONTEND_URL is set we get the Ack button + two deep-link buttons.
+    # The Ack button carries action_id but no url; the deep-links carry urls.
+    urls = [el.get("url") for el in actions["elements"] if el.get("url")]
     assert any("dashboard?cluster=prod-pg" in u for u in urls)
     assert any("alerts?cluster=prod-pg" in u for u in urls)
+    # Ack button is always present regardless of FRONTEND_URL.
+    action_ids = [el.get("action_id") for el in actions["elements"]]
+    assert "ack_alert" in action_ids
 
 
-def test_slack_payload_omits_actions_when_no_url(monkeypatch):
+def test_slack_payload_keeps_ack_button_without_frontend_url(monkeypatch):
+    """Without FRONTEND_URL the deep-link buttons are skipped, but the Ack
+    button must still be present — workspace-only setups (no CloudFront
+    domain configured) can still close out alerts from Slack."""
     monkeypatch.delenv("FRONTEND_URL", raising=False)
     h = _fresh_handler()
-    rule = {"id": 1, "cluster_id": "c", "name": "n", "metric_type": "m", "comparison": ">", "threshold": 0.0}
+    rule = {
+        "id": 1,
+        "cluster_id": "c",
+        "name": "n",
+        "metric_type": "m",
+        "comparison": ">",
+        "threshold": 0.0,
+    }
     payload = h._build_slack_payload(rule, 1.0)
-    block_types = [b.get("type") for b in payload["blocks"]]
-    assert "actions" not in block_types
+    actions = next(
+        (b for b in payload["blocks"] if b.get("type") == "actions"), None
+    )
+    assert actions is not None, "actions block always exists for the Ack button"
+    action_ids = [el.get("action_id") for el in actions["elements"]]
+    assert action_ids == ["ack_alert"], "only the Ack button when FRONTEND_URL absent"
 
 
 def test_pagerduty_dedup_key_uses_window_bucket(handler):
