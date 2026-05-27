@@ -28,25 +28,25 @@ const PRESETS = [
     label: "EXPLAIN ANALYZE",
     template: "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) <your-query-here>;",
     prompt:
-      "Run EXPLAIN (ANALYZE, BUFFERS) for this query, summarize the plan, identify the most expensive node, and suggest improvements.",
+      "**한국어로** 답변해줘. 이 쿼리에 EXPLAIN (ANALYZE, BUFFERS)를 실행하고, plan을 요약 + 가장 비싼 노드 식별 + 개선안을 제시해줘.",
   },
   {
     label: "Index recommendation",
     template: "SELECT * FROM <your-table> WHERE <conditions>;",
     prompt:
-      "Analyze this query, suggest indexes that would improve it, and explain the tradeoffs (write cost, storage, selectivity).",
+      "**한국어로** 답변해줘. 이 쿼리를 분석해서 개선할 수 있는 인덱스를 제안하고, trade-off(쓰기 비용, 스토리지, selectivity)를 설명해줘.",
   },
   {
     label: "Lock conflict diagnosis",
     template: "-- the query that was reported as blocked",
     prompt:
-      "This query was reported as blocked. Diagnose likely lock contention sources and recommend mitigations.",
+      "**한국어로** 답변해줘. 이 쿼리가 락 대기 중이라고 보고됐어. 가장 가능성 높은 락 경합 원인을 진단하고 완화책을 제안해줘.",
   },
   {
     label: "Rewrite for performance",
     template: "-- original SQL",
     prompt:
-      "Rewrite this SQL to be more performant on PostgreSQL. Explain why each change helps, preserving exact semantics.",
+      "**한국어로** 답변해줘. 이 SQL을 PostgreSQL에서 더 빠르게 돌도록 재작성하고, 각 변경이 왜 도움이 되는지 설명해줘. 정확한 시맨틱은 보존.",
   },
 ];
 
@@ -213,7 +213,7 @@ export default function QueryLabPage() {
     // PG-only for now — the summarizer assumes the PG shape.
     const arr = explain.plan as PgPlanRoot[];
     if (!Array.isArray(arr) || arr.length === 0 || !arr[0]?.Plan) {
-      setInsight("AI insight is only available for PostgreSQL plans for now.");
+      setInsight("AI 진단은 현재 PostgreSQL 플랜에 대해서만 제공됩니다.");
       return;
     }
     const summary = summarizePlanForLLM(arr[0]);
@@ -221,10 +221,10 @@ export default function QueryLabPage() {
       ? `\n\nSQL:\n\`\`\`sql\n${lastSql.trim()}\n\`\`\``
       : "";
     const message =
-      `You are a Postgres performance expert. Below is a structured EXPLAIN ANALYZE summary. ` +
-      `Identify the single biggest bottleneck and recommend 2–3 concrete fixes ` +
-      `(indexes with column lists, query rewrites, schema changes, planner settings). ` +
-      `Be specific — no generic advice. Keep the answer under 250 words.` +
+      `너는 시니어 PostgreSQL 성능 전문가야. 아래는 EXPLAIN ANALYZE 결과를 구조화한 요약이야. ` +
+      `**한국어로** 가장 큰 병목 한 가지를 찍고, 구체적인 개선안 2~3가지를 제안해줘 ` +
+      `(인덱스 컬럼 목록, 쿼리 재작성, 스키마 변경, planner 설정 등 — 모호한 일반론 금지). ` +
+      `답변은 250단어 이하로 간결하게.` +
       sqlBlock +
       `\n\nPlan summary:\n\`\`\`\n${summary}\n\`\`\``;
     setInsight("");
@@ -245,7 +245,7 @@ export default function QueryLabPage() {
   const handleBulkReview = useCallback(
     (sqlText: string) => {
       if (!clusterId) {
-        setAnalysis("Select a cluster first.");
+        setAnalysis("먼저 클러스터를 선택하세요.");
         setTab("analysis");
         return;
       }
@@ -253,16 +253,15 @@ export default function QueryLabPage() {
       setLoadingKind("bulk");
       setTab("analysis");
       const message =
-        `You are a senior DBA reviewing a batch of SQL statements before they hit production. ` +
-        `The statements below are separated by semicolons (statements may contain inline ; inside strings; ` +
-        `use SQL parsing judgment, not naive split).\n\n` +
-        `For EACH statement, emit one row in a markdown table with columns:\n` +
-        `| # | Statement (first 80 chars) | Risk | Notes |\n` +
-        `Risk values: **safe** (read-only / parameter-bound DML), **risky** (large scan, missing where, ` +
-        `lock-heavy), **dangerous** (DDL, DROP/TRUNCATE/DELETE without where, ALTER TABLE on hot table).\n` +
-        `Notes should be 1 short sentence — specific to that query.\n` +
-        `After the table, add a "Summary" section with the dangerous queries (if any) listed by index, ` +
-        `and a single recommended next step.\n\n` +
+        `너는 프로덕션 배포 전 SQL 일괄을 검토하는 시니어 DBA야. **한국어로** 답변해줘. ` +
+        `아래 statements는 세미콜론으로 구분되어 있어 ` +
+        `(문자열 안의 inline ;가 있을 수 있으니 단순 split이 아니라 SQL 파싱 판단을 사용).\n\n` +
+        `각 statement마다 마크다운 테이블에 한 행씩 출력:\n` +
+        `| # | Statement (앞 80자) | Risk | Notes |\n` +
+        `Risk 값: **safe** (read-only / 파라미터 바인딩된 DML), **risky** (대량 스캔, WHERE 누락, ` +
+        `락 헤비), **dangerous** (DDL, WHERE 없는 DROP/TRUNCATE/DELETE, hot 테이블에 ALTER TABLE).\n` +
+        `Notes는 그 쿼리에 특화된 짧은 한 문장.\n` +
+        `테이블 다음에 "Summary" 섹션 — dangerous 쿼리들의 인덱스 목록 + 추천하는 다음 단계 한 가지.\n\n` +
         `Batch:\n\`\`\`sql\n${sqlText.trim()}\n\`\`\``;
       streamChat(
         message,
@@ -282,7 +281,7 @@ export default function QueryLabPage() {
   const handleAnalyze = useCallback(
     (sql: string) => {
       if (!clusterId) {
-        setAnalysis("Select a cluster first.");
+        setAnalysis("먼저 클러스터를 선택하세요.");
         setTab("analysis");
         return;
       }
@@ -292,7 +291,7 @@ export default function QueryLabPage() {
 
       const intro =
         presetPrompt ||
-        "Analyze this SQL for correctness, performance, and side effects. If a plan is requested, summarize it clearly.";
+        "**한국어로** 답변해줘. 이 SQL을 정확성, 성능, side effect 관점에서 분석하고, plan을 요청했다면 명확하게 요약해줘.";
       const message = `${intro}\n\n\`\`\`sql\n${sql}\n\`\`\``;
 
       streamChat(
@@ -324,7 +323,7 @@ export default function QueryLabPage() {
       <PageHeader
         eyebrow="automate"
         title="Query Lab"
-        description="EXPLAIN button renders a plan tree directly. AI 분석 sends the SQL to the agent for natural-language commentary."
+        description="EXPLAIN 버튼은 plan tree를 바로 렌더링하고, AI 분석은 SQL을 agent에 보내 자연어 해석을 받아옵니다."
         actions={
           <div className="flex items-center gap-2">
             <label className="text-[10px] uppercase tracking-wider text-zinc-500">
@@ -538,7 +537,7 @@ export default function QueryLabPage() {
           {tab === "plan" ? (
             <>
               {loadingKind === "explain" && (
-                <div className="text-sm text-zinc-500">Running EXPLAIN…</div>
+                <div className="text-sm text-zinc-500">EXPLAIN 실행 중…</div>
               )}
               {explainError && (
                 <div
@@ -560,8 +559,9 @@ export default function QueryLabPage() {
               )}
               {!loadingKind && !explainError && !hasPlan && (
                 <div className="text-sm text-zinc-500">
-                  Paste a SELECT into the editor and click{" "}
-                  <span className="text-amber-300">EXPLAIN</span>.
+                  에디터에 SELECT를 붙여넣고{" "}
+                  <span className="text-amber-300">EXPLAIN</span> 버튼을
+                  눌러주세요.
                 </div>
               )}
               {hasPlan && (
@@ -570,7 +570,7 @@ export default function QueryLabPage() {
                   <div className="mt-4 border border-zinc-800 bg-zinc-900/40">
                     <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
                       <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
-                        ai insight on this plan
+                        AI 진단 — 이 plan 기준
                       </div>
                       <button
                         onClick={handleGetInsight}
@@ -578,20 +578,19 @@ export default function QueryLabPage() {
                         className="text-xs px-3 py-1 border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 disabled:opacity-50 transition-colors"
                       >
                         {insightLoading
-                          ? "thinking…"
+                          ? "분석 중…"
                           : insight
-                            ? "Re-analyze"
-                            : "Get AI insight"}
+                            ? "다시 진단"
+                            : "AI 진단 받기"}
                       </button>
                     </div>
                     <div className="p-3">
                       {!insight && !insightLoading && (
                         <div className="text-xs text-zinc-500">
-                          Click{" "}
-                          <span className="text-sky-300">Get AI insight</span>{" "}
-                          for a 2–3 step recommendation tailored to this plan
-                          (sends the structured summary, not the raw plan, so
-                          the cost is small).
+                          <span className="text-sky-300">AI 진단 받기</span>{" "}
+                          버튼을 누르면 이 plan에 맞춰 2~3단계 권장안을 받아볼
+                          수 있어요 (raw plan이 아니라 구조화된 요약만 보내므로
+                          토큰 비용 적음).
                         </div>
                       )}
                       {insight && (
