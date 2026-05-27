@@ -10,6 +10,7 @@ import {
   fetchAlertSubscriptions,
   createAlertSubscription,
   deleteAlertSubscription,
+  apiUrl,
 } from "@/lib/api-client";
 import {
   PageHeader,
@@ -795,6 +796,8 @@ export default function AlertsPage() {
         </div>
       </Section>
 
+      <SlackAckSetupGuide />
+
       <Section
         eyebrow="rules"
         title={`${rules.length} alert rule${rules.length === 1 ? "" : "s"}`}
@@ -951,5 +954,227 @@ export default function AlertsPage() {
         )}
       </Section>
     </PageBody>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Slack ack setup guide — collapsible, persists state to localStorage.
+//
+// The Slack interactive Lambda is wired in CDK but the workspace-side setup
+// (create Slack app + paste signing secret + set Request URL) can only be
+// done by the user. This panel walks them through the four steps with a
+// copy-button for the API Gateway endpoint URL discovered from the runtime
+// /config.json, so they don't have to dig into the deploy outputs.
+// ---------------------------------------------------------------------------
+
+const SLACK_GUIDE_KEY = "dbops_slack_guide_open";
+
+function SlackAckSetupGuide() {
+  const [open, setOpen] = useState(false);
+  const [endpoint, setEndpoint] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      setOpen(window.localStorage.getItem(SLACK_GUIDE_KEY) === "1");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Resolve the live API Gateway URL once the panel is opened so users see
+  // the actual prefilled path they need to paste into their Slack app.
+  useEffect(() => {
+    if (!open || endpoint) return;
+    apiUrl("/api/slack/interactive")
+      .then((u) => setEndpoint(u))
+      .catch(() => setEndpoint("(unable to resolve — check /config.json)"));
+  }, [open, endpoint]);
+
+  const toggle = () => {
+    setOpen((p) => {
+      const next = !p;
+      try {
+        window.localStorage.setItem(SLACK_GUIDE_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
+  const copyEndpoint = async () => {
+    if (!endpoint) return;
+    try {
+      await navigator.clipboard.writeText(endpoint);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — no fallback for v1 */
+    }
+  };
+
+  return (
+    <Section
+      eyebrow="integration"
+      title="Slack 양방향 Ack 설정"
+      description="Slack 알림 메시지의 ✓ Ack 버튼을 활성화하려면 Slack 앱 측 설정이 한 번 필요합니다."
+      actions={
+        <button
+          type="button"
+          onClick={toggle}
+          className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500 hover:text-amber-300 transition-colors font-mono"
+        >
+          {open ? "× 가이드 닫기" : "셋업 가이드 열기"}
+        </button>
+      }
+    >
+      {open && (
+        <div className="border border-zinc-800 bg-zinc-900/40 p-5 space-y-4">
+          <ol className="space-y-3">
+            <GuideStep
+              num={1}
+              title="Slack 앱 생성"
+              body={
+                <>
+                  <a
+                    href="https://api.slack.com/apps?new_app=1"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-amber-300 hover:text-amber-200 underline underline-offset-2"
+                  >
+                    api.slack.com/apps
+                  </a>
+                  에서{" "}
+                  <span className="text-zinc-200 font-mono">From scratch</span>
+                  로 새 앱 생성 → 워크스페이스 선택.
+                </>
+              }
+            />
+            <GuideStep
+              num={2}
+              title="Signing Secret 복사"
+              body={
+                <>
+                  앱 페이지 좌측 메뉴 →{" "}
+                  <span className="text-zinc-200 font-mono">
+                    Basic Information
+                  </span>{" "}
+                  →{" "}
+                  <span className="text-zinc-200 font-mono">
+                    App Credentials
+                  </span>{" "}
+                  섹션의{" "}
+                  <span className="text-zinc-200 font-mono">
+                    Signing Secret
+                  </span>
+                  을 복사해서{" "}
+                  <span className="text-zinc-200 font-mono">
+                    cdk/config/settings.py
+                  </span>
+                  의{" "}
+                  <span className="text-zinc-200 font-mono">
+                    SLACK_SIGNING_SECRET
+                  </span>
+                  에 붙여넣기.
+                </>
+              }
+            />
+            <GuideStep
+              num={3}
+              title="Interactivity Request URL 등록"
+              body={
+                <>
+                  <div>
+                    좌측 메뉴 →{" "}
+                    <span className="text-zinc-200 font-mono">
+                      Interactivity & Shortcuts
+                    </span>
+                    를 켜고{" "}
+                    <span className="text-zinc-200 font-mono">Request URL</span>
+                    에 아래 주소를 붙여넣기:
+                  </div>
+                  <div className="mt-2 flex items-center gap-2 bg-zinc-950 border border-zinc-700 px-3 py-2">
+                    <code className="flex-1 text-xs font-mono text-amber-300 break-all">
+                      {endpoint ?? "(URL 로딩 중…)"}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={copyEndpoint}
+                      disabled={!endpoint}
+                      className="text-[10px] uppercase tracking-wider px-2 py-1 border border-zinc-700 text-zinc-300 hover:border-amber-500 hover:text-amber-300 disabled:opacity-40 transition-colors shrink-0"
+                    >
+                      {copied ? "✓ 복사됨" : "복사"}
+                    </button>
+                  </div>
+                </>
+              }
+            />
+            <GuideStep
+              num={4}
+              title="Incoming Webhook 추가 + 재배포"
+              body={
+                <>
+                  좌측 메뉴 →{" "}
+                  <span className="text-zinc-200 font-mono">
+                    Incoming Webhooks
+                  </span>
+                  를 켜고 채널 webhook URL 발급 → 위{" "}
+                  <span className="font-mono">Subscribers</span> 섹션에 protocol{" "}
+                  <span className="font-mono">slack-webhook</span>으로 등록.
+                  <br />
+                  마지막으로{" "}
+                  <span className="text-zinc-200 font-mono">
+                    cdk deploy dbops-dev-agent
+                  </span>
+                  로 새 signing secret을 Lambda 환경에 반영.
+                </>
+              }
+            />
+          </ol>
+
+          <div className="border-t border-zinc-800 pt-3 text-[11px] text-zinc-500">
+            <span className="text-zinc-400 font-medium">동작 확인:</span> 알림이
+            한 번 발사되면 Slack 메시지의{" "}
+            <span className="font-mono">✓ Ack alert</span> 버튼을 누르세요. 위
+            룰 테이블에{" "}
+            <span className="px-1 py-0.5 bg-emerald-500/10 text-emerald-300 border border-emerald-500/40 text-[10px] font-mono">
+              ✓ acked @user
+            </span>{" "}
+            배지가 즉시 표시되면 정상.
+            <br />
+            <span className="text-zinc-400 font-medium">트러블슈팅:</span> 버튼
+            클릭 시{" "}
+            <span className="font-mono">
+              SLACK_SIGNING_SECRET not configured
+            </span>{" "}
+            메시지가 뜨면 2~4단계 중 한 단계가 누락된 상태.
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function GuideStep({
+  num,
+  title,
+  body,
+}: {
+  num: number;
+  title: string;
+  body: React.ReactNode;
+}) {
+  return (
+    <li className="grid grid-cols-[28px_1fr] gap-3 items-baseline">
+      <span className="text-xs font-mono text-amber-400 tabular-nums">
+        {String(num).padStart(2, "0")}
+      </span>
+      <div>
+        <div className="text-sm text-zinc-200 font-medium mb-1">{title}</div>
+        <div className="text-[12px] text-zinc-400 leading-relaxed">{body}</div>
+      </div>
+    </li>
   );
 }
