@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { fetchAnomalies } from "@/lib/api-client";
 import { streamChat } from "@/lib/agentcore-sse";
+import { fmtDecimal } from "@/lib/format";
 
 interface Anomaly {
   metric_type: string;
@@ -128,9 +129,9 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
                     ) : null}
                   </div>
                   <div className="text-[11px] text-zinc-500">
-                    베이스라인 {n(a.baseline_mean).toFixed(2)} · 최근 최댓값{" "}
+                    베이스라인 {fmtDecimal(n(a.baseline_mean), 2)} · 최근 최댓값{" "}
                     <span className="text-zinc-300">
-                      {n(a.recent_max).toFixed(2)}
+                      {fmtDecimal(n(a.recent_max), 2)}
                     </span>
                   </div>
                 </div>
@@ -240,9 +241,9 @@ function AnomalyDetailModal({
               {prettyLabel}
             </h2>
             <div className="text-xs text-zinc-400 mt-1">
-              베이스라인 {baseline.toFixed(2)} ± {stddev.toFixed(2)} · 최근
-              최댓값{" "}
-              <span className="text-zinc-200">{recentMax.toFixed(2)}</span>
+              베이스라인 {fmtDecimal(baseline, 2)} ± {fmtDecimal(stddev, 2)} ·
+              최근 최댓값{" "}
+              <span className="text-zinc-200">{fmtDecimal(recentMax, 2)}</span>
             </div>
           </div>
           <button
@@ -258,12 +259,12 @@ function AnomalyDetailModal({
           <div className="grid grid-cols-2 gap-3 mb-4">
             <Stat
               label="최근 최댓값"
-              value={recentMax.toFixed(2)}
+              value={fmtDecimal(recentMax, 2)}
               tone={sevTone}
             />
-            <Stat label="최근 평균" value={recentAvg.toFixed(2)} />
-            <Stat label="베이스라인 평균" value={baseline.toFixed(2)} />
-            <Stat label="베이스라인 σ" value={stddev.toFixed(2)} />
+            <Stat label="최근 평균" value={fmtDecimal(recentAvg, 2)} />
+            <Stat label="베이스라인 평균" value={fmtDecimal(baseline, 2)} />
+            <Stat label="베이스라인 σ" value={fmtDecimal(stddev, 2)} />
           </div>
 
           <div className="border-t border-zinc-800 pt-3">

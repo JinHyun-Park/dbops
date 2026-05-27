@@ -36,6 +36,26 @@ export function fmtExact(v: number | string | null | undefined): string {
   return NUMBER_FORMATTER.format(n);
 }
 
+/** Locale-grouped decimal — same as `n.toFixed(digits)` but with thousand
+ *  separators ("1,234,567.89" instead of "1234567.89"). Use this in big-
+ *  number headlines (anomaly modal stats, timeseries current/peak,
+ *  capacity projections etc.) where the raw .toFixed makes large values
+ *  hard to scan. Percentages, durations < 1000ms, σ-scores etc. are
+ *  better served by their own helpers — don't reach for this when the
+ *  value is small. */
+export function fmtDecimal(
+  v: number | string | null | undefined,
+  digits = 2,
+): string {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(n);
+}
+
 /** Bytes with binary-ish thresholds. Picks the largest unit that keeps the
  * value > 1. We use SI (1000) intentionally so it matches AWS/Postgres
  * conventions rather than IEC (1024). */

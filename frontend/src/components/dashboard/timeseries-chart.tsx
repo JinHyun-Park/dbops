@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { fetchTimeseries } from "@/lib/api-client";
 import { Expandable } from "@/components/design-system/expandable";
+import { fmtDecimal } from "@/lib/format";
 
 type Point = { ts: string; value: number | string; dimensions?: string };
 
@@ -118,8 +119,8 @@ export function TimeseriesChart({
 
   const current = data.length ? data[data.length - 1].value : 0;
   const max = data.reduce((m, d) => Math.max(m, d.value), 0);
-  const display = formatValue ? formatValue(current) : current.toFixed(2);
-  const displayMax = formatValue ? formatValue(max) : max.toFixed(2);
+  const display = formatValue ? formatValue(current) : fmtDecimal(current, 2);
+  const displayMax = formatValue ? formatValue(max) : fmtDecimal(max, 2);
 
   return (
     <Expandable title={title}>
@@ -279,12 +280,12 @@ function StackedAreaChart({
             {title}
           </div>
           <div className="text-xs text-zinc-500">
-            최대: {max.toFixed(2)}
+            최대: {fmtDecimal(max, 2)}
             {unit ? ` ${unit}` : ""}
           </div>
         </div>
         <div className="text-2xl font-semibold text-zinc-100 mb-3">
-          {current.toFixed(2)}
+          {fmtDecimal(current, 2)}
           {unit && <span className="text-sm text-zinc-500 ml-1">{unit}</span>}
         </div>
         <div className="h-64">

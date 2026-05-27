@@ -6,6 +6,7 @@ import {
   type CapacityForecastResponse,
   type CapacityMetric,
 } from "@/lib/api-client";
+import { fmtDecimal } from "@/lib/format";
 
 const METRICS: {
   key: CapacityMetric;
@@ -19,19 +20,19 @@ const METRICS: {
     label: "Storage",
     format: (n) => {
       const gb = n / 1024 ** 3;
-      if (gb >= 1024) return { value: (gb / 1024).toFixed(2), suffix: "TiB" };
-      return { value: gb.toFixed(1), suffix: "GiB" };
+      if (gb >= 1024) return { value: fmtDecimal(gb / 1024, 2), suffix: "TiB" };
+      return { value: fmtDecimal(gb, 1), suffix: "GiB" };
     },
   },
   {
     key: "connections",
     label: "Connections",
-    format: (n) => ({ value: n.toFixed(0), suffix: "" }),
+    format: (n) => ({ value: fmtDecimal(n, 0), suffix: "" }),
   },
   {
     key: "aas",
     label: "Active Sessions (AAS)",
-    format: (n) => ({ value: n.toFixed(2), suffix: "" }),
+    format: (n) => ({ value: fmtDecimal(n, 2), suffix: "" }),
   },
 ];
 
