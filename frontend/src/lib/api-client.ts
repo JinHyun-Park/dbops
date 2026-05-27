@@ -820,3 +820,185 @@ export async function runExplain(
   }
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Simulation MCP — REST mirror
+// ---------------------------------------------------------------------------
+
+export interface ParameterCatalogEntry {
+  name: string;
+  type: "static" | "dynamic" | "unknown";
+  impact: string;
+  restart: boolean;
+}
+
+export interface UpgradeCompatibilityResponse {
+  cluster_id: string;
+  engine: string;
+  current_version: string;
+  target_version: string;
+  is_compatible: boolean;
+  valid_upgrade_targets: string[];
+  target_description: string;
+  target_release_date: string;
+}
+
+export interface UpgradeImpactMethod {
+  method: "in_place" | "blue_green" | "clone";
+  estimated_minutes: number;
+  downtime_text: string;
+  downtime_seconds: number;
+  risk: "low" | "medium" | "moderate" | string;
+}
+
+export interface UpgradeImpactResponse {
+  cluster_id: string;
+  current_version: string;
+  target_version: string;
+  storage_gb: number;
+  methods: UpgradeImpactMethod[];
+  recommendation: string;
+}
+
+export interface UpgradePlanStep {
+  step: number;
+  action: string;
+  details: string;
+}
+
+export interface UpgradePlanResponse {
+  cluster_id: string;
+  target_version: string;
+  method: string;
+  steps: UpgradePlanStep[];
+  rollback_plan: string;
+  estimated_total_minutes: number;
+}
+
+export interface ParameterChangeResponse {
+  cluster_id: string;
+  parameter: string;
+  new_value: string;
+  known: boolean;
+  is_dynamic: boolean;
+  requires_restart: boolean;
+  impact_area: string;
+  recommendation: string;
+}
+
+export interface ScalingResponse {
+  cluster_id: string;
+  is_serverless_v2: boolean;
+  current: { min_acu: number; max_acu: number };
+  proposed: { min_acu: number; max_acu: number };
+  cost_assumption: string;
+  cost_impact: {
+    current_monthly_usd: number;
+    proposed_monthly_usd: number;
+    delta_monthly_usd: number;
+    change_pct: number;
+  };
+  warnings: string[];
+  notes: string;
+}
+
+export interface DdlImpactResponse {
+  cluster_id: string;
+  ddl: string;
+  table: string;
+  table_info: { rows: number; size_mb: number };
+  estimated_seconds: number;
+  online_ddl_possible: boolean;
+  lock_type: string;
+  disk_space_needed_mb: number;
+  recommendation: string;
+}
+
+async function simPost<T>(path: string, body: object): Promise<T> {
+  const res = await fetch(await api(path), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Simulation request failed (${res.status}): ${text.slice(0, 200)}`,
+    );
+  }
+  return res.json();
+}
+
+export async function fetchParameterCatalog(): Promise<{
+  parameters: ParameterCatalogEntry[];
+}> {
+  const res = await fetch(await api(`/api/simulation/parameter-catalog`));
+  if (!res.ok) throw new Error(`Parameter catalog fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export function simulateUpgradeCompatibility(
+  clusterId: string,
+  targetVersion: string,
+): Promise<UpgradeCompatibilityResponse> {
+  return simPost(`/api/simulation/upgrade-compatibility`, {
+    cluster_id: clusterId,
+    target_version: targetVersion,
+  });
+}
+
+export function simulateUpgradeImpact(
+  clusterId: string,
+  targetVersion: string,
+): Promise<UpgradeImpactResponse> {
+  return simPost(`/api/simulation/upgrade-impact`, {
+    cluster_id: clusterId,
+    target_version: targetVersion,
+  });
+}
+
+export function simulateUpgradePlan(
+  clusterId: string,
+  targetVersion: string,
+  method: "blue_green" | "in_place" | "clone",
+): Promise<UpgradePlanResponse> {
+  return simPost(`/api/simulation/upgrade-plan`, {
+    cluster_id: clusterId,
+    target_version: targetVersion,
+    method,
+  });
+}
+
+export function simulateParameterChange(
+  clusterId: string,
+  parameterName: string,
+  newValue: string,
+): Promise<ParameterChangeResponse> {
+  return simPost(`/api/simulation/parameter-change`, {
+    cluster_id: clusterId,
+    parameter_name: parameterName,
+    new_value: newValue,
+  });
+}
+
+export function simulateScaling(
+  clusterId: string,
+  newMinAcu: number | null,
+  newMaxAcu: number | null,
+): Promise<ScalingResponse> {
+  return simPost(`/api/simulation/scaling`, {
+    cluster_id: clusterId,
+    new_min_acu: newMinAcu,
+    new_max_acu: newMaxAcu,
+  });
+}
+
+export function simulateDdlImpact(
+  clusterId: string,
+  ddlSql: string,
+): Promise<DdlImpactResponse> {
+  return simPost(`/api/simulation/ddl-impact`, {
+    cluster_id: clusterId,
+    ddl_sql: ddlSql,
+  });
+}

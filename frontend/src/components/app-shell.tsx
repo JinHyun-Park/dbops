@@ -44,6 +44,11 @@ const NAV: NavGroup[] = [
         hint: "SQL analysis + EXPLAIN",
       },
       { href: "/approvals", label: "Approvals", hint: "DBA gate for writes" },
+      {
+        href: "/simulator",
+        label: "Simulator",
+        hint: "upgrade · param · scaling · DDL — what-if",
+      },
     ],
   },
   {
@@ -65,6 +70,7 @@ function humanize(segment: string): string {
     chat: "Chat",
     "query-lab": "Query Lab",
     approvals: "Approvals",
+    simulator: "Simulator",
     alerts: "Alerts",
     clusters: "Clusters",
     reports: "Reports",

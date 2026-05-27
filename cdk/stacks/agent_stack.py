@@ -276,6 +276,36 @@ class AgentStack(cdk.Stack):
             resources=["*"],
         ))
 
+        # Simulation API — REST mirror of the Simulation MCP tool surface
+        # so the dashboard UI can render "what-if" panels without going
+        # through the chat agent.
+        simulation_lambda = lambda_.Function(
+            self, "SimulationApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/simulation"),
+            # describe_db_engine_versions can be slow on first cold start
+            # in a new region; 30s allows the call to complete.
+            timeout=cdk.Duration.seconds(30),
+            memory_size=512,
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+            },
+        )
+        data.cache_db.secret.grant_read(simulation_lambda)
+        data.cache_db.grant_data_api_access(simulation_lambda)
+        simulation_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "rds-data:ExecuteStatement",
+                "secretsmanager:GetSecretValue",
+                "rds:DescribeDBClusters",
+                "rds:DescribeDBEngineVersions",
+            ],
+            resources=["*"],
+        ))
+
         clusters_lambda = lambda_.Function(
             self, "ClustersApi",
             runtime=lambda_.Runtime.PYTHON_3_12,
@@ -435,6 +465,24 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardTopologyIntegration", dashboard_lambda),
         )
+        # Simulation API — REST mirror of Simulation MCP tools. All write-
+        # like operations are simulations, never DDL execution, so POST is
+        # safe without an approval flow.
+        sim_integration = integrations.HttpLambdaIntegration(
+            "SimulationIntegration", simulation_lambda
+        )
+        for sim_path, sim_methods in [
+            ("/api/simulation/parameter-catalog", [apigwv2.HttpMethod.GET]),
+            ("/api/simulation/upgrade-compatibility", [apigwv2.HttpMethod.POST]),
+            ("/api/simulation/upgrade-impact", [apigwv2.HttpMethod.POST]),
+            ("/api/simulation/upgrade-plan", [apigwv2.HttpMethod.POST]),
+            ("/api/simulation/parameter-change", [apigwv2.HttpMethod.POST]),
+            ("/api/simulation/scaling", [apigwv2.HttpMethod.POST]),
+            ("/api/simulation/ddl-impact", [apigwv2.HttpMethod.POST]),
+        ]:
+            self.api.add_routes(
+                path=sim_path, methods=sim_methods, integration=sim_integration
+            )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/settings",
             methods=[apigwv2.HttpMethod.GET],
