@@ -34,7 +34,10 @@ interface Props {
   externalLoading?: boolean;
 }
 
-const WAIT_COLORS = [
+// Wait-event series palette — 10 hues that read clearly on the dark zinc
+// background. The light variant uses the matching -700/-800 tier of each
+// hue so all series stay above 4.5:1 against the cream + white surfaces.
+const WAIT_COLORS_DARK = [
   "#60a5fa",
   "#f472b6",
   "#fbbf24",
@@ -46,6 +49,34 @@ const WAIT_COLORS = [
   "#fb923c",
   "#94a3b8",
 ];
+const WAIT_COLORS_LIGHT = [
+  "#1d4ed8", // blue-700
+  "#9d174d", // pink-800
+  "#92400e", // amber-800
+  "#065f46", // emerald-800
+  "#5b21b6", // violet-800
+  "#9f1239", // rose-800
+  "#0e7490", // cyan-700
+  "#854d0e", // yellow-800
+  "#9a3412", // orange-800
+  "#475569", // slate-600
+];
+
+function useWaitColors(): string[] {
+  const [light, setLight] = useState(false);
+  useEffect(() => {
+    const sync = () =>
+      setLight(document.documentElement.dataset.theme === "light");
+    sync();
+    const obs = new MutationObserver(sync);
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    return () => obs.disconnect();
+  }, []);
+  return light ? WAIT_COLORS_LIGHT : WAIT_COLORS_DARK;
+}
 
 function fmtTime(iso: string) {
   const d = new Date(iso);
@@ -232,6 +263,7 @@ function StackedAreaChart({
   err: string | null;
   unit?: string;
 }) {
+  const waitColors = useWaitColors();
   const grouped = new Map<string, Map<string, number>>();
   const eventSet = new Set<string>();
 
@@ -329,8 +361,8 @@ function StackedAreaChart({
                     type="monotone"
                     dataKey={ev}
                     stackId="1"
-                    stroke={WAIT_COLORS[i % WAIT_COLORS.length]}
-                    fill={WAIT_COLORS[i % WAIT_COLORS.length]}
+                    stroke={waitColors[i % waitColors.length]}
+                    fill={waitColors[i % waitColors.length]}
                     fillOpacity={0.7}
                   />
                 ))}

@@ -12,6 +12,7 @@ import {
   Legend,
 } from "recharts";
 import { fetchClusters, fetchBatchTimeseries } from "@/lib/api-client";
+import { useChartColors } from "@/lib/use-chart-colors";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
 import { Expandable } from "@/components/design-system/expandable";
 import { engineBadge, isPostgres } from "@/lib/engine";
@@ -219,8 +220,9 @@ export default function ComparePage() {
       ? clusterB || "B"
       : PERIOD_SHIFT_LABEL[hours] || `−${hours}h`;
 
-  const colorA = "#fbbf24"; // amber
-  const colorB = "#38bdf8"; // sky
+  // Recharts injects series colors as inline svg attrs, so light-mode
+  // contrast comes from swapping the hex itself rather than CSS overrides.
+  const { amber: colorA, sky: colorB } = useChartColors();
 
   return (
     <PageBody>

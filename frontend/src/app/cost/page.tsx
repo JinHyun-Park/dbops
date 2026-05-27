@@ -12,6 +12,7 @@ import {
   ReferenceDot,
 } from "recharts";
 import { fetchCost } from "@/lib/api-client";
+import { useChartColors } from "@/lib/use-chart-colors";
 import {
   PageBody,
   PageHeader,
@@ -68,6 +69,7 @@ export default function CostPage() {
   const [data, setData] = useState<CostData | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const colors = useChartColors();
 
   useEffect(() => {
     setLoading(true);
@@ -205,8 +207,8 @@ export default function CostPage() {
                     <Area
                       type="monotone"
                       dataKey="amount"
-                      stroke="#fbbf24"
-                      fill="#fbbf24"
+                      stroke={colors.amber}
+                      fill={colors.amber}
                       fillOpacity={0.2}
                     />
                     {(data?.anomalies ?? []).map((a) => (

@@ -160,9 +160,11 @@ html[data-theme="light"] .bg-zinc-950\/60 {
 }
 html[data-theme="light"] .bg-zinc-900 {
   background-color: #ffffff;
+  border-radius: 6px;
+  border-color: transparent;
   box-shadow:
-    0 1px 2px rgba(20, 20, 18, 0.06),
-    0 0 0 1px rgba(20, 20, 18, 0.04);
+    0 1px 3px rgba(20, 20, 18, 0.08),
+    0 0 0 1px rgba(20, 20, 18, 0.05);
 }
 /* Translucent card-on-dark variants — these are used for nested side panels
    (e.g. chat conversation list). On light they need to be visibly distinct
@@ -293,10 +295,10 @@ html[data-theme="light"] .text-amber-400 {
   color: #b45309;
 }
 html[data-theme="light"] .text-amber-400\/80 {
-  color: rgba(180, 83, 9, 0.85);
+  color: #92400e; /* amber-800 — solid 5.3:1 on cream (was rgba blend 3.58:1) */
 }
 html[data-theme="light"] .text-amber-400\/70 {
-  color: rgba(180, 83, 9, 0.8);
+  color: #92400e; /* amber-800 — solid 5.3:1 on cream (was rgba blend 3.30:1) */
 }
 html[data-theme="light"] .border-amber-500\/40 {
   border-color: rgba(180, 83, 9, 0.45);
@@ -669,4 +671,42 @@ html[data-theme="light"] .prose-invert pre code {
   .chat-printable button {
     display: none !important;
   }
+}
+
+/* =========================================================================
+   Light-theme contrast fixes (2026-05-28 audit)
+   - All targeted at WCAG AA (>=4.5:1 for normal text, >=3:1 for UI elements).
+   - Each rule listed with its measured ratio in the original audit report.
+   ========================================================================= */
+
+/* Sidebar nav hints on the active-item bg (#ddd9cc) — was 3.10:1 */
+html[data-theme="light"] .bg-zinc-800\/80 .text-zinc-600 {
+  color: #4a4945;
+}
+
+/* amber-300 text on the zinc-800 inset surfaces — was 4.21:1 */
+html[data-theme="light"] .bg-zinc-800 .text-amber-300,
+html[data-theme="light"] .bg-zinc-850 .text-amber-300 {
+  color: #7c2d12;
+}
+
+/* AND/OR badge — amber text on amber-tinted bg — was 3.89:1 */
+html[data-theme="light"] .bg-amber-500\/15.text-amber-300 {
+  color: #7c2d12;
+}
+
+/* SLO empty-state body copy — amber-300/80 was unmapped (3.21:1) */
+html[data-theme="light"] .text-amber-300\/80 {
+  color: rgba(124, 45, 18, 0.92);
+}
+
+/* zinc-600 on the slightly darker inset surface (#edebe4) — was 3.67:1 */
+html[data-theme="light"] .bg-zinc-800 .text-zinc-600,
+html[data-theme="light"] .bg-zinc-850 .text-zinc-600 {
+  color: #4a4945;
+}
+
+/* emerald status badge text on the lightly tinted bg — was 3.96–4.10:1 */
+html[data-theme="light"] .bg-emerald-500\/10.text-emerald-400 {
+  color: #065f46;
 }

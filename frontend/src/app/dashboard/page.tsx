@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useChartColors } from "@/lib/use-chart-colors";
 import { ClusterOverview } from "@/components/dashboard/cluster-overview";
 import { TimeseriesChart } from "@/components/dashboard/timeseries-chart";
 import { WaitEventsPanel } from "@/components/dashboard/wait-events-panel";
@@ -196,6 +197,7 @@ export default function DashboardPage() {
   );
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<TimeRange>(DEFAULT_RANGE);
+  const chartColors = useChartColors();
   const [customOpen, setCustomOpen] = useState<boolean>(false);
   const [views, setViews] = useState<SavedView[]>([]);
   const [viewsOpen, setViewsOpen] = useState<boolean>(false);
@@ -619,7 +621,7 @@ export default function DashboardPage() {
                   metric="xact_commit"
                   title="Transactions / sec (PG)"
                   hours={hours}
-                  color="#fbbf24"
+                  color={chartColors.amber}
                   type="line"
                   formatValue={(v) => v.toFixed(1)}
                   externalPoints={tsBatch.xact_commit || []}

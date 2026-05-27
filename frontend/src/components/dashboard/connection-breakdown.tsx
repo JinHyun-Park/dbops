@@ -20,7 +20,9 @@ interface Point {
   value: number | string;
 }
 
-const STATES = [
+// Connection state palette — dark = bright on zinc, light = the matching
+// -800 tier so Recharts inline strokes/fills stay above 4.5:1 on cream.
+const STATES_DARK = [
   { metric: "conn_active", label: "active", color: "#34d399" },
   { metric: "conn_idle", label: "idle", color: "#60a5fa" },
   { metric: "conn_idle_in_tx", label: "idle in tx", color: "#fbbf24" },
@@ -30,6 +32,32 @@ const STATES = [
     color: "#f472b6",
   },
 ];
+const STATES_LIGHT = [
+  { metric: "conn_active", label: "active", color: "#065f46" },
+  { metric: "conn_idle", label: "idle", color: "#1d4ed8" },
+  { metric: "conn_idle_in_tx", label: "idle in tx", color: "#92400e" },
+  {
+    metric: "conn_idle_in_tx_aborted",
+    label: "idle aborted",
+    color: "#9d174d",
+  },
+];
+
+function useStates() {
+  const [light, setLight] = useState(false);
+  useEffect(() => {
+    const sync = () =>
+      setLight(document.documentElement.dataset.theme === "light");
+    sync();
+    const obs = new MutationObserver(sync);
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    return () => obs.disconnect();
+  }, []);
+  return light ? STATES_LIGHT : STATES_DARK;
+}
 
 function fmtTime(iso: string) {
   const d = new Date(iso);
@@ -48,6 +76,7 @@ export function ConnectionBreakdown({
   const [data, setData] = useState<Record<string, number | string>[]>([]);
   const [loading, setLoading] = useState(true);
   const [maxConn, setMaxConn] = useState<number | null>(null);
+  const STATES = useStates();
 
   useEffect(() => {
     let cancelled = false;
