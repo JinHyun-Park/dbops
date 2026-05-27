@@ -123,24 +123,36 @@ def _build_slack_payload(rule: dict, latest: float) -> dict:
         },
     ]
     # Deep-link buttons — only when FRONTEND_URL is set so users without a
-    # deployed CloudFront domain still get a usable message.
+    # deployed CloudFront domain still get a usable message. The Ack button
+    # is added regardless of FRONTEND_URL — DBAs can close out a page from
+    # a phone without opening the console.
+    action_elements: list[dict] = [
+        {
+            "type": "button",
+            "text": {"type": "plain_text", "text": "✓ Ack alert"},
+            # action_id is what /api/slack/interactive matches on; value
+            # carries the rule_id + cluster_id needed to update the row.
+            "action_id": "ack_alert",
+            "value": f"{rule['id']}:{rule['cluster_id']}",
+            "style": "primary",
+        }
+    ]
     if dashboard:
-        blocks.append({
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "Open dashboard"},
-                    "url": dashboard,
-                    "style": "primary",
-                },
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "Open alerts"},
-                    "url": alerts,
-                },
-            ],
-        })
+        action_elements.append(
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "Open dashboard"},
+                "url": dashboard,
+            }
+        )
+        action_elements.append(
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "Open alerts"},
+                "url": alerts,
+            }
+        )
+    blocks.append({"type": "actions", "elements": action_elements})
     blocks.append({
         "type": "context",
         "elements": [

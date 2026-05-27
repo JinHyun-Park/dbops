@@ -36,6 +36,11 @@ interface Rule {
   // Compound rules carry their JSON-encoded conditions DSL. Older payloads
   // (and legacy single-threshold rules) omit it.
   conditions_json?: string | null;
+  // Slack-ack state — written by the /api/slack/interactive endpoint.
+  // The badge only renders when last_acked_at is after last_triggered_at;
+  // older acks are considered stale once the rule fires again.
+  last_acked_at?: string | null;
+  last_acked_by?: string | null;
 }
 
 interface CompoundOperand {
@@ -900,6 +905,33 @@ export default function AlertsPage() {
                       {r.last_triggered_at
                         ? new Date(r.last_triggered_at).toLocaleString()
                         : "never"}
+                      {(() => {
+                        // Ack badge: only when ack is newer than the latest
+                        // trigger. If the rule has fired again since the ack
+                        // we treat the ack as stale.
+                        if (!r.last_acked_at) return null;
+                        if (
+                          r.last_triggered_at &&
+                          new Date(r.last_acked_at) <=
+                            new Date(r.last_triggered_at)
+                        )
+                          return null;
+                        return (
+                          <div
+                            className="mt-1 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 font-mono"
+                            title={`acked ${new Date(
+                              r.last_acked_at,
+                            ).toLocaleString()}`}
+                          >
+                            <span>✓ acked</span>
+                            {r.last_acked_by && (
+                              <span className="text-zinc-400">
+                                @{r.last_acked_by}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-3 py-2 text-right">
                       {admin && (

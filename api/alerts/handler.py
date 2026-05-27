@@ -132,7 +132,8 @@ def _list_rules(query, cluster_id):
     #   no_data  — no snapshot at all, likely a misconfigured cluster_id/metric pair
     base = (
         "SELECT r.id, r.cluster_id, r.name, r.metric_type, r.comparison, r.threshold, r.enabled, "
-        "  r.last_triggered_at, r.created_at, r.conditions::text AS conditions_json, "
+        "  r.last_triggered_at, r.last_acked_at, r.last_acked_by, "
+        "  r.created_at, r.conditions::text AS conditions_json, "
         "  m.latest_metric_ts, "
         "  CASE "
         "    WHEN m.latest_metric_ts IS NULL THEN 'no_data' "

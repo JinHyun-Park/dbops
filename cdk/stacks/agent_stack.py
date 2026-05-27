@@ -386,6 +386,34 @@ class AgentStack(cdk.Stack):
             resources=[data.alert_topic.topic_arn, "*"],
         ))
 
+        # Slack interactive endpoint — verifies HMAC signature and acks
+        # alerts in-place. Disabled when SLACK_SIGNING_SECRET is empty:
+        # the env var is still set, the handler returns a self-explaining
+        # 200 ephemeral message so the user can fix configuration without
+        # hunting through CloudWatch.
+        slack_interactive_lambda = lambda_.Function(
+            self, "SlackInteractiveApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/slack_interactive"),
+            timeout=cdk.Duration.seconds(15),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "SLACK_SIGNING_SECRET": Settings.SLACK_SIGNING_SECRET,
+            },
+        )
+        data.cache_db.secret.grant_read(slack_interactive_lambda)
+        data.cache_db.grant_data_api_access(slack_interactive_lambda)
+        slack_interactive_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "rds-data:ExecuteStatement",
+                "secretsmanager:GetSecretValue",
+            ],
+            resources=["*"],
+        ))
+
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}",
             methods=[apigwv2.HttpMethod.GET],
@@ -672,6 +700,13 @@ class AgentStack(cdk.Stack):
             path="/api/alert-subscriptions",
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE],
             integration=alerts_integration,
+        )
+        # Slack interactive ack — the URL paired with the Slack app's
+        # "Interactivity Request URL" setting.
+        self.api.add_routes(
+            path="/api/slack/interactive",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=integrations.HttpLambdaIntegration("SlackInteractiveIntegration", slack_interactive_lambda),
         )
         clusters_integration = integrations.HttpLambdaIntegration("ClustersIntegration", clusters_lambda)
         self.api.add_routes(
