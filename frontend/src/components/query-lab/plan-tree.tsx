@@ -319,6 +319,261 @@ function NodeRow({
   );
 }
 
+// ----- Anti-pattern detection ----------------------------------------------
+//
+// These rules mirror what pgmustard / pganalyze surface as "issues" — they
+// catch the patterns that explain plan readers learn to look for by hand.
+// Each rule returns null (not a hit) or an Issue. We tune thresholds high
+// enough that small-table noise (sample dbs, dev queries) doesn't dominate.
+//
+// Severity meaning:
+//   critical → likely the cause of slowness
+//   warning  → suspicious, worth investigating
+//   info     → noteworthy but may be expected
+
+interface Issue {
+  severity: "critical" | "warning" | "info";
+  title: string;
+  detail: string;
+  node: string;
+  fix: string;
+}
+
+function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
+  const issues: Issue[] = [];
+
+  const walk = (n: PgPlanNode, parent: PgPlanNode | null) => {
+    const label = nodeLabel(n);
+    const self = selfTime(n);
+    const pct = totalTime > 0 ? (self / totalTime) * 100 : 0;
+    const loops = (n["Actual Loops"] ?? 1) as number;
+    const actualRows = ((n["Actual Rows"] ?? 0) as number) * loops;
+    const planRows = (n["Plan Rows"] ?? 0) as number;
+
+    // 1. Slow Seq Scan — full table scan eating > 20% of execution
+    if (n["Node Type"] === "Seq Scan" && pct > 20 && actualRows > 10_000) {
+      issues.push({
+        severity: pct > 40 ? "critical" : "warning",
+        title: "Sequential scan on a large table",
+        detail: `${label} read ${fmtRows(actualRows)} rows · ${pct.toFixed(
+          1,
+        )}% of execution time`,
+        node: label,
+        fix: "선택성 높은 컬럼에 인덱스 추가, 또는 WHERE 절을 인덱스로 cover 되게 재작성",
+      });
+    }
+
+    // 2. Sort spilled to disk
+    const sortMethod = n["Sort Method"] as string | undefined;
+    if (
+      sortMethod &&
+      (sortMethod.toLowerCase().includes("external") ||
+        sortMethod.toLowerCase().includes("disk"))
+    ) {
+      const spaceKb = n["Sort Space Used"] as number | undefined;
+      issues.push({
+        severity: "warning",
+        title: "Sort spilled to disk",
+        detail: `${label} · method "${sortMethod}"${
+          spaceKb ? ` · ${fmtRows(spaceKb)} kB used` : ""
+        }`,
+        node: label,
+        fix: "work_mem를 늘려 in-memory 정렬 유도 (세션 내 SET work_mem) · 또는 LIMIT을 더 빠른 단계로 push down",
+      });
+    }
+
+    // 3. Hash join with multi-batch (spills to disk during build phase)
+    const hashBatches = n["Hash Batches"] as number | undefined;
+    if (hashBatches && hashBatches > 1) {
+      issues.push({
+        severity: "warning",
+        title: "Hash multi-batch (disk spill)",
+        detail: `${label} · ${hashBatches} batches`,
+        node: label,
+        fix: "work_mem 부족 — 빌드측 테이블이 hash table에 안 맞음. work_mem 증가 또는 join order 변경 검토",
+      });
+    }
+
+    // 4. Lossy bitmap recheck — index scan re-read many rows after bitmap
+    const rechecked = n["Rows Removed by Recheck"] as number | undefined;
+    if (rechecked && rechecked > 10_000) {
+      issues.push({
+        severity: "info",
+        title: "Bitmap recheck dropping many rows",
+        detail: `${label} · ${fmtRows(rechecked)} rows discarded after bitmap`,
+        node: label,
+        fix: "work_mem 부족으로 lossy bitmap이 됨 — 해당 인덱스 selectivity 재확인 또는 work_mem 상향",
+      });
+    }
+
+    // 5. Misestimate — planner badly wrong about row count
+    if (planRows > 0 && actualRows > 0) {
+      const ratio = actualRows / planRows;
+      if (ratio > 100 || ratio < 0.01) {
+        // Only flag at the level that actually drives downstream join choice
+        // (parent is a join node) or at high-impact nodes (>10% self-time).
+        const parentJoinish =
+          parent &&
+          ["Nested Loop", "Hash Join", "Merge Join"].includes(
+            (parent["Node Type"] || "") as string,
+          );
+        if (parentJoinish || pct > 10) {
+          issues.push({
+            severity: ratio > 1000 || ratio < 0.001 ? "warning" : "info",
+            title: "Row-count misestimate",
+            detail: `${label} · planner expected ${fmtRows(
+              planRows,
+            )}, got ${fmtRows(actualRows)} (${
+              ratio > 1
+                ? `${ratio.toFixed(0)}x↑`
+                : `${(1 / ratio).toFixed(0)}x↓`
+            })`,
+            node: label,
+            fix: "ANALYZE 실행으로 통계 갱신 · default_statistics_target 상향 · CREATE STATISTICS로 다중 컬럼 의존성 통계 추가",
+          });
+        }
+      }
+    }
+
+    // 6. Cold buffer reads — high disk reads relative to cache hits
+    const sharedRead = n["Shared Read Blocks"] as number | undefined;
+    const sharedHit = n["Shared Hit Blocks"] as number | undefined;
+    if (sharedRead && sharedRead > 1000) {
+      const ratio =
+        sharedHit != null ? sharedRead / (sharedHit + sharedRead) : 1;
+      if (ratio > 0.3) {
+        issues.push({
+          severity: "info",
+          title: "Cold buffer reads",
+          detail: `${label} · ${sharedRead} disk reads vs ${
+            sharedHit ?? 0
+          } cache hits (${(ratio * 100).toFixed(0)}% miss)`,
+          node: label,
+          fix: "shared_buffers 또는 메모리 부족 · 쿼리가 처음 실행이면 두번째부터 캐시됨. 반복 실행에도 cold면 working set이 buffer를 초과",
+        });
+      }
+    }
+
+    // 7. Nested Loop with high inner-loop count — n*m blow-up
+    if (n["Node Type"] === "Nested Loop" && (n.Plans?.length ?? 0) >= 2) {
+      const inner = n.Plans![1];
+      const innerLoops = (inner["Actual Loops"] ?? 0) as number;
+      if (innerLoops > 5000) {
+        issues.push({
+          severity: pct > 30 ? "critical" : "warning",
+          title: "Nested loop with high inner repetition",
+          detail: `${label} · inner side ran ${fmtRows(innerLoops)} times`,
+          node: label,
+          fix: "Hash Join 또는 Merge Join을 유도 (조인 컬럼에 인덱스 + ANALYZE) · 또는 SET enable_nestloop=off로 검증",
+        });
+      }
+    }
+
+    for (const c of n.Plans ?? []) walk(c, n);
+  };
+
+  walk(root, null);
+
+  // Stable sort by severity then by detail string so the panel doesn't
+  // shuffle between renders if the underlying plan rewalk produces an
+  // equivalent set.
+  const order = { critical: 0, warning: 1, info: 2 };
+  return issues.sort((a, b) => {
+    if (order[a.severity] !== order[b.severity])
+      return order[a.severity] - order[b.severity];
+    return a.title.localeCompare(b.title);
+  });
+}
+
+function IssuesPanel({
+  root,
+  totalTime,
+}: {
+  root: PgPlanNode;
+  totalTime: number;
+}) {
+  const issues = useMemo(
+    () => detectIssues(root, totalTime),
+    [root, totalTime],
+  );
+  if (issues.length === 0) return null;
+
+  const counts = {
+    critical: issues.filter((i) => i.severity === "critical").length,
+    warning: issues.filter((i) => i.severity === "warning").length,
+    info: issues.filter((i) => i.severity === "info").length,
+  };
+
+  return (
+    <div className="border border-zinc-800 bg-zinc-900/40 mb-3">
+      <div className="flex items-center gap-3 px-3 py-2 border-b border-zinc-800">
+        <span className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
+          issues found
+        </span>
+        {counts.critical > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 border border-rose-500/40 bg-rose-500/10 text-rose-300 font-mono">
+            {counts.critical} critical
+          </span>
+        )}
+        {counts.warning > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 border border-amber-500/40 bg-amber-500/10 text-amber-300 font-mono">
+            {counts.warning} warning
+          </span>
+        )}
+        {counts.info > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 border border-zinc-700 bg-zinc-800/40 text-zinc-400 font-mono">
+            {counts.info} info
+          </span>
+        )}
+      </div>
+      <ul className="divide-y divide-zinc-800/60">
+        {issues.map((iss, i) => {
+          const tone =
+            iss.severity === "critical"
+              ? {
+                  bar: "border-l-rose-500",
+                  title: "text-rose-300",
+                  dot: "bg-rose-400",
+                }
+              : iss.severity === "warning"
+                ? {
+                    bar: "border-l-amber-500",
+                    title: "text-amber-300",
+                    dot: "bg-amber-400",
+                  }
+                : {
+                    bar: "border-l-zinc-600",
+                    title: "text-zinc-300",
+                    dot: "bg-zinc-500",
+                  };
+          return (
+            <li
+              key={i}
+              className={`px-3 py-2 border-l-2 ${tone.bar} hover:bg-zinc-800/30 transition-colors`}
+            >
+              <div className="flex items-baseline gap-2">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${tone.dot} flex-shrink-0 mt-0.5`}
+                />
+                <span className={`text-xs font-medium ${tone.title}`}>
+                  {iss.title}
+                </span>
+              </div>
+              <div className="text-[11px] text-zinc-400 mt-1 ml-3.5 font-mono">
+                {iss.detail}
+              </div>
+              <div className="text-[11px] text-zinc-500 mt-1 ml-3.5">
+                <span className="text-zinc-600">→ </span>
+                {iss.fix}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function HotNodes({
   root,
   totalTime,
@@ -447,6 +702,8 @@ export function PlanTree({ plan }: Props) {
           </div>
         </div>
       </div>
+
+      <IssuesPanel root={root.Plan} totalTime={totalTime} />
 
       <HotNodes root={root.Plan} totalTime={totalTime} />
 
