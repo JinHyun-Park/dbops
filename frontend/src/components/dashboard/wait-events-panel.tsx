@@ -60,9 +60,9 @@ export function WaitEventsPanel({
         Wait Events ({hours}h)
       </div>
       {loading ? (
-        <div className="text-xs text-zinc-500">Loading...</div>
+        <div className="text-xs text-zinc-500">불러오는 중…</div>
       ) : events.length === 0 ? (
-        <div className="text-xs text-zinc-500">no wait event data</div>
+        <div className="text-xs text-zinc-500">wait event 데이터가 없어요</div>
       ) : (
         <div className="space-y-2">
           {events.slice(0, 8).map((e) => {

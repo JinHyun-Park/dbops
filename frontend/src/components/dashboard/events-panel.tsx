@@ -20,9 +20,9 @@ const SEVERITY_BADGES: Record<string, string> = {
 // snake_case / CamelCase → "Title Case" — keeps event_type human-readable
 // without needing a back-end migration of historical rows.
 function prettifyEventType(raw: string | null | undefined): string {
-  if (!raw) return "Event";
+  if (!raw) return "이벤트";
   let s = String(raw).trim();
-  if (!s || s === "unknown" || s === "empty") return "Other (RDS)";
+  if (!s || s === "unknown" || s === "empty") return "기타 (RDS)";
   if (s.startsWith("alarm_")) {
     const v = s.slice("alarm_".length).toUpperCase();
     return v === "OK" ? "CloudWatch alarm OK" : `CloudWatch alarm ${v}`;
@@ -40,11 +40,11 @@ function prettifyEventType(raw: string | null | undefined): string {
 function relTime(iso: string) {
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.floor(ms / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
+  if (m < 1) return "방금";
+  if (m < 60) return `${m}분 전`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+  if (h < 24) return `${h}시간 전`;
+  return `${Math.floor(h / 24)}일 전`;
 }
 
 export function EventsPanel({
@@ -64,12 +64,12 @@ export function EventsPanel({
         </div>
         {events.length > 0 && (
           <div className="text-[10px] text-zinc-600">
-            click an event for detail · AI explain
+            이벤트 클릭 시 상세 + AI 설명
           </div>
         )}
       </div>
       {events.length === 0 ? (
-        <div className="text-xs text-zinc-500 py-2">no recent events</div>
+        <div className="text-xs text-zinc-500 py-2">최근 이벤트 없음</div>
       ) : (
         <div className="space-y-2 max-h-96 overflow-y-auto">
           {events.map((e, i) => {
@@ -105,7 +105,7 @@ export function EventsPanel({
                 <div className="text-xs text-zinc-400 leading-snug truncate">
                   {e.message || (
                     <span className="text-zinc-600 italic">
-                      no message — click for raw event
+                      메시지 없음 — 클릭해 원본 이벤트 확인
                     </span>
                   )}
                 </div>

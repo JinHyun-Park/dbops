@@ -49,22 +49,22 @@ function extractKeyFacts(rawObj: unknown): { label: string; value: string }[] {
     if (v && v.length < 240) facts.push({ label, value: v });
   };
   push("Event ID", detail.eventID);
-  push("Action", detail.eventName);
-  push("Cluster ID", req.dBClusterIdentifier || resp.dBClusterIdentifier);
-  push("Instance ID", req.dBInstanceIdentifier);
-  push("Snapshot ID", req.dBSnapshotIdentifier);
+  push("동작", detail.eventName);
+  push("클러스터 ID", req.dBClusterIdentifier || resp.dBClusterIdentifier);
+  push("인스턴스 ID", req.dBInstanceIdentifier);
+  push("스냅샷 ID", req.dBSnapshotIdentifier);
   push(
-    "Parameter group",
+    "파라미터 그룹",
     req.dBClusterParameterGroupName || req.dBParameterGroupName,
   );
-  push("Engine", resp.engine || req.engine);
-  push("Engine version", resp.engineVersion || req.engineVersion);
-  push("Error code", detail.errorCode);
-  push("Error message", detail.errorMessage);
-  push("Invoked by", ident.invokedBy || ident.userName);
-  push("Source IP", detail.sourceIPAddress);
-  push("Region", r.region);
-  push("Event time", detail.eventTime || r.time);
+  push("엔진", resp.engine || req.engine);
+  push("엔진 버전", resp.engineVersion || req.engineVersion);
+  push("에러 코드", detail.errorCode);
+  push("에러 메시지", detail.errorMessage);
+  push("호출 주체", ident.invokedBy || ident.userName);
+  push("소스 IP", detail.sourceIPAddress);
+  push("리전", r.region);
+  push("이벤트 시각", detail.eventTime || r.time);
   return facts;
 }
 
@@ -85,7 +85,9 @@ export function EventDetailModal({
 
   const handleAnalyze = () => {
     if (!clusterId) {
-      setInsightError("cluster_id not available — refresh the dashboard");
+      setInsightError(
+        "cluster_id를 가져오지 못했어요 — 대시보드를 새로고침하세요",
+      );
       return;
     }
     setInsight("");
@@ -93,12 +95,11 @@ export function EventDetailModal({
     setInsightLoading(true);
     const detailJson = JSON.stringify(parsed ?? {}, null, 2).slice(0, 8000);
     const message =
-      `An operations event was recorded for our Aurora cluster. Explain in 3 short sections, ` +
-      `in Korean if the user prefers, otherwise English:\n` +
-      `1. **What this means** — one sentence.\n` +
-      `2. **Impact** — what could break or what is now different (1–2 sentences, be specific to the cluster's runtime).\n` +
-      `3. **Recommended next step** — exactly one concrete action a DBA should take ` +
-      `(or "no action needed" if benign).\n\n` +
+      `Aurora 클러스터에서 운영 이벤트가 기록됐어. **한국어로** 다음 3개 섹션으로 짧고 명확하게 설명해줘:\n` +
+      `1. **무슨 일이 일어났는지** — 한 문장.\n` +
+      `2. **영향** — 무엇이 깨지거나 달라질 수 있는지 (1–2문장, 이 클러스터의 런타임 관점에서 구체적으로).\n` +
+      `3. **권장 조치** — DBA가 지금 취해야 할 구체적인 행동 한 가지 ` +
+      `(영향이 없으면 "조치 불필요"라고 답해줘).\n\n` +
       `Event metadata:\n` +
       `- Cluster: ${clusterId}\n` +
       `- Type: ${event.event_type} (${prettyLabel})\n` +
@@ -162,7 +163,7 @@ export function EventDetailModal({
           <button
             onClick={onClose}
             className="text-zinc-500 hover:text-zinc-200 text-xl leading-none ml-3"
-            aria-label="close"
+            aria-label="닫기"
           >
             ×
           </button>
@@ -177,7 +178,7 @@ export function EventDetailModal({
                 : "border-zinc-800 text-zinc-500 hover:text-zinc-300"
             }`}
           >
-            summary + AI
+            요약 + AI
           </button>
           <button
             onClick={() => setTab("raw")}
@@ -187,7 +188,7 @@ export function EventDetailModal({
                 : "border-zinc-800 text-zinc-500 hover:text-zinc-300"
             }`}
           >
-            raw event
+            원본 이벤트
           </button>
         </div>
 
@@ -197,7 +198,7 @@ export function EventDetailModal({
               {keyFacts.length > 0 && (
                 <div className="mb-4">
                   <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 mb-2">
-                    key facts
+                    주요 정보
                   </div>
                   <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                     {keyFacts.map((f, i) => (
@@ -215,7 +216,7 @@ export function EventDetailModal({
               <div className="border-t border-zinc-800 pt-3">
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
-                    AI analysis
+                    AI 분석
                   </div>
                   <button
                     onClick={handleAnalyze}
@@ -223,10 +224,10 @@ export function EventDetailModal({
                     className="text-xs px-3 py-1 border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 disabled:opacity-50 transition-colors"
                   >
                     {insightLoading
-                      ? "thinking…"
+                      ? "분석 중…"
                       : insight
-                        ? "Re-analyze"
-                        : "Explain + remediate"}
+                        ? "다시 분석"
+                        : "원인 설명 + 조치"}
                   </button>
                 </div>
                 {insightError && (
@@ -236,10 +237,9 @@ export function EventDetailModal({
                 )}
                 {!insight && !insightLoading && !insightError && (
                   <div className="text-xs text-zinc-500">
-                    Click{" "}
-                    <span className="text-sky-300">Explain + remediate</span>{" "}
-                    for what changed, impact, and a single recommended next
-                    step.
+                    <span className="text-sky-300">원인 설명 + 조치</span>{" "}
+                    버튼을 누르면 변경 사항, 영향, 권장 조치 한 가지를 받을 수
+                    있어요.
                   </div>
                 )}
                 {insight && (

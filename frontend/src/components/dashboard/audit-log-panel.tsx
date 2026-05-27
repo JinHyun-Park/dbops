@@ -34,11 +34,11 @@ const STATUS_STYLES: Record<string, string> = {
 function relTime(iso: string) {
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.floor(ms / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
+  if (m < 1) return "방금";
+  if (m < 60) return `${m}분 전`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+  if (h < 24) return `${h}시간 전`;
+  return `${Math.floor(h / 24)}일 전`;
 }
 
 export function AuditLogPanel({ clusterId }: { clusterId: string }) {
@@ -63,7 +63,7 @@ export function AuditLogPanel({ clusterId }: { clusterId: string }) {
             Audit Log
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            DBA-approved actions and changes
+            DBA가 승인한 작업 및 변경 이력
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -74,7 +74,7 @@ export function AuditLogPanel({ clusterId }: { clusterId: string }) {
           >
             {ACTION_TYPES.map((a) => (
               <option key={a} value={a}>
-                {a || "all actions"}
+                {a || "전체 작업"}
               </option>
             ))}
           </select>
@@ -90,28 +90,28 @@ export function AuditLogPanel({ clusterId }: { clusterId: string }) {
         </div>
       </div>
       {loading ? (
-        <div className="p-6 text-zinc-500 text-sm">Loading...</div>
+        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
       ) : entries.length === 0 ? (
-        <div className="p-6 text-zinc-500 text-sm">no audit entries</div>
+        <div className="p-6 text-zinc-500 text-sm">감사 기록이 없습니다</div>
       ) : (
         <div className="max-h-96 overflow-y-auto">
           <table className="w-full text-sm">
             <thead className="bg-zinc-900/50 border-b border-zinc-800 sticky top-0">
               <tr>
                 <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                  When
+                  시각
                 </th>
                 <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                  Action
+                  작업
                 </th>
                 <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                  Requested
+                  요청자
                 </th>
                 <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                  Approved
+                  승인자
                 </th>
                 <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                  Status
+                  상태
                 </th>
                 <th className="text-left px-3 py-2 text-zinc-400 font-medium">
                   SQL

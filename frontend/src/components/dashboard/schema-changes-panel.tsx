@@ -53,7 +53,7 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
             )}
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            tables created, dropped, or with significant row count change
+            테이블 생성·삭제 또는 행 수가 크게 변한 항목
           </div>
         </div>
         <select
@@ -61,17 +61,15 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
           onChange={(e) => setDays(Number(e.target.value))}
           className="bg-zinc-900 border border-zinc-800 text-zinc-200 text-xs rounded px-2 py-1"
         >
-          <option value={1}>last 1 day</option>
-          <option value={7}>last 7 days</option>
-          <option value={30}>last 30 days</option>
+          <option value={1}>최근 1일</option>
+          <option value={7}>최근 7일</option>
+          <option value={30}>최근 30일</option>
         </select>
       </div>
       {loading ? (
-        <div className="p-6 text-zinc-500 text-sm">Loading...</div>
+        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
       ) : changes.length === 0 ? (
-        <div className="p-6 text-zinc-500 text-sm">
-          no schema changes detected
-        </div>
+        <div className="p-6 text-zinc-500 text-sm">감지된 스키마 변경 없음</div>
       ) : (
         <div className="divide-y divide-zinc-700">
           {changes.map((c, i) => {
@@ -105,17 +103,17 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
                     {c.change_type === "created" && (
                       <span
                         className="text-emerald-400"
-                        title={`${fmtExact(current)} rows`}
+                        title={`${fmtExact(current)} 행`}
                       >
-                        {fmtNumber(current)} rows
+                        {fmtNumber(current)} 행
                       </span>
                     )}
                     {c.change_type === "dropped" && (
                       <span
                         className="text-rose-400"
-                        title={`${fmtExact(baseline)} rows lost`}
+                        title={`${fmtExact(baseline)} 행 손실`}
                       >
-                        {fmtNumber(baseline)} rows lost
+                        {fmtNumber(baseline)} 행 손실
                       </span>
                     )}
                     {c.change_type === "changed" && (
@@ -131,7 +129,7 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
                           className={`ml-2 ${
                             delta > 0 ? "text-emerald-400" : "text-rose-400"
                           }`}
-                          title={`delta ${delta > 0 ? "+" : ""}${fmtExact(
+                          title={`증감 ${delta > 0 ? "+" : ""}${fmtExact(
                             delta,
                           )}`}
                         >

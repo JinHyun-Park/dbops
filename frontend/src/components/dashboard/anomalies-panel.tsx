@@ -23,21 +23,21 @@ function n(v: unknown): number {
 }
 
 const METRIC_LABELS: Record<string, string> = {
-  cpu: "CPU utilization",
-  cpu_util: "CPU utilization",
-  cpu_utilization: "CPU utilization",
-  aas: "Active sessions (AAS)",
-  connections: "Active connections",
-  conn: "Active connections",
-  deadlocks: "Deadlocks",
-  blocking_locks: "Blocking locks",
-  storage_size_gb: "Storage size",
-  buffer_cache_hit_ratio: "Buffer cache hit ratio",
-  replication_lag_ms: "Replication lag",
+  cpu: "CPU 사용률",
+  cpu_util: "CPU 사용률",
+  cpu_utilization: "CPU 사용률",
+  aas: "활성 세션 (AAS)",
+  connections: "활성 커넥션",
+  conn: "활성 커넥션",
+  deadlocks: "데드락",
+  blocking_locks: "블로킹 락",
+  storage_size_gb: "스토리지 사용량",
+  buffer_cache_hit_ratio: "버퍼 캐시 적중률",
+  replication_lag_ms: "복제 지연",
 };
 
 function prettyMetric(m: string): string {
-  if (!m) return "metric";
+  if (!m) return "지표";
   return METRIC_LABELS[m.toLowerCase()] || m;
 }
 
@@ -73,15 +73,15 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
           )}
         </div>
         <div className="text-[10px] text-zinc-500">
-          z-score ≥ 2.5 vs 7d baseline
+          z-score ≥ 2.5 (7일 베이스라인 대비)
         </div>
       </div>
       {loading ? (
-        <div className="text-zinc-500 text-sm">Loading...</div>
+        <div className="text-zinc-500 text-sm">불러오는 중…</div>
       ) : items.length === 0 ? (
         <div className="text-emerald-400 text-sm flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-500" />
-          no anomalies in last 4 hours
+          최근 4시간 동안 이상 징후 없음
         </div>
       ) : (
         <div className="space-y-2">
@@ -114,21 +114,21 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
                     {a.mode === "seasonal" ? (
                       <span
                         className="text-[9px] uppercase tracking-wider px-1 py-0.5 border border-emerald-500/40 text-emerald-300 rounded-sm"
-                        title="Compared against this hour-of-week's historical bucket (median + IQR)"
+                        title="요일·시간대별 과거 분포(중앙값 + IQR)와 비교"
                       >
                         seasonal
                       </span>
                     ) : a.mode === "flat" ? (
                       <span
                         className="text-[9px] uppercase tracking-wider px-1 py-0.5 border border-zinc-700 text-zinc-500 rounded-sm"
-                        title="Falling back to flat 7-day mean+stddev — seasonal baseline not yet trained for this bucket"
+                        title="해당 시간대의 seasonal 베이스라인이 아직 학습되지 않아 단순 7일 평균±표준편차로 대체"
                       >
                         flat
                       </span>
                     ) : null}
                   </div>
                   <div className="text-[11px] text-zinc-500">
-                    baseline {n(a.baseline_mean).toFixed(2)} · current max{" "}
+                    베이스라인 {n(a.baseline_mean).toFixed(2)} · 최근 최댓값{" "}
                     <span className="text-zinc-300">
                       {n(a.recent_max).toFixed(2)}
                     </span>
@@ -180,12 +180,12 @@ function AnomalyDetailModal({
     setInsightError(null);
     setInsightLoading(true);
     const message =
-      `An anomaly was detected on our Aurora cluster. Diagnose it in 3 short sections:\n` +
-      `1. **Likely cause** — the most plausible explanation, given the metric and shape ` +
-      `(application workload spike, runaway query, deploy, planner regression, lock storm, etc.).\n` +
-      `2. **Operational impact** — what users / app would currently experience.\n` +
-      `3. **What to investigate next** — one concrete query or MCP tool you'd run to confirm. ` +
-      `If safe, also run that tool yourself and include the finding.\n\n` +
+      `Aurora 클러스터에서 이상 징후가 감지됐어. **한국어로** 다음 3개 섹션으로 짧고 명확하게 진단해줘:\n` +
+      `1. **추정 원인** — 메트릭 종류와 패턴을 보고 가장 그럴듯한 설명 ` +
+      `(애플리케이션 워크로드 급증, 폭주 쿼리, 배포, 플래너 회귀, 락 스톰 등).\n` +
+      `2. **운영 영향** — 지금 사용자나 애플리케이션이 어떤 경험을 하고 있을지.\n` +
+      `3. **다음 점검 단계** — 원인을 확정하기 위해 실행할 구체적인 쿼리 1건 또는 MCP 도구 1개. ` +
+      `안전하다면 직접 실행해서 결과까지 포함해줘.\n\n` +
       `Cluster: ${clusterId}\n` +
       `Metric: ${anomaly.metric_type} (${prettyLabel})\n` +
       `Recent window max: ${recentMax}\n` +
@@ -230,7 +230,7 @@ function AnomalyDetailModal({
               <span
                 className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${sevBadge}`}
               >
-                anomaly · σ{z.toFixed(1)}
+                이상 징후 · σ{z.toFixed(1)}
               </span>
               <span className="text-[10px] text-zinc-500 font-mono">
                 {anomaly.metric_type}
@@ -240,14 +240,15 @@ function AnomalyDetailModal({
               {prettyLabel}
             </h2>
             <div className="text-xs text-zinc-400 mt-1">
-              baseline {baseline.toFixed(2)} ± {stddev.toFixed(2)} · current max{" "}
+              베이스라인 {baseline.toFixed(2)} ± {stddev.toFixed(2)} · 최근
+              최댓값{" "}
               <span className="text-zinc-200">{recentMax.toFixed(2)}</span>
             </div>
           </div>
           <button
             onClick={onClose}
             className="text-zinc-500 hover:text-zinc-200 text-xl leading-none ml-3"
-            aria-label="close"
+            aria-label="닫기"
           >
             ×
           </button>
@@ -256,19 +257,19 @@ function AnomalyDetailModal({
         <div className="flex-1 overflow-y-auto px-5 py-4">
           <div className="grid grid-cols-2 gap-3 mb-4">
             <Stat
-              label="Recent max"
+              label="최근 최댓값"
               value={recentMax.toFixed(2)}
               tone={sevTone}
             />
-            <Stat label="Recent avg" value={recentAvg.toFixed(2)} />
-            <Stat label="Baseline mean" value={baseline.toFixed(2)} />
-            <Stat label="Baseline σ" value={stddev.toFixed(2)} />
+            <Stat label="최근 평균" value={recentAvg.toFixed(2)} />
+            <Stat label="베이스라인 평균" value={baseline.toFixed(2)} />
+            <Stat label="베이스라인 σ" value={stddev.toFixed(2)} />
           </div>
 
           <div className="border-t border-zinc-800 pt-3">
             <div className="flex items-center justify-between mb-2">
               <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
-                AI diagnosis
+                AI 진단
               </div>
               <button
                 onClick={handleAnalyze}
@@ -276,10 +277,10 @@ function AnomalyDetailModal({
                 className="text-xs px-3 py-1 border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 disabled:opacity-50 transition-colors"
               >
                 {insightLoading
-                  ? "thinking…"
+                  ? "분석 중…"
                   : insight
-                    ? "Re-analyze"
-                    : "Diagnose + suggest probe"}
+                    ? "다시 진단"
+                    : "원인 진단 + 다음 점검"}
               </button>
             </div>
             {insightError && (
@@ -289,9 +290,9 @@ function AnomalyDetailModal({
             )}
             {!insight && !insightLoading && !insightError && (
               <div className="text-xs text-zinc-500">
-                Click{" "}
-                <span className="text-sky-300">Diagnose + suggest probe</span>{" "}
-                for likely cause, impact, and a specific next check.
+                <span className="text-sky-300">원인 진단 + 다음 점검</span>{" "}
+                버튼을 누르면 추정 원인, 운영 영향, 다음 점검 단계를 한 번에
+                받아볼 수 있어요.
               </div>
             )}
             {insight && (

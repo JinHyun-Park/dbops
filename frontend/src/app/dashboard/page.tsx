@@ -226,7 +226,7 @@ export default function DashboardPage() {
 
       {selectedCluster && !dashboardData && !error && (
         <div className="mt-6 text-zinc-500">
-          Loading metrics for {selectedCluster}...
+          {selectedCluster} 메트릭 불러오는 중…
         </div>
       )}
 
@@ -247,7 +247,7 @@ export default function DashboardPage() {
                     <div className="flex items-center gap-2">
                       <span
                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 border text-[11px] font-mono uppercase tracking-wider ${badge.classes}`}
-                        title={`Engine: ${eng || "unknown"}`}
+                        title={`엔진: ${eng || "unknown"}`}
                       >
                         <span
                           className={`w-1.5 h-1.5 rounded-full ${badge.accent}`}

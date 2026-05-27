@@ -36,14 +36,14 @@ function safeJSON(s: string): Record<string, unknown> | null {
 }
 
 function relDays(iso: string | null) {
-  if (!iso) return "never";
+  if (!iso) return "없음";
   const ms = Date.now() - new Date(iso).getTime();
   const d = Math.floor(ms / 86400000);
   if (d < 1) {
     const h = Math.floor(ms / 3600000);
-    return h < 1 ? "<1h" : `${h}h ago`;
+    return h < 1 ? "<1시간" : `${h}시간 전`;
   }
-  return `${d}d ago`;
+  return `${d}일 전`;
 }
 
 export function VacuumPanel({ clusterId }: { clusterId: string }) {
@@ -101,14 +101,14 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
           Vacuum & Bloat
         </div>
         <div className="text-[11px] text-zinc-500 mt-0.5">
-          tables sorted by bloat ratio (dead / total tuples)
+          bloat 비율(dead / 전체 튜플) 내림차순 정렬
         </div>
       </div>
       {loading ? (
-        <div className="p-6 text-zinc-500 text-sm">Loading...</div>
+        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
       ) : tables.length === 0 ? (
         <div className="p-6 text-zinc-500 text-sm">
-          no table stats (PG only, runs every 5min)
+          테이블 통계 없음 (PG 전용 · 5분 주기 수집)
         </div>
       ) : (
         <div className="max-h-96 overflow-y-auto">
@@ -120,31 +120,31 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="Live tuples (n_live_tup from pg_stat_user_tables)"
+                  title="Live tuples (pg_stat_user_tables.n_live_tup)"
                 >
                   Live rows
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="Dead tuples — unreclaimed row versions waiting for VACUUM"
+                  title="Dead tuples — VACUUM 대상으로 남아 있는 미회수 행 버전"
                 >
                   Dead rows
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="Dead ÷ (live + dead). >30% = significant bloat, schedule VACUUM"
+                  title="Dead ÷ (live + dead). 30% 초과 시 bloat 심각 — VACUUM 권장"
                 >
                   Dead / total
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="age(relfrozenxid) — transactions since the table was last FREEZEd. 200M = warn, 1.5B = wraparound risk"
+                  title="age(relfrozenxid) — 마지막 FREEZE 이후 트랜잭션 수. 2억 = 경고, 15억 = wraparound 위험"
                 >
                   TXID age
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="Time since last autovacuum or manual VACUUM"
+                  title="마지막 autovacuum 또는 수동 VACUUM 이후 경과 시간"
                 >
                   Last vacuum
                 </th>

@@ -131,9 +131,9 @@ export function SettingsPanel({
         {engineLabel} Configuration
       </div>
       {loading ? (
-        <div className="text-zinc-500 text-sm">Loading...</div>
+        <div className="text-zinc-500 text-sm">불러오는 중…</div>
       ) : settings.length === 0 ? (
-        <div className="text-zinc-500 text-sm">no settings collected</div>
+        <div className="text-zinc-500 text-sm">수집된 설정이 없습니다</div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {settings.map((s) => {

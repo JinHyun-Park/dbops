@@ -93,11 +93,11 @@ export function QueryDetailModal({
             {latest && (
               <Link
                 href={`/chat?prompt=${encodeURIComponent(
-                  `Run EXPLAIN (FORMAT JSON) on this query for cluster ${clusterId} and summarize the plan, highlight the most expensive node, and suggest improvements:\n\n${latest.query_text}`,
+                  `클러스터 ${clusterId}에서 다음 쿼리에 대해 EXPLAIN (FORMAT JSON)을 실행하고, **한국어로** 실행 계획을 요약 + 가장 비싼 노드 강조 + 개선안을 제안해줘:\n\n${latest.query_text}`,
                 )}`}
                 className="text-xs bg-sky-600 hover:bg-sky-500 text-white rounded px-3 py-1.5 transition"
               >
-                Analyze in Chat
+                Chat에서 분석
               </Link>
             )}
             <button
@@ -111,11 +111,11 @@ export function QueryDetailModal({
 
         <div className="overflow-y-auto p-6 space-y-6">
           {loading ? (
-            <div className="text-zinc-500 text-sm">Loading...</div>
+            <div className="text-zinc-500 text-sm">불러오는 중…</div>
           ) : err ? (
             <div className="text-red-400 text-sm">{err}</div>
           ) : !latest ? (
-            <div className="text-zinc-500 text-sm">No snapshots</div>
+            <div className="text-zinc-500 text-sm">스냅샷 없음</div>
           ) : (
             <>
               <div>

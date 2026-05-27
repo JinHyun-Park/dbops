@@ -8,7 +8,7 @@ export function AasChart({ data }: AasChartProps) {
   if (data.length === 0) {
     return (
       <div className="bg-zinc-900/50 border border-zinc-800 p-8 text-center text-zinc-500">
-        No metrics data available
+        메트릭 데이터가 없습니다
       </div>
     );
   }

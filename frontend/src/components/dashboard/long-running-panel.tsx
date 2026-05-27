@@ -53,15 +53,13 @@ export function LongRunningPanel({ clusterId }: { clusterId: string }) {
           Long Running Queries
         </div>
         <div className="text-[11px] text-zinc-500 mt-0.5">
-          active queries running &gt; 5 seconds (last 15 minutes)
+          5초 이상 실행 중인 활성 쿼리 (최근 15분)
         </div>
       </div>
       {loading ? (
-        <div className="p-6 text-zinc-500 text-sm">Loading...</div>
+        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
       ) : items.length === 0 ? (
-        <div className="p-6 text-zinc-500 text-sm">
-          no long-running queries detected
-        </div>
+        <div className="p-6 text-zinc-500 text-sm">장기 실행 쿼리 없음</div>
       ) : (
         <div className="max-h-96 overflow-y-auto">
           <table className="w-full text-sm">

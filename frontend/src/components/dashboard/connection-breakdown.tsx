@@ -137,7 +137,7 @@ export function ConnectionBreakdown({
                       ? "text-amber-400 font-mono tabular-nums"
                       : "text-emerald-400 font-mono tabular-nums"
                 }
-                title={`${total} of ${maxConn} max_connections`}
+                title={`max_connections ${maxConn} 중 ${total}개 사용`}
               >
                 {((total / maxConn) * 100).toFixed(0)}%
               </span>
@@ -169,11 +169,11 @@ export function ConnectionBreakdown({
       <div className="h-56">
         {loading ? (
           <div className="text-xs text-zinc-500 flex items-center h-full">
-            Loading...
+            불러오는 중…
           </div>
         ) : data.length === 0 ? (
           <div className="text-xs text-zinc-500 flex items-center h-full">
-            no connection data yet
+            아직 커넥션 데이터 없음
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">

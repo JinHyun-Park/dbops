@@ -129,11 +129,11 @@ export function MaintenanceHealthPanel({
             </div>
             <div className="text-[11px] text-zinc-500 mt-0.5">
               {pgOnly
-                ? "PostgreSQL-only signals. MySQL parity coming in a follow-up."
-                : "Ranked findings a DBA should act on. Click a row for AI-assisted remediation."}
+                ? "PostgreSQL 전용 신호입니다. MySQL 지원은 후속 작업에서 추가됩니다."
+                : "DBA가 조치할 항목을 심각도 순으로 정렬했어요. 행을 클릭하면 AI가 조치를 제안합니다."}
               {snapshotTime && !pgOnly && (
                 <span className="ml-2 text-zinc-600">
-                  · refreshed {fmtRelative(snapshotTime)}
+                  · {fmtRelative(snapshotTime)} 갱신
                 </span>
               )}
             </div>
@@ -177,15 +177,15 @@ export function MaintenanceHealthPanel({
       </div>
 
       {loading ? (
-        <div className="p-6 text-zinc-500 text-sm">Loading…</div>
+        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
       ) : filtered.length === 0 ? (
         <div className="p-6 text-emerald-400 text-sm flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-500" />
           {tab === "All"
             ? pgOnly
-              ? "no maintenance findings yet for this engine"
-              : "no findings — cluster looks healthy 🎉"
-            : `nothing flagged under ${tab}`}
+              ? "이 엔진에서는 아직 수집된 유지보수 항목이 없어요"
+              : "발견된 이슈가 없어요 — 클러스터 상태 양호 🎉"
+            : `${tab} 카테고리에 해당하는 항목이 없어요`}
         </div>
       ) : (
         <div className="max-h-[28rem] overflow-y-auto divide-y divide-zinc-800">
@@ -264,10 +264,10 @@ function FindingDetailModal({
     setLoading(true);
     const detailJson = JSON.stringify(details ?? {}, null, 2);
     const message =
-      `You are a senior PostgreSQL DBA. Explain the following maintenance finding in 3 short sections:\n` +
-      `1. **Why it matters** — one sentence on operational risk.\n` +
-      `2. **Concrete fix** — exact command(s) or parameter changes. Include the schema.table name.\n` +
-      `3. **How to verify** — one query or check that confirms the fix landed.\n\n` +
+      `너는 시니어 PostgreSQL DBA야. 아래 유지보수 항목을 **한국어로** 다음 3개 섹션으로 짧고 명확하게 설명해줘:\n` +
+      `1. **왜 중요한지** — 운영 리스크 한 문장.\n` +
+      `2. **구체적 조치** — 실행해야 할 정확한 명령어 또는 파라미터 변경. schema.table 이름까지 포함해.\n` +
+      `3. **검증 방법** — 조치가 반영됐는지 확인할 쿼리나 점검 한 가지.\n\n` +
       `Cluster: ${clusterId}\n` +
       `Check: ${finding.check_type} (${finding.severity})\n` +
       `Subject: ${finding.subject}\n` +
@@ -323,7 +323,7 @@ function FindingDetailModal({
           <button
             onClick={onClose}
             className="text-zinc-500 hover:text-zinc-200 text-xl leading-none ml-3"
-            aria-label="close"
+            aria-label="닫기"
           >
             ×
           </button>
@@ -332,7 +332,7 @@ function FindingDetailModal({
         <div className="flex-1 overflow-y-auto px-5 py-4">
           <div className="mb-4">
             <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 mb-1">
-              initial recommendation
+              초기 권장 조치
             </div>
             <div className="text-sm text-zinc-200">
               {finding.recommendation}
@@ -342,7 +342,7 @@ function FindingDetailModal({
           {details && Object.keys(details).length > 0 && (
             <div className="mb-4">
               <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 mb-1">
-                context
+                상세 컨텍스트
               </div>
               <pre className="text-[11px] font-mono text-zinc-400 bg-zinc-950 border border-zinc-800 px-3 py-2 overflow-auto">
                 {JSON.stringify(details, null, 2)}
@@ -353,18 +353,14 @@ function FindingDetailModal({
           <div className="border-t border-zinc-800 pt-3">
             <div className="flex items-center justify-between mb-2">
               <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
-                AI remediation
+                AI 조치 제안
               </div>
               <button
                 onClick={handleAnalyze}
                 disabled={loading}
                 className="text-xs px-3 py-1 border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 disabled:opacity-50 transition-colors"
               >
-                {loading
-                  ? "thinking…"
-                  : insight
-                    ? "Re-analyze"
-                    : "Explain + fix"}
+                {loading ? "분석 중…" : insight ? "다시 분석" : "원인 + 조치"}
               </button>
             </div>
             {error && (
@@ -374,8 +370,8 @@ function FindingDetailModal({
             )}
             {!insight && !loading && !error && (
               <div className="text-xs text-zinc-500">
-                Click <span className="text-sky-300">Explain + fix</span> for
-                risk + exact command + verification check.
+                <span className="text-sky-300">원인 + 조치</span> 버튼을 누르면
+                리스크 설명 + 정확한 명령어 + 검증 방법을 받아볼 수 있어요.
               </div>
             )}
             {insight && (

@@ -47,7 +47,7 @@ export function ExtensionsCard({
         <div className="text-xs text-zinc-400 uppercase tracking-wider mb-2">
           Extensions
         </div>
-        <div className="text-xs text-zinc-500">PostgreSQL-only.</div>
+        <div className="text-xs text-zinc-500">PostgreSQL 전용 패널입니다.</div>
       </div>
     );
   }
@@ -75,7 +75,7 @@ export function ExtensionsCard({
       </div>
 
       {loading ? (
-        <div className="text-zinc-500 text-sm">Loading…</div>
+        <div className="text-zinc-500 text-sm">불러오는 중…</div>
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">

@@ -89,15 +89,15 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
             Table Sizes
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            total {fmtBytes(totalBytes)} across {tables.length} tables (top 30)
+            전체 {fmtBytes(totalBytes)} · {tables.length}개 테이블 (상위 30)
           </div>
         </div>
       </div>
       {loading ? (
-        <div className="p-6 text-zinc-500 text-sm">Loading...</div>
+        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
       ) : tables.length === 0 ? (
         <div className="p-6 text-zinc-500 text-sm">
-          no table size data yet (PG only, next ETL run will include sizes)
+          아직 테이블 크기 데이터 없음 (PG 전용 · 다음 ETL 사이클에서 수집)
         </div>
       ) : (
         <div className="max-h-96 overflow-y-auto">
@@ -109,31 +109,31 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                 </th>
                 <th
                   className="text-right px-3 py-2 text-zinc-400 font-medium"
-                  title="Estimated live row count (pg_stat_user_tables.n_live_tup)"
+                  title="추정 live 행 수 (pg_stat_user_tables.n_live_tup)"
                 >
                   Rows
                 </th>
                 <th
                   className="text-right px-3 py-2 text-zinc-400 font-medium"
-                  title="On-disk heap (table data without indexes/TOAST)"
+                  title="디스크상 heap 크기 (인덱스/TOAST 제외)"
                 >
                   Heap
                 </th>
                 <th
                   className="text-right px-3 py-2 text-zinc-400 font-medium"
-                  title="Combined size of all indexes on this table"
+                  title="이 테이블의 모든 인덱스 크기 합계"
                 >
                   Indexes
                 </th>
                 <th
                   className="text-right px-3 py-2 text-zinc-400 font-medium"
-                  title="Heap + indexes + TOAST"
+                  title="Heap + 인덱스 + TOAST"
                 >
                   Total
                 </th>
                 <th
                   className="text-right px-3 py-2 text-zinc-400 font-medium"
-                  title="Index bytes ÷ total bytes for this row. >50% means indexes are bigger than the heap — review for redundant indexes."
+                  title="인덱스 크기 ÷ 전체 크기. 50%를 넘으면 인덱스가 heap보다 큰 상태 — 중복 인덱스 검토 필요."
                 >
                   Indexes / total
                 </th>
@@ -153,7 +153,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                     <tr
                       className="hover:bg-zinc-900/40 relative cursor-pointer"
                       onClick={() => toggleExpand(t.schema_name, t.table_name)}
-                      title="Click to view indexes on this table"
+                      title="클릭해서 이 테이블의 인덱스 보기"
                     >
                       <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
                         <span className="text-zinc-500 mr-1.5 inline-block w-3">
@@ -210,7 +210,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                           </div>
                           {expand?.loading && (
                             <div className="text-xs text-zinc-500">
-                              Loading…
+                              불러오는 중…
                             </div>
                           )}
                           {expand?.error && (
@@ -220,7 +220,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                           )}
                           {expand?.indexes && expand.indexes.length === 0 && (
                             <div className="text-xs text-zinc-500">
-                              no indexes (table is heap-only)
+                              인덱스 없음 (heap 전용 테이블)
                             </div>
                           )}
                           {expand?.indexes && expand.indexes.length > 0 && (
@@ -235,13 +235,13 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                                   </th>
                                   <th
                                     className="text-right py-1 px-3 font-medium"
-                                    title="Times this index was used to satisfy a query (pg_stat_user_indexes.idx_scan)"
+                                    title="이 인덱스가 쿼리에서 사용된 횟수 (pg_stat_user_indexes.idx_scan)"
                                   >
                                     Scans
                                   </th>
                                   <th
                                     className="text-right py-1 pl-3 font-medium"
-                                    title="Disk size of the index"
+                                    title="인덱스 디스크 크기"
                                   >
                                     Size
                                   </th>
@@ -259,7 +259,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                                         {idx.is_primary && (
                                           <span
                                             className="text-[9px] px-1 py-0.5 border border-amber-500/40 text-amber-300 rounded-sm"
-                                            title="primary key"
+                                            title="기본 키"
                                           >
                                             PK
                                           </span>
@@ -267,7 +267,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                                         {!idx.is_primary && idx.is_unique && (
                                           <span
                                             className="text-[9px] px-1 py-0.5 border border-sky-500/40 text-sky-300 rounded-sm"
-                                            title="unique index"
+                                            title="유니크 인덱스"
                                           >
                                             UQ
                                           </span>
@@ -275,7 +275,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                                         {!idx.is_valid && (
                                           <span
                                             className="text-[9px] px-1 py-0.5 border border-rose-500/40 text-rose-300 rounded-sm"
-                                            title="index is INVALID (concurrent build failed?)"
+                                            title="유효하지 않은 인덱스 (CONCURRENT 빌드 실패 등)"
                                           >
                                             !
                                           </span>
@@ -283,7 +283,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                                         {idx.idx_scan === 0 && (
                                           <span
                                             className="text-[9px] px-1 py-0.5 border border-zinc-700 text-zinc-500 rounded-sm"
-                                            title="never used since stats reset — candidate for DROP"
+                                            title="통계 리셋 이후 한 번도 사용 안 됨 — DROP 후보"
                                           >
                                             unused
                                           </span>

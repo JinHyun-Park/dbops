@@ -227,7 +227,7 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
             )}
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            transactions blocked by other locks (last 15 minutes)
+            다른 락에 의해 대기 중인 트랜잭션 (최근 15분)
           </div>
         </div>
         {locks.length > 0 && (
@@ -239,7 +239,7 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
                   ? "bg-zinc-800 text-zinc-100"
                   : "text-zinc-500 hover:text-zinc-200"
               }`}
-              title="Flat list — one row per (blocked, blocker) pair"
+              title="평면 목록 — (대기, 보유) 쌍을 한 행씩"
             >
               list
             </button>
@@ -250,7 +250,7 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
                   ? "bg-zinc-800 text-zinc-100"
                   : "text-zinc-500 hover:text-zinc-200"
               }`}
-              title="Dependency chain — root holders → waiters, recursive"
+              title="의존성 체인 — 루트 보유자 → 대기자, 재귀 구조"
             >
               chain
             </button>
@@ -258,18 +258,18 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
         )}
       </div>
       {loading ? (
-        <div className="p-6 text-zinc-500 text-sm">Loading...</div>
+        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
       ) : locks.length === 0 ? (
         <div className="p-6 text-emerald-400 text-sm flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-500" />
-          no blocking locks detected
+          블로킹 락 없음
         </div>
       ) : view === "chain" ? (
         <div className="max-h-[28rem] overflow-y-auto py-2">
           {graph.roots.length === 0 ? (
             <div className="p-6 text-zinc-500 text-sm">
-              cyclic deadlock detected — no clear root holder. See list view for
-              raw edges.
+              순환 데드락 감지 — 명확한 루트 보유자가 없습니다. 원본 엣지는 목록
+              뷰에서 확인하세요.
             </div>
           ) : (
             graph.roots.map((rootPid) => (

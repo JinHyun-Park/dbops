@@ -129,7 +129,7 @@ export function TimeseriesChart({
             {title}
           </div>
           <div className="text-xs text-zinc-500">
-            peak: {displayMax}
+            최대: {displayMax}
             {unit ? ` ${unit}` : ""}
           </div>
         </div>
@@ -140,7 +140,7 @@ export function TimeseriesChart({
         <div className="h-32">
           {loading ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              Loading...
+              불러오는 중…
             </div>
           ) : err ? (
             <div className="text-xs text-red-400 flex items-center h-full">
@@ -148,7 +148,7 @@ export function TimeseriesChart({
             </div>
           ) : data.length === 0 ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              no data
+              데이터 없음
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -279,7 +279,7 @@ function StackedAreaChart({
             {title}
           </div>
           <div className="text-xs text-zinc-500">
-            peak: {max.toFixed(2)}
+            최대: {max.toFixed(2)}
             {unit ? ` ${unit}` : ""}
           </div>
         </div>
@@ -290,7 +290,7 @@ function StackedAreaChart({
         <div className="h-64">
           {loading ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              Loading...
+              불러오는 중…
             </div>
           ) : err ? (
             <div className="text-xs text-red-400 flex items-center h-full">
@@ -298,7 +298,7 @@ function StackedAreaChart({
             </div>
           ) : data.length === 0 ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              no data
+              데이터 없음
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
