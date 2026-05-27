@@ -18,6 +18,7 @@ import { SettingsPanel } from "@/components/dashboard/settings-panel";
 import { SchemaChangesPanel } from "@/components/dashboard/schema-changes-panel";
 import { AnomaliesPanel } from "@/components/dashboard/anomalies-panel";
 import { AuditLogPanel } from "@/components/dashboard/audit-log-panel";
+import { LogInsightsPanel } from "@/components/dashboard/log-insights-panel";
 import { TableSizesPanel } from "@/components/dashboard/table-sizes-panel";
 import { BackupPanel } from "@/components/dashboard/backup-panel";
 import {
@@ -599,6 +600,8 @@ export default function DashboardPage() {
           />
 
           <AuditLogPanel clusterId={selectedCluster} />
+
+          <LogInsightsPanel clusterId={selectedCluster} />
         </div>
       )}
     </PageBody>

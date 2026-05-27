@@ -768,6 +768,110 @@ def _wait_events(query, cluster_id, hours):
     return {"cluster_id": cluster_id, "hours": hours, "wait_events": rows}
 
 
+# PG log filter patterns per category. The model that drives the AI panel
+# can already query CloudWatch Logs through the search_logs MCP tool, but a
+# pre-categorized dashboard panel is what DBAs actually scan — pganalyze /
+# Datadog DBM ship the same shape (Log Insights / Database Logs).
+_LOG_CATEGORY_FILTERS = {
+    "slow": "filter @message like /duration: [0-9.]+ ms/",
+    "vacuum": (
+        "filter @message like /automatic vacuum/ or @message like "
+        "/automatic analyze/"
+    ),
+    "error": (
+        "filter @message like /ERROR:/ or @message like /FATAL:/ or "
+        "@message like /PANIC:/"
+    ),
+    "connection": (
+        "filter @message like /connection received/ or @message like "
+        "/connection authorized/ or @message like /disconnection:/"
+    ),
+}
+
+
+def _log_insights(cluster_id, hours, category):
+    """Run a CloudWatch Logs Insights query for one category of PG logs.
+
+    Returns the most recent matching entries (raw @timestamp + @message) so
+    the frontend can render them as a feed. We deliberately do NOT pre-
+    aggregate into time-buckets here — DBAs reach for log insights when
+    they want to see the actual line, not a count. Tight default cap (100
+    entries) keeps CW Insights scan cost predictable."""
+    import time
+
+    log_group = f"/aws/rds/cluster/{cluster_id}/postgresql"
+    client = boto3.client("logs")
+
+    if category not in _LOG_CATEGORY_FILTERS and category != "all":
+        category = "all"
+
+    if category == "all":
+        query_string = (
+            "fields @timestamp, @message | sort @timestamp desc | limit 100"
+        )
+    else:
+        query_string = (
+            f"fields @timestamp, @message | {_LOG_CATEGORY_FILTERS[category]} "
+            f"| sort @timestamp desc | limit 100"
+        )
+
+    base_result = {
+        "cluster_id": cluster_id,
+        "category": category,
+        "hours": hours,
+        "log_group": log_group,
+        "entries": [],
+        "count": 0,
+    }
+
+    try:
+        resp = client.start_query(
+            logGroupName=log_group,
+            startTime=int((time.time() - hours * 3600) * 1000),
+            endTime=int(time.time() * 1000),
+            # CloudWatch Logs Insights does not accept SQL-style comments;
+            # the source-tagging convention applies only to SQL queries.
+            queryString=query_string,
+        )
+    except client.exceptions.ResourceNotFoundException:
+        return {
+            **base_result,
+            "error": (
+                f"Log group {log_group} not found — enable PostgreSQL log "
+                "exports on the cluster (parameter group + Modify cluster → "
+                "Logs)."
+            ),
+        }
+    except Exception as e:
+        return {**base_result, "error": str(e)}
+
+    qid = resp["queryId"]
+    for _ in range(25):  # ~25s budget — Lambda timeout is 30s
+        r = client.get_query_results(queryId=qid)
+        status = r.get("status")
+        if status == "Complete":
+            rows = r.get("results", []) or []
+            entries = []
+            for row in rows:
+                fields = {f["field"]: f["value"] for f in row}
+                entries.append(
+                    {
+                        "ts": fields.get("@timestamp"),
+                        "message": fields.get("@message", ""),
+                    }
+                )
+            return {
+                **base_result,
+                "entries": entries,
+                "count": len(entries),
+            }
+        if status in ("Failed", "Cancelled"):
+            return {**base_result, "error": f"query {status.lower()}"}
+        time.sleep(1)
+
+    return {**base_result, "error": "query timed out — try a smaller hours window"}
+
+
 def lambda_handler(event, context):
     _set_origin(event)
     raw_path_early = event.get("rawPath") or event.get("path") or ""
@@ -873,6 +977,10 @@ def lambda_handler(event, context):
         if raw_path.endswith("/index-recommendations"):
             min_ratio = _parse_float(qs.get("min_seq_ratio"), 0.5)
             return _response(200, _index_recommendations(query, cluster_id, min_ratio))
+        if raw_path.endswith("/log-insights"):
+            hours = _parse_int(qs.get("hours"), 1, min_v=1, max_v=24)
+            category = (qs.get("category") or "all").strip()
+            return _response(200, _log_insights(cluster_id, hours, category))
         return _response(200, _overview(query, cluster_id))
     except Exception:
         print(f"Dashboard error: {traceback.format_exc()}")

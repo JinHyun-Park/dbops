@@ -243,6 +243,27 @@ class AgentStack(cdk.Stack):
             ],
             resources=["*"],
         ))
+        # PG Log Insights panel hits CloudWatch Logs Insights directly via
+        # start_query / get_query_results. Scoped to /aws/rds/cluster/* so
+        # the panel can't read unrelated log groups even if cluster_id is
+        # spoofed in the URL.
+        dashboard_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "logs:StartQuery",
+                "logs:GetQueryResults",
+                "logs:StopQuery",
+            ],
+            resources=[
+                "arn:aws:logs:*:*:log-group:/aws/rds/cluster/*",
+                "arn:aws:logs:*:*:log-group:/aws/rds/cluster/*:*",
+            ],
+        ))
+        # DescribeLogGroups is unscoped (AWS limitation — Insights queries
+        # need it to validate group existence before scanning).
+        dashboard_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["logs:DescribeLogGroups"],
+            resources=["*"],
+        ))
 
         clusters_lambda = lambda_.Function(
             self, "ClustersApi",

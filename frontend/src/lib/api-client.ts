@@ -340,6 +340,34 @@ export async function fetchAuditLog(
   return res.json();
 }
 
+export type LogCategory = "all" | "slow" | "vacuum" | "error" | "connection";
+
+export interface LogInsightsResponse {
+  cluster_id: string;
+  category: LogCategory;
+  hours: number;
+  log_group: string;
+  count: number;
+  entries: { ts: string; message: string }[];
+  error?: string;
+}
+
+export async function fetchLogInsights(
+  clusterId: string,
+  category: LogCategory = "all",
+  hours = 1,
+): Promise<LogInsightsResponse> {
+  const res = await fetch(
+    await api(
+      `/api/dashboard/${enc(clusterId)}/log-insights?category=${enc(
+        category,
+      )}&hours=${hours}`,
+    ),
+  );
+  if (!res.ok) throw new Error(`Log insights fetch failed: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchMultiClusterOverview() {
   const res = await fetch(await api(`/api/multi-cluster/overview`));
   if (!res.ok)
