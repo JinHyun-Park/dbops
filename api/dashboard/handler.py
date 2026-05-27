@@ -675,6 +675,36 @@ def _batch_timeseries(
     return {**base_meta, "series": series}
 
 
+def _registered_cluster_ids() -> set[str] | None:
+    """Return the set of cluster_ids currently in the DDB registry, or None
+    if the registry is unreachable / not configured.
+
+    Fleet reads cluster_meta from the PG cache, which can drift from the
+    DDB registry — e.g. an old ETL run wrote a row that was never followed
+    up by a Clusters page registration, or a row whose registration was
+    deleted but whose cache snapshots survived. Filtering Fleet output by
+    the registry hides those ghosts."""
+    if not _CLUSTERS_TABLE_NAME:
+        return None
+    try:
+        tbl = boto3.resource("dynamodb").Table(_CLUSTERS_TABLE_NAME)
+        ids: set[str] = set()
+        kwargs: dict = {"ProjectionExpression": "cluster_id"}
+        while True:
+            resp = tbl.scan(**kwargs)
+            for item in resp.get("Items", []):
+                cid = item.get("cluster_id")
+                if cid:
+                    ids.add(cid)
+            last = resp.get("LastEvaluatedKey")
+            if not last:
+                return ids
+            kwargs["ExclusiveStartKey"] = last
+    except Exception as e:
+        print(f"[dashboard] registered cluster scan failed: {e}")
+        return None
+
+
 def _multi_cluster_overview(query):
     rows = query(
         "WITH latest_metrics AS ("
@@ -712,6 +742,14 @@ def _multi_cluster_overview(query):
         "LEFT JOIN lock_count l USING (cluster_id) "
         "ORDER BY m.cluster_id"
     )
+    # Filter out rows whose cluster_id isn't in the DDB registry. The PG
+    # cache can carry orphans from old ETL runs or deleted registrations;
+    # the DDB table is the source of truth for "what the operator considers
+    # an active cluster." On registry-fetch failure we leave the list
+    # unfiltered so a transient DDB outage doesn't blank out Fleet.
+    registered = _registered_cluster_ids()
+    if registered is not None:
+        rows = [r for r in rows if r.get("cluster_id") in registered]
     return {"clusters": rows}
 
 
