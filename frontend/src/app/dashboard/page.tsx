@@ -11,6 +11,7 @@ import { VacuumPanel } from "@/components/dashboard/vacuum-panel";
 import { MaintenanceHealthPanel } from "@/components/dashboard/maintenance-health-panel";
 import { ExtensionsCard } from "@/components/dashboard/extensions-card";
 import { IndexRecsPanel } from "@/components/dashboard/index-recs-panel";
+import { RedundantIndexesPanel } from "@/components/dashboard/redundant-indexes-panel";
 import { LongRunningPanel } from "@/components/dashboard/long-running-panel";
 import { ConnectionBreakdown } from "@/components/dashboard/connection-breakdown";
 import { LocksPanel } from "@/components/dashboard/locks-panel";
@@ -697,6 +698,8 @@ export default function DashboardPage() {
               <VacuumPanel clusterId={selectedCluster} />
             )}
             <IndexRecsPanel clusterId={selectedCluster} />
+
+            <RedundantIndexesPanel clusterId={selectedCluster} />
           </div>
 
           <TableSizesPanel clusterId={selectedCluster} />

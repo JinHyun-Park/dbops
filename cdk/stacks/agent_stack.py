@@ -410,6 +410,13 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardCapacityForecastIntegration", dashboard_lambda),
         )
+        # Redundant / prefix-covered / unused indexes (live pg_index query
+        # via Data API). PG-only for v1.
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/redundant-indexes",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardRedundantIndexesIntegration", dashboard_lambda),
+        )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/settings",
             methods=[apigwv2.HttpMethod.GET],

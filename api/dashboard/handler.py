@@ -83,6 +83,168 @@ def _lookup_cluster(cluster_id: str) -> dict:
         return {}
 
 
+def _redundant_indexes(cluster_id: str) -> dict:
+    """Find PG indexes that can likely be dropped — prefix-covered, exact
+    duplicates, or unused (idx_scan = 0 and not constraint-backing).
+
+    pganalyze ships this as the "Index Advisor / Redundant Indexes" panel.
+    Same idea here: catch the easy wasted disk + write amplification before
+    a DBA goes through `pg_stat_user_indexes` by hand. PG-only for v1 —
+    MySQL exposes a different index shape and the planner heuristics are
+    different enough that we don't share logic."""
+    cluster = _lookup_cluster(cluster_id)
+    if not cluster:
+        return {"error": f"cluster {cluster_id!r} not registered", "candidates": []}
+    cluster_arn = cluster.get("cluster_arn")
+    secret_arn = cluster.get("secret_arn")
+    db_name = cluster.get("db_name") or "postgres"
+    engine = (cluster.get("engine") or "").lower()
+    if not cluster_arn or not secret_arn:
+        return {"error": "cluster registry missing cluster_arn/secret_arn", "candidates": []}
+    if "mysql" in engine:
+        return {
+            "cluster_id": cluster_id,
+            "engine": engine,
+            "candidates": [],
+            "info": "MySQL은 v1에서 지원하지 않습니다 — PostgreSQL 클러스터에서 사용하세요.",
+        }
+
+    # One round trip per cluster — pull every valid user index with its
+    # ordered column list, size, and scan count. WITH ORDINALITY preserves
+    # the column order so a (a,b) prefix can be distinguished from (b,a).
+    sql = (
+        "SELECT "
+        "  n.nspname AS schema_name, "
+        "  c.relname AS table_name, "
+        "  ic.relname AS index_name, "
+        "  pg_get_indexdef(i.indexrelid) AS definition, "
+        "  pg_relation_size(i.indexrelid)::bigint AS bytes, "
+        "  COALESCE(s.idx_scan, 0) AS idx_scan, "
+        "  i.indisunique AS is_unique, "
+        "  i.indisprimary AS is_primary, "
+        "  (SELECT string_agg(COALESCE(a.attname, '(expr)'), ',' ORDER BY arr.ord) "
+        "   FROM unnest(i.indkey) WITH ORDINALITY AS arr(col, ord) "
+        "   LEFT JOIN pg_attribute a "
+        "     ON a.attrelid = i.indrelid AND a.attnum = arr.col) AS columns "
+        "FROM pg_index i "
+        "JOIN pg_class c ON c.oid = i.indrelid "
+        "JOIN pg_class ic ON ic.oid = i.indexrelid "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = i.indexrelid "
+        "WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast') "
+        "  AND i.indisvalid "
+        "ORDER BY n.nspname, c.relname, ic.relname"
+    )
+
+    rds_data = boto3.client("rds-data")
+    try:
+        resp = rds_data.execute_statement(
+            resourceArn=cluster_arn,
+            secretArn=secret_arn,
+            database=db_name,
+            sql=f"/* source=dbops-dashboard-redundant */ {sql}",
+            includeResultMetadata=True,
+        )
+    except Exception as e:
+        return {"error": "execution_failed", "message": str(e)[:300], "candidates": []}
+
+    cols = [(c.get("name") or c.get("label") or "") for c in resp.get("columnMetadata", [])]
+    indexes: list[dict] = []
+    for rec in resp.get("records", []):
+        row: dict = {}
+        for i, f in enumerate(rec):
+            col = cols[i] if i < len(cols) and cols[i] else f"col_{i}"
+            if f.get("isNull"):
+                row[col] = None
+                continue
+            for typ in ("stringValue", "longValue", "doubleValue", "booleanValue"):
+                if typ in f:
+                    row[col] = f[typ]
+                    break
+        indexes.append(row)
+
+    # Group by (schema, table) and compute redundancy candidates. We treat:
+    #   - "prefix"   — this index's columns are a strict prefix of another's
+    #   - "duplicate"— same columns as another index (keep the larger; the
+    #                  smaller is usually a leftover migration artifact)
+    #   - "unused"   — idx_scan = 0 and not backing a unique/PK constraint
+    # An index can only show up once — we prefer prefix > duplicate > unused
+    # so the DBA sees the most explainable reason first.
+    findings: list[dict] = []
+    by_table: dict[tuple[str, str], list[dict]] = {}
+    for idx in indexes:
+        key = (idx.get("schema_name") or "", idx.get("table_name") or "")
+        by_table.setdefault(key, []).append(idx)
+
+    for (schema, tbl), group in by_table.items():
+        for a in group:
+            if a.get("is_primary"):
+                continue  # primary key is sacred even if unused
+            a_cols = (a.get("columns") or "").split(",")
+            a_name = a.get("index_name") or ""
+            reason = None
+            covered_by = None
+            for b in group:
+                if b is a:
+                    continue
+                b_cols = (b.get("columns") or "").split(",")
+                b_name = b.get("index_name") or ""
+                if a_cols == b_cols:
+                    # Duplicate — keep whichever is larger / has more scans
+                    a_size = int(a.get("bytes") or 0)
+                    b_size = int(b.get("bytes") or 0)
+                    if (a_size, int(a.get("idx_scan") or 0)) < (
+                        b_size,
+                        int(b.get("idx_scan") or 0),
+                    ):
+                        reason = "duplicate"
+                        covered_by = b_name
+                        break
+                elif (
+                    len(a_cols) < len(b_cols)
+                    and a_cols == b_cols[: len(a_cols)]
+                    and not a.get("is_unique")
+                ):
+                    # Strict prefix — b covers every query a covers, plus
+                    # more. Unique-index prefixes are NOT redundant (they
+                    # enforce a separate uniqueness constraint).
+                    reason = "prefix"
+                    covered_by = b_name
+                    break
+
+            if reason is None and int(a.get("idx_scan") or 0) == 0:
+                # Unused — only flag if it's not enforcing a constraint.
+                if not a.get("is_unique"):
+                    reason = "unused"
+
+            if reason:
+                findings.append(
+                    {
+                        "schema": schema,
+                        "table": tbl,
+                        "index_name": a_name,
+                        "kind": reason,
+                        "bytes": int(a.get("bytes") or 0),
+                        "idx_scan": int(a.get("idx_scan") or 0),
+                        "is_unique": bool(a.get("is_unique")),
+                        "columns": a.get("columns") or "",
+                        "definition": a.get("definition") or "",
+                        "covered_by": covered_by,
+                    }
+                )
+
+    findings.sort(key=lambda f: f["bytes"], reverse=True)
+    total_bytes = sum(f["bytes"] for f in findings)
+    return {
+        "cluster_id": cluster_id,
+        "engine": engine,
+        "indexes_scanned": len(indexes),
+        "candidates_count": len(findings),
+        "total_bytes_reclaimable": total_bytes,
+        "candidates": findings,
+    }
+
+
 def _table_indexes(cluster_id: str, schema: str, table_name: str) -> dict:
     """List every index on a given table (definition, size, scan count,
     uniqueness, primary-key flag). Engine-aware: PG queries pg_stat_user_indexes,
@@ -1072,6 +1234,8 @@ def lambda_handler(event, context):
             return _response(
                 200, _capacity_forecast(query, cluster_id, metric, days_lookback)
             )
+        if raw_path.endswith("/redundant-indexes"):
+            return _response(200, _redundant_indexes(cluster_id))
         return _response(200, _overview(query, cluster_id))
     except Exception:
         print(f"Dashboard error: {traceback.format_exc()}")

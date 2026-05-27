@@ -385,6 +385,43 @@ export interface CapacityForecastResponse {
   error?: string;
 }
 
+export type RedundantIndexKind = "prefix" | "duplicate" | "unused";
+
+export interface RedundantIndexCandidate {
+  schema: string;
+  table: string;
+  index_name: string;
+  kind: RedundantIndexKind;
+  bytes: number;
+  idx_scan: number;
+  is_unique: boolean;
+  columns: string;
+  definition: string;
+  covered_by: string | null;
+}
+
+export interface RedundantIndexesResponse {
+  cluster_id: string;
+  engine: string;
+  indexes_scanned?: number;
+  candidates_count?: number;
+  total_bytes_reclaimable?: number;
+  candidates: RedundantIndexCandidate[];
+  error?: string;
+  info?: string;
+  message?: string;
+}
+
+export async function fetchRedundantIndexes(
+  clusterId: string,
+): Promise<RedundantIndexesResponse> {
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/redundant-indexes`),
+  );
+  if (!res.ok) throw new Error(`Redundant indexes fetch failed: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchCapacityForecast(
   clusterId: string,
   metric: CapacityMetric = "storage_bytes",
