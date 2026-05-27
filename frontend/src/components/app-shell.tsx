@@ -55,6 +55,11 @@ const NAV: NavGroup[] = [
       },
       { href: "/approvals", label: "Approvals", hint: "DBA gate for writes" },
       {
+        href: "/runbooks",
+        label: "Runbooks",
+        hint: "AI 진단 + 처방 재사용",
+      },
+      {
         href: "/simulator",
         label: "Simulator",
         hint: "upgrade · param · scaling · DDL — what-if",
@@ -80,6 +85,7 @@ function humanize(segment: string): string {
     chat: "Chat",
     "query-lab": "Query Lab",
     approvals: "Approvals",
+    runbooks: "Runbooks",
     simulator: "Simulator",
     slo: "SLO",
     schema: "Schema",

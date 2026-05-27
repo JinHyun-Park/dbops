@@ -1113,3 +1113,77 @@ export function simulateDdlImpact(
     ddl_sql: ddlSql,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Runbooks API
+// ---------------------------------------------------------------------------
+
+export interface RunbookListItem {
+  id: number;
+  cluster_id: string | null;
+  title: string;
+  summary_md: string | null;
+  tags: string[];
+  source: string | null;
+  source_ref: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface RunbookDetail extends RunbookListItem {
+  body_md: string;
+  updated_at: string;
+}
+
+export async function fetchRunbooks(opts?: {
+  clusterId?: string;
+  tag?: string;
+  limit?: number;
+}): Promise<{ runbooks: RunbookListItem[]; count: number }> {
+  const params = new URLSearchParams();
+  if (opts?.clusterId) params.set("cluster_id", opts.clusterId);
+  if (opts?.tag) params.set("tag", opts.tag);
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  const url = `/api/runbooks${qs ? "?" + qs : ""}`;
+  const res = await fetch(await api(url));
+  if (!res.ok) throw new Error(`Runbooks fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchRunbook(id: number): Promise<RunbookDetail> {
+  const res = await fetch(await api(`/api/runbooks/${id}`));
+  if (!res.ok) throw new Error(`Runbook fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function createRunbook(input: {
+  cluster_id?: string | null;
+  title: string;
+  summary_md?: string;
+  body_md: string;
+  tags?: string[];
+  source?: "chat" | "anomaly" | "manual";
+  source_ref?: string;
+}): Promise<{ runbook: RunbookDetail }> {
+  const res = await fetch(await api(`/api/runbooks`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(
+      `Create runbook failed (${res.status}): ${detail.slice(0, 200)}`,
+    );
+  }
+  return res.json();
+}
+
+export async function deleteRunbook(id: number): Promise<void> {
+  const res = await fetch(await api(`/api/runbooks/${id}`), {
+    method: "DELETE",
+    headers: { ...(await authHeaders()) },
+  });
+  if (!res.ok) throw new Error(`Delete runbook failed: ${res.status}`);
+}

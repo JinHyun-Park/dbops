@@ -365,6 +365,27 @@ class AgentStack(cdk.Stack):
         )
         foundation.approvals_table.grant_read_write_data(approvals_lambda)
 
+        # Runbooks API — CRUD over the `runbooks` cache table. AI-generated
+        # diagnoses can be saved as reusable playbooks for pattern recurrence.
+        runbooks_lambda = lambda_.Function(
+            self, "RunbooksApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/runbooks"),
+            timeout=cdk.Duration.seconds(15),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+            },
+        )
+        data.cache_db.secret.grant_read(runbooks_lambda)
+        data.cache_db.grant_data_api_access(runbooks_lambda)
+        runbooks_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["rds-data:ExecuteStatement", "secretsmanager:GetSecretValue"],
+            resources=["*"],
+        ))
+
         self.alerts_lambda = alerts_lambda = lambda_.Function(
             self, "AlertsApi",
             runtime=lambda_.Runtime.PYTHON_3_12,
@@ -757,6 +778,20 @@ class AgentStack(cdk.Stack):
             path="/api/approvals/{id}",
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PUT],
             integration=integrations.HttpLambdaIntegration("ApprovalDetailIntegration", approvals_lambda),
+        )
+        # Runbooks — AI-generated playbooks
+        runbooks_integration = integrations.HttpLambdaIntegration(
+            "RunbooksIntegration", runbooks_lambda
+        )
+        self.api.add_routes(
+            path="/api/runbooks",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
+            integration=runbooks_integration,
+        )
+        self.api.add_routes(
+            path="/api/runbooks/{id}",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.DELETE],
+            integration=runbooks_integration,
         )
 
         # ===== Outputs =====
