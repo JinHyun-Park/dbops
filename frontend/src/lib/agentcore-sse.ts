@@ -65,7 +65,15 @@ export interface ChatMessage {
 // chat. Holdback retains a trailing partial tag (e.g. "<inv") across
 // chunk boundaries.
 const TOOL_TAG_PATTERN =
-  /<\/?(?:antml:)?(?:function_calls|function_results|invoke|parameter|tool_use|tool_result|thinking|result|output)\b[^>]*>/gi;
+  /<\/?(?:antml:)?(?:function_calls|function_results|invoke|parameter|tool_use|tool_result|tool_name|tool_parameter|thinking|result|output)\b[^>]*>/gi;
+
+// Some models wrap an entire tool invocation in a parent block like
+// `<use_tool>…<tool_name>…</tool_name>…JSON-result…</use_tool>`. Stripping
+// only the open/close tags would leave the raw JSON tool result visible
+// to the user. Instead, we drop the whole block, content included, by
+// tracking `<use_tool>` open/close across chunks.
+const BLOCK_OPEN_RE = /<use_tool\b[^>]*>/i;
+const BLOCK_CLOSE_RE = /<\/use_tool\s*>/i;
 
 // Partial-tag detector — hold back chunks that end with a possibly-incomplete
 // marker tag. Matches: `<`, `</`, `<inv…`, `</invoke…`, etc. — bounded by
@@ -74,23 +82,53 @@ const TOOL_TAG_PATTERN =
 // at end-of-string after `<`); "<a href=…>link</a>" doesn't match because
 // every `<` is already closed by a `>` before end-of-stream.
 //
-// First-letter set covers the prefixes of every tag in TOOL_TAG_PATTERN:
+// First-letter set covers the prefixes of every tag in TOOL_TAG_PATTERN +
+// the BLOCK pattern:
 //   a (antml:), f (function_calls/results), i (invoke), o (output),
-//   p (parameter), r (result), t (tool_use/result, thinking)
-const PARTIAL_TAG_RE = /<\/?(?:[afioprt][^>]{0,200})?$/i;
+//   p (parameter), r (result), t (tool_*, thinking), u (use_tool)
+const PARTIAL_TAG_RE = /<\/?(?:[afioprtu][^>]{0,200})?$/i;
 
 function makeSanitizer(): (chunk: string) => string {
   let holdback = "";
+  let inBlock = false; // currently inside a <use_tool>…</use_tool>
   return (chunk: string) => {
-    const text = holdback + chunk;
-    const stripped = text.replace(TOOL_TAG_PATTERN, "");
-    const tail = stripped.match(PARTIAL_TAG_RE);
-    if (tail) {
-      holdback = stripped.slice(tail.index!);
-      return stripped.slice(0, tail.index!);
-    }
+    let text = holdback + chunk;
     holdback = "";
-    return stripped;
+    let out = "";
+    // Walk the text, alternating between "in-block" (drop everything until
+    // close) and "out-of-block" (strip bare tags, hold back partial tail).
+    while (text.length > 0) {
+      if (inBlock) {
+        const close = text.match(BLOCK_CLOSE_RE);
+        if (!close || close.index === undefined) {
+          // No close tag yet — drop everything we have and wait.
+          return out;
+        }
+        text = text.slice(close.index + close[0].length);
+        inBlock = false;
+      } else {
+        const open = text.match(BLOCK_OPEN_RE);
+        if (!open || open.index === undefined) {
+          // No more openings — process remainder with bare-tag strip +
+          // partial-tag holdback.
+          const stripped = text.replace(TOOL_TAG_PATTERN, "");
+          const tail = stripped.match(PARTIAL_TAG_RE);
+          if (tail) {
+            holdback = stripped.slice(tail.index!);
+            out += stripped.slice(0, tail.index!);
+          } else {
+            out += stripped;
+          }
+          return out;
+        }
+        // Strip the chunk before the open tag, then enter block mode.
+        const before = text.slice(0, open.index);
+        out += before.replace(TOOL_TAG_PATTERN, "");
+        text = text.slice(open.index + open[0].length);
+        inBlock = true;
+      }
+    }
+    return out;
   };
 }
 
