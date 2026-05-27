@@ -710,3 +710,41 @@ html[data-theme="light"] .bg-zinc-850 .text-zinc-600 {
 html[data-theme="light"] .bg-emerald-500\/10.text-emerald-400 {
   color: #065f46;
 }
+
+/* =========================================================================
+   Linear-style micro motion (theme-independent)
+   - Primary CTA buttons get a tiny scale-down on press for tactile feel.
+   - Tappable nav rows get the same when held.
+   - We deliberately skip page-load card stagger animations — Recharts
+     paths interact poorly with transform animations mid-data-fetch.
+   ========================================================================= */
+
+button.bg-amber-500,
+a.bg-amber-500 {
+  transition:
+    background-color 150ms ease-out,
+    transform 80ms ease-out;
+}
+button.bg-amber-500:active,
+a.bg-amber-500:active {
+  transform: scale(0.97);
+}
+
+/* Sidebar nav rows — same press feedback so the bg fill feels tactile. */
+aside a.group {
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
+}
+aside a.group:active {
+  transform: scale(0.99);
+}
+
+/* Honour the OS reduced-motion preference. */
+@media (prefers-reduced-motion: reduce) {
+  button.bg-amber-500:active,
+  a.bg-amber-500:active,
+  aside a.group:active {
+    transform: none;
+  }
+}

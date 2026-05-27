@@ -124,25 +124,21 @@ function Breadcrumbs({ pathname }: { pathname: string }) {
 }
 
 function SidebarItem({ item, active }: { item: NavItem; active: boolean }) {
+  // Linear-style nav row: the active state is just a full-width subtle bg +
+  // bolder label. No coloured dot, no left-edge bar — those were the noisy
+  // accents the audit called out. The hint stays as a quiet sub-label.
   return (
     <Link
       href={item.href}
       className={`group block px-3 py-2 -mx-2 rounded text-sm transition-colors ${
         active
-          ? "bg-zinc-800/80 text-zinc-100"
-          : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/40"
+          ? "bg-zinc-800/80 text-zinc-100 font-medium"
+          : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/40"
       }`}
     >
-      <div className="flex items-center gap-2">
-        <span
-          className={`w-1 h-3.5 rounded-sm transition-colors ${
-            active ? "bg-amber-400" : "bg-transparent group-hover:bg-zinc-700"
-          }`}
-        />
-        <span>{item.label}</span>
-      </div>
+      <div>{item.label}</div>
       {item.hint && (
-        <div className="ml-3 mt-0.5 text-[10px] text-zinc-600 group-hover:text-zinc-500 leading-tight">
+        <div className="mt-0.5 text-[10px] text-zinc-600 group-hover:text-zinc-500 leading-tight">
           {item.hint}
         </div>
       )}
