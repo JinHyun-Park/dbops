@@ -70,16 +70,39 @@ export async function fetchDashboard(clusterId: string) {
   return res.json();
 }
 
+// Time window selection used by Dashboard / Compare. Either a relative window
+// ending at "now" (preset) or an absolute [from, to] window (custom picker).
+// Absolute mode lets URLs encode an exact window for sharing/incident review.
+export type TimeRange =
+  | { kind: "preset"; hours: number }
+  | { kind: "custom"; from: string; to: string };
+
+export function timeRangeToQs(range: TimeRange): string {
+  if (range.kind === "custom") {
+    return `from=${enc(range.from)}&to=${enc(range.to)}`;
+  }
+  return `hours=${range.hours}`;
+}
+
+/** Translate either a TimeRange or a legacy `hours: number` to query params.
+ *  Callers that still pass `hours` (1/6/24) keep working unchanged. */
+function rangeQs(rangeOrHours: TimeRange | number): string {
+  if (typeof rangeOrHours === "number") {
+    return `hours=${rangeOrHours}`;
+  }
+  return timeRangeToQs(rangeOrHours);
+}
+
 export async function fetchTimeseries(
   clusterId: string,
   metric: string,
-  hours = 1,
+  rangeOrHours: TimeRange | number = 1,
 ) {
   const res = await fetch(
     await api(
       `/api/dashboard/${enc(clusterId)}/timeseries?metric=${enc(
         metric,
-      )}&hours=${hours}`,
+      )}&${rangeQs(rangeOrHours)}`,
     ),
   );
   if (!res.ok) throw new Error(`Timeseries fetch failed: ${res.status}`);
@@ -89,16 +112,21 @@ export async function fetchTimeseries(
 export async function fetchBatchTimeseries(
   clusterId: string,
   metrics: string[],
-  hours = 1,
+  rangeOrHours: TimeRange | number = 1,
   offsetHours = 0,
 ) {
   const csv = metrics.map(enc).join(",");
-  const offsetQs = offsetHours > 0 ? `&offset_hours=${offsetHours}` : "";
+  // offset_hours is only meaningful in preset mode (compare page period-over-
+  // period). Custom mode encodes the absolute window via from/to instead.
+  const offsetQs =
+    typeof rangeOrHours === "number" && offsetHours > 0
+      ? `&offset_hours=${offsetHours}`
+      : "";
   const res = await fetch(
     await api(
       `/api/dashboard/${enc(
         clusterId,
-      )}/batch-timeseries?metrics=${csv}&hours=${hours}${offsetQs}`,
+      )}/batch-timeseries?metrics=${csv}&${rangeQs(rangeOrHours)}${offsetQs}`,
     ),
   );
   if (!res.ok) throw new Error(`Batch timeseries fetch failed: ${res.status}`);
@@ -106,6 +134,8 @@ export async function fetchBatchTimeseries(
     cluster_id: string;
     hours: number;
     offset_hours?: number;
+    from?: string | null;
+    to?: string | null;
     series: Record<
       string,
       Array<{ ts: string; value: number | string; dimensions?: string }>

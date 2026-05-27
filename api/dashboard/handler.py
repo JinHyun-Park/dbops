@@ -241,17 +241,38 @@ def _overview(query, cluster_id):
     }
 
 
-def _timeseries(query, cluster_id, metric_type, hours):
-    rows = query(
-        "SELECT ts, value, dimensions::text as dimensions "
-        "FROM metric_snapshots "
-        "WHERE cluster_id = :cid "
-        "AND metric_type = :mt "
-        "AND ts > NOW() - (:hours || ' hours')::interval "
-        "ORDER BY ts ASC",
-        {"cid": cluster_id, "mt": metric_type, "hours": str(hours)},
-    )
-    return {"cluster_id": cluster_id, "metric_type": metric_type, "hours": hours, "points": rows}
+def _timeseries(query, cluster_id, metric_type, hours, from_iso=None, to_iso=None):
+    """Single-metric timeseries. Same window precedence as _batch_timeseries —
+    absolute (from/to) overrides relative (hours)."""
+    if from_iso and to_iso:
+        rows = query(
+            "SELECT ts, value, dimensions::text as dimensions "
+            "FROM metric_snapshots "
+            "WHERE cluster_id = :cid "
+            "AND metric_type = :mt "
+            "AND ts >= :from_ts::timestamptz "
+            "AND ts <= :to_ts::timestamptz "
+            "ORDER BY ts ASC",
+            {"cid": cluster_id, "mt": metric_type, "from_ts": from_iso, "to_ts": to_iso},
+        )
+    else:
+        rows = query(
+            "SELECT ts, value, dimensions::text as dimensions "
+            "FROM metric_snapshots "
+            "WHERE cluster_id = :cid "
+            "AND metric_type = :mt "
+            "AND ts > NOW() - (:hours || ' hours')::interval "
+            "ORDER BY ts ASC",
+            {"cid": cluster_id, "mt": metric_type, "hours": str(hours)},
+        )
+    return {
+        "cluster_id": cluster_id,
+        "metric_type": metric_type,
+        "hours": hours,
+        "from": from_iso,
+        "to": to_iso,
+        "points": rows,
+    }
 
 
 def _slow_queries(query, cluster_id, hours, threshold_ms):
@@ -283,39 +304,80 @@ def _query_detail(query, cluster_id, query_hash):
 METRIC_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,49}$")
 
 
-def _batch_timeseries(query, cluster_id, metric_names, hours, offset_hours=0):
-    """Returns metric series within the window [NOW - hours, NOW - offset_hours].
-    offset_hours=0 (default) keeps the legacy "last N hours" behavior; pass a
-    positive offset to query a past window — used by the compare page for
-    period-over-period overlays (e.g., this week vs last week)."""
+def _batch_timeseries(
+    query,
+    cluster_id,
+    metric_names,
+    hours,
+    offset_hours=0,
+    from_iso=None,
+    to_iso=None,
+):
+    """Returns metric series within the requested time window.
+
+    Window selection precedence:
+      1. If both `from_iso` and `to_iso` are valid TIMESTAMPTZ strings →
+         use [from_iso, to_iso] as an *absolute* window. This is what the
+         Dashboard custom time picker emits.
+      2. Otherwise → use the legacy relative window
+         (NOW - hours, NOW - offset_hours].
+
+    The absolute path makes the result deterministic across requests (a
+    URL with from/to can be shared), while the relative path keeps every
+    legacy caller working unchanged."""
     metric_names = [m for m in metric_names if METRIC_NAME_RE.match(m)][:20]
+    base_meta = {
+        "cluster_id": cluster_id,
+        "hours": hours,
+        "offset_hours": offset_hours,
+        "from": from_iso,
+        "to": to_iso,
+    }
     if not metric_names:
-        return {"cluster_id": cluster_id, "hours": hours, "offset_hours": offset_hours, "series": {}}
+        return {**base_meta, "series": {}}
 
     placeholders = ", ".join(f":m{i}" for i in range(len(metric_names)))
-    params = {"cid": cluster_id, "hours": str(hours), "offset": str(offset_hours)}
+    params = {"cid": cluster_id}
     for i, m in enumerate(metric_names):
         params[f"m{i}"] = m
 
-    # Window: (NOW - hours, NOW - offset_hours]. When offset_hours=0 the upper
-    # bound collapses to NOW, matching the original "last N hours" semantics.
-    rows = query(
-        f"SELECT ts, metric_type, value, dimensions::text as dimensions "
-        f"FROM metric_snapshots "
-        f"WHERE cluster_id = :cid "
-        f"AND metric_type IN ({placeholders}) "
-        f"AND ts > NOW() - (:hours || ' hours')::interval "
-        f"AND ts <= NOW() - (:offset || ' hours')::interval "
-        f"ORDER BY ts ASC",
-        params,
-    )
+    use_absolute = bool(from_iso) and bool(to_iso)
+    if use_absolute:
+        params["from_ts"] = from_iso
+        params["to_ts"] = to_iso
+        sql = (
+            f"SELECT ts, metric_type, value, dimensions::text as dimensions "
+            f"FROM metric_snapshots "
+            f"WHERE cluster_id = :cid "
+            f"AND metric_type IN ({placeholders}) "
+            f"AND ts >= :from_ts::timestamptz "
+            f"AND ts <= :to_ts::timestamptz "
+            f"ORDER BY ts ASC"
+        )
+    else:
+        params["hours"] = str(hours)
+        params["offset"] = str(offset_hours)
+        # Window: (NOW - hours, NOW - offset_hours]. When offset_hours=0 the
+        # upper bound collapses to NOW, matching the original "last N hours"
+        # semantics.
+        sql = (
+            f"SELECT ts, metric_type, value, dimensions::text as dimensions "
+            f"FROM metric_snapshots "
+            f"WHERE cluster_id = :cid "
+            f"AND metric_type IN ({placeholders}) "
+            f"AND ts > NOW() - (:hours || ' hours')::interval "
+            f"AND ts <= NOW() - (:offset || ' hours')::interval "
+            f"ORDER BY ts ASC"
+        )
+
+    rows = query(sql, params)
 
     series = {m: [] for m in metric_names}
     for r in rows:
         mt = r.get("metric_type")
         if mt in series:
             series[mt].append({"ts": r["ts"], "value": r["value"], "dimensions": r.get("dimensions")})
-    return {"cluster_id": cluster_id, "hours": hours, "offset_hours": offset_hours, "series": series}
+    return {**base_meta, "series": series}
 
 
 def _multi_cluster_overview(query):
@@ -729,11 +791,22 @@ def lambda_handler(event, context):
     qs = event.get("queryStringParameters") or {}
     raw_path = raw_path_early
 
+    # Absolute window (Dashboard custom time picker). When both are present
+    # and parseable, every endpoint that supports an absolute window will use
+    # them in preference to the relative `hours` arg. We accept ISO-8601
+    # strings (e.g. "2026-05-18T14:00:00Z") — RDS Data API's timestamptz cast
+    # tolerates either Z-suffix or "+00:00".
+    from_iso = (qs.get("from") or "").strip() or None
+    to_iso = (qs.get("to") or "").strip() or None
+
     try:
         if raw_path.endswith("/timeseries"):
             metric_type = qs.get("metric", "aas")
             hours = _parse_int(qs.get("hours"), 1)
-            return _response(200, _timeseries(query, cluster_id, metric_type, hours))
+            return _response(
+                200,
+                _timeseries(query, cluster_id, metric_type, hours, from_iso, to_iso),
+            )
         if raw_path.endswith("/wait-events"):
             hours = _parse_int(qs.get("hours"), 1)
             return _response(200, _wait_events(query, cluster_id, hours))
@@ -785,7 +858,18 @@ def lambda_handler(event, context):
             metric_names = [m.strip() for m in metrics_csv.split(",") if m.strip()]
             hours = _parse_int(qs.get("hours"), 1)
             offset_hours = _parse_int(qs.get("offset_hours"), 0, min_v=0)
-            return _response(200, _batch_timeseries(query, cluster_id, metric_names, hours, offset_hours))
+            return _response(
+                200,
+                _batch_timeseries(
+                    query,
+                    cluster_id,
+                    metric_names,
+                    hours,
+                    offset_hours,
+                    from_iso,
+                    to_iso,
+                ),
+            )
         if raw_path.endswith("/index-recommendations"):
             min_ratio = _parse_float(qs.get("min_seq_ratio"), 0.5)
             return _response(200, _index_recommendations(query, cluster_id, min_ratio))
