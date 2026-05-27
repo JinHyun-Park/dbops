@@ -472,6 +472,12 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardSloIntegration", dashboard_lambda),
         )
+        # Schema lineage / FK graph — live pg_constraint introspection.
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/schema-graph",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardSchemaGraphIntegration", dashboard_lambda),
+        )
         # Simulation API — REST mirror of Simulation MCP tools. All write-
         # like operations are simulations, never DDL execution, so POST is
         # safe without an approval flow.

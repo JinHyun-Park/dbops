@@ -422,6 +422,52 @@ export async function fetchRedundantIndexes(
   return res.json();
 }
 
+export interface SchemaGraphTable {
+  table_name: string;
+  row_count: number;
+  size_bytes: number;
+  fk_in: number;
+  fk_out: number;
+  isolated: boolean;
+}
+
+export interface SchemaGraphEdge {
+  source_table: string;
+  target_table: string;
+  target_schema: string;
+  constraint_name: string;
+  definition: string;
+  source_columns: string;
+  target_columns: string;
+}
+
+export interface SchemaGraphResponse {
+  cluster_id: string;
+  engine?: string;
+  schema?: string;
+  tables_count?: number;
+  edges_count?: number;
+  isolated_count?: number;
+  tables: SchemaGraphTable[];
+  edges: SchemaGraphEdge[];
+  error?: string;
+  info?: string;
+  message?: string;
+}
+
+export async function fetchSchemaGraph(
+  clusterId: string,
+  schema = "public",
+): Promise<SchemaGraphResponse> {
+  const res = await fetch(
+    await api(
+      `/api/dashboard/${enc(clusterId)}/schema-graph?schema=${enc(schema)}`,
+    ),
+  );
+  if (!res.ok) throw new Error(`Schema graph fetch failed: ${res.status}`);
+  return res.json();
+}
+
 export interface SloDayBucket {
   day: string;
   availability_pct: number;

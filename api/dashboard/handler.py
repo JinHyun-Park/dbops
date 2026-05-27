@@ -83,6 +83,139 @@ def _lookup_cluster(cluster_id: str) -> dict:
         return {}
 
 
+def _schema_graph(cluster_id: str, schema: str) -> dict:
+    """Return tables + foreign-key edges for one PG schema.
+
+    Used by the Schema lineage page to render an FK graph. We deliberately
+    keep this as a live Data API call (vs caching the snapshot in PG cache)
+    because foreign-key topology is slow-moving but high-cardinality — a
+    full snapshot per cluster would bloat the cache. PG-only for v1;
+    MySQL's information_schema.KEY_COLUMN_USAGE lookup is a follow-up."""
+    cluster = _lookup_cluster(cluster_id)
+    if not cluster:
+        return {"error": f"cluster {cluster_id!r} not registered", "tables": [], "edges": []}
+    cluster_arn = cluster.get("cluster_arn")
+    secret_arn = cluster.get("secret_arn")
+    db_name = cluster.get("db_name") or "postgres"
+    engine = (cluster.get("engine") or "").lower()
+    if not cluster_arn or not secret_arn:
+        return {"error": "cluster registry missing cluster_arn/secret_arn", "tables": [], "edges": []}
+    if "mysql" in engine:
+        return {
+            "cluster_id": cluster_id,
+            "engine": engine,
+            "tables": [],
+            "edges": [],
+            "info": "MySQL은 v1에서 지원하지 않습니다 — PostgreSQL 클러스터에서 사용하세요.",
+        }
+
+    # Sanitise schema name — pg_namespace.nspname is a regular identifier;
+    # we pass it as a string param via Data API to avoid quoting concerns.
+    schema = (schema or "public").strip() or "public"
+
+    tables_sql = (
+        "SELECT "
+        "  c.relname AS table_name, "
+        "  COALESCE(s.n_live_tup, 0)::bigint AS row_count, "
+        "  pg_total_relation_size(c.oid)::bigint AS size_bytes "
+        "FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "LEFT JOIN pg_stat_user_tables s "
+        "  ON s.schemaname = n.nspname AND s.relname = c.relname "
+        "WHERE c.relkind = 'r' AND n.nspname = :schema "
+        "ORDER BY c.relname"
+    )
+
+    edges_sql = (
+        "SELECT "
+        "  cls.relname AS source_table, "
+        "  fcls.relname AS target_table, "
+        "  fns.nspname AS target_schema, "
+        "  con.conname AS constraint_name, "
+        "  pg_get_constraintdef(con.oid) AS definition, "
+        "  (SELECT string_agg(att.attname, ',' ORDER BY u.ord) "
+        "   FROM unnest(con.conkey) WITH ORDINALITY u(att_num, ord) "
+        "   JOIN pg_attribute att "
+        "     ON att.attrelid = cls.oid AND att.attnum = u.att_num) AS source_columns, "
+        "  (SELECT string_agg(att.attname, ',' ORDER BY u.ord) "
+        "   FROM unnest(con.confkey) WITH ORDINALITY u(att_num, ord) "
+        "   JOIN pg_attribute att "
+        "     ON att.attrelid = fcls.oid AND att.attnum = u.att_num) AS target_columns "
+        "FROM pg_constraint con "
+        "JOIN pg_class cls ON cls.oid = con.conrelid "
+        "JOIN pg_namespace ns ON ns.oid = cls.relnamespace "
+        "JOIN pg_class fcls ON fcls.oid = con.confrelid "
+        "JOIN pg_namespace fns ON fns.oid = fcls.relnamespace "
+        "WHERE con.contype = 'f' AND ns.nspname = :schema "
+        "ORDER BY cls.relname, con.conname"
+    )
+
+    rds_data = boto3.client("rds-data")
+
+    def _run(sql: str) -> list[dict]:
+        resp = rds_data.execute_statement(
+            resourceArn=cluster_arn,
+            secretArn=secret_arn,
+            database=db_name,
+            sql=f"/* source=dbops-dashboard-schema-graph */ {sql}",
+            parameters=[{"name": "schema", "value": {"stringValue": schema}}],
+            includeResultMetadata=True,
+        )
+        cols = [(c.get("name") or c.get("label") or "") for c in resp.get("columnMetadata", [])]
+        out: list[dict] = []
+        for rec in resp.get("records", []):
+            row: dict = {}
+            for i, f in enumerate(rec):
+                col = cols[i] if i < len(cols) and cols[i] else f"col_{i}"
+                if f.get("isNull"):
+                    row[col] = None
+                    continue
+                for typ in ("stringValue", "longValue", "doubleValue", "booleanValue"):
+                    if typ in f:
+                        row[col] = f[typ]
+                        break
+            out.append(row)
+        return out
+
+    try:
+        tables = _run(tables_sql)
+        edges = _run(edges_sql)
+    except Exception as e:
+        return {
+            "error": "execution_failed",
+            "message": str(e)[:300],
+            "tables": [],
+            "edges": [],
+        }
+
+    # Per-table FK degree — useful for the UI to highlight hub tables.
+    in_deg: dict[str, int] = {}
+    out_deg: dict[str, int] = {}
+    for e in edges:
+        out_deg[e["source_table"]] = out_deg.get(e["source_table"], 0) + 1
+        # Only count incoming edges from within-schema references — cross-
+        # schema targets would skew "isolated" detection.
+        if e.get("target_schema") == schema:
+            in_deg[e["target_table"]] = in_deg.get(e["target_table"], 0) + 1
+
+    for t in tables:
+        name = t["table_name"]
+        t["fk_out"] = out_deg.get(name, 0)
+        t["fk_in"] = in_deg.get(name, 0)
+        t["isolated"] = t["fk_in"] == 0 and t["fk_out"] == 0
+
+    return {
+        "cluster_id": cluster_id,
+        "engine": engine,
+        "schema": schema,
+        "tables_count": len(tables),
+        "edges_count": len(edges),
+        "isolated_count": sum(1 for t in tables if t["isolated"]),
+        "tables": tables,
+        "edges": edges,
+    }
+
+
 def _redundant_indexes(cluster_id: str) -> dict:
     """Find PG indexes that can likely be dropped — prefix-covered, exact
     duplicates, or unused (idx_scan = 0 and not constraint-backing).
@@ -1543,6 +1676,9 @@ def lambda_handler(event, context):
             avail_t = _parse_float(qs.get("availability_target"), 99.9)
             lat_t = _parse_float(qs.get("latency_target_ms"), 100)
             return _response(200, _slo(query, cluster_id, days, avail_t, lat_t))
+        if raw_path.endswith("/schema-graph"):
+            schema = (qs.get("schema") or "public").strip() or "public"
+            return _response(200, _schema_graph(cluster_id, schema))
         return _response(200, _overview(query, cluster_id))
     except Exception:
         print(f"Dashboard error: {traceback.format_exc()}")

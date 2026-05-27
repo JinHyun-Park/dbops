@@ -37,6 +37,11 @@ const NAV: NavGroup[] = [
         label: "SLO",
         hint: "availability + latency · error budget",
       },
+      {
+        href: "/schema",
+        label: "Schema",
+        hint: "FK lineage · table dependencies",
+      },
     ],
   },
   {
@@ -77,6 +82,7 @@ function humanize(segment: string): string {
     approvals: "Approvals",
     simulator: "Simulator",
     slo: "SLO",
+    schema: "Schema",
     alerts: "Alerts",
     clusters: "Clusters",
     reports: "Reports",
