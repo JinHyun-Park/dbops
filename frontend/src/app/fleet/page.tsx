@@ -91,11 +91,9 @@ export default function FleetPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="monitor"
-        title="Fleet overview"
-        description={`${rows.length} cluster${
-          rows.length === 1 ? "" : "s"
-        } · auto-refresh 30s · click any row for deep dive`}
+        eyebrow="모니터"
+        title="Fleet 개요"
+        description={`총 ${rows.length}개 클러스터 · 30초마다 자동 새로고침 · 행 클릭 시 상세 보기`}
       />
 
       {err && (
@@ -105,13 +103,13 @@ export default function FleetPage() {
       )}
 
       {loading ? (
-        <div className="text-zinc-500 text-sm">loading…</div>
+        <div className="text-zinc-500 text-sm">불러오는 중…</div>
       ) : sorted.length === 0 ? (
         <EmptyState
-          eyebrow="no clusters"
-          title="No clusters registered yet"
-          description="Once you register an Aurora cluster, live CPU, AAS, connection and lock metrics will stream here every 30 seconds."
-          primary={{ href: "/clusters", label: "+ Register cluster" }}
+          eyebrow="클러스터 없음"
+          title="아직 등록된 클러스터가 없습니다"
+          description="Aurora 클러스터를 등록하면 CPU, AAS, connection, lock 등 메트릭이 30초 주기로 이 페이지에 스트리밍됩니다."
+          primary={{ href: "/clusters", label: "+ 클러스터 등록" }}
         />
       ) : (
         <>

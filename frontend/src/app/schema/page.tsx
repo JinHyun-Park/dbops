@@ -64,7 +64,7 @@ export default function SchemaPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="Monitor"
+        eyebrow="모니터"
         title="Schema Lineage"
         description="현재 클러스터의 외래키(FK) 관계를 라이브로 추출해 표 의존성을 시각화합니다. PostgreSQL 전용."
         actions={

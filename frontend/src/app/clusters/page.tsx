@@ -323,8 +323,8 @@ export default function ClustersPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="configuration"
-        title="Cluster registry"
+        eyebrow="설정"
+        title="클러스터 레지스트리"
         description="Aurora 클러스터 등록과 cross-account 연결 관리. 메트릭/실시간 상태는 Fleet 또는 Dashboard에서 확인하세요."
         actions={
           <>
@@ -375,7 +375,7 @@ export default function ClustersPage() {
             )}
             {!admin && (
               <span className="text-[10px] uppercase tracking-wider text-zinc-500 px-2 py-1 border border-zinc-800">
-                read-only · viewer
+                viewer · 읽기 전용
               </span>
             )}
           </>
@@ -398,8 +398,8 @@ export default function ClustersPage() {
 
       {discoverOpen && (
         <Section
-          eyebrow="bulk discovery"
-          title="Discover Aurora clusters"
+          eyebrow="일괄 탐색"
+          title="Aurora 클러스터 자동 탐색"
           description="현재 계정 또는 cross-account role을 통해 RDS에서 Aurora 클러스터를 자동 enumerate. 선택한 항목만 한 번에 등록합니다."
         >
           <div className="border border-zinc-800 bg-zinc-900/40 p-6">
@@ -641,7 +641,7 @@ export default function ClustersPage() {
       )}
 
       {showForm && (
-        <Section eyebrow="new registration" title="Register an Aurora cluster">
+        <Section eyebrow="신규 등록" title="Aurora 클러스터 등록">
           <div className="border border-zinc-800 bg-zinc-900/40 p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field
@@ -715,18 +715,18 @@ export default function ClustersPage() {
       )}
 
       <Section
-        eyebrow="registered"
-        title={`${clusters.length} cluster${clusters.length === 1 ? "" : "s"}`}
+        eyebrow="등록 현황"
+        title={`등록된 클러스터 ${clusters.length}개`}
         description="이 페이지는 등록/검증/관리 전용입니다. 실시간 메트릭은 Fleet 또는 Dashboard에서."
       >
         {clusters.length === 0 ? (
           <EmptyState
-            eyebrow="no clusters"
-            title="Register your first Aurora cluster"
+            eyebrow="클러스터 없음"
+            title="첫 Aurora 클러스터를 등록해보세요"
             description="Cluster ID, account, region을 입력하면 RDS Data API 기반 메트릭 수집이 시작됩니다."
             primary={{
               onClick: () => setShowForm(true),
-              label: "+ Register cluster",
+              label: "+ 클러스터 등록",
             }}
             secondary={{ href: "/chat", label: "Ask the agent first" }}
           />

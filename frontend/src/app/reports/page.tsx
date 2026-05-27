@@ -24,16 +24,16 @@ export default function ReportsPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="automate"
-        title="Reports"
-        description="Scheduled performance summaries 자동 생성. report_generator Lambda가 cron으로 작성한 보고서가 여기에 누적됩니다."
+        eyebrow="자동화"
+        title="리포트"
+        description="report_generator Lambda가 cron으로 작성한 성능 요약 보고서가 여기에 누적됩니다."
       />
       {reports.length === 0 ? (
         <EmptyState
-          eyebrow="no reports"
-          title="No reports yet"
+          eyebrow="리포트 없음"
+          title="아직 생성된 리포트가 없습니다"
           description="ETL이 메트릭을 충분히 모으면 report_generator가 일/주간 요약을 생성합니다."
-          secondary={{ href: "/chat", label: "Generate on demand via chat" }}
+          secondary={{ href: "/chat", label: "채팅으로 즉시 생성하기" }}
         />
       ) : (
         <ReportViewer

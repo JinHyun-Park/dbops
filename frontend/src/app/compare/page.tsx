@@ -225,7 +225,7 @@ export default function ComparePage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="monitor"
+        eyebrow="모니터"
         title="Compare"
         description="멀티 클러스터 비교 또는 같은 클러스터의 시간대별 변화를 사이드바이사이드로 확인."
         actions={

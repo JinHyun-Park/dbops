@@ -321,7 +321,7 @@ export default function QueryLabPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="automate"
+        eyebrow="자동화"
         title="Query Lab"
         description="EXPLAIN 버튼은 plan tree를 바로 렌더링하고, AI 분석은 SQL을 agent에 보내 자연어 해석을 받아옵니다."
         actions={

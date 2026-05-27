@@ -127,7 +127,7 @@ export default function SloPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="Monitor"
+        eyebrow="모니터"
         title="SLO Tracker"
         description="가용성 + 쿼리 지연 SLO 목표 대비 실측 + 에러 버짓 burn-down. 목표값은 클러스터별 브라우저에 저장됩니다."
         actions={

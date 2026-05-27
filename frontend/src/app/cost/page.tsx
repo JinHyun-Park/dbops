@@ -85,8 +85,8 @@ export default function CostPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="finance"
-        title="Bedrock cost"
+        eyebrow="재무"
+        title="Bedrock 비용"
         description="DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다."
         actions={
           <div className="flex items-center gap-1">
@@ -120,8 +120,8 @@ export default function CostPage() {
 
       {data?.no_data_reason && !data?.tag_warning ? (
         <EmptyState
-          eyebrow="not yet tracked"
-          title="Cost allocation tag is not activated"
+          eyebrow="추적 미시작"
+          title="Cost allocation 태그가 활성화되어 있지 않습니다"
           description={
             <>
               {data.no_data_reason}.
@@ -165,7 +165,7 @@ export default function CostPage() {
             <AnomalyPanel anomalies={data.anomalies} />
           )}
 
-          <Section eyebrow="trend" title="Daily Bedrock spend">
+          <Section eyebrow="추이" title="일별 Bedrock 사용액">
             <div className="border border-zinc-800 bg-zinc-900/50 p-4 h-72">
               {loading ? (
                 <div className="text-zinc-500 text-sm">loading…</div>
@@ -226,7 +226,7 @@ export default function CostPage() {
             </div>
           </Section>
 
-          <Section eyebrow="breakdown" title="Cost by model + token direction">
+          <Section eyebrow="세부 분석" title="모델 + token 방향별 비용">
             {loading ? (
               <div className="text-zinc-500 text-sm">loading…</div>
             ) : !data || data.by_usage_type.length === 0 ? (
@@ -289,7 +289,7 @@ export default function CostPage() {
         </>
       )}
 
-      <Section eyebrow="how it works">
+      <Section eyebrow="동작 원리">
         <div className="border border-zinc-800 bg-zinc-900/30 p-5 text-sm text-zinc-400 leading-relaxed">
           <p>
             CDK가 deploy 시점에 각 Claude 모델별로 Application Inference Profile
@@ -318,8 +318,8 @@ function AnomalyPanel({ anomalies }: { anomalies: CostAnomaly[] }) {
   };
   return (
     <Section
-      eyebrow="anomaly"
-      title="Daily spend spike detection"
+      eyebrow="이상치"
+      title="일별 사용액 spike 감지"
       description="7일 baseline 대비 z-score > 2 + relative 50%↑ + 절대 차이 $0.5↑ 모두 만족하는 날을 표시합니다."
     >
       <div className="border border-zinc-800 bg-zinc-900/40">

@@ -340,7 +340,7 @@ export default function DashboardPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="monitor"
+        eyebrow="모니터"
         title="Dashboard"
         description="단일 클러스터 deep dive — 시계열, wait events, locks, vacuum, schema changes 등 17개 패널."
         actions={

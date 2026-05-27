@@ -54,7 +54,7 @@ export default function SimulatorPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="Automate"
+        eyebrow="자동화"
         title="Simulator"
         description="업그레이드 · 파라미터 · 스케일링 · DDL 영향을 실제 실행 전에 추정합니다. 모든 결과는 추정치이며 프로덕션 적용 전 별도 검증 필수."
         actions={

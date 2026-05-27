@@ -40,8 +40,8 @@ export default function ApprovalsPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="automate"
-        title="Approval center"
+        eyebrow="자동화"
+        title="승인 센터"
         description="Agent가 제안한 쓰기 작업 (DDL, parameter, scaling, maintenance)을 DBA가 검토하고 승인하는 게이트입니다."
         actions={
           <div className="flex gap-1">
@@ -56,10 +56,10 @@ export default function ApprovalsPage() {
                 }`}
               >
                 {s === "pending"
-                  ? "pending"
+                  ? "승인 대기"
                   : s === "approved"
-                    ? "approved"
-                    : "rejected"}
+                    ? "승인됨"
+                    : "거부됨"}
               </button>
             ))}
           </div>
@@ -68,20 +68,26 @@ export default function ApprovalsPage() {
 
       {approvals.length === 0 ? (
         <EmptyState
-          eyebrow={filter}
+          eyebrow={
+            filter === "pending"
+              ? "승인 대기"
+              : filter === "approved"
+                ? "승인됨"
+                : "거부됨"
+          }
           title={
             filter === "pending"
-              ? "No pending approvals"
+              ? "대기 중인 승인 요청이 없습니다"
               : filter === "approved"
-                ? "No approved actions yet"
-                : "No rejected actions"
+                ? "아직 승인된 작업이 없습니다"
+                : "거부된 작업이 없습니다"
           }
           description={
             filter === "pending"
-              ? "When the agent proposes a write action, it lands here for review."
+              ? "Agent가 쓰기 작업을 제안하면 이 페이지에 검토 항목으로 올라옵니다."
               : undefined
           }
-          secondary={{ href: "/chat", label: "Ask the agent" }}
+          secondary={{ href: "/chat", label: "Agent에게 물어보기" }}
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
