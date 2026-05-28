@@ -178,8 +178,15 @@ def _cors():
     return {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}
 
 
-def _resp(status, body):
-    return {"statusCode": status, "headers": _cors(), "body": json.dumps(body, default=str)}
+def _resp(status, body, max_age: int = 0):
+    """Build the API Gateway response envelope. `max_age` (seconds)
+    adds Cache-Control: private, max-age=N for 2xx GETs only — used
+    by the cluster registry list, which is loaded on every sidebar
+    nav and changes slowly."""
+    headers = _cors()
+    if max_age > 0 and 200 <= status < 300:
+        headers = {**headers, "Cache-Control": f"private, max-age={int(max_age)}"}
+    return {"statusCode": status, "headers": headers, "body": json.dumps(body, default=str)}
 
 
 def _session_for(region: str, role_arn: str = "") -> boto3.session.Session:
@@ -284,7 +291,9 @@ def _handle_list(table):
     response = table.scan()
     items = response.get("Items", [])
     items = _enrich_with_meta(items)
-    return _resp(200, items)
+    # 30s browser cache — cluster registry doesn't change between
+    # admin actions, and EVERY page navigation hits this list.
+    return _resp(200, items, max_age=30)
 
 
 def _handle_register(table, body: dict):

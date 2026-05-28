@@ -541,7 +541,16 @@ def _set_origin(event):
     _CURRENT_ORIGIN["value"] = headers.get("origin") or headers.get("Origin") or ""
 
 
-def _response(status, body):
+def _response(status, body, max_age: int = 0):
+    """Build the API Gateway response envelope.
+
+    `max_age` adds a Cache-Control header so the browser caches
+    identical GETs for that many seconds. Use sparingly — only for
+    endpoints whose payload genuinely is stable for that window
+    (overview, timeseries, timeline). Default 0 = no cache (safe for
+    mutations + per-call-fresh reads). We use `private` so a shared
+    proxy can't cache one user's response for another.
+    """
     origin = _CURRENT_ORIGIN["value"]
     if _ALLOWED_ORIGINS:
         allow = origin if origin in _ALLOWED_ORIGINS else ""
@@ -552,11 +561,15 @@ def _response(status, body):
         cors = {"Access-Control-Allow-Origin": allow}
         if allow != "*":
             cors["Vary"] = "Origin"
+    cache_hdr = {}
+    if max_age > 0 and 200 <= status < 300:
+        cache_hdr["Cache-Control"] = f"private, max-age={int(max_age)}"
     return {
         "statusCode": status,
         "headers": {
             "Content-Type": "application/json",
             **cors,
+            **cache_hdr,
         },
         "body": json.dumps(body, default=str),
     }
@@ -1868,7 +1881,12 @@ def lambda_handler(event, context):
 
     if raw_path_early.endswith("/multi-cluster/overview"):
         try:
-            return _response(200, _multi_cluster_overview(query))
+            # Fleet overview is the highest-traffic read in the app
+            # (loaded on every sidebar nav). 20s browser cache means
+            # rapid tab-switching stops re-hitting the lambda.
+            return _response(
+                200, _multi_cluster_overview(query), max_age=20
+            )
         except Exception:
             print(f"Multi-cluster overview error: {traceback.format_exc()}")
             return _response(500, {"error": "Internal server error"})
@@ -1896,6 +1914,11 @@ def lambda_handler(event, context):
             return _response(
                 200,
                 _timeseries(query, cluster_id, metric_type, hours, from_iso, to_iso),
+                # Dashboard panels auto-refresh every ~30s for some
+                # users. 15s browser cache halves the lambda QPS for
+                # the per-cluster timeseries endpoint without making
+                # the chart visibly stale.
+                max_age=15,
             )
         if raw_path.endswith("/wait-events"):
             hours = _parse_int(qs.get("hours"), 1)
@@ -1967,6 +1990,7 @@ def lambda_handler(event, context):
                     from_iso,
                     to_iso,
                 ),
+                max_age=15,
             )
         if raw_path.endswith("/index-recommendations"):
             min_ratio = _parse_float(qs.get("min_seq_ratio"), 0.5)
