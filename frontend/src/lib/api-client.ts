@@ -651,6 +651,41 @@ export async function deleteAlertRule(id: number) {
   return res.json();
 }
 
+export interface AlertImpact {
+  rule: {
+    id: number;
+    cluster_id: string;
+    name: string;
+    last_triggered_at: string | null;
+  };
+  window: { center: string; minutes: number } | null;
+  info?: string;
+  top_slow_queries: Array<{
+    query_hash: string;
+    query_excerpt: string;
+    calls: number;
+    total_ms: number;
+    mean_ms: number;
+  }>;
+  concurrent_events: Array<{
+    event_time: string;
+    event_type: string;
+    severity: string;
+    message: string;
+  }>;
+  concurrent_alerts: Array<{
+    event_time: string;
+    rule_id: string;
+    message: string;
+  }>;
+}
+
+export async function fetchAlertImpact(id: number): Promise<AlertImpact> {
+  const res = await fetch(await api(`/api/alert-rules/${id}/impact`));
+  if (!res.ok) throw new Error(`Alert impact fetch failed: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchAlertSubscriptions() {
   const res = await fetch(await api(`/api/alert-subscriptions`));
   if (!res.ok)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   fetchAlertRules,
   fetchClusters,
@@ -10,6 +10,8 @@ import {
   fetchAlertSubscriptions,
   createAlertSubscription,
   deleteAlertSubscription,
+  fetchAlertImpact,
+  type AlertImpact,
   apiUrl,
 } from "@/lib/api-client";
 import {
@@ -248,6 +250,36 @@ const RULE_TEMPLATES: {
 
 export default function AlertsPage() {
   const [rules, setRules] = useState<Rule[]>([]);
+  // Impact panel: which rule's "what was going on?" context is expanded
+  // right now, plus its fetched data. Keyed by rule id so toggling the
+  // same row collapses it.
+  const [impactOpenId, setImpactOpenId] = useState<number | null>(null);
+  const [impactData, setImpactData] = useState<AlertImpact | null>(null);
+  const [impactLoading, setImpactLoading] = useState(false);
+  const [impactError, setImpactError] = useState<string | null>(null);
+
+  const openImpact = useCallback(
+    async (id: number) => {
+      if (impactOpenId === id) {
+        setImpactOpenId(null);
+        setImpactData(null);
+        return;
+      }
+      setImpactOpenId(id);
+      setImpactData(null);
+      setImpactError(null);
+      setImpactLoading(true);
+      try {
+        const data = await fetchAlertImpact(id);
+        setImpactData(data);
+      } catch (e) {
+        setImpactError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setImpactLoading(false);
+      }
+    },
+    [impactOpenId],
+  );
   const [clusters, setClusters] = useState<{ cluster_id: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -972,115 +1004,139 @@ export default function AlertsPage() {
               </thead>
               <tbody className="divide-y divide-zinc-800">
                 {rules.map((r) => (
-                  <tr key={r.id} className="hover:bg-zinc-900/40">
-                    <td className="px-3 py-2">
-                      <button
-                        onClick={() => toggle(r.id, r.enabled)}
-                        disabled={!admin}
-                        className={`px-1.5 py-0.5 border text-[10px] font-mono transition-colors ${
-                          r.enabled
-                            ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/20"
-                            : "bg-zinc-700/40 text-zinc-400 border-zinc-700 hover:bg-zinc-700/60"
-                        } ${admin ? "" : "cursor-not-allowed opacity-70"}`}
-                      >
-                        {r.enabled ? "활성" : "중지"}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2">
-                      <DataStatusBadge
-                        status={r.data_status}
-                        latestTs={r.latest_metric_ts}
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-zinc-300 font-mono text-xs">
-                      {r.cluster_id}
-                    </td>
-                    <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
-                      {(() => {
-                        const comp = parseConditions(r.conditions_json);
-                        if (!comp) {
+                  <Fragment key={r.id}>
+                    <tr className="hover:bg-zinc-900/40">
+                      <td className="px-3 py-2">
+                        <button
+                          onClick={() => toggle(r.id, r.enabled)}
+                          disabled={!admin}
+                          className={`px-1.5 py-0.5 border text-[10px] font-mono transition-colors ${
+                            r.enabled
+                              ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/20"
+                              : "bg-zinc-700/40 text-zinc-400 border-zinc-700 hover:bg-zinc-700/60"
+                          } ${admin ? "" : "cursor-not-allowed opacity-70"}`}
+                        >
+                          {r.enabled ? "활성" : "중지"}
+                        </button>
+                      </td>
+                      <td className="px-3 py-2">
+                        <DataStatusBadge
+                          status={r.data_status}
+                          latestTs={r.latest_metric_ts}
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-zinc-300 font-mono text-xs">
+                        {r.cluster_id}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
+                        {(() => {
+                          const comp = parseConditions(r.conditions_json);
+                          if (!comp) {
+                            return (
+                              <>
+                                {r.metric_type}{" "}
+                                <span className="text-amber-400">
+                                  {r.comparison}
+                                </span>{" "}
+                                {r.threshold}
+                              </>
+                            );
+                          }
+                          const join = ` ${comp.logic.toUpperCase()} `;
                           return (
-                            <>
-                              {r.metric_type}{" "}
-                              <span className="text-amber-400">
-                                {r.comparison}
-                              </span>{" "}
-                              {r.threshold}
-                            </>
-                          );
-                        }
-                        const join = ` ${comp.logic.toUpperCase()} `;
-                        return (
-                          <span
-                            title={comp.operands
-                              .map(
-                                (o) =>
-                                  `${o.metric_type}(${o.agg ?? "max"},${
-                                    o.window_minutes ?? 10
-                                  }m) ${o.comparison} ${o.threshold}`,
-                              )
-                              .join(join)}
-                          >
-                            <span className="px-1 py-0.5 mr-1.5 bg-amber-500/15 text-amber-300 border border-amber-500/40 text-[10px] uppercase tracking-wider">
-                              {comp.logic} · {comp.operands.length}
-                            </span>
-                            <span className="text-zinc-400">
-                              {comp.operands
-                                .slice(0, 2)
+                            <span
+                              title={comp.operands
                                 .map(
                                   (o) =>
-                                    `${o.metric_type} ${o.comparison} ${o.threshold}`,
+                                    `${o.metric_type}(${o.agg ?? "max"},${
+                                      o.window_minutes ?? 10
+                                    }m) ${o.comparison} ${o.threshold}`,
                                 )
                                 .join(join)}
-                              {comp.operands.length > 2 && " …"}
-                            </span>
-                          </span>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-3 py-2 text-zinc-400 text-xs">
-                      {r.last_triggered_at
-                        ? new Date(r.last_triggered_at).toLocaleString()
-                        : "발화 이력 없음"}
-                      {(() => {
-                        // Ack badge: only when ack is newer than the latest
-                        // trigger. If the rule has fired again since the ack
-                        // we treat the ack as stale.
-                        if (!r.last_acked_at) return null;
-                        if (
-                          r.last_triggered_at &&
-                          new Date(r.last_acked_at) <=
-                            new Date(r.last_triggered_at)
-                        )
-                          return null;
-                        return (
-                          <div
-                            className="mt-1 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 font-mono"
-                            title={`acked ${new Date(
-                              r.last_acked_at,
-                            ).toLocaleString()}`}
-                          >
-                            <span>✓ acked</span>
-                            {r.last_acked_by && (
-                              <span className="text-zinc-400">
-                                @{r.last_acked_by}
+                            >
+                              <span className="px-1 py-0.5 mr-1.5 bg-amber-500/15 text-amber-300 border border-amber-500/40 text-[10px] uppercase tracking-wider">
+                                {comp.logic} · {comp.operands.length}
                               </span>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {admin && (
-                        <button
-                          onClick={() => remove(r.id)}
-                          className="text-rose-400 hover:text-rose-300 text-xs"
-                        >
-                          삭제
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                              <span className="text-zinc-400">
+                                {comp.operands
+                                  .slice(0, 2)
+                                  .map(
+                                    (o) =>
+                                      `${o.metric_type} ${o.comparison} ${o.threshold}`,
+                                  )
+                                  .join(join)}
+                                {comp.operands.length > 2 && " …"}
+                              </span>
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-400 text-xs">
+                        {r.last_triggered_at
+                          ? new Date(r.last_triggered_at).toLocaleString()
+                          : "발화 이력 없음"}
+                        {(() => {
+                          // Ack badge: only when ack is newer than the latest
+                          // trigger. If the rule has fired again since the ack
+                          // we treat the ack as stale.
+                          if (!r.last_acked_at) return null;
+                          if (
+                            r.last_triggered_at &&
+                            new Date(r.last_acked_at) <=
+                              new Date(r.last_triggered_at)
+                          )
+                            return null;
+                          return (
+                            <div
+                              className="mt-1 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 font-mono"
+                              title={`acked ${new Date(
+                                r.last_acked_at,
+                              ).toLocaleString()}`}
+                            >
+                              <span>✓ acked</span>
+                              {r.last_acked_by && (
+                                <span className="text-zinc-400">
+                                  @{r.last_acked_by}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <div className="flex items-center justify-end gap-3">
+                          {r.last_triggered_at && (
+                            <button
+                              onClick={() => openImpact(r.id)}
+                              className="text-amber-300 hover:text-amber-200 text-xs underline underline-offset-2"
+                              title="이 룰이 발화한 시점의 슬로우 쿼리·이벤트·동시 알림"
+                            >
+                              {impactOpenId === r.id ? "닫기" : "영향도"}
+                            </button>
+                          )}
+                          {admin && (
+                            <button
+                              onClick={() => remove(r.id)}
+                              className="text-rose-400 hover:text-rose-300 text-xs"
+                            >
+                              삭제
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                    {impactOpenId === r.id && (
+                      <tr className="bg-zinc-950/40">
+                        <td colSpan={6} className="px-3 py-4">
+                          <ImpactPanel
+                            loading={impactLoading}
+                            error={impactError}
+                            data={impactData}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -1310,5 +1366,143 @@ function GuideStep({
         <div className="text-[12px] text-zinc-400 leading-relaxed">{body}</div>
       </div>
     </li>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Impact panel — what was going on at the moment a rule fired. Rendered
+// inline below the table row when the DBA clicks "영향도". Three sections:
+// top slow queries, concurrent ops events (RDS / backup / vacuum etc.),
+// and sibling alerts (other rules that fired in the same window).
+// ---------------------------------------------------------------------------
+
+function ImpactPanel({
+  loading,
+  error,
+  data,
+}: {
+  loading: boolean;
+  error: string | null;
+  data: AlertImpact | null;
+}) {
+  if (loading) {
+    return <div className="text-xs text-zinc-500">불러오는 중…</div>;
+  }
+  if (error) {
+    return <div className="text-xs text-rose-400">{error}</div>;
+  }
+  if (!data) return null;
+  if (!data.window) {
+    return (
+      <div className="text-xs text-zinc-500">
+        {data.info || "이 룰은 아직 발화 이력이 없습니다."}
+      </div>
+    );
+  }
+  const fmt = (iso?: string) => (iso ? new Date(iso).toLocaleString() : "—");
+  return (
+    <div className="space-y-4">
+      <div className="text-[11px] text-zinc-500">
+        기준 시각{" "}
+        <span className="font-mono text-zinc-300">
+          {fmt(data.window.center)}
+        </span>{" "}
+        · ±{data.window.minutes}분 윈도우
+      </div>
+
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
+          Top slow queries
+        </div>
+        {data.top_slow_queries.length === 0 ? (
+          <div className="text-[11px] text-zinc-500 px-2 py-1.5 border border-zinc-800">
+            윈도우 안에 슬로우 쿼리 기록이 없습니다.
+          </div>
+        ) : (
+          <div className="border border-zinc-800 divide-y divide-zinc-800">
+            {data.top_slow_queries.map((q, i) => (
+              <div key={q.query_hash || i} className="px-3 py-2">
+                <div className="flex items-baseline justify-between gap-3 mb-1">
+                  <div className="text-[10px] text-zinc-500 font-mono">
+                    {(q.query_hash || "").slice(0, 12)}…
+                  </div>
+                  <div className="text-[11px] text-zinc-400 tabular-nums">
+                    total{" "}
+                    <span className="text-zinc-200">
+                      {Math.round(Number(q.total_ms) || 0)}ms
+                    </span>{" "}
+                    · {Number(q.calls) || 0} calls · mean{" "}
+                    {Math.round(Number(q.mean_ms) || 0)}ms
+                  </div>
+                </div>
+                <pre className="text-[11px] text-zinc-300 font-mono whitespace-pre-wrap break-all">
+                  {(q.query_excerpt || "").trim()}
+                </pre>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
+          동시 이벤트
+        </div>
+        {data.concurrent_events.length === 0 ? (
+          <div className="text-[11px] text-zinc-500 px-2 py-1.5 border border-zinc-800">
+            윈도우 안에 운영 이벤트가 없습니다.
+          </div>
+        ) : (
+          <div className="border border-zinc-800 divide-y divide-zinc-800">
+            {data.concurrent_events.map((ev, i) => (
+              <div
+                key={i}
+                className="px-3 py-2 flex items-baseline justify-between gap-3"
+              >
+                <div className="text-[11px] text-zinc-400">
+                  <span className="font-mono text-zinc-200 mr-2">
+                    {ev.event_type}
+                  </span>
+                  <span>{ev.message}</span>
+                </div>
+                <div className="text-[10px] text-zinc-600 tabular-nums">
+                  {fmt(ev.event_time)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
+          동시 발화 알림 (cascading)
+        </div>
+        {data.concurrent_alerts.length === 0 ? (
+          <div className="text-[11px] text-zinc-500 px-2 py-1.5 border border-zinc-800">
+            같은 윈도우에 다른 알림은 없었습니다.
+          </div>
+        ) : (
+          <div className="border border-zinc-800 divide-y divide-zinc-800">
+            {data.concurrent_alerts.map((a, i) => (
+              <div
+                key={i}
+                className="px-3 py-2 flex items-baseline justify-between gap-3"
+              >
+                <div className="text-[11px] text-zinc-300">
+                  <span className="font-mono text-zinc-500 mr-2">
+                    rule#{a.rule_id}
+                  </span>
+                  <span>{a.message}</span>
+                </div>
+                <div className="text-[10px] text-zinc-600 tabular-nums">
+                  {fmt(a.event_time)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

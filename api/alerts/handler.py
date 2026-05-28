@@ -417,6 +417,106 @@ def _delete_subscription(sns_client, sub_arn, query):
     return _response(200, {"unsubscribed": sub_arn})
 
 
+def _rule_impact(query, rule_id):
+    """Return the operational context around a rule's most-recent trigger.
+
+    When an alert fires the DBA wants to know "what else was going on at
+    that moment?" — top slow queries, other alerts that fired in the
+    same window, recent ops events. This endpoint stitches those signals
+    into a single response so the UI doesn't have to make N round-trips.
+
+    Window: ±5 minutes around triggered_at (caller can widen via ?window=).
+    """
+    try:
+        rule_id_int = int(rule_id)
+    except (TypeError, ValueError):
+        return _response(400, {"error": "rule_id must be integer"})
+
+    rule_rows = query(
+        "SELECT id, cluster_id, name, metric_type, comparison, threshold, "
+        "       last_triggered_at FROM alert_rules WHERE id = :id",
+        {"id": rule_id_int},
+    )
+    if not rule_rows:
+        return _response(404, {"error": "rule not found"})
+    rule = rule_rows[0]
+    cluster_id = rule.get("cluster_id") or ""
+    triggered_at = rule.get("last_triggered_at")
+    if not triggered_at:
+        return _response(
+            200,
+            {
+                "rule": rule,
+                "window": None,
+                "info": "이 룰은 아직 발화 이력이 없습니다.",
+                "top_slow_queries": [],
+                "concurrent_events": [],
+                "concurrent_alerts": [],
+            },
+        )
+
+    # Top 5 slow queries that overlapped the trigger window. snapshot_time
+    # is the pg_stat_statements snapshot point, so a query showing up here
+    # was active in the same window.
+    top_slow = query(
+        "SELECT query_hash, LEFT(query_text, 200) AS query_excerpt, "
+        "       MAX(calls) AS calls, MAX(total_time_ms) AS total_ms, "
+        "       MAX(mean_time_ms) AS mean_ms "
+        "FROM query_stats "
+        "WHERE cluster_id = :cid "
+        "  AND snapshot_time BETWEEN ((:tat)::timestamptz - INTERVAL '5 minutes') "
+        "                        AND ((:tat)::timestamptz + INTERVAL '5 minutes') "
+        "GROUP BY query_hash, query_text "
+        "ORDER BY total_ms DESC NULLS LAST LIMIT 5",
+        {"cid": cluster_id, "tat": triggered_at},
+    )
+
+    # Non-alert events in the same window (RDS events, scaling, vacuum,
+    # backup completion etc.). Excludes 'alert' event_type to avoid
+    # double-rendering — those go in concurrent_alerts below.
+    concurrent_events = query(
+        "SELECT event_time, event_type, severity, LEFT(message, 240) AS message "
+        "FROM event_log "
+        "WHERE cluster_id = :cid AND event_type <> 'alert' "
+        "  AND event_time BETWEEN ((:tat)::timestamptz - INTERVAL '5 minutes') "
+        "                     AND ((:tat)::timestamptz + INTERVAL '5 minutes') "
+        "ORDER BY event_time DESC LIMIT 10",
+        {"cid": cluster_id, "tat": triggered_at},
+    )
+
+    # Other rules that fired within the same window — useful for spotting
+    # cascading failures (CPU spike + connection burst together).
+    concurrent_alerts = query(
+        "SELECT event_time, raw_event->>'rule_id' AS rule_id, "
+        "       LEFT(message, 200) AS message "
+        "FROM event_log "
+        "WHERE cluster_id = :cid AND event_type = 'alert' "
+        "  AND COALESCE(raw_event->>'rule_id', '') <> :self_id "
+        "  AND event_time BETWEEN ((:tat)::timestamptz - INTERVAL '5 minutes') "
+        "                     AND ((:tat)::timestamptz + INTERVAL '5 minutes') "
+        "ORDER BY event_time DESC LIMIT 10",
+        {
+            "cid": cluster_id,
+            "tat": triggered_at,
+            "self_id": str(rule_id_int),
+        },
+    )
+
+    return _response(
+        200,
+        {
+            "rule": rule,
+            "window": {
+                "center": triggered_at,
+                "minutes": 5,
+            },
+            "top_slow_queries": top_slow,
+            "concurrent_events": concurrent_events,
+            "concurrent_alerts": concurrent_alerts,
+        },
+    )
+
+
 def _delete_rule(query, rule_id):
     try:
         rule_id_int = int(rule_id)
@@ -468,6 +568,11 @@ def lambda_handler(event, context):
                     return forbid
                 return _delete_subscription(sns_client, qs.get("sub_arn"), query)
             return _response(405, {"error": f"method {method} not allowed"})
+
+        # /api/alerts/{id}/impact — operational context around the rule's
+        # most recent firing. Read-only; no admin gate needed.
+        if method == "GET" and raw_path.rstrip("/").endswith("/impact"):
+            return _rule_impact(query, path_params.get("id"))
 
         if method == "GET":
             return _response(200, _list_rules(query, qs.get("cluster_id")))

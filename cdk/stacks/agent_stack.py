@@ -757,6 +757,14 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.PATCH, apigwv2.HttpMethod.DELETE],
             integration=alerts_integration,
         )
+        # /impact: returns the operational context around a rule's
+        # most-recent firing (slow queries, concurrent events, sibling
+        # alerts). Read-only.
+        self.api.add_routes(
+            path="/api/alert-rules/{id}/impact",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=alerts_integration,
+        )
         self.api.add_routes(
             path="/api/alert-subscriptions",
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE],
