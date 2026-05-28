@@ -893,66 +893,71 @@ export default function AlertsPage() {
             </form>
           )}
           {subs.length > 0 ? (
-            <table className="w-full text-sm border border-zinc-800">
-              <thead className="bg-zinc-900/60 border-b border-zinc-800 text-[10px] uppercase tracking-wider text-zinc-500">
-                <tr>
-                  <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                    Protocol
-                  </th>
-                  <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                    Endpoint
-                  </th>
-                  <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                    Status
-                  </th>
-                  <th className="text-right px-3 py-2 text-zinc-400 font-medium">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800">
-                {subs.map((s, i) => {
-                  const pending =
-                    !s.subscription_arn ||
-                    s.subscription_arn === "PendingConfirmation" ||
-                    s.subscription_arn === "Deleted";
-                  return (
-                    <tr
-                      key={`${s.subscription_arn}-${i}`}
-                      className="hover:bg-zinc-900/40"
-                    >
-                      <td className="px-3 py-2 text-zinc-300 font-mono text-xs">
-                        {s.protocol}
-                      </td>
-                      <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
-                        {s.endpoint}
-                      </td>
-                      <td className="px-3 py-2">
-                        <span
-                          className={`px-1.5 py-0.5 border text-[10px] font-mono ${
-                            pending
-                              ? "bg-amber-500/10 text-amber-300 border-amber-500/40"
-                              : "bg-emerald-500/10 text-emerald-300 border-emerald-500/40"
-                          }`}
-                        >
-                          {pending ? "승인 대기" : "활성"}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        {!pending && admin && (
-                          <button
-                            onClick={() => removeSub(s.subscription_arn)}
-                            className="text-rose-400 hover:text-rose-300 text-xs"
+            // Mobile fallback: tables are too column-rich to card-ify
+            // cleanly; horizontal scroll preserves info while letting
+            // the page fit. Same pattern below for the rules table.
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border border-zinc-800 min-w-[640px]">
+                <thead className="bg-zinc-900/60 border-b border-zinc-800 text-[10px] uppercase tracking-wider text-zinc-500">
+                  <tr>
+                    <th className="text-left px-3 py-2 text-zinc-400 font-medium">
+                      Protocol
+                    </th>
+                    <th className="text-left px-3 py-2 text-zinc-400 font-medium">
+                      Endpoint
+                    </th>
+                    <th className="text-left px-3 py-2 text-zinc-400 font-medium">
+                      Status
+                    </th>
+                    <th className="text-right px-3 py-2 text-zinc-400 font-medium">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800">
+                  {subs.map((s, i) => {
+                    const pending =
+                      !s.subscription_arn ||
+                      s.subscription_arn === "PendingConfirmation" ||
+                      s.subscription_arn === "Deleted";
+                    return (
+                      <tr
+                        key={`${s.subscription_arn}-${i}`}
+                        className="hover:bg-zinc-900/40"
+                      >
+                        <td className="px-3 py-2 text-zinc-300 font-mono text-xs">
+                          {s.protocol}
+                        </td>
+                        <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
+                          {s.endpoint}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`px-1.5 py-0.5 border text-[10px] font-mono ${
+                              pending
+                                ? "bg-amber-500/10 text-amber-300 border-amber-500/40"
+                                : "bg-emerald-500/10 text-emerald-300 border-emerald-500/40"
+                            }`}
                           >
-                            구독 해지
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                            {pending ? "승인 대기" : "활성"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {!pending && admin && (
+                            <button
+                              onClick={() => removeSub(s.subscription_arn)}
+                              className="text-rose-400 hover:text-rose-300 text-xs"
+                            >
+                              구독 해지
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <div className="text-zinc-500 text-xs py-2">
               no subscribers yet. Add email/SMS/Slack webhook to receive
@@ -978,8 +983,8 @@ export default function AlertsPage() {
             description="위 폼에서 cluster + metric + threshold를 고르면 됩니다. evaluator가 5분마다 실행되고 SNS / Slack / PagerDuty 구독자에게 fan-out 됩니다."
           />
         ) : (
-          <div className="border border-zinc-800 overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="border border-zinc-800 overflow-x-auto">
+            <table className="w-full text-sm min-w-[768px]">
               <thead className="bg-zinc-900/60 border-b border-zinc-800 text-[10px] uppercase tracking-wider text-zinc-500">
                 <tr>
                   <th className="text-left px-3 py-2 text-zinc-400 font-medium">

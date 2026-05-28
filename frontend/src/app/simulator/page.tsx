@@ -246,46 +246,48 @@ function UpgradePanel({
             <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
               Methods · storage {fmtDecimal(impact.storage_gb, 0)} GB
             </div>
-            <table className="w-full text-xs">
-              <thead className="text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">
-                <tr>
-                  <th className="text-left py-1.5 font-medium">Method</th>
-                  <th className="text-right py-1.5 font-medium">Est. time</th>
-                  <th className="text-right py-1.5 font-medium">Downtime</th>
-                  <th className="text-left py-1.5 font-medium pl-3">Risk</th>
-                </tr>
-              </thead>
-              <tbody>
-                {impact.methods.map((m) => (
-                  <tr
-                    key={m.method}
-                    className={`border-b border-zinc-900 ${
-                      m.method === impact.recommendation
-                        ? "bg-emerald-500/5"
-                        : ""
-                    }`}
-                  >
-                    <td className="py-1.5 font-mono text-zinc-200">
-                      {m.method}
-                      {m.method === impact.recommendation && (
-                        <span className="ml-2 text-[10px] text-emerald-400">
-                          ★ 권장
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums">
-                      ~{m.estimated_minutes}분
-                    </td>
-                    <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums">
-                      {m.downtime_text}
-                    </td>
-                    <td className="py-1.5 pl-3">
-                      <RiskBadge risk={m.risk} />
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs min-w-[640px]">
+                <thead className="text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">
+                  <tr>
+                    <th className="text-left py-1.5 font-medium">Method</th>
+                    <th className="text-right py-1.5 font-medium">Est. time</th>
+                    <th className="text-right py-1.5 font-medium">Downtime</th>
+                    <th className="text-left py-1.5 font-medium pl-3">Risk</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {impact.methods.map((m) => (
+                    <tr
+                      key={m.method}
+                      className={`border-b border-zinc-900 ${
+                        m.method === impact.recommendation
+                          ? "bg-emerald-500/5"
+                          : ""
+                      }`}
+                    >
+                      <td className="py-1.5 font-mono text-zinc-200">
+                        {m.method}
+                        {m.method === impact.recommendation && (
+                          <span className="ml-2 text-[10px] text-emerald-400">
+                            ★ 권장
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums">
+                        ~{m.estimated_minutes}분
+                      </td>
+                      <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums">
+                        {m.downtime_text}
+                      </td>
+                      <td className="py-1.5 pl-3">
+                        <RiskBadge risk={m.risk} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 

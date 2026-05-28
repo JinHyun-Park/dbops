@@ -238,8 +238,8 @@ export default function CostPage() {
                 no usage-type breakdown yet
               </div>
             ) : (
-              <div className="border border-zinc-800 overflow-hidden">
-                <table className="w-full text-sm">
+              <div className="border border-zinc-800 overflow-x-auto">
+                <table className="w-full text-sm min-w-[560px]">
                   <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
                     <tr>
                       <th className="text-left px-4 py-2.5 font-medium">

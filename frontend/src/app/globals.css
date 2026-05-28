@@ -875,6 +875,21 @@ section:nth-of-type(n + 6) {
 }
 
 /* ========================================================================
+   Mobile-safety for wide tables. Several pages render dense tabular
+   data that doesn't fit a phone viewport. Adding overflow-x at the
+   <table> element via media query so each affected page doesn't need
+   its own wrapper. The display:block flip is intentional — table-cell
+   layout doesn't honor overflow without the parent being a block. */
+@media (max-width: 767px) {
+  table {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ========================================================================
    Pointer affordances — Tailwind v4 dropped the implicit cursor:pointer
    on <button>. Without this, clickable controls feel indistinguishable
    from static text since the mouse pointer stays as an arrow over

@@ -16,14 +16,14 @@ export function PageHeader({
   actions,
 }: PageHeaderProps) {
   return (
-    <header className="flex items-end justify-between gap-6 mb-10 pb-7 border-b border-zinc-800/80">
+    <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 md:gap-6 mb-8 md:mb-10 pb-6 md:pb-7 border-b border-zinc-800/80">
       <div>
         {eyebrow && (
           <div className="text-[11px] font-medium text-zinc-500 mb-2">
             {eyebrow}
           </div>
         )}
-        <h1 className="text-[34px] leading-[1.15] font-semibold tracking-tight text-zinc-50">
+        <h1 className="text-2xl md:text-[34px] leading-[1.15] font-semibold tracking-tight text-zinc-50">
           {title}
         </h1>
         {description && (
@@ -44,7 +44,7 @@ interface PageBodyProps {
 }
 
 export function PageBody({ children }: PageBodyProps) {
-  return <div className="max-w-7xl mx-auto p-6 md:p-8 lg:p-10">{children}</div>;
+  return <div className="max-w-7xl mx-auto p-4 md:p-8 lg:p-10">{children}</div>;
 }
 
 interface EmptyStateProps {
