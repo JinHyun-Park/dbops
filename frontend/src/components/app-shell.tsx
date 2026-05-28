@@ -112,15 +112,15 @@ function Breadcrumbs({ pathname }: { pathname: string }) {
     href: "/" + segments.slice(0, i + 1).join("/"),
   }));
   return (
-    <nav className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.12em] text-zinc-500">
+    <nav className="flex items-center gap-1.5 text-[12px] text-zinc-500">
       <Link href="/" className="hover:text-zinc-300 transition-colors">
-        home
+        Home
       </Link>
       {crumbs.map((c, i) => (
         <span key={c.href} className="flex items-center gap-1.5">
           <span className="text-zinc-700">/</span>
           {i === crumbs.length - 1 ? (
-            <span className="text-zinc-300">{c.label}</span>
+            <span className="text-zinc-200">{c.label}</span>
           ) : (
             <Link
               href={c.href}
