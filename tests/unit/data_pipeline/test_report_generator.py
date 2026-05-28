@@ -7,14 +7,24 @@ _write_nl_summary must fall back to _template_summary when bedrock-runtime
 raises.
 """
 
-import sys
+import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(PROJECT_ROOT / "data-pipeline" / "report_generator"))
-
-import handler  # noqa: E402
+# Multiple Lambda handlers in this project are named `handler.py`. If we
+# do plain `sys.path.insert(...) + import handler`, the first test to run
+# wins and subsequent tests get its cached module instead of theirs.
+# Load this handler under a unique name so the module table stays sane
+# regardless of test ordering.
+_HANDLER_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "data-pipeline"
+    / "report_generator"
+    / "handler.py"
+)
+_spec = importlib.util.spec_from_file_location("report_generator_handler", _HANDLER_PATH)
+handler = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(handler)
 
 
 def _sample_data():

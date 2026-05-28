@@ -6,15 +6,20 @@ message normalization + truncation, the 401 unauth path, and the
 """
 
 import base64
+import importlib.util
 import json
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(PROJECT_ROOT / "api" / "chat_sessions"))
-
-import handler  # noqa: E402
+# Load the Lambda handler under a unique module name. Several Lambdas in
+# this project ship as `handler.py`; a plain sys.path.insert + import
+# handler collides with siblings depending on test ordering.
+_HANDLER_PATH = (
+    Path(__file__).resolve().parents[3] / "api" / "chat_sessions" / "handler.py"
+)
+_spec = importlib.util.spec_from_file_location("chat_sessions_handler", _HANDLER_PATH)
+handler = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(handler)
 
 
 def _jwt(sub: str = "user-a") -> str:

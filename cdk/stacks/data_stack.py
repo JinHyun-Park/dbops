@@ -148,7 +148,12 @@ class DataStack(cdk.Stack):
                 "CACHE_DB_CLUSTER_ARN": self.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
+                # Historical name kept here for alert_evaluator/handler.py;
+                # everywhere else uses ALERT_TOPIC_ARN. The evaluator's
+                # env-var lookup will be normalized in a follow-up so this
+                # alias can go away.
                 "ALERT_SNS_TOPIC_ARN": self.alert_topic.topic_arn,
+                "ALERT_TOPIC_ARN": self.alert_topic.topic_arn,
                 # Slack button / PagerDuty link target. Empty disables the deep-link.
                 "FRONTEND_URL": Settings.FRONTEND_URL,
                 # PagerDuty dedup TTL — same rule re-opens an incident every N minutes.

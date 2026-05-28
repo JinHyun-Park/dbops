@@ -306,7 +306,10 @@ def lambda_handler(event, context):
         "FROM alert_rules WHERE enabled = true"
     )
 
-    sns_topic = os.environ.get("ALERT_SNS_TOPIC_ARN", "")
+    # Prefer the canonical ALERT_TOPIC_ARN name (used by every other
+    # Lambda); the SNS-suffixed variant is the original name we shipped
+    # for this evaluator and is kept as a fallback for backward compat.
+    sns_topic = os.environ.get("ALERT_TOPIC_ARN") or os.environ.get("ALERT_SNS_TOPIC_ARN", "")
     sns_client = boto3.client("sns") if sns_topic else None
 
     triggered = 0
