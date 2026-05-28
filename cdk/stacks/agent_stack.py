@@ -71,11 +71,16 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                # request_approval tool writes here; FRONTEND_URL lets the
+                # tool emit a working review link in its return payload.
+                "APPROVALS_TABLE": foundation.approvals_table.table_name,
+                "FRONTEND_URL": Settings.FRONTEND_URL,
             },
         )
         data.cache_db.secret.grant_read(operations_mcp_lambda)
         data.cache_db.grant_data_api_access(operations_mcp_lambda)
         foundation.clusters_table.grant_read_data(operations_mcp_lambda)
+        foundation.approvals_table.grant_read_write_data(operations_mcp_lambda)
         # Allow agent-driven SQL against ANY registered Aurora cluster + admin actions.
         # All write paths still gate through approved=true in tool code.
         operations_mcp_lambda.add_to_role_policy(iam.PolicyStatement(

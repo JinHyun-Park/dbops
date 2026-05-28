@@ -79,6 +79,10 @@ export function MessageList({
               )}
             </div>
 
+            {msg.role === "assistant" && extractApprovalId(msg.content) && (
+              <ApprovalCallout approvalId={extractApprovalId(msg.content)!} />
+            )}
+
             {msg.role === "assistant" &&
               onSaveAsRunbook &&
               msg.content.length > 100 && (
@@ -130,6 +134,42 @@ export function MessageList({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// UUID v4 pattern — matches what the request_approval tool returns.
+const APPROVAL_ID_RX =
+  /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+
+function extractApprovalId(content: string): string | null {
+  // Heuristic: the agent's message must mention an approval to surface
+  // the callout, not just any UUID it happened to print.
+  if (!/approval/i.test(content)) return null;
+  const m = content.match(APPROVAL_ID_RX);
+  return m ? m[0] : null;
+}
+
+function ApprovalCallout({ approvalId }: { approvalId: string }) {
+  return (
+    <div className="mt-2 max-w-[80%] border-l-2 border-amber-500/60 bg-amber-500/5 px-3 py-2 flex items-start gap-2">
+      <span className="text-amber-300 mt-0.5">🔔</span>
+      <div className="flex-1 text-xs">
+        <div className="text-amber-200 font-medium">
+          DBA 승인이 등록되었습니다
+        </div>
+        <div className="text-zinc-400 mt-0.5 font-mono break-all">
+          {approvalId}
+        </div>
+        <a
+          href="/approvals"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-block mt-1.5 text-amber-300 hover:text-amber-200 underline underline-offset-2"
+        >
+          Approval Center 열기 →
+        </a>
+      </div>
     </div>
   );
 }

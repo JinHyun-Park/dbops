@@ -9,6 +9,7 @@ from mcp_servers.operations.tools.execute_sql import execute_sql_impl
 from mcp_servers.operations.tools.manage_maintenance import manage_maintenance_impl
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
 from mcp_servers.operations.tools.modify_scaling import modify_scaling_impl
+from mcp_servers.operations.tools.request_approval import request_approval_impl
 from mcp_servers.operations.tools.review_sql import review_sql_impl
 from mcp_servers.operations.tools.schema_diff import get_schema_diff_impl
 from mcp_servers.operations.tools.schema_history import get_schema_history_impl
@@ -120,6 +121,32 @@ TOOLS = {
                 "engine": {"type": "string", "enum": ["postgresql", "mysql"], "default": "postgresql", "description": "Database engine type"},
             },
             "required": ["cluster_id"],
+        },
+    },
+    "request_approval": {
+        "impl": request_approval_impl,
+        "description": (
+            "Register a DBA approval request for a write action. Call this "
+            "immediately after a write tool returns status=approval_required. "
+            "Returns approval_id + review URL. After the DBA approves on the "
+            "/approvals page, re-issue the original write tool with approved=true."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "action_type": {
+                    "type": "string",
+                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "other"],
+                    "description": "Which write tool needs approval",
+                },
+                "action_details": {
+                    "type": "object",
+                    "description": "The exact arguments the write tool would have been called with — DBA reviews this verbatim",
+                },
+                "requested_by": {"type": "string", "default": "agent"},
+            },
+            "required": ["cluster_id", "action_type", "action_details"],
         },
     },
 }
