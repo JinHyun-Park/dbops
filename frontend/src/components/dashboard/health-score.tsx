@@ -137,7 +137,7 @@ export function HealthScore({ clusterId }: Props) {
           };
 
   return (
-    <div className={`bg-zinc-900/50 border border-zinc-800 p-4 ${grade.bg}`}>
+    <div className={`bg-zinc-900/50 border border-zinc-800 p-5 ${grade.bg}`}>
       <div className="flex items-center gap-4 mb-4">
         <div
           className={`w-20 h-20 rounded-full ring-4 ${grade.ring} flex items-center justify-center bg-zinc-900`}

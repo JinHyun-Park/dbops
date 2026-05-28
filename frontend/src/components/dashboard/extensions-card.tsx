@@ -43,7 +43,7 @@ export function ExtensionsCard({
 
   if (!isPg) {
     return (
-      <div className="bg-zinc-900/50 border border-zinc-800 p-4">
+      <div className="bg-zinc-900/50 border border-zinc-800 p-5">
         <div className="text-sm text-zinc-200 font-medium mb-2">Extensions</div>
         <div className="text-xs text-zinc-500">PostgreSQL 전용 패널입니다.</div>
       </div>
@@ -55,7 +55,7 @@ export function ExtensionsCard({
   );
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 p-4">
+    <div className="bg-zinc-900/50 border border-zinc-800 p-5">
       <div className="flex items-center justify-between mb-3">
         <div>
           <div className="text-sm text-zinc-200 font-medium">

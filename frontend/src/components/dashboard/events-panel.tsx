@@ -57,7 +57,7 @@ export function EventsPanel({
   const [active, setActive] = useState<DashboardEvent | null>(null);
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 p-4">
+    <div className="bg-zinc-900/50 border border-zinc-800 p-5">
       <div className="flex items-center justify-between mb-3">
         <div className="text-sm text-zinc-200 font-medium">Recent Events</div>
         {events.length > 0 && (

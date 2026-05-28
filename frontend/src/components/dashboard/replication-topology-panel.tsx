@@ -144,14 +144,14 @@ export function ReplicationTopologyPanel({ clusterId }: { clusterId: string }) {
           <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
         )}
         {err && (
-          <div className="p-4">
+          <div className="p-5">
             <div className="text-xs text-rose-300 border border-rose-500/40 bg-rose-500/10 px-3 py-2">
               {err}
             </div>
           </div>
         )}
         {data?.error && (
-          <div className="p-4">
+          <div className="p-5">
             <div className="text-xs text-rose-300 border border-rose-500/40 bg-rose-500/10 px-3 py-2">
               {data.error}
             </div>
@@ -163,7 +163,7 @@ export function ReplicationTopologyPanel({ clusterId }: { clusterId: string }) {
           </div>
         )}
         {data && !data.error && (writer || readers.length > 0) && (
-          <div className="p-4 grid grid-cols-1 md:grid-cols-[minmax(220px,260px)_24px_1fr] gap-4 items-start">
+          <div className="p-5 grid grid-cols-1 md:grid-cols-[minmax(220px,260px)_24px_1fr] gap-4 items-start">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5 font-medium">
                 Writer

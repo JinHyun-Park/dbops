@@ -203,7 +203,7 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
               data.error.toLowerCase().includes("log group") &&
               data.error.toLowerCase().includes("not found");
             return (
-              <div className="p-4">
+              <div className="p-5">
                 <div
                   className={`text-xs px-3 py-2 border ${
                     isSetup

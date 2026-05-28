@@ -126,7 +126,7 @@ export function SettingsPanel({
       : "Engine";
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 p-4">
+    <div className="bg-zinc-900/50 border border-zinc-800 p-5">
       <div className="text-sm text-zinc-200 font-medium mb-3">
         {engineLabel} Configuration
       </div>

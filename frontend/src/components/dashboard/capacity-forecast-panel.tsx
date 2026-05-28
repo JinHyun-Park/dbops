@@ -156,21 +156,21 @@ export function CapacityForecastPanel({ clusterId }: { clusterId: string }) {
         <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
       )}
       {err && (
-        <div className="p-4">
+        <div className="p-5">
           <div className="text-xs text-rose-300 border border-rose-500/40 bg-rose-500/10 px-3 py-2">
             {err}
           </div>
         </div>
       )}
       {data && data.error && (
-        <div className="p-4">
+        <div className="p-5">
           <div className="text-xs text-amber-300 border border-amber-500/40 bg-amber-500/10 px-3 py-2">
             {data.error}
           </div>
         </div>
       )}
       {data && !data.error && data.samples < 7 && (
-        <div className="p-4">
+        <div className="p-5">
           <div className="text-xs text-zinc-400 border border-zinc-700 bg-zinc-900/40 px-3 py-2">
             데이터 부족 ({data.samples}개 샘플) — 신뢰성 있는 예측을 위해 최소
             7개 이상의 일별 데이터 포인트가 필요합니다.

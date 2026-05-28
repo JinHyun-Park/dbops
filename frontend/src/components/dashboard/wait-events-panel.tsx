@@ -55,7 +55,7 @@ export function WaitEventsPanel({
   const total = events.reduce((s, e) => s + Number(e.avg_load || 0), 0);
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 p-4">
+    <div className="bg-zinc-900/50 border border-zinc-800 p-5">
       <div className="text-sm text-zinc-200 font-medium mb-3">
         Wait Events ({hours}h)
       </div>

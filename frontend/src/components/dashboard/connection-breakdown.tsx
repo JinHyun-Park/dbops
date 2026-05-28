@@ -135,7 +135,7 @@ export function ConnectionBreakdown({
   const total = STATES.reduce((s, x) => s + (Number(latest[x.label]) || 0), 0);
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 p-4 col-span-full">
+    <div className="bg-zinc-900/50 border border-zinc-800 p-5 col-span-full">
       <div className="flex items-baseline justify-between mb-3">
         <div className="text-sm text-zinc-200 font-medium">
           Connection Activity Breakdown

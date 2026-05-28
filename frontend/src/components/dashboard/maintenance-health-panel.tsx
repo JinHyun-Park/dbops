@@ -290,7 +290,7 @@ function FindingDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur flex items-center justify-center p-5"
       onClick={onClose}
     >
       <div

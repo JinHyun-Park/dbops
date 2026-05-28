@@ -63,7 +63,7 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
   }, [clusterId]);
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 p-4">
+    <div className="bg-zinc-900/50 border border-zinc-800 p-5">
       <div className="flex items-center justify-between mb-3">
         <div className="text-sm text-zinc-200 font-medium">
           Anomalies
@@ -218,7 +218,7 @@ function AnomalyDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur flex items-center justify-center p-5"
       onClick={onClose}
     >
       <div

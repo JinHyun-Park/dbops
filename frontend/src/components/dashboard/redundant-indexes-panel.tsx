@@ -105,21 +105,21 @@ export function RedundantIndexesPanel({ clusterId }: { clusterId: string }) {
           <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
         )}
         {err && (
-          <div className="p-4">
+          <div className="p-5">
             <div className="text-xs text-rose-300 border border-rose-500/40 bg-rose-500/10 px-3 py-2">
               {err}
             </div>
           </div>
         )}
         {data?.info && (
-          <div className="p-4">
+          <div className="p-5">
             <div className="text-xs text-zinc-300 border border-zinc-700 bg-zinc-900/40 px-3 py-2">
               {data.info}
             </div>
           </div>
         )}
         {data?.error && !data?.info && (
-          <div className="p-4">
+          <div className="p-5">
             <div className="text-xs text-rose-300 border border-rose-500/40 bg-rose-500/10 px-3 py-2">
               {data.error}
               {data.message && (
