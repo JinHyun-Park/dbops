@@ -89,66 +89,96 @@ def _schema_graph(cluster_id: str, schema: str) -> dict:
     Used by the Schema lineage page to render an FK graph. We deliberately
     keep this as a live Data API call (vs caching the snapshot in PG cache)
     because foreign-key topology is slow-moving but high-cardinality — a
-    full snapshot per cluster would bloat the cache. PG-only for v1;
-    MySQL's information_schema.KEY_COLUMN_USAGE lookup is a follow-up."""
+    full snapshot per cluster would bloat the cache. Supports both
+    engines: PostgreSQL via pg_class + pg_constraint, MySQL via
+    information_schema.TABLES + KEY_COLUMN_USAGE."""
     cluster = _lookup_cluster(cluster_id)
     if not cluster:
         return {"error": f"cluster {cluster_id!r} not registered", "tables": [], "edges": []}
     cluster_arn = cluster.get("cluster_arn")
     secret_arn = cluster.get("secret_arn")
-    db_name = cluster.get("db_name") or "postgres"
     engine = (cluster.get("engine") or "").lower()
+    is_mysql = "mysql" in engine
+    db_name = (
+        cluster.get("db_name") or ("mysql" if is_mysql else "postgres")
+    )
     if not cluster_arn or not secret_arn:
         return {"error": "cluster registry missing cluster_arn/secret_arn", "tables": [], "edges": []}
-    if "mysql" in engine:
-        return {
-            "cluster_id": cluster_id,
-            "engine": engine,
-            "tables": [],
-            "edges": [],
-            "info": "MySQL은 v1에서 지원하지 않습니다 — PostgreSQL 클러스터에서 사용하세요.",
-        }
 
-    # Sanitise schema name — pg_namespace.nspname is a regular identifier;
-    # we pass it as a string param via Data API to avoid quoting concerns.
-    schema = (schema or "public").strip() or "public"
+    if is_mysql:
+        # MySQL has no schema namespace inside a database — the "schema"
+        # filter the user picks is actually a database name. Default to
+        # the cluster's primary db when the caller hasn't specified one.
+        schema = (schema or db_name).strip() or db_name
+        tables_sql = (
+            "SELECT "
+            "  TABLE_NAME AS table_name, "
+            "  COALESCE(TABLE_ROWS, 0) AS row_count, "
+            "  COALESCE(DATA_LENGTH + INDEX_LENGTH, 0) AS size_bytes "
+            "FROM information_schema.TABLES "
+            "WHERE TABLE_SCHEMA = :schema AND TABLE_TYPE = 'BASE TABLE' "
+            "ORDER BY TABLE_NAME"
+        )
+        # GROUP_CONCAT collapses multi-column FKs into a comma list to
+        # match the PG `string_agg` output shape so the frontend renderer
+        # treats both engines uniformly.
+        edges_sql = (
+            "SELECT "
+            "  kcu.TABLE_NAME AS source_table, "
+            "  kcu.REFERENCED_TABLE_NAME AS target_table, "
+            "  kcu.REFERENCED_TABLE_SCHEMA AS target_schema, "
+            "  kcu.CONSTRAINT_NAME AS constraint_name, "
+            "  NULL AS definition, "
+            "  GROUP_CONCAT(kcu.COLUMN_NAME ORDER BY kcu.ORDINAL_POSITION) AS source_columns, "
+            "  GROUP_CONCAT(kcu.REFERENCED_COLUMN_NAME ORDER BY kcu.ORDINAL_POSITION) AS target_columns "
+            "FROM information_schema.KEY_COLUMN_USAGE kcu "
+            "WHERE kcu.TABLE_SCHEMA = :schema "
+            "  AND kcu.REFERENCED_TABLE_NAME IS NOT NULL "
+            "GROUP BY kcu.TABLE_NAME, kcu.REFERENCED_TABLE_NAME, "
+            "         kcu.REFERENCED_TABLE_SCHEMA, kcu.CONSTRAINT_NAME "
+            "ORDER BY source_table, constraint_name"
+        )
+    else:
+        # Sanitise schema name — pg_namespace.nspname is a regular identifier;
+        # we pass it as a string param via Data API to avoid quoting concerns.
+        schema = (schema or "public").strip() or "public"
 
-    tables_sql = (
-        "SELECT "
-        "  c.relname AS table_name, "
-        "  COALESCE(s.n_live_tup, 0)::bigint AS row_count, "
-        "  pg_total_relation_size(c.oid)::bigint AS size_bytes "
-        "FROM pg_class c "
-        "JOIN pg_namespace n ON n.oid = c.relnamespace "
-        "LEFT JOIN pg_stat_user_tables s "
-        "  ON s.schemaname = n.nspname AND s.relname = c.relname "
-        "WHERE c.relkind = 'r' AND n.nspname = :schema "
-        "ORDER BY c.relname"
-    )
+        tables_sql = (
+            "SELECT "
+            "  c.relname AS table_name, "
+            "  COALESCE(s.n_live_tup, 0)::bigint AS row_count, "
+            "  pg_total_relation_size(c.oid)::bigint AS size_bytes "
+            "FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "LEFT JOIN pg_stat_user_tables s "
+            "  ON s.schemaname = n.nspname AND s.relname = c.relname "
+            "WHERE c.relkind = 'r' AND n.nspname = :schema "
+            "ORDER BY c.relname"
+        )
 
-    edges_sql = (
-        "SELECT "
-        "  cls.relname AS source_table, "
-        "  fcls.relname AS target_table, "
-        "  fns.nspname AS target_schema, "
-        "  con.conname AS constraint_name, "
-        "  pg_get_constraintdef(con.oid) AS definition, "
-        "  (SELECT string_agg(att.attname, ',' ORDER BY u.ord) "
-        "   FROM unnest(con.conkey) WITH ORDINALITY u(att_num, ord) "
-        "   JOIN pg_attribute att "
-        "     ON att.attrelid = cls.oid AND att.attnum = u.att_num) AS source_columns, "
-        "  (SELECT string_agg(att.attname, ',' ORDER BY u.ord) "
-        "   FROM unnest(con.confkey) WITH ORDINALITY u(att_num, ord) "
-        "   JOIN pg_attribute att "
-        "     ON att.attrelid = fcls.oid AND att.attnum = u.att_num) AS target_columns "
-        "FROM pg_constraint con "
-        "JOIN pg_class cls ON cls.oid = con.conrelid "
-        "JOIN pg_namespace ns ON ns.oid = cls.relnamespace "
-        "JOIN pg_class fcls ON fcls.oid = con.confrelid "
-        "JOIN pg_namespace fns ON fns.oid = fcls.relnamespace "
-        "WHERE con.contype = 'f' AND ns.nspname = :schema "
-        "ORDER BY cls.relname, con.conname"
-    )
+        edges_sql = (
+            "SELECT "
+            "  cls.relname AS source_table, "
+            "  fcls.relname AS target_table, "
+            "  fns.nspname AS target_schema, "
+            "  con.conname AS constraint_name, "
+            "  pg_get_constraintdef(con.oid) AS definition, "
+            "  (SELECT string_agg(att.attname, ',' ORDER BY u.ord) "
+            "   FROM unnest(con.conkey) WITH ORDINALITY u(att_num, ord) "
+            "   JOIN pg_attribute att "
+            "     ON att.attrelid = cls.oid AND att.attnum = u.att_num) AS source_columns, "
+            "  (SELECT string_agg(att.attname, ',' ORDER BY u.ord) "
+            "   FROM unnest(con.confkey) WITH ORDINALITY u(att_num, ord) "
+            "   JOIN pg_attribute att "
+            "     ON att.attrelid = fcls.oid AND att.attnum = u.att_num) AS target_columns "
+            "FROM pg_constraint con "
+            "JOIN pg_class cls ON cls.oid = con.conrelid "
+            "JOIN pg_namespace ns ON ns.oid = cls.relnamespace "
+            "JOIN pg_class fcls ON fcls.oid = con.confrelid "
+            "JOIN pg_namespace fns ON fns.oid = fcls.relnamespace "
+            "WHERE con.contype = 'f' AND ns.nspname = :schema "
+            "ORDER BY cls.relname, con.conname"
+        )
 
     rds_data = boto3.client("rds-data")
 
