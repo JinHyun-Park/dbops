@@ -95,8 +95,10 @@ def lambda_handler(event, context):
                 print(f"[report_generator] S3 put failed for {cid}: {e}")
 
         cache_query(
+            # RDS Data API parameters arrive as strings; cast :report_date
+            # to DATE explicitly so PostgreSQL accepts it for the DATE column.
             "INSERT INTO reports (cluster_id, report_type, report_date, summary, data, s3_key) "
-            "VALUES (:cid, :report_type, :report_date, :summary, :data::jsonb, :s3_key)",
+            "VALUES (:cid, :report_type, (:report_date)::date, :summary, :data::jsonb, :s3_key)",
             {
                 "cid": cid,
                 "report_type": report_type,
@@ -134,26 +136,38 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
         {"cid": cluster_id},
     )
     aas_busy_minutes = cache_query(
+        # RDS Data API parameters arrive as stringValue, so PostgreSQL sees
+        # value > '5' and rejects the heterogeneous comparison. Cast the
+        # parameter to double precision explicitly.
         "SELECT COUNT(*) AS cnt FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = 'aas' "
-        "AND value > :threshold "
+        "AND value > (:threshold)::double precision "
         "AND ts > NOW() - INTERVAL '24 hours'",
         {"cid": cluster_id, "threshold": str(AAS_BUSY_THRESHOLD)},
     )
+    # query_stats is the pg_stat_statements-derived table that actually has
+    # call counts + total/mean execution time. The slow_queries table is a
+    # raw log of individual slow executions and lacks the aggregated columns
+    # we want here.
     top_slow = cache_query(
         "SELECT query_hash, LEFT(query_text, 200) AS query_excerpt, "
         "MAX(calls) AS calls, MAX(total_time_ms) AS total_ms, MAX(mean_time_ms) AS mean_ms "
-        "FROM slow_queries "
-        "WHERE cluster_id = :cid AND ts > NOW() - INTERVAL '24 hours' "
+        "FROM query_stats "
+        "WHERE cluster_id = :cid AND snapshot_time > NOW() - INTERVAL '24 hours' "
         "GROUP BY query_hash, query_text "
         "ORDER BY total_ms DESC NULLS LAST LIMIT 5",
         {"cid": cluster_id},
     )
+    # Alerts live in event_log with event_type='alert'. rule_id is buried
+    # inside raw_event JSONB — extract it via the ->> operator so we can
+    # group by rule.
     top_alerts = cache_query(
-        "SELECT rule_id, COUNT(*) AS fired_count, MAX(triggered_at) AS last_fired "
-        "FROM alert_events "
-        "WHERE cluster_id = :cid AND triggered_at > NOW() - INTERVAL '24 hours' "
-        "GROUP BY rule_id "
+        "SELECT raw_event->>'rule_id' AS rule_id, "
+        "COUNT(*) AS fired_count, MAX(event_time) AS last_fired "
+        "FROM event_log "
+        "WHERE cluster_id = :cid AND event_type = 'alert' "
+        "AND event_time > NOW() - INTERVAL '24 hours' "
+        "GROUP BY raw_event->>'rule_id' "
         "ORDER BY fired_count DESC LIMIT 5",
         {"cid": cluster_id},
     )
@@ -161,11 +175,11 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
         "WITH endpoints AS ( "
         "  SELECT "
         "    (SELECT value FROM metric_snapshots "
-        "       WHERE cluster_id = :cid AND metric_type = 'storage_used_bytes' "
+        "       WHERE cluster_id = :cid AND metric_type = 'storage_bytes' "
         "       AND ts > NOW() - INTERVAL '24 hours' "
         "       ORDER BY ts ASC LIMIT 1) AS start_bytes, "
         "    (SELECT value FROM metric_snapshots "
-        "       WHERE cluster_id = :cid AND metric_type = 'storage_used_bytes' "
+        "       WHERE cluster_id = :cid AND metric_type = 'storage_bytes' "
         "       ORDER BY ts DESC LIMIT 1) AS end_bytes "
         ") SELECT start_bytes, end_bytes, (end_bytes - start_bytes) AS delta_bytes "
         "FROM endpoints",
@@ -173,7 +187,7 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
     )
     conn_peak = cache_query(
         "SELECT MAX(value) AS max_conn, AVG(value) AS avg_conn FROM metric_snapshots "
-        "WHERE cluster_id = :cid AND metric_type = 'active_connections' "
+        "WHERE cluster_id = :cid AND metric_type = 'connections' "
         "AND ts > NOW() - INTERVAL '24 hours'",
         {"cid": cluster_id},
     )
