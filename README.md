@@ -19,6 +19,11 @@ AI 기반 종합 데이터베이스 운영 플랫폼. 자연어 대화로 Amazon
 - **PG Log Insights** — CloudWatch Logs Insights를 카테고리(slow/vacuum/error/connection)별로 묶어 Dashboard에서 조회
 - **Cost Anomaly Detection** — Bedrock 일별 사용액 spike를 z-score + 절대 차이 + 상대 비율 triple gate로 감지 (`/cost`)
 - **Compound Alert Rules** — 단일 threshold + AND/OR DSL 양쪽 지원 (per-operand window/agg). Slack 양방향 ack 가능 — 알림 메시지의 "✓ Ack" 버튼을 누르면 알림 페이지에 즉시 반영 (Alerts → "Slack 양방향 Ack 설정" 가이드)
+- **Approval Guard** — 모든 write tool (`execute_sql` DDL/DML, `modify_parameter`, `modify_scaling`, `manage_maintenance`) 이 서버측에서 DDB approval row를 검증. agent가 `approved=true`만 임의로 켤 수 없고, `approval_id` (DBA가 `/approvals`에서 승인 시 발급)를 함께 넘겨야 통과 — cluster/action_type/resolved_at 30분 윈도우/atomic consume까지 모두 강제
+- **AI Runbooks** — 채팅 결과를 마크다운 playbook으로 저장/검색/삭제. 이상 패턴 재발 시 빠르게 복기 (`/runbooks`)
+- **Ask the Fleet** — 자연어로 fleet 조회 ("CPU 80% 넘은 클러스터 보여줘"). NL→filter compiler + saved views (`/ask`)
+- **Daily Operations Report** — `report_generator` Lambda가 매일 자정 클러스터별로 24h 메트릭 (AAS p95/peak/busy minutes, top 5 slow queries, top 5 alert rules, storage delta, connection peak, event mix) 을 집계하고 Bedrock Claude로 3~5문장 한국어 요약을 생성. Bedrock 호출 실패 시 결정적 템플릿 fallback이 동작 (`/reports`)
+- **Cross-Device Chat Sessions** — 대화 세션이 DynamoDB (`sessions` 테이블) 에 영속화. 다른 기기/브라우저에서 열어도 사이드바에서 그대로 이어쓸 수 있음. 1.5s debounced sync + localStorage offline 캐시 + 90-day TTL
 
 ## Architecture
 
@@ -214,7 +219,7 @@ See `cdk/cross-account/README.md` for details.
 dbops/
 ├── cdk/                  # CDK infrastructure (4 stacks)
 ├── agent/                # Strands Agent + Dockerfile
-├── mcp-servers/          # 4 Custom MCP servers (30 tools)
+├── mcp-servers/          # 4 Custom MCP servers (31 tools, incl. request_approval)
 ├── data-pipeline/        # ETL, Event Processor, Report Generator, Monitor
 ├── api/                  # REST API Lambdas
 ├── frontend/             # Next.js Web UI
@@ -290,7 +295,15 @@ Cold start 또는 region capacity 이슈. CloudWatch에서 AgentCore Runtime 로
 
 ### 라이트 모드에서 일부 텍스트가 안 보임
 
-Recharts 범례 색상은 inline SVG attr로 주입되어 CSS override가 닿지 않는 경우가 있음. 패턴이 보이면 `frontend/src/lib/use-chart-colors.ts`에 매핑 추가 후 해당 컴포넌트에서 hook을 통해 색상을 받도록 수정. WCAG AA(4.5:1) 목표.
+Recharts series/grid/axis/tooltip 색상은 inline SVG attr로 주입되어 CSS override가 닿지 않습니다. 모든 chart 컴포넌트는 `frontend/src/lib/use-chart-colors.ts` 의 `useChartColors()` 훅에서 amber/sky/emerald/rose **+ grid/axis/tooltipBg/tooltipBorder/tooltipText** 토큰을 가져와야 합니다. WCAG AA(4.5:1) 목표.
+
+### 채팅에서 "승인됐어"라고 말했는데도 agent가 `approval_denied` 를 반환
+
+서버측 approval guard가 켜진 이후로는 `approved=true`만으로는 부족하고, `approval_id` (request_approval 이 돌려준 UUID) 까지 같은 도구 호출에 함께 넘겨야 합니다. agent의 system prompt가 이 흐름을 알지만, 너무 오래된 모델/낮은 reasoning depth에서는 빠뜨릴 수 있으니 그럴 때는 `agent/prompts/system_prompt.py` 가이드라인 강화 + agent 스택 재배포. 또한 승인은 발급 후 30분 안에 사용해야 합니다 — 지났으면 `request_approval`을 다시 호출.
+
+### `/reports` 에서 NL summary 대신 단순 템플릿 문장이 표시됨
+
+`ReportGenerator` Lambda가 Bedrock invoke에 실패해서 결정적 fallback이 발동된 경우입니다. CloudWatch Logs에서 `[report_generator] Bedrock summary failed` 메시지 확인. 흔한 원인은 (1) `bedrock:InvokeModel` IAM 권한 누락 — 이 버전부터는 `data_stack`에 자동 부여, (2) `REPORT_SUMMARY_MODEL_ID` env가 가리키는 inference profile 미존재 — settings.py에서 모델 ID 확인. 데이터 자체(JSONB `data` 컬럼)는 정상 저장되니 UI의 카드/슬로우 쿼리 패널은 그대로 표시됩니다.
 
 ## Documentation
 
