@@ -221,6 +221,18 @@ class AgentStack(cdk.Stack):
                 allow_credentials=False,
             ),
         )
+        # Throttle on the $default stage so a runaway client (or a
+        # misconfigured polling loop) can't burn budget or take down
+        # the rate-limited downstream (RDS Data API, Bedrock). HTTP API
+        # has no built-in usage plans, so we set burst + steady-state
+        # via CfnStage escape-hatch. The numbers are intentionally
+        # generous — DBOps is a UI-driven app with low natural QPS;
+        # anything above ~50 rps sustained is a bug, not a feature.
+        cfn_stage = self.api.default_stage.node.default_child
+        cfn_stage.default_route_settings = {
+            "throttlingBurstLimit": 100,
+            "throttlingRateLimit": 50,
+        }
 
         self.dashboard_lambda = dashboard_lambda = lambda_.Function(
             self, "DashboardApi",
