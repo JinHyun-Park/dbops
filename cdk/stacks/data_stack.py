@@ -209,6 +209,16 @@ class DataStack(cdk.Stack):
         self.cache_db.secret.grant_read(self.report_generator)
         self.cache_db.grant_data_api_access(self.report_generator)
         self.archive_bucket.grant_write(self.report_generator)
+        # NL summary path invokes a Bedrock Claude model. Failure to invoke
+        # falls back to a template, so this permission is best-effort —
+        # but without it every report is template-summary which is dull.
+        self.report_generator.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=[
+                "arn:aws:bedrock:*::foundation-model/*",
+                "arn:aws:bedrock:*:*:inference-profile/*",
+            ],
+        ))
 
         events.Rule(self, "DailyReportSchedule",
             schedule=events.Schedule.cron(hour="0", minute="0"),

@@ -1,8 +1,44 @@
+"""report_generator — generate per-cluster daily/weekly operations summaries.
+
+The earlier version of this Lambda wrote a literal one-line string
+("daily report for X on YYYY-MM-DD") into the `summary` column and
+called it done. That's information-free.
+
+This version produces a real operations report:
+
+  - structured JSON in `data` column: AAS percentiles, peak time +
+    duration above threshold, top 5 slow queries by total_time, top 5
+    alert rules fired, storage delta, connection peak, event counts
+  - NL summary (Bedrock Claude) in `summary` column: 3–5 sentences that
+    a DBA could skim during morning standup
+
+The Bedrock call is best-effort. If invocation fails (throttling, model
+unavailable, no permission) we fall back to a deterministic template
+summary so the report row still has *something* useful in the summary
+column.
+"""
+
+from __future__ import annotations
+
 import json
 import os
 from datetime import datetime
+from typing import Any
 
 import boto3
+from botocore.exceptions import ClientError
+
+# Threshold above which we count "AAS minutes" — i.e. how long the
+# cluster spent in a notably busy state.
+AAS_BUSY_THRESHOLD = float(os.environ.get("REPORT_AAS_BUSY_THRESHOLD", "5"))
+
+# Which Bedrock model writes the NL summary. Default mirrors the agent's
+# model (apac.anthropic.claude-sonnet-4-...) but operators can swap to a
+# cheaper Haiku via env var if cost matters more than prose quality.
+SUMMARY_MODEL_ID = os.environ.get(
+    "REPORT_SUMMARY_MODEL_ID",
+    "apac.anthropic.claude-sonnet-4-20250514-v1:0",
+)
 
 
 def lambda_handler(event, context):
@@ -12,7 +48,7 @@ def lambda_handler(event, context):
     database = os.environ.get("CACHE_DB_NAME", "dbops")
     s3_bucket = os.environ.get("ARCHIVE_BUCKET", "")
 
-    def cache_query(sql, params=None):
+    def cache_query(sql: str, params: dict | None = None) -> list[dict]:
         sql_params = []
         if params:
             for k, v in params.items():
@@ -25,7 +61,7 @@ def lambda_handler(event, context):
         cols = [c["name"] for c in resp.get("columnMetadata", [])]
         rows = []
         for rec in resp.get("records", []):
-            row = {}
+            row: dict[str, Any] = {}
             for i, f in enumerate(rec):
                 col = cols[i] if i < len(cols) else f"col_{i}"
                 for typ in ("stringValue", "longValue", "doubleValue", "booleanValue"):
@@ -44,47 +80,208 @@ def lambda_handler(event, context):
 
     for cluster in clusters:
         cid = cluster["cluster_id"]
-
-        summary = cache_query(
-            "SELECT AVG(value) as avg_aas, MAX(value) as max_aas FROM metric_snapshots "
-            "WHERE cluster_id = :cid AND metric_type = 'aas' AND ts > NOW() - INTERVAL '24 hours'",
-            {"cid": cid},
-        )
-        slow_count = cache_query(
-            "SELECT COUNT(*) as cnt FROM slow_queries WHERE cluster_id = :cid AND ts > NOW() - INTERVAL '24 hours'",
-            {"cid": cid},
-        )
-        events_count = cache_query(
-            "SELECT COUNT(*) as cnt FROM event_log WHERE cluster_id = :cid AND event_time > NOW() - INTERVAL '24 hours'",
-            {"cid": cid},
-        )
-
-        report_data = {
-            "cluster_id": cid,
-            "date": report_date,
-            "type": report_type,
-            "aas": summary[0] if summary else {},
-            "slow_query_count": slow_count[0].get("cnt", 0) if slow_count else 0,
-            "event_count": events_count[0].get("cnt", 0) if events_count else 0,
-        }
+        report_data = _build_report_data(cache_query, cid)
+        summary_text = _write_nl_summary(cid, report_date, report_data)
 
         s3_key = f"reports/{cid}/{report_date}-{report_type}.json"
         if s3_bucket:
-            boto3.client("s3").put_object(
-                Bucket=s3_bucket, Key=s3_key,
-                Body=json.dumps(report_data, default=str),
-                ContentType="application/json",
-            )
+            try:
+                boto3.client("s3").put_object(
+                    Bucket=s3_bucket, Key=s3_key,
+                    Body=json.dumps(report_data, default=str),
+                    ContentType="application/json",
+                )
+            except ClientError as e:
+                print(f"[report_generator] S3 put failed for {cid}: {e}")
 
         cache_query(
             "INSERT INTO reports (cluster_id, report_type, report_date, summary, data, s3_key) "
             "VALUES (:cid, :report_type, :report_date, :summary, :data::jsonb, :s3_key)",
             {
-                "cid": cid, "report_type": report_type, "report_date": report_date,
-                "summary": f"{report_type} report for {cid} on {report_date}",
-                "data": json.dumps(report_data, default=str), "s3_key": s3_key,
+                "cid": cid,
+                "report_type": report_type,
+                "report_date": report_date,
+                "summary": summary_text,
+                "data": json.dumps(report_data, default=str),
+                "s3_key": s3_key,
             },
         )
         reports_generated.append(cid)
 
-    return {"statusCode": 200, "body": json.dumps({"reports": reports_generated, "date": report_date})}
+    return {
+        "statusCode": 200,
+        "body": json.dumps({"reports": reports_generated, "date": report_date}),
+    }
+
+
+def _build_report_data(cache_query, cluster_id: str) -> dict:
+    """Collect every numeric signal we can over the last 24h and return a
+    structured dict that the UI renders as cards + lists."""
+    aas_stats = cache_query(
+        "SELECT AVG(value) AS avg_aas, MAX(value) AS max_aas, "
+        "PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value) AS p95_aas, "
+        "COUNT(*) AS samples "
+        "FROM metric_snapshots "
+        "WHERE cluster_id = :cid AND metric_type = 'aas' "
+        "AND ts > NOW() - INTERVAL '24 hours'",
+        {"cid": cluster_id},
+    )
+    aas_peak = cache_query(
+        "SELECT ts, value FROM metric_snapshots "
+        "WHERE cluster_id = :cid AND metric_type = 'aas' "
+        "AND ts > NOW() - INTERVAL '24 hours' "
+        "ORDER BY value DESC NULLS LAST LIMIT 1",
+        {"cid": cluster_id},
+    )
+    aas_busy_minutes = cache_query(
+        "SELECT COUNT(*) AS cnt FROM metric_snapshots "
+        "WHERE cluster_id = :cid AND metric_type = 'aas' "
+        "AND value > :threshold "
+        "AND ts > NOW() - INTERVAL '24 hours'",
+        {"cid": cluster_id, "threshold": str(AAS_BUSY_THRESHOLD)},
+    )
+    top_slow = cache_query(
+        "SELECT query_hash, LEFT(query_text, 200) AS query_excerpt, "
+        "MAX(calls) AS calls, MAX(total_time_ms) AS total_ms, MAX(mean_time_ms) AS mean_ms "
+        "FROM slow_queries "
+        "WHERE cluster_id = :cid AND ts > NOW() - INTERVAL '24 hours' "
+        "GROUP BY query_hash, query_text "
+        "ORDER BY total_ms DESC NULLS LAST LIMIT 5",
+        {"cid": cluster_id},
+    )
+    top_alerts = cache_query(
+        "SELECT rule_id, COUNT(*) AS fired_count, MAX(triggered_at) AS last_fired "
+        "FROM alert_events "
+        "WHERE cluster_id = :cid AND triggered_at > NOW() - INTERVAL '24 hours' "
+        "GROUP BY rule_id "
+        "ORDER BY fired_count DESC LIMIT 5",
+        {"cid": cluster_id},
+    )
+    storage_delta = cache_query(
+        "WITH endpoints AS ( "
+        "  SELECT "
+        "    (SELECT value FROM metric_snapshots "
+        "       WHERE cluster_id = :cid AND metric_type = 'storage_used_bytes' "
+        "       AND ts > NOW() - INTERVAL '24 hours' "
+        "       ORDER BY ts ASC LIMIT 1) AS start_bytes, "
+        "    (SELECT value FROM metric_snapshots "
+        "       WHERE cluster_id = :cid AND metric_type = 'storage_used_bytes' "
+        "       ORDER BY ts DESC LIMIT 1) AS end_bytes "
+        ") SELECT start_bytes, end_bytes, (end_bytes - start_bytes) AS delta_bytes "
+        "FROM endpoints",
+        {"cid": cluster_id},
+    )
+    conn_peak = cache_query(
+        "SELECT MAX(value) AS max_conn, AVG(value) AS avg_conn FROM metric_snapshots "
+        "WHERE cluster_id = :cid AND metric_type = 'active_connections' "
+        "AND ts > NOW() - INTERVAL '24 hours'",
+        {"cid": cluster_id},
+    )
+    events_by_type = cache_query(
+        "SELECT event_type, COUNT(*) AS cnt FROM event_log "
+        "WHERE cluster_id = :cid AND event_time > NOW() - INTERVAL '24 hours' "
+        "GROUP BY event_type ORDER BY cnt DESC LIMIT 10",
+        {"cid": cluster_id},
+    )
+
+    return {
+        "cluster_id": cluster_id,
+        "window_hours": 24,
+        "aas": aas_stats[0] if aas_stats else {},
+        "aas_peak": aas_peak[0] if aas_peak else {},
+        "aas_busy_minutes_above_threshold": (aas_busy_minutes[0].get("cnt") if aas_busy_minutes else 0),
+        "aas_busy_threshold": AAS_BUSY_THRESHOLD,
+        "top_slow_queries": top_slow,
+        "top_alerts": top_alerts,
+        "storage": storage_delta[0] if storage_delta else {},
+        "connections": conn_peak[0] if conn_peak else {},
+        "events_by_type": events_by_type,
+    }
+
+
+def _write_nl_summary(cluster_id: str, report_date: str, data: dict) -> str:
+    """Ask Bedrock to write a 3–5 sentence DBA-readable summary. On any
+    error, fall back to a deterministic template so the report row still
+    has a usable summary."""
+    try:
+        bedrock = boto3.client("bedrock-runtime")
+        prompt = _build_summary_prompt(cluster_id, report_date, data)
+        resp = bedrock.invoke_model(
+            modelId=SUMMARY_MODEL_ID,
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 400,
+                "messages": [{"role": "user", "content": prompt}],
+            }),
+        )
+        body = json.loads(resp["body"].read())
+        text = (body.get("content") or [{}])[0].get("text", "").strip()
+        if text:
+            return text
+    except Exception as e:
+        # Throttling, IAM, model unavailable — all land here. Falling
+        # back is fine; the structured data column still has the numbers.
+        print(f"[report_generator] Bedrock summary failed for {cluster_id}: {e}")
+
+    return _template_summary(cluster_id, report_date, data)
+
+
+def _build_summary_prompt(cluster_id: str, report_date: str, data: dict) -> str:
+    aas = data.get("aas") or {}
+    peak = data.get("aas_peak") or {}
+    storage = data.get("storage") or {}
+    conns = data.get("connections") or {}
+    busy_min = data.get("aas_busy_minutes_above_threshold") or 0
+
+    slow_lines = []
+    for i, q in enumerate(data.get("top_slow_queries") or [], 1):
+        slow_lines.append(
+            f"  {i}. total {q.get('total_ms', 0):.0f}ms over {q.get('calls', 0)} calls — "
+            f"{(q.get('query_excerpt') or '').strip()[:120]}"
+        )
+    slow_block = "\n".join(slow_lines) if slow_lines else "  (none)"
+
+    alert_lines = []
+    for i, a in enumerate(data.get("top_alerts") or [], 1):
+        alert_lines.append(f"  {i}. rule_id={a.get('rule_id')} fired {a.get('fired_count')}x")
+    alert_block = "\n".join(alert_lines) if alert_lines else "  (none)"
+
+    storage_delta_mb = ((storage.get("delta_bytes") or 0) / (1024 * 1024)) if storage else 0
+
+    return (
+        f"당신은 시니어 DBA 입니다. Aurora 클러스터 {cluster_id} 의 지난 24시간 운영 요약을 "
+        "한국어 3~5문장으로 작성하세요. 핵심 변화만 짚고, 평소 운영 범위 안의 수치는 굳이 언급하지 마세요. "
+        "리스트/마크다운 헤더 없이 평문으로 쓰세요.\n\n"
+        f"## {report_date} 메트릭 요약\n"
+        f"- AAS avg={aas.get('avg_aas')}, max={aas.get('max_aas')}, p95={aas.get('p95_aas')}\n"
+        f"- AAS 피크: {peak.get('value')} @ {peak.get('ts')}\n"
+        f"- AAS > {data.get('aas_busy_threshold')} 인 1분 샘플 수: {busy_min}\n"
+        f"- 활성 연결 max={conns.get('max_conn')}, avg={conns.get('avg_conn')}\n"
+        f"- 스토리지 변화: {storage_delta_mb:.1f} MB ({storage.get('start_bytes')} → {storage.get('end_bytes')})\n"
+        f"- Top slow queries:\n{slow_block}\n"
+        f"- Top alert rules:\n{alert_block}\n"
+        f"- 이벤트 타입별 카운트: {data.get('events_by_type')}\n"
+    )
+
+
+def _template_summary(cluster_id: str, report_date: str, data: dict) -> str:
+    """Deterministic fallback when Bedrock is unreachable. Less polished
+    than the LLM version but informative."""
+    aas = data.get("aas") or {}
+    busy_min = data.get("aas_busy_minutes_above_threshold") or 0
+    top = data.get("top_slow_queries") or []
+    alerts = data.get("top_alerts") or []
+    pieces = [f"{cluster_id} 24시간 요약 ({report_date})"]
+    if aas:
+        pieces.append(
+            f"AAS avg={float(aas.get('avg_aas') or 0):.2f}, "
+            f"max={float(aas.get('max_aas') or 0):.2f}, "
+            f"AAS>{data.get('aas_busy_threshold')} 인 샘플 {busy_min}개."
+        )
+    if top:
+        pieces.append(f"Top slow query total {float(top[0].get('total_ms') or 0):.0f}ms 누적.")
+    if alerts:
+        pieces.append(f"가장 자주 발화한 룰: {alerts[0].get('rule_id')} ({alerts[0].get('fired_count')}회).")
+    if not (top or alerts):
+        pieces.append("주목할 만한 이벤트는 없었습니다.")
+    return " ".join(pieces)
