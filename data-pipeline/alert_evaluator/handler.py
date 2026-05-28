@@ -101,9 +101,14 @@ def _dashboard_url(rule: dict, path: str = "/dashboard") -> str:
 
 
 def _build_slack_payload(rule: dict, latest: float) -> dict:
-    """Slack Block Kit — color-coded section + dashboard/alerts buttons."""
+    """Slack Block Kit — color-coded section + dashboard/alerts/timeline
+    buttons. The "Open timeline" button is the highest-value link at 3am
+    because it shows the cluster's full incident context (alerts +
+    schema changes + RDS events + writes) in one screen instead of three.
+    """
     dashboard = _dashboard_url(rule, "/dashboard")
     alerts = _dashboard_url(rule, "/alerts")
+    timeline = _dashboard_url(rule, "/timeline")
     blocks: list[dict] = [
         {
             "type": "header",
@@ -138,6 +143,15 @@ def _build_slack_payload(rule: dict, latest: float) -> dict:
         }
     ]
     if dashboard:
+        action_elements.append(
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "🕐 Timeline"},
+                "url": timeline,
+                # Slack treats button order left-to-right; put the
+                # most-useful-at-3am link first.
+            }
+        )
         action_elements.append(
             {
                 "type": "button",
@@ -185,6 +199,11 @@ def _build_pagerduty_payload(rule: dict, latest: float, integration_key: str) ->
     dashboard = _dashboard_url(rule, "/dashboard")
     links = []
     if dashboard:
+        # Same ordering as Slack: Timeline first (highest value at 3am),
+        # then dashboard + alerts for deep dives.
+        timeline = _dashboard_url(rule, "/timeline")
+        if timeline:
+            links.append({"href": timeline, "text": "🕐 Timeline (incident context)"})
         links.append({"href": dashboard, "text": "Open dashboard"})
         links.append({"href": _dashboard_url(rule, "/alerts"), "text": "Open alerts"})
     return {

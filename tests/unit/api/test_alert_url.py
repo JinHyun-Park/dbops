@@ -121,4 +121,29 @@ def test_dedup_window_seconds_default(handler, monkeypatch):
 def test_pagerduty_links_present_when_frontend_url_set(handler):
     rule = {"id": 5, "cluster_id": "c", "name": "n", "metric_type": "m", "comparison": ">", "threshold": 0.0}
     payload = handler._build_pagerduty_payload(rule, 1.0, "KEY")
-    assert len(payload.get("links") or []) == 2
+    # Timeline + dashboard + alerts — the on-call's incident-triage
+    # links in order of usefulness at 3am.
+    links = payload.get("links") or []
+    assert len(links) == 3
+    texts = [link["text"] for link in links]
+    assert any("Timeline" in t for t in texts)
+    assert any("dashboard" in t.lower() for t in texts)
+    assert any("alerts" in t.lower() for t in texts)
+
+
+def test_slack_payload_includes_timeline_button(handler):
+    """The timeline deep-link is the highest-value Slack action at 3am —
+    it shows the full cluster incident context (alerts + schema changes
+    + RDS events + writes) on one page. Make sure it ships first."""
+    rule = {
+        "id": 11,
+        "cluster_id": "prod-pg",
+        "name": "n",
+        "metric_type": "cpu",
+        "comparison": ">",
+        "threshold": 80.0,
+    }
+    payload = handler._build_slack_payload(rule, 92.0)
+    actions = next(b for b in payload["blocks"] if b["type"] == "actions")
+    urls = [el.get("url") for el in actions["elements"] if el.get("url")]
+    assert any("timeline?cluster=prod-pg" in u for u in urls)
