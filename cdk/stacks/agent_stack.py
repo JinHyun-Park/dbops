@@ -864,6 +864,15 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PUT],
             integration=integrations.HttpLambdaIntegration("ApprovalDetailIntegration", approvals_lambda),
         )
+        # DBOps activity log — chronological feed of every approval
+        # (any status) for retro + compliance. Reads the same DDB
+        # table; routed through the approvals lambda to avoid wiring
+        # a second one.
+        self.api.add_routes(
+            path="/api/activity",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("ActivityIntegration", approvals_lambda),
+        )
         # Runbooks — AI-generated playbooks
         runbooks_integration = integrations.HttpLambdaIntegration(
             "RunbooksIntegration", runbooks_lambda

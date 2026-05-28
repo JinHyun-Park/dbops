@@ -1386,6 +1386,39 @@ export async function deleteSavedQuery(id: number): Promise<void> {
   if (!res.ok) throw new Error(`Delete saved query failed: ${res.status}`);
 }
 
+// =====  DBOps activity log =====
+
+export interface ActivityItem {
+  approval_id: string;
+  created_at: string;
+  resolved_at?: string;
+  consumed_at?: string;
+  approval_status: "pending" | "approved" | "rejected" | "consumed" | string;
+  cluster_id: string;
+  action_type: string;
+  requested_by: string;
+  approved_by?: string;
+  action_details_excerpt: string;
+}
+
+export async function fetchActivity(opts?: {
+  cluster_id?: string;
+  actor?: string;
+  action_type?: string;
+  limit?: number;
+}): Promise<{ items: ActivityItem[]; count: number }> {
+  const params = new URLSearchParams();
+  if (opts?.cluster_id) params.set("cluster_id", opts.cluster_id);
+  if (opts?.actor) params.set("actor", opts.actor);
+  if (opts?.action_type) params.set("action_type", opts.action_type);
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  const url = await api(`/api/activity${qs ? `?${qs}` : ""}`);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Activity fetch failed: ${res.status}`);
+  return res.json();
+}
+
 // =====  Unified incident timeline =====
 
 export type TimelineCategory =
