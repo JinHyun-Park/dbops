@@ -748,3 +748,88 @@ aside a.group:active {
     transform: none;
   }
 }
+
+/* =========================================================================
+   Primary CTA refresh — escape the "AI-built amber" identity.
+   Linear/Vercel use a near-monochrome primary (white on dark, black on
+   light). We override .bg-amber-500 only when it lands on an actual
+   button/link element so non-button uses (chart series, opacity badge
+   variants like /10, /15) keep their amber semantics.
+   ========================================================================= */
+button.bg-amber-500,
+a.bg-amber-500 {
+  background-color: #fafaf9; /* stone-50 near-white */
+  color: #18181b; /* zinc-900 */
+}
+button.bg-amber-500:hover,
+a.bg-amber-500:hover,
+button.hover\:bg-amber-400:hover,
+a.hover\:bg-amber-400:hover {
+  background-color: #ffffff;
+}
+button.bg-amber-500:disabled {
+  background-color: #d4d4d8;
+}
+
+/* The hover-text-amber-300 callout (e.g. "✓ Runbook 저장" in chat) used
+   the same amber hue; in monochrome mode it should hover to a clearer
+   foreground. */
+html[data-theme="light"] .hover\:text-amber-300:hover,
+html[data-theme="dark"] .hover\:text-amber-300:hover {
+  color: #18181b;
+}
+
+/* Light mode mirror: white CTA on cream background would disappear, so
+   swap to near-black instead. */
+html[data-theme="light"] button.bg-amber-500,
+html[data-theme="light"] a.bg-amber-500 {
+  background-color: #1c1b18; /* warm near-black to match the cream */
+  color: #fafaf9;
+}
+html[data-theme="light"] button.bg-amber-500:hover,
+html[data-theme="light"] a.bg-amber-500:hover {
+  background-color: #2c2b28;
+}
+
+/* =========================================================================
+   Page-enter motion — subtle staggered fade for first paint.
+   Targets Section blocks (they're the outermost rhythm unit). Triggers
+   only on initial page load (CSS animation runs once and stops); a
+   route change within the same React tree re-mounts the Section so it
+   runs again.
+   ========================================================================= */
+section {
+  animation: dbops-section-in 220ms ease-out both;
+}
+section:nth-of-type(2) {
+  animation-delay: 30ms;
+}
+section:nth-of-type(3) {
+  animation-delay: 60ms;
+}
+section:nth-of-type(4) {
+  animation-delay: 90ms;
+}
+section:nth-of-type(5) {
+  animation-delay: 120ms;
+}
+section:nth-of-type(n + 6) {
+  animation-delay: 150ms;
+}
+
+@keyframes dbops-section-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  section {
+    animation: none;
+  }
+}

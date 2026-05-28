@@ -1,16 +1,20 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import { CommandPalette } from "@/components/design-system/command-palette";
 import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
-const plexSans = IBM_Plex_Sans({
+// Geist is the Vercel/Linear-adjacent default. Replaces IBM Plex which
+// reads as the "AI-tool default" font. We keep both --font-plex-sans /
+// --font-plex-mono CSS variables so existing class references continue
+// to resolve — the swap is invisible to component code.
+const geistSans = Geist({
   variable: "--font-plex-sans",
   subsets: ["latin"],
   weight: ["300", "400", "500", "600", "700"],
 });
 
-const plexMono = IBM_Plex_Mono({
+const geistMono = Geist_Mono({
   variable: "--font-plex-mono",
   subsets: ["latin"],
   weight: ["400", "500", "600"],
@@ -30,7 +34,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${plexSans.variable} ${plexMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
         {/* Pre-hydration theme apply: avoids a flash when a user has
