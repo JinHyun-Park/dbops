@@ -59,22 +59,18 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Subtle grain layer for the canvas — gives the chrome dimensionality
-   without resorting to gradients. */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.025;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.6'/></svg>");
-}
+/* (Grain overlay removed — Linear/Vercel aesthetic prefers flat
+   surfaces. Brought a vintage editorial feel that fought the rest of
+   the design refresh.) */
 
-/* Selection highlight that doesn't fight the amber accent. */
+/* Selection highlight — monochrome to match the Linear-style refresh
+   (the previous amber-tinted selection was the last amber leak). */
 ::selection {
-  background: oklch(0.74 0.18 65 / 0.35);
+  background: rgba(255, 255, 255, 0.18);
   color: var(--text-primary);
+}
+html[data-theme="light"] ::selection {
+  background: rgba(20, 20, 18, 0.14);
 }
 
 /* =========================================================================
