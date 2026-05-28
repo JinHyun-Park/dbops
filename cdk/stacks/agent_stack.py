@@ -391,6 +391,21 @@ class AgentStack(cdk.Stack):
             resources=["*"],
         ))
 
+        # Chat Sessions API — persists chat conversations across devices.
+        # Backed by the existing `sessions` DDB table (PK session_id) plus
+        # a user-updated GSI for cheap list-by-user.
+        chat_sessions_lambda = lambda_.Function(
+            self, "ChatSessionsApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/chat_sessions"),
+            timeout=cdk.Duration.seconds(10),
+            environment={
+                "SESSIONS_TABLE": foundation.sessions_table.table_name,
+            },
+        )
+        foundation.sessions_table.grant_read_write_data(chat_sessions_lambda)
+
         self.alerts_lambda = alerts_lambda = lambda_.Function(
             self, "AlertsApi",
             runtime=lambda_.Runtime.PYTHON_3_12,
@@ -797,6 +812,25 @@ class AgentStack(cdk.Stack):
             path="/api/runbooks/{id}",
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.DELETE],
             integration=runbooks_integration,
+        )
+
+        # Chat sessions — cross-device conversation persistence
+        chat_sessions_integration = integrations.HttpLambdaIntegration(
+            "ChatSessionsIntegration", chat_sessions_lambda
+        )
+        self.api.add_routes(
+            path="/api/chat/sessions",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=chat_sessions_integration,
+        )
+        self.api.add_routes(
+            path="/api/chat/sessions/{id}",
+            methods=[
+                apigwv2.HttpMethod.GET,
+                apigwv2.HttpMethod.PUT,
+                apigwv2.HttpMethod.DELETE,
+            ],
+            integration=chat_sessions_integration,
         )
 
         # ===== Outputs =====

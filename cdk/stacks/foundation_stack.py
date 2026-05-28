@@ -82,6 +82,15 @@ class FoundationStack(cdk.Stack):
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
+        # Listing sessions belonging to a specific user is the hot path
+        # (sidebar load). The GSI lets us avoid a full table scan: query
+        # by user_id, ordered by updated_at DESC.
+        self.sessions_table.add_global_secondary_index(
+            index_name="user-updated-index",
+            partition_key=dynamodb.Attribute(name="user_id", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="updated_at", type=dynamodb.AttributeType.NUMBER),
+            projection_type=dynamodb.ProjectionType.ALL,
+        )
 
         self.approvals_table = dynamodb.Table(
             self, "ApprovalsTable",
