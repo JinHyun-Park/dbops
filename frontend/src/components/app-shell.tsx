@@ -78,6 +78,11 @@ const NAV: NavGroup[] = [
       { href: "/clusters", label: "Clusters", hint: "register + connection" },
       { href: "/reports", label: "Reports", hint: "scheduled summaries" },
       { href: "/cost", label: "Cost", hint: "Bedrock spend by model" },
+      {
+        href: "/preferences",
+        label: "Memory",
+        hint: "what the agent remembers about you",
+      },
     ],
   },
 ];

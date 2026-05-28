@@ -1357,3 +1357,41 @@ export async function deleteSavedQuery(id: number): Promise<void> {
   });
   if (!res.ok) throw new Error(`Delete saved query failed: ${res.status}`);
 }
+
+// =====  Agent memory (read + prune AgentCore Memory records) =====
+
+export type MemoryKind = "preferences" | "facts";
+
+export interface MemoryRecord {
+  id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listMemoryRecords(
+  kind: MemoryKind,
+): Promise<{ namespace: string; kind: MemoryKind; records: MemoryRecord[] }> {
+  const res = await fetch(
+    await api(`/api/memory?kind=${encodeURIComponent(kind)}`),
+    {
+      headers: { ...(await authHeaders()) },
+    },
+  );
+  if (!res.ok) throw new Error(`List memory failed: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteMemoryRecord(
+  id: string,
+  kind: MemoryKind,
+): Promise<void> {
+  const res = await fetch(
+    await api(`/api/memory/${encodeURIComponent(id)}?kind=${kind}`),
+    {
+      method: "DELETE",
+      headers: { ...(await authHeaders()) },
+    },
+  );
+  if (!res.ok) throw new Error(`Delete memory failed: ${res.status}`);
+}

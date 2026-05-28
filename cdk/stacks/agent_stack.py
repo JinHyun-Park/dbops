@@ -426,6 +426,29 @@ class AgentStack(cdk.Stack):
             resources=["*"],
         ))
 
+        # Agent Memory API — read + delete user's AgentCore Memory records
+        # so the DBA can see (and prune) what the agent has remembered.
+        memory_lambda = lambda_.Function(
+            self, "MemoryApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/memory"),
+            timeout=cdk.Duration.seconds(10),
+            environment={
+                "MEMORY_ID": self.memory.memory_id,
+            },
+        )
+        memory_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "bedrock-agentcore:ListMemoryRecords",
+                "bedrock-agentcore:GetMemoryRecord",
+                "bedrock-agentcore:DeleteMemoryRecord",
+            ],
+            # Scope to this memory resource specifically — no chance of
+            # the API leaking into another memory store in the account.
+            resources=[self.memory.memory_arn],
+        ))
+
         self.alerts_lambda = alerts_lambda = lambda_.Function(
             self, "AlertsApi",
             runtime=lambda_.Runtime.PYTHON_3_12,
@@ -859,6 +882,21 @@ class AgentStack(cdk.Stack):
                 apigwv2.HttpMethod.DELETE,
             ],
             integration=chat_sessions_integration,
+        )
+
+        # Agent memory inspector
+        memory_integration = integrations.HttpLambdaIntegration(
+            "MemoryIntegration", memory_lambda
+        )
+        self.api.add_routes(
+            path="/api/memory",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=memory_integration,
+        )
+        self.api.add_routes(
+            path="/api/memory/{id}",
+            methods=[apigwv2.HttpMethod.DELETE],
+            integration=memory_integration,
         )
 
         # Saved queries — durable Query Lab scratchpad
