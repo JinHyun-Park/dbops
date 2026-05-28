@@ -24,6 +24,18 @@ AI 기반 종합 데이터베이스 운영 플랫폼. 자연어 대화로 Amazon
 - **Ask the Fleet** — 자연어로 fleet 조회 ("CPU 80% 넘은 클러스터 보여줘"). NL→filter compiler + saved views (`/ask`)
 - **Daily Operations Report** — `report_generator` Lambda가 매일 자정 클러스터별로 24h 메트릭 (AAS p95/peak/busy minutes, top 5 slow queries, top 5 alert rules, storage delta, connection peak, event mix) 을 집계하고 Bedrock Claude로 3~5문장 한국어 요약을 생성. Bedrock 호출 실패 시 결정적 템플릿 fallback이 동작 (`/reports`)
 - **Cross-Device Chat Sessions** — 대화 세션이 DynamoDB (`sessions` 테이블) 에 영속화. 다른 기기/브라우저에서 열어도 사이드바에서 그대로 이어쓸 수 있음. 1.5s debounced sync + localStorage offline 캐시 + 90-day TTL
+- **Incident Timeline** — 한 cluster의 모든 운영 신호 (알람 발화 / RDS 이벤트 / 스키마 변경 / proactive 알림 / Slack ack / 실행된 쓰기) 를 시간축 한 줄에 (`/timeline`). 카테고리 칩으로 필터, 1h/6h/24h/7d 윈도우. Slack 알람 메시지의 🕐 Timeline 버튼이 cluster 컨텍스트 + 시점 쿼리스트링을 자동 첨부
+- **DBOps Activity Log** — 누가 무엇을 요청/승인/실행했는지 시간순 기록 (`/activity`). 컴플라이언스 감사 + 사후 회고용. cluster / actor / action_type 3 필터, 날짜별 자동 그룹핑
+- **Alert Impact** — 알람 발화 시점 ±5min의 슬로우 쿼리·동시 RDS 이벤트·동시 발화한 다른 알람을 인라인 패널로 (`/alerts` 행의 "영향도" 버튼). 사고 triage 시 페이지 이동 없이 컨텍스트 잡음
+- **Saved Query Library** — Query Lab에서 자주 쓰는 SQL을 라이브러리에 저장/태깅/cross-device 로드. 캡쳐 패널 (Query Lab 화면 좌측) + Save 모달 + admin-only 삭제 (`schema_v13.saved_queries`)
+- **Cluster Registration Wizard** — `/clusters` 등록 폼에 same-account / cross-account 모드 토글. 같은 계정이면 spoke role 필드 자동 숨김 + emerald 힌트, cross-account면 amber 힌트 + 설정 가이드 링크. "연결만 테스트" 버튼으로 STS AssumeRole + DescribeDBClusters + master_user_secret 3-step pre-flight (저장 없이) 가능
+- **Agent Memory Inspector** — AgentCore Memory에 누적된 당신의 preferences / facts 를 읽고 잘못된 항목 삭제 (`/preferences`). Cognito sub 기반 namespace 라우팅으로 cross-user read 차단
+- **Per-Cluster ETL Health** — `/clusters` 레지스트리 테이블에 ETL 신선도 배지 (fresh/stale/no_data) 자동 표시. metric_snapshots MAX(ts) 기반 15분 윈도우
+- **Schema Migration Auto-Trigger** — `cdk deploy` 시 schema_migrator/sql/ 디렉터리의 SHA-256 해시를 자동으로 schema_version property에 주입해 SQL 변경 시 자동 마이그레이션 실행 (수동 bump 불필요)
+- **Rule Templates** — `/alerts` 룰 빌더 상단에 DBA-canonical 프리셋 6개 (CPU 지속 스파이크 / Connection 폭주 / AAS 과부하 / Replica lag / Deadlock / Write storm + CPU 복합) 원클릭으로 operand 채움
+- **MySQL Dashboard Parity** — Schema FK lineage, Redundant indexes, Log Insights 모두 Aurora MySQL 지원 (information_schema + performance_schema + 엔진별 log group 자동 라우팅)
+- **Log Keyword Search** — `/dashboard` Log Insights 패널에 검색어 입력. 공백 구분 AND 조인, regex meta 살균, 컴파일된 CW Insights 쿼리는 응답에 포함 (사용자가 CW Console로 복사 가능)
+- **Activity Audit MCP Tool** — `query_activity_audit` (operations MCP) 로 채팅에서 자연어 감사 질문 ("누가 max_connections 바꿨어?") 처리. DDB approvals + PG audit_log 머지해 시간순 반환
 
 ## Architecture
 
@@ -219,7 +231,7 @@ See `cdk/cross-account/README.md` for details.
 dbops/
 ├── cdk/                  # CDK infrastructure (4 stacks)
 ├── agent/                # Strands Agent + Dockerfile
-├── mcp-servers/          # 4 Custom MCP servers (31 tools, incl. request_approval)
+├── mcp-servers/          # 4 Custom MCP servers (32 tools, incl. request_approval + query_activity_audit)
 ├── data-pipeline/        # ETL, Event Processor, Report Generator, Monitor
 ├── api/                  # REST API Lambdas
 ├── frontend/             # Next.js Web UI
