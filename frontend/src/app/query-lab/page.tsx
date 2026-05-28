@@ -15,6 +15,11 @@ import {
   ExplainSqlError,
   type ExplainResponse,
   type PgPlanRoot,
+  listSavedQueries,
+  fetchSavedQuery,
+  createSavedQuery,
+  deleteSavedQuery,
+  type SavedQuerySummary,
 } from "@/lib/api-client";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
 
@@ -123,6 +128,19 @@ export default function QueryLabPage() {
   // Prefilled SQL — passed to QueryEditor on history-restore / share-link open.
   const [prefilledSql, setPrefilledSql] = useState<string>("");
 
+  // Saved-queries library (cross-device, DDB-backed). Distinct from the
+  // localStorage-only "recent plans" list above: that tracks EXPLAIN
+  // results; this tracks bookmarked SQL queries the DBA wants to re-run
+  // later, possibly from a different machine.
+  const [savedQueries, setSavedQueries] = useState<SavedQuerySummary[]>([]);
+  const [saveModal, setSaveModal] = useState<{
+    title: string;
+    description: string;
+    tags_csv: string;
+    error: string | null;
+    submitting: boolean;
+  } | null>(null);
+
   useEffect(() => {
     fetchClusters()
       .then((rows: ClusterRow[]) => {
@@ -135,6 +153,17 @@ export default function QueryLabPage() {
   useEffect(() => {
     setHistory(loadPlanHistory());
   }, []);
+
+  // Saved-queries library — best-effort fetch; failures stay silent so
+  // the page still works when the backend is mid-deploy.
+  const refreshSavedQueries = useCallback(() => {
+    listSavedQueries({ limit: 50 })
+      .then(setSavedQueries)
+      .catch((e) => console.warn("[query-lab] saved queries load failed", e));
+  }, []);
+  useEffect(() => {
+    refreshSavedQueries();
+  }, [refreshSavedQueries]);
 
   // Handle shared link: /query-lab#sql=<base64>&cluster=<id>
   useEffect(() => {
@@ -388,6 +417,112 @@ export default function QueryLabPage() {
             loadingKind={loadingKind}
             initialSql={prefilledSql}
           />
+
+          {/* Saved-queries library — durable bookmark of the SQL the
+              DBA wants to keep around across devices. Distinct from
+              "recent plans" below, which tracks EXPLAIN runs. */}
+          <div className="border border-zinc-800 bg-zinc-900/40">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+              <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
+                saved queries · {savedQueries.length}
+              </div>
+              <button
+                onClick={() =>
+                  setSaveModal({
+                    title: "",
+                    description: "",
+                    tags_csv: "",
+                    error: null,
+                    submitting: false,
+                  })
+                }
+                disabled={!lastSql.trim()}
+                className="text-[10px] uppercase tracking-wider px-2 py-1 border border-zinc-700 text-zinc-300 hover:border-amber-500/60 hover:text-amber-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                title={
+                  lastSql.trim()
+                    ? "현재 편집기의 SQL을 라이브러리에 저장"
+                    : "먼저 SQL을 작성하거나 EXPLAIN을 실행하세요"
+                }
+              >
+                + 현재 SQL 저장
+              </button>
+            </div>
+            {savedQueries.length === 0 ? (
+              <div className="px-3 py-4 text-[11px] text-zinc-500">
+                저장된 쿼리가 없습니다. 자주 쓰는 진단/감사 SQL을 라이브러리에
+                넣어두면 다른 기기에서도 그대로 불러올 수 있습니다.
+              </div>
+            ) : (
+              <div className="divide-y divide-zinc-800 max-h-72 overflow-y-auto">
+                {savedQueries.map((q) => (
+                  <div
+                    key={q.id}
+                    className="px-3 py-2 hover:bg-zinc-800/40 group"
+                  >
+                    <div className="flex items-baseline justify-between gap-2 mb-0.5">
+                      <button
+                        onClick={async () => {
+                          try {
+                            const detail = await fetchSavedQuery(q.id);
+                            setPrefilledSql(detail.sql_text);
+                            if (detail.cluster_id)
+                              setClusterId(detail.cluster_id);
+                          } catch (e) {
+                            console.warn(
+                              "[query-lab] load saved query failed",
+                              e,
+                            );
+                          }
+                        }}
+                        className="text-xs text-zinc-100 truncate text-left hover:text-amber-200 transition-colors"
+                        title={q.description || q.title}
+                      >
+                        {q.title}
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`"${q.title}" 삭제할까요?`)) return;
+                          try {
+                            await deleteSavedQuery(q.id);
+                            refreshSavedQueries();
+                          } catch (e) {
+                            console.warn(
+                              "[query-lab] delete saved query failed",
+                              e,
+                            );
+                          }
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-[10px] text-zinc-500 hover:text-rose-400 transition flex-shrink-0"
+                      >
+                        삭제
+                      </button>
+                    </div>
+                    {q.description && (
+                      <div className="text-[11px] text-zinc-500 truncate">
+                        {q.description}
+                      </div>
+                    )}
+                    <div className="text-[10px] text-zinc-600 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                      {q.cluster_id && (
+                        <span className="font-mono truncate max-w-[10rem]">
+                          {q.cluster_id}
+                        </span>
+                      )}
+                      {q.tags?.slice(0, 4).map((t) => (
+                        <span
+                          key={t}
+                          className="px-1 py-px border border-zinc-800 text-zinc-500"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {history.length > 0 && (
             <div className="border border-zinc-800 bg-zinc-900/40">
               <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
@@ -624,6 +759,145 @@ export default function QueryLabPage() {
           )}
         </div>
       </div>
+
+      {/* Save modal — small inline form rather than its own component
+          because the state shape is one-off. SQL is taken implicitly
+          from lastSql (set whenever EXPLAIN/Analyze ran). */}
+      {saveModal && (
+        <div
+          className="fixed inset-0 z-50 bg-zinc-950/80 flex items-center justify-center p-6"
+          onClick={() => setSaveModal(null)}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-800 p-6 w-full max-w-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
+                  Save query
+                </div>
+                <h3 className="text-base font-medium text-zinc-100">
+                  현재 SQL을 라이브러리에 저장
+                </h3>
+              </div>
+              <button
+                onClick={() => setSaveModal(null)}
+                className="text-zinc-500 hover:text-zinc-200 text-xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  Title <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={saveModal.title}
+                  onChange={(e) =>
+                    setSaveModal({ ...saveModal, title: e.target.value })
+                  }
+                  placeholder="예: prod-pg-1 capacity probe"
+                  maxLength={255}
+                  className="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  Description (선택)
+                </label>
+                <input
+                  type="text"
+                  value={saveModal.description}
+                  onChange={(e) =>
+                    setSaveModal({ ...saveModal, description: e.target.value })
+                  }
+                  placeholder="목록에서 한 줄로 보일 메모"
+                  maxLength={500}
+                  className="w-full bg-zinc-950 border border-zinc-800 text-zinc-300 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  Tags (comma-separated)
+                </label>
+                <input
+                  type="text"
+                  value={saveModal.tags_csv}
+                  onChange={(e) =>
+                    setSaveModal({ ...saveModal, tags_csv: e.target.value })
+                  }
+                  placeholder="capacity, audit, idx-recommend"
+                  className="w-full bg-zinc-950 border border-zinc-800 text-zinc-300 text-sm px-3 py-2 mt-1 font-mono focus:outline-none focus:border-amber-500/60"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  SQL preview
+                </label>
+                <pre className="bg-zinc-950 border border-zinc-800 p-2 text-[11px] text-zinc-300 font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto mt-1">
+                  {lastSql || "(SQL preview empty)"}
+                </pre>
+              </div>
+              {saveModal.error && (
+                <div className="text-xs text-rose-400">{saveModal.error}</div>
+              )}
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setSaveModal(null)}
+                  className="text-xs px-4 py-2 border border-zinc-700 text-zinc-400 hover:text-zinc-100 transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!saveModal.title.trim()) {
+                      setSaveModal({ ...saveModal, error: "title required" });
+                      return;
+                    }
+                    if (!lastSql.trim()) {
+                      setSaveModal({ ...saveModal, error: "no SQL to save" });
+                      return;
+                    }
+                    setSaveModal({
+                      ...saveModal,
+                      submitting: true,
+                      error: null,
+                    });
+                    try {
+                      await createSavedQuery({
+                        cluster_id: clusterId || null,
+                        title: saveModal.title.trim(),
+                        description: saveModal.description.trim() || undefined,
+                        sql_text: lastSql,
+                        tags: saveModal.tags_csv
+                          .split(",")
+                          .map((t) => t.trim())
+                          .filter(Boolean),
+                      });
+                      setSaveModal(null);
+                      refreshSavedQueries();
+                    } catch (e) {
+                      setSaveModal({
+                        ...saveModal,
+                        submitting: false,
+                        error: e instanceof Error ? e.message : String(e),
+                      });
+                    }
+                  }}
+                  disabled={saveModal.submitting}
+                  className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors disabled:opacity-50"
+                >
+                  {saveModal.submitting ? "저장 중…" : "저장"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </PageBody>
   );
 }

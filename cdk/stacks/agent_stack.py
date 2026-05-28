@@ -406,6 +406,26 @@ class AgentStack(cdk.Stack):
         )
         foundation.sessions_table.grant_read_write_data(chat_sessions_lambda)
 
+        # Saved Queries API — durable Query Lab scratchpad
+        saved_queries_lambda = lambda_.Function(
+            self, "SavedQueriesApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/saved_queries"),
+            timeout=cdk.Duration.seconds(10),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+            },
+        )
+        data.cache_db.secret.grant_read(saved_queries_lambda)
+        data.cache_db.grant_data_api_access(saved_queries_lambda)
+        saved_queries_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["rds-data:ExecuteStatement", "secretsmanager:GetSecretValue"],
+            resources=["*"],
+        ))
+
         self.alerts_lambda = alerts_lambda = lambda_.Function(
             self, "AlertsApi",
             runtime=lambda_.Runtime.PYTHON_3_12,
@@ -831,6 +851,25 @@ class AgentStack(cdk.Stack):
                 apigwv2.HttpMethod.DELETE,
             ],
             integration=chat_sessions_integration,
+        )
+
+        # Saved queries — durable Query Lab scratchpad
+        saved_queries_integration = integrations.HttpLambdaIntegration(
+            "SavedQueriesIntegration", saved_queries_lambda
+        )
+        self.api.add_routes(
+            path="/api/saved-queries",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
+            integration=saved_queries_integration,
+        )
+        self.api.add_routes(
+            path="/api/saved-queries/{id}",
+            methods=[
+                apigwv2.HttpMethod.GET,
+                apigwv2.HttpMethod.PUT,
+                apigwv2.HttpMethod.DELETE,
+            ],
+            integration=saved_queries_integration,
         )
 
         # ===== Outputs =====

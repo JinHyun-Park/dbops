@@ -1253,3 +1253,72 @@ export async function deleteChatSession(id: string): Promise<void> {
   );
   if (!res.ok) throw new Error(`Delete chat session failed: ${res.status}`);
 }
+
+// =====  Saved queries (Query Lab scratchpad) =====
+
+export interface SavedQuerySummary {
+  id: number;
+  cluster_id: string | null;
+  title: string;
+  description: string;
+  tags: string[];
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SavedQueryDetail extends SavedQuerySummary {
+  sql_text: string;
+}
+
+export async function listSavedQueries(opts?: {
+  cluster_id?: string;
+  tag?: string;
+  limit?: number;
+}): Promise<SavedQuerySummary[]> {
+  const params = new URLSearchParams();
+  if (opts?.cluster_id) params.set("cluster_id", opts.cluster_id);
+  if (opts?.tag) params.set("tag", opts.tag);
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  const url = await api(`/api/saved-queries${qs ? `?${qs}` : ""}`);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`List saved queries failed: ${res.status}`);
+  const body = await res.json();
+  return body.queries || [];
+}
+
+export async function fetchSavedQuery(id: number): Promise<SavedQueryDetail> {
+  const res = await fetch(await api(`/api/saved-queries/${id}`));
+  if (!res.ok) throw new Error(`Fetch saved query failed: ${res.status}`);
+  return res.json();
+}
+
+export async function createSavedQuery(input: {
+  cluster_id?: string | null;
+  title: string;
+  description?: string;
+  sql_text: string;
+  tags?: string[];
+}): Promise<SavedQueryDetail> {
+  const res = await fetch(await api(`/api/saved-queries`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(
+      `Create saved query failed (${res.status}): ${detail.slice(0, 200)}`,
+    );
+  }
+  return res.json();
+}
+
+export async function deleteSavedQuery(id: number): Promise<void> {
+  const res = await fetch(await api(`/api/saved-queries/${id}`), {
+    method: "DELETE",
+    headers: { ...(await authHeaders()) },
+  });
+  if (!res.ok) throw new Error(`Delete saved query failed: ${res.status}`);
+}
