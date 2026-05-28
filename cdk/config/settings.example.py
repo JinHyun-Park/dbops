@@ -24,3 +24,10 @@ class Settings:
     # groups into one incident; after the window elapses, a fresh incident
     # opens so on-call sees the alert is still active.
     ALERT_DEDUP_WINDOW_MINUTES = 30
+
+    # Slack signing secret — used by /api/slack/interactive to verify v0
+    # HMAC signatures on Block Kit ack button posts. Leave empty to
+    # disable Slack two-way ack; the endpoint will refuse all calls with
+    # a friendly "not configured" message until you set this. Get it
+    # from your Slack app's Basic Information → Signing Secret.
+    SLACK_SIGNING_SECRET = ""
