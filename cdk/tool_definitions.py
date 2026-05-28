@@ -75,6 +75,18 @@ def operations_schema():
               {"cluster_id": "string", "sql": "string"}, ["cluster_id", "sql"]),
         _tool("audit_permissions", "Audit DB user permissions",
               {"cluster_id": "string"}, ["cluster_id"]),
+        _tool(
+            "query_activity_audit",
+            "Search write history + approval log for compliance / retro questions "
+            "('who changed max_connections last week?')",
+            {
+                "cluster_id": "string",
+                "actor": "string",
+                "action_type": "string",
+                "days": "integer",
+            },
+            [],
+        ),
     ]
 
 

@@ -9,6 +9,7 @@ from mcp_servers.operations.tools.execute_sql import execute_sql_impl
 from mcp_servers.operations.tools.manage_maintenance import manage_maintenance_impl
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
 from mcp_servers.operations.tools.modify_scaling import modify_scaling_impl
+from mcp_servers.operations.tools.query_activity_audit import query_activity_audit_impl
 from mcp_servers.operations.tools.request_approval import request_approval_impl
 from mcp_servers.operations.tools.review_sql import review_sql_impl
 from mcp_servers.operations.tools.schema_diff import get_schema_diff_impl
@@ -139,6 +140,50 @@ TOOLS = {
                 "engine": {"type": "string", "enum": ["postgresql", "mysql"], "default": "postgresql", "description": "Database engine type"},
             },
             "required": ["cluster_id"],
+        },
+    },
+    "query_activity_audit": {
+        "impl": query_activity_audit_impl,
+        "description": (
+            "Search executed write operations + approval history across "
+            "the audit_log PG table and the DDB approvals table. Use this "
+            "to answer compliance / retro questions like 'who changed "
+            "max_connections in prod-pg-1 last week?' or 'show me every "
+            "parameter modification approved by Alice this month'. "
+            "Returns merged + chronological list. Read-only — does NOT "
+            "execute anything."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {
+                    "type": "string",
+                    "description": (
+                        "Filter to one cluster (empty = all clusters caller "
+                        "can see)"
+                    ),
+                },
+                "actor": {
+                    "type": "string",
+                    "description": (
+                        "Match requested_by OR approved_by (Cognito "
+                        "username/email)"
+                    ),
+                },
+                "action_type": {
+                    "type": "string",
+                    "description": (
+                        "Filter by action type: execute_sql, "
+                        "modify_parameter, modify_scaling, "
+                        "manage_maintenance, other"
+                    ),
+                },
+                "days": {
+                    "type": "integer",
+                    "default": 7,
+                    "description": "Look-back window in days (1..90)",
+                },
+            },
         },
     },
     "request_approval": {
