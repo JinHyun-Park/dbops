@@ -45,13 +45,19 @@ TOOLS = {
     },
     "execute_sql": {
         "impl": execute_sql_impl,
-        "description": "Execute SQL against a cluster. Write operations require approval (approved=true). Dangerous SQL (DROP/TRUNCATE/DELETE) requires force=true.",
+        "description": (
+            "Execute SQL against a cluster. SELECT/EXPLAIN/SHOW/DESCRIBE run "
+            "directly. Write operations require approval — set approved=true "
+            "AND approval_id=<uuid from request_approval>. Dangerous SQL "
+            "(DROP/TRUNCATE/DELETE) requires force=true."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "sql": {"type": "string", "description": "SQL statement to execute"},
-                "approved": {"type": "boolean", "default": False, "description": "DBA approval for write operations"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval — server verifies this against DDB before executing"},
                 "force": {"type": "boolean", "default": False, "description": "Force execution of dangerous SQL"},
             },
             "required": ["cluster_id", "sql"],
@@ -59,42 +65,54 @@ TOOLS = {
     },
     "modify_parameter": {
         "impl": modify_parameter_impl,
-        "description": "Modify a DB cluster parameter. Requires approval (approved=true).",
+        "description": (
+            "Modify a DB cluster parameter. Requires approved=true AND "
+            "approval_id=<uuid from request_approval>."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "parameter_name": {"type": "string", "description": "Parameter name to modify"},
                 "value": {"type": "string", "description": "New parameter value"},
-                "approved": {"type": "boolean", "default": False, "description": "DBA approval required"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
             },
             "required": ["cluster_id", "parameter_name", "value"],
         },
     },
     "modify_scaling": {
         "impl": modify_scaling_impl,
-        "description": "Modify Serverless v2 scaling configuration. Requires approval (approved=true).",
+        "description": (
+            "Modify Serverless v2 scaling configuration. Requires approved=true "
+            "AND approval_id=<uuid from request_approval>."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "min_capacity": {"type": "number", "description": "Minimum ACU capacity"},
                 "max_capacity": {"type": "number", "description": "Maximum ACU capacity"},
-                "approved": {"type": "boolean", "default": False, "description": "DBA approval required"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
             },
             "required": ["cluster_id"],
         },
     },
     "manage_maintenance": {
         "impl": manage_maintenance_impl,
-        "description": "Describe or modify maintenance windows. Modify action requires approval (approved=true).",
+        "description": (
+            "Describe or modify maintenance windows. Modify action requires "
+            "approved=true AND approval_id=<uuid from request_approval>."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "action": {"type": "string", "enum": ["describe", "modify"], "default": "describe", "description": "Action to perform"},
                 "window": {"type": "string", "description": "New maintenance window (for modify action)"},
-                "approved": {"type": "boolean", "default": False, "description": "DBA approval required for modify"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
             },
             "required": ["cluster_id"],
         },
@@ -129,7 +147,9 @@ TOOLS = {
             "Register a DBA approval request for a write action. Call this "
             "immediately after a write tool returns status=approval_required. "
             "Returns approval_id + review URL. After the DBA approves on the "
-            "/approvals page, re-issue the original write tool with approved=true."
+            "/approvals page, re-issue the original write tool with BOTH "
+            "approved=true AND approval_id=<returned uuid> — the server "
+            "verifies the id against DDB and refuses replays."
         ),
         "input_schema": {
             "type": "object",

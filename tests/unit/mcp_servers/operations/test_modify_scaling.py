@@ -11,12 +11,31 @@ def test_modify_scaling_requires_approval():
     assert result["max_capacity"] == 4.0
 
 
+@patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
 @patch("mcp_servers.operations.tools.modify_scaling.boto3")
 def test_modify_scaling_with_approval(mock_boto3):
+    """With the guard bypassed via env, approved=True executes the modify."""
     mock_rds = MagicMock()
     mock_boto3.client.return_value = mock_rds
     mock_cache = MagicMock()
-    result = modify_scaling_impl(mock_cache, cluster_id="prod-pg-1", min_capacity=0.5, max_capacity=4.0, approved=True)
+    result = modify_scaling_impl(
+        mock_cache, cluster_id="prod-pg-1", min_capacity=0.5, max_capacity=4.0, approved=True
+    )
     assert result["status"] == "modified"
     assert result["scaling"] == {"MinCapacity": 0.5, "MaxCapacity": 4.0}
     mock_rds.modify_db_cluster.assert_called_once()
+
+
+def test_modify_scaling_approved_without_id_rejected():
+    """approved=True without approval_id is refused by the guard."""
+    with patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"}, clear=True):
+        mock_cache = MagicMock()
+        result = modify_scaling_impl(
+            mock_cache,
+            cluster_id="prod-pg-1",
+            min_capacity=0.5,
+            max_capacity=4.0,
+            approved=True,
+        )
+        assert result["status"] == "approval_denied"
+        assert "approval_id missing" in result["reason"]

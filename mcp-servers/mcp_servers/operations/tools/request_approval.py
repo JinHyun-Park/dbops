@@ -77,7 +77,9 @@ def request_approval_impl(
         "action_details": action_details,
         "review_url": deep_link,
         "message": (
-            "DBA 승인이 등록되었습니다. 검토 후 승인이 떨어지면 같은 호출을 "
-            "approved=true 로 다시 실행해주세요."
+            f"DBA 승인이 등록되었습니다 (approval_id={approval_id}). "
+            "검토 후 승인이 떨어지면 같은 호출을 approved=true 와 "
+            f"approval_id={approval_id!r} 를 모두 넣어서 다시 실행해주세요. "
+            "approval_id 가 없거나 30분이 지나면 서버가 거부합니다."
         ),
     }

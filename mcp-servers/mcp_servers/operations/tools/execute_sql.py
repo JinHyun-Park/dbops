@@ -3,6 +3,7 @@ import re
 
 import boto3
 
+from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 
 SAFE_PATTERNS = [r"^\s*SELECT\b", r"^\s*EXPLAIN\b", r"^\s*SHOW\b", r"^\s*DESCRIBE\b"]
@@ -28,7 +29,14 @@ def _lookup_cluster(cluster_id: str) -> dict:
         return {}
 
 
-def execute_sql_impl(cache: CacheClient, cluster_id: str, sql: str, approved: bool = False, force: bool = False) -> dict:
+def execute_sql_impl(
+    cache: CacheClient,
+    cluster_id: str,
+    sql: str,
+    approved: bool = False,
+    force: bool = False,
+    approval_id: str = "",
+) -> dict:
     sql_upper = sql.strip().upper()
     is_safe = any(re.match(p, sql_upper) for p in SAFE_PATTERNS)
     is_dangerous = any(re.search(p, sql_upper) for p in DANGEROUS_PATTERNS)
@@ -38,6 +46,18 @@ def execute_sql_impl(cache: CacheClient, cluster_id: str, sql: str, approved: bo
 
     if not is_safe and not approved:
         return {"status": "approval_required", "reason": "Non-SELECT SQL requires DBA approval", "sql": sql}
+
+    # Server-side approval enforcement: a write tool that claims approved=true
+    # must back it up with a verifiable approval_id. The guard refuses
+    # mismatched cluster, stale/replayed approvals, and unapproved rows.
+    if not is_safe and approved:
+        guard = verify_approval(approval_id, cluster_id, "execute_sql")
+        if not guard.get("ok"):
+            return {
+                "status": "approval_denied",
+                "reason": guard.get("reason", "approval guard rejected the request"),
+                "sql": sql,
+            }
 
     # Resolve target cluster ARN/Secret from the DynamoDB clusters registry.
     # Falls back to env-var TARGET_* for legacy single-cluster deployments.

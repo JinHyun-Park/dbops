@@ -54,3 +54,19 @@ def test_execute_sql_explain_is_safe():
 
     from mcp_servers.operations.tools.execute_sql import SAFE_PATTERNS
     assert any(re.match(p, "EXPLAIN SELECT * FROM users") for p in SAFE_PATTERNS)
+
+
+def test_execute_sql_write_approved_without_id_rejected():
+    """A write statement with bare `approved=True` (no approval_id) must
+    be rejected by the guard — agent cannot bypass DBA approval by just
+    flipping the boolean."""
+    with patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"}, clear=True):
+        mock_cache = MagicMock()
+        result = execute_sql_impl(
+            mock_cache,
+            cluster_id="prod-pg-1",
+            sql="UPDATE users SET name='test'",
+            approved=True,
+        )
+        assert result["status"] == "approval_denied"
+        assert "approval_id missing" in result["reason"]

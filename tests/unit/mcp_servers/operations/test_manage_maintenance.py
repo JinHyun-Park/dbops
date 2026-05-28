@@ -25,14 +25,40 @@ def test_manage_maintenance_modify_requires_approval():
     assert result["status"] == "approval_required"
 
 
+@patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
 @patch("mcp_servers.operations.tools.manage_maintenance.boto3")
 def test_manage_maintenance_modify_with_approval(mock_boto3):
+    """With the guard bypassed (local-dev env var), an approved=True call
+    proceeds to the actual modify_db_cluster path."""
     mock_rds = MagicMock()
     mock_boto3.client.return_value = mock_rds
     mock_cache = MagicMock()
-    result = manage_maintenance_impl(mock_cache, cluster_id="prod-pg-1", action="modify", window="mon:03:00-mon:04:00", approved=True)
+    result = manage_maintenance_impl(
+        mock_cache,
+        cluster_id="prod-pg-1",
+        action="modify",
+        window="mon:03:00-mon:04:00",
+        approved=True,
+    )
     assert result["status"] == "modified"
     assert result["new_window"] == "mon:03:00-mon:04:00"
+
+
+def test_manage_maintenance_modify_approved_without_id_rejected():
+    """Bare `approved=True` (no approval_id) must be rejected by the guard
+    when APPROVALS_TABLE is configured."""
+    with patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"}, clear=True):
+        mock_cache = MagicMock()
+        result = manage_maintenance_impl(
+            mock_cache,
+            cluster_id="prod-pg-1",
+            action="modify",
+            window="mon:03:00-mon:04:00",
+            approved=True,
+            # approval_id intentionally omitted
+        )
+        assert result["status"] == "approval_denied"
+        assert "approval_id missing" in result["reason"]
 
 
 def test_manage_maintenance_unknown_action():

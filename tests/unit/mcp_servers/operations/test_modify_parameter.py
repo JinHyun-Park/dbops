@@ -14,10 +14,11 @@ def test_modify_parameter_requires_approval():
     assert result["value"] == "200"
 
 
+@patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
 @patch("mcp_servers.operations.tools.modify_parameter.boto3")
 def test_modify_parameter_with_approval(mock_boto3):
     """Approved + cluster on a CUSTOM parameter group → impl applies the
-    change via modify_db_cluster_parameter_group."""
+    change via modify_db_cluster_parameter_group. Guard bypassed via env."""
     mock_rds = MagicMock()
     mock_boto3.client.return_value = mock_rds
     # The impl looks up the cluster's parameter group via DescribeDBClusters
@@ -40,6 +41,7 @@ def test_modify_parameter_with_approval(mock_boto3):
     assert call_kwargs["Parameters"][0]["ParameterValue"] == "200"
 
 
+@patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
 @patch("mcp_servers.operations.tools.modify_parameter.boto3")
 def test_modify_parameter_refuses_default_group(mock_boto3):
     """Approved + cluster on the AWS-default parameter group → impl refuses
@@ -56,3 +58,18 @@ def test_modify_parameter_refuses_default_group(mock_boto3):
     assert result["status"] == "default_group_refused"
     assert result["parameter_group"].startswith("default.")
     mock_rds.modify_db_cluster_parameter_group.assert_not_called()
+
+
+def test_modify_parameter_approved_without_id_rejected():
+    """Bare `approved=True` (no approval_id) is rejected by the guard."""
+    with patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"}, clear=True):
+        mock_cache = MagicMock()
+        result = modify_parameter_impl(
+            mock_cache,
+            cluster_id="prod-pg-1",
+            parameter_name="max_connections",
+            value="200",
+            approved=True,
+        )
+        assert result["status"] == "approval_denied"
+        assert "approval_id missing" in result["reason"]
