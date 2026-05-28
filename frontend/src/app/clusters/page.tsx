@@ -71,6 +71,14 @@ function relTime(iso?: string): string {
 export default function ClustersPage() {
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [showForm, setShowForm] = useState(false);
+  // Two registration paths: same-account (DBOps control plane and the
+  // target Aurora live in the same AWS account → no spoke role needed)
+  // and cross-account (target lives elsewhere → STS AssumeRole path).
+  // Visualizing these as a single flat form confused first-time DBAs
+  // who didn't know whether to fill in spoke_role_arn or not.
+  const [registerMode, setRegisterMode] = useState<
+    "same-account" | "cross-account"
+  >("same-account");
   const [form, setForm] = useState({
     cluster_id: "",
     account_id: "",
@@ -642,7 +650,65 @@ export default function ClustersPage() {
 
       {showForm && (
         <Section eyebrow="신규 등록" title="Aurora 클러스터 등록">
-          <div className="border border-zinc-800 bg-zinc-900/40 p-6">
+          <div className="border border-zinc-800 bg-zinc-900/40 p-6 space-y-5">
+            {/* Mode toggle — drives whether spoke_role_arn is shown.
+                Same-account is the common case; cross-account opens the
+                STS AssumeRole path with prominent guidance. */}
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
+                배포 방식
+              </div>
+              <div className="grid grid-cols-2 border border-zinc-800">
+                {(
+                  [
+                    {
+                      key: "same-account",
+                      title: "이 계정의 Aurora",
+                      hint: "DBOps와 같은 AWS 계정에서 실행 중인 클러스터",
+                    },
+                    {
+                      key: "cross-account",
+                      title: "다른 계정 (cross-account)",
+                      hint: "STS AssumeRole로 접근할 spoke role 필요",
+                    },
+                  ] as const
+                ).map((m) => {
+                  const active = registerMode === m.key;
+                  return (
+                    <button
+                      key={m.key}
+                      type="button"
+                      onClick={() => {
+                        setRegisterMode(m.key);
+                        // Clearing spoke_role_arn when switching back to
+                        // same-account so it doesn't accidentally hitch
+                        // along in a future submit.
+                        if (m.key === "same-account") {
+                          setForm((f) => ({ ...f, spoke_role_arn: "" }));
+                        }
+                      }}
+                      className={`text-left px-4 py-3 transition-colors ${
+                        active
+                          ? "bg-zinc-950 border-l-2 border-amber-500"
+                          : "bg-zinc-900/30 text-zinc-500 hover:bg-zinc-950/50 hover:text-zinc-300"
+                      }`}
+                    >
+                      <div
+                        className={`text-sm ${
+                          active ? "text-zinc-100" : "text-zinc-400"
+                        }`}
+                      >
+                        {m.title}
+                      </div>
+                      <div className="text-[11px] text-zinc-500 mt-0.5">
+                        {m.hint}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field
                 label="Cluster ID"
@@ -678,24 +744,49 @@ export default function ClustersPage() {
                   <option value="aurora-mysql">Aurora MySQL</option>
                 </select>
               </div>
-              <Field
-                label="Spoke Role ARN (cross-account)"
-                value={form.spoke_role_arn}
-                onChange={(v) => setForm({ ...form, spoke_role_arn: v })}
-                placeholder="arn:aws:iam::<account>:role/dbops-spoke-role (optional)"
-                mono
-                fullWidth
-              />
+              {registerMode === "cross-account" && (
+                <Field
+                  label="Spoke Role ARN"
+                  value={form.spoke_role_arn}
+                  onChange={(v) => setForm({ ...form, spoke_role_arn: v })}
+                  placeholder="arn:aws:iam::<account>:role/dbops-spoke-role"
+                  mono
+                  fullWidth
+                />
+              )}
             </div>
-            <p className="text-[11px] text-zinc-500 mt-4 leading-relaxed">
-              same-account 클러스터는 spoke role을 비워 두세요. cross-account
-              등록 시 STS AssumeRole +{" "}
-              <span className="font-mono text-zinc-400">
-                rds:DescribeDBClusters
-              </span>
-              로 연결을 검증한 뒤 저장합니다.
-            </p>
-            <div className="flex gap-2 mt-5">
+
+            {registerMode === "same-account" ? (
+              <div className="border-l-2 border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-[11px] text-zinc-400 leading-relaxed">
+                같은 계정의 Aurora를 등록합니다. DBOps의 Lambda execution role이
+                직접{" "}
+                <span className="font-mono text-zinc-300">
+                  rds:DescribeDBClusters
+                </span>{" "}
+                권한을 가지면 추가 설정 없이 연결됩니다.
+              </div>
+            ) : (
+              <div className="border-l-2 border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[11px] text-zinc-400 leading-relaxed space-y-1">
+                <div>
+                  Cross-account 등록 시 spoke 계정에 STS AssumeRole + RDS
+                  describe 권한이 있는 role이 필요합니다. 등록 시점에 STS{" "}
+                  <span className="font-mono text-zinc-300">AssumeRole</span> +{" "}
+                  <span className="font-mono text-zinc-300">
+                    rds:DescribeDBClusters
+                  </span>{" "}
+                  로 연결을 검증한 뒤 저장합니다.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSetupGuideOpen(true)}
+                  className="text-amber-300 hover:text-amber-200 underline underline-offset-2"
+                >
+                  Cross-account 설정 가이드 →
+                </button>
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-1">
               <button
                 disabled={submitting}
                 onClick={handleRegister}
