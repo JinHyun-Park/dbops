@@ -106,6 +106,71 @@ def _enrich_with_meta(clusters):
                 c["storage_size_gb"] = m["storage_size_gb"]
     except Exception as e:
         print(f"enrich error: {e}")
+
+    # ETL health: per cluster, what's the freshest metric_snapshots row?
+    # Anything older than 15 minutes is suspect — the ETL collector runs
+    # every 5 minutes by default, so two consecutive misses = stale.
+    try:
+        resp2 = rds_data.execute_statement(
+            resourceArn=cluster_arn,
+            secretArn=secret_arn,
+            database=db,
+            sql=(
+                "SELECT cluster_id, MAX(ts) AS latest_ts, COUNT(*) AS row_count "
+                f"FROM metric_snapshots WHERE cluster_id IN ({in_clause}) "
+                "AND ts > NOW() - INTERVAL '24 hours' "
+                "GROUP BY cluster_id"
+            ),
+            parameters=params,
+            includeResultMetadata=True,
+        )
+        cols2 = [c["name"] for c in resp2.get("columnMetadata", [])]
+        etl_by_id: dict = {}
+        for rec in resp2.get("records", []):
+            row = {}
+            for i, f in enumerate(rec):
+                col = cols2[i]
+                for typ in (
+                    "stringValue",
+                    "longValue",
+                    "doubleValue",
+                    "booleanValue",
+                ):
+                    if typ in f:
+                        row[col] = f[typ]
+                        break
+            if row.get("cluster_id"):
+                etl_by_id[row["cluster_id"]] = row
+
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        for c in clusters:
+            etl = etl_by_id.get(c["cluster_id"])
+            if not etl or not etl.get("latest_ts"):
+                c["etl_status"] = "no_data"
+                c["etl_latest_ts"] = None
+                c["etl_rows_24h"] = 0
+                continue
+            latest_str = etl["latest_ts"]
+            c["etl_latest_ts"] = latest_str
+            c["etl_rows_24h"] = etl.get("row_count") or 0
+            try:
+                latest = datetime.fromisoformat(
+                    str(latest_str).replace("Z", "+00:00")
+                )
+                if latest.tzinfo is None:
+                    latest = latest.replace(tzinfo=timezone.utc)
+                age_sec = (now - latest).total_seconds()
+                c["etl_status"] = (
+                    "fresh" if age_sec <= 15 * 60 else "stale"
+                )
+            except (ValueError, TypeError):
+                c["etl_status"] = "no_data"
+    except Exception as e:
+        print(f"etl enrich error: {e}")
+        for c in clusters:
+            c.setdefault("etl_status", "unknown")
+
     return clusters
 
 

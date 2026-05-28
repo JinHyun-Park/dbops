@@ -36,6 +36,12 @@ interface Cluster {
   connection_validated_at?: string;
   registered_at?: string;
   is_demo?: boolean;
+  // ETL freshness — derived from MAX(ts) in metric_snapshots for this
+  // cluster. "fresh" within 15min, "stale" older, "no_data" never
+  // collected. Useful for spotting ETL pipeline failures per-cluster.
+  etl_status?: "fresh" | "stale" | "no_data" | "unknown";
+  etl_latest_ts?: string | null;
+  etl_rows_24h?: number;
 }
 
 const CONN_STYLES: Record<string, { label: string; classes: string }> = {
@@ -60,6 +66,71 @@ const STATUS_STYLES: Record<string, string> = {
   stopped: "text-rose-400",
   failed: "text-rose-400",
 };
+
+function EtlBadge({
+  status,
+  latestTs,
+  rows,
+}: {
+  status?: Cluster["etl_status"];
+  latestTs?: string | null;
+  rows?: number;
+}) {
+  if (!status || status === "unknown") {
+    return <span className="text-zinc-600 text-[10px] font-mono">—</span>;
+  }
+  const map: Record<
+    NonNullable<Cluster["etl_status"]>,
+    {
+      label: string;
+      classes: string;
+      title: (ts?: string | null, n?: number) => string;
+    }
+  > = {
+    fresh: {
+      label: "fresh",
+      classes: "bg-emerald-500/10 text-emerald-300 border-emerald-500/40",
+      title: (ts, n) =>
+        ts
+          ? `latest snapshot ${new Date(ts).toLocaleString()} · ${
+              n ?? 0
+            } rows in 24h`
+          : "metrics current",
+    },
+    stale: {
+      label: "stale",
+      classes: "bg-amber-500/10 text-amber-300 border-amber-500/40",
+      title: (ts, n) =>
+        ts
+          ? `last metric ${new Date(
+              ts,
+            ).toLocaleString()} — ETL has not committed in 15+ minutes (${
+              n ?? 0
+            } rows in 24h)`
+          : "metric stream stale",
+    },
+    no_data: {
+      label: "no data",
+      classes: "bg-rose-500/10 text-rose-300 border-rose-500/40",
+      title: () =>
+        "metric_snapshots has no rows for this cluster — check the ETL collector logs and the cluster registration",
+    },
+    unknown: {
+      label: "?",
+      classes: "bg-zinc-700/40 text-zinc-400 border-zinc-700",
+      title: () => "ETL freshness could not be determined",
+    },
+  };
+  const m = map[status];
+  return (
+    <span
+      className={`px-1.5 py-0.5 border text-[10px] font-mono ${m.classes}`}
+      title={m.title(latestTs, rows)}
+    >
+      {m.label}
+    </span>
+  );
+}
 
 function relTime(iso?: string): string {
   if (!iso) return "—";
@@ -1025,6 +1096,7 @@ export default function ClustersPage() {
                     <th className="text-left px-4 py-2.5 font-medium">
                       connection
                     </th>
+                    <th className="text-left px-4 py-2.5 font-medium">ETL</th>
                     <th className="text-left px-4 py-2.5 font-medium">
                       registered
                     </th>
@@ -1087,6 +1159,13 @@ export default function ClustersPage() {
                           >
                             {connStyle.label}
                           </span>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <EtlBadge
+                            status={c.etl_status}
+                            latestTs={c.etl_latest_ts}
+                            rows={c.etl_rows_24h}
+                          />
                         </td>
                         <td className="px-4 py-2.5 text-zinc-500 text-xs">
                           {relTime(c.registered_at)}
