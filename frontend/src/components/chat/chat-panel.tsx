@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { MessageList, type Message } from "./message-list";
 import { streamChat } from "@/lib/agentcore-sse";
-import { fetchClusters, fetchModels } from "@/lib/api-client";
+import { fetchClusters, fetchModels, createRunbook } from "@/lib/api-client";
 
 interface ClusterRow {
   cluster_id: string;
@@ -323,6 +323,20 @@ export function ChatPanel() {
   const [availableModels, setAvailableModels] =
     useState<ModelOption[]>(FALLBACK_MODELS);
   const [followupsLoading, setFollowupsLoading] = useState(false);
+
+  // Save-as-Runbook modal. Stays here (vs MessageList) so a save in
+  // progress survives a re-render of the streaming message list.
+  const [runbookDraft, setRunbookDraft] = useState<{
+    title: string;
+    body_md: string;
+    tags_csv: string;
+    cluster_id: string;
+  } | null>(null);
+  const [runbookSaving, setRunbookSaving] = useState(false);
+  const [runbookSaveError, setRunbookSaveError] = useState<string | null>(null);
+  const [runbookSavedToast, setRunbookSavedToast] = useState<number | null>(
+    null,
+  );
   const abortRef = useRef<AbortController | null>(null);
   const followupAbortRef = useRef<AbortController | null>(null);
 
@@ -847,6 +861,22 @@ export function ChatPanel() {
               messages={messages}
               onFollowupClick={(text) => sendText(text)}
               followupsLoading={followupsLoading}
+              onSaveAsRunbook={(assistant, question) => {
+                const titleSeed = (question || assistant.content)
+                  .replace(/\s+/g, " ")
+                  .trim()
+                  .slice(0, 80);
+                const body = question
+                  ? `## 질문\n${question}\n\n## 진단 + 조치\n${assistant.content}`
+                  : assistant.content;
+                setRunbookSaveError(null);
+                setRunbookDraft({
+                  title: titleSeed,
+                  body_md: body,
+                  tags_csv: "",
+                  cluster_id: clusterId || "",
+                });
+              }}
             />
           )}
         </div>
@@ -879,6 +909,140 @@ export function ChatPanel() {
           </div>
         </div>
       </div>
+
+      {runbookDraft && (
+        <div
+          className="fixed inset-0 z-40 bg-black/70 flex items-center justify-center p-6"
+          onClick={() => {
+            if (!runbookSaving) setRunbookDraft(null);
+          }}
+        >
+          <div
+            className="bg-zinc-950 border border-zinc-800 max-w-2xl w-full max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-zinc-800 flex items-baseline justify-between">
+              <div className="text-base text-zinc-100 font-semibold">
+                Runbook으로 저장
+              </div>
+              <button
+                type="button"
+                onClick={() => !runbookSaving && setRunbookDraft(null)}
+                className="text-zinc-500 hover:text-zinc-200 text-xs"
+              >
+                ✕ 닫기
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-3 overflow-y-auto flex-1">
+              <label className="block">
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+                  제목
+                </div>
+                <input
+                  value={runbookDraft.title}
+                  onChange={(e) =>
+                    setRunbookDraft({ ...runbookDraft, title: e.target.value })
+                  }
+                  className="w-full bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm px-2 py-1.5"
+                />
+              </label>
+              <label className="block">
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+                  본문 (Markdown — 자동 채워짐, 편집 가능)
+                </div>
+                <textarea
+                  value={runbookDraft.body_md}
+                  onChange={(e) =>
+                    setRunbookDraft({
+                      ...runbookDraft,
+                      body_md: e.target.value,
+                    })
+                  }
+                  rows={12}
+                  className="w-full bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs px-3 py-2 font-mono resize-y"
+                />
+              </label>
+              <label className="block">
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+                  태그 (콤마 구분)
+                </div>
+                <input
+                  value={runbookDraft.tags_csv}
+                  onChange={(e) =>
+                    setRunbookDraft({
+                      ...runbookDraft,
+                      tags_csv: e.target.value,
+                    })
+                  }
+                  placeholder="high-cpu, autovacuum"
+                  className="w-full bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm px-2 py-1.5 font-mono"
+                />
+              </label>
+              {runbookSaveError && (
+                <div className="text-xs text-rose-300 border border-rose-500/40 bg-rose-500/10 px-3 py-2">
+                  {runbookSaveError}
+                </div>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-zinc-800 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => !runbookSaving && setRunbookDraft(null)}
+                disabled={runbookSaving}
+                className="text-xs text-zinc-400 px-3 py-1.5"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                disabled={runbookSaving || !runbookDraft.title.trim()}
+                onClick={async () => {
+                  setRunbookSaving(true);
+                  setRunbookSaveError(null);
+                  try {
+                    const tags = runbookDraft.tags_csv
+                      .split(",")
+                      .map((t) => t.trim())
+                      .filter(Boolean);
+                    await createRunbook({
+                      cluster_id: runbookDraft.cluster_id || undefined,
+                      title: runbookDraft.title.trim(),
+                      body_md: runbookDraft.body_md,
+                      tags,
+                      source: "chat",
+                      source_ref: activeId || undefined,
+                    });
+                    setRunbookDraft(null);
+                    setRunbookSavedToast(Date.now());
+                    setTimeout(() => setRunbookSavedToast(null), 2500);
+                  } catch (e) {
+                    setRunbookSaveError(
+                      e instanceof Error ? e.message : "save failed",
+                    );
+                  } finally {
+                    setRunbookSaving(false);
+                  }
+                }}
+                className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
+              >
+                {runbookSaving ? "저장 중…" : "Runbook 저장"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {runbookSavedToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 px-4 py-2 text-sm shadow-lg">
+          ✓ Runbook으로 저장됨.{" "}
+          <a
+            href="/runbooks"
+            className="text-amber-300 hover:text-amber-200 underline underline-offset-2 ml-1"
+          >
+            보기 →
+          </a>
+        </div>
+      )}
     </div>
   );
 }

@@ -16,12 +16,14 @@ interface MessageListProps {
   messages: Message[];
   onFollowupClick?: (text: string) => void;
   followupsLoading?: boolean;
+  onSaveAsRunbook?: (assistant: Message, question: string | null) => void;
 }
 
 export function MessageList({
   messages,
   onFollowupClick,
   followupsLoading,
+  onSaveAsRunbook,
 }: MessageListProps) {
   const lastIdx = messages.length - 1;
   return (
@@ -76,6 +78,30 @@ export function MessageList({
                 </div>
               )}
             </div>
+
+            {msg.role === "assistant" &&
+              onSaveAsRunbook &&
+              msg.content.length > 100 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Walk back to the immediately preceding user message —
+                    // that's the question this assistant turn answered.
+                    let q: string | null = null;
+                    for (let i = idx - 1; i >= 0; i--) {
+                      if (messages[i].role === "user") {
+                        q = messages[i].content;
+                        break;
+                      }
+                    }
+                    onSaveAsRunbook(msg, q);
+                  }}
+                  className="mt-1.5 text-[10px] text-zinc-500 hover:text-amber-300 transition-colors px-1"
+                  title="이 진단을 Runbook으로 저장 — 같은 패턴 재발 시 곧바로 참조"
+                >
+                  ✓ Runbook 저장
+                </button>
+              )}
 
             {showFollowups && (
               <div className="mt-2 flex flex-col gap-1.5 items-start max-w-[80%]">
