@@ -16,18 +16,20 @@ export function PageHeader({
   actions,
 }: PageHeaderProps) {
   return (
-    <header className="flex items-end justify-between gap-6 mb-8 pb-6 border-b border-zinc-800/80">
+    <header className="flex items-end justify-between gap-6 mb-10 pb-7 border-b border-zinc-800/80">
       <div>
         {eyebrow && (
           <div className="text-[11px] font-medium text-zinc-500 mb-2">
             {eyebrow}
           </div>
         )}
-        <h1 className="text-3xl font-semibold tracking-tight text-zinc-50">
+        <h1 className="text-[34px] leading-[1.15] font-semibold tracking-tight text-zinc-50">
           {title}
         </h1>
         {description && (
-          <p className="mt-2 text-sm text-zinc-400 max-w-2xl">{description}</p>
+          <p className="mt-3 text-[15px] leading-relaxed text-zinc-400 max-w-2xl">
+            {description}
+          </p>
         )}
       </div>
       {actions && (
