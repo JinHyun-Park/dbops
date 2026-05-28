@@ -136,6 +136,116 @@ const METRIC_OPTIONS = [
 
 const COMP_OPS = [">", ">=", "<", "<=", "==", "!="] as const;
 
+// Curated rule presets — one click to populate the builder with a
+// DBA-canonical condition. Keeps the builder accessible to operators
+// who don't have every metric_type memorized. Each template is shown
+// as a clickable chip above the operand grid.
+type CompoundOp = {
+  metric_type: string;
+  comparison: (typeof COMP_OPS)[number];
+  threshold: number;
+  window_minutes: number;
+  agg: "max" | "min" | "avg" | "last";
+};
+const RULE_TEMPLATES: {
+  label: string;
+  hint: string;
+  logic: "and" | "or";
+  operands: CompoundOp[];
+}[] = [
+  {
+    label: "CPU 지속 스파이크",
+    hint: "CPU avg > 80% over 10min",
+    logic: "and",
+    operands: [
+      {
+        metric_type: "cpu",
+        comparison: ">",
+        threshold: 80,
+        window_minutes: 10,
+        agg: "avg",
+      },
+    ],
+  },
+  {
+    label: "Connection 폭주",
+    hint: "active connections last > 90",
+    logic: "and",
+    operands: [
+      {
+        metric_type: "conn_active",
+        comparison: ">",
+        threshold: 90,
+        window_minutes: 5,
+        agg: "last",
+      },
+    ],
+  },
+  {
+    label: "AAS 과부하",
+    hint: "AAS avg > 5 for 10min",
+    logic: "and",
+    operands: [
+      {
+        metric_type: "aas",
+        comparison: ">",
+        threshold: 5,
+        window_minutes: 10,
+        agg: "avg",
+      },
+    ],
+  },
+  {
+    label: "Replica lag",
+    hint: "replica_lag_ms last > 30s",
+    logic: "and",
+    operands: [
+      {
+        metric_type: "replica_lag_ms",
+        comparison: ">",
+        threshold: 30000,
+        window_minutes: 5,
+        agg: "last",
+      },
+    ],
+  },
+  {
+    label: "Deadlock 발생",
+    hint: "deadlocks max > 5 in 5min",
+    logic: "and",
+    operands: [
+      {
+        metric_type: "deadlocks",
+        comparison: ">",
+        threshold: 5,
+        window_minutes: 5,
+        agg: "max",
+      },
+    ],
+  },
+  {
+    label: "Write storm + CPU",
+    hint: "write_iops max > 50k AND cpu avg > 70%",
+    logic: "and",
+    operands: [
+      {
+        metric_type: "write_iops",
+        comparison: ">",
+        threshold: 50000,
+        window_minutes: 5,
+        agg: "max",
+      },
+      {
+        metric_type: "cpu",
+        comparison: ">",
+        threshold: 70,
+        window_minutes: 5,
+        agg: "avg",
+      },
+    ],
+  },
+];
+
 export default function AlertsPage() {
   const [rules, setRules] = useState<Rule[]>([]);
   const [clusters, setClusters] = useState<{ cluster_id: string }[]>([]);
@@ -449,6 +559,32 @@ export default function AlertsPage() {
               onSubmit={submitCompound}
               className="border border-zinc-800 bg-zinc-900/40 p-6 space-y-4"
             >
+              {/* Rule templates — one click populates the builder with a
+                  DBA-canonical condition. Helps operators who don't have
+                  every metric_type memorized. */}
+              <div>
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
+                  Template (선택)
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {RULE_TEMPLATES.map((t) => (
+                    <button
+                      key={t.label}
+                      type="button"
+                      onClick={() =>
+                        setCompound({
+                          logic: t.logic,
+                          operands: t.operands.map((o) => ({ ...o })),
+                        })
+                      }
+                      title={t.hint}
+                      className="text-[11px] px-3 py-1.5 border border-zinc-800 bg-zinc-950/60 text-zinc-300 hover:border-amber-500/60 hover:text-amber-200 transition-colors"
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
                 <div>
                   <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
