@@ -260,44 +260,71 @@ def _redundant_indexes(cluster_id: str) -> dict:
         return {"error": f"cluster {cluster_id!r} not registered", "candidates": []}
     cluster_arn = cluster.get("cluster_arn")
     secret_arn = cluster.get("secret_arn")
-    db_name = cluster.get("db_name") or "postgres"
     engine = (cluster.get("engine") or "").lower()
+    is_mysql = "mysql" in engine
+    db_name = cluster.get("db_name") or ("mysql" if is_mysql else "postgres")
     if not cluster_arn or not secret_arn:
         return {"error": "cluster registry missing cluster_arn/secret_arn", "candidates": []}
-    if "mysql" in engine:
-        return {
-            "cluster_id": cluster_id,
-            "engine": engine,
-            "candidates": [],
-            "info": "MySQL은 v1에서 지원하지 않습니다 — PostgreSQL 클러스터에서 사용하세요.",
-        }
 
-    # One round trip per cluster — pull every valid user index with its
-    # ordered column list, size, and scan count. WITH ORDINALITY preserves
-    # the column order so a (a,b) prefix can be distinguished from (b,a).
-    sql = (
-        "SELECT "
-        "  n.nspname AS schema_name, "
-        "  c.relname AS table_name, "
-        "  ic.relname AS index_name, "
-        "  pg_get_indexdef(i.indexrelid) AS definition, "
-        "  pg_relation_size(i.indexrelid)::bigint AS bytes, "
-        "  COALESCE(s.idx_scan, 0) AS idx_scan, "
-        "  i.indisunique AS is_unique, "
-        "  i.indisprimary AS is_primary, "
-        "  (SELECT string_agg(COALESCE(a.attname, '(expr)'), ',' ORDER BY arr.ord) "
-        "   FROM unnest(i.indkey) WITH ORDINALITY AS arr(col, ord) "
-        "   LEFT JOIN pg_attribute a "
-        "     ON a.attrelid = i.indrelid AND a.attnum = arr.col) AS columns "
-        "FROM pg_index i "
-        "JOIN pg_class c ON c.oid = i.indrelid "
-        "JOIN pg_class ic ON ic.oid = i.indexrelid "
-        "JOIN pg_namespace n ON n.oid = c.relnamespace "
-        "LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = i.indexrelid "
-        "WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast') "
-        "  AND i.indisvalid "
-        "ORDER BY n.nspname, c.relname, ic.relname"
-    )
+    # Engine-specific introspection. Both shapes produce the same column
+    # set (schema_name, table_name, index_name, columns CSV, bytes, idx_scan,
+    # is_unique, is_primary, definition) so the downstream post-processing
+    # is engine-agnostic.
+    if is_mysql:
+        # MySQL idx_scan via performance_schema.table_io_waits_summary_by_
+        # index_usage — COUNT_FETCH is the closest analog to pg_stat_user_
+        # indexes.idx_scan. Per-index byte size isn't cheaply available
+        # from information_schema; report 0 and let the prefix/duplicate
+        # heuristics still flag candidates by structure.
+        sql = (
+            "SELECT "
+            "  s.TABLE_SCHEMA AS schema_name, "
+            "  s.TABLE_NAME AS table_name, "
+            "  s.INDEX_NAME AS index_name, "
+            "  CONCAT('INDEX ', s.INDEX_NAME, ' ON ', s.TABLE_SCHEMA, '.', "
+            "         s.TABLE_NAME, ' (', "
+            "         GROUP_CONCAT(s.COLUMN_NAME ORDER BY s.SEQ_IN_INDEX), "
+            "         ')') AS definition, "
+            "  0 AS bytes, "
+            "  COALESCE(MAX(p.COUNT_FETCH), 0) AS idx_scan, "
+            "  CAST(NOT MAX(s.NON_UNIQUE) AS UNSIGNED) AS is_unique, "
+            "  CAST(s.INDEX_NAME = 'PRIMARY' AS UNSIGNED) AS is_primary, "
+            "  GROUP_CONCAT(s.COLUMN_NAME ORDER BY s.SEQ_IN_INDEX) AS columns "
+            "FROM information_schema.STATISTICS s "
+            "LEFT JOIN performance_schema.table_io_waits_summary_by_index_usage p "
+            "  ON p.OBJECT_SCHEMA = s.TABLE_SCHEMA "
+            " AND p.OBJECT_NAME = s.TABLE_NAME "
+            " AND p.INDEX_NAME = s.INDEX_NAME "
+            "WHERE s.TABLE_SCHEMA NOT IN ('mysql','performance_schema','information_schema','sys') "
+            "GROUP BY s.TABLE_SCHEMA, s.TABLE_NAME, s.INDEX_NAME "
+            "ORDER BY s.TABLE_SCHEMA, s.TABLE_NAME, s.INDEX_NAME"
+        )
+    else:
+        # PG pg_index — WITH ORDINALITY preserves column order so a (a,b)
+        # prefix is distinguishable from (b,a).
+        sql = (
+            "SELECT "
+            "  n.nspname AS schema_name, "
+            "  c.relname AS table_name, "
+            "  ic.relname AS index_name, "
+            "  pg_get_indexdef(i.indexrelid) AS definition, "
+            "  pg_relation_size(i.indexrelid)::bigint AS bytes, "
+            "  COALESCE(s.idx_scan, 0) AS idx_scan, "
+            "  i.indisunique AS is_unique, "
+            "  i.indisprimary AS is_primary, "
+            "  (SELECT string_agg(COALESCE(a.attname, '(expr)'), ',' ORDER BY arr.ord) "
+            "   FROM unnest(i.indkey) WITH ORDINALITY AS arr(col, ord) "
+            "   LEFT JOIN pg_attribute a "
+            "     ON a.attrelid = i.indrelid AND a.attnum = arr.col) AS columns "
+            "FROM pg_index i "
+            "JOIN pg_class c ON c.oid = i.indrelid "
+            "JOIN pg_class ic ON ic.oid = i.indexrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = i.indexrelid "
+            "WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast') "
+            "  AND i.indisvalid "
+            "ORDER BY n.nspname, c.relname, ic.relname"
+        )
 
     rds_data = boto3.client("rds-data")
     try:
@@ -1237,29 +1264,77 @@ _LOG_CATEGORY_FILTERS = {
 }
 
 
+_MYSQL_LOG_CATEGORY_FILTERS = {
+    # Aurora MySQL error log uses bracketed level prefixes; reading the
+    # actual lines requires no filter, but we still gate it so the user
+    # gets only ERROR/Warning/Note severities.
+    "error": "filter @message like /\\[ERROR\\]/ or @message like /\\[FATAL\\]/",
+    # MySQL general log connection events.
+    "connection": (
+        "filter @message like /Connect/ or @message like /Quit/ "
+        "or @message like /Aborted connection/"
+    ),
+    # "slow" goes to a different log group entirely (/aws/rds/cluster/{cid}/slowquery)
+    # and the entire group is slow queries — no filter needed.
+    "slow": "",
+    # MySQL has no autovacuum analog. We leave the key in place for UI
+    # parity but use a filter that won't match anything useful.
+    "vacuum": "filter @message like /InnoDB/",
+}
+
+# Per-category MySQL log group routing — slow queries and error log
+# are separate streams. Default (and `all`) goes to the error log.
+_MYSQL_LOG_GROUPS = {
+    "slow": "slowquery",
+    "connection": "general",
+    "error": "error",
+    "vacuum": "error",
+    "all": "error",
+}
+
+
 def _log_insights(cluster_id, hours, category):
-    """Run a CloudWatch Logs Insights query for one category of PG logs.
+    """Run a CloudWatch Logs Insights query for one category of DB logs.
 
     Returns the most recent matching entries (raw @timestamp + @message) so
     the frontend can render them as a feed. We deliberately do NOT pre-
     aggregate into time-buckets here — DBAs reach for log insights when
     they want to see the actual line, not a count. Tight default cap (100
-    entries) keeps CW Insights scan cost predictable."""
+    entries) keeps CW Insights scan cost predictable.
+
+    Engine-aware: PG clusters log to a single
+    /aws/rds/cluster/{cid}/postgresql group; Aurora MySQL splits logs
+    across error / slowquery / general / audit streams so we pick the
+    matching one per category.
+    """
     import time
 
-    log_group = f"/aws/rds/cluster/{cluster_id}/postgresql"
+    cluster = _lookup_cluster(cluster_id)
+    engine = (cluster.get("engine") or "").lower() if cluster else ""
+    is_mysql = "mysql" in engine
+
+    if is_mysql:
+        suffix = _MYSQL_LOG_GROUPS.get(category, "error")
+        log_group = f"/aws/rds/cluster/{cluster_id}/{suffix}"
+        category_filters = _MYSQL_LOG_CATEGORY_FILTERS
+    else:
+        log_group = f"/aws/rds/cluster/{cluster_id}/postgresql"
+        category_filters = _LOG_CATEGORY_FILTERS
+
     client = boto3.client("logs")
 
-    if category not in _LOG_CATEGORY_FILTERS and category != "all":
+    if category not in category_filters and category != "all":
         category = "all"
 
-    if category == "all":
+    if category == "all" or not (category_filters.get(category) or "").strip():
+        # Either no filter or the log group itself is already filtered
+        # (e.g. MySQL slowquery group).
         query_string = (
             "fields @timestamp, @message | sort @timestamp desc | limit 100"
         )
     else:
         query_string = (
-            f"fields @timestamp, @message | {_LOG_CATEGORY_FILTERS[category]} "
+            f"fields @timestamp, @message | {category_filters[category]} "
             f"| sort @timestamp desc | limit 100"
         )
 
@@ -1282,12 +1357,17 @@ def _log_insights(cluster_id, hours, category):
             queryString=query_string,
         )
     except client.exceptions.ResourceNotFoundException:
+        engine_hint = (
+            "MySQL error/slowquery/general"
+            if is_mysql
+            else "PostgreSQL"
+        )
         return {
             **base_result,
             "error": (
-                f"Log group {log_group} not found — enable PostgreSQL log "
-                "exports on the cluster (parameter group + Modify cluster → "
-                "Logs)."
+                f"Log group {log_group} not found — enable {engine_hint} "
+                "log exports on the cluster (parameter group + Modify "
+                "cluster → Logs)."
             ),
         }
     except Exception as e:
