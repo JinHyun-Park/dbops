@@ -434,11 +434,113 @@ def _handle_delete(table, cluster_id: str):
     return _resp(200, {"status": "deleted", "cluster_id": cluster_id, "was_demo": bool(existing.get("is_demo"))})
 
 
+def _test_connection(body: dict) -> dict:
+    """Pre-flight: AssumeRole + DescribeDBClusters without persisting
+    anything. Returns a structured verdict so the UI can show which
+    specific step failed (vs the existing register-then-show-error
+    path which just stamps `connection_status=failed` on a saved row).
+
+    Steps run in order, and the first failure short-circuits the rest:
+      1. assume_role  — only for cross-account; same-account skips this
+      2. describe_cluster — confirms the role can see the cluster id
+      3. master_user_secret — confirms Aurora has a managed secret
+         (the agent needs this for RDS Data API)
+    """
+    cluster_id = (body.get("cluster_id") or "").strip()
+    region = (body.get("region") or "").strip()
+    spoke_role_arn = (body.get("spoke_role_arn") or "").strip()
+
+    if not cluster_id or not region:
+        return _resp(400, {"error": "cluster_id and region required"})
+
+    steps = []
+
+    # Step 1: AssumeRole (cross-account only)
+    session: boto3.session.Session | None = None
+    if spoke_role_arn:
+        try:
+            session = _session_for(region, spoke_role_arn)
+            steps.append({"name": "assume_role", "status": "ok"})
+        except Exception as e:
+            steps.append({
+                "name": "assume_role",
+                "status": "failed",
+                "error": str(e)[:300],
+            })
+            return _resp(200, {"ok": False, "steps": steps})
+    else:
+        session = _session_for(region)
+        steps.append({
+            "name": "assume_role",
+            "status": "skipped",
+            "note": "same-account — Lambda execution role used directly",
+        })
+
+    # Step 2: DescribeDBClusters
+    try:
+        rds = session.client("rds")
+        resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
+        cluster_list = resp.get("DBClusters") or []
+        if not cluster_list:
+            steps.append({
+                "name": "describe_cluster",
+                "status": "failed",
+                "error": "cluster id not found in this account/region",
+            })
+            return _resp(200, {"ok": False, "steps": steps})
+        cluster = cluster_list[0]
+        steps.append({
+            "name": "describe_cluster",
+            "status": "ok",
+            "engine": cluster.get("Engine", ""),
+            "version": cluster.get("EngineVersion", ""),
+            "endpoint": cluster.get("Endpoint", ""),
+        })
+    except Exception as e:
+        steps.append({
+            "name": "describe_cluster",
+            "status": "failed",
+            "error": str(e)[:300],
+        })
+        return _resp(200, {"ok": False, "steps": steps})
+
+    # Step 3: master user secret (needed for RDS Data API path)
+    secret_arn = (cluster.get("MasterUserSecret") or {}).get("SecretArn", "")
+    if secret_arn:
+        steps.append({
+            "name": "master_user_secret",
+            "status": "ok",
+            "secret_arn": secret_arn,
+        })
+    else:
+        steps.append({
+            "name": "master_user_secret",
+            "status": "warning",
+            "note": (
+                "Aurora cluster has no managed master secret — RDS Data API "
+                "calls will fail. Enable Secrets Manager-managed credentials "
+                "on the cluster or supply secret_arn manually."
+            ),
+        })
+
+    return _resp(200, {"ok": True, "steps": steps})
+
+
 def lambda_handler(event, context):
     dynamodb = boto3.resource("dynamodb")
     table = dynamodb.Table(os.environ["CLUSTERS_TABLE"])
     method = event.get("requestContext", {}).get("http", {}).get("method", event.get("httpMethod", "GET"))
     path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path", "")
+
+    # Sub-route: POST /api/clusters/test-connection — pre-flight that
+    # runs AssumeRole + DescribeDBClusters without saving. Read-only;
+    # viewer allowed since the body is non-persisting.
+    if method == "POST" and path.endswith("/test-connection"):
+        try:
+            body = json.loads(event.get("body") or "{}")
+        except json.JSONDecodeError:
+            return _resp(400, {"error": "body must be valid JSON"})
+        return _test_connection(body)
 
     # Sub-route: POST /api/clusters/discover (read-only enumeration, allow viewer)
     if method == "POST" and path.endswith("/discover"):

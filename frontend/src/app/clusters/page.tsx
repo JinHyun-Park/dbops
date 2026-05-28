@@ -9,7 +9,9 @@ import {
   bulkRegisterClusters,
   generateSampleCluster,
   deleteCluster,
+  testClusterConnection,
   type DiscoveredCluster,
+  type TestConnectionResult,
 } from "@/lib/api-client";
 import { isAdmin } from "@/lib/auth";
 import {
@@ -87,6 +89,12 @@ export default function ClustersPage() {
     spoke_role_arn: "",
   });
   const [submitting, setSubmitting] = useState(false);
+  // Pre-flight: separate state from feedback because we want both
+  // the per-step verdict (panel below the form) AND the toast at top.
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestConnectionResult | null>(
+    null,
+  );
   const [feedback, setFeedback] = useState<{
     kind: "ok" | "warn" | "err";
     msg: string;
@@ -795,12 +803,99 @@ export default function ClustersPage() {
                 {submitting ? "검증 중…" : "등록 + 연결 검증"}
               </button>
               <button
+                onClick={async () => {
+                  if (!form.cluster_id || !form.region) {
+                    setFeedback({
+                      kind: "err",
+                      msg: "cluster_id + region 이 필요합니다.",
+                    });
+                    return;
+                  }
+                  setTesting(true);
+                  setTestResult(null);
+                  setFeedback(null);
+                  try {
+                    const r = await testClusterConnection({
+                      cluster_id: form.cluster_id,
+                      region: form.region,
+                      spoke_role_arn:
+                        registerMode === "cross-account"
+                          ? form.spoke_role_arn
+                          : undefined,
+                    });
+                    setTestResult(r);
+                  } catch (e) {
+                    setFeedback({
+                      kind: "err",
+                      msg: e instanceof Error ? e.message : "test failed",
+                    });
+                  } finally {
+                    setTesting(false);
+                  }
+                }}
+                disabled={testing}
+                className="text-xs px-4 py-2 border border-zinc-700 text-zinc-300 hover:border-amber-500/60 hover:text-amber-200 disabled:opacity-50 transition-colors"
+                title="저장 없이 AssumeRole + DescribeDBClusters 만 실행해 보기"
+              >
+                {testing ? "테스트 중…" : "연결만 테스트"}
+              </button>
+              <button
                 onClick={() => setShowForm(false)}
                 className="text-xs px-4 py-2 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
               >
                 취소
               </button>
             </div>
+
+            {testResult && (
+              <div className="border border-zinc-800 bg-zinc-950 p-4 mt-3">
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
+                  Pre-flight 결과 ·{" "}
+                  <span
+                    className={
+                      testResult.ok ? "text-emerald-400" : "text-rose-400"
+                    }
+                  >
+                    {testResult.ok ? "PASS" : "FAIL"}
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {testResult.steps.map((s, i) => (
+                    <div key={i} className="flex items-baseline gap-3 text-xs">
+                      <span
+                        className={`font-mono w-10 ${
+                          s.status === "ok"
+                            ? "text-emerald-400"
+                            : s.status === "failed"
+                              ? "text-rose-400"
+                              : s.status === "warning"
+                                ? "text-amber-400"
+                                : "text-zinc-500"
+                        }`}
+                      >
+                        {s.status === "ok"
+                          ? "✓"
+                          : s.status === "failed"
+                            ? "✗"
+                            : s.status === "warning"
+                              ? "⚠"
+                              : "—"}
+                      </span>
+                      <span className="font-mono text-zinc-300 w-40 flex-shrink-0">
+                        {s.name}
+                      </span>
+                      <span className="text-zinc-400 flex-1 break-all">
+                        {s.error ||
+                          s.note ||
+                          [s.engine, s.version, s.endpoint, s.secret_arn]
+                            .filter(Boolean)
+                            .join(" · ")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </Section>
       )}

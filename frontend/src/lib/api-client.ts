@@ -774,6 +774,34 @@ export async function registerCluster(data: {
   return res.json();
 }
 
+export interface TestConnectionResult {
+  ok: boolean;
+  steps: Array<{
+    name: "assume_role" | "describe_cluster" | "master_user_secret";
+    status: "ok" | "failed" | "skipped" | "warning";
+    error?: string;
+    note?: string;
+    engine?: string;
+    version?: string;
+    endpoint?: string;
+    secret_arn?: string;
+  }>;
+}
+
+export async function testClusterConnection(input: {
+  cluster_id: string;
+  region: string;
+  spoke_role_arn?: string;
+}): Promise<TestConnectionResult> {
+  const res = await fetch(await api(`/api/clusters/test-connection`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(`Test connection failed: ${res.status}`);
+  return res.json();
+}
+
 export async function generateSampleCluster(): Promise<{
   status: string;
   cluster_id: string;

@@ -812,6 +812,13 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.POST],
             integration=clusters_integration,
         )
+        # Pre-flight: AssumeRole + DescribeDBClusters without saving.
+        # Lets the DBA verify a spoke role works before committing.
+        self.api.add_routes(
+            path="/api/clusters/test-connection",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=clusters_integration,
+        )
         self.api.add_routes(
             path="/api/clusters/bulk-register",
             methods=[apigwv2.HttpMethod.POST],
