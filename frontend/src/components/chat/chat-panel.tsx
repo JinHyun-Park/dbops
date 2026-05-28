@@ -6,7 +6,15 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { MessageList, type Message } from "./message-list";
 import { streamChat } from "@/lib/agentcore-sse";
-import { fetchClusters, fetchModels, createRunbook } from "@/lib/api-client";
+import {
+  fetchClusters,
+  fetchModels,
+  createRunbook,
+  listChatSessions,
+  fetchChatSession,
+  putChatSession,
+  deleteChatSession,
+} from "@/lib/api-client";
 
 interface ClusterRow {
   cluster_id: string;
@@ -371,14 +379,77 @@ export function ChatPanel() {
       localStorage.setItem(MODEL_STORAGE_KEY, modelId);
   }, [modelId]);
 
+  // Initial conversation load: localStorage is the warm cache, DDB is the
+  // source of truth. Render the local copy first so the UI doesn't flash
+  // empty while the API resolves, then replace with the merged view once
+  // the server responds. Sessions in both: server wins. Server-only: pulled
+  // down on demand when the user clicks them (avoids fanning out N detail
+  // fetches). Local-only: pushed up so they're durable across devices.
   useEffect(() => {
     const stored = loadConversations();
-    setConversations(stored);
     if (stored.length > 0) {
+      setConversations(stored);
       setActiveId(stored[0].id);
       if (stored[0].cluster_id) setClusterId(stored[0].cluster_id);
     }
-  }, []);
+
+    let cancelled = false;
+    listChatSessions()
+      .then(async (summaries) => {
+        if (cancelled) return;
+        const remoteById = new Map(summaries.map((s) => [s.session_id, s]));
+        const localById = new Map(stored.map((c) => [c.id, c]));
+        const allIds = new Set([...remoteById.keys(), ...localById.keys()]);
+        const merged: Conversation[] = [];
+        const toPush: Conversation[] = [];
+        for (const id of allIds) {
+          const local = localById.get(id);
+          const remote = remoteById.get(id);
+          if (remote && (!local || remote.updated_at >= local.updated_at)) {
+            // Server has newer (or only) version — render a stub now and let
+            // selection lazy-load full messages.
+            merged.push({
+              id: remote.session_id,
+              title: remote.title || "Untitled",
+              cluster_id: remote.cluster_id || "",
+              updated_at: remote.updated_at,
+              messages: local?.messages || [],
+            });
+          } else if (local) {
+            merged.push(local);
+            // Local has newer version (or remote missing) — push it up.
+            if (!remote || local.updated_at > remote.updated_at) {
+              toPush.push(local);
+            }
+          }
+        }
+        merged.sort((a, b) => b.updated_at - a.updated_at);
+        setConversations(merged);
+        saveConversations(merged);
+        if (merged.length > 0 && !activeId) {
+          setActiveId(merged[0].id);
+          if (merged[0].cluster_id) setClusterId(merged[0].cluster_id);
+        }
+        // Push local-only sessions to DDB so a different device sees them.
+        // Fire-and-forget; failures don't block the UI.
+        for (const conv of toPush) {
+          putChatSession(conv.id, {
+            title: conv.title,
+            cluster_id: conv.cluster_id,
+            messages: conv.messages,
+          }).catch((e) => console.warn("[chat] push local→server failed", e));
+        }
+      })
+      .catch((e) => {
+        console.warn(
+          "[chat] listChatSessions failed; staying on localStorage",
+          e,
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchClusters()
@@ -402,16 +473,80 @@ export function ChatPanel() {
   const active = conversations.find((c) => c.id === activeId);
   const messages = active?.messages || [];
 
+  // Cross-device sync: debounce server PUTs by 1.5s so a streaming response
+  // (which mutates messages on every token) doesn't fire N writes per turn.
+  // Keyed by conversation id — switching conversations cancels the pending
+  // write for the previous one.
+  const syncTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+  const scheduleSync = useCallback((conv: Conversation) => {
+    const existing = syncTimerRef.current.get(conv.id);
+    if (existing) clearTimeout(existing);
+    const t = setTimeout(() => {
+      syncTimerRef.current.delete(conv.id);
+      putChatSession(conv.id, {
+        title: conv.title,
+        cluster_id: conv.cluster_id,
+        messages: conv.messages,
+      }).catch((e) =>
+        console.warn(
+          "[chat] putChatSession failed; localStorage stays authoritative",
+          e,
+        ),
+      );
+    }, 1500);
+    syncTimerRef.current.set(conv.id, t);
+  }, []);
+
   const persist = useCallback(
     (updater: (prev: Conversation[]) => Conversation[]) => {
       setConversations((prev) => {
         const next = updater(prev);
         saveConversations(next);
+        // Schedule a debounced server sync per changed conversation.
+        // Comparing by reference identifies which conversation actually
+        // mutated; skipping unchanged rows keeps the network quiet.
+        const prevById = new Map(prev.map((c) => [c.id, c]));
+        for (const conv of next) {
+          if (prevById.get(conv.id) !== conv) {
+            scheduleSync(conv);
+          }
+        }
         return next;
       });
     },
-    [],
+    [scheduleSync],
   );
+
+  // Lazy detail load when the user switches to a stub conversation that
+  // came back from listChatSessions without messages.
+  useEffect(() => {
+    if (!activeId) return;
+    const conv = conversations.find((c) => c.id === activeId);
+    if (!conv) return;
+    if (conv.messages.length > 0) return;
+    let cancelled = false;
+    fetchChatSession(activeId)
+      .then((detail) => {
+        if (cancelled) return;
+        const restored = (detail.messages || []).map((m, i) => ({
+          id: `${activeId}-${i}`,
+          role: m.role as Message["role"],
+          content: m.content,
+          toolCalls: (m.tool_calls as Message["toolCalls"]) || [],
+        }));
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === activeId ? { ...c, messages: restored } : c,
+          ),
+        );
+      })
+      .catch((e) => console.warn("[chat] fetchChatSession failed", e));
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId, conversations]);
 
   const startNewConversation = useCallback(() => {
     const conv = newConversation(clusterId);
@@ -423,6 +558,12 @@ export function ChatPanel() {
   const removeConversation = useCallback(
     (id: string) => {
       persist((prev) => prev.filter((c) => c.id !== id));
+      // Best-effort server delete. A failure here just means the row
+      // sticks around in DDB until TTL expires it; local UI is already
+      // consistent.
+      deleteChatSession(id).catch((e) =>
+        console.warn("[chat] deleteChatSession failed; will expire via TTL", e),
+      );
       if (activeId === id) {
         setActiveId((prevId) => {
           const remaining = conversations.filter((c) => c.id !== id);

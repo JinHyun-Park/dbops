@@ -1187,3 +1187,69 @@ export async function deleteRunbook(id: number): Promise<void> {
   });
   if (!res.ok) throw new Error(`Delete runbook failed: ${res.status}`);
 }
+
+// =====  Chat sessions (cross-device conversation persistence) =====
+
+export interface ChatSessionSummary {
+  session_id: string;
+  title: string;
+  cluster_id: string;
+  updated_at: number;
+  created_at: number;
+  message_count: number;
+}
+
+export interface ChatSessionDetail extends ChatSessionSummary {
+  messages: Array<{
+    role: string;
+    content: string;
+    tool_calls?: unknown[];
+    ts?: number;
+  }>;
+}
+
+export async function listChatSessions(): Promise<ChatSessionSummary[]> {
+  const res = await fetch(await api(`/api/chat/sessions`), {
+    headers: { ...(await authHeaders()) },
+  });
+  if (!res.ok) throw new Error(`List chat sessions failed: ${res.status}`);
+  const body = await res.json();
+  return body.sessions || [];
+}
+
+export async function fetchChatSession(id: string): Promise<ChatSessionDetail> {
+  const res = await fetch(
+    await api(`/api/chat/sessions/${encodeURIComponent(id)}`),
+    {
+      headers: { ...(await authHeaders()) },
+    },
+  );
+  if (!res.ok) throw new Error(`Fetch chat session failed: ${res.status}`);
+  return res.json();
+}
+
+export async function putChatSession(
+  id: string,
+  payload: { title: string; cluster_id: string; messages: unknown[] },
+): Promise<void> {
+  const res = await fetch(
+    await api(`/api/chat/sessions/${encodeURIComponent(id)}`),
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+      body: JSON.stringify(payload),
+    },
+  );
+  if (!res.ok) throw new Error(`Put chat session failed: ${res.status}`);
+}
+
+export async function deleteChatSession(id: string): Promise<void> {
+  const res = await fetch(
+    await api(`/api/chat/sessions/${encodeURIComponent(id)}`),
+    {
+      method: "DELETE",
+      headers: { ...(await authHeaders()) },
+    },
+  );
+  if (!res.ok) throw new Error(`Delete chat session failed: ${res.status}`);
+}
