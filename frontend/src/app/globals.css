@@ -491,7 +491,15 @@ html[data-theme="light"] .border-rose-500\/40 {
   border-color: rgba(185, 28, 28, 0.5);
 }
 
-/* --- Purple (DEMO badge) --- */
+/* --- Purple (DEMO badge + banner) ---
+   The banner uses bg-purple-500/10 (very light tint) with text-purple-200
+   set on the body copy. In dark mode purple-200 is near-white and reads
+   well against the tint, but in light mode purple-200 → still near-white
+   which is invisible on the now-light banner background. Promote it to a
+   readable dark-violet on light theme. */
+html[data-theme="light"] .text-purple-200 {
+  color: #581c87; /* deep violet — passes WCAG AA on the 10%-tinted bg */
+}
 html[data-theme="light"] .text-purple-300 {
   color: #6d28d9;
 }
@@ -828,4 +836,27 @@ section:nth-of-type(n + 6) {
   section {
     animation: none;
   }
+}
+
+/* ========================================================================
+   Pointer affordances — Tailwind v4 dropped the implicit cursor:pointer
+   on <button>. Without this, clickable controls feel indistinguishable
+   from static text since the mouse pointer stays as an arrow over
+   everything. Restore the affordance globally and add it to the other
+   conventionally-clickable patterns we use: anchor links, summary
+   elements, and elements with role="button"/role="tab"/role="option".
+   Disabled controls keep the not-allowed cursor. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+[role="tab"]:not([aria-disabled="true"]),
+[role="option"]:not([aria-disabled="true"]),
+[role="menuitem"]:not([aria-disabled="true"]),
+summary,
+label[for],
+a[href] {
+  cursor: pointer;
+}
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
 }
