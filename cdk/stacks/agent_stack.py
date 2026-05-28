@@ -488,6 +488,23 @@ class AgentStack(cdk.Stack):
                 "SLACK_SIGNING_SECRET": Settings.SLACK_SIGNING_SECRET,
             },
         )
+
+        # Slack slash-command endpoint — `/dbops status|timeline|
+        # clusters [args]`. Shares the signing secret with the
+        # interactive Lambda so workspaces don't need a second secret.
+        slack_command_lambda = lambda_.Function(
+            self, "SlackCommandApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/slack_command"),
+            timeout=cdk.Duration.seconds(10),
+            environment={
+                "SLACK_SIGNING_SECRET": Settings.SLACK_SIGNING_SECRET,
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                "FRONTEND_URL": Settings.FRONTEND_URL,
+            },
+        )
+        foundation.clusters_table.grant_read_data(slack_command_lambda)
         data.cache_db.secret.grant_read(slack_interactive_lambda)
         data.cache_db.grant_data_api_access(slack_interactive_lambda)
         slack_interactive_lambda.add_to_role_policy(iam.PolicyStatement(
@@ -806,6 +823,13 @@ class AgentStack(cdk.Stack):
             path="/api/slack/interactive",
             methods=[apigwv2.HttpMethod.POST],
             integration=integrations.HttpLambdaIntegration("SlackInteractiveIntegration", slack_interactive_lambda),
+        )
+        # Slack slash command — URL paired with the Slack app's
+        # `/dbops` command settings. Same signing secret as interactive.
+        self.api.add_routes(
+            path="/api/slack/command",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=integrations.HttpLambdaIntegration("SlackCommandIntegration", slack_command_lambda),
         )
         clusters_integration = integrations.HttpLambdaIntegration("ClustersIntegration", clusters_lambda)
         self.api.add_routes(
