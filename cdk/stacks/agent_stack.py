@@ -618,6 +618,13 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardSchemaChangesIntegration", dashboard_lambda),
         )
+        # Unified incident timeline — merges event_log + schema_changes +
+        # audit_log into one chronological feed for incident triage.
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/timeline",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardTimelineIntegration", dashboard_lambda),
+        )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/anomalies",
             methods=[apigwv2.HttpMethod.GET],

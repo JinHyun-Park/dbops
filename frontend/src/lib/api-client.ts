@@ -1386,6 +1386,51 @@ export async function deleteSavedQuery(id: number): Promise<void> {
   if (!res.ok) throw new Error(`Delete saved query failed: ${res.status}`);
 }
 
+// =====  Unified incident timeline =====
+
+export type TimelineCategory =
+  | "alert"
+  | "rds_event"
+  | "proactive"
+  | "ack"
+  | "schema_change"
+  | "audit";
+
+export interface TimelineItem {
+  ts: string;
+  category: TimelineCategory | string;
+  severity: string;
+  title: string;
+  detail: string;
+  source: string;
+  source_id: string;
+}
+
+export interface TimelineResponse {
+  cluster_id: string;
+  hours: number;
+  categories: string[];
+  count: number;
+  items: TimelineItem[];
+}
+
+export async function fetchTimeline(
+  clusterId: string,
+  opts?: { hours?: number; categories?: string[] },
+): Promise<TimelineResponse> {
+  const params = new URLSearchParams();
+  if (opts?.hours) params.set("hours", String(opts.hours));
+  if (opts?.categories?.length)
+    params.set("categories", opts.categories.join(","));
+  const qs = params.toString();
+  const url = await api(
+    `/api/dashboard/${enc(clusterId)}/timeline${qs ? `?${qs}` : ""}`,
+  );
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Timeline fetch failed: ${res.status}`);
+  return res.json();
+}
+
 // =====  Agent memory (read + prune AgentCore Memory records) =====
 
 export type MemoryKind = "preferences" | "facts";

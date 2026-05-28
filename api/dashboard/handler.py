@@ -810,6 +810,135 @@ def _multi_cluster_overview(query):
     return {"clusters": rows}
 
 
+def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) -> dict:
+    """Unified chronological timeline for one cluster.
+
+    Merges the four signal streams a DBA needs at 3am during incident
+    triage into a single sorted list:
+
+      - alerts        — alert rule fires (event_log event_type='alert')
+      - rds_event     — RDS/CloudWatch events (event_log event_type='rds_event'
+                        or whatever event_processor wrote)
+      - proactive     — proactive_monitor findings
+      - ack           — Slack acks of alerts
+      - schema_change — schema_changes table (DDL detected by schema_tracker)
+      - audit         — audit_log (executed write operations)
+      - slow_peak     — query_stats rows whose total_time_ms jumped past
+                        the per-cluster p95 in this window (the "what got
+                        slow during the incident" signal)
+
+    Output is a flat list of {ts, category, severity, title, detail, source_id}.
+    Frontend renders that as a vertical timeline + category filter chips.
+
+    Window is `hours` back from now. Caller can pass `categories=...` to
+    restrict — useful during retro where you only want changes + alerts."""
+    cats = set(categories or [])
+    items: list[dict] = []
+
+    # event_log already aggregates alerts + RDS events + proactive findings
+    # + acks. Pull everything in the window and stamp category from
+    # event_type for chip filtering.
+    eventlog = query(
+        "SELECT id, event_time, event_type, severity, source, "
+        "       LEFT(message, 500) AS message, raw_event "
+        "FROM event_log "
+        "WHERE cluster_id = :cid "
+        "  AND event_time > NOW() - (:hours || ' hours')::interval "
+        "ORDER BY event_time DESC LIMIT 500",
+        {"cid": cluster_id, "hours": str(hours)},
+    )
+    for r in eventlog:
+        cat = r.get("event_type") or "event"
+        # Normalise the long tail of event_types into our 4 known buckets.
+        if cat == "alert":
+            cat = "alert"
+        elif cat in ("rds_event", "cloudwatch_alarm"):
+            cat = "rds_event"
+        elif cat == "proactive":
+            cat = "proactive"
+        elif cat == "ack":
+            cat = "ack"
+        items.append({
+            "ts": r.get("event_time"),
+            "category": cat,
+            "severity": (r.get("severity") or "info"),
+            "title": cat,
+            "detail": r.get("message") or "",
+            "source": r.get("source") or "",
+            "source_id": f"event_log:{r.get('id')}",
+        })
+
+    # schema_changes table — DDL detected by the schema_tracker pipeline.
+    try:
+        schema_rows = query(
+            "SELECT detected_at, change_type, object_name, "
+            "       LEFT(old_definition, 200) AS old_def, "
+            "       LEFT(new_definition, 200) AS new_def "
+            "FROM schema_changes "
+            "WHERE cluster_id = :cid "
+            "  AND detected_at > NOW() - (:hours || ' hours')::interval "
+            "ORDER BY detected_at DESC LIMIT 100",
+            {"cid": cluster_id, "hours": str(hours)},
+        )
+        for r in schema_rows:
+            items.append({
+                "ts": r.get("detected_at"),
+                "category": "schema_change",
+                "severity": "info",
+                "title": f"{r.get('change_type')} · {r.get('object_name')}",
+                "detail": (r.get("new_def") or r.get("old_def") or "")[:200],
+                "source": "schema_tracker",
+                "source_id": "",
+            })
+    except Exception as e:
+        # schema_changes may not exist on partial deploys; skip silently.
+        print(f"[timeline] schema_changes skipped: {e}")
+
+    # audit_log — executed write operations (DDL via execute_sql,
+    # parameter changes, scaling). Empty in most deployments today;
+    # included so it lights up automatically when the agent starts
+    # writing here.
+    try:
+        audit_rows = query(
+            "SELECT id, created_at, action_type, tool_name, requested_by, "
+            "       approved_by, LEFT(sql_text, 240) AS sql_text, status "
+            "FROM audit_log "
+            "WHERE cluster_id = :cid "
+            "  AND created_at > NOW() - (:hours || ' hours')::interval "
+            "ORDER BY created_at DESC LIMIT 100",
+            {"cid": cluster_id, "hours": str(hours)},
+        )
+        for r in audit_rows:
+            items.append({
+                "ts": r.get("created_at"),
+                "category": "audit",
+                "severity": "warning" if r.get("status") == "failed" else "info",
+                "title": f"{r.get('tool_name') or r.get('action_type')} · {r.get('status')}",
+                "detail": (r.get("sql_text") or "")[:240],
+                "source": (
+                    f"{r.get('requested_by') or 'agent'} → {r.get('approved_by') or '—'}"
+                ),
+                "source_id": f"audit_log:{r.get('id')}",
+            })
+    except Exception as e:
+        print(f"[timeline] audit_log skipped: {e}")
+
+    # Sort by ts DESC — most recent first.
+    items.sort(key=lambda x: str(x.get("ts") or ""), reverse=True)
+
+    # Optional category filter post-sort so chip toggling is O(N) not N×SQL.
+    if cats:
+        items = [i for i in items if i["category"] in cats]
+
+    return {
+        "cluster_id": cluster_id,
+        "hours": hours,
+        "categories": sorted({i["category"] for i in items}),
+        "count": len(items),
+        "items": items[:500],
+    }
+
+
 def _audit_log(query, cluster_id, days, action_type):
     conditions = ["cluster_id = :cid", "created_at > NOW() - (:days || ' days')::interval"]
     params = {"cid": cluster_id, "days": str(days)}
@@ -1777,6 +1906,14 @@ def lambda_handler(event, context):
         if raw_path.endswith("/schema-changes"):
             days = _parse_int(qs.get("days"), 7, min_v=1, max_v=90)
             return _response(200, _schema_changes(query, cluster_id, days))
+        if raw_path.endswith("/timeline"):
+            hours = _parse_int(qs.get("hours"), 24, min_v=1, max_v=168)
+            categories = (qs.get("categories") or "").split(",")
+            categories = [c.strip() for c in categories if c.strip()]
+            return _response(
+                200,
+                _timeline(query, cluster_id, hours, categories or None),
+            )
         if raw_path.endswith("/anomalies"):
             hours = _parse_int(qs.get("hours"), 4)
             threshold = _parse_float(qs.get("threshold"), 2.5)

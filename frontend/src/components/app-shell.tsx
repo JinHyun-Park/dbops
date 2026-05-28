@@ -72,6 +72,16 @@ const NAV: NavGroup[] = [
     ],
   },
   {
+    label: "Incident",
+    items: [
+      {
+        href: "/timeline",
+        label: "Timeline",
+        hint: "unified incident feed: alerts + events + writes",
+      },
+    ],
+  },
+  {
     label: "Configure",
     items: [
       { href: "/alerts", label: "Alerts", hint: "rules + SNS subscribers" },
