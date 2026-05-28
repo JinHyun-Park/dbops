@@ -347,6 +347,8 @@ export interface LogInsightsResponse {
   category: LogCategory;
   hours: number;
   log_group: string;
+  compiled_query?: string;
+  keywords?: string;
   count: number;
   entries: { ts: string; message: string }[];
   error?: string;
@@ -356,12 +358,15 @@ export async function fetchLogInsights(
   clusterId: string,
   category: LogCategory = "all",
   hours = 1,
+  keywords: string = "",
 ): Promise<LogInsightsResponse> {
+  const params = new URLSearchParams();
+  params.set("category", category);
+  params.set("hours", String(hours));
+  if (keywords.trim()) params.set("q", keywords.trim());
   const res = await fetch(
     await api(
-      `/api/dashboard/${enc(clusterId)}/log-insights?category=${enc(
-        category,
-      )}&hours=${hours}`,
+      `/api/dashboard/${enc(clusterId)}/log-insights?${params.toString()}`,
     ),
   );
   if (!res.ok) throw new Error(`Log insights fetch failed: ${res.status}`);

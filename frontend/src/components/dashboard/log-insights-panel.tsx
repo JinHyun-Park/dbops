@@ -65,6 +65,10 @@ function relTime(iso?: string): string {
 export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
   const [category, setCategory] = useState<LogCategory>("all");
   const [hours, setHours] = useState<number>(1);
+  // Free-text incident search: space-separated keywords get AND-joined
+  // into a CW Insights filter on @message. The compiled query comes
+  // back in the response so the DBA can copy it into the AWS console.
+  const [keywords, setKeywords] = useState<string>("");
   const [data, setData] = useState<LogInsightsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
@@ -73,10 +77,10 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
   // Once the user opens a category we cache that category's result.
 
   const load = useCallback(
-    async (cat: LogCategory, h: number) => {
+    async (cat: LogCategory, h: number, kw: string = "") => {
       setLoading(true);
       try {
-        const res = await fetchLogInsights(clusterId, cat, h);
+        const res = await fetchLogInsights(clusterId, cat, h, kw);
         setData(res);
         setRefreshedAt(Date.now());
       } catch (e) {
@@ -136,8 +140,19 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
             <option value={6}>last 6h</option>
             <option value={24}>last 24h</option>
           </select>
+          <input
+            type="text"
+            value={keywords}
+            onChange={(e) => setKeywords(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") load(category, hours, keywords);
+            }}
+            placeholder="검색어 (space=AND)"
+            title="공백으로 구분된 키워드가 모두 포함된 라인만 보여줍니다. 예: 'ERROR connection refused'"
+            className="bg-zinc-900 border border-zinc-800 text-zinc-200 text-xs rounded px-2 py-1 w-44 focus:outline-none focus:border-amber-500/60"
+          />
           <button
-            onClick={() => load(category, hours)}
+            onClick={() => load(category, hours, keywords)}
             disabled={loading}
             className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
           >
@@ -152,7 +167,7 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
             key={c.key}
             onClick={() => {
               setCategory(c.key);
-              load(c.key, hours);
+              load(c.key, hours, keywords);
             }}
             title={c.hint}
             className={`text-[10px] uppercase tracking-wider px-2 py-1 border transition-colors ${

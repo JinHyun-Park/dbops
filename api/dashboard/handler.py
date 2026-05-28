@@ -1422,7 +1422,7 @@ _MYSQL_LOG_GROUPS = {
 }
 
 
-def _log_insights(cluster_id, hours, category):
+def _log_insights(cluster_id, hours, category, keywords: str = ""):
     """Run a CloudWatch Logs Insights query for one category of DB logs.
 
     Returns the most recent matching entries (raw @timestamp + @message) so
@@ -1435,7 +1435,14 @@ def _log_insights(cluster_id, hours, category):
     /aws/rds/cluster/{cid}/postgresql group; Aurora MySQL splits logs
     across error / slowquery / general / audit streams so we pick the
     matching one per category.
+
+    Optional `keywords` — free-text DBA input compiled into an AND chain
+    of `@message like /word/` filters. Empty string means no extra
+    filter beyond category. We deliberately keep this compile-side (not
+    LLM) so the user can see the resulting query in the response and
+    understand why a row did or didn't match.
     """
+    import re
     import time
 
     cluster = _lookup_cluster(cluster_id)
@@ -1455,16 +1462,32 @@ def _log_insights(cluster_id, hours, category):
     if category not in category_filters and category != "all":
         category = "all"
 
-    if category == "all" or not (category_filters.get(category) or "").strip():
-        # Either no filter or the log group itself is already filtered
-        # (e.g. MySQL slowquery group).
+    # Compile keywords → CW Insights filter clauses. Strip regex meta
+    # chars so a user typing "(payment)" doesn't try to backref into the
+    # @message regex engine.
+    keyword_clauses: list[str] = []
+    if keywords:
+        for raw in keywords.split():
+            cleaned = re.sub(r"[^A-Za-z0-9_./:\-]", "", raw)
+            if cleaned:
+                keyword_clauses.append(f"@message like /{cleaned}/")
+
+    filter_parts: list[str] = []
+    if category != "all" and (category_filters.get(category) or "").strip():
+        filter_parts.append(category_filters[category])
+    if keyword_clauses:
+        filter_parts.append("filter " + " and ".join(keyword_clauses))
+
+    if not filter_parts:
         query_string = (
             "fields @timestamp, @message | sort @timestamp desc | limit 100"
         )
     else:
+        # filter_parts already include the `filter` prefix once.
         query_string = (
-            f"fields @timestamp, @message | {category_filters[category]} "
-            f"| sort @timestamp desc | limit 100"
+            "fields @timestamp, @message | "
+            + " | ".join(filter_parts)
+            + " | sort @timestamp desc | limit 100"
         )
 
     base_result = {
@@ -1472,6 +1495,12 @@ def _log_insights(cluster_id, hours, category):
         "category": category,
         "hours": hours,
         "log_group": log_group,
+        # Expose the compiled query + sanitized keywords so the UI can
+        # show "we ran this exact CW Insights query for you" — gives
+        # DBAs a copy/paste-ready string to refine in the Console.
+        "compiled_query": query_string,
+        "keywords": " ".join(c.split("/")[1] for c in keyword_clauses)
+        if keyword_clauses else "",
         "entries": [],
         "count": 0,
     }
@@ -1943,9 +1972,13 @@ def lambda_handler(event, context):
             min_ratio = _parse_float(qs.get("min_seq_ratio"), 0.5)
             return _response(200, _index_recommendations(query, cluster_id, min_ratio))
         if raw_path.endswith("/log-insights"):
-            hours = _parse_int(qs.get("hours"), 1, min_v=1, max_v=24)
-            category = (qs.get("category") or "all").strip()
-            return _response(200, _log_insights(cluster_id, hours, category))
+            hours = _parse_int(qs.get("hours"), 1)
+            category = qs.get("category", "all")
+            keywords = (qs.get("q") or qs.get("keywords") or "").strip()
+            return _response(
+                200,
+                _log_insights(cluster_id, hours, category, keywords),
+            )
         if raw_path.endswith("/capacity-forecast"):
             metric = (qs.get("metric") or "storage_bytes").strip()
             days_lookback = _parse_int(qs.get("days_lookback"), 30, min_v=7, max_v=90)
