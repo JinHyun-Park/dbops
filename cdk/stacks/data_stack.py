@@ -1,3 +1,6 @@
+import hashlib
+from pathlib import Path
+
 import aws_cdk as cdk
 from aws_cdk import (
     aws_ec2 as ec2,
@@ -28,6 +31,28 @@ from aws_cdk import (
 )
 from config.settings import Settings
 from constructs import Construct
+
+
+def _hash_schema_dir(rel_path: str) -> str:
+    """Concatenate every .sql file in `rel_path` (sorted by name) and
+    return the first 12 hex chars of its SHA-256. Used as the
+    schema_version property on the Custom Resource so any edit to a
+    migration file auto-triggers a re-run on the next `cdk deploy`.
+
+    Falls back to a sentinel string if the directory is missing so synth
+    doesn't fail in a partial checkout — the migrator will simply not
+    pick up new schema until the directory exists again.
+    """
+    base = Path(__file__).resolve().parent.parent / rel_path
+    if not base.is_dir():
+        return "no-sql-dir"
+    h = hashlib.sha256()
+    for sql in sorted(base.glob("*.sql")):
+        h.update(sql.name.encode())
+        h.update(b"\x00")
+        h.update(sql.read_bytes())
+        h.update(b"\x00")
+    return h.hexdigest()[:12]
 
 
 class DataStack(cdk.Stack):
@@ -83,12 +108,18 @@ class DataStack(cdk.Stack):
             self, "SchemaMigratorProvider",
             on_event_handler=self.schema_migrator,
         )
+        # Auto-derive schema_version from the SHA-256 of every SQL file in
+        # schema_migrator/sql/. CloudFormation re-fires the Custom Resource
+        # whenever any property changes, so this means: change a .sql file
+        # → next `cdk deploy` migrates. No more "I added a column but
+        # forgot to bump schema_version → migration never ran."
         migrate_resource = cdk.CustomResource(
             self, "SchemaMigratorRun",
             service_token=migrate_provider.service_token,
             properties={
-                # Bumping this string forces re-run on next deploy if you need to.
-                "schema_version": "v12",
+                "schema_version": _hash_schema_dir(
+                    "../data-pipeline/schema_migrator/sql",
+                ),
             },
         )
         migrate_resource.node.add_dependency(self.cache_db)
