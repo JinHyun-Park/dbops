@@ -222,7 +222,9 @@ export default function ComparePage() {
 
   // Recharts injects series colors as inline svg attrs, so light-mode
   // contrast comes from swapping the hex itself rather than CSS overrides.
-  const { amber: colorA, sky: colorB } = useChartColors();
+  const chart = useChartColors();
+  const colorA = chart.amber;
+  const colorB = chart.sky;
 
   return (
     <PageBody>
@@ -350,17 +352,17 @@ export default function ComparePage() {
                         >
                           <CartesianGrid
                             strokeDasharray="3 3"
-                            stroke="#27272a"
+                            stroke={chart.grid}
                             vertical={false}
                           />
                           <XAxis
                             dataKey="ts"
-                            stroke="#71717a"
+                            stroke={chart.axis}
                             fontSize={9}
                             interval="preserveStartEnd"
                           />
                           <YAxis
-                            stroke="#71717a"
+                            stroke={chart.axis}
                             fontSize={9}
                             tickFormatter={(v) =>
                               m.fmt ? m.fmt(Number(v)) : String(v)
@@ -368,11 +370,11 @@ export default function ComparePage() {
                           />
                           <Tooltip
                             contentStyle={{
-                              background: "#18181b",
-                              border: "1px solid #3f3f46",
+                              background: chart.tooltipBg,
+                              border: `1px solid ${chart.tooltipBorder}`,
                               fontSize: 11,
                             }}
-                            labelStyle={{ color: "#a1a1aa" }}
+                            labelStyle={{ color: chart.tooltipText }}
                             formatter={(value: unknown) => {
                               const num = Number(value);
                               if (!Number.isFinite(num))

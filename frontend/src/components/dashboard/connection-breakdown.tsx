@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { fetchBatchTimeseries, fetchClusterSettings } from "@/lib/api-client";
 import { fmtExact, fmtNumber } from "@/lib/format";
+import { useChartColors } from "@/lib/use-chart-colors";
 
 interface Point {
   ts: string;
@@ -77,6 +78,7 @@ export function ConnectionBreakdown({
   const [loading, setLoading] = useState(true);
   const [maxConn, setMaxConn] = useState<number | null>(null);
   const STATES = useStates();
+  const chart = useChartColors();
 
   useEffect(() => {
     let cancelled = false;
@@ -212,28 +214,28 @@ export function ConnectionBreakdown({
             >
               <CartesianGrid
                 strokeDasharray="3 3"
-                stroke="#3f3f46"
+                stroke={chart.grid}
                 vertical={false}
               />
-              <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
-              <YAxis stroke="#71717a" fontSize={10} />
+              <XAxis dataKey="ts" stroke={chart.axis} fontSize={10} />
+              <YAxis stroke={chart.axis} fontSize={10} />
               <Tooltip
                 contentStyle={{
-                  background: "#18181b",
-                  border: "1px solid #3f3f46",
+                  background: chart.tooltipBg,
+                  border: `1px solid ${chart.tooltipBorder}`,
                   fontSize: 12,
                 }}
-                labelStyle={{ color: "#a1a1aa" }}
+                labelStyle={{ color: chart.tooltipText }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {maxConn !== null && (
                 <ReferenceLine
                   y={maxConn}
-                  stroke="#ef4444"
+                  stroke={chart.rose}
                   strokeDasharray="4 4"
                   label={{
                     value: `max ${maxConn}`,
-                    fill: "#ef4444",
+                    fill: chart.rose,
                     fontSize: 10,
                     position: "right",
                   }}

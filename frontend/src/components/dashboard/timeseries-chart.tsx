@@ -16,6 +16,7 @@ import {
 import { fetchTimeseries } from "@/lib/api-client";
 import { Expandable } from "@/components/design-system/expandable";
 import { fmtDecimal } from "@/lib/format";
+import { useChartColors } from "@/lib/use-chart-colors";
 
 type Point = { ts: string; value: number | string; dimensions?: string };
 
@@ -100,6 +101,7 @@ export function TimeseriesChart({
   const usingExternal = externalPoints !== undefined;
   const [internalPoints, setInternalPoints] = useState<Point[]>([]);
   const [internalLoading, setInternalLoading] = useState(true);
+  const chart = useChartColors();
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -189,18 +191,18 @@ export function TimeseriesChart({
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
-                    stroke="#3f3f46"
+                    stroke={chart.grid}
                     vertical={false}
                   />
-                  <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
-                  <YAxis stroke="#71717a" fontSize={10} />
+                  <XAxis dataKey="ts" stroke={chart.axis} fontSize={10} />
+                  <YAxis stroke={chart.axis} fontSize={10} />
                   <Tooltip
                     contentStyle={{
-                      background: "#18181b",
-                      border: "1px solid #3f3f46",
+                      background: chart.tooltipBg,
+                      border: `1px solid ${chart.tooltipBorder}`,
                       fontSize: 12,
                     }}
-                    labelStyle={{ color: "#a1a1aa" }}
+                    labelStyle={{ color: chart.tooltipText }}
                   />
                   <Area
                     type="monotone"
@@ -217,18 +219,18 @@ export function TimeseriesChart({
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
-                    stroke="#3f3f46"
+                    stroke={chart.grid}
                     vertical={false}
                   />
-                  <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
-                  <YAxis stroke="#71717a" fontSize={10} />
+                  <XAxis dataKey="ts" stroke={chart.axis} fontSize={10} />
+                  <YAxis stroke={chart.axis} fontSize={10} />
                   <Tooltip
                     contentStyle={{
-                      background: "#18181b",
-                      border: "1px solid #3f3f46",
+                      background: chart.tooltipBg,
+                      border: `1px solid ${chart.tooltipBorder}`,
                       fontSize: 12,
                     }}
-                    labelStyle={{ color: "#a1a1aa" }}
+                    labelStyle={{ color: chart.tooltipText }}
                   />
                   <Line
                     type="monotone"
@@ -262,6 +264,7 @@ function StackedAreaChart({
   unit?: string;
 }) {
   const waitColors = useWaitColors();
+  const chart = useChartColors();
   const grouped = new Map<string, Map<string, number>>();
   const eventSet = new Set<string>();
 
@@ -337,18 +340,18 @@ function StackedAreaChart({
               >
                 <CartesianGrid
                   strokeDasharray="3 3"
-                  stroke="#3f3f46"
+                  stroke={chart.grid}
                   vertical={false}
                 />
-                <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
-                <YAxis stroke="#71717a" fontSize={10} />
+                <XAxis dataKey="ts" stroke={chart.axis} fontSize={10} />
+                <YAxis stroke={chart.axis} fontSize={10} />
                 <Tooltip
                   contentStyle={{
-                    background: "#18181b",
-                    border: "1px solid #3f3f46",
+                    background: chart.tooltipBg,
+                    border: `1px solid ${chart.tooltipBorder}`,
                     fontSize: 12,
                   }}
-                  labelStyle={{ color: "#a1a1aa" }}
+                  labelStyle={{ color: chart.tooltipText }}
                 />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 {events.map((ev, i) => (

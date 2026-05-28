@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { fetchQueryDetail } from "@/lib/api-client";
 import { fmtDuration, fmtExact, fmtNumber } from "@/lib/format";
+import { useChartColors } from "@/lib/use-chart-colors";
 
 interface Snapshot {
   snapshot_time: string;
@@ -42,6 +43,7 @@ export function QueryDetailModal({
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const chart = useChartColors();
 
   useEffect(() => {
     fetchQueryDetail(clusterId, queryHash)
@@ -187,23 +189,23 @@ export function QueryDetailModal({
                       >
                         <CartesianGrid
                           strokeDasharray="3 3"
-                          stroke="#27272a"
+                          stroke={chart.grid}
                           vertical={false}
                         />
-                        <XAxis dataKey="ts" stroke="#71717a" fontSize={10} />
-                        <YAxis stroke="#71717a" fontSize={10} />
+                        <XAxis dataKey="ts" stroke={chart.axis} fontSize={10} />
+                        <YAxis stroke={chart.axis} fontSize={10} />
                         <Tooltip
                           contentStyle={{
-                            background: "#18181b",
-                            border: "1px solid #3f3f46",
+                            background: chart.tooltipBg,
+                            border: `1px solid ${chart.tooltipBorder}`,
                             fontSize: 12,
                           }}
-                          labelStyle={{ color: "#a1a1aa" }}
+                          labelStyle={{ color: chart.tooltipText }}
                         />
                         <Line
                           type="monotone"
                           dataKey="mean"
-                          stroke="#fbbf24"
+                          stroke={chart.amber}
                           strokeWidth={2}
                           dot={false}
                         />

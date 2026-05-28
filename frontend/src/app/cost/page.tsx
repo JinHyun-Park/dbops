@@ -183,22 +183,22 @@ export default function CostPage() {
                   >
                     <CartesianGrid
                       strokeDasharray="3 3"
-                      stroke="#3f3f46"
+                      stroke={colors.grid}
                       vertical={false}
                     />
-                    <XAxis dataKey="date" stroke="#71717a" fontSize={10} />
+                    <XAxis dataKey="date" stroke={colors.axis} fontSize={10} />
                     <YAxis
-                      stroke="#71717a"
+                      stroke={colors.axis}
                       fontSize={10}
                       tickFormatter={(v) => `$${(Number(v) || 0).toFixed(2)}`}
                     />
                     <Tooltip
                       contentStyle={{
-                        background: "#18181b",
-                        border: "1px solid #3f3f46",
+                        background: colors.tooltipBg,
+                        border: `1px solid ${colors.tooltipBorder}`,
                         fontSize: 12,
                       }}
-                      labelStyle={{ color: "#a1a1aa" }}
+                      labelStyle={{ color: colors.tooltipText }}
                       formatter={(v) => [
                         `$${(Number(v) || 0).toFixed(4)}`,
                         "spend",
@@ -217,8 +217,10 @@ export default function CostPage() {
                         x={a.date}
                         y={a.amount}
                         r={5}
-                        fill={a.severity === "critical" ? "#f43f5e" : "#fb923c"}
-                        stroke="#0a0a0a"
+                        fill={
+                          a.severity === "critical" ? colors.rose : "#fb923c"
+                        }
+                        stroke={colors.tooltipBg}
                         strokeWidth={1.5}
                       />
                     ))}

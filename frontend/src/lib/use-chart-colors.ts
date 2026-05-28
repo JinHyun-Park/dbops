@@ -16,6 +16,15 @@ export interface ChartColors {
   sky: string;
   emerald: string;
   rose: string;
+  // Chart chrome — grid + axis tick + tooltip background/border. These
+  // were hardcoded inline in several Recharts components ("#27272a",
+  // "#71717a") which rendered as near-black on the light-theme cream
+  // canvas, producing axis ticks the user couldn't read.
+  grid: string;
+  axis: string;
+  tooltipBg: string;
+  tooltipBorder: string;
+  tooltipText: string;
 }
 
 const DARK: ChartColors = {
@@ -23,6 +32,11 @@ const DARK: ChartColors = {
   sky: "#38bdf8",
   emerald: "#34d399",
   rose: "#fb7185",
+  grid: "#27272a", // zinc-800
+  axis: "#71717a", // zinc-500
+  tooltipBg: "#18181b", // zinc-900
+  tooltipBorder: "#3f3f46", // zinc-700
+  tooltipText: "#a1a1aa", // zinc-400
 };
 
 const LIGHT: ChartColors = {
@@ -30,6 +44,11 @@ const LIGHT: ChartColors = {
   sky: "#1d4ed8",
   emerald: "#065f46",
   rose: "#9f1239",
+  grid: "#d6d3c7", // stone-300 — visible on cream without dominating
+  axis: "#57534e", // stone-600 — readable tick labels
+  tooltipBg: "#ffffff",
+  tooltipBorder: "#a8a29e", // stone-400
+  tooltipText: "#1c1917", // stone-900 — high contrast tooltip copy
 };
 
 function readTheme(): "dark" | "light" {
