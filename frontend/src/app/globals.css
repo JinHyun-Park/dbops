@@ -491,6 +491,42 @@ html[data-theme="light"] .border-rose-500\/40 {
   border-color: rgba(185, 28, 28, 0.5);
 }
 
+/* --- Dark-tier color tints used as semantic backgrounds ---
+   StatusBadge, approval-card severity, events-panel severity rows etc.
+   pick up "darker" tier classes (bg-emerald-900/50, border-amber-700)
+   under the assumption of a dark canvas. In light mode they read as a
+   dark-green or dark-red block on cream — inverted from what the user
+   needs. Remap to a light tinted background + the matching mid-tier
+   border so the semantic color reads correctly. */
+html[data-theme="light"] .bg-emerald-900\/50,
+html[data-theme="light"] .bg-emerald-900\/20 {
+  background-color: rgba(6, 95, 70, 0.1);
+}
+html[data-theme="light"] .bg-amber-900\/50,
+html[data-theme="light"] .bg-amber-900\/20,
+html[data-theme="light"] .bg-amber-950\/10,
+html[data-theme="light"] .bg-amber-950\/20 {
+  background-color: rgba(146, 64, 14, 0.08);
+}
+html[data-theme="light"] .bg-red-900\/50,
+html[data-theme="light"] .bg-red-900\/40,
+html[data-theme="light"] .bg-red-900\/30,
+html[data-theme="light"] .bg-red-900\/20,
+html[data-theme="light"] .bg-red-950\/30,
+html[data-theme="light"] .bg-red-950\/20 {
+  background-color: rgba(185, 28, 28, 0.08);
+}
+html[data-theme="light"] .border-emerald-700 {
+  border-color: rgba(6, 95, 70, 0.45);
+}
+html[data-theme="light"] .border-amber-700 {
+  border-color: rgba(146, 64, 14, 0.45);
+}
+html[data-theme="light"] .border-red-700,
+html[data-theme="light"] .border-red-500 {
+  border-color: rgba(185, 28, 28, 0.5);
+}
+
 /* --- Purple (DEMO badge + banner) ---
    The banner uses bg-purple-500/10 (very light tint) with text-purple-200
    set on the body copy. In dark mode purple-200 is near-white and reads
