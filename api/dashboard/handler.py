@@ -666,6 +666,131 @@ def _query_detail(query, cluster_id, query_hash):
     return {"cluster_id": cluster_id, "query_hash": query_hash, "snapshots": rows}
 
 
+def _workload_diff(query, cluster_id, before_iso, after_iso, regression_pct, match_window_min):
+    """Diff the workload (pg_stat_statements snapshot) between two points
+    in time. Answers "what changed in the workload around this deploy?".
+
+    For each side we take, per query_hash, the single most-recent
+    snapshot at-or-before the target timestamp but no older than
+    match_window_min (so a hash last seen days ago isn't treated as
+    "present" at the target). This gives a "what the workload looked
+    like around time T" picture.
+
+    Buckets (by query_hash):
+      new          — present at `after`, absent at `before`
+      disappeared  — present at `before`, absent at `after`
+      regressed    — present both sides, mean_time_ms worsened by
+                     ≥ regression_pct
+      improved     — present both sides, mean_time_ms improved by
+                     ≥ regression_pct (informational; helps confirm a
+                     fix landed)
+
+    Caveat surfaced in the response: mean_time_ms from pg_stat_statements
+    is cumulative-since-reset, so the comparison is "average over the
+    query's lifetime at snapshot A vs B". For a freshly-reset counter
+    this tracks recent behavior closely; for a long-lived counter it's
+    dampened. We note this in `methodology` so the DBA reads the numbers
+    correctly.
+    """
+    # Resolve each side: latest snapshot per query_hash <= target ts and
+    # within the match window. DISTINCT ON gives one row per hash.
+    side_sql = (
+        "SELECT DISTINCT ON (query_hash) "
+        "  query_hash, LEFT(query_text, 300) AS query_excerpt, "
+        "  calls, total_time_ms, mean_time_ms, rows_returned, snapshot_time "
+        "FROM query_stats "
+        "WHERE cluster_id = :cid "
+        "  AND snapshot_time <= (:ts)::timestamptz "
+        "  AND snapshot_time >= (:ts)::timestamptz - (:win || ' minutes')::interval "
+        "ORDER BY query_hash, snapshot_time DESC"
+    )
+
+    before_rows = query(side_sql, {"cid": cluster_id, "ts": before_iso, "win": str(match_window_min)})
+    after_rows = query(side_sql, {"cid": cluster_id, "ts": after_iso, "win": str(match_window_min)})
+
+    before = {r["query_hash"]: r for r in before_rows}
+    after = {r["query_hash"]: r for r in after_rows}
+    before_hashes = set(before)
+    after_hashes = set(after)
+
+    def _f(v):
+        try:
+            return float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    new = []
+    for h in after_hashes - before_hashes:
+        r = after[h]
+        new.append({
+            "query_hash": h,
+            "query_excerpt": r.get("query_excerpt"),
+            "mean_time_ms": _f(r.get("mean_time_ms")),
+            "calls": r.get("calls"),
+        })
+
+    disappeared = []
+    for h in before_hashes - after_hashes:
+        r = before[h]
+        disappeared.append({
+            "query_hash": h,
+            "query_excerpt": r.get("query_excerpt"),
+            "mean_time_ms": _f(r.get("mean_time_ms")),
+        })
+
+    regressed = []
+    improved = []
+    factor = 1.0 + (regression_pct / 100.0)
+    for h in before_hashes & after_hashes:
+        b_mean = _f(before[h].get("mean_time_ms"))
+        a_mean = _f(after[h].get("mean_time_ms"))
+        if b_mean <= 0:
+            continue  # can't compute a ratio off a zero baseline
+        delta_pct = round((a_mean - b_mean) / b_mean * 100.0, 1)
+        entry = {
+            "query_hash": h,
+            "query_excerpt": after[h].get("query_excerpt"),
+            "before_mean_ms": round(b_mean, 2),
+            "after_mean_ms": round(a_mean, 2),
+            "delta_pct": delta_pct,
+        }
+        if a_mean >= b_mean * factor:
+            regressed.append(entry)
+        elif b_mean >= a_mean * factor:
+            improved.append(entry)
+
+    # Most-impactful first.
+    new.sort(key=lambda x: x["mean_time_ms"], reverse=True)
+    regressed.sort(key=lambda x: x["delta_pct"], reverse=True)
+    improved.sort(key=lambda x: x["delta_pct"])
+
+    return {
+        "cluster_id": cluster_id,
+        "before": before_iso,
+        "after": after_iso,
+        "regression_pct": regression_pct,
+        "match_window_min": match_window_min,
+        "totals": {
+            "before_distinct_queries": len(before_hashes),
+            "after_distinct_queries": len(after_hashes),
+            "new": len(new),
+            "disappeared": len(disappeared),
+            "regressed": len(regressed),
+            "improved": len(improved),
+        },
+        "new": new[:50],
+        "regressed": regressed[:50],
+        "improved": improved[:50],
+        "disappeared": disappeared[:50],
+        "methodology": (
+            "mean_time_ms is pg_stat_statements cumulative-since-reset; "
+            "comparison reflects lifetime average at each snapshot. "
+            "Per query_hash we use the latest snapshot at-or-before each "
+            f"target within a {match_window_min}-minute window."
+        ),
+    }
+
+
 METRIC_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,49}$")
 
 
@@ -1954,6 +2079,21 @@ def lambda_handler(event, context):
             if not qh:
                 return _response(400, {"error": "query_hash required"})
             return _response(200, _query_detail(query, cluster_id, qh))
+        if raw_path.endswith("/workload-diff"):
+            before_iso = (qs.get("before") or "").strip()
+            after_iso = (qs.get("after") or "").strip()
+            if not before_iso or not after_iso:
+                return _response(400, {"error": "before and after timestamps required (ISO-8601)"})
+            regression_pct = _parse_float(qs.get("regression_pct"), 20.0)
+            match_window_min = _parse_int(qs.get("match_window_min"), 120, min_v=10, max_v=1440)
+            return _response(
+                200,
+                _workload_diff(
+                    query, cluster_id, before_iso, after_iso,
+                    regression_pct, match_window_min,
+                ),
+                max_age=30,
+            )
         if raw_path.endswith("/vacuum-stats"):
             return _response(200, _vacuum_stats(query, cluster_id))
         if raw_path.endswith("/table-sizes"):

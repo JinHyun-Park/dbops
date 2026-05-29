@@ -577,6 +577,15 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardQueryDetailIntegration", dashboard_lambda),
         )
+        # Workload diff — pg_stat_statements snapshot delta between two
+        # points in time (new / regressed / improved / disappeared
+        # queries). Wired from the timeline for "what changed around
+        # this deploy".
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/workload-diff",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardWorkloadDiffIntegration", dashboard_lambda),
+        )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/vacuum-stats",
             methods=[apigwv2.HttpMethod.GET],

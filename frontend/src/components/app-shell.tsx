@@ -84,6 +84,11 @@ const NAV: NavGroup[] = [
         label: "Activity",
         hint: "who approved/executed what, for compliance + retro",
       },
+      {
+        href: "/workload-diff",
+        label: "Workload diff",
+        hint: "what queries changed between two points in time",
+      },
     ],
   },
   {

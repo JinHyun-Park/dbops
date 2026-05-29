@@ -164,6 +164,17 @@ export default function TimelinePage() {
                 </button>
               ))}
             </div>
+            {/* Deep-link into workload diff for this cluster — the
+                natural next question after "what happened?" is "what
+                did it do to the query workload?". */}
+            {clusterId && (
+              <a
+                href={`/workload-diff?cluster=${encodeURIComponent(clusterId)}`}
+                className="text-xs px-3 py-1.5 border border-zinc-800 text-zinc-400 hover:border-amber-500/60 hover:text-amber-200 transition-colors"
+              >
+                워크로드 비교 →
+              </a>
+            )}
           </div>
         }
       />

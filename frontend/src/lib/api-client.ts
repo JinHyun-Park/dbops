@@ -1473,6 +1473,65 @@ export async function fetchActivity(opts?: {
   return res.json();
 }
 
+// =====  Workload diff (pg_stat_statements snapshot delta) =====
+
+export interface WorkloadDiffResponse {
+  cluster_id: string;
+  before: string;
+  after: string;
+  regression_pct: number;
+  match_window_min: number;
+  totals: {
+    before_distinct_queries: number;
+    after_distinct_queries: number;
+    new: number;
+    disappeared: number;
+    regressed: number;
+    improved: number;
+  };
+  new: Array<{
+    query_hash: string;
+    query_excerpt: string;
+    mean_time_ms: number;
+    calls: number;
+  }>;
+  regressed: Array<{
+    query_hash: string;
+    query_excerpt: string;
+    before_mean_ms: number;
+    after_mean_ms: number;
+    delta_pct: number;
+  }>;
+  improved: WorkloadDiffResponse["regressed"];
+  disappeared: Array<{
+    query_hash: string;
+    query_excerpt: string;
+    mean_time_ms: number;
+  }>;
+  methodology: string;
+}
+
+export async function fetchWorkloadDiff(
+  clusterId: string,
+  beforeIso: string,
+  afterIso: string,
+  opts?: { regressionPct?: number; matchWindowMin?: number },
+): Promise<WorkloadDiffResponse> {
+  const params = new URLSearchParams();
+  params.set("before", beforeIso);
+  params.set("after", afterIso);
+  if (opts?.regressionPct != null)
+    params.set("regression_pct", String(opts.regressionPct));
+  if (opts?.matchWindowMin != null)
+    params.set("match_window_min", String(opts.matchWindowMin));
+  const url = await api(
+    `/api/dashboard/${enc(clusterId)}/workload-diff?${params.toString()}`,
+  );
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Workload diff fetch failed: ${res.status}`);
+  return res.json();
+}
+
 // =====  Unified incident timeline =====
 
 export type TimelineCategory =
