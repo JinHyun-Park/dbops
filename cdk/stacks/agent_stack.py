@@ -288,6 +288,8 @@ class AgentStack(cdk.Stack):
             actions=[
                 "rds:DescribeDBClusters",
                 "rds:DescribeDBInstances",
+                # Backup inventory panel — read-only snapshot listing.
+                "rds:DescribeDBClusterSnapshots",
                 "cloudwatch:GetMetricStatistics",
             ],
             resources=["*"],
@@ -639,6 +641,13 @@ class AgentStack(cdk.Stack):
             path="/api/dashboard/{cluster_id}/topology",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardTopologyIntegration", dashboard_lambda),
+        )
+        # Backup inventory — snapshots + PITR window (read-only tier of
+        # the backup workflow). Live RDS Describe calls.
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/backups",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardBackupsIntegration", dashboard_lambda),
         )
         # SLO tracker — availability + latency SLI computed from the cache,
         # error budget burn-down, per-day timeline.

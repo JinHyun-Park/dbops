@@ -550,7 +550,7 @@ export default function DashboardPage() {
             />
           )}
 
-          <BackupPanel cluster={dashboardData.cluster} />
+          <BackupPanel clusterId={selectedCluster} />
 
           <ReplicationTopologyPanel clusterId={selectedCluster} />
 

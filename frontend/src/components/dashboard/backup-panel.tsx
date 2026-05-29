@@ -1,17 +1,15 @@
 "use client";
 
-interface ClusterMeta {
-  backup_retention_days?: number | string | null;
-  earliest_restorable_time?: string | null;
-  latest_restorable_time?: string | null;
-  preferred_backup_window?: string | null;
-  preferred_maintenance_window?: string | null;
-  multi_az?: boolean | null;
-  deletion_protection?: boolean | null;
-}
+import { useCallback, useEffect, useState } from "react";
+import {
+  fetchBackups,
+  type BackupsResponse,
+  type BackupSnapshot,
+} from "@/lib/api-client";
+import { fmtNumber } from "@/lib/format";
 
 function relTime(iso: string | null | undefined): string {
-  if (!iso) return "-";
+  if (!iso) return "—";
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.floor(ms / 60000);
   if (m < 1) return "방금";
@@ -21,19 +19,40 @@ function relTime(iso: string | null | undefined): string {
   return `${Math.floor(h / 24)}일 전`;
 }
 
-function pitrWindow(earliest?: string | null, latest?: string | null): string {
-  if (!earliest || !latest) return "-";
-  const e = new Date(earliest).getTime();
-  const l = new Date(latest).getTime();
-  const hours = (l - e) / 3600000;
-  if (hours < 24) return `${hours.toFixed(1)}h`;
-  return `${(hours / 24).toFixed(1)}d`;
-}
+export function BackupPanel({ clusterId }: { clusterId: string }) {
+  const [data, setData] = useState<BackupsResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [showSnapshots, setShowSnapshots] = useState(false);
 
-export function BackupPanel({ cluster }: { cluster?: ClusterMeta }) {
-  if (!cluster) return null;
+  const load = useCallback(() => {
+    setLoading(true);
+    fetchBackups(clusterId)
+      .then(setData)
+      .catch((e) =>
+        setData({
+          cluster_id: clusterId,
+          engine: "",
+          status: "",
+          error: e instanceof Error ? e.message : String(e),
+          backup_retention_days: null,
+          preferred_backup_window: null,
+          earliest_restorable_time: null,
+          latest_restorable_time: null,
+          pitr_window_hours: null,
+          snapshot_count: 0,
+          manual_snapshot_count: 0,
+          snapshots: [],
+          checked_at: Date.now(),
+        }),
+      )
+      .finally(() => setLoading(false));
+  }, [clusterId]);
 
-  const retention = Number(cluster.backup_retention_days || 0);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const retention = Number(data?.backup_retention_days || 0);
   const retentionColor =
     retention < 1
       ? "text-rose-400"
@@ -43,59 +62,131 @@ export function BackupPanel({ cluster }: { cluster?: ClusterMeta }) {
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-5">
-      <div className="text-sm text-zinc-200 font-medium mb-3">
-        Backup & Maintenance
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-sm text-zinc-200 font-medium">
+          Backup & Recovery
+          {data && !data.error && (
+            <span className="ml-2 px-1.5 py-0.5 bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[10px]">
+              {data.snapshot_count} snapshots
+            </span>
+          )}
+        </div>
+        <button
+          onClick={load}
+          disabled={loading}
+          className="text-[10px] text-zinc-500 hover:text-zinc-300 disabled:opacity-50"
+        >
+          {loading ? "…" : "↻"}
+        </button>
       </div>
+
+      {data?.error && (
+        <div className="text-xs text-rose-300 mb-3">{data.error}</div>
+      )}
+
+      {/* Summary grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <div>
           <div className="text-zinc-500 text-xs mb-1">Retention</div>
-          <div className={`font-mono ${retentionColor}`}>{retention}d</div>
+          <div className={`font-mono ${retentionColor}`}>
+            {retention > 0 ? `${retention}d` : "—"}
+          </div>
         </div>
         <div>
           <div className="text-zinc-500 text-xs mb-1">PITR Window</div>
           <div className="text-zinc-100 font-mono">
-            {pitrWindow(
-              cluster.earliest_restorable_time,
-              cluster.latest_restorable_time,
-            )}
+            {data?.pitr_window_hours != null
+              ? data.pitr_window_hours < 24
+                ? `${data.pitr_window_hours}h`
+                : `${(data.pitr_window_hours / 24).toFixed(1)}d`
+              : "—"}
           </div>
         </div>
         <div>
           <div className="text-zinc-500 text-xs mb-1">Latest Restore</div>
           <div className="text-zinc-300 text-xs">
-            {relTime(cluster.latest_restorable_time)}
+            {relTime(data?.latest_restorable_time)}
           </div>
         </div>
         <div>
           <div className="text-zinc-500 text-xs mb-1">Backup Window</div>
           <div className="text-zinc-300 font-mono text-xs">
-            {cluster.preferred_backup_window || "-"}
+            {data?.preferred_backup_window || "—"}
           </div>
         </div>
-        <div>
-          <div className="text-zinc-500 text-xs mb-1">Maintenance Window</div>
-          <div className="text-zinc-300 font-mono text-xs">
-            {cluster.preferred_maintenance_window || "-"}
+      </div>
+
+      {/* PITR visual bar */}
+      {data?.earliest_restorable_time && data?.latest_restorable_time && (
+        <div className="mt-4">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+            Point-in-Time Recovery 윈도우
+          </div>
+          <div className="relative h-5 bg-zinc-800 border border-zinc-700 overflow-hidden">
+            <div
+              className="absolute inset-y-0 left-0 bg-emerald-500/20 border-r border-emerald-500/40"
+              style={{ width: "100%" }}
+            />
+            <div className="absolute inset-0 flex items-center justify-between px-2 text-[10px] font-mono text-zinc-400">
+              <span>
+                {new Date(data.earliest_restorable_time).toLocaleString()}
+              </span>
+              <span className="text-emerald-300">
+                {new Date(data.latest_restorable_time).toLocaleString()}
+              </span>
+            </div>
+          </div>
+          <div className="text-[10px] text-zinc-600 mt-0.5">
+            이 구간의 아무 시점으로 복원할 수 있습니다 (PITR)
           </div>
         </div>
-        <div>
-          <div className="text-zinc-500 text-xs mb-1">Multi-AZ</div>
-          <div
-            className={cluster.multi_az ? "text-emerald-400" : "text-amber-400"}
+      )}
+
+      {/* Snapshot inventory — collapsed by default */}
+      {data && data.snapshots.length > 0 && (
+        <div className="mt-4">
+          <button
+            onClick={() => setShowSnapshots(!showSnapshots)}
+            className="text-[10px] uppercase tracking-wider text-zinc-500 hover:text-zinc-300 transition-colors"
           >
-            {cluster.multi_az ? "enabled" : "disabled"}
-          </div>
+            {showSnapshots ? "▾" : "▸"} Snapshots ({data.manual_snapshot_count}{" "}
+            manual / {data.snapshot_count - data.manual_snapshot_count}{" "}
+            automated)
+          </button>
+          {showSnapshots && (
+            <div className="mt-2 border border-zinc-800 divide-y divide-zinc-800 max-h-64 overflow-y-auto">
+              {data.snapshots.map((s) => (
+                <SnapshotRow key={s.id} snapshot={s} />
+              ))}
+            </div>
+          )}
         </div>
-        <div>
-          <div className="text-zinc-500 text-xs mb-1">Deletion Protection</div>
-          <div
-            className={
-              cluster.deletion_protection ? "text-emerald-400" : "text-rose-400"
-            }
-          >
-            {cluster.deletion_protection ? "enabled" : "disabled"}
-          </div>
-        </div>
+      )}
+    </div>
+  );
+}
+
+function SnapshotRow({ snapshot: s }: { snapshot: BackupSnapshot }) {
+  const isManual = s.type === "manual";
+  return (
+    <div className="px-3 py-2 flex items-baseline justify-between gap-3">
+      <div className="flex items-center gap-2 min-w-0">
+        <span
+          className={`text-[10px] font-mono px-1 py-0.5 border ${
+            isManual
+              ? "bg-amber-500/10 text-amber-300 border-amber-500/40"
+              : "bg-zinc-700/40 text-zinc-400 border-zinc-700"
+          }`}
+        >
+          {isManual ? "manual" : "auto"}
+        </span>
+        <span className="text-xs text-zinc-200 font-mono truncate">{s.id}</span>
+      </div>
+      <div className="text-[10px] text-zinc-500 tabular-nums flex-shrink-0">
+        {s.created ? relTime(s.created) : "—"}
+        {s.allocated_storage_gb != null && (
+          <span className="ml-2">{fmtNumber(s.allocated_storage_gb)} GB</span>
+        )}
       </div>
     </div>
   );

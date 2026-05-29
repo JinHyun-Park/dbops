@@ -1837,6 +1837,91 @@ def _topology(cluster_id: str) -> dict:
     }
 
 
+def _backups(cluster_id: str) -> dict:
+    """Backup inventory + PITR window for one cluster (read-only).
+
+    Live RDS calls (same same-account pattern as _topology):
+      - describe_db_clusters     → PITR window + retention + windows
+      - describe_db_cluster_snapshots → manual + automated snapshots
+
+    No write actions here — this is the safe read tier of the backup
+    workflow. Manual snapshot creation / restore are separate
+    approval-gated write tools (a later phase).
+    """
+    from datetime import datetime, timezone
+
+    rds = boto3.client("rds")
+
+    try:
+        cl_resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
+    except Exception as e:
+        return {"cluster_id": cluster_id, "error": str(e)[:300], "snapshots": []}
+    clusters = cl_resp.get("DBClusters") or []
+    if not clusters:
+        return {"cluster_id": cluster_id, "error": "cluster not found", "snapshots": []}
+    c = clusters[0]
+
+    def _iso(dt):
+        if not dt:
+            return None
+        try:
+            return dt.astimezone(timezone.utc).isoformat()
+        except (AttributeError, ValueError):
+            return str(dt)
+
+    earliest = c.get("EarliestRestorableTime")
+    latest = c.get("LatestRestorableTime")
+    pitr_window_hours = None
+    if earliest and latest:
+        try:
+            pitr_window_hours = round(
+                (latest - earliest).total_seconds() / 3600.0, 1
+            )
+        except (TypeError, AttributeError):
+            pitr_window_hours = None
+
+    # Snapshot inventory — both manual and automated. The API caps at
+    # 100/page; one page covers any realistic cluster snapshot count
+    # for the dashboard view.
+    snapshots = []
+    try:
+        snap_resp = rds.describe_db_cluster_snapshots(
+            DBClusterIdentifier=cluster_id,
+            MaxRecords=100,
+        )
+        for s in snap_resp.get("DBClusterSnapshots", []):
+            snapshots.append({
+                "id": s.get("DBClusterSnapshotIdentifier"),
+                "type": s.get("SnapshotType"),  # manual | automated
+                "status": s.get("Status"),
+                "created": _iso(s.get("SnapshotCreateTime")),
+                "engine_version": s.get("EngineVersion"),
+                "allocated_storage_gb": s.get("AllocatedStorage"),
+                # Manual snapshots are the ones a DBA explicitly created
+                # (and must clean up); automated ones expire on retention.
+            })
+        # Newest first.
+        snapshots.sort(key=lambda x: x.get("created") or "", reverse=True)
+    except Exception as e:
+        print(f"[backups] snapshot list failed for {cluster_id}: {e}")
+
+    manual = sum(1 for s in snapshots if s.get("type") == "manual")
+    return {
+        "cluster_id": cluster_id,
+        "engine": c.get("Engine", ""),
+        "status": c.get("Status", ""),
+        "backup_retention_days": c.get("BackupRetentionPeriod"),
+        "preferred_backup_window": c.get("PreferredBackupWindow"),
+        "earliest_restorable_time": _iso(earliest),
+        "latest_restorable_time": _iso(latest),
+        "pitr_window_hours": pitr_window_hours,
+        "snapshot_count": len(snapshots),
+        "manual_snapshot_count": manual,
+        "snapshots": snapshots,
+        "checked_at": int(datetime.now(timezone.utc).timestamp() * 1000),
+    }
+
+
 def _slo(
     query,
     cluster_id: str,
@@ -2175,6 +2260,11 @@ def lambda_handler(event, context):
             return _response(200, _redundant_indexes(cluster_id))
         if raw_path.endswith("/topology"):
             return _response(200, _topology(cluster_id))
+        if raw_path.endswith("/backups"):
+            # 60s cache — snapshot inventory + PITR window move slowly
+            # (automated snapshots are daily, PITR window slides by the
+            # minute but minute-granularity staleness is fine here).
+            return _response(200, _backups(cluster_id), max_age=60)
         if raw_path.endswith("/slo"):
             days = _parse_int(qs.get("days"), 30, min_v=1, max_v=90)
             avail_t = _parse_float(qs.get("availability_target"), 99.9)

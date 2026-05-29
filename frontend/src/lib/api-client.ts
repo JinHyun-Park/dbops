@@ -1473,6 +1473,43 @@ export async function fetchActivity(opts?: {
   return res.json();
 }
 
+// =====  Backup inventory (snapshots + PITR window) =====
+
+export interface BackupSnapshot {
+  id: string;
+  type: "manual" | "automated" | string;
+  status: string;
+  created: string | null;
+  engine_version: string;
+  allocated_storage_gb: number | null;
+}
+
+export interface BackupsResponse {
+  cluster_id: string;
+  engine: string;
+  status: string;
+  error?: string;
+  backup_retention_days: number | null;
+  preferred_backup_window: string | null;
+  earliest_restorable_time: string | null;
+  latest_restorable_time: string | null;
+  pitr_window_hours: number | null;
+  snapshot_count: number;
+  manual_snapshot_count: number;
+  snapshots: BackupSnapshot[];
+  checked_at: number;
+}
+
+export async function fetchBackups(
+  clusterId: string,
+): Promise<BackupsResponse> {
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/backups`),
+  );
+  if (!res.ok) throw new Error(`Backups fetch failed: ${res.status}`);
+  return res.json();
+}
+
 // =====  Workload diff (pg_stat_statements snapshot delta) =====
 
 export interface WorkloadDiffResponse {
