@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { fetchBatchTimeseries } from "@/lib/api-client";
 import { fmtExact, fmtNumber } from "@/lib/format";
+import { MetricHint } from "@/components/design-system/metric-hint";
 
 interface Props {
   clusterId: string;
@@ -174,6 +175,7 @@ export function HealthScore({ clusterId }: Props) {
               <div className="flex items-center gap-2">
                 <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
                 <span className="text-zinc-300">{s.label}</span>
+                <MetricHint metric={s.metric} />
               </div>
               <span
                 className="text-zinc-400 font-mono tabular-nums"
