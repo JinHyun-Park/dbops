@@ -1391,6 +1391,55 @@ export async function deleteSavedQuery(id: number): Promise<void> {
   if (!res.ok) throw new Error(`Delete saved query failed: ${res.status}`);
 }
 
+// =====  Self-monitoring health =====
+
+export interface HealthResponse {
+  checked_at: number;
+  elapsed_ms: number;
+  lambdas: {
+    error?: string;
+    count?: number;
+    active?: number;
+    items?: Array<{
+      name: string;
+      runtime: string;
+      state: string;
+      last_modified: string;
+      memory_mb: number;
+      timeout_s: number;
+    }>;
+  };
+  aurora: {
+    error?: string;
+    cluster_id?: string;
+    status?: string;
+    engine?: string;
+    engine_version?: string;
+    endpoint?: string;
+    serverless_min_acu?: number;
+    serverless_max_acu?: number;
+    multi_az?: boolean;
+    deletion_protection?: boolean;
+  };
+  ddb: {
+    error?: string;
+    tables?: Array<{
+      label: string;
+      name: string;
+      status?: string;
+      item_count?: number;
+      size_bytes?: number;
+      error?: string;
+    }>;
+  };
+}
+
+export async function fetchHealth(): Promise<HealthResponse> {
+  const res = await fetch(await api(`/api/health`));
+  if (!res.ok) throw new Error(`Health fetch failed: ${res.status}`);
+  return res.json();
+}
+
 // =====  DBOps activity log =====
 
 export interface ActivityItem {

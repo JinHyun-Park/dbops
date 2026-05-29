@@ -98,6 +98,11 @@ const NAV: NavGroup[] = [
         label: "Memory",
         hint: "what the agent remembers about you",
       },
+      {
+        href: "/health",
+        label: "Health",
+        hint: "DBOps self-monitoring — Lambda + Aurora + DDB state",
+      },
     ],
   },
 ];

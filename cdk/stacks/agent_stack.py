@@ -517,6 +517,31 @@ class AgentStack(cdk.Stack):
             },
         )
         foundation.clusters_table.grant_read_data(slack_command_lambda)
+
+        # Self-health endpoint: aggregates Lambda + Aurora + DDB state
+        # so /health renders a single-page operational picture of DBOps
+        # itself. Read-only IAM scoped to describe/list calls.
+        health_lambda = lambda_.Function(
+            self, "HealthApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/health"),
+            timeout=cdk.Duration.seconds(15),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                "SESSIONS_TABLE": foundation.sessions_table.table_name,
+                "APPROVALS_TABLE": foundation.approvals_table.table_name,
+            },
+        )
+        health_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "lambda:ListFunctions",
+                "rds:DescribeDBClusters",
+                "dynamodb:DescribeTable",
+            ],
+            resources=["*"],
+        ))
         data.cache_db.secret.grant_read(slack_interactive_lambda)
         data.cache_db.grant_data_api_access(slack_interactive_lambda)
         slack_interactive_lambda.add_to_role_policy(iam.PolicyStatement(
@@ -842,6 +867,12 @@ class AgentStack(cdk.Stack):
             path="/api/slack/command",
             methods=[apigwv2.HttpMethod.POST],
             integration=integrations.HttpLambdaIntegration("SlackCommandIntegration", slack_command_lambda),
+        )
+        # DBOps self-monitoring health endpoint
+        self.api.add_routes(
+            path="/api/health",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("HealthIntegration", health_lambda),
         )
         clusters_integration = integrations.HttpLambdaIntegration("ClustersIntegration", clusters_lambda)
         self.api.add_routes(
