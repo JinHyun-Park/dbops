@@ -823,6 +823,26 @@ def _multi_cluster_overview(query):
     return {"clusters": rows}
 
 
+def _timeline_category(raw_type: str) -> str:
+    """Collapse the varied event_log event_type strings into the small
+    set of categories the timeline frontend colors:
+      alert / ack / proactive / rds_event  (+ schema_change, audit are
+      stamped by their own source queries below).
+    Unknown families fall through to 'rds_event' — they all originate
+    from the RDS/CloudWatch event pipeline."""
+    t = (raw_type or "").lower()
+    if t == "alert":
+        return "alert"
+    if t in ("alert_ack", "ack"):
+        return "ack"
+    if t == "proactive":
+        return "proactive"
+    # event_processor writes 'alarm_ok' / 'alarm_alarm' for CW alarm
+    # state changes, plus passthrough RDS detail_types. Bucket them all
+    # as rds_event so they share the amber chip.
+    return "rds_event"
+
+
 def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) -> dict:
     """Unified chronological timeline for one cluster.
 
@@ -861,21 +881,23 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
         {"cid": cluster_id, "hours": str(hours)},
     )
     for r in eventlog:
-        cat = r.get("event_type") or "event"
-        # Normalise the long tail of event_types into our 4 known buckets.
-        if cat == "alert":
-            cat = "alert"
-        elif cat in ("rds_event", "cloudwatch_alarm"):
-            cat = "rds_event"
-        elif cat == "proactive":
-            cat = "proactive"
-        elif cat == "ack":
-            cat = "ack"
+        raw_type = r.get("event_type") or "event"
+        # Normalise the long tail of event_types into the buckets the
+        # frontend knows how to color. Writers use varied strings:
+        #   alert_evaluator      → 'alert'
+        #   slack_interactive    → 'alert_ack'
+        #   proactive_monitor    → 'proactive'
+        #   event_processor      → 'alarm_<state>' / RDS detail_type /
+        #                          arbitrary 'event'
+        # so we match by prefix/family rather than exact string.
+        cat = _timeline_category(raw_type)
         items.append({
             "ts": r.get("event_time"),
             "category": cat,
+            # Keep the original event_type as the title so a normalised
+            # 'rds_event' row still tells the DBA it was e.g. a failover.
             "severity": (r.get("severity") or "info"),
-            "title": cat,
+            "title": raw_type,
             "detail": r.get("message") or "",
             "source": r.get("source") or "",
             "source_id": f"event_log:{r.get('id')}",
