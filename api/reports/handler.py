@@ -40,22 +40,36 @@ def lambda_handler(event, context):
     qsp = event.get("queryStringParameters") or {}
     cluster_id = qsp.get("cluster_id")
 
-    if report_id:
-        rows = query("SELECT * FROM reports WHERE id = :id", {"id": report_id})
-        body = rows[0] if rows else None
-        status = 200 if body else 404
-    else:
-        sql = "SELECT id, cluster_id, report_type, report_date, summary, created_at FROM reports"
-        params = {}
-        if cluster_id:
-            sql += " WHERE cluster_id = :cluster_id"
-            params["cluster_id"] = cluster_id
-        sql += " ORDER BY report_date DESC LIMIT 50"
-        body = query(sql, params)
-        status = 200
+    headers = {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}
+
+    try:
+        if report_id:
+            # RDS Data API binds named params as text, and reports.id is
+            # BIGSERIAL — `bigint = text` has no operator in PostgreSQL and
+            # 500s. Validate numeric, then cast the param to bigint.
+            if not str(report_id).isdigit():
+                return {"statusCode": 400, "headers": headers,
+                        "body": json.dumps({"error": "invalid report id"})}
+            rows = query("SELECT * FROM reports WHERE id = :id::bigint", {"id": report_id})
+            body = rows[0] if rows else None
+            status = 200 if body else 404
+        else:
+            sql = "SELECT id, cluster_id, report_type, report_date, summary, created_at FROM reports"
+            params = {}
+            if cluster_id:
+                sql += " WHERE cluster_id = :cluster_id"
+                params["cluster_id"] = cluster_id
+            sql += " ORDER BY report_date DESC LIMIT 50"
+            body = query(sql, params)
+            status = 200
+    except Exception as e:
+        # Never surface a raw boto3/PG fault as a generic 500 page.
+        print(f"[reports] query failed (report_id={report_id}): {e}")
+        return {"statusCode": 500, "headers": headers,
+                "body": json.dumps({"error": "리포트를 불러오지 못했습니다."})}
 
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        "headers": headers,
         "body": json.dumps(body, default=str),
     }
