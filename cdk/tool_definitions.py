@@ -71,6 +71,8 @@ def operations_schema():
               ["cluster_id"]),
         _tool("manage_maintenance", "View or modify maintenance window",
               {"cluster_id": "string", "action": "string"}, ["cluster_id"]),
+        _tool("create_snapshot", "Create a manual cluster snapshot (backup); requires approval",
+              {"cluster_id": "string", "snapshot_id": "string"}, ["cluster_id"]),
         _tool("review_sql", "Pre-execution SQL review with risk assessment",
               {"cluster_id": "string", "sql": "string"}, ["cluster_id", "sql"]),
         _tool("audit_permissions", "Audit DB user permissions",

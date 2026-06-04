@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp_servers.operations.tools.audit_permissions import audit_permissions_impl
+from mcp_servers.operations.tools.create_snapshot import create_snapshot_impl
 from mcp_servers.operations.tools.execute_sql import execute_sql_impl
 from mcp_servers.operations.tools.manage_maintenance import manage_maintenance_impl
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
@@ -118,6 +119,24 @@ TOOLS = {
             "required": ["cluster_id"],
         },
     },
+    "create_snapshot": {
+        "impl": create_snapshot_impl,
+        "description": (
+            "Create a manual cluster snapshot (backup). Non-destructive but "
+            "requires approved=true AND approval_id=<uuid from request_approval>. "
+            "snapshot_id is optional — auto-generated if omitted."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "snapshot_id": {"type": "string", "description": "Optional snapshot identifier (auto-generated if omitted)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id"],
+        },
+    },
     "review_sql": {
         "impl": review_sql_impl,
         "description": "Pre-execution SQL review with risk classification, issue detection, and rollback suggestion",
@@ -202,7 +221,7 @@ TOOLS = {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "action_type": {
                     "type": "string",
-                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "other"],
+                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "other"],
                     "description": "Which write tool needs approval",
                 },
                 "action_details": {

@@ -40,6 +40,7 @@ def request_approval_impl(
         "modify_parameter",
         "modify_scaling",
         "manage_maintenance",
+        "create_snapshot",
         "other",
     ):
         return {

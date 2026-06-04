@@ -405,6 +405,35 @@ class AgentStack(cdk.Stack):
             resources=["*"],
         ))
 
+        # Backups write API — manual snapshot creation (phase 2). Human-
+        # initiated admin write, audit-logged to PG. Separate from the
+        # read tier (dashboard /backups) and from the agent approval path.
+        backups_lambda = lambda_.Function(
+            self, "BackupsApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/backups"),
+            timeout=cdk.Duration.seconds(30),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+            },
+        )
+        data.cache_db.secret.grant_read(backups_lambda)
+        data.cache_db.grant_data_api_access(backups_lambda)
+        backups_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                # CreateDBClusterSnapshot is non-destructive (adds a
+                # backup). AddTags lets us stamp dbops:created-by.
+                "rds:CreateDBClusterSnapshot",
+                "rds:AddTagsToResource",
+                "rds-data:ExecuteStatement",
+                "secretsmanager:GetSecretValue",
+            ],
+            resources=["*"],
+        ))
+
         # Chat Sessions API — persists chat conversations across devices.
         # Backed by the existing `sessions` DDB table (PK session_id) plus
         # a user-updated GSI for cheap list-by-user.
@@ -648,6 +677,14 @@ class AgentStack(cdk.Stack):
             path="/api/dashboard/{cluster_id}/backups",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardBackupsIntegration", dashboard_lambda),
+        )
+        # Manual snapshot creation (phase 2 write tier) — admin-gated,
+        # routed to the dedicated backups Lambda (not the read-only
+        # dashboard handler).
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/snapshot",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=integrations.HttpLambdaIntegration("BackupsSnapshotIntegration", backups_lambda),
         )
         # SLO tracker — availability + latency SLI computed from the cache,
         # error budget burn-down, per-day timeline.

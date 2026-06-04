@@ -45,6 +45,8 @@ const ACTION_RISK: Record<string, string> = {
   modify_parameter: "medium",
   modify_scaling: "medium",
   manage_maintenance: "low",
+  // Snapshot creation is non-destructive (adds a backup) → low risk.
+  create_snapshot: "low",
   other: "medium",
 };
 

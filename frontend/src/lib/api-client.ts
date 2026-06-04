@@ -1510,6 +1510,38 @@ export async function fetchBackups(
   return res.json();
 }
 
+export interface CreateSnapshotResponse {
+  ok: boolean;
+  cluster_id: string;
+  snapshot_id: string;
+  status: string;
+  created_by: string;
+  message: string;
+}
+
+// Manual snapshot creation — admin-gated write. snapshotId optional;
+// backend auto-generates a valid id when omitted.
+export async function createSnapshot(
+  clusterId: string,
+  snapshotId?: string,
+): Promise<CreateSnapshotResponse> {
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/snapshot`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+      body: JSON.stringify(snapshotId ? { snapshot_id: snapshotId } : {}),
+    },
+  );
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(
+      `Create snapshot failed (${res.status}): ${detail.slice(0, 200)}`,
+    );
+  }
+  return res.json();
+}
+
 // =====  Workload diff (pg_stat_statements snapshot delta) =====
 
 export interface WorkloadDiffResponse {
