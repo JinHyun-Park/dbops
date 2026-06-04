@@ -544,6 +544,8 @@ export interface TopologyResponse {
   members_count?: number;
   members: TopologyMember[];
   error?: string;
+  // true when `error` is an informational notice (demo/unregistered cluster).
+  info?: boolean;
 }
 
 export async function fetchTopology(
@@ -1489,6 +1491,9 @@ export interface BackupsResponse {
   engine: string;
   status: string;
   error?: string;
+  // true when `error` is an informational notice (demo/unregistered cluster),
+  // not a real failure — render neutral, not red.
+  info?: boolean;
   backup_retention_days: number | null;
   preferred_backup_window: string | null;
   earliest_restorable_time: string | null;

@@ -1689,7 +1689,11 @@ def _log_insights(cluster_id, hours, category, keywords: str = ""):
             ),
         }
     except Exception as e:
-        return {**base_result, "error": str(e)}
+        print(f"[search_logs] start_query failed for {cluster_id}: {e}")
+        return {
+            **base_result,
+            "error": "로그 검색을 시작하지 못했습니다. 로그 내보내기 설정과 권한을 확인해주세요.",
+        }
 
     qid = resp["queryId"]
     for _ in range(25):  # ~25s budget — Lambda timeout is 30s
@@ -1740,6 +1744,9 @@ def _topology(cluster_id: str) -> dict:
             "클러스터이거나 실제 Aurora로 등록되지 않았습니다. 등록된 클러스터를 "
             "선택하면 writer/reader 구성과 Replica Lag이 표시됩니다."
         ),
+        # info (not error): demo/unregistered cluster — render as a neutral
+        # notice, not a red failure box.
+        "info": True,
         "members": [],
     }
     try:
@@ -1878,6 +1885,8 @@ def _backups(cluster_id: str) -> dict:
             "클러스터이거나 실제 Aurora로 등록되지 않았습니다. 등록된 클러스터를 "
             "선택하면 스냅샷·PITR 윈도우가 표시됩니다."
         ),
+        # info (not error): demo/unregistered cluster — render as a neutral notice.
+        "info": True,
         "snapshots": [],
     }
     try:

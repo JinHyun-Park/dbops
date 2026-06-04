@@ -335,7 +335,15 @@ export function BackupPanel({ clusterId }: { clusterId: string }) {
       )}
 
       {data?.error && (
-        <div className="text-xs text-rose-300 mb-3">{data.error}</div>
+        <div
+          className={`text-xs mb-3 px-3 py-2 border ${
+            data.info
+              ? "text-zinc-400 border-zinc-700 bg-zinc-800/30"
+              : "text-rose-300 border-rose-500/40 bg-rose-500/10"
+          }`}
+        >
+          {data.error}
+        </div>
       )}
 
       {/* Summary grid */}
