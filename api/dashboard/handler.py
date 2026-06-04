@@ -1852,13 +1852,33 @@ def _backups(cluster_id: str) -> dict:
 
     rds = boto3.client("rds")
 
+    # Friendly fallback for clusters RDS can't describe — most often the
+    # synthetic demo cluster (no real Aurora behind it) or one that isn't
+    # registered. Never surface the raw boto3 fault string to the UI.
+    not_real = {
+        "cluster_id": cluster_id,
+        "error": (
+            "이 클러스터의 실시간 백업 정보를 조회할 수 없습니다 — 데모(합성) "
+            "클러스터이거나 실제 Aurora로 등록되지 않았습니다. 등록된 클러스터를 "
+            "선택하면 스냅샷·PITR 윈도우가 표시됩니다."
+        ),
+        "snapshots": [],
+    }
     try:
         cl_resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
     except Exception as e:
-        return {"cluster_id": cluster_id, "error": str(e)[:300], "snapshots": []}
+        msg = str(e)
+        if "DBClusterNotFoundFault" in msg or "not found" in msg.lower():
+            return not_real
+        print(f"[backups] describe failed for {cluster_id}: {e}")
+        return {
+            "cluster_id": cluster_id,
+            "error": "백업 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
+            "snapshots": [],
+        }
     clusters = cl_resp.get("DBClusters") or []
     if not clusters:
-        return {"cluster_id": cluster_id, "error": "cluster not found", "snapshots": []}
+        return not_real
     c = clusters[0]
 
     def _iso(dt):
