@@ -17,8 +17,9 @@ except ImportError:
     from prompts.system_prompt import build_system_prompt
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
+from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
-from strands import Agent
+from strands import Agent, tool
 from strands.models import BedrockModel
 from strands.tools.mcp.mcp_client import MCPClient
 
@@ -91,12 +92,48 @@ def make_mcp_client():
     return MCPClient(lambda: streamablehttp_client(GATEWAY_URL, headers=headers))
 
 
-def make_knowledge_client():
-    """AWS Knowledge MCP client — official AWS/Aurora docs, public + no-auth.
-    Returns None when KNOWLEDGE_MCP_URL is empty (feature disabled)."""
-    if not KNOWLEDGE_MCP_URL:
-        return None
-    return MCPClient(lambda: streamablehttp_client(KNOWLEDGE_MCP_URL))
+async def _call_knowledge_tool(name: str, arguments: dict) -> str:
+    """One-shot call to the AWS Knowledge MCP over a FRESH connection.
+
+    The public endpoint closes idle sessions, so holding one open across the
+    model's thinking time (the persistent-MCPClient approach) left the session
+    dead by the time a tool actually fired — "Connection to the MCP server was
+    closed" / "client session is not running". Opening + initializing per call
+    sidesteps that: each doc lookup is fully self-contained."""
+    async with streamablehttp_client(KNOWLEDGE_MCP_URL) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(name, arguments)
+    parts = [getattr(b, "text", "") for b in (result.content or [])]
+    text = "\n\n".join(p for p in parts if p)
+    return text or "(문서 도구가 빈 응답을 반환했습니다)"
+
+
+@tool
+async def search_aws_documentation(search_phrase: str) -> str:
+    """Search official AWS / Amazon Aurora documentation and return ranked
+    results (title + URL + context). Use for authoritative AWS behavior —
+    parameter defaults, limits, error codes, version differences, upgrade
+    paths. Then call read_aws_documentation on a result URL for the full text.
+    Always cite the source URL in your answer."""
+    try:
+        return await _call_knowledge_tool(
+            "aws___search_documentation", {"search_phrase": search_phrase}
+        )
+    except Exception as e:
+        return f"AWS 문서 검색에 실패했습니다: {str(e)[:200]}"
+
+
+@tool
+async def read_aws_documentation(url: str) -> str:
+    """Read a single AWS documentation page by URL (use a URL returned by
+    search_aws_documentation) and return its content as markdown."""
+    try:
+        return await _call_knowledge_tool(
+            "aws___read_documentation", {"requests": [{"url": url}]}
+        )
+    except Exception as e:
+        return f"AWS 문서 읽기에 실패했습니다: {str(e)[:200]}"
 
 
 def _resolve_model_id(payload) -> str:
@@ -149,16 +186,17 @@ async def invoke(payload, context):
         model_id = MODEL_ID
         model = BedrockModel(model_id=model_id, region_name=REGION)
     gateway_client = make_mcp_client()
-    knowledge_client = make_knowledge_client()
 
-    # Tools come from two independent MCP servers, merged into one list:
-    #   - AgentCore Gateway: the org's read/write tools (Cedar-gated).
-    #   - AWS Knowledge MCP: official AWS/Aurora docs (public, read-only).
-    # Each source is isolated so one being down (token failure, egress block,
-    # rate limit) degrades gracefully instead of breaking chat. Both stay
-    # open via the ExitStack for the duration of streaming, since tool calls
-    # happen mid-stream.
-    tools = []
+    # AWS Knowledge doc tools are STATELESS local tools (fresh connection per
+    # call — see _call_knowledge_tool), so they need no persistent context and
+    # just get appended. The Gateway client DOES need its context held open
+    # for the duration of streaming (AWS keeps that session alive), so it
+    # stays inside the ExitStack.
+    knowledge_tools = (
+        [search_aws_documentation, read_aws_documentation] if KNOWLEDGE_MCP_URL else []
+    )
+
+    tools = list(knowledge_tools)
     with contextlib.ExitStack() as stack:
         if gateway_client is not None:
             try:
@@ -168,14 +206,8 @@ async def invoke(payload, context):
                 log.info(f"Loaded {len(gw_tools)} tools from Gateway")
             except Exception as e:
                 log.warning(f"Gateway tools load failed: {e}")
-        if knowledge_client is not None:
-            try:
-                stack.enter_context(knowledge_client)
-                kb_tools = knowledge_client.list_tools_sync()
-                tools.extend(kb_tools)
-                log.info(f"Loaded {len(kb_tools)} tools from AWS Knowledge MCP")
-            except Exception as e:
-                log.warning(f"AWS Knowledge MCP load failed: {e}")
+        if knowledge_tools:
+            log.info(f"Registered {len(knowledge_tools)} AWS Knowledge doc tools")
 
         agent = Agent(model=model, system_prompt=build_system_prompt(), tools=tools)
         async for event in agent.stream_async(prompt):
