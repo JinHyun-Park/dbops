@@ -9,14 +9,12 @@ class Settings:
     AGENT_MODEL_ID = "anthropic.claude-sonnet-4-20250514-v1:0"
     GATEWAY_SEMANTIC_SEARCH = True
 
-    # AWS Knowledge MCP server (official AWS/Aurora docs). DISABLED for now:
-    # the public endpoint (knowledge-mcp.global.api.aws) answers initialize +
-    # tools/list over standard streamable-HTTP but REJECTS tools/call with
-    # 400 "Http operation is not supported for gateway protocol type MCP", so
-    # the standard mcp client can list the doc tools but never execute them.
-    # Set to the endpoint URL to re-enable once a compatible transport (or the
-    # SigV4 "AWS MCP Server") is wired. Empty = doc tools not registered.
-    KNOWLEDGE_MCP_URL = ""
+    # AWS MCP Server (AWS-managed, SigV4) — official AWS/Aurora docs. The agent
+    # runtime signs requests with its IAM role and exposes ONLY the read-only
+    # doc tools. Regional endpoint (us-east-1 / eu-central-1 only). Empty = doc
+    # tools not registered. Replaces the deprecated public knowledge-mcp server.
+    AWS_MCP_URL = "https://aws-mcp.us-east-1.api.aws/mcp"
+    AWS_MCP_REGION = "us-east-1"
 
     PI_COLLECTION_INTERVAL_MIN = 1
     STATS_COLLECTION_INTERVAL_MIN = 5

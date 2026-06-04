@@ -214,12 +214,14 @@ class AgentStack(cdk.Stack):
                 "AGENT_MODEL_ID": Settings.AGENT_MODEL_ID,
                 "AWS_REGION_OVERRIDE": Settings.REGION,
                 "GATEWAY_MCP_URL": gateway_mcp_url,
-                # AWS Knowledge MCP (official AWS/Aurora docs). getattr default
-                # keeps synth working if a local settings.py predates this key.
-                "KNOWLEDGE_MCP_URL": getattr(
-                    Settings, "KNOWLEDGE_MCP_URL",
-                    "https://knowledge-mcp.global.api.aws/mcp",
+                # AWS MCP Server (managed, SigV4) — official AWS/Aurora docs.
+                # The runtime signs requests with its own IAM role; doc reads
+                # need no extra IAM action. getattr defaults keep synth working
+                # if a local settings.py predates these keys. Empty disables.
+                "AWS_MCP_URL": getattr(
+                    Settings, "AWS_MCP_URL", "https://aws-mcp.us-east-1.api.aws/mcp"
                 ),
+                "AWS_MCP_REGION": getattr(Settings, "AWS_MCP_REGION", "us-east-1"),
             },
             network_configuration=agentcore.RuntimeNetworkConfiguration.using_public_network(),
             authorizer_configuration=agentcore.RuntimeAuthorizerConfiguration.using_cognito(

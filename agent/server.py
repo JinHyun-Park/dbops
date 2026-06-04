@@ -17,7 +17,9 @@ except ImportError:
     from prompts.system_prompt import build_system_prompt
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
-from mcp import ClientSession
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from botocore.session import get_session as _botocore_session
 from mcp.client.streamable_http import streamablehttp_client
 from strands import Agent, tool
 from strands.models import BedrockModel
@@ -33,14 +35,15 @@ GATEWAY_CLIENT_SECRET = os.environ.get("GATEWAY_CLIENT_SECRET", "")
 GATEWAY_SCOPE = os.environ.get("GATEWAY_SCOPE", "")
 MODEL_ID = os.environ.get("AGENT_MODEL_ID", "apac.anthropic.claude-sonnet-4-20250514-v1:0")
 REGION = os.environ.get("AWS_REGION_OVERRIDE", os.environ.get("AWS_REGION", "ap-northeast-2"))
-# AWS Knowledge MCP server — AWS-hosted, public, no-auth streamable-HTTP MCP
-# exposing official AWS/Aurora documentation search + read. Gives the agent
-# always-current docs with zero infrastructure (no Bedrock KB / vector store).
-# Empty disables it. Read-only doc lookups → connects directly, not via the
-# Cedar-gated Gateway.
-KNOWLEDGE_MCP_URL = os.environ.get(
-    "KNOWLEDGE_MCP_URL", "https://knowledge-mcp.global.api.aws/mcp"
-)
+# AWS MCP Server — AWS-MANAGED remote MCP (SigV4-authenticated) exposing
+# official AWS/Aurora documentation. We sign requests with the runtime's IAM
+# role and expose ONLY the read-only doc tools — never the AWS-API-execution
+# tools (call_aws/run_script) the same server also offers. Empty disables it.
+# Replaces the deprecated public knowledge-mcp endpoint (whose tools/call
+# returned 400 over plain streamable-HTTP).
+AWS_MCP_URL = os.environ.get("AWS_MCP_URL", "https://aws-mcp.us-east-1.api.aws/mcp")
+AWS_MCP_REGION = os.environ.get("AWS_MCP_REGION", "us-east-1")
+AWS_MCP_SERVICE = "aws-mcp"
 
 _token_cache = {"token": None, "expires_at": 0}
 
@@ -92,52 +95,72 @@ def make_mcp_client():
     return MCPClient(lambda: streamablehttp_client(GATEWAY_URL, headers=headers))
 
 
-async def _call_knowledge_tool(name: str, arguments: dict) -> str:
-    """One-shot call to the AWS Knowledge MCP over a FRESH connection.
+def _aws_mcp_call(tool_name: str, arguments: dict, max_chars: int = 8000) -> str:
+    """Call one tool on the AWS-managed MCP Server, SigV4-signed per call.
 
-    The public endpoint closes idle sessions, so holding one open across the
-    model's thinking time (the persistent-MCPClient approach) left the session
-    dead by the time a tool actually fired — "Connection to the MCP server was
-    closed" / "client session is not running". Opening + initializing per call
-    sidesteps that: each doc lookup is fully self-contained."""
-    async with streamablehttp_client(KNOWLEDGE_MCP_URL) as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool(name, arguments)
-    parts = [getattr(b, "text", "") for b in (result.content or [])]
-    text = "\n\n".join(p for p in parts if p)
-    return text or "(문서 도구가 빈 응답을 반환했습니다)"
+    Plain synchronous JSON-RPC over SigV4-signed POSTs (no mcp client / anyio /
+    threads): initialize → notifications/initialized → tools/call, each a fresh
+    signed request. Stateless, so a server-side idle timeout can never strand a
+    session. Auth uses the runtime's IAM role credentials; doc reads aren't
+    downstream-authorized, so no extra IAM action is required."""
+    import json
+    import urllib.request
 
+    creds = _botocore_session().get_credentials()
+    if creds is None:
+        return "AWS 자격증명을 찾을 수 없어 문서 도구를 사용할 수 없습니다."
+    frozen = creds.get_frozen_credentials()
+    accept = "application/json, text/event-stream"
 
-def _run_knowledge_tool(name: str, arguments: dict) -> str:
-    """Run the async MCP call in a DEDICATED thread with its own event loop.
+    def _post(body: dict, session_id=None):
+        data = json.dumps(body).encode()
+        headers = {"Content-Type": "application/json", "Accept": accept}
+        if session_id:
+            headers["mcp-session-id"] = session_id
+        signed = AWSRequest(method="POST", url=AWS_MCP_URL, data=data, headers=headers)
+        SigV4Auth(frozen, AWS_MCP_SERVICE, AWS_MCP_REGION).add_auth(signed)
+        req = urllib.request.Request(
+            AWS_MCP_URL, data=data, headers=dict(signed.headers), method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            return resp.status, resp.read().decode(), resp.headers.get("mcp-session-id")
 
-    Strands invokes tools inside its own running event loop; opening the
-    mcp streamable-HTTP client's anyio task group there trips "cancel scope
-    in a different task". A fresh thread + asyncio.run keeps that task group
-    fully self-contained. The error reason is logged so failures aren't a
-    black box."""
-    import asyncio
-    import threading
+    def _extract(raw: str) -> str:
+        # Response is JSON-RPC; tolerate SSE framing (data: lines) just in case.
+        body = raw.strip()
+        if body.startswith("event:") or body.startswith("data:") or "\ndata:" in body:
+            for line in body.splitlines():
+                if line.startswith("data:"):
+                    body = line[5:].strip()
+        obj = json.loads(body)
+        if "error" in obj:
+            return f"AWS 문서 도구 오류: {str(obj['error'])[:200]}"
+        content = (obj.get("result") or {}).get("content") or []
+        parts = [c.get("text", "") for c in content if isinstance(c, dict)]
+        return ("\n\n".join(p for p in parts if p))[:max_chars]
 
-    box: dict = {}
-
-    def runner():
+    try:
+        st, _body, sid = _post({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "clientInfo": {"name": "dbops-agent", "version": "1.0"}},
+        })
+        if st != 200 or not sid:
+            log.warning(f"aws-mcp initialize failed: HTTP {st}")
+            return f"AWS 문서 서버 초기화에 실패했습니다 (HTTP {st})."
         try:
-            box["ok"] = asyncio.run(_call_knowledge_tool(name, arguments))
-        except Exception as e:  # noqa: BLE001
-            box["err"] = e
-
-    t = threading.Thread(target=runner, daemon=True)
-    t.start()
-    t.join(timeout=30)
-    if t.is_alive():
-        log.warning(f"knowledge tool {name} timed out")
-        return "AWS 문서 도구 응답 시간이 초과되었습니다."
-    if "err" in box:
-        log.warning(f"knowledge tool {name} failed: {box['err']!r}")
-        return f"AWS 문서 도구 오류: {str(box['err'])[:200]}"
-    return box.get("ok", "(빈 응답)")
+            _post({"jsonrpc": "2.0", "method": "notifications/initialized"}, sid)
+        except Exception:  # noqa: BLE001 - notification is best-effort
+            pass
+        _st, body2, _ = _post({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": tool_name, "arguments": arguments},
+        }, sid)
+        text = _extract(body2)
+        return text or "(문서 도구가 빈 응답을 반환했습니다)"
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"aws-mcp tool {tool_name} failed: {e!r}")
+        return f"AWS 문서 도구 호출에 실패했습니다: {str(e)[:200]}"
 
 
 @tool
@@ -147,14 +170,16 @@ def search_aws_documentation(search_phrase: str) -> str:
     parameter defaults, limits, error codes, version differences, upgrade
     paths. Then call read_aws_documentation on a result URL for the full text.
     Always cite the source URL in your answer."""
-    return _run_knowledge_tool("aws___search_documentation", {"search_phrase": search_phrase})
+    return _aws_mcp_call("aws___search_documentation", {"search_phrase": search_phrase})
 
 
 @tool
 def read_aws_documentation(url: str) -> str:
     """Read a single AWS documentation page by URL (use a URL returned by
     search_aws_documentation) and return its content as markdown."""
-    return _run_knowledge_tool("aws___read_documentation", {"requests": [{"url": url}]})
+    return _aws_mcp_call(
+        "aws___read_documentation", {"requests": [{"url": url, "max_length": 8000}]}
+    )
 
 
 def _resolve_model_id(payload) -> str:
@@ -214,7 +239,7 @@ async def invoke(payload, context):
     # for the duration of streaming (AWS keeps that session alive), so it
     # stays inside the ExitStack.
     knowledge_tools = (
-        [search_aws_documentation, read_aws_documentation] if KNOWLEDGE_MCP_URL else []
+        [search_aws_documentation, read_aws_documentation] if AWS_MCP_URL else []
     )
 
     tools = list(knowledge_tools)
