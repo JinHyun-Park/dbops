@@ -79,7 +79,9 @@ class AgentStack(cdk.Stack):
         )
         data.cache_db.secret.grant_read(operations_mcp_lambda)
         data.cache_db.grant_data_api_access(operations_mcp_lambda)
-        foundation.clusters_table.grant_read_data(operations_mcp_lambda)
+        # read_write (not read): the restore_cluster tool registers the new
+        # restored cluster row (pending_instance) for the finalizer to pick up.
+        foundation.clusters_table.grant_read_write_data(operations_mcp_lambda)
         foundation.approvals_table.grant_read_write_data(operations_mcp_lambda)
         # Allow agent-driven SQL against ANY registered Aurora cluster + admin actions.
         # All write paths still gate through approved=true in tool code.
@@ -93,6 +95,12 @@ class AgentStack(cdk.Stack):
                 "rds:DescribeDBClusterParameters",
                 "rds:ModifyDBClusterParameterGroup",
                 "rds:ModifyDBCluster",
+                # create_snapshot + restore_cluster (both approval-gated in tool
+                # code). Restore stands up a NEW cluster; the source is untouched.
+                "rds:CreateDBClusterSnapshot",
+                "rds:RestoreDBClusterFromSnapshot",
+                "rds:RestoreDBClusterToPointInTime",
+                "rds:AddTagsToResource",
             ],
             resources=["*"],
         ))
@@ -418,15 +426,26 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
+                # Restore registers the new cluster here (pending_instance) so
+                # the restore_finalizer Lambda can complete provisioning.
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
             },
         )
         data.cache_db.secret.grant_read(backups_lambda)
         data.cache_db.grant_data_api_access(backups_lambda)
+        foundation.clusters_table.grant_read_write_data(backups_lambda)
         backups_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=[
                 # CreateDBClusterSnapshot is non-destructive (adds a
                 # backup). AddTags lets us stamp dbops:created-by.
                 "rds:CreateDBClusterSnapshot",
+                # Restore creates a BRAND-NEW cluster from a snapshot or a
+                # point in time — it never mutates the source. DescribeDBClusters
+                # reads the source VPC/scaling config to clone networking onto
+                # the restored cluster.
+                "rds:RestoreDBClusterFromSnapshot",
+                "rds:RestoreDBClusterToPointInTime",
+                "rds:DescribeDBClusters",
                 "rds:AddTagsToResource",
                 "rds-data:ExecuteStatement",
                 "secretsmanager:GetSecretValue",
@@ -685,6 +704,13 @@ class AgentStack(cdk.Stack):
             path="/api/dashboard/{cluster_id}/snapshot",
             methods=[apigwv2.HttpMethod.POST],
             integration=integrations.HttpLambdaIntegration("BackupsSnapshotIntegration", backups_lambda),
+        )
+        # Restore (phase 3 write tier) — snapshot or PITR into a NEW cluster.
+        # Same backups Lambda, dispatched by path. admin + type-to-confirm.
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/restore",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=integrations.HttpLambdaIntegration("BackupsRestoreIntegration", backups_lambda),
         )
         # SLO tracker — availability + latency SLI computed from the cache,
         # error budget burn-down, per-day timeline.

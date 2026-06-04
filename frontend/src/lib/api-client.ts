@@ -1542,6 +1542,62 @@ export async function createSnapshot(
   return res.json();
 }
 
+export interface RestoreResponse {
+  ok: boolean;
+  cluster_id: string;
+  new_cluster_id: string;
+  mode: string;
+  restore_source: string;
+  registered: boolean;
+  created_by: string;
+  message: string;
+}
+
+export interface RestoreRequest {
+  newClusterId: string;
+  // type-to-confirm: the value the user re-typed. Sent verbatim; the server
+  // requires it to equal newClusterId. The friction lives in the UI.
+  confirm: string;
+  mode: "snapshot" | "pitr";
+  snapshotId?: string;
+  restoreToTime?: string; // ISO 8601, for mode=pitr
+  useLatest?: boolean; // mode=pitr → restore to latest restorable time
+}
+
+// Restore a snapshot or point-in-time into a NEW cluster — admin-gated +
+// type-to-confirm. The restored cluster is provisioned async (writer
+// instance added by the restore_finalizer once it is available).
+export async function restoreCluster(
+  clusterId: string,
+  opts: RestoreRequest,
+): Promise<RestoreResponse> {
+  const body: Record<string, unknown> = {
+    new_cluster_id: opts.newClusterId,
+    confirm: opts.confirm,
+    mode: opts.mode,
+  };
+  if (opts.mode === "snapshot") {
+    body.snapshot_id = opts.snapshotId;
+  } else if (opts.useLatest) {
+    body.use_latest = true;
+  } else {
+    body.restore_to_time = opts.restoreToTime;
+  }
+  const res = await fetch(
+    await api(`/api/dashboard/${enc(clusterId)}/restore`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Restore failed (${res.status}): ${detail.slice(0, 300)}`);
+  }
+  return res.json();
+}
+
 // =====  Workload diff (pg_stat_statements snapshot delta) =====
 
 export interface WorkloadDiffResponse {

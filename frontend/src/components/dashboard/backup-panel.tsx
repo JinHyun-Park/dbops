@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   fetchBackups,
   createSnapshot,
+  restoreCluster,
   type BackupsResponse,
   type BackupSnapshot,
 } from "@/lib/api-client";
@@ -33,6 +34,19 @@ export function BackupPanel({ clusterId }: { clusterId: string }) {
   const [creating, setCreating] = useState(false);
   const [snapError, setSnapError] = useState<string | null>(null);
   const [snapToast, setSnapToast] = useState<string | null>(null);
+  // Restore (phase 3). The strongest write in the backup workflow — it
+  // stands up a NEW billable cluster. restoreMode !== null opens the form;
+  // type-to-confirm (re-typing the new cluster id) gates the submit.
+  const [restoreMode, setRestoreMode] = useState<"snapshot" | "pitr" | null>(
+    null,
+  );
+  const [restoreSnapId, setRestoreSnapId] = useState("");
+  const [restoreToTime, setRestoreToTime] = useState("");
+  const [useLatest, setUseLatest] = useState(true);
+  const [newClusterId, setNewClusterId] = useState("");
+  const [confirmId, setConfirmId] = useState("");
+  const [restoring, setRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
 
   useEffect(() => {
     setAdmin(isAdmin());
@@ -82,6 +96,58 @@ export function BackupPanel({ clusterId }: { clusterId: string }) {
       setCreating(false);
     }
   }, [clusterId, snapName, load]);
+
+  const openRestore = useCallback(
+    (mode: "snapshot" | "pitr", snapId = "") => {
+      setRestoreMode(mode);
+      setRestoreSnapId(snapId);
+      setRestoreError(null);
+      setNewClusterId(`${clusterId}-restore`.slice(0, 63));
+      setConfirmId("");
+      setUseLatest(true);
+      setRestoreToTime("");
+    },
+    [clusterId],
+  );
+
+  const submitRestore = useCallback(async () => {
+    if (!restoreMode) return;
+    setRestoring(true);
+    setRestoreError(null);
+    try {
+      const r = await restoreCluster(clusterId, {
+        newClusterId: newClusterId.trim(),
+        confirm: confirmId.trim(),
+        mode: restoreMode,
+        snapshotId: restoreMode === "snapshot" ? restoreSnapId : undefined,
+        restoreToTime:
+          restoreMode === "pitr" && !useLatest ? restoreToTime : undefined,
+        useLatest: restoreMode === "pitr" ? useLatest : undefined,
+      });
+      setSnapToast(r.message || `복원 시작: ${r.new_cluster_id}`);
+      setRestoreMode(null);
+      setNewClusterId("");
+      setConfirmId("");
+      setRestoreSnapId("");
+      load();
+    } catch (e) {
+      setRestoreError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRestoring(false);
+    }
+  }, [
+    clusterId,
+    restoreMode,
+    newClusterId,
+    confirmId,
+    restoreSnapId,
+    restoreToTime,
+    useLatest,
+    load,
+  ]);
+
+  const confirmMatches =
+    newClusterId.trim().length > 0 && confirmId.trim() === newClusterId.trim();
 
   const retention = Number(data?.backup_retention_days || 0);
   const retentionColor =
@@ -175,6 +241,99 @@ export function BackupPanel({ clusterId }: { clusterId: string }) {
         </div>
       )}
 
+      {/* Inline restore form — admin-only, strongest gate (type-to-confirm).
+          Opened from a snapshot row or the PITR section. */}
+      {restoreMode && (
+        <div className="mb-4 border border-rose-500/40 bg-rose-950/20 p-3">
+          <div className="text-[11px] text-rose-200 mb-2">
+            ⚠ 복원은 <strong>새 클러스터</strong>를 생성합니다 (과금 발생).
+            소스 클러스터 <span className="font-mono">{clusterId}</span> 는
+            변경되지 않습니다. 클러스터가 available 되면 writer 인스턴스가 자동
+            생성되고 DBOps에 자동 등록됩니다 (수 분 소요).
+          </div>
+          <div className="text-[11px] text-zinc-400 mb-2">
+            {restoreMode === "snapshot" ? (
+              <>
+                스냅샷{" "}
+                <span className="font-mono text-zinc-200">{restoreSnapId}</span>{" "}
+                에서 복원
+              </>
+            ) : (
+              <>Point-in-Time 복원</>
+            )}
+          </div>
+
+          {restoreMode === "pitr" && (
+            <div className="mb-2 space-y-1.5">
+              <label className="flex items-center gap-2 text-[11px] text-zinc-300">
+                <input
+                  type="checkbox"
+                  checked={useLatest}
+                  onChange={(e) => setUseLatest(e.target.checked)}
+                />
+                최신 복원 가능 시점으로 복원 (latest restorable time)
+              </label>
+              {!useLatest && (
+                <input
+                  type="datetime-local"
+                  value={restoreToTime}
+                  onChange={(e) => setRestoreToTime(e.target.value)}
+                  className="bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 font-mono focus:outline-none focus:border-rose-500/60"
+                />
+              )}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <input
+              type="text"
+              value={newClusterId}
+              onChange={(e) => setNewClusterId(e.target.value)}
+              placeholder="새 클러스터 id"
+              className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 font-mono focus:outline-none focus:border-rose-500/60"
+            />
+            <input
+              type="text"
+              value={confirmId}
+              onChange={(e) => setConfirmId(e.target.value)}
+              placeholder="확인을 위해 새 클러스터 id 를 다시 입력"
+              className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 font-mono focus:outline-none focus:border-rose-500/60"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              onClick={submitRestore}
+              disabled={
+                restoring ||
+                !confirmMatches ||
+                (restoreMode === "pitr" && !useLatest && !restoreToTime)
+              }
+              className="text-xs font-medium px-3 py-1.5 bg-rose-600 text-white hover:bg-rose-500 disabled:opacity-40 transition-colors"
+            >
+              {restoring ? "복원 시작 중…" : "복원 실행"}
+            </button>
+            <button
+              onClick={() => {
+                setRestoreMode(null);
+                setRestoreError(null);
+              }}
+              className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              취소
+            </button>
+            {!confirmMatches && newClusterId.trim() && (
+              <span className="text-[10px] text-zinc-500">
+                확인 입력이 일치해야 실행됩니다
+              </span>
+            )}
+          </div>
+          {restoreError && (
+            <div className="text-[11px] text-rose-300 mt-2">{restoreError}</div>
+          )}
+        </div>
+      )}
+
       {data?.error && (
         <div className="text-xs text-rose-300 mb-3">{data.error}</div>
       )}
@@ -234,6 +393,14 @@ export function BackupPanel({ clusterId }: { clusterId: string }) {
           <div className="text-[10px] text-zinc-600 mt-0.5">
             이 구간의 아무 시점으로 복원할 수 있습니다 (PITR)
           </div>
+          {admin && (
+            <button
+              onClick={() => openRestore("pitr")}
+              className="mt-2 text-[10px] px-2 py-1 border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 transition-colors"
+            >
+              ↻ 시점으로 복원 (새 클러스터)
+            </button>
+          )}
         </div>
       )}
 
@@ -251,7 +418,16 @@ export function BackupPanel({ clusterId }: { clusterId: string }) {
           {showSnapshots && (
             <div className="mt-2 border border-zinc-800 divide-y divide-zinc-800 max-h-64 overflow-y-auto">
               {data.snapshots.map((s) => (
-                <SnapshotRow key={s.id} snapshot={s} />
+                <SnapshotRow
+                  key={s.id}
+                  snapshot={s}
+                  admin={admin}
+                  onRestore={
+                    s.status === "available"
+                      ? () => openRestore("snapshot", s.id)
+                      : undefined
+                  }
+                />
               ))}
             </div>
           )}
@@ -261,7 +437,15 @@ export function BackupPanel({ clusterId }: { clusterId: string }) {
   );
 }
 
-function SnapshotRow({ snapshot: s }: { snapshot: BackupSnapshot }) {
+function SnapshotRow({
+  snapshot: s,
+  admin,
+  onRestore,
+}: {
+  snapshot: BackupSnapshot;
+  admin?: boolean;
+  onRestore?: () => void;
+}) {
   const isManual = s.type === "manual";
   return (
     <div className="px-3 py-2 flex items-baseline justify-between gap-3">
@@ -277,10 +461,21 @@ function SnapshotRow({ snapshot: s }: { snapshot: BackupSnapshot }) {
         </span>
         <span className="text-xs text-zinc-200 font-mono truncate">{s.id}</span>
       </div>
-      <div className="text-[10px] text-zinc-500 tabular-nums flex-shrink-0">
-        {s.created ? relTime(s.created) : "—"}
-        {s.allocated_storage_gb != null && (
-          <span className="ml-2">{fmtNumber(s.allocated_storage_gb)} GB</span>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="text-[10px] text-zinc-500 tabular-nums">
+          {s.created ? relTime(s.created) : "—"}
+          {s.allocated_storage_gb != null && (
+            <span className="ml-2">{fmtNumber(s.allocated_storage_gb)} GB</span>
+          )}
+        </div>
+        {admin && onRestore && (
+          <button
+            onClick={onRestore}
+            title="이 스냅샷에서 새 클러스터로 복원"
+            className="text-[10px] px-1.5 py-0.5 border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 transition-colors"
+          >
+            복원
+          </button>
         )}
       </div>
     </div>

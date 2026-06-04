@@ -41,6 +41,7 @@ def request_approval_impl(
         "modify_scaling",
         "manage_maintenance",
         "create_snapshot",
+        "restore_cluster",
         "other",
     ):
         return {

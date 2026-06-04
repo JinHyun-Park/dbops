@@ -285,5 +285,42 @@ class DataStack(cdk.Stack):
             targets=[targets.LambdaFunction(self.proactive_monitor)],
         )
 
+        # Restore finalizer (phase 3). RestoreDBCluster* only restores the
+        # cluster volume — the writer instance must be added AFTER the cluster
+        # reaches `available`, which outlasts the synchronous restore request.
+        # This scheduled Lambda scans the registry for `pending_instance` rows
+        # and finishes the job: create one db.serverless writer + backfill the
+        # connection coordinates so the restored cluster becomes queryable.
+        self.restore_finalizer = lambda_.Function(
+            self, "RestoreFinalizer",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../data-pipeline/restore_finalizer"),
+            timeout=cdk.Duration.seconds(60),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": self.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+            },
+        )
+        self.cache_db.secret.grant_read(self.restore_finalizer)
+        self.cache_db.grant_data_api_access(self.restore_finalizer)
+        foundation.clusters_table.grant_read_write_data(self.restore_finalizer)
+        self.restore_finalizer.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "rds:DescribeDBClusters",
+                # Adds the writer instance to the restored cluster once it is
+                # available. AddTags stamps dbops:type=restored on the instance.
+                "rds:CreateDBInstance",
+                "rds:AddTagsToResource",
+            ],
+            resources=["*"],
+        ))
+        events.Rule(self, "RestoreFinalizerSchedule",
+            schedule=events.Schedule.rate(cdk.Duration.minutes(2)),
+            targets=[targets.LambdaFunction(self.restore_finalizer)],
+        )
+
         cdk.CfnOutput(self, "CacheDbClusterArn", value=self.cache_db.cluster_arn)
         cdk.CfnOutput(self, "CacheDbEndpoint", value=self.cache_db.cluster_endpoint.hostname)

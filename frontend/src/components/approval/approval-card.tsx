@@ -47,6 +47,8 @@ const ACTION_RISK: Record<string, string> = {
   manage_maintenance: "low",
   // Snapshot creation is non-destructive (adds a backup) → low risk.
   create_snapshot: "low",
+  // Restore stands up a NEW billable cluster → high risk (source untouched).
+  restore_cluster: "high",
   other: "medium",
 };
 
@@ -183,6 +185,41 @@ function ActionDetails({
       <div className="text-sm text-zinc-100 space-y-1.5">
         <DetailRow label="action" value={String(details.action ?? "")} />
         <DetailRow label="window" value={String(details.window ?? "")} mono />
+      </div>
+    );
+  }
+
+  if (action === "restore_cluster") {
+    const mode = String(details.mode ?? "snapshot");
+    return (
+      <div className="text-sm text-zinc-100 space-y-1.5">
+        <DetailRow
+          label="new cluster"
+          value={String(details.new_cluster_id ?? "")}
+          mono
+        />
+        <DetailRow label="mode" value={mode} />
+        {mode === "pitr" ? (
+          <DetailRow
+            label="restore to"
+            value={
+              details.use_latest === true
+                ? "latest restorable time"
+                : String(details.restore_to_time ?? "")
+            }
+            mono
+          />
+        ) : (
+          <DetailRow
+            label="snapshot"
+            value={String(details.snapshot_id ?? "")}
+            mono
+          />
+        )}
+        <div className="text-[11px] text-amber-300/90">
+          ⚠ 새 클러스터를 생성합니다 (과금 발생). 소스 클러스터는 변경되지
+          않습니다.
+        </div>
       </div>
     );
   }

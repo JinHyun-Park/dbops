@@ -12,6 +12,7 @@ from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
 from mcp_servers.operations.tools.modify_scaling import modify_scaling_impl
 from mcp_servers.operations.tools.query_activity_audit import query_activity_audit_impl
 from mcp_servers.operations.tools.request_approval import request_approval_impl
+from mcp_servers.operations.tools.restore_cluster import restore_cluster_impl
 from mcp_servers.operations.tools.review_sql import review_sql_impl
 from mcp_servers.operations.tools.schema_diff import get_schema_diff_impl
 from mcp_servers.operations.tools.schema_history import get_schema_history_impl
@@ -137,6 +138,32 @@ TOOLS = {
             "required": ["cluster_id"],
         },
     },
+    "restore_cluster": {
+        "impl": restore_cluster_impl,
+        "description": (
+            "Restore a cluster into a BRAND-NEW cluster from a snapshot or a "
+            "point in time. HIGH RISK — it stands up a new, billable Aurora "
+            "cluster. The source cluster is NEVER modified. Requires "
+            "approved=true AND approval_id=<uuid from request_approval>. "
+            "mode='snapshot' needs snapshot_id; mode='pitr' needs "
+            "restore_to_time (ISO 8601 within the PITR window) or "
+            "use_latest=true. new_cluster_id MUST differ from cluster_id."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Source Aurora cluster ID (read-only — never modified)"},
+                "new_cluster_id": {"type": "string", "description": "Identifier for the NEW restored cluster (must differ from source)"},
+                "mode": {"type": "string", "enum": ["snapshot", "pitr"], "default": "snapshot", "description": "Restore source type"},
+                "snapshot_id": {"type": "string", "description": "Snapshot to restore from (mode=snapshot)"},
+                "restore_to_time": {"type": "string", "description": "ISO 8601 timestamp within the PITR window (mode=pitr)"},
+                "use_latest": {"type": "boolean", "default": False, "description": "Restore to the latest restorable time (mode=pitr)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id", "new_cluster_id"],
+        },
+    },
     "review_sql": {
         "impl": review_sql_impl,
         "description": "Pre-execution SQL review with risk classification, issue detection, and rollback suggestion",
@@ -221,7 +248,7 @@ TOOLS = {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "action_type": {
                     "type": "string",
-                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "other"],
+                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "other"],
                     "description": "Which write tool needs approval",
                 },
                 "action_details": {

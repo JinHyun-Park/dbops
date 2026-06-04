@@ -40,6 +40,9 @@ import boto3
 # alphanumeric + hyphens, no consecutive hyphens, no trailing hyphen.
 _SNAPSHOT_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
 _CLUSTER_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-]{0,254}$")
+# A NEW cluster id must satisfy the stricter RDS *create* rules (letter-start,
+# <=63, no leading/trailing/consecutive hyphens) — same shape as a snapshot id.
+_NEW_CLUSTER_ID_RE = _SNAPSHOT_ID_RE
 
 
 def _resp(status: int, body) -> dict:
@@ -89,11 +92,13 @@ def _caller(event: dict) -> tuple[bool, str]:
     return True, name
 
 
-def _audit(cluster_id: str, username: str, snapshot_id: str, status: str, result: str = ""):
+def _audit(cluster_id: str, username: str, action_type: str, params: dict,
+           status: str, result: str = "", message: str = ""):
     """Best-effort write to audit_log (PG) + event_log (PG) via RDS Data
-    API. Failures here don't fail the snapshot — the snapshot already
+    API. Failures here don't fail the operation — the AWS action already
     happened; the audit trail is secondary. Logged so /activity and
-    /timeline pick it up."""
+    /timeline pick it up. Generic over action_type so both snapshot
+    creation and cluster restore share one writer."""
     cluster_arn = os.environ.get("CACHE_DB_CLUSTER_ARN", "")
     secret_arn = os.environ.get("CACHE_DB_SECRET_ARN", "")
     database = os.environ.get("CACHE_DB_NAME", "dbops")
@@ -120,12 +125,13 @@ def _audit(cluster_id: str, username: str, snapshot_id: str, status: str, result
     _exec(
         "INSERT INTO audit_log (cluster_id, action_type, tool_name, "
         "requested_by, approved_by, parameters, result, status, resolved_at) "
-        "VALUES (:cid, 'create_snapshot', 'create_snapshot', :who, :who, "
+        "VALUES (:cid, :atype, :atype, :who, :who, "
         ":params::jsonb, :result, :status, NOW())",
         {
             "cid": cluster_id,
+            "atype": action_type,
             "who": username,
-            "params": json.dumps({"snapshot_id": snapshot_id}),
+            "params": json.dumps(params),
             "result": result[:500],
             "status": status,
         },
@@ -140,8 +146,8 @@ def _audit(cluster_id: str, username: str, snapshot_id: str, status: str, result
         {
             "cid": cluster_id,
             "sev": severity,
-            "msg": f"Manual snapshot {snapshot_id} {status} by {username}",
-            "raw": json.dumps({"snapshot_id": snapshot_id, "status": status, "by": username}),
+            "msg": message or f"{action_type} {status} by {username}",
+            "raw": json.dumps({**params, "status": status, "by": username}),
         },
     )
 
@@ -160,31 +166,66 @@ def _make_snapshot_id(cluster_id: str) -> str:
     return sid[:63].rstrip("-")
 
 
-def lambda_handler(event, context):
-    method = (
-        event.get("requestContext", {}).get("http", {}).get("method")
-        or event.get("httpMethod")
-        or "POST"
-    )
-    if method == "OPTIONS":
-        return _resp(200, {"ok": True})
-    if method != "POST":
-        return _resp(405, {"error": f"method {method} not allowed"})
-
-    path_params = event.get("pathParameters") or {}
-    cluster_id = path_params.get("cluster_id") or ""
-    if not cluster_id or not _CLUSTER_ID_RE.match(cluster_id):
-        return _resp(400, {"error": "invalid cluster_id"})
-
-    is_admin, username = _caller(event)
-    if not is_admin:
-        return _resp(403, {"error": "forbidden", "reason": "admin role required to create snapshots"})
-
+def _source_restore_kwargs(rds, source_id: str):
+    """Read network + scaling config off the source cluster so the restored
+    cluster lands in the same VPC and keeps a Serverless v2 profile. Returns
+    (kwargs, engine). Missing pieces fall back to safe defaults."""
     try:
-        body = json.loads(event.get("body") or "{}")
-    except json.JSONDecodeError:
-        return _resp(400, {"error": "body must be valid JSON"})
+        resp = rds.describe_db_clusters(DBClusterIdentifier=source_id)
+        c = (resp.get("DBClusters") or [{}])[0]
+    except Exception:
+        c = {}
+    kwargs: dict = {}
+    if c.get("DBSubnetGroup"):
+        kwargs["DBSubnetGroupName"] = c["DBSubnetGroup"]
+    sgs = [g.get("VpcSecurityGroupId") for g in (c.get("VpcSecurityGroups") or []) if g.get("VpcSecurityGroupId")]
+    if sgs:
+        kwargs["VpcSecurityGroupIds"] = sgs
+    scaling = c.get("ServerlessV2ScalingConfiguration") or {}
+    kwargs["ServerlessV2ScalingConfiguration"] = {
+        "MinCapacity": scaling.get("MinCapacity", 0.5),
+        "MaxCapacity": scaling.get("MaxCapacity", 4),
+    }
+    return kwargs, c.get("Engine", "aurora-postgresql")
 
+
+def _register_pending(cluster_id: str, source_id: str, restore_source: str,
+                      region: str, engine: str, cluster_arn: str, who: str) -> bool:
+    """Write a clusters-registry row the restore_finalizer will pick up once
+    the cluster is available. pending_instance=true is the finalizer's
+    work signal."""
+    from datetime import datetime, timezone
+
+    table_name = os.environ.get("CLUSTERS_TABLE", "")
+    if not table_name:
+        return False
+    try:
+        boto3.resource("dynamodb").Table(table_name).put_item(
+            Item={
+                "cluster_id": cluster_id,
+                "account_id": (cluster_arn.split(":")[4] if cluster_arn.count(":") >= 4 else ""),
+                "region": region,
+                "engine": engine,
+                "spoke_role_arn": "",
+                "registered_at": datetime.now(timezone.utc).isoformat(),
+                "connection_status": "untested",
+                "connection_error": "",
+                "is_restored": True,
+                "restored_from": source_id,
+                "restore_source": restore_source,
+                "pending_instance": True,
+                "status": "restoring",
+                "created_by": who,
+                **({"cluster_arn": cluster_arn} if cluster_arn else {}),
+            }
+        )
+        return True
+    except Exception as e:
+        print(f"[backups] registry put failed: {e}")
+        return False
+
+
+def _handle_snapshot(cluster_id: str, username: str, body: dict):
     snapshot_id = (body.get("snapshot_id") or "").strip()
     if snapshot_id:
         if not _SNAPSHOT_ID_RE.match(snapshot_id) or len(snapshot_id) > 63:
@@ -211,11 +252,14 @@ def lambda_handler(event, context):
     except rds.exceptions.DBClusterSnapshotAlreadyExistsFault:
         return _resp(409, {"error": f"snapshot id '{snapshot_id}' already exists"})
     except Exception as e:
-        _audit(cluster_id, username, snapshot_id, "failed", str(e)[:300])
+        _audit(cluster_id, username, "create_snapshot", {"snapshot_id": snapshot_id},
+               "failed", str(e)[:300], f"Manual snapshot {snapshot_id} failed by {username}")
         return _resp(502, {"error": "create_snapshot failed", "message": str(e)[:300]})
 
     snap = resp.get("DBClusterSnapshot", {})
-    _audit(cluster_id, username, snapshot_id, "executed", snap.get("Status", "creating"))
+    _audit(cluster_id, username, "create_snapshot", {"snapshot_id": snapshot_id},
+           "executed", snap.get("Status", "creating"),
+           f"Manual snapshot {snapshot_id} executed by {username}")
 
     return _resp(201, {
         "ok": True,
@@ -228,3 +272,141 @@ def lambda_handler(event, context):
             "있으며, Backup 패널에서 상태가 available 로 바뀌면 사용 가능합니다."
         ),
     })
+
+
+def _handle_restore(cluster_id: str, username: str, body: dict):
+    """Restore the source cluster into a NEW cluster (snapshot or PITR).
+
+    Stronger gate than snapshot creation: beyond the admin role, the caller
+    must echo the target cluster id in `confirm` (type-to-confirm), since a
+    restore stands up a billable cluster. The source is never modified —
+    RDS restore APIs only read it, and we refuse target == source.
+    """
+    new_id = (body.get("new_cluster_id") or "").strip()
+    mode = (body.get("mode") or "snapshot").strip().lower()
+    confirm = (body.get("confirm") or "").strip()
+
+    if not new_id or not _NEW_CLUSTER_ID_RE.match(new_id) or len(new_id) > 63:
+        return _resp(400, {"error": (
+            "invalid new_cluster_id — 1-63 chars, start with a letter, "
+            "alphanumeric + single hyphens"
+        )})
+    if new_id == cluster_id:
+        return _resp(400, {"error": (
+            "new_cluster_id must differ from the source — restore always "
+            "creates a NEW cluster"
+        )})
+    if confirm != new_id:
+        return _resp(400, {"error": (
+            "confirmation failed — 'confirm' must exactly match new_cluster_id"
+        )})
+
+    rds = boto3.client("rds")
+    base_kwargs, engine = _source_restore_kwargs(rds, cluster_id)
+    tags = [
+        {"Key": "dbops:type", "Value": "restored"},
+        {"Key": "dbops:restored-from", "Value": cluster_id},
+        {"Key": "dbops:created-by", "Value": username},
+    ]
+
+    try:
+        if mode == "pitr":
+            pitr_kwargs = dict(base_kwargs)
+            use_latest = bool(body.get("use_latest"))
+            restore_to_time = (body.get("restore_to_time") or "").strip()
+            if use_latest:
+                pitr_kwargs["UseLatestRestorableTime"] = True
+            elif restore_to_time:
+                pitr_kwargs["RestoreToTime"] = restore_to_time
+            else:
+                return _resp(400, {"error": "pitr mode requires restore_to_time or use_latest=true"})
+            resp = rds.restore_db_cluster_to_point_in_time(
+                DBClusterIdentifier=new_id,
+                SourceDBClusterIdentifier=cluster_id,
+                Tags=tags,
+                **pitr_kwargs,
+            )
+            restore_source = "pitr:latest" if use_latest else f"pitr:{restore_to_time}"
+        else:
+            snapshot_id = (body.get("snapshot_id") or "").strip()
+            if not snapshot_id:
+                return _resp(400, {"error": "snapshot mode requires snapshot_id"})
+            resp = rds.restore_db_cluster_from_snapshot(
+                DBClusterIdentifier=new_id,
+                SnapshotIdentifier=snapshot_id,
+                Engine=engine,
+                Tags=tags,
+                **base_kwargs,
+            )
+            restore_source = f"snapshot:{snapshot_id}"
+    except rds.exceptions.DBClusterAlreadyExistsFault:
+        return _resp(409, {"error": f"cluster id '{new_id}' already exists"})
+    except Exception as e:
+        _audit(cluster_id, username, "restore_cluster",
+               {"new_cluster_id": new_id, "mode": mode}, "failed", str(e)[:300],
+               f"Restore to {new_id} failed by {username}")
+        return _resp(502, {"error": "restore failed", "message": str(e)[:300]})
+
+    new_cluster = resp.get("DBCluster", {})
+    new_arn = new_cluster.get("DBClusterArn", "")
+    region = new_arn.split(":")[3] if new_arn.count(":") >= 4 else os.environ.get("AWS_REGION", "")
+    registered = _register_pending(new_id, cluster_id, restore_source, region, engine, new_arn, username)
+
+    _audit(cluster_id, username, "restore_cluster",
+           {"new_cluster_id": new_id, "mode": mode, "restore_source": restore_source},
+           "executed", new_cluster.get("Status", "creating"),
+           f"Restore to {new_id} ({restore_source}) started by {username}")
+
+    return _resp(201, {
+        "ok": True,
+        "cluster_id": cluster_id,
+        "new_cluster_id": new_id,
+        "mode": mode,
+        "restore_source": restore_source,
+        "registered": registered,
+        "created_by": username,
+        "message": (
+            f"'{cluster_id}' → 새 클러스터 '{new_id}' 복원을 시작했습니다 "
+            f"({restore_source}). 클러스터가 available 되면 writer 인스턴스가 "
+            "자동 생성되고 DBOps 등록이 마무리됩니다 (수 분 소요). 소스 "
+            "클러스터는 변경되지 않습니다."
+        ),
+    })
+
+
+def lambda_handler(event, context):
+    method = (
+        event.get("requestContext", {}).get("http", {}).get("method")
+        or event.get("httpMethod")
+        or "POST"
+    )
+    if method == "OPTIONS":
+        return _resp(200, {"ok": True})
+    if method != "POST":
+        return _resp(405, {"error": f"method {method} not allowed"})
+
+    raw_path = (
+        event.get("rawPath")
+        or event.get("requestContext", {}).get("http", {}).get("path", "")
+        or ""
+    )
+    path_params = event.get("pathParameters") or {}
+    cluster_id = path_params.get("cluster_id") or ""
+    if not cluster_id or not _CLUSTER_ID_RE.match(cluster_id):
+        return _resp(400, {"error": "invalid cluster_id"})
+
+    is_admin, username = _caller(event)
+    if not is_admin:
+        return _resp(403, {"error": "forbidden", "reason": "admin role required"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except json.JSONDecodeError:
+        return _resp(400, {"error": "body must be valid JSON"})
+
+    # Two write actions share this Lambda, dispatched by path:
+    #   POST .../snapshot  → create a manual snapshot (low risk)
+    #   POST .../restore   → restore into a NEW cluster (type-to-confirm)
+    if raw_path.endswith("/restore"):
+        return _handle_restore(cluster_id, username, body)
+    return _handle_snapshot(cluster_id, username, body)
