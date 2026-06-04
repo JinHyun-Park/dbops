@@ -9,6 +9,12 @@ class Settings:
     AGENT_MODEL_ID = "anthropic.claude-sonnet-4-20250514-v1:0"
     GATEWAY_SEMANTIC_SEARCH = True
 
+    # AWS Knowledge MCP server — AWS-hosted, public, no-auth streamable-HTTP
+    # MCP exposing official AWS/Aurora documentation. The agent connects to
+    # it directly (alongside the Gateway) for always-current docs with zero
+    # infrastructure. Set empty to disable.
+    KNOWLEDGE_MCP_URL = "https://knowledge-mcp.global.api.aws/mcp"
+
     PI_COLLECTION_INTERVAL_MIN = 1
     STATS_COLLECTION_INTERVAL_MIN = 5
 

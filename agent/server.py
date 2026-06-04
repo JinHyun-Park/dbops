@@ -1,4 +1,5 @@
 import base64
+import contextlib
 import json
 import os
 import sys
@@ -31,6 +32,14 @@ GATEWAY_CLIENT_SECRET = os.environ.get("GATEWAY_CLIENT_SECRET", "")
 GATEWAY_SCOPE = os.environ.get("GATEWAY_SCOPE", "")
 MODEL_ID = os.environ.get("AGENT_MODEL_ID", "apac.anthropic.claude-sonnet-4-20250514-v1:0")
 REGION = os.environ.get("AWS_REGION_OVERRIDE", os.environ.get("AWS_REGION", "ap-northeast-2"))
+# AWS Knowledge MCP server — AWS-hosted, public, no-auth streamable-HTTP MCP
+# exposing official AWS/Aurora documentation search + read. Gives the agent
+# always-current docs with zero infrastructure (no Bedrock KB / vector store).
+# Empty disables it. Read-only doc lookups → connects directly, not via the
+# Cedar-gated Gateway.
+KNOWLEDGE_MCP_URL = os.environ.get(
+    "KNOWLEDGE_MCP_URL", "https://knowledge-mcp.global.api.aws/mcp"
+)
 
 _token_cache = {"token": None, "expires_at": 0}
 
@@ -82,6 +91,14 @@ def make_mcp_client():
     return MCPClient(lambda: streamablehttp_client(GATEWAY_URL, headers=headers))
 
 
+def make_knowledge_client():
+    """AWS Knowledge MCP client — official AWS/Aurora docs, public + no-auth.
+    Returns None when KNOWLEDGE_MCP_URL is empty (feature disabled)."""
+    if not KNOWLEDGE_MCP_URL:
+        return None
+    return MCPClient(lambda: streamablehttp_client(KNOWLEDGE_MCP_URL))
+
+
 def _resolve_model_id(payload) -> str:
     """Pick the Bedrock model ID per invocation.
 
@@ -131,22 +148,34 @@ async def invoke(payload, context):
         log.warning(f"Model init failed for {model_id}: {e}; falling back to {MODEL_ID}")
         model_id = MODEL_ID
         model = BedrockModel(model_id=model_id, region_name=REGION)
-    mcp_client = make_mcp_client()
+    gateway_client = make_mcp_client()
+    knowledge_client = make_knowledge_client()
 
-    if mcp_client is None:
-        agent = Agent(model=model, system_prompt=build_system_prompt(), tools=[])
-        async for event in agent.stream_async(prompt):
-            if isinstance(event, dict) and "data" in event and isinstance(event["data"], str):
-                yield event["data"]
-        return
-
-    with mcp_client:
-        try:
-            tools = mcp_client.list_tools_sync()
-            log.info(f"Loaded {len(tools)} tools from Gateway")
-        except Exception as e:
-            log.warning(f"Gateway tools load failed: {e}")
-            tools = []
+    # Tools come from two independent MCP servers, merged into one list:
+    #   - AgentCore Gateway: the org's read/write tools (Cedar-gated).
+    #   - AWS Knowledge MCP: official AWS/Aurora docs (public, read-only).
+    # Each source is isolated so one being down (token failure, egress block,
+    # rate limit) degrades gracefully instead of breaking chat. Both stay
+    # open via the ExitStack for the duration of streaming, since tool calls
+    # happen mid-stream.
+    tools = []
+    with contextlib.ExitStack() as stack:
+        if gateway_client is not None:
+            try:
+                stack.enter_context(gateway_client)
+                gw_tools = gateway_client.list_tools_sync()
+                tools.extend(gw_tools)
+                log.info(f"Loaded {len(gw_tools)} tools from Gateway")
+            except Exception as e:
+                log.warning(f"Gateway tools load failed: {e}")
+        if knowledge_client is not None:
+            try:
+                stack.enter_context(knowledge_client)
+                kb_tools = knowledge_client.list_tools_sync()
+                tools.extend(kb_tools)
+                log.info(f"Loaded {len(kb_tools)} tools from AWS Knowledge MCP")
+            except Exception as e:
+                log.warning(f"AWS Knowledge MCP load failed: {e}")
 
         agent = Agent(model=model, system_prompt=build_system_prompt(), tools=tools)
         async for event in agent.stream_async(prompt):

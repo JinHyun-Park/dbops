@@ -204,11 +204,22 @@ class AgentStack(cdk.Stack):
                 entrypoint=["server.py"],
                 path="../agent",
                 runtime=agentcore.AgentCoreRuntime.PYTHON_3_12,
+                # AgentCore Runtime REJECTS artifacts containing Python bytecode
+                # caches ("artifact contains Python cache files"). Exclude them
+                # so a local `python`/py_compile run inside agent/ can't poison
+                # the next deploy.
+                exclude=["**/__pycache__", "**/*.pyc", "**/*.pyo"],
             ),
             environment_variables={
                 "AGENT_MODEL_ID": Settings.AGENT_MODEL_ID,
                 "AWS_REGION_OVERRIDE": Settings.REGION,
                 "GATEWAY_MCP_URL": gateway_mcp_url,
+                # AWS Knowledge MCP (official AWS/Aurora docs). getattr default
+                # keeps synth working if a local settings.py predates this key.
+                "KNOWLEDGE_MCP_URL": getattr(
+                    Settings, "KNOWLEDGE_MCP_URL",
+                    "https://knowledge-mcp.global.api.aws/mcp",
+                ),
             },
             network_configuration=agentcore.RuntimeNetworkConfiguration.using_public_network(),
             authorizer_configuration=agentcore.RuntimeAuthorizerConfiguration.using_cognito(

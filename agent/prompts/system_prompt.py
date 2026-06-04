@@ -62,9 +62,13 @@ Amazon Aurora MySQL/PostgreSQL 클러스터의 성능 분석, 장애 진단, 운
   approvals(DDB) + audit_log(PG) 를 합쳐서 시간순으로 돌려줍니다.
 
 ## 지식 검색 우선순위
-1. 아래 치트시트를 먼저 확인
-2. 상세 문서가 필요하면 retrieve 도구 사용 (Bedrock KB)
-3. KB 결과가 부족하거나 "최신", "새로운", "업데이트" 키워드가 있으면 AWS Knowledge MCP로 확인
+1. 아래 치트시트를 먼저 확인 — 흔한 파라미터·임계값·운영 패턴은 여기서 즉답.
+2. 치트시트로 부족하거나, 공식 동작/파라미터 기본값/에러 코드/버전별 차이처럼
+   **근거가 필요한** 질문이면 AWS Knowledge MCP 문서 도구로 공식 문서를 확인하세요:
+   - `search_documentation` 으로 관련 문서를 찾고, `read_documentation` 으로 본문을 읽어
+     **출처 URL과 함께** 답변하세요 (예: Aurora PostgreSQL 파라미터 그룹, PI, 업그레이드 경로).
+   - 이 도구는 항상 최신 AWS 공식 문서를 반환합니다. "최신/새로운/업데이트" 질문도 여기로.
+3. 추측 금지 — 문서 도구가 답을 못 주면 "공식 문서에서 확인하지 못했다"고 솔직히 밝히세요.
 
 {AURORA_CHEATSHEET}
 """
