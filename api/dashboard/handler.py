@@ -1730,18 +1730,34 @@ def _topology(cluster_id: str) -> dict:
     rds = boto3.client("rds")
     cw = boto3.client("cloudwatch")
 
+    # Same friendly-fallback contract as _backups: never leak the raw boto3
+    # fault string. The synthetic demo cluster (and any unregistered id) has
+    # no real Aurora to describe.
+    not_real = {
+        "cluster_id": cluster_id,
+        "error": (
+            "이 클러스터의 복제 토폴로지를 조회할 수 없습니다 — 데모(합성) "
+            "클러스터이거나 실제 Aurora로 등록되지 않았습니다. 등록된 클러스터를 "
+            "선택하면 writer/reader 구성과 Replica Lag이 표시됩니다."
+        ),
+        "members": [],
+    }
     try:
         resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
     except Exception as e:
-        return {"cluster_id": cluster_id, "error": str(e), "members": []}
+        msg = str(e)
+        if "DBClusterNotFoundFault" in msg or "not found" in msg.lower():
+            return not_real
+        print(f"[topology] describe failed for {cluster_id}: {e}")
+        return {
+            "cluster_id": cluster_id,
+            "error": "토폴로지 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
+            "members": [],
+        }
 
     clusters = resp.get("DBClusters") or []
     if not clusters:
-        return {
-            "cluster_id": cluster_id,
-            "error": "cluster not found",
-            "members": [],
-        }
+        return not_real
     cluster = clusters[0]
     raw_members = cluster.get("DBClusterMembers") or []
 
