@@ -2,33 +2,135 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { Search } from "lucide-react";
 
-const commands = [
-  { id: "chat", label: "Chat — AI 대화", path: "/chat", shortcut: "C" },
+interface Command {
+  id: string;
+  label: string;
+  path: string;
+  group: string;
+}
+
+// Mirrors the sidebar taxonomy so the palette and the rail tell the same
+// story. Labels keep the English page name + a short Korean gloss.
+const commands: Command[] = [
+  {
+    id: "fleet",
+    label: "Fleet — 전체 클러스터",
+    path: "/fleet",
+    group: "Monitor",
+  },
   {
     id: "dashboard",
-    label: "Dashboard — 모니터링",
+    label: "Dashboard — 단일 클러스터",
     path: "/dashboard",
-    shortcut: "D",
+    group: "Monitor",
   },
+  {
+    id: "compare",
+    label: "Compare — 비교 분석",
+    path: "/compare",
+    group: "Monitor",
+  },
+  {
+    id: "slo",
+    label: "SLO — 가용성·지연 예산",
+    path: "/slo",
+    group: "Monitor",
+  },
+  {
+    id: "schema",
+    label: "Schema — FK 계보·의존성",
+    path: "/schema",
+    group: "Monitor",
+  },
+
+  { id: "chat", label: "Chat — AI 대화", path: "/chat", group: "Automate" },
   {
     id: "query-lab",
     label: "Query Lab — SQL 분석",
     path: "/query-lab",
-    shortcut: "Q",
+    group: "Automate",
   },
-  { id: "reports", label: "Reports — 리포트", path: "/reports", shortcut: "R" },
   {
     id: "approvals",
     label: "Approvals — 승인 센터",
     path: "/approvals",
-    shortcut: "A",
+    group: "Automate",
+  },
+  {
+    id: "ask",
+    label: "Ask the fleet — 자연어 질의",
+    path: "/ask",
+    group: "Automate",
+  },
+  {
+    id: "runbooks",
+    label: "Runbooks — 진단·처방",
+    path: "/runbooks",
+    group: "Automate",
+  },
+  {
+    id: "simulator",
+    label: "Simulator — what-if 시뮬",
+    path: "/simulator",
+    group: "Automate",
+  },
+
+  {
+    id: "timeline",
+    label: "Timeline — 통합 인시던트 피드",
+    path: "/timeline",
+    group: "Incident",
+  },
+  {
+    id: "activity",
+    label: "Activity — 감사·회고 로그",
+    path: "/activity",
+    group: "Incident",
+  },
+  {
+    id: "workload-diff",
+    label: "Workload diff — 쿼리 변화",
+    path: "/workload-diff",
+    group: "Incident",
+  },
+
+  {
+    id: "alerts",
+    label: "Alerts — 규칙·구독자",
+    path: "/alerts",
+    group: "Configure",
   },
   {
     id: "clusters",
     label: "Clusters — 클러스터 관리",
     path: "/clusters",
-    shortcut: "L",
+    group: "Configure",
+  },
+  {
+    id: "reports",
+    label: "Reports — 예약 리포트",
+    path: "/reports",
+    group: "Configure",
+  },
+  {
+    id: "cost",
+    label: "Cost — Bedrock 비용",
+    path: "/cost",
+    group: "Configure",
+  },
+  {
+    id: "preferences",
+    label: "Memory — 에이전트 기억",
+    path: "/preferences",
+    group: "Configure",
+  },
+  {
+    id: "health",
+    label: "Health — 자체 모니터링",
+    path: "/health",
+    group: "Configure",
   },
 ];
 
@@ -41,6 +143,11 @@ export function CommandPalette() {
     c.label.toLowerCase().includes(query.toLowerCase()),
   );
 
+  const open = useCallback(() => {
+    setIsOpen(true);
+    setQuery("");
+  }, []);
+
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "k") {
       e.preventDefault();
@@ -52,8 +159,14 @@ export function CommandPalette() {
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleKeyDown]);
+    // The sidebar Search button (and anything else) can open the palette by
+    // dispatching this event — keeps the trigger decoupled from this state.
+    window.addEventListener("dbops:open-command-palette", open);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("dbops:open-command-palette", open);
+    };
+  }, [handleKeyDown, open]);
 
   const handleSelect = (path: string) => {
     setIsOpen(false);
@@ -70,29 +183,36 @@ export function CommandPalette() {
         onClick={() => setIsOpen(false)}
       />
       <div className="relative w-full max-w-lg bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
-        <input
-          autoFocus
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="명령어 검색..."
-          className="w-full px-4 py-3 bg-transparent text-zinc-100 border-b border-zinc-700 focus:outline-none"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && filtered.length > 0) {
-              handleSelect(filtered[0].path);
-            }
-          }}
-        />
-        <div className="max-h-64 overflow-y-auto">
+        <div className="flex items-center gap-2.5 px-4 border-b border-zinc-700">
+          <Search
+            size={16}
+            strokeWidth={2}
+            className="text-zinc-500 flex-shrink-0"
+          />
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="페이지 검색..."
+            className="w-full py-3 bg-transparent text-zinc-100 focus:outline-none placeholder:text-zinc-600"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && filtered.length > 0) {
+                handleSelect(filtered[0].path);
+              }
+            }}
+          />
+        </div>
+        <div className="max-h-72 overflow-y-auto py-1">
           {filtered.map((cmd) => (
             <button
               key={cmd.id}
               onClick={() => handleSelect(cmd.path)}
-              className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-zinc-800 transition-colors"
+              className="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-zinc-800 transition-colors"
             >
               <span className="text-sm text-zinc-200">{cmd.label}</span>
-              <kbd className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded border border-zinc-700">
-                {cmd.shortcut}
-              </kbd>
+              <span className="text-[10px] uppercase tracking-wider text-zinc-600">
+                {cmd.group}
+              </span>
             </button>
           ))}
           {filtered.length === 0 && (
