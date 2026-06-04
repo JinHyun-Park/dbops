@@ -109,31 +109,52 @@ async def _call_knowledge_tool(name: str, arguments: dict) -> str:
     return text or "(문서 도구가 빈 응답을 반환했습니다)"
 
 
+def _run_knowledge_tool(name: str, arguments: dict) -> str:
+    """Run the async MCP call in a DEDICATED thread with its own event loop.
+
+    Strands invokes tools inside its own running event loop; opening the
+    mcp streamable-HTTP client's anyio task group there trips "cancel scope
+    in a different task". A fresh thread + asyncio.run keeps that task group
+    fully self-contained. The error reason is logged so failures aren't a
+    black box."""
+    import asyncio
+    import threading
+
+    box: dict = {}
+
+    def runner():
+        try:
+            box["ok"] = asyncio.run(_call_knowledge_tool(name, arguments))
+        except Exception as e:  # noqa: BLE001
+            box["err"] = e
+
+    t = threading.Thread(target=runner, daemon=True)
+    t.start()
+    t.join(timeout=30)
+    if t.is_alive():
+        log.warning(f"knowledge tool {name} timed out")
+        return "AWS 문서 도구 응답 시간이 초과되었습니다."
+    if "err" in box:
+        log.warning(f"knowledge tool {name} failed: {box['err']!r}")
+        return f"AWS 문서 도구 오류: {str(box['err'])[:200]}"
+    return box.get("ok", "(빈 응답)")
+
+
 @tool
-async def search_aws_documentation(search_phrase: str) -> str:
+def search_aws_documentation(search_phrase: str) -> str:
     """Search official AWS / Amazon Aurora documentation and return ranked
     results (title + URL + context). Use for authoritative AWS behavior —
     parameter defaults, limits, error codes, version differences, upgrade
     paths. Then call read_aws_documentation on a result URL for the full text.
     Always cite the source URL in your answer."""
-    try:
-        return await _call_knowledge_tool(
-            "aws___search_documentation", {"search_phrase": search_phrase}
-        )
-    except Exception as e:
-        return f"AWS 문서 검색에 실패했습니다: {str(e)[:200]}"
+    return _run_knowledge_tool("aws___search_documentation", {"search_phrase": search_phrase})
 
 
 @tool
-async def read_aws_documentation(url: str) -> str:
+def read_aws_documentation(url: str) -> str:
     """Read a single AWS documentation page by URL (use a URL returned by
     search_aws_documentation) and return its content as markdown."""
-    try:
-        return await _call_knowledge_tool(
-            "aws___read_documentation", {"requests": [{"url": url}]}
-        )
-    except Exception as e:
-        return f"AWS 문서 읽기에 실패했습니다: {str(e)[:200]}"
+    return _run_knowledge_tool("aws___read_documentation", {"requests": [{"url": url}]})
 
 
 def _resolve_model_id(payload) -> str:
