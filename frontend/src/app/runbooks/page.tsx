@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import {
   fetchClusters,
@@ -43,6 +44,7 @@ const DEFAULT_DRAFT: RunbookDraft = {
 };
 
 export default function RunbooksPage() {
+  const router = useRouter();
   const [clusters, setClusters] = useState<ClusterLite[]>([]);
   const [filterCluster, setFilterCluster] = useState<string>("");
   const [filterTag, setFilterTag] = useState<string>("");
@@ -78,6 +80,18 @@ export default function RunbooksPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Hand a runbook off to the agent: navigate to /chat with a pre-filled
+  // prompt. The chat page reads the `prompt` searchParam on mount and seeds
+  // the input. The agent then uses the get_runbook tool to pull the steps
+  // and runs each SQL step through the approval-gated execute_sql flow.
+  const runWithAgent = useCallback(
+    (rb: RunbookListItem) => {
+      const prompt = `다음 런북을 단계별로 검토하고 실행해줘: ${rb.title} (id=${rb.id})`;
+      router.push(`/chat?prompt=${encodeURIComponent(prompt)}`);
+    },
+    [router],
+  );
 
   return (
     <PageBody>
@@ -155,7 +169,10 @@ export default function RunbooksPage() {
         ) : (
           <ul className="divide-y divide-zinc-800 border border-zinc-800 bg-zinc-900/40">
             {items.map((rb) => (
-              <li key={rb.id}>
+              <li
+                key={rb.id}
+                className="flex items-stretch hover:bg-zinc-800/30 transition-colors"
+              >
                 <button
                   type="button"
                   onClick={async () => {
@@ -166,7 +183,7 @@ export default function RunbooksPage() {
                       setErr(e instanceof Error ? e.message : "fetch failed");
                     }
                   }}
-                  className="w-full text-left px-4 py-3 hover:bg-zinc-800/30 transition-colors"
+                  className="flex-1 min-w-0 text-left px-4 py-3"
                 >
                   <div className="flex items-baseline justify-between gap-3 flex-wrap">
                     <span className="text-sm text-zinc-200 font-medium">
@@ -203,6 +220,16 @@ export default function RunbooksPage() {
                     ))}
                   </div>
                 </button>
+                <div className="flex items-center pr-3 pl-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => runWithAgent(rb)}
+                    title="이 Runbook을 채팅으로 가져가 에이전트가 단계별로 검토·실행 (쓰기는 승인 필요)"
+                    className="text-[11px] px-2.5 py-1.5 border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 font-mono whitespace-nowrap transition-colors"
+                  >
+                    ▶ 에이전트로 실행
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

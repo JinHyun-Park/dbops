@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mcp_servers.operations.tools.audit_permissions import audit_permissions_impl
 from mcp_servers.operations.tools.create_snapshot import create_snapshot_impl
 from mcp_servers.operations.tools.execute_sql import execute_sql_impl
+from mcp_servers.operations.tools.get_runbook import get_runbook_impl
 from mcp_servers.operations.tools.manage_maintenance import manage_maintenance_impl
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
 from mcp_servers.operations.tools.modify_scaling import modify_scaling_impl
@@ -228,6 +229,37 @@ TOOLS = {
                     "type": "integer",
                     "default": 7,
                     "description": "Look-back window in days (1..90)",
+                },
+            },
+        },
+    },
+    "get_runbook": {
+        "impl": get_runbook_impl,
+        "description": (
+            "Fetch a saved runbook (markdown playbook from /runbooks) by id "
+            "OR a fuzzy title/tag query, and get back its content plus the "
+            "fenced ```sql blocks extracted as ordered `steps`. Use this to "
+            "EXECUTE a runbook: present the steps to the DBA, then run each "
+            "step's SQL via the execute_sql tool. execute_sql is "
+            "approval-gated — writes require request_approval then "
+            "execute_sql with approved=true AND approval_id. NEVER bypass "
+            "approval. This tool is read-only and executes nothing itself. "
+            "When the query is ambiguous it returns a `candidates` list — "
+            "confirm the intended runbook with the DBA before proceeding."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "runbook_id": {
+                    "type": "string",
+                    "description": "Exact runbook id (preferred when known)",
+                },
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Fuzzy title/tag search when the id is unknown "
+                        "(matches title ILIKE or any tag ILIKE)"
+                    ),
                 },
             },
         },

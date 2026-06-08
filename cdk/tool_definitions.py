@@ -94,6 +94,13 @@ def operations_schema():
             },
             [],
         ),
+        _tool(
+            "get_runbook",
+            "Fetch a saved runbook by id or fuzzy title/tag, returning its SQL "
+            "steps to run via execute_sql (approval-gated); read-only",
+            {"runbook_id": "string", "query": "string"},
+            [],
+        ),
     ]
 
 
