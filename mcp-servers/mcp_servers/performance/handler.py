@@ -135,7 +135,13 @@ TOOLS = {
     },
     "recommend_index": {
         "impl": recommend_index_impl,
-        "description": "Recommend indexes based on sequential scan ratio and query patterns",
+        "description": (
+            "(PostgreSQL) Emit concrete CREATE INDEX CONCURRENTLY DDL by parsing the heavy "
+            "queries in the cache: derives the driving table and composite column order (WHERE "
+            "equality, then JOIN keys, then ORDER BY) from query_text, corroborated by "
+            "table_stats seq_scan/idx_scan when available. Read-only advice — never executed; "
+            "validate with EXPLAIN and create via the approval flow."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {

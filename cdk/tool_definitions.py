@@ -30,8 +30,11 @@ def performance_schema():
               {"cluster_id": "string", "metric": "string"}, ["cluster_id"]),
         _tool("get_performance_summary", "Get KPI summary for a time period",
               {"cluster_id": "string", "hours": "integer"}, ["cluster_id"]),
-        _tool("recommend_index", "Recommend indexes based on sequential scan patterns",
-              {"cluster_id": "string"}, ["cluster_id"]),
+        _tool("recommend_index",
+              "Emit CREATE INDEX CONCURRENTLY DDL by parsing heavy queries (table + "
+              "composite columns from WHERE/JOIN/ORDER BY), corroborated by table_stats "
+              "seq scans; read-only advice validated via EXPLAIN and the approval flow",
+              {"cluster_id": "string", "min_seq_scan_ratio": "number"}, ["cluster_id"]),
         _tool("get_vacuum_stats", "Get autovacuum stats and bloat ratio per table",
               {"cluster_id": "string"}, ["cluster_id"]),
         _tool("explain_plan",
