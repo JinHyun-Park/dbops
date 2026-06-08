@@ -102,9 +102,23 @@ def restore_cluster_impl(
             "cluster_id": cluster_id,
             "new_cluster_id": new_cluster_id,
             "mode": mode,
+            "snapshot_id": snapshot_id,
+            "restore_to_time": restore_to_time,
+            "use_latest": use_latest,
         }
 
-    guard = verify_approval(approval_id, cluster_id, "restore_cluster")
+    guard = verify_approval(
+        approval_id,
+        cluster_id,
+        "restore_cluster",
+        payload={
+            "new_cluster_id": new_cluster_id,
+            "mode": mode,
+            "snapshot_id": snapshot_id,
+            "restore_to_time": restore_to_time,
+            "use_latest": use_latest,
+        },
+    )
     if not guard.get("ok"):
         return {
             "status": "approval_denied",

@@ -27,7 +27,9 @@ def manage_maintenance_impl(
         if not approved:
             return {"status": "approval_required", "action": "modify_maintenance", "window": window}
 
-        guard = verify_approval(approval_id, cluster_id, "manage_maintenance")
+        guard = verify_approval(
+            approval_id, cluster_id, "manage_maintenance", payload={"window": window}
+        )
         if not guard.get("ok"):
             return {
                 "status": "approval_denied",

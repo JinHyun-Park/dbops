@@ -47,7 +47,18 @@ def test_approval_denied_when_guard_rejects(mock_guard):
     )
     assert out["status"] == "approval_denied"
     assert "stale" in out["reason"]
-    mock_guard.assert_called_once_with("aid", "prod-pg-1", "restore_cluster")
+    mock_guard.assert_called_once_with(
+        "aid",
+        "prod-pg-1",
+        "restore_cluster",
+        payload={
+            "new_cluster_id": "restored-1",
+            "mode": "snapshot",
+            "snapshot_id": "",
+            "restore_to_time": "",
+            "use_latest": False,
+        },
+    )
 
 
 @patch("mcp_servers.operations.tools.restore_cluster.verify_approval")

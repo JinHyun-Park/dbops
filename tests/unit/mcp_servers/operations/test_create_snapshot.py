@@ -24,7 +24,9 @@ def test_approval_denied_when_guard_rejects(mock_guard):
     )
     assert out["status"] == "approval_denied"
     assert "stale" in out["reason"]
-    mock_guard.assert_called_once_with("aid-1", "prod-pg-1", "create_snapshot")
+    mock_guard.assert_called_once_with(
+        "aid-1", "prod-pg-1", "create_snapshot", payload={"snapshot_id": ""}
+    )
 
 
 @patch("mcp_servers.operations.tools.create_snapshot.boto3")

@@ -30,6 +30,8 @@ the tool surface unchanged for read-only callers.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import time
 from datetime import datetime, timezone
@@ -42,6 +44,107 @@ from botocore.exceptions import ClientError
 # Window is intentionally short — if the operator approved 45 minutes ago
 # the world has moved on, and the agent must request fresh approval.
 REPLAY_WINDOW_SECONDS = 30 * 60
+
+
+def _bypass_enabled() -> bool:
+    """Whether the local-dev approval bypass is active.
+
+    APPROVAL_GUARD_BYPASS lets local dev and unit tests skip the DDB round-trip.
+    It is REFUSED inside any AWS Lambda runtime — even if the env var is somehow
+    set on a deployed function (misconfig, tampering, a copy-pasted template),
+    the guard will not honor it in production. `AWS_LAMBDA_FUNCTION_NAME` /
+    `AWS_EXECUTION_ENV` are always present in the Lambda runtime and absent
+    locally, so the bypass cannot disable approvals on a real deployment."""
+    if os.environ.get("APPROVAL_GUARD_BYPASS") != "1":
+        return False
+    if os.environ.get("AWS_LAMBDA_FUNCTION_NAME") or os.environ.get("AWS_EXECUTION_ENV"):
+        print(
+            "[approval_guard] APPROVAL_GUARD_BYPASS is set but IGNORED — refusing "
+            "to bypass approval inside a Lambda runtime"
+        )
+        return False
+    return True
+
+
+def _norm_val(v):
+    """Normalise a value for stable hashing so trivially-equal payloads hash
+    the same across the request side (agent's action_details) and the execute
+    side (tool args): numbers and numeric strings collapse to float (2, 2.0,
+    "2" all match), bools stay bools, everything else stringifies."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v)
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return s
+
+
+def _project(action_type: str, details: dict) -> dict:
+    """Reduce an action payload to the fields that DEFINE the operation, so
+    the approval is bound to *what* gets executed, not just (cluster, action).
+    Both request_approval (storing the hash) and verify_approval (checking it)
+    run the same projection — that's the whole point of keeping it here.
+
+    Per-tool projections mirror each write tool's args. Aliases are tolerated
+    (the approval_required response sometimes uses a different key than the
+    tool arg) so the agent can pass either shape without a false mismatch."""
+    d = details or {}
+    if action_type == "execute_sql":
+        return {"sql": str(d.get("sql") or "").strip()}
+    if action_type == "modify_parameter":
+        return {
+            "parameter_name": d.get("parameter_name") or d.get("parameter"),
+            "value": _norm_val(d.get("value")),
+        }
+    if action_type == "modify_scaling":
+        return {
+            "min_capacity": _norm_val(
+                d["min_capacity"] if "min_capacity" in d else d.get("min_acu")
+            ),
+            "max_capacity": _norm_val(
+                d["max_capacity"] if "max_capacity" in d else d.get("max_acu")
+            ),
+        }
+    if action_type == "manage_maintenance":
+        return {"window": str(d.get("window") or "").strip()}
+    if action_type == "create_snapshot":
+        sid = str(d.get("snapshot_id") or "").strip()
+        # The approval_required response advertises "(auto-generated)" when no
+        # id is given; treat that placeholder as empty so the request side
+        # (which may echo the placeholder) and the execute side (empty arg →
+        # auto-gen) hash to the same value instead of falsely mismatching.
+        if sid == "(auto-generated)":
+            sid = ""
+        return {"snapshot_id": sid}
+    if action_type == "restore_cluster":
+        # Bind the full restore spec — an approval for "restore snapshot A into
+        # cluster X" must not be reusable for snapshot B or a PITR target.
+        return {
+            "new_cluster_id": str(d.get("new_cluster_id") or "").strip(),
+            "mode": d.get("mode") or "snapshot",
+            "snapshot_id": str(d.get("snapshot_id") or "").strip(),
+            "restore_to_time": str(d.get("restore_to_time") or "").strip(),
+            "use_latest": bool(d.get("use_latest")),
+        }
+    # other / unknown: bind the FULL detail set VERBATIM (no numeric coercion).
+    # This closes the loose "other" bucket — an "other" approval now matches
+    # only if the entire registered payload matches. We deliberately do NOT
+    # run _norm_val here: collapsing distinct strings like "001" and 1 would
+    # let two different "other" operations share a hash.
+    return {k: d[k] for k in sorted(d.keys())}
+
+
+def canonical_action_hash(action_type: str, details: dict) -> str:
+    """SHA-256 of the canonical projection of an action payload. Stable across
+    key ordering and trivial numeric formatting differences."""
+    proj = _project(action_type, details)
+    blob = json.dumps(proj, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def _parse_resolved_at(value: str) -> Optional[float]:
@@ -81,17 +184,26 @@ def verify_approval(
     approval_id: str,
     cluster_id: str,
     action_type: str,
+    payload: Optional[dict] = None,
 ) -> dict:
     """Verify that `approval_id` is a fresh, matching, un-consumed approval
-    for this exact (cluster_id, action_type). On success, atomically
+    for this exact (cluster_id, action_type, payload). On success, atomically
     consume the row so it cannot be replayed.
+
+    `payload` is the operation the tool is ABOUT to execute (its real args).
+    If the approval row was minted with a `payload_hash` (every row created by
+    `request_approval` after payload-binding shipped), the projected hash of
+    `payload` must match — otherwise a harmless-looking approval cannot be
+    redirected to a different SQL/parameter/window on the same cluster.
 
     Returns `{"ok": True}` or `{"ok": False, "reason": "..."}`.
     """
     # Local-dev escape hatch — gated by a server-side env var so the agent
-    # cannot trigger it from tool arguments. Checked BEFORE approval_id
-    # validation so unit tests don't have to thread an id through.
-    if os.environ.get("APPROVAL_GUARD_BYPASS") == "1":
+    # cannot trigger it from tool arguments, AND refused inside the Lambda
+    # runtime so a misconfigured deploy can't turn approvals into a no-op.
+    # Checked BEFORE approval_id validation so unit tests don't have to thread
+    # an id through.
+    if _bypass_enabled():
         return {"ok": True, "bypass": True}
 
     if not approval_id:
@@ -140,6 +252,31 @@ def verify_approval(
                 f"{action_type!r}"
             ),
         }
+
+    # Payload binding: the approval is for a SPECIFIC operation payload, not
+    # just an (action_type, cluster) pair. Rows minted by request_approval
+    # carry a payload_hash; when present, the tool must pass the exact payload
+    # it is about to run and it must hash-match. Rows without a payload_hash
+    # are legacy (pre-binding) — skip the check rather than break in-flight
+    # approvals across the deploy boundary.
+    expected_hash = row.get("payload_hash")
+    if expected_hash:
+        if payload is None:
+            return {
+                "ok": False,
+                "reason": (
+                    "approval is payload-bound but the tool passed no payload "
+                    "to verify — server refuses to execute"
+                ),
+            }
+        if canonical_action_hash(action_type, payload) != expected_hash:
+            return {
+                "ok": False,
+                "reason": (
+                    "approved payload does not match the operation being "
+                    "executed — request a new approval for this exact change"
+                ),
+            }
 
     resolved_at = _parse_resolved_at(row.get("resolved_at", ""))
     if resolved_at is None:

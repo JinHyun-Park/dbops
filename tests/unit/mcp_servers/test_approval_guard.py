@@ -12,7 +12,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
-from mcp_servers.shared.approval_guard import REPLAY_WINDOW_SECONDS, verify_approval
+from mcp_servers.shared.approval_guard import (
+    REPLAY_WINDOW_SECONDS,
+    canonical_action_hash,
+    verify_approval,
+)
 
 
 def _iso_now(delta_seconds: int = 0) -> str:
@@ -74,6 +78,31 @@ def test_verify_approval_bypass_env_for_local_dev():
     result = verify_approval("aid-1", "prod-pg-1", "execute_sql")
     assert result["ok"] is True
     assert result.get("bypass") is True
+
+
+@patch.dict(
+    "os.environ",
+    {"APPROVAL_GUARD_BYPASS": "1", "AWS_LAMBDA_FUNCTION_NAME": "dbops-prod-OperationsMCP"},
+    clear=True,
+)
+def test_bypass_refused_inside_lambda_runtime():
+    """Even if APPROVAL_GUARD_BYPASS leaks onto a deployed Lambda, the guard
+    must NOT honor it — approvals stay enforced in production. With no
+    APPROVALS_TABLE set, the bypass being refused means we fall through to the
+    fail-closed 'table not configured' path rather than returning ok."""
+    result = verify_approval("aid-1", "prod-pg-1", "execute_sql")
+    assert result["ok"] is False
+    assert "bypass" not in result
+
+
+@patch.dict(
+    "os.environ",
+    {"APPROVAL_GUARD_BYPASS": "1", "AWS_EXECUTION_ENV": "AWS_Lambda_python3.12"},
+    clear=True,
+)
+def test_bypass_refused_when_aws_execution_env_present():
+    result = verify_approval("aid-1", "prod-pg-1", "execute_sql")
+    assert result["ok"] is False
 
 
 @patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
@@ -237,3 +266,99 @@ def test_verify_approval_ddb_scan_error_rejected(mock_boto3):
     result = verify_approval("aid-1", "prod-pg-1", "execute_sql")
     assert result["ok"] is False
     assert "not found" in result["reason"]
+
+
+# ===== Payload binding (the approval is tied to the exact operation) =====
+
+
+def _row_with_hash(action_type, details, **kw):
+    row = _fresh_row(action_type=action_type, **kw)
+    row["payload_hash"] = canonical_action_hash(action_type, details)
+    return row
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
+@patch("mcp_servers.shared.approval_guard.boto3")
+def test_payload_match_passes(mock_boto3):
+    row = _row_with_hash("execute_sql", {"sql": "UPDATE t SET x=1 WHERE id=5"})
+    mock_boto3.resource.return_value.Table.return_value = _scan_returning(row)
+    result = verify_approval(
+        "aid-1", "prod-pg-1", "execute_sql",
+        payload={"sql": "UPDATE t SET x=1 WHERE id=5"},
+    )
+    assert result == {"ok": True}
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
+@patch("mcp_servers.shared.approval_guard.boto3")
+def test_payload_mismatch_rejected(mock_boto3):
+    """The headline P0: an approval for one SQL must not execute a different
+    one on the same cluster/action_type."""
+    row = _row_with_hash("execute_sql", {"sql": "UPDATE t SET x=1 WHERE id=5"})
+    mock_boto3.resource.return_value.Table.return_value = _scan_returning(row)
+    result = verify_approval(
+        "aid-1", "prod-pg-1", "execute_sql",
+        payload={"sql": "UPDATE t SET x=1"},  # WHERE dropped
+    )
+    assert result["ok"] is False
+    assert "does not match" in result["reason"]
+    # A mismatch must NOT consume the row — the legit approval stays usable.
+    mock_boto3.resource.return_value.Table.return_value.update_item.assert_not_called()
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
+@patch("mcp_servers.shared.approval_guard.boto3")
+def test_payload_bound_row_but_no_payload_passed_rejected(mock_boto3):
+    """Fail-closed: a payload-bound row with a tool that forgot to pass the
+    payload must be refused, not waved through."""
+    row = _row_with_hash("execute_sql", {"sql": "SELECT pg_reload_conf()"})
+    mock_boto3.resource.return_value.Table.return_value = _scan_returning(row)
+    result = verify_approval("aid-1", "prod-pg-1", "execute_sql")
+    assert result["ok"] is False
+    assert "payload-bound" in result["reason"]
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
+@patch("mcp_servers.shared.approval_guard.boto3")
+def test_legacy_row_without_hash_skips_binding(mock_boto3):
+    """Rows minted before payload-binding shipped have no payload_hash — the
+    guard must not break them across the deploy boundary."""
+    mock_boto3.resource.return_value.Table.return_value = _scan_returning(_fresh_row())
+    result = verify_approval(
+        "aid-1", "prod-pg-1", "execute_sql", payload={"sql": "anything"}
+    )
+    assert result == {"ok": True}
+
+
+def test_canonical_hash_request_and_execute_shapes_agree():
+    """request_approval stores hash(action_details); the tool verifies with
+    hash(its real args). These must agree for every write tool, including
+    benign shape differences (parameter vs parameter_name, int vs float)."""
+    # execute_sql: extra keys on the request side are ignored
+    assert canonical_action_hash("execute_sql", {"sql": "VACUUM t", "note": "x"}) == \
+        canonical_action_hash("execute_sql", {"sql": "VACUUM t"})
+    # modify_parameter: response key "parameter" vs tool arg "parameter_name"
+    assert canonical_action_hash("modify_parameter", {"parameter": "work_mem", "value": "64MB"}) == \
+        canonical_action_hash("modify_parameter", {"parameter_name": "work_mem", "value": "64MB"})
+    # modify_scaling: int vs float, and min_acu alias vs min_capacity
+    assert canonical_action_hash("modify_scaling", {"min_acu": 2, "max_acu": 8}) == \
+        canonical_action_hash("modify_scaling", {"min_capacity": 2.0, "max_capacity": 8.0})
+    # different operations must NOT collide
+    assert canonical_action_hash("execute_sql", {"sql": "DELETE FROM t"}) != \
+        canonical_action_hash("execute_sql", {"sql": "DELETE FROM u"})
+    # create_snapshot: the approval_required placeholder "(auto-generated)"
+    # must hash the same as the empty arg the execute side passes.
+    assert canonical_action_hash("create_snapshot", {"snapshot_id": "(auto-generated)"}) == \
+        canonical_action_hash("create_snapshot", {"snapshot_id": ""})
+    # ...but a NAMED snapshot must not collide with the auto path.
+    assert canonical_action_hash("create_snapshot", {"snapshot_id": "nightly-1"}) != \
+        canonical_action_hash("create_snapshot", {"snapshot_id": ""})
+
+
+def test_other_bucket_preserves_string_distinctness():
+    """The generic 'other' projection must NOT numeric-coerce, or distinct
+    string payloads could collide into one approval."""
+    assert canonical_action_hash("other", {"code": "001"}) != \
+        canonical_action_hash("other", {"code": "1"})
+    assert canonical_action_hash("other", {"a": 1, "b": 2}) == \
+        canonical_action_hash("other", {"b": 2, "a": 1})  # key order irrelevant

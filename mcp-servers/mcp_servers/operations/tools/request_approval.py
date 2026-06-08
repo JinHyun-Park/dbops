@@ -18,6 +18,8 @@ import uuid
 
 import boto3
 
+from mcp_servers.shared.approval_guard import canonical_action_hash
+
 
 def request_approval_impl(
     cache,
@@ -62,6 +64,11 @@ def request_approval_impl(
                 "cluster_id": cluster_id,
                 "action_type": action_type,
                 "action_details": action_details,
+                # Bind the approval to this exact payload. verify_approval
+                # re-derives the same hash from the tool's real args at execute
+                # time and refuses any mismatch — so an approval for one SQL
+                # cannot be consumed for a different one on the same cluster.
+                "payload_hash": canonical_action_hash(action_type, action_details),
                 "requested_by": requested_by,
             }
         )

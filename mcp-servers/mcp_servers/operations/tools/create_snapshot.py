@@ -41,7 +41,9 @@ def create_snapshot_impl(
             "snapshot_id": snapshot_id or "(auto-generated)",
         }
 
-    guard = verify_approval(approval_id, cluster_id, "create_snapshot")
+    guard = verify_approval(
+        approval_id, cluster_id, "create_snapshot", payload={"snapshot_id": snapshot_id}
+    )
     if not guard.get("ok"):
         return {
             "status": "approval_denied",

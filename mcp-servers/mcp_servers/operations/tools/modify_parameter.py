@@ -15,7 +15,12 @@ def modify_parameter_impl(
     if not approved:
         return {"status": "approval_required", "cluster_id": cluster_id, "parameter": parameter_name, "value": value}
 
-    guard = verify_approval(approval_id, cluster_id, "modify_parameter")
+    guard = verify_approval(
+        approval_id,
+        cluster_id,
+        "modify_parameter",
+        payload={"parameter_name": parameter_name, "value": value},
+    )
     if not guard.get("ok"):
         return {
             "status": "approval_denied",

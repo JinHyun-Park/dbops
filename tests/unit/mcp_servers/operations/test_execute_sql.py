@@ -70,3 +70,159 @@ def test_execute_sql_write_approved_without_id_rejected():
         )
         assert result["status"] == "approval_denied"
         assert "approval_id missing" in result["reason"]
+
+
+# ===== Side-effecting "read" SQL must not take the no-approval fast-path =====
+
+
+def test_select_calling_pg_terminate_backend_needs_approval():
+    """`SELECT pg_terminate_backend(pid)` reads like a SELECT but kills a
+    session — it must require approval, not execute silently."""
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1", sql="SELECT pg_terminate_backend(12345)"
+    )
+    assert out["status"] == "approval_required"
+    assert "side-effecting" in out["reason"]
+
+
+def test_explain_analyze_needs_approval():
+    """EXPLAIN ANALYZE actually executes the underlying statement, so even on a
+    plain SELECT it must require approval (not the read fast-path)."""
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1",
+        sql="EXPLAIN ANALYZE SELECT * FROM big_table",
+    )
+    assert out["status"] == "approval_required"
+    assert "side-effecting" in out["reason"]
+
+
+def test_explain_analyze_of_delete_is_blocked_as_dangerous():
+    """EXPLAIN ANALYZE of a DELETE would run the DELETE — DELETE FROM trips the
+    dangerous-pattern block first, requiring force=true."""
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1",
+        sql="EXPLAIN ANALYZE DELETE FROM users WHERE id=1",
+    )
+    assert out["status"] == "blocked"
+
+
+def test_explain_analyze_with_options_needs_approval():
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1",
+        sql="EXPLAIN (ANALYZE, BUFFERS) SELECT * FROM t",
+    )
+    assert out["status"] == "approval_required"
+
+
+def test_select_into_needs_approval():
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1",
+        sql="SELECT * INTO new_table FROM users",
+    )
+    assert out["status"] == "approval_required"
+
+
+def test_select_for_update_needs_approval():
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1",
+        sql="SELECT * FROM jobs WHERE state='queued' FOR UPDATE",
+    )
+    assert out["status"] == "approval_required"
+
+
+def test_stacked_statements_need_approval():
+    """A SELECT carrying a second statement must not be waved through."""
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1",
+        sql="SELECT 1; UPDATE users SET name='x'",
+    )
+    assert out["status"] == "approval_required"
+    assert "Multiple SQL statements" in out["reason"]
+
+
+@patch.dict(
+    "os.environ",
+    {"TARGET_CLUSTER_ARN": "arn:test", "TARGET_SECRET_ARN": "arn:secret", "TARGET_DB_NAME": "testdb"},
+)
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+def test_benign_select_with_semicolon_and_into_in_literal_still_safe(mock_boto3):
+    """Literals must not trigger false positives: a semicolon and the word
+    INTO inside a string must NOT force approval."""
+    rds = MagicMock()
+    mock_boto3.client.return_value = rds
+    rds.execute_statement.return_value = {"columnMetadata": [{"name": "note"}], "records": []}
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1",
+        sql="SELECT note FROM payments WHERE note = 'paid into acct; ref 9'",
+    )
+    assert out["status"] == "executed"
+
+
+def test_comment_marker_inside_string_cannot_hide_stacked_stmt():
+    """Regression: a `--` inside a string literal must NOT be treated as a
+    comment that erases a following stacked statement. `SELECT '--'; UPDATE...`
+    is genuinely multi-statement and must require approval."""
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1",
+        sql="SELECT '--'; UPDATE t SET x = 1",
+    )
+    assert out["status"] == "approval_required"
+    assert "Multiple SQL statements" in out["reason"]
+
+
+def test_set_config_needs_approval():
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1",
+        sql="SELECT set_config('work_mem', '1GB', false)",
+    )
+    assert out["status"] == "approval_required"
+
+
+def test_pg_try_advisory_lock_needs_approval():
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1",
+        sql="SELECT pg_try_advisory_lock(42)",
+    )
+    assert out["status"] == "approval_required"
+
+
+def test_pg_advisory_unlock_needs_approval():
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1", sql="SELECT pg_advisory_unlock_all()"
+    )
+    assert out["status"] == "approval_required"
+
+
+@patch.dict(
+    "os.environ",
+    {"TARGET_CLUSTER_ARN": "arn:test", "TARGET_SECRET_ARN": "arn:secret", "TARGET_DB_NAME": "testdb"},
+)
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+def test_block_comment_with_semicolon_still_safe(mock_boto3):
+    """A block comment containing a semicolon must not look multi-statement."""
+    rds = MagicMock()
+    mock_boto3.client.return_value = rds
+    rds.execute_statement.return_value = {"columnMetadata": [{"name": "c"}], "records": []}
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1",
+        sql="SELECT count(*) AS c /* careful; do not drop */ FROM orders",
+    )
+    assert out["status"] == "executed"
+
+
+@patch.dict(
+    "os.environ",
+    {"TARGET_CLUSTER_ARN": "arn:test", "TARGET_SECRET_ARN": "arn:secret", "TARGET_DB_NAME": "testdb"},
+)
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+def test_dollar_quoted_literal_with_semicolon_still_safe(mock_boto3):
+    """A dollar-quoted literal containing a semicolon is data, not a second
+    statement."""
+    rds = MagicMock()
+    mock_boto3.client.return_value = rds
+    rds.execute_statement.return_value = {"columnMetadata": [{"name": "v"}], "records": []}
+    out = execute_sql_impl(
+        MagicMock(), cluster_id="prod-pg-1",
+        sql="SELECT $$a; b$$ AS v",
+    )
+    assert out["status"] == "executed"

@@ -15,7 +15,12 @@ def modify_scaling_impl(
     if not approved:
         return {"status": "approval_required", "cluster_id": cluster_id, "min_capacity": min_capacity, "max_capacity": max_capacity}
 
-    guard = verify_approval(approval_id, cluster_id, "modify_scaling")
+    guard = verify_approval(
+        approval_id,
+        cluster_id,
+        "modify_scaling",
+        payload={"min_capacity": min_capacity, "max_capacity": max_capacity},
+    )
     if not guard.get("ok"):
         return {
             "status": "approval_denied",
