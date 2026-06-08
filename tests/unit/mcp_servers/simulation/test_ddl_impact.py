@@ -34,3 +34,19 @@ def test_simulate_exclusive_lock_ddl():
     assert result["online_ddl_possible"] is False
     assert result["lock_type"] == "exclusive"
     assert "점검" in result["recommendation"]
+
+
+def test_ddl_impact_reads_cluster_scoped_cache_not_local_catalog():
+    """Regression: table size/rows must come from the pre-collected
+    `table_stats` cache filtered by cluster_id, not the cache DB's own
+    pg_stat_user_tables."""
+    mock_cache = MagicMock()
+    mock_cache.execute.return_value = QueryResult(columns=[], rows=[], row_count=0)
+    simulate_ddl_impact_impl(
+        mock_cache, cluster_id="prod-pg-1", ddl_sql="ALTER TABLE orders ADD COLUMN note text"
+    )
+    sql, params = mock_cache.execute.call_args.args
+    assert "table_stats" in sql
+    assert "pg_stat_user_tables" not in sql
+    assert "cluster_id = :cluster_id" in sql
+    assert params["cluster_id"] == "prod-pg-1"

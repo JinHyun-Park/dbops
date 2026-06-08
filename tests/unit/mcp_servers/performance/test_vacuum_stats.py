@@ -17,3 +17,17 @@ def test_vacuum_stats_detects_bloat():
     result = get_vacuum_stats_impl(mock_cache, cluster_id="prod-pg-1")
     assert len(result["warnings"]) == 1
     assert "orders" in result["warnings"][0]
+
+
+def test_vacuum_stats_reads_cluster_scoped_cache_not_local_catalog():
+    """Regression: must query the pre-collected `table_stats` cache filtered by
+    cluster_id — NOT the cache DB's own pg_stat_user_tables (which would report
+    DBOps' internal tables for every cluster)."""
+    mock_cache = MagicMock()
+    mock_cache.execute.return_value = QueryResult(columns=[], rows=[], row_count=0)
+    get_vacuum_stats_impl(mock_cache, cluster_id="prod-pg-1")
+    sql, params = mock_cache.execute.call_args.args
+    assert "table_stats" in sql
+    assert "pg_stat_user_tables" not in sql
+    assert "cluster_id = :cluster_id" in sql
+    assert params["cluster_id"] == "prod-pg-1"

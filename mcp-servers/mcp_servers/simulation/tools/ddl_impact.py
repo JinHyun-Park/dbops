@@ -13,7 +13,17 @@ def simulate_ddl_impact_impl(cache: CacheClient, cluster_id: str, ddl_sql: str) 
 
     table_info = {}
     if table_match:
-        info_sql = "SELECT relname, n_live_tup as row_count, pg_total_relation_size(oid) as size_bytes FROM pg_stat_user_tables WHERE upper(relname) = :table_name LIMIT 1"
+        # Read the pre-collected `table_stats` cache (scoped to this cluster,
+        # latest snapshot for the named table) rather than the cache DB's own
+        # pg_stat_user_tables — the previous version had no cluster filter and
+        # introspected the DBOps cache instead of the target cluster.
+        info_sql = """
+            SELECT table_name, n_live_tup AS row_count, total_bytes AS size_bytes
+            FROM table_stats
+            WHERE cluster_id = :cluster_id AND upper(table_name) = :table_name
+            ORDER BY snapshot_time DESC
+            LIMIT 1
+        """
         result = cache.execute(info_sql, {"cluster_id": cluster_id, "table_name": table_match})
         table_info = result.rows[0] if result.rows else {}
 
