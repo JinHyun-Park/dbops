@@ -1,7 +1,6 @@
-import boto3
-
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.cluster_targets import rds_client_for_cluster
 
 
 def modify_scaling_impl(
@@ -28,7 +27,7 @@ def modify_scaling_impl(
             "cluster_id": cluster_id,
         }
 
-    rds = boto3.client("rds")
+    rds = rds_client_for_cluster(cluster_id)
     params = {"DBClusterIdentifier": cluster_id}
     sc = {}
     if min_capacity is not None:

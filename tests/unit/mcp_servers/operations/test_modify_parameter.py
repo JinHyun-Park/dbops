@@ -15,12 +15,12 @@ def test_modify_parameter_requires_approval():
 
 
 @patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
-@patch("mcp_servers.operations.tools.modify_parameter.boto3")
-def test_modify_parameter_with_approval(mock_boto3):
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_modify_parameter_with_approval(mock_rds_for):
     """Approved + cluster on a CUSTOM parameter group → impl applies the
     change via modify_db_cluster_parameter_group. Guard bypassed via env."""
     mock_rds = MagicMock()
-    mock_boto3.client.return_value = mock_rds
+    mock_rds_for.return_value = mock_rds
     # The impl looks up the cluster's parameter group via DescribeDBClusters
     # before mutating — stub that with a non-default group name so the
     # default-group safety check passes.
@@ -42,12 +42,12 @@ def test_modify_parameter_with_approval(mock_boto3):
 
 
 @patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
-@patch("mcp_servers.operations.tools.modify_parameter.boto3")
-def test_modify_parameter_refuses_default_group(mock_boto3):
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_modify_parameter_refuses_default_group(mock_rds_for):
     """Approved + cluster on the AWS-default parameter group → impl refuses
     and returns default_group_refused without calling modify."""
     mock_rds = MagicMock()
-    mock_boto3.client.return_value = mock_rds
+    mock_rds_for.return_value = mock_rds
     mock_rds.describe_db_clusters.return_value = {
         "DBClusters": [{"DBClusterParameterGroup": "default.aurora-postgresql15"}],
     }

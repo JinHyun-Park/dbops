@@ -119,3 +119,32 @@ def test_instance_already_exists_is_idempotent():
     out = handler._finalize_one(rds, table, {"cluster_id": "restored-1"})
     assert out["result"] == "finalized"
     table.update_item.assert_called_once()
+
+
+def test_rds_for_local_when_no_role(monkeypatch):
+    """No spoke role → a region-scoped local RDS client, no assume_role."""
+    fake_boto3 = MagicMock()
+    monkeypatch.setattr(handler, "boto3", fake_boto3)
+    handler._rds_for(region="ap-northeast-2")
+    fake_boto3.client.assert_called_once_with("rds", region_name="ap-northeast-2")
+
+
+def test_rds_for_assumes_spoke_role(monkeypatch):
+    """A spoke_role_arn → assume_role then build the RDS client from temp creds
+    so the finalizer can reach a cross-account restored cluster."""
+    fake_boto3 = MagicMock()
+    sts = MagicMock()
+    sts.assume_role.return_value = {
+        "Credentials": {
+            "AccessKeyId": "AKIA", "SecretAccessKey": "sk", "SessionToken": "tok",
+        }
+    }
+    fake_boto3.client.return_value = sts
+    monkeypatch.setattr(handler, "boto3", fake_boto3)
+    handler._rds_for(region="us-east-1", role_arn="arn:aws:iam::222:role/dbops-spoke")
+    fake_boto3.client.assert_called_once_with("sts")
+    assert sts.assume_role.call_args.kwargs["RoleArn"] == "arn:aws:iam::222:role/dbops-spoke"
+    sess_kwargs = fake_boto3.session.Session.call_args.kwargs
+    assert sess_kwargs["region_name"] == "us-east-1"
+    assert sess_kwargs["aws_session_token"] == "tok"
+    fake_boto3.session.Session.return_value.client.assert_called_once_with("rds")

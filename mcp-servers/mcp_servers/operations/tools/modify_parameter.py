@@ -1,7 +1,6 @@
-import boto3
-
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.cluster_targets import rds_client_for_cluster
 
 
 def modify_parameter_impl(
@@ -30,7 +29,7 @@ def modify_parameter_impl(
             "value": value,
         }
 
-    rds = boto3.client("rds")
+    rds = rds_client_for_cluster(cluster_id)
 
     # Look up the cluster's actual parameter group rather than guessing a name.
     try:

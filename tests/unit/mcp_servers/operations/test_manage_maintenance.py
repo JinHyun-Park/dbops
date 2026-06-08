@@ -3,10 +3,10 @@ from unittest.mock import MagicMock, patch
 from mcp_servers.operations.tools.manage_maintenance import manage_maintenance_impl
 
 
-@patch("mcp_servers.operations.tools.manage_maintenance.boto3")
-def test_manage_maintenance_describe(mock_boto3):
+@patch("mcp_servers.operations.tools.manage_maintenance.rds_client_for_cluster")
+def test_manage_maintenance_describe(mock_rds_for):
     mock_rds = MagicMock()
-    mock_boto3.client.return_value = mock_rds
+    mock_rds_for.return_value = mock_rds
     mock_rds.describe_db_clusters.return_value = {
         "DBClusters": [{
             "PreferredMaintenanceWindow": "sun:03:00-sun:04:00",
@@ -26,12 +26,12 @@ def test_manage_maintenance_modify_requires_approval():
 
 
 @patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
-@patch("mcp_servers.operations.tools.manage_maintenance.boto3")
-def test_manage_maintenance_modify_with_approval(mock_boto3):
+@patch("mcp_servers.operations.tools.manage_maintenance.rds_client_for_cluster")
+def test_manage_maintenance_modify_with_approval(mock_rds_for):
     """With the guard bypassed (local-dev env var), an approved=True call
     proceeds to the actual modify_db_cluster path."""
     mock_rds = MagicMock()
-    mock_boto3.client.return_value = mock_rds
+    mock_rds_for.return_value = mock_rds
     mock_cache = MagicMock()
     result = manage_maintenance_impl(
         mock_cache,

@@ -314,6 +314,10 @@ class DataStack(cdk.Stack):
                 # available. AddTags stamps dbops:type=restored on the instance.
                 "rds:CreateDBInstance",
                 "rds:AddTagsToResource",
+                # Cross-account restores: assume the cluster's spoke role
+                # (carried on the registry row) to finalize a cluster that
+                # landed in a spoke account.
+                "sts:AssumeRole",
             ],
             resources=["*"],
         ))

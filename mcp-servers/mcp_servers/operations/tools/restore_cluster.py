@@ -24,6 +24,7 @@ import boto3
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.cluster_targets import lookup_cluster, rds_client_for_cluster
 
 _CLUSTER_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
 
@@ -52,8 +53,14 @@ def _source_restore_kwargs(rds, source_id: str) -> dict:
 
 
 def _register_pending(cluster_id: str, source_id: str, restore_source: str,
-                      region: str, engine: str, cluster_arn: str, who: str):
-    """Write a clusters-registry row the restore_finalizer will pick up."""
+                      region: str, engine: str, cluster_arn: str, who: str,
+                      spoke_role_arn: str = ""):
+    """Write a clusters-registry row the restore_finalizer will pick up.
+
+    `spoke_role_arn` is inherited from the SOURCE cluster: the restore lands in
+    the same account as the source, so the finalizer (and later ops) must
+    assume the same spoke role to reach the new cluster. Without it a
+    cross-account restore would register a row the finalizer can't reach."""
     table_name = os.environ.get("CLUSTERS_TABLE", "")
     if not table_name:
         return False
@@ -66,7 +73,7 @@ def _register_pending(cluster_id: str, source_id: str, restore_source: str,
                 "account_id": (cluster_arn.split(":")[4] if cluster_arn.count(":") >= 4 else ""),
                 "region": region,
                 "engine": engine,
-                "spoke_role_arn": "",
+                "spoke_role_arn": spoke_role_arn,
                 "registered_at": datetime.now(timezone.utc).isoformat(),
                 "connection_status": "untested",
                 "connection_error": "",
@@ -136,7 +143,7 @@ def restore_cluster_impl(
         return {"status": "invalid_new_cluster_id",
                 "reason": "new_cluster_id must differ from the source cluster"}
 
-    rds = boto3.client("rds")
+    rds = rds_client_for_cluster(cluster_id)
     base_kwargs, engine = _source_restore_kwargs(rds, cluster_id)
     tags = [
         {"Key": "dbops:type", "Value": "restored"},
@@ -181,7 +188,13 @@ def restore_cluster_impl(
     new_cluster = resp.get("DBCluster", {})
     new_arn = new_cluster.get("DBClusterArn", "")
     region = (new_arn.split(":")[3] if new_arn.count(":") >= 4 else os.environ.get("AWS_REGION", ""))
-    registered = _register_pending(nid, cluster_id, restore_source, region, engine, new_arn, "agent")
+    # Inherit the source's spoke role so the finalizer can reach the restored
+    # cluster (it lands in the same account as the source).
+    src_role = lookup_cluster(cluster_id).get("spoke_role_arn", "")
+    registered = _register_pending(
+        nid, cluster_id, restore_source, region, engine, new_arn, "agent",
+        spoke_role_arn=src_role,
+    )
 
     return {
         "status": "restoring",

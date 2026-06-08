@@ -12,11 +12,11 @@ def test_modify_scaling_requires_approval():
 
 
 @patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
-@patch("mcp_servers.operations.tools.modify_scaling.boto3")
-def test_modify_scaling_with_approval(mock_boto3):
+@patch("mcp_servers.operations.tools.modify_scaling.rds_client_for_cluster")
+def test_modify_scaling_with_approval(mock_rds_for):
     """With the guard bypassed via env, approved=True executes the modify."""
     mock_rds = MagicMock()
-    mock_boto3.client.return_value = mock_rds
+    mock_rds_for.return_value = mock_rds
     mock_cache = MagicMock()
     result = modify_scaling_impl(
         mock_cache, cluster_id="prod-pg-1", min_capacity=0.5, max_capacity=4.0, approved=True

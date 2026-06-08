@@ -25,17 +25,42 @@ exists, or the cluster already has members, we skip to backfill + clear.
 A cluster that vanished (deleted mid-restore) gets its flag cleared and
 status marked failed so we stop polling it.
 
-Same-account / same-region only: restores land in the deploy account+
-region (the read tier `_backups` uses the same same-account RDS client),
-so a region-default boto3 client is correct here too.
+Cross-account / cross-region: each pending row carries the `region` and
+`spoke_role_arn` of the account the cluster was restored into (a restore
+lands in the same account+region as its source). The finalizer builds a
+per-row RDS client from those — assuming the spoke role when present — so it
+can finalize restores in spoke accounts, not just the deploy account.
 """
 
 import os
 import re
+from datetime import datetime, timezone
 
 import boto3
 
 _INSTANCE_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
+
+
+def _rds_for(region: str = "", role_arn: str = ""):
+    """RDS client targeting the restored cluster's account+region. With
+    `role_arn` set (cross-account restore), assume the spoke role first. This
+    Lambda lives in a separate package and can't import the mcp-servers shared
+    helper, so it mirrors the minimal assume-role logic (see
+    mcp_servers.shared.cluster_targets / api.clusters._session_for)."""
+    region = region or os.environ.get("AWS_REGION", "")
+    if not role_arn:
+        return boto3.client("rds", region_name=region or None)
+    creds = boto3.client("sts").assume_role(
+        RoleArn=role_arn,
+        RoleSessionName=f"dbops-finalizer-{datetime.now(timezone.utc).strftime('%H%M%S')}",
+        DurationSeconds=900,
+    )["Credentials"]
+    return boto3.session.Session(
+        region_name=region or None,
+        aws_access_key_id=creds["AccessKeyId"],
+        aws_secret_access_key=creds["SecretAccessKey"],
+        aws_session_token=creds["SessionToken"],
+    ).client("rds")
 
 
 def _make_instance_id(cluster_id: str) -> str:
@@ -192,7 +217,6 @@ def lambda_handler(event, context):
         return {"finalized": 0, "error": "CLUSTERS_TABLE missing"}
 
     table = boto3.resource("dynamodb").Table(table_name)
-    rds = boto3.client("rds")
 
     # Scan for pending restores. The registry is small (one row per managed
     # cluster) so a filtered scan every few minutes is cheap; in steady
@@ -207,7 +231,17 @@ def lambda_handler(event, context):
         print(f"[finalizer] scan failed: {e}")
         return {"finalized": 0, "error": str(e)[:200]}
 
-    results = [_finalize_one(rds, table, row) for row in pending]
+    # Build the RDS client PER ROW from its account+region (cross-account
+    # restores carry a spoke_role_arn) — a single hub client can't reach a
+    # cluster that was restored into a spoke account.
+    results = [
+        _finalize_one(
+            _rds_for(row.get("region", ""), row.get("spoke_role_arn", "")),
+            table,
+            row,
+        )
+        for row in pending
+    ]
     finalized = sum(1 for r in results if r.get("result") == "finalized")
     if results:
         print(f"[finalizer] processed {len(results)} pending: {results}")

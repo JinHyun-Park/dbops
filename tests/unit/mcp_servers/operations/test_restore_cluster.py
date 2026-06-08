@@ -82,12 +82,12 @@ def test_rejects_invalid_new_cluster_id(mock_guard):
     assert out["status"] == "invalid_new_cluster_id"
 
 
-@patch("mcp_servers.operations.tools.restore_cluster.boto3")
+@patch("mcp_servers.operations.tools.restore_cluster.rds_client_for_cluster")
 @patch("mcp_servers.operations.tools.restore_cluster.verify_approval")
-def test_snapshot_restore_when_approved(mock_guard, mock_boto3):
+def test_snapshot_restore_when_approved(mock_guard, mock_rds_for):
     mock_guard.return_value = {"ok": True}
     rds = _rds_mock()
-    mock_boto3.client.return_value = rds
+    mock_rds_for.return_value = rds
     out = restore_cluster_impl(
         MagicMock(), cluster_id="prod-pg-1", new_cluster_id="restored-1",
         mode="snapshot", snapshot_id="snap-1", approved=True, approval_id="aid",
@@ -103,11 +103,11 @@ def test_snapshot_restore_when_approved(mock_guard, mock_boto3):
     assert call["VpcSecurityGroupIds"] == ["sg-1"]
 
 
-@patch("mcp_servers.operations.tools.restore_cluster.boto3")
+@patch("mcp_servers.operations.tools.restore_cluster.rds_client_for_cluster")
 @patch("mcp_servers.operations.tools.restore_cluster.verify_approval")
-def test_snapshot_mode_requires_snapshot_id(mock_guard, mock_boto3):
+def test_snapshot_mode_requires_snapshot_id(mock_guard, mock_rds_for):
     mock_guard.return_value = {"ok": True}
-    mock_boto3.client.return_value = _rds_mock()
+    mock_rds_for.return_value = _rds_mock()
     out = restore_cluster_impl(
         MagicMock(), cluster_id="prod-pg-1", new_cluster_id="restored-1",
         mode="snapshot", approved=True, approval_id="aid",
@@ -115,12 +115,12 @@ def test_snapshot_mode_requires_snapshot_id(mock_guard, mock_boto3):
     assert out["status"] == "invalid_request"
 
 
-@patch("mcp_servers.operations.tools.restore_cluster.boto3")
+@patch("mcp_servers.operations.tools.restore_cluster.rds_client_for_cluster")
 @patch("mcp_servers.operations.tools.restore_cluster.verify_approval")
-def test_pitr_restore_use_latest(mock_guard, mock_boto3):
+def test_pitr_restore_use_latest(mock_guard, mock_rds_for):
     mock_guard.return_value = {"ok": True}
     rds = _rds_mock()
-    mock_boto3.client.return_value = rds
+    mock_rds_for.return_value = rds
     out = restore_cluster_impl(
         MagicMock(), cluster_id="prod-pg-1", new_cluster_id="restored-1",
         mode="pitr", use_latest=True, approved=True, approval_id="aid",
@@ -132,11 +132,11 @@ def test_pitr_restore_use_latest(mock_guard, mock_boto3):
     assert call["UseLatestRestorableTime"] is True
 
 
-@patch("mcp_servers.operations.tools.restore_cluster.boto3")
+@patch("mcp_servers.operations.tools.restore_cluster.rds_client_for_cluster")
 @patch("mcp_servers.operations.tools.restore_cluster.verify_approval")
-def test_pitr_requires_time_or_latest(mock_guard, mock_boto3):
+def test_pitr_requires_time_or_latest(mock_guard, mock_rds_for):
     mock_guard.return_value = {"ok": True}
-    mock_boto3.client.return_value = _rds_mock()
+    mock_rds_for.return_value = _rds_mock()
     out = restore_cluster_impl(
         MagicMock(), cluster_id="prod-pg-1", new_cluster_id="restored-1",
         mode="pitr", approved=True, approval_id="aid",
@@ -144,15 +144,15 @@ def test_pitr_requires_time_or_latest(mock_guard, mock_boto3):
     assert out["status"] == "invalid_request"
 
 
-@patch("mcp_servers.operations.tools.restore_cluster.boto3")
+@patch("mcp_servers.operations.tools.restore_cluster.rds_client_for_cluster")
 @patch("mcp_servers.operations.tools.restore_cluster.verify_approval")
-def test_already_exists_surfaced(mock_guard, mock_boto3):
+def test_already_exists_surfaced(mock_guard, mock_rds_for):
     mock_guard.return_value = {"ok": True}
     rds = _rds_mock()
     rds.restore_db_cluster_from_snapshot.side_effect = (
         rds.exceptions.DBClusterAlreadyExistsFault()
     )
-    mock_boto3.client.return_value = rds
+    mock_rds_for.return_value = rds
     out = restore_cluster_impl(
         MagicMock(), cluster_id="prod-pg-1", new_cluster_id="restored-1",
         mode="snapshot", snapshot_id="snap-1", approved=True, approval_id="aid",
@@ -160,13 +160,13 @@ def test_already_exists_surfaced(mock_guard, mock_boto3):
     assert out["status"] == "already_exists"
 
 
-@patch("mcp_servers.operations.tools.restore_cluster.boto3")
+@patch("mcp_servers.operations.tools.restore_cluster.rds_client_for_cluster")
 @patch("mcp_servers.operations.tools.restore_cluster.verify_approval")
-def test_restore_failure_surfaced(mock_guard, mock_boto3):
+def test_restore_failure_surfaced(mock_guard, mock_rds_for):
     mock_guard.return_value = {"ok": True}
     rds = _rds_mock()
     rds.restore_db_cluster_from_snapshot.side_effect = RuntimeError("boom")
-    mock_boto3.client.return_value = rds
+    mock_rds_for.return_value = rds
     out = restore_cluster_impl(
         MagicMock(), cluster_id="prod-pg-1", new_cluster_id="restored-1",
         mode="snapshot", snapshot_id="snap-1", approved=True, approval_id="aid",

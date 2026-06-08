@@ -104,6 +104,10 @@ class AgentStack(cdk.Stack):
                 "rds:RestoreDBClusterFromSnapshot",
                 "rds:RestoreDBClusterToPointInTime",
                 "rds:AddTagsToResource",
+                # Hub-spoke role chaining: control-plane write tools assume the
+                # cluster's spoke_role_arn (from the registry) so they target
+                # the right account+region instead of the hub.
+                "sts:AssumeRole",
             ],
             resources=["*"],
         ))

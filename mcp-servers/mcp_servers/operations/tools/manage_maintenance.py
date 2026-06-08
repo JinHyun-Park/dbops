@@ -1,7 +1,6 @@
-import boto3
-
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.cluster_targets import rds_client_for_cluster
 
 
 def manage_maintenance_impl(
@@ -12,7 +11,7 @@ def manage_maintenance_impl(
     approved: bool = False,
     approval_id: str = "",
 ) -> dict:
-    rds = boto3.client("rds")
+    rds = rds_client_for_cluster(cluster_id)
 
     if action == "describe":
         resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)

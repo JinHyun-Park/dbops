@@ -13,10 +13,9 @@ the guard for consistency and auditability.
 import re
 import time
 
-import boto3
-
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.cluster_targets import rds_client_for_cluster
 
 _SNAPSHOT_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
 
@@ -61,7 +60,7 @@ def create_snapshot_impl(
     else:
         sid = _make_snapshot_id(cluster_id)
 
-    rds = boto3.client("rds")
+    rds = rds_client_for_cluster(cluster_id)
     try:
         resp = rds.create_db_cluster_snapshot(
             DBClusterSnapshotIdentifier=sid,
