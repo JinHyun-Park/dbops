@@ -4,6 +4,9 @@ from aws_cdk import (
     aws_apigatewayv2 as apigwv2,
 )
 from aws_cdk import (
+    aws_apigatewayv2_authorizers as apigwv2_authorizers,
+)
+from aws_cdk import (
     aws_apigatewayv2_integrations as integrations,
 )
 from aws_cdk import aws_bedrockagentcore as agentcore_cfn
@@ -232,9 +235,26 @@ class AgentStack(cdk.Stack):
 
         # ===== REST API =====
 
+        # Cognito JWT authorizer for the REST API. API Gateway verifies the
+        # token signature, issuer, and expiry BEFORE the request reaches any
+        # Lambda — so the per-handler base64 decode only ever sees a token the
+        # gateway already validated, closing the forged-admin-token hole.
+        # Audience is the WebClient id; HTTP API JWT authorizers accept Cognito
+        # access tokens by matching the `client_id` claim, which is what the
+        # frontend sends (Authorization: Bearer <access_token>).
+        jwt_authorizer = apigwv2_authorizers.HttpUserPoolAuthorizer(
+            "DbopsJwtAuthorizer",
+            foundation.user_pool,
+            user_pool_clients=[foundation.user_pool_client],
+        )
+        # Routes that must NOT carry a Cognito JWT — Slack webhooks authenticate
+        # via HMAC signature, and /health is polled by external uptime monitors.
+        public_authorizer = apigwv2.HttpNoneAuthorizer()
+
         self.api = apigwv2.HttpApi(
             self, "HttpApi",
             api_name=f"dbops-{Settings.ENV}-api",
+            default_authorizer=jwt_authorizer,
             cors_preflight=apigwv2.CorsPreflightOptions(
                 allow_origins=["*"],
                 allow_methods=[apigwv2.CorsHttpMethod.ANY],
@@ -954,6 +974,7 @@ class AgentStack(cdk.Stack):
             path="/api/slack/interactive",
             methods=[apigwv2.HttpMethod.POST],
             integration=integrations.HttpLambdaIntegration("SlackInteractiveIntegration", slack_interactive_lambda),
+            authorizer=public_authorizer,
         )
         # Slack slash command — URL paired with the Slack app's
         # `/dbops` command settings. Same signing secret as interactive.
@@ -961,12 +982,15 @@ class AgentStack(cdk.Stack):
             path="/api/slack/command",
             methods=[apigwv2.HttpMethod.POST],
             integration=integrations.HttpLambdaIntegration("SlackCommandIntegration", slack_command_lambda),
+            authorizer=public_authorizer,
         )
-        # DBOps self-monitoring health endpoint
+        # DBOps self-monitoring health endpoint — public so external uptime
+        # monitors can poll it without a Cognito token.
         self.api.add_routes(
             path="/api/health",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("HealthIntegration", health_lambda),
+            authorizer=public_authorizer,
         )
         clusters_integration = integrations.HttpLambdaIntegration("ClustersIntegration", clusters_lambda)
         self.api.add_routes(
