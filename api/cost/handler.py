@@ -86,6 +86,198 @@ def _query_total(ce, start, end, services, tag_filter=None):
         return daily, total, str(e)[:200]
 
 
+# ===========================================================================
+# RDS / Aurora cost path (?view=rds)
+# ---------------------------------------------------------------------------
+# DBAs want "이 Aurora 클러스터가 한 달에 얼마지?". Unlike Bedrock — where DBOps
+# routes everything through Application Inference Profiles it controls — RDS/
+# Aurora resources are the *customer's own clusters*, which DBOps does not tag
+# or own. So per-cluster attribution is only possible if the operator has
+# activated a cost-allocation tag (e.g. `dbops:cluster`) on their clusters.
+# We attempt that grouping and, when it returns nothing, surface a clear
+# `per_cluster_available: false` flag + activation note rather than inventing
+# per-cluster numbers. The always-available view is RDS total + a usage-type
+# breakdown (Aurora I/O, storage, instance hours, backup, etc.).
+# ===========================================================================
+
+# Canonical RDS-family SERVICE name + Aurora alias. AWS bills Aurora under the
+# "Amazon Relational Database Service" SERVICE dimension; "Amazon Aurora" can
+# appear as a separate entry in some accounts/regions, so we keep both as a
+# fallback when discovery fails.
+_RDS_SERVICE_DEFAULT = [
+    "Amazon Relational Database Service",
+    "Amazon Aurora",
+]
+
+# Cost-allocation tag keys that plausibly identify an Aurora cluster. CE
+# stores user-defined tags un-prefixed (no "user:" needed when passed via the
+# Tags filter Key). We try each until one yields grouped rows.
+_CLUSTER_TAG_CANDIDATES = ["dbops:cluster", "cluster", "ClusterId", "DBClusterIdentifier"]
+
+
+def _rds_services(ce, start, end):
+    """Enumerate SERVICE dimension values that look like RDS/Aurora. Mirrors
+    `_bedrock_services` so the breakdown stays correct even if AWS renames or
+    splits the RDS service entry. Falls back to canonical names on failure."""
+    keep = []
+    try:
+        resp = ce.get_dimension_values(
+            TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
+            Dimension="SERVICE",
+        )
+        for v in resp.get("DimensionValues", []):
+            name = v.get("Value", "")
+            low = name.lower()
+            if "relational database" in low or "rds" in low or "aurora" in low:
+                keep.append(name)
+    except Exception as e:
+        print(f"GetDimensionValues (RDS) failed: {e}")
+    if not keep:
+        return list(_RDS_SERVICE_DEFAULT)
+    return keep
+
+
+def _query_by_dimension(ce, start, end, services, dimension):
+    """Roll up cost + usage by a CE DIMENSION (USAGE_TYPE / INSTANCE_TYPE)
+    scoped to the RDS-family SERVICE values. Returns (rows, error_or_none)
+    where each row is {usage_type, amount, quantity}."""
+    rollup = {}
+    try:
+        resp = ce.get_cost_and_usage(
+            TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
+            Granularity="DAILY",
+            Metrics=["UnblendedCost", "UsageQuantity"],
+            GroupBy=[{"Type": "DIMENSION", "Key": dimension}],
+            Filter={"Dimensions": {"Key": "SERVICE", "Values": services}},
+        )
+        for r in resp.get("ResultsByTime", []):
+            for g in r.get("Groups", []):
+                key = g["Keys"][0]
+                amount = float(g["Metrics"]["UnblendedCost"]["Amount"])
+                qty = float(g["Metrics"]["UsageQuantity"]["Amount"])
+                cur = rollup.setdefault(key, {"usage_type": key, "amount": 0.0, "quantity": 0.0})
+                cur["amount"] += amount
+                cur["quantity"] += qty
+        rows = sorted(rollup.values(), key=lambda x: x["amount"], reverse=True)
+        return rows, None
+    except Exception as e:
+        return [], str(e)[:200]
+
+
+def _query_per_cluster(ce, start, end, services):
+    """Attempt per-cluster attribution by grouping RDS spend on a cost-
+    allocation TAG. Tries each candidate tag key; the first that returns
+    non-empty grouped rows wins.
+
+    Returns (rows, tag_key, error_or_none):
+      - rows: [{cluster, amount}] sorted desc (empty list if no tag yields data)
+      - tag_key: the tag key that produced rows, else None
+      - error_or_none: "cost_allocation_tag_not_activated" when CE rejects the
+        tag because it isn't activated, else a short message, else None.
+
+    Per-cluster requires the operator to have activated the tag in AWS Billing
+    AND tagged their clusters with it — neither is something DBOps can do for
+    customer-owned RDS resources. We never fabricate rows; an empty result
+    means "not available", surfaced as a flag to the caller."""
+    last_err = None
+    for tag_key in _CLUSTER_TAG_CANDIDATES:
+        rollup = {}
+        try:
+            resp = ce.get_cost_and_usage(
+                TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
+                Granularity="DAILY",
+                Metrics=["UnblendedCost"],
+                GroupBy=[{"Type": "TAG", "Key": tag_key}],
+                Filter={"Dimensions": {"Key": "SERVICE", "Values": services}},
+            )
+        except Exception as e:
+            msg = str(e).lower()
+            if "is not currently activated" in msg or "not activated" in msg:
+                last_err = "cost_allocation_tag_not_activated"
+            else:
+                last_err = str(e)[:200]
+            continue
+        for r in resp.get("ResultsByTime", []):
+            for g in r.get("Groups", []):
+                # TAG groups come back as "tag_key$value" (empty value = untagged).
+                raw = g["Keys"][0]
+                value = raw.split("$", 1)[1] if "$" in raw else raw
+                if not value:
+                    continue  # skip the untagged bucket — not a real cluster
+                amount = float(g["Metrics"]["UnblendedCost"]["Amount"])
+                rollup[value] = rollup.get(value, 0.0) + amount
+        rows = [
+            {"cluster": k, "amount": round(v, 4)}
+            for k, v in rollup.items()
+            if v != 0.0
+        ]
+        if rows:
+            rows.sort(key=lambda x: x["amount"], reverse=True)
+            return rows, tag_key, None
+    return [], None, last_err
+
+
+def _handle_rds_view(ce, start, end, days):
+    """Build the RDS/Aurora cost response. Same envelope conventions as the
+    Bedrock path (total, currency, daily, by_usage_type, anomalies, ...) plus
+    RDS-specific per-cluster fields."""
+    services = _rds_services(ce, start, end)
+
+    # No tag filter — RDS spend is the customer's own clusters; DBOps doesn't
+    # tag them. We report the whole account's RDS/Aurora bill.
+    daily, total, total_err = _query_total(ce, start, end, services)
+
+    by_usage_type, _ut_err = _query_by_dimension(ce, start, end, services, "USAGE_TYPE")
+
+    per_cluster, cluster_tag, cluster_err = _query_per_cluster(ce, start, end, services)
+    per_cluster_available = len(per_cluster) > 0
+
+    per_cluster_note = None
+    if not per_cluster_available:
+        per_cluster_note = (
+            "Per-cluster cost attribution is not available. Activate a cost-"
+            "allocation tag (e.g. 'dbops:cluster') in the AWS Billing console "
+            "and apply it to your Aurora clusters — Cost Explorer then "
+            "attributes spend per cluster within ~24h. Resource-level CE data "
+            "is not used here (it incurs extra cost). Past spend is not "
+            "back-filled."
+        )
+
+    no_data_reason = None
+    if total_err == "cost_allocation_tag_not_activated":
+        # Shouldn't happen without a tag filter, but guard anyway.
+        no_data_reason = (
+            "Cost Explorer returned no RDS data — ensure Cost Explorer is "
+            "enabled for this account, then re-check in 24h."
+        )
+    elif total == 0 and not daily:
+        no_data_reason = (
+            "No RDS/Aurora spend recorded in this window. If you do run "
+            "Aurora here, ensure Cost Explorer is enabled (it lags ~24h)."
+        )
+
+    anomalies = _detect_anomalies(daily)
+
+    return _response(200, {
+        "env": _ENV,
+        "view": "rds",
+        "range_days": days,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "total": round(total, 4),
+        "currency": "USD",
+        "daily": daily,
+        "by_usage_type": by_usage_type,
+        "per_cluster": per_cluster,
+        "per_cluster_available": per_cluster_available,
+        "per_cluster_tag": cluster_tag,
+        "per_cluster_note": per_cluster_note,
+        "anomalies": anomalies,
+        "no_data_reason": no_data_reason,
+        "discovered_services": services,
+    })
+
+
 def lambda_handler(event, context):
     method = event.get("requestContext", {}).get("http", {}).get("method") \
         or event.get("httpMethod", "GET")
@@ -98,6 +290,12 @@ def lambda_handler(event, context):
     ce = boto3.client("ce", region_name="us-east-1")  # CE is global; us-east-1 is the standard endpoint.
     end = datetime.utcnow().date()
     start = end - timedelta(days=days)
+
+    # `?view=rds` switches from Bedrock spend to Aurora/RDS spend. Same Lambda,
+    # same range windows; the RDS path has its own service discovery + per-
+    # cluster (tag-based) attribution. Default view stays Bedrock.
+    if (qs.get("view") or "bedrock").lower() == "rds":
+        return _handle_rds_view(ce, start, end, days)
 
     services = _bedrock_services(ce, start, end)
 
