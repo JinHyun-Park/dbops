@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mcp_servers.performance.tools.compare_periods import compare_periods_impl
 from mcp_servers.performance.tools.detect_anomalies import detect_anomalies_impl
 from mcp_servers.performance.tools.detect_regressions import detect_regressions_impl
+from mcp_servers.performance.tools.explain_plan import explain_plan_impl
 from mcp_servers.performance.tools.forecast_capacity import forecast_capacity_impl
 from mcp_servers.performance.tools.performance_summary import get_performance_summary_impl
 from mcp_servers.performance.tools.pi_metrics import get_pi_metrics_impl
@@ -153,6 +154,29 @@ TOOLS = {
                 "cluster_id": {"type": "string"},
             },
             "required": ["cluster_id"],
+        },
+    },
+    "explain_plan": {
+        "impl": explain_plan_impl,
+        "description": (
+            "(PostgreSQL) Run EXPLAIN on a SELECT against the target cluster and return a "
+            "structured plan analysis: summary, findings (seq scans, bad row estimates, disk "
+            "spills, nested loops), and the most expensive nodes. analyze=false (default) only "
+            "plans the query (safe/instant); analyze=true ACTUALLY RUNS the SELECT to capture "
+            "real timings and row counts."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "sql": {"type": "string", "description": "SELECT or WITH...SELECT statement to explain"},
+                "analyze": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "If true, run EXPLAIN ANALYZE (executes the query) for real timings",
+                },
+            },
+            "required": ["cluster_id", "sql"],
         },
     },
 }

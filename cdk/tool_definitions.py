@@ -34,6 +34,12 @@ def performance_schema():
               {"cluster_id": "string"}, ["cluster_id"]),
         _tool("get_vacuum_stats", "Get autovacuum stats and bloat ratio per table",
               {"cluster_id": "string"}, ["cluster_id"]),
+        _tool("explain_plan",
+              "Run EXPLAIN on a SELECT and return a structured plan analysis "
+              "(seq scans, bad row estimates, disk spills, expensive nodes); "
+              "analyze=true actually runs the query for real timings",
+              {"cluster_id": "string", "sql": "string", "analyze": "boolean"},
+              ["cluster_id", "sql"]),
     ]
 
 
