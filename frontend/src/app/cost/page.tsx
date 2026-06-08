@@ -11,7 +11,7 @@ import {
   CartesianGrid,
   ReferenceDot,
 } from "recharts";
-import { fetchCost, apiUrl } from "@/lib/api-client";
+import { fetchCost, apiUrl, authedFetch } from "@/lib/api-client";
 import { fmtDecimal } from "@/lib/format";
 import { useChartColors } from "@/lib/use-chart-colors";
 import {
@@ -436,7 +436,7 @@ function RdsCostView({
     (async () => {
       try {
         const url = await apiUrl(`/api/cost?view=rds&days=${days}`);
-        const res = await fetch(url);
+        const res = await authedFetch(url);
         if (!res.ok) throw new Error(`RDS cost fetch failed: ${res.status}`);
         const d = (await res.json()) as RdsCostData;
         if (!cancelled) setData(d);

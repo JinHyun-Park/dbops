@@ -64,8 +64,19 @@ async function authHeaders(): Promise<Record<string, string>> {
   }
 }
 
+// Every REST route is now behind the API Gateway Cognito JWT authorizer, so
+// EVERY call (reads included) must carry a token — not just mutations. This
+// wrapper injects the auth header centrally; explicit per-call headers win.
+export async function authedFetch(
+  url: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const auth = await authHeaders();
+  return fetch(url, { ...init, headers: { ...auth, ...(init.headers || {}) } });
+}
+
 export async function fetchDashboard(clusterId: string) {
-  const res = await fetch(await api(`/api/dashboard/${enc(clusterId)}`));
+  const res = await authedFetch(await api(`/api/dashboard/${enc(clusterId)}`));
   if (!res.ok) throw new Error(`Dashboard fetch failed: ${res.status}`);
   return res.json();
 }
@@ -98,7 +109,7 @@ export async function fetchTimeseries(
   metric: string,
   rangeOrHours: TimeRange | number = 1,
 ) {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(
       `/api/dashboard/${enc(clusterId)}/timeseries?metric=${enc(
         metric,
@@ -122,7 +133,7 @@ export async function fetchBatchTimeseries(
     typeof rangeOrHours === "number" && offsetHours > 0
       ? `&offset_hours=${offsetHours}`
       : "";
-  const res = await fetch(
+  const res = await authedFetch(
     await api(
       `/api/dashboard/${enc(
         clusterId,
@@ -144,7 +155,7 @@ export async function fetchBatchTimeseries(
 }
 
 export async function fetchWaitEvents(clusterId: string, hours = 1) {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/wait-events?hours=${hours}`),
   );
   if (!res.ok) throw new Error(`Wait events fetch failed: ${res.status}`);
@@ -156,7 +167,7 @@ export async function fetchSlowQueries(
   hours = 1,
   thresholdMs = 100,
 ) {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(
       `/api/dashboard/${enc(
         clusterId,
@@ -168,7 +179,7 @@ export async function fetchSlowQueries(
 }
 
 export async function fetchQueryDetail(clusterId: string, queryHash: string) {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(
       `/api/dashboard/${enc(clusterId)}/query-detail?query_hash=${enc(
         queryHash,
@@ -220,7 +231,7 @@ export async function fetchExtensions(clusterId: string): Promise<{
   installed: InstalledExtension[];
   recommended: RecommendedExtension[];
 }> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/extensions`),
   );
   if (!res.ok) throw new Error(`Extensions fetch failed: ${res.status}`);
@@ -233,7 +244,7 @@ export async function fetchHealthFindings(clusterId: string): Promise<{
   counts: { critical: number; warning: number; info: number };
   findings: HealthFinding[];
 }> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/health-findings`),
   );
   if (!res.ok) throw new Error(`Health findings fetch failed: ${res.status}`);
@@ -245,7 +256,7 @@ export async function fetchTableIndexes(
   schema: string,
   table: string,
 ): Promise<{ schema: string; table: string; indexes: TableIndex[] }> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(
       `/api/dashboard/${enc(clusterId)}/table-indexes?schema=${enc(
         schema,
@@ -257,7 +268,7 @@ export async function fetchTableIndexes(
 }
 
 export async function fetchVacuumStats(clusterId: string) {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/vacuum-stats`),
   );
   if (!res.ok) throw new Error(`Vacuum stats fetch failed: ${res.status}`);
@@ -268,7 +279,7 @@ export async function fetchIndexRecommendations(
   clusterId: string,
   minSeqRatio = 0.5,
 ) {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(
       `/api/dashboard/${enc(
         clusterId,
@@ -280,7 +291,7 @@ export async function fetchIndexRecommendations(
 }
 
 export async function fetchLongRunningQueries(clusterId: string) {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/long-running`),
   );
   if (!res.ok) throw new Error(`Long running fetch failed: ${res.status}`);
@@ -288,7 +299,7 @@ export async function fetchLongRunningQueries(clusterId: string) {
 }
 
 export async function fetchBlockingLocks(clusterId: string) {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/blocking-locks`),
   );
   if (!res.ok) throw new Error(`Locks fetch failed: ${res.status}`);
@@ -296,7 +307,7 @@ export async function fetchBlockingLocks(clusterId: string) {
 }
 
 export async function fetchClusterSettings(clusterId: string) {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/settings`),
   );
   if (!res.ok) throw new Error(`Settings fetch failed: ${res.status}`);
@@ -304,7 +315,7 @@ export async function fetchClusterSettings(clusterId: string) {
 }
 
 export async function fetchSchemaChanges(clusterId: string, days = 7) {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/schema-changes?days=${days}`),
   );
   if (!res.ok) throw new Error(`Schema changes fetch failed: ${res.status}`);
@@ -316,7 +327,7 @@ export async function fetchAnomalies(
   hours = 4,
   threshold = 2.5,
 ) {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(
       `/api/dashboard/${enc(
         clusterId,
@@ -333,7 +344,7 @@ export async function fetchAuditLog(
   actionType?: string,
 ) {
   const at = actionType ? `&action_type=${enc(actionType)}` : "";
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/audit-log?days=${days}${at}`),
   );
   if (!res.ok) throw new Error(`Audit log fetch failed: ${res.status}`);
@@ -364,7 +375,7 @@ export async function fetchLogInsights(
   params.set("category", category);
   params.set("hours", String(hours));
   if (keywords.trim()) params.set("q", keywords.trim());
-  const res = await fetch(
+  const res = await authedFetch(
     await api(
       `/api/dashboard/${enc(clusterId)}/log-insights?${params.toString()}`,
     ),
@@ -420,7 +431,7 @@ export interface RedundantIndexesResponse {
 export async function fetchRedundantIndexes(
   clusterId: string,
 ): Promise<RedundantIndexesResponse> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/redundant-indexes`),
   );
   if (!res.ok) throw new Error(`Redundant indexes fetch failed: ${res.status}`);
@@ -464,7 +475,7 @@ export async function fetchSchemaGraph(
   clusterId: string,
   schema = "public",
 ): Promise<SchemaGraphResponse> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(
       `/api/dashboard/${enc(clusterId)}/schema-graph?schema=${enc(schema)}`,
     ),
@@ -510,7 +521,7 @@ export async function fetchSlo(
   availabilityTargetPct: number,
   latencyTargetMs: number,
 ): Promise<SloResponse> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(
       `/api/dashboard/${enc(
         clusterId,
@@ -551,7 +562,7 @@ export interface TopologyResponse {
 export async function fetchTopology(
   clusterId: string,
 ): Promise<TopologyResponse> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/topology`),
   );
   if (!res.ok) throw new Error(`Topology fetch failed: ${res.status}`);
@@ -563,7 +574,7 @@ export async function fetchCapacityForecast(
   metric: CapacityMetric = "storage_bytes",
   daysLookback = 30,
 ): Promise<CapacityForecastResponse> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(
       `/api/dashboard/${enc(clusterId)}/capacity-forecast?metric=${enc(
         metric,
@@ -575,14 +586,14 @@ export async function fetchCapacityForecast(
 }
 
 export async function fetchMultiClusterOverview() {
-  const res = await fetch(await api(`/api/multi-cluster/overview`));
+  const res = await authedFetch(await api(`/api/multi-cluster/overview`));
   if (!res.ok)
     throw new Error(`Multi-cluster overview fetch failed: ${res.status}`);
   return res.json();
 }
 
 export async function fetchTableSizes(clusterId: string) {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/table-sizes`),
   );
   if (!res.ok) throw new Error(`Table sizes fetch failed: ${res.status}`);
@@ -593,7 +604,7 @@ export async function fetchAlertRules(clusterId?: string) {
   const url = clusterId
     ? await api(`/api/alert-rules?cluster_id=${enc(clusterId)}`)
     : await api(`/api/alert-rules`);
-  const res = await fetch(url);
+  const res = await authedFetch(url);
   if (!res.ok) throw new Error(`Alert rules fetch failed: ${res.status}`);
   return res.json();
 }
@@ -623,7 +634,7 @@ export async function createAlertRule(rule: {
   enabled?: boolean;
   conditions?: AlertConditions;
 }) {
-  const res = await fetch(await api(`/api/alert-rules`), {
+  const res = await authedFetch(await api(`/api/alert-rules`), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(rule),
@@ -640,7 +651,7 @@ export async function updateAlertRule(
     name: string;
   }>,
 ) {
-  const res = await fetch(await api(`/api/alert-rules/${id}`), {
+  const res = await authedFetch(await api(`/api/alert-rules/${id}`), {
     method: "PATCH",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(updates),
@@ -650,7 +661,7 @@ export async function updateAlertRule(
 }
 
 export async function deleteAlertRule(id: number) {
-  const res = await fetch(await api(`/api/alert-rules/${id}`), {
+  const res = await authedFetch(await api(`/api/alert-rules/${id}`), {
     method: "DELETE",
     headers: { ...(await authHeaders()) },
   });
@@ -688,13 +699,13 @@ export interface AlertImpact {
 }
 
 export async function fetchAlertImpact(id: number): Promise<AlertImpact> {
-  const res = await fetch(await api(`/api/alert-rules/${id}/impact`));
+  const res = await authedFetch(await api(`/api/alert-rules/${id}/impact`));
   if (!res.ok) throw new Error(`Alert impact fetch failed: ${res.status}`);
   return res.json();
 }
 
 export async function fetchAlertSubscriptions() {
-  const res = await fetch(await api(`/api/alert-subscriptions`));
+  const res = await authedFetch(await api(`/api/alert-subscriptions`));
   if (!res.ok)
     throw new Error(`Alert subscriptions fetch failed: ${res.status}`);
   return res.json() as Promise<{
@@ -711,7 +722,7 @@ export async function createAlertSubscription(
   protocol: string,
   endpoint: string,
 ) {
-  const res = await fetch(await api(`/api/alert-subscriptions`), {
+  const res = await authedFetch(await api(`/api/alert-subscriptions`), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify({ protocol, endpoint }),
@@ -721,7 +732,7 @@ export async function createAlertSubscription(
 }
 
 export async function deleteAlertSubscription(subArn: string) {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/alert-subscriptions?sub_arn=${enc(subArn)}`),
     { method: "DELETE", headers: { ...(await authHeaders()) } },
   );
@@ -730,13 +741,13 @@ export async function deleteAlertSubscription(subArn: string) {
 }
 
 export async function fetchClusters() {
-  const res = await fetch(await api(`/api/clusters`));
+  const res = await authedFetch(await api(`/api/clusters`));
   if (!res.ok) throw new Error(`Clusters fetch failed: ${res.status}`);
   return res.json();
 }
 
 export async function fetchCost(days = 30) {
-  const res = await fetch(await api(`/api/cost?days=${days}`));
+  const res = await authedFetch(await api(`/api/cost?days=${days}`));
   if (!res.ok) throw new Error(`Cost fetch failed: ${res.status}`);
   return res.json() as Promise<{
     env: string;
@@ -755,7 +766,7 @@ export async function fetchCost(days = 30) {
 }
 
 export async function fetchModels() {
-  const res = await fetch(await api(`/api/models`));
+  const res = await authedFetch(await api(`/api/models`));
   if (!res.ok) throw new Error(`Models fetch failed: ${res.status}`);
   return res.json() as Promise<{
     default: string;
@@ -772,7 +783,7 @@ export async function registerCluster(data: {
   engine?: string;
   spoke_role_arn?: string;
 }) {
-  const res = await fetch(await api(`/api/clusters`), {
+  const res = await authedFetch(await api(`/api/clusters`), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(data),
@@ -800,7 +811,7 @@ export async function testClusterConnection(input: {
   region: string;
   spoke_role_arn?: string;
 }): Promise<TestConnectionResult> {
-  const res = await fetch(await api(`/api/clusters/test-connection`), {
+  const res = await authedFetch(await api(`/api/clusters/test-connection`), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(input),
@@ -815,7 +826,7 @@ export async function generateSampleCluster(): Promise<{
   is_demo: boolean;
   rows: Record<string, number>;
 }> {
-  const res = await fetch(await api(`/api/clusters/sample`), {
+  const res = await authedFetch(await api(`/api/clusters/sample`), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
   });
@@ -831,7 +842,7 @@ export async function generateSampleCluster(): Promise<{
 export async function deleteCluster(
   clusterId: string,
 ): Promise<{ status: string; was_demo: boolean }> {
-  const res = await fetch(await api(`/api/clusters/${enc(clusterId)}`), {
+  const res = await authedFetch(await api(`/api/clusters/${enc(clusterId)}`), {
     method: "DELETE",
     headers: { ...(await authHeaders()) },
   });
@@ -870,7 +881,7 @@ export async function discoverClusters(input: {
   role_arn?: string;
   account_id?: string;
 }): Promise<DiscoverResult> {
-  const res = await fetch(await api(`/api/clusters/discover`), {
+  const res = await authedFetch(await api(`/api/clusters/discover`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
@@ -898,7 +909,7 @@ export async function bulkRegisterClusters(
     }
   >,
 ): Promise<BulkRegisterResult> {
-  const res = await fetch(await api(`/api/clusters/bulk-register`), {
+  const res = await authedFetch(await api(`/api/clusters/bulk-register`), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify({ clusters }),
@@ -978,7 +989,7 @@ export async function runExplain(
   clusterId: string,
   sql: string,
 ): Promise<ExplainResponse> {
-  const res = await fetch(await api(`/api/explain`), {
+  const res = await authedFetch(await api(`/api/explain`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cluster_id: clusterId, sql }),
@@ -1096,7 +1107,7 @@ export interface DdlImpactResponse {
 }
 
 async function simPost<T>(path: string, body: object): Promise<T> {
-  const res = await fetch(await api(path), {
+  const res = await authedFetch(await api(path), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(body),
@@ -1113,7 +1124,7 @@ async function simPost<T>(path: string, body: object): Promise<T> {
 export async function fetchParameterCatalog(): Promise<{
   parameters: ParameterCatalogEntry[];
 }> {
-  const res = await fetch(await api(`/api/simulation/parameter-catalog`));
+  const res = await authedFetch(await api(`/api/simulation/parameter-catalog`));
   if (!res.ok) throw new Error(`Parameter catalog fetch failed: ${res.status}`);
   return res.json();
 }
@@ -1216,13 +1227,13 @@ export async function fetchRunbooks(opts?: {
   if (opts?.limit) params.set("limit", String(opts.limit));
   const qs = params.toString();
   const url = `/api/runbooks${qs ? "?" + qs : ""}`;
-  const res = await fetch(await api(url));
+  const res = await authedFetch(await api(url));
   if (!res.ok) throw new Error(`Runbooks fetch failed: ${res.status}`);
   return res.json();
 }
 
 export async function fetchRunbook(id: number): Promise<RunbookDetail> {
-  const res = await fetch(await api(`/api/runbooks/${id}`));
+  const res = await authedFetch(await api(`/api/runbooks/${id}`));
   if (!res.ok) throw new Error(`Runbook fetch failed: ${res.status}`);
   return res.json();
 }
@@ -1236,7 +1247,7 @@ export async function createRunbook(input: {
   source?: "chat" | "anomaly" | "manual";
   source_ref?: string;
 }): Promise<{ runbook: RunbookDetail }> {
-  const res = await fetch(await api(`/api/runbooks`), {
+  const res = await authedFetch(await api(`/api/runbooks`), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(input),
@@ -1251,7 +1262,7 @@ export async function createRunbook(input: {
 }
 
 export async function deleteRunbook(id: number): Promise<void> {
-  const res = await fetch(await api(`/api/runbooks/${id}`), {
+  const res = await authedFetch(await api(`/api/runbooks/${id}`), {
     method: "DELETE",
     headers: { ...(await authHeaders()) },
   });
@@ -1279,7 +1290,7 @@ export interface ChatSessionDetail extends ChatSessionSummary {
 }
 
 export async function listChatSessions(): Promise<ChatSessionSummary[]> {
-  const res = await fetch(await api(`/api/chat/sessions`), {
+  const res = await authedFetch(await api(`/api/chat/sessions`), {
     headers: { ...(await authHeaders()) },
   });
   if (!res.ok) throw new Error(`List chat sessions failed: ${res.status}`);
@@ -1288,7 +1299,7 @@ export async function listChatSessions(): Promise<ChatSessionSummary[]> {
 }
 
 export async function fetchChatSession(id: string): Promise<ChatSessionDetail> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/chat/sessions/${encodeURIComponent(id)}`),
     {
       headers: { ...(await authHeaders()) },
@@ -1302,7 +1313,7 @@ export async function putChatSession(
   id: string,
   payload: { title: string; cluster_id: string; messages: unknown[] },
 ): Promise<void> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/chat/sessions/${encodeURIComponent(id)}`),
     {
       method: "PUT",
@@ -1314,7 +1325,7 @@ export async function putChatSession(
 }
 
 export async function deleteChatSession(id: string): Promise<void> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/chat/sessions/${encodeURIComponent(id)}`),
     {
       method: "DELETE",
@@ -1352,14 +1363,14 @@ export async function listSavedQueries(opts?: {
   if (opts?.limit) params.set("limit", String(opts.limit));
   const qs = params.toString();
   const url = await api(`/api/saved-queries${qs ? `?${qs}` : ""}`);
-  const res = await fetch(url);
+  const res = await authedFetch(url);
   if (!res.ok) throw new Error(`List saved queries failed: ${res.status}`);
   const body = await res.json();
   return body.queries || [];
 }
 
 export async function fetchSavedQuery(id: number): Promise<SavedQueryDetail> {
-  const res = await fetch(await api(`/api/saved-queries/${id}`));
+  const res = await authedFetch(await api(`/api/saved-queries/${id}`));
   if (!res.ok) throw new Error(`Fetch saved query failed: ${res.status}`);
   return res.json();
 }
@@ -1371,7 +1382,7 @@ export async function createSavedQuery(input: {
   sql_text: string;
   tags?: string[];
 }): Promise<SavedQueryDetail> {
-  const res = await fetch(await api(`/api/saved-queries`), {
+  const res = await authedFetch(await api(`/api/saved-queries`), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(input),
@@ -1386,7 +1397,7 @@ export async function createSavedQuery(input: {
 }
 
 export async function deleteSavedQuery(id: number): Promise<void> {
-  const res = await fetch(await api(`/api/saved-queries/${id}`), {
+  const res = await authedFetch(await api(`/api/saved-queries/${id}`), {
     method: "DELETE",
     headers: { ...(await authHeaders()) },
   });
@@ -1437,7 +1448,7 @@ export interface HealthResponse {
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
-  const res = await fetch(await api(`/api/health`));
+  const res = await authedFetch(await api(`/api/health`));
   if (!res.ok) throw new Error(`Health fetch failed: ${res.status}`);
   return res.json();
 }
@@ -1470,7 +1481,7 @@ export async function fetchActivity(opts?: {
   if (opts?.limit) params.set("limit", String(opts.limit));
   const qs = params.toString();
   const url = await api(`/api/activity${qs ? `?${qs}` : ""}`);
-  const res = await fetch(url);
+  const res = await authedFetch(url);
   if (!res.ok) throw new Error(`Activity fetch failed: ${res.status}`);
   return res.json();
 }
@@ -1508,7 +1519,7 @@ export interface BackupsResponse {
 export async function fetchBackups(
   clusterId: string,
 ): Promise<BackupsResponse> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/backups`),
   );
   if (!res.ok) throw new Error(`Backups fetch failed: ${res.status}`);
@@ -1530,7 +1541,7 @@ export async function createSnapshot(
   clusterId: string,
   snapshotId?: string,
 ): Promise<CreateSnapshotResponse> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/snapshot`),
     {
       method: "POST",
@@ -1588,7 +1599,7 @@ export async function restoreCluster(
   } else {
     body.restore_to_time = opts.restoreToTime;
   }
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/restore`),
     {
       method: "POST",
@@ -1657,7 +1668,7 @@ export async function fetchWorkloadDiff(
   const url = await api(
     `/api/dashboard/${enc(clusterId)}/workload-diff?${params.toString()}`,
   );
-  const res = await fetch(url);
+  const res = await authedFetch(url);
   if (!res.ok) throw new Error(`Workload diff fetch failed: ${res.status}`);
   return res.json();
 }
@@ -1702,7 +1713,7 @@ export async function fetchTimeline(
   const url = await api(
     `/api/dashboard/${enc(clusterId)}/timeline${qs ? `?${qs}` : ""}`,
   );
-  const res = await fetch(url);
+  const res = await authedFetch(url);
   if (!res.ok) throw new Error(`Timeline fetch failed: ${res.status}`);
   return res.json();
 }
@@ -1721,7 +1732,7 @@ export interface MemoryRecord {
 export async function listMemoryRecords(
   kind: MemoryKind,
 ): Promise<{ namespace: string; kind: MemoryKind; records: MemoryRecord[] }> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/memory?kind=${encodeURIComponent(kind)}`),
     {
       headers: { ...(await authHeaders()) },
@@ -1735,7 +1746,7 @@ export async function deleteMemoryRecord(
   id: string,
   kind: MemoryKind,
 ): Promise<void> {
-  const res = await fetch(
+  const res = await authedFetch(
     await api(`/api/memory/${encodeURIComponent(id)}?kind=${kind}`),
     {
       method: "DELETE",

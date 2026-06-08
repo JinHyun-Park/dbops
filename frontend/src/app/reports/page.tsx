@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ReportViewer } from "@/components/reports/report-viewer";
-import { apiUrl } from "@/lib/api-client";
+import { apiUrl, authedFetch } from "@/lib/api-client";
 import {
   PageHeader,
   PageBody,
@@ -31,7 +31,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     apiUrl("/api/reports")
-      .then((url) => fetch(url))
+      .then((url) => authedFetch(url))
       .then((r) => r.json())
       .then((rows) => {
         setReports(Array.isArray(rows) ? rows : []);
@@ -46,7 +46,7 @@ export default function ReportsPage() {
     }
     setDetailLoading(true);
     apiUrl(`/api/reports/${selectedRow.id}`)
-      .then((url) => fetch(url))
+      .then((url) => authedFetch(url))
       .then((r) => r.json())
       .then((row) => setDetail(row))
       .catch((e) => {

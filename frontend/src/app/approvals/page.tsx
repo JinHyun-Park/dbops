@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { ApprovalCard } from "@/components/approval/approval-card";
-import { apiUrl } from "@/lib/api-client";
+import { apiUrl, authedFetch } from "@/lib/api-client";
 import {
   PageHeader,
   PageBody,
@@ -17,7 +17,7 @@ export default function ApprovalsPage() {
 
   const loadApprovals = useCallback(() => {
     apiUrl(`/api/approvals?status=${filter}`)
-      .then((url) => fetch(url))
+      .then((url) => authedFetch(url))
       .then((r) => r.json())
       .then(setApprovals)
       .catch(console.error);
@@ -29,7 +29,7 @@ export default function ApprovalsPage() {
 
   const handleAction = async (id: string, action: "approve" | "reject") => {
     const url = await apiUrl(`/api/approvals/${id}`);
-    await fetch(url, {
+    await authedFetch(url, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, approved_by: "dba" }),
