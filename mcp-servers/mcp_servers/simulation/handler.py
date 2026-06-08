@@ -67,13 +67,14 @@ TOOLS = {
     },
     "simulate_scaling": {
         "impl": simulate_scaling_impl,
-        "description": "Simulate ACU scaling and estimate cost impact",
+        "description": "Simulate scaling cost with real AWS pricing — Serverless v2 ACU range or provisioned instance resize",
         "input_schema": {
             "type": "object",
             "properties": {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
-                "new_min_acu": {"type": "number", "description": "New minimum ACU"},
-                "new_max_acu": {"type": "number", "description": "New maximum ACU"},
+                "new_min_acu": {"type": "number", "description": "New minimum ACU (Serverless v2 only)"},
+                "new_max_acu": {"type": "number", "description": "New maximum ACU (Serverless v2 only)"},
+                "new_instance_class": {"type": "string", "description": "New instance class for provisioned clusters, e.g. db.r6g.xlarge"},
             },
             "required": ["cluster_id"],
         },

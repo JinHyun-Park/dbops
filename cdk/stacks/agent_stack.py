@@ -140,9 +140,13 @@ class AgentStack(cdk.Stack):
                 # (Also fixes describe_db_engine_versions for upgrade_compatibility,
                 # which previously had no rds permission at all.)
                 "rds:DescribeDBClusters",
+                "rds:DescribeDBInstances",
                 "rds:DescribeDBEngineVersions",
                 "rds:DescribeDBClusterParameters",
                 "rds:DescribeDBClusterParameterGroups",
+                # Real region/edition/instance pricing for scaling cost sims
+                # (replaces the hardcoded ACU rate). Price List API is read-only.
+                "pricing:GetProducts",
                 # Hub-spoke: assume the cluster's spoke role to describe it in its
                 # own account+region (same pattern as the operations write tools).
                 "sts:AssumeRole",
@@ -386,7 +390,10 @@ class AgentStack(cdk.Stack):
                 "rds-data:ExecuteStatement",
                 "secretsmanager:GetSecretValue",
                 "rds:DescribeDBClusters",
+                "rds:DescribeDBInstances",
                 "rds:DescribeDBEngineVersions",
+                # Real region/edition/instance pricing for scaling cost sims.
+                "pricing:GetProducts",
             ],
             resources=["*"],
         ))

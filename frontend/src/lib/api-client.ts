@@ -1078,20 +1078,39 @@ export interface ParameterChangeResponse {
   recommendation: string;
 }
 
+// serverless mode carries min_acu/max_acu; provisioned mode carries
+// instance_class. Both are optional on the union so the panel branches on
+// `mode` and reads whichever fields are present.
+export interface ScalingTier {
+  min_acu?: number;
+  max_acu?: number;
+  instance_class?: string;
+}
+
+export interface ScalingUnitPricing {
+  kind: "acu" | "instance";
+  price_per_hour: number | null;
+  region: string;
+  io_optimized: boolean;
+  source: "aws_pricing_api" | "fallback";
+}
+
 export interface ScalingResponse {
   cluster_id: string;
-  is_serverless_v2: boolean;
-  current: { min_acu: number; max_acu: number };
-  proposed: { min_acu: number; max_acu: number };
-  cost_assumption: string;
+  mode: "serverless" | "provisioned";
+  current: ScalingTier;
+  proposed: ScalingTier;
+  writers: number;
+  readers: number;
   cost_impact: {
-    current_monthly_usd: number;
-    proposed_monthly_usd: number;
-    delta_monthly_usd: number;
-    change_pct: number;
+    current_monthly_usd: number | null;
+    proposed_monthly_usd: number | null;
+    delta_monthly_usd: number | null;
+    change_pct: number | null;
   };
-  warnings: string[];
-  notes: string;
+  unit_pricing: ScalingUnitPricing;
+  data_source: string;
+  note: string;
 }
 
 export interface DdlImpactResponse {
@@ -1177,11 +1196,13 @@ export function simulateScaling(
   clusterId: string,
   newMinAcu: number | null,
   newMaxAcu: number | null,
+  newInstanceClass?: string | null,
 ): Promise<ScalingResponse> {
   return simPost(`/api/simulation/scaling`, {
     cluster_id: clusterId,
     new_min_acu: newMinAcu,
     new_max_acu: newMaxAcu,
+    new_instance_class: newInstanceClass ?? null,
   });
 }
 

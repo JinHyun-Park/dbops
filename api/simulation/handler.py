@@ -14,6 +14,7 @@ import re
 import traceback
 
 import boto3
+from aurora_pricing import price_per_acu_hour, price_per_instance_hour
 
 # ---------------------------------------------------------------------------
 # Cache (PG) helper — minimal Data API wrapper. Inlined rather than imported
@@ -377,77 +378,285 @@ def _parameter_catalog() -> list[dict]:
 # Tool: simulate_scaling
 # ---------------------------------------------------------------------------
 
-# Aurora Serverless v2 list price (USD per ACU-hour, us-east-1 reference).
-# Pricing varies by region — we expose the value so the UI can show the
-# assumption and DBAs can cross-check against their billing console.
-_ACU_PRICE_PER_HOUR = 0.12
+# Hours billed per month for a continuously-running instance. 730 =
+# 365 * 24 / 12, the AWS convention for monthly estimates.
 _HOURS_PER_MONTH = 730
+
+
+def _cost_impact(current_monthly, proposed_monthly) -> dict:
+    """Build the cost_impact block. Any None input means the price was
+    unavailable, so the delta/pct are also None rather than fabricated."""
+    if current_monthly is None or proposed_monthly is None:
+        return {
+            "current_monthly_usd": (
+                round(current_monthly, 2) if current_monthly is not None else None
+            ),
+            "proposed_monthly_usd": (
+                round(proposed_monthly, 2) if proposed_monthly is not None else None
+            ),
+            "delta_monthly_usd": None,
+            "change_pct": None,
+        }
+    delta = proposed_monthly - current_monthly
+    pct = (delta / current_monthly * 100.0) if current_monthly else None
+    return {
+        "current_monthly_usd": round(current_monthly, 2),
+        "proposed_monthly_usd": round(proposed_monthly, 2),
+        "delta_monthly_usd": round(delta, 2),
+        "change_pct": round(pct, 1) if pct is not None else None,
+    }
 
 
 def _simulate_scaling(
     cluster_id: str,
     new_min_acu: float | None = None,
     new_max_acu: float | None = None,
+    new_instance_class: str | None = None,
 ) -> dict:
-    # Pull live ACU range — describe_db_clusters returns ServerlessV2ScalingConfiguration
-    # for Serverless v2 clusters. Provisioned clusters won't have this; we fall
-    # back to a typical baseline.
-    cur_min, cur_max = 0.5, 4.0
-    is_serverless = False
+    """Estimate the monthly cost impact of a scaling change using REAL AWS
+    pricing. Serverless v2 clusters scale by ACU range; provisioned clusters
+    scale by instance class. The cluster's mode is detected live from
+    describe_db_clusters; pricing comes from the Price List API for the
+    cluster's region/engine/edition. Any pricing miss degrades to a cost-free
+    estimate (cost None, source "fallback") rather than crashing."""
+    region = os.environ.get("AWS_REGION", "")
+    # Never crash on a describe failure (unregistered/unreachable cluster, perms):
+    # degrade to a cost-free estimate that still matches the response contract.
     try:
         rds = boto3.client("rds")
         resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
-        if resp.get("DBClusters"):
-            cfg = resp["DBClusters"][0].get("ServerlessV2ScalingConfiguration")
-            if cfg:
-                is_serverless = True
-                cur_min = float(cfg.get("MinCapacity", cur_min))
-                cur_max = float(cfg.get("MaxCapacity", cur_max))
-    except Exception:
-        pass
+        clusters = resp.get("DBClusters", [])
+        cluster = clusters[0] if clusters else None
+    except Exception as e:
+        cluster = None
+        _describe_err = type(e).__name__
+    else:
+        _describe_err = None
+    if cluster is None:
+        mode = "provisioned" if new_instance_class else "serverless"
+        cur = {"instance_class": None} if mode == "provisioned" else {"min_acu": None, "max_acu": None}
+        prop = (
+            {"instance_class": new_instance_class}
+            if mode == "provisioned"
+            else {"min_acu": new_min_acu, "max_acu": new_max_acu}
+        )
+        why = (
+            f"라이브 클러스터 조회 실패({_describe_err})"
+            if _describe_err
+            else "describe_db_clusters가 해당 cluster_id를 반환하지 않았습니다"
+        )
+        return {
+            "cluster_id": cluster_id,
+            "mode": mode,
+            "current": cur,
+            "proposed": prop,
+            "writers": 0,
+            "readers": 0,
+            "cost_impact": {
+                "current_monthly_usd": None,
+                "proposed_monthly_usd": None,
+                "delta_monthly_usd": None,
+                "change_pct": None,
+            },
+            "unit_pricing": {
+                "kind": "instance" if mode == "provisioned" else "acu",
+                "price_per_hour": None,
+                "region": region,
+                "io_optimized": False,
+                "source": "fallback",
+            },
+            "data_source": "estimate (live describe unavailable)",
+            "note": f"{why}로 비용 비교를 생략합니다.",
+        }
 
+    engine = cluster.get("Engine")
+    io_optimized = cluster.get("StorageType") == "aurora-iopt1"
+    members = cluster.get("DBClusterMembers", [])
+    writers = sum(1 for m in members if m.get("IsClusterWriter"))
+    readers = sum(1 for m in members if not m.get("IsClusterWriter"))
+    # Always bill at least one instance even if the API omitted member roles.
+    member_count = max(1, writers + readers)
+
+    scaling = cluster.get("ServerlessV2ScalingConfiguration")
+    if scaling:
+        return _scaling_serverless(
+            cluster_id,
+            region,
+            engine,
+            io_optimized,
+            scaling,
+            writers,
+            readers,
+            member_count,
+            new_min_acu,
+            new_max_acu,
+        )
+    return _scaling_provisioned(
+        cluster_id,
+        region,
+        engine,
+        io_optimized,
+        cluster_id,
+        members,
+        writers,
+        readers,
+        member_count,
+        new_instance_class,
+    )
+
+
+def _scaling_serverless(
+    cluster_id,
+    region,
+    engine,
+    io_optimized,
+    scaling,
+    writers,
+    readers,
+    member_count,
+    new_min_acu,
+    new_max_acu,
+) -> dict:
+    cur_min = float(scaling.get("MinCapacity"))
+    cur_max = float(scaling.get("MaxCapacity"))
     new_min = float(new_min_acu) if new_min_acu is not None else cur_min
     new_max = float(new_max_acu) if new_max_acu is not None else cur_max
 
-    # Cost assumes mid-point utilisation — gives the right qualitative
-    # answer (saving vs increase) without pretending to predict real spend.
-    current_avg = (cur_min + cur_max) / 2.0
-    proposed_avg = (new_min + new_max) / 2.0
-    current_monthly = current_avg * _ACU_PRICE_PER_HOUR * _HOURS_PER_MONTH
-    proposed_monthly = proposed_avg * _ACU_PRICE_PER_HOUR * _HOURS_PER_MONTH
-    delta = proposed_monthly - current_monthly
-    pct = ((proposed_monthly - current_monthly) / current_monthly * 100.0) if current_monthly else 0
+    price = price_per_acu_hour(region, engine, io_optimized)
+    if price is None:
+        cost_impact = _cost_impact(None, None)
+        data_source = "estimate (pricing unavailable)"
+        source = "fallback"
+    else:
+        # Mid-point usage: Serverless v2 scales continuously between min and
+        # max, so the long-run average is best approximated by the midpoint.
+        # Each member bills its own ACU-hours, so multiply by member_count.
+        current_monthly = ((cur_min + cur_max) / 2.0) * price * _HOURS_PER_MONTH * member_count
+        proposed_monthly = ((new_min + new_max) / 2.0) * price * _HOURS_PER_MONTH * member_count
+        cost_impact = _cost_impact(current_monthly, proposed_monthly)
+        data_source = "live (describe_db_clusters) + aws_pricing_api"
+        source = "aws_pricing_api"
 
-    warnings = []
-    if new_max < cur_max:
-        warnings.append(
-            "max_acu를 낮추면 burst 트래픽이 들어왔을 때 쿼리 지연이 발생할 수 있음 — 최근 7일 max usage 확인 권장"
+    return {
+        "cluster_id": cluster_id,
+        "mode": "serverless",
+        "current": {"min_acu": cur_min, "max_acu": cur_max},
+        "proposed": {"min_acu": new_min, "max_acu": new_max},
+        "writers": writers,
+        "readers": readers,
+        "cost_impact": cost_impact,
+        "unit_pricing": {
+            "kind": "acu",
+            "price_per_hour": price,
+            "region": region,
+            "io_optimized": io_optimized,
+            "source": source,
+        },
+        "data_source": data_source,
+        "note": (
+            f"중간값 ACU 기준 추정치({_HOURS_PER_MONTH}h/month, {member_count}개 인스턴스). "
+            "리더는 라이터와 동일한 ACU 범위로 근사했으며, 단가는 리전/IO-Optimized 여부를 반영한 "
+            "실제 AWS 가격입니다. ACU 변경은 즉시 적용되며 다운타임이 없습니다."
+        ),
+    }
+
+
+def _scaling_provisioned(
+    cluster_id,
+    region,
+    engine,
+    io_optimized,
+    db_cluster_id,
+    members,
+    writers,
+    readers,
+    member_count,
+    new_instance_class,
+) -> dict:
+    # describe_db_clusters members carry DBInstanceClass on some API versions;
+    # describe_db_instances is the authoritative source for the class of each
+    # member, so resolve current classes from there.
+    rds = boto3.client("rds")
+    current_classes = []
+    try:
+        inst_resp = rds.describe_db_instances(
+            Filters=[{"Name": "db-cluster-id", "Values": [db_cluster_id]}]
         )
-    if new_min > new_max:
-        warnings.append("min_acu가 max_acu보다 큼 — RDS API 호출 시 거부됨")
-    if new_min < 0.5:
-        warnings.append("Aurora Serverless v2 최소 ACU는 0.5 — 더 낮추는 것은 불가")
-    if not is_serverless:
-        warnings.append(
-            "이 클러스터는 Serverless v2가 아님 — ACU 시뮬레이션은 추정치이며 실제 비용은 instance class 단가로 계산됨"
+        current_classes = [
+            i.get("DBInstanceClass")
+            for i in inst_resp.get("DBInstances", [])
+            if i.get("DBInstanceClass")
+        ]
+    except Exception:
+        current_classes = [
+            m.get("DBInstanceClass") for m in members if m.get("DBInstanceClass")
+        ]
+
+    current_class = current_classes[0] if current_classes else None
+    proposed_class = new_instance_class or current_class
+
+    # Current monthly = sum of each member's real per-hour price * hours.
+    current_monthly = None
+    current_prices = []
+    for cls in current_classes:
+        p = price_per_instance_hour(region, engine, cls, io_optimized)
+        if p is None:
+            current_prices = None
+            break
+        current_prices.append(p)
+    if current_prices is not None and current_prices:
+        current_monthly = sum(current_prices) * _HOURS_PER_MONTH
+
+    # Proposed: resize every member to new_instance_class (if given), else keep
+    # current. member_count * price * hours.
+    proposed_price = (
+        price_per_instance_hour(region, engine, proposed_class, io_optimized)
+        if proposed_class
+        else None
+    )
+    if new_instance_class:
+        proposed_monthly = (
+            member_count * proposed_price * _HOURS_PER_MONTH
+            if proposed_price is not None
+            else None
+        )
+    else:
+        # No resize requested -> proposed cost equals current cost.
+        proposed_monthly = current_monthly
+
+    cost_impact = _cost_impact(current_monthly, proposed_monthly)
+    if cost_impact["current_monthly_usd"] is None and cost_impact["proposed_monthly_usd"] is None:
+        data_source = "estimate (pricing unavailable)"
+        source = "fallback"
+        unit_price = None
+    else:
+        data_source = "live (describe_db_clusters) + aws_pricing_api"
+        source = "aws_pricing_api"
+        unit_price = proposed_price if proposed_price is not None else (
+            current_prices[0] if current_prices else None
         )
 
     return {
         "cluster_id": cluster_id,
-        "is_serverless_v2": is_serverless,
-        "current": {"min_acu": cur_min, "max_acu": cur_max},
-        "proposed": {"min_acu": new_min, "max_acu": new_max},
-        "cost_assumption": (
-            f"mid-point usage · ${_ACU_PRICE_PER_HOUR:.3f}/ACU-hour · {_HOURS_PER_MONTH}h/month"
-        ),
-        "cost_impact": {
-            "current_monthly_usd": round(current_monthly, 2),
-            "proposed_monthly_usd": round(proposed_monthly, 2),
-            "delta_monthly_usd": round(delta, 2),
-            "change_pct": round(pct, 1),
+        "mode": "provisioned",
+        "current": {"instance_class": current_class},
+        "proposed": {"instance_class": proposed_class},
+        "writers": writers,
+        "readers": readers,
+        "cost_impact": cost_impact,
+        "unit_pricing": {
+            "kind": "instance",
+            "price_per_hour": unit_price,
+            "region": region,
+            "io_optimized": io_optimized,
+            "source": source,
         },
-        "warnings": warnings,
-        "notes": "ACU 변경은 RDS API 호출 시점에 즉시 적용 · 다운타임 없음",
+        "data_source": data_source,
+        "note": (
+            f"프로비저닝 인스턴스 {member_count}개 기준 추정치({_HOURS_PER_MONTH}h/month). "
+            "단가는 리전/IO-Optimized 여부를 반영한 실제 AWS 가격입니다. 인스턴스 클래스 변경은 "
+            "재시작(또는 failover)을 동반할 수 있습니다."
+        ),
     }
 
 
@@ -627,7 +836,12 @@ def lambda_handler(event, context):
         if raw_path.endswith("/scaling"):
             new_min = body.get("new_min_acu")
             new_max = body.get("new_max_acu")
-            return _response(200, _simulate_scaling(cluster_id, new_min, new_max), origin)
+            new_instance_class = body.get("new_instance_class")
+            return _response(
+                200,
+                _simulate_scaling(cluster_id, new_min, new_max, new_instance_class),
+                origin,
+            )
 
         if raw_path.endswith("/ddl-impact"):
             ddl = body.get("ddl_sql") or ""

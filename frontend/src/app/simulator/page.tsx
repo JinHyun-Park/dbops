@@ -14,6 +14,7 @@ import {
   type ParameterCatalogEntry,
   type ParameterChangeResponse,
   type ScalingResponse,
+  type ScalingUnitPricing,
   type UpgradeCompatibilityResponse,
   type UpgradeImpactResponse,
   type UpgradePlanResponse,
@@ -469,6 +470,7 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
 function ScalingPanel({ clusterId }: { clusterId: string }) {
   const [minAcu, setMinAcu] = useState<string>("");
   const [maxAcu, setMaxAcu] = useState<string>("");
+  const [instanceClass, setInstanceClass] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<ScalingResponse | null>(null);
@@ -478,6 +480,7 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
     setErr(null);
     setMinAcu("");
     setMaxAcu("");
+    setInstanceClass("");
   }, [clusterId]);
 
   const run = async () => {
@@ -488,6 +491,7 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
         clusterId,
         minAcu === "" ? null : Number(minAcu),
         maxAcu === "" ? null : Number(maxAcu),
+        instanceClass.trim() === "" ? null : instanceClass.trim(),
       );
       setResult(r);
     } catch (e) {
@@ -497,47 +501,73 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
     }
   };
 
-  const delta = result?.cost_impact.delta_monthly_usd ?? 0;
-  const pct = result?.cost_impact.change_pct ?? 0;
+  // First run defaults the input controls to ACU; once a result arrives we
+  // render whichever control matches the cluster's actual mode. Until then
+  // we show both so the user can drive a provisioned cluster on first call.
+  const mode = result?.mode;
+  const provisioned = mode === "provisioned";
+
+  const delta = result?.cost_impact.delta_monthly_usd ?? null;
+  const pct = result?.cost_impact.change_pct ?? null;
   const deltaTone =
-    delta > 0
-      ? "text-rose-300"
-      : delta < 0
-        ? "text-emerald-300"
-        : "text-zinc-300";
+    delta == null
+      ? "text-zinc-300"
+      : delta > 0
+        ? "text-rose-300"
+        : delta < 0
+          ? "text-emerald-300"
+          : "text-zinc-300";
 
   return (
     <Section
       eyebrow="Scaling"
-      title="ACU 스케일링 비용 시뮬레이션"
-      description="현재 Aurora Serverless v2 ACU 범위에서 min/max를 조정했을 때의 월 추정 비용 변화를 계산합니다."
+      title="스케일링 비용 시뮬레이션"
+      description="Aurora Serverless v2(ACU min/max) 또는 프로비저닝 인스턴스 클래스를 조정했을 때의 월 비용 변화를, 클러스터 리전·에디션(I/O-Optimized) 기준 실시간 Pricing 단가로 추정합니다."
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
-          <label className="text-[10px] uppercase tracking-wider text-zinc-500">
-            New min ACU
-          </label>
-          <input
-            type="number"
-            step="0.5"
-            min="0.5"
-            value={minAcu}
-            onChange={(e) => setMinAcu(e.target.value)}
-            placeholder="0.5"
-            className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-20 tabular-nums"
-          />
-          <label className="text-[10px] uppercase tracking-wider text-zinc-500 ml-2">
-            New max ACU
-          </label>
-          <input
-            type="number"
-            step="0.5"
-            min="0.5"
-            value={maxAcu}
-            onChange={(e) => setMaxAcu(e.target.value)}
-            placeholder="4"
-            className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-20 tabular-nums"
-          />
+          {provisioned ? (
+            <>
+              <label className="text-[10px] uppercase tracking-wider text-zinc-500">
+                New instance class
+              </label>
+              <input
+                type="text"
+                value={instanceClass}
+                onChange={(e) => setInstanceClass(e.target.value)}
+                placeholder="db.r6g.xlarge"
+                spellCheck={false}
+                className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-44"
+              />
+            </>
+          ) : (
+            <>
+              <label className="text-[10px] uppercase tracking-wider text-zinc-500">
+                New min ACU
+              </label>
+              <input
+                type="number"
+                step="0.5"
+                min="0.5"
+                value={minAcu}
+                onChange={(e) => setMinAcu(e.target.value)}
+                placeholder="0.5"
+                className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-20 tabular-nums"
+              />
+              <label className="text-[10px] uppercase tracking-wider text-zinc-500 ml-2">
+                New max ACU
+              </label>
+              <input
+                type="number"
+                step="0.5"
+                min="0.5"
+                value={maxAcu}
+                onChange={(e) => setMaxAcu(e.target.value)}
+                placeholder="4"
+                className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-20 tabular-nums"
+              />
+            </>
+          )}
           <button
             onClick={run}
             disabled={loading}
@@ -552,21 +582,41 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
         {result && (
           <div className="p-4 space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
-              <RangeCard
-                label="현재"
-                min={result.current.min_acu}
-                max={result.current.max_acu}
-                monthly={result.cost_impact.current_monthly_usd}
-                tone="zinc"
-              />
-              <RangeCard
-                label="제안"
-                min={result.proposed.min_acu}
-                max={result.proposed.max_acu}
-                monthly={result.cost_impact.proposed_monthly_usd}
-                tone={delta > 0 ? "amber" : "emerald"}
-                deltaPct={pct}
-              />
+              {provisioned ? (
+                <>
+                  <InstanceCard
+                    label="현재"
+                    instanceClass={result.current.instance_class}
+                    monthly={result.cost_impact.current_monthly_usd}
+                    tone="zinc"
+                  />
+                  <InstanceCard
+                    label="제안"
+                    instanceClass={result.proposed.instance_class}
+                    monthly={result.cost_impact.proposed_monthly_usd}
+                    tone={delta != null && delta > 0 ? "amber" : "emerald"}
+                    deltaPct={pct}
+                  />
+                </>
+              ) : (
+                <>
+                  <RangeCard
+                    label="현재"
+                    min={result.current.min_acu}
+                    max={result.current.max_acu}
+                    monthly={result.cost_impact.current_monthly_usd}
+                    tone="zinc"
+                  />
+                  <RangeCard
+                    label="제안"
+                    min={result.proposed.min_acu}
+                    max={result.proposed.max_acu}
+                    monthly={result.cost_impact.proposed_monthly_usd}
+                    tone={delta != null && delta > 0 ? "amber" : "emerald"}
+                    deltaPct={pct}
+                  />
+                </>
+              )}
             </div>
             <div className="grid gap-2 sm:grid-cols-[1fr_auto] items-baseline border-t border-zinc-800 pt-2.5">
               <div className="text-xs text-zinc-400">
@@ -574,33 +624,27 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
                   월 차액
                 </span>
                 <span className={`font-mono ${deltaTone}`}>
-                  {delta > 0 ? "+" : ""}${fmtDecimal(delta, 2)} / month
+                  {delta == null
+                    ? "n/a"
+                    : `${delta > 0 ? "+" : ""}$${fmtDecimal(delta, 2)} / month`}
                 </span>
               </div>
               <div className="text-[10px] text-zinc-500 font-mono">
-                {result.cost_assumption}
+                writers {result.writers} · readers {result.readers}
               </div>
             </div>
-            {result.warnings.length > 0 && (
-              <ul className="space-y-1 mt-2">
-                {result.warnings.map((w, i) => (
-                  <li
-                    key={i}
-                    className="text-[11px] text-amber-300 border-l-2 border-amber-500/40 pl-2"
-                  >
-                    {w}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="text-[11px] text-zinc-500">{result.notes}</div>
+            <PricingContext
+              pricing={result.unit_pricing}
+              dataSource={result.data_source}
+            />
+            <div className="text-[11px] text-zinc-500">{result.note}</div>
           </div>
         )}
 
         {!result && !loading && !err && (
           <div className="p-6 text-zinc-500 text-sm">
-            min/max ACU를 입력하면 라이브 클러스터의 현재 범위와 비교합니다. 빈
-            값이면 현재값을 그대로 사용합니다.
+            ACU min/max 또는 인스턴스 클래스를 입력하면 라이브 클러스터의 현재
+            구성과 비교합니다. 빈 값이면 현재값을 그대로 사용합니다.
           </div>
         )}
       </div>
@@ -810,6 +854,32 @@ function ResultCell({
   );
 }
 
+/** Shared monthly-cost line for the scaling cards. Renders "n/a" when the
+ *  Pricing API could not resolve a unit price (cost field is null). */
+function MonthlyLine({
+  monthly,
+  deltaPct,
+}: {
+  monthly: number | null | undefined;
+  deltaPct?: number | null;
+}) {
+  return (
+    <div className="text-[11px] text-zinc-400 mt-1 font-mono">
+      {monthly == null ? "n/a" : `$${fmtDecimal(monthly, 2)}/mo`}
+      {deltaPct != null && Math.abs(deltaPct) > 0.1 && (
+        <span
+          className={`ml-2 ${
+            deltaPct > 0 ? "text-rose-300" : "text-emerald-300"
+          }`}
+        >
+          ({deltaPct > 0 ? "+" : ""}
+          {fmtDecimal(deltaPct, 1)}%)
+        </span>
+      )}
+    </div>
+  );
+}
+
 function RangeCard({
   label,
   min,
@@ -819,11 +889,11 @@ function RangeCard({
   deltaPct,
 }: {
   label: string;
-  min: number;
-  max: number;
-  monthly: number;
+  min: number | undefined;
+  max: number | undefined;
+  monthly: number | null | undefined;
   tone: Tone;
-  deltaPct?: number;
+  deltaPct?: number | null;
 }) {
   return (
     <div className={`border px-3 py-2 ${TONE_CLASSES[tone]}`}>
@@ -831,24 +901,72 @@ function RangeCard({
         {label}
       </div>
       <div className="text-base font-mono tabular-nums">
-        {fmtDecimal(min, 1)}
+        {fmtDecimal(min ?? 0, 1)}
         <span className="text-zinc-600 mx-1">→</span>
-        {fmtDecimal(max, 1)}
+        {fmtDecimal(max ?? 0, 1)}
         <span className="text-[10px] text-zinc-500 ml-1">ACU</span>
       </div>
-      <div className="text-[11px] text-zinc-400 mt-1 font-mono">
-        ${fmtDecimal(monthly, 2)}/mo
-        {deltaPct !== undefined && Math.abs(deltaPct) > 0.1 && (
-          <span
-            className={`ml-2 ${
-              deltaPct > 0 ? "text-rose-300" : "text-emerald-300"
-            }`}
-          >
-            ({deltaPct > 0 ? "+" : ""}
-            {fmtDecimal(deltaPct, 1)}%)
-          </span>
-        )}
+      <MonthlyLine monthly={monthly} deltaPct={deltaPct} />
+    </div>
+  );
+}
+
+function InstanceCard({
+  label,
+  instanceClass,
+  monthly,
+  tone,
+  deltaPct,
+}: {
+  label: string;
+  instanceClass: string | undefined;
+  monthly: number | null | undefined;
+  tone: Tone;
+  deltaPct?: number | null;
+}) {
+  return (
+    <div className={`border px-3 py-2 ${TONE_CLASSES[tone]}`}>
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+        {label}
       </div>
+      <div className="text-base font-mono break-all">
+        {instanceClass || "—"}
+      </div>
+      <MonthlyLine monthly={monthly} deltaPct={deltaPct} />
+    </div>
+  );
+}
+
+/** Small line under the cost cards making the price provenance explicit: a
+ *  live region-aware Pricing API number reads differently from a fallback
+ *  estimate, and a DBA needs to know which one they're looking at. */
+function PricingContext({
+  pricing,
+  dataSource,
+}: {
+  pricing: ScalingUnitPricing;
+  dataSource: string;
+}) {
+  const live = pricing.source === "aws_pricing_api";
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-zinc-500 font-mono border-t border-zinc-800 pt-2.5">
+      <span
+        className={`px-1.5 py-0.5 border ${
+          live
+            ? "text-emerald-300 border-emerald-500/40 bg-emerald-500/5"
+            : "text-amber-300 border-amber-500/40 bg-amber-500/5"
+        }`}
+      >
+        {live ? "Pricing API" : "fallback"}
+      </span>
+      <span>
+        {pricing.price_per_hour == null
+          ? "no unit price"
+          : `$${fmtDecimal(pricing.price_per_hour, 4)}/hr · ${pricing.kind}`}
+      </span>
+      <span>{pricing.region}</span>
+      {pricing.io_optimized && <span>I/O-Optimized</span>}
+      <span className="text-zinc-600">{dataSource}</span>
     </div>
   );
 }

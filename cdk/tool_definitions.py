@@ -130,8 +130,9 @@ def simulation_schema():
         _tool("simulate_parameter_change", "Simulate parameter change impact",
               {"cluster_id": "string", "parameter_name": "string", "new_value": "string"},
               ["cluster_id", "parameter_name", "new_value"]),
-        _tool("simulate_scaling", "Simulate scaling cost-performance tradeoff",
-              {"cluster_id": "string", "new_min_acu": "number", "new_max_acu": "number"}, ["cluster_id"]),
+        _tool("simulate_scaling",
+              "Simulate scaling cost with real AWS pricing — Serverless v2 ACU range (new_min_acu/new_max_acu) OR provisioned instance resize (new_instance_class)",
+              {"cluster_id": "string", "new_min_acu": "number", "new_max_acu": "number", "new_instance_class": "string"}, ["cluster_id"]),
         _tool("simulate_ddl_impact", "Estimate DDL execution impact (lock time, duration)",
               {"cluster_id": "string", "ddl_sql": "string"}, ["cluster_id", "ddl_sql"]),
     ]
