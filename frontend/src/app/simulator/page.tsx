@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   fetchClusters,
   fetchParameterCatalog,
@@ -118,6 +118,8 @@ function UpgradePanel({
   );
   const [impact, setImpact] = useState<UpgradeImpactResponse | null>(null);
   const [plan, setPlan] = useState<UpgradePlanResponse | null>(null);
+  // Which method row's time breakdown is expanded, if any.
+  const [openMethod, setOpenMethod] = useState<string | null>(null);
 
   useEffect(() => {
     setCompat(null);
@@ -125,12 +127,14 @@ function UpgradePanel({
     setPlan(null);
     setErr(null);
     setTarget("");
+    setOpenMethod(null);
   }, [clusterId]);
 
   const run = async () => {
     if (!target.trim()) return;
     setLoading(true);
     setErr(null);
+    setOpenMethod(null);
     try {
       const [c, i, p] = await Promise.all([
         simulateUpgradeCompatibility(clusterId, target.trim()),
@@ -278,40 +282,95 @@ function UpgradePanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {impact.methods.map((m) => (
-                    <tr
-                      key={m.method}
-                      className={`border-b border-zinc-900 ${
-                        m.method === impact.recommendation
-                          ? "bg-emerald-500/5"
-                          : ""
-                      }`}
-                    >
-                      <td className="py-1.5 font-mono text-zinc-200 align-top">
-                        {m.method}
-                        {m.method === impact.recommendation && (
-                          <span className="ml-2 text-[10px] text-emerald-400">
-                            ★ 권장
-                          </span>
+                  {impact.methods.map((m) => {
+                    const open = openMethod === m.method;
+                    const hasBasis = !!m.basis && m.basis.length > 0;
+                    return (
+                      <Fragment key={m.method}>
+                        <tr
+                          onClick={() =>
+                            hasBasis && setOpenMethod(open ? null : m.method)
+                          }
+                          className={`border-b border-zinc-900 ${
+                            hasBasis
+                              ? "cursor-pointer hover:bg-zinc-800/40"
+                              : ""
+                          } ${
+                            m.method === impact.recommendation && !open
+                              ? "bg-emerald-500/5"
+                              : ""
+                          }`}
+                          title={
+                            hasBasis ? "클릭하여 추정 근거 보기" : undefined
+                          }
+                        >
+                          <td className="py-1.5 font-mono text-zinc-200 align-top">
+                            {hasBasis && (
+                              <span className="text-zinc-600 mr-1.5 inline-block w-2 select-none">
+                                {open ? "▾" : "▸"}
+                              </span>
+                            )}
+                            {m.method}
+                            {m.method === impact.recommendation && (
+                              <span className="ml-2 text-[10px] text-emerald-400">
+                                ★ 권장
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums align-top">
+                            ~{m.estimated_minutes}분
+                            {typeof m.range_low_minutes === "number" &&
+                              typeof m.range_high_minutes === "number" && (
+                                <span className="block text-[10px] text-zinc-600">
+                                  {m.range_low_minutes}–{m.range_high_minutes}분
+                                </span>
+                              )}
+                          </td>
+                          <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums align-top">
+                            {m.downtime_text}
+                          </td>
+                          <td className="py-1.5 pl-3 align-top">
+                            <RiskBadge risk={m.risk} />
+                          </td>
+                        </tr>
+                        {open && hasBasis && (
+                          <tr className="border-b border-zinc-900 bg-zinc-950/60">
+                            <td colSpan={4} className="px-2 pb-3 pt-1">
+                              <div className="border-l-2 border-emerald-500/40 pl-3">
+                                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+                                  {m.method} ~{m.estimated_minutes}분 추정 근거
+                                </div>
+                                <ul className="space-y-1">
+                                  {m.basis!.map((b, i) => (
+                                    <li
+                                      key={i}
+                                      className="text-[11px] text-zinc-400 leading-relaxed flex gap-1.5"
+                                    >
+                                      <span className="text-emerald-500/60 select-none">
+                                        ·
+                                      </span>
+                                      <span>{b}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                                {typeof m.range_low_minutes === "number" &&
+                                  typeof m.range_high_minutes === "number" && (
+                                    <div className="text-[10px] text-zinc-600 mt-1.5">
+                                      추정 범위 {m.range_low_minutes}–
+                                      {m.range_high_minutes}분
+                                      {impact.confidence &&
+                                        ` · 신뢰도 ${
+                                          CONFIDENCE_KO[impact.confidence]
+                                        }`}
+                                    </div>
+                                  )}
+                              </div>
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums align-top">
-                        ~{m.estimated_minutes}분
-                        {typeof m.range_low_minutes === "number" &&
-                          typeof m.range_high_minutes === "number" && (
-                            <span className="block text-[10px] text-zinc-600">
-                              {m.range_low_minutes}–{m.range_high_minutes}분
-                            </span>
-                          )}
-                      </td>
-                      <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums align-top">
-                        {m.downtime_text}
-                      </td>
-                      <td className="py-1.5 pl-3 align-top">
-                        <RiskBadge risk={m.risk} />
-                      </td>
-                    </tr>
-                  ))}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -883,6 +942,12 @@ function RiskBadge({ risk }: { risk: string }) {
     </span>
   );
 }
+
+const CONFIDENCE_KO: Record<"low" | "medium" | "high", string> = {
+  high: "높음",
+  medium: "보통",
+  low: "낮음",
+};
 
 function ConfidenceBadge({
   confidence,
