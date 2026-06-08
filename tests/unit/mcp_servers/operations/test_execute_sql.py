@@ -1,6 +1,7 @@
+import base64
 from unittest.mock import MagicMock, patch
 
-from mcp_servers.operations.tools.execute_sql import execute_sql_impl
+from mcp_servers.operations.tools.execute_sql import _decode_field, execute_sql_impl
 
 
 def test_execute_sql_dangerous_blocked():
@@ -226,3 +227,44 @@ def test_dollar_quoted_literal_with_semicolon_still_safe(mock_boto3):
         sql="SELECT $$a; b$$ AS v",
     )
     assert out["status"] == "executed"
+
+
+def test_decode_field_handles_full_type_set():
+    """RDS Data API fields beyond the four scalars must decode correctly:
+    NULL, bytea, arrays, and decimals (returned as stringValue)."""
+    assert _decode_field({"isNull": True}) is None
+    assert _decode_field({"stringValue": "x"}) == "x"
+    assert _decode_field({"longValue": 7}) == 7
+    assert _decode_field({"booleanValue": False}) is False
+    # NUMERIC/DECIMAL arrive as stringValue — exact precision preserved
+    assert _decode_field({"stringValue": "123.4500"}) == "123.4500"
+    # bytea -> base64 string (JSON-safe), round-trips to original bytes
+    blob = b"\x00\x01\xfe"
+    decoded = _decode_field({"blobValue": blob})
+    assert base64.b64decode(decoded) == blob
+    # array of scalars
+    assert _decode_field({"arrayValue": {"longValues": [1, 2, 3]}}) == [1, 2, 3]
+    # nested array
+    assert _decode_field(
+        {"arrayValue": {"arrayValues": [{"stringValues": ["a"]}, {"stringValues": ["b"]}]}}
+    ) == [["a"], ["b"]]
+
+
+@patch.dict(
+    "os.environ",
+    {"TARGET_CLUSTER_ARN": "arn:test", "TARGET_SECRET_ARN": "arn:secret", "TARGET_DB_NAME": "testdb"},
+)
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+def test_execute_sql_decodes_null_and_array_rows(mock_boto3):
+    mock_rds_data = MagicMock()
+    mock_boto3.client.return_value = mock_rds_data
+    mock_rds_data.execute_statement.return_value = {
+        "columnMetadata": [{"name": "id"}, {"name": "tags"}, {"name": "deleted_at"}],
+        "records": [[
+            {"longValue": 1},
+            {"arrayValue": {"stringValues": ["a", "b"]}},
+            {"isNull": True},
+        ]],
+    }
+    result = execute_sql_impl(MagicMock(), cluster_id="prod-pg-1", sql="SELECT * FROM t")
+    assert result["rows"][0] == {"id": 1, "tags": ["a", "b"], "deleted_at": None}

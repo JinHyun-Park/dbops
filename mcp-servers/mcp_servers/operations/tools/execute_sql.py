@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 
@@ -123,6 +124,39 @@ def _is_multi_statement(sql: str) -> bool:
     return bool(_STACKED_STMT_RE.search(body))
 
 
+def _decode_array(arr: dict):
+    """Decode an RDS Data API ArrayValue into a Python list (incl. nesting)."""
+    for key in ("stringValues", "longValues", "doubleValues", "booleanValues"):
+        if key in arr:
+            return list(arr[key])
+    if "arrayValues" in arr:
+        return [_decode_array(a) for a in arr["arrayValues"]]
+    return []
+
+
+def _decode_field(field: dict):
+    """Decode one RDS Data API Field into a Python value. Handles the FULL set,
+    not just the four scalar types: explicit SQL NULL (isNull), bytea
+    (blobValue → base64 string), and arrays (arrayValue). NUMERIC/DECIMAL come
+    back as stringValue from the Data API, so exact precision is preserved by
+    keeping the string. The previous decoder collapsed NULL/blob/array — and
+    any unrecognized field — to None, silently losing or misrepresenting data
+    in diagnostics and audit output."""
+    if field.get("isNull"):
+        return None
+    for typ in ("stringValue", "longValue", "doubleValue", "booleanValue"):
+        if typ in field:
+            return field[typ]
+    if "blobValue" in field:
+        blob = field["blobValue"]
+        if isinstance(blob, (bytes, bytearray)):
+            return base64.b64encode(bytes(blob)).decode("ascii")
+        return str(blob)
+    if "arrayValue" in field:
+        return _decode_array(field["arrayValue"])
+    return None
+
+
 _CLUSTERS_TABLE_NAME = os.environ.get("CLUSTERS_TABLE", "")
 
 
@@ -234,12 +268,7 @@ def execute_sql_impl(
         row = {}
         for i, f in enumerate(rec):
             col = cols[i] if i < len(cols) else f"col_{i}"
-            for typ in ("stringValue", "longValue", "doubleValue", "booleanValue"):
-                if typ in f:
-                    row[col] = f[typ]
-                    break
-            else:
-                row[col] = None
+            row[col] = _decode_field(f)
         rows.append(row)
     return {
         "status": "executed",
