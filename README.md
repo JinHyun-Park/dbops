@@ -4,57 +4,95 @@ AI 기반 종합 데이터베이스 운영 플랫폼. 자연어 대화로 Amazon
 
 ## Features
 
-- **AI Chat** — 자연어로 DB 성능 분석, 장애 진단, 운영 작업 요청
-- **Performance Analysis** — Slow query 분석, EXPLAIN plan tree + anti-pattern auto-detection, 인덱스 추천, 이상 탐지
-- **Incident Diagnosis** — RCA(Root Cause Analysis), 시그널 상관 분석, 타임라인 재구성
-- **Operations Automation** — 파라미터 변경, DDL 실행, 스케일링 (Human-in-the-loop 승인)
-- **Simulation UI** — 버전 업그레이드 (compatibility + method matrix + ordered plan), parameter 변경, ACU 스케일링 비용, DDL 영향을 채팅 없이 `/simulator` 페이지에서 즉시 추정
-- **Monitoring Dashboard** — 실시간 클러스터 상태, 메트릭 시각화, 프로액티브 알림
-- **Cross-Account** — Hub-Spoke IAM 패턴으로 여러 AWS 계정의 Aurora 클러스터 통합 관리
-- **SLO Tracker** — 가용성 + p-mean 쿼리 지연 SLO 목표 대비 실측 + 에러 버짓 burn-down (`/slo`)
-- **Schema Lineage** — `pg_constraint` 라이브 introspection으로 외래키 관계 그래프 시각화 (`/schema`)
-- **Replication Topology** — Writer + Readers + 인스턴스별 AuroraReplicaLag, promotion tier, multi-AZ (Dashboard 패널)
-- **Redundant Indexes** — Prefix-covered / 완전 중복 / unused 인덱스 자동 검출 (Dashboard 패널, PG)
-- **Capacity Forecasting** — Storage / Connections / AAS 30-60-90 day 선형 회귀 예측 + 임계 도달 시점
-- **PG Log Insights** — CloudWatch Logs Insights를 카테고리(slow/vacuum/error/connection)별로 묶어 Dashboard에서 조회
-- **Cost Anomaly Detection** — Bedrock 일별 사용액 spike를 z-score + 절대 차이 + 상대 비율 triple gate로 감지 (`/cost`)
-- **Compound Alert Rules** — 단일 threshold + AND/OR DSL 양쪽 지원 (per-operand window/agg). Slack 양방향 ack 가능 — 알림 메시지의 "✓ Ack" 버튼을 누르면 알림 페이지에 즉시 반영 (Alerts → "Slack 양방향 Ack 설정" 가이드)
-- **Approval Guard** — 모든 write tool (`execute_sql` DDL/DML, `modify_parameter`, `modify_scaling`, `manage_maintenance`) 이 서버측에서 DDB approval row를 검증. agent가 `approved=true`만 임의로 켤 수 없고, `approval_id` (DBA가 `/approvals`에서 승인 시 발급)를 함께 넘겨야 통과 — cluster/action_type/resolved_at 30분 윈도우/atomic consume까지 모두 강제
-- **AI Runbooks** — 채팅 결과를 마크다운 playbook으로 저장/검색/삭제. 이상 패턴 재발 시 빠르게 복기 (`/runbooks`)
-- **Ask the Fleet** — 자연어로 fleet 조회 ("CPU 80% 넘은 클러스터 보여줘"). NL→filter compiler + saved views (`/ask`)
-- **Daily Operations Report** — `report_generator` Lambda가 매일 자정 클러스터별로 24h 메트릭 (AAS p95/peak/busy minutes, top 5 slow queries, top 5 alert rules, storage delta, connection peak, event mix) 을 집계하고 Bedrock Claude로 3~5문장 한국어 요약을 생성. Bedrock 호출 실패 시 결정적 템플릿 fallback이 동작 (`/reports`)
-- **Cross-Device Chat Sessions** — 대화 세션이 DynamoDB (`sessions` 테이블) 에 영속화. 다른 기기/브라우저에서 열어도 사이드바에서 그대로 이어쓸 수 있음. 1.5s debounced sync + localStorage offline 캐시 + 90-day TTL
-- **Incident Timeline** — 한 cluster의 모든 운영 신호 (알람 발화 / RDS 이벤트 / 스키마 변경 / proactive 알림 / Slack ack / 실행된 쓰기) 를 시간축 한 줄에 (`/timeline`). 카테고리 칩으로 필터, 1h/6h/24h/7d 윈도우. Slack 알람 메시지의 🕐 Timeline 버튼이 cluster 컨텍스트 + 시점 쿼리스트링을 자동 첨부
-- **DBOps Activity Log** — 누가 무엇을 요청/승인/실행했는지 시간순 기록 (`/activity`). 컴플라이언스 감사 + 사후 회고용. cluster / actor / action_type 3 필터, 날짜별 자동 그룹핑
-- **Alert Impact** — 알람 발화 시점 ±5min의 슬로우 쿼리·동시 RDS 이벤트·동시 발화한 다른 알람을 인라인 패널로 (`/alerts` 행의 "영향도" 버튼). 사고 triage 시 페이지 이동 없이 컨텍스트 잡음
-- **Saved Query Library** — Query Lab에서 자주 쓰는 SQL을 라이브러리에 저장/태깅/cross-device 로드. 캡쳐 패널 (Query Lab 화면 좌측) + Save 모달 + admin-only 삭제 (`schema_v13.saved_queries`)
-- **Cluster Registration Wizard** — `/clusters` 등록 폼에 same-account / cross-account 모드 토글. 같은 계정이면 spoke role 필드 자동 숨김 + emerald 힌트, cross-account면 amber 힌트 + 설정 가이드 링크. "연결만 테스트" 버튼으로 STS AssumeRole + DescribeDBClusters + master_user_secret 3-step pre-flight (저장 없이) 가능
-- **Agent Memory Inspector** — AgentCore Memory에 누적된 당신의 preferences / facts 를 읽고 잘못된 항목 삭제 (`/preferences`). Cognito sub 기반 namespace 라우팅으로 cross-user read 차단
-- **Per-Cluster ETL Health** — `/clusters` 레지스트리 테이블에 ETL 신선도 배지 (fresh/stale/no_data) 자동 표시. metric_snapshots MAX(ts) 기반 15분 윈도우
-- **Schema Migration Auto-Trigger** — `cdk deploy` 시 schema_migrator/sql/ 디렉터리의 SHA-256 해시를 자동으로 schema_version property에 주입해 SQL 변경 시 자동 마이그레이션 실행 (수동 bump 불필요)
-- **Rule Templates** — `/alerts` 룰 빌더 상단에 DBA-canonical 프리셋 6개 (CPU 지속 스파이크 / Connection 폭주 / AAS 과부하 / Replica lag / Deadlock / Write storm + CPU 복합) 원클릭으로 operand 채움
-- **MySQL Dashboard Parity** — Schema FK lineage, Redundant indexes, Log Insights 모두 Aurora MySQL 지원 (information_schema + performance_schema + 엔진별 log group 자동 라우팅)
-- **Log Keyword Search** — `/dashboard` Log Insights 패널에 검색어 입력. 공백 구분 AND 조인, regex meta 살균, 컴파일된 CW Insights 쿼리는 응답에 포함 (사용자가 CW Console로 복사 가능)
-- **Activity Audit MCP Tool** — `query_activity_audit` (operations MCP) 로 채팅에서 자연어 감사 질문 ("누가 max_connections 바꿨어?") 처리. DDB approvals + PG audit_log 머지해 시간순 반환
+DBA를 위한 풀스택 운영 플랫폼 — **대화로 진단하고, 안전하게 실행하고, fleet 전체를 모니터링**합니다.
+아래는 영역별 핵심 기능이며, 각 항목의 `/path`는 해당 Web UI 페이지입니다.
+
+<details open>
+<summary><b>🤖 AI & 대화</b></summary>
+
+- **AI Chat** (`/chat`) — 자연어로 성능 분석·장애 진단·운영 작업 요청. AWS MCP Server(SigV4)로 **공식 AWS/Aurora 문서를 근거로 인용**해 답변
+- **Ask the Fleet** (`/ask`) — "CPU 80% 넘은 클러스터 보여줘" 같은 자연어 fleet 조회. NL→filter compiler + saved views
+- **AI Runbooks** (`/runbooks`) — 채팅 진단/처방을 마크다운 playbook으로 저장·검색·재사용
+- **Cross-Device Chat Sessions** — 대화가 DynamoDB에 영속화돼 다른 기기/브라우저에서 이어쓰기 (1.5s debounced sync + offline 캐시 + 90-day TTL)
+- **Agent Memory Inspector** (`/preferences`) — AgentCore Memory의 preferences/facts 조회·삭제. Cognito sub 기반 namespace로 cross-user read 차단
+
+</details>
+
+<details>
+<summary><b>📊 성능 & 분석</b></summary>
+
+- **Performance Analysis** — Slow query 분석, EXPLAIN plan tree + anti-pattern 자동 검출, 인덱스 추천, 이상 탐지
+- **Schema Lineage** (`/schema`) — `pg_constraint` 라이브 introspection으로 FK 관계 그래프 시각화
+- **Replication Topology** (Dashboard) — Writer/Readers + 인스턴스별 AuroraReplicaLag, promotion tier, multi-AZ
+- **Redundant Indexes** (Dashboard) — prefix-covered / 완전 중복 / unused 인덱스 자동 검출
+- **Capacity Forecasting** — Storage/Connections/AAS 30·60·90일 선형 회귀 예측 + 임계 도달 시점
+- **PG Log Insights** + **Keyword Search** (`/dashboard`) — CloudWatch Logs Insights를 카테고리별로 묶어 조회, 검색어 AND 조인 + regex 살균
+- **Saved Query Library** (Query Lab) — 자주 쓰는 SQL 저장·태깅·cross-device 로드
+- **MySQL Dashboard Parity** — Schema/Indexes/Log Insights 모두 Aurora MySQL 지원
+
+</details>
+
+<details>
+<summary><b>📈 모니터링 & 알림</b></summary>
+
+- **Monitoring Dashboard** (`/dashboard`) — 실시간 클러스터 상태, 메트릭 시각화, Health Score
+- **Fleet Overview** (`/fleet`) — 전체 클러스터 한눈에. ETL 신선도 배지(fresh/stale/no_data) 포함
+- **SLO Tracker** (`/slo`) — 가용성 + p-mean 쿼리 지연 SLO 실측 + 에러 버짓 burn-down
+- **Compound Alert Rules** (`/alerts`) — 단일 threshold + AND/OR DSL(per-operand window/agg). DBA 프리셋 6종 + Slack 양방향 Ack
+- **Alert Impact** — 알람 ±5min의 슬로우 쿼리·동시 이벤트·동시 알람을 인라인 패널로 (사고 triage)
+- **Cost Anomaly Detection** (`/cost`) — Bedrock 일별 사용액 spike를 z-score + 절대차 + 상대비 triple gate로 감지
+
+</details>
+
+<details>
+<summary><b>🔧 운영 & 안전장치</b></summary>
+
+- **Operations Automation** — 파라미터 변경, DDL 실행, 스케일링, **스냅샷·복원** (전부 Human-in-the-loop 승인)
+- **Approval Guard** — 모든 write tool이 서버측에서 DDB approval row를 검증. agent가 `approved=true`를 임의로 못 켜고, `approval_id`(DBA가 `/approvals`에서 승인 시 발급) + cluster/action_type/30분 윈도우/atomic consume까지 강제
+- **Simulation UI** (`/simulator`) — 업그레이드(호환성+method matrix+ordered plan)·파라미터·ACU 비용·DDL 영향을 채팅 없이 즉시 추정
+
+</details>
+
+<details>
+<summary><b>🚨 인시던트 & 감사</b></summary>
+
+- **Incident Diagnosis** — RCA, 시그널 상관 분석, 타임라인 재구성
+- **Incident Timeline** (`/timeline`) — 한 cluster의 모든 신호(알람/RDS 이벤트/스키마 변경/proactive/Slack ack/실행된 쓰기)를 시간축 한 줄에, 카테고리 칩 필터
+- **DBOps Activity Log** (`/activity`) — 누가 무엇을 요청/승인/실행했는지 시간순 기록 (컴플라이언스 감사 + 사후 회고). `query_activity_audit` MCP 도구로 채팅에서도 질의 가능
+- **Daily Operations Report** (`/reports`) — `report_generator` Lambda가 매일 자정 24h 메트릭을 집계 + Bedrock Claude로 한국어 요약 (실패 시 템플릿 fallback)
+
+</details>
+
+<details>
+<summary><b>🏢 플랫폼 & 멀티계정</b></summary>
+
+- **Cross-Account** — Hub-Spoke IAM 패턴으로 여러 AWS 계정의 Aurora 통합 관리
+- **Cluster Registration Wizard** (`/clusters`) — same/cross-account 모드 토글, "연결만 테스트" 3-step pre-flight (STS AssumeRole + DescribeDBClusters + master secret)
+- **Schema Migration Auto-Trigger** — `cdk deploy` 시 SQL 디렉터리 SHA-256 해시를 schema_version에 주입해 변경 시 자동 마이그레이션
+
+</details>
 
 ## Architecture
 
 ```
-Web UI (Next.js) ──SSE──▶ AgentCore Runtime (Strands Agent)
+Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
+                                    │                        │
+                          AgentCore Gateway          AWS MCP Server
+                          (Cedar Policy)             (SigV4 · 공식 AWS 문서)
                                     │
-                              AgentCore Gateway (Cedar Policy)
+              ┌─────────────────────┼─────────────────────┐
+              ▼            ▼              ▼               ▼
+         Performance   Incident      Operations       Simulation
+           MCP          MCP            MCP               MCP
+                       (4 custom MCP servers · 30+ tools)
                                     │
-                    ┌───────────────┼───────────────┐
-                    ▼               ▼               ▼
-              Custom MCP      Official AWS MCP   Bedrock KB
-              (Performance,   (Aurora PG/MySQL,  (S3 Vectors)
-               Incident,      CloudWatch,
-               Operations,    AWS API)
-               Simulation)
-                    │
-                    ▼
-             Aurora PG Cache ◀── Data Collection Pipeline
+                                    ▼
+                  Aurora PG Cache ◀── Data Collection Pipeline
+                  (hot cache)         (ETL · Event Processor · Report · Monitor)
 ```
+
+- **Custom 도구는 Gateway 경유** (Cedar Policy로 write 승인 강제), **공식 AWS 문서는 AWS MCP Server에 SigV4로 직접** — 읽기 전용 문서 도구만 노출
+- **Dashboard 데이터는 사전 수집 캐시에서** — 실시간 렌더링 중 AWS API를 직접 호출하지 않음 (라이브 패널만 예외: topology/backup)
 
 - **Single Agent + Gateway**: 단일 AgentCore Runtime + Gateway MCP로 지연/토큰 최적화
 - **CDK-First**: 모든 인프라는 CDK로만 관리. `cdk deploy --all`로 전체 배포
@@ -62,13 +100,13 @@ Web UI (Next.js) ──SSE──▶ AgentCore Runtime (Strands Agent)
 
 ## Tech Stack
 
-| Layer    | Technology                                          |
-| -------- | --------------------------------------------------- |
-| Agent    | Strands Agents SDK, AgentCore Runtime/Gateway       |
-| LLM      | Amazon Bedrock Claude                               |
-| Frontend | Next.js 15, React, shadcn/ui, Tailwind CSS          |
-| IaC      | AWS CDK (Python)                                    |
-| Data     | Aurora PostgreSQL (Cache), DynamoDB, S3, S3 Vectors |
+| Layer    | Technology                                            |
+| -------- | ----------------------------------------------------- |
+| Agent    | Strands Agents SDK, AgentCore Runtime/Gateway         |
+| LLM      | Amazon Bedrock Claude                                 |
+| Frontend | Next.js 15, React, shadcn/ui, Tailwind CSS            |
+| IaC      | AWS CDK (Python)                                      |
+| Data     | Aurora PostgreSQL (hot cache), DynamoDB, S3 (archive) |
 
 ## Quick Start
 
@@ -231,7 +269,7 @@ See `cdk/cross-account/README.md` for details.
 dbops/
 ├── cdk/                  # CDK infrastructure (4 stacks)
 ├── agent/                # Strands Agent + Dockerfile
-├── mcp-servers/          # 4 Custom MCP servers (32 tools, incl. request_approval + query_activity_audit)
+├── mcp-servers/          # 4 Custom MCP servers (30+ tools, incl. snapshot/restore + request_approval + query_activity_audit)
 ├── data-pipeline/        # ETL, Event Processor, Report Generator, Monitor
 ├── api/                  # REST API Lambdas
 ├── frontend/             # Next.js Web UI
