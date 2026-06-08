@@ -54,6 +54,11 @@ def incident_schema():
         _tool("correlate_signals", "Correlate metrics and events on timeline",
               {"cluster_id": "string", "start_time": "string", "end_time": "string"},
               ["cluster_id", "start_time", "end_time"]),
+        _tool("diagnose_root_cause",
+              "Rank candidate root causes (schema changes, events, locks, metric spikes, "
+              "slow queries) around an incident by proximity and severity",
+              {"cluster_id": "string", "around_time": "string", "window_minutes": "integer"},
+              ["cluster_id"]),
         _tool("get_incident_summary", "Get incident statistics (MTTR, frequency)",
               {"cluster_id": "string", "days": "integer"}, ["cluster_id"]),
         _tool("find_similar_incidents", "Find similar past incidents from knowledge base",

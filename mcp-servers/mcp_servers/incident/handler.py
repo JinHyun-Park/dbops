@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp_servers.incident.tools.correlate_signals import correlate_signals_impl
+from mcp_servers.incident.tools.diagnose_root_cause import diagnose_root_cause_impl
 from mcp_servers.incident.tools.health_status import get_health_status_impl
 from mcp_servers.incident.tools.incident_summary import get_incident_summary_impl
 from mcp_servers.incident.tools.recent_events import get_recent_events_impl
@@ -64,6 +65,31 @@ TOOLS = {
                 "end_time": {"type": "string", "description": "ISO 8601 end time"},
             },
             "required": ["cluster_id", "start_time", "end_time"],
+        },
+    },
+    "diagnose_root_cause": {
+        "impl": diagnose_root_cause_impl,
+        "description": (
+            "Rank candidate root causes for an incident by proximity and severity. "
+            "Gathers schema/DDL changes, operational events, lock contention, metric "
+            "spikes, and slow queries from the cache around the incident time and "
+            "returns a scored, ranked shortlist (correlation, not proof)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "around_time": {
+                    "type": "string",
+                    "description": "ISO 8601 incident time; empty anchors on NOW()",
+                },
+                "window_minutes": {
+                    "type": "integer",
+                    "default": 30,
+                    "description": "Minutes to look back before the anchor",
+                },
+            },
+            "required": ["cluster_id"],
         },
     },
     "get_incident_summary": {
