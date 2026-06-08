@@ -124,10 +124,31 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
+                # Simulation tools resolve a cluster's region/spoke_role_arn from
+                # the registry (cluster_targets) to make read-only RDS Describe
+                # calls in the cluster's own account when grounding simulations
+                # in real config (scaling ACU, parameter values, version, members).
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
             },
         )
         data.cache_db.secret.grant_read(simulation_mcp_lambda)
         data.cache_db.grant_data_api_access(simulation_mcp_lambda)
+        foundation.clusters_table.grant_read_data(simulation_mcp_lambda)
+        simulation_mcp_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                # All READ-ONLY: simulations describe real config, never mutate.
+                # (Also fixes describe_db_engine_versions for upgrade_compatibility,
+                # which previously had no rds permission at all.)
+                "rds:DescribeDBClusters",
+                "rds:DescribeDBEngineVersions",
+                "rds:DescribeDBClusterParameters",
+                "rds:DescribeDBClusterParameterGroups",
+                # Hub-spoke: assume the cluster's spoke role to describe it in its
+                # own account+region (same pattern as the operations write tools).
+                "sts:AssumeRole",
+            ],
+            resources=["*"],
+        ))
 
         # ===== AgentCore Gateway =====
 
