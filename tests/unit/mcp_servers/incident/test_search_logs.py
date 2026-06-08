@@ -4,13 +4,13 @@ from mcp_servers.incident.tools.search_logs import search_logs_impl
 
 
 @patch("mcp_servers.incident.tools.search_logs.time")
-@patch("mcp_servers.incident.tools.search_logs.boto3")
-def test_search_logs_returns_results(mock_boto3, mock_time):
+@patch("mcp_servers.incident.tools.search_logs.client_for_cluster")
+def test_search_logs_returns_results(mock_client_for, mock_time):
     mock_time.time.return_value = 1704067200.0
     mock_time.sleep = MagicMock()
 
     mock_logs_client = MagicMock()
-    mock_boto3.client.return_value = mock_logs_client
+    mock_client_for.return_value = mock_logs_client
     mock_logs_client.start_query.return_value = {"queryId": "q-123"}
     mock_logs_client.get_query_results.return_value = {
         "status": "Complete",
@@ -26,16 +26,18 @@ def test_search_logs_returns_results(mock_boto3, mock_time):
     assert result["count"] == 2
     assert result["log_group"] == "/aws/rds/cluster/prod-pg-1/error"
     assert result["results"][0]["@message"] == "ERROR: deadlock detected"
+    # Cross-account-aware: resolves the logs client for THIS cluster.
+    mock_client_for.assert_called_once_with("prod-pg-1", "logs")
 
 
 @patch("mcp_servers.incident.tools.search_logs.time")
-@patch("mcp_servers.incident.tools.search_logs.boto3")
-def test_search_logs_timeout(mock_boto3, mock_time):
+@patch("mcp_servers.incident.tools.search_logs.client_for_cluster")
+def test_search_logs_timeout(mock_client_for, mock_time):
     mock_time.time.return_value = 1704067200.0
     mock_time.sleep = MagicMock()
 
     mock_logs_client = MagicMock()
-    mock_boto3.client.return_value = mock_logs_client
+    mock_client_for.return_value = mock_logs_client
     mock_logs_client.start_query.return_value = {"queryId": "q-timeout"}
     mock_logs_client.get_query_results.return_value = {"status": "Running"}
 

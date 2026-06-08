@@ -557,11 +557,55 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
               tone={result.requires_restart ? "rose" : "emerald"}
             />
             <ResultCell label="Impact" value={result.impact_area} tone="zinc" />
+            {/* Live current → new value (only when the param group was read). */}
+            {(result.current_value !== undefined ||
+              result.current_value_note) && (
+              <div className="sm:col-span-3 text-[11px] text-zinc-400 flex flex-wrap items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  Value
+                </span>
+                <span className="font-mono text-zinc-300">
+                  {result.current_value ?? "(엔진 기본값)"}
+                </span>
+                <span className="text-zinc-600">→</span>
+                <span className="font-mono text-zinc-200">
+                  {result.new_value}
+                </span>
+                {result.is_modifiable === false && (
+                  <span className="px-1.5 py-0.5 border text-[10px] text-rose-300 border-rose-500/40 bg-rose-500/10">
+                    수정 불가
+                  </span>
+                )}
+                {result.allowed_values && (
+                  <span className="text-[10px] text-zinc-500 font-mono">
+                    허용: {result.allowed_values}
+                  </span>
+                )}
+              </div>
+            )}
+            {result.valid === false && result.validation_reason && (
+              <div className="sm:col-span-3 text-[11px] text-rose-300 border border-rose-500/30 bg-rose-500/5 px-3 py-1.5">
+                ⚠ {result.validation_reason}
+              </div>
+            )}
             <div className="sm:col-span-3 text-zinc-300 border border-zinc-800 bg-zinc-900/60 px-3 py-2">
               <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
                 Recommendation
               </span>
               {result.recommendation}
+              {result.impact_note && (
+                <div className="text-[10px] text-zinc-500 mt-1">
+                  {result.impact_note}
+                </div>
+              )}
+              <div className="text-[10px] text-zinc-600 mt-1 flex flex-wrap gap-2">
+                {result.parameter_group && (
+                  <span className="font-mono">
+                    pg: {result.parameter_group}
+                  </span>
+                )}
+                {result.data_source && <span>{result.data_source}</span>}
+              </div>
               {!result.known && (
                 <div className="text-[10px] text-amber-400 mt-1">
                   카탈로그 미등록 — 결과는 보수적 기본값입니다
@@ -856,6 +900,21 @@ function DdlPanel({
 
         {result && (
           <div className="p-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {result.operation && (
+                <span className="px-1.5 py-0.5 border text-[10px] font-mono text-zinc-300 border-zinc-700 bg-zinc-900/60">
+                  {result.operation}
+                </span>
+              )}
+              {result.confidence && (
+                <ConfidenceBadge confidence={result.confidence} />
+              )}
+              {typeof result.throughput_mb_s === "number" && (
+                <span className="text-[10px] text-zinc-600 font-mono ml-auto">
+                  추정 처리량 ~{fmtDecimal(result.throughput_mb_s, 0)} MB/s
+                </span>
+              )}
+            </div>
             <div className="grid gap-3 sm:grid-cols-4 text-xs">
               <ResultCell label="Table" value={result.table} tone="zinc" mono />
               <ResultCell
@@ -866,7 +925,13 @@ function DdlPanel({
               />
               <ResultCell
                 label="Est. duration"
-                value={`~${fmtExact(result.estimated_seconds)} s`}
+                value={
+                  result.estimated_range_seconds
+                    ? `~${fmtExact(result.estimated_seconds)} s (${fmtExact(
+                        result.estimated_range_seconds[0],
+                      )}–${fmtExact(result.estimated_range_seconds[1])})`
+                    : `~${fmtExact(result.estimated_seconds)} s`
+                }
                 tone={
                   result.estimated_seconds > 600
                     ? "rose"
@@ -909,6 +974,29 @@ function DdlPanel({
               </span>
               {result.recommendation}
             </div>
+            {result.basis && result.basis.length > 0 && (
+              <div className="border-l-2 border-emerald-500/40 pl-3">
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+                  추정 근거
+                </div>
+                <ul className="space-y-0.5">
+                  {result.basis.map((b, i) => (
+                    <li
+                      key={i}
+                      className="text-[11px] text-zinc-400 leading-relaxed flex gap-1.5"
+                    >
+                      <span className="text-emerald-500/60 select-none">·</span>
+                      <span>{b}</span>
+                    </li>
+                  ))}
+                </ul>
+                {result.note && (
+                  <p className="text-[10px] text-zinc-600 leading-relaxed mt-1.5">
+                    {result.note}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 

@@ -56,11 +56,19 @@ def session_for(region: str = "", role_arn: str = "") -> boto3.session.Session:
     )
 
 
+def client_for_cluster(cluster_id: str, service: str):
+    """Any AWS client (rds, logs, cloudwatch, …) targeting the cluster's
+    account+region. Resolves `region` + `spoke_role_arn` from the registry and
+    assumes the spoke role when present; falls back to a local client for
+    single-account deploys."""
+    row = lookup_cluster(cluster_id)
+    return session_for(row.get("region", ""), row.get("spoke_role_arn", "")).client(service)
+
+
 def rds_client_for_cluster(cluster_id: str):
     """RDS control-plane client targeting the cluster's account+region.
 
     Resolves `region` + `spoke_role_arn` from the clusters registry. If the
     cluster isn't registered (or the table is unset), falls back to a local
     client so legacy single-account deploys keep working."""
-    row = lookup_cluster(cluster_id)
-    return session_for(row.get("region", ""), row.get("spoke_role_arn", "")).client("rds")
+    return client_for_cluster(cluster_id, "rds")

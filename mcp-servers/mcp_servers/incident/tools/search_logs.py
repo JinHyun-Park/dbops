@@ -1,8 +1,7 @@
 import time
 
-import boto3
-
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.cluster_targets import client_for_cluster
 
 
 def search_logs_impl(
@@ -15,7 +14,9 @@ def search_logs_impl(
     if not log_group:
         log_group = f"/aws/rds/cluster/{cluster_id}/error"
 
-    client = boto3.client("logs")
+    # Cross-account-aware: the RDS log group lives in the cluster's own account,
+    # so target it via the spoke role when registered (local otherwise).
+    client = client_for_cluster(cluster_id, "logs")
     start_response = client.start_query(
         logGroupName=log_group,
         startTime=int((time.time() - hours * 3600) * 1000),

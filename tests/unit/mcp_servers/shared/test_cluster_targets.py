@@ -54,3 +54,18 @@ def test_rds_client_for_unregistered_cluster_falls_back_local():
          patch.object(ct, "session_for") as mock_session_for:
         ct.rds_client_for_cluster("ghost")
         mock_session_for.assert_called_once_with("", "")
+
+
+def test_client_for_cluster_routes_any_service_cross_account():
+    """client_for_cluster builds an arbitrary-service client (e.g. logs) via the
+    cluster's registry region+role — this is what makes search_logs and the
+    dashboard panels cross-account."""
+    row = {"region": "ap-northeast-2", "spoke_role_arn": "arn:aws:iam::444:role/spoke"}
+    with patch.object(ct, "lookup_cluster", return_value=row), \
+         patch.object(ct, "session_for") as mock_session_for:
+        logs = MagicMock()
+        mock_session_for.return_value.client.return_value = logs
+        out = ct.client_for_cluster("prod-pg-1", "logs")
+        mock_session_for.assert_called_once_with("ap-northeast-2", "arn:aws:iam::444:role/spoke")
+        mock_session_for.return_value.client.assert_called_once_with("logs")
+        assert out is logs

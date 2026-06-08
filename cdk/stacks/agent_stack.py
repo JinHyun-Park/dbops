@@ -56,10 +56,27 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
+                # search_logs resolves the cluster's region/spoke_role_arn here
+                # so it queries the log group in the cluster's OWN account.
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
             },
         )
         data.cache_db.secret.grant_read(incident_mcp_lambda)
         data.cache_db.grant_data_api_access(incident_mcp_lambda)
+        foundation.clusters_table.grant_read_data(incident_mcp_lambda)
+        # search_logs hits CloudWatch Logs Insights, cross-account-aware. Scoped
+        # to /aws/rds/cluster/* so a spoofed cluster_id can't read other groups.
+        # sts:AssumeRole lets it hop to the spoke account (local when no role).
+        incident_mcp_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "logs:StartQuery",
+                "logs:GetQueryResults",
+                "logs:StopQuery",
+                "logs:DescribeLogGroups",
+                "sts:AssumeRole",
+            ],
+            resources=["*"],
+        ))
 
         operations_mcp_lambda = lambda_.Function(
             self, "OperationsMCP",
@@ -361,6 +378,9 @@ class AgentStack(cdk.Stack):
                 # Backup inventory panel — read-only snapshot listing.
                 "rds:DescribeDBClusterSnapshots",
                 "cloudwatch:GetMetricStatistics",
+                # Hub-spoke: topology/backup/log panels assume the cluster's
+                # spoke role to read in its OWN account (local when no role).
+                "sts:AssumeRole",
             ],
             resources=["*"],
         ))
@@ -392,6 +412,9 @@ class AgentStack(cdk.Stack):
                 "rds:DescribeDBClusters",
                 "rds:DescribeDBInstances",
                 "rds:DescribeDBEngineVersions",
+                # Live parameter-group metadata for the parameter-change sim
+                # (ApplyType/IsModifiable/AllowedValues) — same as the MCP tool.
+                "rds:DescribeDBClusterParameters",
                 # Real region/edition/instance pricing for scaling cost sims.
                 "pricing:GetProducts",
             ],
@@ -514,6 +537,9 @@ class AgentStack(cdk.Stack):
                 "rds:AddTagsToResource",
                 "rds-data:ExecuteStatement",
                 "secretsmanager:GetSecretValue",
+                # Hub-spoke: snapshot/restore assume the cluster's spoke role so
+                # they run in the cluster's OWN account (local when no role).
+                "sts:AssumeRole",
             ],
             resources=["*"],
         ))

@@ -166,6 +166,47 @@ def _make_snapshot_id(cluster_id: str) -> str:
     return sid[:63].rstrip("-")
 
 
+_CLUSTERS_TABLE_NAME = os.environ.get("CLUSTERS_TABLE", "")
+
+
+def _lookup_cluster(cluster_id: str) -> dict:
+    """Clusters-registry row for `cluster_id` (region + spoke_role_arn), or {}."""
+    if not cluster_id or not _CLUSTERS_TABLE_NAME:
+        return {}
+    try:
+        table = boto3.resource("dynamodb").Table(_CLUSTERS_TABLE_NAME)
+        return table.get_item(Key={"cluster_id": cluster_id}).get("Item") or {}
+    except Exception as e:
+        print(f"[backups] cluster lookup failed for {cluster_id}: {e}")
+        return {}
+
+
+def _session_for(region: str = "", role_arn: str = "") -> boto3.session.Session:
+    """Session for the cluster's account+region. Assumes the spoke role when
+    present so snapshot/restore target the cluster's OWN account; transparent
+    local session otherwise (single-account deploys unchanged)."""
+    region = region or os.environ.get("AWS_REGION", "")
+    if not role_arn:
+        return boto3.session.Session(region_name=region or None)
+    creds = boto3.client("sts").assume_role(
+        RoleArn=role_arn,
+        RoleSessionName="dbops-backups",
+        DurationSeconds=900,
+    )["Credentials"]
+    return boto3.session.Session(
+        region_name=region or None,
+        aws_access_key_id=creds["AccessKeyId"],
+        aws_secret_access_key=creds["SecretAccessKey"],
+        aws_session_token=creds["SessionToken"],
+    )
+
+
+def _rds_for_cluster(cluster_id: str):
+    """Cross-account-aware RDS client for the cluster's account+region."""
+    row = _lookup_cluster(cluster_id)
+    return _session_for(row.get("region", ""), row.get("spoke_role_arn", "")).client("rds")
+
+
 def _source_restore_kwargs(rds, source_id: str):
     """Read network + scaling config off the source cluster so the restored
     cluster lands in the same VPC and keeps a Serverless v2 profile. Returns
@@ -190,7 +231,8 @@ def _source_restore_kwargs(rds, source_id: str):
 
 
 def _register_pending(cluster_id: str, source_id: str, restore_source: str,
-                      region: str, engine: str, cluster_arn: str, who: str) -> bool:
+                      region: str, engine: str, cluster_arn: str, who: str,
+                      spoke_role_arn: str = "") -> bool:
     """Write a clusters-registry row the restore_finalizer will pick up once
     the cluster is available. pending_instance=true is the finalizer's
     work signal."""
@@ -206,7 +248,9 @@ def _register_pending(cluster_id: str, source_id: str, restore_source: str,
                 "account_id": (cluster_arn.split(":")[4] if cluster_arn.count(":") >= 4 else ""),
                 "region": region,
                 "engine": engine,
-                "spoke_role_arn": "",
+                # Inherit the source's spoke role — the restored cluster lives
+                # in the same spoke account, so later ops must target it too.
+                "spoke_role_arn": spoke_role_arn,
                 "registered_at": datetime.now(timezone.utc).isoformat(),
                 "connection_status": "untested",
                 "connection_error": "",
@@ -239,7 +283,8 @@ def _handle_snapshot(cluster_id: str, username: str, body: dict):
     else:
         snapshot_id = _make_snapshot_id(cluster_id)
 
-    rds = boto3.client("rds")
+    # Cross-account-aware: snapshot the cluster in its own account+region.
+    rds = _rds_for_cluster(cluster_id)
     try:
         resp = rds.create_db_cluster_snapshot(
             DBClusterSnapshotIdentifier=snapshot_id,
@@ -301,7 +346,10 @@ def _handle_restore(cluster_id: str, username: str, body: dict):
             "confirmation failed — 'confirm' must exactly match new_cluster_id"
         )})
 
-    rds = boto3.client("rds")
+    # Cross-account-aware: restore runs in the source cluster's account+region,
+    # so the new cluster is created there (not in the hub).
+    src = _lookup_cluster(cluster_id)
+    rds = _session_for(src.get("region", ""), src.get("spoke_role_arn", "")).client("rds")
     base_kwargs, engine = _source_restore_kwargs(rds, cluster_id)
     tags = [
         {"Key": "dbops:type", "Value": "restored"},
@@ -350,7 +398,8 @@ def _handle_restore(cluster_id: str, username: str, body: dict):
     new_cluster = resp.get("DBCluster", {})
     new_arn = new_cluster.get("DBClusterArn", "")
     region = new_arn.split(":")[3] if new_arn.count(":") >= 4 else os.environ.get("AWS_REGION", "")
-    registered = _register_pending(new_id, cluster_id, restore_source, region, engine, new_arn, username)
+    registered = _register_pending(new_id, cluster_id, restore_source, region, engine, new_arn,
+                                    username, spoke_role_arn=src.get("spoke_role_arn", ""))
 
     _audit(cluster_id, username, "restore_cluster",
            {"new_cluster_id": new_id, "mode": mode, "restore_source": restore_source},

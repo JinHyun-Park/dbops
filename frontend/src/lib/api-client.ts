@@ -1101,6 +1101,18 @@ export interface ParameterChangeResponse {
   requires_restart: boolean;
   impact_area: string;
   recommendation: string;
+  // Live-metadata fields (present when the cluster's parameter group was read).
+  current_value?: string | null;
+  current_value_note?: string;
+  is_modifiable?: boolean;
+  allowed_values?: string | null;
+  data_type?: string | null;
+  parameter_group?: string;
+  impact_note?: string;
+  source?: string;
+  valid?: boolean;
+  validation_reason?: string;
+  data_source?: string;
 }
 
 // serverless mode carries min_acu/max_acu; provisioned mode carries
@@ -1142,12 +1154,18 @@ export interface DdlImpactResponse {
   cluster_id: string;
   ddl: string;
   table: string;
+  operation?: string;
   table_info: { rows: number; size_mb: number };
   estimated_seconds: number;
+  estimated_range_seconds?: [number, number];
+  throughput_mb_s?: number;
   online_ddl_possible: boolean;
   lock_type: string;
   disk_space_needed_mb: number;
+  confidence?: "low" | "medium" | "high";
+  basis?: string[];
   recommendation: string;
+  note?: string;
 }
 
 async function simPost<T>(path: string, body: object): Promise<T> {

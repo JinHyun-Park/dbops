@@ -83,6 +83,35 @@ def _lookup_cluster(cluster_id: str) -> dict:
         return {}
 
 
+def _session_for(region: str = "", role_arn: str = "") -> boto3.session.Session:
+    """A boto3 Session for a cluster's account+region. With `role_arn`, assume
+    the spoke role (hub-spoke chaining) so live RDS/CloudWatch/Logs reads hit
+    the cluster's OWN account — not a same-named resource in the hub. With no
+    role (single-account deploys) this is a transparent local session, so the
+    behavior is unchanged for clusters without a spoke role."""
+    region = region or os.environ.get("AWS_REGION", "")
+    if not role_arn:
+        return boto3.session.Session(region_name=region or None)
+    creds = boto3.client("sts").assume_role(
+        RoleArn=role_arn,
+        RoleSessionName="dbops-dashboard",
+        DurationSeconds=900,
+    )["Credentials"]
+    return boto3.session.Session(
+        region_name=region or None,
+        aws_access_key_id=creds["AccessKeyId"],
+        aws_secret_access_key=creds["SecretAccessKey"],
+        aws_session_token=creds["SessionToken"],
+    )
+
+
+def _cluster_session(cluster_id: str = "", row: dict | None = None) -> boto3.session.Session:
+    """Cross-account-aware session for a cluster's live reads. Pass a registry
+    `row` if you already fetched it to avoid a second DynamoDB lookup."""
+    row = row if row is not None else _lookup_cluster(cluster_id)
+    return _session_for(row.get("region", ""), row.get("spoke_role_arn", ""))
+
+
 def _schema_graph(cluster_id: str, schema: str) -> dict:
     """Return tables + foreign-key edges for one PG schema.
 
@@ -1617,7 +1646,9 @@ def _log_insights(cluster_id, hours, category, keywords: str = ""):
         log_group = f"/aws/rds/cluster/{cluster_id}/postgresql"
         category_filters = _LOG_CATEGORY_FILTERS
 
-    client = boto3.client("logs")
+    # Cross-account-aware: the RDS log group lives in the cluster's own account.
+    # Reuse the registry row already fetched above to avoid a second lookup.
+    client = _cluster_session(row=cluster).client("logs")
 
     if category not in category_filters and category != "all":
         category = "all"
@@ -1731,8 +1762,11 @@ def _topology(cluster_id: str) -> dict:
     is opt-in, so we accept the cold-call cost on button click."""
     from datetime import datetime, timedelta
 
-    rds = boto3.client("rds")
-    cw = boto3.client("cloudwatch")
+    # Cross-account-aware: target the cluster's own account+region (spoke role
+    # when registered; local session otherwise).
+    _sess = _cluster_session(cluster_id)
+    rds = _sess.client("rds")
+    cw = _sess.client("cloudwatch")
 
     # Same friendly-fallback contract as _backups: never leak the raw boto3
     # fault string. The synthetic demo cluster (and any unregistered id) has
@@ -1873,7 +1907,8 @@ def _backups(cluster_id: str) -> dict:
     """
     from datetime import datetime, timezone
 
-    rds = boto3.client("rds")
+    # Cross-account-aware: describe the cluster in its own account+region.
+    rds = _cluster_session(cluster_id).client("rds")
 
     # Friendly fallback for clusters RDS can't describe — most often the
     # synthetic demo cluster (no real Aurora behind it) or one that isn't

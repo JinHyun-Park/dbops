@@ -10,11 +10,17 @@ catch it via parallel unit tests in tests/unit/api/simulation/."""
 
 import json
 import os
-import re
 import traceback
 
 import boto3
 from aurora_pricing import price_per_acu_hour, price_per_instance_hour
+from ddl_estimator import estimate_ddl, resolve_table
+from parameter_estimator import (
+    PARAMETER_INFO,
+    build_live_result,
+    describe_all_parameters,
+    static_fallback,
+)
 from upgrade_estimator import classify_upgrade, estimate_upgrade
 
 # ---------------------------------------------------------------------------
@@ -350,64 +356,41 @@ def _generate_upgrade_plan(
 # Tool: simulate_parameter_change
 # ---------------------------------------------------------------------------
 
-_PARAMETER_INFO = {
-    "shared_buffers": {"type": "static", "impact": "memory", "restart": True},
-    "work_mem": {"type": "dynamic", "impact": "memory", "restart": False},
-    "maintenance_work_mem": {"type": "dynamic", "impact": "memory", "restart": False},
-    "max_connections": {"type": "static", "impact": "connections", "restart": True},
-    "effective_cache_size": {"type": "dynamic", "impact": "planner", "restart": False},
-    "random_page_cost": {"type": "dynamic", "impact": "planner", "restart": False},
-    "checkpoint_timeout": {"type": "dynamic", "impact": "wal", "restart": False},
-    "max_wal_size": {"type": "dynamic", "impact": "wal", "restart": False},
-    "autovacuum_vacuum_scale_factor": {
-        "type": "dynamic",
-        "impact": "autovacuum",
-        "restart": False,
-    },
-    "innodb_buffer_pool_size": {"type": "static", "impact": "memory", "restart": True},
-    "innodb_lock_wait_timeout": {
-        "type": "dynamic",
-        "impact": "locking",
-        "restart": False,
-    },
-    "long_query_time": {"type": "dynamic", "impact": "logging", "restart": False},
-    "max_user_connections": {"type": "dynamic", "impact": "connections", "restart": False},
-    "tmp_table_size": {"type": "dynamic", "impact": "memory", "restart": False},
-}
-
-
 def _simulate_parameter_change(
     cluster_id: str, parameter_name: str, new_value: str
 ) -> dict:
-    info = _PARAMETER_INFO.get(parameter_name)
-    known = info is not None
-    if not info:
-        info = {"type": "unknown", "impact": "unknown", "restart": False}
+    """REST mirror — reads the cluster's LIVE parameter group (same shared
+    derivation as the MCP tool) instead of a static catalog, so the dashboard
+    reports the real ApplyType/IsModifiable/AllowedValues. Degrades to the
+    coarse heuristic only when the live describe is unavailable."""
+    try:
+        rds = boto3.client("rds")
+        resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
+        cluster = (resp.get("DBClusters") or [{}])[0]
+    except Exception as e:
+        return static_fallback(cluster_id, parameter_name, new_value, f"live describe unavailable: {e}")
 
-    if not known:
-        recommendation = (
-            "이 파라미터는 시뮬레이터 카탈로그에 없음 — RDS console / DB engine docs로 직접 검증 권장"
-        )
-    elif info["restart"]:
-        recommendation = "재시작 필요 — 점검 윈도우에서 수행 · failover-aware 모드 적용 권장"
-    else:
-        recommendation = "동적 파라미터 — 적용 즉시 반영, 다운타임 없음"
+    pg_name = cluster.get("DBClusterParameterGroup") or ""
+    if not pg_name:
+        return static_fallback(cluster_id, parameter_name, new_value, "no parameter group on cluster")
+    if pg_name.startswith("default."):
+        return static_fallback(cluster_id, parameter_name, new_value, "AWS-default parameter group")
 
-    return {
-        "cluster_id": cluster_id,
-        "parameter": parameter_name,
-        "new_value": new_value,
-        "known": known,
-        "is_dynamic": info["type"] == "dynamic",
-        "requires_restart": bool(info["restart"]),
-        "impact_area": info["impact"],
-        "recommendation": recommendation,
-    }
+    try:
+        params = describe_all_parameters(rds, pg_name)
+    except Exception as e:
+        return static_fallback(cluster_id, parameter_name, new_value, f"live describe unavailable: {e}")
+
+    row = next((p for p in params if p.get("ParameterName") == parameter_name), None)
+    if row is None:
+        return static_fallback(cluster_id, parameter_name, new_value, "parameter not found in group")
+
+    return build_live_result(cluster_id, parameter_name, new_value, row, pg_name)
 
 
 def _parameter_catalog() -> list[dict]:
     return [
-        {"name": name, **info} for name, info in sorted(_PARAMETER_INFO.items())
+        {"name": name, **info} for name, info in sorted(PARAMETER_INFO.items())
     ]
 
 
@@ -701,19 +684,10 @@ def _scaling_provisioned(
 # Tool: simulate_ddl_impact
 # ---------------------------------------------------------------------------
 
-_TABLE_RX = re.compile(
-    r"\b(?:ALTER\s+TABLE|CREATE\s+(?:UNIQUE\s+)?INDEX(?:\s+CONCURRENTLY)?\s+\S+\s+ON|"
-    r"DROP\s+TABLE|TRUNCATE\s+TABLE|REINDEX\s+TABLE|VACUUM(?:\s+FULL)?|CLUSTER)\s+(?:IF\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_\.\"]*)",
-    re.IGNORECASE,
-)
-
-
 def _simulate_ddl_impact(cluster_id: str, ddl_sql: str) -> dict:
-    ddl_upper = ddl_sql.strip().upper()
-    table = None
-    m = _TABLE_RX.search(ddl_sql)
-    if m:
-        table = m.group(1).strip().strip('"').split(".")[-1]
+    """REST mirror of the DDL impact tool — shares the object/size + instance-
+    derived-throughput model with the MCP tool (no more row_count/100k*5)."""
+    table = resolve_table(ddl_sql)
 
     row_count = 0
     table_bytes = 0
@@ -728,54 +702,24 @@ def _simulate_ddl_impact(cluster_id: str, ddl_sql: str) -> dict:
             row_count = int(rows[0].get("n_live_tup") or 0)
             table_bytes = int(rows[0].get("total_bytes") or 0)
 
-    size_mb = round(table_bytes / (1024 * 1024), 1) if table_bytes else 0.0
+    size_mb = table_bytes / (1024 * 1024) if table_bytes else 0.0
 
-    # Heuristic timing — wall-clock varies enormously by workload, but this
-    # gives DBAs a rough order of magnitude for go/no-go.
-    estimated_seconds = max(1, int(row_count / 100_000 * 5))
+    # Instance class grounds the throughput estimate (vs the old flat 40 MB/s).
+    meta = _cache_query(
+        "SELECT instance_class FROM cluster_meta WHERE cluster_id = :cluster_id",
+        {"cluster_id": cluster_id},
+    )
+    instance_class = meta[0].get("instance_class") if meta else None
 
-    online_ddl = any(
-        kw in ddl_upper
-        for kw in (
-            "ADD COLUMN",
-            "ADD INDEX",
-            "CREATE INDEX CONCURRENTLY",
-            "CREATE UNIQUE INDEX CONCURRENTLY",
-        )
-    ) and "DROP" not in ddl_upper
-
-    if "CREATE INDEX CONCURRENTLY" in ddl_upper:
-        lock_type = "share update exclusive (concurrent)"
-        recommendation = "온라인 인덱스 빌드 — 서비스 영향 거의 없음, 빌드 시간만큼 길어짐"
-    elif online_ddl:
-        lock_type = "share update exclusive"
-        recommendation = "온라인 DDL 가능 — 짧은 AccessShare 충돌만 발생"
-    elif any(x in ddl_upper for x in ("ALTER COLUMN TYPE", "ALTER TABLE", "REINDEX")):
-        lock_type = "access exclusive"
-        recommendation = "테이블 전체 락 — 점검 윈도우에서 수행 · pg_repack 또는 BG 마이그레이션 검토"
-    elif "VACUUM FULL" in ddl_upper or "CLUSTER" in ddl_upper:
-        lock_type = "access exclusive"
-        recommendation = "테이블 전체 락 + 디스크 2배 사용 — pg_repack 강력 권장"
-    elif "TRUNCATE" in ddl_upper or "DROP TABLE" in ddl_upper:
-        lock_type = "access exclusive"
-        recommendation = "비가역 작업 — 백업 확인 후 점검 윈도우에서 수행"
-    else:
-        lock_type = "unknown"
-        recommendation = "구문 해석 실패 — 별도 검증 필요"
-
-    return {
-        "cluster_id": cluster_id,
-        "ddl": ddl_sql,
-        "table": table or "unknown",
-        "table_info": {"rows": row_count, "size_mb": size_mb},
-        "estimated_seconds": estimated_seconds,
-        "online_ddl_possible": online_ddl,
-        "lock_type": lock_type,
-        "disk_space_needed_mb": round(size_mb * 2.0, 1)
-        if ("VACUUM FULL" in ddl_upper or "CLUSTER" in ddl_upper)
-        else (round(size_mb * 1.2, 1) if "INDEX" in ddl_upper else 0.0),
-        "recommendation": recommendation,
-    }
+    est = estimate_ddl(
+        ddl_sql=ddl_sql,
+        table=table,
+        row_count=row_count,
+        size_mb=size_mb,
+        instance_class=instance_class,
+        io_optimized=False,
+    )
+    return {"cluster_id": cluster_id, **est}
 
 
 # ---------------------------------------------------------------------------
