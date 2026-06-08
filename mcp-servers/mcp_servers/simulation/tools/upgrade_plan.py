@@ -1,16 +1,7 @@
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import rds_client_for_cluster
-from mcp_servers.simulation.tools.upgrade_impact import _classify_upgrade
-
-# Time-estimate constants (minutes). The formula is:
-#   base + storage_term + reader_term [+ major_uplift]
-# where storage_term scales with the data volume that must be copied/upgraded,
-# reader_term covers re-creating/upgrading each replica, and major_uplift
-# accounts for the extra compatibility/parameter-group work a major needs.
-_BASE_MINUTES = 15
-_MINUTES_PER_100GB = 6
-_MINUTES_PER_READER = 6
-_MAJOR_UPLIFT_MINUTES = 30
+from mcp_servers.shared.upgrade_estimator import classify_upgrade, estimate_upgrade
+from mcp_servers.simulation.tools.upgrade_impact import _resolve_table_count
 
 
 def _resolve_reader_count(cluster_id: str) -> tuple[int, str]:
@@ -34,26 +25,29 @@ def _resolve_reader_count(cluster_id: str) -> tuple[int, str]:
 def generate_upgrade_plan_impl(cache: CacheClient, cluster_id: str, target_version: str, method: str = "blue_green") -> dict:
     """Generate an upgrade runbook whose steps and time reflect the REAL upgrade.
 
-    Steps are no longer fixed: a MAJOR upgrade adds parameter-group-family
-    migration, extension/feature compatibility checks, and (PG) a pg_upgrade
-    pre-check that a minor upgrade does not need. Readers add a per-reader
-    verification step. Total time is computed from storage + readers + upgrade
-    type instead of ``len(steps) * 5``.
+    Steps are not fixed: a MAJOR upgrade adds parameter-group-family migration,
+    extension/feature compatibility checks, and (PG) a pg_upgrade pre-check that
+    a minor does not need; readers add a per-reader verification step. The time
+    estimate comes from the shared :func:`estimate_upgrade` model (object-count
+    driven for majors, size-independent for minors) — not ``len(steps) * 5`` —
+    and the chosen method's downtime/range/confidence are surfaced too.
     """
     meta_sql = "SELECT * FROM cluster_meta WHERE cluster_id = :cluster_id"
     meta = cache.execute(meta_sql, {"cluster_id": cluster_id})
     cluster = meta.rows[0] if meta.rows else {}
     current_version = cluster.get("engine_version", "unknown")
-    storage_gb = float(cluster.get("storage_size_gb", 50))
+    storage_gb = float(cluster.get("storage_size_gb") or 50)
+    engine = cluster.get("engine") or "aurora-postgresql"
 
-    upgrade_type = _classify_upgrade(current_version, target_version)
+    upgrade_type = classify_upgrade(current_version, target_version)
     readers, reader_note = _resolve_reader_count(cluster_id)
+    table_count = _resolve_table_count(cache, cluster_id)
     is_major = upgrade_type == "major"
     # Engine comes from the cluster_meta `engine` column (e.g. "aurora-postgresql"
     # / "aurora-mysql") — authoritative, unlike inferring it from version text
     # (a MySQL "8.0" target would otherwise be misread as a PG major and get a
     # spurious pg_upgrade step).
-    is_postgres = "postgres" in (cluster.get("engine") or "").lower()
+    is_postgres = "postgres" in engine.lower()
 
     steps: list[dict] = []
 
@@ -127,26 +121,35 @@ def generate_upgrade_plan_impl(cache: CacheClient, cluster_id: str, target_versi
         "clone": "원본 클러스터가 유지되므로 DNS 전환으로 롤백",
     }
 
-    # Time estimate (minutes): base + storage term + reader term + major uplift.
-    # Replaces the old len(steps)*5 heuristic so the number tracks the actual
-    # data volume, replica topology, and upgrade class.
-    estimated_total_minutes = round(
-        _BASE_MINUTES
-        + (storage_gb / 100) * _MINUTES_PER_100GB
-        + readers * _MINUTES_PER_READER
-        + (_MAJOR_UPLIFT_MINUTES if is_major else 0)
+    # Time estimate from the shared model (object-count driven for majors,
+    # size-independent for minors). We pick the chosen method's numbers.
+    est = estimate_upgrade(
+        engine=engine,
+        current_version=current_version,
+        target_version=target_version,
+        storage_gb=storage_gb,
+        readers=readers,
+        table_count=table_count,
     )
+    chosen = next((m for m in est["methods"] if m["method"] == method), est["methods"][0])
 
     result = {
         "cluster_id": cluster_id,
         "current_version": current_version,
         "target_version": target_version,
+        "engine": engine,
         "upgrade_type": upgrade_type,
         "readers": readers,
+        "table_count": table_count,
         "method": method,
         "steps": steps,
         "rollback_plan": rollback.get(method, "수동 복원 필요"),
-        "estimated_total_minutes": estimated_total_minutes,
+        "estimated_total_minutes": chosen["estimated_minutes"],
+        "estimated_range_minutes": [chosen["range_low_minutes"], chosen["range_high_minutes"]],
+        "downtime_text": chosen["downtime_text"],
+        "confidence": est["confidence"],
+        "object_count_basis": est["object_count_basis"],
+        "methodology_note": est["methodology_note"],
     }
     if reader_note:
         result["reader_note"] = reader_note

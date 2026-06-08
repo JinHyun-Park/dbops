@@ -1038,18 +1038,33 @@ export interface UpgradeCompatibilityResponse {
 export interface UpgradeImpactMethod {
   method: "in_place" | "blue_green" | "clone";
   estimated_minutes: number;
+  // Low–high range conveying the genuine uncertainty of the estimate.
+  range_low_minutes?: number;
+  range_high_minutes?: number;
   downtime_text: string;
   downtime_seconds: number;
   risk: "low" | "medium" | "moderate" | string;
+  // The factors that drove this method's number (object count, jump, readers…).
+  basis?: string[];
 }
 
 export interface UpgradeImpactResponse {
   cluster_id: string;
   current_version: string;
   target_version: string;
+  engine?: string;
   storage_gb: number;
+  // Object-count-driven model fields.
+  upgrade_type?: "major" | "minor";
+  major_jump?: number;
+  readers?: number;
+  table_count?: number | null;
+  object_count_basis?: string;
+  confidence?: "low" | "medium" | "high";
   methods: UpgradeImpactMethod[];
   recommendation: string;
+  recommendation_reason?: string;
+  methodology_note?: string;
 }
 
 export interface UpgradePlanStep {
@@ -1060,11 +1075,21 @@ export interface UpgradePlanStep {
 
 export interface UpgradePlanResponse {
   cluster_id: string;
+  current_version?: string;
   target_version: string;
+  engine?: string;
+  upgrade_type?: "major" | "minor";
+  readers?: number;
+  table_count?: number | null;
   method: string;
   steps: UpgradePlanStep[];
   rollback_plan: string;
   estimated_total_minutes: number;
+  estimated_range_minutes?: [number, number];
+  downtime_text?: string;
+  confidence?: "low" | "medium" | "high";
+  object_count_basis?: string;
+  methodology_note?: string;
 }
 
 export interface ParameterChangeResponse {

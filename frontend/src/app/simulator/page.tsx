@@ -244,8 +244,28 @@ function UpgradePanel({
 
         {impact && (
           <div className="px-4 py-3 border-b border-zinc-800">
-            <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
-              Methods · storage {fmtDecimal(impact.storage_gb, 0)} GB
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                Methods
+              </span>
+              {impact.upgrade_type && (
+                <span className="px-1.5 py-0.5 border text-[10px] text-zinc-300 border-zinc-700 bg-zinc-900/60">
+                  {impact.upgrade_type === "major" ? "메이저" : "마이너"}
+                  {typeof impact.major_jump === "number" &&
+                    impact.major_jump > 1 &&
+                    ` ·${impact.major_jump}단계`}
+                </span>
+              )}
+              {impact.confidence && (
+                <ConfidenceBadge confidence={impact.confidence} />
+              )}
+              <span className="text-[10px] text-zinc-600 font-mono ml-auto">
+                storage {fmtDecimal(impact.storage_gb, 0)} GB
+                {typeof impact.table_count === "number" &&
+                  ` · ${fmtDecimal(impact.table_count, 0)} tables`}
+                {typeof impact.readers === "number" &&
+                  ` · readers ${impact.readers}`}
+              </span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs min-w-[640px]">
@@ -267,7 +287,7 @@ function UpgradePanel({
                           : ""
                       }`}
                     >
-                      <td className="py-1.5 font-mono text-zinc-200">
+                      <td className="py-1.5 font-mono text-zinc-200 align-top">
                         {m.method}
                         {m.method === impact.recommendation && (
                           <span className="ml-2 text-[10px] text-emerald-400">
@@ -275,13 +295,19 @@ function UpgradePanel({
                           </span>
                         )}
                       </td>
-                      <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums">
+                      <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums align-top">
                         ~{m.estimated_minutes}분
+                        {typeof m.range_low_minutes === "number" &&
+                          typeof m.range_high_minutes === "number" && (
+                            <span className="block text-[10px] text-zinc-600">
+                              {m.range_low_minutes}–{m.range_high_minutes}분
+                            </span>
+                          )}
                       </td>
-                      <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums">
+                      <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums align-top">
                         {m.downtime_text}
                       </td>
-                      <td className="py-1.5 pl-3">
+                      <td className="py-1.5 pl-3 align-top">
                         <RiskBadge risk={m.risk} />
                       </td>
                     </tr>
@@ -289,17 +315,52 @@ function UpgradePanel({
                 </tbody>
               </table>
             </div>
+            <div className="mt-3 space-y-1 border-t border-zinc-800 pt-2">
+              {impact.recommendation_reason && (
+                <p className="text-[11px] text-zinc-400 leading-relaxed">
+                  <span className="text-emerald-400/80 mr-1">권장 근거</span>
+                  {impact.recommendation_reason}
+                </p>
+              )}
+              {impact.object_count_basis && (
+                <p className="text-[10px] text-zinc-500">
+                  {impact.object_count_basis}
+                </p>
+              )}
+              {impact.methodology_note && (
+                <p className="text-[10px] text-zinc-600 leading-relaxed">
+                  {impact.methodology_note}
+                </p>
+              )}
+            </div>
           </div>
         )}
 
         {plan && (
           <div className="px-4 py-3">
             <div className="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
-              <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-                Plan · {plan.method}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  Plan · {plan.method}
+                </span>
+                {plan.confidence && (
+                  <ConfidenceBadge confidence={plan.confidence} />
+                )}
               </div>
-              <div className="text-[10px] text-zinc-500 font-mono">
-                ~{plan.estimated_total_minutes}분 (계획 단계 합산 추정)
+              <div className="text-[10px] text-zinc-500 font-mono text-right">
+                ~{plan.estimated_total_minutes}분
+                {plan.estimated_range_minutes && (
+                  <span className="text-zinc-600">
+                    {" "}
+                    ({plan.estimated_range_minutes[0]}–
+                    {plan.estimated_range_minutes[1]}분)
+                  </span>
+                )}
+                {plan.downtime_text && (
+                  <span className="block text-zinc-600">
+                    다운타임 {plan.downtime_text}
+                  </span>
+                )}
               </div>
             </div>
             <ol className="space-y-1.5">
@@ -820,6 +881,31 @@ function RiskBadge({ risk }: { risk: string }) {
     <span className={`px-1.5 py-0.5 border text-[10px] font-mono ${tone}`}>
       {risk}
     </span>
+  );
+}
+
+function ConfidenceBadge({
+  confidence,
+}: {
+  confidence: "low" | "medium" | "high";
+}) {
+  const map = {
+    high: {
+      tone: "text-emerald-300 border-emerald-500/40 bg-emerald-500/10",
+      label: "신뢰도 높음",
+    },
+    medium: {
+      tone: "text-sky-300 border-sky-500/40 bg-sky-500/10",
+      label: "신뢰도 보통",
+    },
+    low: {
+      tone: "text-amber-300 border-amber-500/40 bg-amber-500/10",
+      label: "신뢰도 낮음",
+    },
+  } as const;
+  const { tone, label } = map[confidence];
+  return (
+    <span className={`px-1.5 py-0.5 border text-[10px] ${tone}`}>{label}</span>
   );
 }
 

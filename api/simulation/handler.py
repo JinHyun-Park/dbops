@@ -15,6 +15,7 @@ import traceback
 
 import boto3
 from aurora_pricing import price_per_acu_hour, price_per_instance_hour
+from upgrade_estimator import classify_upgrade, estimate_upgrade
 
 # ---------------------------------------------------------------------------
 # Cache (PG) helper — minimal Data API wrapper. Inlined rather than imported
@@ -123,31 +124,60 @@ def _check_upgrade_compatibility(cluster_id: str, target_version: str) -> dict:
 # Tool: estimate_upgrade_impact
 # ---------------------------------------------------------------------------
 
-_UPGRADE_ESTIMATES = {
-    "in_place": {
-        "base_minutes": 20,
-        "per_100gb": 5,
-        "downtime_minutes": 8,
-        "risk": "moderate",
-    },
-    "blue_green": {
-        "base_minutes": 30,
-        "per_100gb": 8,
-        "downtime_seconds": 30,
-        "risk": "low",
-    },
-    "clone": {
-        "base_minutes": 15,
-        "per_100gb": 3,
-        "downtime_minutes": 1,
-        "risk": "medium",
-    },
-}
+def _resolve_upgrade_readers(cluster_id: str) -> int:
+    """Live reader count from describe_db_clusters (local account), or 0.
+
+    Mirrors the MCP tool's topology signal. Degrades to 0 on any failure
+    (unregistered/unreachable cluster, perms) so the estimate never breaks.
+    """
+    try:
+        resp = boto3.client("rds").describe_db_clusters(DBClusterIdentifier=cluster_id)
+        members = resp.get("DBClusters", [{}])[0].get("DBClusterMembers", [])
+        return sum(1 for m in members if not m.get("IsClusterWriter"))
+    except Exception:
+        return 0
+
+
+def _resolve_table_count(cluster_id: str):
+    """Object-count proxy: distinct tables in the latest table_stats snapshot.
+
+    Object count — not raw storage — dominates MAJOR upgrade duration, so we
+    read it from the ETL's ``table_stats`` cache. Returns ``None`` when
+    unavailable so the estimator flags low confidence rather than assuming 0.
+    """
+    try:
+        rows = _cache_query(
+            "SELECT COUNT(*) AS n FROM ("
+            "  SELECT DISTINCT schema_name, table_name FROM table_stats"
+            "  WHERE cluster_id = :cluster_id"
+            "    AND snapshot_time = ("
+            "      SELECT MAX(snapshot_time) FROM table_stats WHERE cluster_id = :cluster_id"
+            "    )"
+            ") t",
+            {"cluster_id": cluster_id},
+        )
+        if not rows:
+            return None
+        n = rows[0].get("n")
+        if n is None:
+            return None
+        n = int(n)
+        return n if n > 0 else None
+    except Exception:
+        return None
 
 
 def _estimate_upgrade_impact(cluster_id: str, target_version: str) -> dict:
+    """Per-method upgrade impact via the shared object-count-driven model.
+
+    MINOR upgrades cost ~a writer reboot (size-independent); MAJOR upgrades
+    scale with the live OBJECT COUNT (table_stats) + major-version jump +
+    readers. Method changes downtime (blue/green = sub-minute switchover;
+    in-place = the upgrade window). Each method carries a range, and the
+    response carries confidence + the factors used + a methodology note.
+    """
     rows = _cache_query(
-        "SELECT engine_version, storage_size_gb FROM cluster_meta WHERE cluster_id = :cluster_id",
+        "SELECT engine, engine_version, storage_size_gb FROM cluster_meta WHERE cluster_id = :cluster_id",
         {"cluster_id": cluster_id},
     )
     cluster = rows[0] if rows else {}
@@ -156,32 +186,34 @@ def _estimate_upgrade_impact(cluster_id: str, target_version: str) -> dict:
     except (TypeError, ValueError):
         storage_gb = 50.0
 
-    methods = []
-    for method, est in _UPGRADE_ESTIMATES.items():
-        total_min = est["base_minutes"] + (storage_gb / 100.0) * est["per_100gb"]
-        if "downtime_minutes" in est:
-            downtime_text = f"~{est['downtime_minutes']}분"
-            downtime_seconds = est["downtime_minutes"] * 60
-        else:
-            downtime_text = f"~{est['downtime_seconds']}초"
-            downtime_seconds = est["downtime_seconds"]
-        methods.append(
-            {
-                "method": method,
-                "estimated_minutes": int(round(total_min)),
-                "downtime_text": downtime_text,
-                "downtime_seconds": downtime_seconds,
-                "risk": est["risk"],
-            }
-        )
+    readers = _resolve_upgrade_readers(cluster_id)
+    table_count = _resolve_table_count(cluster_id)
+
+    est = estimate_upgrade(
+        engine=cluster.get("engine") or "aurora-postgresql",
+        current_version=cluster.get("engine_version") or "unknown",
+        target_version=target_version,
+        storage_gb=storage_gb,
+        readers=readers,
+        table_count=table_count,
+    )
 
     return {
         "cluster_id": cluster_id,
         "current_version": cluster.get("engine_version") or "unknown",
         "target_version": target_version,
+        "engine": est["engine"],
+        "upgrade_type": est["upgrade_type"],
+        "major_jump": est["major_jump"],
         "storage_gb": storage_gb,
-        "methods": methods,
-        "recommendation": "blue_green",
+        "readers": readers,
+        "table_count": table_count,
+        "object_count_basis": est["object_count_basis"],
+        "confidence": est["confidence"],
+        "methods": est["methods"],
+        "recommendation": est["recommendation"],
+        "recommendation_reason": est["recommendation_reason"],
+        "methodology_note": est["methodology_note"],
     }
 
 
@@ -196,116 +228,121 @@ def _generate_upgrade_plan(
     if method not in ("blue_green", "in_place", "clone"):
         method = "blue_green"
 
-    common_pre = [
-        {
-            "step": 1,
-            "action": "사전 체크",
-            "details": "클러스터 상태 확인 · 진행 중인 유지보수 / 백업 윈도우 충돌 여부 확인",
-        },
-        {
-            "step": 2,
-            "action": "백업 확인",
-            "details": "최신 자동 백업 존재 확인, 필요시 수동 스냅샷 생성",
-        },
-        {
-            "step": 3,
-            "action": "파라미터 호환성",
-            "details": f"현재 파라미터 그룹이 {target_version}에 호환되는지 확인",
-        },
-        {
-            "step": 4,
-            "action": "애플리케이션 준비",
-            "details": "커넥션 재시도 로직 / 백오프 / read-only fallback 확인",
-        },
-    ]
+    # Gather real signals up front: engine/version/storage, live reader count,
+    # and the object count (table_stats) that drives a major's duration. Steps
+    # then mirror the MCP plan tool so the agent and the dashboard never drift.
+    meta = _cache_query(
+        "SELECT engine, engine_version, storage_size_gb FROM cluster_meta WHERE cluster_id = :cluster_id",
+        {"cluster_id": cluster_id},
+    )
+    cluster = meta[0] if meta else {}
+    current_version = cluster.get("engine_version") or "unknown"
+    engine = cluster.get("engine") or "aurora-postgresql"
+    try:
+        storage_gb = float(cluster.get("storage_size_gb") or 50)
+    except (TypeError, ValueError):
+        storage_gb = 50.0
+    readers = _resolve_upgrade_readers(cluster_id)
+    table_count = _resolve_table_count(cluster_id)
 
+    upgrade_type = classify_upgrade(current_version, target_version)
+    is_major = upgrade_type == "major"
+    # Engine from cluster_meta (authoritative) — a MySQL major must NOT get a
+    # PG-only pg_upgrade step.
+    is_postgres = "postgres" in engine.lower()
+
+    steps: list[dict] = []
+
+    def add(action: str, details: str) -> None:
+        steps.append({"step": len(steps) + 1, "action": action, "details": details})
+
+    # --- Common pre-flight ---
+    add("사전 체크", "클러스터 상태 확인 · 진행 중인 유지보수 / 백업 윈도우 충돌 여부 확인")
+    add("백업 확인", "최신 자동 백업 존재 확인, 필요시 수동 스냅샷 생성")
+    add("파라미터 호환성", f"현재 파라미터 그룹이 {target_version}에 호환되는지 확인")
+
+    # --- Major-only preparation (needed in BOTH method branches) ---
+    if is_major:
+        add(
+            "파라미터 그룹 패밀리 마이그레이션",
+            f"신규 메이저({target_version})용 파라미터/클러스터 파라미터 그룹 패밀리 생성 및 값 이관",
+        )
+        add(
+            "확장(extension)/비호환 기능 호환성 점검",
+            "설치된 extension·deprecated 기능·예약어/타입 변경 등 메이저 비호환 항목 점검",
+        )
+        if is_postgres:
+            add("pg_upgrade 사전 점검", "pg_upgrade --check로 사전 호환성 검증, 비호환 객체 식별")
+
+    add("애플리케이션 준비", "커넥션 재시도 로직 / 백오프 / read-only fallback 확인")
+
+    # --- Method-specific execution ---
     if method == "blue_green":
-        post = [
-            {
-                "step": 5,
-                "action": "Blue/Green 배포 생성",
-                "details": (
-                    f"aws rds create-blue-green-deployment "
-                    f"--source {cluster_id} --target-engine-version {target_version}"
-                ),
-            },
-            {
-                "step": 6,
-                "action": "Green 환경 검증",
-                "details": "Green 환경에서 핵심 read/write 쿼리 실행 · 응답 시간 비교",
-            },
-            {
-                "step": 7,
-                "action": "전환 (Switchover)",
-                "details": "트래픽을 Green으로 전환 (~30초 다운타임)",
-            },
-            {
-                "step": 8,
-                "action": "검증",
-                "details": "애플리케이션 정상 동작 확인 · 메트릭 모니터링",
-            },
-            {
-                "step": 9,
-                "action": "정리",
-                "details": "롤백 불필요 시 Blue 환경 삭제",
-            },
-        ]
+        add(
+            "Blue/Green 배포 생성",
+            f"aws rds create-blue-green-deployment --source {cluster_id} --target-engine-version {target_version}",
+        )
+        add("Green 환경 검증", "Green 환경에서 핵심 read/write 쿼리 실행 · 응답 시간 비교")
+        if readers > 0:
+            add(
+                "리더 복제 검증",
+                f"Green의 리더 {readers}개가 재생성/업그레이드된 뒤 replica lag·복제 상태 점검",
+            )
+        add("전환 (Switchover)", "트래픽을 Green으로 전환 (~30초 다운타임)")
+        add("검증", "애플리케이션 정상 동작 확인 · 메트릭 모니터링")
+        add("정리", "롤백 불필요 시 Blue 환경 삭제")
         rollback = "Blue 환경이 유지되므로 전환 취소(switchover-rollback)로 즉시 복귀 가능"
     elif method == "clone":
-        post = [
-            {
-                "step": 5,
-                "action": "클러스터 복제 (clone)",
-                "details": f"aws rds restore-db-cluster-to-point-in-time --source-db-cluster-identifier {cluster_id} ...",
-            },
-            {
-                "step": 6,
-                "action": "복제본 업그레이드",
-                "details": f"복제본만 {target_version}로 업그레이드 · 원본은 영향 없음",
-            },
-            {
-                "step": 7,
-                "action": "트래픽 DNS 전환",
-                "details": "DNS 또는 reader endpoint 갱신으로 트래픽 이전",
-            },
-            {
-                "step": 8,
-                "action": "원본 정리",
-                "details": "안정화 후 원본 클러스터 삭제",
-            },
-        ]
-        rollback = "원본 클러스터가 유지되므로 DNS 롤백으로 복귀"
-    else:
-        post = [
-            {
-                "step": 5,
-                "action": "In-place 업그레이드 실행",
-                "details": (
-                    f"aws rds modify-db-cluster --db-cluster-identifier {cluster_id} "
-                    f"--engine-version {target_version} --apply-immediately"
-                ),
-            },
-            {
-                "step": 6,
-                "action": "대기",
-                "details": "업그레이드 완료까지 클러스터 status=upgrading 모니터링 (수분~수십분)",
-            },
-            {
-                "step": 7,
-                "action": "검증",
-                "details": "버전 확인, 애플리케이션 정상 동작 확인",
-            },
-        ]
+        add("클러스터 클론 생성", f"{cluster_id}의 fast clone 생성 (원본 데이터/트래픽에 영향 없음)")
+        add("클론 업그레이드", f"클론 클러스터를 {target_version}으로 업그레이드 (원본 무영향)")
+        add("클론 검증", "클론에서 핵심 쿼리·성능 검증, 비호환 여부 확인")
+        if readers > 0:
+            add("리더 검증", f"클론의 리더 {readers}개 replica lag·복제 상태 점검")
+        add("엔드포인트 전환", "애플리케이션을 클론 클러스터 엔드포인트로 전환 (DNS/설정)")
+        add("검증", "애플리케이션 정상 동작 확인 · 메트릭 모니터링")
+        rollback = "원본 클러스터가 유지되므로 DNS 전환으로 롤백"
+    else:  # in_place
+        add(
+            "In-place 업그레이드 실행",
+            f"aws rds modify-db-cluster --db-cluster-identifier {cluster_id} --engine-version {target_version} --apply-immediately",
+        )
+        add("대기", "업그레이드 완료까지 클러스터 status=upgrading 모니터링")
+        if readers > 0:
+            add(
+                "리더 업그레이드 검증",
+                f"리더 {readers}개가 함께 업그레이드된 뒤 replica lag·복제 상태 점검",
+            )
+        add("검증", "버전 확인, 애플리케이션 정상 동작 확인")
         rollback = "스냅샷 복원으로만 롤백 가능 — 시간 소요. 적용 전 스냅샷 필수."
 
-    steps = common_pre + post
+    # Time from the shared object-count-driven model (not len(steps)*5).
+    est = estimate_upgrade(
+        engine=engine,
+        current_version=current_version,
+        target_version=target_version,
+        storage_gb=storage_gb,
+        readers=readers,
+        table_count=table_count,
+    )
+    chosen = next((m for m in est["methods"] if m["method"] == method), est["methods"][0])
+
     return {
         "cluster_id": cluster_id,
+        "current_version": current_version,
         "target_version": target_version,
+        "engine": est["engine"],
+        "upgrade_type": est["upgrade_type"],
+        "readers": readers,
+        "table_count": table_count,
         "method": method,
         "steps": steps,
         "rollback_plan": rollback,
-        "estimated_total_minutes": len(steps) * 5,
+        "estimated_total_minutes": chosen["estimated_minutes"],
+        "estimated_range_minutes": [chosen["range_low_minutes"], chosen["range_high_minutes"]],
+        "downtime_text": chosen["downtime_text"],
+        "confidence": est["confidence"],
+        "object_count_basis": est["object_count_basis"],
+        "methodology_note": est["methodology_note"],
     }
 
 
