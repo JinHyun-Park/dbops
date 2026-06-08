@@ -28,27 +28,27 @@ export interface ChartColors {
 }
 
 const DARK: ChartColors = {
-  amber: "#fbbf24",
-  sky: "#38bdf8",
-  emerald: "#34d399",
-  rose: "#fb7185",
-  grid: "#27272a", // zinc-800
-  axis: "#71717a", // zinc-500
-  tooltipBg: "#18181b", // zinc-900
-  tooltipBorder: "#3f3f46", // zinc-700
-  tooltipText: "#a1a1aa", // zinc-400
+  amber: "#f6c15a",
+  sky: "#5ee7ff",
+  emerald: "#24f4b6",
+  rose: "#ff5f8a",
+  grid: "#1f3436",
+  axis: "#8ea5a5",
+  tooltipBg: "#0b1719",
+  tooltipBorder: "#2d4a4d",
+  tooltipText: "#d7e5e2",
 };
 
 const LIGHT: ChartColors = {
-  amber: "#92400e",
-  sky: "#1d4ed8",
-  emerald: "#065f46",
-  rose: "#9f1239",
-  grid: "#d6d3c7", // stone-300 — visible on cream without dominating
-  axis: "#57534e", // stone-600 — readable tick labels
-  tooltipBg: "#ffffff",
-  tooltipBorder: "#a8a29e", // stone-400
-  tooltipText: "#1c1917", // stone-900 — high contrast tooltip copy
+  amber: "#9a5b00",
+  sky: "#006b84",
+  emerald: "#00785f",
+  rose: "#b51f46",
+  grid: "#c9d9d2",
+  axis: "#49625c",
+  tooltipBg: "#fbfffb",
+  tooltipBorder: "#9db8ad",
+  tooltipText: "#12211e",
 };
 
 function readTheme(): "dark" | "light" {

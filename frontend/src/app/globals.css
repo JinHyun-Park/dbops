@@ -814,9 +814,12 @@ button.bg-amber-500:disabled {
 /* The hover-text-amber-300 callout (e.g. "✓ Runbook 저장" in chat) used
    the same amber hue; in monochrome mode it should hover to a clearer
    foreground. */
-html[data-theme="light"] .hover\:text-amber-300:hover,
+html[data-theme="light"] .hover\:text-amber-300:hover {
+  color: var(--accent);
+}
+html:not([data-theme="light"]) .hover\:text-amber-300:hover,
 html[data-theme="dark"] .hover\:text-amber-300:hover {
-  color: #18181b;
+  color: #63ffd0;
 }
 
 /* Light mode mirror: white CTA on cream background would disappear, so
@@ -910,4 +913,599 @@ a[href] {
 button:disabled,
 [role="button"][aria-disabled="true"] {
   cursor: not-allowed;
+}
+
+/* =========================================================================
+   2026 DBOps visual language: Aurora Matrix.
+
+   The application still contains many Tailwind zinc/amber utilities in page
+   files. This final cascade remaps those utilities into a cohesive product
+   identity: deep operational glass in dark mode, pale instrumentation paper
+   in light mode, and a phosphor teal/cyan signal system throughout.
+   ========================================================================= */
+:root {
+  --surface-base: #071012;
+  --surface-raised: #0d191b;
+  --surface-inset: #122224;
+  --surface-hot: #183033;
+  --border-subtle: rgba(122, 161, 154, 0.22);
+  --border-strong: rgba(125, 211, 252, 0.36);
+  --text-primary: #edf7f3;
+  --text-secondary: #c8d9d5;
+  --text-muted: #8ea5a5;
+  --text-faint: #637979;
+  --text-ghost: #425657;
+  --accent: #24f4b6;
+  --accent-strong: #5ee7ff;
+  --accent-warm: #f6c15a;
+  --accent-danger: #ff5f8a;
+  --shadow-panel: 0 18px 60px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+  --shadow-pop: 0 26px 90px rgba(0, 0, 0, 0.44),
+    0 0 0 1px rgba(36, 244, 182, 0.12) inset;
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  --surface-base: #eef5ef;
+  --surface-raised: #fbfffb;
+  --surface-inset: #e2ede7;
+  --surface-hot: #d7e8df;
+  --border-subtle: rgba(49, 91, 82, 0.22);
+  --border-strong: rgba(0, 120, 95, 0.38);
+  --text-primary: #12211e;
+  --text-secondary: #243c37;
+  --text-muted: #49625c;
+  --text-faint: #6f8580;
+  --text-ghost: #9aaea8;
+  --accent: #00785f;
+  --accent-strong: #006b84;
+  --accent-warm: #9a5b00;
+  --accent-danger: #b51f46;
+  --shadow-panel: 0 16px 44px rgba(18, 33, 30, 0.08),
+    0 0 0 1px rgba(255, 255, 255, 0.62) inset;
+  --shadow-pop: 0 24px 80px rgba(18, 33, 30, 0.2),
+    0 0 0 1px rgba(0, 120, 95, 0.14) inset;
+  color-scheme: light;
+}
+
+body {
+  background: linear-gradient(
+      135deg,
+      rgba(36, 244, 182, 0.08),
+      transparent 28rem
+    ),
+    linear-gradient(180deg, rgba(94, 231, 255, 0.05), transparent 20rem),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 31px,
+      rgba(126, 162, 155, 0.035) 32px
+    ),
+    var(--surface-base);
+}
+
+html[data-theme="light"] body {
+  background: linear-gradient(135deg, rgba(0, 120, 95, 0.08), transparent 28rem),
+    linear-gradient(180deg, rgba(0, 107, 132, 0.06), transparent 20rem),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 31px,
+      rgba(49, 91, 82, 0.04) 32px
+    ),
+    var(--surface-base);
+}
+
+main {
+  position: relative;
+}
+
+main::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent, rgba(36, 244, 182, 0.055), transparent)
+      0 0 / 100% 1px no-repeat,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 9rem);
+  opacity: 0.85;
+}
+
+html[data-theme="light"] main::before {
+  background:
+    linear-gradient(90deg, transparent, rgba(0, 120, 95, 0.11), transparent) 0 0 /
+      100% 1px no-repeat,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), transparent 10rem);
+}
+
+/* Dark utility remap. */
+html:not([data-theme="light"]) .bg-zinc-950 {
+  background-color: var(--surface-base);
+}
+html:not([data-theme="light"]) .bg-zinc-950\/40 {
+  background-color: rgba(7, 16, 18, 0.4);
+}
+html:not([data-theme="light"]) .bg-zinc-950\/50 {
+  background-color: rgba(7, 16, 18, 0.5);
+}
+html:not([data-theme="light"]) .bg-zinc-950\/60 {
+  background-color: rgba(7, 16, 18, 0.62);
+}
+html:not([data-theme="light"]) .bg-zinc-950\/80 {
+  background-color: rgba(7, 16, 18, 0.82);
+}
+html:not([data-theme="light"]) .bg-zinc-950\/95 {
+  background-color: rgba(7, 16, 18, 0.95);
+}
+html:not([data-theme="light"]) .bg-zinc-900 {
+  background-color: var(--surface-raised);
+}
+html:not([data-theme="light"]) .bg-zinc-900\/30 {
+  background-color: rgba(13, 25, 27, 0.34);
+}
+html:not([data-theme="light"]) .bg-zinc-900\/40 {
+  background-color: rgba(13, 25, 27, 0.48);
+}
+html:not([data-theme="light"]) .bg-zinc-900\/50 {
+  background-color: rgba(13, 25, 27, 0.64);
+}
+html:not([data-theme="light"]) .bg-zinc-900\/60,
+html:not([data-theme="light"]) .bg-zinc-900\/95 {
+  background-color: rgba(13, 25, 27, 0.78);
+}
+html:not([data-theme="light"]) .bg-zinc-800,
+html:not([data-theme="light"]) .bg-zinc-850,
+html:not([data-theme="light"]) .bg-zinc-800\/80 {
+  background-color: var(--surface-inset);
+}
+html:not([data-theme="light"]) .bg-zinc-800\/40,
+html:not([data-theme="light"]) .bg-zinc-800\/50 {
+  background-color: rgba(36, 244, 182, 0.07);
+}
+html:not([data-theme="light"]) .bg-zinc-700,
+html:not([data-theme="light"]) .bg-zinc-700\/40 {
+  background-color: rgba(94, 231, 255, 0.12);
+}
+html:not([data-theme="light"]) .border-zinc-700,
+html:not([data-theme="light"]) .border-zinc-800,
+html:not([data-theme="light"]) .border-zinc-900 {
+  border-color: var(--border-subtle);
+}
+html:not([data-theme="light"]) .divide-zinc-700 > * + *,
+html:not([data-theme="light"]) .divide-zinc-800 > * + * {
+  border-color: var(--border-subtle);
+}
+html:not([data-theme="light"]) .text-zinc-50,
+html:not([data-theme="light"]) .text-zinc-100 {
+  color: var(--text-primary);
+}
+html:not([data-theme="light"]) .text-zinc-200,
+html:not([data-theme="light"]) .text-zinc-300 {
+  color: var(--text-secondary);
+}
+html:not([data-theme="light"]) .text-zinc-400,
+html:not([data-theme="light"]) .text-zinc-500 {
+  color: var(--text-muted);
+}
+html:not([data-theme="light"]) .text-zinc-600 {
+  color: var(--text-faint);
+}
+html:not([data-theme="light"]) .text-zinc-700 {
+  color: var(--text-ghost);
+}
+
+/* Light utility remap, placed after the previous light overrides. */
+html[data-theme="light"] .bg-zinc-950 {
+  background-color: var(--surface-base);
+}
+html[data-theme="light"] .bg-zinc-950\/40 {
+  background-color: rgba(226, 237, 231, 0.42);
+}
+html[data-theme="light"] .bg-zinc-950\/50 {
+  background-color: rgba(226, 237, 231, 0.54);
+}
+html[data-theme="light"] .bg-zinc-950\/60 {
+  background-color: rgba(226, 237, 231, 0.68);
+}
+html[data-theme="light"] .bg-zinc-950\/80 {
+  background-color: rgba(238, 245, 239, 0.84);
+}
+html[data-theme="light"] .bg-zinc-950\/95 {
+  background-color: rgba(238, 245, 239, 0.96);
+}
+html[data-theme="light"] .bg-zinc-900 {
+  background-color: var(--surface-raised);
+}
+html[data-theme="light"] .bg-zinc-900\/30 {
+  background-color: rgba(251, 255, 251, 0.56);
+}
+html[data-theme="light"] .bg-zinc-900\/40 {
+  background-color: rgba(251, 255, 251, 0.68);
+}
+html[data-theme="light"] .bg-zinc-900\/50 {
+  background-color: rgba(251, 255, 251, 0.82);
+}
+html[data-theme="light"] .bg-zinc-900\/60,
+html[data-theme="light"] .bg-zinc-900\/95 {
+  background-color: rgba(251, 255, 251, 0.92);
+}
+html[data-theme="light"] .bg-zinc-800,
+html[data-theme="light"] .bg-zinc-850,
+html[data-theme="light"] .bg-zinc-800\/80 {
+  background-color: var(--surface-inset);
+}
+html[data-theme="light"] .bg-zinc-800\/40,
+html[data-theme="light"] .bg-zinc-800\/50 {
+  background-color: rgba(0, 120, 95, 0.07);
+}
+html[data-theme="light"] .bg-zinc-700,
+html[data-theme="light"] .bg-zinc-700\/40 {
+  background-color: rgba(0, 107, 132, 0.13);
+}
+html[data-theme="light"] .border-zinc-700,
+html[data-theme="light"] .border-zinc-800,
+html[data-theme="light"] .border-zinc-900 {
+  border-color: var(--border-subtle);
+}
+html[data-theme="light"] .divide-zinc-700 > * + *,
+html[data-theme="light"] .divide-zinc-800 > * + * {
+  border-color: var(--border-subtle);
+}
+html[data-theme="light"] .text-zinc-50,
+html[data-theme="light"] .text-zinc-100 {
+  color: var(--text-primary);
+}
+html[data-theme="light"] .text-zinc-200,
+html[data-theme="light"] .text-zinc-300 {
+  color: var(--text-secondary);
+}
+html[data-theme="light"] .text-zinc-400,
+html[data-theme="light"] .text-zinc-500 {
+  color: var(--text-muted);
+}
+html[data-theme="light"] .text-zinc-600 {
+  color: var(--text-faint);
+}
+html[data-theme="light"] .text-zinc-700 {
+  color: var(--text-ghost);
+}
+
+/* Cards and tool surfaces. */
+:where(.bg-zinc-900\/50, .bg-zinc-900\/40, .bg-zinc-900\/30, .bg-zinc-800)
+  :where(.border) {
+  border-color: var(--border-subtle);
+}
+
+:where(
+    .bg-zinc-900\/50.border,
+    .bg-zinc-900\/40.border,
+    .bg-zinc-900\/30.border,
+    .bg-zinc-800.border,
+    .bg-zinc-950.border
+  ),
+:where(
+    div.border.border-zinc-800,
+    ul.border.border-zinc-800,
+    section.border.border-zinc-800
+  ) {
+  border-color: var(--border-subtle);
+  border-radius: 8px;
+  box-shadow: var(--shadow-panel);
+}
+
+:where(.shadow-2xl) {
+  box-shadow: var(--shadow-pop);
+}
+
+table {
+  border-color: var(--border-subtle);
+}
+
+thead {
+  background-color: color-mix(in oklab, var(--surface-inset) 76%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+tbody tr:hover {
+  background-color: color-mix(in oklab, var(--accent) 7%, transparent);
+}
+
+tr,
+button,
+a,
+input,
+select,
+textarea {
+  transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+input,
+select,
+textarea {
+  border-radius: 7px;
+  background-color: var(--surface-base);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent) !important;
+  box-shadow:
+    0 0 0 3px rgba(36, 244, 182, 0.13),
+    0 1px 0 rgba(255, 255, 255, 0.05) inset;
+}
+
+html[data-theme="light"] input:focus,
+html[data-theme="light"] select:focus,
+html[data-theme="light"] textarea:focus {
+  box-shadow:
+    0 0 0 3px rgba(0, 120, 95, 0.14),
+    0 1px 0 rgba(255, 255, 255, 0.75) inset;
+}
+
+/* Accent remap: existing amber utilities become DBOps phosphor actions. */
+.bg-amber-500,
+button.bg-amber-500,
+a.bg-amber-500 {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: #03110f;
+}
+.hover\:bg-amber-400:hover,
+button.bg-amber-500:hover,
+a.bg-amber-500:hover {
+  background: linear-gradient(135deg, #63ffd0, #8ef0ff);
+  color: #03110f;
+}
+html[data-theme="light"] .bg-amber-500,
+html[data-theme="light"] button.bg-amber-500,
+html[data-theme="light"] a.bg-amber-500 {
+  background: linear-gradient(135deg, #00785f, #006b84);
+  color: #fbfffb;
+}
+html[data-theme="light"] .hover\:bg-amber-400:hover,
+html[data-theme="light"] button.bg-amber-500:hover,
+html[data-theme="light"] a.bg-amber-500:hover {
+  background: linear-gradient(135deg, #006c56, #005a70);
+  color: #fbfffb;
+}
+.text-amber-100,
+.text-amber-200,
+.text-amber-300,
+.text-amber-400 {
+  color: var(--accent-warm);
+}
+.border-amber-500,
+.border-amber-500\/40,
+.border-amber-500\/50,
+.border-amber-500\/60 {
+  border-color: color-mix(in oklab, var(--accent) 46%, transparent);
+}
+.bg-amber-500\/5,
+.bg-amber-500\/10,
+.bg-amber-500\/15,
+.bg-amber-500\/20,
+.bg-amber-900\/50,
+.bg-amber-950\/10,
+.bg-amber-950\/20 {
+  background-color: color-mix(in oklab, var(--accent-warm) 13%, transparent);
+}
+
+.bg-amber-600 {
+  background: linear-gradient(135deg, var(--accent-warm), var(--accent));
+  color: #03110f;
+}
+.hover\:bg-amber-500:hover {
+  background: linear-gradient(135deg, #ffe198, #63ffd0);
+  color: #03110f;
+}
+html[data-theme="light"] .bg-amber-600 {
+  background: linear-gradient(135deg, #9a5b00, #00785f);
+  color: #fbfffb;
+}
+html[data-theme="light"] .hover\:bg-amber-500:hover {
+  background: linear-gradient(135deg, #804a00, #006c56);
+  color: #fbfffb;
+}
+
+.text-orange-200,
+.text-orange-300,
+.text-orange-400,
+.text-orange-500 {
+  color: var(--accent-warm);
+}
+.border-orange-500\/30,
+.border-orange-500\/40,
+.border-orange-500\/50,
+.border-l-orange-500 {
+  border-color: color-mix(in oklab, var(--accent-warm) 50%, transparent);
+}
+.bg-orange-500\/10,
+.bg-orange-500\/15,
+.bg-orange-500\/20 {
+  background-color: color-mix(in oklab, var(--accent-warm) 14%, transparent);
+}
+.bg-orange-500 {
+  background-color: var(--accent-warm);
+}
+
+/* Links and user chat bubbles move from generic blue to cyan/teal. */
+.text-blue-400,
+.text-sky-200,
+.text-sky-300,
+.text-sky-400 {
+  color: var(--accent-strong);
+}
+html[data-theme="light"] .text-blue-400,
+html[data-theme="light"] .text-sky-200,
+html[data-theme="light"] .text-sky-300,
+html[data-theme="light"] .text-sky-400 {
+  color: var(--accent-strong);
+}
+.bg-blue-600,
+.bg-sky-500,
+.bg-sky-600 {
+  background: linear-gradient(135deg, #006b84, #00785f);
+  color: #fbfffb;
+}
+.hover\:bg-sky-500:hover,
+.hover\:bg-sky-400:hover,
+.hover\:bg-blue-500:hover {
+  background: linear-gradient(135deg, #0089a7, #009d78);
+  color: #fbfffb;
+}
+.border-sky-500\/30,
+.border-sky-500\/40,
+.border-sky-500\/50,
+.border-sky-500\/60 {
+  border-color: color-mix(in oklab, var(--accent-strong) 48%, transparent);
+}
+.bg-sky-500\/5,
+.bg-sky-500\/10,
+.bg-sky-500\/15,
+.bg-sky-500\/20,
+.bg-sky-950\/10 {
+  background-color: color-mix(in oklab, var(--accent-strong) 12%, transparent);
+}
+
+.text-emerald-200,
+.text-emerald-300,
+.text-emerald-400 {
+  color: var(--accent);
+}
+html[data-theme="light"] .text-emerald-200,
+html[data-theme="light"] .text-emerald-300,
+html[data-theme="light"] .text-emerald-400 {
+  color: var(--accent);
+}
+.border-emerald-500\/30,
+.border-emerald-500\/40 {
+  border-color: color-mix(in oklab, var(--accent) 46%, transparent);
+}
+.bg-emerald-500\/10,
+.bg-emerald-500\/15,
+.bg-emerald-500\/20,
+.bg-emerald-900\/50,
+.bg-emerald-900\/20 {
+  background-color: color-mix(in oklab, var(--accent) 12%, transparent);
+}
+.bg-emerald-500,
+.bg-emerald-600 {
+  background: linear-gradient(135deg, #00785f, #24f4b6);
+  color: #03110f;
+}
+.hover\:bg-emerald-500:hover {
+  background: linear-gradient(135deg, #009d78, #63ffd0);
+  color: #03110f;
+}
+html[data-theme="light"] .bg-emerald-500,
+html[data-theme="light"] .bg-emerald-600,
+html[data-theme="light"] .hover\:bg-emerald-500:hover {
+  background: linear-gradient(135deg, #00785f, #006b84);
+  color: #fbfffb;
+}
+
+.text-rose-200,
+.text-rose-300,
+.text-rose-400,
+.text-red-200,
+.text-red-300,
+.text-red-400 {
+  color: var(--accent-danger);
+}
+html[data-theme="light"] .text-rose-200,
+html[data-theme="light"] .text-rose-300,
+html[data-theme="light"] .text-rose-400,
+html[data-theme="light"] .text-red-200,
+html[data-theme="light"] .text-red-300,
+html[data-theme="light"] .text-red-400 {
+  color: var(--accent-danger);
+}
+.bg-rose-500\/10,
+.bg-rose-500\/15,
+.bg-rose-500\/20,
+.bg-red-900\/30,
+.bg-red-900\/50 {
+  background-color: color-mix(in oklab, var(--accent-danger) 12%, transparent);
+}
+.border-rose-500\/30,
+.border-rose-500\/40,
+.border-red-700,
+.border-red-500 {
+  border-color: color-mix(in oklab, var(--accent-danger) 48%, transparent);
+}
+
+.bg-red-400,
+.bg-red-500,
+.bg-rose-400,
+.bg-rose-500 {
+  background-color: var(--accent-danger);
+}
+
+/* Operational/demo markers keep a distinct secondary signal without the
+   previous purple/fuchsia drift. */
+.text-purple-200,
+.text-purple-300,
+.text-fuchsia-400 {
+  color: var(--accent-strong);
+}
+.bg-purple-500\/10,
+.bg-purple-500\/15,
+.bg-purple-500\/25,
+.bg-fuchsia-400 {
+  background-color: color-mix(in oklab, var(--accent-strong) 14%, transparent);
+}
+.bg-purple-400 {
+  background-color: var(--accent-strong);
+}
+.border-purple-500\/40,
+.border-purple-500\/50 {
+  border-color: color-mix(in oklab, var(--accent-strong) 48%, transparent);
+}
+
+/* Typography details. */
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+.font-mono {
+  font-feature-settings: "ss01", "tnum", "zero";
+}
+
+.prose-invert {
+  --tw-prose-links: var(--accent-strong);
+  --tw-prose-invert-links: var(--accent-strong);
+  --tw-prose-code: var(--accent);
+  --tw-prose-invert-code: var(--accent);
+}
+
+html[data-theme="light"] .prose-invert {
+  --color-amber-300: var(--accent);
+  --color-blue-400: var(--accent-strong);
+  --color-sky-300: var(--accent-strong);
+  --color-emerald-300: var(--accent);
+}
+
+/* Motion signature: quiet lift for operational surfaces. */
+@media (hover: hover) {
+  :where(
+      .bg-zinc-900\/50.border,
+      .bg-zinc-900\/40.border,
+      .bg-zinc-800.border,
+      div.border.border-zinc-800,
+      ul.border.border-zinc-800
+    ):hover {
+    border-color: var(--border-strong);
+  }
+
+  button:not(:disabled):hover,
+  a[href]:hover {
+    transition-property: color, background-color, border-color, transform,
+      box-shadow;
+  }
 }

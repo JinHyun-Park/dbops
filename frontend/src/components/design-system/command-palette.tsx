@@ -179,10 +179,11 @@ export function CommandPalette() {
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]">
       <div
-        className="fixed inset-0 bg-black/60"
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm"
         onClick={() => setIsOpen(false)}
       />
-      <div className="relative w-full max-w-lg bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
+      <div className="relative w-full max-w-lg bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl overflow-hidden">
+        <div className="h-1 bg-gradient-to-r from-emerald-300 via-sky-300 to-fuchsia-400" />
         <div className="flex items-center gap-2.5 px-4 border-b border-zinc-700">
           <Search
             size={16}
@@ -210,7 +211,7 @@ export function CommandPalette() {
               className="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-zinc-800 transition-colors"
             >
               <span className="text-sm text-zinc-200">{cmd.label}</span>
-              <span className="text-[10px] uppercase tracking-wider text-zinc-600">
+              <span className="text-[10px] uppercase tracking-wider text-emerald-300/70">
                 {cmd.group}
               </span>
             </button>

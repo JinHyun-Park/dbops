@@ -236,18 +236,18 @@ function Breadcrumbs({ pathname }: { pathname: string }) {
   }));
   return (
     <nav className="flex items-center gap-1.5 text-[12px] text-zinc-500">
-      <Link href="/" className="hover:text-zinc-300 transition-colors">
+      <Link href="/" className="hover:text-emerald-300 transition-colors">
         Home
       </Link>
       {crumbs.map((c, i) => (
         <span key={c.href} className="flex items-center gap-1.5">
           <span className="text-zinc-700">/</span>
           {i === crumbs.length - 1 ? (
-            <span className="text-zinc-200">{c.label}</span>
+            <span className="text-zinc-100">{c.label}</span>
           ) : (
             <Link
               href={c.href}
-              className="hover:text-zinc-300 transition-colors"
+              className="hover:text-emerald-300 transition-colors"
             >
               {c.label}
             </Link>
@@ -265,16 +265,16 @@ function SidebarItem({ item, active }: { item: NavItem; active: boolean }) {
       href={item.href}
       title={item.hint}
       aria-current={active ? "page" : undefined}
-      className={`group relative flex items-center gap-2.5 pl-3 pr-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+      className={`group relative flex items-center gap-2.5 pl-3 pr-2.5 py-1.5 rounded-md text-[13px] transition-all duration-200 ${
         active
-          ? "bg-zinc-800/70 text-zinc-50 font-medium"
+          ? "bg-zinc-800/70 text-zinc-50 font-medium shadow-[inset_0_0_0_1px_rgba(36,244,182,0.16)]"
           : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/40"
       }`}
     >
       {/* Active marker: a short bright bar pinned to the left edge. Makes the
           current location obvious at a glance without relying on color. */}
       <span
-        className={`absolute left-0 top-1/2 -translate-y-1/2 h-4 w-0.5 rounded-full bg-zinc-100 transition-opacity ${
+        className={`absolute left-0 top-1/2 -translate-y-1/2 h-4 w-0.5 rounded-full bg-emerald-300 transition-opacity ${
           active ? "opacity-100" : "opacity-0"
         }`}
       />
@@ -282,7 +282,9 @@ function SidebarItem({ item, active }: { item: NavItem; active: boolean }) {
         size={15}
         strokeWidth={active ? 2.2 : 1.9}
         className={`flex-shrink-0 transition-colors ${
-          active ? "text-zinc-100" : "text-zinc-500 group-hover:text-zinc-300"
+          active
+            ? "text-emerald-200"
+            : "text-zinc-500 group-hover:text-emerald-300"
         }`}
       />
       <span className="truncate">{item.label}</span>
@@ -302,7 +304,7 @@ const MOBILE_TABS: { href: string; label: string; icon: IconType }[] = [
 
 function MobileTabBar({ pathname }: { pathname: string }) {
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 grid grid-cols-5">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800 grid grid-cols-5">
       {MOBILE_TABS.map((t) => {
         const active = pathname === t.href || pathname.startsWith(t.href + "/");
         const Icon = t.icon;
@@ -311,7 +313,7 @@ function MobileTabBar({ pathname }: { pathname: string }) {
             key={t.href}
             href={t.href}
             className={`flex flex-col items-center justify-center py-2 transition-colors ${
-              active ? "text-zinc-100" : "text-zinc-500 hover:text-zinc-200"
+              active ? "text-emerald-200" : "text-zinc-500 hover:text-zinc-200"
             }`}
           >
             <Icon size={18} strokeWidth={active ? 2.2 : 1.9} />
@@ -344,12 +346,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <AuthGuard>
       <div className="flex h-screen bg-zinc-950 text-zinc-100">
         <MobileTabBar pathname={pathname} />
-        <aside className="hidden md:flex w-56 flex-col border-r border-zinc-800 bg-zinc-950">
+        <aside className="hidden md:flex w-60 flex-col border-r border-zinc-800 bg-zinc-950/95 backdrop-blur-xl">
           <Link
             href="/"
-            className="px-5 py-4 hover:bg-zinc-900/50 transition-colors flex items-center gap-2"
+            className="px-5 py-4 hover:bg-zinc-900/50 transition-colors flex items-center gap-2.5"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-zinc-200" />
+            <span className="relative flex h-7 w-7 items-center justify-center rounded-md border border-emerald-300/30 bg-emerald-300/10 shadow-[0_0_24px_rgba(36,244,182,0.16)]">
+              <span className="h-2.5 w-2.5 rounded-[2px] bg-emerald-300 rotate-45" />
+            </span>
             <span className="text-lg font-semibold tracking-tight text-zinc-100">
               DBOps
             </span>
@@ -360,11 +364,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="px-3 pb-3">
             <button
               onClick={openCommandPalette}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700 transition-colors"
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:text-zinc-300 hover:border-emerald-500/40 transition-colors"
             >
               <Search size={14} strokeWidth={2} className="flex-shrink-0" />
               <span className="text-[13px]">Search</span>
-              <kbd className="ml-auto text-[10px] font-sans text-zinc-600 border border-zinc-700 rounded px-1 py-px">
+              <kbd className="ml-auto text-[10px] font-sans text-zinc-600 border border-zinc-700 rounded px-1 py-px bg-zinc-950/70">
                 ⌘K
               </kbd>
             </button>
@@ -373,7 +377,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <nav className="flex-1 overflow-y-auto px-3 pb-4 space-y-5">
             {NAV.map((group) => (
               <div key={group.label}>
-                <div className="px-3 mb-1 text-[10px] tracking-[0.14em] text-zinc-600 font-medium uppercase">
+                <div className="px-3 mb-1 text-[10px] tracking-[0.16em] text-zinc-600 font-semibold uppercase">
                   {group.label}
                 </div>
                 <div className="space-y-0.5">
@@ -394,13 +398,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             ))}
           </nav>
-          <div className="border-t border-zinc-800 px-4 py-4">
+          <div className="border-t border-zinc-800 px-4 py-4 bg-zinc-900/30">
             <AuthButton />
           </div>
         </aside>
 
         <div className="flex-1 flex flex-col min-w-0">
-          <header className="flex-shrink-0 border-b border-zinc-800 px-6 py-3 flex items-center justify-between bg-zinc-950/80 backdrop-blur">
+          <header
+            data-app-header
+            className="flex-shrink-0 border-b border-zinc-800 px-6 py-3 flex items-center justify-between bg-zinc-950/80 backdrop-blur-xl"
+          >
             <Breadcrumbs pathname={pathname} />
             <div className="flex items-center gap-3">
               <ThemeToggle />

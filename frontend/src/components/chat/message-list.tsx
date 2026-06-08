@@ -42,10 +42,10 @@ export function MessageList({
             }`}
           >
             <div
-              className={`max-w-[80%] rounded-lg px-4 py-3 ${
+              className={`max-w-[80%] rounded-lg px-4 py-3 shadow-sm ${
                 msg.role === "user"
                   ? "bg-blue-600 text-white"
-                  : "bg-zinc-800 text-zinc-100"
+                  : "bg-zinc-800 text-zinc-100 border border-zinc-700/70"
               }`}
             >
               {msg.toolCalls && msg.toolCalls.length > 0 && (
@@ -64,12 +64,12 @@ export function MessageList({
                   prose-p:my-2 prose-p:leading-relaxed
                   prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5
                   prose-strong:text-zinc-100
-                  prose-code:text-amber-300 prose-code:bg-zinc-900 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none
+                  prose-code:text-emerald-300 prose-code:bg-zinc-900 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none
                   prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-700 prose-pre:my-3
-                  prose-a:text-blue-400 hover:prose-a:text-blue-300
+                  prose-a:text-sky-300 hover:prose-a:text-emerald-300
                   prose-table:my-3 prose-th:border prose-th:border-zinc-700 prose-th:bg-zinc-900 prose-th:px-3 prose-th:py-2
                   prose-td:border prose-td:border-zinc-700 prose-td:px-3 prose-td:py-2
-                  prose-blockquote:border-l-blue-500 prose-blockquote:text-zinc-300
+                  prose-blockquote:border-l-emerald-500 prose-blockquote:text-zinc-300
                   prose-hr:border-zinc-700"
                 >
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>

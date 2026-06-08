@@ -16,14 +16,15 @@ export function PageHeader({
   actions,
 }: PageHeaderProps) {
   return (
-    <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 md:gap-6 mb-8 md:mb-10 pb-6 md:pb-7 border-b border-zinc-800/80">
+    <header className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-4 md:gap-6 mb-8 md:mb-10 pb-6 md:pb-7 border-b border-zinc-800/80">
+      <span className="absolute left-0 bottom-[-1px] h-px w-32 bg-gradient-to-r from-emerald-300 via-sky-300 to-transparent" />
       <div>
         {eyebrow && (
-          <div className="text-[11px] font-medium text-zinc-500 mb-2">
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] font-medium text-emerald-300/80 mb-2">
             {eyebrow}
           </div>
         )}
-        <h1 className="text-2xl md:text-[34px] leading-[1.15] font-semibold tracking-tight text-zinc-50">
+        <h1 className="text-2xl md:text-[34px] leading-[1.12] font-semibold tracking-tight text-zinc-50">
           {title}
         </h1>
         {description && (
@@ -63,7 +64,7 @@ export function EmptyState({
   secondary,
 }: EmptyStateProps) {
   return (
-    <div className="border border-dashed border-zinc-800 bg-zinc-900/30 py-16 px-8 text-center">
+    <div className="border border-dashed border-zinc-800 bg-zinc-900/30 py-16 px-8 text-center rounded-lg">
       {eyebrow && (
         <div className="text-[11px] font-medium text-zinc-500 mb-3">
           {eyebrow}
@@ -171,7 +172,7 @@ export function StatRow({ children, cols = 4 }: StatRowProps) {
           : "md:grid-cols-2 lg:grid-cols-4";
   return (
     <div
-      className={`grid grid-cols-1 ${grid} gap-px bg-zinc-800 border border-zinc-800`}
+      className={`grid grid-cols-1 ${grid} gap-px bg-zinc-800 border border-zinc-800 rounded-lg overflow-hidden`}
     >
       {children}
     </div>
