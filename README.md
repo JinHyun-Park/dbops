@@ -154,6 +154,12 @@ real spend you must activate the tag in your billing preferences once:
 4. Wait ~24h. Cost Explorer is not retroactive, but new chat invocations are
    immediately attributed to the profile from then on.
 
+The `/cost` page's **Aurora / RDS** tab works out of the box (RDS total +
+usage-type breakdown). **Per-cluster** Aurora cost is opt-in: apply a
+cost-allocation tag to your Aurora clusters (e.g. `dbops:cluster=<id>`) and
+activate that tag key in the same console. Until then the per-cluster panel
+shows a "not available" notice instead of fabricated numbers.
+
 #### Optional post-deploy: Slack 양방향 Ack
 
 Outbound Slack 알림 메시지의 "✓ Ack" 버튼이 동작하려면 Slack 앱 측 설정이 한 번 필요합니다. **Alerts 페이지의 "Slack 양방향 Ack 설정" 섹션에서 4단계 가이드 + endpoint URL을 자동으로 받을 수 있습니다.** (PageHeader 아래의 "셋업 가이드 열기" 버튼).
