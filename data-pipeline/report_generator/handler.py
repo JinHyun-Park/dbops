@@ -186,8 +186,12 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
         {"cid": cluster_id},
     )
     conn_peak = cache_query(
+        # Canonical total-connections metric = db_connections (CloudWatch
+        # DatabaseConnections), populated for every cluster — the PI-only
+        # "connections" was empty when Performance Insights was off, leaving
+        # the report's connection peak blank.
         "SELECT MAX(value) AS max_conn, AVG(value) AS avg_conn FROM metric_snapshots "
-        "WHERE cluster_id = :cid AND metric_type = 'connections' "
+        "WHERE cluster_id = :cid AND metric_type = 'db_connections' "
         "AND ts > NOW() - INTERVAL '24 hours'",
         {"cid": cluster_id},
     )

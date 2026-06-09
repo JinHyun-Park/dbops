@@ -38,6 +38,14 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
     what: "활성 + 유휴 DB 커넥션 총수.",
     why: "max_connections에 근접하면 신규 연결이 거부됨. 급증은 connection pool 누수 또는 트래픽 폭주.",
   },
+  // Canonical total-connections metric (CloudWatch DatabaseConnections),
+  // collected for every cluster — same meaning as "connections", reliably
+  // populated even when Performance Insights is off.
+  db_connections: {
+    label: "Connections",
+    what: "활성 + 유휴 DB 커넥션 총수 (CloudWatch DatabaseConnections).",
+    why: "max_connections에 근접하면 신규 연결이 거부됨. 급증은 connection pool 누수 또는 트래픽 폭주.",
+  },
   conn_active: {
     label: "Active connections",
     what: "현재 쿼리를 실행 중인 (idle 아닌) 커넥션 수.",

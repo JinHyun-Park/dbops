@@ -127,7 +127,7 @@ function DataStatusBadge({
 const METRIC_OPTIONS = [
   "cpu",
   "aas",
-  "connections",
+  "db_connections",
   "conn_active",
   "deadlocks",
   "read_iops",

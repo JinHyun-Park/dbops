@@ -412,7 +412,7 @@ def _collect_metric_spikes(cache, cluster_id, start_iso, end_iso, baseline_start
         WHERE cluster_id = :cluster_id
           AND ts >= :baseline_start::timestamptz
           AND ts < :end_time::timestamptz
-          AND metric_type IN ('aas', 'cpu', 'connections')
+          AND metric_type IN ('aas', 'cpu', 'db_connections')
         GROUP BY metric_type
     """
     params = {

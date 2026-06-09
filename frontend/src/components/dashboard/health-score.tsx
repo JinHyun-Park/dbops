@@ -29,7 +29,11 @@ const SIGNALS: {
   { metric: "cpu", label: "CPU", warn: 70, crit: 90, weight: 25 },
   { metric: "aas", label: "Load (AAS)", warn: 2, crit: 5, weight: 25 },
   {
-    metric: "connections",
+    // Canonical total-connections metric = db_connections (CloudWatch
+    // DatabaseConnections), collected for every cluster. The PI-only
+    // "connections" (numbackends) was empty whenever Performance Insights
+    // was off, which silently zeroed this signal.
+    metric: "db_connections",
     label: "Connections",
     warn: 100,
     crit: 200,

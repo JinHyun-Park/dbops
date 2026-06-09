@@ -50,7 +50,9 @@ type TsPoint = { ts: string; value: number | string; dimensions?: string };
 const CHART_METRICS = [
   "aas",
   "cpu",
-  "connections",
+  // Canonical total-connections metric (CloudWatch DatabaseConnections),
+  // collected for every cluster — unlike the PI-only "connections".
+  "db_connections",
   "read_iops",
   "write_iops",
   "xact_commit",
@@ -625,13 +627,13 @@ export default function DashboardPage() {
             />
             <TimeseriesChart
               clusterId={selectedCluster}
-              metric="connections"
+              metric="db_connections"
               title="Active Connections"
               hours={hours}
               color="#f472b6"
               type="area"
               formatValue={(v) => v.toFixed(0)}
-              externalPoints={tsBatch.connections || []}
+              externalPoints={tsBatch.db_connections || []}
               externalLoading={tsLoading}
             />
             {isPostgres(dashboardData.cluster?.engine) && (

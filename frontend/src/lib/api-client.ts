@@ -384,7 +384,7 @@ export async function fetchLogInsights(
   return res.json();
 }
 
-export type CapacityMetric = "storage_bytes" | "connections" | "aas";
+export type CapacityMetric = "storage_bytes" | "db_connections" | "aas";
 
 export interface CapacityForecastResponse {
   cluster_id: string;

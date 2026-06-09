@@ -11,7 +11,7 @@ def correlate_signals_impl(
         SELECT ts as event_time, 'metric' as signal_type, metric_type as detail, value::text as value
         FROM metric_snapshots
         WHERE cluster_id = :cluster_id AND ts >= :start_time::timestamptz AND ts < :end_time::timestamptz
-        AND metric_type IN ('aas', 'cpu', 'connections')
+        AND metric_type IN ('aas', 'cpu', 'db_connections')
     """
     events_sql = """
         SELECT event_time, 'event' as signal_type, event_type as detail, message as value

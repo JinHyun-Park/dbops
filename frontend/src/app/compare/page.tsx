@@ -37,7 +37,7 @@ interface MetricSpec {
 const METRICS: MetricSpec[] = [
   { id: "cpu", label: "CPU %", unit: "%", fmt: (v) => v.toFixed(1) },
   { id: "aas", label: "Avg Active Sessions", fmt: (v) => v.toFixed(2) },
-  { id: "connections", label: "Connections", fmt: (v) => v.toFixed(0) },
+  { id: "db_connections", label: "Connections", fmt: (v) => v.toFixed(0) },
   { id: "read_iops", label: "Read IOPS", fmt: (v) => v.toFixed(0) },
   { id: "write_iops", label: "Write IOPS", fmt: (v) => v.toFixed(0) },
   {

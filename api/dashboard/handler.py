@@ -1524,7 +1524,10 @@ def _wait_events(query, cluster_id, hours):
 _CAPACITY_METRICS = {
     # metric_type, display unit, hard cap (in stored units)
     "storage_bytes": {"limit": 128 * 1024**4, "label": "Storage"},  # 128 TiB
-    "connections": {"limit": 5000, "label": "Connections"},
+    # Canonical total-connections metric = db_connections (CloudWatch
+    # DatabaseConnections), collected for every cluster. The PI-only
+    # "connections" was empty whenever Performance Insights was off.
+    "db_connections": {"limit": 5000, "label": "Connections"},
     "aas": {"limit": 64.0, "label": "Active Sessions"},
 }
 
@@ -1557,7 +1560,7 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
     # Connection limit can be looked up dynamically from cluster_settings — when
     # the cluster has a max_connections row, we trust that over our default
     # ceiling.
-    if metric == "connections":
+    if metric == "db_connections":
         cfg = query(
             "SELECT value FROM cluster_settings "
             "WHERE cluster_id = :cid AND name = 'max_connections' "

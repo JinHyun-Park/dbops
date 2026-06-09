@@ -29,6 +29,7 @@ const METRIC_LABELS: Record<string, string> = {
   cpu_utilization: "CPU 사용률",
   aas: "활성 세션 (AAS)",
   connections: "활성 커넥션",
+  db_connections: "활성 커넥션",
   conn: "활성 커넥션",
   deadlocks: "데드락",
   blocking_locks: "블로킹 락",

@@ -25,7 +25,7 @@ const METRICS: {
     },
   },
   {
-    key: "connections",
+    key: "db_connections",
     label: "Connections",
     format: (n) => ({ value: fmtDecimal(n, 0), suffix: "" }),
   },
