@@ -169,17 +169,19 @@ export function CommandPalette() {
   const open = useCallback(() => {
     setIsOpen(true);
     setQuery("");
-    // Lazy-load the cluster list the first time the palette opens, so ⌘K can
-    // double as a fleet-scale cluster switcher (typeahead, no flat dropdown).
-    setClustersLoaded((loaded) => {
-      if (!loaded) {
-        fetchClusters()
-          .then((r: unknown) => setClusters(normalizeClusters(r)))
-          .catch(() => {});
-      }
-      return true;
-    });
   }, []);
+
+  // Lazy-load the cluster list the first time the palette opens BY ANY PATH
+  // (⌘K toggles isOpen directly, the sidebar button fires the open event) so
+  // ⌘K can double as a fleet-scale cluster switcher (typeahead, no dropdown).
+  useEffect(() => {
+    if (isOpen && !clustersLoaded) {
+      setClustersLoaded(true);
+      fetchClusters()
+        .then((r: unknown) => setClusters(normalizeClusters(r)))
+        .catch(() => {});
+    }
+  }, [isOpen, clustersLoaded]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "k") {
