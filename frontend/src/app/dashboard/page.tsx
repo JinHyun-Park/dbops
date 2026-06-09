@@ -20,6 +20,7 @@ import { LocksPanel } from "@/components/dashboard/locks-panel";
 import { SettingsPanel } from "@/components/dashboard/settings-panel";
 import { SchemaChangesPanel } from "@/components/dashboard/schema-changes-panel";
 import { AnomaliesPanel } from "@/components/dashboard/anomalies-panel";
+import { IncidentSummary } from "@/components/dashboard/incident-summary";
 import { AuditLogPanel } from "@/components/dashboard/audit-log-panel";
 import { LogInsightsPanel } from "@/components/dashboard/log-insights-panel";
 import { TableSizesPanel } from "@/components/dashboard/table-sizes-panel";
@@ -458,6 +459,10 @@ export default function DashboardPage() {
         selectedId={selectedCluster}
         onSelect={setSelectedCluster}
       />
+
+      {/* Incident-first: when the selected cluster isn't healthy, lead with
+          WHY + the RCA action before the metric panels below. */}
+      {selectedCluster && <IncidentSummary clusterId={selectedCluster} />}
 
       {selectedCluster &&
         clusters.find((c) => c.cluster_id === selectedCluster)?.is_demo && (
