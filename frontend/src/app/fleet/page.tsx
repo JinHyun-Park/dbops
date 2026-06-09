@@ -134,6 +134,10 @@ interface SavedView {
 const SAVED_VIEWS_KEY = "dbops_fleet_views";
 const SAVED_VIEWS_CAP = 8;
 
+// Render cap: bound the number of rows ever in the DOM so the page stays fast at
+// fleet scale (hundreds of clusters). "더 보기" pages in another step at a time.
+const ROW_CAP_STEP = 100;
+
 function loadSavedViews(): SavedView[] {
   try {
     const raw = window.localStorage.getItem(SAVED_VIEWS_KEY);
@@ -183,6 +187,9 @@ export default function FleetPage() {
 
   // Collapsed group keys (grouped view only); default = every group expanded.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  // How many rows of `view` to actually render (paged by ROW_CAP_STEP).
+  const [rowCap, setRowCap] = useState(ROW_CAP_STEP);
 
   // Saved views (localStorage) + the in-progress name for the save box.
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
@@ -311,6 +318,16 @@ export default function FleetPage() {
     return filtered;
   }, [decorated, q, engine, status, level, eolOnly, sortKey]);
 
+  // Reset the render cap whenever the filter set changes so a new filter always
+  // starts from the top of its result list, not a stale deep page.
+  useEffect(
+    () => setRowCap(ROW_CAP_STEP),
+    [q, engine, status, level, eolOnly, groupBy],
+  );
+
+  // The slice actually rendered — a no-op when the fleet fits under the cap.
+  const capped = useMemo(() => view.slice(0, rowCap), [view, rowCap]);
+
   const filtersActive = !!q || !!engine || !!status || !!level || eolOnly;
   const clearAll = () => {
     setQ("");
@@ -326,7 +343,7 @@ export default function FleetPage() {
   const groups = useMemo<FleetGroup[]>(() => {
     if (groupBy === "none") return [];
     const buckets = new Map<string, FleetGroup>();
-    for (const d of view) {
+    for (const d of capped) {
       let label: string;
       if (groupBy === "account")
         label = meta.get(d.row.cluster_id)?.account_id || "(unknown)";
@@ -348,7 +365,7 @@ export default function FleetPage() {
       if (a.rows.length !== b.rows.length) return b.rows.length - a.rows.length;
       return a.label.localeCompare(b.label);
     });
-  }, [view, groupBy, meta]);
+  }, [capped, groupBy, meta]);
 
   const toggleGroup = (key: string) =>
     setCollapsed((prev) => {
@@ -569,7 +586,7 @@ export default function FleetPage() {
           {/* Mobile card stack — severity-sorted, with a left accent bar. */}
           <div className="md:hidden space-y-3">
             {groupBy === "none"
-              ? view.map((d) => (
+              ? capped.map((d) => (
                   <FleetCard key={d.row.cluster_id} d={d} demoIds={demoIds} />
                 ))
               : groups.map((g) => {
@@ -669,7 +686,7 @@ export default function FleetPage() {
               </thead>
               <tbody className="divide-y divide-zinc-700">
                 {groupBy === "none"
-                  ? view.map((d) => (
+                  ? capped.map((d) => (
                       <FleetRow
                         key={d.row.cluster_id}
                         d={d}
@@ -691,6 +708,28 @@ export default function FleetPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Render cap footer — only when the filtered view exceeds the cap, so
+              a small fleet renders nothing extra (zero overhead). */}
+          {view.length > rowCap && (
+            <div className="flex flex-wrap items-center gap-3 mt-4 text-xs">
+              <span className="text-zinc-500 font-mono">
+                전체 {view.length}개 중 {capped.length}개 표시
+              </span>
+              <button
+                onClick={() => setRowCap((c) => c + ROW_CAP_STEP)}
+                className="px-2.5 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500/50 hover:text-amber-300 transition-colors"
+              >
+                더 보기 (+100)
+              </button>
+              <button
+                onClick={() => setRowCap(view.length)}
+                className="px-2.5 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500/50 hover:text-amber-300 transition-colors"
+              >
+                모두 표시
+              </button>
+            </div>
+          )}
         </>
       )}
     </PageBody>
