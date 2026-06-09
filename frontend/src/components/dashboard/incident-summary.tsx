@@ -1,17 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { fetchMultiClusterOverview } from "@/lib/api-client";
 import { eolFor } from "@/lib/engine";
-import { triage, type Level, type TriageInput } from "@/lib/cluster-triage";
+import { triage, type Level } from "@/lib/cluster-triage";
+import { useFleetOverview } from "@/lib/use-fleet-overview";
 import { RcaButton } from "@/components/design-system/rca-button";
-
-interface OverviewRow extends TriageInput {
-  cluster_id: string;
-  engine?: string;
-  engine_version?: string;
-}
 
 // Incident-first summary: when the selected cluster is not OK, lead the
 // dashboard with WHY (the triage reasons) and the next action (AI RCA), so the
@@ -36,26 +29,10 @@ const STYLE: Record<
 };
 
 export function IncidentSummary({ clusterId }: { clusterId: string }) {
-  const [row, setRow] = useState<OverviewRow | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = () =>
-      fetchMultiClusterOverview()
-        .then((r: { clusters?: OverviewRow[] }) => {
-          if (cancelled) return;
-          setRow(
-            (r.clusters || []).find((c) => c.cluster_id === clusterId) || null,
-          );
-        })
-        .catch(() => {});
-    load();
-    const iv = setInterval(load, 30000);
-    return () => {
-      cancelled = true;
-      clearInterval(iv);
-    };
-  }, [clusterId]);
+  // Shared fleet poll (deduped with the cluster dropdown + strip) — same source,
+  // so the banner severity always matches the card pill and the Fleet page.
+  const fleet = useFleetOverview();
+  const row = fleet.find((c) => c.cluster_id === clusterId) || null;
 
   if (!row) return null;
   const t = triage(row, eolFor(row.engine, row.engine_version));

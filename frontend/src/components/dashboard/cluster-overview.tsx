@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
-import { fetchMultiClusterOverview } from "@/lib/api-client";
 import { eolFor } from "@/lib/engine";
 import {
   triage,
@@ -10,6 +9,7 @@ import {
   type Level,
   type TriageInput,
 } from "@/lib/cluster-triage";
+import { useFleetOverview } from "@/lib/use-fleet-overview";
 
 interface ClusterInfo {
   cluster_id: string;
@@ -22,10 +22,6 @@ interface ClusterOverviewProps {
   clusters: ClusterInfo[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-}
-
-interface OverviewRow extends TriageInput {
-  cluster_id: string;
 }
 
 // Hard cap on chips so the dashboard header stays compact at fleet scale — the
@@ -44,26 +40,13 @@ export function ClusterOverview({
   selectedId,
   onSelect,
 }: ClusterOverviewProps) {
-  const [metrics, setMetrics] = useState<Map<string, TriageInput>>(new Map());
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = () =>
-      fetchMultiClusterOverview()
-        .then((r: { clusters?: OverviewRow[] }) => {
-          if (cancelled) return;
-          const m = new Map<string, TriageInput>();
-          for (const row of r.clusters || []) m.set(row.cluster_id, row);
-          setMetrics(m);
-        })
-        .catch(() => {});
-    load();
-    const iv = setInterval(load, 30000);
-    return () => {
-      cancelled = true;
-      clearInterval(iv);
-    };
-  }, []);
+  // Shared fleet poll (deduped with the header dropdown + incident banner).
+  const fleet = useFleetOverview();
+  const metrics = useMemo(() => {
+    const m = new Map<string, TriageInput>();
+    for (const row of fleet) m.set(row.cluster_id, row);
+    return m;
+  }, [fleet]);
 
   // Decorate + severity-sort (worst first), then heat desc, then name.
   const decorated = useMemo(() => {

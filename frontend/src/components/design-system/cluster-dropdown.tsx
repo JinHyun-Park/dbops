@@ -1,22 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Database, Search } from "lucide-react";
-import { fetchMultiClusterOverview } from "@/lib/api-client";
 import { eolFor } from "@/lib/engine";
-import { triage, type Level, type TriageInput } from "@/lib/cluster-triage";
+import { triage, type Level } from "@/lib/cluster-triage";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
+import { useFleetOverview } from "@/lib/use-fleet-overview";
 
 // A real, discoverable cluster switcher: click → a popover that lists the
 // clusters immediately (with a severity dot from the shared triage), with
 // typeahead for large fleets. Replaces the old chip that opened the ⌘K search
 // palette — ⌘K is now pages/search only, so the two no longer collide.
-interface OverviewRow extends TriageInput {
-  cluster_id: string;
-  engine?: string;
-  engine_version?: string;
-}
-
 const DOT: Record<Level, string> = {
   critical: "bg-rose-500",
   warning: "bg-amber-400",
@@ -37,27 +31,19 @@ export function ClusterDropdown({
   const { clusters, selected, setSelected } = useSelectedCluster();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [levels, setLevels] = useState<Map<string, Level>>(new Map());
-  const [loadedLevels, setLoadedLevels] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Lazy-load severity the first time the menu opens — a dot per row keeps the
-  // switcher useful at fleet scale without an extra fetch on every page.
-  useEffect(() => {
-    if (!open || loadedLevels) return;
-    setLoadedLevels(true);
-    fetchMultiClusterOverview()
-      .then((r: { clusters?: OverviewRow[] }) => {
-        const m = new Map<string, Level>();
-        for (const row of r.clusters || [])
-          m.set(
-            row.cluster_id,
-            triage(row, eolFor(row.engine, row.engine_version)).level,
-          );
-        setLevels(m);
-      })
-      .catch(() => {});
-  }, [open, loadedLevels]);
+  // Severity dots from the shared fleet poll (deduped with the dashboard).
+  const fleet = useFleetOverview();
+  const levels = useMemo(() => {
+    const m = new Map<string, Level>();
+    for (const row of fleet)
+      m.set(
+        row.cluster_id,
+        triage(row, eolFor(row.engine, row.engine_version)).level,
+      );
+    return m;
+  }, [fleet]);
 
   // Close on outside click + Escape.
   useEffect(() => {
