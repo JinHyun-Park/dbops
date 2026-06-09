@@ -202,6 +202,15 @@ def diagnose_root_cause_impl(
         "candidates": top,
         "signals_examined": examined,
         "skipped_sources": skipped,
+        # Surface the priors + per-candidate score_breakdown so the ranking is
+        # explainable (score = base_weight × recency × category factor), not an
+        # opaque number a DBA has to trust blindly.
+        "scoring_weights": BASE_WEIGHTS,
+        "scoring_note": (
+            "각 candidate의 score = base_weight(카테고리 prior) × recency(앵커 근접) × "
+            "카테고리 인자(event=severity, blocking=block 지속, spike=배수). 자세한 분해는 "
+            "candidate.score_breakdown 참고. 우선순위(prior)는 휴리스틱입니다."
+        ),
         "note": "ranked by proximity + severity; correlation, not proof — verify before acting",
     }
 
@@ -237,12 +246,18 @@ def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, 
     examined["schema_changes"] = len(rows)
     for row in rows:
         when = row.get("snapshot_time")
-        score = BASE_WEIGHTS["schema_change"] * _recency_factor(when, anchor, win)
+        rf = _recency_factor(when, anchor, win)
+        score = BASE_WEIGHTS["schema_change"] * rf
         schema_name = row.get("schema_name") or "?"
         out.append(
             {
                 "category": "schema_change",
                 "score": score,
+                "score_breakdown": {
+                    "base_weight": BASE_WEIGHTS["schema_change"],
+                    "recency_factor": round(rf, 3),
+                    "formula": "base × recency",
+                },
                 "summary": f"Schema/DDL change in '{schema_name}' near the incident",
                 "evidence": {
                     "schema_name": schema_name,
@@ -284,12 +299,19 @@ def _collect_events(cache, cluster_id, start_iso, end_iso, anchor, win, examined
         when = row.get("event_time")
         severity = str(row.get("severity") or "info").lower()
         sev_factor = EVENT_SEVERITY_FACTOR.get(severity, 0.7)
-        score = BASE_WEIGHTS["event"] * _recency_factor(when, anchor, win) * sev_factor
+        rf = _recency_factor(when, anchor, win)
+        score = BASE_WEIGHTS["event"] * rf * sev_factor
         event_type = row.get("event_type") or "event"
         out.append(
             {
                 "category": "event",
                 "score": score,
+                "score_breakdown": {
+                    "base_weight": BASE_WEIGHTS["event"],
+                    "recency_factor": round(rf, 3),
+                    "severity_factor": sev_factor,
+                    "formula": "base × recency × severity",
+                },
                 "summary": f"{severity.upper()} event '{event_type}' near the incident",
                 "evidence": {
                     "event_type": event_type,
@@ -339,11 +361,18 @@ def _collect_blocking(cache, cluster_id, start_iso, end_iso, anchor, win, examin
             duration = 0.0
         # Duration factor: 1.0 at 0s rising toward ~2.0 for long (>=60s) blocks.
         duration_factor = 1.0 + min(duration / 60.0, 1.0)
-        score = BASE_WEIGHTS["blocking"] * _recency_factor(when, anchor, win) * duration_factor
+        rf = _recency_factor(when, anchor, win)
+        score = BASE_WEIGHTS["blocking"] * rf * duration_factor
         out.append(
             {
                 "category": "blocking",
                 "score": score,
+                "score_breakdown": {
+                    "base_weight": BASE_WEIGHTS["blocking"],
+                    "recency_factor": round(rf, 3),
+                    "duration_factor": round(duration_factor, 3),
+                    "formula": "base × recency × duration",
+                },
                 "summary": f"Lock contention: pid {row.get('blocked_pid')} blocked {round(duration, 1)}s by pid {row.get('blocking_pid')}",
                 "evidence": {
                     "blocked_pid": row.get("blocked_pid"),
@@ -413,11 +442,19 @@ def _collect_metric_spikes(cache, cluster_id, start_iso, end_iso, baseline_start
         # midpoint rather than the far edge — using start_iso would floor every
         # spike for a full look-back window and unfairly bury it.
         midpoint = anchor - timedelta(minutes=win / 2.0)
-        score = BASE_WEIGHTS["metric_spike"] * _recency_factor(midpoint, anchor, win) * min(ratio / SPIKE_RATIO, 2.0)
+        rf = _recency_factor(midpoint, anchor, win)
+        spike_factor = min(ratio / SPIKE_RATIO, 2.0)
+        score = BASE_WEIGHTS["metric_spike"] * rf * spike_factor
         out.append(
             {
                 "category": "metric_spike",
                 "score": score,
+                "score_breakdown": {
+                    "base_weight": BASE_WEIGHTS["metric_spike"],
+                    "recency_factor": round(rf, 3),
+                    "spike_factor": round(spike_factor, 3),
+                    "formula": "base × recency × spike_magnitude",
+                },
                 "summary": f"{metric_type} spiked {round(ratio, 2)}x vs prior baseline ({round(baseline_avg, 2)} -> {round(window_avg, 2)})",
                 "evidence": {
                     "metric_type": metric_type,
@@ -463,11 +500,17 @@ def _collect_slow_queries(cache, cluster_id, start_iso, end_iso, anchor, win, ex
         total_ms = _to_float(row.get("total_time_ms")) or 0.0
         query_text = (row.get("query_text") or "").strip()
         snippet = (query_text[:120] + "…") if len(query_text) > 120 else query_text
-        score = BASE_WEIGHTS["slow_query"] * _recency_factor(when, anchor, win)
+        rf = _recency_factor(when, anchor, win)
+        score = BASE_WEIGHTS["slow_query"] * rf
         out.append(
             {
                 "category": "slow_query",
                 "score": score,
+                "score_breakdown": {
+                    "base_weight": BASE_WEIGHTS["slow_query"],
+                    "recency_factor": round(rf, 3),
+                    "formula": "base × recency",
+                },
                 "summary": f"Heavy query ({round(total_ms, 1)}ms total, {row.get('calls')} calls): {snippet}",
                 "evidence": {
                     "query_hash": row.get("query_hash"),

@@ -797,6 +797,22 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
                 writers {result.writers} · readers {result.readers}
               </div>
             </div>
+            {result.mode === "serverless" && result.acu_basis && (
+              <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                {result.acu_basis === "observed" ? (
+                  <span className="px-1.5 py-0.5 border text-emerald-300 border-emerald-500/40 bg-emerald-500/10">
+                    관측 ACU {fmtDecimal(result.observed_avg_acu ?? 0, 2)} 기준
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 border text-amber-300 border-amber-500/40 bg-amber-500/10">
+                    중간값 ACU 추정 (관측 데이터 없음)
+                  </span>
+                )}
+                {result.confidence && (
+                  <ConfidenceBadge confidence={result.confidence} />
+                )}
+              </div>
+            )}
             <PricingContext
               pricing={result.unit_pricing}
               dataSource={result.data_source}

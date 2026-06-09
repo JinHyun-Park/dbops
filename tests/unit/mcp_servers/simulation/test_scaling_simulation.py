@@ -59,6 +59,16 @@ def _empty_cache():
     return cache
 
 
+def _cw(averages=None):
+    """A CloudWatch client mock whose get_metric_statistics returns the given
+    per-hour Average ACU datapoints (empty → forces the midpoint fallback)."""
+    cw = MagicMock()
+    cw.get_metric_statistics.return_value = {
+        "Datapoints": [{"Average": a} for a in (averages or [])]
+    }
+    return cw
+
+
 def test_serverless_uses_real_acu_price_and_member_count():
     """Serverless v2: mode serverless, current 2/16, cost uses the REAL 0.26
     rate (NOT the old 0.12) and multiplies by member_count (writer + reader)."""
@@ -70,7 +80,7 @@ def test_serverless_uses_real_acu_price_and_member_count():
         f"{MODULE}.lookup_cluster", return_value={"region": "ap-northeast-2"}
     ), patch(f"{MODULE}.price_per_acu_hour", return_value=0.26) as acu_price, patch(
         f"{MODULE}.price_per_instance_hour"
-    ):
+    ), patch(f"{MODULE}.client_for_cluster", return_value=_cw()):  # no observed ACU → midpoint
         result = simulate_scaling_impl(cache, cluster_id="prod-pg-1")
 
     member_count = 2  # 1 writer + 1 reader
@@ -94,6 +104,34 @@ def test_serverless_uses_real_acu_price_and_member_count():
     rds.describe_db_clusters.assert_called_once_with(DBClusterIdentifier="prod-pg-1")
 
 
+def test_serverless_uses_observed_acu_not_midpoint():
+    """When CloudWatch has observed ACU, cost uses the OBSERVED average (clamped
+    into the range), not the min/max midpoint — a mostly-idle cluster costs far
+    less than (min+max)/2 implies."""
+    cache = _empty_cache()
+    rds = MagicMock()
+    rds.describe_db_clusters.return_value = {"DBClusters": [_serverless_cluster(readers=1)]}
+
+    # Observed ~3 ACU on a 2..16 range — midpoint would be 9, far higher.
+    with patch(f"{MODULE}.rds_client_for_cluster", return_value=rds), patch(
+        f"{MODULE}.lookup_cluster", return_value={"region": "ap-northeast-2"}
+    ), patch(f"{MODULE}.price_per_acu_hour", return_value=0.26), patch(
+        f"{MODULE}.price_per_instance_hour"
+    ), patch(f"{MODULE}.client_for_cluster", return_value=_cw([2.5, 3.0, 3.5])):
+        result = simulate_scaling_impl(cache, cluster_id="prod-pg-1")
+
+    member_count = 2
+    observed = 3.0  # avg of 2.5/3.0/3.5
+    expected = round(observed * 0.26 * HOURS_PER_MONTH * member_count, 2)
+    midpoint_cost = round(((2.0 + 16.0) / 2) * 0.26 * HOURS_PER_MONTH * member_count, 2)
+
+    assert result["acu_basis"] == "observed"
+    assert result["observed_avg_acu"] == 3.0
+    assert result["confidence"] == "high"
+    assert result["cost_impact"]["current_monthly_usd"] == expected
+    assert result["cost_impact"]["current_monthly_usd"] != midpoint_cost
+
+
 def test_serverless_proposed_overrides_drive_cost_and_pct():
     """Proposed range overrides change the cost and produce a sane change_pct."""
     cache = _empty_cache()
@@ -104,7 +142,7 @@ def test_serverless_proposed_overrides_drive_cost_and_pct():
         f"{MODULE}.lookup_cluster", return_value={"region": "ap-northeast-2"}
     ), patch(f"{MODULE}.price_per_acu_hour", return_value=0.26), patch(
         f"{MODULE}.price_per_instance_hour"
-    ):
+    ), patch(f"{MODULE}.client_for_cluster", return_value=_cw()):  # no observed ACU → midpoint
         result = simulate_scaling_impl(
             cache, cluster_id="prod-pg-1", new_min_acu=4.0, new_max_acu=32.0
         )

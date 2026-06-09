@@ -100,12 +100,24 @@ def test_ranks_schema_change_event_and_metric_spike():
     top_two = [c["category"] for c in cands[:2]]
     assert "schema_change" in top_two
 
-    # every candidate carries the expected fields
+    # every candidate carries the expected fields + an explainable breakdown
     for c in cands:
         assert isinstance(c["score"], float)
         assert c["summary"]
         assert c["evidence"]
         assert c["suggested_action"]
+        bd = c["score_breakdown"]
+        assert bd["base_weight"] > 0
+        assert 0 < bd["recency_factor"] <= 1.0
+        assert "formula" in bd
+
+    # the event candidate's breakdown exposes its severity multiplier
+    event = next(c for c in cands if c["category"] == "event")
+    assert event["score_breakdown"]["severity_factor"] == 1.5  # critical
+
+    # top-level scoring transparency
+    assert result["scoring_weights"]["schema_change"] == 5.0
+    assert "score_breakdown" in result["scoring_note"]
 
     # connections was NOT a spike (50/48 < 1.5) -> only cpu counted
     assert result["signals_examined"] == {

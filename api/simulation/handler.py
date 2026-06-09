@@ -525,6 +525,32 @@ def _simulate_scaling(
     )
 
 
+def _observed_avg_acu(cluster_id):
+    """Average ServerlessDatabaseCapacity over a 14-day lookback (local account),
+    or (None, reason). The real serverless bill tracks the observed ACU draw,
+    not the min/max midpoint. Fails soft → midpoint fallback."""
+    from datetime import datetime, timedelta, timezone
+    try:
+        cw = boto3.client("cloudwatch")
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=14)
+        resp = cw.get_metric_statistics(
+            Namespace="AWS/RDS",
+            MetricName="ServerlessDatabaseCapacity",
+            Dimensions=[{"Name": "DBClusterIdentifier", "Value": cluster_id}],
+            StartTime=start,
+            EndTime=end,
+            Period=3600,
+            Statistics=["Average"],
+        )
+        pts = [d["Average"] for d in resp.get("Datapoints", []) if d.get("Average") is not None]
+        if not pts:
+            return None, "CloudWatch ServerlessDatabaseCapacity 데이터포인트 없음"
+        return sum(pts) / len(pts), "CloudWatch 14일 평균 ACU"
+    except Exception as e:
+        return None, f"관측 ACU 조회 실패({type(e).__name__})"
+
+
 def _scaling_serverless(
     cluster_id,
     region,
@@ -543,19 +569,32 @@ def _scaling_serverless(
     new_max = float(new_max_acu) if new_max_acu is not None else cur_max
 
     price = price_per_acu_hour(region, engine, io_optimized)
+    # Observed average ACU is the real billing driver; midpoint is the fallback.
+    observed_acu, acu_basis_note = _observed_avg_acu(cluster_id)
+
+    def _effective(min_acu, max_acu):
+        if observed_acu is not None:
+            return max(min_acu, min(observed_acu, max_acu))  # same workload, new bounds
+        return (min_acu + max_acu) / 2.0  # midpoint fallback
+
     if price is None:
         cost_impact = _cost_impact(None, None)
         data_source = "estimate (pricing unavailable)"
         source = "fallback"
     else:
-        # Mid-point usage: Serverless v2 scales continuously between min and
-        # max, so the long-run average is best approximated by the midpoint.
-        # Each member bills its own ACU-hours, so multiply by member_count.
-        current_monthly = ((cur_min + cur_max) / 2.0) * price * _HOURS_PER_MONTH * member_count
-        proposed_monthly = ((new_min + new_max) / 2.0) * price * _HOURS_PER_MONTH * member_count
+        current_monthly = _effective(cur_min, cur_max) * price * _HOURS_PER_MONTH * member_count
+        proposed_monthly = _effective(new_min, new_max) * price * _HOURS_PER_MONTH * member_count
         cost_impact = _cost_impact(current_monthly, proposed_monthly)
         data_source = "live (describe_db_clusters) + aws_pricing_api"
         source = "aws_pricing_api"
+
+    acu_basis = "observed" if observed_acu is not None else "midpoint"
+    confidence = "high" if (price is not None and observed_acu is not None) else "low"
+    basis_phrase = (
+        f"관측 평균 {round(observed_acu, 2)} ACU 기준({acu_basis_note})"
+        if observed_acu is not None
+        else f"중간값 ACU 기준 추정({acu_basis_note} — 관측 ACU 없음)"
+    )
 
     return {
         "cluster_id": cluster_id,
@@ -564,6 +603,9 @@ def _scaling_serverless(
         "proposed": {"min_acu": new_min, "max_acu": new_max},
         "writers": writers,
         "readers": readers,
+        "observed_avg_acu": round(observed_acu, 2) if observed_acu is not None else None,
+        "acu_basis": acu_basis,
+        "confidence": confidence,
         "cost_impact": cost_impact,
         "unit_pricing": {
             "kind": "acu",
@@ -574,8 +616,8 @@ def _scaling_serverless(
         },
         "data_source": data_source,
         "note": (
-            f"중간값 ACU 기준 추정치({_HOURS_PER_MONTH}h/month, {member_count}개 인스턴스). "
-            "리더는 라이터와 동일한 ACU 범위로 근사했으며, 단가는 리전/IO-Optimized 여부를 반영한 "
+            f"{basis_phrase}, {_HOURS_PER_MONTH}h/month × {member_count}개 인스턴스. "
+            "리더는 라이터와 동일한 ACU로 근사했으며, 단가는 리전/IO-Optimized 여부를 반영한 "
             "실제 AWS 가격입니다. ACU 변경은 즉시 적용되며 다운타임이 없습니다."
         ),
     }

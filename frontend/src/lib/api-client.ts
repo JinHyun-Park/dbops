@@ -1135,6 +1135,11 @@ export interface ScalingUnitPricing {
 export interface ScalingResponse {
   cluster_id: string;
   mode: "serverless" | "provisioned";
+  // serverless: observed average ACU drives the cost when CloudWatch has data,
+  // else falls back to the min/max midpoint (acu_basis tells which).
+  observed_avg_acu?: number | null;
+  acu_basis?: "observed" | "midpoint";
+  confidence?: "low" | "medium" | "high";
   current: ScalingTier;
   proposed: ScalingTier;
   writers: number;

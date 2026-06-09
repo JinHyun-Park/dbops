@@ -164,6 +164,9 @@ class AgentStack(cdk.Stack):
                 # Real region/edition/instance pricing for scaling cost sims
                 # (replaces the hardcoded ACU rate). Price List API is read-only.
                 "pricing:GetProducts",
+                # Observed Serverless v2 ACU draw for the scaling cost sim
+                # (ServerlessDatabaseCapacity) — replaces the min/max midpoint.
+                "cloudwatch:GetMetricStatistics",
                 # Hub-spoke: assume the cluster's spoke role to describe it in its
                 # own account+region (same pattern as the operations write tools).
                 "sts:AssumeRole",
@@ -417,6 +420,8 @@ class AgentStack(cdk.Stack):
                 "rds:DescribeDBClusterParameters",
                 # Real region/edition/instance pricing for scaling cost sims.
                 "pricing:GetProducts",
+                # Observed Serverless v2 ACU draw for the scaling cost sim.
+                "cloudwatch:GetMetricStatistics",
             ],
             resources=["*"],
         ))

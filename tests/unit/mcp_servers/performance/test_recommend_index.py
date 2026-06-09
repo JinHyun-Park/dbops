@@ -325,6 +325,53 @@ def test_order_by_select_list_alias_is_not_indexed():
     assert "email_key" not in parsed["columns"]
 
 
+def test_recommendation_carries_unverified_verification_sql():
+    """Each rec is flagged unverified and carries runnable verification SQL
+    (existing-index check) so the DBA can rule out a duplicate before creating."""
+    mock_cache = MagicMock()
+    mock_cache.execute.side_effect = [
+        _qstats([{
+            "query_hash": "v1",
+            "query_text": "SELECT * FROM orders WHERE status = 'pending'",
+            "total_time_ms": 5000.0, "calls": 100, "blocks_read": 5000, "blocks_hit": 10,
+        }]),
+        _EMPTY,
+    ]
+    rec = recommend_index_impl(mock_cache, cluster_id="prod-pg-1")["recommendations"][0]
+    assert rec["validated"] is False
+    assert "pg_indexes" in rec["verification"]["check_existing_indexes"]
+    assert "tablename = 'orders'" in rec["verification"]["check_existing_indexes"]
+
+
+def test_prefix_index_is_deduped_into_composite():
+    """A rec on (status) and a rec on (status, created_at) for the same table:
+    the shorter is subsumed by the composite (prefix), so only ONE survives and
+    the dropped one's workload is folded in + recorded in `covers`."""
+    mock_cache = MagicMock()
+    mock_cache.execute.side_effect = [
+        _qstats([
+            {  # -> (status, created_at)
+                "query_hash": "p1",
+                "query_text": "SELECT * FROM orders WHERE status = 'x' AND created_at > now()",
+                "total_time_ms": 3000.0, "calls": 30, "blocks_read": 5000, "blocks_hit": 10,
+            },
+            {  # -> (status) — a prefix of the composite above
+                "query_hash": "p2",
+                "query_text": "SELECT * FROM orders WHERE status = 'y'",
+                "total_time_ms": 1000.0, "calls": 70, "blocks_read": 5000, "blocks_hit": 10,
+            },
+        ]),
+        _EMPTY,
+    ]
+    result = recommend_index_impl(mock_cache, cluster_id="prod-pg-1")
+    assert result["count"] == 1
+    rec = result["recommendations"][0]
+    assert rec["columns"] == ["status", "created_at"]
+    assert rec["calls"] == 100  # 30 + 70 folded in
+    assert rec["total_time_ms"] == 4000.0
+    assert [["status"]] == rec["covers"]
+
+
 def test_order_by_qualified_column_is_indexed():
     """A driving-alias-qualified ORDER BY column IS a proven base column."""
     from mcp_servers.performance.tools.recommend_index import _parse_query

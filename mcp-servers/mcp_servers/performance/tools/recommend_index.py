@@ -418,8 +418,14 @@ def recommend_index_impl(cache: CacheClient, cluster_id: str, min_seq_scan_ratio
                 "calls": calls,
             }
 
+    # Prefix-dedup: a btree on (a, b, …) already serves prefix lookups on (a)
+    # and (a, b), so a recommendation whose columns are a PREFIX of another's on
+    # the same table is redundant — drop it and fold its workload into the
+    # surviving longer index. (Longest-first so the composite is the survivor.)
+    deduped = _prefix_dedupe(list(merged.values()))
+
     recommendations = []
-    for rec in merged.values():
+    for rec in deduped:
         short_table = rec["table"].split(".")[-1]
         stat = table_stats.get(short_table)
         if stat is not None:
@@ -432,6 +438,26 @@ def recommend_index_impl(cache: CacheClient, cluster_id: str, min_seq_scan_ratio
             # the agent/DBA can prioritize. We never DROP query-derived advice on a
             # weak table — we just don't boost it.
             rec["seq_scan_confirmed"] = seq > idx * _SEQ_SCAN_DOMINANCE
+        # This is UNVERIFIED advice: we can't see the cluster's existing indexes
+        # or a real plan from the cache. Emit the exact SQL the DBA should run to
+        # (1) check for an existing/overlapping index and (2) confirm the index
+        # actually helps, before creating. validated=False makes that explicit.
+        rec["validated"] = False
+        # Schema-qualify the existing-index check when we recovered a schema, so
+        # it doesn't match a same-named table in another schema. Both parts are
+        # simple-identifier-gated (no quotes), so interpolation is safe here.
+        _parts = rec["table"].split(".")
+        _schema_filter = f" AND schemaname = '{_parts[0]}'" if len(_parts) > 1 else ""
+        rec["verification"] = {
+            "check_existing_indexes": (
+                f"SELECT indexname, indexdef FROM pg_indexes "
+                f"WHERE tablename = '{short_table}'{_schema_filter};"
+            ),
+            "explain_before_after": (
+                "EXPLAIN (ANALYZE, BUFFERS) <run the source query>; "
+                "compare the plan before vs after creating the index on a replica."
+            ),
+        }
         recommendations.append(rec)
 
     # Confirmed-by-stats first, then by aggregate time spent.
@@ -445,8 +471,40 @@ def recommend_index_impl(cache: CacheClient, cluster_id: str, min_seq_scan_ratio
         "recommendations": recommendations,
         "count": len(recommendations),
         "note": (
-            "heuristic suggestions from query-text parsing — validate with EXPLAIN "
-            "and test on a replica before creating; CREATE INDEX CONCURRENTLY avoids "
-            "long locks but cannot run inside a transaction block."
+            "heuristic suggestions from query-text parsing, prefix-deduped (a "
+            "composite index subsumes its prefixes). UNVERIFIED: the cache has no "
+            "index inventory, so each rec carries a `verification` SQL — run "
+            "check_existing_indexes to rule out a duplicate and EXPLAIN to confirm "
+            "the benefit before creating. CREATE INDEX CONCURRENTLY avoids long "
+            "locks but cannot run inside a transaction block."
         ),
     }
+
+
+def _prefix_dedupe(recs: list) -> list:
+    """Drop recommendations whose column list is a prefix of another's on the
+    same table (the longer composite index already serves the shorter lookup);
+    merge the dropped rec's calls/time into the survivor and record it in
+    ``covers`` for transparency."""
+    recs.sort(key=lambda r: len(r["columns"]), reverse=True)  # longest first
+    kept: list = []
+    for rec in recs:
+        survivor = None
+        for k in kept:
+            if k["table"] == rec["table"] and _is_prefix(rec["columns"], k["columns"]):
+                survivor = k
+                break
+        if survivor is not None:
+            survivor["total_time_ms"] += rec["total_time_ms"]
+            survivor["calls"] += rec["calls"]
+            survivor.setdefault("covers", []).append(rec["columns"])
+        else:
+            kept.append(rec)
+    return kept
+
+
+def _is_prefix(short: list, long: list) -> bool:
+    """True if `short` is a leading prefix of `long` (and strictly shorter or
+    equal length). Equal lists are already merged upstream by key, so in
+    practice this catches the strict-prefix case."""
+    return len(short) <= len(long) and long[: len(short)] == short

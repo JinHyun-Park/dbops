@@ -20,17 +20,57 @@ NEVER raise.
 """
 
 import os
+from datetime import datetime, timedelta, timezone
 
 from mcp_servers.shared.aurora_pricing import (
     price_per_acu_hour,
     price_per_instance_hour,
 )
 from mcp_servers.shared.cache_client import CacheClient
-from mcp_servers.shared.cluster_targets import lookup_cluster, rds_client_for_cluster
+from mcp_servers.shared.cluster_targets import (
+    client_for_cluster,
+    lookup_cluster,
+    rds_client_for_cluster,
+)
 
 # Hours billed per month for a continuously-running instance. 730 = 365*24/12,
 # the AWS convention for monthly estimates (Aurora bills ACU-hours / instance-hours).
 HOURS_PER_MONTH = 730
+
+# Lookback for the OBSERVED average ACU (CloudWatch). Serverless v2 bills the
+# actual ACU it ran at, so the real long-run cost tracks the observed average,
+# not the min/max midpoint.
+_ACU_LOOKBACK_DAYS = 14
+
+
+def _observed_avg_acu(cluster_id: str):
+    """(avg_acu, basis) from CloudWatch ServerlessDatabaseCapacity over the
+    lookback, in the cluster's own account; (None, reason) when unavailable.
+
+    This is what makes the serverless cost REAL instead of a midpoint guess: a
+    cluster that idles near its min most of the day costs far less than
+    (min+max)/2 implies. Fails soft so a missing metric/permission degrades to
+    the midpoint fallback rather than raising."""
+    try:
+        cw = client_for_cluster(cluster_id, "cloudwatch")
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=_ACU_LOOKBACK_DAYS)
+        resp = cw.get_metric_statistics(
+            Namespace="AWS/RDS",
+            MetricName="ServerlessDatabaseCapacity",
+            Dimensions=[{"Name": "DBClusterIdentifier", "Value": cluster_id}],
+            StartTime=start,
+            EndTime=end,
+            Period=3600,
+            Statistics=["Average"],
+        )
+        pts = [d["Average"] for d in resp.get("Datapoints", []) if d.get("Average") is not None]
+        if not pts:
+            return None, "CloudWatch ServerlessDatabaseCapacity 데이터포인트 없음"
+        return sum(pts) / len(pts), f"CloudWatch {_ACU_LOOKBACK_DAYS}일 평균 ACU ({len(pts)} 포인트)"
+    except Exception as e:  # pragma: no cover - defensive soft-fail
+        print(f"[scaling_simulation] observed ACU lookup failed for {cluster_id}: {e}")
+        return None, f"관측 ACU 조회 실패({type(e).__name__})"
 
 
 def _change_pct(current, proposed):
@@ -130,20 +170,41 @@ def _serverless_result(
 
     price = price_per_acu_hour(region, engine, io_optimized)
 
-    def _monthly(min_acu, max_acu):
-        if price is None or min_acu is None or max_acu is None:
+    # OBSERVED average ACU (CloudWatch) is the real billing driver; the midpoint
+    # is only a fallback when we have no telemetry. The observed draw is clamped
+    # into each range to model "the same workload under these new bounds".
+    observed_acu, acu_basis_note = _observed_avg_acu(cluster_id)
+
+    def _effective_acu(min_acu, max_acu):
+        if observed_acu is not None:
+            if min_acu is None or max_acu is None:
+                return observed_acu
+            return max(min_acu, min(observed_acu, max_acu))  # clamp into [min,max]
+        if min_acu is None or max_acu is None:
             return None
-        midpoint = (min_acu + max_acu) / 2
-        return round(midpoint * price * HOURS_PER_MONTH * member_count, 2)
+        return (min_acu + max_acu) / 2  # midpoint fallback
+
+    def _monthly(min_acu, max_acu):
+        acu = _effective_acu(min_acu, max_acu)
+        if price is None or acu is None:
+            return None
+        return round(acu * price * HOURS_PER_MONTH * member_count, 2)
 
     current_cost = _monthly(current_min, current_max)
     proposed_cost = _monthly(proposed_min, proposed_max)
     delta = round(proposed_cost - current_cost, 2) if (current_cost is not None and proposed_cost is not None) else None
 
     price_available = price is not None
+    acu_basis = "observed" if observed_acu is not None else "midpoint"
+    confidence = "high" if (price_available and observed_acu is not None) else "low"
+    basis_phrase = (
+        f"관측 평균 {round(observed_acu, 2)} ACU 기준({acu_basis_note})"
+        if observed_acu is not None
+        else f"중간값 ACU 기준 추정({acu_basis_note} — 관측 ACU 없음)"
+    )
     note = (
-        f"중간값 ACU 기준 추정({HOURS_PER_MONTH}h, {member_count}개 인스턴스). "
-        "리더는 라이터와 동일한 ACU 범위로 근사했습니다(API가 인스턴스별 설정을 노출하지 않음). "
+        f"{basis_phrase}, {HOURS_PER_MONTH}h × {member_count}개 인스턴스. "
+        "리더는 라이터와 동일한 ACU로 근사했습니다(API가 인스턴스별 설정을 노출하지 않음). "
         + (
             f"단가는 AWS Price List API 기준 ${price}/ACU-hr "
             f"(region={region}, IO-Optimized={io_optimized})입니다. "
@@ -160,6 +221,9 @@ def _serverless_result(
         "proposed": {"min_acu": proposed_min, "max_acu": proposed_max},
         "writers": writers,
         "readers": readers,
+        "observed_avg_acu": round(observed_acu, 2) if observed_acu is not None else None,
+        "acu_basis": acu_basis,
+        "confidence": confidence,
         "cost_impact": {
             "current_monthly_usd": current_cost,
             "proposed_monthly_usd": proposed_cost,
