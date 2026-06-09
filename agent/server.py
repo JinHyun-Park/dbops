@@ -247,7 +247,20 @@ async def invoke(payload, context):
         if gateway_client is not None:
             try:
                 stack.enter_context(gateway_client)
-                gw_tools = gateway_client.list_tools_sync()
+                # The Gateway paginates tools/list and list_tools_sync returns a
+                # SINGLE page (~30 tools). Follow the cursor so every target's
+                # tools load — otherwise whatever spills onto later pages is
+                # silently missing from the agent (we had 36 defined, 30 loaded).
+                gw_tools = []
+                page = gateway_client.list_tools_sync()
+                gw_tools.extend(page)
+                guard = 0
+                while getattr(page, "pagination_token", None) and guard < 20:
+                    page = gateway_client.list_tools_sync(
+                        pagination_token=page.pagination_token
+                    )
+                    gw_tools.extend(page)
+                    guard += 1
                 tools.extend(gw_tools)
                 log.info(f"Loaded {len(gw_tools)} tools from Gateway")
             except Exception as e:
