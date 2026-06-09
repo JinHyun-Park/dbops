@@ -18,7 +18,10 @@ SAMPLE_ENGINE = "aurora-postgresql"
 METRIC_PROFILES = {
     "cpu":            (40,   15,   5,    14,   88),
     "aas":            (0.6,  0.4,  0.15, 14,   4.2),
-    "connections":    (45,   20,   6,    None, None),
+    # Canonical total-connections metric (matches CloudWatch DatabaseConnections
+    # from cw_collector). Spikes to ~150 (75% of the seeded max_connections=200)
+    # during the synthetic 14:00 incident so connection-storm demos have signal.
+    "db_connections": (45,   20,   6,    14,   150),
     "conn_active":    (12,   6,    2,    14,   45),
     "conn_idle":      (28,   8,    4,    None, None),
     "read_iops":      (350,  200,  80,   9,    2400),
