@@ -935,7 +935,13 @@ def _multi_cluster_overview(query):
         "  SELECT cluster_id, metric_type, "
         "    (array_agg(value ORDER BY ts DESC))[1] AS latest_value "
         "  FROM metric_snapshots "
-        "  WHERE ts > NOW() - INTERVAL '15 minutes' "
+        # Bound BOTH ends of the window. Without the `ts <= NOW()` upper bound a
+        # future-dated snapshot (clock skew, back-test injection) would sort
+        # first under `ORDER BY ts DESC` and masquerade as the "latest" value —
+        # which made Fleet flip a cluster CRITICAL while the Dashboard health
+        # score (computed via _batch_timeseries, already bounded at NOW()) still
+        # read HEALTHY. Same now-boundary on both = the two surfaces agree.
+        "  WHERE ts > NOW() - INTERVAL '15 minutes' AND ts <= NOW() "
         "  AND metric_type IN ('cpu', 'aas', 'conn_active', 'conn_idle', 'storage_bytes', 'deadlocks') "
         "  GROUP BY cluster_id, metric_type"
         "), "
@@ -954,7 +960,7 @@ def _multi_cluster_overview(query):
         "lock_count AS ("
         "  SELECT cluster_id, COUNT(*) AS blocking_count "
         "  FROM blocking_locks "
-        "  WHERE snapshot_time > NOW() - INTERVAL '15 minutes' "
+        "  WHERE snapshot_time > NOW() - INTERVAL '15 minutes' AND snapshot_time <= NOW() "
         "  GROUP BY cluster_id"
         ") "
         "SELECT "
