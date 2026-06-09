@@ -391,7 +391,32 @@ export function ChatPanel() {
   // down on demand when the user clicks them (avoids fanning out N detail
   // fetches). Local-only: pushed up so they're durable across devices.
   useEffect(() => {
-    const stored = loadConversations();
+    let stored = loadConversations();
+    // RCA handoff: arriving from the RCA side panel's "전체 대화로 이어가기".
+    // Materialize the question + the already-streamed analysis as a NEW
+    // conversation HERE — before the DDB merge below — so it's part of `stored`
+    // and survives the merge (a separate effect would race and get clobbered),
+    // and as the newest entry it auto-activates.
+    const handoff = takeRcaHandoff();
+    if (handoff) {
+      const conv: Conversation = {
+        id: `dbops-session-${crypto.randomUUID()}`,
+        title: `RCA · ${handoff.cluster_id}`.slice(0, 50),
+        cluster_id: handoff.cluster_id,
+        updated_at: Date.now(),
+        messages: [
+          { id: crypto.randomUUID(), role: "user", content: handoff.prompt },
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: handoff.analysis,
+            toolCalls: (handoff.tools || []) as Message["toolCalls"],
+          },
+        ],
+      };
+      stored = [conv, ...stored];
+      saveConversations(stored);
+    }
     if (stored.length > 0) {
       setConversations(stored);
       setActiveId(stored[0].id);
@@ -562,32 +587,6 @@ export function ChatPanel() {
       cancelled = true;
     };
   }, [activeId, conversations]);
-
-  // RCA handoff: arriving from the dashboard/timeline RCA panel's "전체 대화로
-  // 이어가기" — materialize the question + already-streamed analysis as a NEW
-  // conversation so nothing is lost and the DBA can keep asking.
-  useEffect(() => {
-    const h = takeRcaHandoff();
-    if (!h) return;
-    const conv: Conversation = {
-      id: `dbops-session-${crypto.randomUUID()}`,
-      title: `RCA · ${h.cluster_id}`.slice(0, 50),
-      cluster_id: h.cluster_id,
-      updated_at: Date.now(),
-      messages: [
-        { id: crypto.randomUUID(), role: "user", content: h.prompt },
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: h.analysis,
-          toolCalls: (h.tools || []) as Message["toolCalls"],
-        },
-      ],
-    };
-    persist((prev) => [conv, ...prev]);
-    setActiveId(conv.id);
-    if (h.cluster_id) setClusterId(h.cluster_id);
-  }, [persist]);
 
   const startNewConversation = useCallback(() => {
     const conv = newConversation(clusterId);
