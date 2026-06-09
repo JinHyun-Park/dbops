@@ -1,5 +1,7 @@
 "use client";
 
+import { prettyToolName } from "@/lib/tool-name";
+
 interface ToolStatusProps {
   name: string;
   status: "running" | "done";
@@ -13,7 +15,7 @@ export function ToolStatus({ name, status }: ToolStatusProps) {
       ) : (
         <span className="inline-block w-2 h-2 rounded-full bg-emerald-400" />
       )}
-      <span>{name}</span>
+      <span title={name}>{prettyToolName(name)}</span>
     </div>
   );
 }

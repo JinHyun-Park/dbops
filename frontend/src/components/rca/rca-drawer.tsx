@@ -15,6 +15,7 @@ import { X, Sparkles, RefreshCw } from "lucide-react";
 import { streamChat } from "@/lib/agentcore-sse";
 import { RCA_PROMPT } from "@/lib/rca-link";
 import { stashRcaHandoff } from "@/lib/rca-handoff";
+import { prettyToolName } from "@/lib/tool-name";
 
 // RCA runs IN PLACE: a right-side drawer that streams the agent's root-cause
 // analysis without leaving the page and — crucially — without writing into the
@@ -155,7 +156,7 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
                         : "border-amber-500/40 text-amber-300/80"
                     }`}
                   >
-                    {t.name} {t.status === "done" ? "✓" : "…"}
+                    {prettyToolName(t.name)} {t.status === "done" ? "✓" : "…"}
                   </span>
                 ))}
               </div>
