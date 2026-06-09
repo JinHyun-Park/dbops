@@ -1,20 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import {
-  fetchClusters,
-  fetchWorkloadDiff,
-  type WorkloadDiffResponse,
-} from "@/lib/api-client";
+import { fetchWorkloadDiff, type WorkloadDiffResponse } from "@/lib/api-client";
 import {
   PageBody,
   PageHeader,
   EmptyState,
 } from "@/components/design-system/page-shell";
-
-interface ClusterRow {
-  cluster_id: string;
-}
+import { useSelectedCluster } from "@/lib/use-selected-cluster";
+import { ClusterPicker } from "@/components/design-system/cluster-picker";
 
 // Default to "24h ago → now" — the most common "what changed since
 // yesterday's deploy" framing. datetime-local needs no timezone suffix.
@@ -26,8 +20,8 @@ function isoLocal(d: Date): string {
 }
 
 export default function WorkloadDiffPage() {
-  const [clusters, setClusters] = useState<ClusterRow[]>([]);
-  const [clusterId, setClusterId] = useState("");
+  // Global cluster selection (shared store) — stays in sync with ⌘K / header.
+  const { selected: clusterId } = useSelectedCluster();
   const now = new Date();
   const dayAgo = new Date(now.getTime() - 24 * 3600 * 1000);
   const [before, setBefore] = useState(isoLocal(dayAgo));
@@ -37,25 +31,15 @@ export default function WorkloadDiffPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Timeline deep-link: ?center=ISO sets `before` to that event time (the
+  // canonical "what changed since this event"). Cluster itself comes from the
+  // shared store (?cluster= is honored there too).
   useEffect(() => {
-    fetchClusters()
-      .then((rows: ClusterRow[]) => {
-        setClusters(rows);
-        if (rows.length > 0) {
-          const sp = new URLSearchParams(window.location.search);
-          const wanted = sp.get("cluster");
-          const match = rows.find((c) => c.cluster_id === wanted);
-          setClusterId(match ? wanted! : rows[0].cluster_id);
-          // Timeline deep-link: ?cluster=X&center=ISO sets `before` to
-          // center and `after` to now (the canonical "since this event").
-          const center = sp.get("center");
-          if (center) {
-            const c = new Date(center);
-            if (!Number.isNaN(c.getTime())) setBefore(isoLocal(c));
-          }
-        }
-      })
-      .catch((e) => setError(e.message));
+    const center = new URLSearchParams(window.location.search).get("center");
+    if (center) {
+      const c = new Date(center);
+      if (!Number.isNaN(c.getTime())) setBefore(isoLocal(c));
+    }
   }, []);
 
   const run = useCallback(() => {
@@ -77,19 +61,7 @@ export default function WorkloadDiffPage() {
         eyebrow="incident"
         title="Workload diff"
         description="두 시점의 쿼리 워크로드(pg_stat_statements)를 비교 — 배포 이후 새로 등장한 쿼리, 갑자기 느려진 쿼리, 사라진 쿼리를 자동 검출. '배포하고 느려졌다'는 신고에 30초 안에 용의자를 좁힙니다."
-        actions={
-          <select
-            value={clusterId}
-            onChange={(e) => setClusterId(e.target.value)}
-            className="bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-3 py-1.5 focus:outline-none focus:border-amber-500/60"
-          >
-            {clusters.map((c) => (
-              <option key={c.cluster_id} value={c.cluster_id}>
-                {c.cluster_id}
-              </option>
-            ))}
-          </select>
-        }
+        actions={<ClusterPicker selected={clusterId} />}
       />
 
       {/* Controls */}

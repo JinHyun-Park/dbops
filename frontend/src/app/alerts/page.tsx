@@ -21,6 +21,7 @@ import {
   EmptyState,
 } from "@/components/design-system/page-shell";
 import { isAdmin } from "@/lib/auth";
+import { getSelectedCluster } from "@/lib/selected-cluster";
 
 interface Rule {
   id: number;
@@ -352,8 +353,17 @@ export default function AlertsPage() {
     fetchClusters()
       .then((cs) => {
         setClusters(cs);
-        if (cs.length > 0)
-          setNewRule((r) => ({ ...r, cluster_id: cs[0].cluster_id }));
+        if (cs.length > 0) {
+          // Prefer the globally selected cluster (⌘K / header / other pages) so
+          // a new rule defaults to the cluster the DBA is focused on; fall back
+          // to the first cluster when the selection isn't a real cluster.
+          const sel = getSelectedCluster();
+          const pick =
+            sel && cs.some((c: { cluster_id: string }) => c.cluster_id === sel)
+              ? sel
+              : cs[0].cluster_id;
+          setNewRule((r) => ({ ...r, cluster_id: pick }));
+        }
       })
       .catch((e) => setErr(`Clusters: ${e.message}`));
     reload();

@@ -11,6 +11,7 @@ import {
   PageHeader,
   EmptyState,
 } from "@/components/design-system/page-shell";
+import { getSelectedCluster } from "@/lib/selected-cluster";
 
 const STATUS_STYLE: Record<string, { label: string; chip: string }> = {
   pending: {
@@ -49,8 +50,12 @@ export default function ActivityPage() {
   const [clusters, setClusters] = useState<ClusterRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Filters
-  const [clusterFilter, setClusterFilter] = useState<string>("");
+  // Filters — seed the cluster filter from the global selection (⌘K / header /
+  // other pages) so a focused DBA lands on "their" cluster's activity; falls
+  // back to "" = all clusters when nothing is selected yet.
+  const [clusterFilter, setClusterFilter] = useState<string>(
+    () => getSelectedCluster() ?? "",
+  );
   const [actorFilter, setActorFilter] = useState<string>("");
   const [actionFilter, setActionFilter] = useState<string>("");
 

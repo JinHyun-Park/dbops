@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  fetchClusters,
   fetchTimeline,
   type TimelineItem,
   type TimelineResponse,
@@ -12,11 +11,8 @@ import {
   PageHeader,
   EmptyState,
 } from "@/components/design-system/page-shell";
-
-interface ClusterRow {
-  cluster_id: string;
-  engine?: string;
-}
+import { useSelectedCluster } from "@/lib/use-selected-cluster";
+import { ClusterPicker } from "@/components/design-system/cluster-picker";
 
 const WINDOWS: { label: string; hours: number }[] = [
   { label: "1h", hours: 1 },
@@ -83,28 +79,14 @@ function relTime(iso: string): string {
 }
 
 export default function TimelinePage() {
-  const [clusters, setClusters] = useState<ClusterRow[]>([]);
-  const [clusterId, setClusterId] = useState<string>("");
+  // Global cluster selection (shared store) — stays in sync with ⌘K / header.
+  const { selected: clusterId } = useSelectedCluster();
   const [hours, setHours] = useState<number>(24);
   const [data, setData] = useState<TimelineResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Empty Set = show all. A category in the set = filtered IN.
   const [filterIn, setFilterIn] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    fetchClusters()
-      .then((rows: ClusterRow[]) => {
-        setClusters(rows);
-        if (rows.length > 0) {
-          const sp = new URLSearchParams(window.location.search);
-          const wanted = sp.get("cluster");
-          const match = rows.find((c) => c.cluster_id === wanted);
-          setClusterId(match ? wanted! : rows[0].cluster_id);
-        }
-      })
-      .catch((e) => setError(e.message));
-  }, []);
 
   const load = useCallback(() => {
     if (!clusterId) return;
@@ -138,17 +120,7 @@ export default function TimelinePage() {
         description="단일 cluster의 모든 운영 신호를 시간축 한 줄에. 알림 발화, RDS 이벤트, 스키마 변경, 실행된 쓰기 작업이 모두 같은 흐름에 보입니다. 사고 시점 컨텍스트를 한 화면에 잡아두는 용도."
         actions={
           <div className="flex items-center gap-2">
-            <select
-              value={clusterId}
-              onChange={(e) => setClusterId(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-3 py-1.5 focus:outline-none focus:border-amber-500/60"
-            >
-              {clusters.map((c) => (
-                <option key={c.cluster_id} value={c.cluster_id}>
-                  {c.cluster_id}
-                </option>
-              ))}
-            </select>
+            <ClusterPicker selected={clusterId} />
             <div className="flex border border-zinc-800">
               {WINDOWS.map((w) => (
                 <button

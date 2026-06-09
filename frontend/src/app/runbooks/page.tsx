@@ -18,6 +18,7 @@ import {
   EmptyState,
   Section,
 } from "@/components/design-system/page-shell";
+import { getSelectedCluster } from "@/lib/selected-cluster";
 
 interface ClusterLite {
   cluster_id: string;
@@ -46,7 +47,11 @@ const DEFAULT_DRAFT: RunbookDraft = {
 export default function RunbooksPage() {
   const router = useRouter();
   const [clusters, setClusters] = useState<ClusterLite[]>([]);
-  const [filterCluster, setFilterCluster] = useState<string>("");
+  // Seed from the global cluster selection so runbooks open scoped to the
+  // cluster the DBA is focused on; "" = all clusters when none is selected.
+  const [filterCluster, setFilterCluster] = useState<string>(
+    () => getSelectedCluster() ?? "",
+  );
   const [filterTag, setFilterTag] = useState<string>("");
   const [items, setItems] = useState<RunbookListItem[]>([]);
   const [loading, setLoading] = useState(true);
