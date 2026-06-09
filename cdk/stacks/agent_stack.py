@@ -266,6 +266,17 @@ class AgentStack(cdk.Stack):
                 "AGENT_MODEL_ID": Settings.AGENT_MODEL_ID,
                 "AWS_REGION_OVERRIDE": Settings.REGION,
                 "GATEWAY_MCP_URL": gateway_mcp_url,
+                # Outbound auth to the Gateway (OAuth2 client-credentials). The
+                # default Cognito M2M client the Gateway construct created for us
+                # — WITHOUT these the agent's get_gateway_token() returns None,
+                # make_mcp_client() returns None, and ZERO of the 42 MCP tools
+                # load: the agent could only reach the AWS doc tools, so every DB
+                # capability (diagnose_root_cause, execute_sql, query_metrics, …)
+                # failed with "tool not found in registry".
+                "GATEWAY_TOKEN_URL": self.gateway.token_endpoint_url,
+                "GATEWAY_CLIENT_ID": self.gateway.user_pool_client.user_pool_client_id,
+                "GATEWAY_CLIENT_SECRET": self.gateway.user_pool_client.user_pool_client_secret.unsafe_unwrap(),
+                "GATEWAY_SCOPE": cdk.Fn.join(" ", self.gateway.oauth_scopes),
                 # AWS MCP Server (managed, SigV4) — official AWS/Aurora docs.
                 # The runtime signs requests with its own IAM role; doc reads
                 # need no extra IAM action. getattr defaults keep synth working
