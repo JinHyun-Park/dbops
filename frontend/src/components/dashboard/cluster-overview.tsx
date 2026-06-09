@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { StatusBadge } from "@/components/design-system/status-badge";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { fetchMultiClusterOverview } from "@/lib/api-client";
 import { eolFor } from "@/lib/engine";
-import { triage, type Level, type TriageInput } from "@/lib/cluster-triage";
+import {
+  triage,
+  LEVEL_RANK,
+  type Level,
+  type TriageInput,
+} from "@/lib/cluster-triage";
 
 interface ClusterInfo {
   cluster_id: string;
@@ -19,31 +24,33 @@ interface ClusterOverviewProps {
   onSelect: (id: string) => void;
 }
 
-// The card pill reflects OPERATIONAL severity (same triage as the Fleet page),
-// not just the RDS lifecycle status — a cluster can be RDS-"available" yet be
-// pegged at 95% CPU with deadlocks, which must not read as "healthy".
-function levelToBadge(level: Level): "healthy" | "warning" | "critical" {
-  return level === "critical"
-    ? "critical"
-    : level === "warning"
-      ? "warning"
-      : "healthy";
+interface OverviewRow extends TriageInput {
+  cluster_id: string;
 }
+
+// Hard cap on chips so the dashboard header stays compact at fleet scale — the
+// dashboard is a single-cluster deep dive, not the place to render 200 cards.
+// The worst clusters surface first; the rest live one click away in Fleet.
+const CHIP_CAP = 12;
+
+const DOT: Record<Level, string> = {
+  critical: "bg-rose-500",
+  warning: "bg-amber-400",
+  ok: "bg-emerald-500",
+};
 
 export function ClusterOverview({
   clusters,
   selectedId,
   onSelect,
 }: ClusterOverviewProps) {
-  // cluster_id -> live triage signals from the multi-cluster overview endpoint
-  // (the SAME source the Fleet page reads, so the two surfaces never disagree).
   const [metrics, setMetrics] = useState<Map<string, TriageInput>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
     const load = () =>
       fetchMultiClusterOverview()
-        .then((r: { clusters?: (TriageInput & { cluster_id: string })[] }) => {
+        .then((r: { clusters?: OverviewRow[] }) => {
           if (cancelled) return;
           const m = new Map<string, TriageInput>();
           for (const row of r.clusters || []) m.set(row.cluster_id, row);
@@ -58,49 +65,125 @@ export function ClusterOverview({
     };
   }, []);
 
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {clusters.map((c) => {
-        const eol = eolFor(c.engine, c.engine_version);
-        // Prefer live metrics; fall back to RDS lifecycle status alone until the
-        // overview lands so a card never falsely flips to "healthy" early.
+  // Decorate + severity-sort (worst first), then heat desc, then name.
+  const decorated = useMemo(() => {
+    return clusters
+      .map((c) => {
         const input: TriageInput = metrics.get(c.cluster_id) ?? {
           status: c.status,
         };
-        const t = triage(input, eol);
-        const lifecycle = c.status || "";
-        const tip =
-          (t.reasons.length ? t.reasons.join(" · ") : "all signals nominal") +
-          (lifecycle ? ` — RDS: ${lifecycle}` : "");
-        return (
-          <button
-            key={c.cluster_id}
-            onClick={() => onSelect(c.cluster_id)}
-            title={tip}
-            className={`text-left bg-zinc-800 border p-5 rounded-lg transition-all hover:border-emerald-500/60 hover:-translate-y-0.5 ${
-              selectedId === c.cluster_id
-                ? "border-emerald-500/70 shadow-[0_0_0_1px_rgba(36,244,182,0.18),0_16px_40px_rgba(0,0,0,0.22)]"
-                : "border-zinc-800"
-            }`}
+        const t = triage(input, eolFor(c.engine, c.engine_version));
+        return { c, level: t.level, heat: t.heat, reasons: t.reasons };
+      })
+      .sort((a, b) => {
+        const r = LEVEL_RANK[b.level] - LEVEL_RANK[a.level];
+        if (r !== 0) return r;
+        if (b.heat !== a.heat) return b.heat - a.heat;
+        return a.c.cluster_id.localeCompare(b.c.cluster_id);
+      });
+  }, [clusters, metrics]);
+
+  const counts = useMemo(() => {
+    let critical = 0,
+      warning = 0;
+    for (const d of decorated) {
+      if (d.level === "critical") critical++;
+      else if (d.level === "warning") warning++;
+    }
+    return { total: decorated.length, critical, warning };
+  }, [decorated]);
+
+  // Always keep the selected cluster visible even if it falls past the cap.
+  const capped = useMemo(() => {
+    const head = decorated.slice(0, CHIP_CAP);
+    if (selectedId && !head.some((d) => d.c.cluster_id === selectedId)) {
+      const sel = decorated.find((d) => d.c.cluster_id === selectedId);
+      if (sel) head[head.length - 1] = sel;
+    }
+    return head;
+  }, [decorated, selectedId]);
+
+  const overflow = decorated.length - capped.length;
+
+  if (clusters.length === 0) {
+    return (
+      <div className="text-sm text-zinc-500">
+        등록된 클러스터가 없습니다.{" "}
+        <Link href="/clusters" className="text-emerald-300 hover:underline">
+          클러스터 등록 →
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border border-zinc-800 bg-zinc-900/40 rounded-lg p-3">
+      {/* Summary band — counts double as quick filters into Fleet. */}
+      <div className="flex flex-wrap items-center gap-2 mb-2.5 text-[11px]">
+        <span className="text-zinc-500 uppercase tracking-wider">
+          {counts.total} clusters
+        </span>
+        {counts.critical > 0 && (
+          <Link
+            href="/fleet?level=critical"
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:border-rose-500/70 transition-colors"
           >
-            <div className="flex items-center justify-between mb-2">
-              <span className="font-medium text-zinc-100">{c.cluster_id}</span>
-              <StatusBadge status={levelToBadge(t.level)} />
-            </div>
-            <div className="text-sm text-zinc-400">
-              {c.engine} {c.engine_version || ""}
-            </div>
-            {/* RDS lifecycle status stays visible when it's anything other than
-                the steady "available" so an in-flight modify/backup isn't hidden
-                behind the operational pill. */}
-            {lifecycle && lifecycle !== "available" && (
-              <div className="text-[11px] text-amber-300/80 mt-1 font-mono">
-                RDS: {lifecycle}
-              </div>
-            )}
-          </button>
-        );
-      })}
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+            {counts.critical} critical
+          </Link>
+        )}
+        {counts.warning > 0 && (
+          <Link
+            href="/fleet?level=warning"
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:border-amber-500/70 transition-colors"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            {counts.warning} warning
+          </Link>
+        )}
+        <Link
+          href="/fleet"
+          className="ml-auto text-zinc-500 hover:text-emerald-300 transition-colors"
+        >
+          Fleet 전체 →
+        </Link>
+      </div>
+
+      {/* Severity-sorted cluster chips — quick switch + peripheral awareness. */}
+      <div className="flex flex-wrap gap-1.5">
+        {capped.map((d) => {
+          const active = d.c.cluster_id === selectedId;
+          return (
+            <button
+              key={d.c.cluster_id}
+              onClick={() => onSelect(d.c.cluster_id)}
+              title={
+                d.reasons.length
+                  ? `${d.c.cluster_id} — ${d.reasons.join(" · ")}`
+                  : d.c.cluster_id
+              }
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[12px] font-mono transition-colors max-w-[260px] ${
+                active
+                  ? "border-emerald-500/70 bg-emerald-500/10 text-zinc-100"
+                  : "border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:border-zinc-600"
+              }`}
+            >
+              <span
+                className={`flex-shrink-0 w-2 h-2 rounded-full ${DOT[d.level]}`}
+              />
+              <span className="truncate">{d.c.cluster_id}</span>
+            </button>
+          );
+        })}
+        {overflow > 0 && (
+          <Link
+            href="/fleet"
+            className="flex items-center px-2.5 py-1 rounded-md border border-zinc-800 bg-zinc-900/40 text-[12px] text-zinc-500 hover:text-emerald-300 hover:border-emerald-500/40 transition-colors"
+          >
+            +{overflow}개 더 → Fleet
+          </Link>
+        )}
+      </div>
     </div>
   );
 }

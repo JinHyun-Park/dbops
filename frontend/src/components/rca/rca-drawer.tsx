@@ -8,12 +8,13 @@ import {
   useRef,
   useState,
 } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { X, Sparkles, RefreshCw } from "lucide-react";
 import { streamChat } from "@/lib/agentcore-sse";
-import { RCA_PROMPT, rcaChatHref } from "@/lib/rca-link";
+import { RCA_PROMPT } from "@/lib/rca-link";
+import { stashRcaHandoff } from "@/lib/rca-handoff";
 
 // RCA runs IN PLACE: a right-side drawer that streams the agent's root-cause
 // analysis without leaving the page and — crucially — without writing into the
@@ -45,6 +46,7 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const runSeq = useRef(0);
+  const router = useRouter();
 
   const run = useCallback((clusterId: string) => {
     abortRef.current?.abort();
@@ -194,13 +196,28 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
                 <RefreshCw size={12} />
                 다시 실행
               </button>
-              <Link
-                href={rcaChatHref(cluster)}
-                onClick={close}
-                className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-emerald-500/50 hover:text-emerald-200 transition-colors"
+              <button
+                onClick={() => {
+                  if (!cluster) return;
+                  // Carry the question AND the streamed analysis into a fresh
+                  // chat conversation — so it's preserved + continuable, not
+                  // discarded into whatever thread was last open.
+                  abortRef.current?.abort();
+                  runSeq.current++;
+                  stashRcaHandoff({
+                    cluster_id: cluster,
+                    prompt: RCA_PROMPT,
+                    analysis: text,
+                    tools,
+                  });
+                  setCluster(null);
+                  router.push("/chat");
+                }}
+                disabled={!text}
+                className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-emerald-500/50 hover:text-emerald-200 disabled:opacity-50 transition-colors"
               >
                 전체 대화로 이어가기 →
-              </Link>
+              </button>
             </div>
           </div>
         </div>

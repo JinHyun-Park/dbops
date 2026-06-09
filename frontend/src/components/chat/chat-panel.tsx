@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { MessageList, type Message } from "./message-list";
 import { streamChat } from "@/lib/agentcore-sse";
+import { takeRcaHandoff } from "@/lib/rca-handoff";
 import {
   fetchClusters,
   fetchModels,
@@ -561,6 +562,32 @@ export function ChatPanel() {
       cancelled = true;
     };
   }, [activeId, conversations]);
+
+  // RCA handoff: arriving from the dashboard/timeline RCA panel's "전체 대화로
+  // 이어가기" — materialize the question + already-streamed analysis as a NEW
+  // conversation so nothing is lost and the DBA can keep asking.
+  useEffect(() => {
+    const h = takeRcaHandoff();
+    if (!h) return;
+    const conv: Conversation = {
+      id: `dbops-session-${crypto.randomUUID()}`,
+      title: `RCA · ${h.cluster_id}`.slice(0, 50),
+      cluster_id: h.cluster_id,
+      updated_at: Date.now(),
+      messages: [
+        { id: crypto.randomUUID(), role: "user", content: h.prompt },
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: h.analysis,
+          toolCalls: (h.tools || []) as Message["toolCalls"],
+        },
+      ],
+    };
+    persist((prev) => [conv, ...prev]);
+    setActiveId(conv.id);
+    if (h.cluster_id) setClusterId(h.cluster_id);
+  }, [persist]);
 
   const startNewConversation = useCallback(() => {
     const conv = newConversation(clusterId);

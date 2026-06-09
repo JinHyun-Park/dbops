@@ -35,6 +35,20 @@ export function setSelectedCluster(id: string): void {
   } catch {
     /* ignore quota/private-mode errors — selection still works in-session */
   }
+  // Keep the URL ?cluster= in sync with the explicit choice. getSelectedCluster()
+  // reads the URL FIRST, so without this a stale ?cluster= (present on every
+  // cluster-scoped page) shadows the new selection — the switch fires its event
+  // but every listener re-reads the OLD cluster from the URL and ignores it.
+  // This was why the dropdown appeared to "not change" the page.
+  try {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("cluster") !== id) {
+      url.searchParams.set("cluster", id);
+      window.history.replaceState(null, "", url.toString());
+    }
+  } catch {
+    /* URL update is best-effort; the event + localStorage still drive sync */
+  }
   window.dispatchEvent(new CustomEvent(CLUSTER_CHANGE_EVENT, { detail: id }));
 }
 
