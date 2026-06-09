@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { getSelectedCluster, onClusterChange } from "@/lib/selected-cluster";
+import { ClusterDropdown } from "@/components/design-system/cluster-dropdown";
 import {
   Activity,
   ArrowLeftRight,
@@ -30,6 +29,7 @@ import {
 import { AuthGuard } from "@/components/auth-guard";
 import { AuthButton } from "@/components/auth-button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { RcaProvider } from "@/components/rca/rca-drawer";
 
 type IconType = React.ComponentType<{
   size?: number | string;
@@ -327,43 +327,6 @@ function MobileTabBar({ pathname }: { pathname: string }) {
   );
 }
 
-// Global current-cluster indicator + switcher trigger. Shows which cluster the
-// cluster-scoped pages are pinned to (from the URL ?cluster= or the last choice)
-// and opens the ⌘K palette to switch — replacing the per-page flat dropdowns.
-function CurrentClusterChip({ pathname }: { pathname: string }) {
-  const [cluster, setCluster] = useState<string | null>(null);
-  // Re-read on navigation (the URL ?cluster= may have changed via a link).
-  useEffect(() => setCluster(getSelectedCluster()), [pathname]);
-  // Re-read on explicit switches (palette) + back/forward.
-  useEffect(() => onClusterChange(() => setCluster(getSelectedCluster())), []);
-
-  const short =
-    cluster && cluster.length > 26 ? `${cluster.slice(0, 24)}…` : cluster;
-  return (
-    <button
-      onClick={openCommandPalette}
-      title={cluster ? `${cluster} — 클러스터 전환 (⌘K)` : "클러스터 선택 (⌘K)"}
-      className="flex items-center gap-2 px-2.5 py-1 rounded-md border border-zinc-800 bg-zinc-900/50 hover:border-emerald-500/40 transition-colors max-w-[260px]"
-    >
-      <Database
-        size={13}
-        strokeWidth={2}
-        className="flex-shrink-0 text-emerald-300/70"
-      />
-      {cluster ? (
-        <span className="text-[12px] font-mono text-zinc-200 truncate">
-          {short}
-        </span>
-      ) : (
-        <span className="text-[12px] text-zinc-500">클러스터 선택</span>
-      )}
-      <kbd className="hidden sm:inline ml-1 text-[10px] font-sans text-zinc-600 border border-zinc-700 rounded px-1 py-px bg-zinc-950/70">
-        ⌘K
-      </kbd>
-    </button>
-  );
-}
-
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "/";
 
@@ -383,84 +346,90 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthGuard>
-      <div className="flex h-screen bg-zinc-950 text-zinc-100">
-        <MobileTabBar pathname={pathname} />
-        <aside className="hidden md:flex w-60 flex-col border-r border-zinc-800 bg-zinc-950/95 backdrop-blur-xl">
-          <Link
-            href="/"
-            className="px-5 py-4 hover:bg-zinc-900/50 transition-colors flex items-center gap-2.5"
-          >
-            <span className="relative flex h-7 w-7 items-center justify-center rounded-md border border-emerald-300/30 bg-emerald-300/10 shadow-[0_0_24px_rgba(36,244,182,0.16)]">
-              <span className="h-2.5 w-2.5 rounded-[2px] bg-emerald-300 rotate-45" />
-            </span>
-            <span className="text-lg font-semibold tracking-tight text-zinc-100">
-              DBOps
-            </span>
-          </Link>
-
-          {/* Search trigger — makes the (previously keyboard-only) command
-              palette discoverable. Shares the open path with ⌘K. */}
-          <div className="px-3 pb-3">
-            <button
-              onClick={openCommandPalette}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:text-zinc-300 hover:border-emerald-500/40 transition-colors"
+      <RcaProvider>
+        <div className="flex h-screen bg-zinc-950 text-zinc-100">
+          <MobileTabBar pathname={pathname} />
+          <aside className="hidden md:flex w-60 flex-col border-r border-zinc-800 bg-zinc-950/95 backdrop-blur-xl">
+            <Link
+              href="/"
+              className="px-5 py-4 hover:bg-zinc-900/50 transition-colors flex items-center gap-2.5"
             >
-              <Search size={14} strokeWidth={2} className="flex-shrink-0" />
-              <span className="text-[13px]">Search</span>
-              <kbd className="ml-auto text-[10px] font-sans text-zinc-600 border border-zinc-700 rounded px-1 py-px bg-zinc-950/70">
-                ⌘K
-              </kbd>
-            </button>
-          </div>
+              <span className="relative flex h-7 w-7 items-center justify-center rounded-md border border-emerald-300/30 bg-emerald-300/10 shadow-[0_0_24px_rgba(36,244,182,0.16)]">
+                <span className="h-2.5 w-2.5 rounded-[2px] bg-emerald-300 rotate-45" />
+              </span>
+              <span className="text-lg font-semibold tracking-tight text-zinc-100">
+                DBOps
+              </span>
+            </Link>
 
-          <nav className="flex-1 overflow-y-auto px-3 pb-4 space-y-5">
-            {NAV.map((group) => (
-              <div key={group.label}>
-                <div className="px-3 mb-1 text-[10px] tracking-[0.16em] text-zinc-600 font-semibold uppercase">
-                  {group.label}
-                </div>
-                <div className="space-y-0.5">
-                  {group.items.map((item) => {
-                    const active =
-                      pathname === item.href ||
-                      (item.href !== "/" &&
-                        pathname.startsWith(item.href + "/"));
-                    return (
-                      <SidebarItem
-                        key={item.href}
-                        item={item}
-                        active={active}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </nav>
-          <div className="border-t border-zinc-800 px-4 py-4 bg-zinc-900/30">
-            <AuthButton />
-          </div>
-        </aside>
-
-        <div className="flex-1 flex flex-col min-w-0">
-          <header
-            data-app-header
-            className="flex-shrink-0 border-b border-zinc-800 px-6 py-3 flex items-center justify-between bg-zinc-950/80 backdrop-blur-xl"
-          >
-            <Breadcrumbs pathname={pathname} />
-            <div className="flex items-center gap-3">
-              <CurrentClusterChip pathname={pathname} />
-              <ThemeToggle />
-              <div className="md:hidden">
-                <AuthButton />
-              </div>
+            {/* Search trigger — makes the (previously keyboard-only) command
+              palette discoverable. Shares the open path with ⌘K. */}
+            <div className="px-3 pb-3">
+              <button
+                onClick={openCommandPalette}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:text-zinc-300 hover:border-emerald-500/40 transition-colors"
+              >
+                <Search size={14} strokeWidth={2} className="flex-shrink-0" />
+                <span className="text-[13px]">Search</span>
+                <kbd className="ml-auto text-[10px] font-sans text-zinc-600 border border-zinc-700 rounded px-1 py-px bg-zinc-950/70">
+                  ⌘K
+                </kbd>
+              </button>
             </div>
-          </header>
-          <main className="flex-1 overflow-y-auto pb-14 md:pb-0">
-            {children}
-          </main>
+
+            <nav className="flex-1 overflow-y-auto px-3 pb-4 space-y-5">
+              {NAV.map((group) => (
+                <div key={group.label}>
+                  <div className="px-3 mb-1 text-[10px] tracking-[0.16em] text-zinc-600 font-semibold uppercase">
+                    {group.label}
+                  </div>
+                  <div className="space-y-0.5">
+                    {group.items.map((item) => {
+                      const active =
+                        pathname === item.href ||
+                        (item.href !== "/" &&
+                          pathname.startsWith(item.href + "/"));
+                      return (
+                        <SidebarItem
+                          key={item.href}
+                          item={item}
+                          active={active}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </nav>
+            <div className="border-t border-zinc-800 px-4 py-4 bg-zinc-900/30">
+              <AuthButton />
+            </div>
+          </aside>
+
+          <div className="flex-1 flex flex-col min-w-0">
+            <header
+              data-app-header
+              className="flex-shrink-0 border-b border-zinc-800 px-6 py-3 flex items-center justify-between bg-zinc-950/80 backdrop-blur-xl"
+            >
+              <Breadcrumbs pathname={pathname} />
+              <div className="flex items-center gap-3">
+                {/* Cluster switcher — a real dropdown, not the ⌘K palette. Hidden
+                  on /chat, which manages its own per-conversation cluster. */}
+                {!pathname.startsWith("/chat") && (
+                  <ClusterDropdown align="right" />
+                )}
+                <ThemeToggle />
+                <div className="md:hidden">
+                  <AuthButton />
+                </div>
+              </div>
+            </header>
+            <main className="flex-1 overflow-y-auto pb-14 md:pb-0">
+              {children}
+            </main>
+          </div>
         </div>
-      </div>
+      </RcaProvider>
     </AuthGuard>
   );
 }
