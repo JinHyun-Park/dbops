@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  fetchClusters,
   fetchSlo,
   type SloDayBucket,
   type SloResponse,
@@ -13,11 +12,8 @@ import {
   EmptyState,
 } from "@/components/design-system/page-shell";
 import { fmtDecimal, fmtExact } from "@/lib/format";
-
-interface ClusterLite {
-  cluster_id: string;
-  engine?: string;
-}
+import { useSelectedCluster } from "@/lib/use-selected-cluster";
+import { ClusterPicker } from "@/components/design-system/cluster-picker";
 
 // Per-cluster target config persisted to localStorage. We keep this client-
 // side for v1 — there is no team-level "official" SLO yet, just a personal
@@ -65,24 +61,11 @@ function saveConfig(clusterId: string, cfg: SloConfig) {
 }
 
 export default function SloPage() {
-  const [clusters, setClusters] = useState<ClusterLite[]>([]);
-  const [selectedCluster, setSelectedCluster] = useState<string>("");
+  const { selected: selectedCluster } = useSelectedCluster();
   const [config, setConfig] = useState<SloConfig>(DEFAULT_CONFIG);
   const [data, setData] = useState<SloResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchClusters()
-      .then((r: unknown) => {
-        const list: ClusterLite[] = Array.isArray(r)
-          ? (r as ClusterLite[])
-          : (r as { clusters?: ClusterLite[] })?.clusters ?? [];
-        setClusters(list);
-        if (list.length > 0) setSelectedCluster(list[0].cluster_id);
-      })
-      .catch(() => {});
-  }, []);
 
   // Reload persisted config whenever the cluster changes.
   useEffect(() => {
@@ -135,18 +118,7 @@ export default function SloPage() {
             <label className="text-[10px] uppercase tracking-wider text-zinc-500">
               Cluster
             </label>
-            <select
-              value={selectedCluster}
-              onChange={(e) => setSelectedCluster(e.target.value)}
-              className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono min-w-[280px]"
-            >
-              {clusters.length === 0 && <option value="">(로딩 중…)</option>}
-              {clusters.map((c) => (
-                <option key={c.cluster_id} value={c.cluster_id}>
-                  {c.cluster_id}
-                </option>
-              ))}
-            </select>
+            <ClusterPicker selected={selectedCluster} />
           </div>
         }
       />

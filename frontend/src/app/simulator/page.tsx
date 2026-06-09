@@ -2,7 +2,6 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
-  fetchClusters,
   fetchParameterCatalog,
   simulateDdlImpact,
   simulateParameterChange,
@@ -26,29 +25,12 @@ import {
   EmptyState,
 } from "@/components/design-system/page-shell";
 import { fmtDecimal, fmtExact, fmtBytes } from "@/lib/format";
-
-interface ClusterLite {
-  cluster_id: string;
-  engine?: string;
-  engine_version?: string;
-}
+import { useSelectedCluster } from "@/lib/use-selected-cluster";
+import { ClusterPicker } from "@/components/design-system/cluster-picker";
 
 export default function SimulatorPage() {
-  const [clusters, setClusters] = useState<ClusterLite[]>([]);
-  const [selectedCluster, setSelectedCluster] = useState<string>("");
-
-  useEffect(() => {
-    fetchClusters()
-      .then((r: unknown) => {
-        // `/api/clusters` returns the array directly in this codebase.
-        const list: ClusterLite[] = Array.isArray(r)
-          ? (r as ClusterLite[])
-          : (r as { clusters?: ClusterLite[] })?.clusters ?? [];
-        setClusters(list);
-        if (list.length > 0) setSelectedCluster(list[0].cluster_id);
-      })
-      .catch(() => {});
-  }, []);
+  // Global selection (shared store) — switching via ⌘K/header persists here.
+  const { clusters, selected: selectedCluster } = useSelectedCluster();
 
   const current = clusters.find((c) => c.cluster_id === selectedCluster);
 
@@ -63,18 +45,7 @@ export default function SimulatorPage() {
             <label className="text-[10px] uppercase tracking-wider text-zinc-500">
               Cluster
             </label>
-            <select
-              value={selectedCluster}
-              onChange={(e) => setSelectedCluster(e.target.value)}
-              className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono min-w-[280px]"
-            >
-              {clusters.length === 0 && <option value="">(로딩 중…)</option>}
-              {clusters.map((c) => (
-                <option key={c.cluster_id} value={c.cluster_id}>
-                  {c.cluster_id}
-                </option>
-              ))}
-            </select>
+            <ClusterPicker selected={selectedCluster} />
           </div>
         }
       />

@@ -10,7 +10,6 @@ import {
 } from "@/components/query-lab/plan-tree";
 import { streamChat } from "@/lib/agentcore-sse";
 import {
-  fetchClusters,
   runExplain,
   ExplainSqlError,
   type ExplainResponse,
@@ -22,11 +21,8 @@ import {
   type SavedQuerySummary,
 } from "@/lib/api-client";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
-
-interface ClusterRow {
-  cluster_id: string;
-  engine?: string;
-}
+import { useSelectedCluster } from "@/lib/use-selected-cluster";
+import { ClusterPicker } from "@/components/design-system/cluster-picker";
 
 const PRESETS = [
   {
@@ -107,8 +103,8 @@ function relTime(ms: number): string {
 }
 
 export default function QueryLabPage() {
-  const [clusters, setClusters] = useState<ClusterRow[]>([]);
-  const [clusterId, setClusterId] = useState<string>("");
+  const { selected: clusterId, setSelected: setClusterId } =
+    useSelectedCluster();
   const [analysis, setAnalysis] = useState("");
   const [explain, setExplain] = useState<ExplainResponse | null>(null);
   const [explainError, setExplainError] = useState<{
@@ -140,15 +136,6 @@ export default function QueryLabPage() {
     error: string | null;
     submitting: boolean;
   } | null>(null);
-
-  useEffect(() => {
-    fetchClusters()
-      .then((rows: ClusterRow[]) => {
-        setClusters(rows);
-        if (rows.length > 0) setClusterId(rows[0].cluster_id);
-      })
-      .catch(console.error);
-  }, []);
 
   useEffect(() => {
     setHistory(loadPlanHistory());
@@ -358,20 +345,7 @@ export default function QueryLabPage() {
             <label className="text-[10px] uppercase tracking-wider text-zinc-500">
               cluster
             </label>
-            <select
-              value={clusterId}
-              onChange={(e) => setClusterId(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-1.5 focus:outline-none focus:border-amber-500/60"
-            >
-              {clusters.length === 0 && (
-                <option value="">(no clusters registered)</option>
-              )}
-              {clusters.map((c) => (
-                <option key={c.cluster_id} value={c.cluster_id}>
-                  {c.cluster_id}
-                </option>
-              ))}
-            </select>
+            <ClusterPicker selected={clusterId} />
           </div>
         }
       />

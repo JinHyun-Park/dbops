@@ -32,6 +32,11 @@ import {
 } from "@/lib/api-client";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
 import {
+  getSelectedCluster,
+  setSelectedCluster as persistCluster,
+  onClusterChange,
+} from "@/lib/selected-cluster";
+import {
   engineBadge,
   isPostgres,
   isMysql,
@@ -249,7 +254,10 @@ export default function DashboardPage() {
           typeof window !== "undefined"
             ? new URLSearchParams(window.location.search)
             : null;
-        const wanted = params?.get("cluster");
+        // Prefer the URL ?cluster=, then the globally-selected cluster (shared
+        // store / localStorage), then the first cluster — so the dashboard
+        // honors a switch made via ⌘K / another page.
+        const wanted = params?.get("cluster") || getSelectedCluster();
         const match =
           wanted &&
           cs.find((c: { cluster_id: string }) => c.cluster_id === wanted);
@@ -290,7 +298,19 @@ export default function DashboardPage() {
     }
     const next = `${window.location.pathname}?${params.toString()}`;
     window.history.replaceState(null, "", next);
+    // Mirror the choice into the shared store so the header chip + every other
+    // page follow this cluster (persists across navigation).
+    if (selectedCluster) persistCluster(selectedCluster);
   }, [selectedCluster, range]);
+
+  // Live-sync: when the cluster is switched elsewhere (⌘K palette, header chip,
+  // browser back/forward), update the dashboard without a remount.
+  useEffect(() => {
+    return onClusterChange(() => {
+      const cur = getSelectedCluster();
+      if (cur) setSelectedCluster(cur);
+    });
+  }, []);
 
   useEffect(() => {
     if (!selectedCluster) return;

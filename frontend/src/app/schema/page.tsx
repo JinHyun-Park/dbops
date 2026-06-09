@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  fetchClusters,
   fetchSchemaGraph,
   type SchemaGraphResponse,
   type SchemaGraphTable,
@@ -13,32 +12,16 @@ import {
   EmptyState,
 } from "@/components/design-system/page-shell";
 import { fmtBytes, fmtExact } from "@/lib/format";
-
-interface ClusterLite {
-  cluster_id: string;
-  engine?: string;
-}
+import { useSelectedCluster } from "@/lib/use-selected-cluster";
+import { ClusterPicker } from "@/components/design-system/cluster-picker";
 
 export default function SchemaPage() {
-  const [clusters, setClusters] = useState<ClusterLite[]>([]);
-  const [selectedCluster, setSelectedCluster] = useState<string>("");
+  const { selected: selectedCluster } = useSelectedCluster();
   const [schema, setSchema] = useState<string>("public");
   const [data, setData] = useState<SchemaGraphResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchClusters()
-      .then((r: unknown) => {
-        const list: ClusterLite[] = Array.isArray(r)
-          ? (r as ClusterLite[])
-          : (r as { clusters?: ClusterLite[] })?.clusters ?? [];
-        setClusters(list);
-        if (list.length > 0) setSelectedCluster(list[0].cluster_id);
-      })
-      .catch(() => {});
-  }, []);
 
   const load = async () => {
     if (!selectedCluster) return;
@@ -72,18 +55,7 @@ export default function SchemaPage() {
             <label className="text-[10px] uppercase tracking-wider text-zinc-500">
               Cluster
             </label>
-            <select
-              value={selectedCluster}
-              onChange={(e) => setSelectedCluster(e.target.value)}
-              className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono min-w-[280px]"
-            >
-              {clusters.length === 0 && <option value="">(로딩 중…)</option>}
-              {clusters.map((c) => (
-                <option key={c.cluster_id} value={c.cluster_id}>
-                  {c.cluster_id}
-                </option>
-              ))}
-            </select>
+            <ClusterPicker selected={selectedCluster} />
           </div>
         }
       />
