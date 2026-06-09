@@ -14,12 +14,17 @@ export function SearchableClusterSelect({
   clusters,
   placeholder = "클러스터 선택",
   className = "",
+  allowAll = false,
+  allLabel = "전체 클러스터",
 }: {
   value: string;
   onChange: (id: string) => void;
   clusters: { cluster_id: string }[];
   placeholder?: string;
   className?: string;
+  // When true, an "all clusters" entry maps to value "" — for filter fields.
+  allowAll?: boolean;
+  allLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -60,7 +65,7 @@ export function SearchableClusterSelect({
             value ? "text-zinc-200" : "text-zinc-500"
           }`}
         >
-          {value || placeholder}
+          {value || (allowAll ? allLabel : placeholder)}
         </span>
         <ChevronDown
           size={13}
@@ -88,6 +93,23 @@ export function SearchableClusterSelect({
             />
           </div>
           <div className="max-h-64 overflow-y-auto py-1">
+            {allowAll && !ql && (
+              <button
+                type="button"
+                onClick={() => {
+                  onChange("");
+                  setOpen(false);
+                  setQ("");
+                }}
+                className={`w-full text-left px-3 py-1.5 text-[12px] transition-colors ${
+                  value === ""
+                    ? "bg-zinc-800/80 text-zinc-100"
+                    : "text-zinc-300 hover:bg-zinc-800/50"
+                }`}
+              >
+                {allLabel}
+              </button>
+            )}
             {visible.map((c) => (
               <button
                 key={c.cluster_id}

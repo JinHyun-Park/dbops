@@ -19,6 +19,7 @@ import {
   Section,
 } from "@/components/design-system/page-shell";
 import { getSelectedCluster } from "@/lib/selected-cluster";
+import { SearchableClusterSelect } from "@/components/design-system/searchable-cluster-select";
 
 interface ClusterLite {
   cluster_id: string;
@@ -133,18 +134,14 @@ export default function RunbooksPage() {
         description={`총 ${items.length}개`}
         actions={
           <div className="flex items-center gap-2">
-            <select
+            <SearchableClusterSelect
               value={filterCluster}
-              onChange={(e) => setFilterCluster(e.target.value)}
-              className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono"
-            >
-              <option value="">(모든 클러스터)</option>
-              {clusters.map((c) => (
-                <option key={c.cluster_id} value={c.cluster_id}>
-                  {c.cluster_id}
-                </option>
-              ))}
-            </select>
+              onChange={setFilterCluster}
+              clusters={clusters}
+              allowAll
+              allLabel="모든 클러스터"
+              className="w-48"
+            />
             <input
               type="text"
               value={filterTag}

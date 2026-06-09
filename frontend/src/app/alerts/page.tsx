@@ -22,6 +22,7 @@ import {
 } from "@/components/design-system/page-shell";
 import { isAdmin } from "@/lib/auth";
 import { getSelectedCluster } from "@/lib/selected-cluster";
+import { SearchableClusterSelect } from "@/components/design-system/searchable-cluster-select";
 
 interface Rule {
   id: number;
@@ -517,19 +518,15 @@ export default function AlertsPage() {
                 <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
                   Cluster
                 </label>
-                <select
-                  value={newRule.cluster_id}
-                  onChange={(e) =>
-                    setNewRule({ ...newRule, cluster_id: e.target.value })
-                  }
-                  className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60 transition-colors"
-                >
-                  {clusters.map((c) => (
-                    <option key={c.cluster_id} value={c.cluster_id}>
-                      {c.cluster_id}
-                    </option>
-                  ))}
-                </select>
+                <div className="mt-1">
+                  <SearchableClusterSelect
+                    value={newRule.cluster_id}
+                    onChange={(id) =>
+                      setNewRule({ ...newRule, cluster_id: id })
+                    }
+                    clusters={clusters}
+                  />
+                </div>
               </div>
               <div>
                 <label className="text-[10px] text-zinc-500 uppercase tracking-wider">

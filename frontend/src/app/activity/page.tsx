@@ -12,6 +12,7 @@ import {
   EmptyState,
 } from "@/components/design-system/page-shell";
 import { getSelectedCluster } from "@/lib/selected-cluster";
+import { SearchableClusterSelect } from "@/components/design-system/searchable-cluster-select";
 
 const STATUS_STYLE: Record<string, { label: string; chip: string }> = {
   pending: {
@@ -102,18 +103,14 @@ export default function ActivityPage() {
         description="DBOps에서 일어난 모든 쓰기 의사결정의 시간순 기록 — 누가 요청했고 누가 승인했고 언제 실행됐는지. 컴플라이언스 감사와 사후 회고 (post-incident retro) 용도."
         actions={
           <div className="flex items-center gap-2">
-            <select
+            <SearchableClusterSelect
               value={clusterFilter}
-              onChange={(e) => setClusterFilter(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-3 py-1.5 focus:outline-none focus:border-amber-500/60"
-            >
-              <option value="">모든 cluster</option>
-              {clusters.map((c) => (
-                <option key={c.cluster_id} value={c.cluster_id}>
-                  {c.cluster_id}
-                </option>
-              ))}
-            </select>
+              onChange={setClusterFilter}
+              clusters={clusters}
+              allowAll
+              allLabel="모든 cluster"
+              className="w-48"
+            />
             <select
               value={actionFilter}
               onChange={(e) => setActionFilter(e.target.value)}
