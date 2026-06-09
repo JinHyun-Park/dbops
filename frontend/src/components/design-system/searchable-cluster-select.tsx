@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronDown, Search } from "lucide-react";
+import { AnchoredPopover } from "@/components/design-system/anchored-popover";
 
 // Controlled, searchable replacement for a native <select> of clusters in FORM
 // fields (chat conversation cluster, alert/runbook pickers). Unlike the header
@@ -30,23 +31,6 @@ export function SearchableClusterSelect({
   const [q, setQ] = useState("");
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node))
-        setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   const ql = q.trim().toLowerCase();
   const visible = ql
     ? clusters.filter((c) => c.cluster_id.toLowerCase().includes(ql))
@@ -73,8 +57,13 @@ export function SearchableClusterSelect({
           className="flex-shrink-0 text-zinc-500"
         />
       </button>
-      {open && (
-        <div className="absolute z-50 mt-1 w-full min-w-[16rem] bg-zinc-900 border border-zinc-700 rounded-md shadow-2xl overflow-hidden">
+      <AnchoredPopover
+        anchorRef={ref}
+        open={open}
+        onClose={() => setOpen(false)}
+        matchWidth
+      >
+        <div className="bg-zinc-900 border border-zinc-700 rounded-md shadow-2xl overflow-hidden">
           <div className="flex items-center gap-2 px-2.5 border-b border-zinc-800">
             <Search size={13} className="text-zinc-500 flex-shrink-0" />
             <input
@@ -135,7 +124,7 @@ export function SearchableClusterSelect({
             )}
           </div>
         </div>
-      )}
+      </AnchoredPopover>
     </div>
   );
 }

@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { ChevronDown, Database, Search } from "lucide-react";
 import { eolFor } from "@/lib/engine";
 import { triage, type Level } from "@/lib/cluster-triage";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { useFleetOverview } from "@/lib/use-fleet-overview";
+import { AnchoredPopover } from "@/components/design-system/anchored-popover";
 
 // A real, discoverable cluster switcher: click → a popover that lists the
 // clusters immediately (with a severity dot from the shared triage), with
@@ -44,24 +45,6 @@ export function ClusterDropdown({
       );
     return m;
   }, [fleet]);
-
-  // Close on outside click + Escape.
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node))
-        setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
 
   const choose = useCallback(
     (id: string) => {
@@ -111,12 +94,13 @@ export function ClusterDropdown({
         />
       </button>
 
-      {open && (
-        <div
-          className={`absolute z-50 mt-1.5 w-72 bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl overflow-hidden ${
-            align === "right" ? "right-0" : "left-0"
-          }`}
-        >
+      <AnchoredPopover
+        anchorRef={rootRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        align={align}
+      >
+        <div className="w-72 bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl overflow-hidden">
           <div className="flex items-center gap-2 px-3 border-b border-zinc-800">
             <Search size={14} className="text-zinc-500 flex-shrink-0" />
             <input
@@ -166,7 +150,7 @@ export function ClusterDropdown({
             )}
           </div>
         </div>
-      )}
+      </AnchoredPopover>
     </div>
   );
 }

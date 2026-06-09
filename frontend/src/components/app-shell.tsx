@@ -407,9 +407,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </aside>
 
           <div className="flex-1 flex flex-col min-w-0">
+            {/* relative z-40 is load-bearing: backdrop-blur creates a stacking
+                context, and with z-index auto the SIBLING <main>'s positioned
+                content (PageHeader etc.) hit-tested ABOVE the header's dropdown
+                popover — the menu looked fine but real clicks fell through to
+                the page underneath. */}
             <header
               data-app-header
-              className="flex-shrink-0 border-b border-zinc-800 px-6 py-3 flex items-center justify-between bg-zinc-950/80 backdrop-blur-xl"
+              className="relative z-40 flex-shrink-0 border-b border-zinc-800 px-6 py-3 flex items-center justify-between bg-zinc-950/80 backdrop-blur-xl"
             >
               <Breadcrumbs pathname={pathname} />
               <div className="flex items-center gap-3">
