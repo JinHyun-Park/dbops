@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { getSelectedCluster, onClusterChange } from "@/lib/selected-cluster";
 import {
   Activity,
   ArrowLeftRight,
@@ -325,6 +327,43 @@ function MobileTabBar({ pathname }: { pathname: string }) {
   );
 }
 
+// Global current-cluster indicator + switcher trigger. Shows which cluster the
+// cluster-scoped pages are pinned to (from the URL ?cluster= or the last choice)
+// and opens the ⌘K palette to switch — replacing the per-page flat dropdowns.
+function CurrentClusterChip({ pathname }: { pathname: string }) {
+  const [cluster, setCluster] = useState<string | null>(null);
+  // Re-read on navigation (the URL ?cluster= may have changed via a link).
+  useEffect(() => setCluster(getSelectedCluster()), [pathname]);
+  // Re-read on explicit switches (palette) + back/forward.
+  useEffect(() => onClusterChange(() => setCluster(getSelectedCluster())), []);
+
+  const short =
+    cluster && cluster.length > 26 ? `${cluster.slice(0, 24)}…` : cluster;
+  return (
+    <button
+      onClick={openCommandPalette}
+      title={cluster ? `${cluster} — 클러스터 전환 (⌘K)` : "클러스터 선택 (⌘K)"}
+      className="flex items-center gap-2 px-2.5 py-1 rounded-md border border-zinc-800 bg-zinc-900/50 hover:border-emerald-500/40 transition-colors max-w-[260px]"
+    >
+      <Database
+        size={13}
+        strokeWidth={2}
+        className="flex-shrink-0 text-emerald-300/70"
+      />
+      {cluster ? (
+        <span className="text-[12px] font-mono text-zinc-200 truncate">
+          {short}
+        </span>
+      ) : (
+        <span className="text-[12px] text-zinc-500">클러스터 선택</span>
+      )}
+      <kbd className="hidden sm:inline ml-1 text-[10px] font-sans text-zinc-600 border border-zinc-700 rounded px-1 py-px bg-zinc-950/70">
+        ⌘K
+      </kbd>
+    </button>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "/";
 
@@ -410,6 +449,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             <Breadcrumbs pathname={pathname} />
             <div className="flex items-center gap-3">
+              <CurrentClusterChip pathname={pathname} />
               <ThemeToggle />
               <div className="md:hidden">
                 <AuthButton />

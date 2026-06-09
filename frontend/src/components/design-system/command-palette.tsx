@@ -3,12 +3,19 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
+import { fetchClusters } from "@/lib/api-client";
+import {
+  normalizeClusters,
+  setSelectedCluster,
+  type ClusterLite,
+} from "@/lib/selected-cluster";
 
 interface Command {
   id: string;
   label: string;
   path: string;
   group: string;
+  cluster?: string; // present when this row switches to a cluster
 }
 
 // Mirrors the sidebar taxonomy so the palette and the rail tell the same
@@ -137,15 +144,41 @@ const commands: Command[] = [
 export function CommandPalette() {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [clusters, setClusters] = useState<ClusterLite[]>([]);
+  const [clustersLoaded, setClustersLoaded] = useState(false);
   const router = useRouter();
 
-  const filtered = commands.filter((c) =>
-    c.label.toLowerCase().includes(query.toLowerCase()),
-  );
+  const q = query.trim().toLowerCase();
+  const pageMatches = commands.filter((c) => c.label.toLowerCase().includes(q));
+  // Clusters only surface once you type — dumping a fleet of dozens on every
+  // ⌘K would bury the page commands. Typing the id finds it (typeahead).
+  const clusterMatches: Command[] = q
+    ? clusters
+        .filter((c) => c.cluster_id.toLowerCase().includes(q))
+        .slice(0, 50)
+        .map((c) => ({
+          id: `cluster:${c.cluster_id}`,
+          label: c.cluster_id,
+          path: `/dashboard?cluster=${encodeURIComponent(c.cluster_id)}`,
+          group: "Cluster",
+          cluster: c.cluster_id,
+        }))
+    : [];
+  const filtered = [...pageMatches, ...clusterMatches];
 
   const open = useCallback(() => {
     setIsOpen(true);
     setQuery("");
+    // Lazy-load the cluster list the first time the palette opens, so ⌘K can
+    // double as a fleet-scale cluster switcher (typeahead, no flat dropdown).
+    setClustersLoaded((loaded) => {
+      if (!loaded) {
+        fetchClusters()
+          .then((r: unknown) => setClusters(normalizeClusters(r)))
+          .catch(() => {});
+      }
+      return true;
+    });
   }, []);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -168,10 +201,13 @@ export function CommandPalette() {
     };
   }, [handleKeyDown, open]);
 
-  const handleSelect = (path: string) => {
+  const handleSelect = (cmd: Command) => {
     setIsOpen(false);
     setQuery("");
-    router.push(path);
+    // Switching cluster persists the choice (localStorage + event) so the
+    // header chip and every cluster-scoped page pick it up.
+    if (cmd.cluster) setSelectedCluster(cmd.cluster);
+    router.push(cmd.path);
   };
 
   if (!isOpen) return null;
@@ -194,11 +230,11 @@ export function CommandPalette() {
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="페이지 검색..."
+            placeholder="페이지 · 클러스터 검색..."
             className="w-full py-3 bg-transparent text-zinc-100 focus:outline-none placeholder:text-zinc-600"
             onKeyDown={(e) => {
               if (e.key === "Enter" && filtered.length > 0) {
-                handleSelect(filtered[0].path);
+                handleSelect(filtered[0]);
               }
             }}
           />
@@ -207,11 +243,21 @@ export function CommandPalette() {
           {filtered.map((cmd) => (
             <button
               key={cmd.id}
-              onClick={() => handleSelect(cmd.path)}
+              onClick={() => handleSelect(cmd)}
               className="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-zinc-800 transition-colors"
             >
-              <span className="text-sm text-zinc-200">{cmd.label}</span>
-              <span className="text-[10px] uppercase tracking-wider text-emerald-300/70">
+              <span
+                className={`text-sm ${
+                  cmd.cluster ? "font-mono text-zinc-100" : "text-zinc-200"
+                }`}
+              >
+                {cmd.label}
+              </span>
+              <span
+                className={`text-[10px] uppercase tracking-wider ${
+                  cmd.cluster ? "text-sky-300/80" : "text-emerald-300/70"
+                }`}
+              >
                 {cmd.group}
               </span>
             </button>
