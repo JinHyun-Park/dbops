@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import { MessageList, type Message } from "./message-list";
 import { streamChat } from "@/lib/agentcore-sse";
 import { takeRcaHandoff } from "@/lib/rca-handoff";
+import { SearchableClusterSelect } from "@/components/design-system/searchable-cluster-select";
 import {
   fetchClusters,
   fetchModels,
@@ -922,18 +923,14 @@ export function ChatPanel() {
             <label className="text-[10px] uppercase tracking-wider text-zinc-500">
               cluster
             </label>
-            <select
+            {/* Searchable — a native <select> of 100+ clusters is unscannable. */}
+            <SearchableClusterSelect
               value={clusterId}
-              onChange={(e) => setClusterId(e.target.value)}
-              className="bg-zinc-900 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500/60"
-            >
-              {clusters.length === 0 && <option value="">no clusters</option>}
-              {clusters.map((c) => (
-                <option key={c.cluster_id} value={c.cluster_id}>
-                  {c.cluster_id}
-                </option>
-              ))}
-            </select>
+              onChange={setClusterId}
+              clusters={clusters}
+              placeholder="no clusters"
+              className="w-56"
+            />
             {active && active.messages.length > 0 && (
               <>
                 <button
