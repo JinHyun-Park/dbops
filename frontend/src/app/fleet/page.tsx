@@ -111,9 +111,61 @@ function triage(c: ClusterRow, eol: EolInfo | null): Decorated {
 
 const LEVEL_RANK: Record<Level, number> = { critical: 2, warning: 1, ok: 0 };
 
+type GroupBy = "none" | "account" | "engine" | "region" | "severity";
+
+// Registry metadata we group on (the overview rows don't carry account/region).
+interface RegistryMeta {
+  account_id?: string;
+  region?: string;
+}
+
+// A named snapshot of the full filter set, persisted to localStorage.
+interface SavedView {
+  name: string;
+  q: string;
+  engine: string;
+  status: string;
+  level: "" | Level;
+  eolOnly: boolean;
+  groupBy: GroupBy;
+  sortKey: "severity" | keyof ClusterRow;
+}
+
+const SAVED_VIEWS_KEY = "dbops_fleet_views";
+const SAVED_VIEWS_CAP = 8;
+
+function loadSavedViews(): SavedView[] {
+  try {
+    const raw = window.localStorage.getItem(SAVED_VIEWS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as SavedView[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedViews(views: SavedView[]): void {
+  try {
+    window.localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(views));
+  } catch {
+    /* private mode / quota — keep state in memory only */
+  }
+}
+
+// One bucket of the grouped view: a stable key, a display label, and its rows
+// (already in the view's sorted order).
+interface FleetGroup {
+  key: string;
+  label: string;
+  rows: Decorated[];
+}
+
 export default function FleetPage() {
   const [rows, setRows] = useState<ClusterRow[]>([]);
   const [demoIds, setDemoIds] = useState<Set<string>>(new Set());
+  // Registry account/region keyed by cluster_id — only used for Group by.
+  const [meta, setMeta] = useState<Map<string, RegistryMeta>>(new Map());
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   // sortKey "severity" (default) = triage-first; any column key overrides it.
@@ -127,6 +179,14 @@ export default function FleetPage() {
   const [status, setStatus] = useState("");
   const [level, setLevel] = useState<"" | Level>("");
   const [eolOnly, setEolOnly] = useState(false);
+  const [groupBy, setGroupBy] = useState<GroupBy>("none");
+
+  // Collapsed group keys (grouped view only); default = every group expanded.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  // Saved views (localStorage) + the in-progress name for the save box.
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [viewName, setViewName] = useState("");
 
   // Hydrate filters from the URL once on mount (client-only — static export).
   useEffect(() => {
@@ -136,6 +196,10 @@ export default function FleetPage() {
     setStatus(sp.get("status") || "");
     setLevel((sp.get("level") as Level) || "");
     setEolOnly(sp.get("eol") === "1");
+    const g = sp.get("group");
+    if (g === "account" || g === "engine" || g === "region" || g === "severity")
+      setGroupBy(g);
+    setSavedViews(loadSavedViews());
   }, []);
 
   // Reflect filters back into the URL (replace, not push — no history spam).
@@ -146,13 +210,14 @@ export default function FleetPage() {
     if (status) sp.set("status", status);
     if (level) sp.set("level", level);
     if (eolOnly) sp.set("eol", "1");
+    if (groupBy !== "none") sp.set("group", groupBy);
     const qs = sp.toString();
     window.history.replaceState(
       null,
       "",
       qs ? `?${qs}` : window.location.pathname,
     );
-  }, [q, engine, status, level, eolOnly]);
+  }, [q, engine, status, level, eolOnly, groupBy]);
 
   useEffect(() => {
     let cancelled = false;
@@ -163,11 +228,21 @@ export default function FleetPage() {
           if (overview.status === "fulfilled")
             setRows(overview.value.clusters || []);
           if (registry.status === "fulfilled") {
+            const items: {
+              cluster_id: string;
+              is_demo?: boolean;
+              account_id?: string;
+              region?: string;
+            }[] = registry.value || [];
             setDemoIds(
-              new Set(
-                (registry.value || [])
-                  .filter((c: { is_demo?: boolean }) => c.is_demo)
-                  .map((c: { cluster_id: string }) => c.cluster_id),
+              new Set(items.filter((c) => c.is_demo).map((c) => c.cluster_id)),
+            );
+            setMeta(
+              new Map(
+                items.map((c) => [
+                  c.cluster_id,
+                  { account_id: c.account_id, region: c.region },
+                ]),
               ),
             );
           }
@@ -244,6 +319,83 @@ export default function FleetPage() {
     setLevel("");
     setEolOnly(false);
   };
+
+  // Partition the already-filtered-and-sorted `view` into groups for the
+  // selected dimension. Rows keep `view`'s order; groups are ordered
+  // worst-severity-first, then size desc, then label asc.
+  const groups = useMemo<FleetGroup[]>(() => {
+    if (groupBy === "none") return [];
+    const buckets = new Map<string, FleetGroup>();
+    for (const d of view) {
+      let label: string;
+      if (groupBy === "account")
+        label = meta.get(d.row.cluster_id)?.account_id || "(unknown)";
+      else if (groupBy === "region")
+        label = meta.get(d.row.cluster_id)?.region || "(unknown)";
+      else if (groupBy === "engine")
+        label = (d.row.engine || "(unknown)").replace("aurora-", "");
+      else label = d.level;
+      const existing = buckets.get(label);
+      if (existing) existing.rows.push(d);
+      else buckets.set(label, { key: label, label, rows: [d] });
+    }
+    const worst = (g: FleetGroup) =>
+      g.rows.reduce((m, d) => Math.max(m, LEVEL_RANK[d.level]), 0);
+    return Array.from(buckets.values()).sort((a, b) => {
+      const wa = worst(a),
+        wb = worst(b);
+      if (wa !== wb) return wb - wa;
+      if (a.rows.length !== b.rows.length) return b.rows.length - a.rows.length;
+      return a.label.localeCompare(b.label);
+    });
+  }, [view, groupBy, meta]);
+
+  const toggleGroup = (key: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const applyView = (v: SavedView) => {
+    setQ(v.q);
+    setEngine(v.engine);
+    setStatus(v.status);
+    setLevel(v.level);
+    setEolOnly(v.eolOnly);
+    setGroupBy(v.groupBy);
+    setSortKey(v.sortKey);
+  };
+
+  const saveView = () => {
+    const name = viewName.trim();
+    if (!name) return;
+    const next: SavedView = {
+      name,
+      q,
+      engine,
+      status,
+      level,
+      eolOnly,
+      groupBy,
+      sortKey,
+    };
+    setSavedViews((prev) => {
+      const without = prev.filter((v) => v.name !== name);
+      const merged = [...without, next].slice(-SAVED_VIEWS_CAP);
+      persistSavedViews(merged);
+      return merged;
+    });
+    setViewName("");
+  };
+
+  const deleteView = (name: string) =>
+    setSavedViews((prev) => {
+      const merged = prev.filter((v) => v.name !== name);
+      persistSavedViews(merged);
+      return merged;
+    });
 
   return (
     <PageBody>
@@ -323,6 +475,17 @@ export default function FleetPage() {
           <option value="available">available</option>
           <option value="other">available 아님</option>
         </FacetSelect>
+        <FacetSelect
+          value={groupBy}
+          onChange={(v) => setGroupBy(v as GroupBy)}
+          label="Group by"
+        >
+          <option value="none">그룹 없음</option>
+          <option value="account">계정</option>
+          <option value="engine">엔진</option>
+          <option value="region">리전</option>
+          <option value="severity">심각도</option>
+        </FacetSelect>
         {filtersActive && (
           <button
             onClick={clearAll}
@@ -334,6 +497,52 @@ export default function FleetPage() {
         <span className="text-[11px] text-zinc-500 font-mono ml-auto">
           {view.length} / {counts.total} 표시
         </span>
+      </div>
+
+      {/* Saved views: name+저장 to snapshot the current filter set, then the
+          stored presets as one-click chips (each deletable). */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+          뷰
+        </span>
+        <input
+          type="text"
+          value={viewName}
+          onChange={(e) => setViewName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") saveView();
+          }}
+          placeholder="뷰 이름…"
+          className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2.5 py-1.5 font-mono w-40 focus:outline-none focus:ring-1 focus:ring-amber-500"
+        />
+        <button
+          onClick={saveView}
+          disabled={!viewName.trim()}
+          className="text-[11px] px-2 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500/50 hover:text-amber-300 disabled:opacity-40 disabled:hover:border-zinc-700 disabled:hover:text-zinc-300 transition-colors"
+        >
+          저장
+        </button>
+        {savedViews.map((v) => (
+          <span
+            key={v.name}
+            className="inline-flex items-center gap-1 border border-zinc-700 bg-zinc-900/60 text-[11px] text-zinc-300 hover:border-amber-500/50"
+          >
+            <button
+              onClick={() => applyView(v)}
+              className="px-2 py-1 font-mono hover:text-amber-300 transition-colors"
+              title={`'${v.name}' 뷰 적용`}
+            >
+              {v.name}
+            </button>
+            <button
+              onClick={() => deleteView(v.name)}
+              className="px-1.5 py-1 text-zinc-500 hover:text-rose-400 transition-colors"
+              title={`'${v.name}' 삭제`}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
       </div>
 
       {loading ? (
@@ -359,105 +568,30 @@ export default function FleetPage() {
         <>
           {/* Mobile card stack — severity-sorted, with a left accent bar. */}
           <div className="md:hidden space-y-3">
-            {view.map((d) => {
-              const c = d.row;
-              const cpu = n(c.cpu);
-              const aas = n(c.aas);
-              const conn = n(c.conn_active) + n(c.conn_idle);
-              const dlk = n(c.deadlocks);
-              const blk = n(c.blocking_count);
-              const badge = engineBadge(c.engine);
-              return (
-                <Link
-                  key={c.cluster_id}
-                  href={`/dashboard?cluster=${encodeURIComponent(
-                    c.cluster_id,
-                  )}`}
-                  className={`block bg-zinc-800 border border-zinc-700 border-l-2 ${
-                    LEVEL_ACCENT[d.level]
-                  } rounded-lg p-3 hover:border-amber-500/40 transition-colors`}
-                >
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <SeverityDot level={d.level} reasons={d.reasons} />
-                        <span className="font-mono text-xs text-zinc-100 truncate">
-                          {c.cluster_id}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                        <span
-                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 border text-[10px] font-mono uppercase tracking-wider ${badge.classes}`}
-                        >
-                          <span
-                            className={`w-1 h-1 rounded-full ${badge.accent}`}
+            {groupBy === "none"
+              ? view.map((d) => (
+                  <FleetCard key={d.row.cluster_id} d={d} demoIds={demoIds} />
+                ))
+              : groups.map((g) => {
+                  const isCollapsed = collapsed.has(g.key);
+                  return (
+                    <div key={g.key} className="space-y-3">
+                      <GroupHeaderCard
+                        group={g}
+                        collapsed={isCollapsed}
+                        onToggle={() => toggleGroup(g.key)}
+                      />
+                      {!isCollapsed &&
+                        g.rows.map((d) => (
+                          <FleetCard
+                            key={d.row.cluster_id}
+                            d={d}
+                            demoIds={demoIds}
                           />
-                          {badge.label}
-                          <span className="text-zinc-300/80 normal-case font-normal">
-                            {c.engine_version}
-                          </span>
-                        </span>
-                        {demoIds.has(c.cluster_id) && (
-                          <span className="px-1.5 py-0.5 text-[9px] font-mono uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
-                            demo
-                          </span>
-                        )}
-                      </div>
-                      {d.eol && (
-                        <div
-                          className={`text-[10px] font-mono mt-1 ${
-                            EOL_STATUS_CLASSES[d.eol.status]
-                          }`}
-                        >
-                          {d.eol.status === "expired"
-                            ? `EOL · ${Math.abs(d.eol.days_remaining)}d past`
-                            : `EOL ${d.eol.eol} · ${d.eol.days_remaining}d`}
-                        </div>
-                      )}
+                        ))}
                     </div>
-                    <span
-                      className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] ${statusBadge(
-                        c.status,
-                      )}`}
-                    >
-                      {c.status || "unknown"}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs font-mono tabular-nums">
-                    <MobileStat
-                      label="CPU"
-                      value={c.cpu === null ? "—" : cpu.toFixed(1)}
-                      tone={severityColor(cpu, 70, 90)}
-                    />
-                    <MobileStat
-                      label="AAS"
-                      value={c.aas === null ? "—" : aas.toFixed(2)}
-                      tone={severityColor(aas, 2, 5)}
-                    />
-                    <MobileStat
-                      label="Conn"
-                      value={conn ? String(conn) : "—"}
-                    />
-                    <MobileStat
-                      label="Storage"
-                      value={
-                        c.storage_bytes ? fmtBytes(n(c.storage_bytes)) : "—"
-                      }
-                    />
-                    <MobileStat
-                      label="Deadlocks"
-                      value={dlk ? String(dlk) : "—"}
-                      tone={dlk ? "text-rose-400" : "text-zinc-500"}
-                    />
-                    <MobileStat
-                      label="Blocks"
-                      value={blk ? String(blk) : "—"}
-                      tone={blk ? "text-rose-400" : "text-zinc-500"}
-                    />
-                  </div>
-                </Link>
-              );
-            })}
+                  );
+                })}
           </div>
 
           {/* Desktop table — severity column leads; default sort is severity. */}
@@ -534,130 +668,324 @@ export default function FleetPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-700">
-                {view.map((d) => {
-                  const c = d.row;
-                  const cpu = n(c.cpu);
-                  const aas = n(c.aas);
-                  const conn = n(c.conn_active) + n(c.conn_idle);
-                  const dlk = n(c.deadlocks);
-                  const blk = n(c.blocking_count);
-                  return (
-                    <tr key={c.cluster_id} className="hover:bg-zinc-900/40">
-                      <td className="px-2 py-2">
-                        <SeverityDot level={d.level} reasons={d.reasons} />
-                      </td>
-                      <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
-                        <div className="flex items-center gap-2">
-                          <Link
-                            href={`/dashboard?cluster=${encodeURIComponent(
-                              c.cluster_id,
-                            )}`}
-                            className="hover:text-sky-400 underline-offset-2 hover:underline"
-                          >
-                            {c.cluster_id}
-                          </Link>
-                          {demoIds.has(c.cluster_id) && (
-                            <span className="px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
-                              demo
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        {(() => {
-                          const badge = engineBadge(c.engine);
-                          return (
-                            <div className="flex flex-col items-start gap-1">
-                              <span
-                                className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 border text-[10px] font-mono uppercase tracking-wider ${badge.classes}`}
-                                title={`${c.engine} ${c.engine_version}`}
-                              >
-                                <span
-                                  className={`w-1 h-1 rounded-full ${badge.accent}`}
-                                />
-                                {badge.label}
-                                <span className="text-zinc-300/80 normal-case font-normal">
-                                  {c.engine_version}
-                                </span>
-                              </span>
-                              {d.eol && (
-                                <span
-                                  className={`text-[10px] font-mono ${
-                                    EOL_STATUS_CLASSES[d.eol.status]
-                                  }`}
-                                  title={eolHint(d.eol)}
-                                >
-                                  {d.eol.status === "expired"
-                                    ? `EOL · ${Math.abs(
-                                        d.eol.days_remaining,
-                                      )}d past`
-                                    : `EOL ${d.eol.eol} · ${d.eol.days_remaining}d`}
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </td>
-                      <td className="px-3 py-2">
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[10px] ${statusBadge(
-                            c.status,
-                          )}`}
-                        >
-                          {c.status || "unknown"}
-                        </span>
-                      </td>
-                      <td
-                        className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
-                          cpu,
-                          70,
-                          90,
-                        )}`}
-                      >
-                        {c.cpu === null ? "-" : cpu.toFixed(1)}
-                      </td>
-                      <td
-                        className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
-                          aas,
-                          2,
-                          5,
-                        )}`}
-                      >
-                        {c.aas === null ? "-" : aas.toFixed(2)}
-                      </td>
-                      <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
-                        {conn || "-"}
-                      </td>
-                      <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
-                        {c.storage_bytes ? fmtBytes(n(c.storage_bytes)) : "-"}
-                      </td>
-                      <td
-                        className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
-                          dlk,
-                          1,
-                          5,
-                        )}`}
-                      >
-                        {dlk || "-"}
-                      </td>
-                      <td
-                        className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
-                          blk,
-                          1,
-                          3,
-                        )}`}
-                      >
-                        {blk || "-"}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {groupBy === "none"
+                  ? view.map((d) => (
+                      <FleetRow
+                        key={d.row.cluster_id}
+                        d={d}
+                        demoIds={demoIds}
+                      />
+                    ))
+                  : groups.map((g) => {
+                      const isCollapsed = collapsed.has(g.key);
+                      return (
+                        <GroupRows
+                          key={g.key}
+                          group={g}
+                          collapsed={isCollapsed}
+                          onToggle={() => toggleGroup(g.key)}
+                          demoIds={demoIds}
+                        />
+                      );
+                    })}
               </tbody>
             </table>
           </div>
         </>
       )}
     </PageBody>
+  );
+}
+
+// One desktop table row. Extracted verbatim from the original inline JSX so the
+// flat and grouped paths render identical cells.
+function FleetRow({ d, demoIds }: { d: Decorated; demoIds: Set<string> }) {
+  const c = d.row;
+  const cpu = n(c.cpu);
+  const aas = n(c.aas);
+  const conn = n(c.conn_active) + n(c.conn_idle);
+  const dlk = n(c.deadlocks);
+  const blk = n(c.blocking_count);
+  return (
+    <tr className="hover:bg-zinc-900/40">
+      <td className="px-2 py-2">
+        <SeverityDot level={d.level} reasons={d.reasons} />
+      </td>
+      <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/dashboard?cluster=${encodeURIComponent(c.cluster_id)}`}
+            className="hover:text-sky-400 underline-offset-2 hover:underline"
+          >
+            {c.cluster_id}
+          </Link>
+          {demoIds.has(c.cluster_id) && (
+            <span className="px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
+              demo
+            </span>
+          )}
+        </div>
+      </td>
+      <td className="px-3 py-2">
+        {(() => {
+          const badge = engineBadge(c.engine);
+          return (
+            <div className="flex flex-col items-start gap-1">
+              <span
+                className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 border text-[10px] font-mono uppercase tracking-wider ${badge.classes}`}
+                title={`${c.engine} ${c.engine_version}`}
+              >
+                <span className={`w-1 h-1 rounded-full ${badge.accent}`} />
+                {badge.label}
+                <span className="text-zinc-300/80 normal-case font-normal">
+                  {c.engine_version}
+                </span>
+              </span>
+              {d.eol && (
+                <span
+                  className={`text-[10px] font-mono ${
+                    EOL_STATUS_CLASSES[d.eol.status]
+                  }`}
+                  title={eolHint(d.eol)}
+                >
+                  {d.eol.status === "expired"
+                    ? `EOL · ${Math.abs(d.eol.days_remaining)}d past`
+                    : `EOL ${d.eol.eol} · ${d.eol.days_remaining}d`}
+                </span>
+              )}
+            </div>
+          );
+        })()}
+      </td>
+      <td className="px-3 py-2">
+        <span
+          className={`px-1.5 py-0.5 rounded text-[10px] ${statusBadge(
+            c.status,
+          )}`}
+        >
+          {c.status || "unknown"}
+        </span>
+      </td>
+      <td
+        className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
+          cpu,
+          70,
+          90,
+        )}`}
+      >
+        {c.cpu === null ? "-" : cpu.toFixed(1)}
+      </td>
+      <td
+        className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
+          aas,
+          2,
+          5,
+        )}`}
+      >
+        {c.aas === null ? "-" : aas.toFixed(2)}
+      </td>
+      <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
+        {conn || "-"}
+      </td>
+      <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
+        {c.storage_bytes ? fmtBytes(n(c.storage_bytes)) : "-"}
+      </td>
+      <td
+        className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
+          dlk,
+          1,
+          5,
+        )}`}
+      >
+        {dlk || "-"}
+      </td>
+      <td
+        className={`px-3 py-2 text-right font-mono text-xs ${severityColor(
+          blk,
+          1,
+          3,
+        )}`}
+      >
+        {blk || "-"}
+      </td>
+    </tr>
+  );
+}
+
+// One mobile card. Extracted verbatim from the original inline JSX.
+function FleetCard({ d, demoIds }: { d: Decorated; demoIds: Set<string> }) {
+  const c = d.row;
+  const cpu = n(c.cpu);
+  const aas = n(c.aas);
+  const conn = n(c.conn_active) + n(c.conn_idle);
+  const dlk = n(c.deadlocks);
+  const blk = n(c.blocking_count);
+  const badge = engineBadge(c.engine);
+  return (
+    <Link
+      href={`/dashboard?cluster=${encodeURIComponent(c.cluster_id)}`}
+      className={`block bg-zinc-800 border border-zinc-700 border-l-2 ${
+        LEVEL_ACCENT[d.level]
+      } rounded-lg p-3 hover:border-amber-500/40 transition-colors`}
+    >
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <SeverityDot level={d.level} reasons={d.reasons} />
+            <span className="font-mono text-xs text-zinc-100 truncate">
+              {c.cluster_id}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+            <span
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 border text-[10px] font-mono uppercase tracking-wider ${badge.classes}`}
+            >
+              <span className={`w-1 h-1 rounded-full ${badge.accent}`} />
+              {badge.label}
+              <span className="text-zinc-300/80 normal-case font-normal">
+                {c.engine_version}
+              </span>
+            </span>
+            {demoIds.has(c.cluster_id) && (
+              <span className="px-1.5 py-0.5 text-[9px] font-mono uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
+                demo
+              </span>
+            )}
+          </div>
+          {d.eol && (
+            <div
+              className={`text-[10px] font-mono mt-1 ${
+                EOL_STATUS_CLASSES[d.eol.status]
+              }`}
+            >
+              {d.eol.status === "expired"
+                ? `EOL · ${Math.abs(d.eol.days_remaining)}d past`
+                : `EOL ${d.eol.eol} · ${d.eol.days_remaining}d`}
+            </div>
+          )}
+        </div>
+        <span
+          className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] ${statusBadge(
+            c.status,
+          )}`}
+        >
+          {c.status || "unknown"}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-xs font-mono tabular-nums">
+        <MobileStat
+          label="CPU"
+          value={c.cpu === null ? "—" : cpu.toFixed(1)}
+          tone={severityColor(cpu, 70, 90)}
+        />
+        <MobileStat
+          label="AAS"
+          value={c.aas === null ? "—" : aas.toFixed(2)}
+          tone={severityColor(aas, 2, 5)}
+        />
+        <MobileStat label="Conn" value={conn ? String(conn) : "—"} />
+        <MobileStat
+          label="Storage"
+          value={c.storage_bytes ? fmtBytes(n(c.storage_bytes)) : "—"}
+        />
+        <MobileStat
+          label="Deadlocks"
+          value={dlk ? String(dlk) : "—"}
+          tone={dlk ? "text-rose-400" : "text-zinc-500"}
+        />
+        <MobileStat
+          label="Blocks"
+          value={blk ? String(blk) : "—"}
+          tone={blk ? "text-rose-400" : "text-zinc-500"}
+        />
+      </div>
+    </Link>
+  );
+}
+
+// "🔴 2 · 🟡 1" style rollup — only non-zero buckets, worst-first.
+function groupRollup(rows: Decorated[]): string {
+  let critical = 0,
+    warning = 0,
+    ok = 0;
+  for (const d of rows) {
+    if (d.level === "critical") critical++;
+    else if (d.level === "warning") warning++;
+    else ok++;
+  }
+  const parts: string[] = [];
+  if (critical) parts.push(`🔴 ${critical}`);
+  if (warning) parts.push(`🟡 ${warning}`);
+  if (ok) parts.push(`🟢 ${ok}`);
+  return parts.join(" · ");
+}
+
+// Desktop group block: a styled colSpan header row + (when expanded) the
+// group's FleetRows. Wrapped in a fragment so it lives inside the single tbody.
+function GroupRows({
+  group,
+  collapsed,
+  onToggle,
+  demoIds,
+}: {
+  group: FleetGroup;
+  collapsed: boolean;
+  onToggle: () => void;
+  demoIds: Set<string>;
+}) {
+  return (
+    <>
+      <tr
+        onClick={onToggle}
+        className="bg-zinc-900/70 border-y border-zinc-700 cursor-pointer hover:bg-zinc-900"
+      >
+        <td colSpan={10} className="px-3 py-2">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-zinc-500 w-3">{collapsed ? "▸" : "▾"}</span>
+            <span className="font-mono text-zinc-100 truncate">
+              {group.label}
+            </span>
+            <span className="text-[10px] text-zinc-500 font-mono">
+              {group.rows.length}
+            </span>
+            <span className="ml-auto text-[11px] tabular-nums">
+              {groupRollup(group.rows)}
+            </span>
+          </div>
+        </td>
+      </tr>
+      {!collapsed &&
+        group.rows.map((d) => (
+          <FleetRow key={d.row.cluster_id} d={d} demoIds={demoIds} />
+        ))}
+    </>
+  );
+}
+
+// Mobile group header card (the cards themselves render outside this).
+function GroupHeaderCard({
+  group,
+  collapsed,
+  onToggle,
+}: {
+  group: FleetGroup;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className="w-full flex items-center gap-2 bg-zinc-900/70 border border-zinc-700 rounded-lg px-3 py-2 text-xs hover:bg-zinc-900 transition-colors"
+    >
+      <span className="text-zinc-500 w-3">{collapsed ? "▸" : "▾"}</span>
+      <span className="font-mono text-zinc-100 truncate">{group.label}</span>
+      <span className="text-[10px] text-zinc-500 font-mono">
+        {group.rows.length}
+      </span>
+      <span className="ml-auto text-[11px] tabular-nums">
+        {groupRollup(group.rows)}
+      </span>
+    </button>
   );
 }
 
