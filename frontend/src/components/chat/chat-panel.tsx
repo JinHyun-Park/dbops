@@ -347,6 +347,10 @@ export function ChatPanel() {
   );
   const abortRef = useRef<AbortController | null>(null);
   const followupAbortRef = useRef<AbortController | null>(null);
+  // When the chat is deep-linked from another page (e.g. the dashboard/timeline
+  // "AI 근본원인 분석" button → /chat?cluster=…&prompt=…), pin that cluster so
+  // the async cluster-defaults below don't clobber it.
+  const deepLinkClusterRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -428,7 +432,8 @@ export function ChatPanel() {
         saveConversations(merged);
         if (merged.length > 0 && !activeId) {
           setActiveId(merged[0].id);
-          if (merged[0].cluster_id) setClusterId(merged[0].cluster_id);
+          if (merged[0].cluster_id && !deepLinkClusterRef.current)
+            setClusterId(merged[0].cluster_id);
         }
         // Push local-only sessions to DDB so a different device sees them.
         // Fire-and-forget; failures don't block the UI.
@@ -455,7 +460,8 @@ export function ChatPanel() {
     fetchClusters()
       .then((rows: ClusterRow[]) => {
         setClusters(rows);
-        if (rows.length > 0 && !clusterId) setClusterId(rows[0].cluster_id);
+        if (rows.length > 0 && !clusterId && !deepLinkClusterRef.current)
+          setClusterId(rows[0].cluster_id);
       })
       .catch((e) => console.error("Failed to load clusters:", e));
   }, []);
@@ -464,8 +470,16 @@ export function ChatPanel() {
     if (typeof window === "undefined") return;
     const sp = new URLSearchParams(window.location.search);
     const prompt = sp.get("prompt");
-    if (prompt) {
-      setInput(prompt);
+    const cluster = sp.get("cluster");
+    if (cluster) {
+      // Pin + select the deep-linked cluster so the prefilled prompt (and the
+      // clusterId sent to the agent) targets the cluster the operator was
+      // looking at, not whatever happens to load first.
+      deepLinkClusterRef.current = cluster;
+      setClusterId(cluster);
+    }
+    if (prompt) setInput(prompt);
+    if (prompt || cluster) {
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);

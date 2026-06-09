@@ -13,6 +13,7 @@ import {
 } from "@/components/design-system/page-shell";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
+import { RcaButton } from "@/components/design-system/rca-button";
 
 const WINDOWS: { label: string; hours: number }[] = [
   { label: "1h", hours: 1 },
@@ -136,6 +137,9 @@ export default function TimelinePage() {
                 </button>
               ))}
             </div>
+            {/* "what happened?" → "why?": hand the incident context to the
+                AI agent for a ranked root-cause analysis. */}
+            {clusterId && <RcaButton clusterId={clusterId} />}
             {/* Deep-link into workload diff for this cluster — the
                 natural next question after "what happened?" is "what
                 did it do to the query workload?". */}
