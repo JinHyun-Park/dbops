@@ -15,6 +15,7 @@ import {
   eolHint,
   type EolInfo,
 } from "@/lib/engine";
+import { triage, n, LEVEL_RANK, type Level } from "@/lib/cluster-triage";
 
 interface ClusterRow {
   cluster_id: string;
@@ -31,22 +32,16 @@ interface ClusterRow {
   blocking_count: number | string | null;
 }
 
-type Level = "critical" | "warning" | "ok";
-
 // A row decorated with the derived triage signals so we sort/filter/group on
-// computed severity, not raw alphabetical cluster_id.
+// computed severity, not raw alphabetical cluster_id. Severity itself comes
+// from the shared `triage()` in @/lib/cluster-triage (also used by the
+// Dashboard cluster cards) so the two surfaces never disagree.
 interface Decorated {
   row: ClusterRow;
   level: Level;
   heat: number; // tiebreak within a level: higher = worse
   reasons: string[]; // why it's at this level (tooltip)
   eol: EolInfo | null;
-}
-
-function n(v: unknown): number {
-  if (v === null || v === undefined) return 0;
-  const x = Number(v);
-  return Number.isFinite(x) ? x : 0;
 }
 
 function severityColor(value: number, warn: number, crit: number): string {
@@ -61,55 +56,6 @@ function fmtBytes(b: number): string {
   if (b > 1e6) return `${(b / 1e6).toFixed(1)} MB`;
   return `${b} B`;
 }
-
-// Per-cluster triage level from the SAME thresholds the table cells use, so the
-// summary band, the row dot, and the cell colors all agree. A missing metric
-// never counts against a cluster (null != a problem).
-function triage(c: ClusterRow, eol: EolInfo | null): Decorated {
-  const cpu = c.cpu === null ? null : n(c.cpu);
-  const aas = c.aas === null ? null : n(c.aas);
-  const dlk = n(c.deadlocks);
-  const blk = n(c.blocking_count);
-  const reasons: string[] = [];
-  let level: Level = "ok";
-
-  const crit: string[] = [];
-  if (c.status && c.status !== "available") crit.push(`status=${c.status}`);
-  if (cpu !== null && cpu >= 90) crit.push(`CPU ${cpu.toFixed(0)}%`);
-  if (aas !== null && aas >= 5) crit.push(`AAS ${aas.toFixed(1)}`);
-  if (dlk >= 5) crit.push(`${dlk} deadlocks`);
-  if (blk >= 3) crit.push(`${blk} blocking`);
-  if (eol && (eol.status === "expired" || eol.status === "imminent"))
-    crit.push(eol.status === "expired" ? "EOL passed" : "EOL imminent");
-
-  const warn: string[] = [];
-  if (cpu !== null && cpu >= 70) warn.push(`CPU ${cpu.toFixed(0)}%`);
-  if (aas !== null && aas >= 2) warn.push(`AAS ${aas.toFixed(1)}`);
-  if (dlk >= 1) warn.push(`${dlk} deadlocks`);
-  if (blk >= 1) warn.push(`${blk} blocking`);
-  if (eol && eol.status === "soon") warn.push("EOL < 1y");
-
-  if (crit.length) {
-    level = "critical";
-    reasons.push(...crit);
-  } else if (warn.length) {
-    level = "warning";
-    reasons.push(...warn);
-  }
-
-  // Heat orders rows within a level: weight the scarier signals higher.
-  const heat =
-    (cpu ?? 0) +
-    (aas ?? 0) * 15 +
-    dlk * 8 +
-    blk * 12 +
-    (c.status && c.status !== "available" ? 100 : 0) +
-    (eol?.status === "expired" ? 60 : eol?.status === "imminent" ? 30 : 0);
-
-  return { row: c, level, heat, reasons, eol };
-}
-
-const LEVEL_RANK: Record<Level, number> = { critical: 2, warning: 1, ok: 0 };
 
 type GroupBy = "none" | "account" | "engine" | "region" | "severity";
 
@@ -266,7 +212,11 @@ export default function FleetPage() {
   }, []);
 
   const decorated = useMemo(
-    () => rows.map((c) => triage(c, eolFor(c.engine, c.engine_version))),
+    () =>
+      rows.map((c): Decorated => {
+        const eol = eolFor(c.engine, c.engine_version);
+        return { row: c, eol, ...triage(c, eol) };
+      }),
     [rows],
   );
 
