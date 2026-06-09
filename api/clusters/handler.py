@@ -10,11 +10,32 @@ Routes:
 import base64
 import json
 import os
+import re
 from datetime import datetime
 
 import boto3
 import seeder
 from botocore.exceptions import ClientError
+
+_TZ_SUFFIX_RE = re.compile(r"(Z|[+-]\d{2}(:?\d{2})?)$")
+
+
+def _norm_ts(s):
+    """Normalize an RDS Data API timestamp string to unambiguous ISO 8601 UTC.
+
+    The Data API returns TIMESTAMP / TIMESTAMPTZ as a space-separated, tz-less
+    string in UTC (e.g. "2026-06-09 10:24:28.123"). The browser's `new Date()`
+    parses that space form as LOCAL time, so every rendered timestamp came out
+    shifted by the viewer's UTC offset (~9h in KST). Emit "...T...Z" so the
+    client parses it as UTC and renders it in local time correctly. Strings
+    that already carry a zone/offset are left untouched.
+    """
+    if not s or not isinstance(s, str):
+        return s
+    iso = s.replace(" ", "T", 1)
+    if _TZ_SUFFIX_RE.search(iso):
+        return iso
+    return iso + "Z"
 
 
 def _decode_jwt_payload(token: str) -> dict:
@@ -124,7 +145,13 @@ def _enrich_with_meta(clusters):
             parameters=params,
             includeResultMetadata=True,
         )
-        cols2 = [c["name"] for c in resp2.get("columnMetadata", [])]
+        meta2 = resp2.get("columnMetadata", [])
+        cols2 = [c["name"] for c in meta2]
+        # normalize ONLY timestamp columns (latest_ts) to ISO 8601 UTC so the
+        # clusters page renders ETL freshness in local time, not 9h-skewed.
+        col2_is_ts = [
+            "timestamp" in (c.get("typeName") or "").lower() for c in meta2
+        ]
         etl_by_id: dict = {}
         for rec in resp2.get("records", []):
             row = {}
@@ -137,7 +164,14 @@ def _enrich_with_meta(clusters):
                     "booleanValue",
                 ):
                     if typ in f:
-                        row[col] = f[typ]
+                        val = f[typ]
+                        if (
+                            typ == "stringValue"
+                            and i < len(col2_is_ts)
+                            and col2_is_ts[i]
+                        ):
+                            val = _norm_ts(val)
+                        row[col] = val
                         break
             if row.get("cluster_id"):
                 etl_by_id[row["cluster_id"]] = row

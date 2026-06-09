@@ -1,7 +1,28 @@
 import json
 import os
+import re
 
 import boto3
+
+_TZ_SUFFIX_RE = re.compile(r"(Z|[+-]\d{2}(:?\d{2})?)$")
+
+
+def _norm_ts(s):
+    """Normalize an RDS Data API timestamp string to unambiguous ISO 8601 UTC.
+
+    The Data API returns TIMESTAMP / TIMESTAMPTZ as a space-separated, tz-less
+    string in UTC (e.g. "2026-06-09 10:24:28.123"). The browser's `new Date()`
+    parses that space form as LOCAL time, so every rendered timestamp came out
+    shifted by the viewer's UTC offset (~9h in KST). Emit "...T...Z" so the
+    client parses it as UTC and renders it in local time correctly. Strings
+    that already carry a zone/offset are left untouched.
+    """
+    if not s or not isinstance(s, str):
+        return s
+    iso = s.replace(" ", "T", 1)
+    if _TZ_SUFFIX_RE.search(iso):
+        return iso
+    return iso + "Z"
 
 
 def lambda_handler(event, context):
@@ -20,7 +41,11 @@ def lambda_handler(event, context):
             sql=f"/* source=dbops-reports-api */ {sql}", parameters=sql_params,
             includeResultMetadata=True,
         )
-        cols = [c["name"] for c in resp.get("columnMetadata", [])]
+        meta = resp.get("columnMetadata", [])
+        cols = [c["name"] for c in meta]
+        # typeName per column, so we normalize ONLY timestamp columns (leaving
+        # text that happens to look date-ish untouched).
+        col_is_ts = ["timestamp" in (c.get("typeName") or "").lower() for c in meta]
         rows = []
         for rec in resp.get("records", []):
             row = {}
@@ -28,7 +53,10 @@ def lambda_handler(event, context):
                 col = cols[i] if i < len(cols) else f"col_{i}"
                 for typ in ("stringValue", "longValue", "doubleValue", "booleanValue"):
                     if typ in f:
-                        row[col] = f[typ]
+                        val = f[typ]
+                        if typ == "stringValue" and i < len(col_is_ts) and col_is_ts[i]:
+                            val = _norm_ts(val)
+                        row[col] = val
                         break
                 else:
                     row[col] = None
