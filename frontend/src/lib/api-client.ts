@@ -741,9 +741,23 @@ export async function deleteAlertSubscription(subArn: string) {
 }
 
 export async function fetchClusters() {
-  const res = await authedFetch(await api(`/api/clusters`));
-  if (!res.ok) throw new Error(`Clusters fetch failed: ${res.status}`);
-  return res.json();
+  // The cluster list is load-bearing for nearly every page (pickers, the header
+  // dropdown, compare's A/B selects). A single transient failure used to be
+  // swallowed by callers' catch(() => {}) and left misleading empty states
+  // ("no clusters" / "register more clusters") with no retry until a manual
+  // reload — so this one call retries briefly before giving up.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, attempt * 1200));
+    try {
+      const res = await authedFetch(await api(`/api/clusters`));
+      if (!res.ok) throw new Error(`Clusters fetch failed: ${res.status}`);
+      return await res.json();
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
 }
 
 export async function fetchCost(days = 30) {

@@ -12,11 +12,17 @@ import {
   EmptyState,
 } from "@/components/design-system/page-shell";
 import { fmtBytes, fmtExact } from "@/lib/format";
+import { isMysql } from "@/lib/engine";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
 
 export default function SchemaPage() {
-  const { selected: selectedCluster } = useSelectedCluster();
+  const { clusters, selected: selectedCluster } = useSelectedCluster();
+  // FK lineage reads pg_constraint — PG only. Guard MySQL selections up front
+  // instead of letting the run fail server-side with a cryptic error.
+  const mysqlSelected = isMysql(
+    clusters.find((c) => c.cluster_id === selectedCluster)?.engine,
+  );
   const [schema, setSchema] = useState<string>("public");
   const [data, setData] = useState<SchemaGraphResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -80,12 +86,23 @@ export default function SchemaPage() {
             <button
               type="button"
               onClick={load}
-              disabled={loading || !selectedCluster}
+              disabled={loading || !selectedCluster || mysqlSelected}
+              title={
+                mysqlSelected ? "FK 그래프는 PostgreSQL 전용입니다" : undefined
+              }
               className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors ml-auto"
             >
               {loading ? "추출 중…" : data ? "새로고침" : "FK 추출 실행"}
             </button>
           </div>
+
+          {mysqlSelected && (
+            <div className="mb-4 text-xs text-amber-300 border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+              선택된 클러스터는 MySQL입니다 — FK 그래프는 pg_constraint 기반의
+              PostgreSQL 전용 기능입니다. 우측 상단에서 PostgreSQL 클러스터로
+              전환하세요.
+            </div>
+          )}
 
           {err && (
             <div className="mb-4 text-xs text-rose-300 border border-rose-500/40 bg-rose-500/10 px-3 py-2">

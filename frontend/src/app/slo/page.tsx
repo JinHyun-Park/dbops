@@ -12,6 +12,7 @@ import {
   EmptyState,
 } from "@/components/design-system/page-shell";
 import { fmtDecimal, fmtExact } from "@/lib/format";
+import { isMysql } from "@/lib/engine";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
 
@@ -61,7 +62,8 @@ function saveConfig(clusterId: string, cfg: SloConfig) {
 }
 
 export default function SloPage() {
-  const { selected: selectedCluster } = useSelectedCluster();
+  const { clusters, selected: selectedCluster } = useSelectedCluster();
+  const engine = clusters.find((c) => c.cluster_id === selectedCluster)?.engine;
   const [config, setConfig] = useState<SloConfig>(DEFAULT_CONFIG);
   const [data, setData] = useState<SloResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -146,7 +148,7 @@ export default function SloPage() {
             <div className="mt-6 space-y-6">
               <div className="grid gap-4 md:grid-cols-2">
                 <AvailabilityCard data={data} />
-                <LatencyCard data={data} />
+                <LatencyCard data={data} engine={engine} />
               </div>
               <Timeline buckets={data.timeline} />
             </div>
@@ -289,7 +291,7 @@ function AvailabilityCard({ data }: { data: SloResponse }) {
   );
 }
 
-function LatencyCard({ data }: { data: SloResponse }) {
+function LatencyCard({ data, engine }: { data: SloResponse; engine?: string }) {
   const l = data.latency;
   const hasData = l.compliance_pct !== null;
   const meeting = (l.compliance_pct ?? 0) >= data.availability.target_pct;
@@ -340,7 +342,11 @@ function LatencyCard({ data }: { data: SloResponse }) {
       }
       emptyNote={
         !hasData
-          ? "이 윈도우에서 query_stats 샘플 없음 — pg_stat_statements 수집이 켜져 있는지 확인하세요."
+          ? `이 윈도우에서 query_stats 샘플 없음 — ${
+              isMysql(engine)
+                ? "performance_schema 문장 수집(events_statements_*)이 켜져 있는지"
+                : "pg_stat_statements 수집이 켜져 있는지"
+            } 확인하세요.`
           : undefined
       }
     />

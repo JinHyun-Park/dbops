@@ -139,16 +139,29 @@ export default function ComparePage() {
   const [seriesA, setSeriesA] = useState<Record<string, SeriesPoint[]>>({});
   const [seriesB, setSeriesB] = useState<Record<string, SeriesPoint[]>>({});
 
-  useEffect(() => {
+  // Distinguish "the registry genuinely has <2 clusters" from "the list failed
+  // to load" — the old code swallowed failures and showed the misleading
+  // "register more clusters" banner with no way to retry short of a reload.
+  const [clustersError, setClustersError] = useState(false);
+
+  const loadClusters = () => {
+    setClustersError(false);
     fetchClusters()
       .then((rows: ClusterRow[]) => {
         setClusters(rows);
         if (rows.length === 0) return;
-        if (!clusterA) setClusterA(rows[0].cluster_id);
-        if (!clusterB) setClusterB(rows[1]?.cluster_id || rows[0].cluster_id);
-        if (!periodCluster) setPeriodCluster(rows[0].cluster_id);
+        setClusterA((cur) => cur || rows[0].cluster_id);
+        setClusterB((cur) => cur || rows[1]?.cluster_id || rows[0].cluster_id);
+        setPeriodCluster((cur) => cur || rows[0].cluster_id);
       })
-      .catch((e) => console.error("clusters fetch failed:", e));
+      .catch((e) => {
+        console.error("clusters fetch failed:", e);
+        setClustersError(true);
+      });
+  };
+
+  useEffect(() => {
+    loadClusters();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -310,7 +323,20 @@ export default function ComparePage() {
         </div>
       )}
 
-      {clusters.length < 2 && mode === "cluster" ? (
+      {clustersError ? (
+        <div className="border border-rose-500/40 bg-rose-500/10 text-rose-300 text-sm px-4 py-3 flex items-center justify-between gap-3">
+          <span>
+            클러스터 목록을 불러오지 못했습니다 — 네트워크/세션 문제일 수
+            있습니다.
+          </span>
+          <button
+            onClick={loadClusters}
+            className="text-xs px-3 py-1.5 border border-rose-500/40 hover:bg-rose-500/15 transition-colors flex-shrink-0"
+          >
+            다시 시도
+          </button>
+        </div>
+      ) : clusters.length < 2 && mode === "cluster" ? (
         <div className="border border-amber-500/30 bg-amber-500/5 text-amber-300 text-sm px-4 py-3">
           Cluster vs Cluster needs at least 2 registered clusters. Add another
           via{" "}
