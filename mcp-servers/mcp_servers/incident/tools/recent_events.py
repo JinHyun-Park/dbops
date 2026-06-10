@@ -9,7 +9,7 @@ def get_recent_events_impl(
 ) -> dict:
     conditions = [
         "cluster_id = :cluster_id",
-        "event_time > NOW() - MAKE_INTERVAL(hours => :hours)",
+        "event_time > NOW() - (:hours || ' hours')::interval",
     ]
     params = {"cluster_id": cluster_id, "hours": hours}
     if event_type:

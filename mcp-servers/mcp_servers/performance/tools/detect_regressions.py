@@ -14,7 +14,7 @@ def detect_regressions_impl(
             SELECT query_hash, query_text, AVG(mean_time_ms) as before_mean_ms
             FROM query_stats
             WHERE cluster_id = :cluster_id
-              AND snapshot_time >= :change_point::timestamptz - MAKE_INTERVAL(hours => :hours_before)
+              AND snapshot_time >= :change_point::timestamptz - (:hours_before || ' hours')::interval
               AND snapshot_time < :change_point::timestamptz
             GROUP BY query_hash, query_text
         ),
@@ -23,7 +23,7 @@ def detect_regressions_impl(
             FROM query_stats
             WHERE cluster_id = :cluster_id
               AND snapshot_time >= :change_point::timestamptz
-              AND snapshot_time < :change_point::timestamptz + MAKE_INTERVAL(hours => :hours_after)
+              AND snapshot_time < :change_point::timestamptz + (:hours_after || ' hours')::interval
             GROUP BY query_hash
         )
         SELECT b.query_hash, b.query_text, b.before_mean_ms, a.after_mean_ms,

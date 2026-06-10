@@ -28,7 +28,7 @@ SELECT * FROM (
         SELECT metric_type, MAX(value) AS recent_max, AVG(value) AS recent_avg
         FROM metric_snapshots
         WHERE cluster_id = :cluster_id
-          AND ts > NOW() - MAKE_INTERVAL(hours => :hours)
+          AND ts > NOW() - (:hours || ' hours')::interval
           AND (dimensions IS NULL OR dimensions::text = '{}')
         GROUP BY metric_type
     ),
@@ -41,7 +41,7 @@ SELECT * FROM (
         SELECT metric_type, AVG(value) AS mean, STDDEV(value) AS stddev
         FROM metric_snapshots
         WHERE cluster_id = :cluster_id
-          AND ts BETWEEN NOW() - INTERVAL '7 days' AND NOW() - MAKE_INTERVAL(hours => :hours)
+          AND ts BETWEEN NOW() - INTERVAL '7 days' AND NOW() - (:hours || ' hours')::interval
           AND (dimensions IS NULL OR dimensions::text = '{}')
         GROUP BY metric_type
         HAVING STDDEV(value) > 0 AND COUNT(*) > 50

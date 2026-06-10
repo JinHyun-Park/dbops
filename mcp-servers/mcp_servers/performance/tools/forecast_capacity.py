@@ -83,7 +83,7 @@ def forecast_capacity_impl(
              ORDER BY ts DESC LIMIT 1) AS current_value
         FROM metric_snapshots
         WHERE cluster_id = :cluster_id AND metric_type = :metric
-          AND ts > NOW() - MAKE_INTERVAL(days => :days_lookback)
+          AND ts > NOW() - (:days_lookback || ' days')::interval
     """
     params = {"cluster_id": cluster_id, "metric": metric, "days_lookback": days_lookback}
     row = (cache.execute(sql, params).rows or [{}])[0]

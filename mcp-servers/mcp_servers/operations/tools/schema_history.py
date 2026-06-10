@@ -5,7 +5,7 @@ def get_schema_history_impl(cache: CacheClient, cluster_id: str, days: int = 30)
     sql = """
         SELECT snapshot_time, schema_name, diff_from_previous_json as changes
         FROM schema_snapshots
-        WHERE cluster_id = :cluster_id AND snapshot_time > NOW() - MAKE_INTERVAL(days => :days)
+        WHERE cluster_id = :cluster_id AND snapshot_time > NOW() - (:days || ' days')::interval
           AND diff_from_previous_json IS NOT NULL AND diff_from_previous_json != '{}'
         ORDER BY snapshot_time DESC
     """

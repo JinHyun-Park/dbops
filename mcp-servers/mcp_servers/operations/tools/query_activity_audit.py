@@ -114,7 +114,7 @@ def query_activity_audit_impl(
 
     # --- PG audit_log ----------------------------------------------------
     try:
-        conds = ["created_at > NOW() - MAKE_INTERVAL(days => :days)"]
+        conds = ["created_at > NOW() - (:days || ' days')::interval"]
         params: dict = {"days": days}
         if cluster_id:
             conds.append("cluster_id = :cid")

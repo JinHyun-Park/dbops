@@ -10,7 +10,7 @@ def get_incident_summary_impl(
         SELECT event_type, severity, COUNT(*) as count,
                MIN(event_time) as first_seen, MAX(event_time) as last_seen
         FROM event_log
-        WHERE cluster_id = :cluster_id AND event_time > NOW() - MAKE_INTERVAL(days => :days)
+        WHERE cluster_id = :cluster_id AND event_time > NOW() - (:days || ' days')::interval
         GROUP BY event_type, severity ORDER BY count DESC
     """
     params = {"cluster_id": cluster_id, "days": days}
