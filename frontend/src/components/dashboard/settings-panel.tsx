@@ -20,37 +20,37 @@ const PG_RECOMMENDED: Record<
   log_checkpoints: {
     value: "on",
     severity: "warning",
-    why: "Required for checkpoint timing analysis.",
+    why: "체크포인트 타이밍 분석에 필요합니다.",
   },
   log_connections: {
     value: "on",
     severity: "info",
-    why: "pgBadger session report needs this.",
+    why: "pgBadger 세션 리포트에 필요합니다.",
   },
   log_disconnections: {
     value: "on",
     severity: "info",
-    why: "pgBadger session report needs this.",
+    why: "pgBadger 세션 리포트에 필요합니다.",
   },
   log_lock_waits: {
     value: "on",
     severity: "warning",
-    why: "Lock contention diagnosis depends on this.",
+    why: "락 경합 진단이 이 설정에 의존합니다.",
   },
   log_autovacuum_min_duration: {
     value: "0",
     severity: "warning",
-    why: "0 logs every autovacuum — pgBadger correlates with bloat.",
+    why: "0이면 모든 autovacuum을 로깅 — pgBadger가 bloat와 상관분석합니다.",
   },
   log_min_duration_statement: {
     value: "1000",
     severity: "warning",
-    why: "Below 1s queries shouldn't log; 1000ms is a reasonable floor.",
+    why: "1초 미만 쿼리는 로깅 제외가 적절 — 1000ms가 합리적인 하한입니다.",
   },
   log_temp_files: {
     value: "0",
     severity: "info",
-    why: "Catches queries that spill to disk.",
+    why: "디스크로 스필하는 쿼리를 잡아냅니다.",
   },
 };
 

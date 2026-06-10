@@ -182,9 +182,9 @@ def _check_serverless_v2_acu(rds_data, cache_arn, cache_secret, cache_db, cluste
             value_str=f"min={sv2_min:.1f} ACU, p95 CPU={p95_cpu:.1f}%",
             threshold_str=f"min < max × {SV2_MIN_RAISE_FACTOR:.1f} AND p95 > 70% → cold-start risk",
             recommendation=(
-                f"Min ACU is {sv2_min:.1f} but the cluster runs hot (p95 CPU {p95_cpu:.1f}%). "
-                f"Raise min ACU to ~{suggested_min:.1f} to reduce scale-up latency on traffic spikes. "
-                "The trade-off is a higher steady-state floor — accept if cold-start hurts."
+                f"min ACU {sv2_min:.1f}로는 부하 대비 여유가 없습니다 (p95 CPU {p95_cpu:.1f}%). "
+                f"min ACU를 ~{suggested_min:.1f}로 올리면 트래픽 스파이크 시 스케일업 지연이 줄어듭니다. "
+                "대신 평시 비용 하한이 올라가는 트레이드오프입니다 — cold-start 지연이 아프다면 수용하세요."
             ),
             details={
                 "current_min_acu": sv2_min,

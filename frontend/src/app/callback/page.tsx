@@ -15,7 +15,7 @@ export default function CallbackPage() {
       window.location.hash = "";
       router.replace("/");
     } else {
-      setError("No tokens received. Please try logging in again.");
+      setError("토큰을 받지 못했습니다. 다시 로그인해 주세요.");
     }
   }, [router]);
 

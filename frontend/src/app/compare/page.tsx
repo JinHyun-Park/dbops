@@ -70,10 +70,10 @@ const RANGE_OPTIONS = [
 // Period offset preset for period-vs-period mode. The "B" series is the same
 // window shifted back by (hours) so the two series align on relative time.
 const PERIOD_SHIFT_LABEL: Record<number, string> = {
-  1: "previous 1h",
-  6: "previous 6h",
-  24: "yesterday",
-  168: "last week",
+  1: "직전 1시간",
+  6: "직전 6시간",
+  24: "어제 같은 시간",
+  168: "지난주 같은 시간",
 };
 
 interface SeriesPoint {
@@ -227,7 +227,7 @@ export default function ComparePage() {
     };
   }, [mode, periodCluster, hours, metricsKey]);
 
-  const labelA = mode === "cluster" ? clusterA || "A" : "current";
+  const labelA = mode === "cluster" ? clusterA || "A" : "현재";
   const labelB =
     mode === "cluster"
       ? clusterB || "B"
@@ -338,12 +338,11 @@ export default function ComparePage() {
         </div>
       ) : clusters.length < 2 && mode === "cluster" ? (
         <div className="border border-amber-500/30 bg-amber-500/5 text-amber-300 text-sm px-4 py-3">
-          Cluster vs Cluster needs at least 2 registered clusters. Add another
-          via{" "}
+          Cluster vs Cluster 비교에는 등록된 클러스터가 2개 이상 필요합니다.{" "}
           <a href="/clusters" className="underline">
             Clusters
           </a>{" "}
-          or generate a sample cluster.
+          페이지에서 추가 등록하거나 샘플 클러스터를 생성하세요.
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

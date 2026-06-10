@@ -354,7 +354,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
     if (n["Node Type"] === "Seq Scan" && pct > 20 && actualRows > 10_000) {
       issues.push({
         severity: pct > 40 ? "critical" : "warning",
-        title: "Sequential scan on a large table",
+        title: "대형 테이블 Seq Scan",
         detail: `${label} read ${fmtRows(actualRows)} rows · ${pct.toFixed(
           1,
         )}% of execution time`,
@@ -373,7 +373,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
       const spaceKb = n["Sort Space Used"] as number | undefined;
       issues.push({
         severity: "warning",
-        title: "Sort spilled to disk",
+        title: "정렬이 디스크로 스필됨",
         detail: `${label} · method "${sortMethod}"${
           spaceKb ? ` · ${fmtRows(spaceKb)} kB used` : ""
         }`,
@@ -387,7 +387,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
     if (hashBatches && hashBatches > 1) {
       issues.push({
         severity: "warning",
-        title: "Hash multi-batch (disk spill)",
+        title: "Hash 멀티배치 (디스크 스필)",
         detail: `${label} · ${hashBatches} batches`,
         node: label,
         fix: "work_mem 부족 — 빌드측 테이블이 hash table에 안 맞음. work_mem 증가 또는 join order 변경 검토",
@@ -399,7 +399,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
     if (rechecked && rechecked > 10_000) {
       issues.push({
         severity: "info",
-        title: "Bitmap recheck dropping many rows",
+        title: "Bitmap recheck에서 다량 행 폐기",
         detail: `${label} · ${fmtRows(rechecked)} rows discarded after bitmap`,
         node: label,
         fix: "work_mem 부족으로 lossy bitmap이 됨 — 해당 인덱스 selectivity 재확인 또는 work_mem 상향",
@@ -420,7 +420,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
         if (parentJoinish || pct > 10) {
           issues.push({
             severity: ratio > 1000 || ratio < 0.001 ? "warning" : "info",
-            title: "Row-count misestimate",
+            title: "행 수 추정 오차",
             detail: `${label} · planner expected ${fmtRows(
               planRows,
             )}, got ${fmtRows(actualRows)} (${
@@ -444,7 +444,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
       if (ratio > 0.3) {
         issues.push({
           severity: "info",
-          title: "Cold buffer reads",
+          title: "콜드 버퍼 읽기 (캐시 미스 높음)",
           detail: `${label} · ${sharedRead} disk reads vs ${
             sharedHit ?? 0
           } cache hits (${(ratio * 100).toFixed(0)}% miss)`,
@@ -461,7 +461,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
       if (innerLoops > 5000) {
         issues.push({
           severity: pct > 30 ? "critical" : "warning",
-          title: "Nested loop with high inner repetition",
+          title: "Nested Loop 내부 반복 과다",
           detail: `${label} · inner side ran ${fmtRows(innerLoops)} times`,
           node: label,
           fix: "Hash Join 또는 Merge Join을 유도 (조인 컬럼에 인덱스 + ANALYZE) · 또는 SET enable_nestloop=off로 검증",

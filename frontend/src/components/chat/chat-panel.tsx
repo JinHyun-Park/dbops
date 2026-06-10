@@ -785,7 +785,7 @@ export function ChatPanel() {
         },
         (err) => {
           console.error("Stream error:", err);
-          setStreamError(err?.message || "Unknown stream error");
+          setStreamError(err?.message || "알 수 없는 스트림 오류");
           setIsStreaming(false);
         },
         convId,
@@ -820,7 +820,7 @@ export function ChatPanel() {
                 onClick={() => {
                   if (
                     window.confirm(
-                      `Delete all ${conversations.length} conversations? This cannot be undone.`,
+                      `대화 ${conversations.length}개를 모두 삭제할까요? 되돌릴 수 없습니다.`,
                     )
                   ) {
                     persist(() => []);
@@ -844,7 +844,7 @@ export function ChatPanel() {
         <div className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
           {conversations.length === 0 ? (
             <div className="px-3 py-6 text-center text-[11px] text-zinc-600">
-              click <span className="text-amber-400">+ new</span> to start
+              <span className="text-amber-400">+ new</span> 를 눌러 시작하세요
             </div>
           ) : (
             conversations
@@ -901,7 +901,7 @@ export function ChatPanel() {
               </span>
             </div>
             <div className="text-sm text-zinc-200 mt-0.5 truncate">
-              {active ? active.title : "Start a new conversation"}
+              {active ? active.title : "새 대화를 시작하세요"}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -945,7 +945,7 @@ export function ChatPanel() {
                     );
                   }}
                   className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-amber-500/40 hover:text-amber-300 transition-colors"
-                  title="Download conversation as Markdown (.md)"
+                  title="대화를 Markdown(.md)으로 다운로드"
                 >
                   ⬇ md
                 </button>
@@ -955,16 +955,14 @@ export function ChatPanel() {
                     exportConversationToPdf(active);
                   }}
                   className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-amber-500/40 hover:text-amber-300 transition-colors"
-                  title="Save the entire conversation as PDF — opens the browser print dialog with only the chat content (no app chrome)."
+                  title="대화 전체를 PDF로 저장 — 채팅 내용만 담긴 브라우저 인쇄 창이 열립니다."
                 >
                   🖨 pdf
                 </button>
                 <button
                   onClick={() => {
                     if (!active) return;
-                    if (
-                      window.confirm("Clear all messages in this conversation?")
-                    ) {
+                    if (window.confirm("이 대화의 모든 메시지를 지울까요?")) {
                       persist((prev) =>
                         prev.map((c) =>
                           c.id === active.id
@@ -989,7 +987,7 @@ export function ChatPanel() {
               <button
                 onClick={() => {
                   if (!active) return;
-                  if (window.confirm("Delete this conversation?")) {
+                  if (window.confirm("이 대화를 삭제할까요?")) {
                     removeConversation(active.id);
                   }
                 }}

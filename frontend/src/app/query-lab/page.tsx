@@ -32,19 +32,19 @@ const PRESETS = [
       "**한국어로** 답변해줘. 이 쿼리에 EXPLAIN (ANALYZE, BUFFERS)를 실행하고, plan을 요약 + 가장 비싼 노드 식별 + 개선안을 제시해줘.",
   },
   {
-    label: "Index recommendation",
+    label: "인덱스 추천",
     template: "SELECT * FROM <your-table> WHERE <conditions>;",
     prompt:
       "**한국어로** 답변해줘. 이 쿼리를 분석해서 개선할 수 있는 인덱스를 제안하고, trade-off(쓰기 비용, 스토리지, selectivity)를 설명해줘.",
   },
   {
-    label: "Lock conflict diagnosis",
+    label: "락 충돌 진단",
     template: "-- the query that was reported as blocked",
     prompt:
       "**한국어로** 답변해줘. 이 쿼리가 락 대기 중이라고 보고됐어. 가장 가능성 높은 락 경합 원인을 진단하고 완화책을 제안해줘.",
   },
   {
-    label: "Rewrite for performance",
+    label: "성능 개선 리라이트",
     template: "-- original SQL",
     prompt:
       "**한국어로** 답변해줘. 이 SQL을 PostgreSQL에서 더 빠르게 돌도록 재작성하고, 각 변경이 왜 도움이 되는지 설명해줘. 정확한 시맨틱은 보존.",
@@ -176,7 +176,10 @@ export default function QueryLabPage() {
   const handleExplain = useCallback(
     async (sql: string) => {
       if (!clusterId) {
-        setExplainError({ message: "Select a cluster first.", kind: "infra" });
+        setExplainError({
+          message: "클러스터를 먼저 선택하세요.",
+          kind: "infra",
+        });
         setTab("plan");
         return;
       }
@@ -352,8 +355,8 @@ export default function QueryLabPage() {
 
       <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-3 mb-4">
         <div className="text-[11px] text-zinc-500 uppercase tracking-wider mb-2">
-          quick presets — copies a template to clipboard and primes the AI
-          analysis prompt
+          quick presets — 템플릿을 클립보드에 복사하고 AI 분석 프롬프트를
+          준비합니다
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           {PRESETS.map((p) => (

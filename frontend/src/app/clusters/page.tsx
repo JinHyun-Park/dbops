@@ -303,7 +303,7 @@ export default function ClustersPage() {
     } catch (e) {
       setFeedback({
         kind: "err",
-        msg: e instanceof Error ? e.message : "Bulk register failed",
+        msg: e instanceof Error ? e.message : "일괄 등록에 실패했습니다",
       });
     } finally {
       setRegistering(false);
@@ -376,7 +376,7 @@ export default function ClustersPage() {
     } catch (e) {
       setFeedback({
         kind: "err",
-        msg: e instanceof Error ? e.message : "Sample generation failed",
+        msg: e instanceof Error ? e.message : "샘플 생성에 실패했습니다",
       });
     } finally {
       setSeedingSample(false);

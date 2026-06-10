@@ -291,7 +291,7 @@ function NodeCard({
         {node.promotion_tier !== null &&
           node.promotion_tier !== undefined &&
           !isWriter && (
-            <span title="Aurora promotion tier — lower = higher failover priority">
+            <span title="Aurora promotion tier — 숫자가 낮을수록 failover 우선순위가 높습니다">
               <span className="text-zinc-600">tier:</span>{" "}
               <span className="text-zinc-400">{node.promotion_tier}</span>
             </span>

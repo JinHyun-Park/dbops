@@ -30,25 +30,25 @@ BLOAT_CRITICAL_PCT = 40.0
 
 # Extensions DBOps recommends. Each entry: (name, criticality, why).
 RECOMMENDED_EXTENSIONS = [
-    ("pg_stat_statements", "warning", "Per-query latency aggregates feed slow-query panels + AI insight."),
-    ("auto_explain",        "info",    "Auto-captures EXPLAIN for slow queries — invaluable for post-mortem."),
-    ("pgstattuple",         "warning", "Precise bloat measurement instead of the size-based estimate."),
-    ("pg_repack",           "info",    "VACUUM FULL alternative that doesn't take an exclusive lock."),
-    ("pg_hint_plan",        "info",    "Override planner choices when stats mislead it."),
-    ("pg_cron",             "info",    "Schedule VACUUM/ANALYZE jobs without an external scheduler."),
+    ("pg_stat_statements", "warning", "쿼리별 지연 집계가 슬로우 쿼리 패널과 AI 분석의 원천입니다."),
+    ("auto_explain",        "info",    "느린 쿼리의 EXPLAIN을 자동 수집 — 사후 분석에 필수입니다."),
+    ("pgstattuple",         "warning", "크기 기반 추정 대신 정밀한 bloat 측정을 제공합니다."),
+    ("pg_repack",           "info",    "배타 락 없이 동작하는 VACUUM FULL 대안입니다."),
+    ("pg_hint_plan",        "info",    "통계가 부정확할 때 플래너 선택을 강제할 수 있습니다."),
+    ("pg_cron",             "info",    "외부 스케줄러 없이 VACUUM/ANALYZE 작업을 예약합니다."),
 ]
 
 
 # Logging parameters DBOps recommends (pgBadger-friendly). Each entry:
 # (name, recommended_value, severity_if_off, why).
 RECOMMENDED_SETTINGS = [
-    ("log_checkpoints",                  "on",     "warning", "Required for checkpoint timing analysis."),
-    ("log_connections",                  "on",     "info",    "pgBadger session report needs this."),
-    ("log_disconnections",               "on",     "info",    "pgBadger session report needs this."),
-    ("log_lock_waits",                   "on",     "warning", "Lock contention diagnosis depends on this."),
-    ("log_autovacuum_min_duration",      "0",      "warning", "0 logs every autovacuum — pgBadger correlates with bloat."),
-    ("log_min_duration_statement",       "1000",   "warning", "Below 1s queries shouldn't log; 1000ms is a reasonable floor."),
-    ("log_temp_files",                   "0",      "info",    "Catches queries that spill to disk."),
+    ("log_checkpoints",                  "on",     "warning", "체크포인트 타이밍 분석에 필요합니다."),
+    ("log_connections",                  "on",     "info",    "pgBadger 세션 리포트에 필요합니다."),
+    ("log_disconnections",               "on",     "info",    "pgBadger 세션 리포트에 필요합니다."),
+    ("log_lock_waits",                   "on",     "warning", "락 경합 진단이 이 설정에 의존합니다."),
+    ("log_autovacuum_min_duration",      "0",      "warning", "0이면 모든 autovacuum을 로깅 — pgBadger가 bloat와 상관분석합니다."),
+    ("log_min_duration_statement",       "1000",   "warning", "1초 미만 쿼리는 로깅 제외가 적절 — 1000ms가 합리적인 하한입니다."),
+    ("log_temp_files",                   "0",      "info",    "디스크로 스필하는 쿼리를 잡아냅니다."),
 ]
 
 
@@ -117,12 +117,12 @@ def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target
             if age_val >= TXID_CRITICAL:
                 add("txid_age", "critical", f"db:{db_name}", f"age={age_val:,}",
                     f"< {TXID_CRITICAL:,}",
-                    "Run VACUUM FREEZE on hot tables immediately — wraparound risk imminent.",
+                    "핫 테이블에 즉시 VACUUM FREEZE를 실행하세요 — wraparound 위험이 임박했습니다.",
                     {"db_name": db_name, "age": age_val})
             elif age_val >= TXID_WARN:
                 add("txid_age", "warning", f"db:{db_name}", f"age={age_val:,}",
                     f"< {TXID_WARN:,}",
-                    "Schedule a manual VACUUM FREEZE pass during the next maintenance window.",
+                    "다음 점검 윈도우에 수동 VACUUM FREEZE 실행을 예약하세요.",
                     {"db_name": db_name, "age": age_val})
     except Exception as e:
         print(f"[health] txid db check failed: {e}")
@@ -177,14 +177,14 @@ def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target
                 add("dead_tuples", "warning", f"{schema}.{relname}",
                     f"{dead_pct:.1f}% ({n_dead:,} dead / {n_live:,} live)",
                     f"< {DEAD_RATIO_WARN_PCT:.0f}%",
-                    f"Consider VACUUM ANALYZE {schema}.{relname}.",
+                    f"{schema}.{relname}에 VACUUM ANALYZE를 검토하세요.",
                     {"schema": schema, "table": relname, "n_dead": n_dead, "n_live": n_live, "dead_pct": dead_pct})
             # Vacuum overdue
             if days is not None and days > VACUUM_OVERDUE_DAYS and n_live > 1000:
                 add("vacuum_overdue", "warning", f"{schema}.{relname}",
                     f"{days:.0f}d since last vacuum",
                     f"< {VACUUM_OVERDUE_DAYS}d",
-                    f"No autovacuum in {days:.0f} days on a {n_live:,}-row table — check autovacuum thresholds.",
+                    f"{n_live:,}행 테이블에 {days:.0f}일간 autovacuum이 없었습니다 — autovacuum 임계값을 확인하세요.",
                     {"schema": schema, "table": relname, "days_since_vacuum": days})
     except Exception as e:
         print(f"[health] dead tuple check failed: {e}")
@@ -289,13 +289,13 @@ def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target
                 add("table_bloat", "critical", f"{schema}.{relname}",
                     f"bloat ≈ {pct:.1f}% ({precision})",
                     f"< {BLOAT_CRITICAL_PCT:.0f}%",
-                    f"pg_repack {schema}.{relname} (or VACUUM FULL during maintenance window).",
+                    f"{schema}.{relname}에 pg_repack을 실행하세요 (또는 점검 윈도우에 VACUUM FULL).",
                     {"schema": schema, "table": relname, "pct": pct, "precision": precision})
             elif pct >= BLOAT_WARN_PCT:
                 add("table_bloat", "warning", f"{schema}.{relname}",
                     f"bloat ≈ {pct:.1f}% ({precision})",
                     f"< {BLOAT_WARN_PCT:.0f}%",
-                    f"Consider pg_repack or scheduled VACUUM on {schema}.{relname}.",
+                    f"{schema}.{relname}에 pg_repack 또는 정기 VACUUM을 검토하세요.",
                     {"schema": schema, "table": relname, "pct": pct, "precision": precision})
     except Exception as e:
         print(f"[health] bloat check failed: {e}")

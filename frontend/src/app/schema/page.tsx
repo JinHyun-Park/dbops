@@ -173,7 +173,7 @@ function SummaryTiles({ data }: { data: SchemaGraphResponse }) {
       <Tile
         label="Isolated"
         value={fmtExact(data.isolated_count ?? 0)}
-        sub="no FK in or out"
+        sub="들어오고 나가는 FK 없음"
         tone={(data.isolated_count ?? 0) > 0 ? "amber" : "zinc"}
       />
       <Tile
@@ -181,7 +181,7 @@ function SummaryTiles({ data }: { data: SchemaGraphResponse }) {
         value={fmtExact(
           data.tables.filter((t) => t.fk_in + t.fk_out >= 3).length,
         )}
-        sub="≥ 3 FK total"
+        sub="FK 합계 ≥ 3"
       />
     </div>
   );
@@ -291,7 +291,7 @@ function GraphCanvas({
   return (
     <div className="bg-zinc-900/40 border border-zinc-800 overflow-auto">
       <div className="px-3 py-2 border-b border-zinc-800 text-[10px] uppercase tracking-wider text-zinc-500">
-        graph · click a table to highlight its FKs
+        graph · 테이블을 클릭하면 해당 FK가 하이라이트됩니다
       </div>
       <svg
         width={svgWidth}
@@ -567,7 +567,7 @@ function TableList({
   return (
     <div className="bg-zinc-900/40 border border-zinc-800 max-h-[680px] overflow-y-auto">
       <div className="px-3 py-2 border-b border-zinc-800 sticky top-0 bg-zinc-900/95 backdrop-blur text-[10px] uppercase tracking-wider text-zinc-500">
-        tables · click for FK detail
+        tables · 클릭하면 FK 상세
       </div>
       <ul className="divide-y divide-zinc-800/60">
         {sorted.map((t) => (
