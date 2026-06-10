@@ -610,12 +610,33 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<ScalingResponse | null>(null);
 
+  // 클러스터 선택 즉시 무변경 베이스라인 시뮬레이션을 자동 실행한다.
+  // 이전에는 첫 실행 결과가 와야 mode를 알 수 있어서 프로비저닝 클러스터에도
+  // ACU 입력이 먼저 보였다(모드는 백엔드가 describe로 라이브 판별 — AWS는
+  // Sv2도 EngineMode "provisioned"로 보고하므로 프런트 단독 판별 불가).
+  // 베이스라인 결과로 입력 컨트롤이 처음부터 실제 모드를 따르고, 현재
+  // 구성·월 비용도 입력 전에 보인다.
   useEffect(() => {
     setResult(null);
     setErr(null);
     setMinAcu("");
     setMaxAcu("");
     setInstanceClass("");
+    let alive = true;
+    setLoading(true);
+    simulateScaling(clusterId, null, null, null)
+      .then((r) => {
+        if (alive) setResult(r);
+      })
+      .catch((e) => {
+        if (alive) setErr(e instanceof Error ? e.message : "fetch failed");
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, [clusterId]);
 
   const run = async () => {
@@ -636,9 +657,6 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
     }
   };
 
-  // First run defaults the input controls to ACU; once a result arrives we
-  // render whichever control matches the cluster's actual mode. Until then
-  // we show both so the user can drive a provisioned cluster on first call.
   const mode = result?.mode;
   const provisioned = mode === "provisioned";
 
@@ -661,7 +679,13 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
-          {provisioned ? (
+          {!result ? (
+            <span className="text-[11px] text-zinc-500">
+              {err
+                ? "모드 감지 실패 — 아래 오류 확인"
+                : "클러스터 모드 감지 중…"}
+            </span>
+          ) : provisioned ? (
             <>
               <label className="text-[10px] uppercase tracking-wider text-zinc-500">
                 New instance class
@@ -670,7 +694,7 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
                 type="text"
                 value={instanceClass}
                 onChange={(e) => setInstanceClass(e.target.value)}
-                placeholder="db.r6g.xlarge"
+                placeholder={result.current.instance_class || "db.r6g.xlarge"}
                 spellCheck={false}
                 className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-44"
               />
@@ -686,7 +710,7 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
                 min="0.5"
                 value={minAcu}
                 onChange={(e) => setMinAcu(e.target.value)}
-                placeholder="0.5"
+                placeholder={String(result.current.min_acu ?? 0.5)}
                 className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-20 tabular-nums"
               />
               <label className="text-[10px] uppercase tracking-wider text-zinc-500 ml-2">
@@ -698,14 +722,14 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
                 min="0.5"
                 value={maxAcu}
                 onChange={(e) => setMaxAcu(e.target.value)}
-                placeholder="4"
+                placeholder={String(result.current.max_acu ?? 4)}
                 className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-20 tabular-nums"
               />
             </>
           )}
           <button
             onClick={run}
-            disabled={loading}
+            disabled={loading || !result}
             className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors ml-auto"
           >
             {loading ? "추정 중…" : "비용 추정"}
@@ -792,10 +816,10 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
           </div>
         )}
 
-        {!result && !loading && !err && (
+        {!result && loading && (
           <div className="p-6 text-zinc-500 text-sm">
-            ACU min/max 또는 인스턴스 클래스를 입력하면 라이브 클러스터의 현재
-            구성과 비교합니다. 빈 값이면 현재값을 그대로 사용합니다.
+            현재 구성과 월 비용을 불러오는 중입니다 — 클러스터 모드(Serverless
+            v2 / 프로비저닝)에 맞는 입력이 곧 표시됩니다.
           </div>
         )}
       </div>
