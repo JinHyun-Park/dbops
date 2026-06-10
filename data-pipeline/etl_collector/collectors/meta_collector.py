@@ -1,3 +1,21 @@
+def _writer_instance_class(rds_client, cluster_id: str, members: list) -> str:
+    """Writer 인스턴스의 DBInstanceClass. Sv2는 "db.serverless", 프로비저닝은
+    db.r6g.large 같은 실제 클래스 — 한 필드로 두 모드를 다 표현한다.
+    describe 권한 문제 등으로 실패하면 빈 문자열(컬럼 유지)."""
+    writer_id = next(
+        (m.get("DBInstanceIdentifier") for m in members if m.get("IsClusterWriter")),
+        None,
+    ) or (members[0].get("DBInstanceIdentifier") if members else None)
+    if not writer_id:
+        return ""
+    try:
+        resp = rds_client.describe_db_instances(DBInstanceIdentifier=writer_id)
+        return resp["DBInstances"][0].get("DBInstanceClass", "")
+    except Exception as e:
+        print(f"[meta] instance class lookup failed for {cluster_id}: {e}")
+        return ""
+
+
 def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, region):
     response = rds_client.describe_db_clusters(DBClusterIdentifier=cluster_id)
     cluster = response["DBClusters"][0]
@@ -8,6 +26,9 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
     # signal to skip the ACU advice.
     sv2 = cluster.get("ServerlessV2ScalingConfiguration") or {}
     engine_mode = cluster.get("EngineMode") or ("serverless" if sv2 else "provisioned")
+    instance_class = _writer_instance_class(
+        rds_client, cluster_id, cluster.get("DBClusterMembers") or []
+    )
 
     sql = """
         INSERT INTO cluster_meta (
@@ -17,6 +38,7 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
             preferred_backup_window, preferred_maintenance_window,
             multi_az, deletion_protection,
             engine_mode, serverlessv2_min_acu, serverlessv2_max_acu,
+            instance_class, http_endpoint_enabled,
             updated_at
         )
         VALUES (
@@ -28,6 +50,7 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
             :preferred_backup_window, :preferred_maintenance_window,
             :multi_az, :deletion_protection,
             :engine_mode, :sv2_min_acu, :sv2_max_acu,
+            :instance_class, :http_endpoint_enabled,
             NOW()
         )
         ON CONFLICT (cluster_id) DO UPDATE SET
@@ -44,6 +67,8 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
             engine_mode = EXCLUDED.engine_mode,
             serverlessv2_min_acu = EXCLUDED.serverlessv2_min_acu,
             serverlessv2_max_acu = EXCLUDED.serverlessv2_max_acu,
+            instance_class = COALESCE(NULLIF(EXCLUDED.instance_class, ''), cluster_meta.instance_class),
+            http_endpoint_enabled = EXCLUDED.http_endpoint_enabled,
             updated_at = NOW()
     """
     params = {
@@ -66,6 +91,8 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
         "engine_mode": engine_mode,
         "sv2_min_acu": float(sv2["MinCapacity"]) if sv2.get("MinCapacity") is not None else None,
         "sv2_max_acu": float(sv2["MaxCapacity"]) if sv2.get("MaxCapacity") is not None else None,
+        "instance_class": instance_class,
+        "http_endpoint_enabled": bool(cluster.get("HttpEndpointEnabled", False)),
     }
     cache_execute(sql, params)
     return {"cluster_id": cluster_id, "status": cluster["Status"]}

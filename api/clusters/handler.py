@@ -374,7 +374,7 @@ def _handle_register(table, body: dict):
         "registered_at": datetime.utcnow().isoformat() + "Z",
         "connection_status": connection_status,
         "connection_error": connection_error,
-        "connection_validated_at": datetime.utcnow().isoformat() if connection_status != "untested" else "",
+        "connection_validated_at": (datetime.utcnow().isoformat() + "Z") if connection_status != "untested" else "",
     }
     # Auto-resolved ARN/secret/db_name from RDS describe go in unless the
     # caller (bulk-register path) supplied explicit overrides.
@@ -514,7 +514,7 @@ def _handle_seed_sample(table):
         "registered_at": datetime.utcnow().isoformat() + "Z",
         "connection_status": "ok",
         "connection_error": "",
-        "connection_validated_at": datetime.utcnow().isoformat(),
+        "connection_validated_at": datetime.utcnow().isoformat() + "Z",
         "is_demo": True,
     }
     table.put_item(Item=item)
@@ -628,6 +628,25 @@ def _test_connection(body: dict) -> dict:
                 "Aurora cluster has no managed master secret — RDS Data API "
                 "calls will fail. Enable Secrets Manager-managed credentials "
                 "on the cluster or supply secret_arn manually."
+            ),
+        })
+
+    # Step 4: Data API(HttpEndpoint). 컨트롤 플레인 점검만으로는 잡히지 않는
+    # 가장 흔한 함정 — 꺼져 있으면 라이브 SQL 수집·에이전트 SQL이 전부 막히는데
+    # 등록 자체는 성공하므로, 여기서 미리 경고해야 DBA가 영문 모를 빈 패널을
+    # 보며 기다리는 사태를 막는다. 실패가 아닌 warning: CloudWatch 기반
+    # 지표·이벤트 수집은 Data API 없이도 정상 동작한다.
+    if cluster.get("HttpEndpointEnabled"):
+        steps.append({"name": "data_api", "status": "ok"})
+    else:
+        steps.append({
+            "name": "data_api",
+            "status": "warning",
+            "note": (
+                "RDS Data API(HttpEndpoint)가 비활성입니다 — CloudWatch 지표는 수집되지만 "
+                "라이브 SQL 기반 기능(테이블 통계·커넥션·Top Queries·에이전트 SQL)은 동작하지 않습니다. "
+                f"활성화: aws rds modify-db-cluster --db-cluster-identifier {cluster_id} "
+                "--enable-http-endpoint (다운타임 없음)"
             ),
         })
 

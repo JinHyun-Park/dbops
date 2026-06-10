@@ -150,12 +150,24 @@ def execute_sql_impl(
             includeResultMetadata=True,
         )
     except Exception as e:
-        return {
+        err = str(e)
+        result = {
             "status": "execution_failed",
-            "error": str(e),
+            "error": err,
             "cluster_id": cluster_id,
             "target_arn": target_arn,
         }
+        # 프로비저닝 클러스터가 가장 흔하게 밟는 케이스: Data API(HttpEndpoint)
+        # 미활성. raw boto 에러만으로는 DBA가 다음 행동을 알 수 없으므로
+        # 활성화 명령까지 안내한다 (Aurora PG 14.9+/15.4+/16+, MySQL 3.07+ 지원).
+        if "HttpEndpoint" in err or "Http endpoint" in err.lower():
+            result["reason"] = (
+                f"이 클러스터는 RDS Data API(HttpEndpoint)가 비활성 상태라 SQL을 실행할 수 없습니다. "
+                f"활성화: aws rds modify-db-cluster --db-cluster-identifier {cluster_id} "
+                f"--enable-http-endpoint (다운타임 없음, 몇 초 내 적용). "
+                f"활성화 전까지는 라이브 SQL 기반 수집(테이블 통계·커넥션·Top Queries)도 동작하지 않습니다."
+            )
+        return result
 
     cols = [c["name"] for c in resp.get("columnMetadata", [])]
     rows = []

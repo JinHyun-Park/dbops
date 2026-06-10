@@ -77,6 +77,7 @@ interface DashboardData {
     status?: string;
     storage_size_gb?: number | string;
     instance_class?: string;
+    http_endpoint_enabled?: boolean | null;
     backup_retention_days?: number | string | null;
     earliest_restorable_time?: string | null;
     latest_restorable_time?: string | null;
@@ -564,6 +565,26 @@ export default function DashboardPage() {
               </div>
             );
           })()}
+
+          {/* false일 때만 — NULL(미수집)·true는 숨김. 라이브 SQL 패널들이
+              영원히 "수집 대기"로 보이는 이유를 여기서 먼저 설명한다. */}
+          {dashboardData.cluster?.http_endpoint_enabled === false && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 text-sm">
+              <div className="text-amber-300 font-medium mb-1">
+                RDS Data API(HttpEndpoint) 비활성
+              </div>
+              <div className="text-zinc-300">
+                CloudWatch 지표는 정상 수집되지만, 라이브 SQL 기반 패널(Vacuum
+                &amp; Bloat, Table Sizes, Connection Activity, Top Queries,
+                Configuration)과 AI 에이전트의 SQL 실행은 이 클러스터에서
+                동작하지 않습니다. 다운타임 없이 활성화할 수 있습니다:
+              </div>
+              <code className="mt-2 block w-fit max-w-full overflow-x-auto rounded bg-zinc-900/80 px-2.5 py-1.5 font-mono text-xs text-amber-200">
+                aws rds modify-db-cluster --db-cluster-identifier{" "}
+                {selectedCluster} --enable-http-endpoint
+              </code>
+            </div>
+          )}
 
           <MaintenanceHealthPanel
             clusterId={selectedCluster}
