@@ -119,27 +119,32 @@ export function HealthScore({ clusterId }: Props) {
           }, 0),
         );
 
-  const grade =
-    score >= 90
+  // Grade by WORST SIGNAL, not by the weighted score alone. A low-weight
+  // signal in crit (e.g. deadlocks, weight 10) only drops the score to 90,
+  // which used to read "HEALTHY" right next to the CRITICAL incident banner —
+  // an active deadlock storm must never grade green regardless of arithmetic.
+  const hasCrit = signals.some((s) => s.status === "crit");
+  const hasWarn = signals.some((s) => s.status === "warn");
+  const grade = hasCrit
+    ? {
+        label: "CRITICAL",
+        color: "text-rose-400",
+        ring: "ring-rose-500/40",
+        bg: "bg-rose-500/10",
+      }
+    : hasWarn || score < 90
       ? {
+          label: "DEGRADED",
+          color: "text-amber-400",
+          ring: "ring-amber-500/40",
+          bg: "bg-amber-500/10",
+        }
+      : {
           label: "HEALTHY",
           color: "text-emerald-400",
           ring: "ring-emerald-500/40",
           bg: "bg-emerald-500/10",
-        }
-      : score >= 70
-        ? {
-            label: "DEGRADED",
-            color: "text-amber-400",
-            ring: "ring-amber-500/40",
-            bg: "bg-amber-500/10",
-          }
-        : {
-            label: "CRITICAL",
-            color: "text-rose-400",
-            ring: "ring-rose-500/40",
-            bg: "bg-rose-500/10",
-          };
+        };
 
   return (
     <div className={`bg-zinc-900/50 border border-zinc-800 p-5 ${grade.bg}`}>

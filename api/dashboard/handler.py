@@ -927,30 +927,31 @@ def _batch_timeseries(
     return {**base_meta, "series": series}
 
 
-def _registered_cluster_ids() -> set[str] | None:
-    """Return the set of cluster_ids currently in the DDB registry, or None
-    if the registry is unreachable / not configured.
+def _registered_clusters() -> dict[str, dict] | None:
+    """Return {cluster_id: {"engine": ...}} for the DDB registry, or None if
+    the registry is unreachable / not configured.
 
-    Fleet reads cluster_meta from the PG cache, which can drift from the
-    DDB registry — e.g. an old ETL run wrote a row that was never followed
-    up by a Clusters page registration, or a row whose registration was
-    deleted but whose cache snapshots survived. Filtering Fleet output by
-    the registry hides those ghosts."""
+    The registry is the source of truth in BOTH directions:
+      - cache rows whose registration was deleted are ghosts → filtered out;
+      - registered clusters with NO cache row yet (new registration, broken
+        ETL) must still APPEAR in Fleet — those are exactly the ones an
+        operator needs to notice, so the overview synthesizes a metric-less
+        row for them instead of letting them vanish."""
     if not _CLUSTERS_TABLE_NAME:
         return None
     try:
         tbl = boto3.resource("dynamodb").Table(_CLUSTERS_TABLE_NAME)
-        ids: set[str] = set()
-        kwargs: dict = {"ProjectionExpression": "cluster_id"}
+        out: dict[str, dict] = {}
+        kwargs: dict = {"ProjectionExpression": "cluster_id, engine"}
         while True:
             resp = tbl.scan(**kwargs)
             for item in resp.get("Items", []):
                 cid = item.get("cluster_id")
                 if cid:
-                    ids.add(cid)
+                    out[cid] = {"engine": item.get("engine") or ""}
             last = resp.get("LastEvaluatedKey")
             if not last:
-                return ids
+                return out
             kwargs["ExclusiveStartKey"] = last
     except Exception as e:
         print(f"[dashboard] registered cluster scan failed: {e}")
@@ -1005,9 +1006,31 @@ def _multi_cluster_overview(query):
     # the DDB table is the source of truth for "what the operator considers
     # an active cluster." On registry-fetch failure we leave the list
     # unfiltered so a transient DDB outage doesn't blank out Fleet.
-    registered = _registered_cluster_ids()
+    registered = _registered_clusters()
     if registered is not None:
         rows = [r for r in rows if r.get("cluster_id") in registered]
+        # Registered but never collected (new registration / broken ETL):
+        # synthesize a metric-less row so the cluster is VISIBLE in Fleet —
+        # the frontend renders null metrics as "-" and treats missing status
+        # as neutral, so it surfaces without false-alarming.
+        present = {r.get("cluster_id") for r in rows}
+        for cid, meta in sorted(registered.items()):
+            if cid in present:
+                continue
+            rows.append({
+                "cluster_id": cid,
+                "engine": meta.get("engine") or "",
+                "engine_version": None,
+                "status": None,
+                "storage_size_gb": None,
+                "cpu": None,
+                "aas": None,
+                "conn_active": None,
+                "conn_idle": None,
+                "storage_bytes": None,
+                "deadlocks": None,
+                "blocking_count": 0,
+            })
     return {"clusters": rows}
 
 

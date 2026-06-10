@@ -75,7 +75,15 @@ export function ApprovalCard({
 
       <div className="flex items-center justify-between text-[11px] text-zinc-500 mt-3 pt-3 border-t border-zinc-800/80">
         <span className="font-mono">{approval.cluster_id}</span>
-        <span>{new Date(approval.created_at).toLocaleString()}</span>
+        {/* created_at is a ms-epoch stored as a DDB STRING (sort key) —
+            new Date("1781…") is Invalid Date, so cast numerics first. */}
+        <span>
+          {new Date(
+            Number.isFinite(Number(approval.created_at))
+              ? Number(approval.created_at)
+              : approval.created_at,
+          ).toLocaleString()}
+        </span>
       </div>
 
       {/* approval_id is what the agent needs when re-issuing the write
