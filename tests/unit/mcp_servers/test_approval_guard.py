@@ -268,6 +268,29 @@ def test_verify_approval_ddb_scan_error_rejected(mock_boto3):
     assert "not found" in result["reason"]
 
 
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
+@patch("mcp_servers.shared.approval_guard.boto3")
+def test_find_approval_paginates_past_nonmatching_pages(mock_boto3):
+    """Regression: scan used Limit=1, but DynamoDB applies Limit BEFORE
+    FilterExpression — with 2+ rows in the table the matching approval was
+    never found and every approved write was refused. The lookup must follow
+    LastEvaluatedKey across pages and must not pass Limit."""
+    table = MagicMock()
+    table.scan.side_effect = [
+        {"Items": [], "LastEvaluatedKey": {"approval_id": "other"}},
+        {"Items": [_fresh_row()]},
+    ]
+    mock_boto3.resource.return_value.Table.return_value = table
+
+    result = verify_approval("aid-1", "prod-pg-1", "execute_sql")
+
+    assert result == {"ok": True}
+    assert table.scan.call_count == 2
+    for call in table.scan.call_args_list:
+        assert "Limit" not in call.kwargs
+    assert table.scan.call_args_list[1].kwargs["ExclusiveStartKey"] == {"approval_id": "other"}
+
+
 # ===== Payload binding (the approval is tied to the exact operation) =====
 
 

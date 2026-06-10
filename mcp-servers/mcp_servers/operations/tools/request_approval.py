@@ -15,10 +15,26 @@ The handoff is intentionally explicit (two tool calls) so:
 import os
 import time
 import uuid
+from decimal import Decimal
 
 import boto3
 
 from mcp_servers.shared.approval_guard import canonical_action_hash
+
+
+def _ddb_safe(value):
+    """boto3의 DynamoDB resource는 Python float을 거부한다("Float types are
+    not supported") — ACU 범위(0.5, 4.0) 같은 숫자가 action_details에 오면
+    put_item이 통째로 실패해 에이전트가 우회 재시도를 해야 했다. float은
+    Decimal로, 중첩 구조는 재귀 변환한다. 해시는 변환 전 값으로 이미 계산되며
+    _norm_val이 숫자/문자열을 동일 취급하므로 검증과도 일관된다."""
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {k: _ddb_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_ddb_safe(v) for v in value]
+    return value
 
 
 def request_approval_impl(
@@ -63,7 +79,7 @@ def request_approval_impl(
                 "approval_status": "pending",
                 "cluster_id": cluster_id,
                 "action_type": action_type,
-                "action_details": action_details,
+                "action_details": _ddb_safe(action_details),
                 # Bind the approval to this exact payload. verify_approval
                 # re-derives the same hash from the tool's real args at execute
                 # time and refuses any mismatch — so an approval for one SQL

@@ -166,18 +166,29 @@ def _find_approval(table, approval_id: str) -> Optional[dict]:
     `request_approval`, ISO from manual POSTs), so we have to scan by
     approval_id. The table is small (one row per write request) so a scan
     is acceptable here — the alternative is a GSI which costs more than
-    it saves."""
+    it saves.
+
+    NO Limit here: DynamoDB applies Limit BEFORE FilterExpression, so
+    `Limit=1` means "scan one row, then filter" — as soon as the table held
+    a second row the matching approval stopped being found and every write
+    was refused with "not found". Paginate to the end instead."""
+    kwargs = {
+        "FilterExpression": "approval_id = :aid",
+        "ExpressionAttributeValues": {":aid": approval_id},
+    }
     try:
-        resp = table.scan(
-            FilterExpression="approval_id = :aid",
-            ExpressionAttributeValues={":aid": approval_id},
-            Limit=1,
-        )
+        while True:
+            resp = table.scan(**kwargs)
+            items = resp.get("Items") or []
+            if items:
+                return items[0]
+            lek = resp.get("LastEvaluatedKey")
+            if not lek:
+                return None
+            kwargs["ExclusiveStartKey"] = lek
     except ClientError as e:
         print(f"[approval_guard] scan failed: {e}")
         return None
-    items = resp.get("Items") or []
-    return items[0] if items else None
 
 
 def verify_approval(
