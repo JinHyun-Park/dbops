@@ -235,25 +235,24 @@ def _handle_rds_view(ce, start, end, days):
     per_cluster_note = None
     if not per_cluster_available:
         per_cluster_note = (
-            "Per-cluster cost attribution is not available. Activate a cost-"
-            "allocation tag (e.g. 'dbops:cluster') in the AWS Billing console "
-            "and apply it to your Aurora clusters — Cost Explorer then "
-            "attributes spend per cluster within ~24h. Resource-level CE data "
-            "is not used here (it incurs extra cost). Past spend is not "
-            "back-filled."
+            "클러스터별 비용 분리를 사용할 수 없습니다. AWS Billing 콘솔에서 "
+            "cost-allocation 태그(예: 'dbops:cluster')를 활성화하고 Aurora "
+            "클러스터에 적용하면 약 24시간 내에 Cost Explorer가 클러스터 단위로 "
+            "비용을 분리합니다. 리소스 수준 CE 데이터는 추가 비용이 발생해 "
+            "사용하지 않으며, 과거 비용은 소급 반영되지 않습니다."
         )
 
     no_data_reason = None
     if total_err == "cost_allocation_tag_not_activated":
         # Shouldn't happen without a tag filter, but guard anyway.
         no_data_reason = (
-            "Cost Explorer returned no RDS data — ensure Cost Explorer is "
-            "enabled for this account, then re-check in 24h."
+            "Cost Explorer가 RDS 데이터를 반환하지 않았습니다 — 이 계정에서 "
+            "Cost Explorer가 활성화되어 있는지 확인 후 24시간 뒤 다시 확인하세요."
         )
     elif total == 0 and not daily:
         no_data_reason = (
-            "No RDS/Aurora spend recorded in this window. If you do run "
-            "Aurora here, ensure Cost Explorer is enabled (it lags ~24h)."
+            "이 기간에 기록된 RDS/Aurora 비용이 없습니다. Aurora를 운영 중이라면 "
+            "Cost Explorer 활성화 여부를 확인하세요 (반영까지 약 24시간 지연)."
         )
 
     anomalies = _detect_anomalies(daily)

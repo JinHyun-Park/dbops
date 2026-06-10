@@ -283,8 +283,8 @@ function BedrockCostView({
               {data.no_data_reason}.
               <br />
               <span className="text-zinc-600">
-                Activate the tag, then wait ~24h. (Past spend is not back-filled
-                — only post-activation calls get attributed.)
+                태그 활성화 후 약 24시간 기다리세요. (과거 비용은 소급 반영되지
+                않으며, 활성화 이후 호출분부터 집계됩니다.)
               </span>
             </>
           }
