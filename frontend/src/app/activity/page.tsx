@@ -46,6 +46,16 @@ interface ClusterRow {
   cluster_id: string;
 }
 
+// created_at is a ms-epoch stored as a DDB STRING sort key (request_approval
+// writes str(epoch_ms)); consumed_at/resolved_at are ISO strings. Coerce both
+// shapes — new Date("1781…") is Invalid Date otherwise.
+function toDate(v: string | null | undefined): Date | null {
+  if (!v) return null;
+  const n = Number(v);
+  const d = new Date(Number.isFinite(n) ? n : v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export default function ActivityPage() {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [clusters, setClusters] = useState<ClusterRow[]>([]);
@@ -88,7 +98,9 @@ export default function ActivityPage() {
   const groups = useMemo(() => {
     const m = new Map<string, ActivityItem[]>();
     for (const it of items) {
-      const day = (it.created_at || "").slice(0, 10) || "(no date)";
+      const d = toDate(it.created_at);
+      // sv-SE locale = YYYY-MM-DD in local time, a stable group key.
+      const day = d ? d.toLocaleDateString("sv-SE") : "(no date)";
       if (!m.has(day)) m.set(day, []);
       m.get(day)!.push(it);
     }
@@ -173,8 +185,8 @@ function ActivityRow({ item }: { item: ActivityItem }) {
     label: item.approval_status,
     chip: "bg-zinc-700/40 text-zinc-300 border-zinc-700",
   };
-  const ts = new Date(item.created_at);
-  const consumedTs = item.consumed_at ? new Date(item.consumed_at) : null;
+  const ts = toDate(item.created_at);
+  const consumedTs = item.consumed_at ? toDate(item.consumed_at) : null;
   return (
     <div className="px-4 py-3">
       <div className="flex items-baseline justify-between gap-3 mb-1">
@@ -192,7 +204,7 @@ function ActivityRow({ item }: { item: ActivityItem }) {
           </span>
         </div>
         <div className="text-[11px] text-zinc-500 tabular-nums flex-shrink-0">
-          {ts.toLocaleTimeString()}{" "}
+          {ts ? ts.toLocaleTimeString() : "—"}{" "}
           {consumedTs && <>· executed {consumedTs.toLocaleTimeString()}</>}
         </div>
       </div>
