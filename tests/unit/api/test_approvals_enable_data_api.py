@@ -158,3 +158,49 @@ def test_post_creates_new_request_when_none_pending():
     put = approvals_table.put_item.call_args.kwargs["Item"]
     assert put["action_type"] == "enable_data_api"
     assert put["approval_status"] == "pending"
+
+
+def test_created_ms_orders_mixed_formats_chronologically():
+    """ms-epoch 문자열(MCP request_approval)과 ISO(UI POST)가 섞여도
+    시간순으로 정렬돼야 한다 — 문자열 비교는 '2026...' > '1781...'이라
+    UI발 행이 무조건 최신으로 보이는 버그가 있었다."""
+    older_epoch = {"created_at": "1781069757421"}   # 2026-06-10T05:35:57Z
+    newer_iso = {"created_at": "2026-06-10T06:42:08"}
+    oldest_iso = {"created_at": "2026-06-09T01:00:00"}
+    rows = sorted(
+        [newer_iso, older_epoch, oldest_iso], key=handler._created_ms, reverse=True
+    )
+    assert rows == [newer_iso, older_epoch, oldest_iso]
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals", "CLUSTERS_TABLE": "clusters"})
+def test_put_on_already_consumed_returns_409():
+    """이미 consumed/rejected된 행은 PUT approve로 되살릴 수 없다 — 없으면
+    guard의 consume-on-use replay 방어를 API에서 우회할 수 있다(Codex)."""
+    from botocore.exceptions import ClientError
+    row = dict(_ROW)
+    row["approval_status"] = "consumed"
+    mock_boto3, approvals_table, _ = _boto3_with([row])
+    approvals_table.update_item.side_effect = ClientError(
+        {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem"
+    )
+    with patch.object(handler, "boto3", mock_boto3):
+        resp = handler.lambda_handler(_event("PUT", approval_id="aid-eda-1", body={"action": "approve"}), None)
+    assert resp["statusCode"] == 409
+    assert json.loads(resp["body"])["error"] == "already_resolved"
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals", "CLUSTERS_TABLE": "clusters"})
+def test_post_rejects_non_enable_data_api_write_action():
+    """UI POST로는 enable_data_api 외 쓰기 승인을 만들 수 없다 — payload_hash
+    없는 쓰기 승인 생성을 봉쇄(Codex 감사 P0)."""
+    mock_boto3, approvals_table, _ = _boto3_with([])
+    with patch.object(handler, "boto3", mock_boto3):
+        resp = handler.lambda_handler(
+            _event("POST", body={"cluster_id": "x", "action_type": "execute_sql",
+                                 "action_details": {"sql": "DROP TABLE t"}}),
+            None,
+        )
+    assert resp["statusCode"] == 400
+    assert json.loads(resp["body"])["error"] == "unsupported_action_type"
+    approvals_table.put_item.assert_not_called()

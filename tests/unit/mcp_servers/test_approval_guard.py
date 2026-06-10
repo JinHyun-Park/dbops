@@ -385,3 +385,18 @@ def test_other_bucket_preserves_string_distinctness():
         canonical_action_hash("other", {"code": "1"})
     assert canonical_action_hash("other", {"a": 1, "b": 2}) == \
         canonical_action_hash("other", {"b": 2, "a": 1})  # key order irrelevant
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
+@patch("mcp_servers.shared.approval_guard.boto3")
+def test_empty_action_type_rejected_fail_closed(mock_boto3):
+    """action_type이 빈 승인 행은 거부한다 — 비어 있으면 매칭이 스킵되어
+    임의 쓰기 툴 승인으로 재사용될 수 있었다(Codex 감사)."""
+    row = _fresh_row(action_type="")
+    table = _scan_returning(row)
+    mock_boto3.resource.return_value.Table.return_value = table
+
+    result = verify_approval("aid-1", "prod-pg-1", "execute_sql")
+    assert result["ok"] is False
+    assert "action_type" in result["reason"]
+    table.update_item.assert_not_called()

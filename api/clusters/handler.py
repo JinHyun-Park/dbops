@@ -20,6 +20,21 @@ from botocore.exceptions import ClientError
 _TZ_SUFFIX_RE = re.compile(r"(Z|[+-]\d{2}(:?\d{2})?)$")
 
 
+def _scan_all(table, **kwargs) -> list:
+    """LastEvaluatedKey를 끝까지 따라가는 scan. 단일 scan은 1MB에서 조용히
+    잘려, fleet이 커지면 등록 목록·디스커버리 중복판별이 일부 클러스터만
+    보게 된다(approvals _scan_all·approval_guard Limit=1과 같은 잘림 패밀리,
+    Codex 감사 적발)."""
+    items = []
+    while True:
+        resp = table.scan(**kwargs)
+        items.extend(resp.get("Items", []))
+        lek = resp.get("LastEvaluatedKey")
+        if not lek:
+            return items
+        kwargs["ExclusiveStartKey"] = lek
+
+
 def _norm_ts(s):
     """Normalize an RDS Data API timestamp string to unambiguous ISO 8601 UTC.
 
@@ -322,9 +337,7 @@ def _list_clusters_in_region(region: str, role_arn: str = "") -> list[dict]:
 
 
 def _handle_list(table):
-    response = table.scan()
-    items = response.get("Items", [])
-    items = _enrich_with_meta(items)
+    items = _enrich_with_meta(_scan_all(table))
     # 30s browser cache — cluster registry doesn't change between
     # admin actions, and EVERY page navigation hits this list.
     return _resp(200, items, max_age=30)
@@ -410,8 +423,11 @@ def _handle_discover(table, body: dict):
     # Build a set of already-registered cluster_ids to flag duplicates.
     existing_ids = set()
     try:
-        scan = table.scan(ProjectionExpression="cluster_id")
-        existing_ids = {row["cluster_id"] for row in scan.get("Items", []) if row.get("cluster_id")}
+        existing_ids = {
+            row["cluster_id"]
+            for row in _scan_all(table, ProjectionExpression="cluster_id")
+            if row.get("cluster_id")
+        }
     except Exception as e:
         print(f"[discover] dedupe scan failed: {e}")
 

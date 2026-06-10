@@ -1,9 +1,30 @@
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import boto3
+from botocore.exceptions import ClientError
+
+
+def _created_ms(item: dict) -> float:
+    """정렬용 created_at 정규화. 두 생성 경로가 다른 포맷을 쓴다 —
+    request_approval(MCP)은 ms-epoch 문자열("1781069757421"), approvals
+    POST(UI)는 ISO("2026-06-10T06:42:08"). 문자열 정렬은 "2026..." >
+    "1781..."이라 UI발 행이 항상 에이전트발 행보다 최신으로 보이는
+    시간 무관 정렬이 된다. epoch ms로 통일해 비교한다."""
+    raw = str(item.get("created_at", "") or "")
+    if raw.isdigit():
+        return float(raw)
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        # 이 핸들러가 쓰는 naive ISO는 utcnow() 산물 — UTC로 명시 고정해야
+        # 실행 환경 타임존(Lambda=UTC, 로컬 테스트=KST)과 무관하게 같은 값.
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp() * 1000
+    except ValueError:
+        return 0.0
 
 
 def _scan_all(table, **kwargs) -> list:
@@ -110,7 +131,7 @@ def lambda_handler(event, context):
 
         items = sorted(
             _scan_all(table, **scan_kwargs),
-            key=lambda x: x.get("created_at", ""),
+            key=_created_ms,
             reverse=True,
         )[:limit]
         # Strip noisy fields so the activity feed stays scannable. The
@@ -158,7 +179,7 @@ def lambda_handler(event, context):
                 FilterExpression="approval_status = :s",
                 ExpressionAttributeValues={":s": status_filter},
             )
-        items = sorted(rows, key=lambda x: x.get("created_at", ""), reverse=True)
+        items = sorted(rows, key=_created_ms, reverse=True)
         return {"statusCode": 200, "headers": headers, "body": json.dumps(items, default=str)}
 
     if method == "GET" and approval_id:
@@ -181,6 +202,28 @@ def lambda_handler(event, context):
         body = json.loads(event.get("body", "{}"))
         now = datetime.utcnow().isoformat()
         action_type = body.get("action_type", "")
+
+        # 이 POST 경로(UI발)로는 enable_data_api 승인만 만들 수 있다. 다른
+        # 쓰기 액션(execute_sql/modify_*/restore 등)은 반드시 MCP의
+        # request_approval을 거쳐야 한다 — 거기서만 payload_hash가 계산되어
+        # 승인이 "특정 페이로드"에 바인딩된다. POST가 임의 action_type을
+        # 받아들이면 payload_hash 없는(=guard가 페이로드 검증을 건너뛰는)
+        # 쓰기 승인을 만들 수 있어, 한 승인을 다른 SQL/파라미터로 재사용하는
+        # 구멍이 된다(Codex 감사 적발). enable_data_api는 페이로드가
+        # cluster_id뿐이고 승인 즉시 서버가 실행하므로 이 경로가 안전하다.
+        if action_type and action_type != "enable_data_api":
+            return {
+                "statusCode": 400,
+                "headers": headers,
+                "body": json.dumps({
+                    "error": "unsupported_action_type",
+                    "detail": (
+                        f"{action_type!r}는 이 경로로 승인 요청을 만들 수 없습니다 — "
+                        "쓰기 작업은 에이전트의 request_approval 도구를 통해 "
+                        "페이로드 바인딩과 함께 등록해야 합니다."
+                    ),
+                }),
+            }
 
         # UI발 enable_data_api 요청은 멱등 — 같은 클러스터의 pending 요청이
         # 이미 있으면 새로 만들지 않고 그 행을 돌려준다 (버튼 더블클릭·
@@ -232,15 +275,33 @@ def lambda_handler(event, context):
             return {"statusCode": 404, "headers": headers, "body": json.dumps({"error": "not found"})}
 
         item = items[0]
-        table.update_item(
-            Key={"approval_id": item["approval_id"], "created_at": item["created_at"]},
-            UpdateExpression="SET approval_status = :s, resolved_at = :t, resolved_by = :by",
-            ExpressionAttributeValues={
-                ":s": "approved" if action == "approve" else "rejected",
-                ":t": datetime.utcnow().isoformat() + "Z",
-                ":by": body.get("approved_by", "dba"),
-            },
-        )
+        # pending 상태에서만 전이 허용 — ConditionExpression이 없으면
+        # 이미 consumed/rejected된 행도 PUT approve로 다시 approved가 되어,
+        # approval_guard의 consume-on-use replay 방어를 API에서 되살릴 수
+        # 있다(Codex 감사 적발). 이미 처리된 승인은 409로 거부한다.
+        try:
+            table.update_item(
+                Key={"approval_id": item["approval_id"], "created_at": item["created_at"]},
+                UpdateExpression="SET approval_status = :s, resolved_at = :t, resolved_by = :by",
+                ConditionExpression="approval_status = :pending",
+                ExpressionAttributeValues={
+                    ":s": "approved" if action == "approve" else "rejected",
+                    ":t": datetime.utcnow().isoformat() + "Z",
+                    ":by": body.get("approved_by", "dba"),
+                    ":pending": "pending",
+                },
+            )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                return {
+                    "statusCode": 409,
+                    "headers": headers,
+                    "body": json.dumps({
+                        "error": "already_resolved",
+                        "detail": f"승인 요청이 이미 {item.get('approval_status')} 상태입니다 — 재처리할 수 없습니다.",
+                    }),
+                }
+            raise
 
         # enable_data_api는 승인 즉시 실행하는 액션 — 쓰기 도구 replay가 없다.
         # 성공하면 행을 consumed로 마감해 Approval Center 의미론(실행된 승인은

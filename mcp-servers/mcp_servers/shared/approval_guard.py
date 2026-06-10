@@ -252,10 +252,20 @@ def verify_approval(
         }
 
     row_action = row.get("action_type", "")
+    # 빈 action_type은 거부한다 — 비어 있으면 아래 매칭이 통째로 스킵되어
+    # 임의 write tool의 승인으로 재사용될 수 있다(Codex 감사 적발). 행이
+    # tool_name만 있고 action_type이 없는 레거시/수동 POST가 이 구멍을
+    # 만들었다. fail-closed: action_type이 없는 승인은 어떤 쓰기도 승인하지
+    # 않는다.
+    if not row_action:
+        return {
+            "ok": False,
+            "reason": "approval row has no action_type — cannot verify intent (fail-closed)",
+        }
     # "other" is a permissive bucket the agent uses when the action doesn't
     # cleanly map. Tools that pass action_type="other" accept any approval
     # whose recorded action_type is also "other".
-    if row_action and row_action != action_type:
+    if row_action != action_type:
         return {
             "ok": False,
             "reason": (

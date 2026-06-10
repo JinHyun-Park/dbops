@@ -79,11 +79,22 @@ def strip_sql_literals(s: str) -> str:
                 i += 1
             out.append(" ")
         elif c == "/" and nxt == "*":                    # block comment
+            # MySQL executable comment `/*! ... */` (+ optional version
+            # `/*!50000 ... */`)는 Aurora MySQL에서 내부 SQL이 실제 실행된다.
+            # 일반 주석처럼 통째로 지우면 classifier가 내부의 DROP/TRUNCATE를
+            # 못 봐서 force 체크와 read/write 분류를 우회한다 — 내용을 보존해
+            # 키워드 매칭이 내부 구문을 보게 한다. 선두 버전 숫자는 키워드
+            # 매칭에 무해하므로 그대로 둔다.
+            is_executable = i + 2 < n and s[i + 2] == "!"
             i += 2
+            body_start = i
             while i < n and not (s[i] == "*" and i + 1 < n and s[i + 1] == "/"):
                 i += 1
+            if is_executable:
+                out.append(" " + s[body_start:i] + " ")
+            else:
+                out.append(" ")
             i += 2
-            out.append(" ")
         elif c == "'":                                   # '...' string literal
             i += 1
             while i < n:

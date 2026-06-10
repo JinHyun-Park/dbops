@@ -198,8 +198,16 @@ export default function ClustersPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [registering, setRegistering] = useState(false);
 
+  // 조회 실패를 빈 배열로 삼키면 기존 등록 클러스터가 사라진 것처럼 보인다 —
+  // 에러를 명시적으로 잡아 "0개"와 "조회 실패"를 구분한다(Codex 감사).
+  const [clustersError, setClustersError] = useState<string | null>(null);
   const loadClusters = useCallback(() => {
-    fetchClusters().then(setClusters).catch(console.error);
+    setClustersError(null);
+    fetchClusters()
+      .then(setClusters)
+      .catch((e) =>
+        setClustersError(e instanceof Error ? e.message : "클러스터 조회 실패"),
+      );
   }, []);
 
   useEffect(() => {
@@ -989,7 +997,23 @@ export default function ClustersPage() {
         title={`등록된 클러스터 ${clusters.length}개`}
         description="이 페이지는 등록/검증/관리 전용입니다. 실시간 메트릭은 Fleet 또는 Dashboard에서."
       >
-        {clusters.length === 0 ? (
+        {clustersError ? (
+          <div className="bg-rose-500/10 border border-rose-500/30 rounded-lg p-4 text-sm">
+            <div className="text-rose-300 font-medium mb-1">
+              클러스터 목록을 불러오지 못했습니다
+            </div>
+            <div className="text-zinc-400">
+              {clustersError} — 기존 등록 클러스터가 사라진 것이 아니라 조회
+              실패 상태입니다.
+            </div>
+            <button
+              onClick={loadClusters}
+              className="mt-2 rounded border border-zinc-700 px-3 py-1 text-zinc-200 hover:bg-zinc-800"
+            >
+              다시 시도
+            </button>
+          </div>
+        ) : clusters.length === 0 ? (
           <EmptyState
             eyebrow="클러스터 없음"
             title="첫 Aurora 클러스터를 등록해보세요"
@@ -998,7 +1022,7 @@ export default function ClustersPage() {
               onClick: () => setShowForm(true),
               label: "+ 클러스터 등록",
             }}
-            secondary={{ href: "/chat", label: "Ask the agent first" }}
+            secondary={{ href: "/chat", label: "먼저 에이전트에게 물어보기" }}
           />
         ) : (
           <>
