@@ -116,9 +116,9 @@ def _check_oversized(rds_data, cache_arn, cache_secret, cache_db, cluster_id, me
         value_str=f"avg CPU {avg_cpu:.1f}% / p95 {p95_cpu:.1f}% / max {max_cpu:.1f}%",
         threshold_str=f"< {CPU_AVG_THRESHOLD:.0f}% avg & < {CPU_P95_THRESHOLD:.0f}% p95 → consider downsize",
         recommendation=(
-            f"7-day avg CPU is {avg_cpu:.1f}% on {instance_class or 'this instance'} — "
-            "consider one-step smaller (typically 30-50% monthly savings). "
-            "Re-evaluate after the smaller size has 1 week of production traffic."
+            f"{instance_class or '이 인스턴스'}의 7일 평균 CPU가 {avg_cpu:.1f}%입니다 — "
+            "한 단계 작은 인스턴스를 검토하세요 (보통 월 30-50% 절감). "
+            "축소 후 프로덕션 트래픽 1주를 지켜보고 재평가하세요."
         ),
         details={
             "instance_class": instance_class,
@@ -156,9 +156,9 @@ def _check_serverless_v2_acu(rds_data, cache_arn, cache_secret, cache_db, cluste
             value_str=f"7d p95 CPU {p95_cpu:.1f}% / max {max_cpu:.1f}%",
             threshold_str=f"< {SV2_MAX_LOWER_P95_CPU:.0f}% p95 CPU → max ACU likely overprovisioned",
             recommendation=(
-                f"Max ACU is {sv2_max:.1f} but observed p95 CPU is only {p95_cpu:.1f}%. "
-                f"Lower max ACU to ~{suggested_max:.1f} for the same throughput at a fraction of the "
-                "burst-cost exposure. (Serverless v2 bills per ACU-hour at peak.)"
+                f"max ACU가 {sv2_max:.1f}인데 관측된 p95 CPU는 {p95_cpu:.1f}%에 불과합니다. "
+                f"max ACU를 ~{suggested_max:.1f}로 낮추면 동일 처리량에 버스트 비용 노출만 줄어듭니다. "
+                "(Serverless v2는 피크 ACU-시간으로 과금됩니다.)"
             ),
             details={
                 "current_min_acu": sv2_min,
@@ -293,8 +293,8 @@ def _check_savings_plan_opportunity(rds_data, cache_arn, cache_secret, cache_db,
             except (TypeError, ValueError):
                 hourly_commit = 0.0
             action = (
-                f"Commit ${hourly_commit:.2f}/hr Compute Savings Plan "
-                f"(1-year, no upfront) — projected ~${monthly:.2f}/mo savings."
+                f"시간당 ${hourly_commit:.2f} Compute Savings Plan(1년, 선결제 없음) 커밋 시 "
+                f"월 ~${monthly:.2f} 절감이 예상됩니다."
             )
             details = {
                 "estimated_monthly_savings_usd": monthly,
@@ -339,7 +339,7 @@ def _check_savings_plan_opportunity(rds_data, cache_arn, cache_secret, cache_db,
         threshold_str=f"> ${SP_SAVINGS_FLOOR_USD:.0f}/mo savings → worth committing",
         recommendation=(
             (rec.get("recommended_action") or "")
-            + " Cost Explorer → Savings Plans → Recommendations confirms the exact hourly commit."
+            + " 정확한 시간당 커밋 금액은 Cost Explorer → Savings Plans → Recommendations에서 확인하세요."
         ),
         details=details_obj or {},
     )
