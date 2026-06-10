@@ -73,7 +73,47 @@ interface RdsCostData {
 
 const RANGES = [7, 14, 30, 60, 90];
 
-type CostTab = "bedrock" | "rds";
+type CostTab = "bedrock" | "rds" | "platform";
+
+interface PlatformServiceCost {
+  service: string;
+  amount: number;
+}
+
+interface PlatformCostData {
+  env: string;
+  view: "platform";
+  range_days: number;
+  start: string;
+  end: string;
+  total: number;
+  currency: string;
+  daily: { date: string; amount: number }[];
+  by_service: PlatformServiceCost[];
+  anomalies?: CostAnomaly[];
+  no_data_reason?: string | null;
+  note?: string | null;
+}
+
+// "Amazon Relational Database Service" → "RDS (Aurora 캐시)" 같은 축약 라벨.
+function platformServiceLabel(svc: string): string {
+  const MAP: Record<string, string> = {
+    "Amazon Relational Database Service": "Aurora (캐시 DB·샘플)",
+    "AWS Lambda": "Lambda",
+    "Amazon DynamoDB": "DynamoDB",
+    "Amazon CloudFront": "CloudFront",
+    "Amazon Simple Storage Service": "S3",
+    "Amazon Bedrock AgentCore": "Bedrock AgentCore",
+    AmazonCloudWatch: "CloudWatch",
+    "Amazon CloudWatch": "CloudWatch",
+    "Amazon Virtual Private Cloud": "VPC",
+    "Amazon Cognito": "Cognito",
+    "AWS Secrets Manager": "Secrets Manager",
+    "Amazon API Gateway": "API Gateway",
+    "Amazon Simple Notification Service": "SNS",
+  };
+  return MAP[svc] || svc.replace(/^(Amazon|AWS)\s+/, "");
+}
 
 // RDS usage-type labels are like "APN1-Aurora:StorageIOUsage" or
 // "APN1-InstanceUsage:db.r6g.large" — strip the region prefix and humanize the
@@ -130,11 +170,19 @@ export default function CostPage() {
     <PageBody>
       <PageHeader
         eyebrow="재무"
-        title={isRds ? "Aurora / RDS 비용" : "Bedrock 비용"}
+        title={
+          tab === "rds"
+            ? "Aurora / RDS 비용"
+            : tab === "platform"
+              ? "DBOps 플랫폼 운영 비용"
+              : "Bedrock 비용"
+        }
         description={
-          isRds
+          tab === "rds"
             ? "계정의 Aurora/RDS 비용 — Cost Explorer로 사용 유형(Aurora I/O·스토리지·인스턴스 시간·백업)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다."
-            : "DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다."
+            : tab === "platform"
+              ? "DBOps 자체를 운영하는 데 드는 전체 비용 — Application=DBOps 태그가 붙은 모든 리소스(Lambda·캐시 Aurora·DynamoDB·CloudFront·AgentCore 등)를 서비스별로 분해합니다. 모니터링 대상 고객 DB 클러스터는 포함되지 않습니다."
+              : "DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다."
         }
         actions={
           <div className="flex items-center gap-1">
@@ -163,6 +211,7 @@ export default function CostPage() {
           [
             { id: "bedrock", label: "Bedrock" },
             { id: "rds", label: "Aurora / RDS" },
+            { id: "platform", label: "DBOps 플랫폼" },
           ] as { id: CostTab; label: string }[]
         ).map((t) => (
           <button
@@ -181,6 +230,8 @@ export default function CostPage() {
 
       {isRds ? (
         <RdsCostView days={days} colors={colors} />
+      ) : tab === "platform" ? (
+        <PlatformCostView days={days} colors={colors} />
       ) : (
         <BedrockCostView
           data={data}
@@ -414,6 +465,192 @@ function BedrockCostView({
           </p>
         </div>
       </Section>
+    </>
+  );
+}
+
+function PlatformCostView({
+  days,
+  colors,
+}: {
+  days: number;
+  colors: ReturnType<typeof useChartColors>;
+}) {
+  const [data, setData] = useState<PlatformCostData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErr(null);
+    (async () => {
+      try {
+        const url = await apiUrl(`/api/cost?view=platform&days=${days}`);
+        const res = await authedFetch(url);
+        if (!res.ok) throw new Error(`플랫폼 비용 조회 실패: ${res.status}`);
+        const d = (await res.json()) as PlatformCostData;
+        if (!cancelled) setData(d);
+      } catch (e) {
+        if (!cancelled) setErr((e as Error).message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [days]);
+
+  const dailyAvg =
+    data && data.daily.length > 0 ? data.total / data.daily.length : 0;
+  const monthlyProjection = dailyAvg * 30;
+
+  return (
+    <>
+      {err && (
+        <div className="mb-6 px-4 py-3 border border-rose-500/30 bg-rose-500/10 text-rose-300 text-sm">
+          {err}
+        </div>
+      )}
+
+      {data?.no_data_reason && data.daily.length === 0 ? (
+        <EmptyState
+          eyebrow="데이터 없음"
+          title="플랫폼 비용 데이터가 없습니다"
+          description={data.no_data_reason}
+          primary={{
+            href: "https://console.aws.amazon.com/cost-management/home",
+            label: "Open Cost Management",
+          }}
+        />
+      ) : (
+        <>
+          <StatRow cols={3}>
+            <Stat
+              label={`Total ${days}d`}
+              value={loading ? "···" : `$${fmtDecimal(data?.total ?? 0, 2)}`}
+              hint={`USD · ${data?.range_days || days}일 윈도우`}
+              loading={loading}
+              accent="amber"
+            />
+            <Stat
+              label="일 평균"
+              value={loading ? "···" : `$${fmtDecimal(dailyAvg, 2)}`}
+              hint="윈도우 평균"
+              loading={loading}
+            />
+            <Stat
+              label="월 환산"
+              value={loading ? "···" : `$${fmtDecimal(monthlyProjection, 2)}`}
+              hint="일 평균 × 30"
+              loading={loading}
+            />
+          </StatRow>
+
+          {data?.anomalies && data.anomalies.length > 0 && (
+            <AnomalyPanel anomalies={data.anomalies} />
+          )}
+
+          <Section eyebrow="추이" title="일별 플랫폼 운영비">
+            <div className="border border-zinc-800 bg-zinc-900/50 p-4 h-72">
+              {loading ? (
+                <div className="text-zinc-500 text-sm">불러오는 중…</div>
+              ) : !data || data.daily.length === 0 ? (
+                <div className="text-zinc-500 text-sm">
+                  아직 집계된 비용이 없습니다
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={data.daily}
+                    margin={{ top: 4, right: 12, bottom: 0, left: -10 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke={colors.grid}
+                      vertical={false}
+                    />
+                    <XAxis dataKey="date" stroke={colors.axis} fontSize={10} />
+                    <YAxis
+                      stroke={colors.axis}
+                      fontSize={10}
+                      tickFormatter={(v) => `$${(Number(v) || 0).toFixed(2)}`}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: colors.tooltipBg,
+                        border: `1px solid ${colors.tooltipBorder}`,
+                        fontSize: 12,
+                      }}
+                      formatter={(v) => [
+                        `$${fmtDecimal(Number(v) || 0, 4)}`,
+                        "비용",
+                      ]}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="amount"
+                      stroke="#f59e0b"
+                      fill="#f59e0b22"
+                      strokeWidth={1.5}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </Section>
+
+          <Section eyebrow="세부 분해" title="서비스별 플랫폼 비용">
+            {loading ? (
+              <div className="text-zinc-500 text-sm">불러오는 중…</div>
+            ) : !data || data.by_service.length === 0 ? (
+              <div className="text-zinc-500 text-sm">
+                서비스별 분해 데이터가 없습니다.
+              </div>
+            ) : (
+              <div className="border border-zinc-800 divide-y divide-zinc-800">
+                {data.by_service.map((row) => {
+                  const pct =
+                    data.total > 0 ? (row.amount / data.total) * 100 : 0;
+                  return (
+                    <div
+                      key={row.service}
+                      className="px-4 py-2.5 flex items-center gap-4"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-zinc-200">
+                          {platformServiceLabel(row.service)}
+                        </div>
+                        <div className="text-[10px] text-zinc-600 font-mono truncate">
+                          {row.service}
+                        </div>
+                      </div>
+                      <div className="w-40 h-1.5 bg-zinc-800 rounded overflow-hidden hidden sm:block">
+                        <div
+                          className="h-full bg-amber-500/70"
+                          style={{ width: `${Math.min(100, pct)}%` }}
+                        />
+                      </div>
+                      <div className="text-sm font-mono tabular-nums text-zinc-100 w-24 text-right">
+                        ${fmtDecimal(row.amount, 2)}
+                      </div>
+                      <div className="text-[11px] font-mono tabular-nums text-zinc-500 w-14 text-right">
+                        {pct.toFixed(1)}%
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {data?.note && (
+              <p className="text-[11px] text-zinc-600 mt-3 leading-relaxed border-l-2 border-zinc-800 pl-3">
+                {data.note}
+              </p>
+            )}
+          </Section>
+        </>
+      )}
     </>
   );
 }

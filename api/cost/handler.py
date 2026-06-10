@@ -278,6 +278,96 @@ def _handle_rds_view(ce, start, end, days):
     })
 
 
+# ===========================================================================
+# DBOps platform cost path (?view=platform)
+# ---------------------------------------------------------------------------
+# "DBOps 자체를 돌리는 데 얼마 드나" — every CDK-managed resource carries
+# Application=DBOps (app.py adds the tag app-wide), and that tag is already
+# activated for cost allocation (the Bedrock view depends on it). So one
+# tag-filtered CE query covers the whole platform: Lambdas, the Aurora cache,
+# DynamoDB, CloudFront/S3, AgentCore, logs… Monitored CUSTOMER clusters are
+# NOT tagged and therefore excluded by construction; the only RDS spend in
+# here is the cache DB (+ any CDK-deployed sample clusters).
+# ===========================================================================
+
+def _handle_platform_view(ce, start, end, days):
+    tag_filter = {"Tags": {"Key": "Application", "Values": ["DBOps"]}}
+
+    daily, total, total_err = [], 0.0, None
+    try:
+        resp = ce.get_cost_and_usage(
+            TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
+            Granularity="DAILY",
+            Metrics=["UnblendedCost"],
+            Filter=tag_filter,
+        )
+        for r in resp.get("ResultsByTime", []):
+            amount = float(r["Total"]["UnblendedCost"]["Amount"])
+            daily.append({"date": r["TimePeriod"]["Start"], "amount": amount})
+            total += amount
+    except Exception as e:
+        msg = str(e).lower()
+        if "not activated" in msg or "is not currently activated" in msg:
+            total_err = "cost_allocation_tag_not_activated"
+        else:
+            total_err = str(e)[:200]
+
+    # Service-level breakdown over the same window.
+    by_service = []
+    try:
+        resp = ce.get_cost_and_usage(
+            TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
+            Granularity="MONTHLY",
+            Metrics=["UnblendedCost"],
+            Filter=tag_filter,
+            GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
+        )
+        rollup = {}
+        for r in resp.get("ResultsByTime", []):
+            for g in r.get("Groups", []):
+                svc = g["Keys"][0]
+                amt = float(g["Metrics"]["UnblendedCost"]["Amount"])
+                rollup[svc] = rollup.get(svc, 0.0) + amt
+        by_service = [
+            {"service": k, "amount": round(v, 4)}
+            for k, v in sorted(rollup.items(), key=lambda kv: kv[1], reverse=True)
+            if round(v, 4) != 0.0
+        ]
+    except Exception as e:
+        print(f"[cost] platform by_service failed: {e}")
+
+    no_data_reason = None
+    if total_err == "cost_allocation_tag_not_activated":
+        no_data_reason = (
+            "Application 태그가 cost allocation tag로 활성화되지 않았습니다 — "
+            "AWS Billing 콘솔에서 활성화하면 ~24시간 후부터 집계됩니다."
+        )
+    elif total == 0 and not daily:
+        no_data_reason = (
+            "이 기간에 Application=DBOps 태그가 붙은 비용이 없습니다. "
+            "배포 직후라면 Cost Explorer 반영(~24h)을 기다려 주세요."
+        )
+
+    return _response(200, {
+        "env": _ENV,
+        "view": "platform",
+        "range_days": days,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "total": round(total, 4),
+        "currency": "USD",
+        "daily": daily,
+        "by_service": by_service,
+        "anomalies": _detect_anomalies(daily),
+        "no_data_reason": no_data_reason,
+        "note": (
+            "Application=DBOps 태그 기준 — 모니터링 대상 고객 클러스터는 태그가 "
+            "없어 제외됩니다. RDS 항목은 DBOps 캐시 DB(+CDK 샘플 클러스터)이며, "
+            "Bedrock 항목은 Bedrock 탭과 동일한 비용입니다."
+        ),
+    })
+
+
 def lambda_handler(event, context):
     method = event.get("requestContext", {}).get("http", {}).get("method") \
         or event.get("httpMethod", "GET")
@@ -294,8 +384,12 @@ def lambda_handler(event, context):
     # `?view=rds` switches from Bedrock spend to Aurora/RDS spend. Same Lambda,
     # same range windows; the RDS path has its own service discovery + per-
     # cluster (tag-based) attribution. Default view stays Bedrock.
-    if (qs.get("view") or "bedrock").lower() == "rds":
+    view = (qs.get("view") or "bedrock").lower()
+    if view == "rds":
         return _handle_rds_view(ce, start, end, days)
+    # `?view=platform` — DBOps 플랫폼 자체 운영비 (Application=DBOps 태그 전체).
+    if view == "platform":
+        return _handle_platform_view(ce, start, end, days)
 
     services = _bedrock_services(ce, start, end)
 
