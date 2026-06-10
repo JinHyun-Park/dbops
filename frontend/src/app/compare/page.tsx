@@ -363,11 +363,11 @@ export default function ComparePage() {
                   <div className="h-40">
                     {loading ? (
                       <div className="h-full flex items-center justify-center text-xs text-zinc-500">
-                        loading…
+                        불러오는 중…
                       </div>
                     ) : data.length === 0 ? (
                       <div className="h-full flex items-center justify-center text-xs text-zinc-600">
-                        no data
+                        데이터 없음
                       </div>
                     ) : (
                       <ResponsiveContainer width="100%" height="100%">

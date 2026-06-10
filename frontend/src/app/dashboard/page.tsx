@@ -504,7 +504,7 @@ export default function DashboardPage() {
                 <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3 gap-3">
                     <div className="text-sm text-zinc-200 font-medium">
-                      Cluster Info
+                      클러스터 정보
                     </div>
                     <div className="flex items-center gap-2">
                       <span
@@ -537,19 +537,19 @@ export default function DashboardPage() {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
                     <div>
-                      <div className="text-zinc-500 text-xs mb-1">Status</div>
+                      <div className="text-zinc-500 text-xs mb-1">상태</div>
                       <div className="text-emerald-400">
                         {dashboardData.cluster?.status || "-"}
                       </div>
                     </div>
                     <div>
-                      <div className="text-zinc-500 text-xs mb-1">Instance</div>
+                      <div className="text-zinc-500 text-xs mb-1">인스턴스</div>
                       <div className="text-zinc-100 font-mono text-xs">
                         {dashboardData.cluster?.instance_class || "-"}
                       </div>
                     </div>
                     <div>
-                      <div className="text-zinc-500 text-xs mb-1">Storage</div>
+                      <div className="text-zinc-500 text-xs mb-1">스토리지</div>
                       <div className="text-zinc-100">
                         {dashboardData.cluster?.storage_size_gb ?? "-"} GB
                       </div>

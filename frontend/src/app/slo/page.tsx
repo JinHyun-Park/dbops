@@ -502,17 +502,17 @@ function Timeline({ buckets }: { buckets: SloDayBucket[] }) {
       <div className="px-4 py-3 border-b border-zinc-800 flex items-baseline justify-between">
         <div>
           <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-            Daily timeline
+            일별 타임라인
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
             각 칸 = 하루. 좌측이 가장 오래된 날.
           </div>
         </div>
         <div className="flex items-center gap-3 text-[10px] text-zinc-500">
-          <LegendDot tone="emerald" label="OK" />
-          <LegendDot tone="amber" label="Avail miss" />
-          <LegendDot tone="rose" label="Latency miss" />
-          <LegendDot tone="zinc" label="No data" />
+          <LegendDot tone="emerald" label="정상" />
+          <LegendDot tone="amber" label="가용성 미달" />
+          <LegendDot tone="rose" label="지연 미달" />
+          <LegendDot tone="zinc" label="데이터 없음" />
         </div>
       </div>
       <div className="p-4 grid grid-cols-2 gap-4">
@@ -567,7 +567,7 @@ function Strip({
         return (
           <div
             key={b.day}
-            title={noData ? `${b.day} · no data` : titleMain}
+            title={noData ? `${b.day} · 데이터 없음` : titleMain}
             className={`w-4 h-6 border ${tone}`}
           />
         );

@@ -373,7 +373,7 @@ export default function QueryLabPage() {
               onClick={() => setPresetPrompt("")}
               className="text-xs px-3 py-1.5 rounded border border-zinc-700 text-zinc-500 hover:text-zinc-300 ml-auto"
             >
-              clear preset
+              프리셋 해제
             </button>
           )}
         </div>
@@ -727,9 +727,9 @@ export default function QueryLabPage() {
                 </div>
               ) : (
                 <div className="text-sm text-zinc-500">
-                  Pick a preset (template copied to clipboard), paste SQL in the
-                  editor, then click
-                  <span className="text-sky-400"> AI 분석</span>.
+                  프리셋을 고르면 템플릿이 클립보드에 복사됩니다. 에디터에 SQL을
+                  붙여넣고
+                  <span className="text-sky-400"> AI 분석</span>을 누르세요.
                 </div>
               )}
             </>
@@ -752,7 +752,7 @@ export default function QueryLabPage() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
-                  Save query
+                  쿼리 저장
                 </div>
                 <h3 className="text-base font-medium text-zinc-100">
                   현재 SQL을 라이브러리에 저장
@@ -769,7 +769,7 @@ export default function QueryLabPage() {
             <div className="space-y-3">
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-zinc-500">
-                  Title <span className="text-rose-400">*</span>
+                  제목 <span className="text-rose-400">*</span>
                 </label>
                 <input
                   type="text"
@@ -784,7 +784,7 @@ export default function QueryLabPage() {
               </div>
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-zinc-500">
-                  Description (선택)
+                  설명 (선택)
                 </label>
                 <input
                   type="text"
@@ -799,7 +799,7 @@ export default function QueryLabPage() {
               </div>
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-zinc-500">
-                  Tags (comma-separated)
+                  태그 (쉼표로 구분)
                 </label>
                 <input
                   type="text"
@@ -813,10 +813,10 @@ export default function QueryLabPage() {
               </div>
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-zinc-500">
-                  SQL preview
+                  SQL 미리보기
                 </label>
                 <pre className="bg-zinc-950 border border-zinc-800 p-2 text-[11px] text-zinc-300 font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto mt-1">
-                  {lastSql || "(SQL preview empty)"}
+                  {lastSql || "(미리보기할 SQL이 없습니다)"}
                 </pre>
               </div>
               {saveModal.error && (
@@ -832,11 +832,17 @@ export default function QueryLabPage() {
                 <button
                   onClick={async () => {
                     if (!saveModal.title.trim()) {
-                      setSaveModal({ ...saveModal, error: "title required" });
+                      setSaveModal({
+                        ...saveModal,
+                        error: "제목을 입력하세요",
+                      });
                       return;
                     }
                     if (!lastSql.trim()) {
-                      setSaveModal({ ...saveModal, error: "no SQL to save" });
+                      setSaveModal({
+                        ...saveModal,
+                        error: "저장할 SQL이 없습니다",
+                      });
                       return;
                     }
                     setSaveModal({

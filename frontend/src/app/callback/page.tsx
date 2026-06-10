@@ -23,10 +23,10 @@ export default function CallbackPage() {
     return (
       <div className="min-h-screen bg-zinc-900 text-zinc-100 flex items-center justify-center">
         <div className="text-center">
-          <div className="text-red-400 text-lg mb-2">Login Failed</div>
+          <div className="text-red-400 text-lg mb-2">로그인 실패</div>
           <div className="text-zinc-400 text-sm mb-4">{error}</div>
           <a href="/" className="text-blue-400 hover:text-blue-300 text-sm">
-            Try again
+            다시 시도
           </a>
         </div>
       </div>
@@ -35,7 +35,7 @@ export default function CallbackPage() {
 
   return (
     <div className="min-h-screen bg-zinc-900 text-zinc-100 flex items-center justify-center">
-      <div className="text-zinc-400">Logging in...</div>
+      <div className="text-zinc-400">로그인 중...</div>
     </div>
   );
 }

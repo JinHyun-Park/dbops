@@ -432,14 +432,14 @@ export default function ClustersPage() {
               href="/fleet"
               className="text-xs px-3 py-2 border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 transition-colors"
             >
-              Fleet overview →
+              Fleet 전체 보기 →
             </Link>
             <button
               onClick={() => setSetupGuideOpen(true)}
               className="text-xs px-3 py-2 border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 transition-colors"
               title="DBOps 전용 read-only 계정 + Secrets Manager 등록 가이드"
             >
-              📋 Setup guide
+              📋 설정 가이드
             </button>
             {admin && (
               <button
@@ -448,7 +448,7 @@ export default function ClustersPage() {
                 className="text-xs px-3 py-2 border border-purple-500/50 text-purple-300 hover:bg-purple-500/10 disabled:opacity-50 transition-colors"
                 title="합성 데이터로 sample-cluster 생성"
               >
-                {seedingSample ? "생성 중…" : "🎲 Generate sample"}
+                {seedingSample ? "생성 중…" : "🎲 샘플 생성"}
               </button>
             )}
             {admin && (
@@ -459,7 +459,7 @@ export default function ClustersPage() {
                 }}
                 className="text-xs px-3 py-2 border border-sky-500/50 text-sky-300 hover:bg-sky-500/10 transition-colors"
               >
-                {discoverOpen ? "Hide discovery" : "🔎 Discover clusters"}
+                {discoverOpen ? "탐색 닫기" : "🔎 클러스터 자동 탐색"}
               </button>
             )}
             {admin && (
@@ -1292,7 +1292,7 @@ function SecretSourceBadge({
   return (
     <span
       className="px-1.5 py-0.5 border text-[10px] font-mono bg-rose-500/10 text-rose-300 border-rose-500/40"
-      title="사용 가능한 시크릿이 없습니다. Setup guide 참고."
+      title="사용 가능한 시크릿이 없습니다. 설정 가이드를 참고하세요."
     >
       ✗ missing
     </span>

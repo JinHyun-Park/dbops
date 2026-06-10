@@ -984,8 +984,8 @@ export default function AlertsPage() {
             </div>
           ) : (
             <div className="text-zinc-500 text-xs py-2">
-              no subscribers yet. Add email/SMS/Slack webhook to receive
-              triggered alerts.
+              아직 구독자가 없습니다. 이메일/SMS/Slack webhook을 추가하면 알림
+              발생 시 전달됩니다.
             </div>
           )}
         </div>
@@ -999,7 +999,7 @@ export default function AlertsPage() {
         description="evaluator는 5분마다 실행되며, metric 데이터가 stale이거나 없는 규칙은 건너뜁니다."
       >
         {loading ? (
-          <div className="text-zinc-500 text-sm">Loading...</div>
+          <div className="text-zinc-500 text-sm">불러오는 중...</div>
         ) : rules.length === 0 ? (
           <EmptyState
             eyebrow="규칙 없음"
@@ -1012,22 +1012,22 @@ export default function AlertsPage() {
               <thead className="bg-zinc-900/60 border-b border-zinc-800 text-[10px] uppercase tracking-wider text-zinc-500">
                 <tr>
                   <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                    Status
+                    상태
                   </th>
                   <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                    Data
+                    데이터
                   </th>
                   <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                    Cluster
+                    클러스터
                   </th>
                   <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                    Rule
+                    규칙
                   </th>
                   <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                    Last Triggered
+                    마지막 발생
                   </th>
                   <th className="text-right px-3 py-2 text-zinc-400 font-medium">
-                    Actions
+                    작업
                   </th>
                 </tr>
               </thead>
@@ -1192,6 +1192,7 @@ function SlackAckSetupGuide() {
   const [open, setOpen] = useState(false);
   const [endpoint, setEndpoint] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1230,7 +1231,11 @@ function SlackAckSetupGuide() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* clipboard blocked — no fallback for v1 */
+      // 클립보드 API가 차단된 환경(비-HTTPS·권한 거부) — 조용히 실패하지
+      // 않고 직접 선택해 복사하라고 안내한다. 주소는 위 code 블록에서
+      // 선택 가능하다.
+      setCopyFailed(true);
+      setTimeout(() => setCopyFailed(false), 4000);
     }
   };
 
@@ -1327,6 +1332,12 @@ function SlackAckSetupGuide() {
                       {copied ? "✓ 복사됨" : "복사"}
                     </button>
                   </div>
+                  {copyFailed && (
+                    <div className="mt-1.5 text-[11px] text-amber-300">
+                      클립보드 접근이 차단되었습니다 — 위 주소를 직접 선택해
+                      복사하세요.
+                    </div>
+                  )}
                 </>
               }
             />
