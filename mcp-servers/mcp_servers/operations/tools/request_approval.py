@@ -60,6 +60,10 @@ def request_approval_impl(
         "manage_maintenance",
         "create_snapshot",
         "restore_cluster",
+        # enable_data_api는 replay 없는 승인-즉시-실행 액션: DBA가 Approval
+        # Center에서 승인하는 순간 approvals API가 rds:EnableHttpEndpoint를
+        # 직접 호출한다. 에이전트는 요청 등록까지만 하면 된다.
+        "enable_data_api",
         "other",
     ):
         return {

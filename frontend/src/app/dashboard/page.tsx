@@ -26,6 +26,7 @@ import { LogInsightsPanel } from "@/components/dashboard/log-insights-panel";
 import { TableSizesPanel } from "@/components/dashboard/table-sizes-panel";
 import { BackupPanel } from "@/components/dashboard/backup-panel";
 import { CapacityForecastPanel } from "@/components/dashboard/capacity-forecast-panel";
+import { DataApiBanner } from "@/components/dashboard/data-api-banner";
 import {
   fetchClusters,
   fetchDashboard,
@@ -568,28 +569,8 @@ export default function DashboardPage() {
 
           {/* false일 때만 — NULL(미수집)·true는 숨김. 라이브 SQL 패널들이
               영원히 "수집 대기"로 보이는 이유를 여기서 먼저 설명한다. */}
-          {dashboardData.cluster?.http_endpoint_enabled === false && (
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 text-sm">
-              <div className="text-amber-300 font-medium mb-1">
-                RDS Data API(HttpEndpoint) 비활성
-              </div>
-              <div className="text-zinc-300">
-                CloudWatch 지표는 정상 수집되지만, 라이브 SQL 기반 패널(Vacuum
-                &amp; Bloat, Table Sizes, Connection Activity, Top Queries,
-                Configuration)과 AI 에이전트의 SQL 실행은 이 클러스터에서
-                동작하지 않습니다. 다운타임 없이 활성화할 수 있습니다:
-              </div>
-              {/* Serverless v2·프로비저닝의 Data API는 EnableHttpEndpoint
-                  (resource-arn 기반, CLI v2 전용)다. modify-db-cluster의
-                  --enable-http-endpoint는 legacy Serverless v1 전용이며
-                  그 외 클러스터에선 조용히 무시된다 — 실측으로 확인. */}
-              <code className="mt-2 block w-fit max-w-full overflow-x-auto rounded bg-zinc-900/80 px-2.5 py-1.5 font-mono text-xs text-amber-200">
-                aws rds enable-http-endpoint --resource-arn
-                arn:aws:rds:&lt;region&gt;:&lt;account&gt;:cluster:
-                {selectedCluster}
-              </code>
-            </div>
-          )}
+          {dashboardData.cluster?.http_endpoint_enabled === false &&
+            selectedCluster && <DataApiBanner clusterId={selectedCluster} />}
 
           <MaintenanceHealthPanel
             clusterId={selectedCluster}

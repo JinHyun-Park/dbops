@@ -492,9 +492,24 @@ class AgentStack(cdk.Stack):
             timeout=cdk.Duration.seconds(30),
             environment={
                 "APPROVALS_TABLE": foundation.approvals_table.table_name,
+                # enable_data_api 승인-즉시-실행: 레지스트리에서 cluster_arn을
+                # 찾아 EnableHttpEndpoint를 호출한다.
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
             },
         )
         foundation.approvals_table.grant_read_write_data(approvals_lambda)
+        foundation.clusters_table.grant_read_data(approvals_lambda)
+        # 의도적으로 rds:EnableHttpEndpoint 단일 액션만 — ModifyDBCluster를
+        # 주면 마스터 패스워드 변경·삭제 보호 해제까지 가능한 광범위 권한이
+        # 플랫폼에 생긴다. 전용 API(설정 1비트)로 블래스트 반경을 좁히는 것이
+        # 이 기능의 보안 전제. Disable은 의도적으로 제외 — 켜는 것만 자동화하고
+        # 끄는 것은 사람이 콘솔/CLI에서 하도록 남겨둔다.
+        approvals_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["rds:EnableHttpEndpoint"],
+                resources=[f"arn:aws:rds:*:{self.account}:cluster:*"],
+            )
+        )
 
         # Runbooks API — CRUD over the `runbooks` cache table. AI-generated
         # diagnoses can be saved as reusable playbooks for pattern recurrence.

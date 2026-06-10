@@ -166,8 +166,9 @@ def execute_sql_impl(
         if "HttpEndpoint" in err or "Http endpoint" in err.lower():
             result["reason"] = (
                 f"이 클러스터는 RDS Data API(HttpEndpoint)가 비활성 상태라 SQL을 실행할 수 없습니다. "
-                f"활성화: aws rds enable-http-endpoint --resource-arn {target_arn} "
-                f"(다운타임 없음, 1~2분 내 적용, CLI v2 필요). "
+                f"request_approval(action_type='enable_data_api')로 활성화 승인 요청을 등록하면 "
+                f"DBA 승인 즉시 서버가 활성화합니다(다운타임 없음, 전파 1~2분). "
+                f"CLI 직접 실행도 가능: aws rds enable-http-endpoint --resource-arn {target_arn} (CLI v2). "
                 f"활성화 전까지는 라이브 SQL 기반 수집(테이블 통계·커넥션·Top Queries)도 동작하지 않습니다."
             )
         return result

@@ -49,6 +49,9 @@ const ACTION_RISK: Record<string, string> = {
   create_snapshot: "low",
   // Restore stands up a NEW billable cluster → high risk (source untouched).
   restore_cluster: "high",
+  // Data API 활성화: 데이터 변경은 없지만 SQL 실행 경로가 IAM 경계로
+  // 열리는 설정 변경 — 중간 위험으로 표시해 DBA가 의미를 인지하고 승인.
+  enable_data_api: "medium",
   other: "medium",
 };
 
