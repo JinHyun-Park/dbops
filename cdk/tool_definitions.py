@@ -76,12 +76,20 @@ def operations_schema():
         _tool("get_schema_history", "Track schema change history",
               {"cluster_id": "string", "days": "integer"}, ["cluster_id"]),
         _tool("execute_sql", "Execute SQL (SELECT auto, DDL/DML requires approval)",
-              {"cluster_id": "string", "sql": "string", "approved": "boolean"}, ["cluster_id", "sql"]),
+              {"cluster_id": "string", "sql": "string", "approved": "boolean", "approval_id": "string"}, ["cluster_id", "sql"]),
+        _tool("request_approval",
+              "Create a DBA approval request in the Approval Center when a write "
+              "tool returned approval_required. Returns approval_id + /approvals "
+              "deep link; after the DBA approves, re-issue the write tool with "
+              "approved=true AND that approval_id",
+              {"cluster_id": "string", "action_type": "string",
+               "action_details": "object", "requested_by": "string"},
+              ["cluster_id", "action_type", "action_details"]),
         _tool("modify_parameter", "Modify DB parameter (requires approval)",
-              {"cluster_id": "string", "parameter_name": "string", "value": "string", "approved": "boolean"},
+              {"cluster_id": "string", "parameter_name": "string", "value": "string", "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "parameter_name", "value"]),
         _tool("modify_scaling", "Scale instance (requires approval)",
-              {"cluster_id": "string", "min_capacity": "number", "max_capacity": "number", "approved": "boolean"},
+              {"cluster_id": "string", "min_capacity": "number", "max_capacity": "number", "approved": "boolean", "approval_id": "string"},
               ["cluster_id"]),
         _tool("manage_maintenance", "View or modify maintenance window",
               {"cluster_id": "string", "action": "string"}, ["cluster_id"]),
