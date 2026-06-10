@@ -373,13 +373,16 @@ export default function AlertsPage() {
 
   const submitSub = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSub.endpoint) return;
+    if (!newSub.endpoint || submitting) return;
+    setSubmitting(true);
     try {
       await createAlertSubscription(newSub.protocol, newSub.endpoint);
       setNewSub({ protocol: "email", endpoint: "" });
       reloadSubs();
     } catch (err) {
       setErr(err instanceof Error ? err.message : "Subscription failed");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -388,21 +391,30 @@ export default function AlertsPage() {
     reloadSubs();
   };
 
+  // Double-submit guard: without it a double-click on 규칙 추가 created the
+  // same rule twice (no idempotency on the API side either).
+  const [submitting, setSubmitting] = useState(false);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newRule.cluster_id) return;
+    if (!newRule.cluster_id || submitting) return;
+    setSubmitting(true);
     try {
       await createAlertRule(newRule);
       setNewRule((r) => ({ ...r, name: "" }));
       reload();
     } catch (err) {
       setErr(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const submitCompound = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newRule.cluster_id || compound.operands.length === 0) return;
+    if (!newRule.cluster_id || compound.operands.length === 0 || submitting)
+      return;
+    setSubmitting(true);
     try {
       await createAlertRule({
         cluster_id: newRule.cluster_id,
@@ -413,6 +425,8 @@ export default function AlertsPage() {
       reload();
     } catch (err) {
       setErr(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -586,7 +600,8 @@ export default function AlertsPage() {
               </div>
               <button
                 type="submit"
-                className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
+                disabled={submitting}
+                className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors disabled:opacity-50"
               >
                 규칙 추가
               </button>
@@ -813,7 +828,8 @@ export default function AlertsPage() {
                 </div>
                 <button
                   type="submit"
-                  className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
+                  disabled={submitting}
+                  className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors disabled:opacity-50"
                 >
                   복합 규칙 추가
                 </button>
@@ -893,7 +909,8 @@ export default function AlertsPage() {
               </div>
               <button
                 type="submit"
-                className="text-xs font-medium px-4 py-2 bg-emerald-500 text-zinc-950 hover:bg-emerald-400 transition-colors"
+                disabled={submitting}
+                className="text-xs font-medium px-4 py-2 bg-emerald-500 text-zinc-950 hover:bg-emerald-400 transition-colors disabled:opacity-50"
               >
                 구독 추가
               </button>

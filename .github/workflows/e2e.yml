@@ -1,0 +1,54 @@
+name: E2E smoke
+
+# Real-input Playwright smoke against the DEPLOYED dev environment. Exists to
+# catch the "renders fine but real clicks fall through" class of regression
+# (stacking-context burial) that unit tests and synthetic clicks cannot see.
+#
+# Requires repo secrets:
+#   DBOPS_E2E_EMAIL / DBOPS_E2E_PASSWORD  — the dedicated Cognito test user
+#   DBOPS_E2E_URL (optional)              — defaults to the dev CloudFront URL
+#
+# Runs nightly + on demand. NOT on every push: it hits live dev infra (and the
+# RCA spec invokes the agent once per run), so a deploy-then-test cadence fits
+# better than per-commit.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 21 * * *" # 06:00 KST daily
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: playwright smoke (deployed dev)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      DBOPS_E2E_EMAIL: ${{ secrets.DBOPS_E2E_EMAIL }}
+      DBOPS_E2E_PASSWORD: ${{ secrets.DBOPS_E2E_PASSWORD }}
+      DBOPS_E2E_URL: ${{ secrets.DBOPS_E2E_URL }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: install deps
+        run: npm ci
+      - name: install chromium
+        run: npx playwright install --with-deps chromium
+      - name: run smoke suite
+        run: npx playwright test
+      - name: upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
+          retention-days: 7

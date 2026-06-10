@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Playwright e2e artifacts + cached auth session
+/test-results/
+/playwright-report/
+/e2e/.auth/
