@@ -579,9 +579,14 @@ export default function DashboardPage() {
                 Configuration)과 AI 에이전트의 SQL 실행은 이 클러스터에서
                 동작하지 않습니다. 다운타임 없이 활성화할 수 있습니다:
               </div>
+              {/* Serverless v2·프로비저닝의 Data API는 EnableHttpEndpoint
+                  (resource-arn 기반, CLI v2 전용)다. modify-db-cluster의
+                  --enable-http-endpoint는 legacy Serverless v1 전용이며
+                  그 외 클러스터에선 조용히 무시된다 — 실측으로 확인. */}
               <code className="mt-2 block w-fit max-w-full overflow-x-auto rounded bg-zinc-900/80 px-2.5 py-1.5 font-mono text-xs text-amber-200">
-                aws rds modify-db-cluster --db-cluster-identifier{" "}
-                {selectedCluster} --enable-http-endpoint
+                aws rds enable-http-endpoint --resource-arn
+                arn:aws:rds:&lt;region&gt;:&lt;account&gt;:cluster:
+                {selectedCluster}
               </code>
             </div>
           )}

@@ -645,8 +645,11 @@ def _test_connection(body: dict) -> dict:
             "note": (
                 "RDS Data API(HttpEndpoint)가 비활성입니다 — CloudWatch 지표는 수집되지만 "
                 "라이브 SQL 기반 기능(테이블 통계·커넥션·Top Queries·에이전트 SQL)은 동작하지 않습니다. "
-                f"활성화: aws rds modify-db-cluster --db-cluster-identifier {cluster_id} "
-                "--enable-http-endpoint (다운타임 없음)"
+                # Sv2·프로비저닝은 EnableHttpEndpoint(resource-arn) API다.
+                # modify-db-cluster --enable-http-endpoint는 legacy Serverless
+                # v1 전용으로, 그 외에선 조용히 무시된다(실측).
+                f"활성화: aws rds enable-http-endpoint --resource-arn "
+                f"{cluster.get('DBClusterArn', '<cluster-arn>')} (다운타임 없음, CLI v2)"
             ),
         })
 
