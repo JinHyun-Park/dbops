@@ -42,7 +42,13 @@ def lambda_handler(event, context):
     def cache_execute(sql, params):
         sql_params = []
         for key, value in params.items():
-            if isinstance(value, bool):
+            if value is None:
+                # str(None) == "None" used to flow into stringValue and blow up
+                # numeric casts ("invalid input syntax for type double
+                # precision") — which silently dropped cluster_meta for every
+                # PROVISIONED cluster (sv2_min/max_acu are None there).
+                sql_params.append({"name": key, "value": {"isNull": True}})
+            elif isinstance(value, bool):
                 sql_params.append({"name": key, "value": {"booleanValue": value}})
             elif isinstance(value, int):
                 sql_params.append({"name": key, "value": {"longValue": value}})
