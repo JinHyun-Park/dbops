@@ -134,7 +134,10 @@ function EtlBadge({
 
 function relTime(iso?: string): string {
   if (!iso) return "—";
-  const diff = Date.now() - new Date(iso).getTime();
+  // registered_at은 naive UTC isoformat으로 저장돼 왔다(시간대 표기 없음).
+  // 그대로 파싱하면 로컬로 해석돼 KST에서 +9h 오차 — 미표기면 Z를 붙인다.
+  const norm = /Z$|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + "Z";
+  const diff = Date.now() - new Date(norm).getTime();
   if (diff < 60_000) return "just now";
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
