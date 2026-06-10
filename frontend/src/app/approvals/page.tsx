@@ -42,7 +42,7 @@ export default function ApprovalsPage() {
       <PageHeader
         eyebrow="자동화"
         title="승인 센터"
-        description="Agent가 제안한 쓰기 작업 (DDL, parameter, scaling, maintenance)을 DBA가 검토하고 승인하는 게이트입니다."
+        description="Agent 또는 대시보드가 제안한 변경 작업(DDL, parameter, scaling, maintenance, snapshot/restore, Data API 활성화)을 DBA가 검토하고 승인하는 게이트입니다. 승인됨 탭에는 실행 완료(consumed)된 건도 함께 표시됩니다."
         actions={
           <div className="flex gap-1">
             {(["pending", "approved", "rejected"] as const).map((s) => (

@@ -228,11 +228,13 @@ export default function ClustersPage() {
       });
       setDiscovered(res.clusters);
       setDiscoverErrors(res.errors || {});
-      // Auto-select unregistered clusters.
+      // Auto-select unregistered clusters — DBOps 내부 캐시 DB(is_internal)는
+      // 제외한다. 자기 자신을 모니터링 대상으로 실수 등록하는 것 방지;
+      // 수동 체크로는 여전히 선택 가능(의도적 등록은 막지 않는다).
       setSelectedIds(
         new Set(
           res.clusters
-            .filter((c) => !c.already_registered)
+            .filter((c) => !c.already_registered && !c.is_internal)
             .map((c) => c.cluster_id),
         ),
       );
@@ -634,6 +636,14 @@ export default function ClustersPage() {
                           {c.already_registered && (
                             <span className="ml-2 text-[10px] text-zinc-500">
                               already registered
+                            </span>
+                          )}
+                          {c.is_internal && !c.already_registered && (
+                            <span
+                              className="ml-2 px-1.5 py-0.5 border border-sky-500/40 bg-sky-500/10 text-sky-300 text-[10px]"
+                              title="DBOps 플랫폼 자체의 캐시 DB입니다 — 모니터링 대상으로 등록할 필요가 없어 자동 선택에서 제외했습니다."
+                            >
+                              DBOps 내부
                             </span>
                           )}
                         </td>

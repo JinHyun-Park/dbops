@@ -417,12 +417,21 @@ def _handle_discover(table, body: dict):
 
     all_clusters = []
     errors_by_region = {}
+    # DBOps 자기 자신의 캐시 DB를 식별 — 디스커버리 결과에 같이 잡히는데
+    # 기본 체크되면 모니터링 대상으로 실수 등록하기 쉽다(자기 자신을 자기가
+    # 모니터링). UI가 자동 선택에서 빼고 배지를 달 수 있도록 마킹만 한다.
+    cache_arn, _, _ = _cache_db_env()
+    cache_cluster_id = cache_arn.rsplit(":", 1)[-1] if cache_arn else ""
+
     for r in regions:
         try:
             rows = _list_clusters_in_region(r, role_arn)
             for row in rows:
                 row["already_registered"] = row["cluster_id"] in existing_ids
                 row["account_id"] = account_id
+                row["is_internal"] = bool(
+                    cache_cluster_id and row["cluster_id"] == cache_cluster_id
+                )
             all_clusters.extend(rows)
         except ClientError as e:
             errors_by_region[r] = e.response.get("Error", {}).get("Code", str(e))

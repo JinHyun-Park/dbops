@@ -6,6 +6,20 @@ from datetime import datetime
 import boto3
 
 
+def _scan_all(table, **kwargs) -> list:
+    """LastEvaluatedKey를 끝까지 따라가는 scan. 단일 호출 scan은 1MB 페이지에서
+    조용히 잘린다 — 승인 이력이 쌓이면 활동 피드·목록·approval_id 조회가
+    임의로 누락되는, approval_guard의 Limit=1 버그와 같은 잘림 패밀리."""
+    items = []
+    while True:
+        resp = table.scan(**kwargs)
+        items.extend(resp.get("Items", []))
+        lek = resp.get("LastEvaluatedKey")
+        if not lek:
+            return items
+        kwargs["ExclusiveStartKey"] = lek
+
+
 def _execute_enable_data_api(item: dict) -> dict:
     """enable_data_api 승인은 승인 즉시 이 핸들러가 직접 실행한다 — 에이전트
     재호출(replay) 단계가 없어, 실행이 DBA의 인증된 승인 클릭 아래에서 일어난다.
@@ -94,9 +108,8 @@ def lambda_handler(event, context):
             scan_kwargs["FilterExpression"] = " AND ".join(filters)
             scan_kwargs["ExpressionAttributeValues"] = attr_values
 
-        response = table.scan(**scan_kwargs)
         items = sorted(
-            response.get("Items", []),
+            _scan_all(table, **scan_kwargs),
             key=lambda x: x.get("created_at", ""),
             reverse=True,
         )[:limit]
@@ -130,22 +143,33 @@ def lambda_handler(event, context):
 
     if method == "GET" and not approval_id:
         status_filter = qsp.get("status", "pending")
-        response = table.scan(
-            FilterExpression="approval_status = :s",
-            ExpressionAttributeValues={":s": status_filter},
-        )
-        items = sorted(response.get("Items", []), key=lambda x: x.get("created_at", ""), reverse=True)
+        # "승인됨" 탭은 consumed(승인 후 실행 완료)도 포함한다 — DBA의 멘탈
+        # 모델에서 둘 다 "내가 승인한 작업"이고, consumed가 어느 탭에도 안
+        # 보이면 실행된 승인이 UI에서 증발한 것처럼 보인다.
+        if status_filter == "approved":
+            rows = _scan_all(
+                table,
+                FilterExpression="approval_status IN (:s1, :s2)",
+                ExpressionAttributeValues={":s1": "approved", ":s2": "consumed"},
+            )
+        else:
+            rows = _scan_all(
+                table,
+                FilterExpression="approval_status = :s",
+                ExpressionAttributeValues={":s": status_filter},
+            )
+        items = sorted(rows, key=lambda x: x.get("created_at", ""), reverse=True)
         return {"statusCode": 200, "headers": headers, "body": json.dumps(items, default=str)}
 
     if method == "GET" and approval_id:
         response = table.get_item(Key={"approval_id": approval_id, "created_at": qsp.get("created_at", "")})
         item = response.get("Item")
         if not item:
-            response = table.scan(
+            items = _scan_all(
+                table,
                 FilterExpression="approval_id = :aid",
                 ExpressionAttributeValues={":aid": approval_id},
             )
-            items = response.get("Items", [])
             item = items[0] if items else None
         return {
             "statusCode": 200 if item else 404,
@@ -162,14 +186,15 @@ def lambda_handler(event, context):
         # 이미 있으면 새로 만들지 않고 그 행을 돌려준다 (버튼 더블클릭·
         # 페이지 재방문으로 승인 대기열이 중복으로 쌓이는 것 방지).
         if action_type == "enable_data_api":
-            existing = table.scan(
+            existing = _scan_all(
+                table,
                 FilterExpression="cluster_id = :c AND action_type = :a AND approval_status = :p",
                 ExpressionAttributeValues={
                     ":c": body.get("cluster_id", ""),
                     ":a": "enable_data_api",
                     ":p": "pending",
                 },
-            ).get("Items") or []
+            )
             if existing:
                 return {"statusCode": 200, "headers": headers, "body": json.dumps(existing[0], default=str)}
 
@@ -198,11 +223,11 @@ def lambda_handler(event, context):
         if action not in ("approve", "reject"):
             return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": "action must be approve or reject"})}
 
-        response = table.scan(
+        items = _scan_all(
+            table,
             FilterExpression="approval_id = :aid",
             ExpressionAttributeValues={":aid": approval_id},
         )
-        items = response.get("Items", [])
         if not items:
             return {"statusCode": 404, "headers": headers, "body": json.dumps({"error": "not found"})}
 

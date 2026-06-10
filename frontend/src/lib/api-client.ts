@@ -882,6 +882,8 @@ export interface DiscoveredCluster {
   region: string;
   account_id: string;
   already_registered: boolean;
+  // DBOps 자기 자신의 캐시 DB — 자동 선택에서 제외되고 배지가 붙는다.
+  is_internal?: boolean;
 }
 
 export interface DiscoverResult {

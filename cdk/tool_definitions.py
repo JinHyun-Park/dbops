@@ -12,22 +12,31 @@ def _tool(name, desc, props, required=None):
 
 def performance_schema():
     return [
-        _tool("get_top_queries", "Get top-N queries sorted by total time, calls, or mean time",
-              {"cluster_id": "string", "sort_by": "string", "limit": "integer"}, ["cluster_id"]),
-        _tool("get_pi_metrics", "Get Performance Insights metrics (AAS, wait events) from cache",
-              {"cluster_id": "string", "metric_type": "string"}, ["cluster_id"]),
-        _tool("get_slow_queries", "Get slow queries exceeding threshold from cache",
-              {"cluster_id": "string", "threshold_ms": "number"}, ["cluster_id"]),
+        # 스키마는 핸들러 시그니처의 전체 파라미터를 노출해야 한다 — 누락된
+        # 파라미터는 기본값으로만 동작해 에이전트 능력이 조용히 제한된다
+        # (예: start_time/end_time이 없으면 "어제 14~15시 슬로우쿼리" 같은
+        # 시간창 분석이 불가능). request_approval 누락 P0와 같은 패밀리.
+        _tool("get_top_queries", "Get top-N queries sorted by total time, calls, or mean time; optional ISO start_time/end_time window",
+              {"cluster_id": "string", "sort_by": "string", "limit": "integer",
+               "start_time": "string", "end_time": "string"}, ["cluster_id"]),
+        _tool("get_pi_metrics", "Get Performance Insights metrics (AAS, wait events) from cache; optional ISO start_time/end_time window",
+              {"cluster_id": "string", "metric_type": "string",
+               "start_time": "string", "end_time": "string"}, ["cluster_id"]),
+        _tool("get_slow_queries", "Get slow queries exceeding threshold from cache; optional ISO start_time/end_time window",
+              {"cluster_id": "string", "threshold_ms": "number", "limit": "integer",
+               "start_time": "string", "end_time": "string"}, ["cluster_id"]),
         _tool("compare_periods", "Compare metrics between two time periods",
               {"cluster_id": "string", "period_a_start": "string", "period_a_end": "string",
-               "period_b_start": "string", "period_b_end": "string"},
+               "period_b_start": "string", "period_b_end": "string", "metric_type": "string"},
               ["cluster_id", "period_a_start", "period_a_end", "period_b_start", "period_b_end"]),
         _tool("detect_anomalies", "Detect metric anomalies using z-score against 7-day baseline",
-              {"cluster_id": "string", "hours": "integer"}, ["cluster_id"]),
+              {"cluster_id": "string", "hours": "integer", "threshold": "number"}, ["cluster_id"]),
         _tool("detect_regressions", "Detect query regressions after a change point",
-              {"cluster_id": "string", "change_point": "string"}, ["cluster_id", "change_point"]),
+              {"cluster_id": "string", "change_point": "string", "hours_before": "integer",
+               "hours_after": "integer", "min_change_pct": "number"},
+              ["cluster_id", "change_point"]),
         _tool("forecast_capacity", "Forecast storage/connection capacity limits",
-              {"cluster_id": "string", "metric": "string"}, ["cluster_id"]),
+              {"cluster_id": "string", "metric": "string", "days_lookback": "integer"}, ["cluster_id"]),
         _tool("get_performance_summary", "Get KPI summary for a time period",
               {"cluster_id": "string", "hours": "integer"}, ["cluster_id"]),
         _tool("recommend_index",
@@ -50,10 +59,11 @@ def incident_schema():
     return [
         _tool("get_health_status", "Get cluster health status overview",
               {"cluster_id": "string"}, ["cluster_id"]),
-        _tool("get_recent_events", "Get recent RDS events and alarms",
-              {"cluster_id": "string", "hours": "integer"}, ["cluster_id"]),
-        _tool("search_logs", "Search CloudWatch Logs via Insights",
-              {"cluster_id": "string", "query": "string", "hours": "integer"}, ["cluster_id"]),
+        _tool("get_recent_events", "Get recent RDS events and alarms; optional event_type filter",
+              {"cluster_id": "string", "hours": "integer", "event_type": "string"}, ["cluster_id"]),
+        _tool("search_logs", "Search CloudWatch Logs via Insights; optional explicit log_group",
+              {"cluster_id": "string", "query": "string", "hours": "integer",
+               "log_group": "string"}, ["cluster_id"]),
         _tool("correlate_signals", "Correlate metrics and events on timeline",
               {"cluster_id": "string", "start_time": "string", "end_time": "string"},
               ["cluster_id", "start_time", "end_time"]),
@@ -71,12 +81,18 @@ def incident_schema():
 
 def operations_schema():
     return [
-        _tool("get_schema_diff", "Compare schemas between two time points",
-              {"cluster_id": "string"}, ["cluster_id"]),
+        _tool("get_schema_diff", "Compare schemas between two snapshots (ISO timestamps); omit both for latest-vs-previous",
+              {"cluster_id": "string", "snapshot_a": "string", "snapshot_b": "string"},
+              ["cluster_id"]),
         _tool("get_schema_history", "Track schema change history",
               {"cluster_id": "string", "days": "integer"}, ["cluster_id"]),
-        _tool("execute_sql", "Execute SQL (SELECT auto, DDL/DML requires approval)",
-              {"cluster_id": "string", "sql": "string", "approved": "boolean", "approval_id": "string"}, ["cluster_id", "sql"]),
+        # force는 DROP/TRUNCATE 차단 해제용 — 노출해도 인간 승인 게이트
+        # (approved+approval_id 검증)는 그대로 통과해야 하므로 안전 모델
+        # 위반이 아니다. 미노출 시 차단 메시지가 force를 안내하는데 에이전트가
+        # 전달할 방법이 없는 자기모순이 된다.
+        _tool("execute_sql", "Execute SQL (SELECT auto, DDL/DML requires approval; DROP/TRUNCATE additionally requires force=true)",
+              {"cluster_id": "string", "sql": "string", "approved": "boolean",
+               "approval_id": "string", "force": "boolean"}, ["cluster_id", "sql"]),
         _tool("request_approval",
               "Create a DBA approval request in the Approval Center when a write "
               "tool returned approval_required. Returns approval_id + /approvals "
@@ -91,19 +107,26 @@ def operations_schema():
         _tool("modify_scaling", "Scale instance (requires approval)",
               {"cluster_id": "string", "min_capacity": "number", "max_capacity": "number", "approved": "boolean", "approval_id": "string"},
               ["cluster_id"]),
-        _tool("manage_maintenance", "View or modify maintenance window",
-              {"cluster_id": "string", "action": "string"}, ["cluster_id"]),
+        # 쓰기 툴 3종 모두 approved/approval_id를 스키마에 노출해야 한다 —
+        # 핸들러·가드가 완비여도 스키마에 없으면 에이전트가 승인 후 재실행을
+        # 못 해 승인 루프가 dead-end가 된다 (request_approval 누락 P0와 동일
+        # 패밀리, 시나리오 테스트로 적발).
+        _tool("manage_maintenance", "View or modify maintenance window (modify requires approval)",
+              {"cluster_id": "string", "action": "string", "window": "string",
+               "approved": "boolean", "approval_id": "string"}, ["cluster_id"]),
         _tool("create_snapshot", "Create a manual cluster snapshot (backup); requires approval",
-              {"cluster_id": "string", "snapshot_id": "string"}, ["cluster_id"]),
+              {"cluster_id": "string", "snapshot_id": "string",
+               "approved": "boolean", "approval_id": "string"}, ["cluster_id"]),
         _tool("restore_cluster",
               "Restore a snapshot or point-in-time into a NEW cluster (high risk); requires approval",
               {"cluster_id": "string", "new_cluster_id": "string", "mode": "string",
-               "snapshot_id": "string", "restore_to_time": "string"},
+               "snapshot_id": "string", "restore_to_time": "string", "use_latest": "boolean",
+               "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "new_cluster_id"]),
         _tool("review_sql", "Pre-execution SQL review with risk assessment",
               {"cluster_id": "string", "sql": "string"}, ["cluster_id", "sql"]),
         _tool("audit_permissions", "Audit DB user permissions",
-              {"cluster_id": "string"}, ["cluster_id"]),
+              {"cluster_id": "string", "engine": "string"}, ["cluster_id"]),
         _tool(
             "query_activity_audit",
             "Search write history + approval log for compliance / retro questions "
