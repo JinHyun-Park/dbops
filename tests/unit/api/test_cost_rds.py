@@ -249,7 +249,9 @@ def test_handle_rds_view_without_per_cluster_sets_flag_and_note(mod):
     assert body["per_cluster"] == []
     assert body["per_cluster_tag"] is None
     assert body["per_cluster_note"]  # non-empty activation guidance
-    assert "cost-allocation tag" in body["per_cluster_note"]
+    # 안내문은 한글이지만 jargon은 영어 유지 — 정확한 문장이 아니라
+    # "cost-allocation 태그 활성화를 안내한다"는 사실에만 결합한다.
+    assert "cost-allocation" in body["per_cluster_note"]
     # total/breakdown still present even when per-cluster is unavailable
     assert body["total"] == pytest.approx(33.0)
     assert len(body["by_usage_type"]) == 1
