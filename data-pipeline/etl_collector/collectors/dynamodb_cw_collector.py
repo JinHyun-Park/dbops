@@ -44,12 +44,45 @@ def collect_dynamodb_metrics(cw, dynamo, cache_execute, cluster_id, table_name, 
         t = dynamo.describe_table(TableName=table_name)["Table"]
         # A successful describe with no BillingModeSummary IS provisioned — keep that default.
         billing_mode = (t.get("BillingModeSummary") or {}).get("BillingMode", "PROVISIONED")
+        # Attribute name -> type (S/N/B), so key schemas can show the data type.
+        attrs = {a["AttributeName"]: a.get("AttributeType", "")
+                 for a in t.get("AttributeDefinitions", [])}
+
+        def _keys(schema):
+            """KeySchema list -> {partition_key:{name,type}, sort_key:{name,type}|None}."""
+            pk = sk = None
+            for k in schema or []:
+                info = {"name": k["AttributeName"], "type": attrs.get(k["AttributeName"], "")}
+                if k.get("KeyType") == "HASH":
+                    pk = info
+                elif k.get("KeyType") == "RANGE":
+                    sk = info
+            return {"partition_key": pk, "sort_key": sk}
+
         details = {
             "billing_mode": billing_mode,
             "item_count": t.get("ItemCount", 0),
             "table_size_bytes": t.get("TableSizeBytes", 0),
             "table_status": t.get("TableStatus", ""),
-            "gsi": [g.get("IndexName") for g in t.get("GlobalSecondaryIndexes", [])],
+            # Primary key (PK + optional SK) with attribute types.
+            "key_schema": _keys(t.get("KeySchema")),
+            # Global secondary indexes: own keys, projection, status, size.
+            "gsi": [{
+                "name": g.get("IndexName"),
+                **_keys(g.get("KeySchema")),
+                "projection": (g.get("Projection") or {}).get("ProjectionType", ""),
+                "projection_attrs": (g.get("Projection") or {}).get("NonKeyAttributes", []),
+                "status": g.get("IndexStatus", ""),
+                "item_count": g.get("ItemCount", 0),
+                "size_bytes": g.get("IndexSizeBytes", 0),
+            } for g in t.get("GlobalSecondaryIndexes", [])],
+            # Local secondary indexes: share the table PK, own sort key + projection.
+            "lsi": [{
+                "name": x.get("IndexName"),
+                **_keys(x.get("KeySchema")),
+                "projection": (x.get("Projection") or {}).get("ProjectionType", ""),
+                "projection_attrs": (x.get("Projection") or {}).get("NonKeyAttributes", []),
+            } for x in t.get("LocalSecondaryIndexes", [])],
         }
         # Fix 1a: include account_id + region to satisfy NOT NULL constraint on fresh rows.
         cache_execute(

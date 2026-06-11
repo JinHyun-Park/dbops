@@ -80,11 +80,36 @@ def ensure_table(account):
         ddb.describe_table(TableName=TABLE)
         _log(f"[setup] table {TABLE} already exists")
     except ddb.exceptions.ResourceNotFoundException:
-        _log(f"[setup] creating PROVISIONED table {TABLE} (1 RCU / 1 WCU)")
+        # Composite primary key (pk + sk) + one GSI + one LSI, so the scenario
+        # exercises the full key-structure surface the dashboard renders
+        # (PK/SK types, GSI keys/projection/status, LSI sort key/projection).
+        _log(f"[setup] creating PROVISIONED table {TABLE} (PK+SK, 1 GSI, 1 LSI; 1 RCU / 1 WCU)")
         ddb.create_table(
             TableName=TABLE,
-            AttributeDefinitions=[{"AttributeName": "pk", "AttributeType": "S"}],
-            KeySchema=[{"AttributeName": "pk", "KeyType": "HASH"}],
+            AttributeDefinitions=[
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "sk", "AttributeType": "S"},
+                {"AttributeName": "gsipk", "AttributeType": "S"},
+                {"AttributeName": "lsisk", "AttributeType": "N"},
+            ],
+            KeySchema=[
+                {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "sk", "KeyType": "RANGE"},
+            ],
+            GlobalSecondaryIndexes=[{
+                "IndexName": "by-gsipk",
+                "KeySchema": [{"AttributeName": "gsipk", "KeyType": "HASH"}],
+                "Projection": {"ProjectionType": "ALL"},
+                "ProvisionedThroughput": {"ReadCapacityUnits": 1, "WriteCapacityUnits": 1},
+            }],
+            LocalSecondaryIndexes=[{
+                "IndexName": "by-lsisk",
+                "KeySchema": [
+                    {"AttributeName": "pk", "KeyType": "HASH"},
+                    {"AttributeName": "lsisk", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "KEYS_ONLY"},
+            }],
             BillingMode="PROVISIONED",
             ProvisionedThroughput={"ReadCapacityUnits": 1, "WriteCapacityUnits": 1},
             Tags=[{"Key": "Project", "Value": "DBOps"},
@@ -119,9 +144,13 @@ def drive_load(writes):
     payload = "x" * 300  # keep each item ~1 WCU
     _log(f"[load] driving {writes} PutItems against a 1-WCU table…")
     for i in range(writes):
+        # Items carry the GSI (gsipk) and LSI (lsisk) attributes too. pk repeats
+        # (i % 50) so items share partition/LSI collections; sk is unique.
         try:
-            ddb.put_item(TableName=TABLE,
-                         Item={"pk": {"S": f"k{i}"}, "data": {"S": payload}})
+            ddb.put_item(TableName=TABLE, Item={
+                "pk": {"S": f"k{i % 50}"}, "sk": {"S": f"s{i}"},
+                "gsipk": {"S": f"g{i % 10}"}, "lsisk": {"N": str(i)},
+                "data": {"S": payload}})
             ok_w += 1
         except ClientError as e:
             if e.response["Error"]["Code"] in (
@@ -129,11 +158,13 @@ def drive_load(writes):
                 thr_w += 1
             else:
                 raise
-    # reads: GetItem (hits + misses) + a couple of Scans → read consumption + latency
+    # reads: Query by pk + GetItem (full key) + Scan → exercises read consumption
+    # and per-operation latency (query/getitem/scan).
     ok_r = thr_r = 0
-    for i in range(0, writes, 4):
+    for i in range(60):
         try:
-            ddb.get_item(TableName=TABLE, Key={"pk": {"S": f"k{i}"}})
+            ddb.query(TableName=TABLE, KeyConditionExpression="pk = :p",
+                      ExpressionAttributeValues={":p": {"S": f"k{i % 50}"}})
             ok_r += 1
         except ClientError as e:
             if e.response["Error"]["Code"] in (
@@ -141,6 +172,12 @@ def drive_load(writes):
                 thr_r += 1
             else:
                 raise
+    for i in range(0, 60, 3):
+        try:
+            ddb.get_item(TableName=TABLE,
+                         Key={"pk": {"S": f"k{i % 50}"}, "sk": {"S": f"s{i}"}})
+        except ClientError:
+            pass
     for _ in range(3):
         try:
             ddb.scan(TableName=TABLE, Limit=50)

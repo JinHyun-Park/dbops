@@ -189,3 +189,71 @@ def test_describe_failure_skips_provisioned_queries():
         f"Provisioned* metrics should NOT be queried when describe_table fails, "
         f"but got: {provisioned_metrics_queried}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 5 — resource_details captures key schema (PK/SK), rich GSI, and LSI
+# ---------------------------------------------------------------------------
+
+def test_resource_details_captures_key_schema_gsi_lsi():
+    import json
+
+    cw = _make_cw()
+    dynamo = MagicMock()
+    dynamo.describe_table.return_value = {
+        "Table": {
+            "BillingModeSummary": {"BillingMode": "PROVISIONED"},
+            "ItemCount": 5, "TableSizeBytes": 99, "TableStatus": "ACTIVE",
+            "AttributeDefinitions": [
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "sk", "AttributeType": "N"},
+                {"AttributeName": "gpk", "AttributeType": "S"},
+                {"AttributeName": "lsk", "AttributeType": "S"},
+            ],
+            "KeySchema": [
+                {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "sk", "KeyType": "RANGE"},
+            ],
+            "GlobalSecondaryIndexes": [{
+                "IndexName": "by-gpk",
+                "KeySchema": [{"AttributeName": "gpk", "KeyType": "HASH"}],
+                "Projection": {"ProjectionType": "INCLUDE", "NonKeyAttributes": ["a", "b"]},
+                "IndexStatus": "ACTIVE", "ItemCount": 3, "IndexSizeBytes": 42,
+            }],
+            "LocalSecondaryIndexes": [{
+                "IndexName": "by-lsk",
+                "KeySchema": [
+                    {"AttributeName": "pk", "KeyType": "HASH"},
+                    {"AttributeName": "lsk", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            }],
+        }
+    }
+    captured = {}
+
+    def cache_execute(sql, params):
+        if "cluster_meta" in sql:
+            captured["details"] = json.loads(params["details"])
+
+    ddb.collect_dynamodb_metrics(cw, dynamo, cache_execute, "c5", "rich", _ACCOUNT_ID, _REGION)
+    d = captured["details"]
+
+    # Primary key schema with types
+    assert d["key_schema"]["partition_key"] == {"name": "pk", "type": "S"}
+    assert d["key_schema"]["sort_key"] == {"name": "sk", "type": "N"}
+
+    # GSI: name, own keys, projection (+ included attrs), status, size
+    g = d["gsi"][0]
+    assert g["name"] == "by-gpk"
+    assert g["partition_key"] == {"name": "gpk", "type": "S"}
+    assert g["sort_key"] is None
+    assert g["projection"] == "INCLUDE"
+    assert g["projection_attrs"] == ["a", "b"]
+    assert g["status"] == "ACTIVE"
+
+    # LSI: shares table PK, own sort key, projection
+    lsi0 = d["lsi"][0]
+    assert lsi0["name"] == "by-lsk"
+    assert lsi0["sort_key"] == {"name": "lsk", "type": "S"}
+    assert lsi0["projection"] == "ALL"
