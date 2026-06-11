@@ -6,6 +6,8 @@ import boto3
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.engine_family import CAPABILITIES
+from mcp_servers.shared.engine_family import engine_family as _engine_family
 
 # SQL read-only/side-effect classification lives in shared/sql_safety so this
 # tool and explain_plan's analyze=True gate can't drift apart. Re-exported names
@@ -129,6 +131,22 @@ def execute_sql_impl(
     # Resolve target cluster ARN/Secret from the DynamoDB clusters registry.
     # Falls back to env-var TARGET_* for legacy single-cluster deployments.
     cluster = _lookup_cluster(cluster_id)
+
+    # Engine-family guard: non-relational engines (DynamoDB, DocumentDB) do not
+    # support the RDS Data API SQL path. Return a clear signal so the agent can
+    # tell the user this resource type isn't supported in Phase 1 chat diagnostics
+    # rather than failing with a confusing "no_target" or rds-data error.
+    fam = cluster.get("engine_family") or _engine_family(cluster.get("engine", ""))
+    if cluster and not CAPABILITIES[fam]["sql"]:
+        return {
+            "status": "unsupported_engine",
+            "engine_family": fam,
+            "cluster_id": cluster_id,
+            "message": (
+                f"{fam} 리소스는 현재 단계(Phase 1)에서 챗 진단을 지원하지 않습니다."
+            ),
+        }
+
     target_arn = cluster.get("cluster_arn") or os.environ.get("TARGET_CLUSTER_ARN", "")
     target_secret = cluster.get("secret_arn") or os.environ.get("TARGET_SECRET_ARN", "")
     target_db = cluster.get("db_name") or os.environ.get("TARGET_DB_NAME", "")
