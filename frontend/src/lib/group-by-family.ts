@@ -1,4 +1,9 @@
-import { EngineFamily, engineFamily } from "@/lib/engine";
+import {
+  EngineFamily,
+  engineFamily,
+  EngineGroup,
+  engineGroup,
+} from "@/lib/engine";
 
 export interface HasEngine {
   cluster_id: string;
@@ -28,4 +33,19 @@ export function groupByEngineFamily<T extends HasEngine>(
 // Human display name: resource_name when set (DynamoDB slug id is opaque), else cluster_id.
 export function displayName(it: HasEngine): string {
   return it.resource_name || it.cluster_id;
+}
+
+// Finer-grained grouping for display — relational splits into PG vs MySQL.
+// (groupByEngineFamily still groups both under "relational" for capability gating.)
+export function groupByEngineGroup<T extends HasEngine>(
+  items: T[],
+): Record<EngineGroup, T[]> {
+  const groups: Record<EngineGroup, T[]> = {
+    "aurora-postgresql": [],
+    "aurora-mysql": [],
+    documentdb: [],
+    dynamodb: [],
+  };
+  for (const it of items) groups[engineGroup(it.engine)].push(it);
+  return groups;
 }

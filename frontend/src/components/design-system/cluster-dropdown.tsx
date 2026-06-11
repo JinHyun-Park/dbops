@@ -2,16 +2,12 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { ChevronDown, Database, Search } from "lucide-react";
-import { eolFor, FAMILY_META } from "@/lib/engine";
+import { eolFor, ENGINE_GROUP_META, ENGINE_GROUP_ORDER } from "@/lib/engine";
 import { triage, type Level } from "@/lib/cluster-triage";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { useFleetOverview } from "@/lib/use-fleet-overview";
 import { AnchoredPopover } from "@/components/design-system/anchored-popover";
-import {
-  groupByEngineFamily,
-  displayName,
-  FAMILY_ORDER,
-} from "@/lib/group-by-family";
+import { groupByEngineGroup, displayName } from "@/lib/group-by-family";
 
 // A real, discoverable cluster switcher: click → a popover that lists the
 // clusters immediately (with a severity dot from the shared triage), with
@@ -68,13 +64,13 @@ export function ClusterDropdown({
   // Flatten the first visible item across families for Enter-key selection.
   const firstVisible = visible[0] ?? null;
 
-  // Group visible results by engine family for section headers.
+  // Group visible results by engine group for section headers.
   const grouped = useMemo(() => {
-    const byFamily = groupByEngineFamily(visible);
-    return FAMILY_ORDER.map((fam) => ({
-      fam,
-      meta: FAMILY_META[fam],
-      items: byFamily[fam],
+    const byGroup = groupByEngineGroup(visible);
+    return ENGINE_GROUP_ORDER.map((g) => ({
+      fam: g,
+      meta: ENGINE_GROUP_META[g],
+      items: byGroup[g],
     })).filter((g) => g.items.length > 0);
   }, [visible]);
 

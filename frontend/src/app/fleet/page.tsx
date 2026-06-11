@@ -13,15 +13,12 @@ import {
   eolFor,
   EOL_STATUS_CLASSES,
   eolHint,
-  FAMILY_META,
+  ENGINE_GROUP_META,
+  ENGINE_GROUP_ORDER,
   type EolInfo,
 } from "@/lib/engine";
 import { triage, n, LEVEL_RANK, type Level } from "@/lib/cluster-triage";
-import {
-  groupByEngineFamily,
-  displayName,
-  FAMILY_ORDER,
-} from "@/lib/group-by-family";
+import { groupByEngineGroup, displayName } from "@/lib/group-by-family";
 
 interface ClusterRow {
   cluster_id: string;
@@ -322,17 +319,18 @@ export default function FleetPage() {
     if (groupBy === "none") return [];
 
     if (groupBy === "engine") {
-      // Stable family order; skip empty buckets.
-      const byFamily = groupByEngineFamily(capped.map((d) => d.row));
+      // Stable engine-group order; skip empty buckets.
+      // Aurora PG and Aurora MySQL now appear as separate groups.
+      const byGroup = groupByEngineGroup(capped.map((d) => d.row));
       const result: FleetGroup[] = [];
-      for (const fam of FAMILY_ORDER) {
-        const ids = new Set(byFamily[fam].map((r) => r.cluster_id));
-        const famRows = capped.filter((d) => ids.has(d.row.cluster_id));
-        if (famRows.length === 0) continue;
+      for (const g of ENGINE_GROUP_ORDER) {
+        const ids = new Set(byGroup[g].map((r) => r.cluster_id));
+        const grpRows = capped.filter((d) => ids.has(d.row.cluster_id));
+        if (grpRows.length === 0) continue;
         result.push({
-          key: fam,
-          label: FAMILY_META[fam].label,
-          rows: famRows,
+          key: g,
+          label: ENGINE_GROUP_META[g].label,
+          rows: grpRows,
         });
       }
       return result;

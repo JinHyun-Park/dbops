@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { eolFor, FAMILY_META } from "@/lib/engine";
+import { eolFor, ENGINE_GROUP_META, ENGINE_GROUP_ORDER } from "@/lib/engine";
 import {
   triage,
   LEVEL_RANK,
@@ -10,11 +10,7 @@ import {
   type TriageInput,
 } from "@/lib/cluster-triage";
 import { useFleetOverview } from "@/lib/use-fleet-overview";
-import {
-  groupByEngineFamily,
-  displayName,
-  FAMILY_ORDER,
-} from "@/lib/group-by-family";
+import { groupByEngineGroup, displayName } from "@/lib/group-by-family";
 
 interface ClusterInfo {
   cluster_id: string;
@@ -143,23 +139,23 @@ export function ClusterOverview({
       {(() => {
         // Build a lookup from cluster_id → decorated entry for O(1) access.
         const byId = new Map(capped.map((d) => [d.c.cluster_id, d]));
-        // Group the capped clusters into family buckets (preserving sort order
-        // within each bucket because `capped` is already severity-sorted).
-        const grouped = groupByEngineFamily(capped.map((d) => d.c));
-        const hasMultipleFamilies =
-          FAMILY_ORDER.filter((fam) => grouped[fam].length > 0).length > 1;
+        // Group the capped clusters into engine-group buckets (preserving sort
+        // order within each bucket because `capped` is already severity-sorted).
+        const grouped = groupByEngineGroup(capped.map((d) => d.c));
+        const hasMultipleGroups =
+          ENGINE_GROUP_ORDER.filter((g) => grouped[g].length > 0).length > 1;
 
         return (
           <div className="space-y-2">
-            {FAMILY_ORDER.map((fam) => {
-              const famClusters = grouped[fam];
+            {ENGINE_GROUP_ORDER.map((g) => {
+              const famClusters = grouped[g];
               if (famClusters.length === 0) return null;
-              const meta = FAMILY_META[fam];
+              const meta = ENGINE_GROUP_META[g];
               return (
-                <div key={fam}>
-                  {/* Only show the family label row when there are multiple
-                      families — keeps the UI clean for pure-relational fleets. */}
-                  {hasMultipleFamilies && (
+                <div key={g}>
+                  {/* Only show the group label row when there are multiple
+                      groups — keeps the UI clean for single-engine fleets. */}
+                  {hasMultipleGroups && (
                     <div className="flex items-center gap-1.5 mb-1">
                       <span
                         className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${meta.accent}`}
@@ -205,6 +201,7 @@ export function ClusterOverview({
                 </div>
               );
             })}
+
             {overflow > 0 && (
               <Link
                 href="/fleet"

@@ -21,12 +21,8 @@ import {
   Section,
 } from "@/components/design-system/page-shell";
 import { SetupGuideModal } from "@/components/clusters/setup-guide-modal";
-import { FAMILY_META } from "@/lib/engine";
-import {
-  groupByEngineFamily,
-  displayName,
-  FAMILY_ORDER,
-} from "@/lib/group-by-family";
+import { ENGINE_GROUP_META, ENGINE_GROUP_ORDER } from "@/lib/engine";
+import { groupByEngineGroup, displayName } from "@/lib/group-by-family";
 
 interface Cluster {
   cluster_id: string;
@@ -1137,18 +1133,18 @@ export default function ClustersPage() {
           />
         ) : (
           <>
-            {/* Group clusters by engine family. Each non-empty family gets a
-                small section header row, then its clusters rendered below. */}
+            {/* Group clusters by engine group. Aurora PG and Aurora MySQL appear
+                as separate sections; DocumentDB and DynamoDB are their own groups. */}
             {(() => {
-              const byFamily = groupByEngineFamily(clusters);
-              const sections = FAMILY_ORDER.map((fam) => ({
-                fam,
-                meta: FAMILY_META[fam],
-                items: byFamily[fam],
+              const byGroup = groupByEngineGroup(clusters);
+              const sections = ENGINE_GROUP_ORDER.map((g) => ({
+                grp: g,
+                meta: ENGINE_GROUP_META[g],
+                items: byGroup[g],
               })).filter((s) => s.items.length > 0);
 
-              return sections.map(({ fam, meta, items }, sIdx) => (
-                <div key={fam} className={sIdx > 0 ? "mt-6" : ""}>
+              return sections.map(({ grp, meta, items }, sIdx) => (
+                <div key={grp} className={sIdx > 0 ? "mt-6" : ""}>
                   {/* Family section header — matches the table's existing label
                       treatment: muted caps with a coloured accent dot. */}
                   <div className="flex items-center gap-2 mb-2">

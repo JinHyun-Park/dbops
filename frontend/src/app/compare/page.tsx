@@ -20,12 +20,10 @@ import {
   engineFamily,
   isPostgres,
   FAMILY_META,
+  ENGINE_GROUP_META,
+  ENGINE_GROUP_ORDER,
 } from "@/lib/engine";
-import {
-  groupByEngineFamily,
-  displayName,
-  FAMILY_ORDER,
-} from "@/lib/group-by-family";
+import { groupByEngineGroup, displayName } from "@/lib/group-by-family";
 
 interface ClusterRow {
   cluster_id: string;
@@ -548,14 +546,15 @@ function ClusterPicker({
   const selected = clusters.find((c) => c.cluster_id === value);
   const badge = engineBadge(selected?.engine);
 
-  // Group options by engine family so the <select> is organised. We use native
+  // Group options by engine group so the <select> is organised. We use native
   // <optgroup> because a custom popover would be disproportionate here and the
   // existing ClusterPicker is a compact inline control.
-  const byFamily = groupByEngineFamily(clusters);
-  const familySections = FAMILY_ORDER.map((fam) => ({
-    fam,
-    meta: FAMILY_META[fam],
-    items: byFamily[fam],
+  // Aurora PG and Aurora MySQL now appear as separate optgroups.
+  const byGroup = groupByEngineGroup(clusters);
+  const groupSections = ENGINE_GROUP_ORDER.map((g) => ({
+    grp: g,
+    meta: ENGINE_GROUP_META[g],
+    items: byGroup[g],
   })).filter((s) => s.items.length > 0);
 
   return (
@@ -570,15 +569,15 @@ function ClusterPicker({
         className="flex-1 bg-zinc-950 text-zinc-100 border border-zinc-800 px-2 py-1 text-xs focus:outline-none focus:border-amber-500/60"
       >
         {clusters.length === 0 && <option value="">(no clusters)</option>}
-        {familySections.length === 1
-          ? // Single family — no optgroup needed, just plain options.
-            familySections[0].items.map((c) => (
+        {groupSections.length === 1
+          ? // Single group — no optgroup needed, just plain options.
+            groupSections[0].items.map((c) => (
               <option key={c.cluster_id} value={c.cluster_id}>
                 {displayName(c)}
               </option>
             ))
-          : familySections.map(({ fam, meta, items }) => (
-              <optgroup key={fam} label={meta.label}>
+          : groupSections.map(({ grp, meta, items }) => (
+              <optgroup key={grp} label={meta.label}>
                 {items.map((c) => (
                   <option key={c.cluster_id} value={c.cluster_id}>
                     {displayName(c)}

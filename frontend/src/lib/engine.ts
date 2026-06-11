@@ -206,6 +206,58 @@ export function eolHint(info: EolInfo): string {
   } days remaining)${info.note ? " — " + info.note : ""}`;
 }
 
+// --- Finer-grained engine groups for DISPLAY/enumeration ---
+// Relational splits into PG vs MySQL here. Capability gating still uses
+// engineFamily — PG and MySQL are both "relational" → same SQL panels.
+export type EngineGroup =
+  | "aurora-postgresql"
+  | "aurora-mysql"
+  | "documentdb"
+  | "dynamodb";
+
+export function engineGroup(engine: string | null | undefined): EngineGroup {
+  const fam = engineFamily(engine);
+  if (fam === "documentdb") return "documentdb";
+  if (fam === "dynamodb") return "dynamodb";
+  // relational → split by PG/MySQL. Unknown relational → treat as PG group.
+  return engineKind(engine) === "mysql" ? "aurora-mysql" : "aurora-postgresql";
+}
+
+export const ENGINE_GROUP_ORDER: EngineGroup[] = [
+  "aurora-postgresql",
+  "aurora-mysql",
+  "documentdb",
+  "dynamodb",
+];
+
+export interface EngineGroupMeta {
+  label: string;
+  accent: string;
+  classes: string;
+}
+export const ENGINE_GROUP_META: Record<EngineGroup, EngineGroupMeta> = {
+  "aurora-postgresql": {
+    label: "Aurora PostgreSQL",
+    accent: "bg-sky-400",
+    classes: "bg-sky-500/15 text-sky-300 border-sky-500/40",
+  },
+  "aurora-mysql": {
+    label: "Aurora MySQL",
+    accent: "bg-orange-400",
+    classes: "bg-orange-500/15 text-orange-300 border-orange-500/40",
+  },
+  documentdb: {
+    label: "DocumentDB",
+    accent: "bg-emerald-400",
+    classes: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
+  },
+  dynamodb: {
+    label: "DynamoDB",
+    accent: "bg-violet-400",
+    classes: "bg-violet-500/15 text-violet-300 border-violet-500/40",
+  },
+};
+
 // --- Engine families (multi-engine foundation) ---
 // A family groups engines that share a monitoring/dashboard shape. `relational`
 // = Aurora MySQL/PostgreSQL (SQL, RDS Data API, instances); `documentdb` =
