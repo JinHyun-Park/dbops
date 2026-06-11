@@ -16,6 +16,7 @@ from datetime import datetime
 import boto3
 import seeder
 from botocore.exceptions import ClientError
+from engine_family import dynamodb_cluster_id, engine_family
 
 _TZ_SUFFIX_RE = re.compile(r"(Z|[+-]\d{2}(:?\d{2})?)$")
 
@@ -264,6 +265,14 @@ def _rds_client_for(region: str, role_arn: str = ""):
     return _session_for(region, role_arn).client("rds")
 
 
+def _ddb_client_for(region: str, role_arn: str = ""):
+    return _session_for(region, role_arn).client("dynamodb")
+
+
+def _docdb_client_for(region: str, role_arn: str = ""):
+    return _session_for(region, role_arn).client("docdb")
+
+
 def _convention_secret_for(session: boto3.session.Session, cluster_id: str) -> str:
     """Look up the dbops convention secret for a cluster.
 
@@ -333,6 +342,46 @@ def _list_clusters_in_region(region: str, role_arn: str = "") -> list[dict]:
                 "secret_source": source,
                 "region": region,
             })
+
+    # DynamoDB tables — best-effort; missing permission doesn't break Aurora discovery.
+    try:
+        dynamo = _session_for(region, role_arn).client("dynamodb")
+        ddb_paginator = dynamo.get_paginator("list_tables")
+        for ddb_page in ddb_paginator.paginate():
+            for name in ddb_page.get("TableNames", []):
+                out.append({
+                    "cluster_id": dynamodb_cluster_id("", region, name),
+                    "resource_name": name,
+                    "engine": "dynamodb",
+                    "engine_family": "dynamodb",
+                    "resource_type": "dynamodb-table",
+                    "region": region,
+                    "secret_source": "n/a",
+                })
+    except Exception as e:
+        print(f"[discover] dynamodb list_tables failed in {region}: {e}")
+
+    # DocumentDB clusters — best-effort.
+    try:
+        docdb = _session_for(region, role_arn).client("docdb")
+        docdb_paginator = docdb.get_paginator("describe_db_clusters")
+        for docdb_page in docdb_paginator.paginate():
+            for c in docdb_page.get("DBClusters", []):
+                cid = c.get("DBClusterIdentifier", "")
+                out.append({
+                    "cluster_id": cid,
+                    "engine": "docdb",
+                    "engine_family": "documentdb",
+                    "engine_version": c.get("EngineVersion", ""),
+                    "resource_name": cid,
+                    "resource_type": "docdb",
+                    "status": c.get("Status", ""),
+                    "region": region,
+                    "secret_source": "n/a",
+                })
+    except Exception as e:
+        print(f"[discover] docdb describe_db_clusters failed in {region}: {e}")
+
     return out
 
 
@@ -343,7 +392,69 @@ def _handle_list(table):
     return _resp(200, items, max_age=30)
 
 
+def _register_dynamodb(table, body):
+    for f in ("account_id", "region", "resource_name"):
+        if not body.get(f):
+            return _resp(400, {"error": f"{f} required"})
+    account_id, region, name = body["account_id"], body["region"], body["resource_name"]
+    status, err = "ok", ""
+    try:
+        _ddb_client_for(region, body.get("spoke_role_arn", "")).describe_table(TableName=name)
+    except Exception as e:
+        status, err = "failed", str(e)[:300]
+    cid = dynamodb_cluster_id(account_id, region, name)
+    item = {
+        "cluster_id": cid, "account_id": account_id, "region": region,
+        "engine": "dynamodb", "engine_family": "dynamodb",
+        "resource_name": name, "resource_type": "dynamodb-table",
+        "requires_secret_for_foundation": False,
+        "spoke_role_arn": body.get("spoke_role_arn", ""),
+        "registered_at": datetime.utcnow().isoformat() + "Z",
+        "connection_status": status, "connection_error": err,
+    }
+    table.put_item(Item=item)
+    return _resp(201 if status == "ok" else 207,
+                 {"status": "registered" if status == "ok" else "registered_with_warning",
+                  "cluster_id": cid, "connection_status": status})
+
+
+def _register_docdb(table, body):
+    for f in ("cluster_id", "account_id", "region"):
+        if not body.get(f):
+            return _resp(400, {"error": f"{f} required"})
+    cluster_id, account_id, region = body["cluster_id"], body["account_id"], body["region"]
+    status, err, version = "ok", "", ""
+    try:
+        resp = _docdb_client_for(region, body.get("spoke_role_arn", "")).describe_db_clusters(
+            DBClusterIdentifier=cluster_id)
+        cl = (resp.get("DBClusters") or [])
+        if cl:
+            version = cl[0].get("EngineVersion", "")
+    except Exception as e:
+        status, err = "failed", str(e)[:300]
+    item = {
+        "cluster_id": cluster_id, "account_id": account_id, "region": region,
+        "engine": "docdb", "engine_family": "documentdb", "engine_version": version,
+        "resource_name": cluster_id, "resource_type": "docdb",
+        "requires_secret_for_foundation": False,
+        "spoke_role_arn": body.get("spoke_role_arn", ""),
+        "registered_at": datetime.utcnow().isoformat() + "Z",
+        "connection_status": status, "connection_error": err,
+    }
+    table.put_item(Item=item)
+    return _resp(201 if status == "ok" else 207,
+                 {"status": "registered" if status == "ok" else "registered_with_warning",
+                  "cluster_id": cluster_id, "connection_status": status})
+
+
 def _handle_register(table, body: dict):
+    fam = engine_family(body.get("engine", ""))
+    if fam == "dynamodb":
+        return _register_dynamodb(table, body)
+    if fam == "documentdb":
+        return _register_docdb(table, body)
+    # relational (Aurora) — existing path unchanged below
+
     required = ["cluster_id", "account_id", "region"]
     for field in required:
         if field not in body:
