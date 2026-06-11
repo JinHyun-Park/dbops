@@ -136,16 +136,19 @@ def execute_sql_impl(
     # support the RDS Data API SQL path. Return a clear signal so the agent can
     # tell the user this resource type isn't supported in Phase 1 chat diagnostics
     # rather than failing with a confusing "no_target" or rds-data error.
-    fam = cluster.get("engine_family") or _engine_family(cluster.get("engine", ""))
-    if cluster and not CAPABILITIES[fam]["sql"]:
-        return {
-            "status": "unsupported_engine",
-            "engine_family": fam,
-            "cluster_id": cluster_id,
-            "message": (
-                f"{fam} 리소스는 현재 단계(Phase 1)에서 챗 진단을 지원하지 않습니다."
-            ),
-        }
+    # Only applies to a real registry dict — legacy env-var TARGET_* deployments
+    # (where _lookup_cluster yields no dict) fall straight through to the env path.
+    if isinstance(cluster, dict) and cluster:
+        fam = cluster.get("engine_family") or _engine_family(cluster.get("engine", ""))
+        if isinstance(fam, str) and not CAPABILITIES.get(fam, {}).get("sql", True):
+            return {
+                "status": "unsupported_engine",
+                "engine_family": fam,
+                "cluster_id": cluster_id,
+                "message": (
+                    f"{fam} 리소스는 현재 단계(Phase 1)에서 챗 진단을 지원하지 않습니다."
+                ),
+            }
 
     target_arn = cluster.get("cluster_arn") or os.environ.get("TARGET_CLUSTER_ARN", "")
     target_secret = cluster.get("secret_arn") or os.environ.get("TARGET_SECRET_ARN", "")
