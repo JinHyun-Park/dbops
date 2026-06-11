@@ -7,6 +7,7 @@ from collectors.capacity_forecast import collect_capacity_forecast
 from collectors.cost_check import collect_cost_findings
 from collectors.cw_collector import collect_cw_metrics
 from collectors.docdb_cw_collector import collect_docdb_metrics
+from collectors.docdb_findings import collect_docdb_findings
 from collectors.dynamodb_cw_collector import collect_dynamodb_metrics
 from collectors.dynamodb_findings import collect_dynamodb_findings
 from collectors.engine_family import engine_family
@@ -93,6 +94,14 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
         except Exception as e:
             result["documentdb_error"] = str(e)
             print(f"[{cluster_id}] documentdb error: {e}")
+        try:
+            result["documentdb_findings"] = collect_docdb_findings(
+                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                snapshot_ts=run_ts,
+            )
+        except Exception as e:
+            result["documentdb_findings_error"] = str(e)
+            print(f"[{cluster_id}] documentdb findings error: {e}")
         return result
 
     # ------------------------------------------------------------------

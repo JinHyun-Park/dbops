@@ -147,3 +147,58 @@ def test_no_writer_skips_instance_metrics():
 
     assert result["writer"] is None
     # Cluster-scoped metrics may still be queried
+
+
+# ---------------------------------------------------------------------------
+# Test 3 — DatabaseConnectionsLimit is queried with DBInstanceIdentifier dim
+#           and inserted as metric_type='db_connections_limit'
+# ---------------------------------------------------------------------------
+
+def test_database_connections_limit_queried_and_inserted():
+    """DatabaseConnectionsLimit must be fetched using the writer DBInstanceIdentifier
+    dimension and stored as metric_type='db_connections_limit'."""
+    cw = _make_cw()
+    client = _make_docdb("docdb-writer-01")
+    cache_calls = []
+
+    def cache_execute(sql, params):
+        cache_calls.append((sql, params))
+
+    result = docdb.collect_docdb_metrics(
+        cw, client, cache_execute, "my-docdb-cluster", "ap-northeast-2", "111122223333"
+    )
+
+    all_cw_calls = cw.get_metric_statistics.call_args_list
+
+    # DatabaseConnectionsLimit must have been requested
+    metric_names_queried = [
+        (c.kwargs if c.kwargs else c[1])["MetricName"]
+        for c in all_cw_calls
+    ]
+    assert "DatabaseConnectionsLimit" in metric_names_queried, (
+        f"DatabaseConnectionsLimit not queried. Metrics queried: {metric_names_queried}"
+    )
+
+    # The call for DatabaseConnectionsLimit must use DBInstanceIdentifier=writer
+    limit_calls = [
+        c for c in all_cw_calls
+        if (c.kwargs if c.kwargs else c[1])["MetricName"] == "DatabaseConnectionsLimit"
+    ]
+    for call in limit_calls:
+        kw = call.kwargs if call.kwargs else call[1]
+        dims = {d["Name"]: d["Value"] for d in kw["Dimensions"]}
+        assert "DBInstanceIdentifier" in dims, (
+            "DatabaseConnectionsLimit must use DBInstanceIdentifier dimension"
+        )
+        assert dims["DBInstanceIdentifier"] == "docdb-writer-01", (
+            f"DatabaseConnectionsLimit must use writer instance ID, got: {dims}"
+        )
+
+    # metric_type='db_connections_limit' must be inserted into cache
+    insert_sqls = [sql for sql, _ in cache_calls if "metric_snapshots" in sql and "INSERT" in sql.upper()]
+    insert_params = [p for sql, p in cache_calls if "metric_snapshots" in sql and "INSERT" in sql.upper()]
+    limit_inserts = [p for p in insert_params if p.get("metric_type") == "db_connections_limit"]
+    assert limit_inserts, (
+        f"Expected at least one INSERT with metric_type='db_connections_limit'. "
+        f"Inserted metric_types: {[p.get('metric_type') for p in insert_params]}"
+    )

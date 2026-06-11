@@ -12,6 +12,7 @@ _CLUSTER_METRICS = [
 _INSTANCE_METRICS = [
     ("CPUUtilization", "cpu_utilization", "Average"),
     ("DatabaseConnections", "db_connections", "Average"),
+    ("DatabaseConnectionsLimit", "db_connections_limit", "Average"),
     ("DatabaseCursors", "cursors", "Average"),
     ("DatabaseCursorsTimedOut", "cursors_timed_out", "Sum"),
     ("BufferCacheHitRatio", "buffer_cache_hit", "Average"),

@@ -39,7 +39,7 @@ CAPABILITIES = {
     DOCUMENTDB: {
         "sql": False, "rds_meta": True, "perf_insights": False,
         "cw_namespace": "AWS/DocDB",
-        "findings": set(),
+        "findings": {"docdb"},
     },
     DYNAMODB: {
         "sql": False, "rds_meta": False, "perf_insights": False,
