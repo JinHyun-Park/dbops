@@ -20,13 +20,52 @@ import { useChartColors } from "@/lib/use-chart-colors";
 type Point = { ts: string; value: number | string };
 
 // DynamoDB-specific resource_details shape
+interface DdbKeyAttr {
+  name: string;
+  type: string; // S | N | B
+}
+
+interface DdbGsi {
+  name: string;
+  partition_key?: DdbKeyAttr | null;
+  sort_key?: DdbKeyAttr | null;
+  projection?: string | null;
+  projection_attrs?: string[] | null;
+  status?: string | null;
+  item_count?: number | null;
+  size_bytes?: number | null;
+  // legacy shape fallback
+  index_name?: string;
+}
+
+interface DdbLsi {
+  name: string;
+  partition_key?: DdbKeyAttr | null;
+  sort_key?: DdbKeyAttr | null;
+  projection?: string | null;
+  projection_attrs?: string[] | null;
+}
+
+interface DdbKeySchema {
+  partition_key?: DdbKeyAttr | null;
+  sort_key?: DdbKeyAttr | null;
+}
+
 interface DdbDetails {
   billing_mode?: string | null;
   item_count?: number | null;
   table_size_bytes?: number | null;
-  // Collector writes gsi as strings; UI writes as objects — accept both shapes.
-  gsi?: Array<string | { index_name?: string; [k: string]: unknown }> | null;
   table_status?: string | null;
+  key_schema?: DdbKeySchema | null;
+  // Accept new rich-object shape AND legacy string[] / {index_name} shape
+  gsi?: Array<string | DdbGsi> | null;
+  lsi?: Array<DdbLsi> | null;
+}
+
+/** Normalise a GSI entry regardless of which shape the collector stored. */
+function normaliseGsi(g: string | DdbGsi): DdbGsi {
+  if (typeof g === "string") return { name: g };
+  return { ...g, name: g.name ?? g.index_name ?? "(unnamed)" };
 }
 
 function fmtTime(iso: string) {
@@ -34,6 +73,45 @@ function fmtTime(iso: string) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(
     d.getMinutes(),
   ).padStart(2, "0")}`;
+}
+
+// ─── Key type badge ──────────────────────────────────────────────────────────
+
+function TypeBadge({ type }: { type: string }) {
+  return (
+    <span className="ml-1.5 inline-flex items-center px-1.5 py-0 rounded text-[10px] font-mono font-semibold bg-zinc-800 text-zinc-300 border border-zinc-700 leading-5">
+      {type}
+    </span>
+  );
+}
+
+function KeyRow({ label, attr }: { label: string; attr?: DdbKeyAttr | null }) {
+  return (
+    <div className="flex items-center gap-2 py-1">
+      <span className="text-[11px] text-zinc-500 w-24 shrink-0">{label}</span>
+      {attr ? (
+        <span className="text-sm font-mono text-zinc-100">
+          {attr.name}
+          {attr.type && <TypeBadge type={attr.type} />}
+        </span>
+      ) : (
+        <span className="text-sm text-zinc-600">없음</span>
+      )}
+    </div>
+  );
+}
+
+// ─── Projection label ─────────────────────────────────────────────────────────
+
+function projectionLabel(
+  projection?: string | null,
+  attrs?: string[] | null,
+): string {
+  if (!projection) return "—";
+  if (projection === "INCLUDE" && attrs && attrs.length > 0) {
+    return `INCLUDE (${attrs.join(", ")})`;
+  }
+  return projection;
 }
 
 // ─── Stat tile ───────────────────────────────────────────────────────────────
@@ -268,7 +346,9 @@ export function DynamodbOverviewPanel({ clusterId }: { clusterId: string }) {
   const isProvisioned =
     (details?.billing_mode ?? "").toUpperCase() === "PROVISIONED";
 
-  const gsiList = details?.gsi ?? [];
+  const gsiList = (details?.gsi ?? []).map(normaliseGsi);
+  const lsiList = details?.lsi ?? [];
+  const keySchema = details?.key_schema ?? null;
 
   return (
     <div className="space-y-6">
@@ -280,7 +360,7 @@ export function DynamodbOverviewPanel({ clusterId }: { clusterId: string }) {
         {detailsLoading ? (
           <div className="text-zinc-500 text-sm">불러오는 중…</div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             <StatTile
               label="Billing Mode"
               value={details?.billing_mode ?? "—"}
@@ -300,26 +380,193 @@ export function DynamodbOverviewPanel({ clusterId }: { clusterId: string }) {
               }
             />
             <StatTile
-              label="GSI 수"
-              value={String(gsiList.length)}
-              sub={
-                gsiList.length > 0
-                  ? gsiList
-                      .map((g) =>
-                        typeof g === "string" ? g : g.index_name ?? "",
-                      )
-                      .filter(Boolean)
-                      .join(", ")
-                  : undefined
-              }
-            />
-            <StatTile
               label="Table Status"
               value={details?.table_status ?? "—"}
             />
           </div>
         )}
       </div>
+
+      {/* ─ Key Schema ─ */}
+      <div className="bg-zinc-900/50 border border-zinc-800 p-5">
+        <div className="text-sm text-zinc-200 font-medium mb-3">Key Schema</div>
+        {detailsLoading ? (
+          <div className="text-zinc-500 text-sm">불러오는 중…</div>
+        ) : (
+          <div className="divide-y divide-zinc-800/60">
+            <KeyRow
+              label="Partition Key"
+              attr={keySchema?.partition_key ?? null}
+            />
+            <KeyRow label="Sort Key" attr={keySchema?.sort_key ?? null} />
+          </div>
+        )}
+      </div>
+
+      {/* ─ Global Secondary Indexes ─ */}
+      <div className="bg-zinc-900/50 border border-zinc-800 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm text-zinc-200 font-medium">
+            Global Secondary Indexes
+          </div>
+          <div className="text-[11px] text-zinc-500 font-mono">
+            {gsiList.length}개
+          </div>
+        </div>
+        {detailsLoading ? (
+          <div className="text-zinc-500 text-sm">불러오는 중…</div>
+        ) : gsiList.length === 0 ? (
+          <div className="text-sm text-zinc-600">GSI 없음</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-zinc-800">
+                  <th className="text-left text-[10px] uppercase tracking-wider text-zinc-500 pb-2 pr-4 font-medium">
+                    Index
+                  </th>
+                  <th className="text-left text-[10px] uppercase tracking-wider text-zinc-500 pb-2 pr-4 font-medium">
+                    Keys
+                  </th>
+                  <th className="text-left text-[10px] uppercase tracking-wider text-zinc-500 pb-2 pr-4 font-medium">
+                    Projection
+                  </th>
+                  <th className="text-left text-[10px] uppercase tracking-wider text-zinc-500 pb-2 pr-4 font-medium">
+                    Status
+                  </th>
+                  <th className="text-right text-[10px] uppercase tracking-wider text-zinc-500 pb-2 font-medium">
+                    Items / Size
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/50">
+                {gsiList.map((g) => (
+                  <tr key={g.name} className="group">
+                    <td className="py-2 pr-4 font-mono text-zinc-200 align-top">
+                      {g.name}
+                    </td>
+                    <td className="py-2 pr-4 align-top">
+                      <div className="flex flex-col gap-0.5">
+                        {g.partition_key ? (
+                          <span className="text-zinc-300">
+                            <span className="text-zinc-500 mr-1">PK:</span>
+                            {g.partition_key.name}
+                            {g.partition_key.type && (
+                              <TypeBadge type={g.partition_key.type} />
+                            )}
+                          </span>
+                        ) : null}
+                        {g.sort_key ? (
+                          <span className="text-zinc-300">
+                            <span className="text-zinc-500 mr-1">SK:</span>
+                            {g.sort_key.name}
+                            {g.sort_key.type && (
+                              <TypeBadge type={g.sort_key.type} />
+                            )}
+                          </span>
+                        ) : null}
+                        {!g.partition_key && !g.sort_key && (
+                          <span className="text-zinc-600">—</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-2 pr-4 text-zinc-400 align-top max-w-[200px] break-words">
+                      {projectionLabel(g.projection, g.projection_attrs)}
+                    </td>
+                    <td className="py-2 pr-4 align-top">
+                      <span
+                        className={
+                          g.status === "ACTIVE"
+                            ? "text-emerald-400"
+                            : "text-zinc-400"
+                        }
+                      >
+                        {g.status ?? "—"}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right text-zinc-400 align-top whitespace-nowrap">
+                      {g.item_count != null ? (
+                        <span>
+                          {fmtExact(g.item_count)}
+                          {g.size_bytes != null && (
+                            <span className="text-zinc-600 ml-1">
+                              / {fmtBytes(g.size_bytes)}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ─ Local Secondary Indexes ─ */}
+      {(detailsLoading || lsiList.length > 0) && (
+        <div className="bg-zinc-900/50 border border-zinc-800 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm text-zinc-200 font-medium">
+              Local Secondary Indexes
+            </div>
+            {!detailsLoading && (
+              <div className="text-[11px] text-zinc-500 font-mono">
+                {lsiList.length}개
+              </div>
+            )}
+          </div>
+          {detailsLoading ? (
+            <div className="text-zinc-500 text-sm">불러오는 중…</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px]">
+                <thead>
+                  <tr className="border-b border-zinc-800">
+                    <th className="text-left text-[10px] uppercase tracking-wider text-zinc-500 pb-2 pr-4 font-medium">
+                      Index
+                    </th>
+                    <th className="text-left text-[10px] uppercase tracking-wider text-zinc-500 pb-2 pr-4 font-medium">
+                      Sort Key
+                    </th>
+                    <th className="text-left text-[10px] uppercase tracking-wider text-zinc-500 pb-2 font-medium">
+                      Projection
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800/50">
+                  {lsiList.map((l) => (
+                    <tr key={l.name}>
+                      <td className="py-2 pr-4 font-mono text-zinc-200 align-top">
+                        {l.name}
+                      </td>
+                      <td className="py-2 pr-4 align-top">
+                        {l.sort_key ? (
+                          <span className="text-zinc-300">
+                            <span className="text-zinc-500 mr-1">SK:</span>
+                            {l.sort_key.name}
+                            {l.sort_key.type && (
+                              <TypeBadge type={l.sort_key.type} />
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-600">—</span>
+                        )}
+                      </td>
+                      <td className="py-2 text-zinc-400 align-top max-w-[200px] break-words">
+                        {projectionLabel(l.projection, l.projection_attrs)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ─ Capacity charts ─ */}
       <div>
