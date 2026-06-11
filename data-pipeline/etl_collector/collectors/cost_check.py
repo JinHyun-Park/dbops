@@ -42,6 +42,13 @@ SV2_MAX_LOWER_FACTOR = 0.5     # suggest cutting max ACU to (current × this)
 SV2_MIN_RAISE_FACTOR = 0.5     # min ACU < (max × this) gives idle-but-not-too-low feel
 SP_SAVINGS_FLOOR_USD = 10.0    # only surface SP recommendations worth >$10/mo
 
+# 이번 실행의 공유 snapshot_time. collect_cost_findings가 handler로부터 받아
+# 설정하고 _emit_finding이 읽는다. 같은 ETL 사이클의 health/param_fitness
+# finding과 snapshot_time을 맞춰 대시보드 MAX(snapshot_time)에 함께 잡히게
+# 한다(collector마다 now()를 따로 찍으면 한 배치만 보이는 버그). Lambda는
+# 클러스터를 단일 스레드로 순차 처리하므로 모듈 변수 공유가 안전하다.
+_RUN_SNAPSHOT_TS = None
+
 
 def _execute(rds_data, cluster_arn, secret_arn, db_name, sql, params=None):
     sql_params = []
@@ -89,7 +96,7 @@ def _emit_finding(
         "VALUES (:cluster_id, :ts::timestamptz, :check_type, :severity, :subject, :value_str, :threshold_str, :recommendation, :details::jsonb)",
         {
             "cluster_id": cluster_id,
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": _RUN_SNAPSHOT_TS or datetime.now(timezone.utc).isoformat(),
             "check_type": check_type,
             "severity": severity,
             "subject": subject,
@@ -346,8 +353,10 @@ def _check_savings_plan_opportunity(rds_data, cache_arn, cache_secret, cache_db,
     return 1
 
 
-def collect_cost_findings(rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id):
+def collect_cost_findings(rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id, snapshot_ts=None):
     """Top-level entry — runs every cost check and tallies findings."""
+    global _RUN_SNAPSHOT_TS
+    _RUN_SNAPSHOT_TS = snapshot_ts
     meta_rows = _execute(
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
         "SELECT instance_class, engine_mode, serverlessv2_min_acu, serverlessv2_max_acu "

@@ -33,6 +33,12 @@ const CHECK_LABELS: Record<string, string> = {
   cost_serverless_max_too_high: "Cost",
   cost_serverless_min_too_low: "Cost",
   cost_savings_plan_opportunity: "Cost",
+  // Parameter Fitness — 이 클러스터 워크로드 기준 파라미터 적정성 진단.
+  param_max_connections: "Tuning",
+  param_work_mem_risk: "Tuning",
+  param_effective_cache: "Tuning",
+  param_autovacuum_workers: "Tuning",
+  param_buffer_cache_hit: "Tuning",
 };
 
 // Full PG tab set. MySQL exposes a trimmed list (VACUUM/Bloat/Extensions are
@@ -44,6 +50,7 @@ const TABS_PG = [
   "Bloat",
   "Indexes",
   "Config",
+  "Tuning",
   "Extensions",
   "Cost",
 ] as const;

@@ -93,7 +93,7 @@ def _has_extension(records, ext_name):
     return False
 
 
-def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, database):
+def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, database, snapshot_ts=None):
     findings = []
 
     def add(check_type, severity, subject, value, threshold, recommendation, details=None):
@@ -304,8 +304,10 @@ def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target
     # All rows share one snapshot_time so the dashboard's MAX(snapshot_time)
     # query returns the full set together. Without this, NOW() evaluates
     # per-row at millisecond resolution and only the last finding surfaces.
+    # handler가 넘긴 공유 ts를 우선 사용 — 같은 사이클의 cost/param_fitness
+    # finding과 snapshot_time을 맞춰야 대시보드 MAX(snapshot_time)에 함께 잡힌다.
     from datetime import datetime, timezone
-    snapshot_ts = datetime.now(timezone.utc).isoformat()
+    snapshot_ts = snapshot_ts or datetime.now(timezone.utc).isoformat()
     inserted = 0
     for f in findings:
         cache_execute(

@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime, timezone
 
 import boto3
 from collectors.cost_check import collect_cost_findings
@@ -14,6 +15,7 @@ from collectors.pg_baseline_trainer import collect_pg_baselines
 from collectors.pg_extensions import collect_pg_extensions
 from collectors.pg_health_checks import collect_pg_health_checks
 from collectors.pg_locks import collect_pg_locks
+from collectors.pg_param_fitness import collect_param_fitness
 from collectors.pg_table_stats import collect_pg_table_stats
 from collectors.pi_collector import collect_pi_metrics
 from collectors.stats_collector import collect_query_stats
@@ -85,6 +87,11 @@ def lambda_handler(event, context):
         pi_client = get_client("pi", region)
         cw_client = get_client("cloudwatch", region)
         result = {"cluster_id": cluster_id}
+        # 이 사이클의 모든 finding collector(health/cost/param_fitness)가
+        # 공유하는 단일 snapshot_time. 대시보드 _health_findings는
+        # MAX(snapshot_time) 한 배치만 반환하므로, collector마다 now()를
+        # 따로 찍으면 마지막 것만 보이고 나머지 finding이 사라진다.
+        run_ts = datetime.now(timezone.utc).isoformat()
 
         try:
             result["meta"] = collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, region)
@@ -147,10 +154,19 @@ def lambda_handler(event, context):
             try:
                 result["health"] = collect_pg_health_checks(
                     rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                    snapshot_ts=run_ts,
                 )
             except Exception as e:
                 result["health_error"] = str(e)
                 print(f"[{cluster_id}] health error: {e}")
+            try:
+                result["param_fitness"] = collect_param_fitness(
+                    rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                    snapshot_ts=run_ts,
+                )
+            except Exception as e:
+                result["param_fitness_error"] = str(e)
+                print(f"[{cluster_id}] param fitness error: {e}")
             try:
                 result["extensions"] = collect_pg_extensions(
                     rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
@@ -204,6 +220,7 @@ def lambda_handler(event, context):
         try:
             result["cost"] = collect_cost_findings(
                 rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                snapshot_ts=run_ts,
             )
         except Exception as e:
             result["cost_error"] = str(e)
