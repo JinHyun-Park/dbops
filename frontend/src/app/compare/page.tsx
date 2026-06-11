@@ -15,11 +15,22 @@ import { fetchClusters, fetchBatchTimeseries } from "@/lib/api-client";
 import { useChartColors } from "@/lib/use-chart-colors";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
 import { Expandable } from "@/components/design-system/expandable";
-import { engineBadge, isPostgres } from "@/lib/engine";
+import {
+  engineBadge,
+  engineFamily,
+  isPostgres,
+  FAMILY_META,
+} from "@/lib/engine";
+import {
+  groupByEngineFamily,
+  displayName,
+  FAMILY_ORDER,
+} from "@/lib/group-by-family";
 
 interface ClusterRow {
   cluster_id: string;
   engine?: string;
+  resource_name?: string;
 }
 
 type Mode = "cluster" | "period";
@@ -150,8 +161,32 @@ export default function ComparePage() {
       .then((rows: ClusterRow[]) => {
         setClusters(rows);
         if (rows.length === 0) return;
-        setClusterA((cur) => cur || rows[0].cluster_id);
-        setClusterB((cur) => cur || rows[1]?.cluster_id || rows[0].cluster_id);
+
+        // Pick initial A (first cluster), then pick an initial B that is in the
+        // same engine family as A. If none exists, fall back to A itself.
+        setClusterA((cur) => {
+          const a = cur || rows[0].cluster_id;
+          // When setting A for the first time, also align B to the same family.
+          if (!cur) {
+            const aRow = rows.find((r) => r.cluster_id === a);
+            const famA = engineFamily(aRow?.engine);
+            setClusterB((curB) => {
+              if (curB) {
+                // Validate existing B is same family; clear if not.
+                const bRow = rows.find((r) => r.cluster_id === curB);
+                if (bRow && engineFamily(bRow.engine) !== famA) return a;
+                return curB;
+              }
+              const sameFamily = rows.filter(
+                (r) => engineFamily(r.engine) === famA,
+              );
+              return (
+                sameFamily.find((r) => r.cluster_id !== a)?.cluster_id || a
+              );
+            });
+          }
+          return a;
+        });
         setPeriodCluster((cur) => cur || rows[0].cluster_id);
       })
       .catch((e) => {
@@ -175,6 +210,23 @@ export default function ComparePage() {
     mode === "cluster"
       ? isPostgres(engineA) && isPostgres(engineB)
       : isPostgres(engineA);
+
+  // Detect cross-family state (e.g. loaded from a URL that had A=aurora, B=dynamodb).
+  // When detected we show a notice and auto-clear B.
+  const famA = engineFamily(engineA);
+  const famB = engineFamily(engineB);
+  const crossFamilyMismatch =
+    mode === "cluster" &&
+    !!clusterA &&
+    !!clusterB &&
+    clusterA !== clusterB &&
+    famA !== famB;
+
+  // Candidates for picker B: only same family as A.
+  const candidatesB = useMemo(
+    () => clusters.filter((c) => engineFamily(c.engine) === famA),
+    [clusters, famA],
+  );
 
   const visibleMetrics = useMemo(
     () => METRICS.filter((m) => !m.pgOnly || showPgOnly),
@@ -294,13 +346,28 @@ export default function ComparePage() {
             color={colorA}
             value={clusterA}
             clusters={clusters}
-            onChange={setClusterA}
+            onChange={(v) => {
+              setClusterA(v);
+              // When A changes, ensure B is still same-family; if not, reset B.
+              const newFam = engineFamily(
+                clusters.find((c) => c.cluster_id === v)?.engine,
+              );
+              const bRow = clusters.find((c) => c.cluster_id === clusterB);
+              if (bRow && engineFamily(bRow.engine) !== newFam) {
+                const sameFam = clusters.filter(
+                  (c) => engineFamily(c.engine) === newFam,
+                );
+                setClusterB(
+                  sameFam.find((c) => c.cluster_id !== v)?.cluster_id || v,
+                );
+              }
+            }}
           />
           <ClusterPicker
             label="B"
             color={colorB}
             value={clusterB}
-            clusters={clusters}
+            clusters={candidatesB}
             onChange={setClusterB}
           />
         </div>
@@ -320,6 +387,30 @@ export default function ComparePage() {
             </span>{" "}
             = same length, shifted back
           </div>
+        </div>
+      )}
+
+      {crossFamilyMismatch && (
+        <div className="border border-amber-500/30 bg-amber-500/5 text-amber-300 text-sm px-4 py-3 flex items-center justify-between gap-3 mb-4">
+          <span>
+            A({FAMILY_META[famA].label})와 B({FAMILY_META[famB].label})가 다른
+            엔진 패밀리입니다 — 같은 패밀리끼리만 비교할 수 있습니다. B를
+            초기화합니다.
+          </span>
+          <button
+            onClick={() => {
+              const sameFam = clusters.filter(
+                (c) => engineFamily(c.engine) === famA,
+              );
+              setClusterB(
+                sameFam.find((c) => c.cluster_id !== clusterA)?.cluster_id ||
+                  clusterA,
+              );
+            }}
+            className="text-xs px-3 py-1.5 border border-amber-500/40 hover:bg-amber-500/15 transition-colors flex-shrink-0"
+          >
+            B 초기화
+          </button>
         </div>
       )}
 
@@ -456,6 +547,17 @@ function ClusterPicker({
 }) {
   const selected = clusters.find((c) => c.cluster_id === value);
   const badge = engineBadge(selected?.engine);
+
+  // Group options by engine family so the <select> is organised. We use native
+  // <optgroup> because a custom popover would be disproportionate here and the
+  // existing ClusterPicker is a compact inline control.
+  const byFamily = groupByEngineFamily(clusters);
+  const familySections = FAMILY_ORDER.map((fam) => ({
+    fam,
+    meta: FAMILY_META[fam],
+    items: byFamily[fam],
+  })).filter((s) => s.items.length > 0);
+
   return (
     <div className="flex items-center gap-2 bg-zinc-900/40 border border-zinc-800 px-3 py-2">
       <span className="w-2 h-2 rounded-full" style={{ background: color }} />
@@ -468,11 +570,22 @@ function ClusterPicker({
         className="flex-1 bg-zinc-950 text-zinc-100 border border-zinc-800 px-2 py-1 text-xs focus:outline-none focus:border-amber-500/60"
       >
         {clusters.length === 0 && <option value="">(no clusters)</option>}
-        {clusters.map((c) => (
-          <option key={c.cluster_id} value={c.cluster_id}>
-            {c.cluster_id}
-          </option>
-        ))}
+        {familySections.length === 1
+          ? // Single family — no optgroup needed, just plain options.
+            familySections[0].items.map((c) => (
+              <option key={c.cluster_id} value={c.cluster_id}>
+                {displayName(c)}
+              </option>
+            ))
+          : familySections.map(({ fam, meta, items }) => (
+              <optgroup key={fam} label={meta.label}>
+                {items.map((c) => (
+                  <option key={c.cluster_id} value={c.cluster_id}>
+                    {displayName(c)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
       </select>
       {selected && (
         <span

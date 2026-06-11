@@ -13,9 +13,15 @@ import {
   eolFor,
   EOL_STATUS_CLASSES,
   eolHint,
+  FAMILY_META,
   type EolInfo,
 } from "@/lib/engine";
 import { triage, n, LEVEL_RANK, type Level } from "@/lib/cluster-triage";
+import {
+  groupByEngineFamily,
+  displayName,
+  FAMILY_ORDER,
+} from "@/lib/group-by-family";
 
 interface ClusterRow {
   cluster_id: string;
@@ -30,6 +36,7 @@ interface ClusterRow {
   storage_bytes: number | string | null;
   deadlocks: number | string | null;
   blocking_count: number | string | null;
+  resource_name?: string;
 }
 
 // A row decorated with the derived triage signals so we sort/filter/group on
@@ -245,7 +252,7 @@ export default function FleetPage() {
     const ql = q.trim().toLowerCase();
     const filtered = decorated.filter((d) => {
       const c = d.row;
-      if (ql && !c.cluster_id.toLowerCase().includes(ql)) return false;
+      if (ql && !displayName(c).toLowerCase().includes(ql)) return false;
       if (engine && c.engine !== engine) return false;
       if (status === "available" && c.status !== "available") return false;
       if (status === "other" && c.status === "available") return false;
@@ -290,8 +297,29 @@ export default function FleetPage() {
   // Partition the already-filtered-and-sorted `view` into groups for the
   // selected dimension. Rows keep `view`'s order; groups are ordered
   // worst-severity-first, then size desc, then label asc.
+  // For "engine" groupBy we use engineFamily → FAMILY_META.label so
+  // "aurora-postgresql" and "aurora-mysql" both appear under "Relational (Aurora)"
+  // rather than as separate raw engine strings.
   const groups = useMemo<FleetGroup[]>(() => {
     if (groupBy === "none") return [];
+
+    if (groupBy === "engine") {
+      // Stable family order; skip empty buckets.
+      const byFamily = groupByEngineFamily(capped.map((d) => d.row));
+      const result: FleetGroup[] = [];
+      for (const fam of FAMILY_ORDER) {
+        const ids = new Set(byFamily[fam].map((r) => r.cluster_id));
+        const famRows = capped.filter((d) => ids.has(d.row.cluster_id));
+        if (famRows.length === 0) continue;
+        result.push({
+          key: fam,
+          label: FAMILY_META[fam].label,
+          rows: famRows,
+        });
+      }
+      return result;
+    }
+
     const buckets = new Map<string, FleetGroup>();
     for (const d of capped) {
       let label: string;
@@ -299,8 +327,6 @@ export default function FleetPage() {
         label = meta.get(d.row.cluster_id)?.account_id || "(unknown)";
       else if (groupBy === "region")
         label = meta.get(d.row.cluster_id)?.region || "(unknown)";
-      else if (groupBy === "engine")
-        label = (d.row.engine || "(unknown)").replace("aurora-", "");
       else label = d.level;
       const existing = buckets.get(label);
       if (existing) existing.rows.push(d);
@@ -706,7 +732,7 @@ function FleetRow({ d, demoIds }: { d: Decorated; demoIds: Set<string> }) {
             href={`/dashboard?cluster=${encodeURIComponent(c.cluster_id)}`}
             className="hover:text-sky-400 underline-offset-2 hover:underline"
           >
-            {c.cluster_id}
+            {displayName(c)}
           </Link>
           {demoIds.has(c.cluster_id) && (
             <span className="px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase bg-purple-500/15 text-purple-300 border border-purple-500/40">
@@ -822,7 +848,7 @@ function FleetCard({ d, demoIds }: { d: Decorated; demoIds: Set<string> }) {
           <div className="flex items-center gap-1.5">
             <SeverityDot level={d.level} reasons={d.reasons} />
             <span className="font-mono text-xs text-zinc-100 truncate">
-              {c.cluster_id}
+              {displayName(c)}
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-1.5 mt-1">

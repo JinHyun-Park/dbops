@@ -2,11 +2,16 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { ChevronDown, Database, Search } from "lucide-react";
-import { eolFor } from "@/lib/engine";
+import { eolFor, FAMILY_META } from "@/lib/engine";
 import { triage, type Level } from "@/lib/cluster-triage";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { useFleetOverview } from "@/lib/use-fleet-overview";
 import { AnchoredPopover } from "@/components/design-system/anchored-popover";
+import {
+  groupByEngineFamily,
+  displayName,
+  FAMILY_ORDER,
+} from "@/lib/group-by-family";
 
 // A real, discoverable cluster switcher: click → a popover that lists the
 // clusters immediately (with a severity dot from the shared triage), with
@@ -57,9 +62,28 @@ export function ClusterDropdown({
 
   const q = query.trim().toLowerCase();
   const visible = q
-    ? clusters.filter((c) => c.cluster_id.toLowerCase().includes(q))
+    ? clusters.filter((c) => displayName(c).toLowerCase().includes(q))
     : clusters;
+
+  // Flatten the first visible item across families for Enter-key selection.
+  const firstVisible = visible[0] ?? null;
+
+  // Group visible results by engine family for section headers.
+  const grouped = useMemo(() => {
+    const byFamily = groupByEngineFamily(visible);
+    return FAMILY_ORDER.map((fam) => ({
+      fam,
+      meta: FAMILY_META[fam],
+      items: byFamily[fam],
+    })).filter((g) => g.items.length > 0);
+  }, [visible]);
+
   const selLevel = selected ? levels.get(selected) : undefined;
+  // For the trigger button, find the selected cluster's displayName.
+  const selectedCluster = selected
+    ? clusters.find((c) => c.cluster_id === selected)
+    : null;
+  const selDisplay = selectedCluster ? displayName(selectedCluster) : null;
 
   return (
     <div ref={rootRef} className={`relative ${className}`}>
@@ -80,9 +104,9 @@ export function ClusterDropdown({
             className="flex-shrink-0 text-emerald-300/70"
           />
         )}
-        {selected ? (
+        {selDisplay ? (
           <span className="text-[12px] font-mono text-zinc-200 truncate">
-            {shorten(selected, 26)}
+            {shorten(selDisplay, 26)}
           </span>
         ) : (
           <span className="text-[12px] text-zinc-500">클러스터 선택</span>
@@ -110,43 +134,61 @@ export function ClusterDropdown({
               placeholder="클러스터 검색…"
               className="w-full py-2.5 bg-transparent text-sm text-zinc-100 focus:outline-none placeholder:text-zinc-600"
               onKeyDown={(e) => {
-                if (e.key === "Enter" && visible.length > 0)
-                  choose(visible[0].cluster_id);
+                if (e.key === "Enter" && firstVisible)
+                  choose(firstVisible.cluster_id);
               }}
             />
           </div>
           <div className="max-h-72 overflow-y-auto py-1">
-            {visible.map((c) => {
-              const lvl = levels.get(c.cluster_id);
-              const active = c.cluster_id === selected;
-              return (
-                <button
-                  key={c.cluster_id}
-                  onClick={() => choose(c.cluster_id)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
-                    active ? "bg-zinc-800/80" : "hover:bg-zinc-800/50"
-                  }`}
-                >
-                  <span
-                    className={`flex-shrink-0 w-2 h-2 rounded-full ${
-                      lvl ? DOT[lvl] : "bg-zinc-600"
-                    }`}
-                  />
-                  <span className="flex-1 min-w-0 text-[12px] font-mono text-zinc-200 truncate">
-                    {c.cluster_id}
-                  </span>
-                  {active && (
-                    <span className="text-[10px] text-emerald-300/80">
-                      현재
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-            {visible.length === 0 && (
+            {grouped.length === 0 ? (
               <div className="px-3 py-6 text-center text-zinc-500 text-sm">
                 {clusters.length === 0 ? "클러스터 없음" : "결과 없음"}
               </div>
+            ) : (
+              grouped.map(({ fam, meta, items }) => (
+                <div key={fam}>
+                  {/* Family section header — a small label row that matches the
+                      surrounding typography: muted caps label + dot accent. */}
+                  <div className="flex items-center gap-1.5 px-3 pt-2 pb-1">
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${meta.accent}`}
+                    />
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium">
+                      {meta.label}
+                    </span>
+                    <span className="text-[10px] text-zinc-600 ml-auto">
+                      {items.length}
+                    </span>
+                  </div>
+                  {items.map((c) => {
+                    const lvl = levels.get(c.cluster_id);
+                    const active = c.cluster_id === selected;
+                    return (
+                      <button
+                        key={c.cluster_id}
+                        onClick={() => choose(c.cluster_id)}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
+                          active ? "bg-zinc-800/80" : "hover:bg-zinc-800/50"
+                        }`}
+                      >
+                        <span
+                          className={`flex-shrink-0 w-2 h-2 rounded-full ${
+                            lvl ? DOT[lvl] : "bg-zinc-600"
+                          }`}
+                        />
+                        <span className="flex-1 min-w-0 text-[12px] font-mono text-zinc-200 truncate">
+                          {displayName(c)}
+                        </span>
+                        {active && (
+                          <span className="text-[10px] text-emerald-300/80">
+                            현재
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))
             )}
           </div>
         </div>

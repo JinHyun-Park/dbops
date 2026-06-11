@@ -12,6 +12,7 @@ export interface ClusterLite {
   cluster_id: string;
   engine?: string;
   engine_version?: string;
+  resource_name?: string;
 }
 
 const KEY = "dbops_selected_cluster";
