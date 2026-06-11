@@ -812,7 +812,13 @@ export default function DashboardPage() {
 
                 {/* ── DocumentDB panels ── */}
                 {fam === "documentdb" && (
-                  <DocdbOverviewPanel clusterId={selectedCluster} />
+                  <>
+                    <MaintenanceHealthPanel
+                      clusterId={selectedCluster}
+                      engine={dashboardData.cluster?.engine}
+                    />
+                    <DocdbOverviewPanel clusterId={selectedCluster} />
+                  </>
                 )}
               </>
             );

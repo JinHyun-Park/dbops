@@ -49,6 +49,11 @@ const CHECK_LABELS: Record<string, string> = {
   ddb_capacity_overprovisioned: "Capacity",
   ddb_hot_partition: "Hot Partition",
   ddb_ondemand_high_throughput: "Cost",
+  // DocumentDB findings — docdb_* check_types from documentdb_findings collector.
+  docdb_connection_saturation: "Connections",
+  docdb_replica_lag: "Replica Lag",
+  docdb_cursor_timeout: "Cursors",
+  docdb_low_cache_hit: "Cache Hit",
 };
 
 // Full PG tab set. MySQL exposes a trimmed list (VACUUM/Bloat/Extensions are
@@ -78,10 +83,20 @@ const TABS_DYNAMODB = [
   "Hot Partition",
   "Cost",
 ] as const;
+// DocumentDB findings cover connection saturation, replica lag, cursor timeouts,
+// and buffer cache hit ratio — each gets its own filter tab.
+const TABS_DOCDB = [
+  "All",
+  "Connections",
+  "Replica Lag",
+  "Cursors",
+  "Cache Hit",
+] as const;
 type Tab =
   | (typeof TABS_PG)[number]
   | (typeof TABS_MYSQL)[number]
-  | (typeof TABS_DYNAMODB)[number];
+  | (typeof TABS_DYNAMODB)[number]
+  | (typeof TABS_DOCDB)[number];
 
 function tryParse(
   raw: HealthFinding["details"],
@@ -145,7 +160,9 @@ export function MaintenanceHealthPanel({
       ? TABS_PG
       : e.includes("dynamodb")
         ? TABS_DYNAMODB
-        : TABS_MYSQL) as unknown as string[];
+        : e.includes("docdb") || e.includes("documentdb")
+          ? TABS_DOCDB
+          : TABS_MYSQL) as unknown as string[];
     if (!allowed.includes(tab)) setTab("All");
   }, [engine, tab]);
 
@@ -153,11 +170,14 @@ export function MaintenanceHealthPanel({
   const e = (engine || "").toLowerCase();
   const isPg = e.includes("postgres");
   const isDynamoDB = e.includes("dynamodb");
+  const isDocDB = e.includes("docdb") || e.includes("documentdb");
   const tabs: readonly Tab[] = isPg
     ? TABS_PG
     : isDynamoDB
       ? TABS_DYNAMODB
-      : TABS_MYSQL;
+      : isDocDB
+        ? TABS_DOCDB
+        : TABS_MYSQL;
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 overflow-hidden">
