@@ -2438,8 +2438,10 @@ def _resource_details(query, cluster_id: str) -> dict:
       - DocumentDB: instances (list), instance_count, engine_version
     The column is JSONB in PG; the Data API returns it as a stringValue which we
     parse back to a dict here so the frontend gets a proper object."""
+    # cluster_meta has NO engine_family column (that lives on the DDB registry);
+    # derive it from `engine` so this SELECT can't fail on a missing column.
     rows = query(
-        "SELECT engine, engine_family, resource_details "
+        "SELECT engine, resource_details "
         "FROM cluster_meta WHERE cluster_id = :cid",
         {"cid": cluster_id},
     )
@@ -2457,10 +2459,11 @@ def _resource_details(query, cluster_id: str) -> dict:
             rd = json.loads(rd)
         except (ValueError, TypeError):
             rd = None
+    eng = row.get("engine")
     return {
         "cluster_id": cluster_id,
-        "engine": row.get("engine"),
-        "engine_family": row.get("engine_family"),
+        "engine": eng,
+        "engine_family": engine_family(eng),
         "resource_details": rd,
     }
 
