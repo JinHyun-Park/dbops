@@ -471,8 +471,10 @@ class AgentStack(cdk.Stack):
         # Multi-engine (DynamoDB/DocumentDB) discovery: the clusters API probes for
         # DynamoDB tables and DocumentDB clusters during bulk Discover so non-Aurora
         # engines can be registered alongside Aurora clusters.
+        # Note: DocumentDB describe is covered by the existing rds:DescribeDBClusters grant
+        # (DocumentDB IAM uses the rds: prefix, not docdb:).
         clusters_lambda.add_to_role_policy(iam.PolicyStatement(
-            actions=["dynamodb:ListTables", "dynamodb:DescribeTable", "docdb:DescribeDBClusters"],
+            actions=["dynamodb:ListTables", "dynamodb:DescribeTable"],
             resources=["*"],
         ))
 

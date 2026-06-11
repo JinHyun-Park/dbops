@@ -112,9 +112,28 @@ def _lookup_cluster(cluster_id: str) -> dict:
         return {}
 
 
-def _registry_engine(cluster_id: str) -> str:
-    """Return the `engine` string for a cluster from the registry, or '' on miss."""
-    return _lookup_cluster(cluster_id).get("engine", "")
+def _registry_engine(cluster_id: str):
+    """Return the `engine` string for a cluster from the registry.
+
+    Returns:
+      - str (possibly "")  when the registry row was read successfully
+                           (including a legitimate missing Item → "").
+      - None               when the registry lookup itself failed (DynamoDB
+                           error, network, etc.) — callers must treat None as
+                           FAIL CLOSED: do NOT create AWS clients or run live
+                           queries against an unknown cluster type.
+    """
+    if not cluster_id or not _CLUSTERS_TABLE_NAME:
+        return ""
+    try:
+        table = boto3.resource("dynamodb").Table(_CLUSTERS_TABLE_NAME)
+        item = table.get_item(Key={"cluster_id": cluster_id}).get("Item") or {}
+        # Row found (or legitimately absent) — return engine string (possibly "").
+        return item.get("engine", "")
+    except Exception as e:
+        print(f"[dashboard] _registry_engine lookup failed for {cluster_id}: {e}")
+        # Lookup failure → fail closed (None signals "unknown, do not proceed").
+        return None
 
 
 def _session_for(region: str = "", role_arn: str = "") -> boto3.session.Session:
@@ -155,6 +174,14 @@ def _schema_graph(cluster_id: str, schema: str) -> dict:
     full snapshot per cluster would bloat the cache. Supports both
     engines: PostgreSQL via pg_class + pg_constraint, MySQL via
     information_schema.TABLES + KEY_COLUMN_USAGE."""
+    eng = _registry_engine(cluster_id)
+    if eng is None:
+        # Registry lookup failed — fail closed; do not create rds-data clients.
+        return {"cluster_id": cluster_id, "not_applicable": True, "registry_unavailable": True,
+                "tables": [], "edges": []}
+    if engine_family(eng) != "relational":
+        return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": engine_family(eng),
+                "tables": [], "edges": []}
     cluster = _lookup_cluster(cluster_id)
     if not cluster:
         return {"error": f"cluster {cluster_id!r} not registered", "tables": [], "edges": []}
@@ -318,6 +345,14 @@ def _redundant_indexes(cluster_id: str) -> dict:
     a DBA goes through `pg_stat_user_indexes` by hand. PG-only for v1 —
     MySQL exposes a different index shape and the planner heuristics are
     different enough that we don't share logic."""
+    eng = _registry_engine(cluster_id)
+    if eng is None:
+        # Registry lookup failed — fail closed; do not create rds-data clients.
+        return {"cluster_id": cluster_id, "not_applicable": True, "registry_unavailable": True,
+                "candidates": []}
+    if engine_family(eng) != "relational":
+        return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": engine_family(eng),
+                "candidates": []}
     cluster = _lookup_cluster(cluster_id)
     if not cluster:
         return {"error": f"cluster {cluster_id!r} not registered", "candidates": []}
@@ -504,6 +539,14 @@ def _table_indexes(cluster_id: str, schema: str, table_name: str) -> dict:
     MySQL aggregates from information_schema.statistics + table_io_waits_summary."""
     if not schema or not table_name:
         return {"error": "schema and table required"}
+    eng = _registry_engine(cluster_id)
+    if eng is None:
+        # Registry lookup failed — fail closed; do not create rds-data clients.
+        return {"cluster_id": cluster_id, "not_applicable": True, "registry_unavailable": True,
+                "indexes": []}
+    if engine_family(eng) != "relational":
+        return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": engine_family(eng),
+                "indexes": []}
     cluster = _lookup_cluster(cluster_id)
     if not cluster:
         return {"error": f"cluster {cluster_id!r} not registered"}
@@ -1514,7 +1557,8 @@ def _health_findings(query, cluster_id):
     """Return the *latest* snapshot of maintenance health findings for this
     cluster. Older snapshots stay in the table for trend analysis but the
     dashboard panel only ever shows the most recent one."""
-    if engine_family(_registry_engine(cluster_id)) != "relational":
+    eng = _registry_engine(cluster_id)
+    if eng is None or engine_family(eng) != "relational":
         return {
             "cluster_id": cluster_id,
             "snapshot_time": None,
@@ -1663,7 +1707,11 @@ _CAPACITY_METRICS = {
 
 
 def _capacity_forecast(query, cluster_id, metric, days_lookback):
-    fam = engine_family(_registry_engine(cluster_id))
+    eng = _registry_engine(cluster_id)
+    if eng is None:
+        return {"cluster_id": cluster_id, "metric": metric, "not_applicable": True,
+                "registry_unavailable": True}
+    fam = engine_family(eng)
     if fam != "relational":
         return {"cluster_id": cluster_id, "metric": metric, "not_applicable": True, "engine_family": fam}
     if metric not in _CAPACITY_METRICS:
@@ -1804,6 +1852,18 @@ def _log_insights(cluster_id, hours, category, keywords: str = ""):
     import re
     import time
 
+    # Gate: non-relational clusters have no /aws/rds/cluster/... log groups.
+    # Registry lookup failure (None) is also treated as fail closed — do NOT
+    # create CloudWatch Logs clients or build log-group paths for unknown types.
+    eng = _registry_engine(cluster_id)
+    if eng is None:
+        return {"cluster_id": cluster_id, "not_applicable": True, "registry_unavailable": True,
+                "entries": [], "count": 0, "category": category, "hours": hours}
+    if engine_family(eng) != "relational":
+        return {"cluster_id": cluster_id, "not_applicable": True,
+                "engine_family": engine_family(eng),
+                "entries": [], "count": 0, "category": category, "hours": hours}
+
     cluster = _lookup_cluster(cluster_id)
     engine = (cluster.get("engine") or "").lower() if cluster else ""
     is_mysql = "mysql" in engine
@@ -1932,7 +1992,11 @@ def _topology(cluster_id: str) -> dict:
     is opt-in, so we accept the cold-call cost on button click."""
     from datetime import datetime, timedelta
 
-    fam = engine_family(_registry_engine(cluster_id))
+    eng = _registry_engine(cluster_id)
+    if eng is None:
+        return {"cluster_id": cluster_id, "not_applicable": True, "registry_unavailable": True,
+                "members": []}
+    fam = engine_family(eng)
     if fam != "relational":
         return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": fam, "members": []}
 
@@ -2081,7 +2145,11 @@ def _backups(cluster_id: str) -> dict:
     """
     from datetime import datetime, timezone
 
-    fam = engine_family(_registry_engine(cluster_id))
+    eng = _registry_engine(cluster_id)
+    if eng is None:
+        return {"cluster_id": cluster_id, "not_applicable": True, "registry_unavailable": True,
+                "snapshots": []}
+    fam = engine_family(eng)
     if fam != "relational":
         return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": fam, "snapshots": []}
 

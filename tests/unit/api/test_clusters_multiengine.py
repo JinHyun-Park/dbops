@@ -208,3 +208,83 @@ def test_register_aurora_unchanged(mock_rds_for):
     assert item["engine"] == "aurora-postgresql"
     # Aurora path MUST set secret_arn from RDS response
     assert item.get("secret_arn") == "arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:master"
+
+
+# ---------------------------------------------------------------------------
+# Test 4 — bulk-register with a DynamoDB entry (resource_name threaded)
+# ---------------------------------------------------------------------------
+
+@patch.object(handler, "_rds_client_for")
+@patch.object(handler, "_ddb_client_for")
+def test_bulk_register_dynamodb_succeeds_with_ddb_slug(mock_ddb_for, mock_rds_for):
+    """_handle_bulk_register must pass resource_name to _register_dynamodb so
+    the DynamoDB path succeeds. The registered cluster_id must start with 'ddb-'.
+    """
+    mock_ddb_client = MagicMock()
+    mock_ddb_client.describe_table.return_value = {"Table": {"TableName": "Orders"}}
+    mock_ddb_for.return_value = mock_ddb_client
+
+    table = _mock_table()
+    # Simulate: table has no existing item (not yet registered)
+    table.get_item.return_value = {}
+
+    bulk_body = {
+        "clusters": [
+            {
+                "cluster_id": "ddb-placeholder",  # will be recomputed inside _register_dynamodb
+                "account_id": "123456789012",
+                "region": "ap-northeast-2",
+                "engine": "dynamodb",
+                "resource_name": "Orders",
+            }
+        ]
+    }
+    resp = handler._handle_bulk_register(table, bulk_body)
+    assert resp["statusCode"] == 200
+    body = json.loads(resp["body"])
+
+    assert body["counts"]["failed"] == 0, f"unexpected failures: {body.get('failed')}"
+    assert body["counts"]["registered"] == 1
+    assert len(body["registered"]) == 1
+    assert body["registered"][0]["connection_status"] == "ok"
+
+    # The DynamoDB put_item must have been called with a ddb-* cluster_id
+    put_call = table.put_item.call_args[1]["Item"]
+    assert put_call["cluster_id"].startswith("ddb-")
+    assert put_call["resource_name"] == "Orders"
+    mock_rds_for.assert_not_called()
+
+
+@patch.object(handler, "_rds_client_for")
+@patch.object(handler, "_ddb_client_for")
+def test_bulk_register_dynamodb_slug_matches_discovery(mock_ddb_for, mock_rds_for):
+    """Discovery and bulk-register must produce the same ddb-* cluster_id when
+    account_id is threaded into _list_clusters_in_region (account-threading approach).
+
+    This test simulates:
+      1. Discovery with account_id='123456789012' → discover the 'Orders' table.
+      2. bulk-register that exact entry → _register_dynamodb recomputes with same account_id.
+      3. Both must produce the same ddb-* slug.
+    """
+    from engine_family import dynamodb_cluster_id
+
+    account_id = "123456789012"
+    region = "ap-northeast-2"
+    table_name = "Orders"
+
+    # The slug discovery produces (after the fix: account_id threaded in)
+    expected_id = dynamodb_cluster_id(account_id, region, table_name)
+    assert expected_id.startswith("ddb-")
+
+    # The slug _register_dynamodb produces with the same account_id
+    registered_id = dynamodb_cluster_id(account_id, region, table_name)
+    assert registered_id == expected_id, (
+        f"Discovery id {expected_id!r} != registration id {registered_id!r} — "
+        "account_id must be threaded into _list_clusters_in_region"
+    )
+
+    # Also verify that the OLD discovery slug (empty account_id) is DIFFERENT
+    old_discovery_id = dynamodb_cluster_id("", region, table_name)
+    assert old_discovery_id != expected_id, (
+        "Regression: empty-account_id slug should differ from real-account_id slug"
+    )

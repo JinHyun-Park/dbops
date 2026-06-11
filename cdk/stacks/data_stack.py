@@ -161,8 +161,10 @@ class DataStack(cdk.Stack):
         # Multi-engine (DynamoDB/DocumentDB) discovery + metrics: the ETL collector
         # enumerates DynamoDB tables and DocumentDB clusters in each spoke account
         # to populate cluster_meta and collect CloudWatch metrics for non-Aurora engines.
+        # Note: DocumentDB describe is covered by the existing rds:DescribeDBClusters above
+        # (DocumentDB IAM uses the rds: prefix, not docdb:).
         self.etl_lambda.add_to_role_policy(iam.PolicyStatement(
-            actions=["dynamodb:ListTables", "dynamodb:DescribeTable", "docdb:DescribeDBClusters"],
+            actions=["dynamodb:ListTables", "dynamodb:DescribeTable"],
             resources=["*"],
         ))
 

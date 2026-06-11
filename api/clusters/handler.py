@@ -295,7 +295,7 @@ def _convention_secret_for(session: boto3.session.Session, cluster_id: str) -> s
         return ""
 
 
-def _list_clusters_in_region(region: str, role_arn: str = "") -> list[dict]:
+def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = "") -> list[dict]:
     """Enumerate Aurora clusters in a region. For each cluster we attach:
 
       - `secret_arn`: convention secret if available, else master fallback
@@ -304,6 +304,10 @@ def _list_clusters_in_region(region: str, role_arn: str = "") -> list[dict]:
           - "master_fallback" → no convention secret, using master user secret
           - "missing"         → neither found; cluster needs manual setup
       - `master_secret_arn`: kept for transparency (UI can show "currently using master")
+
+    `account_id` is threaded in from _handle_discover so that DynamoDB slug
+    computation uses the same account_id that _register_dynamodb will use —
+    this guarantees discovery and registration produce the same `ddb-*` cluster_id.
     """
     session = _session_for(region, role_arn)
     rds = session.client("rds")
@@ -344,13 +348,15 @@ def _list_clusters_in_region(region: str, role_arn: str = "") -> list[dict]:
             })
 
     # DynamoDB tables — best-effort; missing permission doesn't break Aurora discovery.
+    # account_id is threaded from _handle_discover so the slug here matches the one
+    # _register_dynamodb will compute (same account_id → same ddb-* cluster_id).
     try:
         dynamo = _session_for(region, role_arn).client("dynamodb")
         ddb_paginator = dynamo.get_paginator("list_tables")
         for ddb_page in ddb_paginator.paginate():
             for name in ddb_page.get("TableNames", []):
                 out.append({
-                    "cluster_id": dynamodb_cluster_id("", region, name),
+                    "cluster_id": dynamodb_cluster_id(account_id, region, name),
                     "resource_name": name,
                     "engine": "dynamodb",
                     "engine_family": "dynamodb",
@@ -552,7 +558,7 @@ def _handle_discover(table, body: dict):
 
     for r in regions:
         try:
-            rows = _list_clusters_in_region(r, role_arn)
+            rows = _list_clusters_in_region(r, role_arn, account_id)
             for row in rows:
                 row["already_registered"] = row["cluster_id"] in existing_ids
                 row["account_id"] = account_id
@@ -598,6 +604,9 @@ def _handle_bulk_register(table, body: dict):
                 "cluster_arn": c.get("cluster_arn", ""),
                 "secret_arn": c.get("secret_arn", ""),
                 "db_name": c.get("db_name", ""),
+                # Required for DynamoDB registration — _register_dynamodb checks
+                # resource_name (the table name) as a required field.
+                "resource_name": c.get("resource_name", ""),
             }
             resp = _handle_register(table, sub_body)
             payload = json.loads(resp["body"])

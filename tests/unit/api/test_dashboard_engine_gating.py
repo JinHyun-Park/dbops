@@ -253,3 +253,198 @@ def test_health_findings_relational_returns_data(monkeypatch):
     assert len(result["findings"]) == 1
     assert result["counts"]["warning"] == 1
     assert result["snapshot_time"] == "2026-06-01T00:00:00Z"
+
+
+# ===========================================================================
+# 6. _registry_engine returns None (registry lookup failure) → fail closed
+# ===========================================================================
+
+def test_topology_registry_unavailable_fail_closed(monkeypatch):
+    """When _registry_engine returns None (lookup failure), _topology must
+    fail closed: return not_applicable + registry_unavailable, NO RDS client."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: None)
+
+    mock_rds = MagicMock()
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_rds
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._topology("some-cluster")
+
+    assert result.get("not_applicable") is True
+    assert result.get("registry_unavailable") is True
+    mock_rds.describe_db_clusters.assert_not_called()
+
+
+def test_backups_registry_unavailable_fail_closed(monkeypatch):
+    """When _registry_engine returns None, _backups must fail closed."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: None)
+
+    mock_rds = MagicMock()
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_rds
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._backups("some-cluster")
+
+    assert result.get("not_applicable") is True
+    assert result.get("registry_unavailable") is True
+    mock_rds.describe_db_clusters.assert_not_called()
+
+
+def test_capacity_forecast_registry_unavailable_fail_closed(monkeypatch):
+    """When _registry_engine returns None, _capacity_forecast must fail closed."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: None)
+
+    query_called = []
+
+    def _spy_query(sql, params=None):
+        query_called.append(sql)
+        return []
+
+    result = handler._capacity_forecast(_spy_query, "some-cluster", "storage_bytes", 30)
+
+    assert result.get("not_applicable") is True
+    assert result.get("registry_unavailable") is True
+    assert not query_called
+
+
+def test_health_findings_registry_unavailable_fail_closed(monkeypatch):
+    """When _registry_engine returns None, _health_findings must fail closed (empty)."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: None)
+
+    query_called = []
+
+    def _spy_query(sql, params=None):
+        query_called.append(sql)
+        return []
+
+    result = handler._health_findings(_spy_query, "some-cluster")
+
+    assert result["findings"] == []
+    assert not query_called
+
+
+# ===========================================================================
+# 7. _schema_graph / _redundant_indexes / _table_indexes / _log_insights
+#    — non-relational (dynamodb) → not_applicable, no rds-data/logs client
+# ===========================================================================
+
+def test_schema_graph_dynamodb_not_applicable(monkeypatch):
+    """_schema_graph for a dynamodb cluster must return not_applicable without
+    creating an rds-data client."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setattr(handler, "boto3", mock_boto3)
+
+    result = handler._schema_graph("ddb-abc123", "public")
+
+    assert result.get("not_applicable") is True
+    assert result.get("engine_family") == "dynamodb"
+    assert result.get("tables") == []
+    assert result.get("edges") == []
+    # rds-data client must NOT have been created
+    mock_boto3.client.assert_not_called()
+
+
+def test_schema_graph_registry_unavailable_fail_closed(monkeypatch):
+    """_schema_graph with registry_unavailable must also return not_applicable."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: None)
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setattr(handler, "boto3", mock_boto3)
+
+    result = handler._schema_graph("some-cluster", "public")
+
+    assert result.get("not_applicable") is True
+    assert result.get("registry_unavailable") is True
+    mock_boto3.client.assert_not_called()
+
+
+def test_redundant_indexes_dynamodb_not_applicable(monkeypatch):
+    """_redundant_indexes for a dynamodb cluster must return not_applicable."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setattr(handler, "boto3", mock_boto3)
+
+    result = handler._redundant_indexes("ddb-abc123")
+
+    assert result.get("not_applicable") is True
+    assert result.get("engine_family") == "dynamodb"
+    assert result.get("candidates") == []
+    mock_boto3.client.assert_not_called()
+
+
+def test_redundant_indexes_registry_unavailable_fail_closed(monkeypatch):
+    """_redundant_indexes with registry_unavailable must fail closed."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: None)
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setattr(handler, "boto3", mock_boto3)
+
+    result = handler._redundant_indexes("some-cluster")
+
+    assert result.get("not_applicable") is True
+    assert result.get("registry_unavailable") is True
+    mock_boto3.client.assert_not_called()
+
+
+def test_table_indexes_dynamodb_not_applicable(monkeypatch):
+    """_table_indexes for a dynamodb cluster must return not_applicable."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setattr(handler, "boto3", mock_boto3)
+
+    result = handler._table_indexes("ddb-abc123", "main", "orders")
+
+    assert result.get("not_applicable") is True
+    assert result.get("engine_family") == "dynamodb"
+    assert result.get("indexes") == []
+    mock_boto3.client.assert_not_called()
+
+
+def test_table_indexes_registry_unavailable_fail_closed(monkeypatch):
+    """_table_indexes with registry_unavailable must fail closed."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: None)
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setattr(handler, "boto3", mock_boto3)
+
+    result = handler._table_indexes("some-cluster", "main", "orders")
+
+    assert result.get("not_applicable") is True
+    assert result.get("registry_unavailable") is True
+    mock_boto3.client.assert_not_called()
+
+
+def test_log_insights_dynamodb_not_applicable(monkeypatch):
+    """_log_insights for a dynamodb cluster must return not_applicable without
+    creating a CloudWatch Logs client or building any log-group paths."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setattr(handler, "boto3", mock_boto3)
+
+    result = handler._log_insights("ddb-abc123", 1, "error")
+
+    assert result.get("not_applicable") is True
+    assert result.get("engine_family") == "dynamodb"
+    assert result.get("entries") == []
+    mock_boto3.client.assert_not_called()
+
+
+def test_log_insights_registry_unavailable_fail_closed(monkeypatch):
+    """_log_insights with registry_unavailable must fail closed."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: None)
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setattr(handler, "boto3", mock_boto3)
+
+    result = handler._log_insights("some-cluster", 1, "error")
+
+    assert result.get("not_applicable") is True
+    assert result.get("registry_unavailable") is True
+    mock_boto3.client.assert_not_called()
