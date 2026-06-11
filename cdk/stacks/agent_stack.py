@@ -468,6 +468,13 @@ class AgentStack(cdk.Stack):
             actions=["secretsmanager:DescribeSecret"],
             resources=["arn:aws:secretsmanager:*:*:secret:dbops/*"],
         ))
+        # Multi-engine (DynamoDB/DocumentDB) discovery: the clusters API probes for
+        # DynamoDB tables and DocumentDB clusters during bulk Discover so non-Aurora
+        # engines can be registered alongside Aurora clusters.
+        clusters_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["dynamodb:ListTables", "dynamodb:DescribeTable", "docdb:DescribeDBClusters"],
+            resources=["*"],
+        ))
 
         reports_lambda = lambda_.Function(
             self, "ReportsApi",

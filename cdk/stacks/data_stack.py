@@ -158,6 +158,13 @@ class DataStack(cdk.Stack):
                      "ce:GetReservationPurchaseRecommendation"],
             resources=["*"],
         ))
+        # Multi-engine (DynamoDB/DocumentDB) discovery + metrics: the ETL collector
+        # enumerates DynamoDB tables and DocumentDB clusters in each spoke account
+        # to populate cluster_meta and collect CloudWatch metrics for non-Aurora engines.
+        self.etl_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["dynamodb:ListTables", "dynamodb:DescribeTable", "docdb:DescribeDBClusters"],
+            resources=["*"],
+        ))
 
         events.Rule(
             self, "ETLSchedule",
