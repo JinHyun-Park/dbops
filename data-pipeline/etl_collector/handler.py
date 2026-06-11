@@ -12,6 +12,7 @@ from collectors.mysql_query_stats import collect_mysql_query_stats
 from collectors.mysql_table_stats import collect_mysql_table_stats
 from collectors.pg_activity import collect_pg_activity
 from collectors.pg_baseline_trainer import collect_pg_baselines
+from collectors.pg_capacity_forecast import collect_capacity_forecast
 from collectors.pg_extensions import collect_pg_extensions
 from collectors.pg_health_checks import collect_pg_health_checks
 from collectors.pg_locks import collect_pg_locks
@@ -167,6 +168,14 @@ def lambda_handler(event, context):
             except Exception as e:
                 result["param_fitness_error"] = str(e)
                 print(f"[{cluster_id}] param fitness error: {e}")
+            try:
+                result["capacity_forecast"] = collect_capacity_forecast(
+                    rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                    snapshot_ts=run_ts,
+                )
+            except Exception as e:
+                result["capacity_forecast_error"] = str(e)
+                print(f"[{cluster_id}] capacity forecast error: {e}")
             try:
                 result["extensions"] = collect_pg_extensions(
                     rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,

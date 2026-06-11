@@ -39,6 +39,8 @@ const CHECK_LABELS: Record<string, string> = {
   param_effective_cache: "Tuning",
   param_autovacuum_workers: "Tuning",
   param_buffer_cache_hit: "Tuning",
+  // 고갈 예측 경보 — storage/connection 한계 도달 ETA.
+  capacity_forecast: "Capacity",
 };
 
 // Full PG tab set. MySQL exposes a trimmed list (VACUUM/Bloat/Extensions are
@@ -51,6 +53,7 @@ const TABS_PG = [
   "Indexes",
   "Config",
   "Tuning",
+  "Capacity",
   "Extensions",
   "Cost",
 ] as const;
