@@ -892,6 +892,14 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardAuditLogIntegration", dashboard_lambda),
         )
+        # 변경 영향 회고 — RDS 변경 이벤트 전후 워크로드 델타. dashboard
+        # 라우트는 path별 개별 등록이라(greedy proxy 아님) 새 sub-path는
+        # 반드시 여기 추가해야 한다(없으면 핸들러가 구현돼 있어도 404).
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/change-impact",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardChangeImpactIntegration", dashboard_lambda),
+        )
         self.api.add_routes(
             path="/api/multi-cluster/overview",
             methods=[apigwv2.HttpMethod.GET],
