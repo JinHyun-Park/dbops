@@ -292,7 +292,50 @@ def collect_dynamodb_findings(
             },
         )
 
-    # === 규칙 5: ddb_ondemand_high_throughput (PAY_PER_REQUEST only) ===
+    # === 규칙 5: ddb_gsi_throttling (per-GSI, any billing mode) ===
+    # Query metric_snapshots for rows with a non-NULL "gsi" dimension key,
+    # grouped by GSI name, summing read + write throttle events.
+    try:
+        gsi_throttle_rows = _execute(
+            rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
+            "SELECT "
+            "  dimensions->>'gsi' AS gsi_name, "
+            "  COALESCE(SUM(value), 0) AS gsi_throttle_total "
+            "FROM metric_snapshots "
+            "WHERE cluster_id = :cid "
+            "  AND metric_type IN ('read_throttle_events', 'write_throttle_events') "
+            "  AND ts > NOW() - (:hours || ' hours')::interval "
+            "  AND dimensions->>'gsi' IS NOT NULL "
+            "GROUP BY dimensions->>'gsi' "
+            "HAVING COALESCE(SUM(value), 0) > 0",
+            {"cid": cluster_id, "hours": str(window_hours)},
+        )
+    except Exception:
+        gsi_throttle_rows = []
+
+    for gsi_row in (gsi_throttle_rows or []):
+        gsi_nm = gsi_row.get("gsi_name") or ""
+        gsi_throttle = float(gsi_row.get("gsi_throttle_total") or 0)
+        if not gsi_nm or gsi_throttle <= 0:
+            continue
+        add(
+            "ddb_gsi_throttling", "warning",
+            gsi_nm,
+            f"GSI {gsi_nm} throttle {int(gsi_throttle)}건",
+            "GSI throttle > 0",
+            (
+                f"GSI {gsi_nm}이(가) under-provisioned이거나 hot — "
+                "GSI 용량 상향 또는 GSI 키 재설계 검토"
+            ),
+            {
+                "gsi_name": gsi_nm,
+                "gsi_throttle_total": int(gsi_throttle),
+                "window_hours": window_hours,
+                "billing_mode": billing_mode,
+            },
+        )
+
+    # === 규칙 6: ddb_ondemand_high_throughput (PAY_PER_REQUEST only) ===
     if is_ondemand and max(max_consumed_rcu, max_consumed_wcu) >= ONDEMAND_HIGH_THRESHOLD:
         peak_units = max(max_consumed_rcu, max_consumed_wcu)
         add(

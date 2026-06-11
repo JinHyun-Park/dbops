@@ -414,3 +414,155 @@ def test_snapshot_ts_is_shared():
 
     assert ts_seen, "Expected at least one INSERT"
     assert all(ts == fixed_ts for ts in ts_seen), f"ts mismatch: {ts_seen}"
+
+
+# ---------------------------------------------------------------------------
+# Test 12 — per-GSI throttle > 0 → ddb_gsi_throttling (warning)
+# ---------------------------------------------------------------------------
+
+def test_gsi_throttling_emits_finding_when_throttle_nonzero():
+    """When per-GSI throttle query returns a GSI with SUM > 0,
+    a ddb_gsi_throttling warning finding must be emitted."""
+    gsi_name = "gsi-status"
+
+    def fake_with_gsi(rds, arn, secret, db, sql, params=None):
+        # cluster_meta
+        import json
+        if "cluster_meta" in sql and "resource_details" in sql:
+            return [{"resource_details": json.dumps({"billing_mode": "PROVISIONED"})}]
+        # table-level throttle aggregate (dimensions IS NULL or '{}')
+        if "throttle_total" in sql and "gsi" not in sql:
+            return [{"throttle_total": 0.0, "throttle_minutes": 0}]
+        # consumed / provisioned aggregate
+        if "max_consumed_rcu" in sql or ("consumed_rcu" in sql and "gsi" not in sql):
+            return [{
+                "max_consumed_rcu": 60.0,
+                "max_consumed_wcu": 60.0,
+                "prov_rcu": 100.0,
+                "prov_wcu": 100.0,
+                "consumed_datapoints": _CONSUMED_SAMPLES,
+            }]
+        # per-GSI throttle aggregate query — keyed by "gsi" in SQL
+        if "gsi" in sql and "throttle" in sql:
+            return [{"gsi_name": gsi_name, "gsi_throttle_total": 42.0}]
+        if sql.strip().upper().startswith("INSERT"):
+            return []
+        return []
+
+    emitted = []
+    with patch.object(df, "_execute") as mock_ex:
+        def capture(rds, arn, secret, db, sql, params=None):
+            if sql.strip().upper().startswith("INSERT"):
+                emitted.append({
+                    "check_type": params["check_type"],
+                    "severity": params["severity"],
+                    "subject": params.get("subject", ""),
+                    "value_str": params.get("value_str", ""),
+                })
+            return fake_with_gsi(rds, arn, secret, db, sql, params)
+
+        mock_ex.side_effect = capture
+        result = df.collect_dynamodb_findings(
+            MagicMock(), "arn", "secret", "db", "tbl-gsi",
+            snapshot_ts="2026-06-12T00:00:00Z",
+        )
+
+    gsi_findings = [e for e in emitted if e["check_type"] == "ddb_gsi_throttling"]
+    assert len(gsi_findings) >= 1, f"Expected ddb_gsi_throttling finding, got: {emitted}"
+    finding = gsi_findings[0]
+    assert finding["severity"] == "warning"
+    assert gsi_name in finding["subject"] or gsi_name in finding["value_str"], (
+        f"GSI name {gsi_name!r} must appear in subject or value_str: {finding}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 13 — per-GSI throttle = 0 for all GSIs → no ddb_gsi_throttling finding
+# ---------------------------------------------------------------------------
+
+def test_gsi_throttling_silent_when_all_zero():
+    """When per-GSI query returns rows with throttle_total = 0 (or no rows),
+    ddb_gsi_throttling must NOT be emitted."""
+
+    def fake_no_gsi_throttle(rds, arn, secret, db, sql, params=None):
+        import json
+        if "cluster_meta" in sql and "resource_details" in sql:
+            return [{"resource_details": json.dumps({"billing_mode": "PROVISIONED"})}]
+        if "throttle_total" in sql and "gsi" not in sql:
+            return [{"throttle_total": 0.0, "throttle_minutes": 0}]
+        if "max_consumed_rcu" in sql or ("consumed_rcu" in sql and "gsi" not in sql):
+            return [{
+                "max_consumed_rcu": 60.0,
+                "max_consumed_wcu": 60.0,
+                "prov_rcu": 100.0,
+                "prov_wcu": 100.0,
+                "consumed_datapoints": _CONSUMED_SAMPLES,
+            }]
+        # per-GSI throttle query returns zero → no finding
+        if "gsi" in sql and "throttle" in sql:
+            return [{"gsi_name": "gsi-safe", "gsi_throttle_total": 0.0}]
+        if sql.strip().upper().startswith("INSERT"):
+            return []
+        return []
+
+    emitted = []
+    with patch.object(df, "_execute") as mock_ex:
+        def capture(rds, arn, secret, db, sql, params=None):
+            if sql.strip().upper().startswith("INSERT"):
+                emitted.append(params["check_type"])
+            return fake_no_gsi_throttle(rds, arn, secret, db, sql, params)
+
+        mock_ex.side_effect = capture
+        df.collect_dynamodb_findings(
+            MagicMock(), "arn", "secret", "db", "tbl-clean",
+            snapshot_ts="2026-06-12T00:00:00Z",
+        )
+
+    assert "ddb_gsi_throttling" not in emitted, (
+        f"ddb_gsi_throttling should not fire when all GSI throttle = 0, got: {emitted}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 14 — no per-GSI rows at all → silent skip (no ddb_gsi_throttling)
+# ---------------------------------------------------------------------------
+
+def test_gsi_throttling_silent_when_no_gsi_rows():
+    """When the per-GSI query returns an empty result set (no GSIs exist),
+    ddb_gsi_throttling must be silently skipped."""
+
+    def fake_empty_gsi(rds, arn, secret, db, sql, params=None):
+        import json
+        if "cluster_meta" in sql and "resource_details" in sql:
+            return [{"resource_details": json.dumps({"billing_mode": "PAY_PER_REQUEST"})}]
+        if "throttle_total" in sql and "gsi" not in sql:
+            return [{"throttle_total": 0.0, "throttle_minutes": 0}]
+        if "max_consumed_rcu" in sql or ("consumed_rcu" in sql and "gsi" not in sql):
+            return [{
+                "max_consumed_rcu": 100.0,
+                "max_consumed_wcu": 100.0,
+                "prov_rcu": None,
+                "prov_wcu": None,
+                "consumed_datapoints": _CONSUMED_SAMPLES,
+            }]
+        # per-GSI throttle query returns empty list
+        if "gsi" in sql and "throttle" in sql:
+            return []
+        if sql.strip().upper().startswith("INSERT"):
+            return []
+        return []
+
+    emitted = []
+    with patch.object(df, "_execute") as mock_ex:
+        def capture(rds, arn, secret, db, sql, params=None):
+            if sql.strip().upper().startswith("INSERT"):
+                emitted.append(params["check_type"])
+            return fake_empty_gsi(rds, arn, secret, db, sql, params)
+
+        mock_ex.side_effect = capture
+        df.collect_dynamodb_findings(
+            MagicMock(), "arn", "secret", "db", "tbl-nogsi",
+            snapshot_ts="2026-06-12T00:00:00Z",
+        )
+
+    assert "ddb_gsi_throttling" not in emitted

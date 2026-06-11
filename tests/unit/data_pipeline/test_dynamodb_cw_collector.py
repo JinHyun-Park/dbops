@@ -257,3 +257,134 @@ def test_resource_details_captures_key_schema_gsi_lsi():
     assert lsi0["name"] == "by-lsk"
     assert lsi0["sort_key"] == {"name": "lsk", "type": "S"}
     assert lsi0["projection"] == "ALL"
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — per-GSI throttle/consumed metrics collected with GSI dimension
+# ---------------------------------------------------------------------------
+
+def test_gsi_metrics_collected_with_gsi_dimension():
+    """When describe_table returns a GSI, the collector must issue CW calls
+    with a GlobalSecondaryIndexName dimension and insert metric_snapshots
+    rows with dimensions = {"gsi": <gsiname>}."""
+    import json
+
+    gsi_name = "gsi-status"
+    cw = MagicMock()
+
+    # All CW calls return one datapoint
+    dp = {"Timestamp": datetime(2026, 6, 12), "Sum": 5.0, "Average": 5.0}
+    cw.get_metric_statistics.return_value = {"Datapoints": [dp]}
+
+    dynamo = MagicMock()
+    dynamo.describe_table.return_value = {
+        "Table": {
+            "BillingModeSummary": {"BillingMode": "PAY_PER_REQUEST"},
+            "ItemCount": 100,
+            "TableSizeBytes": 4096,
+            "TableStatus": "ACTIVE",
+            "AttributeDefinitions": [
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "status", "AttributeType": "S"},
+            ],
+            "KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+            "GlobalSecondaryIndexes": [
+                {
+                    "IndexName": gsi_name,
+                    "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}],
+                    "Projection": {"ProjectionType": "ALL"},
+                    "IndexStatus": "ACTIVE",
+                    "ItemCount": 50,
+                    "IndexSizeBytes": 2048,
+                }
+            ],
+        }
+    }
+
+    gsi_inserts = []
+
+    def cache_execute(sql, params):
+        if "metric_snapshots" in sql:
+            dims_raw = params.get("dims", "{}")
+            if dims_raw != "{}":
+                import json as _json
+                parsed = _json.loads(dims_raw)
+                # Only collect rows that carry a "gsi" key (not "operation")
+                if "gsi" in parsed:
+                    gsi_inserts.append(params)
+
+    ddb.collect_dynamodb_metrics(
+        cw, dynamo, cache_execute, "c6", "gsi-table", _ACCOUNT_ID, _REGION
+    )
+
+    # At least one CW call must carry GlobalSecondaryIndexName dimension
+    gsi_cw_calls = [
+        c for c in cw.get_metric_statistics.call_args_list
+        if any(
+            d.get("Name") == "GlobalSecondaryIndexName"
+            for d in (c.kwargs if c.kwargs else c[1]).get("Dimensions", [])
+        )
+    ]
+    assert gsi_cw_calls, "Expected CW calls with GlobalSecondaryIndexName dimension"
+
+    # Each such call must have GlobalSecondaryIndexName = gsi_name
+    for cw_call in gsi_cw_calls:
+        kw = cw_call.kwargs if cw_call.kwargs else cw_call[1]
+        dim_map = {d["Name"]: d["Value"] for d in kw["Dimensions"]}
+        assert dim_map.get("GlobalSecondaryIndexName") == gsi_name, (
+            f"Expected GSI name {gsi_name!r}, got {dim_map}"
+        )
+        assert dim_map.get("TableName") == "gsi-table"
+
+    # GSI metric inserts must have dims = {"gsi": gsi_name}
+    assert gsi_inserts, "Expected at least one metric_snapshots insert with GSI dims"
+    for row in gsi_inserts:
+        dims = json.loads(row["dims"])
+        assert dims.get("gsi") == gsi_name, f"Expected gsi dim {gsi_name!r}, got {dims}"
+
+    # The GSI metric_types must be one of the four expected types
+    gsi_metric_types = {row["metric_type"] for row in gsi_inserts}
+    expected_types = {"consumed_rcu", "consumed_wcu", "read_throttle_events", "write_throttle_events"}
+    assert gsi_metric_types <= expected_types, (
+        f"Unexpected GSI metric types: {gsi_metric_types - expected_types}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — GSI collection failure does NOT break table-level metrics
+# ---------------------------------------------------------------------------
+
+def test_gsi_failure_does_not_break_table_metrics():
+    """If a per-GSI CW call raises, table-level metrics are still collected
+    and the function returns without raising."""
+    cw = MagicMock()
+    dp = {"Timestamp": datetime(2026, 6, 12), "Sum": 10.0, "Average": 10.0}
+
+    def cw_side_effect(**kwargs):
+        dims = {d["Name"]: d["Value"] for d in kwargs.get("Dimensions", [])}
+        # Fail only GSI calls
+        if "GlobalSecondaryIndexName" in dims:
+            raise Exception("ThrottlingException: GSI call failed")
+        return {"Datapoints": [dp]}
+
+    cw.get_metric_statistics.side_effect = cw_side_effect
+
+    dynamo = MagicMock()
+    dynamo.describe_table.return_value = {
+        "Table": {
+            "BillingModeSummary": {"BillingMode": "PAY_PER_REQUEST"},
+            "ItemCount": 10,
+            "TableSizeBytes": 1024,
+            "TableStatus": "ACTIVE",
+            "GlobalSecondaryIndexes": [{"IndexName": "bad-gsi"}],
+        }
+    }
+
+    result = ddb.collect_dynamodb_metrics(
+        cw, dynamo, lambda sql, params: None, "c7", "safe-table", _ACCOUNT_ID, _REGION
+    )
+
+    # Must return without raising
+    assert isinstance(result, dict)
+    # Table-level metrics must still be inserted
+    assert result["metrics_inserted"] > 0

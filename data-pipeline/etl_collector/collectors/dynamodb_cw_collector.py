@@ -20,6 +20,12 @@ _PROVISIONED_METRICS_AVG = [
     ("ProvisionedWriteCapacityUnits", "provisioned_wcu"),
 ]
 _LATENCY_OPS = ["GetItem", "Query", "PutItem", "Scan"]
+_GSI_METRICS_SUM = [
+    ("ConsumedReadCapacityUnits", "consumed_rcu"),
+    ("ConsumedWriteCapacityUnits", "consumed_wcu"),
+    ("ReadThrottleEvents", "read_throttle_events"),
+    ("WriteThrottleEvents", "write_throttle_events"),
+]
 
 
 def _insert(cache_execute, cluster_id, ts, metric_type, value, dims="{}"):
@@ -40,6 +46,7 @@ def collect_dynamodb_metrics(cw, dynamo, cache_execute, cluster_id, table_name, 
     # Fix 2: initialize to None so a describe_table failure leaves billing_mode=None,
     # which naturally skips the Provisioned* queries below (guard: == "PROVISIONED").
     billing_mode = None
+    gsi_list = []  # populated inside the try block; empty on describe_table failure
     try:
         t = dynamo.describe_table(TableName=table_name)["Table"]
         # A successful describe with no BillingModeSummary IS provisioned — keep that default.
@@ -84,6 +91,9 @@ def collect_dynamodb_metrics(cw, dynamo, cache_execute, cluster_id, table_name, 
                 "projection_attrs": (x.get("Projection") or {}).get("NonKeyAttributes", []),
             } for x in t.get("LocalSecondaryIndexes", [])],
         }
+        # Capture GSI names for per-GSI metric collection below (no extra API call).
+        gsi_list = t.get("GlobalSecondaryIndexes", [])
+
         # Fix 1a: include account_id + region to satisfy NOT NULL constraint on fresh rows.
         cache_execute(
             "INSERT INTO cluster_meta (cluster_id, account_id, region, engine, resource_details, updated_at) "
@@ -130,6 +140,26 @@ def collect_dynamodb_metrics(cw, dynamo, cache_execute, cluster_id, table_name, 
                     f"latency_ms_{op.lower()}", dp["Average"],
                     json.dumps({"operation": op}))
             inserted += 1
+
+    # --- per-GSI throttle + consumed metrics ---
+    # Reuse the GSI list already fetched from describe_table (no extra API call).
+    # gsi_list is [] when describe_table failed, so this loop is a safe no-op in that case.
+    for gsi in gsi_list:
+        gsi_name = gsi.get("IndexName")
+        if not gsi_name:
+            continue
+        gsi_dims = table_dim + [{"Name": "GlobalSecondaryIndexName", "Value": gsi_name}]
+        gsi_dim_json = json.dumps({"gsi": gsi_name})
+        try:
+            for metric, mtype in _GSI_METRICS_SUM:
+                for dp in pull(metric, "Sum", gsi_dims):
+                    if dp.get("Sum") is None:
+                        continue
+                    _insert(cache_execute, cluster_id, dp["Timestamp"].isoformat(),
+                            mtype, dp["Sum"], gsi_dim_json)
+                    inserted += 1
+        except Exception as exc:
+            errors.append(f"gsi {gsi_name}: {exc}")
 
     return {"cluster_id": cluster_id, "billing_mode": billing_mode,
             "metrics_inserted": inserted, "errors": errors}
