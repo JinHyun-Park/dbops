@@ -76,6 +76,13 @@ def incident_schema():
               {"cluster_id": "string", "days": "integer"}, ["cluster_id"]),
         _tool("find_similar_incidents", "Find similar past incidents from knowledge base",
               {"cluster_id": "string", "symptoms": "string"}, ["cluster_id", "symptoms"]),
+        _tool(
+            "get_maintenance_findings",
+            "Get the latest maintenance/health findings (issues + recommendations) "
+            "for a cluster of ANY engine (Aurora, DocumentDB, DynamoDB)",
+            {"cluster_id": "string"},
+            ["cluster_id"],
+        ),
     ]
 
 

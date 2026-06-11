@@ -8,6 +8,7 @@ from mcp_servers.incident.tools.correlate_signals import correlate_signals_impl
 from mcp_servers.incident.tools.diagnose_root_cause import diagnose_root_cause_impl
 from mcp_servers.incident.tools.health_status import get_health_status_impl
 from mcp_servers.incident.tools.incident_summary import get_incident_summary_impl
+from mcp_servers.incident.tools.maintenance_findings import get_maintenance_findings_impl
 from mcp_servers.incident.tools.recent_events import get_recent_events_impl
 from mcp_servers.incident.tools.search_logs import search_logs_impl
 from mcp_servers.incident.tools.similar_incidents import find_similar_incidents_impl
@@ -114,6 +115,20 @@ TOOLS = {
                 "symptoms": {"type": "string", "description": "Description of current symptoms"},
             },
             "required": ["cluster_id", "symptoms"],
+        },
+    },
+    "get_maintenance_findings": {
+        "impl": get_maintenance_findings_impl,
+        "description": (
+            "Get the latest maintenance/health findings (issues + recommendations) "
+            "for a cluster of ANY engine (Aurora, DocumentDB, DynamoDB)"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target cluster ID"},
+            },
+            "required": ["cluster_id"],
         },
     },
 }

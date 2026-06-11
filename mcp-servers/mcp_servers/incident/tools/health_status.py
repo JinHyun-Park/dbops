@@ -1,4 +1,11 @@
+import json
+
 from mcp_servers.shared.cache_client import CacheClient
+
+# Engines that are NOT relational Aurora clusters — for these we surface
+# engine + parsed resource_details so the agent has billing mode, capacity,
+# GSI/LSI counts, instance topology, etc. without a separate lookup.
+_NON_RELATIONAL_ENGINES = {"dynamodb", "docdb", "documentdb"}
 
 
 def get_health_status_impl(cache: CacheClient, cluster_id: str) -> dict:
@@ -23,9 +30,26 @@ def get_health_status_impl(cache: CacheClient, cluster_id: str) -> dict:
         else "critical"
     )
 
-    return {
+    result: dict = {
         "cluster_id": cluster_id,
         "health": health,
         "cluster": cluster,
         "current_metrics": metrics.rows,
     }
+
+    engine = cluster.get("engine", "")
+    if engine in _NON_RELATIONAL_ENGINES:
+        result["engine"] = engine
+        raw_details = cluster.get("resource_details")
+        if raw_details is not None:
+            if isinstance(raw_details, str):
+                try:
+                    result["resource_details"] = json.loads(raw_details)
+                except (json.JSONDecodeError, ValueError):
+                    result["resource_details"] = raw_details
+            else:
+                result["resource_details"] = raw_details
+        else:
+            result["resource_details"] = None
+
+    return result
