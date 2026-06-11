@@ -205,3 +205,64 @@ export function eolHint(info: EolInfo): string {
     info.days_remaining
   } days remaining)${info.note ? " — " + info.note : ""}`;
 }
+
+// --- Engine families (multi-engine foundation) ---
+// A family groups engines that share a monitoring/dashboard shape. `relational`
+// = Aurora MySQL/PostgreSQL (SQL, RDS Data API, instances); `documentdb` =
+// DocumentDB (MongoDB protocol, cluster/instance); `dynamodb` = DynamoDB
+// (tables, capacity/throttle, no instances). Mirrors the backend
+// engine_family.py / CAPABILITIES so panel gating agrees across the stack.
+export type EngineFamily = "relational" | "documentdb" | "dynamodb";
+
+export function engineFamily(engine: string | null | undefined): EngineFamily {
+  const e = (engine || "").toLowerCase();
+  if (e.includes("docdb") || e.includes("documentdb")) return "documentdb";
+  if (e.includes("dynamodb")) return "dynamodb";
+  return "relational";
+}
+
+export interface FamilyMeta {
+  label: string;
+  noun: string; // unit-of-management noun for the family ("클러스터" / "테이블")
+  accent: string; // tailwind bg for accent dots
+  classes: string; // tailwind bg/text/border for badges
+}
+
+export const FAMILY_META: Record<EngineFamily, FamilyMeta> = {
+  relational: {
+    label: "Relational (Aurora)",
+    noun: "클러스터",
+    accent: "bg-sky-400",
+    classes: "bg-sky-500/15 text-sky-300 border-sky-500/40",
+  },
+  documentdb: {
+    label: "DocumentDB",
+    noun: "클러스터",
+    accent: "bg-emerald-400",
+    classes: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
+  },
+  dynamodb: {
+    label: "DynamoDB",
+    noun: "테이블",
+    accent: "bg-violet-400",
+    classes: "bg-violet-500/15 text-violet-300 border-violet-500/40",
+  },
+};
+
+// Which dashboard panels a family renders. The `relational` sentinel means
+// "render the existing full Aurora panel set"; the new families enumerate their
+// own panel keys (consumed by dashboard/page.tsx gating). Mirrors backend
+// CAPABILITIES — keep in sync.
+export const FAMILY_PANELS: Record<EngineFamily, Set<string>> = {
+  relational: new Set(["all-relational"]),
+  documentdb: new Set([
+    "overview",
+    "connections",
+    "replicaLag",
+    "cacheHit",
+    "cursors",
+    "opcounters",
+    "backups",
+  ]),
+  dynamodb: new Set(["overview", "capacity", "throttles", "latency", "cost"]),
+};
