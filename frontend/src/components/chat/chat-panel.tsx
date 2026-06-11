@@ -418,10 +418,32 @@ export function ChatPanel() {
       stored = [conv, ...stored];
       saveConversations(stored);
     }
+
+    // 일반 prompt 딥링크 (예: 대시보드 진단 모달의 "Chat에서 조치 진행").
+    // RCA handoff와 똑같이 NEW 대화로 시작해야 한다 — 단순 setInput은 마지막
+    // 대화 입력창에 prefill되어 기존 대화에 섞인다(이전에 RCA만 고쳐졌던
+    // 핸드오프 버그의 나머지 절반). merge보다 먼저 stored에 prepend해야
+    // 아래 listChatSessions 머지의 setConversations에 덮이지 않는다.
+    const dlParams = new URLSearchParams(window.location.search);
+    const dlPrompt = dlParams.get("prompt");
+    const dlCluster = dlParams.get("cluster");
+    if (dlCluster) deepLinkClusterRef.current = dlCluster;
+    if (dlPrompt && !handoff) {
+      const conv = newConversation(dlCluster || "");
+      stored = [conv, ...stored];
+      saveConversations(stored);
+    }
+
     if (stored.length > 0) {
       setConversations(stored);
       setActiveId(stored[0].id);
       if (stored[0].cluster_id) setClusterId(stored[0].cluster_id);
+    }
+    // 입력창 prefill(자동 전송 X) — 사용자가 chat에서 검토 후 보내는 것이
+    // 곧 확인 단계다. URL 쿼리는 새로고침 재실행 방지로 즉시 제거.
+    if (dlPrompt) setInput(dlPrompt);
+    if (dlPrompt || dlCluster) {
+      window.history.replaceState({}, "", window.location.pathname);
     }
 
     let cancelled = false;
@@ -493,23 +515,8 @@ export function ChatPanel() {
       .catch((e) => console.error("Failed to load clusters:", e));
   }, []);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const sp = new URLSearchParams(window.location.search);
-    const prompt = sp.get("prompt");
-    const cluster = sp.get("cluster");
-    if (cluster) {
-      // Pin + select the deep-linked cluster so the prefilled prompt (and the
-      // clusterId sent to the agent) targets the cluster the operator was
-      // looking at, not whatever happens to load first.
-      deepLinkClusterRef.current = cluster;
-      setClusterId(cluster);
-    }
-    if (prompt) setInput(prompt);
-    if (prompt || cluster) {
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  }, []);
+  // (prompt/cluster 딥링크 처리는 위 초기 로드 useEffect로 통합됨 — 마지막
+  // 대화 prefill이 아니라 새 대화로 시작하도록.)
 
   const active = conversations.find((c) => c.id === activeId);
   const messages = active?.messages || [];
