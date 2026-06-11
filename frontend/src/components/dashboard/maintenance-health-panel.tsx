@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { fetchHealthFindings, type HealthFinding } from "@/lib/api-client";
@@ -265,8 +266,24 @@ function FindingDetailModal({
   const [insight, setInsight] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   const details = tryParse(finding.details);
+
+  // 사용자가 명시적으로 조치를 진행할 때만 chat으로 — 거기서 에이전트가
+  // request_approval을 호출해 승인 센터에 올린다. "원인+조치"(설명)와
+  // "승인 요청 생성"을 분리해, 단순 확인이 승인 센터를 오염시키지 않게 한다.
+  const proceedInChat = () => {
+    const prompt =
+      `${finding.subject} (${finding.check_type}) 항목을 조치하고 싶어. ` +
+      `현재값 ${finding.value_str}, 권장 ${finding.threshold_str}. ` +
+      `조치를 실행하기 위한 승인 요청을 만들어줘.`;
+    router.push(
+      `/chat?cluster=${encodeURIComponent(
+        clusterId,
+      )}&prompt=${encodeURIComponent(prompt)}`,
+    );
+  };
 
   const handleAnalyze = () => {
     setInsight("");
@@ -278,6 +295,11 @@ function FindingDetailModal({
       `1. **왜 중요한지** — 운영 리스크 한 문장.\n` +
       `2. **구체적 조치** — 실행해야 할 정확한 명령어 또는 파라미터 변경. schema.table 이름까지 포함해.\n` +
       `3. **검증 방법** — 조치가 반영됐는지 확인할 쿼리나 점검 한 가지.\n\n` +
+      // 중요: 이 호출은 "설명만" 받는 읽기 전용이다. 도구를 호출하면
+      // 에이전트가 request_approval을 자동 실행해 승인 센터에 항목이
+      // 쌓인다(사용자는 확인만 하려던 것). 실제 승인 요청은 사용자가
+      // 아래 'Chat에서 조치 진행' 버튼으로 명시적으로 시작한다.
+      `**중요: 절대 어떤 도구도 호출하지 마. request_approval·execute_sql 등 쓰기/승인 도구를 호출하지 말고, 위 3개 섹션 설명만 텍스트로 제공해. 실제 실행은 사용자가 별도로 진행한다.**\n\n` +
       `Cluster: ${clusterId}\n` +
       `Check: ${finding.check_type} (${finding.severity})\n` +
       `Subject: ${finding.subject}\n` +
@@ -385,11 +407,26 @@ function FindingDetailModal({
               </div>
             )}
             {insight && (
-              <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 prose-code:text-sky-300">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {insight}
-                </ReactMarkdown>
-              </div>
+              <>
+                <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 prose-code:text-sky-300">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {insight}
+                  </ReactMarkdown>
+                </div>
+                {/* 설명을 본 뒤, 실제로 조치를 올리고 싶을 때만 명시적으로
+                    승인 흐름으로. 이 버튼을 눌러야 승인 센터에 항목이 생긴다. */}
+                <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center justify-between gap-3">
+                  <span className="text-[11px] text-zinc-500">
+                    설명만 확인했다면 닫아도 됩니다. 실제 조치가 필요하면:
+                  </span>
+                  <button
+                    onClick={proceedInChat}
+                    className="text-xs px-3 py-1.5 border border-amber-500/50 text-amber-300 hover:bg-amber-500/10 transition-colors whitespace-nowrap"
+                  >
+                    Chat에서 조치 진행 →
+                  </button>
+                </div>
+              </>
             )}
           </div>
         </div>

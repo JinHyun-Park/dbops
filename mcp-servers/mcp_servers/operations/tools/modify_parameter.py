@@ -64,10 +64,24 @@ def modify_parameter_impl(
     except Exception as e:
         return {"status": "modify_failed", "cluster_id": cluster_id, "parameter_group": pg_name, "error": str(e)}
 
+    # 변경은 ApplyMethod=pending-reboot로 등록된다 — 파라미터 그룹에 값은
+    # 들어가지만 실제 동작값(pg_settings)은 인스턴스 재시작 전까지 안 바뀐다.
+    # 이 안내가 없으면 에이전트가 "변경 완료"라고만 답하고, DBA는 대시보드에
+    # 즉시 반영을 기대하다 혼란스러워한다(승인 후 안 바뀐다는 실제 피드백).
     return {
         "status": "modified",
         "cluster_id": cluster_id,
         "parameter_group": pg_name,
         "parameter": parameter_name,
         "value": value,
+        "apply_method": "pending-reboot",
+        "applied": False,
+        "note": (
+            f"파라미터 그룹 '{pg_name}'에 {parameter_name}={value}로 등록했습니다. "
+            "ApplyMethod=pending-reboot이라 **실제 적용에는 인스턴스 재시작이 필요**합니다 — "
+            "재시작 전까지 pg_settings(동작값)는 바뀌지 않습니다. "
+            "또한 대시보드의 PostgreSQL Configuration은 5분 주기 수집 캐시라, "
+            "재시작 후에도 최대 5분 뒤에 반영됩니다. 재시작 시점은 유지보수 윈도우 또는 "
+            "manage_maintenance로 계획하세요."
+        ),
     }

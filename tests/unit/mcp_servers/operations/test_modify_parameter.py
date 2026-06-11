@@ -39,6 +39,12 @@ def test_modify_parameter_with_approval(mock_rds_for):
     assert call_kwargs["DBClusterParameterGroupName"] == "prod-pg-1-custom-pg15"
     assert call_kwargs["Parameters"][0]["ParameterName"] == "max_connections"
     assert call_kwargs["Parameters"][0]["ParameterValue"] == "200"
+    # pending-reboot 안내가 결과에 포함돼야 한다 — 에이전트가 "재시작 후
+    # 적용"을 사용자에게 전달하게 하는 핵심(승인 후 즉시 반영 오해 방지).
+    assert call_kwargs["Parameters"][0]["ApplyMethod"] == "pending-reboot"
+    assert result["apply_method"] == "pending-reboot"
+    assert result["applied"] is False
+    assert "재시작" in result["note"]
 
 
 @patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})

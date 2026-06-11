@@ -127,8 +127,16 @@ export function SettingsPanel({
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-5">
-      <div className="text-sm text-zinc-200 font-medium mb-3">
+      <div className="text-sm text-zinc-200 font-medium mb-1">
         {engineLabel} Configuration
+      </div>
+      {/* 반영 지연 안내 — 파라미터 변경 승인 후 "바로 안 바뀐다"는 혼란을
+          막는다: 값은 5분 주기 수집 캐시이고, 변경은 pending-reboot라 재시작
+          전까지 동작값이 바뀌지 않는다. */}
+      <div className="text-[11px] text-zinc-500 mb-3">
+        설정값은 5분 주기로 수집됩니다. 파라미터 변경은 pending-reboot로
+        적용되어 <span className="text-amber-300/90">인스턴스 재시작 후</span>{" "}
+        동작값에 반영됩니다.
       </div>
       {loading ? (
         <div className="text-zinc-500 text-sm">불러오는 중…</div>
