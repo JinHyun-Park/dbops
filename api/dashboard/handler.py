@@ -2429,6 +2429,42 @@ def _slo(
     }
 
 
+def _resource_details(query, cluster_id: str) -> dict:
+    """Return engine + resource_details JSONB from cluster_meta for the cluster.
+
+    resource_details carries engine-specific topology that is too large / too
+    volatile to include in the main _overview response:
+      - DynamoDB: billing_mode, item_count, table_size_bytes, gsi (list), table_status
+      - DocumentDB: instances (list), instance_count, engine_version
+    The column is JSONB in PG; the Data API returns it as a stringValue which we
+    parse back to a dict here so the frontend gets a proper object."""
+    rows = query(
+        "SELECT engine, engine_family, resource_details "
+        "FROM cluster_meta WHERE cluster_id = :cid",
+        {"cid": cluster_id},
+    )
+    if not rows:
+        return {
+            "cluster_id": cluster_id,
+            "engine": None,
+            "engine_family": None,
+            "resource_details": None,
+        }
+    row = rows[0]
+    rd = row.get("resource_details")
+    if isinstance(rd, str):
+        try:
+            rd = json.loads(rd)
+        except (ValueError, TypeError):
+            rd = None
+    return {
+        "cluster_id": cluster_id,
+        "engine": row.get("engine"),
+        "engine_family": row.get("engine_family"),
+        "resource_details": rd,
+    }
+
+
 def lambda_handler(event, context):
     _set_origin(event)
     raw_path_early = event.get("rawPath") or event.get("path") or ""
@@ -2603,6 +2639,8 @@ def lambda_handler(event, context):
         if raw_path.endswith("/schema-graph"):
             schema = (qs.get("schema") or "public").strip() or "public"
             return _response(200, _schema_graph(cluster_id, schema))
+        if raw_path.endswith("/resource-details"):
+            return _response(200, _resource_details(query, cluster_id), max_age=60)
         return _response(200, _overview(query, cluster_id))
     except Exception:
         print(f"Dashboard error: {traceback.format_exc()}")

@@ -1578,6 +1578,18 @@ export interface HealthResponse {
   };
 }
 
+export async function fetchResourceDetails(clusterId: string): Promise<{
+  engine: string;
+  engine_family: string;
+  resource_details: Record<string, unknown> | null;
+}> {
+  const res = await authedFetch(
+    await api(`/api/dashboard/${enc(clusterId)}/resource-details`),
+  );
+  if (!res.ok) throw new Error(`리소스 상세 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
 export async function fetchHealth(): Promise<HealthResponse> {
   const res = await authedFetch(await api(`/api/health`));
   if (!res.ok) throw new Error(`헬스 상태 조회 실패 (상태 ${res.status})`);

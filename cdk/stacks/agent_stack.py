@@ -856,6 +856,14 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardSchemaGraphIntegration", dashboard_lambda),
         )
+        # Resource details — engine-specific metadata (DynamoDB table info,
+        # DocDB instance list) from cluster_meta.resource_details JSONB.
+        # Used by the engine-family dashboard panels.
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/resource-details",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardResourceDetailsIntegration", dashboard_lambda),
+        )
         # Simulation API — REST mirror of Simulation MCP tools. All write-
         # like operations are simulations, never DDL execution, so POST is
         # safe without an approval flow.

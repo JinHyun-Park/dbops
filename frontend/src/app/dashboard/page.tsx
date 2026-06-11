@@ -41,12 +41,15 @@ import {
 } from "@/lib/selected-cluster";
 import {
   engineBadge,
+  engineFamily,
   isPostgres,
   isMysql,
   eolFor,
   EOL_STATUS_CLASSES,
   eolHint,
 } from "@/lib/engine";
+import { DynamodbOverviewPanel } from "@/components/dashboard/dynamodb-overview-panel";
+import { DocdbOverviewPanel } from "@/components/dashboard/docdb-overview-panel";
 
 type TsPoint = { ts: string; value: number | string; dimensions?: string };
 
@@ -568,199 +571,236 @@ export default function DashboardPage() {
             );
           })()}
 
-          {/* false일 때만 — NULL(미수집)·true는 숨김. 라이브 SQL 패널들이
-              영원히 "수집 대기"로 보이는 이유를 여기서 먼저 설명한다. */}
-          {dashboardData.cluster?.http_endpoint_enabled === false &&
-            selectedCluster && <DataApiBanner clusterId={selectedCluster} />}
-
-          <MaintenanceHealthPanel
-            clusterId={selectedCluster}
-            engine={dashboardData.cluster?.engine}
-          />
-
-          {(dashboardData.cluster?.engine || "").includes("postgresql") && (
-            <ExtensionsCard
-              clusterId={selectedCluster}
-              engine={dashboardData.cluster?.engine}
-            />
-          )}
-
-          <BackupPanel clusterId={selectedCluster} />
-
-          <ReplicationTopologyPanel clusterId={selectedCluster} />
-
-          <CapacityForecastPanel clusterId={selectedCluster} />
-
-          <TimeseriesChart
-            clusterId={selectedCluster}
-            metric="aas"
-            title="Active Sessions (AAS) by Wait Event"
-            hours={hours}
-            type="stacked"
-            externalPoints={tsBatch.aas || []}
-            externalLoading={tsLoading}
-          />
-
-          <ConnectionBreakdown clusterId={selectedCluster} hours={hours} />
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <TimeseriesChart
-              clusterId={selectedCluster}
-              metric="cpu"
-              title="CPU Utilization"
-              hours={hours}
-              color="#34d399"
-              type="area"
-              unit="%"
-              formatValue={(v) => v.toFixed(1)}
-              externalPoints={tsBatch.cpu || []}
-              externalLoading={tsLoading}
-            />
-            <TimeseriesChart
-              clusterId={selectedCluster}
-              metric="read_iops"
-              title="Read IOPS"
-              hours={hours}
-              color="#60a5fa"
-              type="line"
-              formatValue={(v) => v.toFixed(0)}
-              externalPoints={tsBatch.read_iops || []}
-              externalLoading={tsLoading}
-            />
-            <TimeseriesChart
-              clusterId={selectedCluster}
-              metric="write_iops"
-              title="Write IOPS"
-              hours={hours}
-              color="#f472b6"
-              type="line"
-              formatValue={(v) => v.toFixed(0)}
-              externalPoints={tsBatch.write_iops || []}
-              externalLoading={tsLoading}
-            />
-            <TimeseriesChart
-              clusterId={selectedCluster}
-              metric="db_connections"
-              title="Active Connections"
-              hours={hours}
-              color="#f472b6"
-              type="area"
-              formatValue={(v) => v.toFixed(0)}
-              externalPoints={tsBatch.db_connections || []}
-              externalLoading={tsLoading}
-            />
-            {isPostgres(dashboardData.cluster?.engine) && (
+          {/* Engine-family panel gating — compute once from cluster metadata */}
+          {(() => {
+            const fam = engineFamily(dashboardData.cluster?.engine);
+            return (
               <>
-                <TimeseriesChart
-                  clusterId={selectedCluster}
-                  metric="xact_commit"
-                  title="Transactions / sec (PG)"
-                  hours={hours}
-                  color={chartColors.amber}
-                  type="line"
-                  formatValue={(v) => v.toFixed(1)}
-                  externalPoints={tsBatch.xact_commit || []}
-                  externalLoading={tsLoading}
-                />
-                <TimeseriesChart
-                  clusterId={selectedCluster}
-                  metric="tup_returned"
-                  title="Tuples Returned / sec (PG)"
-                  hours={hours}
-                  color="#a78bfa"
-                  type="line"
-                  formatValue={(v) => v.toFixed(0)}
-                  externalPoints={tsBatch.tup_returned || []}
-                  externalLoading={tsLoading}
-                />
+                {/* ── Relational (Aurora MySQL / PostgreSQL) panels ── */}
+                {fam === "relational" && (
+                  <>
+                    {/* false일 때만 — NULL(미수집)·true는 숨김. 라이브 SQL 패널들이
+                        영원히 "수집 대기"로 보이는 이유를 여기서 먼저 설명한다. */}
+                    {dashboardData.cluster?.http_endpoint_enabled === false &&
+                      selectedCluster && (
+                        <DataApiBanner clusterId={selectedCluster} />
+                      )}
+
+                    <MaintenanceHealthPanel
+                      clusterId={selectedCluster}
+                      engine={dashboardData.cluster?.engine}
+                    />
+
+                    {(dashboardData.cluster?.engine || "").includes(
+                      "postgresql",
+                    ) && (
+                      <ExtensionsCard
+                        clusterId={selectedCluster}
+                        engine={dashboardData.cluster?.engine}
+                      />
+                    )}
+
+                    <BackupPanel clusterId={selectedCluster} />
+
+                    <ReplicationTopologyPanel clusterId={selectedCluster} />
+
+                    <CapacityForecastPanel clusterId={selectedCluster} />
+
+                    <TimeseriesChart
+                      clusterId={selectedCluster}
+                      metric="aas"
+                      title="Active Sessions (AAS) by Wait Event"
+                      hours={hours}
+                      type="stacked"
+                      externalPoints={tsBatch.aas || []}
+                      externalLoading={tsLoading}
+                    />
+
+                    <ConnectionBreakdown
+                      clusterId={selectedCluster}
+                      hours={hours}
+                    />
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <TimeseriesChart
+                        clusterId={selectedCluster}
+                        metric="cpu"
+                        title="CPU Utilization"
+                        hours={hours}
+                        color="#34d399"
+                        type="area"
+                        unit="%"
+                        formatValue={(v) => v.toFixed(1)}
+                        externalPoints={tsBatch.cpu || []}
+                        externalLoading={tsLoading}
+                      />
+                      <TimeseriesChart
+                        clusterId={selectedCluster}
+                        metric="read_iops"
+                        title="Read IOPS"
+                        hours={hours}
+                        color="#60a5fa"
+                        type="line"
+                        formatValue={(v) => v.toFixed(0)}
+                        externalPoints={tsBatch.read_iops || []}
+                        externalLoading={tsLoading}
+                      />
+                      <TimeseriesChart
+                        clusterId={selectedCluster}
+                        metric="write_iops"
+                        title="Write IOPS"
+                        hours={hours}
+                        color="#f472b6"
+                        type="line"
+                        formatValue={(v) => v.toFixed(0)}
+                        externalPoints={tsBatch.write_iops || []}
+                        externalLoading={tsLoading}
+                      />
+                      <TimeseriesChart
+                        clusterId={selectedCluster}
+                        metric="db_connections"
+                        title="Active Connections"
+                        hours={hours}
+                        color="#f472b6"
+                        type="area"
+                        formatValue={(v) => v.toFixed(0)}
+                        externalPoints={tsBatch.db_connections || []}
+                        externalLoading={tsLoading}
+                      />
+                      {isPostgres(dashboardData.cluster?.engine) && (
+                        <>
+                          <TimeseriesChart
+                            clusterId={selectedCluster}
+                            metric="xact_commit"
+                            title="Transactions / sec (PG)"
+                            hours={hours}
+                            color={chartColors.amber}
+                            type="line"
+                            formatValue={(v) => v.toFixed(1)}
+                            externalPoints={tsBatch.xact_commit || []}
+                            externalLoading={tsLoading}
+                          />
+                          <TimeseriesChart
+                            clusterId={selectedCluster}
+                            metric="tup_returned"
+                            title="Tuples Returned / sec (PG)"
+                            hours={hours}
+                            color="#a78bfa"
+                            type="line"
+                            formatValue={(v) => v.toFixed(0)}
+                            externalPoints={tsBatch.tup_returned || []}
+                            externalLoading={tsLoading}
+                          />
+                        </>
+                      )}
+                      <TimeseriesChart
+                        clusterId={selectedCluster}
+                        metric="storage_bytes"
+                        title="Storage Used"
+                        hours={hours}
+                        color="#22d3ee"
+                        type="area"
+                        formatValue={(v) =>
+                          (v / 1024 / 1024 / 1024).toFixed(2) + " GB"
+                        }
+                        externalPoints={tsBatch.storage_bytes || []}
+                        externalLoading={tsLoading}
+                      />
+                      <TimeseriesChart
+                        clusterId={selectedCluster}
+                        metric="replica_lag_ms"
+                        title="Replica Lag"
+                        hours={hours}
+                        color="#fb7185"
+                        type="line"
+                        unit="ms"
+                        formatValue={(v) => v.toFixed(0)}
+                        externalPoints={tsBatch.replica_lag_ms || []}
+                        externalLoading={tsLoading}
+                      />
+                      <TimeseriesChart
+                        clusterId={selectedCluster}
+                        metric="deadlocks"
+                        title="Deadlocks"
+                        hours={hours}
+                        color="#ef4444"
+                        type="line"
+                        formatValue={(v) => v.toFixed(0)}
+                        externalPoints={tsBatch.deadlocks || []}
+                        externalLoading={tsLoading}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <WaitEventsPanel
+                        clusterId={selectedCluster}
+                        hours={hours}
+                      />
+                      <AnomaliesPanel clusterId={selectedCluster} />
+                      <EventsPanel
+                        events={dashboardData.events || []}
+                        clusterId={selectedCluster}
+                      />
+                    </div>
+
+                    <LocksPanel clusterId={selectedCluster} />
+
+                    <LongRunningPanel clusterId={selectedCluster} />
+
+                    {/* Vacuum is PG-only — MySQL InnoDB has no equivalent surface.
+                        For MySQL clusters the column is collapsed and the right panel
+                        takes the full width. */}
+                    <div
+                      className={`grid grid-cols-1 ${
+                        (dashboardData.cluster?.engine || "").includes(
+                          "postgresql",
+                        )
+                          ? "md:grid-cols-2"
+                          : ""
+                      } gap-4`}
+                    >
+                      {(dashboardData.cluster?.engine || "").includes(
+                        "postgresql",
+                      ) && <VacuumPanel clusterId={selectedCluster} />}
+                      <IndexRecsPanel clusterId={selectedCluster} />
+
+                      <RedundantIndexesPanel clusterId={selectedCluster} />
+                    </div>
+
+                    <TableSizesPanel clusterId={selectedCluster} />
+
+                    <SchemaChangesPanel clusterId={selectedCluster} />
+
+                    <QueriesPanel
+                      clusterId={selectedCluster}
+                      topQueries={dashboardData.top_queries || []}
+                    />
+
+                    <SettingsPanel
+                      clusterId={selectedCluster}
+                      engine={dashboardData.cluster?.engine}
+                    />
+
+                    <ChangeImpactPanel clusterId={selectedCluster} />
+
+                    <AuditLogPanel clusterId={selectedCluster} />
+
+                    <LogInsightsPanel clusterId={selectedCluster} />
+                  </>
+                )}
+
+                {/* ── DynamoDB panels ── */}
+                {fam === "dynamodb" && (
+                  <DynamodbOverviewPanel clusterId={selectedCluster} />
+                )}
+
+                {/* ── DocumentDB panels ── */}
+                {fam === "documentdb" && (
+                  <DocdbOverviewPanel clusterId={selectedCluster} />
+                )}
               </>
-            )}
-            <TimeseriesChart
-              clusterId={selectedCluster}
-              metric="storage_bytes"
-              title="Storage Used"
-              hours={hours}
-              color="#22d3ee"
-              type="area"
-              formatValue={(v) => (v / 1024 / 1024 / 1024).toFixed(2) + " GB"}
-              externalPoints={tsBatch.storage_bytes || []}
-              externalLoading={tsLoading}
-            />
-            <TimeseriesChart
-              clusterId={selectedCluster}
-              metric="replica_lag_ms"
-              title="Replica Lag"
-              hours={hours}
-              color="#fb7185"
-              type="line"
-              unit="ms"
-              formatValue={(v) => v.toFixed(0)}
-              externalPoints={tsBatch.replica_lag_ms || []}
-              externalLoading={tsLoading}
-            />
-            <TimeseriesChart
-              clusterId={selectedCluster}
-              metric="deadlocks"
-              title="Deadlocks"
-              hours={hours}
-              color="#ef4444"
-              type="line"
-              formatValue={(v) => v.toFixed(0)}
-              externalPoints={tsBatch.deadlocks || []}
-              externalLoading={tsLoading}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <WaitEventsPanel clusterId={selectedCluster} hours={hours} />
-            <AnomaliesPanel clusterId={selectedCluster} />
-            <EventsPanel
-              events={dashboardData.events || []}
-              clusterId={selectedCluster}
-            />
-          </div>
-
-          <LocksPanel clusterId={selectedCluster} />
-
-          <LongRunningPanel clusterId={selectedCluster} />
-
-          {/* Vacuum is PG-only — MySQL InnoDB has no equivalent surface.
-              For MySQL clusters the column is collapsed and the right panel
-              takes the full width. */}
-          <div
-            className={`grid grid-cols-1 ${
-              (dashboardData.cluster?.engine || "").includes("postgresql")
-                ? "md:grid-cols-2"
-                : ""
-            } gap-4`}
-          >
-            {(dashboardData.cluster?.engine || "").includes("postgresql") && (
-              <VacuumPanel clusterId={selectedCluster} />
-            )}
-            <IndexRecsPanel clusterId={selectedCluster} />
-
-            <RedundantIndexesPanel clusterId={selectedCluster} />
-          </div>
-
-          <TableSizesPanel clusterId={selectedCluster} />
-
-          <SchemaChangesPanel clusterId={selectedCluster} />
-
-          <QueriesPanel
-            clusterId={selectedCluster}
-            topQueries={dashboardData.top_queries || []}
-          />
-
-          <SettingsPanel
-            clusterId={selectedCluster}
-            engine={dashboardData.cluster?.engine}
-          />
-
-          <ChangeImpactPanel clusterId={selectedCluster} />
-
-          <AuditLogPanel clusterId={selectedCluster} />
-
-          <LogInsightsPanel clusterId={selectedCluster} />
+            );
+          })()}
         </div>
       )}
     </PageBody>
