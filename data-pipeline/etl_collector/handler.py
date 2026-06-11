@@ -6,6 +6,9 @@ import boto3
 from collectors.capacity_forecast import collect_capacity_forecast
 from collectors.cost_check import collect_cost_findings
 from collectors.cw_collector import collect_cw_metrics
+from collectors.docdb_cw_collector import collect_docdb_metrics
+from collectors.dynamodb_cw_collector import collect_dynamodb_metrics
+from collectors.engine_family import engine_family
 from collectors.meta_collector import collect_cluster_meta
 from collectors.mysql_activity import collect_mysql_activity
 from collectors.mysql_locks import collect_mysql_locks
@@ -32,6 +35,231 @@ def _scan_all(table):
         if "LastEvaluatedKey" not in resp:
             return items
         kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+
+
+def _collect_one(resource, get_client, rds_data, cache_execute,
+                 cache_cluster_arn, cache_secret_arn, cache_db_name, run_ts):
+    """Collect metrics/findings for a single registered resource.
+
+    Dispatches on engine_family BEFORE making any RDS/PI/CloudWatch call so
+    that DynamoDB and DocumentDB rows never hit Aurora-specific APIs.
+    The relational branch is the verbatim existing body — no behaviour change.
+    """
+    cluster_id = resource["cluster_id"]
+    account_id = resource.get("account_id", "")
+    region = resource.get("region", os.environ.get("AWS_REGION", "ap-northeast-2"))
+    engine = resource.get("engine", "aurora-postgresql")
+
+    result = {"cluster_id": cluster_id}
+    family = engine_family(engine)
+
+    # ------------------------------------------------------------------
+    # DynamoDB path — no RDS/PI/SQL/findings calls
+    # ------------------------------------------------------------------
+    if family == "dynamodb":
+        cw = get_client("cloudwatch", region)
+        dynamo = get_client("dynamodb", region)
+        table_name = resource.get("resource_name", cluster_id)
+        try:
+            result["dynamodb"] = collect_dynamodb_metrics(
+                cw, dynamo, cache_execute, cluster_id, table_name,
+            )
+        except Exception as e:
+            result["dynamodb_error"] = str(e)
+            print(f"[{cluster_id}] dynamodb error: {e}")
+        return result
+
+    # ------------------------------------------------------------------
+    # DocumentDB path — no RDS-Aurora/PI/SQL/findings calls
+    # ------------------------------------------------------------------
+    if family == "documentdb":
+        cw = get_client("cloudwatch", region)
+        docdb = get_client("docdb", region)
+        try:
+            result["documentdb"] = collect_docdb_metrics(
+                cw, docdb, cache_execute, cluster_id, region, account_id,
+            )
+        except Exception as e:
+            result["documentdb_error"] = str(e)
+            print(f"[{cluster_id}] documentdb error: {e}")
+        return result
+
+    # ------------------------------------------------------------------
+    # Relational path (Aurora PostgreSQL / MySQL) — verbatim existing body
+    # ------------------------------------------------------------------
+    target_cluster_arn = resource.get("cluster_arn", "")
+    target_secret_arn = resource.get("secret_arn", "")
+    target_db = resource.get("db_name", "sampledb")
+
+    rds_client = get_client("rds", region)
+    pi_client = get_client("pi", region)
+    cw_client = get_client("cloudwatch", region)
+
+    # 이 사이클의 모든 finding collector(health/cost/param_fitness)가
+    # 공유하는 단일 snapshot_time. 대시보드 _health_findings는
+    # MAX(snapshot_time) 한 배치만 반환하므로, collector마다 now()를
+    # 따로 찍으면 마지막 것만 보이고 나머지 finding이 사라진다.
+
+    try:
+        result["meta"] = collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, region)
+    except Exception as e:
+        result["meta_error"] = str(e)
+        print(f"[{cluster_id}] meta error: {e}")
+
+    try:
+        instances = rds_client.describe_db_instances(
+            Filters=[{"Name": "db-cluster-id", "Values": [cluster_id]}],
+        )["DBInstances"]
+        if instances:
+            resource_id = instances[0]["DbiResourceId"]
+            result["pi"] = collect_pi_metrics(pi_client, cache_execute, resource_id, cluster_id)
+        else:
+            result["pi"] = {"skipped": "no instances"}
+    except Exception as e:
+        result["pi_error"] = str(e)
+        print(f"[{cluster_id}] pi error: {e}")
+
+    try:
+        result["cw"] = collect_cw_metrics(cw_client, cache_execute, cluster_id)
+    except Exception as e:
+        result["cw_error"] = str(e)
+        print(f"[{cluster_id}] cw error: {e}")
+
+    if target_cluster_arn and target_secret_arn and "postgresql" in engine:
+        try:
+            result["stats"] = collect_query_stats(
+                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+            )
+        except Exception as e:
+            result["stats_error"] = str(e)
+            print(f"[{cluster_id}] stats error: {e}")
+
+        try:
+            result["table_stats"] = collect_pg_table_stats(
+                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+            )
+        except Exception as e:
+            result["table_stats_error"] = str(e)
+            print(f"[{cluster_id}] table_stats error: {e}")
+
+        try:
+            result["activity"] = collect_pg_activity(
+                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+            )
+        except Exception as e:
+            result["activity_error"] = str(e)
+            print(f"[{cluster_id}] activity error: {e}")
+
+        try:
+            result["locks"] = collect_pg_locks(
+                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+            )
+        except Exception as e:
+            result["locks_error"] = str(e)
+            print(f"[{cluster_id}] locks error: {e}")
+
+        try:
+            result["health"] = collect_pg_health_checks(
+                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                snapshot_ts=run_ts,
+            )
+        except Exception as e:
+            result["health_error"] = str(e)
+            print(f"[{cluster_id}] health error: {e}")
+        try:
+            result["param_fitness"] = collect_param_fitness(
+                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                snapshot_ts=run_ts,
+            )
+        except Exception as e:
+            result["param_fitness_error"] = str(e)
+            print(f"[{cluster_id}] param fitness error: {e}")
+        try:
+            result["capacity_forecast"] = collect_capacity_forecast(
+                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                snapshot_ts=run_ts, engine=engine,
+            )
+        except Exception as e:
+            result["capacity_forecast_error"] = str(e)
+            print(f"[{cluster_id}] capacity forecast error: {e}")
+        try:
+            result["extensions"] = collect_pg_extensions(
+                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+            )
+        except Exception as e:
+            result["extensions_error"] = str(e)
+            print(f"[{cluster_id}] extensions error: {e}")
+    elif target_cluster_arn and target_secret_arn and "mysql" in engine:
+        # MySQL counterparts — same cache tables, MySQL-flavored source queries.
+        try:
+            result["stats"] = collect_mysql_query_stats(
+                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+            )
+        except Exception as e:
+            result["stats_error"] = str(e)
+            print(f"[{cluster_id}] mysql stats error: {e}")
+        try:
+            result["table_stats"] = collect_mysql_table_stats(
+                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+            )
+        except Exception as e:
+            result["table_stats_error"] = str(e)
+            print(f"[{cluster_id}] mysql table_stats error: {e}")
+        try:
+            result["locks"] = collect_mysql_locks(
+                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+            )
+        except Exception as e:
+            result["locks_error"] = str(e)
+            print(f"[{cluster_id}] mysql locks error: {e}")
+        try:
+            result["activity"] = collect_mysql_activity(
+                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+            )
+        except Exception as e:
+            result["activity_error"] = str(e)
+            print(f"[{cluster_id}] mysql activity error: {e}")
+        # param_fitness는 cluster_settings(위 mysql_locks가 갱신)에 의존하므로
+        # locks 뒤에 둔다. capacity_forecast는 엔진 무관(metric_snapshots 캐시).
+        try:
+            result["param_fitness"] = collect_mysql_param_fitness(
+                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                snapshot_ts=run_ts,
+            )
+        except Exception as e:
+            result["param_fitness_error"] = str(e)
+            print(f"[{cluster_id}] mysql param fitness error: {e}")
+        try:
+            result["capacity_forecast"] = collect_capacity_forecast(
+                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                snapshot_ts=run_ts, engine=engine,
+            )
+        except Exception as e:
+            result["capacity_forecast_error"] = str(e)
+            print(f"[{cluster_id}] mysql capacity forecast error: {e}")
+    else:
+        result["stats"] = {"skipped": f"engine={engine} or no secret"}
+
+    # Seasonal baseline trainer — engine-agnostic, only reads cache DB
+    # metric_snapshots. Time-gated to once per hour per cluster.
+    try:
+        result["baselines"] = collect_pg_baselines(
+            rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+        )
+    except Exception as e:
+        result["baselines_error"] = str(e)
+        print(f"[{cluster_id}] baseline trainer error: {e}")
+
+    try:
+        result["cost"] = collect_cost_findings(
+            rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+            snapshot_ts=run_ts,
+        )
+    except Exception as e:
+        result["cost_error"] = str(e)
+        print(f"[{cluster_id}] cost check error: {e}")
+
+    return result
 
 
 def lambda_handler(event, context):
@@ -74,186 +302,13 @@ def lambda_handler(event, context):
         return client_cache[key]
 
     clusters = _scan_all(clusters_table)
-    results = []
-
-    for cluster in clusters:
-        cluster_id = cluster["cluster_id"]
-        account_id = cluster.get("account_id", "")
-        region = cluster.get("region", os.environ.get("AWS_REGION", "ap-northeast-2"))
-        engine = cluster.get("engine", "aurora-postgresql")
-        target_cluster_arn = cluster.get("cluster_arn", "")
-        target_secret_arn = cluster.get("secret_arn", "")
-        target_db = cluster.get("db_name", "sampledb")
-
-        rds_client = get_client("rds", region)
-        pi_client = get_client("pi", region)
-        cw_client = get_client("cloudwatch", region)
-        result = {"cluster_id": cluster_id}
-        # 이 사이클의 모든 finding collector(health/cost/param_fitness)가
-        # 공유하는 단일 snapshot_time. 대시보드 _health_findings는
-        # MAX(snapshot_time) 한 배치만 반환하므로, collector마다 now()를
-        # 따로 찍으면 마지막 것만 보이고 나머지 finding이 사라진다.
-        run_ts = datetime.now(timezone.utc).isoformat()
-
-        try:
-            result["meta"] = collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, region)
-        except Exception as e:
-            result["meta_error"] = str(e)
-            print(f"[{cluster_id}] meta error: {e}")
-
-        try:
-            instances = rds_client.describe_db_instances(
-                Filters=[{"Name": "db-cluster-id", "Values": [cluster_id]}],
-            )["DBInstances"]
-            if instances:
-                resource_id = instances[0]["DbiResourceId"]
-                result["pi"] = collect_pi_metrics(pi_client, cache_execute, resource_id, cluster_id)
-            else:
-                result["pi"] = {"skipped": "no instances"}
-        except Exception as e:
-            result["pi_error"] = str(e)
-            print(f"[{cluster_id}] pi error: {e}")
-
-        try:
-            result["cw"] = collect_cw_metrics(cw_client, cache_execute, cluster_id)
-        except Exception as e:
-            result["cw_error"] = str(e)
-            print(f"[{cluster_id}] cw error: {e}")
-
-        if target_cluster_arn and target_secret_arn and "postgresql" in engine:
-            try:
-                result["stats"] = collect_query_stats(
-                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
-                )
-            except Exception as e:
-                result["stats_error"] = str(e)
-                print(f"[{cluster_id}] stats error: {e}")
-
-            try:
-                result["table_stats"] = collect_pg_table_stats(
-                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
-                )
-            except Exception as e:
-                result["table_stats_error"] = str(e)
-                print(f"[{cluster_id}] table_stats error: {e}")
-
-            try:
-                result["activity"] = collect_pg_activity(
-                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
-                )
-            except Exception as e:
-                result["activity_error"] = str(e)
-                print(f"[{cluster_id}] activity error: {e}")
-
-            try:
-                result["locks"] = collect_pg_locks(
-                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
-                )
-            except Exception as e:
-                result["locks_error"] = str(e)
-                print(f"[{cluster_id}] locks error: {e}")
-
-            try:
-                result["health"] = collect_pg_health_checks(
-                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
-                    snapshot_ts=run_ts,
-                )
-            except Exception as e:
-                result["health_error"] = str(e)
-                print(f"[{cluster_id}] health error: {e}")
-            try:
-                result["param_fitness"] = collect_param_fitness(
-                    rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
-                    snapshot_ts=run_ts,
-                )
-            except Exception as e:
-                result["param_fitness_error"] = str(e)
-                print(f"[{cluster_id}] param fitness error: {e}")
-            try:
-                result["capacity_forecast"] = collect_capacity_forecast(
-                    rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
-                    snapshot_ts=run_ts, engine=engine,
-                )
-            except Exception as e:
-                result["capacity_forecast_error"] = str(e)
-                print(f"[{cluster_id}] capacity forecast error: {e}")
-            try:
-                result["extensions"] = collect_pg_extensions(
-                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
-                )
-            except Exception as e:
-                result["extensions_error"] = str(e)
-                print(f"[{cluster_id}] extensions error: {e}")
-        elif target_cluster_arn and target_secret_arn and "mysql" in engine:
-            # MySQL counterparts — same cache tables, MySQL-flavored source queries.
-            try:
-                result["stats"] = collect_mysql_query_stats(
-                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
-                )
-            except Exception as e:
-                result["stats_error"] = str(e)
-                print(f"[{cluster_id}] mysql stats error: {e}")
-            try:
-                result["table_stats"] = collect_mysql_table_stats(
-                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
-                )
-            except Exception as e:
-                result["table_stats_error"] = str(e)
-                print(f"[{cluster_id}] mysql table_stats error: {e}")
-            try:
-                result["locks"] = collect_mysql_locks(
-                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
-                )
-            except Exception as e:
-                result["locks_error"] = str(e)
-                print(f"[{cluster_id}] mysql locks error: {e}")
-            try:
-                result["activity"] = collect_mysql_activity(
-                    rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
-                )
-            except Exception as e:
-                result["activity_error"] = str(e)
-                print(f"[{cluster_id}] mysql activity error: {e}")
-            # param_fitness는 cluster_settings(위 mysql_locks가 갱신)에 의존하므로
-            # locks 뒤에 둔다. capacity_forecast는 엔진 무관(metric_snapshots 캐시).
-            try:
-                result["param_fitness"] = collect_mysql_param_fitness(
-                    rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
-                    snapshot_ts=run_ts,
-                )
-            except Exception as e:
-                result["param_fitness_error"] = str(e)
-                print(f"[{cluster_id}] mysql param fitness error: {e}")
-            try:
-                result["capacity_forecast"] = collect_capacity_forecast(
-                    rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
-                    snapshot_ts=run_ts, engine=engine,
-                )
-            except Exception as e:
-                result["capacity_forecast_error"] = str(e)
-                print(f"[{cluster_id}] mysql capacity forecast error: {e}")
-        else:
-            result["stats"] = {"skipped": f"engine={engine} or no secret"}
-
-        # Seasonal baseline trainer — engine-agnostic, only reads cache DB
-        # metric_snapshots. Time-gated to once per hour per cluster.
-        try:
-            result["baselines"] = collect_pg_baselines(
-                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
-            )
-        except Exception as e:
-            result["baselines_error"] = str(e)
-            print(f"[{cluster_id}] baseline trainer error: {e}")
-
-        try:
-            result["cost"] = collect_cost_findings(
-                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
-                snapshot_ts=run_ts,
-            )
-        except Exception as e:
-            result["cost_error"] = str(e)
-            print(f"[{cluster_id}] cost check error: {e}")
-
-        results.append(result)
+    results = [
+        _collect_one(
+            resource, get_client, rds_data, cache_execute,
+            cache_cluster_arn, cache_secret_arn, cache_db_name,
+            datetime.now(timezone.utc).isoformat(),
+        )
+        for resource in clusters
+    ]
 
     return {"statusCode": 200, "body": json.dumps({"collected": len(results), "results": results}, default=str)}

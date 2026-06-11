@@ -1,0 +1,199 @@
+"""ETL dispatcher unit tests — engine_family routing.
+
+Verifies that _collect_one dispatches to the correct collector based on engine
+family and that no RDS/PI/cost calls leak into non-relational paths.
+
+Uses the importlib-from-path loader (same pattern as test_param_fitness.py).
+Collector functions are monkeypatched on the loaded handler module so we test
+the actual dispatch logic without any AWS calls.
+"""
+
+import importlib.util
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+_ROOT = Path(__file__).resolve().parents[3] / "data-pipeline" / "etl_collector"
+
+
+def _load_handler():
+    """Load handler.py as a module, ensuring its collectors imports resolve."""
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+    spec = importlib.util.spec_from_file_location("etl_handler", _ROOT / "handler.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _fake_get_client(*args, **kwargs):
+    """Returns a fresh MagicMock regardless of service/region."""
+    return MagicMock()
+
+
+def _noop_cache_execute(sql, params):
+    pass
+
+
+_COMMON_KWARGS = dict(
+    get_client=_fake_get_client,
+    rds_data=MagicMock(),
+    cache_execute=_noop_cache_execute,
+    cache_cluster_arn="arn:aws:rds:ap-northeast-2:123:cluster:cache",
+    cache_secret_arn="arn:aws:secretsmanager:ap-northeast-2:123:secret:cache",
+    cache_db_name="dbops",
+    run_ts="2026-06-11T00:00:00+00:00",
+)
+
+
+# ---------------------------------------------------------------------------
+# Test 1: DynamoDB routes ONLY to collect_dynamodb_metrics
+# ---------------------------------------------------------------------------
+
+def test_dynamodb_routes_to_ddb_collector_only():
+    handler = _load_handler()
+
+    resource = {
+        "cluster_id": "ddb-abc",
+        "engine": "dynamodb",
+        "region": "ap-northeast-2",
+        "account_id": "111122223333",
+        "resource_name": "Orders",
+    }
+
+    mock_ddb_collector = MagicMock(return_value={"metrics_inserted": 5})
+    mock_meta = MagicMock()
+    mock_pi = MagicMock()
+    mock_cw = MagicMock()
+    mock_cost = MagicMock()
+
+    with (
+        patch.object(handler, "collect_dynamodb_metrics", mock_ddb_collector),
+        patch.object(handler, "collect_cluster_meta", mock_meta),
+        patch.object(handler, "collect_pi_metrics", mock_pi),
+        patch.object(handler, "collect_cw_metrics", mock_cw),
+        patch.object(handler, "collect_cost_findings", mock_cost),
+    ):
+        result = handler._collect_one(resource, **_COMMON_KWARGS)
+
+    # DynamoDB collector must be called exactly once
+    mock_ddb_collector.assert_called_once()
+    # RDS/PI/CW/cost must NOT be called
+    mock_meta.assert_not_called()
+    mock_pi.assert_not_called()
+    mock_cw.assert_not_called()
+    mock_cost.assert_not_called()
+    # Result carries the cluster_id
+    assert result["cluster_id"] == "ddb-abc"
+
+
+# ---------------------------------------------------------------------------
+# Test 2: DocumentDB routes ONLY to collect_docdb_metrics
+# ---------------------------------------------------------------------------
+
+def test_documentdb_routes_to_docdb_collector_only():
+    handler = _load_handler()
+
+    resource = {
+        "cluster_id": "docdb-cluster-1",
+        "engine": "docdb",
+        "region": "ap-northeast-2",
+        "account_id": "111122223333",
+    }
+
+    mock_docdb_collector = MagicMock(return_value={"metrics_inserted": 3})
+    mock_meta = MagicMock()
+    mock_pi = MagicMock()
+    mock_cw = MagicMock()
+    mock_cost = MagicMock()
+
+    with (
+        patch.object(handler, "collect_docdb_metrics", mock_docdb_collector),
+        patch.object(handler, "collect_cluster_meta", mock_meta),
+        patch.object(handler, "collect_pi_metrics", mock_pi),
+        patch.object(handler, "collect_cw_metrics", mock_cw),
+        patch.object(handler, "collect_cost_findings", mock_cost),
+    ):
+        result = handler._collect_one(resource, **_COMMON_KWARGS)
+
+    # DocDB collector must be called exactly once
+    mock_docdb_collector.assert_called_once()
+    # RDS/PI/CW/cost must NOT be called
+    mock_meta.assert_not_called()
+    mock_pi.assert_not_called()
+    mock_cw.assert_not_called()
+    mock_cost.assert_not_called()
+    assert result["cluster_id"] == "docdb-cluster-1"
+
+
+# ---------------------------------------------------------------------------
+# Test 3: Relational (aurora-postgresql) calls meta AND cost (existing path)
+# ---------------------------------------------------------------------------
+
+def test_relational_runs_meta_and_cost():
+    handler = _load_handler()
+
+    resource = {
+        "cluster_id": "prod-pg-1",
+        "engine": "aurora-postgresql",
+        "region": "ap-northeast-2",
+        "account_id": "111122223333",
+        "cluster_arn": "arn:aws:rds:ap-northeast-2:123:cluster:prod-pg-1",
+        "secret_arn": "arn:aws:secretsmanager:ap-northeast-2:123:secret:prod-pg-1",
+        "db_name": "sampledb",
+    }
+
+    mock_meta = MagicMock(return_value={"status": "available"})
+    mock_cost = MagicMock(return_value={"findings": []})
+    # Mock all the heavy collectors so no real AWS calls occur
+    mock_pi = MagicMock(return_value={"rows": 0})
+    mock_cw = MagicMock(return_value={"rows": 0})
+    mock_instances = MagicMock(return_value={"DBInstances": []})
+    mock_baselines = MagicMock(return_value={"trained": 0})
+    mock_ddb_collector = MagicMock()
+    mock_docdb_collector = MagicMock()
+
+    # Patch all collectors that touch AWS
+    with (
+        patch.object(handler, "collect_cluster_meta", mock_meta),
+        patch.object(handler, "collect_cost_findings", mock_cost),
+        patch.object(handler, "collect_pi_metrics", mock_pi),
+        patch.object(handler, "collect_cw_metrics", mock_cw),
+        patch.object(handler, "collect_pg_baselines", mock_baselines),
+        patch.object(handler, "collect_dynamodb_metrics", mock_ddb_collector),
+        patch.object(handler, "collect_docdb_metrics", mock_docdb_collector),
+        # Mock the pg/mysql SQL collectors (need rds_data calls)
+        patch.object(handler, "collect_query_stats", MagicMock(return_value={})),
+        patch.object(handler, "collect_pg_table_stats", MagicMock(return_value={})),
+        patch.object(handler, "collect_pg_activity", MagicMock(return_value={})),
+        patch.object(handler, "collect_pg_locks", MagicMock(return_value={})),
+        patch.object(handler, "collect_pg_health_checks", MagicMock(return_value={})),
+        patch.object(handler, "collect_param_fitness", MagicMock(return_value={})),
+        patch.object(handler, "collect_capacity_forecast", MagicMock(return_value={})),
+        patch.object(handler, "collect_pg_extensions", MagicMock(return_value={})),
+    ):
+        # describe_db_instances needs to return something; patch via get_client mock
+        fake_rds_client = MagicMock()
+        fake_rds_client.describe_db_instances.return_value = {"DBInstances": []}
+
+        def patched_get_client(service, region):
+            if service == "rds":
+                return fake_rds_client
+            return MagicMock()
+
+        kwargs = dict(_COMMON_KWARGS)
+        kwargs["get_client"] = patched_get_client
+
+        result = handler._collect_one(resource, **kwargs)
+
+    # Relational path: meta AND cost must be called
+    mock_meta.assert_called_once()
+    mock_cost.assert_called_once()
+    # Non-relational collectors must NOT be called
+    mock_ddb_collector.assert_not_called()
+    mock_docdb_collector.assert_not_called()
+    assert result["cluster_id"] == "prod-pg-1"
