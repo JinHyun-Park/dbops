@@ -3,16 +3,17 @@ import os
 from datetime import datetime, timezone
 
 import boto3
+from collectors.capacity_forecast import collect_capacity_forecast
 from collectors.cost_check import collect_cost_findings
 from collectors.cw_collector import collect_cw_metrics
 from collectors.meta_collector import collect_cluster_meta
 from collectors.mysql_activity import collect_mysql_activity
 from collectors.mysql_locks import collect_mysql_locks
+from collectors.mysql_param_fitness import collect_mysql_param_fitness
 from collectors.mysql_query_stats import collect_mysql_query_stats
 from collectors.mysql_table_stats import collect_mysql_table_stats
 from collectors.pg_activity import collect_pg_activity
 from collectors.pg_baseline_trainer import collect_pg_baselines
-from collectors.pg_capacity_forecast import collect_capacity_forecast
 from collectors.pg_extensions import collect_pg_extensions
 from collectors.pg_health_checks import collect_pg_health_checks
 from collectors.pg_locks import collect_pg_locks
@@ -171,7 +172,7 @@ def lambda_handler(event, context):
             try:
                 result["capacity_forecast"] = collect_capacity_forecast(
                     rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
-                    snapshot_ts=run_ts,
+                    snapshot_ts=run_ts, engine=engine,
                 )
             except Exception as e:
                 result["capacity_forecast_error"] = str(e)
@@ -213,6 +214,24 @@ def lambda_handler(event, context):
             except Exception as e:
                 result["activity_error"] = str(e)
                 print(f"[{cluster_id}] mysql activity error: {e}")
+            # param_fitness는 cluster_settings(위 mysql_locks가 갱신)에 의존하므로
+            # locks 뒤에 둔다. capacity_forecast는 엔진 무관(metric_snapshots 캐시).
+            try:
+                result["param_fitness"] = collect_mysql_param_fitness(
+                    rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                    snapshot_ts=run_ts,
+                )
+            except Exception as e:
+                result["param_fitness_error"] = str(e)
+                print(f"[{cluster_id}] mysql param fitness error: {e}")
+            try:
+                result["capacity_forecast"] = collect_capacity_forecast(
+                    rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                    snapshot_ts=run_ts, engine=engine,
+                )
+            except Exception as e:
+                result["capacity_forecast_error"] = str(e)
+                print(f"[{cluster_id}] mysql capacity forecast error: {e}")
         else:
             result["stats"] = {"skipped": f"engine={engine} or no secret"}
 

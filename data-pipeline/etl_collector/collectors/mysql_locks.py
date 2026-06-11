@@ -32,7 +32,12 @@ WHERE VARIABLE_NAME IN (
   'max_connections', 'innodb_buffer_pool_size', 'innodb_log_file_size',
   'innodb_flush_log_at_trx_commit', 'innodb_io_capacity',
   'innodb_read_io_threads', 'innodb_write_io_threads',
-  'slow_query_log', 'long_query_time', 'log_bin'
+  'slow_query_log', 'long_query_time', 'log_bin',
+  -- Per-connection 버퍼 — mysql_param_fitness의 OOM 상호작용 규칙
+  -- (Σ버퍼 × max_connections vs 인스턴스 메모리)에 쓰인다. 모두 바이트.
+  'sort_buffer_size', 'join_buffer_size', 'read_buffer_size',
+  'read_rnd_buffer_size', 'tmp_table_size', 'max_heap_table_size',
+  'thread_stack'
 )
 ORDER BY VARIABLE_NAME
 """

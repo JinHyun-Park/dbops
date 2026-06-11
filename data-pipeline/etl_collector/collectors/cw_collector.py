@@ -9,6 +9,10 @@ CW_METRICS = [
     {"name": "Deadlocks", "metric_type": "deadlocks", "stat": "Sum"},
     {"name": "BufferCacheHitRatio", "metric_type": "buffer_cache_hit", "stat": "Average"},
     {"name": "EngineUptime", "metric_type": "uptime_sec", "stat": "Average"},
+    # Serverless v2 현재 용량(ACU). 프로비저닝 클러스터는 이 메트릭을 내보내지
+    # 않아 Datapoints가 비고, 아래 루프가 그냥 건너뛴다(무해). capacity_forecast의
+    # ACU 고갈 예측이 이 값(metric_type=serverless_acu)을 일별 peak로 회귀한다.
+    {"name": "ServerlessDatabaseCapacity", "metric_type": "serverless_acu", "stat": "Average"},
 ]
 
 

@@ -15,7 +15,7 @@ def _load():
     import sys
     sys.path.insert(0, str(_ROOT))
     spec = importlib.util.spec_from_file_location(
-        "pg_capacity_forecast", _ROOT / "collectors/pg_capacity_forecast.py"
+        "capacity_forecast", _ROOT / "collectors/capacity_forecast.py"
     )
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
@@ -87,3 +87,69 @@ def test_unknown_max_connections_skips_connection_rule():
     # max_connections 미상 → connection ETA 계산 불가 → connection 규칙 skip
     emitted, _ = _run(None, {"slope": 5.0, "latest": 90.0, "samples": 200})
     assert [e for e in emitted if e[0] == "capacity_forecast"] == []
+
+
+# ---- ACU 고갈 예측 (Serverless v2) ----
+def _mock_execute_acu(max_acu, acu_agg):
+    """ACU 전용 mock. storage/connection 루프는 평탄(경보 없음)으로 둔다.
+    acu_agg: dict(slope, latest_peak, max_peak, days, sat_days)."""
+    def fake(rds, arn, secret, db, sql, params=None):
+        if "FROM cluster_meta" in sql:
+            return [{"max_connections": 100, "serverlessv2_max_acu": max_acu}]
+        if "serverless_acu" in sql:   # ACU 일별 peak 집계 쿼리
+            return [acu_agg]
+        if "REGR_SLOPE" in sql:       # storage/connection 루프 → 평탄
+            return [{"slope": 0.0, "latest": 1.0, "samples": 200}]
+        if "FROM cluster_settings" in sql:
+            return [{"value": "100"}]
+        return []
+    return fake
+
+
+def _run_acu(max_acu, acu_agg):
+    emitted = []
+    with patch.object(cf, "_execute") as m:
+        def capture(rds, arn, secret, db, sql, params=None):
+            if sql.strip().upper().startswith("INSERT"):
+                emitted.append((params["check_type"], params["severity"], params["subject"]))
+            return _mock_execute_acu(max_acu, acu_agg)(rds, arn, secret, db, sql, params)
+        m.side_effect = capture
+        result = cf.collect_capacity_forecast(
+            MagicMock(), "a", "s", "d", "c1", snapshot_ts="2026-06-11T00:00:00Z", engine="aurora-postgresql",
+        )
+    return emitted, result
+
+
+def test_acu_ceiling_reached_critical():
+    # max 16 ACU, 5일 관측 중 4일이 95%(15.2) 이상 → 포화율 0.8 ≥ 0.6 → critical.
+    emitted, _ = _run_acu(16.0, {"slope": 0.1, "latest_peak": 15.8, "max_peak": 16.0, "days": 5, "sat_days": 4})
+    acu = [e for e in emitted if e[0] == "capacity_forecast" and e[2] == "ACU"]
+    assert len(acu) == 1
+    assert acu[0][1] == "critical"
+
+
+def test_acu_trending_up_warns():
+    # max 16, 일별 peak 12에서 하루 1씩 상승 → (16-12)/1 = 4일 → warning(≤7).
+    # 포화일 0 → 천장 케이스 아님, 추세 케이스로 진입.
+    emitted, _ = _run_acu(16.0, {"slope": 1.0, "latest_peak": 12.0, "max_peak": 12.0, "days": 6, "sat_days": 0})
+    acu = [e for e in emitted if e[0] == "capacity_forecast" and e[2] == "ACU"]
+    assert len(acu) == 1
+    assert acu[0][1] == "warning"
+
+
+def test_acu_no_max_acu_skips():
+    # serverlessv2_max_acu 미상(프로비저닝) → ACU 규칙 자체를 skip.
+    emitted, _ = _run_acu(None, {"slope": 1.0, "latest_peak": 12.0, "max_peak": 12.0, "days": 6, "sat_days": 0})
+    assert [e for e in emitted if e[2] == "ACU"] == []
+
+
+def test_acu_insufficient_days_skips():
+    # 일별 peak 관측 < 3일 → 추세 신뢰 불가 → 침묵.
+    emitted, _ = _run_acu(16.0, {"slope": 1.0, "latest_peak": 15.0, "max_peak": 15.0, "days": 2, "sat_days": 2})
+    assert [e for e in emitted if e[2] == "ACU"] == []
+
+
+def test_acu_flat_trend_no_finding():
+    # 포화 아님 + slope ≤ 0 → 천장도 추세도 아님 → 침묵.
+    emitted, _ = _run_acu(16.0, {"slope": -0.5, "latest_peak": 5.0, "max_peak": 6.0, "days": 6, "sat_days": 0})
+    assert [e for e in emitted if e[2] == "ACU"] == []

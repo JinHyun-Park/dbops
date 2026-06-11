@@ -36,11 +36,12 @@ const CHECK_LABELS: Record<string, string> = {
   cost_savings_plan_opportunity: "Cost",
   // Parameter Fitness — 이 클러스터 워크로드 기준 파라미터 적정성 진단.
   param_max_connections: "Tuning",
-  param_work_mem_risk: "Tuning",
-  param_effective_cache: "Tuning",
-  param_autovacuum_workers: "Tuning",
+  param_work_mem_risk: "Tuning", // PG
+  param_effective_cache: "Tuning", // PG
+  param_autovacuum_workers: "Tuning", // PG
   param_buffer_cache_hit: "Tuning",
-  // 고갈 예측 경보 — storage/connection 한계 도달 ETA.
+  param_mysql_conn_buffers: "Tuning", // MySQL: per-connection 버퍼 × max_conn OOM 위험
+  // 고갈 예측 경보 — storage/connection/ACU 한계 도달 ETA.
   capacity_forecast: "Capacity",
 };
 
@@ -58,7 +59,10 @@ const TABS_PG = [
   "Extensions",
   "Cost",
 ] as const;
-const TABS_MYSQL = ["All", "Cost"] as const;
+// MySQL now has Parameter Fitness (mysql_param_fitness) and capacity/ACU
+// forecast (capacity_forecast is engine-agnostic) — so Tuning/Capacity apply.
+// VACUUM/Bloat/Indexes/Config/Extensions remain PG-only collectors.
+const TABS_MYSQL = ["All", "Tuning", "Capacity", "Cost"] as const;
 type Tab = (typeof TABS_PG)[number] | (typeof TABS_MYSQL)[number];
 
 function tryParse(
@@ -124,11 +128,11 @@ export function MaintenanceHealthPanel({
     if (!allowed.includes(tab)) setTab("All");
   }, [engine, tab]);
 
-  // Bloat/extension/setting checks are PG-only — collector emits nothing for
-  // MySQL clusters today, so trim the tab strip and adjust empty-state copy.
+  // MySQL now emits Tuning/Capacity/Cost findings; only the PG-specific
+  // collectors (VACUUM/Bloat/Indexes/Config/Extensions) are absent, so all
+  // that differs by engine is the tab strip.
   const isPg = (engine || "").toLowerCase().includes("postgres");
   const tabs: readonly Tab[] = isPg ? TABS_PG : TABS_MYSQL;
-  const pgOnly = !isPg;
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 overflow-hidden">
@@ -139,10 +143,9 @@ export function MaintenanceHealthPanel({
               Maintenance Health
             </div>
             <div className="text-[11px] text-zinc-500 mt-0.5">
-              {pgOnly
-                ? "PostgreSQL 전용 신호입니다. MySQL 지원은 후속 작업에서 추가됩니다."
-                : "DBA가 조치할 항목을 심각도 순으로 정렬했어요. 행을 클릭하면 AI가 조치를 제안합니다."}
-              {snapshotTime && !pgOnly && (
+              DBA가 조치할 항목을 심각도 순으로 정렬했어요. 행을 클릭하면 AI가
+              조치를 제안합니다.
+              {snapshotTime && (
                 <span className="ml-2 text-zinc-600">
                   · {fmtRelative(snapshotTime)} 갱신
                 </span>
@@ -193,9 +196,7 @@ export function MaintenanceHealthPanel({
         <div className="p-6 text-emerald-400 text-sm flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-500" />
           {tab === "All"
-            ? pgOnly
-              ? "이 엔진에서는 아직 수집된 유지보수 항목이 없어요"
-              : "발견된 이슈가 없어요 — 클러스터 상태 양호 🎉"
+            ? "발견된 이슈가 없어요 — 클러스터 상태 양호 🎉"
             : `${tab} 카테고리에 해당하는 항목이 없어요`}
         </div>
       ) : (
