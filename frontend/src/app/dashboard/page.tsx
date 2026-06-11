@@ -467,8 +467,12 @@ export default function DashboardPage() {
       />
 
       {/* Incident-first: when the selected cluster isn't healthy, lead with
-          WHY + the RCA action before the metric panels below. */}
-      {selectedCluster && <IncidentSummary clusterId={selectedCluster} />}
+          WHY + the RCA action before the metric panels below.
+          RCA / incident diagnosis is Aurora-oriented — skip for non-relational. */}
+      {selectedCluster &&
+        engineFamily(
+          clusters.find((c) => c.cluster_id === selectedCluster)?.engine,
+        ) === "relational" && <IncidentSummary clusterId={selectedCluster} />}
 
       {selectedCluster &&
         clusters.find((c) => c.cluster_id === selectedCluster)?.is_demo && (
@@ -501,8 +505,14 @@ export default function DashboardPage() {
           {(() => {
             const eng = dashboardData.cluster?.engine || "";
             const ver = dashboardData.cluster?.engine_version || "";
+            const fam = engineFamily(eng);
             const badge = engineBadge(eng);
             const eol = eolFor(eng, ver);
+            // "클러스터 정보" (instances / storage / Multi-AZ) and HealthScore
+            // (CPU / AAS / Connections gauge) are Aurora-relational concepts.
+            // For DynamoDB / DocumentDB the family panel below carries the
+            // relevant overview — render nothing here to avoid misleading "-"s.
+            if (fam !== "relational") return null;
             return (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">

@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { eolFor } from "@/lib/engine";
+import { eolFor, FAMILY_META } from "@/lib/engine";
 import {
   triage,
   LEVEL_RANK,
@@ -10,12 +10,18 @@ import {
   type TriageInput,
 } from "@/lib/cluster-triage";
 import { useFleetOverview } from "@/lib/use-fleet-overview";
+import {
+  groupByEngineFamily,
+  displayName,
+  FAMILY_ORDER,
+} from "@/lib/group-by-family";
 
 interface ClusterInfo {
   cluster_id: string;
   engine?: string;
   engine_version?: string;
   status?: string;
+  resource_name?: string;
 }
 
 interface ClusterOverviewProps {
@@ -132,41 +138,84 @@ export function ClusterOverview({
         </Link>
       </div>
 
-      {/* Severity-sorted cluster chips — quick switch + peripheral awareness. */}
-      <div className="flex flex-wrap gap-1.5">
-        {capped.map((d) => {
-          const active = d.c.cluster_id === selectedId;
-          return (
-            <button
-              key={d.c.cluster_id}
-              onClick={() => onSelect(d.c.cluster_id)}
-              title={
-                d.reasons.length
-                  ? `${d.c.cluster_id} — ${d.reasons.join(" · ")}`
-                  : d.c.cluster_id
-              }
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[12px] font-mono transition-colors max-w-[260px] ${
-                active
-                  ? "border-emerald-500/70 bg-emerald-500/10 text-zinc-100"
-                  : "border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:border-zinc-600"
-              }`}
-            >
-              <span
-                className={`flex-shrink-0 w-2 h-2 rounded-full ${DOT[d.level]}`}
-              />
-              <span className="truncate">{d.c.cluster_id}</span>
-            </button>
-          );
-        })}
-        {overflow > 0 && (
-          <Link
-            href="/fleet"
-            className="flex items-center px-2.5 py-1 rounded-md border border-zinc-800 bg-zinc-900/40 text-[12px] text-zinc-500 hover:text-emerald-300 hover:border-emerald-500/40 transition-colors"
-          >
-            +{overflow}개 더 → Fleet
-          </Link>
-        )}
-      </div>
+      {/* Engine-family grouped chips — each family gets a small header label
+          then its severity-sorted chips. Empty families are skipped. */}
+      {(() => {
+        // Build a lookup from cluster_id → decorated entry for O(1) access.
+        const byId = new Map(capped.map((d) => [d.c.cluster_id, d]));
+        // Group the capped clusters into family buckets (preserving sort order
+        // within each bucket because `capped` is already severity-sorted).
+        const grouped = groupByEngineFamily(capped.map((d) => d.c));
+        const hasMultipleFamilies =
+          FAMILY_ORDER.filter((fam) => grouped[fam].length > 0).length > 1;
+
+        return (
+          <div className="space-y-2">
+            {FAMILY_ORDER.map((fam) => {
+              const famClusters = grouped[fam];
+              if (famClusters.length === 0) return null;
+              const meta = FAMILY_META[fam];
+              return (
+                <div key={fam}>
+                  {/* Only show the family label row when there are multiple
+                      families — keeps the UI clean for pure-relational fleets. */}
+                  {hasMultipleFamilies && (
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${meta.accent}`}
+                      />
+                      <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                        {meta.label}
+                      </span>
+                      <span className="text-[10px] text-zinc-600 font-mono">
+                        {famClusters.length}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-1.5">
+                    {famClusters.map((c) => {
+                      const d = byId.get(c.cluster_id);
+                      if (!d) return null;
+                      const active = c.cluster_id === selectedId;
+                      return (
+                        <button
+                          key={c.cluster_id}
+                          onClick={() => onSelect(c.cluster_id)}
+                          title={
+                            d.reasons.length
+                              ? `${c.cluster_id} — ${d.reasons.join(" · ")}`
+                              : c.cluster_id
+                          }
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[12px] font-mono transition-colors max-w-[260px] ${
+                            active
+                              ? "border-emerald-500/70 bg-emerald-500/10 text-zinc-100"
+                              : "border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:border-zinc-600"
+                          }`}
+                        >
+                          <span
+                            className={`flex-shrink-0 w-2 h-2 rounded-full ${
+                              DOT[d.level]
+                            }`}
+                          />
+                          <span className="truncate">{displayName(c)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            {overflow > 0 && (
+              <Link
+                href="/fleet"
+                className="inline-flex items-center px-2.5 py-1 rounded-md border border-zinc-800 bg-zinc-900/40 text-[12px] text-zinc-500 hover:text-emerald-300 hover:border-emerald-500/40 transition-colors"
+              >
+                +{overflow}개 더 → Fleet
+              </Link>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

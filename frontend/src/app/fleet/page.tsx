@@ -185,14 +185,16 @@ export default function FleetPage() {
       Promise.allSettled([fetchMultiClusterOverview(), fetchClusters()])
         .then(([overview, registry]) => {
           if (cancelled) return;
-          if (overview.status === "fulfilled")
-            setRows(overview.value.clusters || []);
+          // Build a resource_name lookup from the registry first so we can
+          // merge it into the overview rows (overview rows don't carry it).
+          const resourceNames = new Map<string, string>();
           if (registry.status === "fulfilled") {
             const items: {
               cluster_id: string;
               is_demo?: boolean;
               account_id?: string;
               region?: string;
+              resource_name?: string;
             }[] = registry.value || [];
             setDemoIds(
               new Set(items.filter((c) => c.is_demo).map((c) => c.cluster_id)),
@@ -204,6 +206,22 @@ export default function FleetPage() {
                   { account_id: c.account_id, region: c.region },
                 ]),
               ),
+            );
+            for (const c of items) {
+              if (c.resource_name)
+                resourceNames.set(c.cluster_id, c.resource_name);
+            }
+          }
+          if (overview.status === "fulfilled") {
+            const rawRows: ClusterRow[] = overview.value.clusters || [];
+            // Merge resource_name so displayName() shows the human name
+            // (e.g. "dbops-dev-sessions") instead of the ddb-<hash> slug.
+            setRows(
+              rawRows.map((r) => ({
+                ...r,
+                resource_name:
+                  resourceNames.get(r.cluster_id) ?? r.resource_name,
+              })),
             );
           }
           if (overview.status === "rejected")
