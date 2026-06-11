@@ -22,6 +22,7 @@ import { SchemaChangesPanel } from "@/components/dashboard/schema-changes-panel"
 import { AnomaliesPanel } from "@/components/dashboard/anomalies-panel";
 import { IncidentSummary } from "@/components/dashboard/incident-summary";
 import { AuditLogPanel } from "@/components/dashboard/audit-log-panel";
+import { ChangeImpactPanel } from "@/components/dashboard/change-impact-panel";
 import { LogInsightsPanel } from "@/components/dashboard/log-insights-panel";
 import { TableSizesPanel } from "@/components/dashboard/table-sizes-panel";
 import { BackupPanel } from "@/components/dashboard/backup-panel";
@@ -754,6 +755,8 @@ export default function DashboardPage() {
             clusterId={selectedCluster}
             engine={dashboardData.cluster?.engine}
           />
+
+          <ChangeImpactPanel clusterId={selectedCluster} />
 
           <AuditLogPanel clusterId={selectedCluster} />
 

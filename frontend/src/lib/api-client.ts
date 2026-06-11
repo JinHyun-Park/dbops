@@ -351,6 +351,49 @@ export async function fetchAuditLog(
   return res.json();
 }
 
+export interface ChangeImpactDelta {
+  metric: string;
+  label: string;
+  direction: "lower" | "higher" | "neutral";
+  before: number;
+  after: number;
+  delta: number;
+  delta_pct: number | null;
+}
+
+export interface ChangeImpactEvent {
+  event_id: number;
+  event_time: string;
+  event_type: string;
+  message: string;
+  window_hours: number;
+  deltas: ChangeImpactDelta[];
+}
+
+export interface ChangeImpactResponse {
+  cluster_id: string;
+  window_hours: number;
+  days: number;
+  changes: ChangeImpactEvent[];
+}
+
+// 변경 영향 자동 회고 — RDS 변경 이벤트 전후 워크로드 델타.
+export async function fetchChangeImpact(
+  clusterId: string,
+  windowHours = 2,
+  days = 7,
+): Promise<ChangeImpactResponse> {
+  const res = await authedFetch(
+    await api(
+      `/api/dashboard/${enc(
+        clusterId,
+      )}/change-impact?window_hours=${windowHours}&days=${days}`,
+    ),
+  );
+  if (!res.ok) throw new Error(`변경 영향 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
 export type LogCategory = "all" | "slow" | "vacuum" | "error" | "connection";
 
 export interface LogInsightsResponse {

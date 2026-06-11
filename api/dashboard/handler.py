@@ -851,6 +851,100 @@ def _workload_diff(query, cluster_id, before_iso, after_iso, regression_pct, mat
 METRIC_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,49}$")
 
 
+# 변경 영향 회고에서 전후 델타가 의미 있는 핵심 메트릭. direction은 UI가
+# 개선/악화 색을 칠하는 기준 — 대부분 lower=좋음, 캐시 히트는 higher=좋음,
+# 커넥션·IOPS는 워크로드 자체라 중립(증감을 가치판단하지 않음).
+_IMPACT_METRICS = [
+    ("cpu", "CPU", "lower"),
+    ("aas", "Active Sessions (AAS)", "lower"),
+    ("db_connections", "Connections", "neutral"),
+    ("read_iops", "Read IOPS", "neutral"),
+    ("write_iops", "Write IOPS", "neutral"),
+    ("deadlocks", "Deadlocks", "lower"),
+    ("buffer_cache_hit", "Buffer Cache Hit %", "higher"),
+]
+
+
+def _change_impact(query, cluster_id, window_hours, days):
+    """변경 영향 자동 회고 — event_log의 RDS 변경 이벤트를 앵커로, 전후 동일
+    윈도우의 핵심 메트릭을 비교해 '이 변경 후 무엇이 좋아졌/나빠졌나'를 수치로
+    보여준다. DBA가 compare 페이지에서 수동으로 기간을 맞춰 비교하던 일을
+    변경 이벤트마다 자동으로 해준다.
+
+    앵커는 RDS 컨트롤플레인 이벤트(source=aws.rds, configuration change /
+    maintenance / parameter / reboot / scaling / upgrade 류)다 — DBOps 경유
+    여부와 무관하게 콘솔·CLI 직접 변경까지 포착한다. dbops-monitor가 만든
+    anomaly_* 이벤트는 변경이 아니므로 source 필터로 제외한다."""
+    events = query(
+        "SELECT id, event_time, event_type, message FROM event_log "
+        "WHERE cluster_id = :cid AND source = 'aws.rds' "
+        "  AND event_time > NOW() - (:days || ' days')::interval "
+        "  AND ("
+        "    event_type ILIKE '%config%' OR event_type ILIKE '%maintenance%' "
+        "    OR message ILIKE '%modif%' OR message ILIKE '%parameter%' "
+        "    OR message ILIKE '%reboot%' OR message ILIKE '%reset%' "
+        "    OR message ILIKE '%scal%' OR message ILIKE '%upgrad%'"
+        "  ) "
+        "ORDER BY event_time DESC LIMIT 20",
+        {"cid": cluster_id, "days": str(days)},
+    )
+
+    metric_list = [m[0] for m in _IMPACT_METRICS]
+    placeholders = ", ".join(f":m{i}" for i in range(len(metric_list)))
+
+    changes = []
+    for ev in events:
+        anchor = ev["event_time"]
+        params = {"cid": cluster_id, "anchor": anchor, "win": str(window_hours)}
+        for i, m in enumerate(metric_list):
+            params[f"m{i}"] = m
+        # 앵커 ±윈도우 범위만 읽고, FILTER로 앵커 기준 전/후를 한 번에 집계.
+        # 후 윈도우가 NOW를 넘으면(아주 최근 변경) after 표본이 적을 수 있어
+        # before_n/after_n을 같이 돌려 UI가 신뢰도를 판단하게 한다.
+        rows = query(
+            "SELECT metric_type, "
+            "  AVG(value) FILTER (WHERE ts <= :anchor::timestamptz) AS before_avg, "
+            "  AVG(value) FILTER (WHERE ts >  :anchor::timestamptz) AS after_avg, "
+            "  COUNT(*)   FILTER (WHERE ts <= :anchor::timestamptz) AS before_n, "
+            "  COUNT(*)   FILTER (WHERE ts >  :anchor::timestamptz) AS after_n "
+            "FROM metric_snapshots "
+            f"WHERE cluster_id = :cid AND metric_type IN ({placeholders}) "
+            "  AND ts > :anchor::timestamptz - (:win || ' hours')::interval "
+            "  AND ts < :anchor::timestamptz + (:win || ' hours')::interval "
+            "  AND (dimensions IS NULL OR dimensions::text = '{}') "
+            "GROUP BY metric_type",
+            params,
+        )
+        by_metric = {r["metric_type"]: r for r in rows}
+        deltas = []
+        for key, label, direction in _IMPACT_METRICS:
+            r = by_metric.get(key)
+            if not r or r.get("before_avg") is None or r.get("after_avg") is None:
+                continue
+            if int(r.get("before_n") or 0) < 3 or int(r.get("after_n") or 0) < 3:
+                continue  # 표본 부족 — 노이즈 방지로 생략
+            before = float(r["before_avg"])
+            after = float(r["after_avg"])
+            delta = after - before
+            pct = (delta / before * 100) if before else None
+            deltas.append({
+                "metric": key, "label": label, "direction": direction,
+                "before": round(before, 3), "after": round(after, 3),
+                "delta": round(delta, 3),
+                "delta_pct": round(pct, 1) if pct is not None else None,
+            })
+        changes.append({
+            "event_id": ev["id"],
+            "event_time": ev["event_time"],
+            "event_type": ev["event_type"],
+            "message": (ev.get("message") or "")[:200],
+            "window_hours": window_hours,
+            "deltas": deltas,
+        })
+
+    return {"cluster_id": cluster_id, "window_hours": window_hours, "days": days, "changes": changes}
+
+
 def _batch_timeseries(
     query,
     cluster_id,
@@ -2361,6 +2455,10 @@ def lambda_handler(event, context):
             days = _parse_int(qs.get("days"), 7, min_v=1, max_v=90)
             action_type = qs.get("action_type")
             return _response(200, _audit_log(query, cluster_id, days, action_type))
+        if raw_path.endswith("/change-impact"):
+            window_hours = _parse_int(qs.get("window_hours"), 2, min_v=1, max_v=24)
+            days = _parse_int(qs.get("days"), 7, min_v=1, max_v=30)
+            return _response(200, _change_impact(query, cluster_id, window_hours, days), max_age=30)
         if raw_path.endswith("/batch-timeseries"):
             metrics_csv = qs.get("metrics", "")
             metric_names = [m.strip() for m in metrics_csv.split(",") if m.strip()]
