@@ -4,6 +4,7 @@ import re
 import traceback
 
 import boto3
+from engine_family import engine_family
 
 
 def _parse_int(value, default, min_v=1, max_v=168):
@@ -109,6 +110,11 @@ def _lookup_cluster(cluster_id: str) -> dict:
     except Exception as e:
         print(f"[dashboard] cluster lookup failed for {cluster_id}: {e}")
         return {}
+
+
+def _registry_engine(cluster_id: str) -> str:
+    """Return the `engine` string for a cluster from the registry, or '' on miss."""
+    return _lookup_cluster(cluster_id).get("engine", "")
 
 
 def _session_for(region: str = "", role_arn: str = "") -> boto3.session.Session:
@@ -1508,6 +1514,13 @@ def _health_findings(query, cluster_id):
     """Return the *latest* snapshot of maintenance health findings for this
     cluster. Older snapshots stay in the table for trend analysis but the
     dashboard panel only ever shows the most recent one."""
+    if engine_family(_registry_engine(cluster_id)) != "relational":
+        return {
+            "cluster_id": cluster_id,
+            "snapshot_time": None,
+            "counts": {"critical": 0, "warning": 0, "info": 0},
+            "findings": [],
+        }
     rows = query(
         "WITH latest AS ("
         "  SELECT MAX(snapshot_time) AS ts FROM cluster_health_findings WHERE cluster_id = :cid"
@@ -1650,6 +1663,9 @@ _CAPACITY_METRICS = {
 
 
 def _capacity_forecast(query, cluster_id, metric, days_lookback):
+    fam = engine_family(_registry_engine(cluster_id))
+    if fam != "relational":
+        return {"cluster_id": cluster_id, "metric": metric, "not_applicable": True, "engine_family": fam}
     if metric not in _CAPACITY_METRICS:
         return {"cluster_id": cluster_id, "metric": metric, "error": f"unknown metric {metric}"}
     # RDS Data API params come through as strings — we cast to interval the
@@ -1916,6 +1932,10 @@ def _topology(cluster_id: str) -> dict:
     is opt-in, so we accept the cold-call cost on button click."""
     from datetime import datetime, timedelta
 
+    fam = engine_family(_registry_engine(cluster_id))
+    if fam != "relational":
+        return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": fam, "members": []}
+
     # Cross-account-aware: target the cluster's own account+region (spoke role
     # when registered; local session otherwise).
     _sess = _cluster_session(cluster_id)
@@ -2060,6 +2080,10 @@ def _backups(cluster_id: str) -> dict:
     approval-gated write tools (a later phase).
     """
     from datetime import datetime, timezone
+
+    fam = engine_family(_registry_engine(cluster_id))
+    if fam != "relational":
+        return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": fam, "snapshots": []}
 
     # Cross-account-aware: describe the cluster in its own account+region.
     rds = _cluster_session(cluster_id).client("rds")
