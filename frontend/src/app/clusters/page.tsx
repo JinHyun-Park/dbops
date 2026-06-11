@@ -168,6 +168,7 @@ export default function ClustersPage() {
     region: "ap-northeast-2",
     engine: "aurora-postgresql",
     spoke_role_arn: "",
+    resource_name: "", // DynamoDB table name
   });
   const [submitting, setSubmitting] = useState(false);
   // Pre-flight: separate state from feedback because we want both
@@ -331,22 +332,64 @@ export default function ClustersPage() {
   };
 
   const handleRegister = async () => {
-    if (!form.cluster_id || !form.account_id || !form.region) {
-      setFeedback({
-        kind: "err",
-        msg: "cluster_id / account_id / region 모두 필요합니다.",
-      });
-      return;
+    if (form.engine === "dynamodb") {
+      if (!form.resource_name || !form.account_id || !form.region) {
+        setFeedback({
+          kind: "err",
+          msg: "Table name / account_id / region 모두 필요합니다.",
+        });
+        return;
+      }
+    } else if (form.engine === "docdb") {
+      if (!form.cluster_id || !form.account_id || !form.region) {
+        setFeedback({
+          kind: "err",
+          msg: "Cluster identifier / account_id / region 모두 필요합니다.",
+        });
+        return;
+      }
+    } else {
+      if (!form.cluster_id || !form.account_id || !form.region) {
+        setFeedback({
+          kind: "err",
+          msg: "cluster_id / account_id / region 모두 필요합니다.",
+        });
+        return;
+      }
     }
     setSubmitting(true);
     setFeedback(null);
     try {
-      const result = await registerCluster(form);
+      // Build the request body per engine family
+      let payload: Parameters<typeof registerCluster>[0];
+      if (form.engine === "dynamodb") {
+        payload = {
+          engine: "dynamodb",
+          account_id: form.account_id,
+          region: form.region,
+          resource_name: form.resource_name,
+        };
+      } else if (form.engine === "docdb") {
+        payload = {
+          engine: "docdb",
+          cluster_id: form.cluster_id,
+          account_id: form.account_id,
+          region: form.region,
+        };
+      } else {
+        payload = {
+          ...form,
+          ...(registerMode !== "cross-account" ? { spoke_role_arn: "" } : {}),
+        };
+      }
+      const result = await registerCluster(payload);
+      const displayId =
+        form.engine === "dynamodb" ? form.resource_name : form.cluster_id;
       const status = result?.connection_status;
       if (status === "ok") {
         setFeedback({
           kind: "ok",
-          msg: `등록됨: ${form.cluster_id} · 연결 검증 통과`,
+          msg: `등록됨: ${displayId} · 연결 검증 통과`,
         });
       } else if (status === "failed") {
         setFeedback({
@@ -356,7 +399,7 @@ export default function ClustersPage() {
           }`,
         });
       } else {
-        setFeedback({ kind: "ok", msg: `등록됨: ${form.cluster_id}` });
+        setFeedback({ kind: "ok", msg: `등록됨: ${displayId}` });
       }
       setShowForm(false);
       setForm({
@@ -365,6 +408,7 @@ export default function ClustersPage() {
         region: "ap-northeast-2",
         engine: "aurora-postgresql",
         spoke_role_arn: "",
+        resource_name: "",
       });
       loadClusters();
     } catch (e) {
@@ -756,74 +800,131 @@ export default function ClustersPage() {
       )}
 
       {showForm && (
-        <Section eyebrow="신규 등록" title="Aurora 클러스터 등록">
+        <Section eyebrow="신규 등록" title="클러스터 / 리소스 등록">
           <div className="border border-zinc-800 bg-zinc-900/40 p-6 space-y-5">
-            {/* Mode toggle — drives whether spoke_role_arn is shown.
-                Same-account is the common case; cross-account opens the
-                STS AssumeRole path with prominent guidance. */}
+            {/* Engine selector — shown first so subsequent fields can be
+                conditioned on the selected engine family. */}
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
-                배포 방식
-              </div>
-              <div className="grid grid-cols-2 border border-zinc-800">
-                {(
-                  [
-                    {
-                      key: "same-account",
-                      title: "이 계정의 Aurora",
-                      hint: "DBOps와 같은 AWS 계정에서 실행 중인 클러스터",
-                    },
-                    {
-                      key: "cross-account",
-                      title: "다른 계정 (cross-account)",
-                      hint: "STS AssumeRole로 접근할 spoke role 필요",
-                    },
-                  ] as const
-                ).map((m) => {
-                  const active = registerMode === m.key;
-                  return (
-                    <button
-                      key={m.key}
-                      type="button"
-                      onClick={() => {
-                        setRegisterMode(m.key);
-                        // Clearing spoke_role_arn when switching back to
-                        // same-account so it doesn't accidentally hitch
-                        // along in a future submit.
-                        if (m.key === "same-account") {
-                          setForm((f) => ({ ...f, spoke_role_arn: "" }));
-                        }
-                      }}
-                      className={`text-left px-4 py-3 transition-colors ${
-                        active
-                          ? "bg-zinc-950 border-l-2 border-amber-500"
-                          : "bg-zinc-900/30 text-zinc-500 hover:bg-zinc-950/50 hover:text-zinc-300"
-                      }`}
-                    >
-                      <div
-                        className={`text-sm ${
-                          active ? "text-zinc-100" : "text-zinc-400"
-                        }`}
-                      >
-                        {m.title}
-                      </div>
-                      <div className="text-[11px] text-zinc-500 mt-0.5">
-                        {m.hint}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+              <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                Engine
+              </label>
+              <select
+                value={form.engine}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    engine: e.target.value,
+                    // reset resource-specific fields on engine change
+                    cluster_id: "",
+                    resource_name: "",
+                  })
+                }
+                className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 focus:outline-none focus:border-amber-500/60"
+              >
+                <option value="aurora-postgresql">Aurora PostgreSQL</option>
+                <option value="aurora-mysql">Aurora MySQL</option>
+                <option value="dynamodb">DynamoDB</option>
+                <option value="docdb">DocumentDB</option>
+              </select>
+              {(form.engine === "dynamodb" || form.engine === "docdb") && (
+                <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">
+                  DynamoDB·DocumentDB는 CloudWatch 메트릭만 수집합니다 (시크릿
+                  불필요).
+                </p>
+              )}
             </div>
 
+            {/* Mode toggle — only relevant for Aurora engines */}
+            {(form.engine === "aurora-postgresql" ||
+              form.engine === "aurora-mysql") && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
+                  배포 방식
+                </div>
+                <div className="grid grid-cols-2 border border-zinc-800">
+                  {(
+                    [
+                      {
+                        key: "same-account",
+                        title: "이 계정의 Aurora",
+                        hint: "DBOps와 같은 AWS 계정에서 실행 중인 클러스터",
+                      },
+                      {
+                        key: "cross-account",
+                        title: "다른 계정 (cross-account)",
+                        hint: "STS AssumeRole로 접근할 spoke role 필요",
+                      },
+                    ] as const
+                  ).map((m) => {
+                    const active = registerMode === m.key;
+                    return (
+                      <button
+                        key={m.key}
+                        type="button"
+                        onClick={() => {
+                          setRegisterMode(m.key);
+                          if (m.key === "same-account") {
+                            setForm((f) => ({ ...f, spoke_role_arn: "" }));
+                          }
+                        }}
+                        className={`text-left px-4 py-3 transition-colors ${
+                          active
+                            ? "bg-zinc-950 border-l-2 border-amber-500"
+                            : "bg-zinc-900/30 text-zinc-500 hover:bg-zinc-950/50 hover:text-zinc-300"
+                        }`}
+                      >
+                        <div
+                          className={`text-sm ${
+                            active ? "text-zinc-100" : "text-zinc-400"
+                          }`}
+                        >
+                          {m.title}
+                        </div>
+                        <div className="text-[11px] text-zinc-500 mt-0.5">
+                          {m.hint}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field
-                label="Cluster ID"
-                value={form.cluster_id}
-                onChange={(v) => setForm({ ...form, cluster_id: v })}
-                placeholder="my-aurora-cluster"
-                mono
-              />
+              {/* Aurora: cluster ID */}
+              {(form.engine === "aurora-postgresql" ||
+                form.engine === "aurora-mysql") && (
+                <Field
+                  label="Cluster ID"
+                  value={form.cluster_id}
+                  onChange={(v) => setForm({ ...form, cluster_id: v })}
+                  placeholder="my-aurora-cluster"
+                  mono
+                />
+              )}
+
+              {/* DynamoDB: table name */}
+              {form.engine === "dynamodb" && (
+                <Field
+                  label="Table name"
+                  value={form.resource_name}
+                  onChange={(v) => setForm({ ...form, resource_name: v })}
+                  placeholder="my-dynamodb-table"
+                  mono
+                />
+              )}
+
+              {/* DocumentDB: cluster identifier */}
+              {form.engine === "docdb" && (
+                <Field
+                  label="Cluster identifier"
+                  value={form.cluster_id}
+                  onChange={(v) => setForm({ ...form, cluster_id: v })}
+                  placeholder="my-docdb-cluster"
+                  mono
+                />
+              )}
+
               <Field
                 label="Account ID"
                 value={form.account_id}
@@ -838,60 +939,55 @@ export default function ClustersPage() {
                 placeholder="ap-northeast-2"
                 mono
               />
-              <div>
-                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
-                  Engine
-                </label>
-                <select
-                  value={form.engine}
-                  onChange={(e) => setForm({ ...form, engine: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 focus:outline-none focus:border-amber-500/60"
-                >
-                  <option value="aurora-postgresql">Aurora PostgreSQL</option>
-                  <option value="aurora-mysql">Aurora MySQL</option>
-                </select>
-              </div>
-              {registerMode === "cross-account" && (
-                <Field
-                  label="Spoke Role ARN"
-                  value={form.spoke_role_arn}
-                  onChange={(v) => setForm({ ...form, spoke_role_arn: v })}
-                  placeholder="arn:aws:iam::<account>:role/dbops-spoke-role"
-                  mono
-                  fullWidth
-                />
-              )}
+
+              {/* Spoke role — Aurora cross-account only */}
+              {(form.engine === "aurora-postgresql" ||
+                form.engine === "aurora-mysql") &&
+                registerMode === "cross-account" && (
+                  <Field
+                    label="Spoke Role ARN"
+                    value={form.spoke_role_arn}
+                    onChange={(v) => setForm({ ...form, spoke_role_arn: v })}
+                    placeholder="arn:aws:iam::<account>:role/dbops-spoke-role"
+                    mono
+                    fullWidth
+                  />
+                )}
             </div>
 
-            {registerMode === "same-account" ? (
-              <div className="border-l-2 border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-[11px] text-zinc-400 leading-relaxed">
-                같은 계정의 Aurora를 등록합니다. DBOps의 Lambda execution role이
-                직접{" "}
-                <span className="font-mono text-zinc-300">
-                  rds:DescribeDBClusters
-                </span>{" "}
-                권한을 가지면 추가 설정 없이 연결됩니다.
-              </div>
-            ) : (
-              <div className="border-l-2 border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[11px] text-zinc-400 leading-relaxed space-y-1">
-                <div>
-                  Cross-account 등록 시 spoke 계정에 STS AssumeRole + RDS
-                  describe 권한이 있는 role이 필요합니다. 등록 시점에 STS{" "}
-                  <span className="font-mono text-zinc-300">AssumeRole</span> +{" "}
+            {/* Contextual hint banners */}
+            {(form.engine === "aurora-postgresql" ||
+              form.engine === "aurora-mysql") &&
+              (registerMode === "same-account" ? (
+                <div className="border-l-2 border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-[11px] text-zinc-400 leading-relaxed">
+                  같은 계정의 Aurora를 등록합니다. DBOps의 Lambda execution
+                  role이 직접{" "}
                   <span className="font-mono text-zinc-300">
                     rds:DescribeDBClusters
                   </span>{" "}
-                  로 연결을 검증한 뒤 저장합니다.
+                  권한을 가지면 추가 설정 없이 연결됩니다.
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSetupGuideOpen(true)}
-                  className="text-amber-300 hover:text-amber-200 underline underline-offset-2"
-                >
-                  Cross-account 설정 가이드 →
-                </button>
-              </div>
-            )}
+              ) : (
+                <div className="border-l-2 border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[11px] text-zinc-400 leading-relaxed space-y-1">
+                  <div>
+                    Cross-account 등록 시 spoke 계정에 STS AssumeRole + RDS
+                    describe 권한이 있는 role이 필요합니다. 등록 시점에 STS{" "}
+                    <span className="font-mono text-zinc-300">AssumeRole</span>{" "}
+                    +{" "}
+                    <span className="font-mono text-zinc-300">
+                      rds:DescribeDBClusters
+                    </span>{" "}
+                    로 연결을 검증한 뒤 저장합니다.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSetupGuideOpen(true)}
+                    className="text-amber-300 hover:text-amber-200 underline underline-offset-2"
+                  >
+                    Cross-account 설정 가이드 →
+                  </button>
+                </div>
+              ))}
 
             <div className="flex gap-2 pt-1">
               <button
@@ -899,45 +995,53 @@ export default function ClustersPage() {
                 onClick={handleRegister}
                 className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:bg-zinc-700 disabled:text-zinc-500 transition-colors"
               >
-                {submitting ? "검증 중…" : "등록 + 연결 검증"}
+                {submitting
+                  ? "등록 중…"
+                  : form.engine === "dynamodb" || form.engine === "docdb"
+                    ? "등록"
+                    : "등록 + 연결 검증"}
               </button>
-              <button
-                onClick={async () => {
-                  if (!form.cluster_id || !form.region) {
-                    setFeedback({
-                      kind: "err",
-                      msg: "cluster_id + region 이 필요합니다.",
-                    });
-                    return;
-                  }
-                  setTesting(true);
-                  setTestResult(null);
-                  setFeedback(null);
-                  try {
-                    const r = await testClusterConnection({
-                      cluster_id: form.cluster_id,
-                      region: form.region,
-                      spoke_role_arn:
-                        registerMode === "cross-account"
-                          ? form.spoke_role_arn
-                          : undefined,
-                    });
-                    setTestResult(r);
-                  } catch (e) {
-                    setFeedback({
-                      kind: "err",
-                      msg: e instanceof Error ? e.message : "test failed",
-                    });
-                  } finally {
-                    setTesting(false);
-                  }
-                }}
-                disabled={testing}
-                className="text-xs px-4 py-2 border border-zinc-700 text-zinc-300 hover:border-amber-500/60 hover:text-amber-200 disabled:opacity-50 transition-colors"
-                title="저장 없이 AssumeRole + DescribeDBClusters 만 실행해 보기"
-              >
-                {testing ? "테스트 중…" : "연결만 테스트"}
-              </button>
+              {/* Connection pre-flight test — Aurora only */}
+              {(form.engine === "aurora-postgresql" ||
+                form.engine === "aurora-mysql") && (
+                <button
+                  onClick={async () => {
+                    if (!form.cluster_id || !form.region) {
+                      setFeedback({
+                        kind: "err",
+                        msg: "cluster_id + region 이 필요합니다.",
+                      });
+                      return;
+                    }
+                    setTesting(true);
+                    setTestResult(null);
+                    setFeedback(null);
+                    try {
+                      const r = await testClusterConnection({
+                        cluster_id: form.cluster_id,
+                        region: form.region,
+                        spoke_role_arn:
+                          registerMode === "cross-account"
+                            ? form.spoke_role_arn
+                            : undefined,
+                      });
+                      setTestResult(r);
+                    } catch (e) {
+                      setFeedback({
+                        kind: "err",
+                        msg: e instanceof Error ? e.message : "test failed",
+                      });
+                    } finally {
+                      setTesting(false);
+                    }
+                  }}
+                  disabled={testing}
+                  className="text-xs px-4 py-2 border border-zinc-700 text-zinc-300 hover:border-amber-500/60 hover:text-amber-200 disabled:opacity-50 transition-colors"
+                  title="저장 없이 AssumeRole + DescribeDBClusters 만 실행해 보기"
+                >
+                  {testing ? "테스트 중…" : "연결만 테스트"}
+                </button>
+              )}
               <button
                 onClick={() => setShowForm(false)}
                 className="text-xs px-4 py-2 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"

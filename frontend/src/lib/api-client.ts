@@ -833,11 +833,12 @@ export async function fetchModels() {
 }
 
 export async function registerCluster(data: {
-  cluster_id: string;
+  cluster_id?: string;
   account_id: string;
   region: string;
   engine?: string;
   spoke_role_arn?: string;
+  resource_name?: string;
 }) {
   const res = await authedFetch(await api(`/api/clusters`), {
     method: "POST",
