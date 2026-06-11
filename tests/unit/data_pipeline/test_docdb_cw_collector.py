@@ -96,11 +96,22 @@ def test_uses_docdb_namespace_and_writer_instance_dim():
     assert result["writer"] == "docdb-1-writer"
     assert result["errors"] == []
 
-    # cluster_meta upsert must contain resource_details and engine='docdb'
+    # cluster_meta upsert must contain account_id, region, resource_details, engine='docdb'
     meta_sqls = [sql for sql, _ in cache_calls if "cluster_meta" in sql]
     assert meta_sqls, "Expected a cluster_meta upsert call"
     assert any("resource_details" in sql for sql in meta_sqls)
     assert any("engine='docdb'" in sql for sql in meta_sqls)
+    assert any("account_id" in sql for sql in meta_sqls), \
+        "cluster_meta INSERT must include account_id column"
+    assert any("region" in sql for sql in meta_sqls), \
+        "cluster_meta INSERT must include region column"
+
+    # Params must carry the actual account_id and region values
+    meta_params = [p for sql, p in cache_calls if "cluster_meta" in sql]
+    assert any(p.get("account_id") == "123456789012" for p in meta_params), \
+        "account_id param not passed to cluster_meta upsert"
+    assert any(p.get("region") == "us-east-1" for p in meta_params), \
+        "region param not passed to cluster_meta upsert"
 
 
 # ---------------------------------------------------------------------------

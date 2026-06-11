@@ -51,7 +51,9 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
     engine = resource.get("engine", "aurora-postgresql")
 
     result = {"cluster_id": cluster_id}
-    family = engine_family(engine)
+    # Fix 3: prefer an explicit engine_family field set during registration so dispatch
+    # is robust even if the engine string is malformed or uses a variant spelling.
+    family = resource.get("engine_family") or engine_family(engine)
 
     # ------------------------------------------------------------------
     # DynamoDB path — no RDS/PI/SQL/findings calls
@@ -62,7 +64,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
         table_name = resource.get("resource_name", cluster_id)
         try:
             result["dynamodb"] = collect_dynamodb_metrics(
-                cw, dynamo, cache_execute, cluster_id, table_name,
+                cw, dynamo, cache_execute, cluster_id, table_name, account_id, region,
             )
         except Exception as e:
             result["dynamodb_error"] = str(e)

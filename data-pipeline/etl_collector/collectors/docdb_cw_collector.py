@@ -47,12 +47,14 @@ def collect_docdb_metrics(cw, docdb, cache_execute, cluster_id, region, account_
                       members[0]["DBInstanceIdentifier"] if members else None)
         details = {"instances": [m.get("DBInstanceIdentifier") for m in members],
                    "instance_count": len(members)}
+        # Fix 1b: include account_id + region to satisfy NOT NULL constraint on fresh rows.
         cache_execute(
-            "INSERT INTO cluster_meta (cluster_id, engine, engine_version, status, resource_details, updated_at) "
-            "VALUES (:cid, 'docdb', :ver, :status, :details::jsonb, NOW()) "
+            "INSERT INTO cluster_meta (cluster_id, account_id, region, engine, engine_version, status, resource_details, updated_at) "
+            "VALUES (:cid, :account_id, :region, 'docdb', :ver, :status, :details::jsonb, NOW()) "
             "ON CONFLICT (cluster_id) DO UPDATE SET engine='docdb', engine_version=EXCLUDED.engine_version, "
             "status=EXCLUDED.status, resource_details=EXCLUDED.resource_details, updated_at=NOW()",
-            {"cid": cluster_id, "ver": c.get("EngineVersion", ""), "status": c.get("Status", ""),
+            {"cid": cluster_id, "account_id": account_id, "region": region,
+             "ver": c.get("EngineVersion", ""), "status": c.get("Status", ""),
              "details": json.dumps(details)})
     except Exception as e:
         errors.append(f"describe_db_clusters: {e}")

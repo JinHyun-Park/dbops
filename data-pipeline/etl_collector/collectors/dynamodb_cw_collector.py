@@ -31,15 +31,18 @@ def _insert(cache_execute, cluster_id, ts, metric_type, value, dims="{}"):
          "value": float(value), "dims": dims})
 
 
-def collect_dynamodb_metrics(cw, dynamo, cache_execute, cluster_id, table_name):
+def collect_dynamodb_metrics(cw, dynamo, cache_execute, cluster_id, table_name, account_id, region):
     end = datetime.utcnow()
     start = end - timedelta(minutes=10)
     inserted = 0
     errors = []
 
-    billing_mode = "PROVISIONED"
+    # Fix 2: initialize to None so a describe_table failure leaves billing_mode=None,
+    # which naturally skips the Provisioned* queries below (guard: == "PROVISIONED").
+    billing_mode = None
     try:
         t = dynamo.describe_table(TableName=table_name)["Table"]
+        # A successful describe with no BillingModeSummary IS provisioned — keep that default.
         billing_mode = (t.get("BillingModeSummary") or {}).get("BillingMode", "PROVISIONED")
         details = {
             "billing_mode": billing_mode,
@@ -48,12 +51,13 @@ def collect_dynamodb_metrics(cw, dynamo, cache_execute, cluster_id, table_name):
             "table_status": t.get("TableStatus", ""),
             "gsi": [g.get("IndexName") for g in t.get("GlobalSecondaryIndexes", [])],
         }
+        # Fix 1a: include account_id + region to satisfy NOT NULL constraint on fresh rows.
         cache_execute(
-            "INSERT INTO cluster_meta (cluster_id, engine, resource_details, updated_at) "
-            "VALUES (:cid, 'dynamodb', :details::jsonb, NOW()) "
+            "INSERT INTO cluster_meta (cluster_id, account_id, region, engine, resource_details, updated_at) "
+            "VALUES (:cid, :account_id, :region, 'dynamodb', :details::jsonb, NOW()) "
             "ON CONFLICT (cluster_id) DO UPDATE SET resource_details = EXCLUDED.resource_details, "
             "engine = 'dynamodb', updated_at = NOW()",
-            {"cid": cluster_id, "details": json.dumps(details)})
+            {"cid": cluster_id, "account_id": account_id, "region": region, "details": json.dumps(details)})
     except Exception as e:
         errors.append(f"describe_table: {e}")
 
