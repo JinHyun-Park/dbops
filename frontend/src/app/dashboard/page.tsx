@@ -801,7 +801,13 @@ export default function DashboardPage() {
 
                 {/* ── DynamoDB panels ── */}
                 {fam === "dynamodb" && (
-                  <DynamodbOverviewPanel clusterId={selectedCluster} />
+                  <>
+                    <MaintenanceHealthPanel
+                      clusterId={selectedCluster}
+                      engine={dashboardData.cluster?.engine}
+                    />
+                    <DynamodbOverviewPanel clusterId={selectedCluster} />
+                  </>
                 )}
 
                 {/* ── DocumentDB panels ── */}

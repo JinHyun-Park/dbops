@@ -143,30 +143,38 @@ def test_capacity_forecast_dynamodb_returns_not_applicable(monkeypatch):
 
 
 # ===========================================================================
-# 4. Health-findings — non-relational → empty findings, no error
+# 4. Health-findings — dynamodb now has findings capability → returns data
 # ===========================================================================
 
-def test_health_findings_dynamodb_returns_empty(monkeypatch):
-    """_health_findings for a dynamodb cluster must return empty findings list
-    without querying the DB."""
+def test_health_findings_dynamodb_returns_data(monkeypatch):
+    """_health_findings for a dynamodb cluster must now execute SQL and return
+    ddb_* findings because CAPABILITIES["dynamodb"]["findings"] = {"ddb"}.
+
+    This test was previously 'returns_empty' — updated when DynamoDB findings
+    support was added (Part B capability flag spec)."""
     monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+
+    fake_row = {
+        "id": "x", "check_type": "ddb_throttling", "severity": "warning",
+        "subject": "orders", "value_str": "12/min", "threshold_str": "0",
+        "recommendation": "Increase RCU.", "details": {}, "snapshot_time": "2026-06-01T00:00:00Z",
+    }
 
     query_called = []
 
     def _spy_query(sql, params=None):
         query_called.append(sql)
-        return [{"id": "x", "check_type": "health", "severity": "warning",
-                 "subject": "s", "value_str": "v", "threshold_str": "t",
-                 "recommendation": "r", "details": {}, "snapshot_time": "2026-06-01T00:00:00Z"}]
+        return [fake_row]
 
     result = handler._health_findings(_spy_query, "ddb-abc123")
 
-    assert result["findings"] == []
-    assert result["counts"] == {"critical": 0, "warning": 0, "info": 0}
-    assert result["snapshot_time"] is None
+    # DynamoDB now has findings — SQL must be executed and data returned.
+    assert len(result["findings"]) == 1
+    assert result["findings"][0]["check_type"] == "ddb_throttling"
+    assert result["counts"]["warning"] == 1
+    assert result["snapshot_time"] == "2026-06-01T00:00:00Z"
     assert result["cluster_id"] == "ddb-abc123"
-    # SQL must NOT have been executed for non-relational
-    assert not query_called, "SQL query should not be executed for non-relational clusters"
+    assert len(query_called) > 0, "SQL must be executed for dynamodb (findings capability enabled)"
 
 
 # ===========================================================================
@@ -522,3 +530,93 @@ def test_overview_hot_resource_relational_unchanged(monkeypatch):
     assert result["cluster"] == fake_meta_row
     # _lookup_cluster must NOT have been called (meta row was found)
     assert lookup_called == []
+
+
+# ===========================================================================
+# 9. _health_findings capability-driven gating (Part B spec)
+# ===========================================================================
+
+def test_health_findings_dynamodb_returns_findings_via_capability(monkeypatch):
+    """_health_findings for a dynamodb cluster must now return findings because
+    CAPABILITIES["dynamodb"]["findings"] = {"ddb"} is non-empty.
+    SQL must be executed and rows returned."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+
+    fake_row = {
+        "id": "d1", "check_type": "ddb_throttling", "severity": "warning",
+        "subject": "orders-table", "value_str": "throttled=12/min",
+        "threshold_str": "0", "recommendation": "Increase RCU/WCU provisioned capacity.",
+        "details": {}, "snapshot_time": "2026-06-12T00:00:00Z",
+    }
+
+    def _spy_query(sql, params=None):
+        return [fake_row]
+
+    result = handler._health_findings(_spy_query, "ddb-abc123")
+
+    assert len(result["findings"]) == 1
+    assert result["findings"][0]["check_type"] == "ddb_throttling"
+    assert result["counts"]["warning"] == 1
+    assert result["snapshot_time"] == "2026-06-12T00:00:00Z"
+    assert result["cluster_id"] == "ddb-abc123"
+
+
+def test_health_findings_documentdb_returns_empty_via_capability(monkeypatch):
+    """_health_findings for a documentdb cluster must return empty findings
+    because CAPABILITIES["documentdb"]["findings"] = set() is empty."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "docdb")
+
+    query_called = []
+
+    def _spy_query(sql, params=None):
+        query_called.append(sql)
+        return [{"id": "x", "check_type": "some_check", "severity": "warning",
+                 "subject": "s", "value_str": "v", "threshold_str": "t",
+                 "recommendation": "r", "details": {}, "snapshot_time": "2026-06-12T00:00:00Z"}]
+
+    result = handler._health_findings(_spy_query, "docdb-abc123")
+
+    assert result["findings"] == []
+    assert result["counts"] == {"critical": 0, "warning": 0, "info": 0}
+    assert result["snapshot_time"] is None
+    # documentdb has no findings capability — SQL must NOT be executed.
+    assert not query_called, "SQL should not execute for documentdb (empty findings capability)"
+
+
+def test_health_findings_relational_unchanged_with_capability(monkeypatch):
+    """_health_findings for relational clusters must still work as before —
+    the capability-driven gate must not break the existing relational path."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "aurora-postgresql")
+
+    fake_row = {
+        "id": "f1", "check_type": "txid_age", "severity": "critical",
+        "subject": "public.orders", "value_str": "2.1B", "threshold_str": "2.0B",
+        "recommendation": "Run VACUUM FREEZE.", "details": {}, "snapshot_time": "2026-06-12T01:00:00Z",
+    }
+
+    def _spy_query(sql, params=None):
+        return [fake_row]
+
+    result = handler._health_findings(_spy_query, "prod-pg")
+
+    assert len(result["findings"]) == 1
+    assert result["counts"]["critical"] == 1
+    assert result["snapshot_time"] == "2026-06-12T01:00:00Z"
+
+
+def test_health_findings_registry_unavailable_returns_registry_unavailable_flag(monkeypatch):
+    """When _registry_engine returns None, _health_findings must return
+    registry_unavailable=True and empty findings (fail-closed)."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: None)
+
+    query_called = []
+
+    def _spy_query(sql, params=None):
+        query_called.append(sql)
+        return []
+
+    result = handler._health_findings(_spy_query, "some-cluster")
+
+    assert result["findings"] == []
+    assert result.get("registry_unavailable") is True
+    assert not query_called

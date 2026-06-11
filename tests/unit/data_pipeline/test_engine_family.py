@@ -28,7 +28,8 @@ def test_capabilities_shape():
     assert ef.CAPABILITIES["dynamodb"]["cw_namespace"] == "AWS/DynamoDB"
     assert ef.CAPABILITIES["relational"]["findings"] == {"health", "cost", "param_fitness", "capacity_forecast"}
     assert ef.CAPABILITIES["documentdb"]["findings"] == set()
-    assert ef.CAPABILITIES["dynamodb"]["findings"] == set()
+    # DynamoDB findings are now enabled — ddb_* check_types from dynamodb_findings collector.
+    assert ef.CAPABILITIES["dynamodb"]["findings"] == {"ddb"}
 
 def test_dynamodb_cluster_id_is_regex_safe():
     import re

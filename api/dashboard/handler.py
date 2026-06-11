@@ -4,7 +4,7 @@ import re
 import traceback
 
 import boto3
-from engine_family import engine_family
+from engine_family import CAPABILITIES, engine_family
 
 
 def _parse_int(value, default, min_v=1, max_v=168):
@@ -1572,9 +1572,29 @@ def _extensions(query, cluster_id):
 def _health_findings(query, cluster_id):
     """Return the *latest* snapshot of maintenance health findings for this
     cluster. Older snapshots stay in the table for trend analysis but the
-    dashboard panel only ever shows the most recent one."""
+    dashboard panel only ever shows the most recent one.
+
+    Gating is capability-driven: any engine family whose CAPABILITIES["findings"]
+    set is non-empty gets findings returned. This lets relational (Aurora) AND
+    dynamodb both surface their respective findings, while documentdb (empty set)
+    still returns an empty response.
+
+    Registry lookup failure (None) → fail closed: return empty, signal
+    registry_unavailable so the UI can show a neutral placeholder."""
     eng = _registry_engine(cluster_id)
-    if eng is None or engine_family(eng) != "relational":
+    if eng is None:
+        # Registry lookup failed — fail closed; do not query the cache DB.
+        return {
+            "cluster_id": cluster_id,
+            "snapshot_time": None,
+            "counts": {"critical": 0, "warning": 0, "info": 0},
+            "findings": [],
+            "registry_unavailable": True,
+        }
+    fam = engine_family(eng)
+    cap = CAPABILITIES.get(fam, {})
+    if not cap.get("findings"):
+        # Family has no findings capability (e.g. documentdb) — return empty.
         return {
             "cluster_id": cluster_id,
             "snapshot_time": None,

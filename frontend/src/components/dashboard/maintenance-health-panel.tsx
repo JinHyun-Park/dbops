@@ -43,6 +43,12 @@ const CHECK_LABELS: Record<string, string> = {
   param_mysql_conn_buffers: "Tuning", // MySQL: per-connection 버퍼 × max_conn OOM 위험
   // 고갈 예측 경보 — storage/connection/ACU 한계 도달 ETA.
   capacity_forecast: "Capacity",
+  // DynamoDB findings — ddb_* check_types from dynamodb_findings collector.
+  ddb_throttling: "Throttling",
+  ddb_capacity_underprovisioned: "Capacity",
+  ddb_capacity_overprovisioned: "Capacity",
+  ddb_hot_partition: "Hot Partition",
+  ddb_ondemand_high_throughput: "Cost",
 };
 
 // Full PG tab set. MySQL exposes a trimmed list (VACUUM/Bloat/Extensions are
@@ -63,7 +69,19 @@ const TABS_PG = [
 // forecast (capacity_forecast is engine-agnostic) — so Tuning/Capacity apply.
 // VACUUM/Bloat/Indexes/Config/Extensions remain PG-only collectors.
 const TABS_MYSQL = ["All", "Tuning", "Capacity", "Cost"] as const;
-type Tab = (typeof TABS_PG)[number] | (typeof TABS_MYSQL)[number];
+// DynamoDB findings cover throttling, capacity sizing, hot-partition detection,
+// and on-demand cost signals — each gets its own filter tab.
+const TABS_DYNAMODB = [
+  "All",
+  "Throttling",
+  "Capacity",
+  "Hot Partition",
+  "Cost",
+] as const;
+type Tab =
+  | (typeof TABS_PG)[number]
+  | (typeof TABS_MYSQL)[number]
+  | (typeof TABS_DYNAMODB)[number];
 
 function tryParse(
   raw: HealthFinding["details"],
@@ -119,20 +137,27 @@ export function MaintenanceHealthPanel({
     return findings.filter((f) => CHECK_LABELS[f.check_type] === tab);
   }, [findings, tab]);
 
-  // If a PG-only tab is selected and we switch to a MySQL cluster, snap back
-  // to "All" so the user isn't stuck on a tab that no longer exists.
+  // If a tab is selected that doesn't exist for the current engine family,
+  // snap back to "All" so the user isn't stuck on a missing tab.
   useEffect(() => {
-    const allowed: string[] = ((engine || "").toLowerCase().includes("postgres")
+    const e = (engine || "").toLowerCase();
+    const allowed: string[] = (e.includes("postgres")
       ? TABS_PG
-      : TABS_MYSQL) as unknown as string[];
+      : e.includes("dynamodb")
+        ? TABS_DYNAMODB
+        : TABS_MYSQL) as unknown as string[];
     if (!allowed.includes(tab)) setTab("All");
   }, [engine, tab]);
 
-  // MySQL now emits Tuning/Capacity/Cost findings; only the PG-specific
-  // collectors (VACUUM/Bloat/Indexes/Config/Extensions) are absent, so all
-  // that differs by engine is the tab strip.
-  const isPg = (engine || "").toLowerCase().includes("postgres");
-  const tabs: readonly Tab[] = isPg ? TABS_PG : TABS_MYSQL;
+  // Select the correct tab strip per engine family.
+  const e = (engine || "").toLowerCase();
+  const isPg = e.includes("postgres");
+  const isDynamoDB = e.includes("dynamodb");
+  const tabs: readonly Tab[] = isPg
+    ? TABS_PG
+    : isDynamoDB
+      ? TABS_DYNAMODB
+      : TABS_MYSQL;
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 overflow-hidden">

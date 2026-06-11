@@ -44,7 +44,7 @@ CAPABILITIES = {
     DYNAMODB: {
         "sql": False, "rds_meta": False, "perf_insights": False,
         "cw_namespace": "AWS/DynamoDB",
-        "findings": set(),
+        "findings": {"ddb"},
     },
 }
 
