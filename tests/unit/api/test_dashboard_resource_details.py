@@ -119,6 +119,79 @@ def test_resource_details_malformed_json():
     assert result["resource_details"] is None
 
 
+def test_resource_details_docdb_engine_version_merged_from_column():
+    """engine_version stored as a cluster_meta column (not inside JSONB) must be
+    merged into resource_details so the DocDB panel can render it."""
+    rd_payload = {"instance_count": 3, "instances": ["docdb-instance-1", "docdb-instance-2"]}
+    rows = [{
+        "engine": "docdb",
+        "engine_version": "5.0.0",
+        "resource_details": rd_payload,  # already a dict (parsed JSONB)
+    }]
+    result = handler._resource_details(_make_query(rows), "my-docdb")
+
+    rd = result["resource_details"]
+    assert rd is not None
+    assert rd["engine_version"] == "5.0.0", "engine_version must be merged from column"
+
+
+def test_resource_details_docdb_engine_version_not_overwritten():
+    """If engine_version is already inside resource_details JSONB, the column
+    value must NOT overwrite it."""
+    rd_payload = {"instance_count": 2, "engine_version": "4.0.0"}
+    rows = [{
+        "engine": "docdb",
+        "engine_version": "5.0.0",  # column says 5.0.0
+        "resource_details": rd_payload,  # JSONB says 4.0.0 — keep this
+    }]
+    result = handler._resource_details(_make_query(rows), "my-docdb")
+
+    rd = result["resource_details"]
+    assert rd["engine_version"] == "4.0.0", "existing JSONB engine_version must not be overwritten"
+
+
+def test_resource_details_docdb_instances_normalised_to_objects():
+    """DocDB instances stored as plain strings must be normalised to
+    {"instance_id": <str>} objects so the frontend panel can render them."""
+    rd_payload = {
+        "instance_count": 2,
+        "instances": ["docdb-inst-1", "docdb-inst-2"],
+    }
+    rows = [{
+        "engine": "docdb",
+        "engine_version": "5.0.0",
+        "resource_details": rd_payload,
+    }]
+    result = handler._resource_details(_make_query(rows), "my-docdb")
+
+    instances = result["resource_details"]["instances"]
+    assert len(instances) == 2
+    for inst in instances:
+        assert isinstance(inst, dict), "each instance must be a dict"
+        assert "instance_id" in inst, "instance must have instance_id key"
+    assert instances[0]["instance_id"] == "docdb-inst-1"
+    assert instances[1]["instance_id"] == "docdb-inst-2"
+
+
+def test_resource_details_docdb_instances_already_objects_unchanged():
+    """If instances are already objects (e.g. from a newer collector), leave them
+    as-is without wrapping further."""
+    rd_payload = {
+        "instance_count": 1,
+        "instances": [{"instance_id": "docdb-inst-1", "status": "available"}],
+    }
+    rows = [{
+        "engine": "docdb",
+        "engine_version": "5.0.0",
+        "resource_details": rd_payload,
+    }]
+    result = handler._resource_details(_make_query(rows), "my-docdb")
+
+    instances = result["resource_details"]["instances"]
+    assert instances[0]["instance_id"] == "docdb-inst-1"
+    assert instances[0]["status"] == "available"
+
+
 def test_resource_details_via_lambda_handler(monkeypatch):
     """lambda_handler must route /resource-details to _resource_details and
     return 200 with the correct JSON body."""

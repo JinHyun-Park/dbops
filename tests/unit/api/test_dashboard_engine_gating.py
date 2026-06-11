@@ -448,3 +448,77 @@ def test_log_insights_registry_unavailable_fail_closed(monkeypatch):
     assert result.get("not_applicable") is True
     assert result.get("registry_unavailable") is True
     mock_boto3.client.assert_not_called()
+
+
+# ===========================================================================
+# 8. _overview cold-resource registry fallback
+# ===========================================================================
+
+def test_overview_cold_resource_falls_back_to_registry(monkeypatch):
+    """When cluster_meta has no row but the registry has the cluster,
+    _overview must return a cluster stub with engine and engine_family
+    from the registry so the frontend can gate on engine_family correctly."""
+    # Stub _lookup_cluster to return a registry row
+    monkeypatch.setattr(
+        handler,
+        "_lookup_cluster",
+        lambda cid: {"cluster_id": cid, "engine": "dynamodb"},
+    )
+
+    # query always returns empty — simulates no cluster_meta row and no metrics
+    def _empty_query(sql, params=None):
+        return []
+
+    result = handler._overview(_empty_query, "ddb-cold-123")
+
+    cluster = result["cluster"]
+    assert cluster is not None, "cluster must not be None when registry row exists"
+    assert cluster["engine"] == "dynamodb"
+    assert cluster["engine_family"] == "dynamodb"
+    assert cluster["cluster_id"] == "ddb-cold-123"
+    # Other fields should still be present and empty
+    assert result["metrics"] == []
+    assert result["top_queries"] == []
+    assert result["events"] == []
+
+
+def test_overview_cold_resource_no_registry_returns_none(monkeypatch):
+    """When cluster_meta has no row AND the registry has nothing,
+    _overview must return cluster=None (unchanged behaviour)."""
+    monkeypatch.setattr(handler, "_lookup_cluster", lambda cid: {})
+
+    def _empty_query(sql, params=None):
+        return []
+
+    result = handler._overview(_empty_query, "ghost-cluster")
+
+    assert result["cluster"] is None
+
+
+def test_overview_hot_resource_relational_unchanged(monkeypatch):
+    """When cluster_meta HAS a row, _overview must return that row verbatim
+    regardless of registry content — relational path must be unchanged."""
+    # Make sure registry is never consulted when meta has data
+    lookup_called = []
+    monkeypatch.setattr(
+        handler,
+        "_lookup_cluster",
+        lambda cid: lookup_called.append(cid) or {},
+    )
+
+    fake_meta_row = {
+        "cluster_id": "prod-pg",
+        "engine": "aurora-postgresql",
+        "status": "available",
+    }
+
+    def _query(sql, params=None):
+        if "cluster_meta" in sql:
+            return [fake_meta_row]
+        return []
+
+    result = handler._overview(_query, "prod-pg")
+
+    assert result["cluster"] == fake_meta_row
+    # _lookup_cluster must NOT have been called (meta row was found)
+    assert lookup_called == []

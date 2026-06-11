@@ -24,7 +24,8 @@ interface DdbDetails {
   billing_mode?: string | null;
   item_count?: number | null;
   table_size_bytes?: number | null;
-  gsi?: Array<{ index_name: string; [k: string]: unknown }> | null;
+  // Collector writes gsi as strings; UI writes as objects — accept both shapes.
+  gsi?: Array<string | { index_name?: string; [k: string]: unknown }> | null;
   table_status?: string | null;
 }
 
@@ -303,7 +304,12 @@ export function DynamodbOverviewPanel({ clusterId }: { clusterId: string }) {
               value={String(gsiList.length)}
               sub={
                 gsiList.length > 0
-                  ? gsiList.map((g) => g.index_name).join(", ")
+                  ? gsiList
+                      .map((g) =>
+                        typeof g === "string" ? g : g.index_name ?? "",
+                      )
+                      .filter(Boolean)
+                      .join(", ")
                   : undefined
               }
             />

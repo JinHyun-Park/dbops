@@ -704,8 +704,24 @@ def _overview(query, cluster_id):
         "ORDER BY event_time DESC LIMIT 10",
         {"cid": cluster_id},
     )
+
+    cluster_row = meta[0] if meta else None
+
+    # Cold-resource fallback: if cluster_meta has no row yet (first ETL not run),
+    # synthesise a minimal cluster stub from the registry so the frontend can gate
+    # on engine_family correctly instead of defaulting to "relational".
+    if not cluster_row:
+        reg = _lookup_cluster(cluster_id)
+        if reg:
+            eng = reg.get("engine") or ""
+            cluster_row = {
+                "cluster_id": cluster_id,
+                "engine": eng,
+                "engine_family": engine_family(eng),
+            }
+
     return {
-        "cluster": meta[0] if meta else None,
+        "cluster": cluster_row,
         "metrics": recent_metrics,
         "top_queries": top_queries,
         "events": recent_events,
@@ -2440,8 +2456,10 @@ def _resource_details(query, cluster_id: str) -> dict:
     parse back to a dict here so the frontend gets a proper object."""
     # cluster_meta has NO engine_family column (that lives on the DDB registry);
     # derive it from `engine` so this SELECT can't fail on a missing column.
+    # engine_version is stored as a plain column (not inside resource_details JSONB)
+    # by the DocDB collector — SELECT it explicitly so the DocDB panel can render it.
     rows = query(
-        "SELECT engine, resource_details "
+        "SELECT engine, engine_version, resource_details "
         "FROM cluster_meta WHERE cluster_id = :cid",
         {"cid": cluster_id},
     )
@@ -2460,6 +2478,27 @@ def _resource_details(query, cluster_id: str) -> dict:
         except (ValueError, TypeError):
             rd = None
     eng = row.get("engine")
+    eng_ver = row.get("engine_version")
+
+    # Normalise DocDB resource_details so the panel always gets a consistent shape:
+    #   engine_version — merge in from the cluster_meta column when absent from JSONB
+    #   instances      — collector stores plain strings; wrap each as {"instance_id": str}
+    if rd is not None and engine_family(eng) == "documentdb":
+        if isinstance(rd, dict):
+            # Merge engine_version from the column if not already present in JSONB
+            if eng_ver is not None and "engine_version" not in rd:
+                rd = {**rd, "engine_version": eng_ver}
+            # Normalise instances list: strings → {"instance_id": str}
+            instances = rd.get("instances")
+            if isinstance(instances, list):
+                normalised = []
+                for inst in instances:
+                    if isinstance(inst, str):
+                        normalised.append({"instance_id": inst})
+                    else:
+                        normalised.append(inst)
+                rd = {**rd, "instances": normalised}
+
     return {
         "cluster_id": cluster_id,
         "engine": eng,
