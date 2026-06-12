@@ -187,50 +187,62 @@ cluster is fine for 1-2 clusters; a fleet of 50+ makes onboarding painful.
 - Multi-cluster diff page (pick A and B, see metric-by-metric side-by-side).
 - Time-period diff (e.g., this week vs last week) overlay.
 
-### P3.6 Multi-engine support — DocumentDB / RDS non-Aurora / DynamoDB
+### P3.6 Multi-engine support — DocumentDB / DynamoDB ✅ (program #1–#5 shipped 2026-06)
 
-**Why:** DBOps today only handles Aurora MySQL/PostgreSQL. Expanding to
-sibling AWS database services would let one console cover the same DBA's
-fleet end-to-end (transactional + document + key-value).
+**Shipped** (engine-family approach, not the old `service`-enum plan): a thin
+`engine_family()` + `CAPABILITIES` layer (4 byte-identical copies + `lib/engine.ts`)
+keyed off `cluster_id`. DynamoDB = Table-as-resource (slug `ddb-<12hex>`), grouped
+by account/region. Delivered across 5 sequenced specs:
 
-**What — collectors:**
+- **#1 Foundation** — engine-family model, ETL dispatch (`_collect_one` branches
+  before any RDS/PI/CW call), per-family registration/discovery, `resource_details`
+  JSONB on `cluster_meta`, capability-gated dashboard shell + Fleet grouping.
+- **#2 DocumentDB diagnosis** — `docdb_findings.py` (connection saturation,
+  replica lag, cursor timeout, low cache hit), AWS/DocDB metrics + connections-limit.
+- **#3 DynamoDB diagnosis** — `dynamodb_findings.py` (throttling, capacity
+  under/over-provisioned, hot partition, on-demand high throughput, per-GSI
+  throttle), PK/SK/GSI/LSI structural surfacing.
+- **#4 MCP tools + AI** — `get_maintenance_findings` (engine-agnostic) + engine-aware
+  `get_health_status`; agent prompt is engine-family-aware; chat diagnoses NoSQL.
+- **#5 Simulation gating** — simulation tools/page are Aurora-only and cleanly
+  refuse NoSQL (`unsupported_engine`); `simulation_policy.cedar`; Cedar parity test.
+- **Dashboard parity (audit follow-up)** — ⛶ Expandable metric-expand + time-range
+  selector wiring + previously-uncollected-but-now-charted metrics on the
+  NoSQL overview panels (Codex parity audit TOP 3).
 
-- DocumentDB: `docdb.describe_db_clusters` (mirrors Aurora's API). Cluster
-  meta fits the existing `cluster_meta` schema; storage model is Aurora-like
-  (auto-scale, per-GB-used).
-- RDS non-Aurora (MySQL/PG/MariaDB): `rds.describe_db_instances`. `AllocatedStorage`
-  is fixed → **storage rightsize advice applies here** (allocated vs used
-  via `information_schema` / `pg_database_size`). Storage type (gp2/gp3/io1)
-  also affects rightsize recommendation.
-- DynamoDB: `dynamodb.list_tables` + `describe_table`. No traditional storage
-  knob, but `ProvisionedThroughput` (RCU/WCU) is the equivalent rightsize
-  target — emit `cost_dynamodb_capacity_oversized` when provisioned tier is
-  used and average consumed < 30% over 7 days.
+**Remaining follow-ups (concretely scoped, pick up independently):**
 
-**What — schema additions to `cluster_meta`:**
+- **DocDB cost rightsizing.** Aurora `cost_check` can't be reused as-is: DocDB
+  stores CPU as `cpu_utilization` (not `cpu`) and has no `instance_class` in
+  `cluster_meta`/`resource_details`. Plan: extend `docdb_cw_collector`/meta to
+  capture the writer instance class, then add a `docdb_cost_oversized` rule
+  inside `docdb_findings.py` (read `cpu_utilization` + class; skip burstable t-family).
+- **Dashboard parity — backend panels for new engines** (Codex audit, med/low):
+  - Health score for DynamoDB/DocDB (synthesize from throttle/latency/capacity
+    resp. CPU/connections/lag/cache — findings panel partially covers this today).
+  - Backup/snapshot panel: DocDB cluster snapshots + restore window; DynamoDB
+    PITR / on-demand backups (Aurora `BackupPanel` is relational-gated today).
+  - Events panel for DocDB (RDS-family events); capacity/usage forecast;
+    replication/topology view for DocDB cluster members; connection
+    pressure/headroom for DocDB; engine settings panel (DDB billing/PITR/TTL/
+    stream/GSI status; DocDB params/maintenance/deletion-protection).
+  - Per-GSI metric lines on the DynamoDB panel (collected with `dimensions.gsi`,
+    not yet exposed as selectable per-index series).
+- **NoSQL write / remediation tools** + Cedar policies + approval binding
+  (capacity change, TTL, index ops) — mirrors the operations server's approval flow.
+- **Mongo-protocol deep diagnosis** for DocumentDB (`serverStatus`, `currentOp`,
+  profiler/slow-op) — needs the connectivity decision from
+  `docs/adr/2026-06-12-aws-managed-mcp-servers.md` (thin pymongo read collector
+  in a VPC Lambda vs. read-only AWS DocDB MCP with credential-level least-privilege).
+- **DynamoDB capacity-mode cost simulator** (Provisioned↔On-Demand $ what-if) —
+  net-new; needs a region-specific Pricing-API-backed estimate (a hardcoded
+  pricing table goes stale; a wrong number is worse than none). Advice is
+  already delivered via #3's `ddb_capacity_overprovisioned` finding + #4 chat.
 
-- `allocated_storage_gb`, `actual_storage_used_gb`, `storage_type` (RDS path)
-- `provisioned_rcu`, `provisioned_wcu`, `billing_mode` (DDB path)
-- `service` enum: `aurora` | `documentdb` | `rds` | `dynamodb` to dispatch
-  collector + cost checks per resource.
-
-**What — cost_check.py:**
-
-- `_check_storage_rightsize` is scaffolded today and short-circuits on Aurora.
-  Implement the RDS branch (compare allocated vs used) + the DDB capacity
-  branch when the meta fields land.
-- `cost_storage_oversized` and `cost_dynamodb_capacity_oversized` need labels
-  in `maintenance-health-panel.tsx` CHECK_LABELS map.
-
-**What — frontend:**
-
-- Engine badge component (`lib/engine.ts`) needs DocDB / DDB variants beyond
-  the current postgres/mysql split.
-- Dashboard panels that are engine-specific today (Vacuum, Extensions) need
-  to gracefully no-op for DDB.
-
-**Out of scope:** Redshift / OpenSearch / RDS Custom — different operational
-shapes (cluster-management vs DB-tuning).
+**Still future (separate):** RDS non-Aurora (MySQL/PG/MariaDB) storage rightsize
+(`AllocatedStorage` vs used); cross-account ETL for new-engine resources (ETL
+`get_client` is local-account today). **Out of scope:** Redshift / OpenSearch /
+RDS Custom — different operational shapes.
 
 ---
 
