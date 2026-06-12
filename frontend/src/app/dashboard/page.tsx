@@ -576,7 +576,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </div>
-                <HealthScore clusterId={selectedCluster} />
+                <HealthScore clusterId={selectedCluster} engine={eng} />
               </div>
             );
           })()}
@@ -802,6 +802,10 @@ export default function DashboardPage() {
                 {/* ── DynamoDB panels ── */}
                 {fam === "dynamodb" && (
                   <>
+                    <HealthScore
+                      clusterId={selectedCluster}
+                      engine={dashboardData.cluster?.engine}
+                    />
                     <MaintenanceHealthPanel
                       clusterId={selectedCluster}
                       engine={dashboardData.cluster?.engine}
@@ -820,6 +824,10 @@ export default function DashboardPage() {
                 {/* ── DocumentDB panels ── */}
                 {fam === "documentdb" && (
                   <>
+                    <HealthScore
+                      clusterId={selectedCluster}
+                      engine={dashboardData.cluster?.engine}
+                    />
                     <MaintenanceHealthPanel
                       clusterId={selectedCluster}
                       engine={dashboardData.cluster?.engine}
