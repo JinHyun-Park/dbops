@@ -337,7 +337,7 @@ export function BackupPanel({
       )}
 
       {/* Inline create-snapshot form — admin-only, opened by the button */}
-      {snapOpen && (
+      {!readOnly && snapOpen && (
         <div className="mb-4 border border-zinc-800 bg-zinc-950 p-3">
           <div className="text-[11px] text-zinc-400 mb-2">
             수동 스냅샷을 생성합니다. 이름을 비워두면 자동으로 생성됩니다 (예:
@@ -377,7 +377,7 @@ export function BackupPanel({
 
       {/* Inline restore form — admin-only, strongest gate (type-to-confirm).
           Opened from a snapshot row or the PITR section. */}
-      {restoreMode && (
+      {!readOnly && restoreMode && (
         <div className="mb-4 border border-rose-500/40 bg-rose-950/20 p-3">
           <div className="text-[11px] text-rose-200 mb-2">
             ⚠ 복원은 <strong>새 클러스터</strong>를 생성합니다 (과금 발생).
