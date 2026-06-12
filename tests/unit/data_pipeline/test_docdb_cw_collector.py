@@ -202,3 +202,38 @@ def test_database_connections_limit_queried_and_inserted():
         f"Expected at least one INSERT with metric_type='db_connections_limit'. "
         f"Inserted metric_types: {[p.get('metric_type') for p in insert_params]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Writer instance class captured into resource_details (for docdb_cost_oversized)
+# ---------------------------------------------------------------------------
+
+def test_writer_instance_class_captured_in_resource_details():
+    """The collector resolves the writer's instance class via describe_db_instances
+    and stores it in resource_details.instance_class (consumed by the
+    docdb_cost_oversized rule)."""
+    import json as _json
+
+    cw = _make_cw()
+    client = _make_docdb("docdb-1-writer")
+    client.describe_db_instances.return_value = {
+        "DBInstances": [
+            {"DBInstanceIdentifier": "docdb-1-writer", "DBInstanceClass": "db.r6g.large"}
+        ]
+    }
+    cache_calls = []
+
+    result = docdb.collect_docdb_metrics(
+        cw,
+        client,
+        lambda sql, params: cache_calls.append((sql, params)),
+        "my-docdb-cluster",
+        "ap-northeast-2",
+        "123456789012",
+    )
+
+    assert result["errors"] == []
+    meta_params = [p for sql, p in cache_calls if "cluster_meta" in sql]
+    assert meta_params, "Expected a cluster_meta upsert call"
+    details = _json.loads(meta_params[0]["details"])
+    assert details["instance_class"] == "db.r6g.large"

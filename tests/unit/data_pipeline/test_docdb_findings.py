@@ -57,6 +57,11 @@ def _mock_execute(
     cache_hit_samples=_MIN_CACHE_SAMPLES,
     # control: whether limit row is present
     limit_present=True,
+    # cost rightsizing (rule 5): instance_class from cluster_meta + 7d cpu agg
+    instance_class=None,
+    cpu_avg=None,
+    cpu_p95=None,
+    cpu_samples=0,
 ):
     """Return a fake _execute side-effect that branches on SQL keywords."""
 
@@ -80,6 +85,13 @@ def _mock_execute(
             }
             return [row]
 
+        # cost rule 5: instance_class from cluster_meta.resource_details
+        if "cluster_meta" in sql_lower and "instance_class" in sql_lower:
+            return [{"instance_class": instance_class}]
+        # cost rule 5: 7-day cpu_utilization aggregate
+        if "cpu_utilization" in sql_lower and "avg_cpu" in sql_lower:
+            return [{"avg_cpu": cpu_avg, "p95_cpu": cpu_p95, "samples": cpu_samples}]
+
         return []
 
     return fake
@@ -93,6 +105,10 @@ def _run(
     avg_buffer_cache_hit=99.0,
     cache_hit_samples=_MIN_CACHE_SAMPLES,
     limit_present=True,
+    instance_class=None,
+    cpu_avg=None,
+    cpu_p95=None,
+    cpu_samples=0,
 ):
     """Run the collector with patched _execute; return (emitted list, result dict).
 
@@ -107,6 +123,10 @@ def _run(
         avg_buffer_cache_hit=avg_buffer_cache_hit,
         cache_hit_samples=cache_hit_samples,
         limit_present=limit_present,
+        instance_class=instance_class,
+        cpu_avg=cpu_avg,
+        cpu_p95=cpu_p95,
+        cpu_samples=cpu_samples,
     )
 
     with patch.object(df, "_execute") as mock_ex:
@@ -432,3 +452,61 @@ def test_result_dict_structure():
     assert result["cluster_id"] == _CLUSTER_ID
     assert "findings_emitted" in result
     assert isinstance(result["findings_emitted"], int)
+
+
+# ---------------------------------------------------------------------------
+# Rule 5 — docdb_cost_oversized (7-day CPU rightsizing on a SIZED instance)
+# ---------------------------------------------------------------------------
+
+def test_cost_oversized_sized_low_cpu_emits():
+    """Sized instance (db.r6g.large) with 7d avg CPU < 30% & p95 < 60% and enough
+    samples → docdb_cost_oversized (info)."""
+    emitted, _ = _run(
+        instance_class="db.r6g.large",
+        cpu_avg=12.0,
+        cpu_p95=20.0,
+        cpu_samples=200,
+    )
+    finding = next((e for e in emitted if e["check_type"] == "docdb_cost_oversized"), None)
+    assert finding is not None, f"Expected docdb_cost_oversized, got: {[e['check_type'] for e in emitted]}"
+    assert finding["severity"] == "info"
+    assert "db.r6g.large" in finding["recommendation"]
+
+
+def test_cost_oversized_burstable_skipped():
+    """Burstable t-family (db.t3.medium) is never flagged for downsize even at low CPU."""
+    emitted, _ = _run(
+        instance_class="db.t3.medium",
+        cpu_avg=12.0,
+        cpu_p95=20.0,
+        cpu_samples=200,
+    )
+    assert not any(e["check_type"] == "docdb_cost_oversized" for e in emitted)
+
+
+def test_cost_oversized_no_instance_class_skipped():
+    """No instance_class captured (older meta / collector not yet run) → rule self-skips."""
+    emitted, _ = _run(instance_class=None, cpu_avg=12.0, cpu_p95=20.0, cpu_samples=200)
+    assert not any(e["check_type"] == "docdb_cost_oversized" for e in emitted)
+
+
+def test_cost_oversized_high_cpu_skipped():
+    """Sized instance but CPU not low (avg >= 30%) → no downsize advice."""
+    emitted, _ = _run(
+        instance_class="db.r6g.large",
+        cpu_avg=45.0,
+        cpu_p95=70.0,
+        cpu_samples=200,
+    )
+    assert not any(e["check_type"] == "docdb_cost_oversized" for e in emitted)
+
+
+def test_cost_oversized_insufficient_samples_skipped():
+    """Sized + low CPU but too few samples → no finding (avoid flagging brand-new clusters)."""
+    emitted, _ = _run(
+        instance_class="db.r6g.large",
+        cpu_avg=12.0,
+        cpu_p95=20.0,
+        cpu_samples=5,
+    )
+    assert not any(e["check_type"] == "docdb_cost_oversized" for e in emitted)

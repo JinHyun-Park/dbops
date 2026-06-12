@@ -46,8 +46,27 @@ def collect_docdb_metrics(cw, docdb, cache_execute, cluster_id, region, account_
         members = c.get("DBClusterMembers", [])
         writer = next((m["DBInstanceIdentifier"] for m in members if m.get("IsClusterWriter")),
                       members[0]["DBInstanceIdentifier"] if members else None)
+        # Capture the writer's instance class so the cost-rightsizing finding
+        # (docdb_cost_oversized) can name the instance + skip burstable t-family.
+        # DBClusterMembers don't carry the class, so a describe_db_instances is
+        # needed; failure is non-fatal (class stays None → rule self-skips).
+        writer_class = None
+        if writer:
+            try:
+                wi = docdb.describe_db_instances(
+                    Filters=[{"Name": "db-instance-id", "Values": [writer]}]
+                ).get("DBInstances", [])
+                if wi:
+                    writer_class = wi[0].get("DBInstanceClass")
+            except Exception as e:
+                errors.append(f"describe_db_instances: {e}")
+        # Coerce to str-or-None: real AWS returns a string class; anything else
+        # (unexpected shape) must not poison the json.dumps(details) below.
+        if not isinstance(writer_class, str):
+            writer_class = None
         details = {"instances": [m.get("DBInstanceIdentifier") for m in members],
-                   "instance_count": len(members)}
+                   "instance_count": len(members),
+                   "instance_class": writer_class}
         # Fix 1b: include account_id + region to satisfy NOT NULL constraint on fresh rows.
         cache_execute(
             "INSERT INTO cluster_meta (cluster_id, account_id, region, engine, engine_version, status, resource_details, updated_at) "

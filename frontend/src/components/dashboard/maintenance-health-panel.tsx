@@ -54,6 +54,7 @@ const CHECK_LABELS: Record<string, string> = {
   docdb_replica_lag: "Replica Lag",
   docdb_cursor_timeout: "Cursors",
   docdb_low_cache_hit: "Cache Hit",
+  docdb_cost_oversized: "Cost",
 };
 
 // Full PG tab set. MySQL exposes a trimmed list (VACUUM/Bloat/Extensions are
@@ -91,6 +92,7 @@ const TABS_DOCDB = [
   "Replica Lag",
   "Cursors",
   "Cache Hit",
+  "Cost",
 ] as const;
 type Tab =
   | (typeof TABS_PG)[number]
