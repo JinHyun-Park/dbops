@@ -561,26 +561,29 @@ def test_health_findings_dynamodb_returns_findings_via_capability(monkeypatch):
     assert result["cluster_id"] == "ddb-abc123"
 
 
-def test_health_findings_documentdb_returns_empty_via_capability(monkeypatch):
-    """_health_findings for a documentdb cluster must return empty findings
-    because CAPABILITIES["documentdb"]["findings"] = set() is empty."""
+def test_health_findings_documentdb_returns_findings_via_capability(monkeypatch):
+    """_health_findings for a documentdb cluster must return findings because
+    spec #2 (DocumentDB diagnosis) set CAPABILITIES["documentdb"]["findings"]
+    = {"docdb"} (non-empty). Mirrors the dynamodb path above."""
     monkeypatch.setattr(handler, "_registry_engine", lambda cid: "docdb")
 
-    query_called = []
+    fake_row = {
+        "id": "x", "check_type": "docdb_connection_saturation", "severity": "warning",
+        "subject": "connections", "value_str": "85%", "threshold_str": "80%",
+        "recommendation": "Use connection pooling / raise instance class.",
+        "details": {}, "snapshot_time": "2026-06-12T00:00:00Z",
+    }
 
     def _spy_query(sql, params=None):
-        query_called.append(sql)
-        return [{"id": "x", "check_type": "some_check", "severity": "warning",
-                 "subject": "s", "value_str": "v", "threshold_str": "t",
-                 "recommendation": "r", "details": {}, "snapshot_time": "2026-06-12T00:00:00Z"}]
+        return [fake_row]
 
     result = handler._health_findings(_spy_query, "docdb-abc123")
 
-    assert result["findings"] == []
-    assert result["counts"] == {"critical": 0, "warning": 0, "info": 0}
-    assert result["snapshot_time"] is None
-    # documentdb has no findings capability — SQL must NOT be executed.
-    assert not query_called, "SQL should not execute for documentdb (empty findings capability)"
+    assert len(result["findings"]) == 1
+    assert result["findings"][0]["check_type"] == "docdb_connection_saturation"
+    assert result["counts"]["warning"] == 1
+    assert result["snapshot_time"] == "2026-06-12T00:00:00Z"
+    assert result["cluster_id"] == "docdb-abc123"
 
 
 def test_health_findings_relational_unchanged_with_capability(monkeypatch):

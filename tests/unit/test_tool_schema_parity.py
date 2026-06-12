@@ -19,6 +19,17 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[2]
 _SCHEMA_SRC = (_REPO / "cdk" / "tool_definitions.py").read_text()
 _TOOLS_ROOT = _REPO / "mcp-servers" / "mcp_servers"
+_CEDAR_ROOT = _REPO / "cdk" / "policies" / "cedar"
+
+# READ-ONLY MCP 서버 → 그 서버 전 툴이 permit 되어야 하는 Cedar 정책 파일.
+# 이 서버들은 모든 툴이 read-only이므로 단일 permit allowlist에 전부 들어가야
+# 한다(README: "All performance and incident tools are read-only — always
+# permitted"). operations는 MIXED(write는 approved=true 필요)라 정책 구조가
+# 달라 이 불변식에서 의도적으로 제외한다.
+_READONLY_POLICY = {
+    "performance": "performance_policy.cedar",
+    "incident": "incident_policy.cedar",
+}
 
 # 핸들러 시그니처에 있지만 Gateway에 의도적으로 노출하지 않는 파라미터.
 # 추가할 때는 반드시 사유를 적을 것.
@@ -63,6 +74,46 @@ def _parse_handlers() -> dict[str, list[str]]:
                     if a.arg not in ("cache", "rds", "self")
                 ]
     return handlers
+
+
+def _parse_handler_tools(server: str) -> set[str]:
+    """한 서버의 tools/*.py에서 `*_impl` 툴 이름만 추출."""
+    tools: set[str] = set()
+    for p in (_TOOLS_ROOT / server / "tools").glob("*.py"):
+        for node in ast.walk(ast.parse(p.read_text())):
+            if isinstance(node, ast.FunctionDef) and node.name.endswith("_impl"):
+                tools.add(node.name[: -len("_impl")])
+    return tools
+
+
+def _parse_cedar_actions(policy_file: str) -> set[str]:
+    """Cedar 정책 파일에서 Action::"name" 토큰 전부 추출."""
+    src = (_CEDAR_ROOT / policy_file).read_text()
+    return set(re.findall(r'Action::"([^"]+)"', src))
+
+
+def test_every_readonly_tool_is_permitted_in_cedar_policy():
+    """READ-ONLY 서버의 모든 툴이 Cedar permit allowlist에 있어야 한다.
+
+    네 번째 재발 버그 패밀리: 핸들러+스키마에는 추가했으나 Cedar 정책
+    allowlist에 빠뜨려, Gateway 기본 DENY 하에서 툴이 조용히 차단되는 경우
+    (#4에서 get_maintenance_findings; 동시에 explain_plan/get_vacuum_stats/
+    recommend_index/diagnose_root_cause 누락도 적발). 새 read-only 툴을
+    추가하면 이 테스트가 Cedar 등록을 강제한다.
+    """
+    problems = []
+    for server, policy_file in sorted(_READONLY_POLICY.items()):
+        tools = _parse_handler_tools(server)
+        assert tools, f"{server}: 핸들러 툴 파싱 실패"
+        permitted = _parse_cedar_actions(policy_file)
+        missing = sorted(tools - permitted)
+        if missing:
+            problems.append(f"{server} ({policy_file}): allowlist 누락 {missing}")
+    assert not problems, (
+        "READ-ONLY 툴이 Cedar permit allowlist에 없음 — Gateway 기본 DENY에서 "
+        "차단됩니다. cdk/policies/cedar/*.cedar에 Action을 추가하세요:\n"
+        + "\n".join(problems)
+    )
 
 
 def test_every_handler_param_is_exposed_in_gateway_schema():

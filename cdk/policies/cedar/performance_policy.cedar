@@ -11,7 +11,10 @@ permit(
     Action::"detect_anomalies",
     Action::"detect_regressions",
     Action::"forecast_capacity",
-    Action::"get_performance_summary"
+    Action::"get_performance_summary",
+    Action::"explain_plan",
+    Action::"get_vacuum_stats",
+    Action::"recommend_index"
   ],
   resource
 );

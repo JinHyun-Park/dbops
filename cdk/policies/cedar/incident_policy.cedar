@@ -8,7 +8,9 @@ permit(
     Action::"search_logs",
     Action::"correlate_signals",
     Action::"get_incident_summary",
-    Action::"find_similar_incidents"
+    Action::"find_similar_incidents",
+    Action::"get_maintenance_findings",
+    Action::"diagnose_root_cause"
   ],
   resource
 );
