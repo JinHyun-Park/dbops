@@ -7,6 +7,7 @@ They are applied outside agent code — the agent cannot bypass them.
 
 - `cedar/performance_policy.cedar` — READ-ONLY for all performance tools
 - `cedar/incident_policy.cedar` — READ-ONLY for all incident tools
+- `cedar/simulation_policy.cedar` — READ-ONLY for all simulation tools (what-if estimates)
 - `cedar/operations_policy.cedar` — MIXED: read auto, write requires approval
 
 ## How Policies Are Applied
@@ -29,5 +30,6 @@ They are applied outside agent code — the agent cannot bypass them.
 # After AgentCore Gateway is deployed:
 agentcore policy create --name dbops-performance --file cedar/performance_policy.cedar
 agentcore policy create --name dbops-incident --file cedar/incident_policy.cedar
+agentcore policy create --name dbops-simulation --file cedar/simulation_policy.cedar
 agentcore policy create --name dbops-operations --file cedar/operations_policy.cedar
 ```

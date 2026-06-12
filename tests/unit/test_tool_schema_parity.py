@@ -23,12 +23,13 @@ _CEDAR_ROOT = _REPO / "cdk" / "policies" / "cedar"
 
 # READ-ONLY MCP 서버 → 그 서버 전 툴이 permit 되어야 하는 Cedar 정책 파일.
 # 이 서버들은 모든 툴이 read-only이므로 단일 permit allowlist에 전부 들어가야
-# 한다(README: "All performance and incident tools are read-only — always
-# permitted"). operations는 MIXED(write는 approved=true 필요)라 정책 구조가
-# 달라 이 불변식에서 의도적으로 제외한다.
+# 한다(performance/incident는 진단 read, simulation은 what-if 추정만 — 변경
+# 없음). operations는 MIXED(write는 approved=true 필요)라 정책 구조가 달라 이
+# 불변식에서 의도적으로 제외한다.
 _READONLY_POLICY = {
     "performance": "performance_policy.cedar",
     "incident": "incident_policy.cedar",
+    "simulation": "simulation_policy.cedar",
 }
 
 # 핸들러 시그니처에 있지만 Gateway에 의도적으로 노출하지 않는 파라미터.

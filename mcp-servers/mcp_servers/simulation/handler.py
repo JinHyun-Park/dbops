@@ -5,6 +5,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.engine_family import CAPABILITIES
+from mcp_servers.shared.engine_family import engine_family as _engine_family
 from mcp_servers.simulation.tools.ddl_impact import simulate_ddl_impact_impl
 from mcp_servers.simulation.tools.parameter_simulation import simulate_parameter_change_impl
 from mcp_servers.simulation.tools.scaling_simulation import simulate_scaling_impl
@@ -94,6 +96,26 @@ TOOLS = {
 }
 
 
+def _resolve_family(cluster_id):
+    """Resolve the engine family from cluster_meta via the cache. Returns None
+    (→ DEFAULT-PERMIT) when cluster_id is empty, the row is missing, or the
+    lookup errors — mirroring the execute_sql guard so legacy/mock/transient
+    paths never false-positive."""
+    if not cluster_id:
+        return None
+    try:
+        rows = cache.execute(
+            "SELECT engine FROM cluster_meta WHERE cluster_id = :cid",
+            {"cid": cluster_id},
+        )
+    except Exception as e:
+        print(f"[simulation] family lookup failed for {cluster_id}: {e}")
+        return None
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+        return _engine_family(rows[0].get("engine"))
+    return None
+
+
 def _extract_tool_name(context):
     cc = getattr(context, "client_context", None)
     if not cc:
@@ -116,6 +138,24 @@ def lambda_handler(event, context):
         ]}
 
     if tool_name and tool_name in TOOLS:
+        # Engine-family guard: simulation (upgrade/parameter/DDL/scaling) is an
+        # Aurora-specific feature — version-upgrade, SQL DDL, DB parameter groups,
+        # and ACU/instance resize have no NoSQL equivalent. Refuse cleanly for
+        # documentdb/dynamodb so the agent doesn't run Aurora logic on a NoSQL
+        # resource. DEFAULT-PERMIT on unknown/missing/error (mirror execute_sql).
+        cluster_id = (event or {}).get("cluster_id") if isinstance(event, dict) else None
+        fam = _resolve_family(cluster_id)
+        if isinstance(fam, str) and not CAPABILITIES.get(fam, {}).get("simulation", True):
+            return {"content": [{"type": "text", "text": json.dumps({
+                "status": "unsupported_engine",
+                "engine_family": fam,
+                "cluster_id": cluster_id,
+                "message": (
+                    "시뮬레이션(업그레이드·파라미터·DDL·스케일링)은 Aurora(PostgreSQL/MySQL) "
+                    "전용입니다. DynamoDB 용량/비용이나 DocumentDB 스케일링은 "
+                    "get_maintenance_findings로 진단하고, 변경은 AWS Console/CDK로 적용하세요."
+                ),
+            })}]}
         try:
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}

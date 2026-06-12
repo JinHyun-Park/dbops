@@ -32,17 +32,17 @@ def engine_family(engine):
 # pre-branch RDS calls and the dashboard backend endpoints.
 CAPABILITIES = {
     RELATIONAL: {
-        "sql": True, "rds_meta": True, "perf_insights": True,
+        "sql": True, "rds_meta": True, "perf_insights": True, "simulation": True,
         "cw_namespace": "AWS/RDS",
         "findings": {"health", "cost", "param_fitness", "capacity_forecast"},
     },
     DOCUMENTDB: {
-        "sql": False, "rds_meta": True, "perf_insights": False,
+        "sql": False, "rds_meta": True, "perf_insights": False, "simulation": False,
         "cw_namespace": "AWS/DocDB",
         "findings": {"docdb"},
     },
     DYNAMODB: {
-        "sql": False, "rds_meta": False, "perf_insights": False,
+        "sql": False, "rds_meta": False, "perf_insights": False, "simulation": False,
         "cw_namespace": "AWS/DynamoDB",
         "findings": {"ddb"},
     },
