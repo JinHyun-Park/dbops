@@ -810,6 +810,10 @@ export default function DashboardPage() {
                       clusterId={selectedCluster}
                       range={range}
                     />
+                    <BackupPanel
+                      clusterId={selectedCluster}
+                      engine={dashboardData.cluster?.engine}
+                    />
                   </>
                 )}
 
@@ -823,6 +827,10 @@ export default function DashboardPage() {
                     <DocdbOverviewPanel
                       clusterId={selectedCluster}
                       range={range}
+                    />
+                    <BackupPanel
+                      clusterId={selectedCluster}
+                      engine={dashboardData.cluster?.engine}
                     />
                   </>
                 )}

@@ -1658,6 +1658,22 @@ export interface BackupsResponse {
   manual_snapshot_count: number;
   snapshots: BackupSnapshot[];
   checked_at: number;
+  // Engine-family tag (relational | documentdb | dynamodb). Absent on older
+  // relational responses → treated as relational by the panel.
+  engine_family?: string;
+  // DynamoDB-only: PITR posture + on-demand backups (no RDS-style snapshots).
+  table_name?: string;
+  pitr_enabled?: boolean;
+  on_demand_backups?: DdbOnDemandBackup[];
+  on_demand_count?: number;
+}
+
+export interface DdbOnDemandBackup {
+  name: string | null;
+  status: string | null;
+  created: string | null;
+  size_bytes: number | null;
+  type: string | null;
 }
 
 export async function fetchBackups(

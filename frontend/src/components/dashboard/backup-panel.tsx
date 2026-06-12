@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-client";
 import { fmtNumber } from "@/lib/format";
 import { isAdmin } from "@/lib/auth";
+import { engineFamily } from "@/lib/engine";
 
 function relTime(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -22,7 +23,13 @@ function relTime(iso: string | null | undefined): string {
   return `${Math.floor(h / 24)}일 전`;
 }
 
-export function BackupPanel({ clusterId }: { clusterId: string }) {
+export function BackupPanel({
+  clusterId,
+  engine,
+}: {
+  clusterId: string;
+  engine?: string;
+}) {
   const [data, setData] = useState<BackupsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [showSnapshots, setShowSnapshots] = useState(false);
@@ -157,6 +164,128 @@ export function BackupPanel({ clusterId }: { clusterId: string }) {
         ? "text-amber-400"
         : "text-emerald-400";
 
+  const fam = engineFamily(engine);
+  // Non-relational backup views are READ-ONLY — snapshot create / restore POST
+  // to the Aurora-only write handler, so those controls are hidden here.
+  const readOnly = fam !== "relational";
+
+  // DynamoDB has no RDS-style cluster snapshots — show PITR posture + on-demand
+  // backups instead. Enabling PITR / creating backups is an AWS Console/CDK
+  // action (not yet in the platform's write surface).
+  if (fam === "dynamodb") {
+    const pitr = !!data?.pitr_enabled;
+    const backups = data?.on_demand_backups ?? [];
+    return (
+      <div className="bg-zinc-900/50 border border-zinc-800 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm text-zinc-200 font-medium">
+            Backup &amp; Recovery
+            <span className="ml-2 px-1.5 py-0.5 bg-zinc-700/40 text-zinc-400 border border-zinc-700 text-[10px]">
+              읽기 전용
+            </span>
+          </div>
+          <button
+            onClick={load}
+            disabled={loading}
+            className="text-[10px] text-zinc-500 hover:text-zinc-300 disabled:opacity-50"
+          >
+            {loading ? "…" : "↻"}
+          </button>
+        </div>
+
+        {data?.error && (
+          <div
+            className={`text-xs mb-3 px-3 py-2 border ${
+              data.info
+                ? "text-zinc-400 border-zinc-700 bg-zinc-800/30"
+                : "text-rose-300 border-rose-500/40 bg-rose-500/10"
+            }`}
+          >
+            {data.error}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+          <div>
+            <div className="text-zinc-500 text-xs mb-1">
+              Point-in-Time Recovery
+            </div>
+            <div
+              className={`font-mono ${
+                pitr ? "text-emerald-400" : "text-zinc-500"
+              }`}
+            >
+              {pitr ? "활성" : "비활성"}
+            </div>
+          </div>
+          <div>
+            <div className="text-zinc-500 text-xs mb-1">On-Demand Backups</div>
+            <div className="text-zinc-100 font-mono">{backups.length}</div>
+          </div>
+          <div>
+            <div className="text-zinc-500 text-xs mb-1">Latest Restorable</div>
+            <div className="text-zinc-300 text-xs">
+              {relTime(data?.latest_restorable_time)}
+            </div>
+          </div>
+        </div>
+
+        {pitr &&
+          data?.earliest_restorable_time &&
+          data?.latest_restorable_time && (
+            <div className="mt-4">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                Point-in-Time Recovery 윈도우
+              </div>
+              <div className="relative h-5 bg-zinc-800 border border-zinc-700 overflow-hidden">
+                <div
+                  className="absolute inset-y-0 left-0 bg-emerald-500/20 border-r border-emerald-500/40"
+                  style={{ width: "100%" }}
+                />
+                <div className="absolute inset-0 flex items-center justify-between px-2 text-[10px] font-mono text-zinc-400">
+                  <span>
+                    {new Date(data.earliest_restorable_time).toLocaleString()}
+                  </span>
+                  <span className="text-emerald-300">
+                    {new Date(data.latest_restorable_time).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+        {backups.length > 0 ? (
+          <div className="mt-4 border border-zinc-800 divide-y divide-zinc-800 max-h-64 overflow-y-auto">
+            {backups.map((b) => (
+              <div
+                key={b.name}
+                className="px-3 py-2 flex items-baseline justify-between gap-3"
+              >
+                <span className="text-xs text-zinc-200 font-mono truncate">
+                  {b.name}
+                </span>
+                <div className="text-[10px] text-zinc-500 tabular-nums flex-shrink-0">
+                  {b.created ? relTime(b.created) : "—"}
+                  {b.size_bytes != null && (
+                    <span className="ml-2">{fmtNumber(b.size_bytes)} B</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          !data?.error && (
+            <div className="mt-4 text-[11px] text-zinc-500 border border-zinc-800 bg-zinc-800/20 px-3 py-2">
+              {pitr
+                ? "온디맨드 백업이 없습니다. PITR로 위 구간의 임의 시점 복원이 가능합니다."
+                : "PITR가 비활성이고 온디맨드 백업이 없습니다. DynamoDB 백업은 AWS Console 또는 CDK에서 설정하세요 (현재 플랫폼은 읽기 전용)."}
+            </div>
+          )
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-5">
       <div className="flex items-center justify-between mb-3">
@@ -167,9 +296,14 @@ export function BackupPanel({ clusterId }: { clusterId: string }) {
               {data.snapshot_count} snapshots
             </span>
           )}
+          {readOnly && (
+            <span className="ml-2 px-1.5 py-0.5 bg-zinc-700/40 text-zinc-400 border border-zinc-700 text-[10px]">
+              읽기 전용
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3">
-          {admin && (
+          {admin && !readOnly && (
             <button
               onClick={() => {
                 setSnapError(null);
@@ -401,7 +535,7 @@ export function BackupPanel({ clusterId }: { clusterId: string }) {
           <div className="text-[10px] text-zinc-600 mt-0.5">
             이 구간의 아무 시점으로 복원할 수 있습니다 (PITR)
           </div>
-          {admin && (
+          {admin && !readOnly && (
             <button
               onClick={() => openRestore("pitr")}
               className="mt-2 text-[10px] px-2 py-1 border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 transition-colors"
@@ -429,7 +563,7 @@ export function BackupPanel({ clusterId }: { clusterId: string }) {
                 <SnapshotRow
                   key={s.id}
                   snapshot={s}
-                  admin={admin}
+                  admin={admin && !readOnly}
                   onRestore={
                     s.status === "available"
                       ? () => openRestore("snapshot", s.id)

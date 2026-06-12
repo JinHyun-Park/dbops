@@ -2168,6 +2168,166 @@ def _topology(cluster_id: str) -> dict:
     }
 
 
+def _backups_docdb(cluster_id: str) -> dict:
+    """DocumentDB backup inventory (read-only). DocDB mirrors the RDS cluster
+    snapshot API, so this is the relational path with a `docdb` client.
+    `cluster_id` IS the DocDB DBClusterIdentifier (not a slug)."""
+    from datetime import datetime, timezone
+
+    docdb = _cluster_session(cluster_id).client("docdb")
+
+    def _iso(dt):
+        if not dt:
+            return None
+        try:
+            return dt.astimezone(timezone.utc).isoformat()
+        except (AttributeError, ValueError):
+            return str(dt)
+
+    not_real = {
+        "cluster_id": cluster_id,
+        "engine_family": "documentdb",
+        "error": (
+            "이 DocumentDB 클러스터의 백업 정보를 조회할 수 없습니다 — 등록되지 "
+            "않았거나 접근 권한이 없습니다."
+        ),
+        "info": True,
+        "snapshots": [],
+    }
+    try:
+        cl_resp = docdb.describe_db_clusters(DBClusterIdentifier=cluster_id)
+    except Exception as e:
+        msg = str(e)
+        if "DBClusterNotFoundFault" in msg or "not found" in msg.lower():
+            return not_real
+        print(f"[backups] docdb describe failed for {cluster_id}: {e}")
+        return {
+            "cluster_id": cluster_id,
+            "engine_family": "documentdb",
+            "error": "백업 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
+            "snapshots": [],
+        }
+    clusters = cl_resp.get("DBClusters") or []
+    if not clusters:
+        return not_real
+    c = clusters[0]
+
+    earliest = c.get("EarliestRestorableTime")
+    latest = c.get("LatestRestorableTime")
+    pitr_window_hours = None
+    if earliest and latest:
+        try:
+            pitr_window_hours = round((latest - earliest).total_seconds() / 3600.0, 1)
+        except (TypeError, AttributeError):
+            pitr_window_hours = None
+
+    snapshots = []
+    try:
+        snap_resp = docdb.describe_db_cluster_snapshots(
+            DBClusterIdentifier=cluster_id, MaxRecords=100,
+        )
+        for s in snap_resp.get("DBClusterSnapshots", []):
+            snapshots.append({
+                "id": s.get("DBClusterSnapshotIdentifier"),
+                "type": s.get("SnapshotType"),  # manual | automated
+                "status": s.get("Status"),
+                "created": _iso(s.get("SnapshotCreateTime")),
+                "engine_version": s.get("EngineVersion"),
+            })
+        snapshots.sort(key=lambda x: x.get("created") or "", reverse=True)
+    except Exception as e:
+        print(f"[backups] docdb snapshot list failed for {cluster_id}: {e}")
+
+    manual = sum(1 for s in snapshots if s.get("type") == "manual")
+    return {
+        "cluster_id": cluster_id,
+        "engine_family": "documentdb",
+        "engine": c.get("Engine", "docdb"),
+        "status": c.get("Status", ""),
+        "backup_retention_days": c.get("BackupRetentionPeriod"),
+        "preferred_backup_window": c.get("PreferredBackupWindow"),
+        "earliest_restorable_time": _iso(earliest),
+        "latest_restorable_time": _iso(latest),
+        "pitr_window_hours": pitr_window_hours,
+        "snapshot_count": len(snapshots),
+        "manual_snapshot_count": manual,
+        "snapshots": snapshots,
+        "checked_at": int(datetime.now(timezone.utc).timestamp() * 1000),
+    }
+
+
+def _backups_dynamodb(cluster_id: str) -> dict:
+    """DynamoDB backup posture (read-only): PITR window + on-demand backups.
+    The `ddb-<hex>` slug is the registry PK; the real table name lives in
+    the registry row's `resource_name`."""
+    from datetime import datetime, timezone
+
+    row = _lookup_cluster(cluster_id)
+    table_name = (row.get("resource_name") if row else "") or cluster_id
+    ddb = _cluster_session(cluster_id, row=row).client("dynamodb")
+
+    def _iso(dt):
+        if not dt:
+            return None
+        try:
+            return dt.astimezone(timezone.utc).isoformat()
+        except (AttributeError, ValueError):
+            return str(dt)
+
+    result = {
+        "cluster_id": cluster_id,
+        "engine_family": "dynamodb",
+        "table_name": table_name,
+        "pitr_enabled": False,
+        "earliest_restorable_time": None,
+        "latest_restorable_time": None,
+        "on_demand_backups": [],
+        "on_demand_count": 0,
+        # Shared-shape safety: the frontend BackupPanel reads `snapshots` on the
+        # common path; DynamoDB has none (PITR + on-demand only).
+        "snapshots": [],
+        "checked_at": int(datetime.now(timezone.utc).timestamp() * 1000),
+    }
+    try:
+        cb = ddb.describe_continuous_backups(TableName=table_name)
+        pitr = (cb.get("ContinuousBackupsDescription") or {}).get(
+            "PointInTimeRecoveryDescription"
+        ) or {}
+        result["pitr_enabled"] = pitr.get("PointInTimeRecoveryStatus") == "ENABLED"
+        result["earliest_restorable_time"] = _iso(pitr.get("EarliestRestorableDateTime"))
+        result["latest_restorable_time"] = _iso(pitr.get("LatestRestorableDateTime"))
+    except Exception as e:
+        msg = str(e)
+        if "ResourceNotFound" in msg or "not found" in msg.lower():
+            result["error"] = (
+                "이 DynamoDB 테이블의 백업 정보를 조회할 수 없습니다 — 등록되지 "
+                "않았거나 접근 권한이 없습니다."
+            )
+            result["info"] = True
+            return result
+        print(f"[backups] dynamodb continuous-backups failed for {cluster_id}: {e}")
+        result["error"] = "백업 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요."
+
+    try:
+        lb = ddb.list_backups(TableName=table_name, Limit=100)
+        backups = []
+        for b in lb.get("BackupSummaries", []):
+            backups.append({
+                "name": b.get("BackupName"),
+                "status": b.get("BackupStatus"),
+                "created": _iso(b.get("BackupCreationDateTime")),
+                "size_bytes": b.get("BackupSizeBytes"),
+                "type": b.get("BackupType"),
+            })
+        backups.sort(key=lambda x: x.get("created") or "", reverse=True)
+        result["on_demand_backups"] = backups
+        result["on_demand_count"] = len(backups)
+    except Exception as e:
+        print(f"[backups] dynamodb list-backups failed for {cluster_id}: {e}")
+
+    return result
+
+
 def _backups(cluster_id: str) -> dict:
     """Backup inventory + PITR window for one cluster (read-only).
 
@@ -2186,6 +2346,10 @@ def _backups(cluster_id: str) -> dict:
         return {"cluster_id": cluster_id, "not_applicable": True, "registry_unavailable": True,
                 "snapshots": []}
     fam = engine_family(eng)
+    if fam == "documentdb":
+        return _backups_docdb(cluster_id)
+    if fam == "dynamodb":
+        return _backups_dynamodb(cluster_id)
     if fam != "relational":
         return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": fam, "snapshots": []}
 

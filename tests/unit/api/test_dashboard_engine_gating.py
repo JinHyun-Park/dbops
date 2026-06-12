@@ -100,23 +100,101 @@ def test_topology_dynamodb_returns_not_applicable_no_rds_call(monkeypatch):
 
 
 # ===========================================================================
-# 2. Backups — non-relational (dynamodb) → not_applicable, RDS never called
+# 2. Backups — non-relational now returns read-only posture (no RDS call)
+#    (backup-visibility-multiengine spec: dynamodb=PITR/on-demand, docdb=snapshots)
 # ===========================================================================
 
-def test_backups_dynamodb_returns_not_applicable_no_rds_call(monkeypatch):
-    """_backups for a dynamodb cluster must return not_applicable=True without
-    calling rds.describe_db_clusters."""
-    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+def test_backups_dynamodb_returns_pitr_and_ondemand_no_rds(monkeypatch):
+    """_backups for a dynamodb cluster reads PITR + on-demand backups via the
+    dynamodb client (NOT rds), using the registry resource_name as the table."""
+    from datetime import datetime, timezone
 
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+    monkeypatch.setattr(
+        handler, "_lookup_cluster",
+        lambda cid: {"resource_name": "orders-table", "region": "ap-northeast-2"},
+    )
+
+    mock_ddb = MagicMock()
+    mock_ddb.describe_continuous_backups.return_value = {
+        "ContinuousBackupsDescription": {
+            "PointInTimeRecoveryDescription": {
+                "PointInTimeRecoveryStatus": "ENABLED",
+                "EarliestRestorableDateTime": datetime(2026, 6, 1, tzinfo=timezone.utc),
+                "LatestRestorableDateTime": datetime(2026, 6, 2, tzinfo=timezone.utc),
+            }
+        }
+    }
+    mock_ddb.list_backups.return_value = {
+        "BackupSummaries": [{
+            "BackupName": "manual-1", "BackupStatus": "AVAILABLE",
+            "BackupCreationDateTime": datetime(2026, 6, 1, 12, tzinfo=timezone.utc),
+            "BackupSizeBytes": 1024, "BackupType": "USER",
+        }]
+    }
     mock_rds = MagicMock()
+
+    def _client(service, **kwargs):
+        return mock_ddb if service == "dynamodb" else mock_rds
+
     mock_session = MagicMock()
-    mock_session.client.return_value = mock_rds
+    mock_session.client.side_effect = _client
     monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
 
     result = handler._backups("ddb-abc123")
 
-    assert result.get("not_applicable") is True
     assert result.get("engine_family") == "dynamodb"
+    assert result.get("not_applicable") is not True
+    assert result["pitr_enabled"] is True
+    assert result["table_name"] == "orders-table"
+    assert result["on_demand_count"] == 1
+    assert result["on_demand_backups"][0]["name"] == "manual-1"
+    mock_ddb.describe_continuous_backups.assert_called_once()
+    mock_rds.describe_db_clusters.assert_not_called()
+
+
+def test_backups_documentdb_returns_snapshots_via_docdb_client(monkeypatch):
+    """_backups for a documentdb cluster reads snapshots + window via the docdb
+    client (mirrors the RDS cluster-snapshot API), not the rds client."""
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "docdb")
+
+    mock_docdb = MagicMock()
+    mock_docdb.describe_db_clusters.return_value = {
+        "DBClusters": [{
+            "Engine": "docdb", "Status": "available",
+            "BackupRetentionPeriod": 1, "PreferredBackupWindow": "15:05-15:35",
+            "EarliestRestorableTime": datetime(2026, 6, 11, 12, tzinfo=timezone.utc),
+            "LatestRestorableTime": datetime(2026, 6, 12, 2, tzinfo=timezone.utc),
+        }]
+    }
+    mock_docdb.describe_db_cluster_snapshots.return_value = {
+        "DBClusterSnapshots": [{
+            "DBClusterSnapshotIdentifier": "rds:dbops-docdb-test-2026-06-11-15-06",
+            "SnapshotType": "automated", "Status": "available",
+            "SnapshotCreateTime": datetime(2026, 6, 11, 15, 7, tzinfo=timezone.utc),
+            "EngineVersion": "5.0.0",
+        }]
+    }
+    mock_rds = MagicMock()
+
+    def _client(service, **kwargs):
+        return mock_docdb if service == "docdb" else mock_rds
+
+    mock_session = MagicMock()
+    mock_session.client.side_effect = _client
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._backups("dbops-docdb-test")
+
+    assert result.get("engine_family") == "documentdb"
+    assert result.get("not_applicable") is not True
+    assert result["backup_retention_days"] == 1
+    assert result["preferred_backup_window"] == "15:05-15:35"
+    assert result["snapshot_count"] == 1
+    assert result["snapshots"][0]["type"] == "automated"
+    mock_docdb.describe_db_cluster_snapshots.assert_called_once()
     mock_rds.describe_db_clusters.assert_not_called()
 
 
