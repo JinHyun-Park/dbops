@@ -71,6 +71,13 @@ def collect_dynamodb_metrics(cw, dynamo, cache_execute, cluster_id, table_name, 
             "item_count": t.get("ItemCount", 0),
             "table_size_bytes": t.get("TableSizeBytes", 0),
             "table_status": t.get("TableStatus", ""),
+            # Table class: "STANDARD" or "STANDARD_INFREQUENT_ACCESS".
+            "table_class": (t.get("TableClassSummary") or {}).get("TableClass", "STANDARD"),
+            # Global table replica regions (non-empty ⟹ this is a global table).
+            "global_table_replicas": [
+                r.get("RegionName") for r in (t.get("Replicas") or [])
+                if r.get("RegionName")
+            ],
             # Primary key (PK + optional SK) with attribute types.
             "key_schema": _keys(t.get("KeySchema")),
             # Global secondary indexes: own keys, projection, status, size.

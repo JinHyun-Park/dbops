@@ -43,6 +43,7 @@ CAPABILITIES = {
     },
     DYNAMODB: {
         "sql": False, "rds_meta": False, "perf_insights": False, "simulation": False,
+        "ddb_cost_simulation": True,
         "cw_namespace": "AWS/DynamoDB",
         "findings": {"ddb"},
     },

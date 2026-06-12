@@ -248,10 +248,25 @@ by account/region. Delivered across 5 sequenced specs:
   `_PipLocalBundling` builds the asset Docker-free (manylinux py3.12 wheels) with a
   Docker fallback. **Deployer setup to activate**: create RO Mongo user → store creds
   in a secret → put ARN on the registry row → ensure SG reaches the cluster on 27017.
-- **DynamoDB capacity-mode cost simulator** (Provisioned↔On-Demand $ what-if) —
-  net-new; needs a region-specific Pricing-API-backed estimate (a hardcoded
-  pricing table goes stale; a wrong number is worse than none). Advice is
-  already delivered via #3's `ddb_capacity_overprovisioned` finding + #4 chat.
+- ~~**DynamoDB capacity-mode cost simulator** (Provisioned↔On-Demand $ what-if)~~
+  ✅ **shipped** (2026-06-12, live pricing confirmed for ap-northeast-2, Codex
+  adversarial cost-math review → 3 findings all fixed). New `simulate_dynamodb_capacity_cost`
+  simulation tool (positive `ddb_cost_simulation` capability gate — Aurora tools
+  still cleanly refuse DynamoDB via the untouched `simulation: False`). Reads the
+  table's actual consumed_rcu/wcu series + billing_mode/region from the cache,
+  prices BOTH modes with the real AWS Price List API (`dynamodb_pricing.py`,
+  2 byte-identical copies, mirrors `aurora_pricing.py`: regionCode filter, process
+  cache, soft-fail→None), and computes the monthly $ comparison + recommendation
+  in a shared pure module (`dynamodb_cost.py`, 2 byte-identical copies). Surfaced
+  on the `/simulator` page for DynamoDB (new `DynamoDbCapacitySimulator` panel;
+  DocumentDB → "지원 예정") + a REST route `/api/simulation/dynamodb-capacity-cost`.
+  **Honesty contract**: a price that won't resolve → `partial`/`fallback`, never a
+  fabricated $; <20 datapoints → `no_data`; non-STANDARD table class or global
+  tables → `unsupported` (different capacity SKUs — refuses rather than mis-prices,
+  using new collector fields `table_class`/`global_table_replicas`). Provisioned
+  sizing = ceil(p99(consumed/min ÷ 60) ÷ headroom), disclosed as a 1-min-CloudWatch
+  smoothed lower-bound (sub-minute bursts invisible). Capacity (RCU/WCU) only —
+  storage/backup/stream/replication excluded. Cedar + parity updated.
 
 **Still future (separate):** RDS non-Aurora (MySQL/PG/MariaDB) storage rightsize
 (`AllocatedStorage` vs used); cross-account ETL for new-engine resources (ETL

@@ -173,4 +173,7 @@ def simulation_schema():
               {"cluster_id": "string", "new_min_acu": "number", "new_max_acu": "number", "new_instance_class": "string"}, ["cluster_id"]),
         _tool("simulate_ddl_impact", "Estimate DDL execution impact (lock time, duration)",
               {"cluster_id": "string", "ddl_sql": "string"}, ["cluster_id", "ddl_sql"]),
+        _tool("simulate_dynamodb_capacity_cost",
+              "DynamoDB only: compare Provisioned vs On-Demand monthly cost from the table's actual consumed capacity, priced with the real AWS Price List API",
+              {"cluster_id": "string", "headroom": "number", "window_hours": "number"}, ["cluster_id"]),
     ]

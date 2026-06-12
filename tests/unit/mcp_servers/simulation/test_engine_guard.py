@@ -87,6 +87,28 @@ def test_allows_unknown_cluster_default_permit():
     impl.assert_called_once()
 
 
+def test_ddb_capacity_cost_allows_dynamodb():
+    # The DynamoDB-only tool uses a POSITIVE gate (ddb_cost_simulation): a
+    # resolved dynamodb table must PASS where the Aurora tools refuse it.
+    body, impl = _run(
+        "simulate_dynamodb_capacity_cost", {"cluster_id": "ddb-abc123"},
+        execute_return=[{"engine": "dynamodb"}],
+    )
+    assert body.get("status") != "unsupported_engine"
+    impl.assert_called_once()
+
+
+def test_ddb_capacity_cost_blocks_relational():
+    # The same positive gate refuses Aurora (relational lacks ddb_cost_simulation).
+    body, impl = _run(
+        "simulate_dynamodb_capacity_cost", {"cluster_id": "prod-pg"},
+        execute_return=[{"engine": "aurora-postgresql"}],
+    )
+    assert body["status"] == "unsupported_engine"
+    assert body["engine_family"] == "relational"
+    impl.assert_not_called()
+
+
 def test_allows_when_cache_errors_default_permit():
     # cache lookup raises → permit (don't brick the tool on a transient cache error).
     body, impl = _run(

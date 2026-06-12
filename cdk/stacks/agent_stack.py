@@ -898,6 +898,7 @@ class AgentStack(cdk.Stack):
             ("/api/simulation/parameter-change", [apigwv2.HttpMethod.POST]),
             ("/api/simulation/scaling", [apigwv2.HttpMethod.POST]),
             ("/api/simulation/ddl-impact", [apigwv2.HttpMethod.POST]),
+            ("/api/simulation/dynamodb-capacity-cost", [apigwv2.HttpMethod.POST]),
         ]:
             self.api.add_routes(
                 path=sim_path, methods=sim_methods, integration=sim_integration

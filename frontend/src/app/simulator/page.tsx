@@ -28,6 +28,7 @@ import { fmtDecimal, fmtExact, fmtBytes } from "@/lib/format";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
 import { engineFamily } from "@/lib/engine";
+import { DynamoDbCapacitySimulator } from "@/components/dashboard/dynamodb-capacity-simulator";
 
 export default function SimulatorPage() {
   // Global selection (shared store) — switching via ⌘K/header persists here.
@@ -35,8 +36,9 @@ export default function SimulatorPage() {
 
   const current = clusters.find((c) => c.cluster_id === selectedCluster);
   // 시뮬레이션(업그레이드/파라미터/DDL/스케일링)은 Aurora 전용 — 버전 업그레이드·
-  // SQL DDL·DB 파라미터그룹·ACU/인스턴스 리사이즈는 NoSQL 등가물이 없다. 비관계형
-  // 엔진에는 Aurora 패널 대신 안내 문구를 보여준다(백엔드 핸들러 가드와 일관).
+  // SQL DDL·DB 파라미터그룹·ACU/인스턴스 리사이즈는 NoSQL 등가물이 없다. DynamoDB는
+  // 용량 모드 비용 what-if 전용 패널을 보여주고, DocumentDB는 안내 문구를 보여준다
+  // (백엔드 핸들러 가드와 일관: dynamodb는 ddb_cost_simulation 능력만 양성 게이트).
   const fam = engineFamily(current?.engine);
 
   return (
@@ -60,10 +62,12 @@ export default function SimulatorPage() {
           title="클러스터가 없습니다"
           description="시뮬레이션을 실행하려면 Clusters 페이지에서 먼저 등록하세요."
         />
+      ) : fam === "dynamodb" ? (
+        <DynamoDbCapacitySimulator clusterId={selectedCluster} />
       ) : fam !== "relational" ? (
         <EmptyState
-          title="시뮬레이션은 Aurora 전용"
-          description="업그레이드 · 파라미터 · DDL · 스케일링 시뮬레이션은 Aurora PostgreSQL/MySQL 클러스터에만 적용됩니다. DynamoDB · DocumentDB의 용량/비용 권장은 대시보드의 Maintenance Health 패널과 Chat 진단을 참고하세요."
+          title="DocumentDB 시뮬레이션은 지원 예정"
+          description="업그레이드 · 파라미터 · DDL · 스케일링 시뮬레이션은 Aurora PostgreSQL/MySQL 전용입니다. DocumentDB의 용량/비용 권장은 대시보드의 Maintenance Health 패널과 Chat 진단을 참고하세요."
         />
       ) : (
         <div className="space-y-8">

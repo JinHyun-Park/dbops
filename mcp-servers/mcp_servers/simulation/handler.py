@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.engine_family import CAPABILITIES
 from mcp_servers.shared.engine_family import engine_family as _engine_family
+from mcp_servers.simulation.tools.capacity_cost import simulate_dynamodb_capacity_cost_impl
 from mcp_servers.simulation.tools.ddl_impact import simulate_ddl_impact_impl
 from mcp_servers.simulation.tools.parameter_simulation import simulate_parameter_change_impl
 from mcp_servers.simulation.tools.scaling_simulation import simulate_scaling_impl
@@ -93,6 +94,19 @@ TOOLS = {
             "required": ["cluster_id", "ddl_sql"],
         },
     },
+    "simulate_dynamodb_capacity_cost": {
+        "impl": simulate_dynamodb_capacity_cost_impl,
+        "description": "DynamoDB only: compare Provisioned vs On-Demand monthly cost from the table's actual consumed capacity, priced with the real AWS Price List API",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target DynamoDB table ID (ddb-* registry slug)"},
+                "headroom": {"type": "number", "description": "Target utilization for provisioned sizing (0-1, default 0.70)"},
+                "window_hours": {"type": "number", "description": "Consumed-capacity lookback window in hours (default/cap 168)"},
+            },
+            "required": ["cluster_id"],
+        },
+    },
 }
 
 
@@ -138,24 +152,41 @@ def lambda_handler(event, context):
         ]}
 
     if tool_name and tool_name in TOOLS:
-        # Engine-family guard: simulation (upgrade/parameter/DDL/scaling) is an
-        # Aurora-specific feature — version-upgrade, SQL DDL, DB parameter groups,
-        # and ACU/instance resize have no NoSQL equivalent. Refuse cleanly for
-        # documentdb/dynamodb so the agent doesn't run Aurora logic on a NoSQL
-        # resource. DEFAULT-PERMIT on unknown/missing/error (mirror execute_sql).
         cluster_id = (event or {}).get("cluster_id") if isinstance(event, dict) else None
         fam = _resolve_family(cluster_id)
-        if isinstance(fam, str) and not CAPABILITIES.get(fam, {}).get("simulation", True):
-            return {"content": [{"type": "text", "text": json.dumps({
-                "status": "unsupported_engine",
-                "engine_family": fam,
-                "cluster_id": cluster_id,
-                "message": (
-                    "시뮬레이션(업그레이드·파라미터·DDL·스케일링)은 Aurora(PostgreSQL/MySQL) "
-                    "전용입니다. DynamoDB 용량/비용이나 DocumentDB 스케일링은 "
-                    "get_maintenance_findings로 진단하고, 변경은 AWS Console/CDK로 적용하세요."
-                ),
-            })}]}
+        if tool_name == "simulate_dynamodb_capacity_cost":
+            # POSITIVE gate: this is the one simulation tool that is DynamoDB-only.
+            # It uses its own `ddb_cost_simulation` capability (Aurora/DocDB lack it)
+            # rather than the generic `simulation` key (which dynamodb leaves False
+            # so the Aurora tools still cleanly refuse it). A None family (missing/
+            # error) → .get(None,{}) → False → refused, which is correct: only a
+            # resolved dynamodb table should pass.
+            if not CAPABILITIES.get(fam, {}).get("ddb_cost_simulation", False):
+                return {"content": [{"type": "text", "text": json.dumps({
+                    "status": "unsupported_engine",
+                    "engine_family": fam,
+                    "cluster_id": cluster_id,
+                    "message": (
+                        "용량/비용 비교(Provisioned↔On-Demand)는 DynamoDB 테이블 전용입니다."
+                    ),
+                })}]}
+        else:
+            # Engine-family guard: the OTHER simulation tools (upgrade/parameter/
+            # DDL/scaling) are Aurora-specific — version-upgrade, SQL DDL, DB
+            # parameter groups, and ACU/instance resize have no NoSQL equivalent.
+            # Refuse cleanly for documentdb/dynamodb. DEFAULT-PERMIT on unknown/
+            # missing/error (mirror execute_sql).
+            if isinstance(fam, str) and not CAPABILITIES.get(fam, {}).get("simulation", True):
+                return {"content": [{"type": "text", "text": json.dumps({
+                    "status": "unsupported_engine",
+                    "engine_family": fam,
+                    "cluster_id": cluster_id,
+                    "message": (
+                        "시뮬레이션(업그레이드·파라미터·DDL·스케일링)은 Aurora(PostgreSQL/MySQL) "
+                        "전용입니다. DynamoDB 용량/비용이나 DocumentDB 스케일링은 "
+                        "get_maintenance_findings로 진단하고, 변경은 AWS Console/CDK로 적용하세요."
+                    ),
+                })}]}
         try:
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}

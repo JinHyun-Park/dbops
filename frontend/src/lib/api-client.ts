@@ -1285,6 +1285,34 @@ export interface DdlImpactResponse {
   note?: string;
 }
 
+// DynamoDB capacity-mode (Provisioned ↔ On-Demand) cost what-if. Dollar fields
+// are null when the AWS Price List API couldn't resolve a price (status
+// "partial"/"no_data" → fallback) — the UI must render "n/a", never a fake $.
+export interface DdbCapacityCostResponse {
+  status: "ok" | "partial" | "no_data" | "unsupported";
+  cluster_id: string;
+  billing_mode: "PROVISIONED" | "PAY_PER_REQUEST" | null;
+  region: string;
+  window_hours: number;
+  datapoints: number;
+  no_data_reason?: string;
+  unsupported_reason?: string;
+  on_demand_monthly_usd?: number | null;
+  provisioned_monthly_usd?: number | null;
+  current_monthly_usd?: number | null;
+  recommended_mode?: "PROVISIONED" | "PAY_PER_REQUEST" | null;
+  monthly_savings_usd?: number | null;
+  savings_pct?: number | null;
+  sizing?: {
+    rcu_per_sec: number;
+    wcu_per_sec: number;
+    basis: string;
+    headroom: number;
+  };
+  pricing_source: "aws_pricing_api" | "fallback";
+  assumptions: string[];
+}
+
 async function simPost<T>(path: string, body: object): Promise<T> {
   const res = await authedFetch(await api(path), {
     method: "POST",
@@ -1374,6 +1402,17 @@ export function simulateDdlImpact(
   return simPost(`/api/simulation/ddl-impact`, {
     cluster_id: clusterId,
     ddl_sql: ddlSql,
+  });
+}
+
+export function simulateDynamodbCapacityCost(
+  clusterId: string,
+  opts?: { headroom?: number; windowHours?: number },
+): Promise<DdbCapacityCostResponse> {
+  return simPost(`/api/simulation/dynamodb-capacity-cost`, {
+    cluster_id: clusterId,
+    ...(opts?.headroom != null ? { headroom: opts.headroom } : {}),
+    ...(opts?.windowHours != null ? { window_hours: opts.windowHours } : {}),
   });
 }
 

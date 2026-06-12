@@ -15,6 +15,13 @@ import traceback
 import boto3
 from aurora_pricing import price_per_acu_hour, price_per_instance_hour
 from ddl_estimator import estimate_ddl, resolve_table
+from dynamodb_cost import compute_capacity_cost
+from dynamodb_pricing import (
+    price_per_million_rru,
+    price_per_million_wru,
+    price_per_rcu_hour,
+    price_per_wcu_hour,
+)
 from parameter_estimator import (
     PARAMETER_INFO,
     build_live_result,
@@ -765,6 +772,141 @@ def _simulate_ddl_impact(cluster_id: str, ddl_sql: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Tool: simulate_dynamodb_capacity_cost (DynamoDB only)
+# ---------------------------------------------------------------------------
+
+# 7-day cap on the consumed-capacity lookback (matches the MCP tool).
+_DDB_WINDOW_CAP_HOURS = 168
+
+
+def _ddb_meta(cluster_id: str):
+    """(billing_mode, region, table_class, is_global_table) for a DynamoDB table
+    from cluster_meta. billing_mode/table_class are in resource_details JSONB;
+    region is a top-level column. Absent table_class defaults to STANDARD (pre-fix
+    ETL rows won't have it until next collection cycle)."""
+    rows = _cache_query(
+        "SELECT region, "
+        "resource_details->>'billing_mode' AS billing_mode, "
+        "resource_details->>'table_class' AS table_class, "
+        "resource_details->'global_table_replicas' AS global_table_replicas "
+        "FROM cluster_meta WHERE cluster_id = :cluster_id",
+        {"cluster_id": cluster_id},
+    )
+    if not rows:
+        return None, "", "STANDARD", False
+    row = rows[0]
+    table_class = row.get("table_class") or "STANDARD"
+    raw_replicas = row.get("global_table_replicas")
+    try:
+        replicas = json.loads(raw_replicas) if isinstance(raw_replicas, str) else (raw_replicas or [])
+    except (TypeError, ValueError):
+        replicas = []
+    is_global_table = bool(replicas)
+    return row.get("billing_mode"), (row.get("region") or ""), table_class, is_global_table
+
+
+def _ddb_consumed(cluster_id: str, window_hours: float) -> dict:
+    """Per-side consumed aggregates over the window (table-level rows only; the
+    GSI rows carry dimensions={"gsi":..} and are excluded). p99 is of the
+    per-minute Sum series; datapoints counts the consumed_rcu rows."""
+    rows = _cache_query(
+        "SELECT "
+        "  COUNT(*) FILTER (WHERE metric_type = 'consumed_rcu') AS datapoints, "
+        "  COALESCE(SUM(value) FILTER (WHERE metric_type = 'consumed_rcu'), 0) AS sum_rcu, "
+        "  COALESCE(SUM(value) FILTER (WHERE metric_type = 'consumed_wcu'), 0) AS sum_wcu, "
+        "  COALESCE(percentile_cont(0.99) WITHIN GROUP ("
+        "    ORDER BY value) FILTER (WHERE metric_type = 'consumed_rcu'), 0) AS p99_rcu, "
+        "  COALESCE(percentile_cont(0.99) WITHIN GROUP ("
+        "    ORDER BY value) FILTER (WHERE metric_type = 'consumed_wcu'), 0) AS p99_wcu "
+        "FROM metric_snapshots "
+        "WHERE cluster_id = :cluster_id "
+        "  AND metric_type IN ('consumed_rcu', 'consumed_wcu') "
+        "  AND ts > NOW() - (:hours || ' hours')::interval "
+        "  AND (dimensions IS NULL OR dimensions::text = '{}')",
+        {"cluster_id": cluster_id, "hours": str(window_hours)},
+    )
+    row = rows[0] if rows else {}
+
+    def _f(v):
+        try:
+            return float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    return {
+        "datapoints": int(row.get("datapoints") or 0),
+        "sum_rcu": _f(row.get("sum_rcu")),
+        "sum_wcu": _f(row.get("sum_wcu")),
+        "p99_rcu_per_min": _f(row.get("p99_rcu")),
+        "p99_wcu_per_min": _f(row.get("p99_wcu")),
+    }
+
+
+def _ddb_provisioned(cluster_id: str):
+    """Latest per-second provisioned_rcu/wcu for a PROVISIONED table, or None."""
+    rows = _cache_query(
+        "SELECT metric_type, value FROM metric_snapshots m "
+        "WHERE cluster_id = :cluster_id AND metric_type IN ('provisioned_rcu', 'provisioned_wcu') "
+        "  AND (dimensions IS NULL OR dimensions::text = '{}') "
+        "  AND ts = (SELECT MAX(ts) FROM metric_snapshots "
+        "            WHERE cluster_id = m.cluster_id AND metric_type = m.metric_type "
+        "              AND (dimensions IS NULL OR dimensions::text = '{}'))",
+        {"cluster_id": cluster_id},
+    )
+    if not rows:
+        return None
+    out = {}
+    for r in rows:
+        try:
+            val = float(r.get("value")) if r.get("value") is not None else 0.0
+        except (TypeError, ValueError):
+            val = 0.0
+        if r.get("metric_type") == "provisioned_rcu":
+            out["rcu"] = val
+        elif r.get("metric_type") == "provisioned_wcu":
+            out["wcu"] = val
+    return out or None
+
+
+def _simulate_dynamodb_capacity_cost(
+    cluster_id: str, headroom: float = 0.70, window_hours: float = 168
+) -> dict:
+    """REST mirror of the MCP tool — gathers the consumed series + billing
+    mode/region from the cache, resolves both modes' prices via the Price List
+    API, and delegates the math to the shared compute. Same JSON shape as the
+    MCP tool; never fabricates a dollar number (partial/fallback on a miss)."""
+    try:
+        window = float(window_hours)
+    except (TypeError, ValueError):
+        window = _DDB_WINDOW_CAP_HOURS
+    window = max(1.0, min(window, _DDB_WINDOW_CAP_HOURS))
+
+    billing_mode, region, table_class, is_global_table = _ddb_meta(cluster_id)
+    consumed = _ddb_consumed(cluster_id, window)
+    provisioned = _ddb_provisioned(cluster_id) if billing_mode == "PROVISIONED" else None
+
+    prices = {
+        "rcu_hr": price_per_rcu_hour(region) if region else None,
+        "wcu_hr": price_per_wcu_hour(region) if region else None,
+        "m_rru": price_per_million_rru(region) if region else None,
+        "m_wru": price_per_million_wru(region) if region else None,
+    }
+
+    return compute_capacity_cost(
+        cluster_id=cluster_id,
+        billing_mode=billing_mode,
+        region=region,
+        window_hours=window,
+        consumed=consumed,
+        provisioned=provisioned,
+        prices=prices,
+        headroom=headroom,
+        table_class=table_class,
+        is_global_table=is_global_table,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Lambda dispatcher
 # ---------------------------------------------------------------------------
 
@@ -871,6 +1013,20 @@ def lambda_handler(event, context):
             if not ddl.strip():
                 return _response(400, {"error": "ddl_sql required"}, origin)
             return _response(200, _simulate_ddl_impact(cluster_id, ddl), origin)
+
+        if raw_path.endswith("/dynamodb-capacity-cost"):
+            headroom = body.get("headroom")
+            window_hours = body.get("window_hours")
+            kwargs = {}
+            if headroom is not None:
+                kwargs["headroom"] = float(headroom)
+            if window_hours is not None:
+                kwargs["window_hours"] = float(window_hours)
+            return _response(
+                200,
+                _simulate_dynamodb_capacity_cost(cluster_id, **kwargs),
+                origin,
+            )
 
         return _response(404, {"error": f"unknown route: {raw_path}"}, origin)
 

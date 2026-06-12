@@ -10,7 +10,8 @@ permit(
     Action::"generate_upgrade_plan",
     Action::"simulate_parameter_change",
     Action::"simulate_scaling",
-    Action::"simulate_ddl_impact"
+    Action::"simulate_ddl_impact",
+    Action::"simulate_dynamodb_capacity_cost"
   ],
   resource
 );
