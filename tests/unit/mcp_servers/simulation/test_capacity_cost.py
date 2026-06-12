@@ -74,6 +74,25 @@ def test_provisioned_sizing_uses_p99_per_second_over_headroom_ceil():
     assert r["current_monthly_usd"] == round(expected_cur, 2)
 
 
+def test_provisioned_sizing_floors_at_one_unit_per_side():
+    """A near-idle table (p99≈0) still needs the 1 RCU + 1 WCU provisioned minimum
+    — sizing must floor at 1, not 0, so the provisioned estimate is the real $0.62-
+    ish minimum and the recommendation isn't the degenerate 'Provisioned, save 100%'
+    against an on-demand cost of ~$0."""
+    consumed = _consumed(datapoints=120, sum_rcu=0.0, sum_wcu=0.0, p99_rcu=0.0, p99_wcu=0.0)
+    r = compute_capacity_cost(
+        cluster_id="ddb-idle", billing_mode="PAY_PER_REQUEST", region="ap-northeast-2",
+        window_hours=168.0, consumed=consumed, provisioned=None, prices=PRICES,
+    )
+    assert r["sizing"]["rcu_per_sec"] == 1
+    assert r["sizing"]["wcu_per_sec"] == 1
+    expected_prov = 1 * 0.00014098 * HOURS_PER_MONTH + 1 * 0.0007049 * HOURS_PER_MONTH
+    assert r["provisioned_monthly_usd"] == round(expected_prov, 2)
+    assert r["provisioned_monthly_usd"] > 0
+    # Idle table: on-demand (~$0) is cheaper than the 1+1 provisioned minimum.
+    assert r["recommended_mode"] == "PAY_PER_REQUEST"
+
+
 def test_recommendation_points_to_cheaper_mode():
     """A spiky-but-low-average table is cheaper on-demand → recommend on-demand."""
     # Low total consumption (cheap on-demand) but a high p99 spike (expensive

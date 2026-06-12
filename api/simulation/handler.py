@@ -61,6 +61,12 @@ def _cache_query(sql: str, params: dict | None = None) -> list[dict]:
         database=os.environ.get("CACHE_DB_NAME", "dbops"),
         sql=sql,
         parameters=sql_params,
+        # REQUIRED: without this the Data API omits columnMetadata, so the
+        # column-name → value mapping below produces empty dict rows and every
+        # name-based .get() returns None. (Latent bug — all REST simulation
+        # cache reads silently returned empty until the DynamoDB cost tool, which
+        # has no live-describe fallback, surfaced it.)
+        includeResultMetadata=True,
     )
     cols = [c["name"] for c in resp.get("columnMetadata", [])]
     rows = []

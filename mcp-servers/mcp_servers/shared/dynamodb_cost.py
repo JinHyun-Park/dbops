@@ -145,8 +145,12 @@ def compute_capacity_cost(
         on_demand_monthly = rru_month * p_m_rru + wru_month * p_m_wru
 
     # --- Provisioned sizing (p99 per-second / headroom, ceil) ---
-    rcu_sized = math.ceil((p99_rcu_min / 60.0) / headroom) if p99_rcu_min > 0 else 0
-    wcu_sized = math.ceil((p99_wcu_min / 60.0) / headroom) if p99_wcu_min > 0 else 0
+    # DynamoDB provisioned mode has a HARD minimum of 1 RCU + 1 WCU per table —
+    # you cannot provision 0 — so floor each side at 1. Without this a near-idle
+    # table would be priced at an impossible $0 and the recommendation would read
+    # "switch to Provisioned, save 100%" against an on-demand cost of ~$0.
+    rcu_sized = max(1, math.ceil((p99_rcu_min / 60.0) / headroom))
+    wcu_sized = max(1, math.ceil((p99_wcu_min / 60.0) / headroom))
     provisioned_monthly = None
     if p_rcu_hr is not None and p_wcu_hr is not None:
         provisioned_monthly = (
@@ -191,8 +195,9 @@ def compute_capacity_cost(
         f"관측 윈도우 {round(window_hours, 1)}h를 730h/월로 환산(×{round(month_factor, 2)})했습니다.",
         "On-Demand: 1 consumed RCU ≈ 1 RRU(≤4KB strongly-consistent read), 1 consumed WCU ≈ 1 WRU로 근사합니다.",
         f"Provisioned sizing: p99(consumed/분 ÷ 60) ÷ headroom {headroom:.0%}를 올림(ceil)한 per-second 용량 "
-        f"(RCU {rcu_sized} / WCU {wcu_sized}). 1분 CloudWatch 집계 기준의 평활화된 하한값입니다. "
-        "1분 미만 burst는 관측되지 않으므로 실제 필요 Provisioned 용량(과 비용)은 이 추정보다 높을 수 있습니다.",
+        f"(RCU {rcu_sized} / WCU {wcu_sized}), 프로비저닝 최소치인 면당 1 RCU/1 WCU로 하한 적용. "
+        "1분 CloudWatch 집계 기준의 평활화된 추정으로, 1분 미만 burst는 관측되지 않으므로 실제 필요 "
+        "Provisioned 용량(과 비용)은 이 추정보다 높을 수 있습니다.",
         "RCU/WCU(capacity)만 비교합니다 — storage·backup·stream·global-table replication·free-tier는 제외합니다.",
     ]
     if not pricing_resolved:
