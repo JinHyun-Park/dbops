@@ -614,7 +614,10 @@ export default function DashboardPage() {
 
                     <ReplicationTopologyPanel clusterId={selectedCluster} />
 
-                    <CapacityForecastPanel clusterId={selectedCluster} />
+                    <CapacityForecastPanel
+                      clusterId={selectedCluster}
+                      engine={dashboardData.cluster?.engine}
+                    />
 
                     <TimeseriesChart
                       clusterId={selectedCluster}
@@ -814,6 +817,10 @@ export default function DashboardPage() {
                       clusterId={selectedCluster}
                       range={range}
                     />
+                    <CapacityForecastPanel
+                      clusterId={selectedCluster}
+                      engine={dashboardData.cluster?.engine}
+                    />
                     <BackupPanel
                       clusterId={selectedCluster}
                       engine={dashboardData.cluster?.engine}
@@ -835,6 +842,10 @@ export default function DashboardPage() {
                     <DocdbOverviewPanel
                       clusterId={selectedCluster}
                       range={range}
+                    />
+                    <CapacityForecastPanel
+                      clusterId={selectedCluster}
+                      engine={dashboardData.cluster?.engine}
                     />
                     <ReplicationTopologyPanel clusterId={selectedCluster} />
                     <BackupPanel

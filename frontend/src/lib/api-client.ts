@@ -427,7 +427,12 @@ export async function fetchLogInsights(
   return res.json();
 }
 
-export type CapacityMetric = "storage_bytes" | "db_connections" | "aas";
+export type CapacityMetric =
+  | "storage_bytes"
+  | "db_connections"
+  | "aas"
+  | "consumed_rcu"
+  | "consumed_wcu";
 
 export interface CapacityForecastResponse {
   cluster_id: string;
@@ -442,6 +447,11 @@ export interface CapacityForecastResponse {
   days_lookback: number;
   projections: { d30: number; d60: number; d90: number };
   error?: string;
+  // Engine-aware: dynamodb on-demand tables (no provisioned capacity) and
+  // metrics outside the cluster's engine family return not_applicable.
+  not_applicable?: boolean;
+  engine_family?: string;
+  reason?: string;
 }
 
 export type RedundantIndexKind = "prefix" | "duplicate" | "unused";

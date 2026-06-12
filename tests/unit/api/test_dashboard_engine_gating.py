@@ -202,8 +202,11 @@ def test_backups_documentdb_returns_snapshots_via_docdb_client(monkeypatch):
 # 3. Capacity-forecast — non-relational → not_applicable, no SQL executed
 # ===========================================================================
 
-def test_capacity_forecast_dynamodb_returns_not_applicable(monkeypatch):
-    """_capacity_forecast for a dynamodb cluster must return not_applicable=True."""
+def test_capacity_forecast_dynamodb_invalid_metric_returns_not_applicable(monkeypatch):
+    """_capacity_forecast for a dynamodb cluster asked for a metric OUTSIDE its
+    engine family (storage_bytes is relational/docdb-only) must return
+    not_applicable=True without executing any SQL — the metric is not valid
+    for DynamoDB, whose capacity forecasts are consumed_rcu/consumed_wcu."""
     monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
 
     query_called = []
@@ -216,8 +219,8 @@ def test_capacity_forecast_dynamodb_returns_not_applicable(monkeypatch):
 
     assert result.get("not_applicable") is True
     assert result.get("engine_family") == "dynamodb"
-    # The SQL regression query must NOT have been executed
-    assert not query_called, "SQL query should not be executed for non-relational clusters"
+    # The SQL regression query must NOT have been executed for an invalid metric
+    assert not query_called, "SQL query should not run for a metric outside the engine family"
 
 
 # ===========================================================================
@@ -367,6 +370,80 @@ def test_capacity_forecast_relational_executes_sql(monkeypatch):
 
     assert result.get("not_applicable") is None or result.get("not_applicable") is False
     assert len(query_called) > 0, "SQL query must be executed for relational clusters"
+
+
+def test_capacity_forecast_documentdb_db_connections_resolves_limit_from_metric(monkeypatch):
+    """_capacity_forecast for a documentdb cluster forecasting db_connections must
+    resolve the limit from the LATEST db_connections_limit metric (NOT
+    cluster_settings.max_connections, which DocDB has no row for)."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "docdb")
+
+    seen = {}
+
+    def _spy_query(sql, params=None):
+        if "REGR_SLOPE" in sql:
+            # Growing connections, well below the limit.
+            return [{"slope": 1.0, "latest": 100.0, "first_ts": None,
+                     "last_ts": None, "samples": 30}]
+        if "db_connections_limit" in sql:
+            seen["limit_query"] = sql
+            # DocDB DatabaseConnectionsLimit (latest datapoint).
+            return [{"value": 1700.0}]
+        # max_connections must NOT be consulted for documentdb.
+        seen["unexpected"] = sql
+        return []
+
+    result = handler._capacity_forecast(_spy_query, "docdb-abc123", "db_connections", 30)
+
+    assert result.get("not_applicable") is not True
+    assert result["engine_family"] == "documentdb"
+    assert result["limit"] == 1700.0
+    assert result["current"] == 100.0
+    assert "limit_query" in seen, "db_connections_limit metric must be queried"
+    assert "max_connections" not in seen.get("limit_query", "")
+    assert "unexpected" not in seen, "cluster_settings must not be consulted for docdb"
+
+
+def test_capacity_forecast_dynamodb_consumed_wcu_resolves_limit_from_provisioned(monkeypatch):
+    """_capacity_forecast for a dynamodb cluster forecasting consumed_wcu must
+    resolve the limit as the LATEST provisioned_wcu × 60 (per-minute ceiling)."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+
+    def _spy_query(sql, params=None):
+        if "REGR_SLOPE" in sql:
+            return [{"slope": 5.0, "latest": 1000.0, "first_ts": None,
+                     "last_ts": None, "samples": 30}]
+        # Limit-resolution query is parameterized (metric_type = :pm).
+        if (params or {}).get("pm") == "provisioned_wcu":
+            return [{"value": 50.0}]  # 50 WCU/s provisioned
+        return []
+
+    result = handler._capacity_forecast(_spy_query, "ddb-abc123", "consumed_wcu", 30)
+
+    assert result.get("not_applicable") is not True
+    assert result["engine_family"] == "dynamodb"
+    assert result["limit"] == 50.0 * 60.0  # 3000 WCU/min
+    assert result["current"] == 1000.0
+
+
+def test_capacity_forecast_dynamodb_ondemand_no_provisioned_not_applicable(monkeypatch):
+    """_capacity_forecast for a dynamodb cluster with NO provisioned_* datapoint
+    (on-demand table) must return not_applicable — there is no ceiling to
+    forecast toward."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+
+    def _spy_query(sql, params=None):
+        if "REGR_SLOPE" in sql:
+            return [{"slope": 5.0, "latest": 1000.0, "first_ts": None,
+                     "last_ts": None, "samples": 30}]
+        # provisioned_rcu query returns no rows → on-demand
+        return []
+
+    result = handler._capacity_forecast(_spy_query, "ddb-abc123", "consumed_rcu", 30)
+
+    assert result.get("not_applicable") is True
+    assert result["engine_family"] == "dynamodb"
+    assert "on-demand" in result.get("reason", "")
 
 
 def test_health_findings_relational_returns_data(monkeypatch):

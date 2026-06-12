@@ -7,34 +7,59 @@ import {
   type CapacityMetric,
 } from "@/lib/api-client";
 import { fmtDecimal } from "@/lib/format";
+import { engineFamily } from "@/lib/engine";
 
-const METRICS: {
+type MetricSpec = {
   key: CapacityMetric;
   label: string;
   // Convert raw stored unit → display value + suffix. Storage is in bytes;
-  // connections + AAS are scalar numbers.
+  // connections / AAS / capacity units are scalar numbers.
   format: (n: number) => { value: string; suffix: string };
-}[] = [
-  {
-    key: "storage_bytes",
-    label: "Storage",
-    format: (n) => {
-      const gb = n / 1024 ** 3;
-      if (gb >= 1024) return { value: fmtDecimal(gb / 1024, 2), suffix: "TiB" };
-      return { value: fmtDecimal(gb, 1), suffix: "GiB" };
-    },
+};
+
+const _storage: MetricSpec = {
+  key: "storage_bytes",
+  label: "Storage",
+  format: (n) => {
+    const gb = n / 1024 ** 3;
+    if (gb >= 1024) return { value: fmtDecimal(gb / 1024, 2), suffix: "TiB" };
+    return { value: fmtDecimal(gb, 1), suffix: "GiB" };
   },
-  {
-    key: "db_connections",
-    label: "Connections",
-    format: (n) => ({ value: fmtDecimal(n, 0), suffix: "" }),
-  },
-  {
-    key: "aas",
-    label: "Active Sessions (AAS)",
-    format: (n) => ({ value: fmtDecimal(n, 2), suffix: "" }),
-  },
-];
+};
+const _connections: MetricSpec = {
+  key: "db_connections",
+  label: "Connections",
+  format: (n) => ({ value: fmtDecimal(n, 0), suffix: "" }),
+};
+const _aas: MetricSpec = {
+  key: "aas",
+  label: "Active Sessions (AAS)",
+  format: (n) => ({ value: fmtDecimal(n, 2), suffix: "" }),
+};
+const _rcu: MetricSpec = {
+  key: "consumed_rcu",
+  label: "Read Capacity (RCU/분)",
+  format: (n) => ({ value: fmtDecimal(n, 0), suffix: "RCU" }),
+};
+const _wcu: MetricSpec = {
+  key: "consumed_wcu",
+  label: "Write Capacity (WCU/분)",
+  format: (n) => ({ value: fmtDecimal(n, 0), suffix: "WCU" }),
+};
+
+// Engine-specific metric tabs. Relational keeps the original list; DocDB
+// forecasts connections + storage; DynamoDB forecasts provisioned throughput.
+const METRICS_BY_FAMILY: Record<string, MetricSpec[]> = {
+  relational: [_storage, _connections, _aas],
+  documentdb: [_connections, _storage],
+  dynamodb: [_wcu, _rcu],
+};
+
+function metricsFor(engine?: string): MetricSpec[] {
+  return (
+    METRICS_BY_FAMILY[engineFamily(engine)] ?? METRICS_BY_FAMILY.relational
+  );
+}
 
 function urgencyColor(days: number | null): {
   text: string;
@@ -71,8 +96,17 @@ function urgencyColor(days: number | null): {
   };
 }
 
-export function CapacityForecastPanel({ clusterId }: { clusterId: string }) {
-  const [active, setActive] = useState<CapacityMetric>("storage_bytes");
+export function CapacityForecastPanel({
+  clusterId,
+  engine,
+}: {
+  clusterId: string;
+  engine?: string;
+}) {
+  const metrics = useMemo(() => metricsFor(engine), [engine]);
+  const defaultMetric = metrics[0].key;
+
+  const [active, setActive] = useState<CapacityMetric>(defaultMetric);
   const [cache, setCache] = useState<
     Partial<Record<CapacityMetric, CapacityForecastResponse>>
   >({});
@@ -80,7 +114,7 @@ export function CapacityForecastPanel({ clusterId }: { clusterId: string }) {
   const [err, setErr] = useState<string | null>(null);
 
   const data = cache[active];
-  const metricSpec = METRICS.find((m) => m.key === active)!;
+  const metricSpec = metrics.find((m) => m.key === active) ?? metrics[0];
 
   const load = useCallback(
     async (m: CapacityMetric) => {
@@ -103,13 +137,14 @@ export function CapacityForecastPanel({ clusterId }: { clusterId: string }) {
     [clusterId, cache],
   );
 
-  // Initial load — pull storage forecast on mount.
+  // Initial load — pull the engine's default metric forecast on mount /
+  // whenever the selected cluster (or its engine family) changes.
   useEffect(() => {
     setCache({});
-    setActive("storage_bytes");
-    load("storage_bytes");
+    setActive(defaultMetric);
+    load(defaultMetric);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clusterId]);
+  }, [clusterId, defaultMetric]);
 
   const usagePct = useMemo(() => {
     if (!data || !data.limit) return 0;
@@ -136,7 +171,7 @@ export function CapacityForecastPanel({ clusterId }: { clusterId: string }) {
           </div>
         </div>
         <div className="flex items-center gap-1">
-          {METRICS.map((m) => (
+          {metrics.map((m) => (
             <button
               key={m.key}
               onClick={() => load(m.key)}
@@ -169,7 +204,18 @@ export function CapacityForecastPanel({ clusterId }: { clusterId: string }) {
           </div>
         </div>
       )}
-      {data && !data.error && data.samples < 7 && (
+      {/* not_applicable — e.g. on-demand DynamoDB (no provisioned ceiling to
+          forecast toward). Neutral notice, not an error. */}
+      {data && !data.error && data.not_applicable && (
+        <div className="p-5">
+          <div className="text-xs text-zinc-400 border border-zinc-700 bg-zinc-900/40 px-3 py-2">
+            이 지표는 현재 클러스터에서 용량 예측을 제공하지 않습니다 —
+            온디맨드(프로비저닝되지 않은) 용량이거나 예측 가능한 한도가
+            없습니다.
+          </div>
+        </div>
+      )}
+      {data && !data.error && !data.not_applicable && data.samples < 7 && (
         <div className="p-5">
           <div className="text-xs text-zinc-400 border border-zinc-700 bg-zinc-900/40 px-3 py-2">
             데이터 부족 ({data.samples}개 샘플) — 신뢰성 있는 예측을 위해 최소
@@ -177,7 +223,7 @@ export function CapacityForecastPanel({ clusterId }: { clusterId: string }) {
           </div>
         </div>
       )}
-      {data && !data.error && data.samples >= 7 && (
+      {data && !data.error && !data.not_applicable && data.samples >= 7 && (
         <div className="p-5 space-y-5">
           {/* Headline: current vs limit + urgency */}
           <div className="flex items-end justify-between gap-4 flex-wrap">

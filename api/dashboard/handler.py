@@ -1739,6 +1739,23 @@ _CAPACITY_METRICS = {
     # "connections" was empty whenever Performance Insights was off.
     "db_connections": {"limit": 5000, "label": "Connections"},
     "aas": {"limit": 64.0, "label": "Active Sessions"},
+    # DynamoDB provisioned throughput — consumed_* are per-minute Sums; the
+    # ceiling is the provisioned per-second rate × 60. Default limits below are
+    # placeholders only — _capacity_forecast OVERRIDES them from the latest
+    # provisioned_rcu/provisioned_wcu datapoint (and returns not_applicable when
+    # there is none, i.e. on-demand tables).
+    "consumed_rcu": {"limit": 60000.0, "label": "Read Capacity (RCU/min)"},
+    "consumed_wcu": {"limit": 60000.0, "label": "Write Capacity (WCU/min)"},
+}
+
+# Which metrics are valid per engine family. Relational keeps the full
+# (storage/connections/aas) set; the new engines forecast only the things that
+# "grow toward a limit" — DocDB connections + storage, DynamoDB provisioned
+# throughput. A metric outside its family's set → not_applicable (no SQL).
+_CAPACITY_METRICS_BY_FAMILY = {
+    "relational": {"storage_bytes", "db_connections", "aas"},
+    "documentdb": {"db_connections", "storage_bytes"},
+    "dynamodb": {"consumed_rcu", "consumed_wcu"},
 }
 
 
@@ -1748,10 +1765,16 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
         return {"cluster_id": cluster_id, "metric": metric, "not_applicable": True,
                 "registry_unavailable": True}
     fam = engine_family(eng)
-    if fam != "relational":
+    # Engine-aware dispatch: relational, documentdb and dynamodb all forecast
+    # against metric_snapshots — only the valid metric set + limit resolution
+    # differ. Any other family is genuinely not applicable.
+    allowed = _CAPACITY_METRICS_BY_FAMILY.get(fam)
+    if allowed is None:
         return {"cluster_id": cluster_id, "metric": metric, "not_applicable": True, "engine_family": fam}
-    if metric not in _CAPACITY_METRICS:
-        return {"cluster_id": cluster_id, "metric": metric, "error": f"unknown metric {metric}"}
+    # Metric must be both globally known AND valid for this engine family.
+    if metric not in _CAPACITY_METRICS or metric not in allowed:
+        return {"cluster_id": cluster_id, "metric": metric, "not_applicable": True,
+                "engine_family": fam}
     # RDS Data API params come through as strings — we cast to interval the
     # same way the other lookback queries in this file do, instead of using
     # MAKE_INTERVAL which would need an integer-typed param. Float-cast
@@ -1774,10 +1797,10 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
     spec = _CAPACITY_METRICS[metric]
     limit = float(spec["limit"])
 
-    # Connection limit can be looked up dynamically from cluster_settings — when
-    # the cluster has a max_connections row, we trust that over our default
-    # ceiling.
-    if metric == "db_connections":
+    # --- Dynamic limit resolution (engine-aware) ---------------------------
+    # Relational: connection limit comes from cluster_settings.max_connections
+    # when present; otherwise the conservative default ceiling stands.
+    if fam == "relational" and metric == "db_connections":
         cfg = query(
             "SELECT value FROM cluster_settings "
             "WHERE cluster_id = :cid AND name = 'max_connections' "
@@ -1791,6 +1814,53 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
         except (ValueError, KeyError, TypeError):
             pass
 
+    # DocumentDB: connection ceiling is the LATEST DatabaseConnectionsLimit
+    # metric (db_connections_limit), NOT cluster_settings — DocDB has no
+    # max_connections setting. storage_bytes keeps the Aurora-style ceiling
+    # (DocDB storage auto-scales the same way), so no override there.
+    if fam == "documentdb" and metric == "db_connections":
+        lim_rows = query(
+            "SELECT value FROM metric_snapshots "
+            "WHERE cluster_id = :cid AND metric_type = 'db_connections_limit' "
+            "AND (dimensions IS NULL OR dimensions::text = '{}') "
+            "ORDER BY ts DESC LIMIT 1",
+            {"cid": cluster_id},
+        )
+        try:
+            cl = float(lim_rows[0]["value"]) if lim_rows else 0.0
+            if cl > 0:
+                limit = cl
+        except (ValueError, KeyError, TypeError):
+            pass
+
+    # DynamoDB: per-minute capacity ceiling = LATEST provisioned_* × 60
+    # (consumed_* are per-minute Sums). No provisioned datapoint means the
+    # table is on-demand (or capacity unknown) — there is no limit to forecast
+    # toward, so we return not_applicable rather than a misleading default.
+    if fam == "dynamodb" and metric in ("consumed_rcu", "consumed_wcu"):
+        prov_metric = "provisioned_rcu" if metric == "consumed_rcu" else "provisioned_wcu"
+        prov_rows = query(
+            "SELECT value FROM metric_snapshots "
+            "WHERE cluster_id = :cid AND metric_type = :pm "
+            "AND (dimensions IS NULL OR dimensions::text = '{}') "
+            "ORDER BY ts DESC LIMIT 1",
+            {"cid": cluster_id, "pm": prov_metric},
+        )
+        provisioned = 0.0
+        try:
+            provisioned = float(prov_rows[0]["value"]) if prov_rows else 0.0
+        except (ValueError, KeyError, TypeError):
+            provisioned = 0.0
+        if provisioned <= 0:
+            return {
+                "cluster_id": cluster_id,
+                "metric": metric,
+                "not_applicable": True,
+                "engine_family": fam,
+                "reason": "on-demand or no provisioned capacity",
+            }
+        limit = provisioned * 60.0
+
     days_until = None
     if slope > 0 and current < limit:
         days_until = max(0, int((limit - current) / slope))
@@ -1799,6 +1869,7 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
     return {
         "cluster_id": cluster_id,
         "metric": metric,
+        "engine_family": fam,
         "label": spec["label"],
         "current": current,
         "slope_per_day": slope,
