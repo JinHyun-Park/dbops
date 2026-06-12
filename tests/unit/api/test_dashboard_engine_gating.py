@@ -826,3 +826,208 @@ def test_health_findings_registry_unavailable_returns_registry_unavailable_flag(
     assert result["findings"] == []
     assert result.get("registry_unavailable") is True
     assert not query_called
+
+
+# ===========================================================================
+# 10. _engine_config — engine-level config panel (read-only)
+#     DocumentDB cluster settings + DynamoDB table settings the overview
+#     panels don't already show. Relational → not_applicable (has SettingsPanel).
+# ===========================================================================
+
+def test_engine_config_documentdb_returns_cluster_settings_via_docdb_client(monkeypatch):
+    """_engine_config for a documentdb cluster reads maintenance window,
+    deletion protection, encryption, parameter group, and retention via the
+    docdb client (mirrors the RDS cluster API), not the rds client."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "docdb")
+
+    mock_docdb = MagicMock()
+    mock_docdb.describe_db_clusters.return_value = {
+        "DBClusters": [{
+            "Engine": "docdb", "Status": "available",
+            "PreferredMaintenanceWindow": "sun:18:00-sun:18:30",
+            "DeletionProtection": True,
+            "StorageEncrypted": True,
+            "DBClusterParameterGroup": "default.docdb5.0",
+            "BackupRetentionPeriod": 7,
+        }]
+    }
+    mock_rds = MagicMock()
+
+    def _client(service, **kwargs):
+        return mock_docdb if service == "docdb" else mock_rds
+
+    mock_session = MagicMock()
+    mock_session.client.side_effect = _client
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._engine_config("dbops-docdb-test")
+
+    assert result.get("engine_family") == "documentdb"
+    assert result.get("not_applicable") is not True
+    assert result["preferred_maintenance_window"] == "sun:18:00-sun:18:30"
+    assert result["deletion_protection"] is True
+    assert result["storage_encrypted"] is True
+    assert result["db_cluster_parameter_group"] == "default.docdb5.0"
+    assert result["backup_retention_period"] == 7
+    mock_docdb.describe_db_clusters.assert_called_once()
+    mock_rds.describe_db_clusters.assert_not_called()
+
+
+def test_engine_config_dynamodb_returns_ttl_stream_class_via_dynamodb_client(monkeypatch):
+    """_engine_config for a dynamodb cluster reads table class, deletion
+    protection, SSE, streams, and TTL via the dynamodb client (describe_table +
+    describe_time_to_live), using the registry resource_name as the table."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+    monkeypatch.setattr(
+        handler, "_lookup_cluster",
+        lambda cid: {"resource_name": "orders-table", "region": "ap-northeast-2"},
+    )
+
+    mock_ddb = MagicMock()
+    mock_ddb.describe_table.return_value = {
+        "Table": {
+            "TableClassSummary": {"TableClass": "STANDARD_INFREQUENT_ACCESS"},
+            "DeletionProtectionEnabled": True,
+            "SSEDescription": {"SSEType": "KMS", "Status": "ENABLED"},
+            "StreamSpecification": {
+                "StreamEnabled": True, "StreamViewType": "NEW_AND_OLD_IMAGES",
+            },
+        }
+    }
+    mock_ddb.describe_time_to_live.return_value = {
+        "TimeToLiveDescription": {
+            "TimeToLiveStatus": "ENABLED", "AttributeName": "expires_at",
+        }
+    }
+    mock_rds = MagicMock()
+
+    def _client(service, **kwargs):
+        return mock_ddb if service == "dynamodb" else mock_rds
+
+    mock_session = MagicMock()
+    mock_session.client.side_effect = _client
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._engine_config("ddb-abc123")
+
+    assert result.get("engine_family") == "dynamodb"
+    assert result.get("not_applicable") is not True
+    assert result["table_name"] == "orders-table"
+    assert result["table_class"] == "STANDARD_INFREQUENT_ACCESS"
+    assert result["deletion_protection_enabled"] is True
+    assert result["sse_type"] == "KMS"
+    assert result["sse_status"] == "ENABLED"
+    assert result["stream_enabled"] is True
+    assert result["stream_view_type"] == "NEW_AND_OLD_IMAGES"
+    assert result["ttl_status"] == "ENABLED"
+    assert result["ttl_attribute_name"] == "expires_at"
+    mock_ddb.describe_table.assert_called_once()
+    mock_ddb.describe_time_to_live.assert_called_once()
+    mock_rds.describe_db_clusters.assert_not_called()
+
+
+def test_engine_config_dynamodb_defaults_table_class_when_absent(monkeypatch):
+    """_engine_config for a dynamodb table with no TableClassSummary must
+    default to STANDARD (AWS omits the summary for the default class)."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+    monkeypatch.setattr(
+        handler, "_lookup_cluster",
+        lambda cid: {"resource_name": "orders-table"},
+    )
+
+    mock_ddb = MagicMock()
+    mock_ddb.describe_table.return_value = {"Table": {}}
+    mock_ddb.describe_time_to_live.return_value = {
+        "TimeToLiveDescription": {"TimeToLiveStatus": "DISABLED"}
+    }
+
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_ddb
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._engine_config("ddb-abc123")
+
+    assert result["table_class"] == "STANDARD"
+    assert result["deletion_protection_enabled"] is False
+    assert result["stream_enabled"] is False
+    assert result["ttl_status"] == "DISABLED"
+
+
+def test_engine_config_relational_returns_not_applicable(monkeypatch):
+    """_engine_config for a relational cluster must return not_applicable
+    (relational has the SettingsPanel) without calling any AWS client."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "aurora-postgresql")
+
+    mock_rds = MagicMock()
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_rds
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._engine_config("prod-pg")
+
+    assert result.get("not_applicable") is True
+    assert result.get("engine_family") == "relational"
+    mock_rds.describe_db_clusters.assert_not_called()
+
+
+def test_engine_config_registry_unavailable_fail_closed(monkeypatch):
+    """When _registry_engine returns None, _engine_config must fail closed:
+    not_applicable + registry_unavailable, NO AWS client."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: None)
+
+    mock_session = MagicMock()
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._engine_config("some-cluster")
+
+    assert result.get("not_applicable") is True
+    assert result.get("registry_unavailable") is True
+    mock_session.client.assert_not_called()
+
+
+def test_engine_config_documentdb_no_raw_boto_leak_on_error(monkeypatch):
+    """_engine_config for a documentdb cluster whose describe raises a generic
+    boto error must return a friendly Korean message, not the raw fault."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "docdb")
+
+    mock_docdb = MagicMock()
+    mock_docdb.describe_db_clusters.side_effect = RuntimeError(
+        "botocore.exceptions.ClientError: AccessDenied raw secret leak"
+    )
+
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_docdb
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._engine_config("dbops-docdb-test")
+
+    assert result.get("engine_family") == "documentdb"
+    assert "raw secret leak" not in result.get("error", "")
+    assert "AccessDenied" not in result.get("error", "")
+    assert "구성" in result.get("error", "")
+
+
+def test_engine_config_dynamodb_no_raw_boto_leak_on_error(monkeypatch):
+    """_engine_config for a dynamodb table whose describe_table raises a generic
+    boto error must return a friendly Korean message, not the raw fault."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+    monkeypatch.setattr(
+        handler, "_lookup_cluster",
+        lambda cid: {"resource_name": "orders-table"},
+    )
+
+    mock_ddb = MagicMock()
+    mock_ddb.describe_table.side_effect = RuntimeError(
+        "botocore.exceptions.ClientError: AccessDenied raw secret leak"
+    )
+
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_ddb
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._engine_config("ddb-abc123")
+
+    assert result.get("engine_family") == "dynamodb"
+    assert "raw secret leak" not in result.get("error", "")
+    assert "AccessDenied" not in result.get("error", "")
+    assert "구성" in result.get("error", "")

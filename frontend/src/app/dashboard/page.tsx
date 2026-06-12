@@ -26,6 +26,7 @@ import { ChangeImpactPanel } from "@/components/dashboard/change-impact-panel";
 import { LogInsightsPanel } from "@/components/dashboard/log-insights-panel";
 import { TableSizesPanel } from "@/components/dashboard/table-sizes-panel";
 import { BackupPanel } from "@/components/dashboard/backup-panel";
+import { EngineConfigPanel } from "@/components/dashboard/engine-config-panel";
 import { CapacityForecastPanel } from "@/components/dashboard/capacity-forecast-panel";
 import { DataApiBanner } from "@/components/dashboard/data-api-banner";
 import {
@@ -817,6 +818,10 @@ export default function DashboardPage() {
                       clusterId={selectedCluster}
                       range={range}
                     />
+                    <EngineConfigPanel
+                      clusterId={selectedCluster}
+                      engine={dashboardData.cluster?.engine}
+                    />
                     <CapacityForecastPanel
                       clusterId={selectedCluster}
                       engine={dashboardData.cluster?.engine}
@@ -824,6 +829,10 @@ export default function DashboardPage() {
                     <BackupPanel
                       clusterId={selectedCluster}
                       engine={dashboardData.cluster?.engine}
+                    />
+                    <EventsPanel
+                      events={dashboardData.events || []}
+                      clusterId={selectedCluster}
                     />
                   </>
                 )}
@@ -843,6 +852,10 @@ export default function DashboardPage() {
                       clusterId={selectedCluster}
                       range={range}
                     />
+                    <EngineConfigPanel
+                      clusterId={selectedCluster}
+                      engine={dashboardData.cluster?.engine}
+                    />
                     <CapacityForecastPanel
                       clusterId={selectedCluster}
                       engine={dashboardData.cluster?.engine}
@@ -851,6 +864,10 @@ export default function DashboardPage() {
                     <BackupPanel
                       clusterId={selectedCluster}
                       engine={dashboardData.cluster?.engine}
+                    />
+                    <EventsPanel
+                      events={dashboardData.events || []}
+                      clusterId={selectedCluster}
                     />
                   </>
                 )}

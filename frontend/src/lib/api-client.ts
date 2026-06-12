@@ -622,6 +622,47 @@ export async function fetchTopology(
   return res.json();
 }
 
+// Engine-level config (read-only) — surfaces config the overview panels don't
+// already show. DocumentDB cluster settings + DynamoDB table settings. Returns
+// not_applicable for relational (which has the SettingsPanel instead).
+export interface EngineConfigResponse {
+  cluster_id: string;
+  engine_family?: string;
+  // true when the family has no engine-config panel (relational) or registry
+  // lookup failed.
+  not_applicable?: boolean;
+  registry_unavailable?: boolean;
+  // Friendly fallback on missing/boto error. `info` → neutral notice, not red.
+  error?: string;
+  info?: boolean;
+  // ── DocumentDB ──
+  preferred_maintenance_window?: string | null;
+  deletion_protection?: boolean;
+  storage_encrypted?: boolean;
+  db_cluster_parameter_group?: string | null;
+  backup_retention_period?: number | null;
+  // ── DynamoDB ──
+  table_name?: string;
+  table_class?: string | null;
+  deletion_protection_enabled?: boolean | null;
+  sse_type?: string | null;
+  sse_status?: string | null;
+  stream_enabled?: boolean | null;
+  stream_view_type?: string | null;
+  ttl_status?: string | null;
+  ttl_attribute_name?: string | null;
+}
+
+export async function fetchEngineConfig(
+  clusterId: string,
+): Promise<EngineConfigResponse> {
+  const res = await authedFetch(
+    await api(`/api/dashboard/${enc(clusterId)}/engine-config`),
+  );
+  if (!res.ok) throw new Error(`구성 정보 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
 export async function fetchCapacityForecast(
   clusterId: string,
   metric: CapacityMetric = "storage_bytes",

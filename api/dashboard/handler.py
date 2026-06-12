@@ -2639,6 +2639,136 @@ def _backups(cluster_id: str) -> dict:
     }
 
 
+def _engine_config_docdb(cluster_id: str) -> dict:
+    """DocumentDB engine-level config (read-only). Surfaces cluster settings
+    the DocDB overview panel does NOT already show (engine/version are shown
+    there). Mirrors the friendly-fallback contract of _backups_docdb —
+    `cluster_id` IS the DocDB DBClusterIdentifier."""
+    docdb = _cluster_session(cluster_id).client("docdb")
+
+    not_real = {
+        "cluster_id": cluster_id,
+        "engine_family": "documentdb",
+        "error": (
+            "이 DocumentDB 클러스터의 구성 정보를 조회할 수 없습니다 — 등록되지 "
+            "않았거나 접근 권한이 없습니다."
+        ),
+        "info": True,
+    }
+    try:
+        resp = docdb.describe_db_clusters(DBClusterIdentifier=cluster_id)
+    except Exception as e:
+        msg = str(e)
+        if "DBClusterNotFoundFault" in msg or "not found" in msg.lower():
+            return not_real
+        print(f"[engine-config] docdb describe failed for {cluster_id}: {e}")
+        return {
+            "cluster_id": cluster_id,
+            "engine_family": "documentdb",
+            "error": "구성 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
+        }
+    clusters = resp.get("DBClusters") or []
+    if not clusters:
+        return not_real
+    c = clusters[0]
+    return {
+        "cluster_id": cluster_id,
+        "engine_family": "documentdb",
+        "preferred_maintenance_window": c.get("PreferredMaintenanceWindow"),
+        "deletion_protection": bool(c.get("DeletionProtection")),
+        "storage_encrypted": bool(c.get("StorageEncrypted")),
+        "db_cluster_parameter_group": c.get("DBClusterParameterGroup"),
+        "backup_retention_period": c.get("BackupRetentionPeriod"),
+    }
+
+
+def _engine_config_dynamodb(cluster_id: str) -> dict:
+    """DynamoDB table-level config (read-only). Surfaces config the DynamoDB
+    overview panel does NOT already show (billing_mode/item_count/key_schema/
+    GSI/LSI are shown there). The `ddb-<hex>` slug is the registry PK; the real
+    table name lives in the registry row's `resource_name`."""
+    row = _lookup_cluster(cluster_id)
+    table_name = (row.get("resource_name") if row else "") or cluster_id
+    ddb = _cluster_session(cluster_id, row=row).client("dynamodb")
+
+    result = {
+        "cluster_id": cluster_id,
+        "engine_family": "dynamodb",
+        "table_name": table_name,
+        "table_class": None,
+        "deletion_protection_enabled": None,
+        "sse_type": None,
+        "sse_status": None,
+        "stream_enabled": None,
+        "stream_view_type": None,
+        "ttl_status": None,
+        "ttl_attribute_name": None,
+    }
+    try:
+        desc = (ddb.describe_table(TableName=table_name) or {}).get("Table") or {}
+    except Exception as e:
+        msg = str(e)
+        if "ResourceNotFound" in msg or "not found" in msg.lower():
+            result["error"] = (
+                "이 DynamoDB 테이블의 구성 정보를 조회할 수 없습니다 — 등록되지 "
+                "않았거나 접근 권한이 없습니다."
+            )
+            result["info"] = True
+            return result
+        print(f"[engine-config] dynamodb describe_table failed for {cluster_id}: {e}")
+        result["error"] = "구성 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요."
+        return result
+
+    # STANDARD when the table-class summary is absent (default class).
+    result["table_class"] = (desc.get("TableClassSummary") or {}).get(
+        "TableClass", "STANDARD"
+    )
+    result["deletion_protection_enabled"] = bool(desc.get("DeletionProtectionEnabled"))
+    sse = desc.get("SSEDescription") or {}
+    if sse:
+        # SSEType absent → AWS-owned key (no SSEDescription) vs KMS/AES256.
+        result["sse_type"] = sse.get("SSEType")
+        result["sse_status"] = sse.get("Status")
+    stream = desc.get("StreamSpecification") or {}
+    result["stream_enabled"] = bool(stream.get("StreamEnabled"))
+    result["stream_view_type"] = stream.get("StreamViewType")
+
+    try:
+        ttl = (ddb.describe_time_to_live(TableName=table_name) or {}).get(
+            "TimeToLiveDescription"
+        ) or {}
+        result["ttl_status"] = ttl.get("TimeToLiveStatus")
+        result["ttl_attribute_name"] = ttl.get("AttributeName")
+    except Exception as e:
+        print(f"[engine-config] dynamodb describe_time_to_live failed for {cluster_id}: {e}")
+
+    return result
+
+
+def _engine_config(cluster_id: str) -> dict:
+    """Engine-level configuration for non-relational families (read-only).
+
+    Surfaces config NOT already shown in the overview panels — DocumentDB
+    cluster settings (maintenance window, deletion protection, encryption,
+    parameter group, retention) and DynamoDB table settings (table class,
+    deletion protection, SSE, streams, TTL).
+
+    Relational clusters already have the SettingsPanel (cluster_settings),
+    so they return not_applicable here. Same friendly-fallback contract as
+    _topology / _backups — never leak the raw boto3 fault string.
+    """
+    eng = _registry_engine(cluster_id)
+    if eng is None:
+        return {"cluster_id": cluster_id, "not_applicable": True, "registry_unavailable": True}
+    fam = engine_family(eng)
+    if fam == "documentdb":
+        return _engine_config_docdb(cluster_id)
+    if fam == "dynamodb":
+        return _engine_config_dynamodb(cluster_id)
+    # relational already has the SettingsPanel — nothing engine-config-specific here.
+    return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": fam}
+
+
 def _slo(
     query,
     cluster_id: str,
@@ -3048,6 +3178,11 @@ def lambda_handler(event, context):
             # (automated snapshots are daily, PITR window slides by the
             # minute but minute-granularity staleness is fine here).
             return _response(200, _backups(cluster_id), max_age=60)
+        if raw_path.endswith("/engine-config"):
+            # 60s cache — engine-level config (maintenance window, deletion
+            # protection, SSE, streams, TTL) is near-static; minute-grained
+            # staleness is fine for a read-only config panel.
+            return _response(200, _engine_config(cluster_id), max_age=60)
         if raw_path.endswith("/slo"):
             days = _parse_int(qs.get("days"), 30, min_v=1, max_v=90)
             avail_t = _parse_float(qs.get("availability_target"), 99.9)

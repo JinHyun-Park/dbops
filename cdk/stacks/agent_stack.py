@@ -399,6 +399,10 @@ class AgentStack(cdk.Stack):
                 # DynamoDB backup panel — PITR window + on-demand backups (read-only).
                 "dynamodb:DescribeContinuousBackups",
                 "dynamodb:ListBackups",
+                # DynamoDB engine-config panel — table class, SSE, streams, TTL,
+                # deletion protection (read-only).
+                "dynamodb:DescribeTable",
+                "dynamodb:DescribeTimeToLive",
                 "cloudwatch:GetMetricStatistics",
                 # Hub-spoke: topology/backup/log panels assume the cluster's
                 # spoke role to read in its OWN account (local when no role).
@@ -835,6 +839,14 @@ class AgentStack(cdk.Stack):
             path="/api/dashboard/{cluster_id}/backups",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardBackupsIntegration", dashboard_lambda),
+        )
+        # Engine-level config (read-only) — DocumentDB cluster settings +
+        # DynamoDB table settings the overview panels don't already show.
+        # Live docdb/dynamodb Describe calls.
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/engine-config",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardEngineConfigIntegration", dashboard_lambda),
         )
         # Manual snapshot creation (phase 2 write tier) — admin-gated,
         # routed to the dedicated backups Lambda (not the read-only
