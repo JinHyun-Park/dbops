@@ -1,0 +1,7 @@
+# Dependencies bundled into the MCP-servers Lambda asset.
+# boto3/botocore ship in the Lambda runtime, so the only extra dependency is
+# pymongo for the DocumentDB Mongo-protocol write tools (set_docdb_profiler,
+# create_docdb_index) in the operations server. The other MCP servers share the
+# same asset and get pymongo too (harmless, unused). Same pin as the read-only
+# docdb_mongo_collector.
+pymongo>=4

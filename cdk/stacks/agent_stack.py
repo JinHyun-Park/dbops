@@ -16,6 +16,7 @@ from aws_cdk import (
 from aws_cdk import (
     aws_lambda as lambda_,
 )
+from bundling import _PipLocalBundling
 from config.settings import Settings
 from constructs import Construct
 from tool_definitions import incident_schema, operations_schema, performance_schema, simulation_schema
@@ -82,7 +83,27 @@ class AgentStack(cdk.Stack):
             self, "OperationsMCP",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="mcp_servers.operations.handler.lambda_handler",
-            code=lambda_.Code.from_asset("../mcp-servers"),
+            # The operations server's DocDB write tools (set_docdb_profiler,
+            # create_docdb_index) connect over the Mongo wire protocol, so the
+            # asset must carry pymongo (not in the Lambda runtime) + the RDS/DocDB
+            # CA bundle. Reuse the collector's Docker-free local-pip bundling
+            # (Docker fallback). The other MCP servers share this asset and get
+            # pymongo too (harmless, unused).
+            code=lambda_.Code.from_asset(
+                "../mcp-servers",
+                bundling=cdk.BundlingOptions(
+                    image=lambda_.Runtime.PYTHON_3_12.bundling_image,
+                    local=_PipLocalBundling("../mcp-servers"),
+                    command=[
+                        "bash", "-c",
+                        "pip install -r requirements.txt -t /asset-output "
+                        "&& cp -au . /asset-output "
+                        "&& (curl -fsSL -o /asset-output/global-bundle.pem "
+                        "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem "
+                        "|| true)",
+                    ],
+                ),
+            ),
             timeout=cdk.Duration.minutes(2),
             memory_size=512,
             vpc=data.vpc,

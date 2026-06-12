@@ -90,3 +90,48 @@ def test_gate_aurora_tool_ungated():
         result = _invoke("execute_sql", {"cluster_id": "prod-pg-1", "sql": "SELECT 1"})
     assert result["status"] == "ok"
     spy.assert_called_once()
+
+
+# ===== DocDB Mongo write tools — same FAIL-CLOSED gate (docdb_write) =====
+
+
+def test_gate_docdb_none_family_fail_closed():
+    """fix #3: set_docdb_profiler on an unresolvable cluster → unsupported_engine,
+    impl never invoked — so no Mongo connect even with a valid-looking approval."""
+    spy = MagicMock()
+    with _patch_family(None), patch.dict(
+        handler.TOOLS["set_docdb_profiler"], {"impl": spy}
+    ):
+        result = _invoke(
+            "set_docdb_profiler",
+            {"cluster_id": "ghost", "level": 1, "approved": True, "approval_id": "x"},
+        )
+    assert result["status"] == "unsupported_engine"
+    assert "could not be resolved" in result["reason"]
+    spy.assert_not_called()
+
+
+def test_gate_docdb_wrong_engine_dynamodb_refused():
+    """create_docdb_index on a DynamoDB cluster (no docdb_write cap) → refused."""
+    spy = MagicMock()
+    with _patch_family("dynamodb"), patch.dict(
+        handler.TOOLS["create_docdb_index"], {"impl": spy}
+    ):
+        result = _invoke(
+            "create_docdb_index",
+            {"cluster_id": "ddb-abc", "db": "app", "collection": "c",
+             "keys": [["a", 1]], "name": "ix", "approved": True, "approval_id": "x"},
+        )
+    assert result["status"] == "unsupported_engine"
+    spy.assert_not_called()
+
+
+def test_gate_docdb_family_passes_to_impl():
+    """A resolved documentdb family passes the gate and the impl runs."""
+    spy = MagicMock(return_value={"status": "approval_required"})
+    with _patch_family("documentdb"), patch.dict(
+        handler.TOOLS["set_docdb_profiler"], {"impl": spy}
+    ):
+        result = _invoke("set_docdb_profiler", {"cluster_id": "docdb-1", "level": 1})
+    assert result["status"] == "approval_required"
+    spy.assert_called_once()

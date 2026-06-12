@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp_servers.operations.tools.audit_permissions import audit_permissions_impl
+from mcp_servers.operations.tools.create_docdb_index import create_docdb_index_impl
 from mcp_servers.operations.tools.create_snapshot import create_snapshot_impl
 from mcp_servers.operations.tools.enable_dynamodb_pitr import enable_dynamodb_pitr_impl
 from mcp_servers.operations.tools.execute_sql import execute_sql_impl
@@ -20,6 +21,7 @@ from mcp_servers.operations.tools.restore_cluster import restore_cluster_impl
 from mcp_servers.operations.tools.review_sql import review_sql_impl
 from mcp_servers.operations.tools.schema_diff import get_schema_diff_impl
 from mcp_servers.operations.tools.schema_history import get_schema_history_impl
+from mcp_servers.operations.tools.set_docdb_profiler import set_docdb_profiler_impl
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.engine_family import CAPABILITIES
 from mcp_servers.shared.engine_family import engine_family as _engine_family
@@ -37,6 +39,11 @@ _ENGINE_GATED_TOOLS = {
     "modify_dynamodb_capacity": "ddb_write",
     "modify_dynamodb_ttl": "ddb_write",
     "enable_dynamodb_pitr": "ddb_write",
+    # DocumentDB Mongo-protocol write tools (stage 2). FAIL-CLOSED on None family
+    # too: a documentdb cluster missing the docdb_write capability — or any
+    # unresolvable cluster — refuses before reaching the impl (review fix #3).
+    "set_docdb_profiler": "docdb_write",
+    "create_docdb_index": "docdb_write",
 }
 
 TOOLS = {
@@ -244,6 +251,53 @@ TOOLS = {
             "required": ["cluster_id"],
         },
     },
+    "set_docdb_profiler": {
+        "impl": set_docdb_profiler_impl,
+        "description": (
+            "DocumentDB only: set the database profiler level via the Mongo "
+            "protocol (db.command profile). level 0=off, 1=slow ops (slowms "
+            "threshold), 2=all ops. Requires approved=true AND "
+            "approval_id=<uuid from request_approval>. Idempotent. Needs a "
+            "configured write credential (mongo_write_secret_arn)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target DocumentDB cluster ID"},
+                "db": {"type": "string", "default": "admin", "description": "Target database name (defaults to admin)"},
+                "level": {"type": "integer", "default": 1, "description": "Profiler level: 0=off, 1=slow ops, 2=all ops"},
+                "slowms": {"type": "integer", "default": 100, "description": "slowms threshold in milliseconds (>=0)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id"],
+        },
+    },
+    "create_docdb_index": {
+        "impl": create_docdb_index_impl,
+        "description": (
+            "DocumentDB only: create an index on a collection via the Mongo "
+            "protocol (create_index, background=true). keys is an ORDERED list "
+            "of [field, direction] pairs (direction 1=asc, -1=desc) — compound "
+            "order is significant. name is required. Requires approved=true AND "
+            "approval_id=<uuid from request_approval>. Idempotent (skips if the "
+            "named index exists). Needs a configured write credential "
+            "(mongo_write_secret_arn)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target DocumentDB cluster ID"},
+                "db": {"type": "string", "description": "Target database name"},
+                "collection": {"type": "string", "description": "Target collection name"},
+                "keys": {"type": "array", "description": "Ordered list of [field, direction] pairs, e.g. [[\"user_id\", 1], [\"created_at\", -1]]"},
+                "name": {"type": "string", "description": "Index name (required)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id", "db", "collection", "keys", "name"],
+        },
+    },
     "review_sql": {
         "impl": review_sql_impl,
         "description": "Pre-execution SQL review with risk classification, issue detection, and rollback suggestion",
@@ -418,14 +472,15 @@ def lambda_handler(event, context):
 
     if tool_name and tool_name in TOOLS:
         # POSITIVE engine-capability gate, FAIL-CLOSED for the NoSQL write tools
-        # only (the Aurora tools stay ungated). A DynamoDB tool called on an
-        # Aurora cluster — or on an unresolvable/unregistered cluster — refuses,
-        # so a valid-looking approval can never drive a write at the wrong engine.
+        # only (the Aurora tools stay ungated). A NoSQL tool called on an Aurora
+        # cluster — or on an unresolvable/unregistered cluster — refuses, so a
+        # valid-looking approval can never drive a write at the wrong engine.
         cap_key = _ENGINE_GATED_TOOLS.get(tool_name)
         if cap_key:
             cluster_id = (event or {}).get("cluster_id") if isinstance(event, dict) else None
             fam = _resolve_family(cluster_id)
             if not CAPABILITIES.get(fam, {}).get(cap_key, False):
+                engine_label = "DocumentDB 클러스터" if cap_key == "docdb_write" else "DynamoDB 테이블"
                 return {"content": [{"type": "text", "text": json.dumps({
                     "status": "unsupported_engine",
                     "engine_family": fam,
@@ -433,7 +488,7 @@ def lambda_handler(event, context):
                     "reason": (
                         "cluster engine could not be resolved"
                         if fam is None
-                        else f"{tool_name}는 DynamoDB 테이블 전용입니다 (현재 엔진: {fam})."
+                        else f"{tool_name}는 {engine_label} 전용입니다 (현재 엔진: {fam})."
                     ),
                 })}]}
         try:
