@@ -63,6 +63,15 @@ DocumentDB 또는 DynamoDB 클러스터에 대해서는 아래 방식으로만 �
 - 대신 `get_maintenance_findings` / `get_health_status` 결과와 아래 치트시트를 활용해
   진단 및 권고안을 제공하세요.
 
+### 시뮬레이션 도구 사용 금지 (Aurora 전용)
+시뮬레이션 도구 — `check_upgrade_compatibility`, `estimate_upgrade_impact`,
+`generate_upgrade_plan`, `simulate_parameter_change`, `simulate_scaling`,
+`simulate_ddl_impact` — 는 Aurora(PostgreSQL/MySQL) 전용입니다(버전 업그레이드 ·
+DB 파라미터그룹 · SQL DDL · ACU/인스턴스 리사이즈는 NoSQL 등가물이 없음).
+DocumentDB/DynamoDB 클러스터에는 이 도구들을 호출하지 마세요(호출해도 게이트웨이가
+`unsupported_engine`을 반환합니다). DynamoDB 용량/비용 또는 DocumentDB 스케일링
+질문은 `get_maintenance_findings`로 진단하고 AWS Console/CDK 적용을 안내하세요.
+
 ### 쓰기 / Remediation 제한
 DocumentDB/DynamoDB에 대한 직접 변경(용량 조정, 인스턴스 클래스 변경 등)은 현재
 플랫폼에서 지원하지 않습니다. findings의 recommendation을 사용자에게 제시하고,

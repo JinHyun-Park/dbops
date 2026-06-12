@@ -60,4 +60,6 @@ MULTIENGINE_CHEATSHEET = """
 2. `get_maintenance_findings(cluster_id)` 호출 → findings + recommendations 확인
 3. findings 기반으로 위 항목과 매핑하여 원인 분석 및 권고안 제시
 4. 쓰기/구성 변경이 필요한 경우 권고안만 제공 (직접 remediation 불가)
+5. 시뮬레이션 도구(upgrade/parameter/DDL/scaling)는 Aurora 전용 — DocumentDB/DynamoDB엔
+   호출 금지(게이트웨이가 unsupported_engine 반환). 용량/비용 what-if는 findings 권고안으로 대체.
 """
