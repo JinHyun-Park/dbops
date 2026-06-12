@@ -244,49 +244,53 @@ def collect_docdb_findings(
     # === 규칙 5: docdb_cost_oversized (7일 CPU rightsizing) ===
     # Aurora cost_check의 DocDB판. instance_class는 collector가 resource_details에
     # 담은 writer 클래스. 버스터블(db.t*)/서버리스/미수집은 skip(축소 권고 부적합).
-    meta_rows = _execute(
-        rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
-        "SELECT resource_details->>'instance_class' AS instance_class "
-        "FROM cluster_meta WHERE cluster_id = :cid",
-        {"cid": cluster_id},
-    )
-    instance_class = (meta_rows[0].get("instance_class") if meta_rows else None) or ""
-    ic_lower = instance_class.lower()
-    if instance_class and "serverless" not in ic_lower and not ic_lower.startswith("db.t"):
-        cpu_rows = _execute(
+    # 이 규칙의 SELECT 실패가 위 4개 운영 finding의 INSERT를 막지 않도록 try로 격리.
+    try:
+        meta_rows = _execute(
             rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
-            "SELECT AVG(value) AS avg_cpu, "
-            "  PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value) AS p95_cpu, "
-            "  COUNT(*) AS samples "
-            "FROM metric_snapshots "
-            "WHERE cluster_id = :cid AND metric_type = 'cpu_utilization' "
-            "  AND ts > NOW() - INTERVAL '7 days' "
-            "  AND (dimensions IS NULL OR dimensions::text = '{}')",
+            "SELECT resource_details->>'instance_class' AS instance_class "
+            "FROM cluster_meta WHERE cluster_id = :cid",
             {"cid": cluster_id},
         )
-        row2 = cpu_rows[0] if cpu_rows else {}
-        samples = int(row2.get("samples") or 0)
-        if samples >= COST_MIN_CPU_SAMPLES and row2.get("avg_cpu") is not None:
-            avg_cpu = float(row2.get("avg_cpu") or 0)
-            p95_cpu = float(row2.get("p95_cpu") or 0)
-            if avg_cpu < COST_CPU_AVG_THRESHOLD and p95_cpu < COST_CPU_P95_THRESHOLD:
-                add(
-                    "docdb_cost_oversized", "info", instance_class,
-                    f"7일 평균 CPU {avg_cpu:.1f}% / p95 {p95_cpu:.1f}% ({samples} 샘플)",
-                    f"avg < {COST_CPU_AVG_THRESHOLD:.0f}% & p95 < {COST_CPU_P95_THRESHOLD:.0f}% → 한 단계 축소 검토",
-                    (
-                        f"{instance_class}의 7일 평균 CPU가 {avg_cpu:.1f}%입니다 — 한 단계 작은 "
-                        "인스턴스 클래스를 검토하세요 (보통 월 30-50% 절감). 축소 후 프로덕션 "
-                        "트래픽 1주를 지켜보고 재평가하세요."
-                    ),
-                    {
-                        "instance_class": instance_class,
-                        "avg_cpu": round(avg_cpu, 2),
-                        "p95_cpu": round(p95_cpu, 2),
-                        "samples": samples,
-                        "window_days": 7,
-                    },
-                )
+        instance_class = (meta_rows[0].get("instance_class") if meta_rows else None) or ""
+        ic_lower = instance_class.lower()
+        if instance_class and "serverless" not in ic_lower and not ic_lower.startswith("db.t"):
+            cpu_rows = _execute(
+                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
+                "SELECT AVG(value) AS avg_cpu, "
+                "  PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value) AS p95_cpu, "
+                "  COUNT(*) AS samples "
+                "FROM metric_snapshots "
+                "WHERE cluster_id = :cid AND metric_type = 'cpu_utilization' "
+                "  AND ts > NOW() - INTERVAL '7 days' "
+                "  AND (dimensions IS NULL OR dimensions::text = '{}')",
+                {"cid": cluster_id},
+            )
+            row2 = cpu_rows[0] if cpu_rows else {}
+            samples = int(row2.get("samples") or 0)
+            if samples >= COST_MIN_CPU_SAMPLES and row2.get("avg_cpu") is not None:
+                avg_cpu = float(row2.get("avg_cpu") or 0)
+                p95_cpu = float(row2.get("p95_cpu") or 0)
+                if avg_cpu < COST_CPU_AVG_THRESHOLD and p95_cpu < COST_CPU_P95_THRESHOLD:
+                    add(
+                        "docdb_cost_oversized", "info", instance_class,
+                        f"7일 평균 CPU {avg_cpu:.1f}% / p95 {p95_cpu:.1f}% ({samples} 샘플)",
+                        f"avg < {COST_CPU_AVG_THRESHOLD:.0f}% & p95 < {COST_CPU_P95_THRESHOLD:.0f}% → 한 단계 축소 검토",
+                        (
+                            f"{instance_class}의 7일 평균 CPU가 {avg_cpu:.1f}%입니다 — 한 단계 작은 "
+                            "인스턴스 클래스를 검토하세요 (보통 월 30-50% 절감). 축소 후 프로덕션 "
+                            "트래픽 1주를 지켜보고 재평가하세요."
+                        ),
+                        {
+                            "instance_class": instance_class,
+                            "avg_cpu": round(avg_cpu, 2),
+                            "p95_cpu": round(p95_cpu, 2),
+                            "samples": samples,
+                            "window_days": 7,
+                        },
+                    )
+    except Exception as e:
+        print(f"[docdb_findings] cost rule failed for {cluster_id}: {e}")
 
     # --- 단일 snapshot_time으로 일괄 적재 ---
     for finding in findings:
