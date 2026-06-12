@@ -22,7 +22,39 @@ import { Expandable } from "@/components/design-system/expandable";
 import { fmtDecimal, fmtBytes, fmtExact } from "@/lib/format";
 import { useChartColors } from "@/lib/use-chart-colors";
 
-type Point = { ts: string; value: number | string };
+// A series point carries the raw `dimensions` JSON text from the cache so the
+// panel can separate table-level points (`{}`/null) from per-GSI points
+// (`{"gsi":"<IndexName>"}`). The batch-timeseries endpoint returns BOTH kinds
+// intermixed under the same metric_type (e.g. consumed_rcu), so any chart that
+// must show only the table aggregate has to filter on this field.
+type Point = { ts: string; value: number | string; dimensions?: string | null };
+
+/** Parse the `gsi` key out of a point's dimensions JSON text. Returns null for
+ *  table-level points (dimensions null, `{}`, or any non-gsi dimension such as
+ *  the latency operation tag). */
+function gsiOf(dimensions?: string | null): string | null {
+  if (!dimensions) return null;
+  try {
+    const d =
+      typeof dimensions === "string" ? JSON.parse(dimensions) : dimensions;
+    const g = (d as Record<string, unknown>)?.gsi;
+    return typeof g === "string" && g ? g : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Table-level points only: dimensions null/`{}` (and not a per-GSI point).
+ *  Non-GSI metrics (latency, provisioned, returned_item_count) are unaffected
+ *  — they never carry a gsi dimension, so this is a no-op for them. */
+function tableLevelPoints(pts: Point[]): Point[] {
+  return pts.filter((p) => gsiOf(p.dimensions) === null);
+}
+
+/** Points belonging to a specific GSI (dimensions `{"gsi":"<name>"}`). */
+function gsiPoints(pts: Point[], gsiName: string): Point[] {
+  return pts.filter((p) => gsiOf(p.dimensions) === gsiName);
+}
 
 // DynamoDB-specific resource_details shape
 interface DdbKeyAttr {
@@ -364,6 +396,38 @@ export function DynamodbOverviewPanel({
   const lsiList = details?.lsi ?? [];
   const keySchema = details?.key_schema ?? null;
 
+  // Per-GSI metric chart names: union of GSI names from resource_details (stable
+  // labels, even for idle indexes with no datapoints) and any gsi-dimension
+  // present in the fetched capacity/throttle series. resource_details ordering
+  // wins; series-only GSIs (e.g. a brand-new index not yet in the meta snapshot)
+  // are appended.
+  const metricGsiNames: string[] = (() => {
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    for (const g of gsiList) {
+      if (g.name && !seen.has(g.name)) {
+        seen.add(g.name);
+        ordered.push(g.name);
+      }
+    }
+    const gsiMetrics: DdbMetric[] = [
+      "consumed_rcu",
+      "consumed_wcu",
+      "read_throttle_events",
+      "write_throttle_events",
+    ];
+    for (const m of gsiMetrics) {
+      for (const p of series[m] ?? []) {
+        const name = gsiOf(p.dimensions);
+        if (name && !seen.has(name)) {
+          seen.add(name);
+          ordered.push(name);
+        }
+      }
+    }
+    return ordered;
+  })();
+
   return (
     <div className="space-y-6">
       {/* ─ Resource details tiles ─ */}
@@ -598,7 +662,7 @@ export function DynamodbOverviewPanel({
                     {
                       name: "consumed_rcu",
                       color: "#60a5fa",
-                      points: series.consumed_rcu ?? [],
+                      points: tableLevelPoints(series.consumed_rcu ?? []),
                     },
                     {
                       name: "provisioned_rcu",
@@ -610,7 +674,7 @@ export function DynamodbOverviewPanel({
                     {
                       name: "consumed_rcu",
                       color: "#60a5fa",
-                      points: series.consumed_rcu ?? [],
+                      points: tableLevelPoints(series.consumed_rcu ?? []),
                     },
                   ]
             }
@@ -627,7 +691,7 @@ export function DynamodbOverviewPanel({
                     {
                       name: "consumed_wcu",
                       color: "#f472b6",
-                      points: series.consumed_wcu ?? [],
+                      points: tableLevelPoints(series.consumed_wcu ?? []),
                     },
                     {
                       name: "provisioned_wcu",
@@ -639,7 +703,7 @@ export function DynamodbOverviewPanel({
                     {
                       name: "consumed_wcu",
                       color: "#f472b6",
-                      points: series.consumed_wcu ?? [],
+                      points: tableLevelPoints(series.consumed_wcu ?? []),
                     },
                   ]
             }
@@ -661,7 +725,7 @@ export function DynamodbOverviewPanel({
               {
                 name: "read_throttle_events",
                 color: "#fb7185",
-                points: series.read_throttle_events ?? [],
+                points: tableLevelPoints(series.read_throttle_events ?? []),
               },
             ]}
             loading={seriesLoading}
@@ -673,7 +737,7 @@ export function DynamodbOverviewPanel({
               {
                 name: "write_throttle_events",
                 color: "#fb923c",
-                points: series.write_throttle_events ?? [],
+                points: tableLevelPoints(series.write_throttle_events ?? []),
               },
             ]}
             loading={seriesLoading}
@@ -693,6 +757,68 @@ export function DynamodbOverviewPanel({
           />
         </div>
       </div>
+
+      {/* ─ Per-GSI capacity / throttle ─
+          Only rendered when at least one GSI exists. Each GSI gets its own
+          consumed RCU/WCU + read/write throttle chart, sourced from the
+          gsi-dimension points (dimensions = {"gsi":"<name>"}) inside the same
+          series arrays the table-level charts use. Idle GSIs (the common case)
+          render flat/zero lines rather than a misleading "데이터 없음". */}
+      {metricGsiNames.length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
+            GSI별 용량/스로틀 (Per-GSI)
+          </div>
+          <div className="space-y-6">
+            {metricGsiNames.map((g) => (
+              <div key={g}>
+                <div className="text-[11px] font-mono text-zinc-300 mb-2">
+                  {g}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <MiniChart
+                    title={`${g} — Consumed RCU/WCU`}
+                    series={[
+                      {
+                        name: "consumed_rcu",
+                        color: "#60a5fa",
+                        points: gsiPoints(series.consumed_rcu ?? [], g),
+                      },
+                      {
+                        name: "consumed_wcu",
+                        color: "#f472b6",
+                        points: gsiPoints(series.consumed_wcu ?? [], g),
+                      },
+                    ]}
+                    loading={seriesLoading}
+                    colors={chart}
+                  />
+                  <MiniChart
+                    title={`${g} — Throttle Events`}
+                    series={[
+                      {
+                        name: "read_throttle_events",
+                        color: "#fb7185",
+                        points: gsiPoints(series.read_throttle_events ?? [], g),
+                      },
+                      {
+                        name: "write_throttle_events",
+                        color: "#fb923c",
+                        points: gsiPoints(
+                          series.write_throttle_events ?? [],
+                          g,
+                        ),
+                      },
+                    ]}
+                    loading={seriesLoading}
+                    colors={chart}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ─ Latency charts ─ */}
       <div>
