@@ -55,6 +55,11 @@ const CHECK_LABELS: Record<string, string> = {
   docdb_cursor_timeout: "Cursors",
   docdb_low_cache_hit: "Cache Hit",
   docdb_cost_oversized: "Cost",
+  // DocumentDB Mongo-protocol deep diagnosis — docdb_mongo_* check_types from
+  // the in-VPC docdb_mongo_collector (currentOp / serverStatus / profiler).
+  docdb_mongo_long_running_ops: "Live Ops",
+  docdb_mongo_slow_ops: "Live Ops",
+  docdb_mongo_profiler_off: "Live Ops",
 };
 
 // Full PG tab set. MySQL exposes a trimmed list (VACUUM/Bloat/Extensions are
@@ -85,13 +90,15 @@ const TABS_DYNAMODB = [
   "Cost",
 ] as const;
 // DocumentDB findings cover connection saturation, replica lag, cursor timeouts,
-// and buffer cache hit ratio — each gets its own filter tab.
+// buffer cache hit ratio, and Mongo-protocol live ops (currentOp / slow ops /
+// profiler) — each gets its own filter tab.
 const TABS_DOCDB = [
   "All",
   "Connections",
   "Replica Lag",
   "Cursors",
   "Cache Hit",
+  "Live Ops",
   "Cost",
 ] as const;
 type Tab =

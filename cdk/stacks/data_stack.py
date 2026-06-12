@@ -1,7 +1,10 @@
 import hashlib
+import shutil
+import subprocess
 from pathlib import Path
 
 import aws_cdk as cdk
+import jsii
 from aws_cdk import (
     aws_ec2 as ec2,
 )
@@ -53,6 +56,72 @@ def _hash_schema_dir(rel_path: str) -> str:
         h.update(sql.read_bytes())
         h.update(b"\x00")
     return h.hexdigest()[:12]
+
+
+@jsii.implements(cdk.ILocalBundling)
+class _PipLocalBundling:
+    """Local bundling fallback for the DocDB Mongo collector asset.
+
+    The collector needs pymongo (not in the Lambda runtime) + the RDS/DocDB CA
+    bundle. CDK's default path bundles inside Docker, but Docker isn't always
+    available (CI / the demo host) — and the existing tests/cdk synth smoke test
+    must stay Docker-free. If local `pip` is present we build the asset on the
+    host (pip install the linux manylinux wheels for py3.12 + copy source + fetch
+    the CA); otherwise try_bundle returns False and CDK falls back to Docker.
+
+    pymongo ships pure-Python with optional C extensions; we install the
+    manylinux2014_x86_64 wheels for the Lambda runtime so the host arch/OS
+    doesn't leak into the asset.
+    """
+
+    def __init__(self, source_dir: str):
+        self._source_dir = Path(source_dir).resolve()
+
+    def try_bundle(self, output_dir: str, *_args, **_kwargs) -> bool:
+        pip = shutil.which("pip3") or shutil.which("pip")
+        if pip is None:
+            return False  # no local pip → let CDK use Docker
+        out = Path(output_dir)
+        try:
+            subprocess.run(
+                [
+                    pip, "install",
+                    "-r", str(self._source_dir / "requirements.txt"),
+                    "-t", str(out),
+                    "--platform", "manylinux2014_x86_64",
+                    "--implementation", "cp",
+                    "--python-version", "3.12",
+                    "--only-binary=:all:",
+                    "--upgrade",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            # Copy the handler source (everything but requirements.txt) into the asset.
+            for item in self._source_dir.iterdir():
+                if item.name == "requirements.txt":
+                    continue
+                dest = out / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dest, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, dest)
+            # Fetch the RDS/DocDB CA bundle (best-effort: a committed pem in the
+            # source dir, copied above, is the fallback when the host is offline).
+            curl = shutil.which("curl")
+            if curl is not None:
+                subprocess.run(
+                    [
+                        curl, "-fsSL", "-o", str(out / "global-bundle.pem"),
+                        "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem",
+                    ],
+                    check=False,
+                    capture_output=True,
+                )
+            return True
+        except (subprocess.CalledProcessError, OSError) as e:
+            print(f"[DocDBMongoCollector] local bundling failed, falling back to Docker: {e}")
+            return False
 
 
 class DataStack(cdk.Stack):
@@ -174,6 +243,72 @@ class DataStack(cdk.Stack):
                 cdk.Duration.minutes(Settings.STATS_COLLECTION_INTERVAL_MIN)
             ),
             targets=[targets.LambdaFunction(self.etl_lambda)],
+        )
+
+        # DocumentDB Mongo-protocol deep-diagnosis collector. UNLIKE the ETL
+        # collector (which is NOT in a VPC and only calls public AWS APIs), this
+        # one connects to DocumentDB over the Mongo wire protocol on TLS 27017,
+        # which lives inside the private VPC — so it MUST be in-VPC and bundle
+        # pymongo + the RDS/DocDB CA (not in the Lambda runtime). It scans the
+        # registry for documentdb rows carrying `mongo_secret_arn`, runs a
+        # read-only command allowlist, and writes findings/metrics to the cache.
+        docdb_mongo_sg = ec2.SecurityGroup(
+            self, "DocDBMongoCollectorSG",
+            vpc=self.vpc,
+            description="DocumentDB Mongo deep-diagnosis collector - egress to DocDB 27017",
+            allow_all_outbound=True,
+        )
+        self.docdb_mongo_lambda = lambda_.Function(
+            self, "DocDBMongoCollector",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset(
+                "../data-pipeline/docdb_mongo_collector",
+                bundling=cdk.BundlingOptions(
+                    image=lambda_.Runtime.PYTHON_3_12.bundling_image,
+                    # Prefer local pip bundling (Docker-free CI / demo host); CDK
+                    # falls back to the Docker command below if local returns False.
+                    local=_PipLocalBundling("../data-pipeline/docdb_mongo_collector"),
+                    command=[
+                        "bash", "-c",
+                        # pip-install pymongo + copy source, then fetch the
+                        # RDS/DocDB CA bundle into the asset. The CA fetch is
+                        # best-effort (|| true): if the build host has no network
+                        # a committed global-bundle.pem fallback is used instead.
+                        "pip install -r requirements.txt -t /asset-output "
+                        "&& cp -au . /asset-output "
+                        "&& (curl -fsSL -o /asset-output/global-bundle.pem "
+                        "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem "
+                        "|| true)",
+                    ],
+                ),
+            ),
+            timeout=cdk.Duration.minutes(5),
+            memory_size=512,
+            vpc=self.vpc,
+            security_groups=[docdb_mongo_sg],
+            environment={
+                "CACHE_DB_CLUSTER_ARN": self.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+            },
+        )
+        self.cache_db.secret.grant_read(self.docdb_mongo_lambda)
+        self.cache_db.grant_data_api_access(self.docdb_mongo_lambda)
+        foundation.clusters_table.grant_read_data(self.docdb_mongo_lambda)
+        # Per-cluster read-only Mongo creds live in arbitrary Secrets Manager
+        # secrets whose ARNs are on the registry rows (mongo_secret_arn), so this
+        # must be resource "*" — the deployer scopes each secret to one RO user.
+        self.docdb_mongo_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=["*"],
+        ))
+
+        events.Rule(
+            self, "DocDBMongoCollectorSchedule",
+            schedule=events.Schedule.rate(cdk.Duration.minutes(5)),
+            targets=[targets.LambdaFunction(self.docdb_mongo_lambda)],
         )
 
         self.alert_topic = sns.Topic(self, "AlertTopic", topic_name=f"dbops-{Settings.ENV}-alerts")

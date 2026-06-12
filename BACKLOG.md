@@ -233,10 +233,21 @@ by account/region. Delivered across 5 sequenced specs:
     - docdb_connection_saturation finding — no separate panel needed.)
 - **NoSQL write / remediation tools** + Cedar policies + approval binding
   (capacity change, TTL, index ops) — mirrors the operations server's approval flow.
-- **Mongo-protocol deep diagnosis** for DocumentDB (`serverStatus`, `currentOp`,
-  profiler/slow-op) — needs the connectivity decision from
-  `docs/adr/2026-06-12-aws-managed-mcp-servers.md` (thin pymongo read collector
-  in a VPC Lambda vs. read-only AWS DocDB MCP with credential-level least-privilege).
+- ~~**Mongo-protocol deep diagnosis** for DocumentDB~~ ✅ **shipped** (2026-06-12,
+  unit + cdk-synth/bundling verified; **live deferred** — no RO Mongo user/secret/
+  network on the demo cluster). Connectivity = **Option A** (ADR 2026-06-12 update):
+  a new in-VPC, pymongo-bundled, scheduled Lambda `data-pipeline/docdb_mongo_collector/`
+  (NOT the AWS DocDB MCP). Read-only command allowlist only (`serverStatus`,
+  `currentOp(active)`, `getProfilingStatus`, `system.profile` reads — no generic
+  runCommand/eval). Emits `mongo_*` metric_snapshots + `docdb_mongo_long_running_ops`
+  / `docdb_mongo_slow_ops` / `docdb_mongo_profiler_off` findings (shared `run_ts`),
+  surfaced on the DocDB Maintenance Health panel's new **"Live Ops"** tab. Multi-layer
+  read-only: deployer-provisioned RO Mongo user + scoped per-cluster `mongo_secret_arn`
+  secret + in-VPC SG + command allowlist + `retryWrites=False`/`secondaryPreferred`.
+  Absent `mongo_secret_arn` the cluster no-ops (CW-based DocDB diagnosis unaffected).
+  `_PipLocalBundling` builds the asset Docker-free (manylinux py3.12 wheels) with a
+  Docker fallback. **Deployer setup to activate**: create RO Mongo user → store creds
+  in a secret → put ARN on the registry row → ensure SG reaches the cluster on 27017.
 - **DynamoDB capacity-mode cost simulator** (Provisioned↔On-Demand $ what-if) —
   net-new; needs a region-specific Pricing-API-backed estimate (a hardcoded
   pricing table goes stale; a wrong number is worse than none). Advice is
