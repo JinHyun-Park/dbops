@@ -124,3 +124,34 @@ attack surface.
 - Spec #3 needs no AWS-MCP integration. Spec #2 includes an explicit A-vs-B connectivity
   decision for Mongo-level diagnosis.
 - AWS MCP servers remain a useful reference for which diagnostic queries/tools matter.
+
+## Update 2026-06-12 — Mongo connectivity decision: Option A
+
+The DocumentDB deep-diagnosis A-vs-B connectivity question (deferred above) is now
+decided: **Option A — a thin, read-only pymongo collector running in-VPC**, NOT the
+AWS DocDB MCP. Rationale:
+
+- **Architectural fit.** Deep diagnosis is just another bounded-read collector that
+  feeds the cache (metric_snapshots / cluster_health_findings); the dashboard + chat
+  read the cache, consistent with "never call AWS in real-time for dashboard rendering."
+  Option B would be a live, out-of-band call that bypasses the cache.
+- **Value-layer preservation.** Option B sits below our cache/Cedar/audit layer (per
+  this ADR's core finding). Option A keeps results inside it — chat reads the resulting
+  findings through the existing Cedar-gated `get_maintenance_findings` tool.
+- **The read-only guarantee is credential-level either way** — a least-privilege
+  read-only Mongo user — so Option B saves no scoping work, only Mongo-client code,
+  which mirrors our existing collectors.
+- **Self-deploy portability.** A pymongo collector is self-contained CDK; an external
+  managed MCP adds an auth/availability dependency that is fragile in the headless/cron
+  context where collectors run.
+
+**Enforcement (multi-layer read-only):** least-privilege read-only DocDB user, scoped
+Secrets Manager secret (per cluster, like spoke_role_arn), in-VPC reachability only,
+and a hardcoded allowlist of read-only commands (serverStatus, currentOp,
+getProfilingStatus, system.profile reads) — never a generic eval/runCommand surface.
+
+**Deployer setup required** (so the collector activates): provision a read-only Mongo
+user on the DocDB cluster + a Secrets Manager secret with its credentials, and ensure
+the ETL collector's VPC/SG can reach the cluster on 27017. Absent that secret the
+collector no-ops gracefully (CloudWatch-based DocDB diagnosis continues unaffected).
+Live verification on the kept demo cluster is therefore deferred until that setup exists.
