@@ -828,6 +828,7 @@ export default function DashboardPage() {
                       clusterId={selectedCluster}
                       range={range}
                     />
+                    <ReplicationTopologyPanel clusterId={selectedCluster} />
                     <BackupPanel
                       clusterId={selectedCluster}
                       engine={dashboardData.cluster?.engine}

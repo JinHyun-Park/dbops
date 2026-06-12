@@ -391,10 +391,11 @@ class AgentStack(cdk.Stack):
                 "rds:DescribeDBInstances",
                 # Backup inventory panel — read-only snapshot listing.
                 "rds:DescribeDBClusterSnapshots",
-                # DocumentDB backup panel — DocDB mirrors the RDS cluster
-                # snapshot API on its own namespace (read-only).
+                # DocumentDB backup + topology panels — DocDB mirrors the RDS
+                # cluster/snapshot API on its own namespace (read-only).
                 "docdb:DescribeDBClusters",
                 "docdb:DescribeDBClusterSnapshots",
+                "docdb:DescribeDBInstances",
                 # DynamoDB backup panel — PITR window + on-demand backups (read-only).
                 "dynamodb:DescribeContinuousBackups",
                 "dynamodb:ListBackups",

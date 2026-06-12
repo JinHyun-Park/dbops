@@ -2019,6 +2019,124 @@ def _log_insights(cluster_id, hours, category, keywords: str = ""):
     return {**base_result, "error": "query timed out — try a smaller hours window"}
 
 
+def _topology_docdb(cluster_id: str) -> dict:
+    """DocumentDB cluster topology (read-only). DocDB mirrors the RDS cluster
+    member API (`docdb describe_db_clusters` → DBClusterMembers, writer +
+    readers), so this is the relational topology path with a `docdb` client and
+    the AWS/DocDB per-instance replica-lag metric. `cluster_id` IS the DocDB
+    DBClusterIdentifier."""
+    from datetime import datetime, timedelta
+
+    _sess = _cluster_session(cluster_id)
+    docdb = _sess.client("docdb")
+    cw = _sess.client("cloudwatch")
+
+    not_real = {
+        "cluster_id": cluster_id,
+        "engine_family": "documentdb",
+        "error": (
+            "이 DocumentDB 클러스터의 토폴로지를 조회할 수 없습니다 — 등록되지 "
+            "않았거나 접근 권한이 없습니다."
+        ),
+        "info": True,
+        "members": [],
+    }
+    try:
+        resp = docdb.describe_db_clusters(DBClusterIdentifier=cluster_id)
+    except Exception as e:
+        msg = str(e)
+        if "DBClusterNotFoundFault" in msg or "not found" in msg.lower():
+            return not_real
+        print(f"[topology] docdb describe failed for {cluster_id}: {e}")
+        return {
+            "cluster_id": cluster_id,
+            "engine_family": "documentdb",
+            "error": "토폴로지 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
+            "members": [],
+        }
+    clusters = resp.get("DBClusters") or []
+    if not clusters:
+        return not_real
+    cluster = clusters[0]
+    raw_members = cluster.get("DBClusterMembers") or []
+
+    end = datetime.utcnow()
+    start = end - timedelta(minutes=15)
+
+    instance_meta: dict[str, dict] = {}
+    instance_ids = [
+        m.get("DBInstanceIdentifier") for m in raw_members if m.get("DBInstanceIdentifier")
+    ]
+    if instance_ids:
+        try:
+            inst_resp = docdb.describe_db_instances(
+                Filters=[{"Name": "db-instance-id", "Values": instance_ids}]
+            )
+            for inst in inst_resp.get("DBInstances", []):
+                instance_meta[inst["DBInstanceIdentifier"]] = inst
+        except Exception:
+            pass
+
+    members = []
+    for m in raw_members:
+        instance_id = m.get("DBInstanceIdentifier") or ""
+        is_writer = bool(m.get("IsClusterWriter"))
+        meta = instance_meta.get(instance_id, {})
+
+        # Per-instance replica lag — DocDB publishes AWS/DocDB DBInstanceReplicaLag
+        # (ms) for readers; the writer is 0 by definition.
+        lag_ms = 0.0 if is_writer else None
+        if not is_writer:
+            try:
+                lag_resp = cw.get_metric_statistics(
+                    Namespace="AWS/DocDB",
+                    MetricName="DBInstanceReplicaLag",
+                    Dimensions=[{"Name": "DBInstanceIdentifier", "Value": instance_id}],
+                    StartTime=start,
+                    EndTime=end,
+                    Period=60,
+                    Statistics=["Average"],
+                )
+                dps = sorted(lag_resp.get("Datapoints", []), key=lambda d: d["Timestamp"])
+                if dps:
+                    lag_ms = float(dps[-1]["Average"])
+            except Exception:
+                pass
+
+        members.append({
+            "instance_id": instance_id,
+            "is_writer": is_writer,
+            "promotion_tier": m.get("PromotionTier"),
+            "parameter_group_status": m.get("DBClusterParameterGroupStatus", ""),
+            "instance_class": meta.get("DBInstanceClass", ""),
+            "instance_status": meta.get("DBInstanceStatus", ""),
+            "engine_version": meta.get("EngineVersion", ""),
+            "availability_zone": meta.get("AvailabilityZone", ""),
+            "replica_lag_ms": lag_ms,
+        })
+
+    members.sort(
+        key=lambda x: (
+            0 if x["is_writer"] else 1,
+            x.get("promotion_tier") if x.get("promotion_tier") is not None else 99,
+            x["instance_id"],
+        )
+    )
+
+    return {
+        "cluster_id": cluster_id,
+        "engine_family": "documentdb",
+        "engine": cluster.get("Engine", "docdb"),
+        "engine_version": cluster.get("EngineVersion", ""),
+        "endpoint": cluster.get("Endpoint", ""),
+        "reader_endpoint": cluster.get("ReaderEndpoint", ""),
+        "multi_az": bool(cluster.get("MultiAZ")),
+        "status": cluster.get("Status", ""),
+        "members_count": len(members),
+        "members": members,
+    }
+
+
 def _topology(cluster_id: str) -> dict:
     """Return Aurora writer + readers with per-instance replica lag.
 
@@ -2033,6 +2151,8 @@ def _topology(cluster_id: str) -> dict:
         return {"cluster_id": cluster_id, "not_applicable": True, "registry_unavailable": True,
                 "members": []}
     fam = engine_family(eng)
+    if fam == "documentdb":
+        return _topology_docdb(cluster_id)
     if fam != "relational":
         return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": fam, "members": []}
 

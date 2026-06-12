@@ -287,6 +287,54 @@ def test_topology_relational_calls_describe_db_clusters(monkeypatch):
     mock_rds.describe_db_clusters.assert_called_once()
 
 
+def test_topology_documentdb_uses_docdb_client(monkeypatch):
+    """_topology for a documentdb cluster reads members via the docdb client
+    (DocDB mirrors the RDS cluster-member API), not rds."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "docdb")
+
+    mock_docdb = MagicMock()
+    mock_docdb.describe_db_clusters.return_value = {
+        "DBClusters": [{
+            "Engine": "docdb", "Status": "available",
+            "EngineVersion": "5.0.0",
+            "DBClusterMembers": [
+                {"IsClusterWriter": True, "DBInstanceIdentifier": "dbops-docdb-test-1",
+                 "PromotionTier": 0},
+            ],
+        }]
+    }
+    mock_docdb.describe_db_instances.return_value = {
+        "DBInstances": [{
+            "DBInstanceIdentifier": "dbops-docdb-test-1",
+            "DBInstanceClass": "db.t3.medium", "DBInstanceStatus": "available",
+            "EngineVersion": "5.0.0", "AvailabilityZone": "ap-northeast-2a",
+        }]
+    }
+    mock_rds = MagicMock()
+    mock_cw = MagicMock()
+
+    def _client(service, **kwargs):
+        if service == "docdb":
+            return mock_docdb
+        if service == "cloudwatch":
+            return mock_cw
+        return mock_rds
+
+    mock_session = MagicMock()
+    mock_session.client.side_effect = _client
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._topology("dbops-docdb-test")
+
+    assert result.get("engine_family") == "documentdb"
+    assert result.get("not_applicable") is not True
+    assert result["members_count"] == 1
+    assert result["members"][0]["is_writer"] is True
+    assert result["members"][0]["instance_class"] == "db.t3.medium"
+    mock_docdb.describe_db_clusters.assert_called_once()
+    mock_rds.describe_db_clusters.assert_not_called()
+
+
 def test_backups_relational_calls_describe_db_clusters(monkeypatch):
     """_backups for an aurora-postgresql cluster must call rds.describe_db_clusters."""
     monkeypatch.setattr(handler, "_registry_engine", lambda cid: "aurora-postgresql")
