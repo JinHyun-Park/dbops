@@ -231,8 +231,24 @@ by account/region. Delivered across 5 sequenced specs:
     dimension-mixing bug — table charts now filter to `dimensions='{}'`).
   - (Connection pressure/headroom for DocDB: covered by the db_connections chart
     - docdb_connection_saturation finding — no separate panel needed.)
-- **NoSQL write / remediation tools** + Cedar policies + approval binding
-  (capacity change, TTL, index ops) — mirrors the operations server's approval flow.
+- ~~**NoSQL write / remediation tools** + Cedar policies + approval binding~~ ✅
+  **shipped** (2026-06-13, Codex adversarial safety review → 7 holes fixed; 5 safety
+  gates live-verified; consume→write unit-verified; DocDB Mongo write deferred-live).
+  Five approval-gated write tools on the operations server, mirroring the modify_scaling
+  3-state model (Cedar `approved==true` at the Gateway + approval_guard payload-hash/
+  atomic-consume at the tool): **DynamoDB** `modify_dynamodb_capacity` (update_table
+  RCU/WCU + billing-mode switch), `modify_dynamodb_ttl`, `enable_dynamodb_pitr`;
+  **DocumentDB** (Mongo wire protocol, in-VPC pymongo, hardcoded 2-command write
+  allowlist) `set_docdb_profiler`, `create_docdb_index`. Safety: FAIL-CLOSED engine
+  gate (None family refused — opposite of the read tools); RCU/WCU `<1` rejected (not
+  floored); GSI tables blocked on capacity change; TOCTOU execute-time re-read; PITR
+  disable needs `force` (hashed + Cedar forbid-unless-force); compound-index key ORDER
+  preserved + hashed; DynamoDB table name resolved from the registry `resource_name`
+  (NOT cluster_meta — caught live); separate RW Mongo secret (`mongo_write_secret_arn`).
+  operations Lambda now bundles pymongo + CA (shared `cdk/bundling.py`). **Deployer
+  setup to activate DocDB writes**: provision a read-write Mongo user + secret, put its
+  ARN on the registry row as `mongo_write_secret_arn`; re-run `agentcore policy create`
+  (Cedar is manually applied). This completes P3.6 Group C — the multi-engine program.
 - ~~**Mongo-protocol deep diagnosis** for DocumentDB~~ ✅ **shipped** (2026-06-12,
   unit + cdk-synth/bundling verified; **live deferred** — no RO Mongo user/secret/
   network on the demo cluster). Connectivity = **Option A** (ADR 2026-06-12 update):
