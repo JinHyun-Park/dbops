@@ -1,0 +1,92 @@
+"""Tests for the operations-handler FAIL-CLOSED engine gate (review fix #3).
+
+The 3 DynamoDB write tools must REFUSE when the engine family cannot be resolved
+(None → unsupported_engine) or when the cluster is the wrong engine (Aurora). A
+valid-looking approval must NEVER drive a write at the wrong/unknown engine — so
+we assert the AWS write method is never even reached (the impl is monkeypatched to
+a spy that fails the test if called)."""
+
+import json
+import os
+from unittest.mock import MagicMock, patch
+
+# The operations handler instantiates CacheClient() at import time, which reads
+# CACHE_DB_CLUSTER_ARN. Set a dummy before import so this file collects in
+# isolation too (mirrors simulation/test_engine_guard.py). The cache is never
+# actually queried — _resolve_family is monkeypatched in every test.
+os.environ.setdefault("CACHE_DB_CLUSTER_ARN", "arn:aws:rds:ap-northeast-2:0:cluster:test")
+os.environ.setdefault("CACHE_DB_SECRET_ARN", "arn:aws:secretsmanager:ap-northeast-2:0:secret:test")
+os.environ.setdefault("CACHE_DB_NAME", "dbops")
+
+import mcp_servers.operations.handler as handler  # noqa: E402
+
+
+class _Ctx:
+    def __init__(self, tool_name):
+        self.client_context = MagicMock()
+        self.client_context.custom = {"bedrockAgentCoreToolName": f"x___{tool_name}"}
+
+
+def _invoke(tool_name, event):
+    result = handler.lambda_handler(event, _Ctx(tool_name))
+    return json.loads(result["content"][0]["text"])
+
+
+def _patch_family(fam):
+    return patch.object(handler, "_resolve_family", lambda cid: fam)
+
+
+def test_gate_none_family_fail_closed():
+    """fix #3: family=None (unresolvable cluster) → unsupported_engine, impl
+    never invoked — even with approved=true + an approval_id present."""
+    spy = MagicMock()
+    with _patch_family(None), patch.dict(
+        handler.TOOLS["modify_dynamodb_capacity"], {"impl": spy}
+    ):
+        result = _invoke(
+            "modify_dynamodb_capacity",
+            {"cluster_id": "ghost", "rcu": 5, "wcu": 5, "approved": True, "approval_id": "x"},
+        )
+    assert result["status"] == "unsupported_engine"
+    assert "could not be resolved" in result["reason"]
+    spy.assert_not_called()
+
+
+def test_gate_wrong_engine_aurora_refused():
+    """A DynamoDB tool called on an Aurora (relational) cluster → refused."""
+    spy = MagicMock()
+    with _patch_family("relational"), patch.dict(
+        handler.TOOLS["enable_dynamodb_pitr"], {"impl": spy}
+    ):
+        result = _invoke(
+            "enable_dynamodb_pitr",
+            {"cluster_id": "prod-pg-1", "enabled": True, "approved": True, "approval_id": "x"},
+        )
+    assert result["status"] == "unsupported_engine"
+    spy.assert_not_called()
+
+
+def test_gate_dynamodb_family_passes_to_impl():
+    """A resolved dynamodb family passes the gate and the impl runs."""
+    spy = MagicMock(return_value={"status": "approval_required"})
+    with _patch_family("dynamodb"), patch.dict(
+        handler.TOOLS["modify_dynamodb_ttl"], {"impl": spy}
+    ):
+        result = _invoke(
+            "modify_dynamodb_ttl",
+            {"cluster_id": "ddb-abc", "attribute": "expires_at"},
+        )
+    assert result["status"] == "approval_required"
+    spy.assert_called_once()
+
+
+def test_gate_aurora_tool_ungated():
+    """The Aurora tools stay UNGATED — execute_sql is not in the gate map, so a
+    relational cluster reaches the impl without an engine check."""
+    spy = MagicMock(return_value={"status": "ok"})
+    with _patch_family("relational"), patch.dict(
+        handler.TOOLS["execute_sql"], {"impl": spy}
+    ):
+        result = _invoke("execute_sql", {"cluster_id": "prod-pg-1", "sql": "SELECT 1"})
+    assert result["status"] == "ok"
+    spy.assert_called_once()

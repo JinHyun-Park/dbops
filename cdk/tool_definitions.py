@@ -130,6 +130,27 @@ def operations_schema():
                "snapshot_id": "string", "restore_to_time": "string", "use_latest": "boolean",
                "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "new_cluster_id"]),
+        # NoSQL write/remediation (multi-engine #P3.6 Group C). Only the 3
+        # DynamoDB tools ship this stage; the 2 DocDB Mongo writes (set_docdb_
+        # profiler, create_docdb_index) get their schema entries together with
+        # their handler impls in stage 2, so the impl<->schema parity test stays
+        # green. Each exposes approved/approval_id (and force where applicable)
+        # so the agent can complete the approval round-trip.
+        _tool("modify_dynamodb_capacity",
+              "DynamoDB only: change provisioned RCU/WCU and/or switch billing mode (Provisioned<->On-Demand); requires approval. Blocks tables with any GSI; rejects RCU/WCU < 1",
+              {"cluster_id": "string", "billing_mode": "string", "rcu": "integer",
+               "wcu": "integer", "approved": "boolean", "approval_id": "string"},
+              ["cluster_id"]),
+        _tool("modify_dynamodb_ttl",
+              "DynamoDB only: enable or disable an attribute TTL (update_time_to_live); requires approval; idempotent",
+              {"cluster_id": "string", "attribute": "string", "enabled": "boolean",
+               "approved": "boolean", "approval_id": "string"},
+              ["cluster_id", "attribute"]),
+        _tool("enable_dynamodb_pitr",
+              "DynamoDB only: turn Point-in-Time Recovery on/off (update_continuous_backups); requires approval. DISABLING additionally requires force=true",
+              {"cluster_id": "string", "enabled": "boolean", "force": "boolean",
+               "approved": "boolean", "approval_id": "string"},
+              ["cluster_id"]),
         _tool("review_sql", "Pre-execution SQL review with risk assessment",
               {"cluster_id": "string", "sql": "string"}, ["cluster_id", "sql"]),
         _tool("audit_permissions", "Audit DB user permissions",

@@ -38,12 +38,14 @@ CAPABILITIES = {
     },
     DOCUMENTDB: {
         "sql": False, "rds_meta": True, "perf_insights": False, "simulation": False,
+        "docdb_write": True,
         "cw_namespace": "AWS/DocDB",
         "findings": {"docdb"},
     },
     DYNAMODB: {
         "sql": False, "rds_meta": False, "perf_insights": False, "simulation": False,
         "ddb_cost_simulation": True,
+        "ddb_write": True,
         "cw_namespace": "AWS/DynamoDB",
         "findings": {"ddb"},
     },

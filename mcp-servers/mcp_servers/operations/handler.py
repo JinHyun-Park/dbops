@@ -6,9 +6,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp_servers.operations.tools.audit_permissions import audit_permissions_impl
 from mcp_servers.operations.tools.create_snapshot import create_snapshot_impl
+from mcp_servers.operations.tools.enable_dynamodb_pitr import enable_dynamodb_pitr_impl
 from mcp_servers.operations.tools.execute_sql import execute_sql_impl
 from mcp_servers.operations.tools.get_runbook import get_runbook_impl
 from mcp_servers.operations.tools.manage_maintenance import manage_maintenance_impl
+from mcp_servers.operations.tools.modify_dynamodb_capacity import modify_dynamodb_capacity_impl
+from mcp_servers.operations.tools.modify_dynamodb_ttl import modify_dynamodb_ttl_impl
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
 from mcp_servers.operations.tools.modify_scaling import modify_scaling_impl
 from mcp_servers.operations.tools.query_activity_audit import query_activity_audit_impl
@@ -18,8 +21,23 @@ from mcp_servers.operations.tools.review_sql import review_sql_impl
 from mcp_servers.operations.tools.schema_diff import get_schema_diff_impl
 from mcp_servers.operations.tools.schema_history import get_schema_history_impl
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.engine_family import CAPABILITIES
+from mcp_servers.shared.engine_family import engine_family as _engine_family
 
 cache = CacheClient()
+
+# NoSQL write tools → the per-family CAPABILITIES key they REQUIRE. Only these
+# tools are engine-gated; the Aurora tools (execute_sql etc.) stay ungated.
+# FAIL-CLOSED for writes: a None family (missing row / lookup error / empty
+# cluster_id) resolves to .get(None,{}).get(key,False) == False → refused, so an
+# unknown/unregistered/lookup-failed cluster can NEVER slip a write through even
+# with a valid-looking approval (review fix #3 — opposite of simulation's read-side
+# DEFAULT-PERMIT).
+_ENGINE_GATED_TOOLS = {
+    "modify_dynamodb_capacity": "ddb_write",
+    "modify_dynamodb_ttl": "ddb_write",
+    "enable_dynamodb_pitr": "ddb_write",
+}
 
 TOOLS = {
     "get_schema_diff": {
@@ -165,6 +183,67 @@ TOOLS = {
             "required": ["cluster_id", "new_cluster_id"],
         },
     },
+    "modify_dynamodb_capacity": {
+        "impl": modify_dynamodb_capacity_impl,
+        "description": (
+            "DynamoDB only: change provisioned RCU/WCU and/or switch billing "
+            "mode (Provisioned<->On-Demand) via update_table. Requires "
+            "approved=true AND approval_id=<uuid from request_approval>. Blocks "
+            "tables that have any GSI (per-GSI capacity unsupported in v1). "
+            "Reject RCU/WCU < 1."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target DynamoDB table ID (ddb-* registry slug)"},
+                "billing_mode": {"type": "string", "description": "PROVISIONED or On-Demand — omit to keep current mode"},
+                "rcu": {"type": "integer", "description": "Provisioned read capacity units (>=1; required for Provisioned)"},
+                "wcu": {"type": "integer", "description": "Provisioned write capacity units (>=1; required for Provisioned)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id"],
+        },
+    },
+    "modify_dynamodb_ttl": {
+        "impl": modify_dynamodb_ttl_impl,
+        "description": (
+            "DynamoDB only: enable or disable an attribute TTL via "
+            "update_time_to_live. Requires approved=true AND "
+            "approval_id=<uuid from request_approval>. Idempotent."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target DynamoDB table ID (ddb-* registry slug)"},
+                "attribute": {"type": "string", "description": "TTL attribute name (expiry epoch-seconds attribute)"},
+                "enabled": {"type": "boolean", "default": True, "description": "True to enable TTL, false to disable"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id", "attribute"],
+        },
+    },
+    "enable_dynamodb_pitr": {
+        "impl": enable_dynamodb_pitr_impl,
+        "description": (
+            "DynamoDB only: turn Point-in-Time Recovery (PITR) on or off via "
+            "update_continuous_backups. Requires approved=true AND "
+            "approval_id=<uuid from request_approval>. DISABLING PITR is a "
+            "data-protection degradation and additionally requires force=true."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target DynamoDB table ID (ddb-* registry slug)"},
+                "enabled": {"type": "boolean", "default": True, "description": "True to enable PITR, false to disable (force required)"},
+                "force": {"type": "boolean", "default": False, "description": "Required to DISABLE PITR (enabled=false)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id"],
+        },
+    },
     "review_sql": {
         "impl": review_sql_impl,
         "description": "Pre-execution SQL review with risk classification, issue detection, and rollback suggestion",
@@ -280,7 +359,7 @@ TOOLS = {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "action_type": {
                     "type": "string",
-                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "other"],
+                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "modify_dynamodb_capacity", "modify_dynamodb_ttl", "enable_dynamodb_pitr", "set_docdb_profiler", "create_docdb_index", "other"],
                     "description": "Which write tool needs approval",
                 },
                 "action_details": {
@@ -306,6 +385,27 @@ def _extract_tool_name(context):
     return raw.split("___", 1)[1] if "___" in raw else raw
 
 
+def _resolve_family(cluster_id):
+    """Resolve the engine family from cluster_meta via the cache. Returns None
+    when cluster_id is empty, the row is missing, or the lookup errors. For the
+    engine-gated WRITE tools a None family is FAIL-CLOSED (refused) — opposite of
+    simulation's read-side default-permit (review fix #3)."""
+    if not cluster_id:
+        return None
+    try:
+        rows = cache.execute(
+            "SELECT engine FROM cluster_meta WHERE cluster_id = :cid",
+            {"cid": cluster_id},
+        )
+    except Exception as e:
+        print(f"[operations] family lookup failed for {cluster_id}: {e}")
+        return None
+    rows = getattr(rows, "rows", rows)
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+        return _engine_family(rows[0].get("engine"))
+    return None
+
+
 def lambda_handler(event, context):
     tool_name = _extract_tool_name(context)
     method = event.get("method") if isinstance(event, dict) else None
@@ -317,6 +417,25 @@ def lambda_handler(event, context):
         ]}
 
     if tool_name and tool_name in TOOLS:
+        # POSITIVE engine-capability gate, FAIL-CLOSED for the NoSQL write tools
+        # only (the Aurora tools stay ungated). A DynamoDB tool called on an
+        # Aurora cluster — or on an unresolvable/unregistered cluster — refuses,
+        # so a valid-looking approval can never drive a write at the wrong engine.
+        cap_key = _ENGINE_GATED_TOOLS.get(tool_name)
+        if cap_key:
+            cluster_id = (event or {}).get("cluster_id") if isinstance(event, dict) else None
+            fam = _resolve_family(cluster_id)
+            if not CAPABILITIES.get(fam, {}).get(cap_key, False):
+                return {"content": [{"type": "text", "text": json.dumps({
+                    "status": "unsupported_engine",
+                    "engine_family": fam,
+                    "cluster_id": cluster_id,
+                    "reason": (
+                        "cluster engine could not be resolved"
+                        if fam is None
+                        else f"{tool_name}는 DynamoDB 테이블 전용입니다 (현재 엔진: {fam})."
+                    ),
+                })}]}
         try:
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}

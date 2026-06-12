@@ -400,3 +400,129 @@ def test_empty_action_type_rejected_fail_closed(mock_boto3):
     assert result["ok"] is False
     assert "action_type" in result["reason"]
     table.update_item.assert_not_called()
+
+
+# ===== NoSQL write projections (multi-engine #P3.6 Group C) =====
+
+
+def test_ddb_capacity_target_is_bound_in_hash():
+    """fix #1: the table target is INSIDE the capacity hash — an approval for
+    table A can't be redirected to table B even on the same (cluster, action)."""
+    a = canonical_action_hash(
+        "modify_dynamodb_capacity",
+        {"target": "orders", "billing_mode": "", "rcu": 20, "wcu": 10, "force": False},
+    )
+    b = canonical_action_hash(
+        "modify_dynamodb_capacity",
+        {"target": "payments", "billing_mode": "", "rcu": 20, "wcu": 10, "force": False},
+    )
+    assert a != b
+
+
+def test_ddb_capacity_hashed_rcu_equals_executed():
+    """fix #4: the hash is over the EFFECTIVE (validated >=1) rcu/wcu, and
+    _norm_val makes the request-time (e.g. "20") and execute-time (20 int) shapes
+    agree, so the approved value equals the executed value."""
+    request_side = canonical_action_hash(
+        "modify_dynamodb_capacity",
+        {"target": "orders", "billing_mode": "", "rcu": "20", "wcu": "10", "force": False},
+    )
+    execute_side = canonical_action_hash(
+        "modify_dynamodb_capacity",
+        {"target": "orders", "billing_mode": "", "rcu": 20, "wcu": 10, "force": False},
+    )
+    assert request_side == execute_side
+    # A different effective rcu must NOT collide.
+    assert request_side != canonical_action_hash(
+        "modify_dynamodb_capacity",
+        {"target": "orders", "billing_mode": "", "rcu": 21, "wcu": 10, "force": False},
+    )
+
+
+def test_ddb_capacity_billing_mode_change_changes_hash():
+    keep = canonical_action_hash(
+        "modify_dynamodb_capacity",
+        {"target": "orders", "billing_mode": "", "rcu": 20, "wcu": 10, "force": False},
+    )
+    switch = canonical_action_hash(
+        "modify_dynamodb_capacity",
+        {"target": "orders", "billing_mode": "PAY_PER_REQUEST", "rcu": 20, "wcu": 10, "force": False},
+    )
+    assert keep != switch
+
+
+def test_ddb_ttl_projection_binds_attribute_and_enabled():
+    on = canonical_action_hash(
+        "modify_dynamodb_ttl", {"attribute": "expires_at", "enabled": True}
+    )
+    off = canonical_action_hash(
+        "modify_dynamodb_ttl", {"attribute": "expires_at", "enabled": False}
+    )
+    other_attr = canonical_action_hash(
+        "modify_dynamodb_ttl", {"attribute": "ttl", "enabled": True}
+    )
+    assert on != off
+    assert on != other_attr
+
+
+def test_ddb_pitr_force_changes_hash():
+    """fix #7: the force flag is hashed, so the disable-with-force variant the DBA
+    approves is a DISTINCT approval from a (would-be-blocked) disable-without-force."""
+    disable_forced = canonical_action_hash(
+        "enable_dynamodb_pitr", {"enabled": False, "force": True}
+    )
+    disable_unforced = canonical_action_hash(
+        "enable_dynamodb_pitr", {"enabled": False, "force": False}
+    )
+    enable = canonical_action_hash(
+        "enable_dynamodb_pitr", {"enabled": True, "force": False}
+    )
+    assert disable_forced != disable_unforced
+    assert disable_forced != enable
+
+
+def test_docdb_index_compound_key_order_hashes_differently():
+    """fix #2: compound-index field ORDER is semantically significant — the keys
+    list must NOT be sorted, so [a,b] and [b,a] hash DIFFERENTLY."""
+    ab = canonical_action_hash(
+        "create_docdb_index",
+        {"db": "app", "collection": "users", "keys": [["a", 1], ["b", 1]], "name": "ab_idx"},
+    )
+    ba = canonical_action_hash(
+        "create_docdb_index",
+        {"db": "app", "collection": "users", "keys": [["b", 1], ["a", 1]], "name": "ab_idx"},
+    )
+    assert ab != ba
+    # Same order must be stable (idempotent hash).
+    ab2 = canonical_action_hash(
+        "create_docdb_index",
+        {"db": "app", "collection": "users", "keys": [["a", 1], ["b", 1]], "name": "ab_idx"},
+    )
+    assert ab == ab2
+
+
+def test_docdb_index_direction_changes_hash():
+    asc = canonical_action_hash(
+        "create_docdb_index",
+        {"db": "app", "collection": "users", "keys": [["a", 1]], "name": "a_idx"},
+    )
+    desc = canonical_action_hash(
+        "create_docdb_index",
+        {"db": "app", "collection": "users", "keys": [["a", -1]], "name": "a_idx"},
+    )
+    assert asc != desc
+
+
+def test_docdb_profiler_projection_binds_level_and_slowms():
+    a = canonical_action_hash(
+        "set_docdb_profiler", {"db": "app", "level": 1, "slowms": 100}
+    )
+    b = canonical_action_hash(
+        "set_docdb_profiler", {"db": "app", "level": 2, "slowms": 100}
+    )
+    # _norm_val collapses numeric aliases so request/execute shapes agree.
+    a_str = canonical_action_hash(
+        "set_docdb_profiler", {"db": "app", "level": "1", "slowms": "100"}
+    )
+    assert a != b
+    assert a == a_str

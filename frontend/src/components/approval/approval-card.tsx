@@ -54,6 +54,12 @@ const ACTION_RISK: Record<string, string> = {
   // Data API 활성화: 데이터 변경은 없지만 SQL 실행 경로가 IAM 경계로
   // 열리는 설정 변경 — 중간 위험으로 표시해 DBA가 의미를 인지하고 승인.
   enable_data_api: "medium",
+  // DynamoDB write/remediation. Capacity/billing-mode 전환은 throttle·비용
+  // 영향(medium); TTL 토글은 만료 정책 변경(medium); PITR 활성화는 보호
+  // 강화(low)지만 비활성화는 보호 저하(high) — 카드 단계에선 medium 고정.
+  modify_dynamodb_capacity: "medium",
+  modify_dynamodb_ttl: "medium",
+  enable_dynamodb_pitr: "medium",
   other: "medium",
 };
 
@@ -136,6 +142,40 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     considerations: [
       "다운타임 없음 — 설정 변경만",
       "활성화 후 라이브 SQL 수집·에이전트 SQL이 동작",
+    ],
+  },
+  modify_dynamodb_capacity: {
+    what: "DynamoDB 테이블의 프로비저닝 RCU/WCU 또는 빌링 모드(Provisioned↔On-Demand)를 변경합니다.",
+    risks: [
+      "RCU/WCU를 낮추면 스파이크 시 throttle, 빌링 모드 전환은 비용 구조가 바뀝니다.",
+      "빌링 모드 전환은 AWS가 테이블당 rate-limit 합니다.",
+      "GSI가 있는 테이블은 v1에서 차단됩니다(per-GSI 용량 미지원).",
+    ],
+    considerations: [
+      "관측 소비량 대비 적정 용량인지 Cost Simulator로 확인",
+      "On-Demand는 트래픽이 불규칙할 때, Provisioned는 안정적일 때 유리",
+    ],
+  },
+  modify_dynamodb_ttl: {
+    what: "DynamoDB 테이블의 속성 TTL(자동 만료)을 활성화하거나 비활성화합니다.",
+    risks: [
+      "TTL을 켜면 해당 속성의 epoch가 지난 항목이 백그라운드로 삭제됩니다 — 비가역.",
+      "TTL 변경은 테이블당 약 1시간에 한 번만 가능합니다.",
+    ],
+    considerations: [
+      "만료 타임스탬프 속성 이름이 정확한지 확인(잘못된 속성이면 삭제 안 됨)",
+      "삭제 대상 데이터가 아카이브 불필요한지 확인",
+    ],
+  },
+  enable_dynamodb_pitr: {
+    what: "DynamoDB 테이블의 Point-in-Time Recovery(PITR)를 켜거나 끕니다.",
+    risks: [
+      "켜기는 데이터 보호 강화(35일 연속 백업) — 약간의 추가 비용.",
+      "끄기는 데이터 보호 저하 — 복구 가능 시점이 즉시 단절됩니다(force=true 필요).",
+    ],
+    considerations: [
+      "비활성화 요청이면 force=true가 포함됐는지, 정말 보호를 끌 의도인지 확인",
+      "다운타임 없음 — 백업 설정 변경만",
     ],
   },
 };
@@ -371,6 +411,51 @@ function ActionDetails({
           ⚠ 새 클러스터를 생성합니다 (과금 발생). 소스 클러스터는 변경되지
           않습니다.
         </div>
+      </div>
+    );
+  }
+
+  if (action === "modify_dynamodb_capacity") {
+    const mode = String(details.billing_mode ?? "");
+    return (
+      <div className="text-sm text-zinc-100 space-y-1.5">
+        <DetailRow label="table" value={String(details.target ?? "")} mono />
+        <DetailRow label="billing mode" value={mode || "(unchanged)"} mono />
+        <DetailRow label="RCU" value={fmt(details.rcu)} mono />
+        <DetailRow label="WCU" value={fmt(details.wcu)} mono />
+      </div>
+    );
+  }
+
+  if (action === "modify_dynamodb_ttl") {
+    return (
+      <div className="text-sm text-zinc-100 space-y-1.5">
+        <DetailRow
+          label="attribute"
+          value={String(details.attribute ?? "")}
+          mono
+        />
+        <DetailRow
+          label="enabled"
+          value={details.enabled === true ? "true (enable)" : "false (disable)"}
+        />
+      </div>
+    );
+  }
+
+  if (action === "enable_dynamodb_pitr") {
+    const enabling = details.enabled === true;
+    return (
+      <div className="text-sm text-zinc-100 space-y-1.5">
+        <DetailRow
+          label="enabled"
+          value={enabling ? "true (enable PITR)" : "false (disable PITR)"}
+        />
+        {!enabling && (
+          <div className="text-[11px] text-rose-300">
+            ⚠ PITR 비활성화 — 연속 백업 보호가 사라집니다 (force=true).
+          </div>
+        )}
       </div>
     );
   }

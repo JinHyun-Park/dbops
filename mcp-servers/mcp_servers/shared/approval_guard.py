@@ -131,6 +131,56 @@ def _project(action_type: str, details: dict) -> dict:
             "restore_to_time": str(d.get("restore_to_time") or "").strip(),
             "use_latest": bool(d.get("use_latest")),
         }
+    # ===== NoSQL write tools (multi-engine #P3.6 Group C) =====
+    if action_type == "modify_dynamodb_capacity":
+        # Bind the table target explicitly (fix #1 — no user-controllable target
+        # outside the hash) + the EFFECTIVE (validated >=1) rcu/wcu so the hashed
+        # value equals the executed value (fix #4). billing_mode is the requested
+        # switch ("" when not switching). force is bound for parity (v1 unused).
+        return {
+            "target": str(d.get("target") or "").strip(),
+            "billing_mode": str(d.get("billing_mode") or "").strip(),
+            "rcu": _norm_val(d.get("rcu")),
+            "wcu": _norm_val(d.get("wcu")),
+            "force": bool(d.get("force")),
+        }
+    if action_type == "modify_dynamodb_ttl":
+        return {
+            "attribute": str(d.get("attribute") or "").strip(),
+            "enabled": bool(d.get("enabled")),
+        }
+    if action_type == "enable_dynamodb_pitr":
+        # force is required to DISABLE (fix #7) and is hashed so the DBA approves
+        # the forceful variant specifically — a disable approval can't be reused
+        # for a different (enable) shape and vice-versa.
+        return {
+            "enabled": bool(d.get("enabled")),
+            "force": bool(d.get("force")),
+        }
+    if action_type == "set_docdb_profiler":
+        # stage 2: handler impl + pymongo bundling land later; the projection is
+        # added now so the guard/Cedar stay coherent across the 5 NoSQL writes.
+        return {
+            "db": str(d.get("db") or "").strip(),
+            "level": _norm_val(d.get("level")),
+            "slowms": _norm_val(d.get("slowms")),
+        }
+    if action_type == "create_docdb_index":
+        # stage 2: handler impl lands later. keys is an ORDERED list of
+        # [field, direction] pairs (fix #2) — compound-index field order is
+        # semantically significant, so we must NOT sort it: [["a",1],["b",1]] and
+        # [["b",1],["a",1]] are different indexes and MUST hash differently.
+        raw_keys = d.get("keys") or []
+        keys = []
+        for pair in raw_keys:
+            if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                keys.append([str(pair[0]), _norm_val(pair[1])])
+        return {
+            "db": str(d.get("db") or "").strip(),
+            "collection": str(d.get("collection") or "").strip(),
+            "keys": keys,
+            "name": str(d.get("name") or "").strip(),
+        }
     # other / unknown: bind the FULL detail set VERBATIM (no numeric coercion).
     # This closes the loose "other" bucket — an "other" approval now matches
     # only if the entire registered payload matches. We deliberately do NOT

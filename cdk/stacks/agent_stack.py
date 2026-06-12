@@ -121,6 +121,16 @@ class AgentStack(cdk.Stack):
                 "rds:RestoreDBClusterFromSnapshot",
                 "rds:RestoreDBClusterToPointInTime",
                 "rds:AddTagsToResource",
+                # NoSQL write/remediation (multi-engine #P3.6 Group C). The 3
+                # DynamoDB write tools (capacity/TTL/PITR) need Update* + the
+                # paired Describe* for the request-time + TOCTOU re-read. All
+                # approval-gated in tool code; cross-account via assume-role.
+                "dynamodb:UpdateTable",
+                "dynamodb:UpdateTimeToLive",
+                "dynamodb:UpdateContinuousBackups",
+                "dynamodb:DescribeTable",
+                "dynamodb:DescribeContinuousBackups",
+                "dynamodb:DescribeTimeToLive",
                 # Hub-spoke role chaining: control-plane write tools assume the
                 # cluster's spoke_role_arn (from the registry) so they target
                 # the right account+region instead of the hub.

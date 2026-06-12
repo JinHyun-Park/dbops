@@ -117,6 +117,35 @@ def test_every_readonly_tool_is_permitted_in_cedar_policy():
     )
 
 
+def test_nosql_write_actions_in_operations_cedar_write_block():
+    """The 5 NoSQL write actions (multi-engine #P3.6 Group C) must be in the
+    operations Cedar policy — otherwise the Gateway default-DENY silently blocks
+    them despite the handler + guard being complete (same failure family as the
+    create_snapshot/restore_cluster + request_approval Explore findings). This
+    asserts presence in the policy file; the approved==true gating is structural
+    in the .cedar source."""
+    src = (_CEDAR_ROOT / "operations_policy.cedar").read_text()
+    actions = set(re.findall(r'Action::"([^"]+)"', src))
+    required = {
+        "modify_dynamodb_capacity",
+        "modify_dynamodb_ttl",
+        "enable_dynamodb_pitr",
+        "set_docdb_profiler",
+        "create_docdb_index",
+        # Explore-found gaps closed in the same pass.
+        "create_snapshot",
+        "restore_cluster",
+        "request_approval",
+        "query_activity_audit",
+        "get_runbook",
+    }
+    missing = sorted(required - actions)
+    assert not missing, (
+        "operations_policy.cedar에 누락된 Action — Gateway 기본 DENY에서 차단됩니다: "
+        + ", ".join(missing)
+    )
+
+
 def test_every_handler_param_is_exposed_in_gateway_schema():
     schema = _parse_schema()
     handlers = _parse_handlers()

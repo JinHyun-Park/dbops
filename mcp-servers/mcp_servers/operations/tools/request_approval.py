@@ -64,6 +64,15 @@ def request_approval_impl(
         # Center에서 승인하는 순간 approvals API가 rds:EnableHttpEndpoint를
         # 직접 호출한다. 에이전트는 요청 등록까지만 하면 된다.
         "enable_data_api",
+        # NoSQL write/remediation (multi-engine #P3.6 Group C). DynamoDB tools
+        # ship this stage; the two DocDB Mongo writes ship stage 2 but their
+        # enum values are added now so the approval enum stays coherent with
+        # the guard projections + Cedar write block.
+        "modify_dynamodb_capacity",
+        "modify_dynamodb_ttl",
+        "enable_dynamodb_pitr",
+        "set_docdb_profiler",
+        "create_docdb_index",
         "other",
     ):
         return {
