@@ -212,25 +212,25 @@ by account/region. Delivered across 5 sequenced specs:
 
 **Remaining follow-ups (concretely scoped, pick up independently):**
 
-- **DocDB cost rightsizing.** Aurora `cost_check` can't be reused as-is: DocDB
-  stores CPU as `cpu_utilization` (not `cpu`) and has no `instance_class` in
-  `cluster_meta`/`resource_details`. Plan: extend `docdb_cw_collector`/meta to
-  capture the writer instance class, then add a `docdb_cost_oversized` rule
-  inside `docdb_findings.py` (read `cpu_utilization` + class; skip burstable t-family).
-- **Dashboard parity — backend panels for new engines** (Codex audit, med/low):
-  - Health score for DynamoDB/DocDB (synthesize from throttle/latency/capacity
-    resp. CPU/connections/lag/cache — findings panel partially covers this today).
-  - ~~Backup/snapshot panel: DocDB cluster snapshots + restore window; DynamoDB
-    PITR / on-demand backups~~ ✅ **shipped read-only** (backup-visibility spec,
-    2026-06-12): DocDB snapshots/retention/restore-window + DynamoDB PITR posture/
-    on-demand list, read-only (write controls hidden). Snapshot **create/restore**
-    - **enable-PITR** for new engines remain deferred (writes → need Cedar/approval).
-  - Events panel for DocDB (RDS-family events); capacity/usage forecast;
-    replication/topology view for DocDB cluster members; connection
-    pressure/headroom for DocDB; engine settings panel (DDB billing/PITR/TTL/
-    stream/GSI status; DocDB params/maintenance/deletion-protection).
-  - Per-GSI metric lines on the DynamoDB panel (collected with `dimensions.gsi`,
-    not yet exposed as selectable per-index series).
+- ~~**DocDB cost rightsizing**~~ ✅ **shipped** (2026-06-12): docdb_cw_collector
+  captures the writer instance class into resource_details; `docdb_cost_oversized`
+  rule in `docdb_findings.py` (7d cpu_utilization avg<30/p95<60 on a sized
+  instance, skips burstable t-family). Isolated in try/except so it can't
+  suppress the operational findings.
+- ~~**Dashboard parity — backend panels for new engines**~~ ✅ **shipped**
+  (2026-06-12, all live-verified on DocDB + DynamoDB, Codex SHIP):
+  - ✅ Health score (engine-aware signals + `invert` for cache-hit; no-data→ok).
+  - ✅ Backup/snapshot panel (read-only) — see backup-visibility spec.
+  - ✅ Events panel (un-gate — event_log is keyed by cluster_id).
+  - ✅ Capacity forecast (DocDB connections→db_connections_limit; DynamoDB
+    consumed→provisioned×60; not_applicable on on-demand).
+  - ✅ Replication/topology (DocDB cluster members via docdb describe).
+  - ✅ Engine configuration panel (`/engine-config`: DocDB maintenance/deletion-
+    protection/param-group/retention; DynamoDB table-class/SSE/stream/TTL).
+  - ✅ Per-GSI metric lines on the DynamoDB panel (+ fixed a latent table-level
+    dimension-mixing bug — table charts now filter to `dimensions='{}'`).
+  - (Connection pressure/headroom for DocDB: covered by the db_connections chart
+    - docdb_connection_saturation finding — no separate panel needed.)
 - **NoSQL write / remediation tools** + Cedar policies + approval binding
   (capacity change, TTL, index ops) — mirrors the operations server's approval flow.
 - **Mongo-protocol deep diagnosis** for DocumentDB (`serverStatus`, `currentOp`,
