@@ -12,20 +12,7 @@ Cross-account via `client_for_cluster`. Never raises into the caller.
 from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
-from mcp_servers.shared.cluster_targets import client_for_cluster
-
-
-def _table_name(cache, cluster_id: str) -> str:
-    try:
-        rows = cache.execute(
-            "SELECT resource_name FROM cluster_meta WHERE cluster_id = :cid",
-            {"cid": cluster_id},
-        ).rows
-    except Exception:
-        rows = []
-    if rows and rows[0].get("resource_name"):
-        return rows[0]["resource_name"]
-    return cluster_id
+from mcp_servers.shared.cluster_targets import client_for_cluster, table_name_for_cluster
 
 
 def _pitr_enabled(client, table: str) -> bool:
@@ -47,7 +34,7 @@ def enable_dynamodb_pitr_impl(
 ) -> dict:
     """update_continuous_backups to turn PITR on (enabled=True) or off
     (enabled=False, requires force=true). Approval-gated; never raises."""
-    table = _table_name(cache, cluster_id)
+    table = table_name_for_cluster(cluster_id)
     enabled = bool(enabled)
     force = bool(force)
 

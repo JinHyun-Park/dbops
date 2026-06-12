@@ -9,15 +9,26 @@ is mocked so no AWS call is ever made.
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from mcp_servers.operations.tools.modify_dynamodb_capacity import (
     modify_dynamodb_capacity_impl,
 )
 
 
+@pytest.fixture(autouse=True)
+def _mock_table_name():
+    """The real table name comes from the cluster registry (table_name_for_cluster),
+    NOT cluster_meta — pin it to 'orders' so the target-binding assertions exercise
+    the real resolution path."""
+    with patch(
+        "mcp_servers.operations.tools.modify_dynamodb_capacity.table_name_for_cluster",
+        return_value="orders",
+    ):
+        yield
+
+
 def _cache_with_name(name="orders"):
-    cache = MagicMock()
-    cache.execute.return_value.rows = [{"resource_name": name}]
-    return cache
+    return MagicMock()
 
 
 def _ddb_client(*, billing_mode="PROVISIONED", rcu=5, wcu=5, gsis=None, describe_seq=None):

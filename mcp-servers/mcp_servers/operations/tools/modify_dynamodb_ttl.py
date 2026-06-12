@@ -10,20 +10,7 @@ Cross-account via `client_for_cluster`. Never raises into the caller.
 from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
-from mcp_servers.shared.cluster_targets import client_for_cluster
-
-
-def _table_name(cache, cluster_id: str) -> str:
-    try:
-        rows = cache.execute(
-            "SELECT resource_name FROM cluster_meta WHERE cluster_id = :cid",
-            {"cid": cluster_id},
-        ).rows
-    except Exception:
-        rows = []
-    if rows and rows[0].get("resource_name"):
-        return rows[0]["resource_name"]
-    return cluster_id
+from mcp_servers.shared.cluster_targets import client_for_cluster, table_name_for_cluster
 
 
 def _ttl_state(client, table: str) -> dict:
@@ -48,7 +35,7 @@ def modify_dynamodb_ttl_impl(
 ) -> dict:
     """update_time_to_live for `attribute`. enabled=True turns TTL on for the
     attribute; enabled=False turns it off. Approval-gated; never raises."""
-    table = _table_name(cache, cluster_id)
+    table = table_name_for_cluster(cluster_id)
     enabled = bool(enabled)
     attribute = (attribute or "").strip()
 

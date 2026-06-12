@@ -19,25 +19,9 @@ caller — any boto3/guard error degrades to `{"status":"error", reason}`.
 from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
-from mcp_servers.shared.cluster_targets import client_for_cluster
+from mcp_servers.shared.cluster_targets import client_for_cluster, table_name_for_cluster
 
 _VALID_MODES = ("PROVISIONED", "PAY_PER_REQUEST")
-
-
-def _table_name(cache, cluster_id: str) -> str:
-    """The real DynamoDB table name for a `ddb-*` registry slug. cluster_meta
-    keeps it in resource_name (the slug is regex-safe but not the table name).
-    Falls back to cluster_id so a non-slug id (direct table name) still works."""
-    try:
-        rows = cache.execute(
-            "SELECT resource_name FROM cluster_meta WHERE cluster_id = :cid",
-            {"cid": cluster_id},
-        ).rows
-    except Exception:
-        rows = []
-    if rows and rows[0].get("resource_name"):
-        return rows[0]["resource_name"]
-    return cluster_id
 
 
 def _norm_mode(billing_mode):
@@ -108,7 +92,7 @@ def modify_dynamodb_capacity_impl(
 ) -> dict:
     """update_table to switch billing mode (Provisioned<->On-Demand) and/or set
     provisioned RCU/WCU. Approval-gated; never raises."""
-    table = _table_name(cache, cluster_id)
+    table = table_name_for_cluster(cluster_id)
 
     # --- request-time describe: surface constraints + BLOCK on GSI (fix #5) ---
     try:

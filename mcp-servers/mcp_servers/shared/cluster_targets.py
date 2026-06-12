@@ -65,6 +65,15 @@ def client_for_cluster(cluster_id: str, service: str):
     return session_for(row.get("region", ""), row.get("spoke_role_arn", "")).client(service)
 
 
+def table_name_for_cluster(cluster_id: str) -> str:
+    """Real resource name (e.g. the DynamoDB table name) for a `ddb-*` registry
+    slug. The slug is a one-way hash of account+region+name, so the real name is
+    NOT recoverable from it — it lives on the registry row as `resource_name`
+    (the SAME row client_for_cluster reads), NOT in the Aurora cluster_meta cache.
+    Falls back to cluster_id so a direct, non-slug id still works."""
+    return lookup_cluster(cluster_id).get("resource_name") or cluster_id
+
+
 def rds_client_for_cluster(cluster_id: str):
     """RDS control-plane client targeting the cluster's account+region.
 
