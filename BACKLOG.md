@@ -220,8 +220,11 @@ by account/region. Delivered across 5 sequenced specs:
 - **Dashboard parity — backend panels for new engines** (Codex audit, med/low):
   - Health score for DynamoDB/DocDB (synthesize from throttle/latency/capacity
     resp. CPU/connections/lag/cache — findings panel partially covers this today).
-  - Backup/snapshot panel: DocDB cluster snapshots + restore window; DynamoDB
-    PITR / on-demand backups (Aurora `BackupPanel` is relational-gated today).
+  - ~~Backup/snapshot panel: DocDB cluster snapshots + restore window; DynamoDB
+    PITR / on-demand backups~~ ✅ **shipped read-only** (backup-visibility spec,
+    2026-06-12): DocDB snapshots/retention/restore-window + DynamoDB PITR posture/
+    on-demand list, read-only (write controls hidden). Snapshot **create/restore**
+    - **enable-PITR** for new engines remain deferred (writes → need Cedar/approval).
   - Events panel for DocDB (RDS-family events); capacity/usage forecast;
     replication/topology view for DocDB cluster members; connection
     pressure/headroom for DocDB; engine settings panel (DDB billing/PITR/TTL/
