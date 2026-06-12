@@ -806,7 +806,10 @@ export default function DashboardPage() {
                       clusterId={selectedCluster}
                       engine={dashboardData.cluster?.engine}
                     />
-                    <DynamodbOverviewPanel clusterId={selectedCluster} />
+                    <DynamodbOverviewPanel
+                      clusterId={selectedCluster}
+                      range={range}
+                    />
                   </>
                 )}
 
@@ -817,7 +820,10 @@ export default function DashboardPage() {
                       clusterId={selectedCluster}
                       engine={dashboardData.cluster?.engine}
                     />
-                    <DocdbOverviewPanel clusterId={selectedCluster} />
+                    <DocdbOverviewPanel
+                      clusterId={selectedCluster}
+                      range={range}
+                    />
                   </>
                 )}
               </>

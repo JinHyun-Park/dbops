@@ -13,7 +13,12 @@ import {
   CartesianGrid,
   Legend,
 } from "recharts";
-import { fetchResourceDetails, fetchBatchTimeseries } from "@/lib/api-client";
+import {
+  fetchResourceDetails,
+  fetchBatchTimeseries,
+  type TimeRange,
+} from "@/lib/api-client";
+import { Expandable } from "@/components/design-system/expandable";
 import { fmtDecimal, fmtBytes, fmtExact } from "@/lib/format";
 import { useChartColors } from "@/lib/use-chart-colors";
 
@@ -174,104 +179,106 @@ function MiniChart({
   const displayCurrent = fmtDecimal(primaryCurrent, 2);
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 p-5">
-      <div className="flex items-baseline justify-between mb-3">
-        <div className="text-sm text-zinc-200 font-medium">{title}</div>
-        {unit && (
-          <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
-            {unit}
-          </div>
-        )}
-      </div>
-      <div className="text-2xl font-semibold text-zinc-100 mb-3">
-        {displayCurrent}
-        {unit && <span className="text-sm text-zinc-500 ml-1">{unit}</span>}
-      </div>
-      <div className="h-32">
-        {loading ? (
-          <div className="text-xs text-zinc-500 flex items-center h-full">
-            불러오는 중…
-          </div>
-        ) : data.length === 0 ? (
-          <div className="text-xs text-zinc-500 flex items-center h-full">
-            데이터 없음
-          </div>
-        ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            {type === "area" ? (
-              <AreaChart
-                data={data}
-                margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke={colors.grid}
-                  vertical={false}
-                />
-                <XAxis dataKey="ts" stroke={colors.axis} fontSize={10} />
-                <YAxis stroke={colors.axis} fontSize={10} />
-                <Tooltip
-                  contentStyle={{
-                    background: colors.tooltipBg,
-                    border: `1px solid ${colors.tooltipBorder}`,
-                    fontSize: 12,
-                  }}
-                  labelStyle={{ color: colors.tooltipText }}
-                />
-                {allKeys.length > 1 && (
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                )}
-                {series.map((s) => (
-                  <Area
-                    key={s.name}
-                    type="monotone"
-                    dataKey={s.name}
-                    stroke={s.color}
-                    fill={s.color}
-                    fillOpacity={0.15}
-                    dot={false}
+    <Expandable title={title}>
+      <div className="bg-zinc-900/50 border border-zinc-800 p-5">
+        <div className="flex items-baseline justify-between mb-3 pr-6">
+          <div className="text-sm text-zinc-200 font-medium">{title}</div>
+          {unit && (
+            <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
+              {unit}
+            </div>
+          )}
+        </div>
+        <div className="text-2xl font-semibold text-zinc-100 mb-3">
+          {displayCurrent}
+          {unit && <span className="text-sm text-zinc-500 ml-1">{unit}</span>}
+        </div>
+        <div className="h-32">
+          {loading ? (
+            <div className="text-xs text-zinc-500 flex items-center h-full">
+              불러오는 중…
+            </div>
+          ) : data.length === 0 ? (
+            <div className="text-xs text-zinc-500 flex items-center h-full">
+              데이터 없음
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              {type === "area" ? (
+                <AreaChart
+                  data={data}
+                  margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke={colors.grid}
+                    vertical={false}
                   />
-                ))}
-              </AreaChart>
-            ) : (
-              <LineChart
-                data={data}
-                margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke={colors.grid}
-                  vertical={false}
-                />
-                <XAxis dataKey="ts" stroke={colors.axis} fontSize={10} />
-                <YAxis stroke={colors.axis} fontSize={10} />
-                <Tooltip
-                  contentStyle={{
-                    background: colors.tooltipBg,
-                    border: `1px solid ${colors.tooltipBorder}`,
-                    fontSize: 12,
-                  }}
-                  labelStyle={{ color: colors.tooltipText }}
-                />
-                {allKeys.length > 1 && (
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                )}
-                {series.map((s) => (
-                  <Line
-                    key={s.name}
-                    type="monotone"
-                    dataKey={s.name}
-                    stroke={s.color}
-                    strokeWidth={2}
-                    dot={false}
+                  <XAxis dataKey="ts" stroke={colors.axis} fontSize={10} />
+                  <YAxis stroke={colors.axis} fontSize={10} />
+                  <Tooltip
+                    contentStyle={{
+                      background: colors.tooltipBg,
+                      border: `1px solid ${colors.tooltipBorder}`,
+                      fontSize: 12,
+                    }}
+                    labelStyle={{ color: colors.tooltipText }}
                   />
-                ))}
-              </LineChart>
-            )}
-          </ResponsiveContainer>
-        )}
+                  {allKeys.length > 1 && (
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                  )}
+                  {series.map((s) => (
+                    <Area
+                      key={s.name}
+                      type="monotone"
+                      dataKey={s.name}
+                      stroke={s.color}
+                      fill={s.color}
+                      fillOpacity={0.15}
+                      dot={false}
+                    />
+                  ))}
+                </AreaChart>
+              ) : (
+                <LineChart
+                  data={data}
+                  margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke={colors.grid}
+                    vertical={false}
+                  />
+                  <XAxis dataKey="ts" stroke={colors.axis} fontSize={10} />
+                  <YAxis stroke={colors.axis} fontSize={10} />
+                  <Tooltip
+                    contentStyle={{
+                      background: colors.tooltipBg,
+                      border: `1px solid ${colors.tooltipBorder}`,
+                      fontSize: 12,
+                    }}
+                    labelStyle={{ color: colors.tooltipText }}
+                  />
+                  {allKeys.length > 1 && (
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                  )}
+                  {series.map((s) => (
+                    <Line
+                      key={s.name}
+                      type="monotone"
+                      dataKey={s.name}
+                      stroke={s.color}
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  ))}
+                </LineChart>
+              )}
+            </ResponsiveContainer>
+          )}
+        </div>
       </div>
-    </div>
+    </Expandable>
   );
 }
 
@@ -289,11 +296,18 @@ const DDB_METRICS = [
   "latency_ms_query",
   "latency_ms_putitem",
   "latency_ms_scan",
+  "returned_item_count",
 ] as const;
 
 type DdbMetric = (typeof DDB_METRICS)[number];
 
-export function DynamodbOverviewPanel({ clusterId }: { clusterId: string }) {
+export function DynamodbOverviewPanel({
+  clusterId,
+  range,
+}: {
+  clusterId: string;
+  range: TimeRange;
+}) {
   const chart = useChartColors();
   const [details, setDetails] = useState<DdbDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(true);
@@ -325,7 +339,7 @@ export function DynamodbOverviewPanel({ clusterId }: { clusterId: string }) {
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      fetchBatchTimeseries(clusterId, [...DDB_METRICS], 1)
+      fetchBatchTimeseries(clusterId, [...DDB_METRICS], range)
         .then((d) => {
           if (cancelled) return;
           setSeries((d.series || {}) as Record<DdbMetric, Point[]>);
@@ -341,7 +355,7 @@ export function DynamodbOverviewPanel({ clusterId }: { clusterId: string }) {
       cancelled = true;
       clearInterval(iv);
     };
-  }, [clusterId]);
+  }, [clusterId, range]);
 
   const isProvisioned =
     (details?.billing_mode ?? "").toUpperCase() === "PROVISIONED";
@@ -737,6 +751,27 @@ export function DynamodbOverviewPanel({ clusterId }: { clusterId: string }) {
             loading={seriesLoading}
             colors={chart}
             unit="ms"
+          />
+        </div>
+      </div>
+
+      {/* ─ Throughput ─ */}
+      <div>
+        <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
+          처리량 (Throughput)
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <MiniChart
+            title="Returned Item Count"
+            series={[
+              {
+                name: "returned_item_count",
+                color: "#60a5fa",
+                points: series.returned_item_count ?? [],
+              },
+            ]}
+            loading={seriesLoading}
+            colors={chart}
           />
         </div>
       </div>

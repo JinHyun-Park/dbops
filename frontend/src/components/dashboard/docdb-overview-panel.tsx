@@ -13,7 +13,12 @@ import {
   CartesianGrid,
   Legend,
 } from "recharts";
-import { fetchResourceDetails, fetchBatchTimeseries } from "@/lib/api-client";
+import {
+  fetchResourceDetails,
+  fetchBatchTimeseries,
+  type TimeRange,
+} from "@/lib/api-client";
+import { Expandable } from "@/components/design-system/expandable";
 import { fmtDecimal } from "@/lib/format";
 import { useChartColors } from "@/lib/use-chart-colors";
 
@@ -94,104 +99,106 @@ function MiniChart({
     : 0;
 
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 p-5">
-      <div className="flex items-baseline justify-between mb-3">
-        <div className="text-sm text-zinc-200 font-medium">{title}</div>
-        {unit && (
-          <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
-            {unit}
-          </div>
-        )}
-      </div>
-      <div className="text-2xl font-semibold text-zinc-100 mb-3">
-        {fmtDecimal(primaryCurrent, 2)}
-        {unit && <span className="text-sm text-zinc-500 ml-1">{unit}</span>}
-      </div>
-      <div className="h-32">
-        {loading ? (
-          <div className="text-xs text-zinc-500 flex items-center h-full">
-            불러오는 중…
-          </div>
-        ) : data.length === 0 ? (
-          <div className="text-xs text-zinc-500 flex items-center h-full">
-            데이터 없음
-          </div>
-        ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            {type === "area" ? (
-              <AreaChart
-                data={data}
-                margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke={colors.grid}
-                  vertical={false}
-                />
-                <XAxis dataKey="ts" stroke={colors.axis} fontSize={10} />
-                <YAxis stroke={colors.axis} fontSize={10} />
-                <Tooltip
-                  contentStyle={{
-                    background: colors.tooltipBg,
-                    border: `1px solid ${colors.tooltipBorder}`,
-                    fontSize: 12,
-                  }}
-                  labelStyle={{ color: colors.tooltipText }}
-                />
-                {series.length > 1 && (
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                )}
-                {series.map((s) => (
-                  <Area
-                    key={s.name}
-                    type="monotone"
-                    dataKey={s.name}
-                    stroke={s.color}
-                    fill={s.color}
-                    fillOpacity={0.15}
-                    dot={false}
+    <Expandable title={title}>
+      <div className="bg-zinc-900/50 border border-zinc-800 p-5">
+        <div className="flex items-baseline justify-between mb-3 pr-6">
+          <div className="text-sm text-zinc-200 font-medium">{title}</div>
+          {unit && (
+            <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
+              {unit}
+            </div>
+          )}
+        </div>
+        <div className="text-2xl font-semibold text-zinc-100 mb-3">
+          {fmtDecimal(primaryCurrent, 2)}
+          {unit && <span className="text-sm text-zinc-500 ml-1">{unit}</span>}
+        </div>
+        <div className="h-32">
+          {loading ? (
+            <div className="text-xs text-zinc-500 flex items-center h-full">
+              불러오는 중…
+            </div>
+          ) : data.length === 0 ? (
+            <div className="text-xs text-zinc-500 flex items-center h-full">
+              데이터 없음
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              {type === "area" ? (
+                <AreaChart
+                  data={data}
+                  margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke={colors.grid}
+                    vertical={false}
                   />
-                ))}
-              </AreaChart>
-            ) : (
-              <LineChart
-                data={data}
-                margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke={colors.grid}
-                  vertical={false}
-                />
-                <XAxis dataKey="ts" stroke={colors.axis} fontSize={10} />
-                <YAxis stroke={colors.axis} fontSize={10} />
-                <Tooltip
-                  contentStyle={{
-                    background: colors.tooltipBg,
-                    border: `1px solid ${colors.tooltipBorder}`,
-                    fontSize: 12,
-                  }}
-                  labelStyle={{ color: colors.tooltipText }}
-                />
-                {series.length > 1 && (
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                )}
-                {series.map((s) => (
-                  <Line
-                    key={s.name}
-                    type="monotone"
-                    dataKey={s.name}
-                    stroke={s.color}
-                    strokeWidth={2}
-                    dot={false}
+                  <XAxis dataKey="ts" stroke={colors.axis} fontSize={10} />
+                  <YAxis stroke={colors.axis} fontSize={10} />
+                  <Tooltip
+                    contentStyle={{
+                      background: colors.tooltipBg,
+                      border: `1px solid ${colors.tooltipBorder}`,
+                      fontSize: 12,
+                    }}
+                    labelStyle={{ color: colors.tooltipText }}
                   />
-                ))}
-              </LineChart>
-            )}
-          </ResponsiveContainer>
-        )}
+                  {series.length > 1 && (
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                  )}
+                  {series.map((s) => (
+                    <Area
+                      key={s.name}
+                      type="monotone"
+                      dataKey={s.name}
+                      stroke={s.color}
+                      fill={s.color}
+                      fillOpacity={0.15}
+                      dot={false}
+                    />
+                  ))}
+                </AreaChart>
+              ) : (
+                <LineChart
+                  data={data}
+                  margin={{ top: 4, right: 4, bottom: 0, left: -20 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke={colors.grid}
+                    vertical={false}
+                  />
+                  <XAxis dataKey="ts" stroke={colors.axis} fontSize={10} />
+                  <YAxis stroke={colors.axis} fontSize={10} />
+                  <Tooltip
+                    contentStyle={{
+                      background: colors.tooltipBg,
+                      border: `1px solid ${colors.tooltipBorder}`,
+                      fontSize: 12,
+                    }}
+                    labelStyle={{ color: colors.tooltipText }}
+                  />
+                  {series.length > 1 && (
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                  )}
+                  {series.map((s) => (
+                    <Line
+                      key={s.name}
+                      type="monotone"
+                      dataKey={s.name}
+                      stroke={s.color}
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  ))}
+                </LineChart>
+              )}
+            </ResponsiveContainer>
+          )}
+        </div>
       </div>
-    </div>
+    </Expandable>
   );
 }
 
@@ -208,11 +215,22 @@ const DOCDB_METRICS = [
   "opcounter_update",
   "opcounter_delete",
   "cpu_utilization",
+  "freeable_memory",
+  "read_latency_ms",
+  "write_latency_ms",
+  "disk_queue_depth",
+  "storage_bytes",
 ] as const;
 
 type DocDbMetric = (typeof DOCDB_METRICS)[number];
 
-export function DocdbOverviewPanel({ clusterId }: { clusterId: string }) {
+export function DocdbOverviewPanel({
+  clusterId,
+  range,
+}: {
+  clusterId: string;
+  range: TimeRange;
+}) {
   const chart = useChartColors();
   const [details, setDetails] = useState<DocDbDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(true);
@@ -244,7 +262,7 @@ export function DocdbOverviewPanel({ clusterId }: { clusterId: string }) {
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      fetchBatchTimeseries(clusterId, [...DOCDB_METRICS], 1)
+      fetchBatchTimeseries(clusterId, [...DOCDB_METRICS], range)
         .then((d) => {
           if (cancelled) return;
           setSeries((d.series || {}) as Record<DocDbMetric, Point[]>);
@@ -260,7 +278,7 @@ export function DocdbOverviewPanel({ clusterId }: { clusterId: string }) {
       cancelled = true;
       clearInterval(iv);
     };
-  }, [clusterId]);
+  }, [clusterId, range]);
 
   const instances = details?.instances ?? [];
 
@@ -465,6 +483,79 @@ export function DocdbOverviewPanel({ clusterId }: { clusterId: string }) {
             ]}
             loading={seriesLoading}
             colors={chart}
+          />
+        </div>
+      </div>
+
+      {/* ─ Memory + Storage + Latency + Disk Queue ─ */}
+      <div>
+        <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
+          스토리지 / 메모리 / 레이턴시
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <MiniChart
+            title="Freeable Memory"
+            series={[
+              {
+                name: "freeable_memory",
+                color: "#34d399",
+                points: (series.freeable_memory ?? []).map((p) => ({
+                  ...p,
+                  value: Number(p.value) / 1073741824,
+                })),
+              },
+            ]}
+            loading={seriesLoading}
+            colors={chart}
+            unit="GB"
+            type="area"
+          />
+          <MiniChart
+            title="Read / Write Latency"
+            series={[
+              {
+                name: "read",
+                color: "#60a5fa",
+                points: series.read_latency_ms ?? [],
+              },
+              {
+                name: "write",
+                color: "#f472b6",
+                points: series.write_latency_ms ?? [],
+              },
+            ]}
+            loading={seriesLoading}
+            colors={chart}
+            unit="ms"
+          />
+          <MiniChart
+            title="Disk Queue Depth"
+            series={[
+              {
+                name: "disk_queue_depth",
+                color: "#fbbf24",
+                points: series.disk_queue_depth ?? [],
+              },
+            ]}
+            loading={seriesLoading}
+            colors={chart}
+          />
+          <MiniChart
+            title="Storage"
+            series={[
+              {
+                name: "storage_bytes",
+                color: "#a78bfa",
+                points: (series.storage_bytes ?? []).map((p) => ({
+                  ...p,
+                  value: Number(p.value) / 1073741824,
+                })),
+              },
+            ]}
+            loading={seriesLoading}
+            colors={chart}
+            unit="GB"
+            type="area"
           />
         </div>
       </div>
