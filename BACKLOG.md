@@ -105,11 +105,27 @@ impression decides whether someone sticks with the product.
 - Default model: 모든 사용자는 admin (`dbops-viewer` 명시 가입 시에만 viewer로 강등)
 - `/clusters`, `/alerts` 페이지에서 mutation 버튼/폼이 viewer 사용자에겐 숨김
 - "read-only · viewer" 뱃지로 모드 표시
-  **Remaining (P2.4.2):**
-- API Gateway JWT authorizer 또는 per-Lambda 검증으로 서버 측 RBAC 강제
-  (현재는 DevTools에서 직접 API 호출 시 mutation 가능 — frontend gate만 있음)
+  **P2.4.2 server-side RBAC ✅ shipped** (2026-06-13):
+- API Gateway에 Cognito JWT authorizer가 default로 전 라우트 적용(public 3개 제외:
+  slack webhook ×2 + /health) — 인증은 게이트웨이가 Lambda 진입 전 강제.
+- 모든 mutating 핸들러가 `_is_admin(event)`로 `cognito:groups` 검증 후 viewer면 403:
+  clusters(POST/DELETE), approvals(POST 생성 + PUT 승인/거부 — human-in-the-loop의 핵심),
+  alerts(POST/PATCH/DELETE), backups(POST), saved_queries·runbooks·chat_sessions, explain.
+  `_is_admin` semantics: bearer 없음=NOT admin(fail-closed), `dbops-viewer`만 있으면 거부,
+  그 외(또는 group claim 없음)=admin(one-admin 배포 기본). frontend isAdmin()과 일치.
+- mutation 없는 핸들러(reports/models)·read-only 계산(simulation POST)·per-user ownership
+  (memory DELETE, sub-scoped)은 admin gate 비대상.
+- viewer→403 강제 보증 유닛 테스트(approvals 승인·생성, saved_queries 삭제).
+  DevTools 직접 호출도 서버에서 차단 — frontend gate만 있던 갭 해소.
 
-### P2.5 Bulk cluster discovery + register
+### P2.5 Bulk cluster discovery + register ✅ shipped
+
+`POST /api/clusters/discover` (assume-role → enumerate) + `/bulk-register`; the
+`/clusters` page has the Discover panel (discoverForm/discoverOpen, checkbox table,
+bulk register). Multi-engine: Aurora (DescribeDBClusters), DocumentDB (docdb client),
+DynamoDB (ListTables → `ddb-*` slug). Discovery + registration compute the same
+cluster_id (account+region+name) so re-discovery flags already-registered rows.
+Tests: `test_clusters_multiengine.py`.
 
 **Why:** Manually entering cluster_id / account_id / region / spoke role per
 cluster is fine for 1-2 clusters; a fleet of 50+ makes onboarding painful.
