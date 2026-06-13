@@ -5,6 +5,7 @@
 rds:EnableHttpEndpoint를 직접 호출하고 행을 consumed로 마감한다.
 """
 
+import base64
 import importlib.util
 import json
 from pathlib import Path
@@ -16,12 +17,21 @@ handler = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(handler)
 
 
-def _event(method, path="/api/approvals", body=None, approval_id=None):
+def _jwt(admin=True) -> str:
+    """A decodable Cognito-style JWT (hdr.payload.sig) the handler's
+    _decode_jwt_payload reads. P2.4.2: creating/approving requires admin."""
+    payload = {"cognito:groups": ["dbops-admin"] if admin else ["dbops-viewer"]}
+    b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+    return f"hdr.{b64}.sig"
+
+
+def _event(method, path="/api/approvals", body=None, approval_id=None, admin=True):
     return {
         "requestContext": {"http": {"method": method}},
         "rawPath": path,
         "pathParameters": {"id": approval_id} if approval_id else {},
         "queryStringParameters": {},
+        "headers": {"authorization": f"Bearer {_jwt(admin)}"},
         "body": json.dumps(body or {}),
     }
 
@@ -203,4 +213,47 @@ def test_post_rejects_non_enable_data_api_write_action():
         )
     assert resp["statusCode"] == 400
     assert json.loads(resp["body"])["error"] == "unsupported_action_type"
+    approvals_table.put_item.assert_not_called()
+
+
+# --- P2.4.2 server-side RBAC: viewers cannot approve or create (the security gate) ---
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals", "CLUSTERS_TABLE": "clusters"})
+def test_put_approve_rejected_for_viewer():
+    """A viewer-role token must NOT be able to approve an operation — the DBA
+    approval gate is the heart of the human-in-the-loop model. Server-side 403
+    even though the frontend also hides the button."""
+    rds = MagicMock()
+    mock_boto3, approvals_table, _ = _boto3_with(
+        [dict(_ROW)], registry_item={"cluster_arn": "arn:x"}, rds_client=rds
+    )
+    with patch.object(handler, "boto3", mock_boto3):
+        resp = handler.lambda_handler(
+            _event("PUT", approval_id="aid-eda-1", body={"action": "approve"}, admin=False),
+            None,
+        )
+    assert resp["statusCode"] == 403
+    rds.enable_http_endpoint.assert_not_called()
+    approvals_table.update_item.assert_not_called()
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals", "CLUSTERS_TABLE": "clusters"})
+def test_post_create_rejected_for_viewer():
+    """A viewer cannot register an approval request either (server-side 403)."""
+    mock_boto3, approvals_table, _ = _boto3_with([])
+    with patch.object(handler, "boto3", mock_boto3):
+        resp = handler.lambda_handler(
+            _event(
+                "POST",
+                body={
+                    "cluster_id": "pgtsd-demo-aurora-pg",
+                    "action_type": "enable_data_api",
+                    "action_details": {},
+                },
+                admin=False,
+            ),
+            None,
+        )
+    assert resp["statusCode"] == 403
     approvals_table.put_item.assert_not_called()

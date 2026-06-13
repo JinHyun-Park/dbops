@@ -23,7 +23,9 @@ def _jwt(user="alice", admin=False) -> str:
     return f"hdr.{b64}.sig"
 
 
-def _event(method, body=None, path_params=None, qs=None, user="alice", admin=False):
+def _event(method, body=None, path_params=None, qs=None, user="alice", admin=True):
+    # P2.4.2: mutating routes are admin-gated, so the default caller is an admin.
+    # Viewer-denial cases pass admin=False explicitly (see the DELETE viewer test).
     e = {
         "httpMethod": method,
         "requestContext": {"http": {"method": method}},
