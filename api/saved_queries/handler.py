@@ -259,6 +259,9 @@ def _get_one(id_str: str) -> dict:
 
 
 def _create(event: dict) -> dict:
+    # P2.4.2 server-side RBAC: saving queries is an admin action.
+    if not _is_admin(event):
+        return _resp(403, {"error": "admin only"})
     try:
         body = json.loads(event.get("body") or "{}")
     except json.JSONDecodeError:

@@ -22,6 +22,37 @@ _CORS = {
 }
 
 
+def _decode_jwt_payload(token: str) -> dict:
+    """Base64-decode a JWT payload — API Gateway has already verified the
+    signature before this Lambda is invoked."""
+    try:
+        import base64
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+        import json as _json
+        return _json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return {}
+
+
+def _is_admin(event: dict) -> bool:
+    """True if the caller's token does not place them in dbops-viewer.
+    No token at all = NOT admin (fail-closed)."""
+    hdrs = event.get("headers") or {}
+    auth = hdrs.get("authorization") or hdrs.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        return False
+    claims = _decode_jwt_payload(auth.split(" ", 1)[1])
+    groups = claims.get("cognito:groups") or []
+    if not isinstance(groups, list):
+        return False
+    if "dbops-viewer" in groups and "dbops-admin" not in groups:
+        return False
+    return True
+
+
 def _resp(status: int, body: dict) -> dict:
     return {"statusCode": status, "headers": _CORS, "body": json.dumps(body, default=str)}
 
@@ -104,6 +135,11 @@ def lambda_handler(event, context):
         return _resp(413, {"error": f"sql too long (>{_MAX_SQL_LEN} chars)"})
     if not _is_select(sql):
         return _resp(400, {"error": "only SELECT (or WITH ... SELECT) is allowed in EXPLAIN"})
+
+    # P2.4.2 server-side RBAC: EXPLAIN ANALYZE touches the live cluster
+    # engine directly. Gate to admins, consistent with other live-cluster ops.
+    if not _is_admin(event):
+        return _resp(403, {"error": "forbidden", "reason": "admin role required"})
 
     cluster = _lookup_cluster(cluster_id)
     if not cluster:

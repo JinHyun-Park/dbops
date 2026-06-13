@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import uuid
@@ -5,6 +6,53 @@ from datetime import datetime, timezone
 
 import boto3
 from botocore.exceptions import ClientError
+
+
+def _decode_jwt_payload(token: str) -> dict:
+    """Base64-decode a JWT payload — no signature check needed here
+    because API Gateway's Cognito JWT authorizer already verified the
+    token before the Lambda was invoked."""
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return {}
+
+
+def _is_admin(event: dict) -> bool:
+    """True if the caller's token does not place them in dbops-viewer.
+    Matches the frontend isAdmin() semantics: no group claim = default admin.
+    No token at all = NOT admin (fail-closed)."""
+    hdrs = event.get("headers") or {}
+    auth = hdrs.get("authorization") or hdrs.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        return False
+    claims = _decode_jwt_payload(auth.split(" ", 1)[1])
+    groups = claims.get("cognito:groups") or []
+    if not isinstance(groups, list):
+        return False
+    if "dbops-viewer" in groups and "dbops-admin" not in groups:
+        return False
+    return True
+
+
+def _caller_name(event: dict) -> str:
+    """Return the caller's display name from the token claims, for audit
+    stamping. Falls back to 'unknown' when the claim is absent."""
+    hdrs = event.get("headers") or {}
+    auth = hdrs.get("authorization") or hdrs.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        return "unknown"
+    claims = _decode_jwt_payload(auth.split(" ", 1)[1])
+    return (
+        claims.get("preferred_username")
+        or claims.get("cognito:username")
+        or claims.get("email")
+        or "unknown"
+    )
 
 
 def _created_ms(item: dict) -> float:
@@ -199,6 +247,19 @@ def lambda_handler(event, context):
         }
 
     if method == "POST":
+        # P2.4.2 server-side RBAC: only admins may create approval requests
+        # via the UI path. Agent-originated rows come through the MCP
+        # request_approval tool (different code path) which also requires
+        # an authenticated runtime session, so this gate doesn't affect it.
+        if not _is_admin(event):
+            return {
+                "statusCode": 403,
+                "headers": headers,
+                "body": json.dumps({
+                    "error": "forbidden",
+                    "reason": "admin role required to create approval requests",
+                }),
+            }
         body = json.loads(event.get("body", "{}"))
         now = datetime.utcnow().isoformat()
         action_type = body.get("action_type", "")
@@ -261,6 +322,17 @@ def lambda_handler(event, context):
         return {"statusCode": 201, "headers": headers, "body": json.dumps(item, default=str)}
 
     if method == "PUT" and approval_id:
+        # P2.4.2 server-side RBAC: only admins may approve or reject operations.
+        # Viewers can READ the approval queue but cannot act on it.
+        if not _is_admin(event):
+            return {
+                "statusCode": 403,
+                "headers": headers,
+                "body": json.dumps({
+                    "error": "forbidden",
+                    "reason": "admin role required to approve or reject operations",
+                }),
+            }
         body = json.loads(event.get("body", "{}"))
         action = body.get("action")
         if action not in ("approve", "reject"):
@@ -287,7 +359,7 @@ def lambda_handler(event, context):
                 ExpressionAttributeValues={
                     ":s": "approved" if action == "approve" else "rejected",
                     ":t": datetime.utcnow().isoformat() + "Z",
-                    ":by": body.get("approved_by", "dba"),
+                    ":by": _caller_name(event),  # stamped from verified token, not caller-supplied body
                     ":pending": "pending",
                 },
             )

@@ -321,6 +321,9 @@ def lambda_handler(event, context):
         if method == "GET":
             return _resp(200, _list_runbooks(qs))
         if method == "POST":
+            # P2.4.2 server-side RBAC: creating runbooks is an admin action.
+            if not _is_admin(event):
+                return _resp(403, {"error": "admin role required"})
             try:
                 body = json.loads(event.get("body") or "{}")
             except json.JSONDecodeError:
