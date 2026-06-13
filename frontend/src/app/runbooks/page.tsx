@@ -418,6 +418,43 @@ function ManualForm({
 // Detail modal
 // ---------------------------------------------------------------------------
 
+// Export a runbook as a portable Markdown file (YAML front-matter + body) so it
+// can be moved into git / a wiki / an incident ticket. Browser Blob download —
+// no new dependency. For PDF, the browser's own "Print → Save as PDF" on the
+// rendered modal is the path; we don't ship a fragile print-CSS hack.
+function exportRunbookMarkdown(rb: RunbookDetail) {
+  const fm = [
+    "---",
+    `title: ${JSON.stringify(rb.title)}`,
+    rb.cluster_id ? `cluster: ${rb.cluster_id}` : null,
+    `created: ${rb.created_at}`,
+    rb.created_by ? `author: ${rb.created_by}` : null,
+    rb.tags.length ? `tags: [${rb.tags.join(", ")}]` : null,
+    rb.source ? `source: ${rb.source}` : null,
+    "---",
+    "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const blob = new Blob([fm + (rb.body_md || "")], {
+    type: "text/markdown;charset=utf-8",
+  });
+  const slug =
+    (rb.title || "runbook")
+      .toLowerCase()
+      .replace(/[^a-z0-9가-힣]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "runbook";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${slug}.md`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function RunbookModal({
   runbook,
   onClose,
@@ -500,7 +537,16 @@ function RunbookModal({
         </div>
         <div className="px-5 py-3 border-t border-zinc-800 flex items-center justify-between gap-3">
           {err && <div className="text-xs text-rose-300">{err}</div>}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => exportRunbookMarkdown(runbook)}
+              className="text-xs text-zinc-300 hover:text-zinc-100 transition-colors"
+              title="YAML front-matter + 본문을 .md 파일로 내보냅니다"
+            >
+              ⬇ Markdown 내보내기
+            </button>
+            <span className="text-zinc-700">·</span>
             {confirmDelete ? (
               <>
                 <button
