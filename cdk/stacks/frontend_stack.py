@@ -81,25 +81,62 @@ function handler(event) {
         # We avoid wiring this automatically because it would create a cyclic
         # frontend->foundation->frontend dependency at synth time.
 
-        # Single BucketDeployment: ship the static SPA + runtime config.json in one shot.
-        # Doing them as two deployments lets the first one prune the second's artifact.
-        s3_deploy.BucketDeployment(
-            self, "DeployFrontend",
-            sources=[
-                s3_deploy.Source.asset("../frontend/out"),
-                s3_deploy.Source.json_data("config.json", {
-                    "apiUrl": agent.api.api_endpoint,
-                    "frontendUrl": f"https://{distribution.distribution_domain_name}",
-                    "region": Settings.REGION,
-                    "cognitoDomain": f"https://{Settings.COGNITO_DOMAIN_PREFIX}.auth.{Settings.REGION}.amazoncognito.com",
-                    "cognitoClientId": foundation.user_pool_client.user_pool_client_id,
-                "cognitoUserPoolId": foundation.user_pool.user_pool_id,
-                    "agentRuntimeArn": agent.runtime.agent_runtime_arn,
-                }),
-            ],
+        # Cache strategy (fixes the "page couldn't load" after a redeploy): a
+        # `output: export` SPA is code-split into content-hashed chunks under
+        # /_next/static. With NO Cache-Control, the browser heuristically caches
+        # the HTML + runtime, so after a redeploy an already-open tab navigates
+        # with a STALE chunk manifest and 404s on the new hashed chunks — even
+        # though CloudFront's edge was invalidated (that only clears the edge,
+        # not the browser's local cache). Fix by splitting the deployment by
+        # cache policy so HTML always revalidates and hashed assets are immutable.
+        runtime_config = {
+            "apiUrl": agent.api.api_endpoint,
+            "frontendUrl": f"https://{distribution.distribution_domain_name}",
+            "region": Settings.REGION,
+            "cognitoDomain": f"https://{Settings.COGNITO_DOMAIN_PREFIX}.auth.{Settings.REGION}.amazoncognito.com",
+            "cognitoClientId": foundation.user_pool_client.user_pool_client_id,
+            "cognitoUserPoolId": foundation.user_pool.user_pool_id,
+            "agentRuntimeArn": agent.runtime.agent_runtime_arn,
+        }
+        _deploy_common = dict(
             destination_bucket=bucket,
             distribution=distribution,
             distribution_paths=["/*"],
+            # prune=False so the three deployments don't delete each other's
+            # objects. HTML keeps fixed names (overwritten in place, never
+            # stale); hashed chunks accumulate but are immutable + unreferenced
+            # once a build rotates, so old ones are harmless.
+            prune=False,
+        )
+        # 1) Content-hashed immutable assets (the whole /_next tree) — cache
+        #    forever, never revalidate. Sourced from out/_next and re-prefixed to
+        #    /_next so we can scope this deployment to just the hashed assets
+        #    (Source.asset has no `include`, only `exclude`).
+        s3_deploy.BucketDeployment(
+            self, "DeployStaticAssets",
+            sources=[s3_deploy.Source.asset("../frontend/out/_next")],
+            destination_key_prefix="_next",
+            cache_control=[s3_deploy.CacheControl.from_string(
+                "public, max-age=31536000, immutable",
+            )],
+            **_deploy_common,
+        )
+        # 2) Everything else (HTML, etc., minus /_next) — always revalidate so a
+        #    redeploy is picked up on the next request (ETag → 304 or fresh HTML).
+        s3_deploy.BucketDeployment(
+            self, "DeployHtml",
+            sources=[s3_deploy.Source.asset(
+                "../frontend/out", exclude=["_next/**"],
+            )],
+            cache_control=[s3_deploy.CacheControl.from_string("no-cache")],
+            **_deploy_common,
+        )
+        # 3) Runtime config — never cached (login/runtime ARNs must be fresh).
+        s3_deploy.BucketDeployment(
+            self, "DeployConfig",
+            sources=[s3_deploy.Source.json_data("config.json", runtime_config)],
+            cache_control=[s3_deploy.CacheControl.from_string("no-store")],
+            **_deploy_common,
         )
 
         # Auto-register the CloudFront callback URL with the Cognito user pool client
