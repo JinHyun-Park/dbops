@@ -378,6 +378,14 @@ class AgentStack(cdk.Stack):
             # CPU-bound part of the 0.34–0.63s Duration. Cost is memory×duration,
             # offset by the shorter duration; safe, reversible.
             memory_size=512,
+            # Retain published versions so the "live" alias has prior versions
+            # to roll back to (a deploy publishes a new version + shifts the
+            # alias; keeping the old ones is a free rollback target). See the
+            # DashboardLiveAlias below — the API integrations point at the alias
+            # for zero-downtime deploys.
+            current_version_options=lambda_.VersionOptions(
+                removal_policy=cdk.RemovalPolicy.RETAIN,
+            ),
             environment={
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
@@ -782,30 +790,46 @@ class AgentStack(cdk.Stack):
             resources=["*"],
         ))
 
+        # Zero-downtime deploys under load: point the API integrations at a
+        # Lambda ALIAS ("live") that tracks the published current_version,
+        # rather than $LATEST. A low-traffic deploy doesn't drop requests, but
+        # under a burst of concurrent dashboard loads (many users) during a code
+        # swap, $LATEST invocations can transiently fail (observed ~30 API-GW
+        # 503s under a 15-way concurrent probe mid-deploy; a clean low-traffic
+        # deploy showed 0). With an alias, CDK publishes the new version and
+        # shifts the alias only once it is ready — no in-flight gap. This is
+        # also the prerequisite for SnapStart, which only optimizes published
+        # versions.
+        dashboard_alias = lambda_.Alias(
+            self, "DashboardLiveAlias",
+            alias_name="live",
+            version=dashboard_lambda.current_version,
+        )
+
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/timeseries",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardTimeseriesIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardTimeseriesIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/wait-events",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardWaitEventsIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardWaitEventsIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/slow-queries",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardSlowQueriesIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardSlowQueriesIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/query-detail",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardQueryDetailIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardQueryDetailIntegration", dashboard_alias),
         )
         # Workload diff — pg_stat_statements snapshot delta between two
         # points in time (new / regressed / improved / disappeared
@@ -814,32 +838,32 @@ class AgentStack(cdk.Stack):
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/workload-diff",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardWorkloadDiffIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardWorkloadDiffIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/vacuum-stats",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardVacuumStatsIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardVacuumStatsIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/index-recommendations",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardIndexRecsIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardIndexRecsIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/long-running",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardLongRunningIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardLongRunningIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/batch-timeseries",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardBatchTsIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardBatchTsIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/blocking-locks",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardBlockingLocksIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardBlockingLocksIntegration", dashboard_alias),
         )
         # PG log analytics (CW Logs Insights pass-through). Distinct route
         # from /dashboard/{id} catch-all so API Gateway resolves to the same
@@ -847,35 +871,35 @@ class AgentStack(cdk.Stack):
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/log-insights",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardLogInsightsIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardLogInsightsIntegration", dashboard_alias),
         )
         # Capacity forecast (linear regression on metric_snapshots → 30/60/90d
         # projections + days_until_limit).
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/capacity-forecast",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardCapacityForecastIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardCapacityForecastIntegration", dashboard_alias),
         )
         # Redundant / prefix-covered / unused indexes (live pg_index query
         # via Data API). PG-only for v1.
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/redundant-indexes",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardRedundantIndexesIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardRedundantIndexesIntegration", dashboard_alias),
         )
         # Replication topology (writer + readers + per-instance replica lag,
         # live RDS Describe + CloudWatch).
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/topology",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardTopologyIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardTopologyIntegration", dashboard_alias),
         )
         # Backup inventory — snapshots + PITR window (read-only tier of
         # the backup workflow). Live RDS Describe calls.
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/backups",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardBackupsIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardBackupsIntegration", dashboard_alias),
         )
         # Engine-level config (read-only) — DocumentDB cluster settings +
         # DynamoDB table settings the overview panels don't already show.
@@ -883,7 +907,7 @@ class AgentStack(cdk.Stack):
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/engine-config",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardEngineConfigIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardEngineConfigIntegration", dashboard_alias),
         )
         # Manual snapshot creation (phase 2 write tier) — admin-gated,
         # routed to the dedicated backups Lambda (not the read-only
@@ -905,13 +929,13 @@ class AgentStack(cdk.Stack):
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/slo",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardSloIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardSloIntegration", dashboard_alias),
         )
         # Schema lineage / FK graph — live pg_constraint introspection.
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/schema-graph",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardSchemaGraphIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardSchemaGraphIntegration", dashboard_alias),
         )
         # Resource details — engine-specific metadata (DynamoDB table info,
         # DocDB instance list) from cluster_meta.resource_details JSONB.
@@ -919,7 +943,7 @@ class AgentStack(cdk.Stack):
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/resource-details",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardResourceDetailsIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardResourceDetailsIntegration", dashboard_alias),
         )
         # Simulation API — REST mirror of Simulation MCP tools. All write-
         # like operations are simulations, never DDL execution, so POST is
@@ -943,29 +967,29 @@ class AgentStack(cdk.Stack):
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/settings",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardSettingsIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardSettingsIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/schema-changes",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardSchemaChangesIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardSchemaChangesIntegration", dashboard_alias),
         )
         # Unified incident timeline — merges event_log + schema_changes +
         # audit_log into one chronological feed for incident triage.
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/timeline",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardTimelineIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardTimelineIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/anomalies",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardAnomaliesIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardAnomaliesIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/audit-log",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardAuditLogIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardAuditLogIntegration", dashboard_alias),
         )
         # 변경 영향 회고 — RDS 변경 이벤트 전후 워크로드 델타. dashboard
         # 라우트는 path별 개별 등록이라(greedy proxy 아님) 새 sub-path는
@@ -973,32 +997,32 @@ class AgentStack(cdk.Stack):
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/change-impact",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardChangeImpactIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardChangeImpactIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/multi-cluster/overview",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("MultiClusterOverviewIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("MultiClusterOverviewIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/table-sizes",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardTableSizesIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardTableSizesIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/table-indexes",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardTableIndexesIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardTableIndexesIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/health-findings",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardHealthFindingsIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardHealthFindingsIntegration", dashboard_alias),
         )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/extensions",
             methods=[apigwv2.HttpMethod.GET],
-            integration=integrations.HttpLambdaIntegration("DashboardExtensionsIntegration", dashboard_lambda),
+            integration=integrations.HttpLambdaIntegration("DashboardExtensionsIntegration", dashboard_alias),
         )
         # ===== Application Inference Profiles (cost-allocation tagging) =====
         # One AIP per supported Claude generation, all tagged with Application=DBOps
