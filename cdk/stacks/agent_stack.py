@@ -386,6 +386,16 @@ class AgentStack(cdk.Stack):
             current_version_options=lambda_.VersionOptions(
                 removal_policy=cdk.RemovalPolicy.RETAIN,
             ),
+            # SnapStart cuts cold-init by restoring from a snapshot of the
+            # initialized container instead of cold-booting Python+boto3 — the
+            # win shows up on scale-out (many users → many fresh containers) and
+            # first-load-after-idle. Free for Python (only a small snapshot
+            # cache cost). Safe here: the handler creates no boto3 clients /
+            # connections / init-time uniqueness at module load, and _LIVE_CACHE
+            # is snapshotted EMPTY (the correct starting state). Optimizes the
+            # PUBLISHED versions the "live" alias points at (so the integrations
+            # must target the alias, which they now do).
+            snap_start=lambda_.SnapStartConf.ON_PUBLISHED_VERSIONS,
             environment={
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
