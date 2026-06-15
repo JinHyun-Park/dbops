@@ -30,7 +30,7 @@ impression decides whether someone sticks with the product.
 - Call `ConfirmForgotPassword` with code + new password.
 - Cognito User Pool already has email verification configured.
 
-### P1.3 Onboarding tour
+### P1.3 Onboarding tour ✅ (shipped — `onboarding-modal.tsx`, 4-step, first-login localStorage gate, verified rendering 2026-06-16)
 
 **Why:** A first-time visitor lands on an empty dashboard and bounces.
 **What:**
@@ -42,7 +42,7 @@ impression decides whether someone sticks with the product.
 - Skippable via "Already familiar" link.
 - Use `<EmptyState>` primitive on every page when `clusters.length === 0`.
 
-### P1.4 Sample data / demo mode
+### P1.4 Sample data / demo mode ✅ (shipped — `generateSampleCluster` + seeder + DEMO badge + one-click delete on `/clusters`)
 
 **Why:** People want to evaluate the product before connecting their cluster.
 **What:**
@@ -184,10 +184,17 @@ cluster is fine for 1-2 clusters; a fleet of 50+ makes onboarding painful.
 - 임계 (avg<30% AND p95<60% AND not burstable/serverless) 시 `cost_oversized`
   finding을 기존 `cluster_health_findings`에 INSERT
 - MaintenanceHealthPanel에 **Cost** 탭 추가
-  **Remaining (P3.3.2):**
-- Aurora Serverless v2 min/max ACU 권장 (DescribeDBClusters + ScalingConfiguration)
-- Reserved Instance / Savings Plan 매칭 (Cost Explorer 통합)
-- Storage rightsizing
+  **P3.3.2 ✅ shipped** (verified 2026-06-16 — implemented, wired, IAM'd, schema present):
+- ✅ Aurora Serverless v2 min/max ACU 권장 — `cost_check.py::_check_serverless_v2_acu`
+  emits `cost_serverless_max_too_high` (p95 CPU < 40% → max ACU overprovisioned) +
+  `cost_serverless_min_too_low` (min < max×0.5 AND p95 > 70% → cold-start risk).
+  `meta_collector.py` collects `serverlessv2_min_acu`/`max_acu` from ScalingConfiguration.
+- ✅ Reserved Instance / Savings Plan 매칭 — `_check_savings_plan_opportunity` calls Cost
+  Explorer `get_savings_plans_purchase_recommendation` (IAM `ce:GetSavingsPlansPurchaseRecommendation`
+  - `GetReservationPurchaseRecommendation` in data_stack.py), cached daily in
+    `cost_recommendations_cache` (schema_v9), emits `cost_savings_plan_opportunity` (>$10/mo).
+- Storage rightsizing — intentional no-op for Aurora (auto-scaled storage, per-GB billing).
+  `_check_storage_rightsize` scaffolded for RDS-non-Aurora / DocDB / DynamoDB (see "Still future").
 
 ### P3.4 Lock dependency graph ✅
 
