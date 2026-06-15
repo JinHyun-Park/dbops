@@ -252,6 +252,140 @@ class AgentStack(cdk.Stack):
             if self.gateway.role.node.try_find_child("DefaultPolicy"):
                 target.add_dependency(self.gateway.role.node.find_child("DefaultPolicy").node.default_child)
 
+        # ===== Cedar Authorization Policies (Gateway-level) =====
+        # The Gateway evaluates these Cedar policies on every tool call: reads
+        # auto-allowed, writes need approved==true, DROP/TRUNCATE forbidden
+        # without force. They used to be applied MANUALLY via
+        # `agentcore policy create` — so on a fresh `cdk deploy` they were never
+        # applied and Cedar was DARK (the tool-level approval_guard was the only
+        # active control). Wire them into the deploy: one PolicyEngine + one
+        # Policy per .cedar file, bound to the Gateway.
+        #
+        # ROLLOUT MODE = LOG_ONLY: Cedar evaluates and logs every decision to
+        # CloudWatch but never DENIES. This lets these never-live-validated
+        # policies be observed against real traffic without a default-DENY that
+        # would break legitimate reads if the policy schema doesn't match what
+        # AgentCore actually passes. Flip to "ENFORCE" only after the decision
+        # logs confirm reads permitted + unapproved writes denied. Writes stay
+        # protected meanwhile by the tool-level approval_guard.
+        import pathlib
+        import re as _re
+
+        cedar_mode = "LOG_ONLY"
+        cedar_dir = pathlib.Path(__file__).resolve().parent.parent / "policies" / "cedar"
+
+        self.policy_engine = agentcore_cfn.CfnPolicyEngine(
+            self, "PolicyEngine",
+            name=f"dbops_{Settings.ENV}_policy_engine",
+            description="Cedar authorization for the DBOps MCP gateway",
+        )
+
+        for _key, _fname in (
+            ("performance", "performance_policy.cedar"),
+            ("incident", "incident_policy.cedar"),
+            ("simulation", "simulation_policy.cedar"),
+            ("operations", "operations_policy.cedar"),
+        ):
+            # AgentCore CreatePolicy accepts exactly ONE Cedar statement per
+            # policy — a multi-statement file fails with "unexpected token
+            # forbid". Strip // comments FIRST (they can contain ';', e.g.
+            # "(no DB change);", which would otherwise corrupt the split), then
+            # split the file into individual statements and create one Policy
+            # per statement. The .cedar source files stay multi-statement for
+            # readability; the split happens only at synth.
+            _raw = (cedar_dir / _fname).read_text()
+            _statements = [
+                s.strip()
+                for s in _re.sub(r"//[^\n]*", "", _raw).split(";")
+                if s.strip()
+            ]
+            for _i, _stmt in enumerate(_statements):
+                # Action identifiers are scoped to the gateway TARGET (the MCP
+                # server). The .cedar source uses a __TARGET__ placeholder;
+                # substitute the env-specific target name (matches the
+                # CfnGatewayTarget name `dbops-{ENV}-{server}-target` above).
+                _stmt = _stmt.replace(
+                    "__TARGET__", f"dbops-{Settings.ENV}-{_key}-target"
+                )
+                # AgentCore requires tool-specific (constrained-action) policies
+                # to bind the resource to a SPECIFIC gateway, not just the type
+                # ("a constrained action scope was encountered, please constrain
+                # the resource to a specific AgentCore::Gateway resource"). The
+                # .cedar source uses the readable type form
+                # `resource is AgentCore::Gateway`; rewrite it to the concrete
+                # gateway entity here (its ARN is only known at deploy).
+                _stmt = _stmt.replace(
+                    "resource is AgentCore::Gateway",
+                    f'resource == AgentCore::Gateway::"{self.gateway.gateway_arn}"',
+                )
+                agentcore_cfn.CfnPolicy(
+                    self, f"CedarPolicy{_key.title()}{_i}",
+                    policy_engine_id=self.policy_engine.attr_policy_engine_id,
+                    # Name must match ^[A-Za-z][A-Za-z0-9_]*$ — underscores only,
+                    # NO hyphens (CFN property validation rejects hyphens).
+                    name=f"dbops_{Settings.ENV}_{_key}_{_i}",
+                    definition=agentcore_cfn.CfnPolicy.PolicyDefinitionProperty(
+                        cedar=agentcore_cfn.CfnPolicy.CedarPolicyProperty(
+                            statement=_stmt + ";",
+                        ),
+                    ),
+                    # IGNORE_ALL_FINDINGS during the LOG_ONLY rollout: these
+                    # statements aren't yet validated against the live AgentCore
+                    # Cedar schema (action / context attribute names), so
+                    # FAIL_ON_ANY_FINDINGS could block creation — and we WANT
+                    # them CREATED so their decisions are observable in
+                    # CloudWatch. Tighten to FAIL_ON_ANY_FINDINGS when flipping
+                    # to ENFORCE (after the logs confirm they match).
+                    validation_mode="IGNORE_ALL_FINDINGS",
+                )
+
+        # Bind the engine to the Gateway. The installed CfnGateway L1 predates
+        # the PolicyEngineConfiguration property (the service added it 2026-03),
+        # so set it via the escape hatch — the service schema in this region
+        # accepts it (get-gateway returns a policyEngineConfiguration field).
+        cfn_gateway = self.gateway.node.default_child
+        cfn_gateway.add_property_override(
+            "PolicyEngineConfiguration",
+            {
+                "Arn": self.policy_engine.attr_policy_engine_arn,
+                "Mode": cedar_mode,
+            },
+        )
+        # The Gateway role must be able to evaluate Cedar against the engine.
+        # Verified empirically from the binding's own preflight checks:
+        #   - GetPolicyEngine   → on the policy-engine ARN (the engine lookup)
+        #   - AuthorizeAction / PartiallyAuthorizeActions → on the GATEWAY ARN
+        #     (the gateway's "GenesisPolicyEngineCheck" authorizes against the
+        #     gateway resource, not the engine).
+        # Grant all three on both ARNs to cover the binding + runtime eval.
+        self.gateway.role.add_to_principal_policy(iam.PolicyStatement(
+            actions=[
+                "bedrock-agentcore:GetPolicyEngine",
+                "bedrock-agentcore:AuthorizeAction",
+                "bedrock-agentcore:PartiallyAuthorizeActions",
+            ],
+            resources=[
+                self.policy_engine.attr_policy_engine_arn,
+                # Construct the gateway ARN from pseudo-params + a wildcard for
+                # the generated id suffix, rather than referencing
+                # self.gateway.gateway_arn. A token reference would make THIS
+                # policy depend on the Gateway, while the Gateway also depends on
+                # this policy (the binding-ordering dependency above) — a
+                # circular dependency. The wildcard matches the real gateway id
+                # (e.g. dbops-dev-gateway-jrndurhosm).
+                f"arn:aws:bedrock-agentcore:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}"
+                f":gateway/dbops-{Settings.ENV}-gateway-*",
+            ],
+        ))
+        # The Gateway's PolicyEngineConfiguration update calls GetPolicyEngine
+        # using the Gateway role, so it must run AFTER the role's policy (with
+        # that permission) is in place. CFN doesn't infer this ordering — make
+        # it explicit (same pattern as the gateway targets above), else the
+        # binding fails with "Access denied while calling GetPolicyEngine".
+        _gw_default_policy = self.gateway.role.node.try_find_child("DefaultPolicy")
+        if _gw_default_policy is not None:
+            cfn_gateway.add_dependency(_gw_default_policy.node.default_child)
+
         # ===== AgentCore Memory =====
 
         self.memory = agentcore.Memory(

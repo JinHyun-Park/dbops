@@ -1,20 +1,12 @@
-// Performance MCP Server: READ-ONLY
-// Only SELECT and EXPLAIN queries allowed via explain_query tool
-
+// Performance MCP target: READ-ONLY — permit all tools on the target.
+//
+// AgentCore's action form is target-as-action-group: `action in
+// AgentCore::Action::"<target>"` permits every tool registered under that
+// target. __TARGET__ (env-specific target name) and the gateway resource are
+// substituted at deploy time by agent_stack.py (the gateway ARN is only known
+// at deploy; constrained-action policies require a specific gateway resource).
 permit(
   principal,
-  action in [
-    Action::"get_top_queries",
-    Action::"get_pi_metrics",
-    Action::"get_slow_queries",
-    Action::"compare_periods",
-    Action::"detect_anomalies",
-    Action::"detect_regressions",
-    Action::"forecast_capacity",
-    Action::"get_performance_summary",
-    Action::"explain_plan",
-    Action::"get_vacuum_stats",
-    Action::"recommend_index"
-  ],
-  resource
+  action in AgentCore::Action::"__TARGET__",
+  resource is AgentCore::Gateway
 );

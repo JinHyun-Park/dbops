@@ -1,83 +1,48 @@
-// Operations MCP Server: MIXED (read auto / write approval required)
-
-// Read-only tools: always permitted
+// Operations MCP target: MIXED (reads auto / writes need approval).
+//
+// LOG_ONLY rollout: this coarse "permit all tools on the target" is deployed
+// FIRST so Cedar binds and every decision is observable in CloudWatch, without
+// risking a default-DENY that would break legitimate calls. It does not weaken
+// security today: the REAL write enforcement is in the tool code —
+// execute_sql.py classifies SQL (SELECT/EXPLAIN/SHOW/DESCRIBE auto-allowed;
+// other SQL needs approved=true; DROP/TRUNCATE/DELETE need force=true) plus the
+// server-side approval_guard (payload-hash + atomic single-use); the structured
+// write tools mirror the same approval model.
+//
+// STEP 2 — before flipping the gateway binding to ENFORCE, replace this coarse
+// permit with per-tool rules. Cedar's action form is "<target>___<tool>" (three
+// underscores), and forbid wins over permit. For example (substitute __TARGET__
+// and verify each context.input.<param> is a REAL declared tool parameter via
+// `aws bedrock-agentcore-control list-gateway-targets` — CreatePolicy validates
+// context attrs against the auto-generated schema):
+//
+//   permit(principal,
+//     action in [
+//       AgentCore::Action::"__TARGET_____modify_parameter",
+//       AgentCore::Action::"__TARGET_____modify_scaling",
+//       AgentCore::Action::"__TARGET_____manage_maintenance",
+//       AgentCore::Action::"__TARGET_____create_snapshot",
+//       AgentCore::Action::"__TARGET_____restore_cluster",
+//       AgentCore::Action::"__TARGET_____modify_dynamodb_capacity",
+//       AgentCore::Action::"__TARGET_____modify_dynamodb_ttl",
+//       AgentCore::Action::"__TARGET_____enable_dynamodb_pitr",
+//       AgentCore::Action::"__TARGET_____set_docdb_profiler",
+//       AgentCore::Action::"__TARGET_____create_docdb_index"
+//     ],
+//     resource is AgentCore::Gateway)
+//   when { context.input has approved && context.input.approved == true };
+//
+//   forbid(principal,
+//     action == AgentCore::Action::"__TARGET_____enable_dynamodb_pitr",
+//     resource is AgentCore::Gateway)
+//   when { context.input has enabled && context.input.enabled == false }
+//   unless { context.input has force && context.input.force == true };
+//
+// (execute_sql is intentionally NOT gated by Cedar — its SELECT/DROP/force
+//  decisions are SQL-content-dependent, which Cedar can't express; the tool
+//  code owns it.)
 permit(
   principal,
-  action in [
-    Action::"get_schema_diff",
-    Action::"get_schema_history",
-    Action::"review_sql",
-    Action::"audit_permissions",
-    // request_approval registers a DBA approval row (no DB change); the audit
-    // search and runbook fetch are read-only. Explore found these absent → the
-    // Gateway default-DENY was silently blocking them. Added to the read block.
-    Action::"request_approval",
-    Action::"query_activity_audit",
-    Action::"get_runbook"
-  ],
-  resource
+  action in AgentCore::Action::"__TARGET__",
+  resource is AgentCore::Gateway
 );
-
-// SELECT queries: auto-permitted
-permit(
-  principal,
-  action == Action::"execute_sql",
-  resource
-) when {
-  context.input.sql.toUpper().startsWith("SELECT") ||
-  context.input.sql.toUpper().startsWith("EXPLAIN") ||
-  context.input.sql.toUpper().startsWith("SHOW") ||
-  context.input.sql.toUpper().startsWith("DESCRIBE")
-};
-
-// Write tools: require approved flag
-permit(
-  principal,
-  action in [
-    Action::"execute_sql",
-    Action::"modify_parameter",
-    Action::"modify_scaling",
-    Action::"manage_maintenance",
-    // Explore found create_snapshot/restore_cluster absent from the write
-    // block → silent Gateway DENY despite the handler + guard being complete.
-    Action::"create_snapshot",
-    Action::"restore_cluster",
-    // NoSQL write/remediation (multi-engine #P3.6 Group C). All five are
-    // approval-gated exactly like modify_scaling. The two DocDB Mongo writes
-    // ship stage 2, but their Cedar actions are added now so the policy stays
-    // coherent with the approval enum + guard projections.
-    Action::"modify_dynamodb_capacity",
-    Action::"modify_dynamodb_ttl",
-    Action::"enable_dynamodb_pitr",
-    Action::"set_docdb_profiler",
-    Action::"create_docdb_index"
-  ],
-  resource
-) when {
-  context.input.approved == true
-};
-
-// Block dangerous SQL without force flag
-forbid(
-  principal,
-  action == Action::"execute_sql",
-  resource
-) when {
-  context.input.sql.toUpper().contains("DROP") ||
-  context.input.sql.toUpper().contains("TRUNCATE")
-} unless {
-  context.input.force == true
-};
-
-// DISABLING PITR is a data-protection degradation — forbid unless force==true.
-// The force flag is also hashed into the approval payload, so the DBA approves
-// the forceful (disable) variant specifically (review fix #7).
-forbid(
-  principal,
-  action == Action::"enable_dynamodb_pitr",
-  resource
-) when {
-  context.input.enabled == false
-} unless {
-  context.input.force == true
-};

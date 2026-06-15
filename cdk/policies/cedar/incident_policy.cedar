@@ -1,16 +1,11 @@
-// Incident MCP Server: READ-ONLY
-
+// Incident MCP target: READ-ONLY — permit all tools on the target.
+//
+// AgentCore action form is target-as-action-group: `action in
+// AgentCore::Action::"<target>"` permits every tool under that target.
+// __TARGET__ and the gateway resource are substituted at deploy by
+// agent_stack.py.
 permit(
   principal,
-  action in [
-    Action::"get_health_status",
-    Action::"get_recent_events",
-    Action::"search_logs",
-    Action::"correlate_signals",
-    Action::"get_incident_summary",
-    Action::"find_similar_incidents",
-    Action::"get_maintenance_findings",
-    Action::"diagnose_root_cause"
-  ],
-  resource
+  action in AgentCore::Action::"__TARGET__",
+  resource is AgentCore::Gateway
 );
