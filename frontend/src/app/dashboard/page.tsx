@@ -33,6 +33,7 @@ import {
   fetchClusters,
   fetchDashboard,
   fetchBatchTimeseries,
+  prefetchDashboard,
 } from "@/lib/api-client";
 import { useSmartPoll } from "@/lib/use-smart-poll";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
@@ -485,25 +486,71 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {selectedCluster && !dashboardData && !error && (
-        <div className="mt-6 text-zinc-500">
-          {selectedCluster} 메트릭 불러오는 중…
-        </div>
-      )}
-
-      {selectedCluster && dashboardData && (
+      {selectedCluster && clusters.length > 0 && (
         <div className="mt-6 space-y-6">
           {(() => {
-            const eng = dashboardData.cluster?.engine || "";
-            const ver = dashboardData.cluster?.engine_version || "";
-            const fam = engineFamily(eng);
-            const badge = engineBadge(eng);
-            const eol = eolFor(eng, ver);
+            // Prefer the richer /overview engine when it has arrived; fall back
+            // to the engine string already available from the clusters list so
+            // the panel layout renders immediately on click without waiting for
+            // the /overview fetch to complete.
+            const activeEngine =
+              dashboardData?.cluster?.engine ??
+              clusters.find((c) => c.cluster_id === selectedCluster)?.engine ??
+              "";
+            const ver = dashboardData?.cluster?.engine_version ?? "";
+            const fam = engineFamily(activeEngine);
+            const badge = engineBadge(activeEngine);
+            const eol = eolFor(activeEngine, ver);
             // "클러스터 정보" (instances / storage / Multi-AZ) and HealthScore
             // (CPU / AAS / Connections gauge) are Aurora-relational concepts.
             // For DynamoDB / DocumentDB the family panel below carries the
             // relevant overview — render nothing here to avoid misleading "-"s.
             if (fam !== "relational") return null;
+
+            // /overview has not yet landed — render a same-dimension skeleton
+            // so there is no layout shift when the data arrives.
+            if (!dashboardData) {
+              return (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3 gap-3">
+                      <div className="text-sm text-zinc-200 font-medium">
+                        클러스터 정보
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {/* Engine badge available immediately from clusters list */}
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 border text-[11px] font-mono uppercase tracking-wider ${badge.classes}`}
+                          title={`엔진: ${activeEngine || "unknown"}`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${badge.accent}`}
+                          />
+                          {badge.label}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {(
+                        ["상태", "인스턴스", "스토리지", "Multi-AZ"] as const
+                      ).map((label) => (
+                        <div key={label}>
+                          <div className="text-zinc-500 text-xs mb-1">
+                            {label}
+                          </div>
+                          <div className="h-4 w-20 rounded bg-zinc-700 animate-pulse" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <HealthScore
+                    clusterId={selectedCluster}
+                    engine={activeEngine}
+                  />
+                </div>
+              );
+            }
+
             return (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">
@@ -514,7 +561,7 @@ export default function DashboardPage() {
                     <div className="flex items-center gap-2">
                       <span
                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 border text-[11px] font-mono uppercase tracking-wider ${badge.classes}`}
-                        title={`엔진: ${eng || "unknown"}`}
+                        title={`엔진: ${activeEngine || "unknown"}`}
                       >
                         <span
                           className={`w-1.5 h-1.5 rounded-full ${badge.accent}`}
@@ -567,14 +614,22 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </div>
-                <HealthScore clusterId={selectedCluster} engine={eng} />
+                <HealthScore
+                  clusterId={selectedCluster}
+                  engine={activeEngine}
+                />
               </div>
             );
           })()}
 
-          {/* Engine-family panel gating — compute once from cluster metadata */}
+          {/* Engine-family panel gating — derive engine from whichever source
+              has landed first: /overview response or the clusters list. */}
           {(() => {
-            const fam = engineFamily(dashboardData.cluster?.engine);
+            const activeEngine =
+              dashboardData?.cluster?.engine ??
+              clusters.find((c) => c.cluster_id === selectedCluster)?.engine ??
+              "";
+            const fam = engineFamily(activeEngine);
             return (
               <>
                 {/* ── Relational (Aurora MySQL / PostgreSQL) panels ── */}
@@ -582,22 +637,20 @@ export default function DashboardPage() {
                   <>
                     {/* false일 때만 — NULL(미수집)·true는 숨김. 라이브 SQL 패널들이
                         영원히 "수집 대기"로 보이는 이유를 여기서 먼저 설명한다. */}
-                    {dashboardData.cluster?.http_endpoint_enabled === false &&
+                    {dashboardData?.cluster?.http_endpoint_enabled === false &&
                       selectedCluster && (
                         <DataApiBanner clusterId={selectedCluster} />
                       )}
 
                     <MaintenanceHealthPanel
                       clusterId={selectedCluster}
-                      engine={dashboardData.cluster?.engine}
+                      engine={activeEngine}
                     />
 
-                    {(dashboardData.cluster?.engine || "").includes(
-                      "postgresql",
-                    ) && (
+                    {activeEngine.includes("postgresql") && (
                       <ExtensionsCard
                         clusterId={selectedCluster}
-                        engine={dashboardData.cluster?.engine}
+                        engine={activeEngine}
                       />
                     )}
 
@@ -607,7 +660,7 @@ export default function DashboardPage() {
 
                     <CapacityForecastPanel
                       clusterId={selectedCluster}
-                      engine={dashboardData.cluster?.engine}
+                      engine={activeEngine}
                     />
 
                     <TimeseriesChart
@@ -671,7 +724,7 @@ export default function DashboardPage() {
                         externalPoints={tsBatch.db_connections || []}
                         externalLoading={tsLoading}
                       />
-                      {isPostgres(dashboardData.cluster?.engine) && (
+                      {isPostgres(activeEngine) && (
                         <>
                           <TimeseriesChart
                             clusterId={selectedCluster}
@@ -742,7 +795,7 @@ export default function DashboardPage() {
                       />
                       <AnomaliesPanel clusterId={selectedCluster} />
                       <EventsPanel
-                        events={dashboardData.events || []}
+                        events={dashboardData?.events || []}
                         clusterId={selectedCluster}
                       />
                     </div>
@@ -756,16 +809,14 @@ export default function DashboardPage() {
                         takes the full width. */}
                     <div
                       className={`grid grid-cols-1 ${
-                        (dashboardData.cluster?.engine || "").includes(
-                          "postgresql",
-                        )
+                        activeEngine.includes("postgresql")
                           ? "md:grid-cols-2"
                           : ""
                       } gap-4`}
                     >
-                      {(dashboardData.cluster?.engine || "").includes(
-                        "postgresql",
-                      ) && <VacuumPanel clusterId={selectedCluster} />}
+                      {activeEngine.includes("postgresql") && (
+                        <VacuumPanel clusterId={selectedCluster} />
+                      )}
                       <IndexRecsPanel clusterId={selectedCluster} />
 
                       <RedundantIndexesPanel clusterId={selectedCluster} />
@@ -777,12 +828,12 @@ export default function DashboardPage() {
 
                     <QueriesPanel
                       clusterId={selectedCluster}
-                      topQueries={dashboardData.top_queries || []}
+                      topQueries={dashboardData?.top_queries || []}
                     />
 
                     <SettingsPanel
                       clusterId={selectedCluster}
-                      engine={dashboardData.cluster?.engine}
+                      engine={activeEngine}
                     />
 
                     <ChangeImpactPanel clusterId={selectedCluster} />
@@ -798,11 +849,11 @@ export default function DashboardPage() {
                   <>
                     <HealthScore
                       clusterId={selectedCluster}
-                      engine={dashboardData.cluster?.engine}
+                      engine={activeEngine}
                     />
                     <MaintenanceHealthPanel
                       clusterId={selectedCluster}
-                      engine={dashboardData.cluster?.engine}
+                      engine={activeEngine}
                     />
                     <DynamodbOverviewPanel
                       clusterId={selectedCluster}
@@ -810,18 +861,18 @@ export default function DashboardPage() {
                     />
                     <EngineConfigPanel
                       clusterId={selectedCluster}
-                      engine={dashboardData.cluster?.engine}
+                      engine={activeEngine}
                     />
                     <CapacityForecastPanel
                       clusterId={selectedCluster}
-                      engine={dashboardData.cluster?.engine}
+                      engine={activeEngine}
                     />
                     <BackupPanel
                       clusterId={selectedCluster}
-                      engine={dashboardData.cluster?.engine}
+                      engine={activeEngine}
                     />
                     <EventsPanel
-                      events={dashboardData.events || []}
+                      events={dashboardData?.events || []}
                       clusterId={selectedCluster}
                     />
                   </>
@@ -832,11 +883,11 @@ export default function DashboardPage() {
                   <>
                     <HealthScore
                       clusterId={selectedCluster}
-                      engine={dashboardData.cluster?.engine}
+                      engine={activeEngine}
                     />
                     <MaintenanceHealthPanel
                       clusterId={selectedCluster}
-                      engine={dashboardData.cluster?.engine}
+                      engine={activeEngine}
                     />
                     <DocdbOverviewPanel
                       clusterId={selectedCluster}
@@ -844,19 +895,19 @@ export default function DashboardPage() {
                     />
                     <EngineConfigPanel
                       clusterId={selectedCluster}
-                      engine={dashboardData.cluster?.engine}
+                      engine={activeEngine}
                     />
                     <CapacityForecastPanel
                       clusterId={selectedCluster}
-                      engine={dashboardData.cluster?.engine}
+                      engine={activeEngine}
                     />
                     <ReplicationTopologyPanel clusterId={selectedCluster} />
                     <BackupPanel
                       clusterId={selectedCluster}
-                      engine={dashboardData.cluster?.engine}
+                      engine={activeEngine}
                     />
                     <EventsPanel
-                      events={dashboardData.events || []}
+                      events={dashboardData?.events || []}
                       clusterId={selectedCluster}
                     />
                   </>

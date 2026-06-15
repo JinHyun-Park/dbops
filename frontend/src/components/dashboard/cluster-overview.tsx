@@ -11,6 +11,7 @@ import {
 } from "@/lib/cluster-triage";
 import { useFleetOverview } from "@/lib/use-fleet-overview";
 import { groupByEngineGroup, displayName } from "@/lib/group-by-family";
+import { prefetchDashboard } from "@/lib/api-client";
 
 interface ClusterInfo {
   cluster_id: string;
@@ -177,6 +178,10 @@ export function ClusterOverview({
                         <button
                           key={c.cluster_id}
                           onClick={() => onSelect(c.cluster_id)}
+                          // Warm the /overview + batch-timeseries cache on hover
+                          // so the click→render is already in flight (often
+                          // cached) by the time the user commits to a cluster.
+                          onMouseEnter={() => prefetchDashboard(c.cluster_id)}
                           title={
                             d.reasons.length
                               ? `${c.cluster_id} — ${d.reasons.join(" · ")}`

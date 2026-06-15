@@ -1,7 +1,9 @@
 import json
 import os
 import re
+import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 from engine_family import CAPABILITIES, engine_family
@@ -682,29 +684,140 @@ def _response(status, body, max_age: int = 0):
     }
 
 
+# Warm-container TTL cache for the expensive cross-account live-describe reads
+# (topology / backups / engine-config). Each of those endpoints fires
+# sts:AssumeRole + multiple rds:Describe* + (for topology) N× cloudwatch:
+# GetMetricStatistics PER REQUEST against the cluster's own account. The
+# region-level RDS-describe and CloudWatch quotas (tens of req/s) throttle long
+# before the Data API does, so under many concurrent dashboard pollers these
+# are the first thing to fall over. HTTP Cache-Control only dedups within a
+# single browser; this dedups ACROSS users sharing a warm Lambda container.
+#
+# Lives in module memory → scoped to one warm container. Lambda scales out
+# horizontally, so the global ceiling is (concurrent containers × 1/ttl)
+# describe-bursts — still far below the per-request rate without it, and it
+# degrades gracefully (a cold container just does one live call). Kept at the
+# routing layer (not inside _topology/_backups/_engine_config) so those stay
+# pure + directly unit-testable.
+_LIVE_CACHE: dict[str, tuple[float, object, float]] = {}
+
+# Successful describe results are stable for the TTL; failures (error-shaped
+# dicts AND raised exceptions) are cached only briefly so a transient fault
+# doesn't pin a panel for a full minute, while still throttling a hard-failing
+# cluster down from every-poll to once per negative-TTL window.
+_LIVE_NEG_TTL = 5.0
+
+# Defensive ceiling on the cache size. The real key space is 3 endpoints ×
+# registered clusters (bounded by the DynamoDB registry, ~hundreds), so this is
+# never reached in normal operation — it only guards a warm container against an
+# unforeseen key explosion. On overflow we drop the whole cache (cheap; it
+# refills on the next polls) rather than maintain a per-entry LRU.
+_LIVE_CACHE_MAX = 1024
+
+
+class _CachedError:
+    """Wraps an exception raised by a live-describe producer so the FAILURE is
+    cached for the negative TTL and re-raised on subsequent hits — otherwise a
+    producer that throws (e.g. sts:AssumeRole / rds:Describe* throttle or
+    outage) would be retried live on every poll, the exact thundering-herd this
+    cache exists to prevent, and precisely when AWS is already rate-limiting."""
+
+    __slots__ = ("exc",)
+
+    def __init__(self, exc):
+        self.exc = exc
+
+
+def _store_live(key: str, val, ttl: float):
+    # Stamp the entry with the time AFTER producer() finished (not before it
+    # started) so a slow live call doesn't eat into the entry's effective TTL —
+    # matters most for the 5s negative TTL, where a multi-second failure could
+    # otherwise land already-expired.
+    if len(_LIVE_CACHE) >= _LIVE_CACHE_MAX and key not in _LIVE_CACHE:
+        _LIVE_CACHE.clear()
+    _LIVE_CACHE[key] = (time.monotonic(), val, ttl)
+
+
+def _cached_live(key: str, ttl: float, producer):
+    """Return producer()'s result, served from a warm-container TTL cache.
+
+    `producer` is invoked only on a miss (or after the entry's TTL lapses),
+    bounding the live-AWS call rate behind this key. Both failure modes — an
+    error-shaped dict (truthy "error") and a raised exception — are cached for
+    the shorter negative TTL so a transient fault is still throttled from
+    every-poll down to once per window, without pinning a panel for a full
+    minute."""
+    hit = _LIVE_CACHE.get(key)
+    if hit is not None and (time.monotonic() - hit[0]) < hit[2]:
+        cached = hit[1]
+        if isinstance(cached, _CachedError):
+            raise cached.exc
+        return cached
+
+    try:
+        val = producer()
+    except Exception as exc:
+        # Cache the failure (negative TTL) BEFORE re-raising so the next poll in
+        # this window is served from cache instead of re-hitting the live API.
+        # Re-raising preserves the existing 500 behaviour at the routing layer.
+        _store_live(key, _CachedError(exc), _LIVE_NEG_TTL)
+        raise
+
+    entry_ttl = _LIVE_NEG_TTL if (isinstance(val, dict) and val.get("error")) else ttl
+    _store_live(key, val, entry_ttl)
+    return val
+
+
 def _overview(query, cluster_id):
-    meta = query(
-        "SELECT * FROM cluster_meta WHERE cluster_id = :cid",
-        {"cid": cluster_id},
+    # The four reads below are independent (different tables, no shared
+    # state) and each is a separate RDS Data API round-trip (~100-300ms of
+    # HTTP RTT). Run sequentially this is the dominant click→render latency,
+    # since the whole dashboard body waits on /overview. Fan them out across
+    # a small thread pool so the wall-clock cost collapses from 4 serial RTTs
+    # to ~1 (the slowest single query). botocore low-level clients are
+    # thread-safe for operation calls, so the shared rds-data client behind
+    # `query` is safe to invoke concurrently. Throttle posture is unchanged:
+    # still 4 Data API calls, just not serialized (Data API's region quota,
+    # ~1000 req/s, is not the binding constraint here — the live-describe
+    # endpoints are; see _cached_live).
+    reads = (
+        (
+            "meta",
+            "SELECT * FROM cluster_meta WHERE cluster_id = :cid",
+            {"cid": cluster_id},
+        ),
+        (
+            "metrics",
+            "SELECT metric_type, AVG(value) as avg_val, MAX(value) as max_val "
+            "FROM metric_snapshots WHERE cluster_id = :cid AND ts > NOW() - INTERVAL '1 hour' "
+            "GROUP BY metric_type",
+            {"cid": cluster_id},
+        ),
+        (
+            "top_queries",
+            "SELECT query_hash, query_text, calls, total_time_ms, mean_time_ms "
+            "FROM query_stats WHERE cluster_id = :cid AND snapshot_time > NOW() - INTERVAL '1 hour' "
+            "ORDER BY total_time_ms DESC LIMIT 10",
+            {"cid": cluster_id},
+        ),
+        (
+            "events",
+            "SELECT id, event_time as ts, event_type, severity, source, message, raw_event "
+            "FROM event_log WHERE cluster_id = :cid "
+            "ORDER BY event_time DESC LIMIT 10",
+            {"cid": cluster_id},
+        ),
     )
-    recent_metrics = query(
-        "SELECT metric_type, AVG(value) as avg_val, MAX(value) as max_val "
-        "FROM metric_snapshots WHERE cluster_id = :cid AND ts > NOW() - INTERVAL '1 hour' "
-        "GROUP BY metric_type",
-        {"cid": cluster_id},
-    )
-    top_queries = query(
-        "SELECT query_hash, query_text, calls, total_time_ms, mean_time_ms "
-        "FROM query_stats WHERE cluster_id = :cid AND snapshot_time > NOW() - INTERVAL '1 hour' "
-        "ORDER BY total_time_ms DESC LIMIT 10",
-        {"cid": cluster_id},
-    )
-    recent_events = query(
-        "SELECT id, event_time as ts, event_type, severity, source, message, raw_event "
-        "FROM event_log WHERE cluster_id = :cid "
-        "ORDER BY event_time DESC LIMIT 10",
-        {"cid": cluster_id},
-    )
+    with ThreadPoolExecutor(max_workers=len(reads)) as ex:
+        futures = {
+            name: ex.submit(query, sql, params) for name, sql, params in reads
+        }
+        results = {name: fut.result() for name, fut in futures.items()}
+
+    meta = results["meta"]
+    recent_metrics = results["metrics"]
+    top_queries = results["top_queries"]
+    recent_events = results["events"]
 
     cluster_row = meta[0] if meta else None
 
@@ -3175,17 +3288,34 @@ def lambda_handler(event, context):
         if raw_path.endswith("/redundant-indexes"):
             return _response(200, _redundant_indexes(cluster_id), max_age=30)
         if raw_path.endswith("/topology"):
-            return _response(200, _topology(cluster_id), max_age=30)
+            # Server-side TTL (just under the 30s browser max_age) bounds the
+            # cross-account rds:Describe* + cloudwatch:GetMetric* burst this
+            # endpoint fires, so many pollers share one live call per window.
+            return _response(
+                200,
+                _cached_live(f"topology:{cluster_id}", 25, lambda: _topology(cluster_id)),
+                max_age=30,
+            )
         if raw_path.endswith("/backups"):
             # 60s cache — snapshot inventory + PITR window move slowly
             # (automated snapshots are daily, PITR window slides by the
-            # minute but minute-granularity staleness is fine here).
-            return _response(200, _backups(cluster_id), max_age=60)
+            # minute but minute-granularity staleness is fine here). Server
+            # TTL (55s) caps the rds:Describe* rate across concurrent pollers.
+            return _response(
+                200,
+                _cached_live(f"backups:{cluster_id}", 55, lambda: _backups(cluster_id)),
+                max_age=60,
+            )
         if raw_path.endswith("/engine-config"):
             # 60s cache — engine-level config (maintenance window, deletion
             # protection, SSE, streams, TTL) is near-static; minute-grained
-            # staleness is fine for a read-only config panel.
-            return _response(200, _engine_config(cluster_id), max_age=60)
+            # staleness is fine for a read-only config panel. Server TTL (55s)
+            # caps the cross-account describe rate across concurrent pollers.
+            return _response(
+                200,
+                _cached_live(f"engine-config:{cluster_id}", 55, lambda: _engine_config(cluster_id)),
+                max_age=60,
+            )
         if raw_path.endswith("/slo"):
             days = _parse_int(qs.get("days"), 30, min_v=1, max_v=90)
             avail_t = _parse_float(qs.get("availability_target"), 99.9)

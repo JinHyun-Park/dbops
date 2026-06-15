@@ -372,6 +372,12 @@ class AgentStack(cdk.Stack):
             handler="handler.lambda_handler",
             code=lambda_.Code.from_asset("../api/dashboard"),
             timeout=cdk.Duration.seconds(30),
+            # 128MB (CDK default) ≈ 0.07 vCPU. This handler serializes ~13KB
+            # JSON, marshals RDS Data API params/results, and ran at Max Memory
+            # ~110/128MB (near the ceiling). 512MB ≈ 0.3 vCPU + headroom cuts the
+            # CPU-bound part of the 0.34–0.63s Duration. Cost is memory×duration,
+            # offset by the shorter duration; safe, reversible.
+            memory_size=512,
             environment={
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
