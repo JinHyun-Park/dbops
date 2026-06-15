@@ -669,7 +669,8 @@ def _response(status, body, max_age: int = 0):
             cors["Vary"] = "Origin"
     cache_hdr = {}
     if max_age > 0 and 200 <= status < 300:
-        cache_hdr["Cache-Control"] = f"private, max-age={int(max_age)}"
+        swr = int(max_age) * 4
+        cache_hdr["Cache-Control"] = f"private, max-age={int(max_age)}, stale-while-revalidate={swr}"
     return {
         "statusCode": status,
         "headers": {
@@ -3063,11 +3064,11 @@ def lambda_handler(event, context):
             )
         if raw_path.endswith("/wait-events"):
             hours = _parse_int(qs.get("hours"), 1)
-            return _response(200, _wait_events(query, cluster_id, hours))
+            return _response(200, _wait_events(query, cluster_id, hours), max_age=30)
         if raw_path.endswith("/slow-queries"):
             hours = _parse_int(qs.get("hours"), 1)
             threshold = _parse_float(qs.get("threshold_ms"), 100.0)
-            return _response(200, _slow_queries(query, cluster_id, hours, threshold))
+            return _response(200, _slow_queries(query, cluster_id, hours, threshold), max_age=30)
         if raw_path.endswith("/query-detail"):
             qh = qs.get("query_hash")
             if not qh:
@@ -3089,13 +3090,13 @@ def lambda_handler(event, context):
                 max_age=30,
             )
         if raw_path.endswith("/vacuum-stats"):
-            return _response(200, _vacuum_stats(query, cluster_id))
+            return _response(200, _vacuum_stats(query, cluster_id), max_age=30)
         if raw_path.endswith("/table-sizes"):
-            return _response(200, _table_sizes(query, cluster_id))
+            return _response(200, _table_sizes(query, cluster_id), max_age=30)
         if raw_path.endswith("/health-findings"):
-            return _response(200, _health_findings(query, cluster_id))
+            return _response(200, _health_findings(query, cluster_id), max_age=30)
         if raw_path.endswith("/extensions"):
-            return _response(200, _extensions(query, cluster_id))
+            return _response(200, _extensions(query, cluster_id), max_age=30)
         if raw_path.endswith("/table-indexes"):
             schema = (qs.get("schema") or "").strip()
             table_name = (qs.get("table") or "").strip()
@@ -3106,14 +3107,14 @@ def lambda_handler(event, context):
                 status = 404 if "not registered" in str(result.get("error")) else 502
             return _response(status, result)
         if raw_path.endswith("/long-running"):
-            return _response(200, _long_running(query, cluster_id))
+            return _response(200, _long_running(query, cluster_id), max_age=15)
         if raw_path.endswith("/blocking-locks"):
-            return _response(200, _blocking_locks(query, cluster_id))
+            return _response(200, _blocking_locks(query, cluster_id), max_age=15)
         if raw_path.endswith("/settings"):
-            return _response(200, _cluster_settings(query, cluster_id))
+            return _response(200, _cluster_settings(query, cluster_id), max_age=30)
         if raw_path.endswith("/schema-changes"):
             days = _parse_int(qs.get("days"), 7, min_v=1, max_v=90)
-            return _response(200, _schema_changes(query, cluster_id, days))
+            return _response(200, _schema_changes(query, cluster_id, days), max_age=30)
         if raw_path.endswith("/timeline"):
             hours = _parse_int(qs.get("hours"), 24, min_v=1, max_v=168)
             categories = (qs.get("categories") or "").split(",")
@@ -3121,15 +3122,16 @@ def lambda_handler(event, context):
             return _response(
                 200,
                 _timeline(query, cluster_id, hours, categories or None),
+                max_age=30,
             )
         if raw_path.endswith("/anomalies"):
             hours = _parse_int(qs.get("hours"), 4)
             threshold = _parse_float(qs.get("threshold"), 2.5)
-            return _response(200, _anomalies(query, cluster_id, hours, threshold))
+            return _response(200, _anomalies(query, cluster_id, hours, threshold), max_age=30)
         if raw_path.endswith("/audit-log"):
             days = _parse_int(qs.get("days"), 7, min_v=1, max_v=90)
             action_type = qs.get("action_type")
-            return _response(200, _audit_log(query, cluster_id, days, action_type))
+            return _response(200, _audit_log(query, cluster_id, days, action_type), max_age=30)
         if raw_path.endswith("/change-impact"):
             window_hours = _parse_int(qs.get("window_hours"), 2, min_v=1, max_v=24)
             days = _parse_int(qs.get("days"), 7, min_v=1, max_v=30)
@@ -3154,7 +3156,7 @@ def lambda_handler(event, context):
             )
         if raw_path.endswith("/index-recommendations"):
             min_ratio = _parse_float(qs.get("min_seq_ratio"), 0.5)
-            return _response(200, _index_recommendations(query, cluster_id, min_ratio))
+            return _response(200, _index_recommendations(query, cluster_id, min_ratio), max_age=30)
         if raw_path.endswith("/log-insights"):
             hours = _parse_int(qs.get("hours"), 1)
             category = qs.get("category", "all")
@@ -3162,17 +3164,18 @@ def lambda_handler(event, context):
             return _response(
                 200,
                 _log_insights(cluster_id, hours, category, keywords),
+                max_age=30,
             )
         if raw_path.endswith("/capacity-forecast"):
             metric = (qs.get("metric") or "storage_bytes").strip()
             days_lookback = _parse_int(qs.get("days_lookback"), 30, min_v=7, max_v=90)
             return _response(
-                200, _capacity_forecast(query, cluster_id, metric, days_lookback)
+                200, _capacity_forecast(query, cluster_id, metric, days_lookback), max_age=30
             )
         if raw_path.endswith("/redundant-indexes"):
-            return _response(200, _redundant_indexes(cluster_id))
+            return _response(200, _redundant_indexes(cluster_id), max_age=30)
         if raw_path.endswith("/topology"):
-            return _response(200, _topology(cluster_id))
+            return _response(200, _topology(cluster_id), max_age=30)
         if raw_path.endswith("/backups"):
             # 60s cache — snapshot inventory + PITR window move slowly
             # (automated snapshots are daily, PITR window slides by the
@@ -3187,13 +3190,13 @@ def lambda_handler(event, context):
             days = _parse_int(qs.get("days"), 30, min_v=1, max_v=90)
             avail_t = _parse_float(qs.get("availability_target"), 99.9)
             lat_t = _parse_float(qs.get("latency_target_ms"), 100)
-            return _response(200, _slo(query, cluster_id, days, avail_t, lat_t))
+            return _response(200, _slo(query, cluster_id, days, avail_t, lat_t), max_age=30)
         if raw_path.endswith("/schema-graph"):
             schema = (qs.get("schema") or "public").strip() or "public"
-            return _response(200, _schema_graph(cluster_id, schema))
+            return _response(200, _schema_graph(cluster_id, schema), max_age=30)
         if raw_path.endswith("/resource-details"):
             return _response(200, _resource_details(query, cluster_id), max_age=60)
-        return _response(200, _overview(query, cluster_id))
+        return _response(200, _overview(query, cluster_id), max_age=30)
     except Exception:
         print(f"Dashboard error: {traceback.format_exc()}")
         return _response(500, {"error": "Internal server error"})
