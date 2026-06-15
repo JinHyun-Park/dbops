@@ -139,6 +139,79 @@ def test_overview_parallel_propagates_query_error():
 # 2. _cached_live — warm-container TTL cache
 # ===========================================================================
 
+# ===========================================================================
+# 1b. Timeseries server-side bucketing (bounded payload regardless of window)
+# ===========================================================================
+
+def test_bucket_seconds_scales_with_window():
+    """Bucket width keeps ~TS_TARGET_POINTS points: a 1h window stays at the
+    60s floor (no-op vs 1-min source), wider windows downsample."""
+    # 1h / 240 = 15s → clamped up to the 60s floor (matches raw granularity).
+    assert handler._bucket_seconds(1) == 60
+    # 6h = 21600s / 240 = 90s.
+    assert handler._bucket_seconds(6) == 90
+    # 24h = 86400s / 240 = 360s.
+    assert handler._bucket_seconds(24) == 360
+    # Never finer than 60s even for tiny windows.
+    assert handler._bucket_seconds(0) == 60
+
+
+def test_bucket_seconds_absolute_window():
+    """Absolute from/to windows derive the span from the timestamps; a 12h
+    span → 86400/2/240 = 180s. Z and +00:00 suffixes both parse."""
+    assert handler._bucket_seconds(1, "2026-06-15T00:00:00Z", "2026-06-15T12:00:00Z") == 180
+    assert handler._bucket_seconds(1, "2026-06-15T00:00:00+00:00", "2026-06-15T12:00:00+00:00") == 180
+    # Garbage from/to falls back to the relative `hours`.
+    assert handler._bucket_seconds(24, "nonsense", "also-bad") == 360
+
+
+def test_batch_timeseries_emits_bucketed_aggregation_and_shape():
+    """The query must aggregate (AVG + GROUP BY bucket) and preserve the
+    {series: {metric: [{ts,value,dimensions}]}} shape + the AAS dimension
+    breakdown. Captures the SQL to assert it's bucketed, not a raw scan."""
+    captured = {}
+
+    def _spy(sql, params=None):
+        captured["sql"] = sql
+        captured["params"] = params
+        # Simulate two metrics; AAS carries a wait-event dimension.
+        return [
+            {"ts": "2026-06-15T00:00:00Z", "metric_type": "cpu", "value": 12.0, "dimensions": None},
+            {"ts": "2026-06-15T00:06:00Z", "metric_type": "cpu", "value": 14.0, "dimensions": None},
+            {"ts": "2026-06-15T00:00:00Z", "metric_type": "aas", "value": 1.5, "dimensions": '{"wait":"CPU"}'},
+        ]
+
+    out = handler._batch_timeseries(_spy, "prod-pg", ["cpu", "aas"], hours=24)
+
+    sql = captured["sql"]
+    assert "AVG(value)" in sql, "must aggregate, not return raw rows"
+    assert "floor(extract(epoch from ts)" in sql, "must bucket by epoch in the SELECT"
+    # GROUP/ORDER by ordinal: PG won't match the nested floor() expr between
+    # SELECT and GROUP BY once a parameter is involved (caused a live 42803).
+    assert "GROUP BY 1" in sql and "ORDER BY 1" in sql, "must group/order by the bucket ordinal"
+    assert captured["params"]["bucket"] == 360, "24h → 360s buckets"
+    assert out["bucket_seconds"] == 360
+    assert set(out["series"].keys()) == {"cpu", "aas"}
+    assert len(out["series"]["cpu"]) == 2
+    assert out["series"]["aas"][0]["dimensions"] == '{"wait":"CPU"}'
+
+
+def test_timeseries_single_metric_is_bucketed():
+    """The single-metric endpoint buckets too (same wide-window payload risk)."""
+    captured = {}
+
+    def _spy(sql, params=None):
+        captured["sql"] = sql
+        captured["params"] = params
+        return [{"ts": "2026-06-15T00:00:00Z", "value": 5.0, "dimensions": None}]
+
+    out = handler._timeseries(_spy, "prod-pg", "aas", hours=24)
+    assert "AVG(value)" in captured["sql"]
+    assert captured["params"]["bucket"] == 360
+    assert out["bucket_seconds"] == 360
+    assert out["points"][0]["value"] == 5.0
+
+
 class _Clock:
     """Controllable monotonic clock so TTL behaviour is tested without sleep."""
     def __init__(self, t0=1000.0):

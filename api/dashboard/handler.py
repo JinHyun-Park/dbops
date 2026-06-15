@@ -844,27 +844,29 @@ def _overview(query, cluster_id):
 
 def _timeseries(query, cluster_id, metric_type, hours, from_iso=None, to_iso=None):
     """Single-metric timeseries. Same window precedence as _batch_timeseries —
-    absolute (from/to) overrides relative (hours)."""
+    absolute (from/to) overrides relative (hours). Server-side bucketed to a
+    bounded point count (see _bucket_seconds) so a wide window doesn't return
+    thousands of sub-pixel raw points."""
+    bucket = _bucket_seconds(hours, from_iso, to_iso)
+    head = (
+        f"SELECT {_BUCKET_TS_EXPR} AS ts, AVG(value)::double precision AS value, "
+        f"dimensions::text as dimensions "
+        f"FROM metric_snapshots "
+        f"WHERE cluster_id = :cid AND metric_type = :mt "
+    )
+    tail = (
+        "GROUP BY 1, dimensions::text "
+        "ORDER BY 1 ASC"
+    )
     if from_iso and to_iso:
         rows = query(
-            "SELECT ts, value, dimensions::text as dimensions "
-            "FROM metric_snapshots "
-            "WHERE cluster_id = :cid "
-            "AND metric_type = :mt "
-            "AND ts >= :from_ts::timestamptz "
-            "AND ts <= :to_ts::timestamptz "
-            "ORDER BY ts ASC",
-            {"cid": cluster_id, "mt": metric_type, "from_ts": from_iso, "to_ts": to_iso},
+            head + "AND ts >= :from_ts::timestamptz AND ts <= :to_ts::timestamptz " + tail,
+            {"cid": cluster_id, "mt": metric_type, "from_ts": from_iso, "to_ts": to_iso, "bucket": bucket},
         )
     else:
         rows = query(
-            "SELECT ts, value, dimensions::text as dimensions "
-            "FROM metric_snapshots "
-            "WHERE cluster_id = :cid "
-            "AND metric_type = :mt "
-            "AND ts > NOW() - (:hours || ' hours')::interval "
-            "ORDER BY ts ASC",
-            {"cid": cluster_id, "mt": metric_type, "hours": str(hours)},
+            head + "AND ts > NOW() - (:hours || ' hours')::interval " + tail,
+            {"cid": cluster_id, "mt": metric_type, "hours": str(hours), "bucket": bucket},
         )
     return {
         "cluster_id": cluster_id,
@@ -872,6 +874,7 @@ def _timeseries(query, cluster_id, metric_type, hours, from_iso=None, to_iso=Non
         "hours": hours,
         "from": from_iso,
         "to": to_iso,
+        "bucket_seconds": bucket,
         "points": rows,
     }
 
@@ -1124,6 +1127,51 @@ def _change_impact(query, cluster_id, window_hours, days):
     return {"cluster_id": cluster_id, "window_hours": window_hours, "days": days, "changes": changes}
 
 
+# Charts are ~600px wide; beyond a few hundred points per series the extra
+# resolution is sub-pixel. metric_snapshots is 1-minute granularity, so a 24h
+# window returns ~1440 raw points/metric (×8 metrics, ×AAS wait-event
+# dimensions) → a ~1.4MB payload and ~2s of RDS Data API marshaling + JSON
+# serialize, and at the wide end brushes the Data API's 1MB result cap. We
+# instead bucket server-side to a bounded point count regardless of window —
+# bounding payload, query time, transfer, AND Data-API result size at once.
+TS_TARGET_POINTS = 240
+
+# Bucket boundary, computed from the UTC epoch so it's timezone-independent
+# (metric_snapshots.ts is timestamptz/UTC). to_char emits an explicit-Z ISO
+# string directly — sidestepping the _norm_ts path and any naive-datetime
+# ambiguity. The bucket string is zero-padded fixed-width, so its lexical order
+# IS chronological order — which lets the queries GROUP BY 1 / ORDER BY 1 on
+# this column (PG won't reliably match the nested floor() expression between
+# SELECT and GROUP BY when a parameter is involved; the ordinal sidesteps that).
+_BUCKET_TS_EXPR = (
+    "to_char("
+    "to_timestamp(floor(extract(epoch from ts) / :bucket) * :bucket) AT TIME ZONE 'UTC', "
+    "'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')"
+)
+
+
+def _bucket_seconds(hours, from_iso=None, to_iso=None):
+    """Bucket width (≥60s, never finer than the 1-min source granularity) that
+    keeps a window to ~TS_TARGET_POINTS points. For a 1h window this resolves
+    to 60s — i.e. a no-op that preserves the existing default-load behaviour —
+    and only downsamples once the window is wide enough to need it."""
+    span = None
+    if from_iso and to_iso:
+        try:
+            from datetime import datetime
+
+            f = datetime.fromisoformat(str(from_iso).replace("Z", "+00:00"))
+            t = datetime.fromisoformat(str(to_iso).replace("Z", "+00:00"))
+            s = (t - f).total_seconds()
+            if s > 0:
+                span = s
+        except Exception:
+            span = None
+    if span is None:
+        span = max(1, int(hours)) * 3600
+    return max(60, int(span // TS_TARGET_POINTS))
+
+
 def _batch_timeseries(
     query,
     cluster_id,
@@ -1157,38 +1205,48 @@ def _batch_timeseries(
         return {**base_meta, "series": {}}
 
     placeholders = ", ".join(f":m{i}" for i in range(len(metric_names)))
-    params = {"cid": cluster_id}
+    bucket = _bucket_seconds(hours, from_iso, to_iso)
+    params = {"cid": cluster_id, "bucket": bucket}
+    base_meta["bucket_seconds"] = bucket
     for i, m in enumerate(metric_names):
         params[f"m{i}"] = m
+
+    # Bucketed read: AVG(value) per (time bucket, metric_type, dimensions).
+    # Grouping by dimensions::text preserves the AAS per-wait-event breakdown
+    # the stacked chart needs; non-dimensional metrics collapse to one series.
+    # AVG is a visual downsample — at the default 1h window bucket=60s is a
+    # no-op (exact 1-min points); at wide windows it smooths sparse spikes
+    # (e.g. a one-minute deadlock burst). That's acceptable here because spike
+    # DETECTION lives in the raw-data endpoints (/anomalies, /events,
+    # /health-findings), not in these chart series.
+    select_head = (
+        f"SELECT {_BUCKET_TS_EXPR} AS ts, metric_type, "
+        f"AVG(value)::double precision AS value, dimensions::text AS dimensions "
+        f"FROM metric_snapshots "
+        f"WHERE cluster_id = :cid AND metric_type IN ({placeholders}) "
+    )
+    group_tail = (
+        "GROUP BY 1, metric_type, dimensions::text "
+        "ORDER BY 1 ASC"
+    )
 
     use_absolute = bool(from_iso) and bool(to_iso)
     if use_absolute:
         params["from_ts"] = from_iso
         params["to_ts"] = to_iso
-        sql = (
-            f"SELECT ts, metric_type, value, dimensions::text as dimensions "
-            f"FROM metric_snapshots "
-            f"WHERE cluster_id = :cid "
-            f"AND metric_type IN ({placeholders}) "
-            f"AND ts >= :from_ts::timestamptz "
-            f"AND ts <= :to_ts::timestamptz "
-            f"ORDER BY ts ASC"
-        )
+        sql = select_head + (
+            "AND ts >= :from_ts::timestamptz AND ts <= :to_ts::timestamptz "
+        ) + group_tail
     else:
         params["hours"] = str(hours)
         params["offset"] = str(offset_hours)
         # Window: (NOW - hours, NOW - offset_hours]. When offset_hours=0 the
         # upper bound collapses to NOW, matching the original "last N hours"
         # semantics.
-        sql = (
-            f"SELECT ts, metric_type, value, dimensions::text as dimensions "
-            f"FROM metric_snapshots "
-            f"WHERE cluster_id = :cid "
-            f"AND metric_type IN ({placeholders}) "
-            f"AND ts > NOW() - (:hours || ' hours')::interval "
-            f"AND ts <= NOW() - (:offset || ' hours')::interval "
-            f"ORDER BY ts ASC"
-        )
+        sql = select_head + (
+            "AND ts > NOW() - (:hours || ' hours')::interval "
+            "AND ts <= NOW() - (:offset || ' hours')::interval "
+        ) + group_tail
 
     rows = query(sql, params)
 
