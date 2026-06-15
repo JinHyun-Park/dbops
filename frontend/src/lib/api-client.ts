@@ -1968,6 +1968,66 @@ export async function fetchTimeline(
   return res.json();
 }
 
+// =====  Hover-prefetch — warm the browser HTTP cache before navigation =====
+//
+// The dashboard panel APIs are served with Cache-Control: max-age=30,
+// stale-while-revalidate=120. Fetching them on hover (before the click) means
+// the click hits the warm browser cache → instant first paint.
+//
+// Strategy: fire the same two calls the dashboard page makes on cluster select
+// so the browser caches them under the identical URLs.
+//   1. fetchDashboard(clusterId)          — cluster meta + top queries + events
+//   2. fetchBatchTimeseries(clusterId, PREFETCH_CHART_METRICS, DEFAULT_HOURS)
+//      — the 10-metric batch the timeseries charts read
+//
+// Dedupe: skip if the same cluster was prefetched within 10 s to avoid
+// hover-spam on fast mouse movements across a dense fleet table.
+
+// Must match the CHART_METRICS array in dashboard/page.tsx exactly so the
+// URLs are identical (same query string → same browser cache entry).
+const PREFETCH_CHART_METRICS = [
+  "aas",
+  "cpu",
+  "db_connections",
+  "read_iops",
+  "write_iops",
+  "xact_commit",
+  "tup_returned",
+  "storage_bytes",
+  "replica_lag_ms",
+  "deadlocks",
+];
+
+// Must match DEFAULT_RANGE in dashboard/page.tsx: { kind: "preset", hours: 1 }
+const PREFETCH_DEFAULT_RANGE: TimeRange = { kind: "preset", hours: 1 };
+
+// clusterId → timestamp of last prefetch (ms). Module-level so it persists
+// across renders but resets on full page load (acceptable).
+const _prefetchTimestamps = new Map<string, number>();
+const PREFETCH_DEDUPE_MS = 10_000; // 10 seconds
+
+/**
+ * Fire-and-forget prefetch of the dashboard's two primary data calls.
+ * Call this on cluster hover/focus. Never throws, never blocks the UI.
+ * Returns void — callers should not await or chain on this.
+ */
+export function prefetchDashboard(clusterId: string): void {
+  if (!clusterId) return;
+  const now = Date.now();
+  const last = _prefetchTimestamps.get(clusterId);
+  if (last !== undefined && now - last < PREFETCH_DEDUPE_MS) return;
+  _prefetchTimestamps.set(clusterId, now);
+
+  // Fire both calls in parallel. Errors are silently swallowed — the only
+  // purpose is populating the browser HTTP cache; UI never reads the result.
+  fetchDashboard(clusterId).catch(() => {});
+  fetchBatchTimeseries(
+    clusterId,
+    PREFETCH_CHART_METRICS,
+    PREFETCH_DEFAULT_RANGE,
+  ).catch(() => {});
+}
+
 // =====  Agent memory (read + prune AgentCore Memory records) =====
 
 export type MemoryKind = "preferences" | "facts";

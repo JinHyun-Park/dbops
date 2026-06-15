@@ -8,6 +8,7 @@ import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { useFleetOverview } from "@/lib/use-fleet-overview";
 import { AnchoredPopover } from "@/components/design-system/anchored-popover";
 import { groupByEngineGroup, displayName } from "@/lib/group-by-family";
+import { prefetchDashboard } from "@/lib/api-client";
 
 // A real, discoverable cluster switcher: click → a popover that lists the
 // clusters immediately (with a severity dot from the shared triage), with
@@ -163,6 +164,8 @@ export function ClusterDropdown({
                       <button
                         key={c.cluster_id}
                         onClick={() => choose(c.cluster_id)}
+                        onMouseEnter={() => prefetchDashboard(c.cluster_id)}
+                        onFocus={() => prefetchDashboard(c.cluster_id)}
                         className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
                           active ? "bg-zinc-800/80" : "hover:bg-zinc-800/50"
                         }`}

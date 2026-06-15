@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { fetchMultiClusterOverview, fetchClusters } from "@/lib/api-client";
+import {
+  fetchMultiClusterOverview,
+  fetchClusters,
+  prefetchDashboard,
+} from "@/lib/api-client";
 import { useSmartPoll } from "@/lib/use-smart-poll";
 import {
   PageHeader,
@@ -731,7 +735,10 @@ function FleetRow({ d, demoIds }: { d: Decorated; demoIds: Set<string> }) {
   const dlk = n(c.deadlocks);
   const blk = n(c.blocking_count);
   return (
-    <tr className="hover:bg-zinc-900/40">
+    <tr
+      className="hover:bg-zinc-900/40"
+      onMouseEnter={() => prefetchDashboard(c.cluster_id)}
+    >
       <td className="px-2 py-2">
         <SeverityDot level={d.level} reasons={d.reasons} />
       </td>
@@ -848,6 +855,8 @@ function FleetCard({ d, demoIds }: { d: Decorated; demoIds: Set<string> }) {
   return (
     <Link
       href={`/dashboard?cluster=${encodeURIComponent(c.cluster_id)}`}
+      onMouseEnter={() => prefetchDashboard(c.cluster_id)}
+      onFocus={() => prefetchDashboard(c.cluster_id)}
       className={`block bg-zinc-800 border border-zinc-700 border-l-2 ${
         LEVEL_ACCENT[d.level]
       } rounded-lg p-3 hover:border-amber-500/40 transition-colors`}
