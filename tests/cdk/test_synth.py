@@ -41,10 +41,19 @@ def cdk_app():
     # job that doesn't produce a CDK artifact) — stub a minimal directory
     # so synth resolves the asset path. Local devs who already have a
     # built `out/` keep their real artifact.
+    #
+    # NOTE: the frontend stack now ships THREE deployments by cache policy, and
+    # the hashed-assets one sources `frontend/out/_next` as a SEPARATE asset —
+    # so that subtree must exist at synth time too, or synth fails with
+    # CannotFindAsset on CI (where there's no real build). Stub both.
     frontend_out = ROOT / "frontend" / "out"
-    if not frontend_out.exists():
-        frontend_out.mkdir(parents=True, exist_ok=True)
+    frontend_out.mkdir(parents=True, exist_ok=True)
+    if not (frontend_out / "index.html").exists():
         (frontend_out / "index.html").write_text("<!-- synth stub -->\n")
+    next_static = frontend_out / "_next" / "static"
+    if not next_static.exists():
+        next_static.mkdir(parents=True, exist_ok=True)
+        (next_static / ".synth-stub").write_text("// synth stub\n")
 
     original_cwd = os.getcwd()
     os.chdir(CDK_DIR)
