@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useChartColors } from "@/lib/use-chart-colors";
 import { ClusterOverview } from "@/components/dashboard/cluster-overview";
 import { TimeseriesChart } from "@/components/dashboard/timeseries-chart";
@@ -34,6 +34,7 @@ import {
   fetchDashboard,
   fetchBatchTimeseries,
 } from "@/lib/api-client";
+import { useSmartPoll } from "@/lib/use-smart-poll";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
 import {
   getSelectedCluster,
@@ -322,52 +323,41 @@ export default function DashboardPage() {
     });
   }, []);
 
-  useEffect(() => {
+  const loadTimeseries = useCallback(() => {
     if (!selectedCluster) return;
-    setTsBatch({});
-    setTsLoading(true);
-    let cancelled = false;
-    const load = () => {
-      fetchBatchTimeseries(selectedCluster, CHART_METRICS, range)
-        .then((d) => {
-          if (cancelled) return;
-          setTsBatch(d.series || {});
-          setTsLoading(false);
-        })
-        .catch(() => {
-          if (cancelled) return;
-          setTsLoading(false);
-        });
-    };
-    load();
-    const iv = setInterval(load, 30000);
-    return () => {
-      cancelled = true;
-      clearInterval(iv);
-    };
+    fetchBatchTimeseries(selectedCluster, CHART_METRICS, range)
+      .then((d) => {
+        setTsBatch(d.series || {});
+        setTsLoading(false);
+      })
+      .catch(() => {
+        setTsLoading(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCluster, JSON.stringify(range)]);
 
   useEffect(() => {
     if (!selectedCluster) return;
+    setTsBatch({});
+    setTsLoading(true);
+  }, [selectedCluster, range]);
+
+  useSmartPoll(loadTimeseries, 30000);
+
+  const loadDashboard = useCallback(() => {
+    if (!selectedCluster) return;
+    fetchDashboard(selectedCluster)
+      .then((d) => setDashboardData(d))
+      .catch((e) => setError(`Failed to load dashboard: ${e.message}`));
+  }, [selectedCluster]);
+
+  useEffect(() => {
+    if (!selectedCluster) return;
     setDashboardData(null);
     setError(null);
-    let cancelled = false;
-    const load = () => {
-      fetchDashboard(selectedCluster)
-        .then((d) => !cancelled && setDashboardData(d))
-        .catch(
-          (e) =>
-            !cancelled && setError(`Failed to load dashboard: ${e.message}`),
-        );
-    };
-    load();
-    const interval = setInterval(load, 15000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
   }, [selectedCluster]);
+
+  useSmartPoll(loadDashboard, 15000);
 
   return (
     <PageBody>

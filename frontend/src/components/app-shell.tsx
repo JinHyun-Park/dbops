@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ClusterDropdown } from "@/components/design-system/cluster-dropdown";
 import {
   Activity,
@@ -25,11 +25,13 @@ import {
   Sparkles,
   Target,
   Wand2,
+  X,
 } from "lucide-react";
 import { AuthGuard } from "@/components/auth-guard";
 import { AuthButton } from "@/components/auth-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { RcaProvider } from "@/components/rca/rca-drawer";
+import { useAlertBadge, type AlertToast } from "@/lib/use-alert-badge";
 
 type IconType = React.ComponentType<{
   size?: number | string;
@@ -327,8 +329,106 @@ function MobileTabBar({ pathname }: { pathname: string }) {
   );
 }
 
+// ── Alert badge + toast system ──────────────────────────────────────────────
+
+function AlertBadgeButton({
+  criticalCount,
+  warningCount,
+  onClick,
+}: {
+  criticalCount: number;
+  warningCount: number;
+  onClick: () => void;
+}) {
+  const total = criticalCount + warningCount;
+  const badgeColor =
+    criticalCount > 0
+      ? "bg-rose-500 text-white"
+      : warningCount > 0
+        ? "bg-amber-500 text-zinc-950"
+        : "bg-zinc-700 text-zinc-300";
+
+  const ariaLabel =
+    total === 0
+      ? "알림 없음"
+      : `알림 ${total}개 — critical ${criticalCount}, warning ${warningCount}`;
+
+  return (
+    <button
+      onClick={onClick}
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      className="relative flex items-center justify-center w-8 h-8 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors"
+    >
+      <Bell size={16} strokeWidth={1.8} />
+      {total > 0 && (
+        <span
+          aria-hidden="true"
+          className={`absolute -top-0.5 -right-0.5 min-w-[16px] h-4 flex items-center justify-center rounded-full text-[10px] font-mono font-medium leading-none px-1 ${badgeColor}`}
+        >
+          {total > 99 ? "99+" : total}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function ToastItem({
+  toast,
+  onDismiss,
+}: {
+  toast: AlertToast;
+  onDismiss: (id: string) => void;
+}) {
+  const colorClass =
+    toast.severity === "critical"
+      ? "border-rose-500/60 bg-rose-500/10 text-rose-200"
+      : "border-amber-500/60 bg-amber-500/10 text-amber-200";
+  return (
+    <div
+      role="alert"
+      className={`flex items-start gap-2.5 border px-3 py-2.5 text-xs font-mono shadow-lg backdrop-blur-sm ${colorClass}`}
+    >
+      <span className="flex-1 leading-snug">{toast.message}</span>
+      <button
+        onClick={() => onDismiss(toast.id)}
+        aria-label="알림 닫기"
+        className="flex-shrink-0 opacity-60 hover:opacity-100 transition-opacity mt-px"
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
+}
+
+function ToastStack({
+  toasts,
+  onDismiss,
+}: {
+  toasts: AlertToast[];
+  onDismiss: (id: string) => void;
+}) {
+  if (toasts.length === 0) return null;
+  return (
+    <div
+      aria-live="polite"
+      aria-atomic="false"
+      className="fixed bottom-16 right-4 md:bottom-4 z-50 flex flex-col gap-2 w-72 max-w-[calc(100vw-2rem)]"
+    >
+      {toasts.map((t) => (
+        <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />
+      ))}
+    </div>
+  );
+}
+
+// ── AppShell ─────────────────────────────────────────────────────────────────
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "/";
+  const router = useRouter();
+  const { criticalCount, warningCount, toasts, dismissToast, markSeen } =
+    useAlertBadge();
 
   // Auth pages should not be wrapped in the chrome.
   if (
@@ -417,7 +517,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               className="relative z-40 flex-shrink-0 border-b border-zinc-800 px-6 py-3 flex items-center justify-between bg-zinc-950/80 backdrop-blur-xl"
             >
               <Breadcrumbs pathname={pathname} />
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                {/* Alert badge — bell icon with live critical/warning count.
+                    Clicking navigates to /fleet and marks the current count
+                    as "seen" so a stable fleet doesn't re-toast on next load. */}
+                <AlertBadgeButton
+                  criticalCount={criticalCount}
+                  warningCount={warningCount}
+                  onClick={() => {
+                    markSeen();
+                    router.push("/fleet");
+                  }}
+                />
                 {/* Cluster switcher — a real dropdown, not the ⌘K palette. Hidden
                   on /chat, which manages its own per-conversation cluster. */}
                 {!pathname.startsWith("/chat") && (
@@ -434,6 +545,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </main>
           </div>
         </div>
+        {/* Toast stack — fixed to the viewport, above the mobile tab bar */}
+        <ToastStack toasts={toasts} onDismiss={dismissToast} />
       </RcaProvider>
     </AuthGuard>
   );

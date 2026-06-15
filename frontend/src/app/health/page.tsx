@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { fetchHealth, type HealthResponse } from "@/lib/api-client";
+import { useSmartPoll } from "@/lib/use-smart-poll";
 import {
   PageBody,
   PageHeader,
@@ -43,13 +44,9 @@ export default function HealthPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    load();
-    // Auto-refresh every 30s — health state moves slowly + endpoint
-    // is Cache-Control: 10s so the actual hit-rate is at most 3/min.
-    const t = setInterval(load, 30_000);
-    return () => clearInterval(t);
-  }, [load]);
+  // Visibility-aware: pauses when the tab is hidden, catches up immediately
+  // on focus. Health state moves slowly so 30s active cadence is enough.
+  useSmartPoll(load, 30_000);
 
   return (
     <PageBody>
