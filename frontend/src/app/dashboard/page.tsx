@@ -116,6 +116,31 @@ type TimeRange =
 
 const DEFAULT_RANGE: TimeRange = { kind: "preset", hours: 1 };
 
+// Parse the initial range from the URL SYNCHRONOUSLY (used as the useState
+// initializer). This must NOT be deferred to an effect: the URL-sync effect
+// below runs on mount with whatever `range` currently is and rewrites the
+// query string — so if `range` started at the default, it would clobber a
+// shared `?range=24h` / `?from&to` URL back to 1h before any async loader
+// could read it. Seeding state from the URL up-front keeps shared windows.
+function readInitialRange(): TimeRange {
+  if (typeof window === "undefined") return DEFAULT_RANGE;
+  const params = new URLSearchParams(window.location.search);
+  const fromQs = params.get("from");
+  const toQs = params.get("to");
+  if (
+    fromQs &&
+    toQs &&
+    !Number.isNaN(new Date(fromQs).getTime()) &&
+    !Number.isNaN(new Date(toQs).getTime())
+  ) {
+    return { kind: "custom", from: fromQs, to: toQs };
+  }
+  const r = params.get("range");
+  const m = r && /^(\d+)h$/.exec(r);
+  if (m) return { kind: "preset", hours: parseInt(m[1], 10) };
+  return DEFAULT_RANGE;
+}
+
 // Pretty short label for the current range (used on the Custom button).
 function rangeLabel(r: TimeRange): string {
   if (r.kind === "preset") return `${r.hours}h`;
@@ -213,7 +238,7 @@ export default function DashboardPage() {
     null,
   );
   const [error, setError] = useState<string | null>(null);
-  const [range, setRange] = useState<TimeRange>(DEFAULT_RANGE);
+  const [range, setRange] = useState<TimeRange>(readInitialRange);
   const chartColors = useChartColors();
   const [customOpen, setCustomOpen] = useState<boolean>(false);
   const [views, setViews] = useState<SavedView[]>([]);
@@ -274,21 +299,9 @@ export default function DashboardPage() {
           wanted &&
           cs.find((c: { cluster_id: string }) => c.cluster_id === wanted);
         setSelectedCluster(match ? wanted : cs[0].cluster_id);
-
-        // Initialise time range from URL — `?from=ISO&to=ISO` for absolute,
-        // `?range=24h` for preset. This makes the URL bar a shareable bookmark
-        // of a specific window (incident review handoffs etc.).
-        if (params) {
-          const fromQs = params.get("from");
-          const toQs = params.get("to");
-          if (fromQs && toQs && !Number.isNaN(new Date(fromQs).getTime())) {
-            setRange({ kind: "custom", from: fromQs, to: toQs });
-          } else {
-            const r = params.get("range");
-            const m = r && /^(\d+)h$/.exec(r);
-            if (m) setRange({ kind: "preset", hours: parseInt(m[1], 10) });
-          }
-        }
+        // Time range is seeded synchronously from the URL via readInitialRange()
+        // (the useState initializer) — doing it here instead would race with the
+        // URL-sync effect and lose shared ?range / ?from&to windows.
       })
       .catch((e) => setError(`Failed to load clusters: ${e.message}`));
   }, []);
@@ -343,7 +356,10 @@ export default function DashboardPage() {
     setTsLoading(true);
   }, [selectedCluster, range]);
 
-  useSmartPoll(loadTimeseries, 30000);
+  // deps drive an immediate re-fetch when the cluster or range changes —
+  // otherwise the charts sit on "불러오는 중…" until the next 30s tick because
+  // the mount fire happens before the async cluster list resolves.
+  useSmartPoll(loadTimeseries, 30000, [selectedCluster, JSON.stringify(range)]);
 
   const loadDashboard = useCallback(() => {
     if (!selectedCluster) return;
@@ -358,7 +374,7 @@ export default function DashboardPage() {
     setError(null);
   }, [selectedCluster]);
 
-  useSmartPoll(loadDashboard, 15000);
+  useSmartPoll(loadDashboard, 15000, [selectedCluster]);
 
   return (
     <PageBody>
