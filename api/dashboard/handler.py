@@ -303,9 +303,12 @@ def _schema_graph(cluster_id: str, schema: str) -> dict:
         tables = _run(tables_sql)
         edges = _run(edges_sql)
     except Exception as e:
+        # Never surface the raw boto3 fault to the client — it can carry ARNs /
+        # account ids. Log it server-side (CloudWatch) for debugging instead.
+        print(f"[dashboard] schema-graph query failed for {cluster_id}: {e}")
         return {
             "error": "execution_failed",
-            "message": str(e)[:300],
+            "message": "스키마 그래프 쿼리 실행에 실패했습니다. 잠시 후 다시 시도해주세요.",
             "tables": [],
             "edges": [],
         }
@@ -436,7 +439,12 @@ def _redundant_indexes(cluster_id: str) -> dict:
             includeResultMetadata=True,
         )
     except Exception as e:
-        return {"error": "execution_failed", "message": str(e)[:300], "candidates": []}
+        print(f"[dashboard] redundant-indexes query failed for {cluster_id}: {e}")
+        return {
+            "error": "execution_failed",
+            "message": "중복 인덱스 분석 쿼리 실행에 실패했습니다. 잠시 후 다시 시도해주세요.",
+            "candidates": [],
+        }
 
     cols = [(c.get("name") or c.get("label") or "") for c in resp.get("columnMetadata", [])]
     indexes: list[dict] = []
@@ -614,7 +622,11 @@ def _table_indexes(cluster_id: str, schema: str, table_name: str) -> dict:
             includeResultMetadata=True,
         )
     except Exception as e:
-        return {"error": "execution_failed", "message": str(e)[:300]}
+        print(f"[dashboard] table-indexes query failed for {cluster_id}: {e}")
+        return {
+            "error": "execution_failed",
+            "message": "인덱스 조회 쿼리 실행에 실패했습니다. 잠시 후 다시 시도해주세요.",
+        }
 
     # MySQL Data API leaves `name` blank for computed/aliased columns; the
     # alias ends up in `label`. Prefer whichever is non-empty.
