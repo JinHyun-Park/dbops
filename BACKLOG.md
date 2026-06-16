@@ -67,9 +67,9 @@ impression decides whether someone sticks with the product.
 - `<PlanTree>` 재귀 컴포넌트, self-time 기반 색상, hot nodes, planner misestimate 배지
 - "Get AI insight" 버튼 → plan summary를 LLM에 보내 2–3개 구체적 권장사항
 - SQL 에러 = 노란 warning (HTTP 400), 인프라 에러 = 빨간 error (502)
-  **Remaining (5단계, optional polish):**
-- localStorage plan history (최근 10개), 다시 열기
-- "copy plan as JSON" / "share link" 액션
+  **5단계 ✅ shipped** (verified 2026-06-16):
+- ✅ localStorage plan history (`PLAN_HISTORY_KEY`, 최근 10개) + 다시 열기
+- ✅ "copy json" / "copy link" 액션 + 공유 링크 복원 (`/query-lab#sql=<base64>&cluster=`)
 
 ### P2.2 Mobile responsive ✅ (mobile tab bar)
 
@@ -93,8 +93,9 @@ impression decides whether someone sticks with the product.
 - PagerDuty Events API v2 payload (`dedup_key=dbops-rule-<id>`로 반복 트리거 그룹화)
 - 호출 결과를 `last_used_at` / `last_error`에 기록
   **Remaining:**
-- 알림 트리거 시 dashboard URL 자동 첨부 (Slack action link)
-- 토픽 dedup 윈도우 조정 (현재는 영구 dedup)
+- ✅ 알림 트리거 시 dashboard URL 자동 첨부 — `_dashboard_url()` 딥링크 + Slack Block Kit
+  dashboard/alerts/timeline 버튼 (verified 2026-06-16)
+- 토픽 dedup 윈도우 조정 (현재 영구 dedup `dedup_key=dbops-rule-<id>`) — 미구현, minor
 
 ### P2.4 RBAC (admin / viewer) ✅ (frontend gate)
 
