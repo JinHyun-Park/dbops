@@ -666,70 +666,101 @@ export default function ClustersPage() {
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-800">
-                    {discovered.map((c) => (
-                      <tr
-                        key={`${c.region}:${c.cluster_id}`}
-                        className={`hover:bg-zinc-900/40 ${
-                          c.already_registered ? "opacity-50" : ""
-                        }`}
+                  {/* Group discovered resources by engine family — each family
+                      is its own <tbody> with a bordered header row, so the list
+                      reads as separated sections instead of one mixed table. */}
+                  {(() => {
+                    const byGroup = groupByEngineGroup(discovered);
+                    const sections = ENGINE_GROUP_ORDER.map((g) => ({
+                      grp: g,
+                      meta: ENGINE_GROUP_META[g],
+                      items: byGroup[g],
+                    })).filter((s) => s.items.length > 0);
+                    return sections.map(({ grp, meta, items }) => (
+                      <tbody
+                        key={grp}
+                        className="divide-y divide-zinc-800 border-t-2 border-zinc-700/70"
                       >
-                        <td className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            checked={
-                              selectedIds.has(c.cluster_id) &&
-                              !c.already_registered
-                            }
-                            disabled={c.already_registered}
-                            onChange={() => toggleSelect(c.cluster_id)}
-                            className="accent-amber-500"
-                          />
-                        </td>
-                        <td className="px-3 py-2 font-mono text-xs text-zinc-100">
-                          {c.cluster_id}
-                          {c.already_registered && (
-                            <span className="ml-2 text-[10px] text-zinc-500">
-                              already registered
-                            </span>
-                          )}
-                          {c.is_internal && !c.already_registered && (
-                            <span
-                              className="ml-2 px-1.5 py-0.5 border border-sky-500/40 bg-sky-500/10 text-sky-300 text-[10px]"
-                              title="DBOps 플랫폼 자체의 캐시 DB입니다 — 모니터링 대상으로 등록할 필요가 없어 자동 선택에서 제외했습니다."
+                        <tr className="bg-zinc-900/50">
+                          <td colSpan={7} className="px-3 py-1.5">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`w-2 h-2 rounded-full flex-shrink-0 ${meta.accent}`}
+                              />
+                              <span className="text-[11px] uppercase tracking-wider text-zinc-400 font-medium">
+                                {meta.label}
+                              </span>
+                              <span className="text-[10px] text-zinc-600">
+                                {items.length}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                        {items.map((c) => (
+                          <tr
+                            key={`${c.region}:${c.cluster_id}`}
+                            className={`hover:bg-zinc-900/40 ${
+                              c.already_registered ? "opacity-50" : ""
+                            }`}
+                          >
+                            <td className="px-3 py-2 text-center">
+                              <input
+                                type="checkbox"
+                                checked={
+                                  selectedIds.has(c.cluster_id) &&
+                                  !c.already_registered
+                                }
+                                disabled={c.already_registered}
+                                onChange={() => toggleSelect(c.cluster_id)}
+                                className="accent-amber-500"
+                              />
+                            </td>
+                            <td className="px-3 py-2 font-mono text-xs text-zinc-100">
+                              {c.cluster_id}
+                              {c.already_registered && (
+                                <span className="ml-2 text-[10px] text-zinc-500">
+                                  already registered
+                                </span>
+                              )}
+                              {c.is_internal && !c.already_registered && (
+                                <span
+                                  className="ml-2 px-1.5 py-0.5 border border-sky-500/40 bg-sky-500/10 text-sky-300 text-[10px]"
+                                  title="DBOps 플랫폼 자체의 캐시 DB입니다 — 모니터링 대상으로 등록할 필요가 없어 자동 선택에서 제외했습니다."
+                                >
+                                  DBOps 내부
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-xs">
+                              <div className="text-zinc-300">{c.engine}</div>
+                              <div className="text-[10px] text-zinc-500 font-mono">
+                                {c.engine_version}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-xs font-mono text-zinc-400">
+                              {c.region}
+                            </td>
+                            <td
+                              className={`px-3 py-2 text-xs ${
+                                STATUS_STYLES[c.status] || "text-zinc-500"
+                              }`}
                             >
-                              DBOps 내부
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-xs">
-                          <div className="text-zinc-300">{c.engine}</div>
-                          <div className="text-[10px] text-zinc-500 font-mono">
-                            {c.engine_version}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-xs font-mono text-zinc-400">
-                          {c.region}
-                        </td>
-                        <td
-                          className={`px-3 py-2 text-xs ${
-                            STATUS_STYLES[c.status] || "text-zinc-500"
-                          }`}
-                        >
-                          {c.status || "—"}
-                        </td>
-                        <td className="px-3 py-2 text-[10px] text-zinc-500 font-mono truncate max-w-xs">
-                          {c.endpoint || "—"}
-                        </td>
-                        <td className="px-3 py-2 text-[10px]">
-                          <SecretSourceBadge
-                            source={c.secret_source}
-                            hasArn={!!c.secret_arn}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
+                              {c.status || "—"}
+                            </td>
+                            <td className="px-3 py-2 text-[10px] text-zinc-500 font-mono truncate max-w-xs">
+                              {c.endpoint || "—"}
+                            </td>
+                            <td className="px-3 py-2 text-[10px]">
+                              <SecretSourceBadge
+                                source={c.secret_source}
+                                hasArn={!!c.secret_arn}
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    ));
+                  })()}
                 </table>
               </div>
             )}
