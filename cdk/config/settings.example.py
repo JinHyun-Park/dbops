@@ -22,6 +22,13 @@ class Settings:
     CACHE_DB_MIN_ACU = 0.5
     CACHE_DB_MAX_ACU = 4
 
+    # Archive bucket (S3 Tables / Iceberg + reports) retention. Objects always
+    # tier down to cheaper storage (IA → Glacier Instant Retrieval → Deep
+    # Archive). Set to a positive number of days to EXPIRE (delete) archived
+    # objects after that age for your org's retention policy; 0 = keep forever
+    # (default — never auto-delete the audit archive).
+    ARCHIVE_RETENTION_DAYS = 0
+
     # Frontend deep-link base URL used by alert dispatchers (Slack button,
     # PagerDuty links). Fill in your CloudFront domain after the first
     # frontend stack deploy — leave empty to disable the deep-link.

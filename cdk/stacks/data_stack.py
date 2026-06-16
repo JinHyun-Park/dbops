@@ -80,11 +80,48 @@ class DataStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
+        # Archive bucket (S3 Tables / Iceberg + report exports). Without a
+        # lifecycle it grows unbounded — old archived metrics/reports are rarely
+        # read, so tier them down to cheaper storage automatically. Retention
+        # (object expiration) is OPT-IN per org via ARCHIVE_RETENTION_DAYS
+        # (default 0 = keep forever — never delete a deployer's audit archive by
+        # surprise); transitions always run (pure cost savings, no data loss).
+        _retention_days = getattr(Settings, "ARCHIVE_RETENTION_DAYS", 0)
         self.archive_bucket = s3.Bucket(
             self, "ArchiveBucket",
             bucket_name=f"dbops-{Settings.ENV}-archive-{Settings.ACCOUNT_ID}",
             removal_policy=cdk.RemovalPolicy.DESTROY,
             auto_delete_objects=True,
+            lifecycle_rules=[
+                s3.LifecycleRule(
+                    id="archive-tiering",
+                    enabled=True,
+                    transitions=[
+                        s3.Transition(
+                            storage_class=s3.StorageClass.INFREQUENT_ACCESS,
+                            transition_after=cdk.Duration.days(30),
+                        ),
+                        # Glacier Instant Retrieval keeps mid-term data queryable
+                        # (Athena / S3 Tables) at ~Glacier cost.
+                        s3.Transition(
+                            storage_class=s3.StorageClass.GLACIER_INSTANT_RETRIEVAL,
+                            transition_after=cdk.Duration.days(90),
+                        ),
+                        s3.Transition(
+                            storage_class=s3.StorageClass.DEEP_ARCHIVE,
+                            transition_after=cdk.Duration.days(365),
+                        ),
+                    ],
+                    # Reclaim storage from failed multipart uploads.
+                    abort_incomplete_multipart_upload_after=cdk.Duration.days(7),
+                    # Per-org retention: only expire when explicitly configured.
+                    expiration=(
+                        cdk.Duration.days(_retention_days)
+                        if _retention_days and _retention_days > 0
+                        else None
+                    ),
+                ),
+            ],
         )
 
         # Schema migrator — runs all schema_v*.sql on stack create/update via Custom Resource.
