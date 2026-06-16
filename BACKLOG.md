@@ -308,10 +308,21 @@ by account/region. Delivered across 5 sequenced specs:
   smoothed lower-bound (sub-minute bursts invisible). Capacity (RCU/WCU) only —
   storage/backup/stream/replication excluded. Cedar + parity updated.
 
+- ~~**Cross-account ETL collection**~~ ✅ **shipped** (2026-06-16, commits
+  `fbac4d2` + `5c62f8a`): the ETL collector now assumes each registry row's
+  `spoke_role_arn` per-cluster (`_session_for`, mirrors dashboard/MCP) so RDS /
+  PI / CloudWatch / RDS-Data TARGET reads run in the cluster's OWN account,
+  cache writes stay in the hub; clusters with no spoke role keep byte-identical
+  local behaviour. Covers ALL engines (relational + DynamoDB + DocumentDB),
+  not just new ones. Also resolved the platform-wide trust mismatch: the spoke
+  template now trusts the hub **account** (each role still gated by its own
+  `sts:AssumeRole` identity policy) so direct-assume works for every path
+  (dashboard/MCP/api/ETL). Unit + CDK-synth + adversarial-review verified;
+  **live deferred** — no real spoke account registered to assume against.
+
 **Still future (separate):** RDS non-Aurora (MySQL/PG/MariaDB) storage rightsize
-(`AllocatedStorage` vs used); cross-account ETL for new-engine resources (ETL
-`get_client` is local-account today). **Out of scope:** Redshift / OpenSearch /
-RDS Custom — different operational shapes.
+(`AllocatedStorage` vs used; `_check_storage_rightsize` is a no-op scaffold today).
+**Out of scope:** Redshift / OpenSearch / RDS Custom — different operational shapes.
 
 ---
 
