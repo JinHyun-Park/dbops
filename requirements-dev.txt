@@ -2,7 +2,7 @@
 # Production Lambda deployments do NOT pick these up (each Lambda's own
 # requirements.txt is what gets packaged).
 
-pytest>=8.0,<9
+pytest>=9.1.0,<10
 pytest-cov>=5,<7
 
 # CDK synth tests
