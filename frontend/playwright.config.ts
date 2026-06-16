@@ -19,10 +19,18 @@ if (fs.existsSync(envFile)) {
 // hit-tested ("element intercepts pointer events" fails loudly), so these
 // specs are the regression net for exactly that.
 //
-// Target URL: DBOPS_E2E_URL (defaults to the dev CloudFront distribution).
+// Target URL: DBOPS_E2E_URL — your deployed frontend's CloudFront URL.
+// Required, with no baked-in default, so a public checkout never points the
+// suite at someone else's distribution. Set it in frontend/.env.e2e
+// (gitignored) for local runs or as a CI secret.
 // Auth: see e2e/auth.setup.ts — env credentials or a cached storage state.
-const BASE_URL =
-  process.env.DBOPS_E2E_URL || "https://dm1xo7omariq4.cloudfront.net";
+const BASE_URL = process.env.DBOPS_E2E_URL;
+if (!BASE_URL) {
+  throw new Error(
+    "DBOPS_E2E_URL is not set — point it at your deployed frontend " +
+      "(frontend/.env.e2e or a CI secret) before running the E2E suite.",
+  );
+}
 
 export default defineConfig({
   testDir: "./e2e",

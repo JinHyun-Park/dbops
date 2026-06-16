@@ -322,8 +322,26 @@ RDS Custom — different operational shapes.
 - Audit log visual timeline (current is text table).
 - PDF / markdown runbook export for resolved incidents.
 - Inbound webhook from Datadog / PagerDuty incidents to auto-start a chat session.
-- Per-org retention policy + archival to S3 Glacier.
+- Per-org retention policy + archival to S3 Glacier ✅ (archive bucket lifecycle: IA 30d → Glacier Instant Retrieval 90d → Deep Archive 365d, optional `ARCHIVE_RETENTION_DAYS` expiry; verified live 2026-06-16).
 - CDN cache tuning for `/config.json` (currently no-store).
+
+### Pre-public hardening (gate before flipping the repo public)
+
+Done (2026-06-16):
+
+- ✅ Secret scan of full git history (regex sweep over all blobs) — clean; only matches are code assigning from assume-role creds + a test fixture. `e2e/.auth/state.json` confirmed gitignored/untracked (no auth-state leak).
+- ✅ Playwright config no longer ships a baked-in CloudFront URL — `DBOPS_E2E_URL` is now required and throws a clear error if unset (verified both paths).
+- ✅ `npm audit` (frontend): js-cookie (high) → 3.0.8 and js-yaml (moderate) → 4.2.0 fixed via `npm audit fix` (lockfile-only, no `package.json`/Next change); build verified green.
+- ✅ `pip-audit` over CDK + agent + MCP + data-pipeline requirements — no known vulnerabilities.
+- ✅ Dependabot config added (`.github/dependabot.yml`) — weekly grouped minor/patch PRs for npm, pip (all manifests), and GitHub Actions.
+
+Remaining (do at actual flip time):
+
+- `gitleaks` proper history scan (the regex sweep above is a good proxy; run the real tool before the flip for entropy/rule coverage).
+- postcss (moderate) lives under Next's bundled toolchain — `npm audit fix --force` would downgrade Next 16 → 9 (catastrophic). Real fix is a Next minor bump to a patched 16.x; build-time CSS-stringify only, so runtime exposure on a static export is negligible. Defer to a deliberate Next bump.
+- `cdk-nag` aspect on the CDK app + resolve/justify findings (code change + synth).
+- Enable GitHub secret scanning + CodeQL after the repo is public.
+- Steering docs say "Next.js 15" but the lockfile resolves Next 16.2.6 — reconcile the docs.
 
 ---
 

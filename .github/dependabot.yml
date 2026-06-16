@@ -1,0 +1,38 @@
+# Dependabot keeps dependencies patched automatically. Minor/patch bumps are
+# grouped into a single weekly PR per ecosystem to keep review noise low;
+# major bumps still open individually so they get deliberate review.
+version: 2
+updates:
+  # Frontend (Next.js static export) npm dependencies.
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Python dependencies across CDK, the agent, every MCP server, and every
+  # data-pipeline Lambda. Globs pick up nested per-service requirements files.
+  - package-ecosystem: "pip"
+    directories:
+      - "/"
+      - "/cdk"
+      - "/agent"
+      - "/mcp-servers"
+      - "/mcp-servers/**"
+      - "/data-pipeline/**"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      pip-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # GitHub Actions pinned in the CI / E2E workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
