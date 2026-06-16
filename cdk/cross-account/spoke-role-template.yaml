@@ -5,22 +5,26 @@ Parameters:
   HubAccountId:
     Type: String
     Description: AWS Account ID where DBOps platform is deployed
-  HubRoleName:
-    Type: String
-    Default: dbops-dev-hub-role
-    Description: Name of the hub role in the central account
 
 Resources:
   DBOpsSpokeRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: dbops-spoke-role
+      # Trust the whole hub account. The DBOps platform's Lambda roles
+      # (dashboard / MCP / ETL collector / cluster-API) each assume this spoke
+      # role DIRECTLY. Trusting the account root does NOT by itself grant
+      # access: every hub role is individually scoped by its OWN sts:AssumeRole
+      # IAM policy (resource = this spoke role ARN), so the trust policy AND the
+      # caller's identity policy must BOTH allow. This is the standard AWS
+      # hub-spoke pattern — the boundary is the hub account plus each role's
+      # identity policy, not a single named role.
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub "arn:aws:iam::${HubAccountId}:role/${HubRoleName}"
+              AWS: !Sub "arn:aws:iam::${HubAccountId}:root"
             Action: "sts:AssumeRole"
       Policies:
         - PolicyName: DBOpsReadOnly

@@ -5,16 +5,21 @@ DBOps uses a Hub-Spoke IAM role pattern for cross-account Aurora cluster managem
 ## Architecture
 
 ```
-Central Account (Hub)          Target Account (Spoke)
-┌──────────────────┐           ┌───────────────────────┐
-│ MCP Server Lambda│           │ dbops-spoke-role      │
-│       │          │           │                       │
-│       ▼          │           │ Trust: Hub Account    │
-│ dbops-hub-role   │──assume──▶│ Read: RDS, PI, CW     │
-│                  │  role     │ Write: RDS Modify      │
-│                  │           │  (tagged resources)    │
-└──────────────────┘           └───────────────────────┘
+Central Account (Hub)            Target Account (Spoke)
+┌────────────────────────┐       ┌───────────────────────┐
+│ Platform Lambda roles:  │       │ dbops-spoke-role      │
+│  dashboard / MCP /      │       │                       │
+│  ETL collector /        │──────▶│ Trust: Hub Account    │
+│  cluster-API            │assume │ Read: RDS, PI, CW     │
+│ (each scoped by its own │ role  │ Write: RDS Modify      │
+│  sts:AssumeRole policy) │       │  (tagged resources)    │
+└────────────────────────┘       └───────────────────────┘
 ```
+
+Each platform Lambda role assumes the spoke role **directly**. Access requires
+BOTH the spoke role's trust policy (trusts the hub account) AND the calling
+role's own identity policy (`sts:AssumeRole` on this spoke role ARN) — standard
+AWS hub-spoke.
 
 ## Setup Steps
 
@@ -26,7 +31,6 @@ aws cloudformation deploy \
   --stack-name dbops-spoke-role \
   --parameter-overrides \
     HubAccountId=<YOUR_HUB_ACCOUNT_ID> \
-    HubRoleName=dbops-dev-hub-role \
   --capabilities CAPABILITY_NAMED_IAM \
   --region <TARGET_REGION>
 ```
@@ -59,7 +63,10 @@ curl -X POST https://<api-url>/api/clusters \
 
 ## Security Notes
 
-- Spoke role only trusts the specific hub role, not the entire hub account
+- The spoke role trusts the hub **account**; access still requires the calling
+  hub role's own `sts:AssumeRole` identity policy (trust + identity must both
+  allow). Each platform role is scoped to exactly this spoke role ARN, so the
+  account-root trust does not widen who can actually assume it.
 - Write operations (ModifyDBCluster) require the `ManagedBy=dbops` tag on the cluster
 - Read-only operations work on all RDS resources in the account
 - SecretsManager access is limited to RDS-managed secrets
