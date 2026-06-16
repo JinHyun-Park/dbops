@@ -41,7 +41,7 @@ def _noop_cache_execute(sql, params):
 
 _COMMON_KWARGS = dict(
     get_client=_fake_get_client,
-    rds_data=MagicMock(),
+    cache_rds_data=MagicMock(),
     cache_execute=_noop_cache_execute,
     cache_cluster_arn="arn:aws:rds:ap-northeast-2:123:cluster:cache",
     cache_secret_arn="arn:aws:secretsmanager:ap-northeast-2:123:secret:cache",

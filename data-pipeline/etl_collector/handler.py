@@ -28,6 +28,33 @@ from collectors.pi_collector import collect_pi_metrics
 from collectors.stats_collector import collect_query_stats
 
 
+def _session_for(region, role_arn=""):
+    """A boto3 Session for a registered cluster's account+region.
+
+    Registered clusters can live in spoke accounts; each registry row carries a
+    ``spoke_role_arn`` (empty for same-account deploys). With a role we assume
+    it (hub-spoke chaining) so every RDS / PI / CloudWatch / RDS-Data call for
+    that cluster runs in the cluster's OWN account — mirroring api ``_session_for``.
+    With no role this is a transparent local session, so single-account
+    behaviour is unchanged. Creds are scoped to one collection run (900s, well
+    over the 5-min ETL window); sessions are cached PER INVOCATION only (see
+    ``lambda_handler``) so warm containers never reuse expired credentials."""
+    region = region or os.environ.get("AWS_REGION", "")
+    if not role_arn:
+        return boto3.session.Session(region_name=region or None)
+    creds = boto3.client("sts").assume_role(
+        RoleArn=role_arn,
+        RoleSessionName="dbops-etl",
+        DurationSeconds=900,
+    )["Credentials"]
+    return boto3.session.Session(
+        region_name=region or None,
+        aws_access_key_id=creds["AccessKeyId"],
+        aws_secret_access_key=creds["SecretAccessKey"],
+        aws_session_token=creds["SessionToken"],
+    )
+
+
 def _scan_all(table):
     items = []
     kwargs = {}
@@ -39,7 +66,7 @@ def _scan_all(table):
         kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
 
 
-def _collect_one(resource, get_client, rds_data, cache_execute,
+def _collect_one(resource, get_client, cache_rds_data, cache_execute,
                  cache_cluster_arn, cache_secret_arn, cache_db_name, run_ts):
     """Collect metrics/findings for a single registered resource.
 
@@ -73,7 +100,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
             print(f"[{cluster_id}] dynamodb error: {e}")
         try:
             result["dynamodb_findings"] = collect_dynamodb_findings(
-                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
                 snapshot_ts=run_ts,
             )
         except Exception as e:
@@ -96,7 +123,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
             print(f"[{cluster_id}] documentdb error: {e}")
         try:
             result["documentdb_findings"] = collect_docdb_findings(
-                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
                 snapshot_ts=run_ts,
             )
         except Exception as e:
@@ -114,6 +141,11 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
     rds_client = get_client("rds", region)
     pi_client = get_client("pi", region)
     cw_client = get_client("cloudwatch", region)
+    # Target-DB SQL (pg_stat_*, information_schema, SHOW ...) over the RDS Data
+    # API must run in the cluster's OWN account, so it uses the spoke-bound
+    # client from get_client. Cache writes keep using cache_rds_data, which is
+    # always the hub account where the Aurora PG cache lives.
+    target_rds_data = get_client("rds-data", region)
 
     # 이 사이클의 모든 finding collector(health/cost/param_fitness)가
     # 공유하는 단일 snapshot_time. 대시보드 _health_findings는
@@ -148,7 +180,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
     if target_cluster_arn and target_secret_arn and "postgresql" in engine:
         try:
             result["stats"] = collect_query_stats(
-                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
             )
         except Exception as e:
             result["stats_error"] = str(e)
@@ -156,7 +188,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
 
         try:
             result["table_stats"] = collect_pg_table_stats(
-                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
             )
         except Exception as e:
             result["table_stats_error"] = str(e)
@@ -164,7 +196,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
 
         try:
             result["activity"] = collect_pg_activity(
-                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
             )
         except Exception as e:
             result["activity_error"] = str(e)
@@ -172,7 +204,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
 
         try:
             result["locks"] = collect_pg_locks(
-                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
             )
         except Exception as e:
             result["locks_error"] = str(e)
@@ -180,7 +212,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
 
         try:
             result["health"] = collect_pg_health_checks(
-                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
                 snapshot_ts=run_ts,
             )
         except Exception as e:
@@ -188,7 +220,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
             print(f"[{cluster_id}] health error: {e}")
         try:
             result["param_fitness"] = collect_param_fitness(
-                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
                 snapshot_ts=run_ts,
             )
         except Exception as e:
@@ -196,7 +228,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
             print(f"[{cluster_id}] param fitness error: {e}")
         try:
             result["capacity_forecast"] = collect_capacity_forecast(
-                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
                 snapshot_ts=run_ts, engine=engine,
             )
         except Exception as e:
@@ -204,7 +236,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
             print(f"[{cluster_id}] capacity forecast error: {e}")
         try:
             result["extensions"] = collect_pg_extensions(
-                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
             )
         except Exception as e:
             result["extensions_error"] = str(e)
@@ -213,28 +245,28 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
         # MySQL counterparts — same cache tables, MySQL-flavored source queries.
         try:
             result["stats"] = collect_mysql_query_stats(
-                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
             )
         except Exception as e:
             result["stats_error"] = str(e)
             print(f"[{cluster_id}] mysql stats error: {e}")
         try:
             result["table_stats"] = collect_mysql_table_stats(
-                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
             )
         except Exception as e:
             result["table_stats_error"] = str(e)
             print(f"[{cluster_id}] mysql table_stats error: {e}")
         try:
             result["locks"] = collect_mysql_locks(
-                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
             )
         except Exception as e:
             result["locks_error"] = str(e)
             print(f"[{cluster_id}] mysql locks error: {e}")
         try:
             result["activity"] = collect_mysql_activity(
-                rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
             )
         except Exception as e:
             result["activity_error"] = str(e)
@@ -243,7 +275,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
         # locks 뒤에 둔다. capacity_forecast는 엔진 무관(metric_snapshots 캐시).
         try:
             result["param_fitness"] = collect_mysql_param_fitness(
-                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
                 snapshot_ts=run_ts,
             )
         except Exception as e:
@@ -251,7 +283,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
             print(f"[{cluster_id}] mysql param fitness error: {e}")
         try:
             result["capacity_forecast"] = collect_capacity_forecast(
-                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
                 snapshot_ts=run_ts, engine=engine,
             )
         except Exception as e:
@@ -264,7 +296,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
     # metric_snapshots. Time-gated to once per hour per cluster.
     try:
         result["baselines"] = collect_pg_baselines(
-            rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+            cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
         )
     except Exception as e:
         result["baselines_error"] = str(e)
@@ -272,7 +304,7 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
 
     try:
         result["cost"] = collect_cost_findings(
-            rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+            cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
             snapshot_ts=run_ts,
         )
     except Exception as e:
@@ -285,7 +317,11 @@ def _collect_one(resource, get_client, rds_data, cache_execute,
 def lambda_handler(event, context):
     dynamodb = boto3.resource("dynamodb")
     clusters_table = dynamodb.Table(os.environ["CLUSTERS_TABLE"])
-    rds_data = boto3.client("rds-data")
+    # cache_rds_data always targets the hub-account Aurora PG cache where every
+    # collector WRITES its results. Per-cluster TARGET reads use a spoke-bound
+    # client built below (get_client), so cross-account clusters are collected
+    # in their own account.
+    cache_rds_data = boto3.client("rds-data")
 
     cache_cluster_arn = os.environ["CACHE_DB_CLUSTER_ARN"]
     cache_secret_arn = os.environ["CACHE_DB_SECRET_ARN"]
@@ -308,27 +344,39 @@ def lambda_handler(event, context):
                 sql_params.append({"name": key, "value": {"doubleValue": value}})
             else:
                 sql_params.append({"name": key, "value": {"stringValue": str(value)}})
-        rds_data.execute_statement(
+        cache_rds_data.execute_statement(
             resourceArn=cache_cluster_arn, secretArn=cache_secret_arn, database=cache_db_name,
             sql=f"/* source=dbops-etl */ {sql}", parameters=sql_params,
         )
 
+    # Per-INVOCATION caches: a spoke role is assumed at most once per (role, region)
+    # and reused across that cluster's service clients, but never carried across
+    # invocations (assumed-role creds expire; warm containers must re-assume).
+    session_cache = {}
     client_cache = {}
 
-    def get_client(service, region):
-        key = (service, region)
-        if key not in client_cache:
-            client_cache[key] = boto3.client(service, region_name=region)
-        return client_cache[key]
+    def make_get_client(role_arn):
+        """get_client(service, region) bound to one cluster's account. With no
+        spoke role this is a plain local client — identical to the previous
+        single-account behaviour."""
+        def get_client(service, region):
+            sk = (role_arn, region)
+            if sk not in session_cache:
+                session_cache[sk] = _session_for(region, role_arn)
+            ck = (role_arn, region, service)
+            if ck not in client_cache:
+                client_cache[ck] = session_cache[sk].client(service)
+            return client_cache[ck]
+        return get_client
 
     clusters = _scan_all(clusters_table)
-    results = [
-        _collect_one(
-            resource, get_client, rds_data, cache_execute,
+    results = []
+    for resource in clusters:
+        get_client = make_get_client(resource.get("spoke_role_arn", ""))
+        results.append(_collect_one(
+            resource, get_client, cache_rds_data, cache_execute,
             cache_cluster_arn, cache_secret_arn, cache_db_name,
             datetime.now(timezone.utc).isoformat(),
-        )
-        for resource in clusters
-    ]
+        ))
 
     return {"statusCode": 200, "body": json.dumps({"collected": len(results), "results": results}, default=str)}

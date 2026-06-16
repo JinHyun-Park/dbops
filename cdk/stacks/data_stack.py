@@ -182,6 +182,15 @@ class DataStack(cdk.Stack):
         self.cache_db.grant_data_api_access(self.etl_lambda)
         foundation.clusters_table.grant_read_data(self.etl_lambda)
         foundation.hub_role.grant(self.etl_lambda.role, "sts:AssumeRole")
+        # Cross-account metric collection: assume each registered cluster's spoke
+        # role DIRECTLY (same pattern as the dashboard/MCP _session_for) so RDS /
+        # PI / CloudWatch / RDS-Data reads run in the cluster's OWN account.
+        # Scoped to the documented spoke role name; same-account clusters carry
+        # no spoke_role_arn and skip AssumeRole entirely (behaviour unchanged).
+        self.etl_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["sts:AssumeRole"],
+            resources=["arn:aws:iam::*:role/dbops-spoke-role"],
+        ))
 
         self.etl_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=["rds:DescribeDBClusters", "rds:DescribeDBInstances", "rds:ListTagsForResource",
