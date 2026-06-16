@@ -11,7 +11,7 @@ constructs>=10,<11
 aws-cdk.aws-bedrock-agentcore-alpha
 
 # Required by handler modules under test (they import boto3 at module top)
-boto3>=1.35
+boto3>=1.43.30
 
 # Linting / formatting
 ruff>=0.6,<1
