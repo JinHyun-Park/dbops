@@ -4,4 +4,4 @@ boto3>=1.43.30
 psycopg2-binary>=2.9.12
 pytest>=9.1.0
 pytest-asyncio>=1.4.0
-moto[all]>=5.0.0
+moto[all]>=5.2.2
