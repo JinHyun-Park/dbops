@@ -348,3 +348,48 @@ def test_discover_docdb_path_excludes_non_docdb(mock_session_for, _mock_secret):
     assert not any(c.get("engine") == "docdb" and c["cluster_id"] == "prod-pg" for c in out), (
         "Aurora cluster leaked into discovery as a fake 'docdb' entry"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — discovery flags DBOps's own DynamoDB control-plane tables internal
+# ---------------------------------------------------------------------------
+
+@patch.object(handler, "_list_clusters_in_region")
+@patch.object(handler, "_cache_db_env")
+def test_discover_flags_dbops_own_dynamodb_internal(mock_cache_env, mock_list, monkeypatch):
+    """DBOps's own DynamoDB control-plane tables (clusters / sessions /
+    approvals, sharing the dbops-<env>- prefix of CLUSTERS_TABLE) must be
+    flagged is_internal — otherwise list_tables surfaces the platform's own
+    tables (even the registry backing this call) as monitorable databases.
+    Other tables (other projects', demo data) stay discoverable."""
+    monkeypatch.setenv("CLUSTERS_TABLE", "dbops-dev-clusters")
+    mock_cache_env.return_value = (
+        "arn:aws:rds:ap-northeast-2:123:cluster:dbops-dev-data-cachedb",
+        "sec",
+        "db",
+    )
+    mock_list.return_value = [
+        {"cluster_id": "ddb-a", "engine": "dynamodb", "resource_name": "dbops-dev-clusters"},
+        {"cluster_id": "ddb-b", "engine": "dynamodb", "resource_name": "dbops-dev-sessions"},
+        {"cluster_id": "ddb-c", "engine": "dynamodb", "resource_name": "dbops-dev-approvals"},
+        {"cluster_id": "ddb-d", "engine": "dynamodb", "resource_name": "demo-daangn-products"},
+        {"cluster_id": "prod-pg", "engine": "aurora-postgresql", "resource_name": ""},
+    ]
+
+    table = _mock_table()
+    table.scan.return_value = {"Items": []}  # no existing registrations
+
+    resp = handler._handle_discover(
+        table, {"regions": ["ap-northeast-2"], "account_id": "123"}
+    )
+    assert resp["statusCode"] == 200
+    rows = json.loads(resp["body"])["clusters"]
+    by_key = {(r.get("resource_name") or r["cluster_id"]): r for r in rows}
+
+    # DBOps's own tables → internal (de-selected + badged)
+    assert by_key["dbops-dev-clusters"]["is_internal"] is True
+    assert by_key["dbops-dev-sessions"]["is_internal"] is True
+    assert by_key["dbops-dev-approvals"]["is_internal"] is True
+    # A real user/demo DynamoDB table and an Aurora cluster stay discoverable
+    assert by_key["demo-daangn-products"]["is_internal"] is False
+    assert by_key["prod-pg"]["is_internal"] is False

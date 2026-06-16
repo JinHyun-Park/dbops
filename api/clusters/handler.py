@@ -563,6 +563,19 @@ def _handle_discover(table, body: dict):
     # 모니터링). UI가 자동 선택에서 빼고 배지를 달 수 있도록 마킹만 한다.
     cache_arn, _, _ = _cache_db_env()
     cache_cluster_id = cache_arn.rsplit(":", 1)[-1] if cache_arn else ""
+    # DBOps's own DynamoDB control-plane tables (the cluster registry itself,
+    # plus sessions / approvals / alert-dedup) all share the dbops-<env>- name
+    # prefix — derive it from the registry table name. Without this,
+    # list_tables surfaces the platform's own tables (even the registry backing
+    # THIS very call) as monitorable databases. Flag them internal like the
+    # cache DB so the UI de-selects + badges them instead of listing them as
+    # candidates. Other tables (incl. other projects') stay discoverable.
+    _clusters_table = os.environ.get("CLUSTERS_TABLE", "")
+    dbops_ddb_prefix = (
+        _clusters_table[: -len("clusters")]
+        if _clusters_table.endswith("clusters")
+        else ""
+    )
 
     for r in regions:
         try:
@@ -570,9 +583,15 @@ def _handle_discover(table, body: dict):
             for row in rows:
                 row["already_registered"] = row["cluster_id"] in existing_ids
                 row["account_id"] = account_id
-                row["is_internal"] = bool(
+                is_cache = bool(
                     cache_cluster_id and row["cluster_id"] == cache_cluster_id
                 )
+                is_dbops_ddb = bool(
+                    row.get("engine") == "dynamodb"
+                    and dbops_ddb_prefix
+                    and (row.get("resource_name") or "").startswith(dbops_ddb_prefix)
+                )
+                row["is_internal"] = is_cache or is_dbops_ddb
             all_clusters.extend(rows)
         except ClientError as e:
             errors_by_region[r] = e.response.get("Error", {}).get("Code", str(e))
