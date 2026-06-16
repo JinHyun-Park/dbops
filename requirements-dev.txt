@@ -14,7 +14,7 @@ aws-cdk.aws-bedrock-agentcore-alpha
 boto3>=1.35
 
 # Linting / formatting
-ruff>=0.6,<1
+ruff>=0.15.17,<1
 
 # Pre-commit framework (local + CI)
 pre-commit>=3.7,<5
