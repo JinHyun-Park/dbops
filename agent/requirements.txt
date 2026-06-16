@@ -4,4 +4,4 @@ mcp>=1.0.0
 # server.py SigV4-signs requests to the AWS MCP Server (doc tools) with
 # botocore directly — declare boto3 explicitly so the runtime never relies on
 # it only being pulled transitively via strands-agents.
-boto3>=1.35.0
+boto3>=1.43.30
