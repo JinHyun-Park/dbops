@@ -373,6 +373,14 @@ def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = 
         docdb_paginator = docdb.get_paginator("describe_db_clusters")
         for docdb_page in docdb_paginator.paginate():
             for c in docdb_page.get("DBClusters", []):
+                # The docdb client shares the RDS control plane, so this call
+                # returns EVERY cluster in the account (Aurora / RDS / Neptune /
+                # DocumentDB) — not just DocumentDB. Without this guard, every
+                # Aurora cluster already found via the rds paginator above is
+                # added a second time mislabeled as "docdb". Keep only real
+                # DocumentDB clusters.
+                if c.get("Engine") != "docdb":
+                    continue
                 cid = c.get("DBClusterIdentifier", "")
                 out.append({
                     "cluster_id": cid,

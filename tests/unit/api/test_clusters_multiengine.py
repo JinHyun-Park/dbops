@@ -288,3 +288,63 @@ def test_bulk_register_dynamodb_slug_matches_discovery(mock_ddb_for, mock_rds_fo
     assert old_discovery_id != expected_id, (
         "Regression: empty-account_id slug should differ from real-account_id slug"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 5 — discovery must not duplicate Aurora as fake DocumentDB
+# ---------------------------------------------------------------------------
+
+def _paginator(pages_key, items):
+    pag = MagicMock()
+    pag.paginate.return_value = [{pages_key: items}]
+    return pag
+
+
+@patch.object(handler, "_convention_secret_for", return_value="")
+@patch.object(handler, "_session_for")
+def test_discover_docdb_path_excludes_non_docdb(mock_session_for, _mock_secret):
+    """Regression: the docdb client shares the RDS control plane, so
+    docdb.describe_db_clusters returns Aurora / RDS / Neptune clusters too — not
+    just DocumentDB. _list_clusters_in_region must keep only Engine=='docdb' from
+    the docdb path; otherwise every Aurora cluster (already found via the rds
+    paginator) is duplicated and mislabeled 'docdb', flooding discovery."""
+    aurora = {
+        "DBClusterIdentifier": "prod-pg",
+        "DBClusterArn": "arn:aws:rds:ap-northeast-2:123456789012:cluster:prod-pg",
+        "Engine": "aurora-postgresql",
+        "EngineVersion": "15.4",
+        "Status": "available",
+        "DatabaseName": "mydb",
+    }
+    real_docdb = {
+        "DBClusterIdentifier": "my-docdb",
+        "Engine": "docdb",
+        "EngineVersion": "5.0.0",
+        "Status": "available",
+    }
+
+    rds_client = MagicMock()
+    rds_client.get_paginator.return_value = _paginator("DBClusters", [aurora])
+    dynamo_client = MagicMock()
+    dynamo_client.get_paginator.return_value = _paginator("TableNames", [])
+    # The docdb endpoint echoes the Aurora cluster back alongside the real one.
+    docdb_client = MagicMock()
+    docdb_client.get_paginator.return_value = _paginator("DBClusters", [aurora, real_docdb])
+
+    clients = {"rds": rds_client, "dynamodb": dynamo_client, "docdb": docdb_client}
+    session = MagicMock()
+    session.client.side_effect = lambda svc, *a, **k: clients.get(svc, MagicMock())
+    mock_session_for.return_value = session
+
+    out = handler._list_clusters_in_region("ap-northeast-2", account_id="123456789012")
+
+    aurora_entries = [c for c in out if c["engine"].startswith("aurora")]
+    docdb_entries = [c for c in out if c.get("engine") == "docdb"]
+
+    assert len(aurora_entries) == 1, f"Aurora should appear once, got {aurora_entries}"
+    assert len(docdb_entries) == 1, f"only the real DocDB should appear, got {docdb_entries}"
+    assert docdb_entries[0]["cluster_id"] == "my-docdb"
+    # The specific regression: Aurora must NOT be duplicated as a docdb entry.
+    assert not any(c.get("engine") == "docdb" and c["cluster_id"] == "prod-pg" for c in out), (
+        "Aurora cluster leaked into discovery as a fake 'docdb' entry"
+    )
