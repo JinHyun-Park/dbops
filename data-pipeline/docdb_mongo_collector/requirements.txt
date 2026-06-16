@@ -1,1 +1,1 @@
-pymongo>=4
+pymongo>=4.17.0
