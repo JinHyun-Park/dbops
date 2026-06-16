@@ -318,7 +318,11 @@ by account/region. Delivered across 5 sequenced specs:
   template now trusts the hub **account** (each role still gated by its own
   `sts:AssumeRole` identity policy) so direct-assume works for every path
   (dashboard/MCP/api/ETL). Unit + CDK-synth + adversarial-review verified;
-  **live deferred** — no real spoke account registered to assume against.
+  **deployed to dev (`dbops-dev-data`) + live non-regression confirmed** — an
+  ETL Lambda invoke collected all 6 real clusters (Aurora MySQL/PG, DynamoDB×2,
+  DocumentDB) error-free; only the demo placeholder `sample-cluster` shows its
+  usual `DBClusterNotFoundFault` (no real resource). **Spoke-assume path itself
+  is still live-deferred** — no real spoke account registered to assume against.
 
 **Still future (separate):** RDS non-Aurora (MySQL/PG/MariaDB) storage rightsize
 (`AllocatedStorage` vs used; `_check_storage_rightsize` is a no-op scaffold today).
