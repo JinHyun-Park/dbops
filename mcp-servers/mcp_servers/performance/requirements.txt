@@ -1,2 +1,2 @@
 boto3>=1.43.30
-psycopg2-binary>=2.9.0
+psycopg2-binary>=2.9.12
