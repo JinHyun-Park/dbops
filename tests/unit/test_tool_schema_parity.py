@@ -87,10 +87,32 @@ def _parse_handler_tools(server: str) -> set[str]:
     return tools
 
 
-def _parse_cedar_actions(policy_file: str) -> set[str]:
-    """Cedar 정책 파일에서 Action::"name" 토큰 전부 추출."""
+# AgentCore Cedar grants come in two forms (see cdk/policies/README.md):
+#   • target-wide — `action in AgentCore::Action::"__TARGET__"` permits EVERY
+#     tool on the target. This is the LOG_ONLY rollout form all policies use now.
+#   • per-tool    — `AgentCore::Action::"<target>___<tool>"` (THREE underscores)
+#     permits one tool. This is the ENFORCE refinement form (STEP 2).
+_TARGET_WIDE_RE = re.compile(r'action\s+in\s+AgentCore::Action::"__TARGET__"')
+
+
+def _policy_permits_all_tools(policy_file: str) -> bool:
+    """True when the policy grants its whole target — which covers every tool on
+    that target, so no per-tool allowlisting is needed (the LOG_ONLY form)."""
     src = (_CEDAR_ROOT / policy_file).read_text()
-    return set(re.findall(r'Action::"([^"]+)"', src))
+    return bool(_TARGET_WIDE_RE.search(src))
+
+
+def _parse_cedar_actions(policy_file: str) -> set[str]:
+    """Per-tool tool names a policy permits. Extracts the `<tool>` suffix from
+    per-tool `AgentCore::Action::"<target>___<tool>"` grants; the target-wide
+    `__TARGET__` form is handled separately by _policy_permits_all_tools."""
+    src = (_CEDAR_ROOT / policy_file).read_text()
+    tools: set[str] = set()
+    for raw in re.findall(r'Action::"([^"]+)"', src):
+        if raw == "__TARGET__":
+            continue
+        tools.add(raw.rsplit("___", 1)[-1])
+    return tools
 
 
 def test_every_readonly_tool_is_permitted_in_cedar_policy():
@@ -101,11 +123,17 @@ def test_every_readonly_tool_is_permitted_in_cedar_policy():
     (#4에서 get_maintenance_findings; 동시에 explain_plan/get_vacuum_stats/
     recommend_index/diagnose_root_cause 누락도 적발). 새 read-only 툴을
     추가하면 이 테스트가 Cedar 등록을 강제한다.
+
+    두 정책 형식을 모두 지원: target-wide permit(`action in
+    AgentCore::Action::"__TARGET__"`)는 그 타깃의 모든 툴을 덮으므로 통과,
+    per-tool ENFORCE 형식으로 전환되면 그때는 툴별 등록을 강제한다.
     """
     problems = []
     for server, policy_file in sorted(_READONLY_POLICY.items()):
         tools = _parse_handler_tools(server)
         assert tools, f"{server}: 핸들러 툴 파싱 실패"
+        if _policy_permits_all_tools(policy_file):
+            continue  # target-wide permit covers every tool on the target
         permitted = _parse_cedar_actions(policy_file)
         missing = sorted(tools - permitted)
         if missing:
@@ -121,11 +149,17 @@ def test_nosql_write_actions_in_operations_cedar_write_block():
     """The 5 NoSQL write actions (multi-engine #P3.6 Group C) must be in the
     operations Cedar policy — otherwise the Gateway default-DENY silently blocks
     them despite the handler + guard being complete (same failure family as the
-    create_snapshot/restore_cluster + request_approval Explore findings). This
-    asserts presence in the policy file; the approved==true gating is structural
-    in the .cedar source."""
-    src = (_CEDAR_ROOT / "operations_policy.cedar").read_text()
-    actions = set(re.findall(r'Action::"([^"]+)"', src))
+    create_snapshot/restore_cluster + request_approval Explore findings).
+
+    Under the LOG_ONLY rollout the operations policy is a single target-wide
+    permit, which already covers every operations tool (incl. the NoSQL writes)
+    — actual write-gating lives in the tool-level approval_guard, and per-tool
+    Cedar `approved==true` conditions are the ENFORCE/STEP-2 refinement. Once
+    that refinement lands (per-tool grants), this test enforces each required
+    action is present."""
+    if _policy_permits_all_tools("operations_policy.cedar"):
+        return  # target-wide permit covers all operations tools (LOG_ONLY)
+    actions = _parse_cedar_actions("operations_policy.cedar")
     required = {
         "modify_dynamodb_capacity",
         "modify_dynamodb_ttl",
