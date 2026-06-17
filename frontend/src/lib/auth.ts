@@ -92,11 +92,23 @@ export function getAccessToken(): string | null {
 export function setTokens(idToken: string, accessToken: string): void {
   localStorage.setItem("dbops_id_token", idToken);
   localStorage.setItem("dbops_access_token", accessToken);
+  // Notify auth-aware singletons (e.g. the alert-stream WS client) that a fresh
+  // session is available so they can (re)connect. Decoupled via a DOM event to
+  // avoid an import cycle (alert-stream.ts already imports from this module).
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("dbops:auth-login"));
+  }
 }
 
 export function clearTokens(): void {
   localStorage.removeItem("dbops_id_token");
   localStorage.removeItem("dbops_access_token");
+  // On logout/revocation, tell auth-aware singletons to tear down. Without this,
+  // the alert-stream WebSocket (authorized only at $connect) would survive up to
+  // its 2h TTL, so a logged-out user keeps receiving pushed alerts.
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("dbops:auth-logout"));
+  }
 }
 
 // Decode a JWT (no signature verification — exp/iat only).

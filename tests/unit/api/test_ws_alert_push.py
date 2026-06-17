@@ -94,3 +94,15 @@ def test_broadcast_posts_and_prunes_gone(monkeypatch):
     delivered = notify.broadcast({"type": "alert", "cluster_id": "prod-pg"})
     assert delivered == 1  # c1 delivered; c2 Gone → pruned
     table.delete_item.assert_called_once_with(Key={"connection_id": "c2"})
+
+
+# --- drift guard: the two ws_notify.py copies must stay byte-identical ---
+
+def test_ws_notify_copies_are_identical():
+    """broadcast() is copied verbatim into both broadcasting Lambdas (no shared
+    layer). If the copies drift, a fix to one path (e.g. audience filtering)
+    silently skips the other — alerts get scoped but external incidents don't,
+    or vice versa. Pin them equal so a partial edit fails CI."""
+    a = (_ROOT / "api/incident_webhook/ws_notify.py").read_bytes()
+    b = (_ROOT / "data-pipeline/alert_evaluator/ws_notify.py").read_bytes()
+    assert a == b, "ws_notify.py copies drifted — re-sync the two files"
