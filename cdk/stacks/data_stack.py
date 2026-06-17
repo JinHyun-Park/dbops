@@ -317,6 +317,8 @@ class DataStack(cdk.Stack):
         self.cache_db.secret.grant_read(self.alert_evaluator)
         self.cache_db.grant_data_api_access(self.alert_evaluator)
         self.alert_topic.grant_publish(self.alert_evaluator)
+        # Instant in-app push of fired alerts over the WS channel (foundation).
+        foundation.grant_alert_broadcast(self.alert_evaluator)
 
         events.Rule(
             self, "AlertEvaluatorSchedule",

@@ -169,6 +169,19 @@ def lambda_handler(event, context):
     except Exception as e:
         print(f"[incident-webhook] event_log write failed: {type(e).__name__}")
         return _resp(500, {"error": "failed to record incident"})
+    # Best-effort instant in-app push (no-op when the WS channel isn't configured).
+    try:
+        from ws_notify import broadcast
+
+        broadcast({
+            "type": "incident",
+            "source": inc["source"],
+            "cluster_id": inc["cluster_id"],
+            "severity": inc["severity"],
+            "title": inc["title"],
+        })
+    except Exception as e:
+        print(f"[incident-webhook] ws broadcast failed: {type(e).__name__}")
     return _resp(
         200,
         {

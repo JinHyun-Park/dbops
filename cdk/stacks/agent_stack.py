@@ -921,6 +921,8 @@ class AgentStack(cdk.Stack):
         )
         data.cache_db.secret.grant_read(incident_webhook_lambda)
         data.cache_db.grant_data_api_access(incident_webhook_lambda)
+        # Instant in-app push of external incidents over the WS channel.
+        foundation.grant_alert_broadcast(incident_webhook_lambda)
 
         # Self-health endpoint: aggregates Lambda + Aurora + DDB state
         # so /health renders a single-page operational picture of DBOps

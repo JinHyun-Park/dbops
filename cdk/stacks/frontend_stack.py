@@ -103,6 +103,8 @@ function handler(event) {
             "cognitoClientId": foundation.user_pool_client.user_pool_client_id,
             "cognitoUserPoolId": foundation.user_pool.user_pool_id,
             "agentRuntimeArn": agent.runtime.agent_runtime_arn,
+            # WebSocket URL for the in-app alert push channel (scoped alert push).
+            "webSocketUrl": foundation.ws_stage.url,
         }
         _deploy_common = dict(
             destination_bucket=bucket,

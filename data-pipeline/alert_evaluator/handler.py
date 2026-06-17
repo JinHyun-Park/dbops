@@ -430,6 +430,20 @@ def lambda_handler(event, context):
         # Slack / PagerDuty fan-out (RDS-backed subscribers).
         _fanout_managed(q, rule, latest)
 
+        # Best-effort instant in-app push (no-op when the WS channel isn't configured).
+        try:
+            from ws_notify import broadcast
+
+            broadcast({
+                "type": "alert",
+                "source": "dbops-alert-evaluator",
+                "cluster_id": rule["cluster_id"],
+                "severity": "warning",
+                "title": message,
+            })
+        except Exception as e:
+            print(f"[alert-evaluator] ws broadcast failed for rule {rule_id}: {type(e).__name__}")
+
         triggered += 1
 
     return {

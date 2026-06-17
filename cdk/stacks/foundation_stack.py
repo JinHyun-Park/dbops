@@ -1,5 +1,14 @@
 import aws_cdk as cdk
 from aws_cdk import (
+    aws_apigatewayv2 as apigwv2,
+)
+from aws_cdk import (
+    aws_apigatewayv2_authorizers as apigwv2_authorizers,
+)
+from aws_cdk import (
+    aws_apigatewayv2_integrations as apigwv2_integrations,
+)
+from aws_cdk import (
     aws_cognito as cognito,
 )
 from aws_cdk import (
@@ -7,6 +16,9 @@ from aws_cdk import (
 )
 from aws_cdk import (
     aws_iam as iam,
+)
+from aws_cdk import (
+    aws_lambda as lambda_,
 )
 from config.settings import Settings
 from constructs import Construct
@@ -125,5 +137,85 @@ class FoundationStack(cdk.Stack):
             resources=["arn:aws:iam::*:role/dbops-spoke-role"],
         ))
 
+        # ===== In-app alert push (scoped) — WebSocket channel =====
+        # Real-time push of fired alerts / external incidents to connected
+        # operators so they don't wait for the next dashboard poll. Lives in
+        # foundation so data (alert_evaluator), agent (incident_webhook) and
+        # frontend (config.json) can all reference it without a cross-stack cycle.
+        self.ws_connections_table = dynamodb.Table(
+            self, "WsConnections",
+            table_name=f"dbops-{Settings.ENV}-ws-connections",
+            partition_key=dynamodb.Attribute(name="connection_id", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            time_to_live_attribute="ttl",
+            point_in_time_recovery=True,  # cdk-nag AwsSolutions-DDB3
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
+        _ws_env = {"WS_CONNECTIONS_TABLE": self.ws_connections_table.table_name}
+        ws_connect_fn = lambda_.Function(
+            self, "WsConnect",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/ws_connect"),
+            timeout=cdk.Duration.seconds(10),
+            environment=_ws_env,
+        )
+        ws_disconnect_fn = lambda_.Function(
+            self, "WsDisconnect",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/ws_disconnect"),
+            timeout=cdk.Duration.seconds(10),
+            environment=_ws_env,
+        )
+        # Authorizer validates the Cognito ACCESS token (passed as ?token=) via
+        # Cognito GetUser — no IAM, no JWKS/crypto bundling.
+        ws_authorizer_fn = lambda_.Function(
+            self, "WsAuthorizer",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/ws_authorizer"),
+            timeout=cdk.Duration.seconds(10),
+        )
+        self.ws_connections_table.grant_read_write_data(ws_connect_fn)
+        self.ws_connections_table.grant_read_write_data(ws_disconnect_fn)
+
+        self.ws_api = apigwv2.WebSocketApi(
+            self, "AlertWs",
+            api_name=f"dbops-{Settings.ENV}-alert-ws",
+            connect_route_options=apigwv2.WebSocketRouteOptions(
+                integration=apigwv2_integrations.WebSocketLambdaIntegration(
+                    "WsConnectInt", ws_connect_fn,
+                ),
+                authorizer=apigwv2_authorizers.WebSocketLambdaAuthorizer(
+                    "WsAuth", ws_authorizer_fn,
+                    identity_source=["route.request.querystring.token"],
+                ),
+            ),
+            disconnect_route_options=apigwv2.WebSocketRouteOptions(
+                integration=apigwv2_integrations.WebSocketLambdaIntegration(
+                    "WsDisconnectInt", ws_disconnect_fn,
+                ),
+            ),
+        )
+        self.ws_stage = apigwv2.WebSocketStage(
+            self, "AlertWsStage",
+            web_socket_api=self.ws_api,
+            stage_name="prod",
+            auto_deploy=True,
+        )
+        # wss:// connect URL (frontend) + https:// management endpoint (broadcasters).
+        self.ws_mgmt_endpoint = self.ws_stage.callback_url
+
+        cdk.CfnOutput(self, "AlertWsUrl", value=self.ws_stage.url)
         cdk.CfnOutput(self, "UserPoolId", value=self.user_pool.user_pool_id)
         cdk.CfnOutput(self, "UserPoolClientId", value=self.user_pool_client.user_pool_client_id)
+
+    def grant_alert_broadcast(self, fn) -> None:
+        """Wire a Lambda to broadcast over the WS alert channel (env + grants).
+        Used by data (alert_evaluator) and agent (incident_webhook)."""
+        fn.add_environment("WS_CONNECTIONS_TABLE", self.ws_connections_table.table_name)
+        fn.add_environment("WS_MGMT_ENDPOINT", self.ws_mgmt_endpoint)
+        self.ws_connections_table.grant_read_write_data(fn)
+        self.ws_api.grant_manage_connections(fn)

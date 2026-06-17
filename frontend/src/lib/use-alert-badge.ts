@@ -28,6 +28,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchMultiClusterOverview } from "@/lib/api-client";
 import { triage, type TriageInput } from "@/lib/cluster-triage";
 import { useSmartPoll } from "@/lib/use-smart-poll";
+import { subscribeAlertStream } from "@/lib/alert-stream";
 
 const SEEN_KEY = "dbops_alert_badge_seen_v1";
 const TOAST_TTL_MS = 6000;
@@ -192,6 +193,19 @@ export function useAlertBadge(): AlertBadgeState {
   }, [addToast]);
 
   useSmartPoll(poll, BADGE_POLL_MS);
+
+  // Real-time push: fired alerts / external incidents toast INSTANTLY instead
+  // of waiting for the next 45s badge poll. Additive — the poll still drives the
+  // badge counts; the WS just delivers the toast the moment an alert fires.
+  useEffect(() => {
+    const unsub = subscribeAlertStream((a) => {
+      const severity = a.severity === "critical" ? "critical" : "warning";
+      const label = a.cluster_id ? `${a.cluster_id}: ` : "";
+      const fallback = a.type === "incident" ? "외부 인시던트" : "새 경보";
+      addToast(`${label}${a.title || fallback}`, severity);
+    });
+    return unsub;
+  }, [addToast]);
 
   return { criticalCount, warningCount, toasts, dismissToast, markSeen };
 }
