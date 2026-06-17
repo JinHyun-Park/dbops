@@ -21,21 +21,99 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // When an admin-created account signs in with its temporary password, Cognito
+  // demands a new one before issuing tokens. We hold that continuation here and
+  // swap the form to a "set new password" step instead of dead-ending.
+  const [challenge, setChallenge] = useState<
+    ((newPassword: string) => Promise<unknown>) | null
+  >(null);
+  const [newPw, setNewPw] = useState("");
+  const [newPwConfirm, setNewPwConfirm] = useState("");
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
     setBusy(true);
     try {
-      await signIn(email.trim(), password);
+      const r = await signIn(email.trim(), password);
+      if (r.status === "new_password_required") {
+        // Wrap in a fn so React stores it rather than invoking it as an updater.
+        setChallenge(() => r.complete);
+        setBusy(false);
+        return;
+      }
       router.replace(next);
     } catch (e2) {
-      const msg = e2 instanceof Error ? e2.message : "로그인 실패";
-      setErr(msg);
-    } finally {
+      setErr(e2 instanceof Error ? e2.message : "로그인 실패");
       setBusy(false);
     }
   };
+
+  const submitNewPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr(null);
+    if (newPw !== newPwConfirm) {
+      setErr("비밀번호가 일치하지 않습니다");
+      return;
+    }
+    if (newPw.length < 8) {
+      setErr("비밀번호는 최소 8자 이상이어야 합니다");
+      return;
+    }
+    setBusy(true);
+    try {
+      await challenge!(newPw);
+      router.replace(next);
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "비밀번호 설정 실패");
+      setBusy(false);
+    }
+  };
+
+  if (challenge) {
+    return (
+      <AuthLayout
+        eyebrow="dbops"
+        title="새 비밀번호 설정"
+        subtitle="최초 로그인 — 임시 비밀번호를 변경하세요"
+      >
+        <form onSubmit={submitNewPassword} className="space-y-4">
+          <Field label="새 비밀번호">
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={newPw}
+              onChange={(e) => setNewPw(e.target.value)}
+              required
+              className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm focus:outline-none focus:border-amber-500/60"
+            />
+          </Field>
+          <Field label="비밀번호 확인">
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={newPwConfirm}
+              onChange={(e) => setNewPwConfirm(e.target.value)}
+              required
+              className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm focus:outline-none focus:border-amber-500/60"
+            />
+          </Field>
+          {err && (
+            <div className="text-xs text-rose-400 border border-rose-500/40 bg-rose-500/10 px-3 py-2">
+              {err}
+            </div>
+          )}
+          <button
+            type="submit"
+            disabled={busy}
+            className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium py-2 disabled:opacity-50"
+          >
+            {busy ? "설정 중…" : "비밀번호 설정 후 로그인"}
+          </button>
+        </form>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout

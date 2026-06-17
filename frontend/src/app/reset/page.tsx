@@ -38,10 +38,12 @@ function ResetForm() {
     setBusy(true);
     try {
       await confirmPasswordReset(email.trim(), code.trim(), password);
-      // Try to sign in immediately so the user lands on the app.
+      // Try to sign in immediately so the user lands on the app. A
+      // just-reset account is CONFIRMED, so signIn returns status "ok"; any
+      // other outcome falls back to the login page.
       try {
-        await signIn(email.trim(), password);
-        router.replace("/");
+        const r = await signIn(email.trim(), password);
+        router.replace(r.status === "ok" ? "/" : "/login");
       } catch {
         router.replace("/login");
       }

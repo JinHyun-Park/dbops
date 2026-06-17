@@ -199,10 +199,28 @@ async function getPool(): Promise<CognitoUserPool> {
   return poolPromise;
 }
 
+export interface Tokens {
+  id_token: string;
+  access_token: string;
+}
+
+// signIn resolves to one of two outcomes (it only rejects on a real failure):
+//   - status "ok": authenticated, tokens stored.
+//   - status "new_password_required": the account is in FORCE_CHANGE_PASSWORD
+//     (admin-created user with a temporary password). The caller must collect a
+//     new password and call complete() to finish the challenge on the SAME
+//     CognitoUser instance — otherwise the invited user's first login dead-ends.
+export type SignInResult =
+  | ({ status: "ok" } & Tokens)
+  | {
+      status: "new_password_required";
+      complete: (newPassword: string) => Promise<Tokens>;
+    };
+
 export async function signIn(
   email: string,
   password: string,
-): Promise<{ id_token: string; access_token: string }> {
+): Promise<SignInResult> {
   const pool = await getPool();
   const user = new CognitoUser({ Username: email, Pool: pool });
   const auth = new AuthenticationDetails({
@@ -215,15 +233,34 @@ export async function signIn(
         const idToken = session.getIdToken().getJwtToken();
         const accessToken = session.getAccessToken().getJwtToken();
         setTokens(idToken, accessToken);
-        resolve({ id_token: idToken, access_token: accessToken });
+        resolve({ status: "ok", id_token: idToken, access_token: accessToken });
       },
       onFailure: (err) => reject(err),
       newPasswordRequired: () => {
-        reject(
-          new Error(
-            "New password required — check email or use forgot-password flow",
-          ),
-        );
+        // Resolve with a continuation bound to THIS user instance. Pass {} as
+        // required attributes: the pool's required attr (email) is already set
+        // at admin-creation time, and email/email_verified are immutable —
+        // passing them back errors. Extend only if the pool genuinely requires
+        // a NEW attribute at first login.
+        resolve({
+          status: "new_password_required",
+          complete: (newPassword: string) =>
+            new Promise<Tokens>((res, rej) => {
+              user.completeNewPasswordChallenge(
+                newPassword,
+                {},
+                {
+                  onSuccess: (session) => {
+                    const idToken = session.getIdToken().getJwtToken();
+                    const accessToken = session.getAccessToken().getJwtToken();
+                    setTokens(idToken, accessToken);
+                    res({ id_token: idToken, access_token: accessToken });
+                  },
+                  onFailure: (err) => rej(err),
+                },
+              );
+            }),
+        });
       },
     });
   });
