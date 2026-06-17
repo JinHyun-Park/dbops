@@ -67,6 +67,36 @@ if os.environ.get("CDK_NAG") == "1":
             apply_to_nested_stacks=True,
         )
 
+    # Per-stack accepted / deferred findings (genuine quick wins — DDB PITR,
+    # S3/SNS SSL, Cognito password policy — were FIXED in the stacks; these are
+    # the remainder, each with a justification).
+    NagSuppressions.add_stack_suppressions(foundation, [
+        {"id": "AwsSolutions-COG2", "reason": "MFA not required for this self-hosted DBA console; deferred pending an operator-MFA product decision (TOTP enrollment UX)."},
+        {"id": "AwsSolutions-COG8", "reason": "Cognito advanced-security (plus) feature plan is a paid tier; out of scope for the default self-hosted deployment."},
+    ], apply_to_nested_stacks=True)
+    NagSuppressions.add_stack_suppressions(agent, [
+        {"id": "AwsSolutions-APIG4", "reason": "The only routes without the default Cognito JWT authorizer are the Slack webhooks, /health, and /api/incident-webhook, which authenticate by HMAC / shared-secret token instead."},
+        {"id": "AwsSolutions-APIG1", "reason": "HTTP API access logging deferred — needs a log destination + retention decision; per-request handler activity is already in CloudWatch Lambda logs."},
+        {"id": "AwsSolutions-COG1", "reason": "The Gateway's auto-created Cognito pool is machine-to-machine (client_credentials) only — no human users/passwords, so a password policy is N/A."},
+        {"id": "AwsSolutions-COG2", "reason": "Gateway M2M pool has no human users; MFA is N/A."},
+        {"id": "AwsSolutions-COG8", "reason": "Gateway M2M pool; advanced-security plus tier is N/A and paid."},
+    ], apply_to_nested_stacks=True)
+    NagSuppressions.add_stack_suppressions(data, [
+        {"id": "AwsSolutions-RDS2", "reason": "Storage encryption on the EXISTING cache Aurora requires a cluster replacement; the cache is rebuildable but disruptive — deferred to a scheduled maintenance window."},
+        {"id": "AwsSolutions-RDS6", "reason": "Access is via the RDS Data API + Secrets Manager, not IAM database authentication."},
+        {"id": "AwsSolutions-RDS10", "reason": "The cache cluster is intentionally disposable (removal_policy=DESTROY, repopulated by the ETL); deletion protection would contradict that design."},
+        {"id": "AwsSolutions-S1", "reason": "Archive bucket server-access logging deferred — needs a dedicated log bucket + lifecycle; the bucket is private (BlockPublicAccess) and now SSL-enforced."},
+        {"id": "AwsSolutions-SMG4", "reason": "Automatic secret rotation deferred — needs a rotation Lambda; the cache DB secret is least-privilege and access-scoped."},
+        {"id": "AwsSolutions-VPC7", "reason": "VPC flow logs deferred — cost/retention decision; Lambdas use the VPC only for private DB egress and there are no inbound paths."},
+    ], apply_to_nested_stacks=True)
+    NagSuppressions.add_stack_suppressions(frontend, [
+        {"id": "AwsSolutions-CFR1", "reason": "No geo-restriction requirement for a self-hosted console; operators access from anywhere."},
+        {"id": "AwsSolutions-CFR2", "reason": "AWS WAF is a paid add-on; out of scope for the default deployment (auth is enforced at the API/app layer)."},
+        {"id": "AwsSolutions-CFR3", "reason": "CloudFront access logging deferred — needs a log bucket + retention decision."},
+        {"id": "AwsSolutions-CFR4", "reason": "Distribution uses the default *.cloudfront.net cert, which pins AWS's modern TLS; minimum_protocol_version is only valid with a custom ACM cert (CFN rejects it otherwise), so it's set once a custom domain is configured."},
+        {"id": "AwsSolutions-S1", "reason": "Frontend bucket server-access logging deferred; the bucket is private (OAC-only, BlockPublicAccess) and now SSL-enforced."},
+    ], apply_to_nested_stacks=True)
+
     cdk.Aspects.of(app).add(AwsSolutionsChecks(verbose=True))
 
 app.synth()

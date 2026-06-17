@@ -21,6 +21,14 @@ class FoundationStack(cdk.Stack):
             user_pool_name=f"dbops-{Settings.ENV}",
             self_sign_up_enabled=False,
             sign_in_aliases=cognito.SignInAliases(email=True),
+            # cdk-nag AwsSolutions-COG1: enforce a minimum-strength password.
+            password_policy=cognito.PasswordPolicy(
+                min_length=8,
+                require_lowercase=True,
+                require_uppercase=True,
+                require_digits=True,
+                require_symbols=True,
+            ),
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
@@ -71,6 +79,7 @@ class FoundationStack(cdk.Stack):
             table_name=f"dbops-{Settings.ENV}-clusters",
             partition_key=dynamodb.Attribute(name="cluster_id", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            point_in_time_recovery=True,  # cdk-nag AwsSolutions-DDB3
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
@@ -80,6 +89,7 @@ class FoundationStack(cdk.Stack):
             partition_key=dynamodb.Attribute(name="session_id", type=dynamodb.AttributeType.STRING),
             time_to_live_attribute="ttl",
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            point_in_time_recovery=True,  # cdk-nag AwsSolutions-DDB3
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
         # Listing sessions belonging to a specific user is the hot path
@@ -98,6 +108,7 @@ class FoundationStack(cdk.Stack):
             partition_key=dynamodb.Attribute(name="approval_id", type=dynamodb.AttributeType.STRING),
             sort_key=dynamodb.Attribute(name="created_at", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            point_in_time_recovery=True,  # cdk-nag AwsSolutions-DDB3
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 

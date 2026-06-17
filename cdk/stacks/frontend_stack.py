@@ -28,6 +28,7 @@ class FrontendStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
             auto_delete_objects=True,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            enforce_ssl=True,  # cdk-nag AwsSolutions-S10
         )
 
         rewrite_function = cloudfront.Function(
@@ -50,6 +51,11 @@ function handler(event) {
 
         distribution = cloudfront.Distribution(
             self, "Distribution",
+            # NB: minimum_protocol_version is intentionally NOT set — it's only
+            # valid with a custom ACM cert, and CFN rejects it alongside the
+            # default *.cloudfront.net cert. The default cert already pins AWS's
+            # modern TLS. cdk-nag AwsSolutions-CFR4 is suppressed accordingly;
+            # set min-TLS here once a custom domain is configured.
             default_behavior=cloudfront.BehaviorOptions(
                 origin=origins.S3BucketOrigin.with_origin_access_control(bucket),
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,

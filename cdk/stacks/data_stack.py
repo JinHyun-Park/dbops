@@ -92,6 +92,7 @@ class DataStack(cdk.Stack):
             bucket_name=f"dbops-{Settings.ENV}-archive-{Settings.ACCOUNT_ID}",
             removal_policy=cdk.RemovalPolicy.DESTROY,
             auto_delete_objects=True,
+            enforce_ssl=True,  # cdk-nag AwsSolutions-S10
             lifecycle_rules=[
                 s3.LifecycleRule(
                     id="archive-tiering",
@@ -289,7 +290,7 @@ class DataStack(cdk.Stack):
             targets=[targets.LambdaFunction(self.docdb_mongo_lambda)],
         )
 
-        self.alert_topic = sns.Topic(self, "AlertTopic", topic_name=f"dbops-{Settings.ENV}-alerts")
+        self.alert_topic = sns.Topic(self, "AlertTopic", topic_name=f"dbops-{Settings.ENV}-alerts", enforce_ssl=True)  # cdk-nag AwsSolutions-SNS3
 
         self.alert_evaluator = lambda_.Function(
             self, "AlertEvaluator",
