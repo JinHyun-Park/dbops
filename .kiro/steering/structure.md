@@ -32,7 +32,7 @@ dbops/
 │   ├── event_processor/          # Real-time RDS/CW events
 │   └── schema_tracker/           # Schema snapshot collector
 ├── api/                          # REST API Lambdas (dashboard, clusters, approvals)
-├── frontend/                     # Next.js 15 Web UI
+├── frontend/                     # Next.js 16 Web UI
 │   └── src/
 │       ├── app/                  # App Router pages
 │       ├── components/           # design-system/, chat/, dashboard/, query-lab/, approval/

@@ -1,0 +1,8 @@
+# gitleaks allowlist — reviewed false positives (fingerprint = commit:path:rule:line)
+#
+# Verified false positive (2026-06-17): the `generic-api-key` rule flags the
+# high-entropy string in `const STORAGE_KEY = "dbops_conversations_v1"`
+# (frontend/src/components/chat/chat-panel.tsx) — but that is a browser
+# localStorage key name for chat history, NOT a credential. No secret, no
+# rotation needed.
+8d1c95997a4b1f3a87fc5b584acfa36c70a233fb:frontend/src/components/chat/chat-panel.tsx:generic-api-key:41

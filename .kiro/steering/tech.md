@@ -15,7 +15,7 @@ inclusion: always
 
 ## Frontend
 
-- **Framework**: Next.js 15 (App Router, Static Export)
+- **Framework**: Next.js 16 (App Router, Static Export)
 - **UI**: shadcn/ui + Tailwind CSS with custom design system
 - **Charts**: Recharts or Tremor
 - **State**: TanStack Query

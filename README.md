@@ -104,7 +104,7 @@ Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
 | -------- | ----------------------------------------------------- |
 | Agent    | Strands Agents SDK, AgentCore Runtime/Gateway         |
 | LLM      | Amazon Bedrock Claude                                 |
-| Frontend | Next.js 15, React, shadcn/ui, Tailwind CSS            |
+| Frontend | Next.js 16, React, shadcn/ui, Tailwind CSS            |
 | IaC      | AWS CDK (Python)                                      |
 | Data     | Aurora PostgreSQL (hot cache), DynamoDB, S3 (archive) |
 

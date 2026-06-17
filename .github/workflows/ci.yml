@@ -57,6 +57,39 @@ jobs:
       - name: cdk synth smoke test
         run: pytest tests/cdk -q
 
+      # ----- cdk-nag gate (AwsSolutions ruleset) -----
+      # Fails the build if any unsuppressed AwsSolutions finding is introduced,
+      # so new IaC misconfigurations can't be merged. cdk-nag only runs when
+      # CDK_NAG=1 (app.py gate) — normal deploys are untouched.
+      - name: install cdk-nag (pinned 2.x via cdk/requirements.txt)
+        # cdk-nag MUST stay on the 2.x line — 3.x needs aws-cdk-lib>=2.260
+        # (cloud-assembly schema 54), which outruns the pinned CDK CLI (schema
+        # 53) and breaks synth. cdk/requirements.txt pins `cdk-nag>=2.28,<3`;
+        # install it as-is — do NOT add/upgrade cdk-nag here.
+        run: pip install -r cdk/requirements.txt
+      - name: install CDK CLI (pinned to the 2.x line)
+        # The smoke test above uses a Python-level synth; the nag gate needs the
+        # real `cdk synth` exit code. Pin to aws-cdk@2 so the CLI's cloud-assembly
+        # schema stays compatible with the pinned cdk-nag 2.x.
+        run: npm install -g aws-cdk@2
+      - name: stub frontend/out for synth (no frontend build in this job)
+        # FrontendStack's BucketDeployment needs frontend/out/ (and the hashed
+        # _next/static subtree) to exist at synth time. The frontend build is a
+        # separate job, so stub the minimal asset tree — same as tests/cdk does.
+        run: |
+          mkdir -p frontend/out/_next/static
+          [ -f frontend/out/index.html ] || printf '<!-- synth stub -->\n' > frontend/out/index.html
+          [ -f frontend/out/_next/static/.synth-stub ] || printf '// synth stub\n' > frontend/out/_next/static/.synth-stub
+      - name: cdk-nag synth gate
+        # AwsSolutionsChecks fails synth (non-zero exit) on any unsuppressed
+        # finding — the exit code IS the gate, no grep needed. No AWS creds are
+        # required: there are no from_lookup() calls, and the AZ context lookup
+        # for the template account is pre-cached in cdk/cdk.context.json.
+        working-directory: cdk
+        env:
+          CDK_NAG: "1"
+        run: cdk synth >/dev/null
+
   frontend:
     name: frontend (build + typecheck)
     runs-on: ubuntu-latest

@@ -74,6 +74,28 @@ if os.environ.get("CDK_NAG") == "1":
         {"id": "AwsSolutions-COG2", "reason": "MFA not required for this self-hosted DBA console; deferred pending an operator-MFA product decision (TOTP enrollment UX)."},
         {"id": "AwsSolutions-COG8", "reason": "Cognito advanced-security (plus) feature plan is a paid tier; out of scope for the default self-hosted deployment."},
     ], apply_to_nested_stacks=True)
+    # Alert-push WebSocket API (apigatewayv2). Two findings are accepted by
+    # design and documented inline in foundation_stack.py:
+    #   - APIG1 (no access logging on AlertWsStage): the $connect authorizer's
+    #     identity source is the Cognito access token in the query string; WS
+    #     access logs would persist that token in plaintext. No access logging
+    #     is the intended mitigation — see the HARDENING GUARD comment + BACKLOG
+    #     "WS-ticket" before ever enabling it.
+    #   - APIG4 ($disconnect route has no authorizer): WebSocket authorization
+    #     happens once at $connect (Cognito Lambda authorizer); $disconnect fires
+    #     on an already-authorized, server-initiated teardown and cannot carry an
+    #     authorizer by design.
+    _fnd = foundation.node.path  # e.g. "dbops-dev-foundation" — env-agnostic
+    NagSuppressions.add_resource_suppressions_by_path(
+        foundation,
+        f"/{_fnd}/AlertWsStage/Resource",
+        [{"id": "AwsSolutions-APIG1", "reason": "WS access logging is intentionally disabled: the $connect authorizer reads the Cognito access token from the query string, so access logs would record it in plaintext. Mitigation per foundation_stack.py HARDENING GUARD; revisit only via the WS-ticket pattern (BACKLOG)."}],
+    )
+    NagSuppressions.add_resource_suppressions_by_path(
+        foundation,
+        f"/{_fnd}/AlertWs/$disconnect-Route/Resource",
+        [{"id": "AwsSolutions-APIG4", "reason": "WebSocket $disconnect route carries no authorizer by design — authorization is enforced once at $connect via a Cognito Lambda authorizer; $disconnect is a server-side teardown on an already-authorized connection."}],
+    )
     NagSuppressions.add_stack_suppressions(agent, [
         {"id": "AwsSolutions-APIG4", "reason": "The only routes without the default Cognito JWT authorizer are the Slack webhooks, /health, and /api/incident-webhook, which authenticate by HMAC / shared-secret token instead."},
         {"id": "AwsSolutions-APIG1", "reason": "HTTP API access logging deferred — needs a log destination + retention decision; per-request handler activity is already in CloudWatch Lambda logs."},

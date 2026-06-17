@@ -361,12 +361,12 @@ Done (2026-06-17):
 
 Remaining (do at actual flip time):
 
-- **Optional: enforce cdk-nag as a CI gate** — baseline is clean (0 errors), so add a `CDK_NAG=1 cdk synth` step (needs cdk-nag in the CI env) to fail new violations. Until then it's an on-demand lint.
+- ~~**Optional: enforce cdk-nag as a CI gate**~~ ✅ done (2026-06-17) — `ci.yml` cdk job now installs `cdk/requirements.txt` (cdk-nag 2.x) + `aws-cdk@2` CLI, stubs `frontend/out`, and runs `CDK_NAG=1 cdk synth` as the gate (synth exits non-zero on any unsuppressed AwsSolutions finding — no AWS creds needed; the CI account's AZ lookup is pre-cached in `cdk.context.json`). New WebSocket resources' findings (APIG1 no-access-logging, APIG4 $disconnect-no-authorizer) are suppressed with justifications in `app.py`. Verified `CDK_NAG=1 cdk synth` → exit 0 locally.
 - **WS-ticket pattern before enabling WS alert-channel access logging / public flip** — the `$connect` authorizer's identity source is the Cognito access token in the query string (mitigated today by TLS + no access logging). Code guards are in `foundation_stack.py` at the authorizer `identity_source` and the WS stage. See BACKLOG P4 "WS-ticket" for the design.
 - `gitleaks` proper history scan (the regex sweep above is a good proxy; run the real tool before the flip for entropy/rule coverage).
 - postcss (moderate) lives under Next's bundled toolchain — `npm audit fix --force` would downgrade Next 16 → 9 (catastrophic). Real fix is a Next minor bump to a patched 16.x; build-time CSS-stringify only, so runtime exposure on a static export is negligible. Defer to a deliberate Next bump.
 - Enable GitHub secret scanning + CodeQL after the repo is public.
-- Steering docs say "Next.js 15" but the lockfile resolves Next 16.2.6 — reconcile the docs.
+- ~~Steering docs say "Next.js 15" but the lockfile resolves Next 16 — reconcile the docs.~~ ✅ done (2026-06-17) — living docs (`.kiro/steering/tech.md`, `structure.md`, `README.md`) updated to Next.js 16 (lockfile: 16.2.9); dated plan/spec artifacts left as point-in-time records.
 
 ---
 
