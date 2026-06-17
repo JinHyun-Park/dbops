@@ -7,7 +7,7 @@ Items are scoped concretely so any of them can be picked up without re-design.
 
 ## P1 — First-impression breakers
 
-### P1.1 Self-hosted login UX ✅ (shipped — in-app `/login` page, SRP auth via `auth.ts signIn()` + amazon-cognito-identity-js; auth-guard redirects to `/login` not Hosted UI; User Pool Client `user_srp=True`; config.json exposes `cognitoUserPoolId`; verified deployed 2026-06-17)
+### P1.1 Self-hosted login UX ✅ (shipped — in-app `/login` page, SRP auth via `auth.ts signIn()` + amazon-cognito-identity-js; auth-guard redirects to `/login` not Hosted UI; User Pool Client `user_srp=True`; config.json exposes `cognitoUserPoolId`; verified deployed 2026-06-17. Also handles FORCE_CHANGE_PASSWORD first-login for admin-invited users — `signIn` returns a `new_password_required` continuation and `/login` shows a set-new-password step, `55fc8b8`)
 
 **Why:** Cognito Hosted UI is the default AWS-branded ugly login form. First
 impression decides whether someone sticks with the product.
