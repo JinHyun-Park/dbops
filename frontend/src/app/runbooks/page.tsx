@@ -420,8 +420,7 @@ function ManualForm({
 
 // Export a runbook as a portable Markdown file (YAML front-matter + body) so it
 // can be moved into git / a wiki / an incident ticket. Browser Blob download —
-// no new dependency. For PDF, the browser's own "Print → Save as PDF" on the
-// rendered modal is the path; we don't ship a fragile print-CSS hack.
+// no new dependency. (PDF export is exportRunbookPdf below.)
 function exportRunbookMarkdown(rb: RunbookDetail) {
   const fm = [
     "---",
@@ -453,6 +452,50 @@ function exportRunbookMarkdown(rb: RunbookDetail) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(
+    /[&<>"]/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] as string,
+  );
+}
+
+// Export to PDF WITHOUT a fragile global print-CSS hack: clone the already-
+// rendered markdown HTML from the open modal into an ISOLATED print window with
+// its own minimal stylesheet, then trigger the browser's print → "Save as PDF".
+// The body HTML is ReactMarkdown output (no raw HTML), so injecting it is safe.
+function exportRunbookPdf(rb: RunbookDetail) {
+  const article = document.getElementById(`runbook-article-${rb.id}`);
+  const bodyHtml = article ? article.innerHTML : "";
+  const meta = [
+    rb.cluster_id ? `클러스터: ${rb.cluster_id}` : null,
+    `작성: ${new Date(rb.created_at).toLocaleString()}`,
+    rb.created_by ? `작성자: ${rb.created_by}` : null,
+    rb.tags.length ? `태그: ${rb.tags.map((t) => "#" + t).join(" ")}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const w = window.open("", "_blank", "width=820,height=1000");
+  if (!w) return;
+  w.document.write(
+    `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(
+      rb.title,
+    )}</title><style>` +
+      "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111;max-width:780px;margin:32px auto;padding:0 20px;line-height:1.55}" +
+      "h1{font-size:22px;margin:0 0 4px}h2{font-size:17px}h3{font-size:15px}" +
+      ".meta{color:#666;font-size:12px;margin:0 0 24px;border-bottom:1px solid #ddd;padding-bottom:12px}" +
+      "pre{background:#f5f5f5;padding:10px;border-radius:4px;overflow:auto}code{font-family:ui-monospace,monospace}" +
+      "table{border-collapse:collapse}th,td{border:1px solid #ccc;padding:4px 8px}" +
+      "@media print{body{margin:0}}" +
+      `</style></head><body><h1>${escapeHtml(rb.title)}</h1>` +
+      `<div class="meta">${escapeHtml(meta)}</div>${bodyHtml}</body></html>`,
+  );
+  w.document.close();
+  w.focus();
+  // Let the new document lay out before invoking the print dialog.
+  setTimeout(() => w.print(), 250);
 }
 
 function RunbookModal({
@@ -531,7 +574,10 @@ function RunbookModal({
           </button>
         </div>
         <div className="px-5 py-4 overflow-y-auto flex-1">
-          <article className="prose prose-invert prose-sm max-w-none">
+          <article
+            id={`runbook-article-${runbook.id}`}
+            className="prose prose-invert prose-sm max-w-none"
+          >
             <ReactMarkdown>{runbook.body_md}</ReactMarkdown>
           </article>
         </div>
@@ -545,6 +591,15 @@ function RunbookModal({
               title="YAML front-matter + 본문을 .md 파일로 내보냅니다"
             >
               ⬇ Markdown 내보내기
+            </button>
+            <span className="text-zinc-700">·</span>
+            <button
+              type="button"
+              onClick={() => exportRunbookPdf(runbook)}
+              className="text-xs text-zinc-300 hover:text-zinc-100 transition-colors"
+              title="렌더된 런북을 PDF로 인쇄/저장합니다 (브라우저 인쇄 대화상자 → Save as PDF)"
+            >
+              ⬇ PDF 내보내기
             </button>
             <span className="text-zinc-700">·</span>
             {confirmDelete ? (
