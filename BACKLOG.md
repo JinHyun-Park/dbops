@@ -7,7 +7,7 @@ Items are scoped concretely so any of them can be picked up without re-design.
 
 ## P1 — First-impression breakers
 
-### P1.1 Self-hosted login UX
+### P1.1 Self-hosted login UX ✅ (shipped — in-app `/login` page, SRP auth via `auth.ts signIn()` + amazon-cognito-identity-js; auth-guard redirects to `/login` not Hosted UI; User Pool Client `user_srp=True`; config.json exposes `cognitoUserPoolId`; verified deployed 2026-06-17)
 
 **Why:** Cognito Hosted UI is the default AWS-branded ugly login form. First
 impression decides whether someone sticks with the product.
@@ -20,7 +20,7 @@ impression decides whether someone sticks with the product.
 - Keep Hosted UI as a fallback for social SSO later.
   **Out of scope:** SAML/OIDC federation.
 
-### P1.2 Forgot password flow
+### P1.2 Forgot password flow ✅ (shipped — `/forgot` → `requestPasswordReset()` (ForgotPassword) → `/reset` → `confirmPasswordReset()` (ConfirmForgotPassword) + auto sign-in; full validation, wired to auth.ts)
 
 **Why:** Users locked out can't self-recover today.
 **What:**
