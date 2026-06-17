@@ -60,55 +60,70 @@ let closedByUs = false;
 // Suspended between logout and the next login: blocks both connect() and the
 // reconnect timer so a logged-out tab doesn't spin retrying with no token.
 let suspended = false;
+// Guards the await window inside connect() so two callers (e.g. the first
+// subscriber and a dbops:auth-login event firing together) can't both create a
+// socket — the second would orphan the first without closing it.
+let connectInFlight = false;
 
 async function connect(): Promise<void> {
-  if (typeof window === "undefined" || socket || suspended) return;
-  const base = await loadWsUrl();
-  if (!base) return; // push channel not configured on this deployment
-  if (!isLoggedIn()) {
-    scheduleReconnect(); // not logged in yet — retry later
+  if (typeof window === "undefined" || socket || suspended || connectInFlight)
     return;
-  }
-  const token = await getValidAccessToken();
-  if (!token) {
-    scheduleReconnect();
-    return;
-  }
-  closedByUs = false;
+  connectInFlight = true;
   try {
-    socket = new WebSocket(`${base}?token=${encodeURIComponent(token)}`);
-  } catch {
-    scheduleReconnect();
-    return;
+    const base = await loadWsUrl();
+    if (!base) return; // push channel not configured on this deployment
+    if (!isLoggedIn()) {
+      scheduleReconnect(); // not logged in yet — retry later
+      return;
+    }
+    const token = await getValidAccessToken();
+    if (!token) {
+      scheduleReconnect();
+      return;
+    }
+    // Re-check after the awaits: a logout (suspended) or another connect()
+    // (socket) may have landed while we were awaiting the url/token.
+    if (suspended || socket) return;
+    closedByUs = false;
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(`${base}?token=${encodeURIComponent(token)}`);
+    } catch {
+      scheduleReconnect();
+      return;
+    }
+    socket = ws;
+    ws.onopen = () => {
+      backoff = 1000;
+    };
+    ws.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data) as PushedAlert;
+        listeners.forEach((l) => {
+          try {
+            l(data);
+          } catch {
+            // a bad listener must not break the others
+          }
+        });
+      } catch {
+        // ignore malformed frames
+      }
+    };
+    ws.onclose = () => {
+      socket = null;
+      if (!closedByUs) scheduleReconnect();
+    };
+    ws.onerror = () => {
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+    };
+  } finally {
+    connectInFlight = false;
   }
-  socket.onopen = () => {
-    backoff = 1000;
-  };
-  socket.onmessage = (ev) => {
-    try {
-      const data = JSON.parse(ev.data) as PushedAlert;
-      listeners.forEach((l) => {
-        try {
-          l(data);
-        } catch {
-          // a bad listener must not break the others
-        }
-      });
-    } catch {
-      // ignore malformed frames
-    }
-  };
-  socket.onclose = () => {
-    socket = null;
-    if (!closedByUs) scheduleReconnect();
-  };
-  socket.onerror = () => {
-    try {
-      socket?.close();
-    } catch {
-      // ignore
-    }
-  };
 }
 
 function scheduleReconnect(): void {
