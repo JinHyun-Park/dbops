@@ -190,6 +190,15 @@ class FoundationStack(cdk.Stack):
                 ),
                 authorizer=apigwv2_authorizers.WebSocketLambdaAuthorizer(
                     "WsAuth", ws_authorizer_fn,
+                    # The Cognito access token rides the query string (browsers
+                    # can't set WS headers). Acceptable only because: wss:// is
+                    # TLS so the query string is inside the encrypted GET (proxies
+                    # see only CONNECT host:443), AND this stage has NO access
+                    # logging (see the stage below). HARDENING GUARD: if you ever
+                    # need WS access logs, FIRST switch to the WS-ticket pattern
+                    # (short-lived single-use nonce in the URL instead of the
+                    # token) — see BACKLOG "WS-ticket". Otherwise the token lands
+                    # in CloudWatch in plaintext.
                     identity_source=["route.request.querystring.token"],
                 ),
             ),
@@ -199,6 +208,11 @@ class FoundationStack(cdk.Stack):
                 ),
             ),
         )
+        # HARDENING GUARD: do NOT add access_log_settings here without first
+        # implementing the WS-ticket pattern (BACKLOG "WS-ticket"). The connect
+        # authorizer's identity source is the access token in the query string;
+        # WS access logs would record it in plaintext. No access logging today =
+        # the token-in-URL exposure is mitigated.
         self.ws_stage = apigwv2.WebSocketStage(
             self, "AlertWsStage",
             web_socket_api=self.ws_api,
