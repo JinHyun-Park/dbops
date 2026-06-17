@@ -66,9 +66,13 @@ def _list_lambdas() -> dict:
         active = sum(1 for f in funcs if f.get("state") == "Active")
         return {"count": len(funcs), "active": active, "items": funcs}
     except ClientError as e:
-        return {"error": f"{e.response.get('Error', {}).get('Code')}: {str(e)[:200]}"}
+        # Public endpoint — return only the (non-sensitive) error code; the full
+        # message can carry ARNs / account ids, so log it server-side instead.
+        print(f"[health] lambdas summary ClientError: {e}")
+        return {"error": e.response.get("Error", {}).get("Code", "ClientError")}
     except Exception as e:
-        return {"error": str(e)[:300]}
+        print(f"[health] lambdas summary failed: {e}")
+        return {"error": "internal_error"}
 
 
 def _aurora_cache() -> dict:
@@ -102,7 +106,8 @@ def _aurora_cache() -> dict:
             "deletion_protection": c.get("DeletionProtection"),
         }
     except ClientError as e:
-        return {"error": f"{e.response.get('Error', {}).get('Code')}: {str(e)[:200]}"}
+        print(f"[health] aurora cache ClientError: {e}")
+        return {"error": e.response.get("Error", {}).get("Code", "ClientError")}
 
 
 def _ddb_tables() -> dict:
@@ -134,10 +139,11 @@ def _ddb_tables() -> dict:
                 out.append({
                     "label": label,
                     "name": table_name,
-                    "error": e.response.get("Error", {}).get("Code", str(e)),
+                    "error": e.response.get("Error", {}).get("Code", "ClientError"),
                 })
     except Exception as e:
-        return {"error": str(e)[:300]}
+        print(f"[health] dynamodb summary failed: {e}")
+        return {"error": "internal_error"}
     return {"tables": out}
 
 
