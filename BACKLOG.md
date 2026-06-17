@@ -350,11 +350,16 @@ Done (2026-06-16):
 - ✅ `pip-audit` over CDK + agent + MCP + data-pipeline requirements — no known vulnerabilities.
 - ✅ Dependabot config added (`.github/dependabot.yml`) — weekly grouped minor/patch PRs for npm, pip (all manifests), and GitHub Actions.
 
+Done (2026-06-17):
+
+- ✅ Public `/api/health` no longer leaks raw exceptions (`str(e)` → server-log + error code / generic message; `affd54b`). Dashboard read panels were already hardened; authenticated-admin handlers keep bounded `str(e)[:N]` diagnostics.
+- ✅ `cdk-nag` (AwsSolutions) wired as a synth-time lint, **gated behind `CDK_NAG=1`** so it never blocks deploys/CI (`72277db`). First triage pass: **162 → 31** findings — stack-level NagSuppressions (with justifications) cover the 131 accepted-by-design (IAM4 managed exec role, IAM5 describe/list/AssumeRole wildcards, L1 pinned Python 3.12). Pinned to cdk-nag 2.x (3.x needs aws-cdk-lib≥2.260, schema 54 > pinned CLI).
+
 Remaining (do at actual flip time):
 
+- **cdk-nag: triage the remaining 31** (run `CDK_NAG=1 cdk synth`). Quick wins (in-place, safe): DDB3 (PITR on clusters/sessions/approvals), S10 (S3 `enforce_ssl`), SNS3 (topic SSL), CFR4 (CloudFront min TLS 1.2), COG1 (Cognito password policy). Product/cost decisions: COG2 (MFA), CFR2 (WAF), VPC7/APIG1/CFR3/S1 (access/flow logging + log buckets), SMG4 (secret rotation). Accept+suppress: APIG4 (3 public routes auth via HMAC/token), RDS10 (cache DB is disposable, removal_policy=DESTROY), RDS6 (uses RDS Data API + secrets, not IAM DB auth). Needs-care: RDS2 (storage encryption — enabling requires cluster replacement; cache is rebuildable but disruptive).
 - `gitleaks` proper history scan (the regex sweep above is a good proxy; run the real tool before the flip for entropy/rule coverage).
 - postcss (moderate) lives under Next's bundled toolchain — `npm audit fix --force` would downgrade Next 16 → 9 (catastrophic). Real fix is a Next minor bump to a patched 16.x; build-time CSS-stringify only, so runtime exposure on a static export is negligible. Defer to a deliberate Next bump.
-- `cdk-nag` aspect on the CDK app + resolve/justify findings (code change + synth).
 - Enable GitHub secret scanning + CodeQL after the repo is public.
 - Steering docs say "Next.js 15" but the lockfile resolves Next 16.2.6 — reconcile the docs.
 
