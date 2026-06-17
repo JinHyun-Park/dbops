@@ -332,11 +332,11 @@ by account/region. Delivered across 5 sequenced specs:
 
 ## P4 — Operational polish
 
-- OpenAPI / Swagger docs for `/api/*` endpoints.
+- ~~OpenAPI / Swagger docs for `/api/*` endpoints.~~ ✅ shipped (2026-06-17) — `tools/openapi_gen.py` generates `frontend/public/openapi.json` from the CDK route table (63 paths; parity-tested), rendered on-brand at `/api-docs`.
 - SSE/WebSocket push for real-time alerts (replace 5-min polling).
-- Audit log visual timeline (current is text table).
-- PDF / markdown runbook export for resolved incidents.
-- Inbound webhook from Datadog / PagerDuty incidents to auto-start a chat session.
+- ~~Audit log visual timeline (current is text table).~~ ✅ shipped (2026-06-17) — `audit-log-panel` is now a vertical timeline (status rail dots, cards, day separators); fixed a naive-UTC +9h skew.
+- ~~PDF / markdown runbook export for resolved incidents.~~ ✅ shipped (2026-06-17) — markdown export (pre-existing) + PDF via an isolated print window in `/runbooks`.
+- ~~Inbound webhook from Datadog / PagerDuty incidents to auto-start a chat session.~~ ✅ shipped (2026-06-17) — `POST /api/incident-webhook` (shared-secret, fail-closed) writes an `external_incident` event_log row; Events panel shows a one-click chat deep-link (deep-link inbox, no autonomous agent). Set `INCIDENT_WEBHOOK_SECRET` to enable.
 - Per-org retention policy + archival to S3 Glacier ✅ (archive bucket lifecycle: IA 30d → Glacier Instant Retrieval 90d → Deep Archive 365d, optional `ARCHIVE_RETENTION_DAYS` expiry; verified live 2026-06-16).
 - CDN cache tuning for `/config.json` (currently no-store).
 
