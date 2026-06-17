@@ -646,9 +646,7 @@ export default function ClustersPage() {
                           className="accent-amber-500"
                         />
                       </th>
-                      <th className="text-left px-3 py-2 font-medium">
-                        cluster_id
-                      </th>
+                      <th className="text-left px-3 py-2 font-medium">name</th>
                       <th className="text-left px-3 py-2 font-medium">
                         engine
                       </th>
@@ -716,7 +714,12 @@ export default function ClustersPage() {
                               />
                             </td>
                             <td className="px-3 py-2 font-mono text-xs text-zinc-100">
-                              {c.cluster_id}
+                              {/* DynamoDB's cluster_id is an opaque ddb-<hash>
+                                  slug; show the table name (resource_name) so
+                                  the list is readable. Aurora/DocDB have no
+                                  resource_name, so displayName falls back to
+                                  cluster_id — unchanged for them. */}
+                              {displayName(c)}
                               {c.already_registered && (
                                 <span className="ml-2 text-[10px] text-zinc-500">
                                   already registered
@@ -725,7 +728,7 @@ export default function ClustersPage() {
                               {c.is_internal && !c.already_registered && (
                                 <span
                                   className="ml-2 px-1.5 py-0.5 border border-sky-500/40 bg-sky-500/10 text-sky-300 text-[10px]"
-                                  title="DBOps 플랫폼 자체의 캐시 DB입니다 — 모니터링 대상으로 등록할 필요가 없어 자동 선택에서 제외했습니다."
+                                  title="DBOps 플랫폼 자체 리소스입니다 (캐시 DB 또는 컨트롤 플레인 테이블) — 모니터링 대상으로 등록할 필요가 없어 자동 선택에서 제외했습니다."
                                 >
                                   DBOps 내부
                                 </span>
