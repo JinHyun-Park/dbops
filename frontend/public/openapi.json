@@ -46,6 +46,9 @@
       "name": "health"
     },
     {
+      "name": "incident-webhook"
+    },
+    {
       "name": "memory"
     },
     {
@@ -1566,6 +1569,17 @@
       "get": {
         "tags": ["health"],
         "summary": "GET /api/health",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/incident-webhook": {
+      "post": {
+        "tags": ["incident-webhook"],
+        "summary": "POST /api/incident-webhook",
         "responses": {
           "200": {
             "description": "OK"

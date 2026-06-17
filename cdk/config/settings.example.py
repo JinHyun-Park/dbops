@@ -45,3 +45,9 @@ class Settings:
     # a friendly "not configured" message until you set this. Get it
     # from your Slack app's Basic Information → Signing Secret.
     SLACK_SIGNING_SECRET = ""
+
+    # Shared secret for the inbound incident webhook (/api/incident-webhook).
+    # Datadog / PagerDuty send it in the X-DBOps-Webhook-Token header; the
+    # handler compares it in constant time. Leave empty to disable the endpoint
+    # (it returns 503 until set). Use a long random string.
+    INCIDENT_WEBHOOK_SECRET = ""

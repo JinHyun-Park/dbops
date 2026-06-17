@@ -900,6 +900,28 @@ class AgentStack(cdk.Stack):
         )
         foundation.clusters_table.grant_read_data(slack_command_lambda)
 
+        # Inbound incident webhook (P4) — Datadog / PagerDuty POST an incident;
+        # we record it to event_log so it surfaces in the Events panel with a
+        # "Chat에서 진단" deep-link. Shared-secret auth (X-DBOps-Webhook-Token);
+        # 503 until INCIDENT_WEBHOOK_SECRET is set, 401 on a bad token.
+        incident_webhook_lambda = lambda_.Function(
+            self, "IncidentWebhookApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/incident_webhook"),
+            timeout=cdk.Duration.seconds(10),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "INCIDENT_WEBHOOK_SECRET": getattr(
+                    Settings, "INCIDENT_WEBHOOK_SECRET", ""
+                ),
+            },
+        )
+        data.cache_db.secret.grant_read(incident_webhook_lambda)
+        data.cache_db.grant_data_api_access(incident_webhook_lambda)
+
         # Self-health endpoint: aggregates Lambda + Aurora + DDB state
         # so /health renders a single-page operational picture of DBOps
         # itself. Read-only IAM scoped to describe/list calls.
@@ -1322,6 +1344,14 @@ class AgentStack(cdk.Stack):
             path="/api/slack/command",
             methods=[apigwv2.HttpMethod.POST],
             integration=integrations.HttpLambdaIntegration("SlackCommandIntegration", slack_command_lambda),
+            authorizer=public_authorizer,
+        )
+        # Inbound incident webhook (Datadog / PagerDuty) — public route,
+        # authenticated by the shared-secret token the handler checks.
+        self.api.add_routes(
+            path="/api/incident-webhook",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=integrations.HttpLambdaIntegration("IncidentWebhookIntegration", incident_webhook_lambda),
             authorizer=public_authorizer,
         )
         # DBOps self-monitoring health endpoint — public so external uptime
