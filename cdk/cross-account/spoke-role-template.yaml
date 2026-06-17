@@ -69,10 +69,13 @@ Resources:
                 Effect: Allow
                 Action:
                   - "secretsmanager:GetSecretValue"
-                Resource: "*"
-                Condition:
-                  StringLike:
-                    "secretsmanager:ResourceTag/ManagedBy": "rds"
+                # RDS-managed secrets are always named `rds!cluster-*` / `rds!db-*`,
+                # so scope by that ARN pattern. (The previous condition
+                # `ResourceTag/ManagedBy=rds` never matched: RDS tags its managed
+                # secrets `aws:secretsmanager:owningService=rds`, NOT ManagedBy — so
+                # cross-account RDS Data API SQL collection failed with AccessDenied
+                # "Failed to fetch secret". Caught via live cross-account testing.)
+                Resource: "arn:aws:secretsmanager:*:*:secret:rds!*"
         - PolicyName: DBOpsWriteConditional
           PolicyDocument:
             Version: "2012-10-17"

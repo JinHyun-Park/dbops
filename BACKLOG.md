@@ -321,8 +321,27 @@ by account/region. Delivered across 5 sequenced specs:
   **deployed to dev (`dbops-dev-data`) + live non-regression confirmed** — an
   ETL Lambda invoke collected all 6 real clusters (Aurora MySQL/PG, DynamoDB×2,
   DocumentDB) error-free; only the demo placeholder `sample-cluster` shows its
-  usual `DBClusterNotFoundFault` (no real resource). **Spoke-assume path itself
-  is still live-deferred** — no real spoke account registered to assume against.
+  usual `DBClusterNotFoundFault` (no real resource).
+  - ✅ **Spoke-assume path LIVE-VERIFIED end-to-end** (2026-06-17): deployed
+    `dbops-spoke-role` (the repo's CFN template) into a real second account
+    (619071337646) trusting the hub (830858425797), and confirmed the full chain
+    against that account's Aurora PG: test-connection (assume + describe + secret
+    - data_api all ok), cross-account discover (found the cluster via the spoke
+      role), register (resolved cluster_arn/secret_arn/db_name cross-account), and
+      ETL collection (CloudWatch 60 metrics, pg_stat_activity, pg_locks, health 13
+      findings — all cross-account). Hub roles' `sts:AssumeRole` is scoped
+      `arn:aws:iam::*:role/dbops-spoke-role`, so no hub redeploy was needed.
+  - 🐞→✅ **Spoke template bug found + fixed via this live test**: the
+    `SecretsManager` statement gated `GetSecretValue` on `ResourceTag/ManagedBy=rds`,
+    which **never matches** real RDS-managed secrets (they carry
+    `aws:secretsmanager:owningService=rds`, not `ManagedBy`). Cross-account RDS
+    Data API SQL collection (slow queries, table/lock/activity/extension stats —
+    the core telemetry) failed `AccessDenied "Failed to fetch secret"`; same-account
+    worked because the hub Lambda role reads the secret directly. Fixed to scope by
+    the RDS-managed secret ARN pattern `arn:aws:secretsmanager:*:*:secret:rds!*`;
+    re-verified — SQL collection now succeeds cross-account. (Remaining `stats`
+    error is just the target DB lacking `pg_stat_statements`; PI `NotAuthorized` =
+    PI not enabled on that cluster — both target-config, not DBOps bugs.)
 
 **Still future (separate):** RDS non-Aurora (MySQL/PG/MariaDB) storage rightsize
 (`AllocatedStorage` vs used; `_check_storage_rightsize` is a no-op scaffold today).
