@@ -331,6 +331,11 @@ by account/region. Delivered across 5 sequenced specs:
       ETL collection (CloudWatch 60 metrics, pg_stat_activity, pg_locks, health 13
       findings — all cross-account). Hub roles' `sts:AssumeRole` is scoped
       `arn:aws:iam::*:role/dbops-spoke-role`, so no hub redeploy was needed.
+      **Torn down afterward** (spoke role CFN stack + hub registry row deleted):
+      the test account's corporate policy disallows external cross-account trust,
+      so it can't host the spoke role long-term. The verification result and the
+      bug fix below stand regardless — the spoke-assume path is proven to work
+      end-to-end against a real second account.
   - 🐞→✅ **Spoke template bug found + fixed via this live test**: the
     `SecretsManager` statement gated `GetSecretValue` on `ResourceTag/ManagedBy=rds`,
     which **never matches** real RDS-managed secrets (they carry
