@@ -319,6 +319,10 @@ class DataStack(cdk.Stack):
         self.alert_topic.grant_publish(self.alert_evaluator)
         # Instant in-app push of fired alerts over the WS channel (foundation).
         foundation.grant_alert_broadcast(self.alert_evaluator)
+        # Event-based auto-RCA: on trigger, enqueue a pending agent task; the
+        # agent-tasks stream then drives the task_worker (agent stack). data
+        # can't invoke the worker directly, so the table is the decoupling point.
+        foundation.grant_task_enqueue(self.alert_evaluator)
 
         events.Rule(
             self, "AlertEvaluatorSchedule",

@@ -16,6 +16,9 @@ from aws_cdk import (
 from aws_cdk import (
     aws_lambda as lambda_,
 )
+from aws_cdk import (
+    aws_lambda_event_sources as lambda_event_sources,
+)
 from bundling import _PipLocalBundling
 from config.settings import Settings
 from constructs import Construct
@@ -77,6 +80,46 @@ class AgentStack(cdk.Stack):
                 "sts:AssumeRole",
             ],
             resources=["*"],
+        ))
+
+        # ===== Agent Tasks worker — stream-driven task executor =====
+        # Runs the deterministic RCA (and, later, scheduled reports) for tasks
+        # enqueued by alert_evaluator / the scheduler / the manual API. Shares
+        # the MCP asset so it imports diagnose_root_cause + CacheClient exactly
+        # like the incident server. NO VPC: it only touches public AWS endpoints
+        # (RDS Data API for the cache, DynamoDB, Secrets Manager, execute-api for
+        # the WS push) — same as alert_evaluator, which reads the cache + pushes
+        # WS without a VPC. The agent-tasks STREAM is the single trigger, so
+        # data-stack enqueuers never invoke this Lambda directly.
+        task_worker = lambda_.Function(
+            self, "TaskWorker",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="mcp_servers.workers.task_worker.lambda_handler",
+            code=lambda_.Code.from_asset("../mcp-servers"),
+            timeout=cdk.Duration.minutes(2),
+            memory_size=512,
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+            },
+        )
+        data.cache_db.secret.grant_read(task_worker)
+        data.cache_db.grant_data_api_access(task_worker)
+        foundation.clusters_table.grant_read_data(task_worker)
+        foundation.grant_task_manage(task_worker)      # agent-tasks R/W + env
+        foundation.grant_alert_broadcast(task_worker)   # WS push on completion
+        # The table stream is the single trigger. Filter to INSERTs so the
+        # worker's own running/done UPDATEs don't re-invoke it.
+        task_worker.add_event_source(lambda_event_sources.DynamoEventSource(
+            foundation.agent_tasks_table,
+            starting_position=lambda_.StartingPosition.LATEST,
+            batch_size=5,
+            retry_attempts=2,
+            filters=[lambda_.FilterCriteria.filter(
+                {"eventName": lambda_.FilterRule.is_equal("INSERT")}
+            )],
         ))
 
         operations_mcp_lambda = lambda_.Function(
@@ -720,6 +763,22 @@ class AgentStack(cdk.Stack):
                 resources=[f"arn:aws:rds:*:{self.account}:cluster:*"],
             )
         )
+
+        # Agent Tasks API — list / get / create over the agent-tasks DDB table.
+        # Read path backs the /tasks UI + the alert toast deep link; POST writes
+        # a pending manual_rca row that the stream worker then executes.
+        tasks_lambda = lambda_.Function(
+            self, "TasksApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/tasks"),
+            timeout=cdk.Duration.seconds(15),
+            environment={
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+            },
+        )
+        foundation.grant_task_manage(tasks_lambda)  # agent-tasks R/W + AGENT_TASKS_TABLE env
+        foundation.clusters_table.grant_read_data(tasks_lambda)
 
         # Runbooks API — CRUD over the `runbooks` cache table. AI-generated
         # diagnoses can be saved as reusable playbooks for pattern recurrence.
@@ -1429,6 +1488,18 @@ class AgentStack(cdk.Stack):
             path="/api/activity",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("ActivityIntegration", approvals_lambda),
+        )
+        # Agent Tasks — autonomous/scheduled/manual agent work
+        tasks_integration = integrations.HttpLambdaIntegration("TasksIntegration", tasks_lambda)
+        self.api.add_routes(
+            path="/api/tasks",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
+            integration=tasks_integration,
+        )
+        self.api.add_routes(
+            path="/api/tasks/{id}",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=tasks_integration,
         )
         # Runbooks — AI-generated playbooks
         runbooks_integration = integrations.HttpLambdaIntegration(

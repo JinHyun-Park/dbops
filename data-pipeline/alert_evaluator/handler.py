@@ -444,6 +444,17 @@ def lambda_handler(event, context):
         except Exception as e:
             print(f"[alert-evaluator] ws broadcast failed for rule {rule_id}: {type(e).__name__}")
 
+        # Event-based auto-RCA: enqueue a deterministic RCA task for this
+        # cluster so a DBA who clicks the alert toast lands on an already-run
+        # analysis instead of an empty dashboard. Best-effort + deduped; the
+        # agent-tasks stream drives the worker that actually runs it.
+        try:
+            from task_enqueue import enqueue_auto_rca
+
+            enqueue_auto_rca(rule["cluster_id"], rule_id, title=f"경보 RCA · {message}")
+        except Exception as e:
+            print(f"[alert-evaluator] auto-RCA enqueue error for rule {rule_id}: {type(e).__name__}")
+
         triggered += 1
 
     return {

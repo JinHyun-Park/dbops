@@ -124,6 +124,40 @@ class FoundationStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
+        # ===== Agent Tasks — event-driven & scheduled agent work =====
+        # Records of autonomous agent work: auto-RCA on alert, scheduled
+        # reports, manual runs. Lives in foundation so data (alert_evaluator,
+        # task_scheduler) can ENQUEUE and agent (task_worker, tasks API) can
+        # PROCESS without a cross-stack cycle. The table's STREAM is the single
+        # processing trigger — any pending row, from any source, drives the
+        # worker. See docs/superpowers/specs/2026-06-18-agent-tasks-design.md.
+        self.agent_tasks_table = dynamodb.Table(
+            self, "AgentTasksTable",
+            table_name=f"dbops-{Settings.ENV}-agent-tasks",
+            partition_key=dynamodb.Attribute(name="task_id", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            time_to_live_attribute="ttl",
+            stream=dynamodb.StreamViewType.NEW_IMAGE,
+            point_in_time_recovery=True,  # cdk-nag AwsSolutions-DDB3
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+        # Per-cluster recent tasks: dashboard cluster view + alert_evaluator
+        # dedupe (skip a fresh auto-RCA if one already ran minutes ago).
+        self.agent_tasks_table.add_global_secondary_index(
+            index_name="cluster-created-index",
+            partition_key=dynamodb.Attribute(name="cluster_id", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="created_at", type=dynamodb.AttributeType.STRING),
+            projection_type=dynamodb.ProjectionType.ALL,
+        )
+        # Fleet-wide recent tasks (the /tasks list). Constant partition key
+        # (record_type == "task") so we Query by recency instead of scanning.
+        self.agent_tasks_table.add_global_secondary_index(
+            index_name="recency-index",
+            partition_key=dynamodb.Attribute(name="record_type", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="created_at", type=dynamodb.AttributeType.STRING),
+            projection_type=dynamodb.ProjectionType.ALL,
+        )
+
         self.hub_role = iam.Role(
             self, "HubRole",
             role_name=f"dbops-{Settings.ENV}-hub-role",
@@ -233,3 +267,16 @@ class FoundationStack(cdk.Stack):
         fn.add_environment("WS_MGMT_ENDPOINT", self.ws_mgmt_endpoint)
         self.ws_connections_table.grant_read_write_data(fn)
         self.ws_api.grant_manage_connections(fn)
+
+    def grant_task_enqueue(self, fn) -> None:
+        """Wire a Lambda to ENQUEUE agent tasks: write pending rows and query
+        the per-cluster GSI for dedupe. Used by data (alert_evaluator,
+        task_scheduler). grant_read_write_data covers the table + its indexes."""
+        fn.add_environment("AGENT_TASKS_TABLE", self.agent_tasks_table.table_name)
+        self.agent_tasks_table.grant_read_write_data(fn)
+
+    def grant_task_manage(self, fn) -> None:
+        """Wire a Lambda to PROCESS/read agent tasks (the stream worker and the
+        list/get API). Includes table + index read/write."""
+        fn.add_environment("AGENT_TASKS_TABLE", self.agent_tasks_table.table_name)
+        self.agent_tasks_table.grant_read_write_data(fn)

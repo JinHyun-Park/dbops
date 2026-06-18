@@ -68,6 +68,9 @@
     },
     {
       "name": "slack"
+    },
+    {
+      "name": "tasks"
     }
   ],
   "paths": {
@@ -1952,6 +1955,71 @@
             "description": "OK"
           }
         }
+      }
+    },
+    "/api/tasks": {
+      "get": {
+        "tags": ["tasks"],
+        "summary": "GET /api/tasks",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      },
+      "post": {
+        "tags": ["tasks"],
+        "summary": "POST /api/tasks",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/tasks/{id}": {
+      "get": {
+        "tags": ["tasks"],
+        "summary": "GET /api/tasks/{id}",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
       }
     }
   }
