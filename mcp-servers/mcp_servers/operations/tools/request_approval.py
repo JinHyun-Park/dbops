@@ -89,6 +89,12 @@ def request_approval_impl(
             Item={
                 "approval_id": approval_id,
                 "created_at": created_at,
+                # DynamoDB TTL (the table's ttl attribute): a pending request
+                # auto-expires 24h after creation so stale, never-acted-on
+                # requests don't linger in the Approval Center indefinitely.
+                # Well above the 60-min replay window, so a legitimately
+                # approved request always stays consumable.
+                "ttl": int(time.time()) + 24 * 60 * 60,
                 "approval_status": "pending",
                 "cluster_id": cluster_id,
                 "action_type": action_type,
@@ -118,6 +124,6 @@ def request_approval_impl(
             f"DBA 승인이 등록되었습니다 (approval_id={approval_id}). "
             "검토 후 승인이 떨어지면 같은 호출을 approved=true 와 "
             f"approval_id={approval_id!r} 를 모두 넣어서 다시 실행해주세요. "
-            "approval_id 가 없거나 30분이 지나면 서버가 거부합니다."
+            "approval_id 가 없거나 승인 후 1시간이 지나면 서버가 거부합니다."
         ),
     }

@@ -305,6 +305,10 @@ def lambda_handler(event, context):
         item = {
             "approval_id": str(uuid.uuid4()),
             "created_at": now,
+            # DynamoDB TTL: pending requests auto-expire 24h after creation so
+            # stale, never-approved requests don't linger in the Approval Center
+            # (well above the 60-min replay window, so approved rows stay usable).
+            "ttl": int(datetime.now(timezone.utc).timestamp()) + 24 * 60 * 60,
             "cluster_id": body.get("cluster_id", ""),
             "tool_name": body.get("tool_name", ""),
             "action_description": body.get("action_description", ""),

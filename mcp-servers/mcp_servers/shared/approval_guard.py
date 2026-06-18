@@ -40,10 +40,11 @@ from typing import Optional
 import boto3
 from botocore.exceptions import ClientError
 
-# Approvals older than this (measured from `resolved_at`) cannot be replayed.
-# Window is intentionally short — if the operator approved 45 minutes ago
-# the world has moved on, and the agent must request fresh approval.
-REPLAY_WINDOW_SECONDS = 30 * 60
+# Approvals older than this (measured from `resolved_at`, i.e. the moment the
+# DBA approved) cannot be replayed. Kept short so a long-stale approval can't be
+# executed against a world that has since moved on — but 60 min gives an operator
+# realistic headroom to approve and let the agent execute.
+REPLAY_WINDOW_SECONDS = 60 * 60
 
 
 def _bypass_enabled() -> bool:
