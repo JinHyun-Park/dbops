@@ -22,3 +22,8 @@ agent/_deps/
 .claude/projects/
 .claude/state/
 .pytest_cache/
+
+# Customer-facing demo/presentation materials — local only, not part of the
+# product source. Intro deck (HTML), simulation guide, incident trigger/resolve
+# scripts. Kept out of the repo intentionally.
+/demo/
