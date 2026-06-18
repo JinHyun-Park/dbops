@@ -10,13 +10,12 @@ interface Setting {
   updated_at: string;
 }
 
+type Rec = { value: string; why: string; severity: "warning" | "info" };
+
 // Recommended values per setting. Mirrors the list in
 // pg_health_checks.RECOMMENDED_SETTINGS — keep these in sync so the panel
 // diff matches the Maintenance Health findings.
-const PG_RECOMMENDED: Record<
-  string,
-  { value: string; why: string; severity: "warning" | "info" }
-> = {
+const PG_RECOMMENDED: Record<string, Rec> = {
   log_checkpoints: {
     value: "on",
     severity: "warning",
@@ -72,6 +71,36 @@ const NEGATIVE_SENTINEL: Record<string, string> = {
   vacuum_cost_delay: "default",
 };
 
+// MySQL generic operational recommendations.
+// Memory-sized settings (innodb_buffer_pool_size, *_buffer_size,
+// max_connections, innodb_log_file_size, tmp_table_size, max_heap_table_size,
+// thread_stack, innodb_io_capacity, innodb_read/write_io_threads) are
+// intentionally absent — their correct values depend on the cluster's instance
+// memory and workload profile, and are computed per-cluster by the Maintenance
+// Health param-fitness panel. Adding static values here would be misleading.
+const MYSQL_RECOMMENDED: Record<string, Rec> = {
+  slow_query_log: {
+    value: "ON",
+    severity: "warning",
+    why: "느린 쿼리 로깅을 켜야 성능 분석이 가능합니다.",
+  },
+  long_query_time: {
+    value: "1",
+    severity: "info",
+    why: "1초 이상 쿼리를 느린 쿼리로 기록 — 워크로드에 따라 조정.",
+  },
+  innodb_flush_log_at_trx_commit: {
+    value: "1",
+    severity: "info",
+    why: "1이 완전한 ACID 내구성 — 성능을 위해 2로 낮추는 건 트레이드오프.",
+  },
+  log_bin: {
+    value: "ON",
+    severity: "info",
+    why: "바이너리 로그(PITR/복제) — Aurora는 클러스터에서 관리.",
+  },
+};
+
 function fmtValue(s: Setting): string {
   const v = s.value;
   const u = s.unit;
@@ -90,11 +119,27 @@ function fmtValue(s: Setting): string {
   return `${v} ${u}`;
 }
 
-function matchesRecommendation(name: string, value: string): boolean {
-  const rec = PG_RECOMMENDED[name];
-  if (!rec) return true; // not a recommendation we track — treat as OK
-  if (name === "log_min_duration_statement") {
-    // any positive integer is acceptable
+// ON/OFF settings where "1" and "ON" (or "0" and "OFF") are equivalent.
+const ONOFF_SETTINGS = new Set([
+  "slow_query_log",
+  "log_bin",
+  "log_checkpoints",
+  "log_connections",
+  "log_disconnections",
+  "log_lock_waits",
+]);
+
+function matchesRecommendation(rec: Rec, name: string, value: string): boolean {
+  if (ONOFF_SETTINGS.has(name)) {
+    const norm = (v: string) => {
+      const u = v.toUpperCase().trim();
+      return u === "1" || u === "ON" ? "ON" : "OFF";
+    };
+    return norm(value) === norm(rec.value);
+  }
+  // PG: any positive value is acceptable for log_min_duration_statement.
+  // MySQL: any positive value is acceptable for long_query_time.
+  if (name === "log_min_duration_statement" || name === "long_query_time") {
     const iv = Number(value);
     return Number.isFinite(iv) && iv > 0;
   }
@@ -146,8 +191,13 @@ export function SettingsPanel({
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {settings.map((s) => {
             const isPg = engineLabel === "PostgreSQL";
-            const rec = isPg ? PG_RECOMMENDED[s.name] : undefined;
-            const ok = !rec || matchesRecommendation(s.name, s.value);
+            const isMy = engineLabel === "MySQL";
+            const rec = isPg
+              ? PG_RECOMMENDED[s.name]
+              : isMy
+                ? MYSQL_RECOMMENDED[s.name]
+                : undefined;
+            const ok = !rec || matchesRecommendation(rec, s.name, s.value);
             const borderClass = !rec
               ? "border-zinc-800"
               : ok
