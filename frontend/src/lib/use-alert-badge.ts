@@ -39,6 +39,8 @@ export interface AlertToast {
   id: string;
   message: string;
   severity: "critical" | "warning";
+  /** cluster_id, if known — used by the toast to deep-link to /dashboard?cluster= */
+  cluster_id?: string;
 }
 
 export interface AlertBadgeState {
@@ -95,11 +97,14 @@ export function useAlertBadge(): AlertBadgeState {
   }, []);
 
   const addToast = useCallback(
-    (msg: string, severity: "critical" | "warning") => {
+    (msg: string, severity: "critical" | "warning", cluster_id?: string) => {
       const id = `toast-${Date.now()}-${Math.random()
         .toString(36)
         .slice(2, 6)}`;
-      setToasts((prev) => [...prev, { id, message: msg, severity }]);
+      setToasts((prev) => [
+        ...prev,
+        { id, message: msg, severity, cluster_id },
+      ]);
       // Auto-dismiss after TTL.
       setTimeout(() => {
         setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -173,11 +178,12 @@ export function useAlertBadge(): AlertBadgeState {
           if (newCritical.length === 1) {
             const c = newCritical[0];
             const name = c.resource_name || c.cluster_id;
-            addToast(`${name} critical 전환`, "critical");
+            addToast(`${name} critical 전환`, "critical", c.cluster_id);
           } else if (newCritical.length > 1) {
             addToast(
               `${newCritical.length}개 클러스터 critical 전환`,
               "critical",
+              // multiple clusters — no single deep-link target
             );
           } else if (crit + warn > seenBaseline.current) {
             addToast(
@@ -202,7 +208,7 @@ export function useAlertBadge(): AlertBadgeState {
       const severity = a.severity === "critical" ? "critical" : "warning";
       const label = a.cluster_id ? `${a.cluster_id}: ` : "";
       const fallback = a.type === "incident" ? "외부 인시던트" : "새 경보";
-      addToast(`${label}${a.title || fallback}`, severity);
+      addToast(`${label}${a.title || fallback}`, severity, a.cluster_id);
     });
     return unsub;
   }, [addToast]);

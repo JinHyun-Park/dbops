@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useCallback } from "react";
 import { ClusterDropdown } from "@/components/design-system/cluster-dropdown";
 import {
   Activity,
@@ -380,18 +381,41 @@ function ToastItem({
   toast: AlertToast;
   onDismiss: (id: string) => void;
 }) {
+  const router = useRouter();
+  const href = toast.cluster_id
+    ? `/dashboard?cluster=${encodeURIComponent(toast.cluster_id)}`
+    : null;
+
+  const handleClick = useCallback(() => {
+    if (href) router.push(href);
+  }, [href, router]);
+
   const colorClass =
     toast.severity === "critical"
       ? "border-rose-500/60 bg-rose-500/10 text-rose-200"
       : "border-amber-500/60 bg-amber-500/10 text-amber-200";
+
+  const hoverClass = href
+    ? "cursor-pointer hover:brightness-125 hover:border-opacity-90 transition-[filter,border-color]"
+    : "";
+
   return (
     <div
       role="alert"
-      className={`flex items-start gap-2.5 border px-3 py-2.5 text-xs font-mono shadow-lg backdrop-blur-sm ${colorClass}`}
+      onClick={href ? handleClick : undefined}
+      className={`flex items-start gap-2.5 border px-3 py-2.5 text-xs font-mono shadow-lg backdrop-blur-sm ${colorClass} ${hoverClass}`}
     >
       <span className="flex-1 leading-snug">{toast.message}</span>
+      {href && (
+        <span className="flex-shrink-0 opacity-50 text-[9px] uppercase tracking-wider mt-px self-center">
+          →
+        </span>
+      )}
       <button
-        onClick={() => onDismiss(toast.id)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDismiss(toast.id);
+        }}
         aria-label="알림 닫기"
         className="flex-shrink-0 opacity-60 hover:opacity-100 transition-opacity mt-px"
       >
