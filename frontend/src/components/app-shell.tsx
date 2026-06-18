@@ -139,7 +139,7 @@ const NAV: NavGroup[] = [
     items: [
       {
         href: "/tasks",
-        label: "작업",
+        label: "Tasks",
         icon: Bot,
         hint: "경보 자동 RCA·예약·수동 실행 등 에이전트 작업과 결과",
       },

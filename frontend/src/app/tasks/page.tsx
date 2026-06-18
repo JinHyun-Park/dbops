@@ -373,6 +373,12 @@ function TaskRow({
   const reportLines =
     (task.result as { lines?: { label: string; value: string }[] } | undefined)
       ?.lines ?? null;
+  // Hybrid RCA: a Korean narrative + recommendations layered over the signals.
+  const insight = task.result as
+    | { narrative?: string; recommendations?: string[] }
+    | undefined;
+  const narrative = insight?.narrative;
+  const recommendations = insight?.recommendations;
   const expandable = task.status === "done" || task.status === "failed";
 
   return (
@@ -440,36 +446,69 @@ function TaskRow({
                 </div>
               ))}
             </dl>
-          ) : candidates.length === 0 ? (
-            <div className="text-xs text-zinc-500">
-              자동 수집 신호에서 뚜렷한 원인을 찾지 못했습니다. 수동 점검을
-              권장합니다.
-            </div>
           ) : (
-            <ol className="flex flex-col gap-2">
-              {candidates.map((c, i) => (
-                <li
-                  key={c.rank ?? i}
-                  className="flex items-start gap-3 text-sm"
-                >
-                  <span className="flex-shrink-0 w-5 text-zinc-500 font-mono">
-                    #{c.rank ?? i + 1}
-                  </span>
-                  <span className="flex-shrink-0 text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 border border-zinc-700 text-zinc-400 mt-0.5">
-                    {String(c.category ?? "—")}
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className="text-zinc-200">
-                      {String(c.summary ?? "")}
-                    </span>
-                    <span className="block text-[11px] text-zinc-500 font-mono mt-0.5">
-                      score {String(c.score ?? "—")}
-                      {c.when ? ` · ${String(c.when)}` : ""}
-                    </span>
-                  </span>
-                </li>
-              ))}
-            </ol>
+            <div className="flex flex-col gap-3">
+              {(narrative ||
+                (recommendations && recommendations.length > 0)) && (
+                <div className="border-l-2 border-emerald-500/50 pl-3">
+                  {narrative && (
+                    <p className="text-sm text-zinc-100 leading-relaxed">
+                      {narrative}
+                    </p>
+                  )}
+                  {recommendations && recommendations.length > 0 && (
+                    <div className="mt-2">
+                      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+                        권장 조치
+                      </div>
+                      <ul className="list-disc list-inside text-sm text-emerald-200/90 space-y-0.5">
+                        {recommendations.map((r, i) => (
+                          <li key={i}>{r}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+              {candidates.length === 0 ? (
+                !narrative && (
+                  <div className="text-xs text-zinc-500">
+                    자동 수집 신호에서 뚜렷한 원인을 찾지 못했습니다. 수동
+                    점검을 권장합니다.
+                  </div>
+                )
+              ) : (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                    신호 증거 (상관관계)
+                  </div>
+                  <ol className="flex flex-col gap-2">
+                    {candidates.map((c, i) => (
+                      <li
+                        key={c.rank ?? i}
+                        className="flex items-start gap-3 text-sm"
+                      >
+                        <span className="flex-shrink-0 w-5 text-zinc-500 font-mono">
+                          #{c.rank ?? i + 1}
+                        </span>
+                        <span className="flex-shrink-0 text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 border border-zinc-700 text-zinc-400 mt-0.5">
+                          {String(c.category ?? "—")}
+                        </span>
+                        <span className="flex-1 min-w-0">
+                          <span className="text-zinc-200">
+                            {String(c.summary ?? "")}
+                          </span>
+                          <span className="block text-[11px] text-zinc-500 font-mono mt-0.5">
+                            score {String(c.score ?? "—")}
+                            {c.when ? ` · ${String(c.when)}` : ""}
+                          </span>
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </div>
           )}
           {task.result?.note && (
             <div className="text-[11px] text-zinc-600 mt-3 italic">
