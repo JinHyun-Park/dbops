@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { ChevronDown, Search } from "lucide-react";
 import { AnchoredPopover } from "@/components/design-system/anchored-popover";
+import { EngineBadge } from "@/components/design-system/engine-badge";
 
 // Controlled, searchable replacement for a native <select> of clusters in FORM
 // fields (chat conversation cluster, alert/runbook pickers). Unlike the header
@@ -20,7 +21,7 @@ export function SearchableClusterSelect({
 }: {
   value: string;
   onChange: (id: string) => void;
-  clusters: { cluster_id: string }[];
+  clusters: { cluster_id: string; engine?: string | null }[];
   placeholder?: string;
   className?: string;
   // When true, an "all clusters" entry maps to value "" — for filter fields.
@@ -33,8 +34,13 @@ export function SearchableClusterSelect({
 
   const ql = q.trim().toLowerCase();
   const visible = ql
-    ? clusters.filter((c) => c.cluster_id.toLowerCase().includes(ql))
+    ? clusters.filter(
+        (c) =>
+          c.cluster_id.toLowerCase().includes(ql) ||
+          (c.engine || "").toLowerCase().includes(ql),
+      )
     : clusters;
+  const selected = clusters.find((c) => c.cluster_id === value);
 
   return (
     <div ref={ref} className={`relative ${className}`}>
@@ -44,6 +50,13 @@ export function SearchableClusterSelect({
         className="w-full flex items-center gap-2 bg-zinc-900 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500/60 transition-colors"
         title={value || placeholder}
       >
+        {selected?.engine && (
+          <EngineBadge
+            engine={selected.engine}
+            size="compact"
+            className="flex-shrink-0"
+          />
+        )}
         <span
           className={`flex-1 min-w-0 truncate text-left font-mono ${
             value ? "text-zinc-200" : "text-zinc-500"
@@ -108,13 +121,20 @@ export function SearchableClusterSelect({
                   setOpen(false);
                   setQ("");
                 }}
-                className={`w-full text-left px-3 py-1.5 text-[12px] font-mono truncate transition-colors ${
+                className={`w-full flex items-center gap-2 text-left px-3 py-1.5 text-[12px] font-mono transition-colors ${
                   c.cluster_id === value
                     ? "bg-zinc-800/80 text-zinc-100"
                     : "text-zinc-300 hover:bg-zinc-800/50"
                 }`}
               >
-                {c.cluster_id}
+                {c.engine && (
+                  <EngineBadge
+                    engine={c.engine}
+                    size="compact"
+                    className="flex-shrink-0"
+                  />
+                )}
+                <span className="truncate">{c.cluster_id}</span>
               </button>
             ))}
             {visible.length === 0 && (
