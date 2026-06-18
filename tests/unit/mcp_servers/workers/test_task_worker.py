@@ -88,12 +88,37 @@ def test_unknown_kind_marked_failed():
     table = MagicMock()
     with patch.object(tw, "_table", return_value=table), \
          patch.object(tw, "_broadcast"):
-        out = tw.lambda_handler({"Records": [_insert(kind="scheduled_report")]}, None)
+        out = tw.lambda_handler({"Records": [_insert(kind="bogus_kind")]}, None)
     assert out["processed"] == 0
     # claim succeeded then work raised => finish(failed)
     assert table.update_item.call_count == 2
     last = table.update_item.call_args_list[-1].kwargs
     assert last["ExpressionAttributeValues"][":s"] == "failed"
+
+
+def test_scheduled_report_happy_path():
+    table = MagicMock()
+    # health_status returns `health` as a STRING + cluster meta + current_metrics.
+    health = {
+        "health": "warning",
+        "cluster": {"status": "available", "engine": "aurora-postgresql"},
+        "current_metrics": [{"metric_type": "cpu", "avg_val": 42.0, "max_val": 88.0}],
+    }
+    with patch.object(tw, "_table", return_value=table), \
+         patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw, "get_health_status_impl", return_value=health), \
+         patch.object(tw, "_broadcast") as mbc:
+        out = tw.lambda_handler(
+            {"Records": [_insert(kind="scheduled_report")]}, None
+        )
+    assert out["processed"] == 1
+    written = table.update_item.call_args_list[-1].kwargs["ExpressionAttributeValues"][":r"]
+    assert written["report_kind"] == "health_digest"
+    labels = {line["label"] for line in written["lines"]}
+    assert "헬스" in labels and "cpu" in labels  # overall + per-metric lines
+    payload = mbc.call_args[0][0]
+    assert payload["task_kind"] == "report_ready"
+    assert "리포트 준비됨" in payload["title"]
 
 
 def test_float_scores_persisted_as_decimal():

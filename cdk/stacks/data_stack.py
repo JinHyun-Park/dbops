@@ -330,6 +330,30 @@ class DataStack(cdk.Stack):
             targets=[targets.LambdaFunction(self.alert_evaluator)],
         )
 
+        # Recurring agent work — reads due scheduled_tasks and enqueues a pending
+        # agent-tasks row for each (the worker then runs the report). Public
+        # endpoints only (Data API + DynamoDB), no agent-stack dependency.
+        self.task_scheduler = lambda_.Function(
+            self, "TaskScheduler",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../data-pipeline/task_scheduler"),
+            timeout=cdk.Duration.seconds(60),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": self.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+            },
+        )
+        self.cache_db.secret.grant_read(self.task_scheduler)
+        self.cache_db.grant_data_api_access(self.task_scheduler)
+        foundation.grant_task_enqueue(self.task_scheduler)  # agent-tasks put + AGENT_TASKS_TABLE env
+        events.Rule(
+            self, "TaskSchedulerSchedule",
+            schedule=events.Schedule.rate(cdk.Duration.hours(1)),
+            targets=[targets.LambdaFunction(self.task_scheduler)],
+        )
+
         self.event_processor = lambda_.Function(
             self, "EventProcessor",
             runtime=lambda_.Runtime.PYTHON_3_12,

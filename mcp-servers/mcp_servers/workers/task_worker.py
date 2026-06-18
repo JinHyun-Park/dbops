@@ -25,6 +25,7 @@ from boto3.dynamodb.types import TypeDeserializer
 from botocore.exceptions import ClientError
 
 from mcp_servers.incident.tools.diagnose_root_cause import diagnose_root_cause_impl
+from mcp_servers.incident.tools.health_status import get_health_status_impl
 from mcp_servers.shared.cache_client import CacheClient
 
 _DESER = TypeDeserializer()
@@ -177,6 +178,35 @@ def _run_rca(cluster_id: str):
     return res, summary
 
 
+def _run_report(cluster_id: str):
+    """Recurring health digest (scheduled_report). Reuses the incident
+    health_status tool and normalizes it into display `lines` so the UI renders
+    reports generically without coupling to health_status internals.
+
+    health_status returns `health` as an overall string (healthy/warning/
+    critical), cluster meta, and `current_metrics` (per-metric avg/max over the
+    last 10 min) — the digest surfaces all three."""
+    res = get_health_status_impl(_get_cache(), cluster_id)
+    lines = []
+    health = res.get("health") if isinstance(res, dict) else None
+    if health:
+        lines.append({"label": "헬스", "value": str(health)})
+    cluster = (res.get("cluster") if isinstance(res, dict) else None) or {}
+    if isinstance(cluster, dict):
+        for k in ("status", "engine", "engine_version"):
+            if cluster.get(k):
+                lines.append({"label": k, "value": str(cluster[k])})
+    for m in (res.get("current_metrics") if isinstance(res, dict) else None) or []:
+        if isinstance(m, dict) and m.get("metric_type") is not None:
+            lines.append({
+                "label": str(m["metric_type"]),
+                "value": f"avg {m.get('avg_val')} / max {m.get('max_val')}",
+            })
+    summary = f"헬스 다이제스트 · {health}" if health else "헬스 다이제스트"
+    report = {"report_kind": "health_digest", "lines": lines, "raw": res}
+    return report, summary
+
+
 def lambda_handler(event, context):
     processed = 0
     skipped = 0
@@ -198,20 +228,23 @@ def lambda_handler(event, context):
         try:
             if kind in ("auto_rca", "manual_rca"):
                 result, summary = _run_rca(cluster_id)
+            elif kind == "scheduled_report":
+                result, summary = _run_report(cluster_id)
             else:
-                # scheduled_report and any future kinds land here until their
-                # generator ships — fail loudly so it shows in the task list
-                # instead of hanging at "running" forever.
+                # Any future kind lands here until its generator ships — fail
+                # loudly so it shows in the task list instead of hanging at
+                # "running" forever.
                 raise NotImplementedError(f"task kind {kind!r} not yet supported by the worker")
 
             _finish(task_id, status="done", result=result, summary=summary)
+            is_report = kind == "scheduled_report"
             _broadcast({
                 "type": "task",
-                "task_kind": "rca_ready",
+                "task_kind": "report_ready" if is_report else "rca_ready",
                 "task_id": task_id,
                 "cluster_id": cluster_id,
                 "severity": "warning",
-                "title": f"RCA 준비됨 · {cluster_id}: {summary}",
+                "title": f"{'리포트' if is_report else 'RCA'} 준비됨 · {cluster_id}: {summary}",
             })
             processed += 1
         except Exception as e:

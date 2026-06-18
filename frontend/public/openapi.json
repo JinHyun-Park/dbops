@@ -67,6 +67,9 @@
       "name": "saved-queries"
     },
     {
+      "name": "scheduled-tasks"
+    },
+    {
       "name": "slack"
     },
     {
@@ -1910,6 +1913,71 @@
       "delete": {
         "tags": ["saved-queries"],
         "summary": "DELETE /api/saved-queries/{id}",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/scheduled-tasks": {
+      "get": {
+        "tags": ["scheduled-tasks"],
+        "summary": "GET /api/scheduled-tasks",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      },
+      "post": {
+        "tags": ["scheduled-tasks"],
+        "summary": "POST /api/scheduled-tasks",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/scheduled-tasks/{id}": {
+      "delete": {
+        "tags": ["scheduled-tasks"],
+        "summary": "DELETE /api/scheduled-tasks/{id}",
         "responses": {
           "200": {
             "description": "OK"

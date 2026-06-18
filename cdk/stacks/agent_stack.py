@@ -780,6 +780,25 @@ class AgentStack(cdk.Stack):
         foundation.grant_task_manage(tasks_lambda)  # agent-tasks R/W + AGENT_TASKS_TABLE env
         foundation.clusters_table.grant_read_data(tasks_lambda)
 
+        # Scheduled Tasks API — CRUD over the scheduled_tasks cache table (the
+        # task_scheduler reads these and enqueues agent-tasks when due).
+        scheduled_tasks_lambda = lambda_.Function(
+            self, "ScheduledTasksApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/scheduled_tasks"),
+            timeout=cdk.Duration.seconds(15),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+            },
+        )
+        data.cache_db.secret.grant_read(scheduled_tasks_lambda)
+        data.cache_db.grant_data_api_access(scheduled_tasks_lambda)
+        foundation.clusters_table.grant_read_data(scheduled_tasks_lambda)
+
         # Runbooks API — CRUD over the `runbooks` cache table. AI-generated
         # diagnoses can be saved as reusable playbooks for pattern recurrence.
         runbooks_lambda = lambda_.Function(
@@ -1500,6 +1519,20 @@ class AgentStack(cdk.Stack):
             path="/api/tasks/{id}",
             methods=[apigwv2.HttpMethod.GET],
             integration=tasks_integration,
+        )
+        # Scheduled (recurring) agent tasks
+        scheduled_integration = integrations.HttpLambdaIntegration(
+            "ScheduledTasksIntegration", scheduled_tasks_lambda
+        )
+        self.api.add_routes(
+            path="/api/scheduled-tasks",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
+            integration=scheduled_integration,
+        )
+        self.api.add_routes(
+            path="/api/scheduled-tasks/{id}",
+            methods=[apigwv2.HttpMethod.DELETE],
+            integration=scheduled_integration,
         )
         # Runbooks — AI-generated playbooks
         runbooks_integration = integrations.HttpLambdaIntegration(
