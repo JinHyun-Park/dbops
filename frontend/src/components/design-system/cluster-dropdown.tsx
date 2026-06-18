@@ -7,6 +7,7 @@ import { triage, type Level } from "@/lib/cluster-triage";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { useFleetOverview } from "@/lib/use-fleet-overview";
 import { AnchoredPopover } from "@/components/design-system/anchored-popover";
+import { EngineBadge } from "@/components/design-system/engine-badge";
 import { groupByEngineGroup, displayName } from "@/lib/group-by-family";
 import { prefetchDashboard } from "@/lib/api-client";
 
@@ -102,9 +103,14 @@ export function ClusterDropdown({
           />
         )}
         {selDisplay ? (
-          <span className="text-[12px] font-mono text-zinc-200 truncate">
-            {shorten(selDisplay, 26)}
-          </span>
+          <>
+            <span className="text-[12px] font-mono text-zinc-200 truncate">
+              {shorten(selDisplay, 22)}
+            </span>
+            {selectedCluster?.engine && (
+              <EngineBadge engine={selectedCluster.engine} size="compact" />
+            )}
+          </>
         ) : (
           <span className="text-[12px] text-zinc-500">클러스터 선택</span>
         )}
@@ -178,8 +184,11 @@ export function ClusterDropdown({
                         <span className="flex-1 min-w-0 text-[12px] font-mono text-zinc-200 truncate">
                           {displayName(c)}
                         </span>
+                        {c.engine && (
+                          <EngineBadge engine={c.engine} size="compact" />
+                        )}
                         {active && (
-                          <span className="text-[10px] text-emerald-300/80">
+                          <span className="text-[10px] text-emerald-300/80 ml-1">
                             현재
                           </span>
                         )}

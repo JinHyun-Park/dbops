@@ -4,12 +4,19 @@
 // Treat anything else conservatively (UNKNOWN) so we don't accidentally hide
 // PG-only panels on a future engine variant.
 
-export type EngineKind = "postgres" | "mysql" | "unknown";
+export type EngineKind =
+  | "postgres"
+  | "mysql"
+  | "docdb"
+  | "dynamodb"
+  | "unknown";
 
 export function engineKind(engine: string | null | undefined): EngineKind {
   const e = (engine || "").toLowerCase();
   if (e.includes("postgres")) return "postgres";
   if (e.includes("mysql")) return "mysql";
+  if (e.includes("docdb")) return "docdb";
+  if (e.includes("dynamodb")) return "dynamodb";
   return "unknown";
 }
 
@@ -43,6 +50,20 @@ export function engineBadge(engine: string | null | undefined): EngineBadge {
         short: "MySQL",
         classes: "bg-orange-500/15 text-orange-300 border-orange-500/40",
         accent: "bg-orange-400",
+      };
+    case "docdb":
+      return {
+        label: "DocumentDB",
+        short: "DocDB",
+        classes: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
+        accent: "bg-emerald-400",
+      };
+    case "dynamodb":
+      return {
+        label: "DynamoDB",
+        short: "DDB",
+        classes: "bg-purple-500/15 text-purple-300 border-purple-500/40",
+        accent: "bg-purple-400",
       };
     default:
       return {
