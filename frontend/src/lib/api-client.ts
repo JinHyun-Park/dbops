@@ -853,6 +853,83 @@ export async function fetchClusters() {
   throw lastErr;
 }
 
+// ── Agent Tasks — event-driven / scheduled / manual agent work ──────────────
+export interface AgentTask {
+  task_id: string;
+  cluster_id: string;
+  kind: string; // auto_rca | manual_rca | scheduled_report
+  trigger: string; // alert:{rule_id} | schedule:{id} | manual:{user}
+  status: string; // pending | running | done | failed
+  created_at: string; // ms-epoch string
+  started_at?: string;
+  completed_at?: string;
+  title?: string;
+  summary?: string;
+  error?: string;
+  // RCA kinds carry the deterministic diagnose_root_cause payload.
+  result?: {
+    status?: string;
+    anchor_time?: string;
+    window_minutes?: number;
+    candidates?: Array<{
+      rank?: number;
+      category?: string;
+      summary?: string;
+      score?: number;
+      when?: string;
+      score_breakdown?: Record<string, unknown>;
+      [k: string]: unknown;
+    }>;
+    signals_examined?: Record<string, number>;
+    skipped_sources?: string[];
+    note?: string;
+    [k: string]: unknown;
+  };
+}
+
+export async function fetchTasks(params?: {
+  cluster?: string;
+  status?: string;
+  limit?: number;
+}): Promise<{ tasks: AgentTask[] }> {
+  const qs = new URLSearchParams();
+  if (params?.cluster) qs.set("cluster", params.cluster);
+  if (params?.status) qs.set("status", params.status);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const q = qs.toString();
+  const res = await authedFetch(await api(`/api/tasks${q ? "?" + q : ""}`));
+  if (!res.ok) throw new Error(`작업 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function fetchTask(taskId: string): Promise<AgentTask> {
+  const res = await authedFetch(await api(`/api/tasks/${enc(taskId)}`));
+  if (!res.ok) throw new Error(`작업 상세 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function createTask(
+  clusterId: string,
+  kind = "manual_rca",
+): Promise<AgentTask> {
+  const res = await authedFetch(await api(`/api/tasks`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ cluster_id: clusterId, kind }),
+  });
+  if (!res.ok) {
+    let msg = `작업 생성 실패 (상태 ${res.status})`;
+    try {
+      const e = await res.json();
+      if (e?.error) msg = e.error;
+    } catch {
+      // keep the status-based message
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
 export async function fetchCost(days = 30) {
   const res = await authedFetch(await api(`/api/cost?days=${days}`));
   if (!res.ok) throw new Error(`비용 조회 실패 (상태 ${res.status})`);

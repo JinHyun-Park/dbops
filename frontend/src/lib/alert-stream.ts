@@ -25,11 +25,15 @@
 import { getValidAccessToken, isLoggedIn } from "@/lib/auth";
 
 export interface PushedAlert {
-  type: "alert" | "incident";
+  type: "alert" | "incident" | "task";
   source?: string;
   cluster_id?: string;
   severity?: string;
   title?: string;
+  // Present on "task" pushes (e.g. an auto-RCA finished) so the toast can deep
+  // link to the stored result instead of just the dashboard.
+  task_id?: string;
+  task_kind?: string;
 }
 
 let wsUrlPromise: Promise<string> | null = null;

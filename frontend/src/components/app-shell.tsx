@@ -9,6 +9,7 @@ import {
   ArrowLeftRight,
   Bell,
   BookOpen,
+  Bot,
   Boxes,
   Brain,
   Clock,
@@ -136,6 +137,12 @@ const NAV: NavGroup[] = [
   {
     label: "Incident",
     items: [
+      {
+        href: "/tasks",
+        label: "작업",
+        icon: Bot,
+        hint: "경보 자동 RCA·예약·수동 실행 등 에이전트 작업과 결과",
+      },
       {
         href: "/timeline",
         label: "Timeline",
@@ -382,9 +389,11 @@ function ToastItem({
   onDismiss: (id: string) => void;
 }) {
   const router = useRouter();
-  const href = toast.cluster_id
-    ? `/dashboard?cluster=${encodeURIComponent(toast.cluster_id)}`
-    : null;
+  const href =
+    toast.href ||
+    (toast.cluster_id
+      ? `/dashboard?cluster=${encodeURIComponent(toast.cluster_id)}`
+      : null);
 
   const handleClick = useCallback(() => {
     if (href) router.push(href);

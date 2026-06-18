@@ -41,6 +41,9 @@ export interface AlertToast {
   severity: "critical" | "warning";
   /** cluster_id, if known — used by the toast to deep-link to /dashboard?cluster= */
   cluster_id?: string;
+  /** Explicit deep-link target. Overrides the cluster_id-derived dashboard
+   *  link — e.g. an auto-RCA "task ready" toast links to /tasks?focus=… */
+  href?: string;
 }
 
 export interface AlertBadgeState {
@@ -97,13 +100,18 @@ export function useAlertBadge(): AlertBadgeState {
   }, []);
 
   const addToast = useCallback(
-    (msg: string, severity: "critical" | "warning", cluster_id?: string) => {
+    (
+      msg: string,
+      severity: "critical" | "warning",
+      cluster_id?: string,
+      href?: string,
+    ) => {
       const id = `toast-${Date.now()}-${Math.random()
         .toString(36)
         .slice(2, 6)}`;
       setToasts((prev) => [
         ...prev,
-        { id, message: msg, severity, cluster_id },
+        { id, message: msg, severity, cluster_id, href },
       ]);
       // Auto-dismiss after TTL.
       setTimeout(() => {
@@ -206,6 +214,14 @@ export function useAlertBadge(): AlertBadgeState {
   useEffect(() => {
     const unsub = subscribeAlertStream((a) => {
       const severity = a.severity === "critical" ? "critical" : "warning";
+      // A finished agent task (e.g. auto-RCA) deep-links to the stored result.
+      if (a.type === "task") {
+        const href = a.task_id
+          ? `/tasks?focus=${encodeURIComponent(a.task_id)}`
+          : "/tasks";
+        addToast(a.title || "에이전트 작업 완료", severity, a.cluster_id, href);
+        return;
+      }
       const label = a.cluster_id ? `${a.cluster_id}: ` : "";
       const fallback = a.type === "incident" ? "외부 인시던트" : "새 경보";
       addToast(`${label}${a.title || fallback}`, severity, a.cluster_id);
