@@ -15,7 +15,17 @@ import { X, Sparkles, RefreshCw } from "lucide-react";
 import { streamChat } from "@/lib/agentcore-sse";
 import { RCA_PROMPT } from "@/lib/rca-link";
 import { stashRcaHandoff } from "@/lib/rca-handoff";
+import { loadRcaCache, saveRcaCache } from "@/lib/rca-cache";
 import { prettyToolName } from "@/lib/tool-name";
+
+// Korean relative time for the "cached analysis" banner.
+function koAgo(ts: number): string {
+  const ms = Date.now() - ts;
+  if (ms < 60_000) return "방금";
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}분 전`;
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}시간 전`;
+  return `${Math.floor(ms / 86_400_000)}일 전`;
+}
 
 // RCA runs IN PLACE: a right-side drawer that streams the agent's root-cause
 // analysis without leaving the page and — crucially — without writing into the
@@ -45,8 +55,15 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
   const [tools, setTools] = useState<ToolCall[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // When the drawer shows a previously-cached analysis (no live run), this holds
+  // the completion time of that analysis; null while streaming a fresh run.
+  const [cachedTs, setCachedTs] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const runSeq = useRef(0);
+  // Mirror the streamed text/tools into refs so the on-complete callback can
+  // snapshot the FINAL values into the cache (state is stale inside the closure).
+  const accRef = useRef("");
+  const toolsRef = useRef<ToolCall[]>([]);
   const router = useRouter();
 
   const run = useCallback((clusterId: string) => {
@@ -56,26 +73,46 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
     setTools([]);
     setError(null);
     setStreaming(true);
+    setCachedTs(null); // this is a live run, not a cached view
+    accRef.current = "";
+    toolsRef.current = [];
     abortRef.current = streamChat(
       RCA_PROMPT,
       clusterId,
       (token) => {
-        if (runSeq.current === seq) setText((t) => t + token);
+        if (runSeq.current === seq) {
+          accRef.current += token;
+          setText((t) => t + token);
+        }
       },
       (name, status) => {
         if (runSeq.current !== seq) return;
+        const i = toolsRef.current.findIndex((t) => t.name === name);
+        if (i >= 0) toolsRef.current[i] = { name, status };
+        else toolsRef.current = [...toolsRef.current, { name, status }];
         setTools((prev) => {
-          const i = prev.findIndex((t) => t.name === name);
-          if (i >= 0) {
+          const j = prev.findIndex((t) => t.name === name);
+          if (j >= 0) {
             const next = [...prev];
-            next[i] = { name, status };
+            next[j] = { name, status };
             return next;
           }
           return [...prev, { name, status }];
         });
       },
       () => {
-        if (runSeq.current === seq) setStreaming(false);
+        if (runSeq.current === seq) {
+          setStreaming(false);
+          // Persist the completed analysis so reopening this cluster's drawer
+          // shows it instantly (no re-run). Snapshot from refs (state is stale).
+          if (accRef.current.trim()) {
+            saveRcaCache(clusterId, {
+              analysis: accRef.current,
+              tools: toolsRef.current,
+              ts: Date.now(),
+            });
+          }
+        }
       },
       (err) => {
         if (runSeq.current === seq) {
@@ -92,7 +129,21 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
   const open = useCallback(
     (clusterId: string) => {
       setCluster(clusterId);
-      run(clusterId);
+      // Show the last completed analysis instantly if we have one — no agent
+      // call, no waiting. "다시 실행" re-runs for a fresh one.
+      const cached = loadRcaCache(clusterId);
+      if (cached) {
+        abortRef.current?.abort();
+        runSeq.current++; // invalidate any in-flight callbacks
+        setText(cached.analysis);
+        setTools(cached.tools || []);
+        setError(null);
+        setStreaming(false);
+        setCachedTs(cached.ts);
+      } else {
+        setCachedTs(null);
+        run(clusterId);
+      }
     },
     [run],
   );
@@ -164,6 +215,15 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto px-5 py-4">
+              {cachedTs && !streaming && (
+                <div className="mb-3 flex items-start gap-2 px-3 py-2 border border-zinc-700/60 bg-zinc-900/60 text-[11px] text-zinc-400">
+                  <span className="text-zinc-500">🕘</span>
+                  <span>
+                    {koAgo(cachedTs)} 저장된 분석입니다 — 재분석 없이 다시 보는
+                    중. 최신 상태가 필요하면 아래 “다시 실행”을 누르세요.
+                  </span>
+                </div>
+              )}
               {error && (
                 <div className="mb-3 px-3 py-2 border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs">
                   {error}
