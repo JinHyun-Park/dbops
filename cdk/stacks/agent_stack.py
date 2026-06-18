@@ -103,6 +103,9 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                # Hybrid RCA: a single Bedrock call turns the deterministic
+                # ranked signals into a Korean narrative + recommendations.
+                "RCA_NARRATIVE_MODEL_ID": Settings.AGENT_MODEL_ID,
             },
         )
         data.cache_db.secret.grant_read(task_worker)
@@ -110,6 +113,16 @@ class AgentStack(cdk.Stack):
         foundation.clusters_table.grant_read_data(task_worker)
         foundation.grant_task_manage(task_worker)      # agent-tasks R/W + env
         foundation.grant_alert_broadcast(task_worker)   # WS push on completion
+        # Bedrock for the hybrid narrative. The model id is an APAC inference
+        # profile, which fans out to foundation models across regions — so the
+        # grant must cover both the profile ARNs and the underlying FM ARNs.
+        task_worker.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=[
+                "arn:aws:bedrock:*::foundation-model/*",
+                f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
+            ],
+        ))
         # The table stream is the single trigger. Filter to INSERTs so the
         # worker's own running/done UPDATEs don't re-invoke it.
         task_worker.add_event_source(lambda_event_sources.DynamoEventSource(

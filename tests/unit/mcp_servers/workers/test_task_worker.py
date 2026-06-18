@@ -71,6 +71,47 @@ def test_auto_rca_happy_path():
     assert "CPU spike 3x" in payload["title"]
 
 
+def test_rca_hybrid_narrative(monkeypatch):
+    """With a model configured, the worker layers a Korean narrative +
+    recommendations (one Bedrock call) onto the deterministic signals."""
+    monkeypatch.setenv("RCA_NARRATIVE_MODEL_ID", "model-x")
+    table = MagicMock()
+    rca = {
+        "status": "ok",
+        "candidates": [{"summary": "CPU spike", "category": "metric_spike", "score": 3.0, "when": "t"}],
+        "signals_examined": {},
+    }
+    bedrock = MagicMock()
+    bedrock.converse.return_value = {
+        "output": {"message": {"content": [{"text": '{"narrative":"메모리 압박이 원인입니다", "recommendations":["work_mem 조정","느린 쿼리 최적화"]}'}]}}
+    }
+    with patch.object(tw, "_table", return_value=table), \
+         patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw, "diagnose_root_cause_impl", return_value=rca), \
+         patch.object(tw.boto3, "client", return_value=bedrock), \
+         patch.object(tw, "_broadcast"):
+        out = tw.lambda_handler({"Records": [_insert()]}, None)
+    assert out["processed"] == 1
+    written = table.update_item.call_args_list[-1].kwargs["ExpressionAttributeValues"][":r"]
+    assert written["narrative"] == "메모리 압박이 원인입니다"
+    assert "work_mem 조정" in written["recommendations"]
+
+
+def test_rca_narrative_skipped_without_model():
+    """No model configured => no Bedrock call; the task still completes with
+    the raw ranked signals (narrative is best-effort)."""
+    table = MagicMock()
+    rca = {"status": "ok", "candidates": [{"summary": "x", "category": "event"}]}
+    with patch.object(tw, "_table", return_value=table), \
+         patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw, "diagnose_root_cause_impl", return_value=rca), \
+         patch.object(tw.boto3, "client") as mclient, \
+         patch.object(tw, "_broadcast"):
+        out = tw.lambda_handler({"Records": [_insert()]}, None)
+    assert out["processed"] == 1
+    mclient.assert_not_called()  # no RCA_NARRATIVE_MODEL_ID => no bedrock-runtime client
+
+
 def test_lost_claim_runs_nothing():
     table = MagicMock()
     table.update_item.side_effect = ClientError(

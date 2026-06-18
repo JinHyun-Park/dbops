@@ -162,14 +162,73 @@ def _finish(task_id, *, status, result=None, summary=None, error=None):
     )
 
 
+def _narrative(cluster_id: str, rca: dict):
+    """Hybrid layer: turn the deterministic candidate signals into a Korean
+    root-cause narrative + concrete recommendations via ONE Bedrock call.
+
+    Best-effort — returns None (and the task still completes with the raw
+    ranked signals) if the model isn't configured or the call/parse fails. The
+    prompt is constrained to the supplied signals so the model can't invent
+    causes the data doesn't support."""
+    model_id = os.environ.get("RCA_NARRATIVE_MODEL_ID", "")
+    candidates = rca.get("candidates") if isinstance(rca, dict) else None
+    if not model_id or not candidates:
+        return None
+
+    lines = [
+        f"- [{c.get('category')}] {c.get('summary')} (score {c.get('score')}, {c.get('when')})"
+        for c in candidates[:8]
+    ]
+    prompt = (
+        f"클러스터 '{cluster_id}'의 근본원인 분석 후보 신호입니다 "
+        "(상관관계 기반 증거, 점수 내림차순):\n"
+        + "\n".join(lines)
+        + f"\n\n검사한 신호 수: {rca.get('signals_examined', {})}\n\n"
+        "위 신호만 근거로(신호에 없는 원인은 추측 금지) 한국어로 분석하세요. "
+        "반드시 아래 JSON 형식만 출력하세요:\n"
+        '{"narrative": "가장 가능성 높은 근본 원인을 2-3문장으로", '
+        '"recommendations": ["구체적이고 실행 가능한 권장 조치", "..."]}'
+    )
+    try:
+        resp = boto3.client("bedrock-runtime").converse(
+            modelId=model_id,
+            messages=[{"role": "user", "content": [{"text": prompt}]}],
+            system=[{"text": (
+                "당신은 Aurora/RDS 데이터베이스 운영(DBA) 전문가입니다. 제공된 신호만으로 "
+                "간결하고 실무적으로 진단하며, 항상 한국어로 답합니다."
+            )}],
+            inferenceConfig={"maxTokens": 900, "temperature": 0.2},
+        )
+        text = resp["output"]["message"]["content"][0]["text"].strip()
+        # Models sometimes wrap JSON in prose / fences — extract the object.
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end == -1:
+            return None
+        obj = json.loads(text[start : end + 1])
+        out = {}
+        if obj.get("narrative"):
+            out["narrative"] = str(obj["narrative"])
+        if isinstance(obj.get("recommendations"), list):
+            out["recommendations"] = [str(r) for r in obj["recommendations"] if r]
+        return out or None
+    except Exception as e:
+        print(f"[task-worker] narrative gen failed for {cluster_id}: {type(e).__name__}: {e}")
+        return None
+
+
 def _run_rca(cluster_id: str):
-    """Deterministic RCA via the incident diagnose_root_cause tool.
+    """Deterministic RCA via the incident diagnose_root_cause tool, with a
+    hybrid Korean narrative + recommendations layered on (best-effort LLM).
 
     Returns (result_dict, one_line_summary). The summary is the top-ranked
     candidate's own summary line, so the toast / list reads meaningfully without
     the DBA opening the full result."""
     res = diagnose_root_cause_impl(_get_cache(), cluster_id)
     candidates = res.get("candidates", []) if isinstance(res, dict) else []
+    if isinstance(res, dict):
+        narr = _narrative(cluster_id, res)
+        if narr:
+            res.update(narr)  # adds narrative + recommendations
     if candidates:
         top = candidates[0]
         summary = top.get("summary") or top.get("category") or "신호 감지"
