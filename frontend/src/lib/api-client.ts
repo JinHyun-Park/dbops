@@ -930,6 +930,61 @@ export async function createTask(
   return res.json();
 }
 
+// ── Scheduled (recurring) agent tasks ───────────────────────────────────────
+export interface AgentSchedule {
+  id: number;
+  cluster_id: string;
+  kind: string;
+  interval_kind: string; // hourly | daily | weekly
+  enabled: boolean;
+  last_run_at?: string | null;
+  created_at?: string;
+}
+
+export async function fetchSchedules(
+  cluster?: string,
+): Promise<{ schedules: AgentSchedule[] }> {
+  const q = cluster ? `?cluster=${enc(cluster)}` : "";
+  const res = await authedFetch(await api(`/api/scheduled-tasks${q}`));
+  if (!res.ok) throw new Error(`예약 작업 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function createSchedule(
+  clusterId: string,
+  intervalKind: string,
+  kind = "scheduled_report",
+): Promise<AgentSchedule> {
+  const res = await authedFetch(await api(`/api/scheduled-tasks`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({
+      cluster_id: clusterId,
+      interval_kind: intervalKind,
+      kind,
+    }),
+  });
+  if (!res.ok) {
+    let msg = `예약 생성 실패 (상태 ${res.status})`;
+    try {
+      const e = await res.json();
+      if (e?.error) msg = e.error;
+    } catch {
+      // keep the status-based message
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+export async function deleteSchedule(id: number): Promise<void> {
+  const res = await authedFetch(await api(`/api/scheduled-tasks/${id}`), {
+    method: "DELETE",
+    headers: { ...(await authHeaders()) },
+  });
+  if (!res.ok) throw new Error(`예약 삭제 실패 (상태 ${res.status})`);
+}
+
 export async function fetchCost(days = 30) {
   const res = await authedFetch(await api(`/api/cost?days=${days}`));
   if (!res.ok) throw new Error(`비용 조회 실패 (상태 ${res.status})`);

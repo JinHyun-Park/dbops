@@ -2,9 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  createSchedule,
   createTask,
+  deleteSchedule,
   fetchClusters,
+  fetchSchedules,
   fetchTasks,
+  type AgentSchedule,
   type AgentTask,
 } from "@/lib/api-client";
 import {
@@ -201,7 +205,145 @@ export default function TasksPage() {
           </div>
         )}
       </Section>
+      <SchedulesSection
+        filterCluster={filterCluster}
+        clusterOptions={clusterOptions}
+      />
     </PageBody>
+  );
+}
+
+const INTERVAL_LABEL: Record<string, string> = {
+  hourly: "매시간",
+  daily: "매일",
+  weekly: "매주",
+};
+
+function SchedulesSection({
+  filterCluster,
+  clusterOptions,
+}: {
+  filterCluster: string;
+  clusterOptions: { cluster_id: string; engine?: string }[];
+}) {
+  const [schedules, setSchedules] = useState<AgentSchedule[]>([]);
+  const [intervalKind, setIntervalKind] = useState("daily");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    fetchSchedules()
+      .then((d) => setSchedules(d.schedules || []))
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const engineOf = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const c of clusterOptions) if (c.engine) m[c.cluster_id] = c.engine;
+    return m;
+  }, [clusterOptions]);
+
+  const add = useCallback(async () => {
+    if (!filterCluster) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await createSchedule(filterCluster, intervalKind);
+      load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [filterCluster, intervalKind, load]);
+
+  const remove = useCallback(
+    async (id: number) => {
+      try {
+        await deleteSchedule(id);
+        load();
+      } catch (e) {
+        setMsg(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [load],
+  );
+
+  return (
+    <Section title="예약 작업">
+      <p className="text-xs text-zinc-500 mb-3">
+        반복 헬스 다이제스트를 예약합니다. 스케줄러가 주기마다 작업을 자동
+        등록하고, 결과는 위 목록과 토스트로 도착합니다.
+      </p>
+      <div className="flex items-center gap-2 flex-wrap mb-4">
+        <span className="text-xs text-zinc-400 font-mono">
+          {filterCluster ||
+            "위에서 클러스터를 선택하면 예약을 추가할 수 있습니다"}
+        </span>
+        {filterCluster && (
+          <>
+            <select
+              value={intervalKind}
+              onChange={(e) => setIntervalKind(e.target.value)}
+              className="bg-zinc-900 border border-zinc-800 text-zinc-200 text-sm px-3 py-1.5 focus:outline-none focus:border-amber-500/60"
+            >
+              <option value="hourly">매시간</option>
+              <option value="daily">매일</option>
+              <option value="weekly">매주</option>
+            </select>
+            <button
+              onClick={add}
+              disabled={busy}
+              className="text-xs px-3 py-1.5 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
+            >
+              {busy ? "추가 중…" : "+ 예약 추가"}
+            </button>
+          </>
+        )}
+      </div>
+      {msg && <div className="text-xs text-rose-300 mb-3">{msg}</div>}
+      {schedules.length === 0 ? (
+        <div className="text-xs text-zinc-600">등록된 예약이 없습니다.</div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {schedules.map((s) => (
+            <div
+              key={s.id}
+              className="flex items-center gap-3 border border-zinc-800 bg-zinc-900/40 px-4 py-2.5 text-sm"
+            >
+              <span className="flex-shrink-0 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider border border-sky-500/40 bg-sky-500/10 text-sky-300">
+                {INTERVAL_LABEL[s.interval_kind] || s.interval_kind}
+              </span>
+              {engineOf[s.cluster_id] && (
+                <EngineBadge
+                  engine={engineOf[s.cluster_id]}
+                  size="compact"
+                  className="flex-shrink-0"
+                />
+              )}
+              <span className="flex-1 min-w-0 truncate font-mono text-zinc-300">
+                {s.cluster_id}
+              </span>
+              <span className="flex-shrink-0 text-[11px] text-zinc-500 font-mono">
+                {s.last_run_at
+                  ? `최근 ${fmtRelative(s.last_run_at)}`
+                  : "미실행"}
+              </span>
+              <button
+                onClick={() => remove(s.id)}
+                className="flex-shrink-0 text-[11px] text-zinc-500 hover:text-rose-300 transition-colors"
+                title="예약 삭제"
+              >
+                삭제
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -226,6 +368,11 @@ function TaskRow({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const candidates = task.result?.candidates ?? [];
+  // scheduled_report results carry normalized display lines instead of RCA
+  // candidates — render them as a key/value digest.
+  const reportLines =
+    (task.result as { lines?: { label: string; value: string }[] } | undefined)
+      ?.lines ?? null;
   const expandable = task.status === "done" || task.status === "failed";
 
   return (
@@ -281,7 +428,19 @@ function TaskRow({
 
       {open && task.status === "done" && (
         <div className="px-4 pb-4 border-t border-zinc-800/60 pt-3">
-          {candidates.length === 0 ? (
+          {reportLines ? (
+            <dl className="grid grid-cols-2 gap-x-8 gap-y-1">
+              {reportLines.map((l, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between gap-3 text-xs"
+                >
+                  <dt className="text-zinc-500 font-mono">{l.label}</dt>
+                  <dd className="text-zinc-200 font-mono">{l.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : candidates.length === 0 ? (
             <div className="text-xs text-zinc-500">
               자동 수집 신호에서 뚜렷한 원인을 찾지 못했습니다. 수동 점검을
               권장합니다.
