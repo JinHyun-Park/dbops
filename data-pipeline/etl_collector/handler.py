@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import boto3
 from collectors.capacity_forecast import collect_capacity_forecast
 from collectors.cost_check import collect_cost_findings
-from collectors.cw_collector import collect_cw_metrics
+from collectors.cw_collector import collect_cw_instance_metrics, collect_cw_metrics
 from collectors.docdb_cw_collector import collect_docdb_metrics
 from collectors.docdb_findings import collect_docdb_findings
 from collectors.dynamodb_cw_collector import collect_dynamodb_metrics
@@ -176,6 +176,15 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
     except Exception as e:
         result["cw_error"] = str(e)
         print(f"[{cluster_id}] cw error: {e}")
+
+    try:
+        meta_instances = (result.get("meta") or {}).get("instances") or []
+        result["cw_instance"] = collect_cw_instance_metrics(
+            cw_client, cache_execute, cluster_id, meta_instances
+        )
+    except Exception as e:
+        result["cw_instance_error"] = str(e)
+        print(f"[{cluster_id}] cw_instance error: {e}")
 
     if target_cluster_arn and target_secret_arn and "postgresql" in engine:
         try:
