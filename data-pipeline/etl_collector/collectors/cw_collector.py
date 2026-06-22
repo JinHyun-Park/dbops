@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta
 
 CW_METRICS = [
@@ -40,7 +41,6 @@ def collect_cw_instance_metrics(cw_client, cache_execute, cluster_id, instances)
     alongside the cluster-level rows (which keep dimensions={}). Read by the
     Compare instance mode via the dimensions filter; invisible to cluster-level
     queries (which exclude rows where dimensions has an 'instance' key)."""
-    import json
     end_time = datetime.utcnow()
     start_time = end_time - timedelta(minutes=10)
     inserted = 0
