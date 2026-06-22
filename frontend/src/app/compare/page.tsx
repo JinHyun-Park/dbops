@@ -11,7 +11,12 @@ import {
   CartesianGrid,
   Legend,
 } from "recharts";
-import { fetchClusters, fetchBatchTimeseries } from "@/lib/api-client";
+import {
+  fetchClusters,
+  fetchBatchTimeseries,
+  fetchClusterInstances,
+  ClusterInstance,
+} from "@/lib/api-client";
 import { useChartColors } from "@/lib/use-chart-colors";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
 import { Expandable } from "@/components/design-system/expandable";
@@ -31,7 +36,7 @@ interface ClusterRow {
   resource_name?: string;
 }
 
-type Mode = "cluster" | "period";
+type Mode = "cluster" | "period" | "instance";
 
 interface MetricSpec {
   id: string;
@@ -143,6 +148,14 @@ export default function ComparePage() {
   // Period-vs-period
   const [periodCluster, setPeriodCluster] = useState<string>("");
 
+  // Instance-vs-instance
+  const [instanceCluster, setInstanceCluster] = useState<string>("");
+  const [instanceA, setInstanceA] = useState<string>("");
+  const [instanceB, setInstanceB] = useState<string>("");
+  const [clusterInstances, setClusterInstances] = useState<ClusterInstance[]>(
+    [],
+  );
+
   const [loadingA, setLoadingA] = useState(false);
   const [loadingB, setLoadingB] = useState(false);
   const [seriesA, setSeriesA] = useState<Record<string, SeriesPoint[]>>({});
@@ -186,6 +199,7 @@ export default function ComparePage() {
           return a;
         });
         setPeriodCluster((cur) => cur || rows[0].cluster_id);
+        setInstanceCluster((cur) => cur || rows[0].cluster_id);
       })
       .catch((e) => {
         console.error("clusters fetch failed:", e);
@@ -201,7 +215,13 @@ export default function ComparePage() {
   // Decide which engines we're comparing so we can hide PG-only metrics
   // when at least one side is MySQL.
   const engineA = clusters.find(
-    (c) => c.cluster_id === (mode === "cluster" ? clusterA : periodCluster),
+    (c) =>
+      c.cluster_id ===
+      (mode === "cluster"
+        ? clusterA
+        : mode === "instance"
+          ? instanceCluster
+          : periodCluster),
   )?.engine;
   const engineB = clusters.find((c) => c.cluster_id === clusterB)?.engine;
   const showPgOnly =
@@ -277,11 +297,62 @@ export default function ComparePage() {
     };
   }, [mode, periodCluster, hours, metricsKey]);
 
-  const labelA = mode === "cluster" ? clusterA || "A" : "현재";
+  // Instance mode — fetch instances when the cluster changes and set defaults.
+  useEffect(() => {
+    if (!instanceCluster) return;
+    fetchClusterInstances(instanceCluster)
+      .then(({ instances }) => {
+        setClusterInstances(instances);
+        // Default A to the writer, B to the first reader (or writer if only one).
+        const writer = instances.find((i) => i.role === "writer");
+        const reader = instances.find((i) => i.role !== "writer");
+        setInstanceA(writer?.id || instances[0]?.id || "");
+        setInstanceB(reader?.id || instances[1]?.id || instances[0]?.id || "");
+      })
+      .catch((e) => console.error("instances fetch failed:", e));
+  }, [instanceCluster]);
+
+  // Instance load effect — fetch both instances in parallel.
+  useEffect(() => {
+    if (
+      mode !== "instance" ||
+      !instanceCluster ||
+      !instanceA ||
+      !instanceB ||
+      instanceA === instanceB ||
+      metricIds.length === 0
+    )
+      return;
+    let cancelled = false;
+    setLoadingA(true);
+    setLoadingB(true);
+    Promise.allSettled([
+      fetchBatchTimeseries(instanceCluster, metricIds, hours, 0, instanceA),
+      fetchBatchTimeseries(instanceCluster, metricIds, hours, 0, instanceB),
+    ]).then(([a, b]) => {
+      if (cancelled) return;
+      if (a.status === "fulfilled") setSeriesA(a.value.series || {});
+      if (b.status === "fulfilled") setSeriesB(b.value.series || {});
+      setLoadingA(false);
+      setLoadingB(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, instanceCluster, instanceA, instanceB, hours, metricsKey]);
+
+  const labelA =
+    mode === "cluster"
+      ? clusterA || "A"
+      : mode === "instance"
+        ? instanceA || "A"
+        : "현재";
   const labelB =
     mode === "cluster"
       ? clusterB || "B"
-      : PERIOD_SHIFT_LABEL[hours] || `−${hours}h`;
+      : mode === "instance"
+        ? instanceB || "B"
+        : PERIOD_SHIFT_LABEL[hours] || `−${hours}h`;
 
   // Recharts injects series colors as inline svg attrs, so light-mode
   // contrast comes from swapping the hex itself rather than CSS overrides.
@@ -335,6 +406,16 @@ export default function ComparePage() {
         >
           Period vs Period
         </button>
+        <button
+          onClick={() => setMode("instance")}
+          className={`text-xs px-3 py-1.5 border transition-colors ${
+            mode === "instance"
+              ? "border-amber-500/60 text-amber-300 bg-amber-500/5"
+              : "border-zinc-800 text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          인스턴스
+        </button>
       </div>
 
       {mode === "cluster" ? (
@@ -367,6 +448,30 @@ export default function ComparePage() {
             value={clusterB}
             clusters={candidatesB}
             onChange={setClusterB}
+          />
+        </div>
+      ) : mode === "instance" ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+          <ClusterPicker
+            label="cluster"
+            color={colorA}
+            value={instanceCluster}
+            clusters={clusters}
+            onChange={setInstanceCluster}
+          />
+          <InstancePicker
+            label="A"
+            color={colorA}
+            value={instanceA}
+            instances={clusterInstances}
+            onChange={setInstanceA}
+          />
+          <InstancePicker
+            label="B"
+            color={colorB}
+            value={instanceB}
+            instances={clusterInstances}
+            onChange={setInstanceB}
           />
         </div>
       ) : (
@@ -527,6 +632,41 @@ export default function ComparePage() {
         </div>
       )}
     </PageBody>
+  );
+}
+
+function InstancePicker({
+  label,
+  color,
+  value,
+  instances,
+  onChange,
+}: {
+  label: string;
+  color: string;
+  value: string;
+  instances: ClusterInstance[];
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 bg-zinc-900/40 border border-zinc-800 px-3 py-2">
+      <span className="w-2 h-2 rounded-full" style={{ background: color }} />
+      <div className="font-mono text-[10px] tracking-wider uppercase text-zinc-500 w-16">
+        {label}
+      </div>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="flex-1 bg-zinc-950 text-zinc-100 border border-zinc-800 px-2 py-1 text-xs focus:outline-none focus:border-amber-500/60"
+      >
+        {instances.length === 0 && <option value="">(인스턴스 없음)</option>}
+        {instances.map((inst) => (
+          <option key={inst.id} value={inst.id}>
+            {inst.id} ({inst.role})
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
