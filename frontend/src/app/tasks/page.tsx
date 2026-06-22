@@ -7,9 +7,11 @@ import {
   deleteSchedule,
   fetchClusters,
   fetchSchedules,
+  fetchTaskStats,
   fetchTasks,
   type AgentSchedule,
   type AgentTask,
+  type TaskStats,
 } from "@/lib/api-client";
 import {
   EmptyState,
@@ -20,7 +22,7 @@ import {
 import { EngineBadge } from "@/components/design-system/engine-badge";
 import { SearchableClusterSelect } from "@/components/design-system/searchable-cluster-select";
 import { getSelectedCluster } from "@/lib/selected-cluster";
-import { fmtRelative } from "@/lib/format";
+import { fmtDecimal, fmtRelative } from "@/lib/format";
 
 const KIND_LABEL: Record<string, string> = {
   auto_rca: "자동 RCA",
@@ -54,6 +56,7 @@ function isoFromMs(ms: string | undefined): string | undefined {
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
+  const [stats, setStats] = useState<TaskStats | null>(null);
   const [engineByCluster, setEngineByCluster] = useState<
     Record<string, string>
   >({});
@@ -79,6 +82,9 @@ export default function TasksPage() {
       })
       .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
+    fetchTaskStats()
+      .then(setStats)
+      .catch(() => {});
   }, [filterCluster, statusFilter]);
 
   useEffect(() => {
@@ -140,6 +146,37 @@ export default function TasksPage() {
         description="경보 자동 RCA · 예약 · 수동 실행 작업의 기록과 결과. 모든 작업은 읽기 전용 분석입니다 — 변경은 승인 센터를 거칩니다."
       />
       <Section>
+        {stats && (
+          <div className="flex items-center gap-4 flex-wrap mb-4 px-4 py-2.5 border border-zinc-800 bg-zinc-900/40 text-xs font-mono">
+            <span className="text-zinc-400">
+              총 작업{" "}
+              <span className="text-zinc-100">{fmtDecimal(stats.total)}</span>
+            </span>
+            <span className="text-zinc-400">
+              성공률{" "}
+              <span className="text-emerald-300">
+                {Math.round(stats.success_rate * 100)}%
+              </span>
+            </span>
+            <span className="text-zinc-400">
+              평균 소요{" "}
+              <span className="text-zinc-100">
+                {(stats.avg_duration_ms / 1000).toFixed(1)}s
+              </span>
+            </span>
+            {Object.entries(stats.by_kind).map(([kind, count]) => (
+              <span key={kind} className="text-zinc-500">
+                {KIND_LABEL[kind] || kind}{" "}
+                <span className="text-zinc-300">{fmtDecimal(count)}</span>
+              </span>
+            ))}
+            {stats.recent_failures > 0 && (
+              <span className="text-rose-400">
+                최근 실패 {fmtDecimal(stats.recent_failures)}
+              </span>
+            )}
+          </div>
+        )}
         <div className="flex items-center gap-2 flex-wrap mb-4">
           <SearchableClusterSelect
             value={filterCluster}
@@ -513,6 +550,71 @@ function TaskRow({
           {task.result?.note && (
             <div className="text-[11px] text-zinc-600 mt-3 italic">
               {String(task.result.note)}
+            </div>
+          )}
+
+          {task.result?.signals_examined && (
+            <div className="mt-3 border-t border-zinc-800/60 pt-3">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                검사한 신호
+              </div>
+              <div className="flex flex-col gap-0.5">
+                {Object.entries(task.result.signals_examined).map(
+                  ([src, cnt]) => (
+                    <div
+                      key={src}
+                      className="flex items-center gap-3 text-xs font-mono"
+                    >
+                      <span className="text-zinc-400 w-40 truncate">{src}</span>
+                      <span className="text-zinc-200">{fmtDecimal(cnt)}</span>
+                    </div>
+                  ),
+                )}
+                {task.result.skipped_sources &&
+                  (task.result.skipped_sources as string[]).length > 0 && (
+                    <div className="text-[11px] text-zinc-600 mt-1 font-mono">
+                      건너뜀:{" "}
+                      {(task.result.skipped_sources as string[]).join(", ")}
+                    </div>
+                  )}
+              </div>
+            </div>
+          )}
+
+          {task.trace && task.trace.length > 0 && (
+            <div className="mt-3 border-t border-zinc-800/60 pt-3">
+              <div className="flex items-center gap-3 mb-1.5">
+                <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  실행 추적
+                </span>
+                {task.duration_ms != null && (
+                  <span className="text-[11px] font-mono text-zinc-500">
+                    총 {(task.duration_ms / 1000).toFixed(1)}s
+                  </span>
+                )}
+              </div>
+              <ol className="flex flex-col gap-1">
+                {task.trace.map((s, i) => (
+                  <li key={i} className="flex items-start gap-2 text-xs">
+                    <span className="flex-shrink-0 w-4 text-zinc-600 font-mono">
+                      {i + 1}.
+                    </span>
+                    <span className="flex-shrink-0 font-mono text-zinc-300">
+                      {s.step}
+                    </span>
+                    <span className="flex-shrink-0 text-zinc-600">·</span>
+                    <span className="flex-shrink-0 font-mono text-zinc-500">
+                      {s.tool}
+                    </span>
+                    <span className="flex-1 min-w-0 text-zinc-500 truncate">
+                      {s.detail}
+                    </span>
+                    <span className="flex-shrink-0 font-mono text-zinc-600">
+                      {s.ms}ms
+                    </span>
+                  </li>
+                ))}
+              </ol>
             </div>
           )}
         </div>
