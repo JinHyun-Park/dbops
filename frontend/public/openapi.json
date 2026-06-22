@@ -2090,6 +2090,25 @@
         ]
       }
     },
+    "/api/tasks/stats": {
+      "get": {
+        "tags": ["tasks"],
+        "summary": "GET /api/tasks/stats",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
     "/api/tasks/{id}": {
       "get": {
         "tags": ["tasks"],

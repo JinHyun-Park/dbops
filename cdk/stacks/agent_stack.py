@@ -1542,6 +1542,14 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
             integration=tasks_integration,
         )
+        # Aggregate stats (counts by status/kind, success rate, avg duration).
+        # Registered before /{id} — literal segment takes precedence over path
+        # param, but explicit ordering keeps intent unambiguous.
+        self.api.add_routes(
+            path="/api/tasks/stats",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=tasks_integration,
+        )
         self.api.add_routes(
             path="/api/tasks/{id}",
             methods=[apigwv2.HttpMethod.GET],

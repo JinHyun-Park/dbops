@@ -67,6 +67,42 @@ def _cluster_exists(cluster_id: str) -> bool:
         return True  # fail-open on a registry read error — POST isn't destructive
 
 
+def _recent_for_stats(limit=500):
+    resp = _table().query(
+        IndexName="recency-index",
+        KeyConditionExpression=Key("record_type").eq("task"),
+        ScanIndexForward=False,
+        Limit=limit,
+    )
+    return resp.get("Items", [])
+
+
+def _stats():
+    rows = _recent_for_stats()
+    by_status, by_kind, durs = {}, {}, []
+    for r in rows:
+        st = str(r.get("status", "unknown"))
+        by_status[st] = by_status.get(st, 0) + 1
+        kd = str(r.get("kind", "unknown"))
+        by_kind[kd] = by_kind.get(kd, 0) + 1
+        if st == "done" and r.get("duration_ms") is not None:
+            try:
+                durs.append(int(r["duration_ms"]))
+            except (TypeError, ValueError):
+                pass
+    done = by_status.get("done", 0)
+    failed = by_status.get("failed", 0)
+    finished = done + failed
+    return {
+        "total": len(rows),
+        "by_status": by_status,
+        "by_kind": by_kind,
+        "success_rate": round(done / finished, 4) if finished else 0,
+        "avg_duration_ms": int(sum(durs) / len(durs)) if durs else 0,
+        "recent_failures": failed,
+    }
+
+
 def _list(qsp: dict) -> list:
     cluster = (qsp.get("cluster") or "").strip()
     status = (qsp.get("status") or "").strip()
@@ -105,6 +141,13 @@ def lambda_handler(event, context):
     headers = {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}
 
     task_id = path_params.get("id")
+    raw_path = event.get("rawPath") or event.get("path") or ""
+
+    if method == "GET" and raw_path.endswith("/stats"):
+        try:
+            return {"statusCode": 200, "headers": headers, "body": json.dumps(_stats(), default=str)}
+        except Exception as e:
+            return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
 
     if method == "GET" and task_id:
         try:
