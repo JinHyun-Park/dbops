@@ -874,6 +874,23 @@ export async function fetchClusters() {
 }
 
 // ── Agent Tasks — event-driven / scheduled / manual agent work ──────────────
+
+export interface TraceStep {
+  step: string;
+  tool: string;
+  ms: number;
+  detail: string;
+}
+
+export interface TaskStats {
+  total: number;
+  by_status: Record<string, number>;
+  by_kind: Record<string, number>;
+  success_rate: number;
+  avg_duration_ms: number;
+  recent_failures: number;
+}
+
 export interface AgentTask {
   task_id: string;
   cluster_id: string;
@@ -886,6 +903,8 @@ export interface AgentTask {
   title?: string;
   summary?: string;
   error?: string;
+  trace?: TraceStep[];
+  duration_ms?: number;
   // RCA kinds carry the deterministic diagnose_root_cause payload.
   result?: {
     status?: string;
@@ -925,6 +944,12 @@ export async function fetchTasks(params?: {
 export async function fetchTask(taskId: string): Promise<AgentTask> {
   const res = await authedFetch(await api(`/api/tasks/${enc(taskId)}`));
   if (!res.ok) throw new Error(`작업 상세 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function fetchTaskStats(): Promise<TaskStats> {
+  const res = await authedFetch(await api(`/api/tasks/stats`));
+  if (!res.ok) throw new Error(`작업 통계 조회 실패 (상태 ${res.status})`);
   return res.json();
 }
 
