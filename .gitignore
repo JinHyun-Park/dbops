@@ -27,3 +27,6 @@ agent/_deps/
 # product source. Intro deck (HTML), simulation guide, incident trigger/resolve
 # scripts. Kept out of the repo intentionally.
 /demo/
+
+# Subagent-driven-development scratch (briefs, reports, ledger) — local only
+.superpowers/
