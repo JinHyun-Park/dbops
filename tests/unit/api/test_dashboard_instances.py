@@ -3,7 +3,6 @@ import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 _DASHBOARD_DIR = Path(__file__).resolve().parents[3] / "api" / "dashboard"
 sys.path.insert(0, str(_DASHBOARD_DIR))
@@ -38,7 +37,7 @@ def test_batch_timeseries_instance_filter_in_sql():
         captured["params"] = params or {}
         return []
     h._batch_timeseries(query, "c1", ["cpu"], 1, instance="r1")
-    assert "jsonb_exists" in captured["sql"]
+    assert "dimensions->>'instance' = :inst" in captured["sql"]
     assert captured["params"].get("inst") == "r1"
 
 

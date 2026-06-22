@@ -1240,7 +1240,7 @@ def _batch_timeseries(
     # `jsonb_exists(col, key)` is used instead of the `?` operator because the
     # RDS Data API rejects `?` as a positional-parameter character.
     inst_clause = (
-        " AND jsonb_exists(dimensions, 'instance') AND dimensions->>'instance' = :inst"
+        " AND dimensions->>'instance' = :inst"
         if instance
         else " AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))"
     )
@@ -3160,7 +3160,6 @@ def _instances(query, cluster_id):
     if not rows or not rows[0].get("instances"):
         return {"instances": []}
     try:
-        import json
         return {"instances": json.loads(rows[0]["instances"]) or []}
     except (ValueError, TypeError):
         return {"instances": []}
