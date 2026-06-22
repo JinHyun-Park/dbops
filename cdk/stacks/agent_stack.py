@@ -1204,6 +1204,16 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardResourceDetailsIntegration", dashboard_alias),
         )
+        # Instance list — Aurora cluster member list (writer + readers) for
+        # the Compare instance picker. Populated by the meta collector into
+        # cluster_meta.instances; cached 30s (membership changes rarely).
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/instances",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration(
+                "DashboardInstancesIntegration", dashboard_alias
+            ),
+        )
         # Simulation API — REST mirror of Simulation MCP tools. All write-
         # like operations are simulations, never DDL execution, so POST is
         # safe without an approval flow.
