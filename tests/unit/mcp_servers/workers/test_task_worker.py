@@ -204,3 +204,56 @@ def test_empty_candidates_still_completes():
     assert out["processed"] == 1
     # done with a "no clear cause" summary
     assert "원인" in mbc.call_args[0][0]["title"]
+
+
+def test_ticket_url_stored_and_broadcast_when_provider_returns_url():
+    """When the ticketing provider creates a ticket, the worker persists
+    ticket_url on the task row and surfaces it in the WS push."""
+    table = MagicMock()
+    rca = {"status": "ok", "candidates": [{"summary": "x", "category": "event"}]}
+    with patch.object(tw, "_table", return_value=table), \
+         patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw, "diagnose_root_cause_impl", return_value=rca), \
+         patch.object(tw, "get_provider") as mgp, \
+         patch.object(tw, "_broadcast") as mbc:
+        mgp.return_value.create_ticket.return_value = "https://tickets.example/INC-1"
+        out = tw.lambda_handler({"Records": [_insert()]}, None)
+    assert out["processed"] == 1
+    finish = table.update_item.call_args_list[-1].kwargs
+    assert finish["ExpressionAttributeValues"][":turl"] == "https://tickets.example/INC-1"
+    assert "ticket_url = :turl" in finish["UpdateExpression"]
+    assert mbc.call_args[0][0]["ticket_url"] == "https://tickets.example/INC-1"
+
+
+def test_no_ticket_url_when_disabled():
+    """Default seam (provider 'none'): nothing created, no ticket_url written or
+    pushed — behaviour identical to before the seam existed."""
+    table = MagicMock()
+    rca = {"status": "ok", "candidates": [{"summary": "x", "category": "event"}]}
+    with patch.object(tw, "_table", return_value=table), \
+         patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw, "diagnose_root_cause_impl", return_value=rca), \
+         patch.object(tw, "_broadcast") as mbc:
+        out = tw.lambda_handler({"Records": [_insert()]}, None)
+    assert out["processed"] == 1
+    finish = table.update_item.call_args_list[-1].kwargs
+    assert ":turl" not in finish["ExpressionAttributeValues"]
+    assert "ticket_url" not in mbc.call_args[0][0]
+
+
+def test_ticket_provider_failure_does_not_break_completion():
+    """A provider that raises must not fail the task: it completes 'done' with
+    no ticket_url (the seam is isolated)."""
+    table = MagicMock()
+    rca = {"status": "ok", "candidates": [{"summary": "x", "category": "event"}]}
+    with patch.object(tw, "_table", return_value=table), \
+         patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw, "diagnose_root_cause_impl", return_value=rca), \
+         patch.object(tw, "get_provider") as mgp, \
+         patch.object(tw, "_broadcast"):
+        mgp.return_value.create_ticket.side_effect = RuntimeError("provider down")
+        out = tw.lambda_handler({"Records": [_insert()]}, None)
+    assert out["processed"] == 1  # still done, not failed
+    finish = table.update_item.call_args_list[-1].kwargs
+    assert finish["ExpressionAttributeValues"][":s"] == "done"
+    assert ":turl" not in finish["ExpressionAttributeValues"]

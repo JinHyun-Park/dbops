@@ -19,6 +19,7 @@ import json
 import os
 import time
 from decimal import Decimal
+from typing import Optional
 
 import boto3
 from boto3.dynamodb.types import TypeDeserializer
@@ -27,6 +28,7 @@ from botocore.exceptions import ClientError
 from mcp_servers.incident.tools.diagnose_root_cause import diagnose_root_cause_impl
 from mcp_servers.incident.tools.health_status import get_health_status_impl
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.workers.ticketing import get_provider
 
 _DESER = TypeDeserializer()
 
@@ -139,7 +141,7 @@ def _claim(task_id: str) -> bool:
         raise
 
 
-def _finish(task_id, *, status, result=None, summary=None, error=None):
+def _finish(task_id, *, status, result=None, summary=None, error=None, ticket_url=None):
     names = {"#s": "status"}
     vals = {":s": status, ":ts": str(_now_ms())}
     sets = ["#s = :s", "completed_at = :ts"]
@@ -150,6 +152,9 @@ def _finish(task_id, *, status, result=None, summary=None, error=None):
     if summary is not None:
         vals[":sum"] = summary
         sets.append("summary = :sum")
+    if ticket_url is not None:
+        vals[":turl"] = ticket_url
+        sets.append("ticket_url = :turl")
     if error is not None:
         vals[":e"] = error[:500]
         sets.append("#err = :e")
@@ -160,6 +165,26 @@ def _finish(task_id, *, status, result=None, summary=None, error=None):
         ExpressionAttributeNames=names,
         ExpressionAttributeValues=vals,
     )
+
+
+def _maybe_create_ticket(task_id, cluster_id, kind, summary, result) -> Optional[str]:
+    """Hand a completed task to the configured ticketing provider and return the
+    ticket URL, or None when ticketing is disabled / no ticket was created.
+
+    Inert by default (``TICKETING_PROVIDER`` unset → no-op provider → None). The
+    call is isolated: any provider failure is logged and treated as "no ticket"
+    so the ticketing seam can never block or fail task completion."""
+    try:
+        return get_provider().create_ticket(
+            task_id=task_id,
+            cluster_id=cluster_id,
+            kind=kind,
+            summary=summary,
+            result=result,
+        )
+    except Exception as e:
+        print(f"[task-worker] ticketing seam failed for {task_id}: {type(e).__name__}: {e}")
+        return None
 
 
 def _narrative(cluster_id: str, rca: dict):
@@ -295,16 +320,23 @@ def lambda_handler(event, context):
                 # "running" forever.
                 raise NotImplementedError(f"task kind {kind!r} not yet supported by the worker")
 
-            _finish(task_id, status="done", result=result, summary=summary)
+            # Ticketing seam: inert by default (provider "none" → None). When a
+            # provider is wired and returns a URL, persist it on the task and
+            # surface it in the push so the toast/list can link to the ticket.
+            ticket_url = _maybe_create_ticket(task_id, cluster_id, kind, summary, result)
+            _finish(task_id, status="done", result=result, summary=summary, ticket_url=ticket_url)
             is_report = kind == "scheduled_report"
-            _broadcast({
+            payload = {
                 "type": "task",
                 "task_kind": "report_ready" if is_report else "rca_ready",
                 "task_id": task_id,
                 "cluster_id": cluster_id,
                 "severity": "warning",
                 "title": f"{'리포트' if is_report else 'RCA'} 준비됨 · {cluster_id}: {summary}",
-            })
+            }
+            if ticket_url:
+                payload["ticket_url"] = ticket_url
+            _broadcast(payload)
             processed += 1
         except Exception as e:
             print(f"[task-worker] task {task_id} ({kind}) failed: {type(e).__name__}: {e}")

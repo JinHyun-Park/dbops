@@ -106,6 +106,10 @@ class AgentStack(cdk.Stack):
                 # Hybrid RCA: a single Bedrock call turns the deterministic
                 # ranked signals into a Korean narrative + recommendations.
                 "RCA_NARRATIVE_MODEL_ID": Settings.AGENT_MODEL_ID,
+                # Ticketing seam: "none" (default) keeps it inert. Flip via
+                # settings once a provider integration ships; an unwired name
+                # makes the worker's ticketing step fail loudly.
+                "TICKETING_PROVIDER": getattr(Settings, "TICKETING_PROVIDER", "none"),
             },
         )
         data.cache_db.secret.grant_read(task_worker)

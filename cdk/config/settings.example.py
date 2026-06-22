@@ -51,3 +51,12 @@ class Settings:
     # handler compares it in constant time. Leave empty to disable the endpoint
     # (it returns 503 until set). Use a long random string.
     INCIDENT_WEBHOOK_SECRET = ""
+
+    # Ticketing provider for completed agent tasks (auto-RCA, scheduled
+    # reports). "none" (default) keeps ticketing disabled — the task worker's
+    # ticketing seam is inert and nothing is created. The provider integration
+    # itself is not shipped yet; this is the config switch that will turn it on
+    # once a provider is wired (e.g. "jira"). Setting an unwired provider name
+    # makes the worker fail the ticketing step loudly rather than silently drop
+    # tickets.
+    TICKETING_PROVIDER = "none"
