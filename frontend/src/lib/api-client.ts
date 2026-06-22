@@ -125,6 +125,7 @@ export async function fetchBatchTimeseries(
   metrics: string[],
   rangeOrHours: TimeRange | number = 1,
   offsetHours = 0,
+  instance?: string,
 ) {
   const csv = metrics.map(enc).join(",");
   // offset_hours is only meaningful in preset mode (compare page period-over-
@@ -133,11 +134,14 @@ export async function fetchBatchTimeseries(
     typeof rangeOrHours === "number" && offsetHours > 0
       ? `&offset_hours=${offsetHours}`
       : "";
+  const instanceQs = instance ? `&instance=${enc(instance)}` : "";
   const res = await authedFetch(
     await api(
       `/api/dashboard/${enc(
         clusterId,
-      )}/batch-timeseries?metrics=${csv}&${rangeQs(rangeOrHours)}${offsetQs}`,
+      )}/batch-timeseries?metrics=${csv}&${rangeQs(
+        rangeOrHours,
+      )}${offsetQs}${instanceQs}`,
     ),
   );
   if (!res.ok) throw new Error(`배치 시계열 조회 실패 (상태 ${res.status})`);
@@ -830,6 +834,22 @@ export async function deleteAlertSubscription(subArn: string) {
     { method: "DELETE", headers: { ...(await authHeaders()) } },
   );
   if (!res.ok) throw new Error(`구독 삭제 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export interface ClusterInstance {
+  id: string;
+  role: string; // writer | reader
+  class: string;
+}
+
+export async function fetchClusterInstances(
+  clusterId: string,
+): Promise<{ instances: ClusterInstance[] }> {
+  const res = await authedFetch(
+    await api(`/api/dashboard/${enc(clusterId)}/instances`),
+  );
+  if (!res.ok) throw new Error(`인스턴스 목록 조회 실패 (상태 ${res.status})`);
   return res.json();
 }
 
