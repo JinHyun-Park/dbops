@@ -1192,6 +1192,7 @@ def _batch_timeseries(
     offset_hours=0,
     from_iso=None,
     to_iso=None,
+    instance=None,
 ):
     """Returns metric series within the requested time window.
 
@@ -1212,6 +1213,7 @@ def _batch_timeseries(
         "offset_hours": offset_hours,
         "from": from_iso,
         "to": to_iso,
+        "instance": instance,
     }
     if not metric_names:
         return {**base_meta, "series": {}}
@@ -1231,12 +1233,26 @@ def _batch_timeseries(
     # (e.g. a one-minute deadlock burst). That's acceptable here because spike
     # DETECTION lives in the raw-data endpoints (/anomalies, /events,
     # /health-findings), not in these chart series.
+    #
+    # Dimensions filter: per-instance rows (dimensions->>'instance' IS NOT NULL)
+    # are excluded from cluster-level queries so existing charts are unaffected.
+    # When `instance` is given, we narrow to that instance's rows only.
+    # `jsonb_exists(col, key)` is used instead of the `?` operator because the
+    # RDS Data API rejects `?` as a positional-parameter character.
+    inst_clause = (
+        " AND jsonb_exists(dimensions, 'instance') AND dimensions->>'instance' = :inst"
+        if instance
+        else " AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))"
+    )
     select_head = (
         f"SELECT {_BUCKET_TS_EXPR} AS ts, metric_type, "
         f"AVG(value)::double precision AS value, dimensions::text AS dimensions "
         f"FROM metric_snapshots "
-        f"WHERE cluster_id = :cid AND metric_type IN ({placeholders}) "
+        f"WHERE cluster_id = :cid AND metric_type IN ({placeholders})"
+        f"{inst_clause} "
     )
+    if instance:
+        params["inst"] = instance
     group_tail = (
         "GROUP BY 1, metric_type, dimensions::text "
         "ORDER BY 1 ASC"
@@ -3134,6 +3150,22 @@ def _slo(
     }
 
 
+def _instances(query, cluster_id):
+    """Cluster member list for the Compare instance picker, from
+    cluster_meta.instances (populated by the meta collector)."""
+    rows = query(
+        "SELECT instances::text AS instances FROM cluster_meta WHERE cluster_id = :cid",
+        {"cid": cluster_id},
+    )
+    if not rows or not rows[0].get("instances"):
+        return {"instances": []}
+    try:
+        import json
+        return {"instances": json.loads(rows[0]["instances"]) or []}
+    except (ValueError, TypeError):
+        return {"instances": []}
+
+
 def _resource_details(query, cluster_id: str) -> dict:
     """Return engine + resource_details JSONB from cluster_meta for the cluster.
 
@@ -3324,6 +3356,7 @@ def lambda_handler(event, context):
             metric_names = [m.strip() for m in metrics_csv.split(",") if m.strip()]
             hours = _parse_int(qs.get("hours"), 1)
             offset_hours = _parse_int(qs.get("offset_hours"), 0, min_v=0)
+            instance = (qs.get("instance") or "").strip() or None
             return _response(
                 200,
                 _batch_timeseries(
@@ -3334,6 +3367,7 @@ def lambda_handler(event, context):
                     offset_hours,
                     from_iso,
                     to_iso,
+                    instance=instance,
                 ),
                 max_age=15,
             )
@@ -3396,6 +3430,8 @@ def lambda_handler(event, context):
             return _response(200, _schema_graph(cluster_id, schema), max_age=30)
         if raw_path.endswith("/resource-details"):
             return _response(200, _resource_details(query, cluster_id), max_age=60)
+        if raw_path.endswith("/instances"):
+            return _response(200, _instances(query, cluster_id), max_age=30)
         return _response(200, _overview(query, cluster_id), max_age=30)
     except Exception:
         print(f"Dashboard error: {traceback.format_exc()}")
