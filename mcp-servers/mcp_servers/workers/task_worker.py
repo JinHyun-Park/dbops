@@ -141,7 +141,7 @@ def _claim(task_id: str) -> bool:
         raise
 
 
-def _finish(task_id, *, status, result=None, summary=None, error=None, ticket_url=None):
+def _finish(task_id, *, status, result=None, summary=None, error=None, ticket_url=None, trace=None, duration_ms=None):
     names = {"#s": "status"}
     vals = {":s": status, ":ts": str(_now_ms())}
     sets = ["#s = :s", "completed_at = :ts"]
@@ -155,6 +155,13 @@ def _finish(task_id, *, status, result=None, summary=None, error=None, ticket_ur
     if ticket_url is not None:
         vals[":turl"] = ticket_url
         sets.append("ticket_url = :turl")
+    if trace is not None:
+        vals[":trace"] = _ddb_safe(trace)
+        sets.append("#trc = :trace")
+        names["#trc"] = "trace"
+    if duration_ms is not None:
+        vals[":dur"] = int(duration_ms)
+        sets.append("duration_ms = :dur")
     if error is not None:
         vals[":e"] = error[:500]
         sets.append("#err = :e")
@@ -245,21 +252,33 @@ def _run_rca(cluster_id: str):
     """Deterministic RCA via the incident diagnose_root_cause tool, with a
     hybrid Korean narrative + recommendations layered on (best-effort LLM).
 
-    Returns (result_dict, one_line_summary). The summary is the top-ranked
-    candidate's own summary line, so the toast / list reads meaningfully without
-    the DBA opening the full result."""
+    Returns (result_dict, one_line_summary, steps). The summary is the
+    top-ranked candidate's own summary line, so the toast / list reads
+    meaningfully without the DBA opening the full result. steps is a list of
+    trace dicts recording each tool invocation with timing."""
+    steps = []
+    t = time.time()
     res = diagnose_root_cause_impl(_get_cache(), cluster_id)
-    candidates = res.get("candidates", []) if isinstance(res, dict) else []
+    cands = res.get("candidates", []) if isinstance(res, dict) else []
+    examined = res.get("signals_examined", {}) if isinstance(res, dict) else {}
+    nsrc = len([k for k, v in examined.items() if v]) if isinstance(examined, dict) else 0
+    steps.append({"step": "진단", "tool": "diagnose_root_cause",
+                  "ms": int((time.time() - t) * 1000),
+                  "detail": f"{nsrc}개 소스 검사 · 후보 {len(cands)}"})
     if isinstance(res, dict):
+        t = time.time()
         narr = _narrative(cluster_id, res)
         if narr:
             res.update(narr)  # adds narrative + recommendations
-    if candidates:
-        top = candidates[0]
-        summary = top.get("summary") or top.get("category") or "신호 감지"
-    else:
-        summary = "자동 수집 신호에서 뚜렷한 원인 미발견 — 수동 점검 권장"
-    return res, summary
+            steps.append({"step": "서술 생성", "tool": "bedrock",
+                          "ms": int((time.time() - t) * 1000),
+                          "detail": "한국어 narrative+권장조치"})
+        else:
+            steps.append({"step": "서술 생성", "tool": "bedrock", "ms": 0,
+                          "detail": "모델 미설정/실패 — 스킵"})
+    summary = (cands[0].get("summary") or cands[0].get("category") or "신호 감지") if cands \
+        else "자동 수집 신호에서 뚜렷한 원인 미발견 — 수동 점검 권장"
+    return res, summary, steps
 
 
 def _run_report(cluster_id: str):
@@ -269,7 +288,11 @@ def _run_report(cluster_id: str):
 
     health_status returns `health` as an overall string (healthy/warning/
     critical), cluster meta, and `current_metrics` (per-metric avg/max over the
-    last 10 min) — the digest surfaces all three."""
+    last 10 min) — the digest surfaces all three.
+
+    Returns (report_dict, one_line_summary, steps)."""
+    steps = []
+    t = time.time()
     res = get_health_status_impl(_get_cache(), cluster_id)
     lines = []
     health = res.get("health") if isinstance(res, dict) else None
@@ -288,7 +311,10 @@ def _run_report(cluster_id: str):
             })
     summary = f"헬스 다이제스트 · {health}" if health else "헬스 다이제스트"
     report = {"report_kind": "health_digest", "lines": lines, "raw": res}
-    return report, summary
+    steps.append({"step": "헬스 다이제스트", "tool": "health_status",
+                  "ms": int((time.time() - t) * 1000),
+                  "detail": f"헬스: {health} · 메트릭 {len(lines)}개"})
+    return report, summary, steps
 
 
 def lambda_handler(event, context):
@@ -309,11 +335,12 @@ def lambda_handler(event, context):
             skipped += 1  # someone else is handling it
             continue
 
+        t0 = time.time()
         try:
             if kind in ("auto_rca", "manual_rca"):
-                result, summary = _run_rca(cluster_id)
+                result, summary, steps = _run_rca(cluster_id)
             elif kind == "scheduled_report":
-                result, summary = _run_report(cluster_id)
+                result, summary, steps = _run_report(cluster_id)
             else:
                 # Any future kind lands here until its generator ships — fail
                 # loudly so it shows in the task list instead of hanging at
@@ -324,7 +351,9 @@ def lambda_handler(event, context):
             # provider is wired and returns a URL, persist it on the task and
             # surface it in the push so the toast/list can link to the ticket.
             ticket_url = _maybe_create_ticket(task_id, cluster_id, kind, summary, result)
-            _finish(task_id, status="done", result=result, summary=summary, ticket_url=ticket_url)
+            _finish(task_id, status="done", result=result, summary=summary,
+                    ticket_url=ticket_url, trace=steps,
+                    duration_ms=int((time.time() - t0) * 1000))
             is_report = kind == "scheduled_report"
             payload = {
                 "type": "task",
@@ -346,6 +375,7 @@ def lambda_handler(event, context):
                     status="failed",
                     summary=f"작업 실패: {type(e).__name__}",
                     error=str(e),
+                    duration_ms=int((time.time() - t0) * 1000),
                 )
             except Exception as e2:
                 print(f"[task-worker] could not mark {task_id} failed: {type(e2).__name__}")

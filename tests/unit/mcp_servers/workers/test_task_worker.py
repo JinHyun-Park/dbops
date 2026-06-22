@@ -241,6 +241,35 @@ def test_no_ticket_url_when_disabled():
     assert "ticket_url" not in mbc.call_args[0][0]
 
 
+def test_auto_rca_records_trace_and_duration():
+    table = MagicMock()
+    rca = {"status": "ok", "candidates": [{"summary": "x", "category": "event"}],
+           "signals_examined": {"events": 3, "metric_spikes": 2}}
+    with patch.object(tw, "_table", return_value=table), \
+         patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw, "diagnose_root_cause_impl", return_value=rca), \
+         patch.object(tw, "_broadcast"):
+        out = tw.lambda_handler({"Records": [_insert()]}, None)
+    assert out["processed"] == 1
+    finish = table.update_item.call_args_list[-1].kwargs["ExpressionAttributeValues"]
+    trace = finish[":trace"]
+    assert isinstance(trace, list) and any(s["tool"] == "diagnose_root_cause" for s in trace)
+    assert ":dur" in finish  # duration recorded
+
+
+def test_failed_task_still_records_trace_and_duration():
+    table = MagicMock()
+    with patch.object(tw, "_table", return_value=table), \
+         patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw, "diagnose_root_cause_impl", side_effect=RuntimeError("boom")), \
+         patch.object(tw, "_broadcast"):
+        out = tw.lambda_handler({"Records": [_insert()]}, None)
+    assert out["processed"] == 0
+    finish = table.update_item.call_args_list[-1].kwargs["ExpressionAttributeValues"]
+    assert finish[":s"] == "failed"
+    assert ":dur" in finish  # duration recorded even on failure
+
+
 def test_ticket_provider_failure_does_not_break_completion():
     """A provider that raises must not fail the task: it completes 'done' with
     no ticket_url (the seam is isolated)."""
