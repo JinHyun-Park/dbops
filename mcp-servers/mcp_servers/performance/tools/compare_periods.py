@@ -16,7 +16,8 @@ def compare_periods_impl(
             "MIN(value) as min_value, COUNT(*) as sample_count "
             "FROM metric_snapshots "
             "WHERE cluster_id = :cluster_id AND metric_type = :metric_type "
-            "AND ts >= :start_time AND ts < :end_time"
+            "AND ts >= :start_time AND ts < :end_time "
+            "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))"
         )
         params = {
             "cluster_id": cluster_id,

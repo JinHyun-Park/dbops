@@ -16,6 +16,7 @@ def get_health_status_impl(cache: CacheClient, cluster_id: str) -> dict:
         SELECT metric_type, AVG(value) as avg_val, MAX(value) as max_val
         FROM metric_snapshots
         WHERE cluster_id = :cluster_id AND ts > NOW() - INTERVAL '10 minutes'
+          AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))
         GROUP BY metric_type
     """
     metrics = cache.execute(metrics_sql, {"cluster_id": cluster_id})

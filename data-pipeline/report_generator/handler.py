@@ -192,7 +192,8 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
         # the report's connection peak blank.
         "SELECT MAX(value) AS max_conn, AVG(value) AS avg_conn FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = 'db_connections' "
-        "AND ts > NOW() - INTERVAL '24 hours'",
+        "AND ts > NOW() - INTERVAL '24 hours' "
+        "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))",
         {"cid": cluster_id},
     )
     events_by_type = cache_query(

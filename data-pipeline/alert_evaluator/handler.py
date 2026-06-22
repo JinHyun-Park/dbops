@@ -36,7 +36,8 @@ def _evaluate_operand(query_fn, cluster_id: str, op: dict) -> tuple[bool, float 
         f"SELECT {sql_agg}(value) AS v "
         "FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = :mt "
-        "AND ts > NOW() - (:win || ' minutes')::interval",
+        "AND ts > NOW() - (:win || ' minutes')::interval "
+        "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))",
         {"cid": cluster_id, "mt": metric, "win": str(window_min)},
     )
     if not rows or rows[0].get("v") is None:
@@ -370,7 +371,8 @@ def lambda_handler(event, context):
                 "FROM metric_snapshots "
                 "WHERE cluster_id = :cid "
                 "AND metric_type = :mt "
-                "AND ts > NOW() - INTERVAL '10 minutes'",
+                "AND ts > NOW() - INTERVAL '10 minutes' "
+                "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))",
                 {"cid": rule["cluster_id"], "mt": rule["metric_type"]},
             )
             if not metric_rows or metric_rows[0].get("latest_value") is None:

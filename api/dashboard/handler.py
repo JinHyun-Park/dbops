@@ -802,6 +802,7 @@ def _overview(query, cluster_id):
             "metrics",
             "SELECT metric_type, AVG(value) as avg_val, MAX(value) as max_val "
             "FROM metric_snapshots WHERE cluster_id = :cid AND ts > NOW() - INTERVAL '1 hour' "
+            "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance')) "
             "GROUP BY metric_type",
             {"cid": cluster_id},
         ),
@@ -865,6 +866,7 @@ def _timeseries(query, cluster_id, metric_type, hours, from_iso=None, to_iso=Non
         f"dimensions::text as dimensions "
         f"FROM metric_snapshots "
         f"WHERE cluster_id = :cid AND metric_type = :mt "
+        f"AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance')) "
     )
     tail = (
         "GROUP BY 1, dimensions::text "
@@ -1331,6 +1333,7 @@ def _multi_cluster_overview(query):
         # read HEALTHY. Same now-boundary on both = the two surfaces agree.
         "  WHERE ts > NOW() - INTERVAL '15 minutes' AND ts <= NOW() "
         "  AND metric_type IN ('cpu', 'aas', 'conn_active', 'conn_idle', 'storage_bytes', 'deadlocks') "
+        "  AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance')) "
         "  GROUP BY cluster_id, metric_type"
         "), "
         "agg AS ("
@@ -1987,7 +1990,8 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
         "       COUNT(*)                                                AS samples "
         "FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = :mt "
-        "AND ts > NOW() - (:days || ' days')::interval",
+        "AND ts > NOW() - (:days || ' days')::interval "
+        "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))",
         {"cid": cluster_id, "mt": metric, "days": str(days_lookback)},
     )
     row = rows[0] if rows else {}

@@ -44,12 +44,14 @@ def lambda_handler(event, context):
             SELECT cluster_id, metric_type, AVG(value) as current_avg
             FROM metric_snapshots
             WHERE ts > NOW() - INTERVAL '15 minutes'
+              AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))
             GROUP BY cluster_id, metric_type
         ),
         baseline AS (
             SELECT cluster_id, metric_type, AVG(value) as baseline_avg, STDDEV(value) as baseline_std
             FROM metric_snapshots
             WHERE ts > NOW() - INTERVAL '7 days' AND ts <= NOW() - INTERVAL '15 minutes'
+              AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))
             GROUP BY cluster_id, metric_type
         )
         SELECT r.cluster_id, r.metric_type, r.current_avg, b.baseline_avg, b.baseline_std,

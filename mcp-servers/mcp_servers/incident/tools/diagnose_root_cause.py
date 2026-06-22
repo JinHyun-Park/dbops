@@ -413,6 +413,7 @@ def _collect_metric_spikes(cache, cluster_id, start_iso, end_iso, baseline_start
           AND ts >= :baseline_start::timestamptz
           AND ts < :end_time::timestamptz
           AND metric_type IN ('aas', 'cpu', 'db_connections')
+          AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))
         GROUP BY metric_type
     """
     params = {
