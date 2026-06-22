@@ -1,3 +1,33 @@
+import json
+
+
+def _build_instance_list(rds_client, cluster_id: str, members: list) -> list:
+    """[{"id","role","class"}] for every cluster member. role from
+    DBClusterMembers.IsClusterWriter; class from a single filtered
+    describe_db_instances. On describe failure, returns role-only entries
+    (class "") so the picker still works."""
+    roles = {
+        m.get("DBInstanceIdentifier"): ("writer" if m.get("IsClusterWriter") else "reader")
+        for m in members
+        if m.get("DBInstanceIdentifier")
+    }
+    classes = {}
+    try:
+        resp = rds_client.describe_db_instances(
+            Filters=[{"Name": "db-cluster-id", "Values": [cluster_id]}]
+        )
+        classes = {
+            i["DBInstanceIdentifier"]: i.get("DBInstanceClass", "")
+            for i in resp.get("DBInstances", [])
+        }
+    except Exception as e:
+        print(f"[meta] instance list class lookup failed for {cluster_id}: {e}")
+    return [
+        {"id": iid, "role": role, "class": classes.get(iid, "")}
+        for iid, role in roles.items()
+    ]
+
+
 def _writer_instance_class(rds_client, cluster_id: str, members: list) -> str:
     """Writer 인스턴스의 DBInstanceClass. Sv2는 "db.serverless", 프로비저닝은
     db.r6g.large 같은 실제 클래스 — 한 필드로 두 모드를 다 표현한다.
@@ -29,6 +59,9 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
     instance_class = _writer_instance_class(
         rds_client, cluster_id, cluster.get("DBClusterMembers") or []
     )
+    instances = _build_instance_list(
+        rds_client, cluster_id, cluster.get("DBClusterMembers") or []
+    )
 
     sql = """
         INSERT INTO cluster_meta (
@@ -39,6 +72,7 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
             multi_az, deletion_protection,
             engine_mode, serverlessv2_min_acu, serverlessv2_max_acu,
             instance_class, http_endpoint_enabled,
+            instances,
             updated_at
         )
         VALUES (
@@ -51,6 +85,7 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
             :multi_az, :deletion_protection,
             :engine_mode, :sv2_min_acu, :sv2_max_acu,
             :instance_class, :http_endpoint_enabled,
+            :instances::jsonb,
             NOW()
         )
         ON CONFLICT (cluster_id) DO UPDATE SET
@@ -69,6 +104,7 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
             serverlessv2_max_acu = EXCLUDED.serverlessv2_max_acu,
             instance_class = COALESCE(NULLIF(EXCLUDED.instance_class, ''), cluster_meta.instance_class),
             http_endpoint_enabled = EXCLUDED.http_endpoint_enabled,
+            instances = EXCLUDED.instances,
             updated_at = NOW()
     """
     params = {
@@ -93,6 +129,7 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
         "sv2_max_acu": float(sv2["MaxCapacity"]) if sv2.get("MaxCapacity") is not None else None,
         "instance_class": instance_class,
         "http_endpoint_enabled": bool(cluster.get("HttpEndpointEnabled", False)),
+        "instances": json.dumps(instances),
     }
     cache_execute(sql, params)
-    return {"cluster_id": cluster_id, "status": cluster["Status"]}
+    return {"cluster_id": cluster_id, "status": cluster["Status"], "instances": instances}
