@@ -299,7 +299,7 @@ export default function ComparePage() {
 
   // Instance mode — fetch instances when the cluster changes and set defaults.
   useEffect(() => {
-    if (!instanceCluster) return;
+    if (!instanceCluster || mode !== "instance") return;
     fetchClusterInstances(instanceCluster)
       .then(({ instances }) => {
         setClusterInstances(instances);
@@ -310,7 +310,7 @@ export default function ComparePage() {
         setInstanceB(reader?.id || instances[1]?.id || instances[0]?.id || "");
       })
       .catch((e) => console.error("instances fetch failed:", e));
-  }, [instanceCluster]);
+  }, [instanceCluster, mode]);
 
   // Instance load effect — fetch both instances in parallel.
   useEffect(() => {
@@ -492,6 +492,20 @@ export default function ComparePage() {
           </div>
         </div>
       )}
+
+      {mode === "instance" && instanceCluster && clusterInstances.length < 2 ? (
+        <div className="border border-amber-500/30 bg-amber-500/5 text-amber-300 text-sm px-4 py-3 mb-4">
+          이 클러스터는 인스턴스가 1대뿐이라 비교할 수 없습니다. 인스턴스가 여러
+          대인 클러스터를 선택하세요.
+        </div>
+      ) : mode === "instance" &&
+        instanceA &&
+        instanceB &&
+        instanceA === instanceB ? (
+        <div className="border border-amber-500/30 bg-amber-500/5 text-amber-300 text-sm px-4 py-3 mb-4">
+          비교하려면 서로 다른 인스턴스를 선택하세요.
+        </div>
+      ) : null}
 
       {crossFamilyMismatch && (
         <div className="border border-amber-500/30 bg-amber-500/5 text-amber-300 text-sm px-4 py-3 flex items-center justify-between gap-3 mb-4">
