@@ -176,6 +176,22 @@ class FoundationStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
+        # ===== Approval Policies — designated-approver routing =====
+        # Admin-defined policies that restrict WHO may approve specific
+        # cluster/action requests (advanced approval). Lives in foundation so
+        # the policy CRUD API and the approvals API (both agent stack) reach it
+        # via grant helpers without a cross-stack cycle. A request with no
+        # matching policy falls back to the existing "any admin" rule, so an
+        # empty table reproduces today's behavior.
+        self.approval_policies_table = dynamodb.Table(
+            self, "ApprovalPoliciesTable",
+            table_name=f"dbops-{Settings.ENV}-approval-policies",
+            partition_key=dynamodb.Attribute(name="policy_id", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            point_in_time_recovery=True,  # cdk-nag AwsSolutions-DDB3
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
         self.hub_role = iam.Role(
             self, "HubRole",
             role_name=f"dbops-{Settings.ENV}-hub-role",
@@ -311,3 +327,15 @@ class FoundationStack(cdk.Stack):
         Used by the config API (GET/PUT /api/config), admin-gated in the handler."""
         fn.add_environment("APP_CONFIG_TABLE", self.app_config_table.table_name)
         self.app_config_table.grant_read_write_data(fn)
+
+    def grant_approval_policy_read(self, fn) -> None:
+        """Wire a Lambda to READ approval policies (env + read grant). Used by
+        the approvals API to resolve a request's eligible approver set."""
+        fn.add_environment("APPROVAL_POLICIES_TABLE", self.approval_policies_table.table_name)
+        self.approval_policies_table.grant_read_data(fn)
+
+    def grant_approval_policy_write(self, fn) -> None:
+        """Wire a Lambda to READ/WRITE approval policies (env + R/W grant). Used
+        by the policy CRUD API, admin-gated in the handler."""
+        fn.add_environment("APPROVAL_POLICIES_TABLE", self.approval_policies_table.table_name)
+        self.approval_policies_table.grant_read_write_data(fn)

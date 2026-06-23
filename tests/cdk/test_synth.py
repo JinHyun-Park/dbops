@@ -118,6 +118,29 @@ def test_app_config_table_present(cdk_app):
     )
 
 
+def test_approval_policies_table_present(cdk_app):
+    """Foundation must define the approval-policies table (policy_id PK)."""
+    from aws_cdk.assertions import Template
+
+    original_cwd = os.getcwd()
+    os.chdir(CDK_DIR)
+    try:
+        import aws_cdk as cdk_lib
+        from config.settings import Settings  # type: ignore  # noqa: F401
+        from stacks.foundation_stack import FoundationStack
+
+        app = cdk_lib.App()
+        foundation = FoundationStack(app, "test-foundation")
+        template = Template.from_stack(foundation)
+    finally:
+        os.chdir(original_cwd)
+
+    template.has_resource_properties(
+        "AWS::DynamoDB::Table",
+        {"KeySchema": [{"AttributeName": "policy_id", "KeyType": "HASH"}]},
+    )
+
+
 def test_app_carries_application_tag(cdk_app):
     """Every stack must have Application=DBOps so Bedrock AIPs etc. inherit
     the cost-allocation tag at deploy time."""
