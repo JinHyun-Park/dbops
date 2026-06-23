@@ -9,9 +9,11 @@ interface QueryEditorProps {
   onAnalyze: (sql: string) => void;
   // Reviews multiple semicolon-separated SQL statements at once.
   onBulkReview: (sql: string) => void;
+  // Asks the agent to propose a semantically-equivalent rewrite.
+  onRewrite: (sql: string) => void;
   isLoading: boolean;
   // Which side button shows the spinner — null if idle.
-  loadingKind?: "explain" | "analyze" | "bulk" | null;
+  loadingKind?: "explain" | "analyze" | "bulk" | "rewrite" | null;
   // Used when restoring a plan from history or opening a shared link.
   initialSql?: string;
 }
@@ -20,6 +22,7 @@ export function QueryEditor({
   onExplain,
   onAnalyze,
   onBulkReview,
+  onRewrite,
   isLoading,
   loadingKind,
   initialSql,
@@ -59,6 +62,14 @@ export function QueryEditor({
             title="Paste multiple SQLs (semicolon-separated) — agent rates each as safe / risky / dangerous with notes"
           >
             {loadingKind === "bulk" ? "검수 중..." : "Bulk review"}
+          </button>
+          <button
+            onClick={() => onRewrite(sql)}
+            disabled={!sql.trim() || isLoading}
+            className="px-3 py-1 text-xs bg-violet-600 text-white rounded hover:bg-violet-500 disabled:opacity-50 transition-colors"
+            title="AI가 시맨틱을 보존하면서 성능 개선 재작성안을 제안합니다 (plan-only EXPLAIN 비교, 실행 없음)"
+          >
+            {loadingKind === "rewrite" ? "분석 중..." : "리라이팅 제안"}
           </button>
         </div>
       </div>

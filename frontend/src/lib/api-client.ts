@@ -1277,11 +1277,14 @@ export class ExplainSqlError extends Error {
 export async function runExplain(
   clusterId: string,
   sql: string,
+  analyze?: boolean,
 ): Promise<ExplainResponse> {
+  const body: Record<string, unknown> = { cluster_id: clusterId, sql };
+  if (analyze !== undefined) body.analyze = analyze;
   const res = await authedFetch(await api(`/api/explain`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cluster_id: clusterId, sql }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     let parsed: { error?: string; message?: string; engine?: string } = {};

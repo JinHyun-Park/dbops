@@ -20,6 +20,7 @@ import {
   deleteSavedQuery,
   type SavedQuerySummary,
 } from "@/lib/api-client";
+import { extractSqlBlock, planTotalCost } from "@/lib/query-rewrite";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
@@ -51,8 +52,18 @@ const PRESETS = [
   },
 ];
 
-type Tab = "plan" | "analysis";
-type LoadingKind = "explain" | "analyze" | "bulk" | null;
+type Tab = "plan" | "analysis" | "rewrite";
+type LoadingKind = "explain" | "analyze" | "bulk" | "rewrite" | null;
+
+interface RewriteComparison {
+  proposedSql: string;
+  rewriteText: string;
+  beforePlan: ExplainResponse["plan"] | null;
+  afterPlan: ExplainResponse["plan"] | null;
+  beforeCost: number | null;
+  afterCost: number | null;
+  planNote: string | null; // graceful note when EXPLAIN failed
+}
 
 interface SavedPlan {
   id: string;
@@ -120,6 +131,7 @@ export default function QueryLabPage() {
   const [insight, setInsight] = useState<string>("");
   const [insightLoading, setInsightLoading] = useState(false);
   const [lastSql, setLastSql] = useState<string>("");
+  const [rewrite, setRewrite] = useState<RewriteComparison | null>(null);
   const [history, setHistory] = useState<SavedPlan[]>([]);
   // Prefilled SQL — passed to QueryEditor on history-restore / share-link open.
   const [prefilledSql, setPrefilledSql] = useState<string>("");
@@ -328,6 +340,110 @@ export default function QueryLabPage() {
     [clusterId, presetPrompt],
   );
 
+  const handleRewrite = useCallback(
+    (sql: string) => {
+      if (!clusterId) {
+        setAnalysis("먼저 클러스터를 선택하세요.");
+        setTab("analysis");
+        return;
+      }
+      setRewrite(null);
+      setLoadingKind("rewrite");
+      setTab("rewrite");
+
+      // Include current plan summary as grounding context when available.
+      const planSummary =
+        explain?.plan &&
+        Array.isArray(explain.plan) &&
+        explain.plan.length > 0 &&
+        (explain.plan as PgPlanRoot[])[0]?.Plan
+          ? `\n\nCurrent plan summary:\n\`\`\`\n${summarizePlanForLLM(
+              (explain.plan as PgPlanRoot[])[0],
+            )}\n\`\`\``
+          : "";
+
+      const message =
+        `너는 PostgreSQL 성능 전문가야. 아래 SQL을 **시맨틱을 완전히 보존**하면서 성능을 개선하는 재작성안을 제안해줘.\n\n` +
+        `반드시 아래 형식으로 **한국어**로 답변해줘:\n` +
+        `1. 재작성된 SQL을 \`\`\`sql 블록으로 먼저 출력\n` +
+        `2. 변경 근거 (왜 이 방식이 더 빠른지 구체적으로)\n` +
+        `3. 주의사항 (시맨틱 변화 가능성, 인덱스 의존성, 엣지 케이스 등)\n\n` +
+        `원본 SQL:\n\`\`\`sql\n${sql}\n\`\`\`` +
+        planSummary;
+
+      let fullText = "";
+      streamChat(
+        message,
+        clusterId,
+        (token) => {
+          fullText += token;
+        },
+        () => {},
+        async () => {
+          // Extract proposed SQL from the streamed response.
+          const proposedSql = extractSqlBlock(fullText);
+
+          // Fetch plan-only EXPLAIN (analyze:false) for both SQLs.
+          // SAFETY: proposed SQL is never executed — plan-only only.
+          let beforePlan: ExplainResponse["plan"] | null = null;
+          let afterPlan: ExplainResponse["plan"] | null = null;
+          let beforeCost: number | null = null;
+          let afterCost: number | null = null;
+          let planNote: string | null = null;
+
+          if (proposedSql) {
+            try {
+              const orig = await runExplain(clusterId, sql, false);
+              beforePlan = orig.plan;
+              beforeCost = planTotalCost(orig.plan);
+            } catch {
+              planNote =
+                "원본 SQL의 plan-only EXPLAIN을 가져오지 못했습니다 (권한 또는 구문 오류).";
+            }
+
+            try {
+              const proposed = await runExplain(clusterId, proposedSql, false);
+              afterPlan = proposed.plan;
+              afterCost = planTotalCost(proposed.plan);
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              // 403 = non-admin; show graceful note, don't throw.
+              planNote =
+                planNote ||
+                (msg.includes("403") || msg.toLowerCase().includes("forbidden")
+                  ? "EXPLAIN 권한이 없습니다. plan 비교를 건너뜁니다."
+                  : "제안 SQL의 plan-only EXPLAIN을 가져오지 못했습니다 (구문 검증 필요).");
+            }
+          }
+
+          setRewrite({
+            proposedSql: proposedSql ?? "",
+            rewriteText: fullText,
+            beforePlan,
+            afterPlan,
+            beforeCost,
+            afterCost,
+            planNote,
+          });
+          setLoadingKind(null);
+        },
+        (err) => {
+          setRewrite({
+            proposedSql: "",
+            rewriteText: `Error: ${err.message}`,
+            beforePlan: null,
+            afterPlan: null,
+            beforeCost: null,
+            afterCost: null,
+            planNote: null,
+          });
+          setLoadingKind(null);
+        },
+      );
+    },
+    [clusterId, explain],
+  );
+
   const applyPreset = (template: string, prompt: string) => {
     setPresetPrompt(prompt);
     setAnalysis("");
@@ -390,6 +506,7 @@ export default function QueryLabPage() {
             onExplain={handleExplain}
             onAnalyze={handleAnalyze}
             onBulkReview={handleBulkReview}
+            onRewrite={handleRewrite}
             isLoading={loadingKind !== null}
             loadingKind={loadingKind}
             initialSql={prefilledSql}
@@ -631,6 +748,16 @@ export default function QueryLabPage() {
             >
               ai analysis
             </button>
+            <button
+              onClick={() => setTab("rewrite")}
+              className={`text-[10px] uppercase tracking-[0.16em] px-2.5 py-1 border transition-colors ${
+                tab === "rewrite"
+                  ? "border-violet-500/60 text-violet-300 bg-violet-500/5"
+                  : "border-zinc-800 text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              rewrite
+            </button>
             {clusterId && (
               <>
                 <span className="text-zinc-700">·</span>
@@ -717,7 +844,7 @@ export default function QueryLabPage() {
                 </>
               )}
             </>
-          ) : (
+          ) : tab === "analysis" ? (
             <>
               {hasAnalysis ? (
                 <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 prose-code:text-sky-300">
@@ -730,6 +857,119 @@ export default function QueryLabPage() {
                   프리셋을 고르면 템플릿이 클립보드에 복사됩니다. 에디터에 SQL을
                   붙여넣고
                   <span className="text-sky-400"> AI 분석</span>을 누르세요.
+                </div>
+              )}
+            </>
+          ) : (
+            /* rewrite tab */
+            <>
+              {loadingKind === "rewrite" && (
+                <div className="text-sm text-zinc-500">
+                  리라이팅 제안 생성 중…
+                </div>
+              )}
+              {!loadingKind && !rewrite && (
+                <div className="text-sm text-zinc-500">
+                  에디터에 SQL을 붙여넣고{" "}
+                  <span className="text-violet-300">리라이팅 제안</span> 버튼을
+                  눌러주세요.
+                </div>
+              )}
+              {rewrite && (
+                <div className="space-y-4">
+                  {/* Advisory banner */}
+                  <div className="text-xs px-3 py-2 border border-amber-500/30 bg-amber-500/5 text-amber-200">
+                    AI 제안 — 실행 전 동등성·성능을 직접 검증하세요 (아래 비교는
+                    실행 없이 planner 추정 cost)
+                  </div>
+
+                  {/* Rewrite narrative */}
+                  <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 prose-code:text-sky-300">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {String(rewrite.rewriteText)}
+                    </ReactMarkdown>
+                  </div>
+
+                  {/* Plan comparison */}
+                  {rewrite.planNote && (
+                    <div className="text-xs px-3 py-2 border border-zinc-700 text-zinc-400">
+                      {rewrite.planNote}
+                    </div>
+                  )}
+                  {(rewrite.beforePlan || rewrite.afterPlan) && (
+                    <div className="border border-zinc-800 bg-zinc-900/40">
+                      <div className="px-3 py-2 border-b border-zinc-800">
+                        <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
+                          plan-only EXPLAIN 비교 (실행 없음)
+                        </div>
+                      </div>
+                      {/* Cost summary */}
+                      {(rewrite.beforeCost !== null ||
+                        rewrite.afterCost !== null) && (
+                        <div className="flex items-center gap-4 px-3 py-2 border-b border-zinc-800 text-xs">
+                          <div className="text-zinc-400">
+                            원본 cost:{" "}
+                            <span className="font-mono text-zinc-200">
+                              {rewrite.beforeCost !== null
+                                ? rewrite.beforeCost.toFixed(2)
+                                : "—"}
+                            </span>
+                          </div>
+                          <div className="text-zinc-400">
+                            제안 cost:{" "}
+                            <span className="font-mono text-zinc-200">
+                              {rewrite.afterCost !== null
+                                ? rewrite.afterCost.toFixed(2)
+                                : "—"}
+                            </span>
+                          </div>
+                          {rewrite.beforeCost !== null &&
+                            rewrite.afterCost !== null &&
+                            rewrite.beforeCost > 0 && (
+                              <div
+                                className={`font-mono font-medium ${
+                                  rewrite.afterCost < rewrite.beforeCost
+                                    ? "text-emerald-400"
+                                    : "text-rose-400"
+                                }`}
+                              >
+                                {rewrite.afterCost < rewrite.beforeCost
+                                  ? "▼"
+                                  : "▲"}{" "}
+                                {Math.abs(
+                                  ((rewrite.afterCost - rewrite.beforeCost) /
+                                    rewrite.beforeCost) *
+                                    100,
+                                ).toFixed(1)}
+                                %{" "}
+                                {rewrite.afterCost < rewrite.beforeCost
+                                  ? "개선"
+                                  : "악화"}
+                              </div>
+                            )}
+                        </div>
+                      )}
+                      {/* Plan trees */}
+                      <div className="grid grid-cols-1 gap-4 p-3">
+                        {rewrite.beforePlan && (
+                          <div>
+                            <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
+                              원본 plan
+                            </div>
+                            <PlanTree plan={rewrite.beforePlan} />
+                          </div>
+                        )}
+                        {rewrite.afterPlan && (
+                          <div>
+                            <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
+                              제안 plan
+                            </div>
+                            <PlanTree plan={rewrite.afterPlan} />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </>
