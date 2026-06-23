@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchActivity,
+  fetchAllActivity,
   fetchClusters,
   type ActivityItem,
 } from "@/lib/api-client";
@@ -243,39 +244,34 @@ export default function ActivityPage() {
               <button
                 type="button"
                 onClick={async () => {
-                  // Export the fullest set the backend allows (cap 500), not
-                  // just the in-view ~200, so the compliance export isn't
-                  // silently truncated. The filename records the row count and
-                  // flags when it hit the 500 cap. (A true unbounded/paginated
-                  // export is a backlog item.)
                   let rows = items;
                   let capped = false;
                   try {
-                    const r = await fetchActivity({
+                    const r = await fetchAllActivity({
                       cluster_id: clusterFilter || undefined,
                       actor: actorFilter || undefined,
                       action_type: actionFilter || undefined,
-                      limit: 500,
                     });
-                    rows = r.items;
-                    capped = r.items.length >= 500;
+                    rows = [...r.items].sort((a, b) =>
+                      String(b.created_at).localeCompare(String(a.created_at)),
+                    );
+                    capped = r.capped;
                   } catch {
-                    // fetch error — fall back to the in-view items
+                    // fall back to the already-loaded in-view rows
                   }
                   const csv = buildAuditCsv(rows);
                   const blob = new Blob([csv], {
                     type: "text/csv;charset=utf-8",
                   });
-                  const url = URL.createObjectURL(blob);
                   const a = document.createElement("a");
-                  a.href = url;
+                  a.href = URL.createObjectURL(blob);
                   a.download = `audit-${new Date()
                     .toISOString()
                     .slice(0, 10)}-${rows.length}rows${
                     capped ? "-capped" : ""
                   }.csv`;
                   a.click();
-                  URL.revokeObjectURL(url);
+                  URL.revokeObjectURL(a.href);
                 }}
                 className="inline-flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 text-zinc-300 hover:border-zinc-600 hover:text-zinc-100 text-xs px-3 py-1.5 transition-colors duration-150"
               >

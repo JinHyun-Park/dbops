@@ -1887,17 +1887,53 @@ export async function fetchActivity(opts?: {
   actor?: string;
   action_type?: string;
   limit?: number;
-}): Promise<{ items: ActivityItem[]; count: number }> {
+  cursor?: string;
+  exportMode?: boolean;
+}): Promise<{
+  items: ActivityItem[];
+  count: number;
+  next_cursor?: string | null;
+}> {
   const params = new URLSearchParams();
   if (opts?.cluster_id) params.set("cluster_id", opts.cluster_id);
   if (opts?.actor) params.set("actor", opts.actor);
   if (opts?.action_type) params.set("action_type", opts.action_type);
   if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.cursor) params.set("cursor", opts.cursor);
+  if (opts?.exportMode) params.set("export", "true");
   const qs = params.toString();
   const url = await api(`/api/activity${qs ? `?${qs}` : ""}`);
   const res = await authedFetch(url);
   if (!res.ok) throw new Error(`활동 조회 실패 (상태 ${res.status})`);
   return res.json();
+}
+
+// Loop the cursor-paginated export until exhausted, accumulating all rows.
+// Continues while next_cursor is non-null (a filtered DDB page can be empty
+// yet still have more pages). A hard page ceiling bounds a runaway loop.
+export async function fetchAllActivity(opts?: {
+  cluster_id?: string;
+  actor?: string;
+  action_type?: string;
+}): Promise<{ items: ActivityItem[]; capped: boolean }> {
+  const MAX_PAGES = 200;
+  const items: ActivityItem[] = [];
+  let cursor: string | undefined = undefined;
+  let pages = 0;
+  for (;;) {
+    const page = await fetchActivity({
+      ...opts,
+      exportMode: true,
+      limit: 1000,
+      cursor,
+    });
+    items.push(...page.items);
+    pages += 1;
+    const next = page.next_cursor;
+    if (!next) return { items, capped: false };
+    if (pages >= MAX_PAGES) return { items, capped: true };
+    cursor = next;
+  }
 }
 
 // =====  Backup inventory (snapshots + PITR window) =====
