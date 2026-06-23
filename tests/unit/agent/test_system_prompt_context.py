@@ -56,4 +56,4 @@ def test_fence_marker_sanitized():
     assert out.count("<<<OPERATOR_CONTEXT\n") == 1
     assert out.count("\nOPERATOR_CONTEXT>>>") == 1
     # The injected markers must have been neutralized (replaced with dashes)
-    assert "<<<OPERATOR-CONTEXT" in out or "OPERATOR-CONTEXT>>>" in out
+    assert "<<<OPERATOR-CONTEXT" in out and "OPERATOR-CONTEXT>>>" in out
