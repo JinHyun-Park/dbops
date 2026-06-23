@@ -395,6 +395,11 @@ def lambda_handler(event, context):
         # requester can still cancel their own request.
         if action == "approve":
             approver = _caller_name(event)
+            # Depends on the bearer being the Cognito ID token (the frontend
+            # sends getValidIdToken()), which always carries cognito:username/
+            # email — so a logged-in admin never resolves to "unknown". If the
+            # bearer ever switches to an access token (no username claims), this
+            # guard would 403 every approval — revisit _caller_name then.
             if not approver or approver == "unknown":
                 return {
                     "statusCode": 403,
