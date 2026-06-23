@@ -67,6 +67,9 @@
       "name": "multi-cluster"
     },
     {
+      "name": "onboarding"
+    },
+    {
       "name": "reports"
     },
     {
@@ -1895,6 +1898,25 @@
       "get": {
         "tags": ["multi-cluster"],
         "summary": "GET /api/multi-cluster/overview",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/onboarding/template": {
+      "get": {
+        "tags": ["onboarding"],
+        "summary": "GET /api/onboarding/template",
         "responses": {
           "200": {
             "description": "OK"

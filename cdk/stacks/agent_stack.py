@@ -1645,6 +1645,24 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PUT],
             integration=config_integration,
         )
+        # Onboarding — generates the spoke-account IAM role CloudFormation
+        # template an admin deploys so the hub account can assume into it.
+        onboarding_lambda = lambda_.Function(
+            self, "OnboardingApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/onboarding"),
+            timeout=cdk.Duration.seconds(15),
+            environment={"HUB_ROLE_ARN": foundation.hub_role.role_arn},
+        )
+        onboarding_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["sts:GetCallerIdentity"], resources=["*"],
+        ))
+        self.api.add_routes(
+            path="/api/onboarding/template",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("OnboardingIntegration", onboarding_lambda),
+        )
         # Runbooks — AI-generated playbooks
         runbooks_integration = integrations.HttpLambdaIntegration(
             "RunbooksIntegration", runbooks_lambda
