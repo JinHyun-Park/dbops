@@ -22,7 +22,7 @@ import {
 import { EngineBadge } from "@/components/design-system/engine-badge";
 import { SearchableClusterSelect } from "@/components/design-system/searchable-cluster-select";
 import { getSelectedCluster } from "@/lib/selected-cluster";
-import { fmtDecimal, fmtRelative } from "@/lib/format";
+import { fmtExact, fmtRelative } from "@/lib/format";
 
 const KIND_LABEL: Record<string, string> = {
   auto_rca: "자동 RCA",
@@ -150,7 +150,7 @@ export default function TasksPage() {
           <div className="flex items-center gap-4 flex-wrap mb-4 px-4 py-2.5 border border-zinc-800 bg-zinc-900/40 text-xs font-mono">
             <span className="text-zinc-400">
               총 작업{" "}
-              <span className="text-zinc-100">{fmtDecimal(stats.total)}</span>
+              <span className="text-zinc-100">{fmtExact(stats.total)}</span>
             </span>
             <span className="text-zinc-400">
               성공률{" "}
@@ -169,12 +169,12 @@ export default function TasksPage() {
             {Object.entries(stats.by_kind).map(([kind, count]) => (
               <span key={kind} className="text-zinc-500">
                 {KIND_LABEL[kind] || kind}{" "}
-                <span className="text-zinc-300">{fmtDecimal(count)}</span>
+                <span className="text-zinc-300">{fmtExact(count)}</span>
               </span>
             ))}
             {stats.recent_failures > 0 && (
               <span className="text-rose-400">
-                최근 실패 {fmtDecimal(stats.recent_failures)}
+                최근 실패 {fmtExact(stats.recent_failures)}
               </span>
             )}
           </div>
@@ -568,7 +568,7 @@ function TaskRow({
                       className="flex items-center gap-3 text-xs font-mono"
                     >
                       <span className="text-zinc-400 w-40 truncate">{src}</span>
-                      <span className="text-zinc-200">{fmtDecimal(cnt)}</span>
+                      <span className="text-zinc-200">{fmtExact(cnt)}</span>
                     </div>
                   ),
                 )}
