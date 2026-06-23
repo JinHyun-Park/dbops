@@ -18,8 +18,9 @@ import { fmtBytes } from "@/lib/format";
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const ALLOWED_EXTENSIONS = new Set(["md", "txt", "csv"]);
-const MAX_BYTES = 32_768; // 32 KB per file
-const TOTAL_BUDGET_BYTES = 65_536; // 64 KB total
+const MAX_BYTES = 32_768; // per-file cap
+const PER_FILE_MAX_BYTES = MAX_BYTES;
+const TOTAL_BUDGET_BYTES = 65_536; // total budget
 const RESERVED_MARKER = "OPERATOR_CONTEXT";
 
 function extOf(name: string): string {
@@ -165,8 +166,9 @@ function UploadZone({
         <p className="text-xs text-zinc-400 mb-3">
           <code className="text-zinc-300">.md</code>,{" "}
           <code className="text-zinc-300">.txt</code>,{" "}
-          <code className="text-zinc-300">.csv</code> 형식만 허용 · 파일당 최대
-          32 KB · 전체 예산 64 KB
+          <code className="text-zinc-300">.csv</code> 형식만 허용 · 파일당 최대{" "}
+          {fmtBytes(PER_FILE_MAX_BYTES)} · 전체 예산{" "}
+          {fmtBytes(TOTAL_BUDGET_BYTES)}
         </p>
         <input
           ref={inputRef}
@@ -263,7 +265,7 @@ export default function ContextFilesPage() {
       return;
     }
 
-    if (content.includes(RESERVED_MARKER)) {
+    if (content.toLowerCase().includes(RESERVED_MARKER.toLowerCase())) {
       setUploadError(
         `파일에 예약어 "${RESERVED_MARKER}"가 포함되어 있어 업로드할 수 없습니다.`,
       );
@@ -286,13 +288,13 @@ export default function ContextFilesPage() {
   };
 
   const handleDelete = async (id: string, name: string) => {
+    setDeleteError(null);
     if (
       !confirm(
         `"${name}" 파일을 삭제할까요? 에이전트 컨텍스트에서 즉시 제거됩니다.`,
       )
     )
       return;
-    setDeleteError(null);
     setDeletingId(id);
     try {
       await deleteContextFile(id);
@@ -349,9 +351,15 @@ export default function ContextFilesPage() {
             업로드하면 에이전트가 진단·권고 시 이를 참조합니다.
           </p>
           <p>
-            파일당 최대 <strong className="text-zinc-300">32 KB</strong>, 전체
-            예산 <strong className="text-zinc-300">64 KB</strong>. 예산 초과 시
-            업로드가 거부됩니다.
+            파일당 최대{" "}
+            <strong className="text-zinc-300">
+              {fmtBytes(PER_FILE_MAX_BYTES)}
+            </strong>
+            , 전체 예산{" "}
+            <strong className="text-zinc-300">
+              {fmtBytes(TOTAL_BUDGET_BYTES)}
+            </strong>
+            . 예산 초과 시 업로드가 거부됩니다.
           </p>
         </div>
       </Section>
@@ -408,7 +416,9 @@ export default function ContextFilesPage() {
           <Section
             eyebrow="Upload"
             title="파일 업로드"
-            description=".md · .txt · .csv — 파일당 최대 32 KB"
+            description={`.md · .txt · .csv — 파일당 최대 ${fmtBytes(
+              PER_FILE_MAX_BYTES,
+            )}`}
           >
             <UploadZone
               onUpload={handleUpload}
