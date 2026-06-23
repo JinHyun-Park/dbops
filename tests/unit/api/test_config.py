@@ -169,6 +169,9 @@ def test_bearer_garbage_token_denied():
 def test_dev_fallback_valid_token_no_groups_is_admin():
     # A VALID (decodable) token with NO cognito:groups claim is the one-admin
     # dev fallback → admin. This must still work after the empty-claims guard.
+    # NOTE: a real Cognito token always carries sub/iss/aud/email etc., so the
+    # dev-fallback principal is non-empty — see test_empty_payload_jwt_denied
+    # for why an empty {} payload is intentionally NOT the fallback.
     payload = {"preferred_username": "solo"}  # no cognito:groups
     b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
     e = {
@@ -178,3 +181,18 @@ def test_dev_fallback_valid_token_no_groups_is_admin():
     with patch.object(handler, "_table", return_value=_fake_table()):
         r = handler.lambda_handler(e)
     assert r["statusCode"] == 200
+
+
+def test_empty_payload_jwt_denied():
+    # A decodable token whose payload is exactly {} has no identity (no sub/iss)
+    # — it is NOT a real Cognito principal and must NOT get the one-admin dev
+    # fallback. The narrowing from "decodable" to "non-empty decodable" is
+    # deliberate: real Cognito tokens are always non-empty, so this only
+    # excludes the degenerate empty-payload case. Fail-closed.
+    b64 = base64.urlsafe_b64encode(json.dumps({}).encode()).rstrip(b"=").decode()
+    e = {
+        "requestContext": {"http": {"method": "GET"}},
+        "headers": {"authorization": f"Bearer hdr.{b64}.sig"},
+    }
+    r = handler.lambda_handler(e)
+    assert r["statusCode"] == 403
