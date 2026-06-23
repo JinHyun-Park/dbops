@@ -141,6 +141,7 @@ export function streamChat(
   onError: (error: Error) => void,
   explicitSessionId?: string,
   modelId?: string,
+  onUsage?: (u: { input: number; output: number }) => void,
 ): AbortController {
   const controller = new AbortController();
   const sanitize = makeSanitizer();
@@ -230,6 +231,11 @@ export function streamChat(
                 emit(parsed.content || parsed.delta?.text || "");
               } else if (parsed.type === "tool_use") {
                 onToolCall(parsed.name || "tool", parsed.status || "running");
+              } else if (parsed.type === "usage") {
+                onUsage?.({
+                  input: Number(parsed.input_tokens) || 0,
+                  output: Number(parsed.output_tokens) || 0,
+                });
               } else if (parsed.data) {
                 emit(
                   typeof parsed.data === "string"

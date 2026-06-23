@@ -350,6 +350,20 @@ export function ChatPanel() {
   const abortRef = useRef<AbortController | null>(null);
   const followupAbortRef = useRef<AbortController | null>(null);
   const titleAbortRef = useRef<AbortController | null>(null);
+  // Per-session token usage accumulators. Keyed by session id so switching
+  // conversations doesn't mix totals. Updated by onUsage / onError callbacks
+  // and flushed into the server PUT via scheduleSync.
+  const tokenTotalsRef = useRef<
+    Map<
+      string,
+      {
+        total_input_tokens: number;
+        total_output_tokens: number;
+        turn_count: number;
+        last_error?: { message: string; at: number };
+      }
+    >
+  >(new Map());
   // When the chat is deep-linked from another page (e.g. the dashboard/timeline
   // "AI 근본원인 분석" button → /chat?cluster=…&prompt=…), pin that cluster so
   // the async cluster-defaults below don't clobber it.
@@ -534,10 +548,12 @@ export function ChatPanel() {
     if (existing) clearTimeout(existing);
     const t = setTimeout(() => {
       syncTimerRef.current.delete(conv.id);
+      const usage = tokenTotalsRef.current.get(conv.id);
       putChatSession(conv.id, {
         title: conv.title,
         cluster_id: conv.cluster_id,
         messages: conv.messages,
+        ...(usage ? usage : {}),
       }).catch((e) =>
         console.warn(
           "[chat] putChatSession failed; localStorage stays authoritative",
@@ -856,9 +872,36 @@ export function ChatPanel() {
           console.error("Stream error:", err);
           setStreamError(err?.message || "알 수 없는 스트림 오류");
           setIsStreaming(false);
+          // Record last error per session for server persistence.
+          const prev = tokenTotalsRef.current.get(convId) ?? {
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            turn_count: 0,
+          };
+          tokenTotalsRef.current.set(convId, {
+            ...prev,
+            last_error: {
+              message: err?.message || "unknown stream error",
+              at: Date.now(),
+            },
+          });
         },
         convId,
         modelId,
+        (u) => {
+          // Accumulate token usage across turns for this session.
+          const prev = tokenTotalsRef.current.get(convId) ?? {
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            turn_count: 0,
+          };
+          tokenTotalsRef.current.set(convId, {
+            ...prev,
+            total_input_tokens: prev.total_input_tokens + u.input,
+            total_output_tokens: prev.total_output_tokens + u.output,
+            turn_count: prev.turn_count + 1,
+          });
+        },
       );
     },
     [

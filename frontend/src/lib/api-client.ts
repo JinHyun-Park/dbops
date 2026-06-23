@@ -1728,7 +1728,15 @@ export async function fetchChatSession(id: string): Promise<ChatSessionDetail> {
 
 export async function putChatSession(
   id: string,
-  payload: { title: string; cluster_id: string; messages: unknown[] },
+  payload: {
+    title: string;
+    cluster_id: string;
+    messages: unknown[];
+    total_input_tokens?: number;
+    total_output_tokens?: number;
+    turn_count?: number;
+    last_error?: { message: string; at: number };
+  },
 ): Promise<void> {
   const res = await authedFetch(
     await api(`/api/chat/sessions/${encodeURIComponent(id)}`),

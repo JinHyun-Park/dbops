@@ -222,3 +222,57 @@ def test_delete_owner_succeeds(mock_boto3):
     )
     assert res["statusCode"] == 200
     table.delete_item.assert_called_once_with(Key={"session_id": "s1"})
+
+
+@patch.dict("os.environ", {"SESSIONS_TABLE": "sessions"})
+@patch.object(handler, "boto3")
+def test_put_persists_token_fields(mock_boto3):
+    """PUT body with all four token/error fields → stored item carries them."""
+    table = MagicMock()
+    table.get_item.return_value = {}  # no existing row
+    mock_boto3.resource.return_value.Table.return_value = table
+
+    body = {
+        "title": "token test",
+        "cluster_id": "prod-pg-1",
+        "messages": [],
+        "total_input_tokens": 1234,
+        "total_output_tokens": 567,
+        "turn_count": 3,
+        "last_error": {"message": "stream timeout", "at": 1700000000000},
+    }
+    res = handler.lambda_handler(
+        _event("PUT", path_params={"id": "sess-tok"}, body=body), None,
+    )
+
+    assert res["statusCode"] == 200
+    put_item = table.put_item.call_args.kwargs["Item"]
+    assert put_item["total_input_tokens"] == 1234
+    assert put_item["total_output_tokens"] == 567
+    assert put_item["turn_count"] == 3
+    assert put_item["last_error"] == {"message": "stream timeout", "at": 1700000000000}
+
+
+@patch.dict("os.environ", {"SESSIONS_TABLE": "sessions"})
+@patch.object(handler, "boto3")
+def test_put_without_token_fields_is_unchanged(mock_boto3):
+    """PUT without token fields → item has no token keys (backward-compatible)."""
+    table = MagicMock()
+    table.get_item.return_value = {}  # no existing row
+    mock_boto3.resource.return_value.Table.return_value = table
+
+    body = {
+        "title": "plain session",
+        "cluster_id": "dev-pg-1",
+        "messages": [],
+    }
+    res = handler.lambda_handler(
+        _event("PUT", path_params={"id": "sess-plain"}, body=body), None,
+    )
+
+    assert res["statusCode"] == 200
+    put_item = table.put_item.call_args.kwargs["Item"]
+    assert "total_input_tokens" not in put_item
+    assert "total_output_tokens" not in put_item
+    assert "turn_count" not in put_item
+    assert "last_error" not in put_item

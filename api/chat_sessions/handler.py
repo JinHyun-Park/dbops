@@ -157,7 +157,7 @@ def _list_sessions(table, user_id: str, qsp: dict) -> dict:
             ScanIndexForward=False,  # most recent first
             Limit=limit,
             # Don't pull `messages` blob in list view — keeps payload small.
-            ProjectionExpression="session_id, title, cluster_id, updated_at, message_count, created_at",
+            ProjectionExpression="session_id, title, cluster_id, updated_at, message_count, created_at, total_input_tokens, total_output_tokens",
         )
     except ClientError as e:
         return _response(500, {"error": str(e)[:300]})
@@ -208,6 +208,12 @@ def _put_session(table, user_id: str, session_id: str, event: dict) -> dict:
         "created_at": existing.get("created_at", now_ms),
         "ttl": int(time.time()) + SESSION_TTL_SECONDS,
     }
+    for k in ("total_input_tokens", "total_output_tokens", "turn_count"):
+        v = body.get(k)
+        if isinstance(v, (int, float)):
+            item[k] = int(v)
+    if isinstance(body.get("last_error"), dict):
+        item["last_error"] = body["last_error"]
     try:
         table.put_item(Item=item)
     except ClientError as e:
