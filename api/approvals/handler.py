@@ -395,7 +395,16 @@ def lambda_handler(event, context):
         # requester can still cancel their own request.
         if action == "approve":
             approver = _caller_name(event)
-            if approver and approver == item.get("requested_by"):
+            if not approver or approver == "unknown":
+                return {
+                    "statusCode": 403,
+                    "headers": headers,
+                    "body": json.dumps({
+                        "error": "not_authenticated",
+                        "reason": "승인자를 식별할 수 없습니다.",
+                    }),
+                }
+            if approver.strip().lower() == str(item.get("requested_by") or "").strip().lower():
                 return {
                     "statusCode": 403,
                     "headers": headers,

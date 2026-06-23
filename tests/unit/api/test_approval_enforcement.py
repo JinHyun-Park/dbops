@@ -90,17 +90,21 @@ def test_non_designated_approver_denied():
 
 def test_designated_approver_allowed():
     row = _approval_row(requested_by="agent")
-    with patch.object(handler, "boto3"), \
+    with patch.object(handler, "boto3") as mock_boto3, \
          patch.object(handler, "_scan_all", return_value=[row]), \
          patch.object(handler, "_load_eligible_approvers", return_value={"alice"}):
         r = handler.lambda_handler(_put_event("a1", approver="alice"), None)
     assert r["statusCode"] == 200
+    table = mock_boto3.resource.return_value.Table.return_value
+    assert table.update_item.called
 
 
 def test_no_policy_falls_back_to_any_admin():
     row = _approval_row(requested_by="agent")
-    with patch.object(handler, "boto3"), \
+    with patch.object(handler, "boto3") as mock_boto3, \
          patch.object(handler, "_scan_all", return_value=[row]), \
          patch.object(handler, "_load_eligible_approvers", return_value=set()):
         r = handler.lambda_handler(_put_event("a1", approver="alice"), None)
     assert r["statusCode"] == 200
+    table = mock_boto3.resource.return_value.Table.return_value
+    assert table.update_item.called

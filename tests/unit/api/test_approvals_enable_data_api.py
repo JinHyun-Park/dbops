@@ -20,7 +20,10 @@ _spec.loader.exec_module(handler)
 def _jwt(admin=True) -> str:
     """A decodable Cognito-style JWT (hdr.payload.sig) the handler's
     _decode_jwt_payload reads. P2.4.2: creating/approving requires admin."""
-    payload = {"cognito:groups": ["dbops-admin"] if admin else ["dbops-viewer"]}
+    payload = {
+        "preferred_username": "dba-approver",
+        "cognito:groups": ["dbops-admin"] if admin else ["dbops-viewer"],
+    }
     b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
     return f"hdr.{b64}.sig"
 
