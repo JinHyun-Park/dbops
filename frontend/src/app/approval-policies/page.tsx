@@ -82,6 +82,7 @@ function policyToForm(p: ApprovalPolicy): PolicyFormState {
 
 interface PolicyFormProps {
   initial?: PolicyFormState;
+  resetKey: string;
   submitting: boolean;
   error: string | null;
   submitLabel: string;
@@ -91,6 +92,7 @@ interface PolicyFormProps {
 
 function PolicyForm({
   initial = EMPTY_FORM,
+  resetKey,
   submitting,
   error,
   submitLabel,
@@ -99,10 +101,11 @@ function PolicyForm({
 }: PolicyFormProps) {
   const [form, setForm] = useState<PolicyFormState>(initial);
 
-  // Sync initial when it changes (switching edit targets)
+  // Sync initial only when the edit target changes, not on every new object ref
   useEffect(() => {
     setForm(initial);
-  }, [initial]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetKey]);
 
   const set =
     (k: keyof PolicyFormState) =>
@@ -248,6 +251,7 @@ function PolicyRow({
         </div>
         <PolicyForm
           initial={policyToForm(policy)}
+          resetKey={policy.policy_id}
           submitting={saving}
           error={editError}
           submitLabel="수정 저장"
@@ -339,6 +343,7 @@ export default function ApprovalPoliciesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -407,11 +412,12 @@ export default function ApprovalPoliciesPage() {
       )
     )
       return;
+    setDeleteError(null);
     try {
       await deleteApprovalPolicy(id);
       setPolicies((prev) => prev.filter((p) => p.policy_id !== id));
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : String(e));
+      setDeleteError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -482,6 +488,13 @@ export default function ApprovalPoliciesPage() {
         <div className="text-sm text-zinc-500">불러오는 중…</div>
       ) : (
         <>
+          {/* ── Delete error ── */}
+          {deleteError && (
+            <div className="mb-6 px-3 py-2 border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-mono">
+              {deleteError}
+            </div>
+          )}
+
           {/* ── Existing policies ── */}
           <Section
             eyebrow="Policies"
@@ -522,10 +535,11 @@ export default function ApprovalPoliciesPage() {
           <Section
             eyebrow="Add"
             title="정책 추가"
-            description="cluster_id + action_type 조합이 고유해야 합니다."
+            description="같은 cluster_id + action_type 조합이 여러 개면, 매칭 시 승인자 목록이 합산됩니다."
           >
             <PolicyForm
               initial={EMPTY_FORM}
+              resetKey="__add__"
               submitting={addSubmitting}
               error={addError}
               submitLabel="정책 추가"
