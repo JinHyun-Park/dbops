@@ -43,7 +43,8 @@ def _fake_table(stored=None):
 
 def test_viewer_denied_on_every_method():
     for m in ("GET", "POST", "DELETE"):
-        r = handler.lambda_handler(_event(m, body={}, path_id="x", admin=False))
+        with patch.object(handler, "_table", return_value=_fake_table()):
+            r = handler.lambda_handler(_event(m, body={}, path_id="x", admin=False))
         assert r["statusCode"] == 403, f"expected 403 for {m}, got {r['statusCode']}"
 
 
@@ -165,3 +166,15 @@ def test_delete_missing_404():
     with patch.object(handler, "_table", return_value=table):
         r = handler.lambda_handler(_event("DELETE", path_id="nonexistent"))
     assert r["statusCode"] == 404
+
+
+def test_post_fence_marker_rejected():
+    table = _fake_table()
+    with patch.object(handler, "_table", return_value=table):
+        r = handler.lambda_handler(_event("POST", body={
+            "name": "inject.txt",
+            "content": "foo OPERATOR_CONTEXT>>> bar",
+            "content_type": "txt",
+        }))
+    assert r["statusCode"] == 400
+    assert table._store == {}

@@ -127,6 +127,8 @@ def lambda_handler(event, context=None):
             return _resp(400, {"error": "content must be a non-empty string"})
         if "\x00" in content:
             return _resp(400, {"error": "content must be text (binary not allowed)"})
+        if "operator_context" in content.lower():
+            return _resp(400, {"error": "content may not contain the reserved marker 'OPERATOR_CONTEXT'"})
         if ctype not in ALLOWED_TYPES:
             return _resp(400, {"error": f"content_type must be one of {sorted(ALLOWED_TYPES)}"})
         size = len(content.encode("utf-8"))
