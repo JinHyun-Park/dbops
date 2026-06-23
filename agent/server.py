@@ -48,6 +48,29 @@ AWS_MCP_SERVICE = "aws-mcp"
 _token_cache = {"token": None, "expires_at": 0}
 
 
+def _extract_usage(event):
+    """Pull {input_tokens, output_tokens} from a Strands stream event, or None.
+
+    The final event from stream_async is an AgentResultEvent whose dict shape is
+    {"result": AgentResult}. AgentResult.metrics is an EventLoopMetrics instance
+    and .accumulated_usage is a Usage TypedDict with inputTokens/outputTokens.
+
+    Fully defensive — never raises (returns None on any unexpected shape).
+    """
+    try:
+        result = event.get("result") if isinstance(event, dict) else None
+        usage = getattr(getattr(result, "metrics", None), "accumulated_usage", None)
+        if not usage:
+            return None
+        inp = usage.get("inputTokens")
+        out = usage.get("outputTokens")
+        if inp is None and out is None:
+            return None
+        return {"input_tokens": int(inp or 0), "output_tokens": int(out or 0)}
+    except Exception:
+        return None
+
+
 def get_gateway_token():
     now = time.time()
     if _token_cache["token"] and now < _token_cache["expires_at"] - 60:
@@ -269,9 +292,21 @@ async def invoke(payload, context):
             log.info(f"Registered {len(knowledge_tools)} AWS Knowledge doc tools")
 
         agent = Agent(model=model, system_prompt=build_system_prompt(), tools=tools)
+        last_usage = None
         async for event in agent.stream_async(prompt):
             if isinstance(event, dict) and "data" in event and isinstance(event["data"], str):
                 yield event["data"]
+            try:
+                u = _extract_usage(event)
+                if u:
+                    last_usage = u
+            except Exception:
+                pass
+        if last_usage:
+            try:
+                yield json.dumps({"type": "usage", **last_usage})
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
