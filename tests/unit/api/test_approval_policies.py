@@ -111,3 +111,26 @@ def test_delete_removes():
         r = handler.lambda_handler(_event("DELETE", path_id="p1"))
     assert r["statusCode"] == 200
     assert table._store == {}
+
+
+def test_delete_missing_404():
+    table = _fake_table()
+    with patch.object(handler, "_table", return_value=table):
+        r = handler.lambda_handler(_event("DELETE", path_id="nope"))
+    assert r["statusCode"] == 404
+
+
+def test_post_blank_approvers_rejected():
+    table = _fake_table()
+    with patch.object(handler, "_table", return_value=table):
+        r = handler.lambda_handler(_event("POST", body={"approvers": ["  ", " "]}))
+    assert r["statusCode"] == 400
+    assert table._store == {}
+
+
+def test_post_non_list_approvers_rejected():
+    table = _fake_table()
+    with patch.object(handler, "_table", return_value=table):
+        r = handler.lambda_handler(_event("POST", body={"approvers": "a@x.com"}))
+    assert r["statusCode"] == 400
+    assert table._store == {}

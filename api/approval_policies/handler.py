@@ -156,6 +156,8 @@ def lambda_handler(event, context=None):
     if method == "DELETE":
         if not policy_id:
             return _resp(400, {"error": "policy id required"})
+        if "Item" not in table.get_item(Key={"policy_id": policy_id}):
+            return _resp(404, {"error": "policy not found"})
         table.delete_item(Key={"policy_id": policy_id})
         return _resp(200, {"deleted": policy_id})
 
