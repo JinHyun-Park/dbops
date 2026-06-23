@@ -1695,6 +1695,12 @@ export interface ChatSessionSummary {
   updated_at: number;
   created_at: number;
   message_count: number;
+  // Added in token-usage tracking (Task 3 ProjectionExpression).
+  // Optional: older sessions and any list that pre-dates the backend change
+  // will simply omit these fields — the UI guards with ?? 0.
+  total_input_tokens?: number;
+  total_output_tokens?: number;
+  last_error?: { message: string; at: number };
 }
 
 export interface ChatSessionDetail extends ChatSessionSummary {

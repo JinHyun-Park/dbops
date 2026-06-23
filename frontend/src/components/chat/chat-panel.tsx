@@ -17,6 +17,7 @@ import {
   putChatSession,
   deleteChatSession,
 } from "@/lib/api-client";
+import { fmtExact } from "@/lib/format";
 
 interface ClusterRow {
   cluster_id: string;
@@ -29,6 +30,11 @@ interface Conversation {
   cluster_id: string;
   updated_at: number;
   messages: Message[];
+  // Token usage fields from the server list projection (Task 3).
+  // Optional: absent for older sessions and local-only conversations.
+  total_input_tokens?: number;
+  total_output_tokens?: number;
+  last_error?: { message: string; at: number };
 }
 
 interface ModelOption {
@@ -482,6 +488,17 @@ export function ChatPanel() {
               cluster_id: remote.cluster_id || "",
               updated_at: remote.updated_at,
               messages: local?.messages || [],
+              // Carry token usage fields from the server projection so the
+              // sidebar can display per-session totals without a detail fetch.
+              ...(remote.total_input_tokens !== undefined
+                ? { total_input_tokens: remote.total_input_tokens }
+                : {}),
+              ...(remote.total_output_tokens !== undefined
+                ? { total_output_tokens: remote.total_output_tokens }
+                : {}),
+              ...(remote.last_error !== undefined
+                ? { last_error: remote.last_error }
+                : {}),
             });
           } else if (local) {
             merged.push(local);
@@ -1024,11 +1041,35 @@ export function ChatPanel() {
                       <div className="text-[10px] text-zinc-600 mt-0.5 truncate font-mono">
                         {c.cluster_id || "—"}
                       </div>
+                      {/* Token total — only shown when the server has recorded
+                          usage (absent for local-only or pre-tracking sessions). */}
+                      {(c.total_input_tokens ?? 0) +
+                        (c.total_output_tokens ?? 0) >
+                        0 && (
+                        <div className="text-[10px] text-zinc-600 mt-0.5 font-mono">
+                          {fmtExact(
+                            (c.total_input_tokens ?? 0) +
+                              (c.total_output_tokens ?? 0),
+                          )}{" "}
+                          토큰
+                        </div>
+                      )}
                     </div>
                     <div className="flex flex-col items-end gap-1">
-                      <span className="text-[10px] text-zinc-600">
-                        {relTime(c.updated_at)}
-                      </span>
+                      <div className="flex items-center gap-1">
+                        {/* Error badge — shown when the session's last stream
+                            ended with an error. Red dot with hover tooltip. */}
+                        {c.last_error && (
+                          <span
+                            className="inline-block w-1.5 h-1.5 rounded-full bg-rose-500 flex-shrink-0"
+                            title={`마지막 오류: ${c.last_error.message}`}
+                            aria-label="마지막 오류"
+                          />
+                        )}
+                        <span className="text-[10px] text-zinc-600">
+                          {relTime(c.updated_at)}
+                        </span>
+                      </div>
                       <span
                         onClick={(e) => {
                           e.stopPropagation();
