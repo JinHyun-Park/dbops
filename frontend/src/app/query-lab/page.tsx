@@ -48,7 +48,7 @@ const PRESETS = [
     label: "성능 개선 리라이트",
     template: "-- original SQL",
     prompt:
-      "**한국어로** 답변해줘. 이 SQL을 PostgreSQL에서 더 빠르게 돌도록 재작성하고, 각 변경이 왜 도움이 되는지 설명해줘. 정확한 시맨틱은 보존.",
+      "**한국어로** 답변해줘. 이 SQL을 대상 클러스터의 DB 엔진에서(해당 엔진 문법·기능만 사용) 더 빠르게 돌도록 재작성하고, 각 변경이 왜 도움이 되는지 설명해줘. 정확한 시맨틱은 보존.",
   },
 ];
 
@@ -362,8 +362,14 @@ export default function QueryLabPage() {
             )}\n\`\`\``
           : "";
 
+      const eng = explain?.engine || "";
+      const engineLabel = eng.includes("mysql")
+        ? "Aurora MySQL"
+        : eng.includes("postgres")
+          ? "Aurora PostgreSQL"
+          : "대상 클러스터의 DB 엔진";
       const message =
-        `너는 PostgreSQL 성능 전문가야. 아래 SQL을 **시맨틱을 완전히 보존**하면서 성능을 개선하는 재작성안을 제안해줘.\n\n` +
+        `너는 ${engineLabel} 성능 전문가야. 아래 SQL을 **${engineLabel}의 문법·기능만 사용해**(다른 엔진 전용 구문 금지) **시맨틱을 완전히 보존**하면서 성능을 개선하는 재작성안을 제안해줘.\n\n` +
         `반드시 아래 형식으로 **한국어**로 답변해줘:\n` +
         `1. 재작성된 SQL을 \`\`\`sql 블록으로 먼저 출력\n` +
         `2. 변경 근거 (왜 이 방식이 더 빠른지 구체적으로)\n` +
