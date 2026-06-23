@@ -349,6 +349,7 @@ export function ChatPanel() {
   );
   const abortRef = useRef<AbortController | null>(null);
   const followupAbortRef = useRef<AbortController | null>(null);
+  const titleAbortRef = useRef<AbortController | null>(null);
   // When the chat is deep-linked from another page (e.g. the dashboard/timeline
   // "AI 근본원인 분석" button → /chat?cluster=…&prompt=…), pin that cluster so
   // the async cluster-defaults below don't clobber it.
@@ -683,16 +684,73 @@ export function ChatPanel() {
     [modelId, persist],
   );
 
+  // Generate a concise Korean title after the first exchange on a throwaway
+  // session so the main conversation memory isn't polluted. Best-effort —
+  // failures are silent and the first-message-slice title is kept.
+  const generateTitle = useCallback(
+    (convId: string, userText: string, assistantText: string) => {
+      // Skip if the answer is too short to produce a meaningful title.
+      if (assistantText.trim().length < 40) return;
+      titleAbortRef.current?.abort();
+      const prompt =
+        `이 질문/답변을 6단어 이내의 간결한 한국어 제목으로 요약해줘. 제목 텍스트만 출력 — 따옴표·마크다운·코드펜스·접두어 금지.\n\n` +
+        `Q: ${userText}\n\nA: ${assistantText.slice(0, 2000)}`;
+      let buffer = "";
+      titleAbortRef.current = streamChat(
+        prompt,
+        "",
+        (token) => {
+          buffer += token;
+        },
+        () => {},
+        () => {
+          // Trim, strip wrapping quotes/backticks, collapse newlines, cap to 50.
+          const raw = buffer
+            .trim()
+            .replace(/^[`"']+|[`"']+$/g, "")
+            .replace(/\n+/g, " ")
+            .trim()
+            .slice(0, 50);
+          if (!raw) return;
+          // Only overwrite when the title is still the auto first-message-slice
+          // (guard against overwriting a user-set or handoff title like "RCA · …").
+          const firstMsgSlice = userText.slice(0, 50);
+          persist((prev) =>
+            prev.map((c) => {
+              if (c.id !== convId) return c;
+              if (c.title !== firstMsgSlice) return c;
+              return { ...c, title: raw };
+            }),
+          );
+        },
+        () => {
+          // Silent failure — keep the first-message title.
+        },
+        // Throwaway session id so the agent's memory stays clean.
+        `title-${convId}-${Date.now()}`,
+        modelId,
+      );
+    },
+    [modelId, persist],
+  );
+
   const sendText = useCallback(
     (raw: string) => {
       const userText = raw.trim();
       if (!userText || isStreaming) return;
 
-      // Cancel any in-flight followup generation for the previous turn.
+      // Cancel any in-flight followup/title generation for the previous turn.
       followupAbortRef.current?.abort();
+      titleAbortRef.current?.abort();
 
       // Ensure there is an active conversation.
       let convId = activeId;
+      // Capture first-turn status NOW (before the persist below adds messages)
+      // so the onComplete closure can decide whether to generate a title.
+      const isFirstTurn =
+        !convId ||
+        (conversations.find((c) => c.id === convId)?.messages.length ?? 0) ===
+          0;
       if (!convId) {
         const conv = newConversation(clusterId);
         convId = conv.id;
@@ -786,6 +844,10 @@ export function ChatPanel() {
             const finalAssistant = conv?.messages[conv.messages.length - 1];
             if (finalAssistant && finalAssistant.role === "assistant") {
               generateFollowups(convId, userText, finalAssistant.content);
+              // On the first exchange only, generate a concise Korean title.
+              if (isFirstTurn) {
+                generateTitle(convId, userText, finalAssistant.content);
+              }
             }
             return prev;
           });
@@ -799,7 +861,16 @@ export function ChatPanel() {
         modelId,
       );
     },
-    [isStreaming, clusterId, activeId, modelId, persist, generateFollowups],
+    [
+      isStreaming,
+      clusterId,
+      activeId,
+      modelId,
+      persist,
+      generateFollowups,
+      generateTitle,
+      conversations,
+    ],
   );
 
   const handleSend = useCallback(() => {
