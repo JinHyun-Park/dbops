@@ -19,7 +19,9 @@ import {
   ShieldCheck,
   XCircle,
   CheckCircle2,
+  Download,
 } from "lucide-react";
+import { buildAuditCsv } from "@/lib/audit-export";
 
 // ---------------------------------------------------------------------------
 // Status config: color tokens drawn from the existing dark-zinc palette
@@ -237,6 +239,29 @@ export default function ActivityPage() {
         description="DBOps에서 일어난 모든 쓰기 의사결정의 시간순 기록 — 누가 요청했고 누가 승인했고 언제 실행됐는지. 컴플라이언스 감사와 사후 회고 (post-incident retro) 용도."
         actions={
           <div className="flex items-center gap-2 flex-wrap">
+            {items.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  const csv = buildAuditCsv(items);
+                  const blob = new Blob([csv], {
+                    type: "text/csv;charset=utf-8",
+                  });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `audit-${new Date()
+                    .toISOString()
+                    .slice(0, 10)}.csv`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="inline-flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 text-zinc-300 hover:border-zinc-600 hover:text-zinc-100 text-xs px-3 py-1.5 transition-colors duration-150"
+              >
+                <Download size={12} strokeWidth={2} aria-hidden="true" />
+                CSV 내보내기
+              </button>
+            )}
             <SearchableClusterSelect
               value={clusterFilter}
               onChange={setClusterFilter}
