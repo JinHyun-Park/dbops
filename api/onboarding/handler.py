@@ -121,6 +121,8 @@ def lambda_handler(event, context=None):
         return _resp(403, {"error": "admin only"})
 
     qs = event.get("queryStringParameters") or {}
+    # region is an advisory passthrough — echoed in the response for the caller's
+    # `aws cloudformation deploy --region`; the IAM role template itself is region-agnostic.
     region = (qs.get("region") or "").strip() or None
     remediation = str(qs.get("remediation") or "").strip().lower() in ("true", "1", "yes", "on")
 

@@ -103,7 +103,10 @@ def test_template_remediation_adds_write(monkeypatch):
         else:
             all_actions.append(actions)
 
+    # Write action is added by remediation flag
     assert "rds:ModifyDBCluster" in all_actions
+    # Remediation is ADDITIVE — read actions are still present
+    assert "rds:Describe*" in all_actions
     assert body["remediation"] is True
 
 
@@ -138,6 +141,16 @@ def test_no_auth_header_denied():
     e = {
         "requestContext": {"http": {"method": "GET"}},
         "headers": {},
+    }
+    r = handler.lambda_handler(e)
+    assert r["statusCode"] == 403
+
+
+def test_garbage_token_denied():
+    # Bearer prefix present but payload is not a valid JWT — decodes to empty claims → 403.
+    e = {
+        "requestContext": {"http": {"method": "GET"}},
+        "headers": {"Authorization": "Bearer notajwt"},
     }
     r = handler.lambda_handler(e)
     assert r["statusCode"] == 403
