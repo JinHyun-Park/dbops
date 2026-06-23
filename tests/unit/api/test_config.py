@@ -90,3 +90,29 @@ def test_put_bad_provider_format_rejected():
 def test_put_viewer_denied():
     r = handler.lambda_handler(_event("PUT", {"config": {"REPORT_DELIVERY_ENABLED": True}}, admin=False))
     assert r["statusCode"] == 403
+
+
+def test_options_bypasses_auth():
+    # CORS preflight must pass even for non-admin tokens — no auth gate before OPTIONS return.
+    r = handler.lambda_handler(_event("OPTIONS", admin=False))
+    assert r["statusCode"] == 200
+
+
+def test_put_malformed_json_body_400():
+    # Build the event inline (not via _event) so body is a raw non-JSON string.
+    e = {
+        "requestContext": {"http": {"method": "PUT"}},
+        "headers": {"authorization": f"Bearer {_jwt(admin=True)}"},
+        "body": "{not json",
+    }
+    r = handler.lambda_handler(e)
+    assert r["statusCode"] == 400
+
+
+def test_put_missing_config_key_400():
+    # Empty body dict has no "config" key — must be rejected and nothing written.
+    table = _fake_table()
+    with patch.object(handler, "_table", return_value=table):
+        r = handler.lambda_handler(_event("PUT", {}))
+    assert r["statusCode"] == 400
+    assert table._store == {}

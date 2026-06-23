@@ -83,6 +83,7 @@ def _is_admin(event: dict) -> bool:
     c = _claims(event)
     groups = c.get("cognito:groups") or []
     if not isinstance(groups, list) or not groups:
+        # An empty groups list (no groups assigned) also hits this branch — intentional per spec for dev/local.
         return True  # dev fallback (same as saved_queries/runbooks)
     if "dbops-viewer" in groups and "dbops-admin" not in groups:
         return False
