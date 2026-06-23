@@ -244,21 +244,25 @@ export default function ActivityPage() {
               <button
                 type="button"
                 onClick={async () => {
-                  let rows = items;
-                  let capped = false;
+                  setError(null);
+                  let result;
                   try {
-                    const r = await fetchAllActivity({
+                    result = await fetchAllActivity({
                       cluster_id: clusterFilter || undefined,
                       actor: actorFilter || undefined,
                       action_type: actionFilter || undefined,
                     });
-                    rows = [...r.items].sort((a, b) =>
-                      String(b.created_at).localeCompare(String(a.created_at)),
+                  } catch (e) {
+                    setError(
+                      `감사 export 실패: ${
+                        e instanceof Error ? e.message : String(e)
+                      } — 다시 시도해 주세요.`,
                     );
-                    capped = r.capped;
-                  } catch {
-                    // fall back to the already-loaded in-view rows
+                    return; // do NOT download a misleading partial file
                   }
+                  const rows = [...result.items].sort((a, b) =>
+                    String(b.created_at).localeCompare(String(a.created_at)),
+                  );
                   const csv = buildAuditCsv(rows);
                   const blob = new Blob([csv], {
                     type: "text/csv;charset=utf-8",
@@ -268,7 +272,7 @@ export default function ActivityPage() {
                   a.download = `audit-${new Date()
                     .toISOString()
                     .slice(0, 10)}-${rows.length}rows${
-                    capped ? "-capped" : ""
+                    result.capped ? "-capped" : ""
                   }.csv`;
                   a.click();
                   URL.revokeObjectURL(a.href);

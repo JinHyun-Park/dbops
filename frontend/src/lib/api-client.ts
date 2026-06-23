@@ -1917,6 +1917,7 @@ export async function fetchAllActivity(opts?: {
   action_type?: string;
 }): Promise<{ items: ActivityItem[]; capped: boolean }> {
   const MAX_PAGES = 200;
+  const MAX_ROWS = 50000;
   const items: ActivityItem[] = [];
   let cursor: string | undefined = undefined;
   let pages = 0;
@@ -1928,6 +1929,7 @@ export async function fetchAllActivity(opts?: {
       cursor,
     });
     items.push(...page.items);
+    if (items.length >= MAX_ROWS) return { items, capped: true };
     pages += 1;
     const next = page.next_cursor;
     if (!next) return { items, capped: false };
