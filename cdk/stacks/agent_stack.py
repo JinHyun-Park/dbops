@@ -1663,6 +1663,36 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("OnboardingIntegration", onboarding_lambda),
         )
+        # Admin console — Cognito user & role management (admin-gated)
+        admin_users_lambda = lambda_.Function(
+            self, "AdminUsersApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/admin_users"),
+            timeout=cdk.Duration.seconds(15),
+            environment={"USER_POOL_ID": foundation.user_pool.user_pool_id},
+        )
+        admin_users_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "cognito-idp:ListUsers",
+                "cognito-idp:AdminListGroupsForUser",
+                "cognito-idp:AdminAddUserToGroup",
+                "cognito-idp:AdminRemoveUserFromGroup",
+            ],
+            resources=[foundation.user_pool.user_pool_arn],
+        ))
+        admin_users_integration = integrations.HttpLambdaIntegration(
+            "AdminUsersIntegration", admin_users_lambda)
+        self.api.add_routes(
+            path="/api/admin/users",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=admin_users_integration,
+        )
+        self.api.add_routes(
+            path="/api/admin/users/{username}/role",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=admin_users_integration,
+        )
         # Runbooks — AI-generated playbooks
         runbooks_integration = integrations.HttpLambdaIntegration(
             "RunbooksIntegration", runbooks_lambda
