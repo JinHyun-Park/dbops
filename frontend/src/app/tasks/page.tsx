@@ -158,12 +158,14 @@ export default function TasksPage() {
                 {Math.round(stats.success_rate * 100)}%
               </span>
             </span>
-            <span className="text-zinc-400">
-              평균 소요{" "}
-              <span className="text-zinc-100">
-                {(stats.avg_duration_ms / 1000).toFixed(1)}s
+            {stats.avg_duration_ms > 0 && (
+              <span className="text-zinc-400">
+                평균 소요{" "}
+                <span className="text-zinc-100">
+                  {(stats.avg_duration_ms / 1000).toFixed(1)}s
+                </span>
               </span>
-            </span>
+            )}
             {Object.entries(stats.by_kind).map(([kind, count]) => (
               <span key={kind} className="text-zinc-500">
                 {KIND_LABEL[kind] || kind}{" "}
