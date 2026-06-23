@@ -28,12 +28,6 @@ function extOf(name: string): string {
   return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
-function contentTypeOf(ext: string): string {
-  if (ext === "md") return "text/markdown";
-  if (ext === "csv") return "text/csv";
-  return "text/plain";
-}
-
 function fmtTs(ts?: string): string | null {
   if (!ts) return null;
   try {
@@ -277,7 +271,7 @@ export default function ContextFilesPage() {
       const created = await uploadContextFile({
         name: file.name,
         content,
-        content_type: contentTypeOf(ext),
+        content_type: ext,
       });
       setFiles((prev) => [created, ...prev]);
     } catch (e: unknown) {
