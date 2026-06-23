@@ -78,6 +78,8 @@ def _caller(event: dict) -> tuple[bool, str]:
     if not auth.lower().startswith("bearer "):
         return False, "anonymous"
     claims = _decode_jwt_payload(auth.split(" ", 1)[1])
+    if not claims:
+        return False, "unknown"
     name = (
         claims.get("preferred_username")
         or claims.get("cognito:username")
@@ -87,7 +89,7 @@ def _caller(event: dict) -> tuple[bool, str]:
     groups = claims.get("cognito:groups") or []
     if not isinstance(groups, list):
         return False, name
-    if "dbops-viewer" in groups and "dbops-admin" not in groups:
+    if groups and "dbops-admin" not in groups:
         return False, name
     return True, name
 

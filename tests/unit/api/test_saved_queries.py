@@ -236,3 +236,107 @@ def test_update_viewer_blocked():
 def test_unknown_method():
     res = handler.lambda_handler(_event("PATCH", path_params={"id": "1"}), None)
     assert res["statusCode"] == 405
+
+
+# ---------------------------------------------------------------------------
+# Admin-gate contract tests (regression for priv-esc via no-bearer / unknown-group)
+# ---------------------------------------------------------------------------
+
+def _raw_event(method, auth_header, path_params=None, body=None):
+    """Build an event with an explicit auth header value (used for boundary cases)."""
+    e = {
+        "httpMethod": method,
+        "requestContext": {"http": {"method": method}},
+        "pathParameters": path_params or {},
+        "queryStringParameters": {},
+        "headers": {"authorization": auth_header} if auth_header else {},
+    }
+    if body is not None:
+        e["body"] = json.dumps(body)
+    return e
+
+
+def _jwt_with_groups(groups) -> str:
+    """Build a JWT whose cognito:groups is exactly `groups` (list or absent)."""
+    payload = {"preferred_username": "tester"}
+    if groups is not None:
+        payload["cognito:groups"] = groups
+    b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+    return f"hdr.{b64}.sig"
+
+
+def test_put_no_bearer_prefix_denied():
+    # Raw token without "Bearer " prefix was the priv-esc: _caller_groups returned []
+    # which the old code treated as admin. Must now be 403.
+    raw_token = _jwt_with_groups(["dbops-admin"])  # valid admin token, but no "Bearer "
+    res = handler.lambda_handler(
+        _raw_event("PUT", raw_token, path_params={"id": "7"},
+                   body={"title": "T", "sql_text": "SELECT 1"}),
+        None,
+    )
+    assert res["statusCode"] == 403
+
+
+def test_put_garbage_token_denied():
+    # "Bearer <non-jwt>" decodes to empty claims — must NOT be treated as dev-fallback admin.
+    res = handler.lambda_handler(
+        _raw_event("PUT", "Bearer not-a-real-jwt", path_params={"id": "7"},
+                   body={"title": "T", "sql_text": "SELECT 1"}),
+        None,
+    )
+    assert res["statusCode"] == 403
+
+
+def test_put_viewer_group_denied():
+    res = handler.lambda_handler(
+        _raw_event("PUT", f"Bearer {_jwt_with_groups(['dbops-viewer'])}",
+                   path_params={"id": "7"}, body={"title": "T", "sql_text": "SELECT 1"}),
+        None,
+    )
+    assert res["statusCode"] == 403
+
+
+def test_put_analyst_group_denied():
+    # Unknown/other group without dbops-admin → deny (closes unknown-group hole).
+    res = handler.lambda_handler(
+        _raw_event("PUT", f"Bearer {_jwt_with_groups(['dbops-analyst'])}",
+                   path_params={"id": "7"}, body={"title": "T", "sql_text": "SELECT 1"}),
+        None,
+    )
+    assert res["statusCode"] == 403
+
+
+def test_delete_no_bearer_prefix_denied():
+    raw_token = _jwt_with_groups(["dbops-admin"])
+    res = handler.lambda_handler(
+        _raw_event("DELETE", raw_token, path_params={"id": "3"}),
+        None,
+    )
+    assert res["statusCode"] == 403
+
+
+@patch.object(handler, "_execute")
+def test_put_no_groups_claim_is_admin(mock_execute):
+    # Valid token with NO cognito:groups claim = one-admin dev fallback → admin.
+    mock_execute.return_value = [
+        {"id": 7, "title": "T", "sql_text": "SELECT 1", "tags": []}
+    ]
+    res = handler.lambda_handler(
+        _raw_event("PUT", f"Bearer {_jwt_with_groups(None)}",
+                   path_params={"id": "7"}, body={"title": "T", "sql_text": "SELECT 1"}),
+        None,
+    )
+    assert res["statusCode"] != 403
+
+
+@patch.object(handler, "_execute")
+def test_put_admin_group_allowed(mock_execute):
+    mock_execute.return_value = [
+        {"id": 7, "title": "T", "sql_text": "SELECT 1", "tags": []}
+    ]
+    res = handler.lambda_handler(
+        _raw_event("PUT", f"Bearer {_jwt_with_groups(['dbops-admin'])}",
+                   path_params={"id": "7"}, body={"title": "T", "sql_text": "SELECT 1"}),
+        None,
+    )
+    assert res["statusCode"] != 403

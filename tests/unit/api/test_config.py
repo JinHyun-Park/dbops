@@ -183,6 +183,18 @@ def test_dev_fallback_valid_token_no_groups_is_admin():
     assert r["statusCode"] == 200
 
 
+def test_get_analyst_group_denied():
+    # Any group other than dbops-admin is now denied (closes unknown-group hole).
+    payload = {"preferred_username": "analyst1", "cognito:groups": ["dbops-analyst"]}
+    b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+    e = {
+        "requestContext": {"http": {"method": "GET"}},
+        "headers": {"authorization": f"Bearer hdr.{b64}.sig"},
+    }
+    r = handler.lambda_handler(e)
+    assert r["statusCode"] == 403
+
+
 def test_empty_payload_jwt_denied():
     # A decodable token whose payload is exactly {} has no identity (no sub/iss)
     # — it is NOT a real Cognito principal and must NOT get the one-admin dev

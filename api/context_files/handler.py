@@ -50,7 +50,7 @@ def _is_admin(event: dict) -> bool:
     groups = claims.get("cognito:groups") or []
     if not isinstance(groups, list):
         return False
-    if "dbops-viewer" in groups and "dbops-admin" not in groups:
+    if groups and "dbops-admin" not in groups:
         return False
     return True
 

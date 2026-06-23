@@ -60,14 +60,17 @@ def _caller_name(event: dict) -> str:
 
 
 def _is_admin(event: dict) -> bool:
-    """True for callers in dbops-admin (or unauthenticated — dev fallback,
-    same convention as alerts handler)."""
-    groups = _caller_groups(event)
-    if not groups:
-        # No groups attached = either unauthenticated or default-admin in
-        # the dev pool. Match the alerts/approvals convention.
-        return True
-    if "dbops-viewer" in groups and "dbops-admin" not in groups:
+    headers = event.get("headers") or {}
+    auth = headers.get("authorization") or headers.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        return False
+    claims = _decode_jwt_payload(auth.split(" ", 1)[1])
+    if not claims:
+        return False
+    groups = claims.get("cognito:groups") or []
+    if not isinstance(groups, list):
+        return False
+    if groups and "dbops-admin" not in groups:
         return False
     return True
 

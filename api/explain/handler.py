@@ -45,10 +45,12 @@ def _is_admin(event: dict) -> bool:
     if not auth.lower().startswith("bearer "):
         return False
     claims = _decode_jwt_payload(auth.split(" ", 1)[1])
+    if not claims:
+        return False
     groups = claims.get("cognito:groups") or []
     if not isinstance(groups, list):
         return False
-    if "dbops-viewer" in groups and "dbops-admin" not in groups:
+    if groups and "dbops-admin" not in groups:
         return False
     return True
 
