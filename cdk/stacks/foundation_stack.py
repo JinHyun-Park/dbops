@@ -192,6 +192,21 @@ class FoundationStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
+        # ===== Context Files — operator-uploaded reference context =====
+        # Small text files (org charts, tagging conventions, account↔owner
+        # mappings) an ADMIN uploads; their text is injected into the agent's
+        # system prompt as fenced operator-provided reference DATA (not
+        # commands). Global / platform-wide. Lives in foundation so the agent
+        # Runtime (agent stack) + the CRUD API can both reach it.
+        self.context_files_table = dynamodb.Table(
+            self, "ContextFilesTable",
+            table_name=f"dbops-{Settings.ENV}-context-files",
+            partition_key=dynamodb.Attribute(name="file_id", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            point_in_time_recovery=True,  # cdk-nag AwsSolutions-DDB3
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
         self.hub_role = iam.Role(
             self, "HubRole",
             role_name=f"dbops-{Settings.ENV}-hub-role",
@@ -339,3 +354,15 @@ class FoundationStack(cdk.Stack):
         by the policy CRUD API, admin-gated in the handler."""
         fn.add_environment("APPROVAL_POLICIES_TABLE", self.approval_policies_table.table_name)
         self.approval_policies_table.grant_read_write_data(fn)
+
+    def grant_context_files_read(self, fn) -> None:
+        """Wire a Lambda to READ context files (env + read grant). Used by the
+        agent Runtime to inject operator reference context into the prompt."""
+        fn.add_environment("CONTEXT_FILES_TABLE", self.context_files_table.table_name)
+        self.context_files_table.grant_read_data(fn)
+
+    def grant_context_files_write(self, fn) -> None:
+        """Wire a Lambda to READ/WRITE context files (env + R/W grant). Used by
+        the admin CRUD API."""
+        fn.add_environment("CONTEXT_FILES_TABLE", self.context_files_table.table_name)
+        self.context_files_table.grant_read_write_data(fn)
