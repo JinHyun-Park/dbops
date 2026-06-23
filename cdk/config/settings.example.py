@@ -60,3 +60,9 @@ class Settings:
     # makes the worker fail the ticketing step loudly rather than silently drop
     # tickets.
     TICKETING_PROVIDER = "none"
+
+    # Push generated report digests to managed Slack subscribers + the SNS
+    # topic (email). False (default) keeps report delivery off so existing
+    # alert subscribers don't start receiving daily reports. Turn on once you
+    # want scheduled reports delivered, not just viewable in /reports.
+    REPORT_DELIVERY_ENABLED = False

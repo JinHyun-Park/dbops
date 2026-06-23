@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
+import urllib.request
 from datetime import datetime
 from typing import Any
 
@@ -108,6 +110,7 @@ def lambda_handler(event, context):
                 "s3_key": s3_key,
             },
         )
+        _deliver_report(cache_query, cid, report_date, report_type, summary_text)
         reports_generated.append(cid)
 
     return {
@@ -304,3 +307,57 @@ def _template_summary(cluster_id: str, report_date: str, data: dict) -> str:
     if not (top or alerts):
         pieces.append("주목할 만한 이벤트는 없었습니다.")
     return " ".join(pieces)
+
+
+def _post_json(url: str, payload: dict, timeout: int = 5) -> tuple[int, str]:
+    """POST JSON to a webhook URL. Returns (status_code, body_excerpt)."""
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "User-Agent": "dbops-report-generator/1"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read(512).decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(512).decode("utf-8", errors="replace") if hasattr(e, "read") else str(e)
+    except Exception as e:
+        return 0, str(e)[:200]
+
+
+def _build_report_slack_blocks(cluster_id, report_date, report_type, summary):
+    return {
+        "text": f"DBOps 리포트 · {cluster_id}",
+        "blocks": [
+            {"type": "header", "text": {"type": "plain_text", "text": f"📋 DBOps 리포트 · {report_date}"}},
+            {"type": "section", "text": {"type": "mrkdwn",
+                "text": f"*클러스터* `{cluster_id}` · *유형* {report_type}\n\n{summary[:2800]}"}},
+        ],
+    }
+
+
+def _deliver_report(cache_query, cluster_id, report_date, report_type, summary):
+    """Best-effort: publish the digest to SNS (email) + POST to managed slack-webhook
+    subscribers. Inert unless REPORT_DELIVERY_ENABLED is truthy. Never raises."""
+    if os.environ.get("REPORT_DELIVERY_ENABLED", "").strip().lower() not in ("true", "1", "yes", "on"):
+        return
+    try:
+        topic = os.environ.get("ALERT_TOPIC_ARN", "")
+        if topic:
+            boto3.client("sns").publish(
+                TopicArn=topic,
+                Subject=f"DBOps 리포트 · {cluster_id} · {report_date}"[:100],
+                Message=summary,
+            )
+        subs = cache_query(
+            "SELECT id, protocol, endpoint FROM alert_subscribers_managed "
+            "WHERE enabled = true AND protocol = 'slack-webhook'"
+        )
+        for s in subs or []:
+            try:
+                _post_json(s["endpoint"], _build_report_slack_blocks(cluster_id, report_date, report_type, summary))
+            except Exception as e:
+                print(f"[report-gen] slack deliver failed for sub {s.get('id')}: {type(e).__name__}: {e}")
+    except Exception as e:
+        print(f"[report-gen] delivery failed for {cluster_id}: {type(e).__name__}: {e}")

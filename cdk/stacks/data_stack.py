@@ -393,11 +393,14 @@ class DataStack(cdk.Stack):
                 "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
                 "ARCHIVE_BUCKET": self.archive_bucket.bucket_name,
+                "ALERT_TOPIC_ARN": self.alert_topic.topic_arn,
+                "REPORT_DELIVERY_ENABLED": "true" if getattr(Settings, "REPORT_DELIVERY_ENABLED", False) else "false",
             },
         )
         self.cache_db.secret.grant_read(self.report_generator)
         self.cache_db.grant_data_api_access(self.report_generator)
         self.archive_bucket.grant_write(self.report_generator)
+        self.alert_topic.grant_publish(self.report_generator)
         # NL summary path invokes a Bedrock Claude model. Failure to invoke
         # falls back to a template, so this permission is best-effort —
         # but without it every report is template-summary which is dull.
