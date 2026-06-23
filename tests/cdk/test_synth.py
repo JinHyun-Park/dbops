@@ -86,6 +86,38 @@ def test_synth_produces_four_stacks(cdk_app):
     assert expected.issubset(set(stacks)), f"missing stacks. got: {stacks}"
 
 
+def test_app_config_table_present(cdk_app):
+    """Foundation must define the app-config key-value table (config_key PK).
+
+    The cdk_app fixture returns a CloudAssembly, not a dict of stack objects,
+    so we cannot call Template.from_stack() directly on it. Instead we
+    re-synth an isolated FoundationStack here, mirroring the fixture's
+    CWD-swap + settings-fallback logic. The assertion matches on KeySchema
+    only (env-agnostic — no table-name check).
+    """
+    from aws_cdk.assertions import Template
+
+    original_cwd = os.getcwd()
+    os.chdir(CDK_DIR)
+    try:
+        import aws_cdk as cdk_lib
+        from config.settings import Settings  # type: ignore  # noqa: F401
+        from stacks.foundation_stack import FoundationStack
+
+        app = cdk_lib.App()
+        foundation = FoundationStack(app, "test-foundation")
+        template = Template.from_stack(foundation)
+    finally:
+        os.chdir(original_cwd)
+
+    template.has_resource_properties(
+        "AWS::DynamoDB::Table",
+        {
+            "KeySchema": [{"AttributeName": "config_key", "KeyType": "HASH"}],
+        },
+    )
+
+
 def test_app_carries_application_tag(cdk_app):
     """Every stack must have Application=DBOps so Bedrock AIPs etc. inherit
     the cost-allocation tag at deploy time."""

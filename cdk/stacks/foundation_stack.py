@@ -158,6 +158,24 @@ class FoundationStack(cdk.Stack):
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
+        # ===== App Config — in-app, DB-backed feature toggles =====
+        # Small key-value store an ADMIN edits from the web UI (GET/PUT
+        # /api/config) to flip opt-in features (ticketing provider, report
+        # delivery) WITHOUT a redeploy. Lives in foundation so the agent stack
+        # (config API + task worker) and the data stack (report generator) can
+        # all reach it without a cross-stack cycle — same rationale as the
+        # agent_tasks_table above. Read precedence at consumers is
+        # DB value -> env var -> default, so a fresh deploy with no rows here
+        # behaves exactly as the baked-in env defaults.
+        self.app_config_table = dynamodb.Table(
+            self, "AppConfigTable",
+            table_name=f"dbops-{Settings.ENV}-app-config",
+            partition_key=dynamodb.Attribute(name="config_key", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            point_in_time_recovery=True,  # cdk-nag AwsSolutions-DDB3
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
         self.hub_role = iam.Role(
             self, "HubRole",
             role_name=f"dbops-{Settings.ENV}-hub-role",
@@ -280,3 +298,16 @@ class FoundationStack(cdk.Stack):
         list/get API). Includes table + index read/write."""
         fn.add_environment("AGENT_TASKS_TABLE", self.agent_tasks_table.table_name)
         self.agent_tasks_table.grant_read_write_data(fn)
+
+    def grant_app_config_read(self, fn) -> None:
+        """Wire a Lambda to READ the app-config table (env + read grant).
+        Used by feature consumers (task_worker via ticketing, report_generator)
+        to resolve DB-backed toggles with an env/default fallback."""
+        fn.add_environment("APP_CONFIG_TABLE", self.app_config_table.table_name)
+        self.app_config_table.grant_read_data(fn)
+
+    def grant_app_config_write(self, fn) -> None:
+        """Wire a Lambda to READ/WRITE the app-config table (env + R/W grant).
+        Used by the config API (GET/PUT /api/config), admin-gated in the handler."""
+        fn.add_environment("APP_CONFIG_TABLE", self.app_config_table.table_name)
+        self.app_config_table.grant_read_write_data(fn)
