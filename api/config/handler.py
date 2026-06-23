@@ -80,11 +80,19 @@ def _caller_name(event: dict) -> str:
 
 
 def _is_admin(event: dict) -> bool:
-    c = _claims(event)
-    groups = c.get("cognito:groups") or []
-    if not isinstance(groups, list) or not groups:
-        # An empty groups list (no groups assigned) also hits this branch — intentional per spec for dev/local.
-        return True  # dev fallback (same as saved_queries/runbooks)
+    # Fail-closed: a request without a parseable "Bearer <jwt>" is NOT admin.
+    # The API Gateway JWT authorizer accepts a raw (scheme-less) token and
+    # forwards it, so we must not treat unparseable auth as the dev-fallback
+    # admin — only a VALID token with no group claim gets that fallback
+    # (one-admin deploys), matching api/clusters/handler.py and the frontend.
+    headers = event.get("headers") or {}
+    auth = headers.get("authorization") or headers.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        return False
+    claims = _decode_jwt_payload(auth.split(" ", 1)[1])
+    groups = claims.get("cognito:groups") or []
+    if not isinstance(groups, list):
+        return False
     if "dbops-viewer" in groups and "dbops-admin" not in groups:
         return False
     return True

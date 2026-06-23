@@ -116,3 +116,39 @@ def test_put_missing_config_key_400():
         r = handler.lambda_handler(_event("PUT", {}))
     assert r["statusCode"] == 400
     assert table._store == {}
+
+
+def test_get_raw_token_no_bearer_denied():
+    # A scheme-less token (no "Bearer " prefix) must be rejected — fail-closed.
+    # The API Gateway JWT authorizer can forward such tokens; Lambda must not
+    # treat the resulting empty claims as the one-admin dev fallback.
+    e = {
+        "requestContext": {"http": {"method": "GET"}},
+        "headers": {"authorization": _jwt(admin=True)},  # raw token, no "Bearer "
+    }
+    r = handler.lambda_handler(e)
+    assert r["statusCode"] == 403
+
+
+def test_get_no_auth_header_denied():
+    # No Authorization header at all must be rejected — fail-closed.
+    e = {
+        "requestContext": {"http": {"method": "GET"}},
+        "headers": {},
+    }
+    r = handler.lambda_handler(e)
+    assert r["statusCode"] == 403
+
+
+def test_put_raw_token_no_bearer_denied_no_write():
+    # PUT with a scheme-less token must be rejected AND must not write anything.
+    table = _fake_table()
+    e = {
+        "requestContext": {"http": {"method": "PUT"}},
+        "headers": {"authorization": _jwt(admin=True)},  # raw token, no "Bearer "
+        "body": json.dumps({"config": {"REPORT_DELIVERY_ENABLED": True}}),
+    }
+    with patch.object(handler, "_table", return_value=table):
+        r = handler.lambda_handler(e)
+    assert r["statusCode"] == 403
+    assert table._store == {}
