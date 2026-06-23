@@ -19,6 +19,9 @@
       "name": "activity"
     },
     {
+      "name": "admin"
+    },
+    {
       "name": "alert-rules"
     },
     {
@@ -101,6 +104,54 @@
             "description": "Unauthorized (missing/invalid token)"
           }
         },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/admin/users": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "GET /api/admin/users",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/admin/users/{username}/role": {
+      "post": {
+        "tags": ["admin"],
+        "summary": "POST /api/admin/users/{username}/role",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "security": [
           {
             "cognitoJwt": []
