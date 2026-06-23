@@ -27,8 +27,11 @@ PIDF=".omc/.tester.pid"
 echo $$ > "$PIDF"
 
 # --- skip trivial commits (docs/scratch/markdown only) to save Codex cost ----
+# NOTE: tools/local-tester/*.sh is intentionally NOT skipped — changes to the
+# gate's own logic are high-stakes (a broken gate silently passes everything),
+# so the tester adversarially reviews its own script changes too.
 CHANGED="$(git diff --name-only "$RANGE" 2>/dev/null)"
-if [ -z "$CHANGED" ] || ! printf '%s\n' "$CHANGED" | grep -qvE '^(docs/|\.superpowers/|\.omc/|tools/local-tester/|.*\.md$)'; then
+if [ -z "$CHANGED" ] || ! printf '%s\n' "$CHANGED" | grep -qvE '^(docs/|\.superpowers/|\.omc/|.*\.md$)'; then
   printf 'commit: %s\nstatus: clean\n\n_사소한 커밋(docs/scratch) — 테스터 스킵._\n' "$SHA" > "$OUT"
   rm -f "$PIDF"; exit 0
 fi
