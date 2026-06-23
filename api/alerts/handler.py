@@ -324,7 +324,7 @@ def _update_rule(query, rule_id, body):
     return _response(200, {"rule": rows[0]})
 
 
-_MANAGED_PROTOCOLS = {"slack-webhook", "pagerduty-events-v2"}
+_MANAGED_PROTOCOLS = {"slack-webhook", "pagerduty-events-v2", "teams-webhook"}
 
 
 def _list_subscriptions(sns_client, topic_arn, query):
@@ -381,6 +381,8 @@ def _create_subscription(sns_client, topic_arn, body, query):
     if protocol in _MANAGED_PROTOCOLS:
         if protocol == "slack-webhook" and not endpoint.startswith("https://hooks.slack.com/"):
             return _response(400, {"error": "slack-webhook endpoint must be https://hooks.slack.com/..."})
+        if protocol == "teams-webhook" and not endpoint.startswith("https://"):
+            return _response(400, {"error": "teams-webhook endpoint must be an https Teams Incoming Webhook URL"})
         if protocol == "pagerduty-events-v2" and len(endpoint) < 20:
             return _response(400, {"error": "pagerduty-events-v2 endpoint must be the integration key"})
         label = (body.get("label") or "").strip() or None

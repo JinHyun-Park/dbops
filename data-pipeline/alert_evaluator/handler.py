@@ -181,6 +181,36 @@ def _build_slack_payload(rule: dict, latest: float) -> dict:
     }
 
 
+def _build_teams_payload(rule: dict, latest: float) -> dict:
+    """Teams MessageCard mirroring _build_slack_payload — facts + OpenUri deep
+    links. MessageCard works with classic Teams Incoming Webhooks."""
+    # No severity field on rule; use a fixed warning orange-red.
+    theme = "D93F0B"
+    facts = [
+        {"name": "Rule", "value": str(rule.get("name", ""))},
+        {"name": "Metric", "value": f"`{rule.get('metric_type', '')}`"},
+        {"name": "Threshold", "value": f"`{rule.get('comparison', '')} {rule.get('threshold', '')}`"},
+        {"name": "Observed", "value": f"`{latest:.2f}`"},
+    ]
+    card: dict = {
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "summary": f"DBOps alert: {rule.get('cluster_id', '')}",
+        "themeColor": theme,
+        "title": f"\U0001f6a8 DBOps alert · {rule.get('cluster_id', '')}",
+        "sections": [{"facts": facts, "markdown": True}],
+    }
+    # Deep-link buttons only when FRONTEND_URL is set (same condition as Slack).
+    actions = []
+    for label, path in (("Open timeline", "/timeline"), ("Open dashboard", "/dashboard"), ("Open alerts", "/alerts")):
+        uri = _dashboard_url(rule, path)
+        if uri:
+            actions.append({"@type": "OpenUri", "name": label, "targets": [{"os": "default", "uri": uri}]})
+    if actions:
+        card["potentialAction"] = actions
+    return card
+
+
 def _dedup_window_seconds() -> int:
     """How many seconds make up one PagerDuty dedup bucket. Configurable via
     env var so a deploy can tune flapping behavior without a code change."""
@@ -254,6 +284,9 @@ def _fanout_managed(query, rule: dict, latest: float) -> None:
         elif protocol == "pagerduty-events-v2":
             payload = _build_pagerduty_payload(rule, latest, endpoint)
             url = "https://events.pagerduty.com/v2/enqueue"
+        elif protocol == "teams-webhook":
+            payload = _build_teams_payload(rule, latest)
+            url = endpoint
         else:
             continue
         status, body = _post_json(url, payload)

@@ -338,6 +338,24 @@ def _build_report_slack_blocks(cluster_id, report_date, report_type, summary):
     }
 
 
+def _build_report_teams_card(cluster_id, report_date, report_type, summary) -> dict:
+    return {
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "summary": f"DBOps 리포트 · {cluster_id}",
+        "themeColor": "2563EB",
+        "title": f"\U0001f4cb DBOps 리포트 · {report_date}",
+        "sections": [{
+            "facts": [
+                {"name": "클러스터", "value": f"`{cluster_id}`"},
+                {"name": "유형", "value": str(report_type)},
+            ],
+            "text": str(summary)[:2800],
+            "markdown": True,
+        }],
+    }
+
+
 def _deliver_report(cache_query, cluster_id, report_date, report_type, summary):
     """Best-effort: publish the digest to SNS (email) + POST to managed slack-webhook
     subscribers. Inert unless REPORT_DELIVERY_ENABLED is truthy. Never raises."""
@@ -354,12 +372,16 @@ def _deliver_report(cache_query, cluster_id, report_date, report_type, summary):
             )
         subs = cache_query(
             "SELECT id, protocol, endpoint FROM alert_subscribers_managed "
-            "WHERE enabled = true AND protocol = 'slack-webhook'"
+            "WHERE enabled = true AND protocol IN ('slack-webhook','teams-webhook')"
         )
         for s in subs or []:
             try:
-                _post_json(s["endpoint"], _build_report_slack_blocks(cluster_id, report_date, report_type, summary))
+                if s["protocol"] == "teams-webhook":
+                    payload = _build_report_teams_card(cluster_id, report_date, report_type, summary)
+                else:
+                    payload = _build_report_slack_blocks(cluster_id, report_date, report_type, summary)
+                _post_json(s["endpoint"], payload)
             except Exception as e:
-                print(f"[report-gen] slack deliver failed for sub {s.get('id')}: {type(e).__name__}: {e}")
+                print(f"[report-gen] deliver failed for sub {s.get('id')} ({s.get('protocol')}): {type(e).__name__}: {e}")
     except Exception as e:
         print(f"[report-gen] delivery failed for {cluster_id}: {type(e).__name__}: {e}")
