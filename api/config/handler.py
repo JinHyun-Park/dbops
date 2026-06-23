@@ -90,6 +90,12 @@ def _is_admin(event: dict) -> bool:
     if not auth.lower().startswith("bearer "):
         return False
     claims = _decode_jwt_payload(auth.split(" ", 1)[1])
+    # Empty claims == the token didn't decode (malformed/non-JWT after "Bearer ").
+    # The gateway JWT authorizer rejects such tokens, but defense-in-depth: an
+    # unparseable token is NOT the dev-fallback (which is a VALID token that
+    # merely lacks a group claim — that always decodes to non-empty claims).
+    if not claims:
+        return False
     groups = claims.get("cognito:groups") or []
     if not isinstance(groups, list):
         return False

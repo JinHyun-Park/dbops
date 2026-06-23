@@ -152,3 +152,29 @@ def test_put_raw_token_no_bearer_denied_no_write():
         r = handler.lambda_handler(e)
     assert r["statusCode"] == 403
     assert table._store == {}
+
+
+def test_bearer_garbage_token_denied():
+    # "Bearer <non-jwt>" decodes to empty claims — must NOT be treated as the
+    # one-admin dev fallback (which only applies to a VALID token lacking a
+    # group claim). Defense-in-depth behind the gateway JWT authorizer.
+    e = {
+        "requestContext": {"http": {"method": "GET"}},
+        "headers": {"authorization": "Bearer not-a-real-jwt"},
+    }
+    r = handler.lambda_handler(e)
+    assert r["statusCode"] == 403
+
+
+def test_dev_fallback_valid_token_no_groups_is_admin():
+    # A VALID (decodable) token with NO cognito:groups claim is the one-admin
+    # dev fallback → admin. This must still work after the empty-claims guard.
+    payload = {"preferred_username": "solo"}  # no cognito:groups
+    b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+    e = {
+        "requestContext": {"http": {"method": "GET"}},
+        "headers": {"authorization": f"Bearer hdr.{b64}.sig"},
+    }
+    with patch.object(handler, "_table", return_value=_fake_table()):
+        r = handler.lambda_handler(e)
+    assert r["statusCode"] == 200
