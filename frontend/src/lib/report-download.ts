@@ -1,3 +1,5 @@
+import { fmtBytes } from "@/lib/format";
+
 interface SlowRow {
   query_hash?: string;
   query_excerpt?: string;
@@ -61,15 +63,6 @@ function parsePayload(
 function fmt(v: number | undefined, decimals = 0): string {
   if (v == null) return "—";
   return decimals > 0 ? v.toFixed(decimals) : String(v);
-}
-
-function fmtBytes(bytes: number | undefined): string {
-  if (bytes == null) return "—";
-  const abs = Math.abs(bytes);
-  if (abs >= 1_073_741_824) return (bytes / 1_073_741_824).toFixed(2) + " GB";
-  if (abs >= 1_048_576) return (bytes / 1_048_576).toFixed(2) + " MB";
-  if (abs >= 1024) return (bytes / 1024).toFixed(2) + " KB";
-  return bytes + " B";
 }
 
 export function buildReportMarkdown(report: ReportForDownload): string {
