@@ -217,6 +217,13 @@ const NAV: NavGroup[] = [
         hint: "지정 승인자 라우팅 — 클러스터·액션별 승인자 (관리자)",
       },
       {
+        href: "/admin/users",
+        label: "Users",
+        icon: UserCheck,
+        adminOnly: true,
+        hint: "사용자 역할 관리 — admin · viewer (관리자)",
+      },
+      {
         href: "/context-files",
         label: "Context files",
         icon: FileUp,

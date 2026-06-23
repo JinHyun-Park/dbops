@@ -2486,6 +2486,56 @@ export async function deleteContextFile(id: string): Promise<void> {
   if (!res.ok) throw new Error(`delete failed: ${res.status}`);
 }
 
+// =====  Admin user/role management (admin-gated)  =====
+
+export interface AdminUser {
+  username: string;
+  email: string | null;
+  status: string | null;
+  enabled: boolean;
+  created: string | null;
+  role: "admin" | "viewer";
+  implicit: boolean;
+}
+
+export async function fetchAdminUsers(
+  cursor?: string,
+): Promise<{ items: AdminUser[]; next_cursor: string | null }> {
+  const path = cursor
+    ? `/api/admin/users?cursor=${enc(cursor)}`
+    : "/api/admin/users";
+  const res = await authedFetch(await apiUrl(path));
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) throw new Error(`사용자 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function updateUserRole(
+  username: string,
+  role: "admin" | "viewer",
+): Promise<{ username: string; role: string }> {
+  const res = await authedFetch(
+    await apiUrl(`/api/admin/users/${enc(username)}/role`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    },
+  );
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) {
+    let msg = `역할 변경 실패 (상태 ${res.status})`;
+    try {
+      const b = await res.json();
+      if (b?.error) msg = b.error;
+    } catch {
+      /* keep default */
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
 // ---------------------------------------------------------------------------
 // Onboarding — spoke-account CloudFormation template
 // ---------------------------------------------------------------------------

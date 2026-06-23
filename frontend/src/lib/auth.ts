@@ -327,6 +327,16 @@ export function getUserGroups(): string[] {
   return Array.isArray(g) ? g : [];
 }
 
+// The pool's Cognito username is a UUID (== sub); email is a display
+// attribute. Used to disable the acting admin's own role control.
+export function getUsername(): string | null {
+  const claims = decodeJwt(getToken()) as {
+    "cognito:username"?: string;
+    sub?: string;
+  } | null;
+  return claims?.["cognito:username"] || claims?.sub || null;
+}
+
 export function isAdmin(): boolean {
   const groups = getUserGroups();
   // Deny if a group set is present but lacks dbops-admin; empty groups (no

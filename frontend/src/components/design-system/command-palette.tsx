@@ -157,6 +157,13 @@ const commands: Command[] = [
     adminOnly: true,
   },
   {
+    id: "admin-users",
+    label: "Users — 사용자 역할 관리",
+    path: "/admin/users",
+    group: "Configure",
+    adminOnly: true,
+  },
+  {
     id: "health",
     label: "Health — 자체 모니터링",
     path: "/health",
