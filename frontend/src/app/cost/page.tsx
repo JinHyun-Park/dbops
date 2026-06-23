@@ -11,7 +11,13 @@ import {
   CartesianGrid,
   ReferenceDot,
 } from "recharts";
-import { fetchCost, apiUrl, authedFetch } from "@/lib/api-client";
+import {
+  fetchCost,
+  fetchCostTokens,
+  type TokensCost,
+  apiUrl,
+  authedFetch,
+} from "@/lib/api-client";
 import { fmtDecimal } from "@/lib/format";
 import { useChartColors } from "@/lib/use-chart-colors";
 import {
@@ -73,7 +79,7 @@ interface RdsCostData {
 
 const RANGES = [7, 14, 30, 60, 90];
 
-type CostTab = "bedrock" | "rds" | "platform";
+type CostTab = "bedrock" | "rds" | "platform" | "tokens";
 
 interface PlatformServiceCost {
   service: string;
@@ -175,14 +181,18 @@ export default function CostPage() {
             ? "Aurora / RDS 비용"
             : tab === "platform"
               ? "DBOps 플랫폼 운영 비용"
-              : "Bedrock 비용"
+              : tab === "tokens"
+                ? "Bedrock 토큰 사용량"
+                : "Bedrock 비용"
         }
         description={
           tab === "rds"
             ? "계정의 Aurora/RDS 비용 — Cost Explorer로 사용 유형(Aurora I/O·스토리지·인스턴스 시간·백업)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다."
             : tab === "platform"
               ? "DBOps 자체를 운영하는 데 드는 전체 비용 — Application=DBOps 태그가 붙은 모든 리소스(Lambda·캐시 Aurora·DynamoDB·CloudFront·AgentCore 등)를 서비스별로 분해합니다. 모니터링 대상 고객 DB 클러스터는 포함되지 않습니다."
-              : "DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다."
+              : tab === "tokens"
+                ? "계정 전체 Bedrock 토큰 사용량(모델별) — CloudWatch AWS/Bedrock 메트릭 기반. 태그 필터 불가로 계정 전체 집계입니다."
+                : "DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다."
         }
         actions={
           <div className="flex items-center gap-1">
@@ -212,6 +222,7 @@ export default function CostPage() {
             { id: "bedrock", label: "Bedrock" },
             { id: "rds", label: "Aurora / RDS" },
             { id: "platform", label: "DBOps 플랫폼" },
+            { id: "tokens", label: "토큰" },
           ] as { id: CostTab; label: string }[]
         ).map((t) => (
           <button
@@ -232,6 +243,8 @@ export default function CostPage() {
         <RdsCostView days={days} colors={colors} />
       ) : tab === "platform" ? (
         <PlatformCostView days={days} colors={colors} />
+      ) : tab === "tokens" ? (
+        <TokensCostView days={days} colors={colors} />
       ) : (
         <BedrockCostView
           data={data}
@@ -968,6 +981,195 @@ function RdsCostView({
           </p>
         </div>
       </Section>
+    </>
+  );
+}
+
+function TokensCostView({
+  days,
+  colors,
+}: {
+  days: number;
+  colors: ReturnType<typeof useChartColors>;
+}) {
+  const [data, setData] = useState<TokensCost | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErr(null);
+    fetchCostTokens(days)
+      .then((d) => {
+        if (!cancelled) setData(d);
+      })
+      .catch((e) => {
+        if (!cancelled) setErr((e as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [days]);
+
+  return (
+    <>
+      {err && (
+        <div className="mb-6 px-4 py-3 border border-rose-500/30 bg-rose-500/10 text-rose-300 text-sm">
+          {err}
+        </div>
+      )}
+
+      {!loading && data && data.by_model.length === 0 ? (
+        <EmptyState
+          eyebrow="데이터 없음"
+          title="Bedrock 토큰 메트릭이 없습니다"
+          description={
+            data.note ||
+            "아직 모델 호출 기록이 없거나 CloudWatch 메트릭 전파 전입니다."
+          }
+          primary={{
+            href: "https://console.aws.amazon.com/cloudwatch/home#metricsV2?graph=~()&namespace=AWS%2FBedrock",
+            label: "CloudWatch 메트릭 확인",
+          }}
+        />
+      ) : (
+        <>
+          <Section eyebrow="모델별" title="토큰 사용량 (모델별)">
+            {loading ? (
+              <div className="text-zinc-500 text-sm">불러오는 중…</div>
+            ) : !data || data.by_model.length === 0 ? (
+              <div className="text-zinc-500 text-sm border border-zinc-800 p-6">
+                집계된 토큰 데이터가 없습니다.
+              </div>
+            ) : (
+              <div className="border border-zinc-800 overflow-x-auto">
+                <table className="w-full text-sm min-w-[560px]">
+                  <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
+                    <tr>
+                      <th className="text-left px-4 py-2.5 font-medium">
+                        모델
+                      </th>
+                      <th className="text-right px-4 py-2.5 font-medium">
+                        입력 토큰
+                      </th>
+                      <th className="text-right px-4 py-2.5 font-medium">
+                        출력 토큰
+                      </th>
+                      <th className="text-right px-4 py-2.5 font-medium">
+                        합계
+                      </th>
+                      <th className="text-right px-4 py-2.5 font-medium">
+                        비율
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {data.by_model.map((row, i) => {
+                      const grandTotal = data.by_model.reduce(
+                        (s, m) => s + m.total,
+                        0,
+                      );
+                      const share =
+                        grandTotal > 0 ? (row.total / grandTotal) * 100 : 0;
+                      return (
+                        <tr
+                          key={`${row.model}-${i}`}
+                          className="hover:bg-zinc-900/40"
+                        >
+                          <td className="px-4 py-2 text-zinc-200 font-mono text-xs">
+                            {row.model}
+                          </td>
+                          <td className="px-4 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums">
+                            {fmtDecimal(row.input, 0)}
+                          </td>
+                          <td className="px-4 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums">
+                            {fmtDecimal(row.output, 0)}
+                          </td>
+                          <td className="px-4 py-2 text-right text-zinc-100 font-mono text-xs tabular-nums">
+                            {fmtDecimal(row.total, 0)}
+                          </td>
+                          <td className="px-4 py-2 text-right text-amber-400 font-mono text-xs tabular-nums">
+                            {share.toFixed(1)}%
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Section>
+
+          <Section eyebrow="추이" title="일별 토큰 사용량">
+            <div className="border border-zinc-800 bg-zinc-900/50 p-4 h-72">
+              {loading ? (
+                <div className="text-zinc-500 text-sm">불러오는 중…</div>
+              ) : !data || data.daily.length === 0 ? (
+                <div className="text-zinc-500 text-sm">
+                  일별 토큰 데이터가 없습니다.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={data.daily}
+                    margin={{ top: 4, right: 12, bottom: 0, left: -10 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke={colors.grid}
+                      vertical={false}
+                    />
+                    <XAxis dataKey="date" stroke={colors.axis} fontSize={10} />
+                    <YAxis
+                      stroke={colors.axis}
+                      fontSize={10}
+                      tickFormatter={(v) => fmtDecimal(Number(v) || 0, 0)}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: colors.tooltipBg,
+                        border: `1px solid ${colors.tooltipBorder}`,
+                        fontSize: 12,
+                      }}
+                      labelStyle={{ color: colors.tooltipText }}
+                      formatter={(v, name) => [
+                        fmtDecimal(Number(v) || 0, 0),
+                        name === "input" ? "입력" : "출력",
+                      ]}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="input"
+                      stroke={colors.amber}
+                      fill={colors.amber}
+                      fillOpacity={0.15}
+                      stackId="tokens"
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="output"
+                      stroke={colors.sky}
+                      fill={colors.sky}
+                      fillOpacity={0.15}
+                      stackId="tokens"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </Section>
+
+          {data?.note && (
+            <p className="text-[11px] text-zinc-600 mt-3 leading-relaxed border-l-2 border-zinc-800 pl-3">
+              {data.note}
+            </p>
+          )}
+        </>
+      )}
     </>
   );
 }

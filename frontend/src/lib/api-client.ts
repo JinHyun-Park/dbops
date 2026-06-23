@@ -1049,6 +1049,22 @@ export async function fetchCost(days = 30) {
   }>;
 }
 
+export interface TokensCost {
+  view: string;
+  days: number;
+  by_model: { model: string; input: number; output: number; total: number }[];
+  daily: { date: string; input: number; output: number }[];
+  note?: string;
+}
+
+export async function fetchCostTokens(days = 30): Promise<TokensCost> {
+  const res = await authedFetch(
+    await api(`/api/cost?view=tokens&days=${days}`),
+  );
+  if (!res.ok) throw new Error(`토큰 사용량 조회 실패 (상태 ${res.status})`);
+  return res.json() as Promise<TokensCost>;
+}
+
 export async function fetchModels() {
   const res = await authedFetch(await api(`/api/models`));
   if (!res.ok) throw new Error(`모델 조회 실패 (상태 ${res.status})`);

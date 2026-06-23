@@ -367,7 +367,70 @@ def _handle_platform_view(ce, start, end, days):
     })
 
 
-def lambda_handler(event, context):
+def _handle_tokens_view(start, end, days):
+    """Fleet Bedrock token usage by model + daily series, from CloudWatch
+    AWS/Bedrock metrics. NOTE: these metrics are not tag-filterable, so this is
+    account-wide Bedrock token usage (same untagged scope the cost views note)."""
+    cw = boto3.client("cloudwatch")
+    # Discover model ids from the InputTokenCount metric's ModelId dimension.
+    try:
+        metrics = cw.list_metrics(Namespace="AWS/Bedrock", MetricName="InputTokenCount").get("Metrics", [])
+    except Exception as e:
+        return _response(200, {"view": "tokens", "days": days, "by_model": [], "daily": [],
+                               "note": f"CloudWatch 토큰 메트릭 조회 실패: {type(e).__name__}"})
+    model_ids = sorted({
+        d["Value"] for m in metrics for d in m.get("Dimensions", []) if d["Name"] == "ModelId"
+    })
+    if not model_ids:
+        return _response(200, {"view": "tokens", "days": days, "by_model": [], "daily": [],
+                               "note": "Bedrock 토큰 메트릭 없음 — 아직 모델 호출 기록이 없거나 메트릭 전파 전입니다."})
+
+    # Build GetMetricData queries: per model, Input + Output, Sum, daily period.
+    import datetime as _dt
+    queries, idmap = [], {}
+    for i, mid in enumerate(model_ids):
+        for kind, metric in (("input", "InputTokenCount"), ("output", "OutputTokenCount")):
+            qid = f"m{i}_{kind}"
+            idmap[qid] = (mid, kind)
+            queries.append({
+                "Id": qid,
+                "MetricStat": {
+                    "Metric": {"Namespace": "AWS/Bedrock", "MetricName": metric,
+                               "Dimensions": [{"Name": "ModelId", "Value": mid}]},
+                    "Period": 86400, "Stat": "Sum",
+                },
+                "ReturnData": True,
+            })
+    start_dt = _dt.datetime.combine(start, _dt.time.min)
+    end_dt = _dt.datetime.combine(end, _dt.time.min)
+    # GetMetricData caps at 500 queries/call; our model count is tiny, so one call.
+    resp = cw.get_metric_data(MetricDataQueries=queries[:500], StartTime=start_dt, EndTime=end_dt,
+                              ScanBy="TimestampAscending")
+    totals = {mid: {"input": 0.0, "output": 0.0} for mid in model_ids}
+    daily: dict = {}
+    for res in resp.get("MetricDataResults", []):
+        mid, kind = idmap.get(res["Id"], (None, None))
+        if mid is None:
+            continue
+        for ts, val in zip(res.get("Timestamps", []), res.get("Values", []), strict=False):
+            totals[mid][kind] += val
+            day = ts.date().isoformat() if hasattr(ts, "date") else str(ts)[:10]
+            daily.setdefault(day, {"input": 0.0, "output": 0.0})[kind] += val
+        if not res.get("Timestamps"):
+            # some mocks/edge return Values without Timestamps — fold into totals
+            for val in res.get("Values", []):
+                totals[mid][kind] += val
+    by_model = [{"model": mid, "input": int(t["input"]), "output": int(t["output"]),
+                 "total": int(t["input"] + t["output"])}
+                for mid, t in totals.items()]
+    by_model.sort(key=lambda m: m["total"], reverse=True)
+    daily_list = [{"date": d, "input": int(v["input"]), "output": int(v["output"])}
+                  for d, v in sorted(daily.items())]
+    return _response(200, {"view": "tokens", "days": days, "by_model": by_model, "daily": daily_list,
+                           "note": "계정 전체 Bedrock 토큰 사용량(모델별) — CloudWatch 메트릭은 태그 필터 불가."})
+
+
+def lambda_handler(event, context=None):
     method = event.get("requestContext", {}).get("http", {}).get("method") \
         or event.get("httpMethod", "GET")
     if method != "GET":
@@ -389,6 +452,8 @@ def lambda_handler(event, context):
     # `?view=platform` — DBOps 플랫폼 자체 운영비 (Application=DBOps 태그 전체).
     if view == "platform":
         return _handle_platform_view(ce, start, end, days)
+    if view == "tokens":
+        return _handle_tokens_view(start, end, days)
 
     services = _bedrock_services(ce, start, end)
 

@@ -1382,6 +1382,10 @@ class AgentStack(cdk.Stack):
             ],
             resources=["*"],
         ))
+        cost_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["cloudwatch:GetMetricData", "cloudwatch:ListMetrics"],
+            resources=["*"],  # CloudWatch GetMetricData/ListMetrics don't support resource scoping
+        ))
         self.api.add_routes(
             path="/api/cost",
             methods=[apigwv2.HttpMethod.GET],
