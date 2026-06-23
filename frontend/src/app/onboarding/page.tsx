@@ -36,7 +36,7 @@ function downloadJson(content: string, filename: string) {
   a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
 // ── Step 1: Spoke role template ───────────────────────────────────────────────
@@ -416,7 +416,7 @@ export default function OnboardingPage() {
 
   const load = useCallback((withRemediation: boolean) => {
     setLoadingRemediation(true);
-    fetchOnboardingTemplate({ remediation: withRemediation || undefined })
+    fetchOnboardingTemplate({ remediation: withRemediation ? true : undefined })
       .then((d) => {
         setTpl(d);
         setLoadError(null);

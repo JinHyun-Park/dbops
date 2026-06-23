@@ -1096,7 +1096,11 @@ export async function registerCluster(data: {
 export interface TestConnectionResult {
   ok: boolean;
   steps: Array<{
-    name: "assume_role" | "describe_cluster" | "master_user_secret";
+    name:
+      | "assume_role"
+      | "describe_cluster"
+      | "master_user_secret"
+      | "data_api";
     status: "ok" | "failed" | "skipped" | "warning";
     error?: string;
     note?: string;
