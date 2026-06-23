@@ -357,8 +357,9 @@ def _build_report_teams_card(cluster_id, report_date, report_type, summary) -> d
 
 
 def _deliver_report(cache_query, cluster_id, report_date, report_type, summary):
-    """Best-effort: publish the digest to SNS (email) + POST to managed slack-webhook
-    subscribers. Inert unless REPORT_DELIVERY_ENABLED is truthy. Never raises."""
+    """Best-effort: publish the digest to SNS (email) + POST to managed
+    slack-webhook and teams-webhook subscribers. Inert unless
+    REPORT_DELIVERY_ENABLED is truthy. Never raises."""
     enabled = get_config("REPORT_DELIVERY_ENABLED", os.environ.get("REPORT_DELIVERY_ENABLED", "false"))
     if str(enabled).strip().lower() not in ("true", "1", "yes", "on"):
         return

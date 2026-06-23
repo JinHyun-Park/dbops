@@ -404,7 +404,7 @@ def _create_subscription(sns_client, topic_arn, body, query):
     if not topic_arn or not sns_client:
         return _response(503, {"error": "alert topic not configured"})
     if protocol not in {"email", "email-json", "sms", "https"}:
-        return _response(400, {"error": "protocol must be one of: email, email-json, sms, https, slack-webhook, pagerduty-events-v2"})
+        return _response(400, {"error": "protocol must be one of: email, email-json, sms, https, slack-webhook, pagerduty-events-v2, teams-webhook"})
     if protocol == "https" and not endpoint.startswith("https://"):
         return _response(400, {"error": "https endpoint must start with https://"})
     resp = sns_client.subscribe(
