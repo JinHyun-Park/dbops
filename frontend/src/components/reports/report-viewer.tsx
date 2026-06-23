@@ -1,6 +1,7 @@
 "use client";
 
 import { fmtBytes, fmtDecimal, fmtDuration, fmtNumber } from "@/lib/format";
+import { buildReportMarkdown } from "@/lib/report-download";
 
 interface ReportRow {
   id: number;
@@ -13,6 +14,7 @@ interface ReportRow {
 
 interface ReportDetail extends ReportRow {
   data?: string | object | null;
+  s3_key?: string;
 }
 
 interface ReportViewerProps {
@@ -122,7 +124,11 @@ export function ReportViewer({
         ) : detailLoading ? (
           <div className="text-sm text-zinc-500">불러오는 중…</div>
         ) : (
-          <ReportDetailPanel row={detail || selectedRow} payload={payload} />
+          <ReportDetailPanel
+            row={detail || selectedRow}
+            payload={payload}
+            detail={detail}
+          />
         )}
       </section>
     </div>
@@ -132,19 +138,51 @@ export function ReportViewer({
 function ReportDetailPanel({
   row,
   payload,
+  detail,
 }: {
   row: ReportDetail | ReportRow;
   payload: ReportPayload | null;
+  detail: ReportDetail | null;
 }) {
+  function handleDownload() {
+    if (!detail) return;
+    const md = buildReportMarkdown({
+      cluster_id: detail.cluster_id,
+      report_date: detail.report_date,
+      report_type: detail.report_type,
+      summary: detail.summary,
+      data: detail.data,
+    });
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `report-${detail.cluster_id}-${detail.report_date}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="space-y-8">
       <header>
-        <div className="text-[11px] font-medium text-zinc-500 mb-1">
-          {row.report_type} report
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-[11px] font-medium text-zinc-500 mb-1">
+              {row.report_type} report
+            </div>
+            <h2 className="text-2xl font-semibold tracking-tight text-zinc-50">
+              {row.report_date} · {row.cluster_id}
+            </h2>
+          </div>
+          {detail && (
+            <button
+              onClick={handleDownload}
+              className="shrink-0 px-3 py-1.5 text-xs font-medium border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 transition-colors"
+            >
+              다운로드
+            </button>
+          )}
         </div>
-        <h2 className="text-2xl font-semibold tracking-tight text-zinc-50">
-          {row.report_date} · {row.cluster_id}
-        </h2>
         {row.summary && (
           <p className="mt-4 text-[15px] leading-relaxed text-zinc-200 max-w-3xl whitespace-pre-wrap">
             {row.summary}
