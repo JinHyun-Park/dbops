@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { isAdmin } from "@/lib/auth";
 import { ClusterDropdown } from "@/components/design-system/cluster-dropdown";
 import {
   Activity,
@@ -47,6 +48,7 @@ interface NavItem {
   label: string;
   icon: IconType;
   hint?: string;
+  adminOnly?: boolean;
 }
 
 interface NavGroup {
@@ -202,6 +204,7 @@ const NAV: NavGroup[] = [
         label: "Settings",
         icon: SlidersHorizontal,
         hint: "기능 토글 — 티켓팅·리포트 전달 (관리자)",
+        adminOnly: true,
       },
       {
         href: "/health",
@@ -471,6 +474,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { criticalCount, warningCount, toasts, dismissToast, markSeen } =
     useAlertBadge();
 
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => {
+    setAdmin(isAdmin());
+  }, []);
+
   // Auth pages should not be wrapped in the chrome.
   if (
     pathname.startsWith("/callback") ||
@@ -519,28 +527,34 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
 
             <nav className="flex-1 overflow-y-auto px-3 pb-4 space-y-5">
-              {NAV.map((group) => (
-                <div key={group.label}>
-                  <div className="px-3 mb-1 text-[10px] tracking-[0.16em] text-zinc-600 font-semibold uppercase">
-                    {group.label}
+              {NAV.map((group) => {
+                const visibleItems = group.items.filter(
+                  (item) => !item.adminOnly || admin,
+                );
+                if (visibleItems.length === 0) return null;
+                return (
+                  <div key={group.label}>
+                    <div className="px-3 mb-1 text-[10px] tracking-[0.16em] text-zinc-600 font-semibold uppercase">
+                      {group.label}
+                    </div>
+                    <div className="space-y-0.5">
+                      {visibleItems.map((item) => {
+                        const active =
+                          pathname === item.href ||
+                          (item.href !== "/" &&
+                            pathname.startsWith(item.href + "/"));
+                        return (
+                          <SidebarItem
+                            key={item.href}
+                            item={item}
+                            active={active}
+                          />
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="space-y-0.5">
-                    {group.items.map((item) => {
-                      const active =
-                        pathname === item.href ||
-                        (item.href !== "/" &&
-                          pathname.startsWith(item.href + "/"));
-                      return (
-                        <SidebarItem
-                          key={item.href}
-                          item={item}
-                          active={active}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </nav>
             <div className="border-t border-zinc-800 px-4 py-4 bg-zinc-900/30">
               <AuthButton />

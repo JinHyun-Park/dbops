@@ -3,12 +3,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
+import { isAdmin } from "@/lib/auth";
 
 interface Command {
   id: string;
   label: string;
   path: string;
   group: string;
+  adminOnly?: boolean;
 }
 
 // Mirrors the sidebar taxonomy so the palette and the rail tell the same
@@ -131,6 +133,7 @@ const commands: Command[] = [
     label: "Settings — 기능 토글·티켓팅·리포트 전달",
     path: "/settings",
     group: "Configure",
+    adminOnly: true,
   },
   {
     id: "health",
@@ -143,12 +146,19 @@ const commands: Command[] = [
 export function CommandPalette() {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [admin, setAdmin] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    setAdmin(isAdmin());
+  }, []);
 
   const q = query.trim().toLowerCase();
   // Pages/search only — cluster switching lives in the dedicated ClusterDropdown
   // now, so ⌘K and the cluster control no longer open the same overloaded modal.
-  const filtered = commands.filter((c) => c.label.toLowerCase().includes(q));
+  const filtered = commands.filter(
+    (c) => (!c.adminOnly || admin) && c.label.toLowerCase().includes(q),
+  );
 
   const open = useCallback(() => {
     setIsOpen(true);
