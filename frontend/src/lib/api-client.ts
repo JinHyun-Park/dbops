@@ -1929,11 +1929,16 @@ export async function fetchAllActivity(opts?: {
       cursor,
     });
     items.push(...page.items);
-    if (items.length >= MAX_ROWS) return { items, capped: true };
     pages += 1;
     const next = page.next_cursor;
+    // Exhausted → complete, regardless of count (even exactly MAX_ROWS is NOT
+    // capped when there is no next page). Check this BEFORE the ceilings.
     if (!next) return { items, capped: false };
-    if (pages >= MAX_PAGES) return { items, capped: true };
+    // More data exists but we stop at a ceiling → slice to the exact row cap
+    // so the in-memory result never overshoots by a page, and mark it capped.
+    if (pages >= MAX_PAGES || items.length >= MAX_ROWS) {
+      return { items: items.slice(0, MAX_ROWS), capped: true };
+    }
     cursor = next;
   }
 }
