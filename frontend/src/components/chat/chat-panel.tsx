@@ -1062,7 +1062,9 @@ export function ChatPanel() {
                         {c.last_error && (
                           <span
                             className="inline-block w-1.5 h-1.5 rounded-full bg-rose-500 flex-shrink-0"
-                            title={`마지막 오류: ${c.last_error.message}`}
+                            title={`마지막 오류: ${
+                              c.last_error.message ?? "알 수 없는 오류"
+                            }`}
                             aria-label="마지막 오류"
                           />
                         )}

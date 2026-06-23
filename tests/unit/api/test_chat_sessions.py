@@ -66,6 +66,51 @@ def test_list_queries_by_user_id(mock_boto3):
     call = table.query.call_args.kwargs
     assert call["IndexName"] == "user-updated-index"
     assert call["ScanIndexForward"] is False  # newest first
+    # ProjectionExpression must include last_error so the sidebar badge works.
+    assert "last_error" in call["ProjectionExpression"]
+
+
+@patch.dict("os.environ", {"SESSIONS_TABLE": "sessions"})
+@patch.object(handler, "boto3")
+def test_list_includes_last_error_when_present(mock_boto3):
+    """When a stored session carries last_error the LIST response returns it."""
+    error_payload = {"message": "stream timeout", "at": 1700000000000}
+    table = MagicMock()
+    table.query.return_value = {
+        "Items": [
+            {
+                "session_id": "s-err",
+                "title": "Broken session",
+                "last_error": error_payload,
+            }
+        ]
+    }
+    mock_boto3.resource.return_value.Table.return_value = table
+
+    res = handler.lambda_handler(_event("GET"), None)
+
+    assert res["statusCode"] == 200
+    sessions = json.loads(res["body"])["sessions"]
+    assert len(sessions) == 1
+    assert sessions[0]["last_error"] == error_payload
+
+
+@patch.dict("os.environ", {"SESSIONS_TABLE": "sessions"})
+@patch.object(handler, "boto3")
+def test_list_session_without_last_error_is_unchanged(mock_boto3):
+    """Sessions without last_error still list fine — field is simply absent."""
+    table = MagicMock()
+    table.query.return_value = {
+        "Items": [{"session_id": "s-ok", "title": "Healthy session"}]
+    }
+    mock_boto3.resource.return_value.Table.return_value = table
+
+    res = handler.lambda_handler(_event("GET"), None)
+
+    assert res["statusCode"] == 200
+    sessions = json.loads(res["body"])["sessions"]
+    assert len(sessions) == 1
+    assert "last_error" not in sessions[0]
 
 
 @patch.dict("os.environ", {"SESSIONS_TABLE": "sessions"})

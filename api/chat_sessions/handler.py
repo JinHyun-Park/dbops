@@ -157,7 +157,7 @@ def _list_sessions(table, user_id: str, qsp: dict) -> dict:
             ScanIndexForward=False,  # most recent first
             Limit=limit,
             # Don't pull `messages` blob in list view — keeps payload small.
-            ProjectionExpression="session_id, title, cluster_id, updated_at, message_count, created_at, total_input_tokens, total_output_tokens",
+            ProjectionExpression="session_id, title, cluster_id, updated_at, message_count, created_at, total_input_tokens, total_output_tokens, last_error",
         )
     except ClientError as e:
         return _response(500, {"error": str(e)[:300]})
