@@ -879,6 +879,7 @@ export default function AlertsPage() {
                   <option value="sms">SMS</option>
                   <option value="https">HTTPS webhook</option>
                   <option value="slack-webhook">Slack incoming webhook</option>
+                  <option value="teams-webhook">Microsoft Teams</option>
                   <option value="pagerduty-events-v2">
                     PagerDuty events-v2
                   </option>
@@ -900,12 +901,20 @@ export default function AlertsPage() {
                         ? "+821012345678"
                         : newSub.protocol === "slack-webhook"
                           ? "https://hooks.slack.com/services/T.../B.../..."
-                          : newSub.protocol === "pagerduty-events-v2"
-                            ? "PagerDuty integration key (32 hex chars)"
-                            : "https://example.com/webhook"
+                          : newSub.protocol === "teams-webhook"
+                            ? "https://<조직>.webhook.office.com/webhookb2/..."
+                            : newSub.protocol === "pagerduty-events-v2"
+                              ? "PagerDuty integration key (32 hex chars)"
+                              : "https://example.com/webhook"
                   }
                   className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60 transition-colors"
                 />
+                {newSub.protocol === "teams-webhook" && (
+                  <p className="mt-1 text-[11px] text-zinc-500">
+                    Incoming Webhook URL 또는 Workflows URL 모두 사용
+                    가능합니다.
+                  </p>
+                )}
               </div>
               <button
                 type="submit"
