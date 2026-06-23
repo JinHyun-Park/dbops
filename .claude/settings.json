@@ -20,6 +20,15 @@
             "command": ".claude/hooks/stop-session-memory.sh"
           }
         ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tools/local-tester/stop-hook.sh"
+          }
+        ]
       }
     ]
   }

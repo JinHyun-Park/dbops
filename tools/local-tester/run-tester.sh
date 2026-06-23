@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Background post-commit tester (cross-model adversarial review + tests + smoke).
+#
+# Dev agent = Claude (the main Claude Code session). This tester runs the
+# ADVERSARIAL review with a DIFFERENT model — Codex (openai.gpt-5.5, Bedrock) —
+# plus the unit suite and an optional live dev smoke, then writes findings the
+# Stop hook surfaces back to the dev agent. READ-ONLY: it never edits the tree
+# or commits — the dev agent fixes (author/reviewer separation).
+#
+# Invoked DETACHED by .git/hooks/post-commit so it never blocks the dev loop.
+# Findings: .omc/tester-findings.md  (a `commit:`/`status:` header + details).
+set -uo pipefail   # intentionally NOT -e: run every step and record failures
+
+REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$REPO" || exit 0
+mkdir -p .omc
+OUT=".omc/tester-findings.md"
+RANGE="${1:-HEAD~1..HEAD}"
+SHA="$(git rev-parse HEAD 2>/dev/null)"
+SHORT="$(git rev-parse --short HEAD 2>/dev/null)"
+SUBJECT="$(git log -1 --format='%s' 2>/dev/null)"
+CODEX_MODEL="${DBOPS_TESTER_CODEX_MODEL:-openai.gpt-5.5}"
+
+# --- single-flight: a newer commit's tester wins (kill the previous run) -----
+PIDF=".omc/.tester.pid"
+[ -f "$PIDF" ] && kill "$(cat "$PIDF" 2>/dev/null)" 2>/dev/null
+echo $$ > "$PIDF"
+
+# --- skip trivial commits (docs/scratch/markdown only) to save Codex cost ----
+CHANGED="$(git diff --name-only "$RANGE" 2>/dev/null)"
+if [ -z "$CHANGED" ] || ! printf '%s\n' "$CHANGED" | grep -qvE '^(docs/|\.superpowers/|\.omc/|tools/local-tester/|.*\.md$)'; then
+  printf 'commit: %s\nstatus: clean\n\n_사소한 커밋(docs/scratch) — 테스터 스킵._\n' "$SHA" > "$OUT"
+  rm -f "$PIDF"; exit 0
+fi
+
+printf 'commit: %s\nstatus: pending\n\n_테스터 실행 중: %s (%s)…_\n' "$SHA" "$SHORT" "$SUBJECT" > "$OUT"
+
+DIFF="$(git diff "$RANGE" 2>/dev/null | head -c 60000)"
+
+# --- 1) Codex adversarial review (cross-model) -------------------------------
+PROMPT="You are an adversarial code reviewer. Review ONLY the git diff below (commit ${SHORT}: ${SUBJECT}). Surface real Critical/Important issues introduced by THIS diff — bugs, regressions, security holes, broken non-breaking invariants, missing error handling. Be concise: one bullet per issue as '- [SEV] path: what / why'. If you find no blocking issues, say so briefly. Your VERY LAST line MUST be exactly 'VERDICT: CLEAN' or 'VERDICT: ISSUES'.
+
+DIFF:
+${DIFF}"
+CODEX_RAW="$(codex exec -m "$CODEX_MODEL" -s read-only "$PROMPT" 2>&1)"
+# Codex prints: separator, prompt, a line 'codex', the response, 'tokens used', N.
+CODEX_REVIEW="$(printf '%s\n' "$CODEX_RAW" | awk '/^codex$/{f=1;next} /^tokens used$/{f=0} f')"
+[ -z "${CODEX_REVIEW// }" ] && CODEX_REVIEW="$CODEX_RAW"
+if printf '%s' "$CODEX_REVIEW" | grep -q 'VERDICT: ISSUES'; then CODEX_ST=issues; else CODEX_ST=clean; fi
+
+# --- 2) Unit tests -----------------------------------------------------------
+TEST_RAW="$(python3 -m pytest tests/unit -q 2>&1)"
+TEST_TAIL="$(printf '%s\n' "$TEST_RAW" | tail -1)"
+if printf '%s\n' "$TEST_RAW" | tail -3 | grep -qiE 'failed|error'; then TEST_ST=fail; else TEST_ST=pass; fi
+
+# --- 3) Optional live dev smoke (pluggable, best-effort) ---------------------
+SMOKE_OUT="(스킵 — tools/local-tester/dev-smoke.sh 없음/비실행)"; SMOKE_ST=skip
+if [ -x tools/local-tester/dev-smoke.sh ]; then
+  SMOKE_OUT="$(tools/local-tester/dev-smoke.sh 2>&1 | tail -20)"
+  if printf '%s' "$SMOKE_OUT" | grep -q 'SMOKE: FAIL'; then SMOKE_ST=fail
+  elif printf '%s' "$SMOKE_OUT" | grep -q 'SMOKE: PASS'; then SMOKE_ST=pass; else SMOKE_ST=skip; fi
+fi
+
+# --- aggregate + write findings ---------------------------------------------
+STATUS=clean
+[ "$CODEX_ST" = issues ] && STATUS=issues
+[ "$TEST_ST" = fail ] && STATUS=issues
+[ "$SMOKE_ST" = fail ] && STATUS=issues
+
+{
+  echo "commit: $SHA"
+  echo "status: $STATUS"
+  echo ""
+  echo "# 백그라운드 테스터 — ${SHORT} (${SUBJECT})"
+  echo "- Codex(${CODEX_MODEL}) 적대 리뷰: **${CODEX_ST}**"
+  echo "- 유닛 테스트(tests/unit): **${TEST_ST}** — ${TEST_TAIL}"
+  echo "- dev 스모크: **${SMOKE_ST}**"
+  echo ""
+  echo "## Codex 적대 리뷰"
+  printf '%s\n' "$CODEX_REVIEW"
+  echo ""
+  echo "## 유닛 테스트 (tail)"
+  printf '%s\n' "$TEST_RAW" | tail -6
+  echo ""
+  echo "## dev 스모크"
+  printf '%s\n' "$SMOKE_OUT"
+} > "$OUT"
+
+rm -f "$PIDF"
+exit 0
