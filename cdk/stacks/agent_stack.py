@@ -782,6 +782,17 @@ class AgentStack(cdk.Stack):
             )
         )
 
+        # Approval-policies API — admin CRUD over designated-approver policies
+        # that the approvals API enforces. Admin-gated + fail-closed in-handler.
+        approval_policies_lambda = lambda_.Function(
+            self, "ApprovalPoliciesApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/approval_policies"),
+            timeout=cdk.Duration.seconds(15),
+        )
+        foundation.grant_approval_policy_write(approval_policies_lambda)  # R/W + env
+
         # Agent Tasks API — list / get / create over the agent-tasks DDB table.
         # Read path backs the /tasks UI + the alert toast deep link; POST writes
         # a pending manual_rca row that the stream worker then executes.
@@ -1537,6 +1548,20 @@ class AgentStack(cdk.Stack):
             path="/api/approvals/{id}",
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PUT],
             integration=integrations.HttpLambdaIntegration("ApprovalDetailIntegration", approvals_lambda),
+        )
+        # Approval policies — admin-gated designated-approver routing
+        approval_policies_integration = integrations.HttpLambdaIntegration(
+            "ApprovalPoliciesIntegration", approval_policies_lambda
+        )
+        self.api.add_routes(
+            path="/api/approval-policies",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
+            integration=approval_policies_integration,
+        )
+        self.api.add_routes(
+            path="/api/approval-policies/{id}",
+            methods=[apigwv2.HttpMethod.PUT, apigwv2.HttpMethod.DELETE],
+            integration=approval_policies_integration,
         )
         # DBOps activity log — chronological feed of every approval
         # (any status) for retro + compliance. Reads the same DDB

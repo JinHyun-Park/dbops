@@ -25,6 +25,9 @@
       "name": "alert-subscriptions"
     },
     {
+      "name": "approval-policies"
+    },
+    {
       "name": "approvals"
     },
     {
@@ -266,6 +269,98 @@
             "description": "Unauthorized (missing/invalid token)"
           }
         },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/approval-policies": {
+      "get": {
+        "tags": ["approval-policies"],
+        "summary": "GET /api/approval-policies",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      },
+      "post": {
+        "tags": ["approval-policies"],
+        "summary": "POST /api/approval-policies",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/approval-policies/{id}": {
+      "put": {
+        "tags": ["approval-policies"],
+        "summary": "PUT /api/approval-policies/{id}",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["approval-policies"],
+        "summary": "DELETE /api/approval-policies/{id}",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "security": [
           {
             "cognitoJwt": []
