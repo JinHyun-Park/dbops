@@ -89,6 +89,44 @@ def _scan_all(table, **kwargs) -> list:
         kwargs["ExclusiveStartKey"] = lek
 
 
+def resolve_eligible_approvers(cluster_id, action_type, policies) -> set:
+    """Return the designated-approver set for a request (lower-cased), or an
+    EMPTY set when no policy matches (= policy not applicable → fallback).
+
+    A policy matches when its cluster_id is the request's cluster_id or "*",
+    AND its action_type is the request's action_type or "*". The most specific
+    matching policy wins (cluster-exact=2 + action-exact=1); ties at the top
+    score union their approvers."""
+    best, eligible = -1, set()
+    for p in policies or []:
+        pc = p.get("cluster_id", "*")
+        pa = p.get("action_type", "*")
+        if pc not in (cluster_id, "*") or pa not in (action_type, "*"):
+            continue
+        score = (2 if pc == cluster_id else 0) + (1 if pa == action_type else 0)
+        approvers = {str(a).strip().lower() for a in (p.get("approvers") or []) if str(a).strip()}
+        if score > best:
+            best, eligible = score, set(approvers)
+        elif score == best:
+            eligible |= approvers
+    return eligible
+
+
+def _load_eligible_approvers(cluster_id, action_type) -> set:
+    """Resolve the eligible approver set from the policies table. FAIL-SAFE:
+    any error (no env, no grant, DDB down) → empty set → fallback to any-admin.
+    A policy-infra failure must never freeze the approval loop."""
+    try:
+        name = os.environ.get("APPROVAL_POLICIES_TABLE")
+        if not name:
+            return set()
+        table = boto3.resource("dynamodb").Table(name)
+        return resolve_eligible_approvers(cluster_id, action_type, _scan_all(table))
+    except Exception as e:  # noqa: BLE001 - fail-safe by design
+        print(f"[approvals] policy load failed: {type(e).__name__}: {e}")
+        return set()
+
+
 def _execute_enable_data_api(item: dict) -> dict:
     """enable_data_api 승인은 승인 즉시 이 핸들러가 직접 실행한다 — 에이전트
     재호출(replay) 단계가 없어, 실행이 DBA의 인증된 승인 클릭 아래에서 일어난다.
@@ -351,6 +389,33 @@ def lambda_handler(event, context):
             return {"statusCode": 404, "headers": headers, "body": json.dumps({"error": "not found"})}
 
         item = items[0]
+
+        # Advanced approval — designated approvers + separation of duties.
+        # Applies to approve only; reject keeps the _is_admin-only gate so a
+        # requester can still cancel their own request.
+        if action == "approve":
+            approver = _caller_name(event)
+            if approver and approver == item.get("requested_by"):
+                return {
+                    "statusCode": 403,
+                    "headers": headers,
+                    "body": json.dumps({
+                        "error": "self_approval",
+                        "reason": "자기 요청은 승인할 수 없습니다 — 다른 승인자가 처리해야 합니다.",
+                    }),
+                }
+            action_type = item.get("action_type") or item.get("tool_name")
+            eligible = _load_eligible_approvers(item.get("cluster_id"), action_type)
+            if eligible and approver.strip().lower() not in eligible:
+                return {
+                    "statusCode": 403,
+                    "headers": headers,
+                    "body": json.dumps({
+                        "error": "not_designated_approver",
+                        "reason": "이 작업은 지정된 승인자만 승인할 수 있습니다.",
+                    }),
+                }
+
         # pending 상태에서만 전이 허용 — ConditionExpression이 없으면
         # 이미 consumed/rejected된 행도 PUT approve로 다시 approved가 되어,
         # approval_guard의 consume-on-use replay 방어를 API에서 되살릴 수

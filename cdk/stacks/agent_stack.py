@@ -770,6 +770,7 @@ class AgentStack(cdk.Stack):
         )
         foundation.approvals_table.grant_read_write_data(approvals_lambda)
         foundation.clusters_table.grant_read_data(approvals_lambda)
+        foundation.grant_approval_policy_read(approvals_lambda)  # designated-approver enforcement
         # 의도적으로 rds:EnableHttpEndpoint 단일 액션만 — ModifyDBCluster를
         # 주면 마스터 패스워드 변경·삭제 보호 해제까지 가능한 광범위 권한이
         # 플랫폼에 생긴다. 전용 API(설정 1비트)로 블래스트 반경을 좁히는 것이
