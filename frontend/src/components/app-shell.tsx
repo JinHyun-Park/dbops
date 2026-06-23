@@ -28,6 +28,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Target,
+  UserCheck,
   Wand2,
   X,
 } from "lucide-react";
@@ -205,6 +206,13 @@ const NAV: NavGroup[] = [
         icon: SlidersHorizontal,
         hint: "기능 토글 — 티켓팅·리포트 전달 (관리자)",
         adminOnly: true,
+      },
+      {
+        href: "/approval-policies",
+        label: "Approval policies",
+        icon: UserCheck,
+        adminOnly: true,
+        hint: "지정 승인자 라우팅 — 클러스터·액션별 승인자 (관리자)",
       },
       {
         href: "/health",

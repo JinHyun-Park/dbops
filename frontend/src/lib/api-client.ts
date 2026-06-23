@@ -2246,6 +2246,78 @@ export async function deleteMemoryRecord(
   if (!res.ok) throw new Error(`메모리 삭제 실패 (상태 ${res.status})`);
 }
 
+// =====  Approval policies (designated-approver routing, admin-gated) =====
+
+export interface ApprovalPolicy {
+  policy_id: string;
+  cluster_id: string;
+  action_type: string;
+  approvers: string[];
+  description: string;
+  updated_at?: string;
+  updated_by?: string;
+}
+
+export async function fetchApprovalPolicies(): Promise<{
+  policies: ApprovalPolicy[];
+}> {
+  const res = await authedFetch(await apiUrl("/api/approval-policies"));
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) throw new Error(`policy fetch failed: ${res.status}`);
+  return res.json();
+}
+
+async function _writePolicy(
+  method: "POST" | "PUT",
+  body: Partial<ApprovalPolicy>,
+  id?: string,
+): Promise<ApprovalPolicy> {
+  const path = id
+    ? `/api/approval-policies/${encodeURIComponent(id)}`
+    : "/api/approval-policies";
+  const res = await authedFetch(await apiUrl(path), {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) {
+    let msg = `policy save failed: ${res.status}`;
+    try {
+      const b = await res.json();
+      if (b?.error) msg = b.error;
+    } catch {
+      /* keep default */
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+export function createApprovalPolicy(
+  body: Partial<ApprovalPolicy>,
+): Promise<ApprovalPolicy> {
+  return _writePolicy("POST", body);
+}
+
+export function updateApprovalPolicy(
+  id: string,
+  body: Partial<ApprovalPolicy>,
+): Promise<ApprovalPolicy> {
+  return _writePolicy("PUT", body, id);
+}
+
+export async function deleteApprovalPolicy(id: string): Promise<void> {
+  const res = await authedFetch(
+    await apiUrl(`/api/approval-policies/${encodeURIComponent(id)}`),
+    {
+      method: "DELETE",
+    },
+  );
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) throw new Error(`policy delete failed: ${res.status}`);
+}
+
 // =====  App-level feature config (admin-gated) =====
 
 export interface AppConfigItem {

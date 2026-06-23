@@ -136,6 +136,13 @@ const commands: Command[] = [
     adminOnly: true,
   },
   {
+    id: "approval-policies",
+    label: "Approval policies — 지정 승인자 라우팅",
+    path: "/approval-policies",
+    group: "Configure",
+    adminOnly: true,
+  },
+  {
     id: "health",
     label: "Health — 자체 모니터링",
     path: "/health",
