@@ -511,6 +511,10 @@ class AgentStack(cdk.Stack):
                     Settings, "AWS_MCP_URL", "https://aws-mcp.us-east-1.api.aws/mcp"
                 ),
                 "AWS_MCP_REGION": getattr(Settings, "AWS_MCP_REGION", "us-east-1"),
+                # Operator-uploaded context files table — read at prompt-build time.
+                # grant_context_files_read() is for Lambdas (calls fn.add_environment);
+                # the Runtime env is set here directly, and the role grant is below.
+                "CONTEXT_FILES_TABLE": foundation.context_files_table.table_name,
             },
             network_configuration=agentcore.RuntimeNetworkConfiguration.using_public_network(),
             authorizer_configuration=agentcore.RuntimeAuthorizerConfiguration.using_cognito(
@@ -518,6 +522,10 @@ class AgentStack(cdk.Stack):
                 user_pool_clients=[foundation.user_pool_client],
             ),
         )
+        # Grant the Runtime's IAM role read access to the context-files table.
+        # (grant_context_files_read() is for Lambda fns — it calls fn.add_environment
+        # which is unsupported on the Runtime construct. Set env above; grant role here.)
+        foundation.context_files_table.grant_read_data(self.runtime.role)
 
         # ===== REST API =====
 

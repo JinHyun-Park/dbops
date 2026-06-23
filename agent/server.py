@@ -28,6 +28,43 @@ from strands.tools.mcp.mcp_client import MCPClient
 app = BedrockAgentCoreApp()
 log = app.logger
 
+
+def _load_context_files() -> str:
+    """Concatenate operator-uploaded context files into a single string for the
+    system prompt. FAIL-SAFE: any error (no env, no grant, DDB down) -> "" so the
+    chat is never affected."""
+    try:
+        import re
+
+        import boto3
+        name = os.environ.get("CONTEXT_FILES_TABLE")
+        if not name:
+            return ""
+        table = boto3.resource("dynamodb").Table(name)
+        items, kwargs = [], {}
+        while True:
+            resp = table.scan(**kwargs)
+            items.extend(resp.get("Items", []))
+            lek = resp.get("LastEvaluatedKey")
+            if not lek:
+                break
+            kwargs["ExclusiveStartKey"] = lek
+        blocks = []
+        for it in items:
+            if not it.get("content"):
+                continue
+            # Sanitize fence markers so a stored row can't break the outer fence
+            safe_content = re.sub(r"OPERATOR_CONTEXT", "OPERATOR-CONTEXT", it["content"], flags=re.IGNORECASE)
+            safe_name = re.sub(r"OPERATOR_CONTEXT", "OPERATOR-CONTEXT", it.get("name", ""), flags=re.IGNORECASE)
+            blocks.append(f"### {safe_name}\n{safe_content}")
+        return "\n\n".join(blocks)
+    except Exception as e:  # noqa: BLE001 - fail-safe by design
+        try:
+            log.warning(f"context-files load failed: {type(e).__name__}: {e}")
+        except Exception:
+            pass
+        return ""
+
 GATEWAY_URL = os.environ.get("GATEWAY_MCP_URL", "")
 GATEWAY_TOKEN_URL = os.environ.get("GATEWAY_TOKEN_URL", "")
 GATEWAY_CLIENT_ID = os.environ.get("GATEWAY_CLIENT_ID", "")
@@ -291,7 +328,7 @@ async def invoke(payload, context):
         if knowledge_tools:
             log.info(f"Registered {len(knowledge_tools)} AWS Knowledge doc tools")
 
-        agent = Agent(model=model, system_prompt=build_system_prompt(), tools=tools)
+        agent = Agent(model=model, system_prompt=build_system_prompt(_load_context_files()), tools=tools)
         last_usage = None
         async for event in agent.stream_async(prompt):
             if isinstance(event, dict) and "data" in event and isinstance(event["data"], str):
