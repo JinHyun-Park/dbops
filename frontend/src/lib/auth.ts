@@ -315,8 +315,10 @@ export function getUserFromToken(): { email?: string; sub?: string } | null {
 
 // --- RBAC ---
 // `cognito:groups` is present on the ID token. Default model: a user is
-// admin unless they're explicitly placed in the dbops-viewer group.
+// admin if they have no group claim (single-admin deploys) or are in
+// dbops-admin; any other group set (dbops-viewer or otherwise) is denied.
 // This keeps existing single-admin deployments working without a migration.
+// Cosmetic gate only — the server's _is_admin is authoritative.
 export function getUserGroups(): string[] {
   const claims = decodeJwt(getToken()) as {
     "cognito:groups"?: string[];
@@ -327,9 +329,10 @@ export function getUserGroups(): string[] {
 
 export function isAdmin(): boolean {
   const groups = getUserGroups();
-  // Explicit viewer override beats default admin.
-  if (groups.includes("dbops-viewer") && !groups.includes("dbops-admin"))
-    return false;
+  // Deny if a group set is present but lacks dbops-admin; empty groups (no
+  // claim) stays admin (single-admin default). Cosmetic gate only — the
+  // server enforces.
+  if (groups.length > 0 && !groups.includes("dbops-admin")) return false;
   return true;
 }
 
