@@ -14,8 +14,12 @@ const COLS: (keyof ActivityItem)[] = [
 ];
 
 function csvCell(v: unknown): string {
-  const s = v === undefined || v === null ? "" : String(v);
-  return `"${s.replace(/"/g, '""')}"`; // always quote; escape embedded quotes
+  let s = v === undefined || v === null ? "" : String(v);
+  // CSV formula-injection guard: a cell starting with = + - @ (or tab/CR) can
+  // execute as a formula when an auditor opens the file in Excel/Sheets. Prefix
+  // a single quote to neutralize it (spreadsheets hide the leading quote).
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return `"${s.replace(/"/g, '""')}"`; // then always quote; escape embedded quotes
 }
 
 export function buildAuditCsv(items: ActivityItem[]): string {

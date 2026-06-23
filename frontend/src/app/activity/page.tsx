@@ -242,8 +242,27 @@ export default function ActivityPage() {
             {items.length > 0 && (
               <button
                 type="button"
-                onClick={() => {
-                  const csv = buildAuditCsv(items);
+                onClick={async () => {
+                  // Export the fullest set the backend allows (cap 500), not
+                  // just the in-view ~200, so the compliance export isn't
+                  // silently truncated. The filename records the row count and
+                  // flags when it hit the 500 cap. (A true unbounded/paginated
+                  // export is a backlog item.)
+                  let rows = items;
+                  let capped = false;
+                  try {
+                    const r = await fetchActivity({
+                      cluster_id: clusterFilter || undefined,
+                      actor: actorFilter || undefined,
+                      action_type: actionFilter || undefined,
+                      limit: 500,
+                    });
+                    rows = r.items;
+                    capped = r.items.length >= 500;
+                  } catch {
+                    // fetch error — fall back to the in-view items
+                  }
+                  const csv = buildAuditCsv(rows);
                   const blob = new Blob([csv], {
                     type: "text/csv;charset=utf-8",
                   });
@@ -252,7 +271,9 @@ export default function ActivityPage() {
                   a.href = url;
                   a.download = `audit-${new Date()
                     .toISOString()
-                    .slice(0, 10)}.csv`;
+                    .slice(0, 10)}-${rows.length}rows${
+                    capped ? "-capped" : ""
+                  }.csv`;
                   a.click();
                   URL.revokeObjectURL(url);
                 }}
