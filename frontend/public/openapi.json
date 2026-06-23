@@ -40,6 +40,9 @@
       "name": "config"
     },
     {
+      "name": "context-files"
+    },
+    {
       "name": "cost"
     },
     {
@@ -732,6 +735,71 @@
             "description": "Unauthorized (missing/invalid token)"
           }
         },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/context-files": {
+      "get": {
+        "tags": ["context-files"],
+        "summary": "GET /api/context-files",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      },
+      "post": {
+        "tags": ["context-files"],
+        "summary": "POST /api/context-files",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/context-files/{id}": {
+      "delete": {
+        "tags": ["context-files"],
+        "summary": "DELETE /api/context-files/{id}",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "security": [
           {
             "cognitoJwt": []

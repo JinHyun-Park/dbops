@@ -794,6 +794,17 @@ class AgentStack(cdk.Stack):
         )
         foundation.grant_approval_policy_write(approval_policies_lambda)  # R/W + env
 
+        # Context Files API — admin CRUD over operator-uploaded reference text
+        # injected into the agent prompt (per-file 32KB, 64KB total budget).
+        context_files_lambda = lambda_.Function(
+            self, "ContextFilesApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/context_files"),
+            timeout=cdk.Duration.seconds(15),
+        )
+        foundation.grant_context_files_write(context_files_lambda)  # R/W + CONTEXT_FILES_TABLE env
+
         # Agent Tasks API — list / get / create over the agent-tasks DDB table.
         # Read path backs the /tasks UI + the alert toast deep link; POST writes
         # a pending manual_rca row that the stream worker then executes.
@@ -1577,6 +1588,14 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("ActivityIntegration", approvals_lambda),
         )
+        # Context files — admin-gated operator-uploaded reference text
+        context_files_integration = integrations.HttpLambdaIntegration("ContextFilesIntegration", context_files_lambda)
+        self.api.add_routes(path="/api/context-files",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
+            integration=context_files_integration)
+        self.api.add_routes(path="/api/context-files/{id}",
+            methods=[apigwv2.HttpMethod.DELETE],
+            integration=context_files_integration)
         # Agent Tasks — autonomous/scheduled/manual agent work
         tasks_integration = integrations.HttpLambdaIntegration("TasksIntegration", tasks_lambda)
         self.api.add_routes(
