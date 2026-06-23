@@ -210,7 +210,7 @@ def _put_session(table, user_id: str, session_id: str, event: dict) -> dict:
     }
     for k in ("total_input_tokens", "total_output_tokens", "turn_count"):
         v = body.get(k)
-        if isinstance(v, (int, float)):
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
             item[k] = int(v)
     if isinstance(body.get("last_error"), dict):
         item["last_error"] = body["last_error"]

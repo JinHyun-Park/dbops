@@ -623,6 +623,8 @@ export function ChatPanel() {
   const removeConversation = useCallback(
     (id: string) => {
       persist((prev) => prev.filter((c) => c.id !== id));
+      // Prune token totals so the Map doesn't grow unboundedly.
+      tokenTotalsRef.current.delete(id);
       // Best-effort server delete. A failure here just means the row
       // sticks around in DDB until TTL expires it; local UI is already
       // consistent.
@@ -695,6 +697,20 @@ export function ChatPanel() {
         // Throwaway session id so the agent's memory stays clean.
         `followup-${convId}-${Date.now()}`,
         modelId,
+        (u) => {
+          // Attribute followup LLM tokens to the real conversation's totals.
+          // Do NOT increment turn_count — this is a sub-call of the same turn.
+          const prev = tokenTotalsRef.current.get(convId) ?? {
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            turn_count: 0,
+          };
+          tokenTotalsRef.current.set(convId, {
+            ...prev,
+            total_input_tokens: prev.total_input_tokens + u.input,
+            total_output_tokens: prev.total_output_tokens + u.output,
+          });
+        },
       );
     },
     [modelId, persist],
@@ -745,6 +761,20 @@ export function ChatPanel() {
         // Throwaway session id so the agent's memory stays clean.
         `title-${convId}-${Date.now()}`,
         modelId,
+        (u) => {
+          // Attribute title LLM tokens to the real conversation's totals.
+          // Do NOT increment turn_count — this is a sub-call of the same turn.
+          const prev = tokenTotalsRef.current.get(convId) ?? {
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            turn_count: 0,
+          };
+          tokenTotalsRef.current.set(convId, {
+            ...prev,
+            total_input_tokens: prev.total_input_tokens + u.input,
+            total_output_tokens: prev.total_output_tokens + u.output,
+          });
+        },
       );
     },
     [modelId, persist],
@@ -854,6 +884,14 @@ export function ChatPanel() {
         },
         () => {
           setIsStreaming(false);
+          // Count one turn per completed main-turn response (not per usage event).
+          const prevTotals = tokenTotalsRef.current.get(convId);
+          if (prevTotals) {
+            tokenTotalsRef.current.set(convId, {
+              ...prevTotals,
+              turn_count: prevTotals.turn_count + 1,
+            });
+          }
           // Pull the final assistant text from state at the moment we finished.
           setConversations((prev) => {
             const conv = prev.find((c) => c.id === convId);
@@ -890,6 +928,7 @@ export function ChatPanel() {
         modelId,
         (u) => {
           // Accumulate token usage across turns for this session.
+          // turn_count is incremented in onDone (once per completed turn).
           const prev = tokenTotalsRef.current.get(convId) ?? {
             total_input_tokens: 0,
             total_output_tokens: 0,
@@ -899,7 +938,6 @@ export function ChatPanel() {
             ...prev,
             total_input_tokens: prev.total_input_tokens + u.input,
             total_output_tokens: prev.total_output_tokens + u.output,
-            turn_count: prev.turn_count + 1,
           });
         },
       );

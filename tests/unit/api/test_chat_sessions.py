@@ -276,3 +276,34 @@ def test_put_without_token_fields_is_unchanged(mock_boto3):
     assert "total_output_tokens" not in put_item
     assert "turn_count" not in put_item
     assert "last_error" not in put_item
+
+
+@patch.dict("os.environ", {"SESSIONS_TABLE": "sessions"})
+@patch.object(handler, "boto3")
+def test_put_rejects_non_int_token_fields(mock_boto3):
+    """String and bool values for token fields must NOT be stored — the additive
+    guard drops them silently rather than storing invalid types in DDB."""
+    table = MagicMock()
+    table.get_item.return_value = {}  # no existing row
+    mock_boto3.resource.return_value.Table.return_value = table
+
+    body = {
+        "title": "bad types",
+        "cluster_id": "dev-pg-1",
+        "messages": [],
+        # string — must be rejected
+        "total_input_tokens": "bad",
+        # bool — subclasses int in Python, must still be rejected
+        "total_output_tokens": True,
+        # also bool
+        "turn_count": False,
+    }
+    res = handler.lambda_handler(
+        _event("PUT", path_params={"id": "sess-badtype"}, body=body), None,
+    )
+
+    assert res["statusCode"] == 200
+    put_item = table.put_item.call_args.kwargs["Item"]
+    assert "total_input_tokens" not in put_item, "string must not be stored"
+    assert "total_output_tokens" not in put_item, "True (bool) must not be stored"
+    assert "turn_count" not in put_item, "False (bool) must not be stored"
