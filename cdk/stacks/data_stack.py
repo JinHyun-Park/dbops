@@ -399,6 +399,7 @@ class DataStack(cdk.Stack):
         )
         self.cache_db.secret.grant_read(self.report_generator)
         self.cache_db.grant_data_api_access(self.report_generator)
+        foundation.grant_app_config_read(self.report_generator)  # DB-backed REPORT_DELIVERY_ENABLED
         self.archive_bucket.grant_write(self.report_generator)
         self.alert_topic.grant_publish(self.report_generator)
         # NL summary path invokes a Bedrock Claude model. Failure to invoke

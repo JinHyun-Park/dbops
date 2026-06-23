@@ -28,6 +28,7 @@ from datetime import datetime
 from typing import Any
 
 import boto3
+from app_config import get_config
 from botocore.exceptions import ClientError
 
 # Threshold above which we count "AAS minutes" — i.e. how long the
@@ -340,7 +341,8 @@ def _build_report_slack_blocks(cluster_id, report_date, report_type, summary):
 def _deliver_report(cache_query, cluster_id, report_date, report_type, summary):
     """Best-effort: publish the digest to SNS (email) + POST to managed slack-webhook
     subscribers. Inert unless REPORT_DELIVERY_ENABLED is truthy. Never raises."""
-    if os.environ.get("REPORT_DELIVERY_ENABLED", "").strip().lower() not in ("true", "1", "yes", "on"):
+    enabled = get_config("REPORT_DELIVERY_ENABLED", os.environ.get("REPORT_DELIVERY_ENABLED", "false"))
+    if str(enabled).strip().lower() not in ("true", "1", "yes", "on"):
         return
     try:
         topic = os.environ.get("ALERT_TOPIC_ARN", "")

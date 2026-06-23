@@ -116,6 +116,7 @@ class AgentStack(cdk.Stack):
         data.cache_db.grant_data_api_access(task_worker)
         foundation.clusters_table.grant_read_data(task_worker)
         foundation.grant_task_manage(task_worker)      # agent-tasks R/W + env
+        foundation.grant_app_config_read(task_worker)  # DB-backed TICKETING_PROVIDER
         foundation.grant_alert_broadcast(task_worker)   # WS push on completion
         # Bedrock for the hybrid narrative. The model id is an APAC inference
         # profile, which fans out to foundation models across regions — so the

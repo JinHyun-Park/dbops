@@ -20,6 +20,8 @@ isolates any provider exception so ticketing can never break task completion.
 import os
 from typing import Optional
 
+from mcp_servers.shared.app_config import get_config
+
 
 class TicketProvider:
     """Base seam. A real provider overrides :meth:`create_ticket`."""
@@ -78,7 +80,7 @@ def get_provider(name: Optional[str] = None) -> TicketProvider:
     implementation → that provider. Any other name → :class:`_UnwiredProvider`
     (raises on use)."""
     if name is None:
-        name = os.environ.get("TICKETING_PROVIDER", "none")
+        name = get_config("TICKETING_PROVIDER", os.environ.get("TICKETING_PROVIDER", "none"))
     name = name.strip().lower()
     if name in _DISABLED:
         return NoopTicketProvider()

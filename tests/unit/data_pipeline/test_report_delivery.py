@@ -14,6 +14,11 @@ _HANDLER_PATH = (
     / "report_generator"
     / "handler.py"
 )
+import sys as _sys
+
+_HANDLER_DIR = str(_HANDLER_PATH.parent)
+if _HANDLER_DIR not in _sys.path:
+    _sys.path.insert(0, _HANDLER_DIR)
 _spec = importlib.util.spec_from_file_location("report_generator.handler", _HANDLER_PATH)
 h = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(h)
