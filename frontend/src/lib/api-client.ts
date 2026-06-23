@@ -2481,3 +2481,33 @@ export async function deleteContextFile(id: string): Promise<void> {
   if (res.status === 403) throw new Error("admin only");
   if (!res.ok) throw new Error(`delete failed: ${res.status}`);
 }
+
+// ---------------------------------------------------------------------------
+// Onboarding — spoke-account CloudFormation template
+// ---------------------------------------------------------------------------
+
+export interface OnboardingTemplate {
+  template: string;
+  hub_account_id: string;
+  hub_role_arn: string;
+  role_name: string;
+  remediation: boolean;
+  region: string | null;
+}
+
+export async function fetchOnboardingTemplate(opts?: {
+  region?: string;
+  remediation?: boolean;
+}): Promise<OnboardingTemplate> {
+  const p = new URLSearchParams();
+  if (opts?.region) p.set("region", opts.region);
+  if (opts?.remediation) p.set("remediation", "true");
+  const qs = p.toString();
+  const res = await authedFetch(
+    await apiUrl(`/api/onboarding/template${qs ? `?${qs}` : ""}`),
+  );
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok)
+    throw new Error(`onboarding template fetch failed: ${res.status}`);
+  return res.json();
+}

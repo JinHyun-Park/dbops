@@ -24,6 +24,7 @@ import {
   HeartPulse,
   MessageSquare,
   Network,
+  PlugZap,
   Search,
   ShieldCheck,
   SlidersHorizontal,
@@ -223,6 +224,13 @@ const NAV: NavGroup[] = [
         hint: "에이전트 참조 컨텍스트 업로드 (관리자)",
       },
       {
+        href: "/onboarding",
+        label: "Onboarding",
+        icon: PlugZap,
+        adminOnly: true,
+        hint: "멤버 계정 연결 위저드 (관리자)",
+      },
+      {
         href: "/health",
         label: "Health",
         icon: HeartPulse,
@@ -255,6 +263,7 @@ function humanize(segment: string): string {
     preferences: "Memory",
     settings: "Settings",
     "context-files": "Context files",
+    onboarding: "Onboarding",
     health: "Health",
     callback: "Login",
   };

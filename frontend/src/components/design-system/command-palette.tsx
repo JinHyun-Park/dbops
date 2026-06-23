@@ -150,6 +150,13 @@ const commands: Command[] = [
     adminOnly: true,
   },
   {
+    id: "onboarding",
+    label: "Onboarding — 멤버 계정 연결 위저드",
+    path: "/onboarding",
+    group: "Configure",
+    adminOnly: true,
+  },
+  {
     id: "health",
     label: "Health — 자체 모니터링",
     path: "/health",
