@@ -89,6 +89,28 @@ def _scan_all(table, **kwargs) -> list:
         kwargs["ExclusiveStartKey"] = lek
 
 
+def _compact_activity(items: list) -> list:
+    """Project approval rows to the compact activity-feed shape (strip noisy
+    fields; action_details kept as a 500-char head excerpt)."""
+    compact = []
+    for it in items:
+        details = it.get("action_details") or it.get("parameters") or {}
+        details_str = details if isinstance(details, str) else json.dumps(details, default=str)
+        compact.append({
+            "approval_id": it.get("approval_id"),
+            "created_at": it.get("created_at"),
+            "resolved_at": it.get("resolved_at"),
+            "consumed_at": it.get("consumed_at"),
+            "approval_status": it.get("approval_status"),
+            "cluster_id": it.get("cluster_id"),
+            "action_type": it.get("action_type") or it.get("tool_name"),
+            "requested_by": it.get("requested_by"),
+            "approved_by": it.get("approved_by"),
+            "action_details_excerpt": details_str[:500],
+        })
+    return compact
+
+
 def resolve_eligible_approvers(cluster_id, action_type, policies) -> set:
     """Return the designated-approver set for a request (lower-cased), or an
     EMPTY set when no policy matches (= policy not applicable → fallback).
@@ -215,33 +237,33 @@ def lambda_handler(event, context):
             scan_kwargs["FilterExpression"] = " AND ".join(filters)
             scan_kwargs["ExpressionAttributeValues"] = attr_values
 
-        items = sorted(
-            _scan_all(table, **scan_kwargs),
-            key=_created_ms,
-            reverse=True,
-        )[:limit]
-        # Strip noisy fields so the activity feed stays scannable. The
-        # action_details JSON can be huge for big DDL — keep a head
-        # excerpt only.
-        compact = []
-        for it in items:
-            details = it.get("action_details") or it.get("parameters") or {}
-            if isinstance(details, str):
-                details_str = details
-            else:
-                details_str = json.dumps(details, default=str)
-            compact.append({
-                "approval_id": it.get("approval_id"),
-                "created_at": it.get("created_at"),
-                "resolved_at": it.get("resolved_at"),
-                "consumed_at": it.get("consumed_at"),
-                "approval_status": it.get("approval_status"),
-                "cluster_id": it.get("cluster_id"),
-                "action_type": it.get("action_type") or it.get("tool_name"),
-                "requested_by": it.get("requested_by"),
-                "approved_by": it.get("approved_by"),
-                "action_details_excerpt": details_str[:500],
-            })
+        cursor_param = qsp.get("cursor")
+        export_mode = qsp.get("export") == "true" or bool(cursor_param)
+
+        if export_mode:
+            page = max(1, min(int(qsp.get("limit", "500")), 1000))
+            if cursor_param:
+                try:
+                    scan_kwargs["ExclusiveStartKey"] = json.loads(
+                        base64.urlsafe_b64decode(cursor_param)
+                    )
+                except Exception:
+                    return {"statusCode": 400, "headers": headers,
+                            "body": json.dumps({"error": "invalid cursor"})}
+            scan_kwargs["Limit"] = page
+            resp = table.scan(**scan_kwargs)
+            compact = _compact_activity(resp.get("Items", []))
+            lek = resp.get("LastEvaluatedKey")
+            next_cursor = (
+                base64.urlsafe_b64encode(json.dumps(lek, default=str).encode()).decode()
+                if lek else None
+            )
+            return {"statusCode": 200, "headers": headers,
+                    "body": json.dumps({"items": compact, "count": len(compact),
+                                        "next_cursor": next_cursor}, default=str)}
+
+        items = sorted(_scan_all(table, **scan_kwargs), key=_created_ms, reverse=True)[:limit]
+        compact = _compact_activity(items)
         return {
             "statusCode": 200,
             "headers": headers,

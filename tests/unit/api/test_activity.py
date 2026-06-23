@@ -165,3 +165,98 @@ def test_activity_decimal_serialized(mock_boto3):
     assert res["statusCode"] == 200
     # Should not have thrown — Decimal coerced via default=str
     json.loads(res["body"])
+
+
+# ---------------------------------------------------------------------------
+# Cursor-pagination / export mode tests
+# ---------------------------------------------------------------------------
+
+import base64 as _base64
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
+@patch.object(handler, "boto3")
+def test_export_first_page_returns_next_cursor(mock_boto3):
+    """Page 1: scan returns 2 items + a LastEvaluatedKey -> next_cursor present."""
+    mock_table = MagicMock()
+    mock_table.scan.return_value = {
+        "Items": [
+            {"approval_id": "a2", "created_at": "2", "approval_status": "approved"},
+            {"approval_id": "a1", "created_at": "1", "approval_status": "approved"},
+        ],
+        "LastEvaluatedKey": {"approval_id": "a1", "created_at": "1"},
+    }
+    mock_boto3.resource.return_value.Table.return_value = mock_table
+
+    res = handler.lambda_handler(
+        _activity_event(qs={"export": "true"}), None
+    )
+    assert res["statusCode"] == 200
+    body = json.loads(res["body"])
+    assert body["count"] == 2
+    assert body["next_cursor"]  # non-null
+    # the cursor decodes back to the LEK
+    assert json.loads(_base64.urlsafe_b64decode(body["next_cursor"])) == {
+        "approval_id": "a1", "created_at": "1"
+    }
+    # scan was a single page (Limit set), not _scan_all
+    assert mock_table.scan.call_count == 1
+    assert mock_table.scan.call_args.kwargs.get("Limit")
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
+@patch.object(handler, "boto3")
+def test_export_last_page_null_cursor(mock_boto3):
+    """Last page: no LastEvaluatedKey -> next_cursor is None; ExclusiveStartKey set."""
+    mock_table = MagicMock()
+    mock_table.scan.return_value = {
+        "Items": [{"approval_id": "a0", "created_at": "0", "approval_status": "consumed"}]
+    }  # no LEK
+    cursor = _base64.urlsafe_b64encode(b'{"approval_id":"a1","created_at":"1"}').decode()
+    mock_boto3.resource.return_value.Table.return_value = mock_table
+
+    res = handler.lambda_handler(
+        _activity_event(qs={"export": "true", "cursor": cursor}), None
+    )
+    body = json.loads(res["body"])
+    assert body["next_cursor"] is None
+    assert body["count"] == 1
+    # the decoded cursor was passed as ExclusiveStartKey
+    assert mock_table.scan.call_args.kwargs.get("ExclusiveStartKey") == {
+        "approval_id": "a1", "created_at": "1"
+    }
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
+@patch.object(handler, "boto3")
+def test_export_bad_cursor_400(mock_boto3):
+    """Malformed cursor -> 400 with 'cursor' in error message; scan never called."""
+    mock_table = MagicMock()
+    mock_boto3.resource.return_value.Table.return_value = mock_table
+
+    res = handler.lambda_handler(
+        _activity_event(qs={"cursor": "!!!not-base64!!!"}), None
+    )
+    assert res["statusCode"] == 400
+    assert "cursor" in json.loads(res["body"]).get("error", "")
+    mock_table.scan.assert_not_called()
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
+@patch.object(handler, "boto3")
+def test_default_mode_unchanged(mock_boto3):
+    """No export/cursor -> still uses _scan_all + sort + truncate, shape {items,count}."""
+    rows = [
+        {"approval_id": f"a{i}", "created_at": str(i), "approval_status": "approved"}
+        for i in range(3)
+    ]
+    mock_table = MagicMock()
+    mock_boto3.resource.return_value.Table.return_value = mock_table
+
+    with patch.object(handler, "_scan_all", return_value=rows):
+        res = handler.lambda_handler(_activity_event(qs={"limit": "2"}), None)
+
+    body = json.loads(res["body"])
+    assert body["count"] == 2  # truncated, sorted desc
+    assert "next_cursor" not in body or body["next_cursor"] is None
+    assert body["items"][0]["created_at"] == "2"  # newest first
