@@ -42,16 +42,29 @@ PROMPT="You are an adversarial code reviewer. Review ONLY the git diff below (co
 
 DIFF:
 ${DIFF}"
-CODEX_RAW="$(codex exec -m "$CODEX_MODEL" -s read-only "$PROMPT" 2>&1)"
+CODEX_RAW="$(codex exec -m "$CODEX_MODEL" -s read-only "$PROMPT" 2>&1)"; CODEX_RC=$?
 # Codex prints: separator, prompt, a line 'codex', the response, 'tokens used', N.
 CODEX_REVIEW="$(printf '%s\n' "$CODEX_RAW" | awk '/^codex$/{f=1;next} /^tokens used$/{f=0} f')"
 [ -z "${CODEX_REVIEW// }" ] && CODEX_REVIEW="$CODEX_RAW"
-if printf '%s' "$CODEX_REVIEW" | grep -q 'VERDICT: ISSUES'; then CODEX_ST=issues; else CODEX_ST=clean; fi
+# codex can exit 0 even on a model/auth error (e.g. a 404 with no VERDICT line).
+# Require an explicit VERDICT line: its absence (or a non-zero exit) means the
+# review did NOT actually run -> 'error' (surfaced, not a silent 'clean'), so a
+# broken adversarial gate never passes a commit unreviewed.
+if [ "$CODEX_RC" -ne 0 ] || ! printf '%s' "$CODEX_RAW" | grep -q 'VERDICT:'; then
+  CODEX_ST=error
+elif printf '%s' "$CODEX_REVIEW" | grep -q 'VERDICT: ISSUES'; then
+  CODEX_ST=issues
+else
+  CODEX_ST=clean
+fi
 
 # --- 2) Unit tests -----------------------------------------------------------
-TEST_RAW="$(python3 -m pytest tests/unit -q 2>&1)"
+TEST_RAW="$(python3 -m pytest tests/unit -q 2>&1)"; TEST_RC=$?
 TEST_TAIL="$(printf '%s\n' "$TEST_RAW" | tail -1)"
-if printf '%s\n' "$TEST_RAW" | tail -3 | grep -qiE 'failed|error'; then TEST_ST=fail; else TEST_ST=pass; fi
+# Use pytest's EXIT CODE, not output text: 0 = all passed; any non-zero (test
+# failures, usage error, no tests collected, interrupted, pytest missing) is
+# NOT a pass — text-grepping for 'failed|error' missed those cases.
+[ "$TEST_RC" -eq 0 ] && TEST_ST=pass || TEST_ST=fail
 
 # --- 3) Optional live dev smoke (pluggable, best-effort) ---------------------
 SMOKE_OUT="(스킵 — tools/local-tester/dev-smoke.sh 없음/비실행)"; SMOKE_ST=skip
@@ -63,7 +76,7 @@ fi
 
 # --- aggregate + write findings ---------------------------------------------
 STATUS=clean
-[ "$CODEX_ST" = issues ] && STATUS=issues
+{ [ "$CODEX_ST" = issues ] || [ "$CODEX_ST" = error ]; } && STATUS=issues
 [ "$TEST_ST" = fail ] && STATUS=issues
 [ "$SMOKE_ST" = fail ] && STATUS=issues
 
