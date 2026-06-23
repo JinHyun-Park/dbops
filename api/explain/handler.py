@@ -85,14 +85,16 @@ def _is_select(sql: str) -> bool:
     return False
 
 
-def _build_explain_sql(sql: str, engine: str) -> str:
+def _build_explain_sql(sql: str, engine: str, analyze: bool = True) -> str:
     inner = _strip_explain_prefix(sql).rstrip().rstrip(";")
     if engine.startswith("aurora-mysql") or engine == "mysql":
         # MySQL 8.0+: EXPLAIN FORMAT=JSON returns one row with a JSON string.
         # We deliberately skip ANALYZE — its output isn't JSON-formatted.
         return f"EXPLAIN FORMAT=JSON {inner}"
     # Default: PostgreSQL.
-    return f"EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) {inner}"
+    if analyze:
+        return f"EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) {inner}"
+    return f"EXPLAIN (BUFFERS, VERBOSE, FORMAT JSON) {inner}"
 
 
 def _extract_plan_json(records: list, columns: list) -> dict | list | None:
@@ -153,7 +155,8 @@ def lambda_handler(event, context):
     if not cluster_arn or not secret_arn:
         return _resp(500, {"error": "cluster registry missing cluster_arn/secret_arn"})
 
-    explain_sql = _build_explain_sql(sql, engine)
+    analyze = bool(body.get("analyze", True))
+    explain_sql = _build_explain_sql(sql, engine, analyze)
 
     rds_data = boto3.client("rds-data")
     t0 = time.time()
