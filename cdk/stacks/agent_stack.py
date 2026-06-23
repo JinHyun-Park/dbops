@@ -816,6 +816,17 @@ class AgentStack(cdk.Stack):
         data.cache_db.grant_data_api_access(scheduled_tasks_lambda)
         foundation.clusters_table.grant_read_data(scheduled_tasks_lambda)
 
+        # Config API — admin-edits DB-backed feature toggles (ticketing
+        # provider, report delivery) so they flip without a redeploy.
+        config_lambda = lambda_.Function(
+            self, "ConfigApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/config"),
+            timeout=cdk.Duration.seconds(15),
+        )
+        foundation.grant_app_config_write(config_lambda)  # R/W + APP_CONFIG_TABLE env
+
         # Runbooks API — CRUD over the `runbooks` cache table. AI-generated
         # diagnoses can be saved as reusable playbooks for pattern recurrence.
         runbooks_lambda = lambda_.Function(
@@ -1568,6 +1579,13 @@ class AgentStack(cdk.Stack):
             path="/api/scheduled-tasks/{id}",
             methods=[apigwv2.HttpMethod.DELETE],
             integration=scheduled_integration,
+        )
+        # App config — admin-gated DB-backed feature toggles
+        config_integration = integrations.HttpLambdaIntegration("ConfigIntegration", config_lambda)
+        self.api.add_routes(
+            path="/api/config",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PUT],
+            integration=config_integration,
         )
         # Runbooks — AI-generated playbooks
         runbooks_integration = integrations.HttpLambdaIntegration(

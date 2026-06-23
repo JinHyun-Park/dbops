@@ -34,6 +34,9 @@
       "name": "clusters"
     },
     {
+      "name": "config"
+    },
+    {
       "name": "cost"
     },
     {
@@ -598,6 +601,42 @@
             }
           }
         ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/config": {
+      "get": {
+        "tags": ["config"],
+        "summary": "GET /api/config",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      },
+      "put": {
+        "tags": ["config"],
+        "summary": "PUT /api/config",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
         "security": [
           {
             "cognitoJwt": []
