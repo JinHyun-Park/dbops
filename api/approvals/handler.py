@@ -244,9 +244,10 @@ def lambda_handler(event, context):
             page = max(1, min(int(qsp.get("limit", "500")), 1000))
             if cursor_param:
                 try:
-                    scan_kwargs["ExclusiveStartKey"] = json.loads(
-                        base64.urlsafe_b64decode(cursor_param)
-                    )
+                    decoded = json.loads(base64.urlsafe_b64decode(cursor_param))
+                    if not isinstance(decoded, dict):
+                        raise ValueError("cursor is not a key object")
+                    scan_kwargs["ExclusiveStartKey"] = decoded
                 except Exception:
                     return {"statusCode": 400, "headers": headers,
                             "body": json.dumps({"error": "invalid cursor"})}
@@ -254,6 +255,10 @@ def lambda_handler(event, context):
             resp = table.scan(**scan_kwargs)
             compact = _compact_activity(resp.get("Items", []))
             lek = resp.get("LastEvaluatedKey")
+            # NOTE: approvals keys are strings (approval_id, created_at), so the
+            # json round-trip is lossless. default=str would coerce a Decimal/
+            # Binary key to a string — revisit this codec if the key schema
+            # ever gains a numeric/binary key.
             next_cursor = (
                 base64.urlsafe_b64encode(json.dumps(lek, default=str).encode()).decode()
                 if lek else None

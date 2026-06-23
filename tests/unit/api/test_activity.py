@@ -244,6 +244,23 @@ def test_export_bad_cursor_400(mock_boto3):
 
 @patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
 @patch.object(handler, "boto3")
+def test_export_valid_base64_non_dict_cursor_400(mock_boto3):
+    """Valid base64 + valid JSON but NOT a dict (e.g. `true`) -> 400, scan never called.
+    Previously this reached table.scan and caused a DDB ClientError -> 500."""
+    mock_table = MagicMock()
+    mock_boto3.resource.return_value.Table.return_value = mock_table
+
+    cursor = _base64.urlsafe_b64encode(b"true").decode()
+    res = handler.lambda_handler(
+        _activity_event(qs={"cursor": cursor}), None
+    )
+    assert res["statusCode"] == 400
+    assert "cursor" in json.loads(res["body"]).get("error", "")
+    mock_table.scan.assert_not_called()
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
+@patch.object(handler, "boto3")
 def test_default_mode_unchanged(mock_boto3):
     """No export/cursor -> still uses _scan_all + sort + truncate, shape {items,count}."""
     rows = [
@@ -253,6 +270,7 @@ def test_default_mode_unchanged(mock_boto3):
     mock_table = MagicMock()
     mock_boto3.resource.return_value.Table.return_value = mock_table
 
+    # boto3 patched only to block a real AWS call; _scan_all is stubbed directly
     with patch.object(handler, "_scan_all", return_value=rows):
         res = handler.lambda_handler(_activity_event(qs={"limit": "2"}), None)
 
