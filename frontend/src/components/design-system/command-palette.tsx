@@ -143,6 +143,13 @@ const commands: Command[] = [
     adminOnly: true,
   },
   {
+    id: "context-files",
+    label: "Context files — 에이전트 참조 컨텍스트",
+    path: "/context-files",
+    group: "Configure",
+    adminOnly: true,
+  },
+  {
     id: "health",
     label: "Health — 자체 모니터링",
     path: "/health",

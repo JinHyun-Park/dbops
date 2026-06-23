@@ -2429,3 +2429,55 @@ export async function updateAppConfig(
   }
   return res.json();
 }
+
+// =====  Operator context files (admin-gated) =====
+
+export interface ContextFile {
+  file_id: string;
+  name: string;
+  content: string;
+  content_type: string;
+  size: number;
+  updated_at?: string;
+  updated_by?: string;
+}
+
+export async function fetchContextFiles(): Promise<{ items: ContextFile[] }> {
+  const res = await authedFetch(await apiUrl("/api/context-files"));
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) throw new Error(`context-files fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function uploadContextFile(body: {
+  name: string;
+  content: string;
+  content_type: string;
+}): Promise<ContextFile> {
+  const res = await authedFetch(await apiUrl("/api/context-files"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) {
+    let msg = `upload failed: ${res.status}`;
+    try {
+      const b = await res.json();
+      if (b?.error) msg = b.error;
+    } catch {
+      /* keep */
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+export async function deleteContextFile(id: string): Promise<void> {
+  const res = await authedFetch(
+    await apiUrl(`/api/context-files/${encodeURIComponent(id)}`),
+    { method: "DELETE" },
+  );
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) throw new Error(`delete failed: ${res.status}`);
+}

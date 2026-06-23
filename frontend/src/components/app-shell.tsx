@@ -17,6 +17,7 @@ import {
   Database,
   DollarSign,
   FileText,
+  FileUp,
   FlaskConical,
   Gauge,
   GitCompare,
@@ -215,6 +216,13 @@ const NAV: NavGroup[] = [
         hint: "지정 승인자 라우팅 — 클러스터·액션별 승인자 (관리자)",
       },
       {
+        href: "/context-files",
+        label: "Context files",
+        icon: FileUp,
+        adminOnly: true,
+        hint: "에이전트 참조 컨텍스트 업로드 (관리자)",
+      },
+      {
         href: "/health",
         label: "Health",
         icon: HeartPulse,
@@ -246,6 +254,7 @@ function humanize(segment: string): string {
     cost: "Cost",
     preferences: "Memory",
     settings: "Settings",
+    "context-files": "Context files",
     health: "Health",
     callback: "Login",
   };
