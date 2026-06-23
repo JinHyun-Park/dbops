@@ -386,7 +386,6 @@ def _handle_tokens_view(start, end, days):
                                "note": "Bedrock 토큰 메트릭 없음 — 아직 모델 호출 기록이 없거나 메트릭 전파 전입니다."})
 
     # Build GetMetricData queries: per model, Input + Output, Sum, daily period.
-    import datetime as _dt
     queries, idmap = [], {}
     for i, mid in enumerate(model_ids):
         for kind, metric in (("input", "InputTokenCount"), ("output", "OutputTokenCount")):
@@ -401,25 +400,25 @@ def _handle_tokens_view(start, end, days):
                 },
                 "ReturnData": True,
             })
-    start_dt = _dt.datetime.combine(start, _dt.time.min)
-    end_dt = _dt.datetime.combine(end, _dt.time.min)
+    start_dt = datetime.combine(start, datetime.min.time())
+    end_dt = datetime.combine(end, datetime.min.time())
     # GetMetricData caps at 500 queries/call; our model count is tiny, so one call.
-    resp = cw.get_metric_data(MetricDataQueries=queries[:500], StartTime=start_dt, EndTime=end_dt,
-                              ScanBy="TimestampAscending")
-    totals = {mid: {"input": 0.0, "output": 0.0} for mid in model_ids}
-    daily: dict = {}
-    for res in resp.get("MetricDataResults", []):
-        mid, kind = idmap.get(res["Id"], (None, None))
-        if mid is None:
-            continue
-        for ts, val in zip(res.get("Timestamps", []), res.get("Values", []), strict=False):
-            totals[mid][kind] += val
-            day = ts.date().isoformat() if hasattr(ts, "date") else str(ts)[:10]
-            daily.setdefault(day, {"input": 0.0, "output": 0.0})[kind] += val
-        if not res.get("Timestamps"):
-            # some mocks/edge return Values without Timestamps — fold into totals
-            for val in res.get("Values", []):
+    try:
+        resp = cw.get_metric_data(MetricDataQueries=queries[:500], StartTime=start_dt, EndTime=end_dt,
+                                  ScanBy="TimestampAscending")
+        totals = {mid: {"input": 0.0, "output": 0.0} for mid in model_ids}
+        daily: dict = {}
+        for res in resp.get("MetricDataResults", []):
+            mid, kind = idmap.get(res["Id"], (None, None))
+            if mid is None:
+                continue
+            for ts, val in zip(res.get("Timestamps", []), res.get("Values", []), strict=False):
                 totals[mid][kind] += val
+                day = ts.date().isoformat() if hasattr(ts, "date") else str(ts)[:10]
+                daily.setdefault(day, {"input": 0.0, "output": 0.0})[kind] += val
+    except Exception as e:
+        return _response(200, {"view": "tokens", "days": days, "by_model": [], "daily": [],
+                               "note": f"CloudWatch 메트릭 조회 실패: {type(e).__name__}"})
     by_model = [{"model": mid, "input": int(t["input"]), "output": int(t["output"]),
                  "total": int(t["input"] + t["output"])}
                 for mid, t in totals.items()]
@@ -438,22 +437,25 @@ def lambda_handler(event, context=None):
 
     qs = event.get("queryStringParameters") or {}
     days = max(7, min(int(qs.get("days") or "30"), 90))
-
-    ce = boto3.client("ce", region_name="us-east-1")  # CE is global; us-east-1 is the standard endpoint.
     end = datetime.utcnow().date()
     start = end - timedelta(days=days)
+
+    view = (qs.get("view") or "bedrock").lower()
+
+    # Tokens path uses CloudWatch, not Cost Explorer — dispatch before building ce.
+    if view == "tokens":
+        return _handle_tokens_view(start, end, days)
+
+    ce = boto3.client("ce", region_name="us-east-1")  # CE is global; us-east-1 is the standard endpoint.
 
     # `?view=rds` switches from Bedrock spend to Aurora/RDS spend. Same Lambda,
     # same range windows; the RDS path has its own service discovery + per-
     # cluster (tag-based) attribution. Default view stays Bedrock.
-    view = (qs.get("view") or "bedrock").lower()
     if view == "rds":
         return _handle_rds_view(ce, start, end, days)
     # `?view=platform` — DBOps 플랫폼 자체 운영비 (Application=DBOps 태그 전체).
     if view == "platform":
         return _handle_platform_view(ce, start, end, days)
-    if view == "tokens":
-        return _handle_tokens_view(start, end, days)
 
     services = _bedrock_services(ce, start, end)
 

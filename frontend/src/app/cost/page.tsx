@@ -1041,10 +1041,6 @@ function TokensCostView({
           <Section eyebrow="모델별" title="토큰 사용량 (모델별)">
             {loading ? (
               <div className="text-zinc-500 text-sm">불러오는 중…</div>
-            ) : !data || data.by_model.length === 0 ? (
-              <div className="text-zinc-500 text-sm border border-zinc-800 p-6">
-                집계된 토큰 데이터가 없습니다.
-              </div>
             ) : (
               <div className="border border-zinc-800 overflow-x-auto">
                 <table className="w-full text-sm min-w-[560px]">
@@ -1068,36 +1064,38 @@ function TokensCostView({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
-                    {data.by_model.map((row, i) => {
-                      const grandTotal = data.by_model.reduce(
+                    {(() => {
+                      const grandTotal = (data?.by_model ?? []).reduce(
                         (s, m) => s + m.total,
                         0,
                       );
-                      const share =
-                        grandTotal > 0 ? (row.total / grandTotal) * 100 : 0;
-                      return (
-                        <tr
-                          key={`${row.model}-${i}`}
-                          className="hover:bg-zinc-900/40"
-                        >
-                          <td className="px-4 py-2 text-zinc-200 font-mono text-xs">
-                            {row.model}
-                          </td>
-                          <td className="px-4 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums">
-                            {fmtDecimal(row.input, 0)}
-                          </td>
-                          <td className="px-4 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums">
-                            {fmtDecimal(row.output, 0)}
-                          </td>
-                          <td className="px-4 py-2 text-right text-zinc-100 font-mono text-xs tabular-nums">
-                            {fmtDecimal(row.total, 0)}
-                          </td>
-                          <td className="px-4 py-2 text-right text-amber-400 font-mono text-xs tabular-nums">
-                            {share.toFixed(1)}%
-                          </td>
-                        </tr>
-                      );
-                    })}
+                      return (data?.by_model ?? []).map((row, i) => {
+                        const share =
+                          grandTotal > 0 ? (row.total / grandTotal) * 100 : 0;
+                        return (
+                          <tr
+                            key={`${row.model}-${i}`}
+                            className="hover:bg-zinc-900/40"
+                          >
+                            <td className="px-4 py-2 text-zinc-200 font-mono text-xs">
+                              {row.model}
+                            </td>
+                            <td className="px-4 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums">
+                              {fmtDecimal(row.input, 0)}
+                            </td>
+                            <td className="px-4 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums">
+                              {fmtDecimal(row.output, 0)}
+                            </td>
+                            <td className="px-4 py-2 text-right text-zinc-100 font-mono text-xs tabular-nums">
+                              {fmtDecimal(row.total, 0)}
+                            </td>
+                            <td className="px-4 py-2 text-right text-amber-400 font-mono text-xs tabular-nums">
+                              {share.toFixed(1)}%
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
                   </tbody>
                 </table>
               </div>

@@ -15,6 +15,7 @@ def _event(view="tokens", days="30"):
 
 
 def _fake_cw():
+    import datetime as _dt
     cw = MagicMock()
     cw.list_metrics.return_value = {
         "Metrics": [
@@ -22,11 +23,12 @@ def _fake_cw():
             {"Dimensions": [{"Name": "ModelId", "Value": "anthropic.claude-opus-4-8"}]},
         ]
     }
-    # get_metric_data returns one result per (model, input|output) query id.
+    # get_metric_data returns co-indexed Timestamps+Values (real CloudWatch shape).
     def _gmd(MetricDataQueries, **kw):
+        ts = [_dt.datetime(2026, 6, 20), _dt.datetime(2026, 6, 21)]
         results = []
         for q in MetricDataQueries:
-            results.append({"Id": q["Id"], "Timestamps": [], "Values": [100.0]})
+            results.append({"Id": q["Id"], "Timestamps": ts, "Values": [50.0, 50.0]})
         return {"MetricDataResults": results}
     cw.get_metric_data.side_effect = _gmd
     return cw
@@ -43,6 +45,14 @@ def test_tokens_view_aggregates_by_model():
     assert "anthropic.claude-sonnet-4-6" in models
     assert all("input" in m and "output" in m and "total" in m for m in body["by_model"])
     assert "note" in body
+    # Verify the zip path is exercised: 2 timestamps × 50.0 each = 100 per kind.
+    sonnet = next(m for m in body["by_model"] if m["model"] == "anthropic.claude-sonnet-4-6")
+    assert sonnet["input"] == 100
+    assert sonnet["output"] == 100
+    assert sonnet["total"] == 200
+    # daily series must be populated (2 days of data).
+    assert len(body["daily"]) == 2
+    assert body["daily"][0]["input"] > 0
 
 
 def test_tokens_view_empty_metrics_is_valid():
