@@ -2245,3 +2245,42 @@ export async function deleteMemoryRecord(
   );
   if (!res.ok) throw new Error(`메모리 삭제 실패 (상태 ${res.status})`);
 }
+
+// =====  App-level feature config (admin-gated) =====
+
+export interface AppConfigItem {
+  key: string;
+  value: string;
+  default: string;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export async function fetchAppConfig(): Promise<{ items: AppConfigItem[] }> {
+  const res = await authedFetch(await apiUrl("/api/config"));
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) throw new Error(`config fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function updateAppConfig(
+  config: Record<string, string | boolean>,
+): Promise<{ items: AppConfigItem[] }> {
+  const res = await authedFetch(await apiUrl("/api/config"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ config }),
+  });
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) {
+    let msg = `config update failed: ${res.status}`;
+    try {
+      const b = await res.json();
+      if (b?.error) msg = b.error;
+    } catch {
+      /* keep default */
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+}

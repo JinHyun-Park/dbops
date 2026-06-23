@@ -127,6 +127,12 @@ const commands: Command[] = [
     group: "Configure",
   },
   {
+    id: "settings",
+    label: "Settings — 기능 토글·티켓팅·리포트 전달",
+    path: "/settings",
+    group: "Configure",
+  },
+  {
     id: "health",
     label: "Health — 자체 모니터링",
     path: "/health",

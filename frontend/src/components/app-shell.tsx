@@ -24,6 +24,7 @@ import {
   Network,
   Search,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Target,
   Wand2,
@@ -197,6 +198,12 @@ const NAV: NavGroup[] = [
         hint: "에이전트가 기억하는 내용",
       },
       {
+        href: "/settings",
+        label: "Settings",
+        icon: SlidersHorizontal,
+        hint: "기능 토글 — 티켓팅·리포트 전달 (관리자)",
+      },
+      {
         href: "/health",
         label: "Health",
         icon: HeartPulse,
@@ -227,6 +234,7 @@ function humanize(segment: string): string {
     reports: "Reports",
     cost: "Cost",
     preferences: "Memory",
+    settings: "Settings",
     health: "Health",
     callback: "Login",
   };
