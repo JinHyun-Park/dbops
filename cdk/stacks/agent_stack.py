@@ -558,11 +558,12 @@ class AgentStack(cdk.Stack):
                 "CONTEXT_FILES_TABLE": foundation.context_files_table.table_name,
                 # Tenancy: cluster registry + team membership tables for per-caller
                 # visible-cluster resolution. The Runtime resolves identity from a
-                # JWKS-verified Cognito ID token the frontend passes in a custom
-                # header (AgentCore's authorizer consumes the inbound Authorization
-                # header and does NOT forward it), then restricts tool calls to the
-                # caller's visible cluster set. USER_POOL_ID/CLIENT_ID are the JWKS
-                # issuer + audience for verifying that ID token.
+                # JWKS-verified Cognito ID token the frontend passes in the
+                # invocation PAYLOAD (AgentCore's authorizer consumes the inbound
+                # Authorization header and forwards neither it nor custom headers to
+                # the container), then restricts tool calls to the caller's visible
+                # cluster set. USER_POOL_ID/CLIENT_ID are the JWKS issuer + audience
+                # for verifying that ID token.
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
                 "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
                 "TEAM_MEMBERS_BY_USER_INDEX": "by-user",

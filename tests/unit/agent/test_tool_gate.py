@@ -76,6 +76,35 @@ class TestClusterVisibilityGate:
         event._invoke(self._gate(self.VISIBLE))
         assert event.cancel_tool is False
 
+    # --- fleet-capable tool with NO cluster_id => denied for non-admin (C1) ---
+    def test_fleet_capable_tool_without_cluster_id_denied(self):
+        event = FakeEvent("query_activity_audit", {"days": 7})
+        event._invoke(self._gate(self.VISIBLE))
+        assert event.cancel_tool == _DENY
+
+    def test_fleet_capable_tool_empty_cluster_id_denied(self):
+        event = FakeEvent("find_similar_incidents", {"cluster_id": "", "symptoms": "x"})
+        event._invoke(self._gate(self.VISIBLE))
+        assert event.cancel_tool == _DENY
+
+    # --- fleet-capable tool WITH a visible cluster_id => allowed ---
+    def test_fleet_capable_tool_with_visible_cluster_allowed(self):
+        event = FakeEvent("query_activity_audit", {"cluster_id": "c-teamA"})
+        event._invoke(self._gate(self.VISIBLE))
+        assert event.cancel_tool is False
+
+    # --- fleet-capable tool with a NON-visible cluster_id => denied ---
+    def test_fleet_capable_tool_with_hidden_cluster_denied(self):
+        event = FakeEvent("query_activity_audit", {"cluster_id": "c-teamB"})
+        event._invoke(self._gate(self.VISIBLE))
+        assert event.cancel_tool == _DENY
+
+    # --- admin can call a fleet-capable tool fleet-wide (visible=None) ---
+    def test_fleet_capable_tool_admin_allowed(self):
+        event = FakeEvent("query_activity_audit", {"days": 7})
+        event._invoke(self._gate(None))
+        assert event.cancel_tool is False
+
     # --- admin (visible=None) never blocked ---
     def test_admin_none_not_cancelled_even_for_hidden_cluster(self):
         event = FakeEvent("get_top_queries", {"cluster_id": "c-teamB"})

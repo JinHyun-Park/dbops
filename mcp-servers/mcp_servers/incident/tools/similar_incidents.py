@@ -142,13 +142,13 @@ def find_similar_incidents_impl(
 
     similar: list[dict] = []
 
-    # 1) Events for this cluster.
+    # Events for THIS cluster only. A fleet-wide fallback (cluster_id=None) was
+    # removed for tenancy: it surfaced other teams' incident events (messages
+    # often carry hostnames / error text / query fragments) to a caller who may
+    # not be allowed to see those clusters, and this MCP tool has no caller
+    # identity to scope a fleet search safely. No local history => empty events.
     event_rows = _search_events(cache, keywords, cluster_id=cluster_id)
     scope = "cluster"
-    # 2) Fall back to fleet-wide events if this cluster has no history.
-    if not event_rows:
-        event_rows = _search_events(cache, keywords, cluster_id=None)
-        scope = "fleet"
 
     for row in event_rows:
         message = row.get("message") or ""

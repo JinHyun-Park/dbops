@@ -81,8 +81,8 @@ def test_includes_matching_runbooks():
         ],
         row_count=1,
     )
-    # events empty for cluster, empty fleet-wide, then runbook hit
-    mock_cache.execute.side_effect = [_empty(), _empty(), runbook_rows]
+    # cluster events empty -> (no fleet search) -> runbook hit
+    mock_cache.execute.side_effect = [_empty(), runbook_rows]
 
     result = find_similar_incidents_impl(
         mock_cache,
@@ -97,25 +97,16 @@ def test_includes_matching_runbooks():
     assert "autovacuum" in rb["why_matched"]
 
 
-def test_falls_back_to_fleet_wide_when_cluster_has_no_events():
+def test_no_fleet_fallback_when_cluster_has_no_events():
+    """Tenancy (whole-branch review C2): a cluster with no matching events must
+    NOT fall back to a fleet-wide search — that leaked other teams' incident
+    events to callers who can't see those clusters. No local history => empty
+    events, only the cluster query + the runbook query run (no 2nd event search)."""
     mock_cache = MagicMock()
-    fleet_rows = QueryResult(
-        columns=["cluster_id", "event_time", "event_type", "severity", "source", "message", "match_count"],
-        rows=[
-            {
-                "cluster_id": "other-pg-9",
-                "event_time": "2026-05-02T00:00:00Z",
-                "event_type": "alert",
-                "severity": "warning",
-                "source": "dbops-monitor",
-                "message": "Replica lag growing rapidly",
-                "match_count": 1,
-            }
-        ],
-        row_count=1,
-    )
-    # cluster-scoped events empty -> fleet-wide returns hit -> runbooks empty
-    mock_cache.execute.side_effect = [_empty(), fleet_rows, _empty()]
+    # cluster-scoped events empty -> (NO fleet search) -> runbooks empty.
+    # Only a 3rd side_effect would be consumed IF the removed fleet search still
+    # ran; with it gone, exactly two queries execute.
+    mock_cache.execute.side_effect = [_empty(), _empty()]
 
     result = find_similar_incidents_impl(
         mock_cache,
@@ -123,12 +114,10 @@ def test_falls_back_to_fleet_wide_when_cluster_has_no_events():
         symptoms="replica lag growing",
     )
 
-    assert result["count"] == 1
-    inc = result["similar_incidents"][0]
-    assert inc["cluster_id"] == "other-pg-9"
-    assert inc["scope"] == "fleet"
-    # event search invoked twice (cluster then fleet) + one runbook search
-    assert mock_cache.execute.call_count == 3
+    assert result["count"] == 0
+    assert all(s.get("scope") != "fleet" for s in result["similar_incidents"])
+    # Exactly two queries: cluster-scoped events + runbooks. No fleet event search.
+    assert mock_cache.execute.call_count == 2
 
 
 def test_empty_and_note_when_no_matches():
