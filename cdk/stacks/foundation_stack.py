@@ -95,6 +95,33 @@ class FoundationStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
+        # ===== Multi-team tenancy =====
+        # teams: one row per team. team_members: one row per (team, member);
+        # the by-user GSI answers "which teams is this user in?" in O(1) for the
+        # per-request visibility overlay (api/*/tenancy.py).
+        self.teams_table = dynamodb.Table(
+            self, "TeamsTable",
+            table_name=f"dbops-{Settings.ENV}-teams",
+            partition_key=dynamodb.Attribute(name="team_id", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            point_in_time_recovery=True,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+        self.team_members_table = dynamodb.Table(
+            self, "TeamMembersTable",
+            table_name=f"dbops-{Settings.ENV}-team-members",
+            partition_key=dynamodb.Attribute(name="team_id", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="username", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            point_in_time_recovery=True,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+        self.team_members_table.add_global_secondary_index(
+            index_name="by-user",
+            partition_key=dynamodb.Attribute(name="username", type=dynamodb.AttributeType.STRING),
+            projection_type=dynamodb.ProjectionType.ALL,
+        )
+
         self.sessions_table = dynamodb.Table(
             self, "SessionsTable",
             table_name=f"dbops-{Settings.ENV}-sessions",
