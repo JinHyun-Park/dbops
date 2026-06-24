@@ -1756,6 +1756,36 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.POST],
             integration=admin_users_integration,
         )
+        # Admin console — Teams CRUD + member/cluster assignment (admin-gated)
+        admin_teams_lambda = lambda_.Function(
+            self, "AdminTeamsApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/admin_teams"),
+            timeout=cdk.Duration.seconds(30),
+            memory_size=256,
+            environment={
+                "TEAMS_TABLE": foundation.teams_table.table_name,
+                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+            },
+        )
+        foundation.teams_table.grant_read_write_data(admin_teams_lambda)
+        foundation.team_members_table.grant_read_write_data(admin_teams_lambda)
+        foundation.clusters_table.grant_read_write_data(admin_teams_lambda)
+
+        _admin_teams_int = integrations.HttpLambdaIntegration("AdminTeamsIntegration", admin_teams_lambda)
+        for _p in (
+            "/api/admin/teams",
+            "/api/admin/teams/{team_id}",
+            "/api/admin/teams/{team_id}/members/{username}",
+            "/api/admin/teams/{team_id}/clusters/{cluster_id}",
+        ):
+            self.api.add_routes(
+                path=_p,
+                methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE],
+                integration=_admin_teams_int,
+            )
         # Runbooks — AI-generated playbooks
         runbooks_integration = integrations.HttpLambdaIntegration(
             "RunbooksIntegration", runbooks_lambda
