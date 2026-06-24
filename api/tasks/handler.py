@@ -16,6 +16,7 @@ import time
 import uuid
 
 import boto3
+import tenancy
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
@@ -65,6 +66,21 @@ def _cluster_exists(cluster_id: str) -> bool:
         return "Item" in t.get_item(Key={"cluster_id": cluster_id})
     except Exception:
         return True  # fail-open on a registry read error — POST isn't destructive
+
+
+def _cluster_item(cluster_id: str) -> dict:
+    """Fetch {cluster_id, team_id} from the clusters registry for a single
+    cluster. Returns {} on miss or infra error (caller's cluster_visible treats
+    missing team_id as default-open)."""
+    table_name = os.environ.get("CLUSTERS_TABLE", "")
+    if not cluster_id or not table_name:
+        return {}
+    try:
+        table = boto3.resource("dynamodb").Table(table_name)
+        return table.get_item(Key={"cluster_id": cluster_id}).get("Item") or {}
+    except Exception as e:
+        print(f"[tasks] cluster lookup failed for {cluster_id}: {e}")
+        return {}
 
 
 def _recent_for_stats(limit=500):
@@ -154,6 +170,9 @@ def lambda_handler(event, context):
             item = _table().get_item(Key={"task_id": task_id}).get("Item")
         except Exception as e:
             return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
+        if item and not tenancy.cluster_visible(event, _cluster_item(item.get("cluster_id", ""))):
+            return {"statusCode": 403, "headers": headers,
+                    "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
         return {
             "statusCode": 200 if item else 404,
             "headers": headers,
@@ -165,6 +184,9 @@ def lambda_handler(event, context):
             items = _list(qsp)
         except Exception as e:
             return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
+        visible = tenancy.visible_set_from_registry(event)
+        if visible is not None:
+            items = [it for it in items if it.get("cluster_id") in visible]
         return {"statusCode": 200, "headers": headers, "body": json.dumps({"tasks": items}, default=str)}
 
     if method == "POST":
@@ -180,6 +202,9 @@ def lambda_handler(event, context):
             return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": f"kind must be one of {sorted(KINDS_MANUAL)}"})}
         if not _cluster_exists(cluster_id):
             return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": f"unknown cluster {cluster_id}"})}
+        if not tenancy.cluster_visible(event, _cluster_item(cluster_id)):
+            return {"statusCode": 403, "headers": headers,
+                    "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
 
         now_ms = int(time.time() * 1000)
         new_task_id = str(uuid.uuid4())

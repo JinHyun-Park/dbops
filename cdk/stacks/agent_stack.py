@@ -896,10 +896,13 @@ class AgentStack(cdk.Stack):
             timeout=cdk.Duration.seconds(15),
             environment={
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
+                "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
             },
         )
         foundation.grant_task_manage(tasks_lambda)  # agent-tasks R/W + AGENT_TASKS_TABLE env
         foundation.clusters_table.grant_read_data(tasks_lambda)
+        foundation.team_members_table.grant_read_data(tasks_lambda)
 
         # Scheduled Tasks API — CRUD over the scheduled_tasks cache table (the
         # task_scheduler reads these and enqueues agent-tasks when due).
@@ -914,11 +917,14 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
+                "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
             },
         )
         data.cache_db.secret.grant_read(scheduled_tasks_lambda)
         data.cache_db.grant_data_api_access(scheduled_tasks_lambda)
         foundation.clusters_table.grant_read_data(scheduled_tasks_lambda)
+        foundation.team_members_table.grant_read_data(scheduled_tasks_lambda)
 
         # Config API — admin-edits DB-backed feature toggles (ticketing
         # provider, report delivery) so they flip without a redeploy.

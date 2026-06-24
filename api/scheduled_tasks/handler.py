@@ -11,6 +11,7 @@ import json
 import os
 
 import boto3
+import tenancy
 
 INTERVALS = {"hourly", "daily", "weekly"}
 KINDS = {"scheduled_report"}
@@ -70,6 +71,21 @@ def _cluster_exists(cluster_id: str) -> bool:
         return True  # fail-open on registry read error
 
 
+def _cluster_item(cluster_id: str) -> dict:
+    """Fetch {cluster_id, team_id} from the clusters registry for a single
+    cluster. Returns {} on miss or infra error (caller's cluster_visible treats
+    missing team_id as default-open)."""
+    table_name = os.environ.get("CLUSTERS_TABLE", "")
+    if not cluster_id or not table_name:
+        return {}
+    try:
+        table = boto3.resource("dynamodb").Table(table_name)
+        return table.get_item(Key={"cluster_id": cluster_id}).get("Item") or {}
+    except Exception as e:
+        print(f"[scheduled_tasks] cluster lookup failed for {cluster_id}: {e}")
+        return {}
+
+
 def lambda_handler(event, context):
     method = event.get("requestContext", {}).get("http", {}).get("method", event.get("httpMethod", "GET"))
     path_params = event.get("pathParameters") or {}
@@ -95,6 +111,9 @@ def lambda_handler(event, context):
                 )
         except Exception as e:
             return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
+        visible = tenancy.visible_set_from_registry(event)
+        if visible is not None:
+            rows = [r for r in rows if r.get("cluster_id") in visible]
         return {"statusCode": 200, "headers": headers, "body": json.dumps({"schedules": rows}, default=str)}
 
     if method == "POST":
@@ -113,6 +132,9 @@ def lambda_handler(event, context):
             return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": f"kind must be one of {sorted(KINDS)}"})}
         if not _cluster_exists(cluster_id):
             return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": f"unknown cluster {cluster_id}"})}
+        if not tenancy.cluster_visible(event, _cluster_item(cluster_id)):
+            return {"statusCode": 403, "headers": headers,
+                    "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
         try:
             rows = _query(
                 "INSERT INTO scheduled_tasks (cluster_id, kind, interval_kind) "
@@ -133,9 +155,24 @@ def lambda_handler(event, context):
 
     if method == "DELETE" and sched_id:
         try:
-            _query("DELETE FROM scheduled_tasks WHERE id = :id", {"id": int(sched_id)})
+            sched_id_int = int(sched_id)
         except (ValueError, TypeError):
             return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": "invalid id"})}
+        # Fetch the task first to gate on its cluster_id before deleting.
+        try:
+            rows = _query(
+                "SELECT id, cluster_id FROM scheduled_tasks WHERE id = :id",
+                {"id": sched_id_int},
+            )
+        except Exception as e:
+            return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
+        if rows:
+            row_cluster_id = rows[0].get("cluster_id") or ""
+            if not tenancy.cluster_visible(event, _cluster_item(row_cluster_id)):
+                return {"statusCode": 403, "headers": headers,
+                        "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
+        try:
+            _query("DELETE FROM scheduled_tasks WHERE id = :id", {"id": sched_id_int})
         except Exception as e:
             return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
         return {"statusCode": 200, "headers": headers, "body": json.dumps({"deleted": sched_id})}
