@@ -24,16 +24,19 @@ import { useChartColors } from "@/lib/use-chart-colors";
 
 type Point = { ts: string; value: number | string };
 
-// ElastiCache resource_details shape
+// ElastiCache resource_details shape — canonical fields from _register_elasticache
+// and elasticache_cw_collector cluster_meta upsert.
 interface ElastiCacheDetails {
-  engine?: string | null; // "redis" | "memcached"
+  engine?: string | null; // "redis" | "valkey" | "memcached"
   engine_version?: string | null;
   node_type?: string | null;
-  num_nodes?: number | null;
-  num_shards?: number | null;
-  multi_az?: boolean | null;
+  num_node_groups?: number | null; // Redis: number of shards
+  replicas_per_node_group?: number | null; // Redis: replicas per shard
+  num_cache_nodes?: number | null; // Memcached / standalone: total nodes
+  cluster_mode?: boolean | null; // Redis cluster mode enabled
+  auth_enabled?: boolean | null;
+  tls_enabled?: boolean | null;
   status?: string | null;
-  replication_group_id?: string | null;
 }
 
 function fmtTime(iso: string) {
@@ -336,25 +339,51 @@ export function ElasticacheOverviewPanel({
               }
             />
             <StatTile label="Node Type" value={details?.node_type ?? "—"} />
-            <StatTile
-              label="노드 수"
-              value={
-                details?.num_nodes != null ? fmtExact(details.num_nodes) : "—"
-              }
-              sub={
-                details?.num_shards != null
-                  ? `${fmtExact(details.num_shards)} shard(s)`
-                  : undefined
-              }
-            />
+            {/* Redis: show Shards + Replicas/shard; Memcached: show Nodes */}
+            {isMemcached ? (
+              <StatTile
+                label="Nodes"
+                value={
+                  details?.num_cache_nodes != null
+                    ? fmtExact(details.num_cache_nodes)
+                    : "—"
+                }
+              />
+            ) : (
+              <StatTile
+                label="Shards"
+                value={
+                  details?.num_node_groups != null
+                    ? fmtExact(details.num_node_groups)
+                    : "—"
+                }
+                sub={
+                  details?.replicas_per_node_group != null
+                    ? `${fmtExact(
+                        details.replicas_per_node_group,
+                      )} replica(s)/shard`
+                    : undefined
+                }
+              />
+            )}
             <StatTile label="Status" value={details?.status ?? "—"} />
             <StatTile
-              label="Multi-AZ"
+              label="Cluster Mode"
               value={
-                details?.multi_az != null
-                  ? details.multi_az
+                details?.cluster_mode != null
+                  ? details.cluster_mode
                     ? "enabled"
                     : "disabled"
+                  : "—"
+              }
+            />
+            <StatTile
+              label="Encryption"
+              value={
+                details?.tls_enabled != null
+                  ? details.tls_enabled
+                    ? "TLS"
+                    : "none"
                   : "—"
               }
             />

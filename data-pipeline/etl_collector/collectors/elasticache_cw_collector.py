@@ -2,6 +2,7 @@
 """ElastiCache CloudWatch → cache. Namespace AWS/ElastiCache, dimension
 CacheClusterId. Redis/Valkey use the full metric set; Memcached uses a subset
 (no replication/persistence). Cluster-level rows only (dimensions='{}')."""
+import json
 from datetime import datetime, timedelta
 
 # (metric_name, metric_type, statistic)
@@ -49,12 +50,97 @@ def _insert(cache_execute, cluster_id, ts, metric_type, value):
          "value": float(value), "dims": "{}"})
 
 
+def _upsert_cluster_meta(ec, cache_execute, cluster_id, resource_name, engine, account_id, region, errors):
+    """Describe the ElastiCache cluster and upsert cluster_meta.resource_details.
+
+    Tries describe_replication_groups first (Redis/Valkey replication group),
+    falls back to describe_cache_clusters (Memcached / standalone node).
+    Any describe or upsert failure is appended to errors and silently swallowed
+    so the caller's metric-collection loop is never interrupted.
+    """
+    try:
+        details = None
+        eng = (engine or "redis").lower()
+        # -- Redis / Valkey replication group path --
+        try:
+            rg_resp = ec.describe_replication_groups(ReplicationGroupId=resource_name)
+            rg_list = rg_resp.get("ReplicationGroups") or []
+            if rg_list:
+                g = rg_list[0]
+                node_groups = g.get("NodeGroups") or []
+                members = g.get("MemberClusters") or []
+                details = {
+                    "engine": eng,
+                    "engine_version": g.get("EngineVersion", "") or "",
+                    "node_type": g.get("CacheNodeType", ""),
+                    "num_node_groups": len(node_groups),
+                    "replicas_per_node_group": max(
+                        0,
+                        (len(members) // max(1, len(node_groups))) - 1,
+                    ),
+                    "num_cache_nodes": len(members),
+                    "cluster_mode": bool(g.get("ClusterEnabled", False)),
+                    "auth_enabled": bool(g.get("AuthTokenEnabled", False)),
+                    "tls_enabled": bool(g.get("TransitEncryptionEnabled", False)),
+                    "status": g.get("Status", ""),
+                }
+        except Exception:
+            pass  # fall through to cache_cluster path
+
+        # -- Memcached / standalone cache cluster path --
+        if details is None:
+            cc_resp = ec.describe_cache_clusters(
+                CacheClusterId=resource_name, ShowCacheNodeInfo=True
+            )
+            cc_list = cc_resp.get("CacheClusters") or []
+            if cc_list:
+                c = cc_list[0]
+                eng = (c.get("Engine") or eng).lower()
+                details = {
+                    "engine": eng,
+                    "engine_version": c.get("EngineVersion", "") or "",
+                    "node_type": c.get("CacheNodeType", ""),
+                    "num_node_groups": 0,
+                    "replicas_per_node_group": 0,
+                    "num_cache_nodes": c.get("NumCacheNodes", 0),
+                    "cluster_mode": False,
+                    "auth_enabled": bool(c.get("AuthTokenEnabled", False)),
+                    "tls_enabled": bool(c.get("TransitEncryptionEnabled", False)),
+                    "status": c.get("CacheClusterStatus", ""),
+                }
+
+        if details is not None:
+            cache_execute(
+                "INSERT INTO cluster_meta "
+                "(cluster_id, account_id, region, engine, resource_details, updated_at) "
+                "VALUES (:cid, :account_id, :region, :engine, :details::jsonb, NOW()) "
+                "ON CONFLICT (cluster_id) DO UPDATE SET "
+                "resource_details = EXCLUDED.resource_details, "
+                "engine = EXCLUDED.engine, "
+                "updated_at = NOW()",
+                {
+                    "cid": cluster_id,
+                    "account_id": account_id,
+                    "region": region,
+                    "engine": details["engine"],
+                    "details": json.dumps(details),
+                },
+            )
+    except Exception as e:
+        errors.append(f"describe_elasticache: {e}")
+
+
 def collect_elasticache_metrics(cw, ec, cache_execute, cluster_id, resource_name, engine, region, account_id):
     end = datetime.utcnow()
     start = end - timedelta(minutes=10)
     inserted = 0
     errors = []
     eng = (engine or "redis").lower()
+
+    # Upsert cluster_meta.resource_details before metric collection.
+    # A describe failure is captured in errors and never raises.
+    _upsert_cluster_meta(ec, cache_execute, cluster_id, resource_name, engine, account_id, region, errors)
+
     metrics = _MEMCACHED_METRICS if eng == "memcached" else _REDIS_METRICS
     dims = [{"Name": "CacheClusterId", "Value": resource_name}]
 
