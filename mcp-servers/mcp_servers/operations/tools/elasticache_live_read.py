@@ -147,12 +147,6 @@ def elasticache_live_read_impl(cache, cluster_id=None, sections=None, **_):
                     info[sec] = client.info(sec)
                 except Exception:
                     pass
-        else:
-            for sec in want:
-                try:
-                    info[sec] = client.info(sec)
-                except Exception:
-                    pass
         slow = []
         try:
             for e in (client.slowlog_get(_SLOWLOG_COUNT) or []):

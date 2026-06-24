@@ -48,6 +48,12 @@ _ENGINE_GATED_TOOLS = {
     "elasticache_live_read": "live_read",
 }
 
+_CAP_LABEL = {
+    "ddb_write": "DynamoDB 테이블",
+    "docdb_write": "DocumentDB 클러스터",
+    "live_read": "ElastiCache 클러스터",
+}
+
 TOOLS = {
     "get_schema_diff": {
         "impl": get_schema_diff_impl,
@@ -498,7 +504,7 @@ def lambda_handler(event, context):
             cluster_id = (event or {}).get("cluster_id") if isinstance(event, dict) else None
             fam = _resolve_family(cluster_id)
             if not CAPABILITIES.get(fam, {}).get(cap_key, False):
-                engine_label = "DocumentDB 클러스터" if cap_key == "docdb_write" else "DynamoDB 테이블"
+                engine_label = _CAP_LABEL.get(cap_key, cap_key)
                 return {"content": [{"type": "text", "text": json.dumps({
                     "status": "unsupported_engine",
                     "engine_family": fam,
