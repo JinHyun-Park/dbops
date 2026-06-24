@@ -18,6 +18,7 @@ import os
 import re
 
 import boto3
+import tenancy
 
 # ---------------------------------------------------------------------------
 # Auth helpers — mirror api/runbooks/handler.py
@@ -170,6 +171,21 @@ def _execute(sql: str, params: dict | None = None) -> list[dict]:
 _CLUSTER_ID_RE = re.compile(r"^[a-zA-Z0-9._:\-/]{1,255}$")
 
 
+def _cluster_item(cluster_id: str) -> dict:
+    """Fetch {cluster_id, team_id} from the clusters registry for a single
+    cluster. Returns {} on miss or infra error (caller's cluster_visible treats
+    missing team_id as default-open)."""
+    table_name = os.environ.get("CLUSTERS_TABLE", "")
+    if not cluster_id or not table_name:
+        return {}
+    try:
+        table = boto3.resource("dynamodb").Table(table_name)
+        return table.get_item(Key={"cluster_id": cluster_id}).get("Item") or {}
+    except Exception as e:
+        print(f"[saved_queries] cluster lookup failed for {cluster_id}: {e}")
+        return {}
+
+
 def _validate_create(body: dict) -> str | None:
     title = (body.get("title") or "").strip()
     if not title or len(title) > 255:
@@ -213,9 +229,9 @@ def lambda_handler(event, context):
     saved_id_str = path_params.get("id")
 
     if method == "GET" and not saved_id_str:
-        return _list(qsp)
+        return _list(event, qsp)
     if method == "GET" and saved_id_str:
-        return _get_one(saved_id_str)
+        return _get_one(event, saved_id_str)
     if method == "POST":
         return _create(event)
     if method == "PUT" and saved_id_str:
@@ -225,7 +241,7 @@ def lambda_handler(event, context):
     return _resp(405, {"error": f"method {method} not allowed"})
 
 
-def _list(qsp: dict) -> dict:
+def _list(event: dict, qsp: dict) -> dict:
     cluster_id = qsp.get("cluster_id")
     tag = qsp.get("tag")
     limit = max(1, min(int(qsp.get("limit", "50")), 200))
@@ -246,10 +262,13 @@ def _list(qsp: dict) -> dict:
         f"FROM saved_queries {where} ORDER BY updated_at DESC LIMIT :lim",
         params,
     )
+    visible = tenancy.visible_set_from_registry(event)
+    if visible is not None:
+        rows = [r for r in rows if r.get("cluster_id") in visible]
     return _resp(200, {"queries": rows})
 
 
-def _get_one(id_str: str) -> dict:
+def _get_one(event: dict, id_str: str) -> dict:
     try:
         sid = int(id_str)
     except ValueError:
@@ -262,7 +281,10 @@ def _get_one(id_str: str) -> dict:
     )
     if not rows:
         return _resp(404, {"error": "not found"})
-    return _resp(200, rows[0])
+    row = rows[0]
+    if not tenancy.cluster_visible(event, _cluster_item(row.get("cluster_id"))):
+        return _resp(403, {"error": "이 클러스터에 대한 접근 권한이 없습니다."})
+    return _resp(200, row)
 
 
 def _create(event: dict) -> dict:

@@ -3,9 +3,25 @@ import os
 import re
 
 import boto3
+import tenancy
 from botocore.exceptions import ClientError
 
 _TZ_SUFFIX_RE = re.compile(r"(Z|[+-]\d{2}(:?\d{2})?)$")
+
+
+def _cluster_item(cluster_id: str) -> dict:
+    """Fetch {cluster_id, team_id} from the clusters registry for a single
+    cluster. Returns {} on miss or infra error (caller's cluster_visible treats
+    missing team_id as default-open)."""
+    table_name = os.environ.get("CLUSTERS_TABLE", "")
+    if not cluster_id or not table_name:
+        return {}
+    try:
+        table = boto3.resource("dynamodb").Table(table_name)
+        return table.get_item(Key={"cluster_id": cluster_id}).get("Item") or {}
+    except Exception as e:
+        print(f"[reports] cluster lookup failed for {cluster_id}: {e}")
+        return {}
 
 
 def _norm_ts(s):
@@ -78,10 +94,14 @@ def lambda_handler(event, context):
             return {"statusCode": 400, "headers": headers,
                     "body": json.dumps({"error": "invalid report id"})}
         try:
-            rows = query("SELECT s3_key FROM reports WHERE id = :id::bigint", {"id": report_id})
+            rows = query("SELECT cluster_id, s3_key FROM reports WHERE id = :id::bigint", {"id": report_id})
             if not rows:
                 return {"statusCode": 404, "headers": headers,
                         "body": json.dumps({"error": "리포트를 찾을 수 없습니다."})}
+            row_cluster_id = rows[0].get("cluster_id")
+            if not tenancy.cluster_visible(event, _cluster_item(row_cluster_id)):
+                return {"statusCode": 403, "headers": headers,
+                        "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
             s3_key = rows[0].get("s3_key")
             if not s3_key or not str(s3_key).endswith(".json"):
                 return {
@@ -128,8 +148,16 @@ def lambda_handler(event, context):
                 return {"statusCode": 400, "headers": headers,
                         "body": json.dumps({"error": "invalid report id"})}
             rows = query("SELECT * FROM reports WHERE id = :id::bigint", {"id": report_id})
-            body = rows[0] if rows else None
-            status = 200 if body else 404
+            if not rows:
+                body = None
+                status = 404
+            else:
+                row = rows[0]
+                if not tenancy.cluster_visible(event, _cluster_item(row.get("cluster_id"))):
+                    return {"statusCode": 403, "headers": headers,
+                            "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
+                body = row
+                status = 200
         else:
             sql = "SELECT id, cluster_id, report_type, report_date, summary, created_at FROM reports"
             params = {}
@@ -137,7 +165,11 @@ def lambda_handler(event, context):
                 sql += " WHERE cluster_id = :cluster_id"
                 params["cluster_id"] = cluster_id
             sql += " ORDER BY report_date DESC LIMIT 50"
-            body = query(sql, params)
+            rows = query(sql, params)
+            visible = tenancy.visible_set_from_registry(event)
+            if visible is not None:
+                rows = [r for r in rows if r.get("cluster_id") in visible]
+            body = rows
             status = 200
     except Exception as e:
         # Never surface a raw boto3/PG fault as a generic 500 page.

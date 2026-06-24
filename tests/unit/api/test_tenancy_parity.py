@@ -4,6 +4,8 @@ _ROOT = Path(__file__).resolve().parents[3]
 _COPIES = [
     _ROOT / "api" / "clusters" / "tenancy.py",
     _ROOT / "api" / "dashboard" / "tenancy.py",
+    _ROOT / "api" / "reports" / "tenancy.py",
+    _ROOT / "api" / "saved_queries" / "tenancy.py",
 ]
 
 

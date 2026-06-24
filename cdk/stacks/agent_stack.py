@@ -818,6 +818,9 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
                 "ARCHIVE_BUCKET": data.archive_bucket.bucket_name,
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
+                "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
             },
         )
         data.cache_db.secret.grant_read(reports_lambda)
@@ -826,6 +829,8 @@ class AgentStack(cdk.Stack):
         # archive bucket (report_generator already has grant_write on the same
         # bucket). grant_read adds s3:GetObject + s3:ListBucket.
         data.archive_bucket.grant_read(reports_lambda)
+        foundation.clusters_table.grant_read_data(reports_lambda)
+        foundation.team_members_table.grant_read_data(reports_lambda)
 
         approvals_lambda = lambda_.Function(
             self, "ApprovalsApi",
@@ -1013,10 +1018,15 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
+                "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
             },
         )
         data.cache_db.secret.grant_read(saved_queries_lambda)
         data.cache_db.grant_data_api_access(saved_queries_lambda)
+        foundation.clusters_table.grant_read_data(saved_queries_lambda)
+        foundation.team_members_table.grant_read_data(saved_queries_lambda)
         saved_queries_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=["rds-data:ExecuteStatement", "secretsmanager:GetSecretValue"],
             resources=["*"],
