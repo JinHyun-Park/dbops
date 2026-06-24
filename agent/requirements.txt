@@ -5,3 +5,9 @@ mcp>=1.0.0
 # botocore directly — declare boto3 explicitly so the runtime never relies on
 # it only being pulled transitively via strands-agents.
 boto3>=1.43.30
+# tenancy.py verifies the caller's Cognito ID token against the pool JWKS
+# (PyJWKClient needs the [crypto] extra → cryptography for RS256). Declared
+# explicitly so a _deps rebuild can never drop it transitively — without it,
+# token verification ImportErrors and silently downgrades every caller to
+# no-team visibility, breaking team/admin-scoped chat.
+PyJWT[crypto]>=2.10.0

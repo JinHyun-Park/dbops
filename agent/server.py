@@ -294,6 +294,17 @@ async def invoke(payload, context):
     except Exception as e:
         log.warning(f"tenancy resolve failed: {type(e).__name__}")
         visible = None  # fail-open -- never break chat
+    try:
+        _c = tenancy._claims_from_headers(headers)
+        _u = (_c.get("cognito:username") or _c.get("sub") or "")
+        log.info(
+            "[tenancy-diag] hdr_keys=%s verified_claims=%s user=...%s groups=%s visible=%s",
+            [k for k in (headers or {}).keys()], bool(_c), _u[-6:],
+            _c.get("cognito:groups"),
+            ("None(all)" if visible is None else len(visible)),
+        )
+    except Exception as e:
+        log.warning(f"[tenancy-diag] failed: {type(e).__name__}: {e}")
 
     # First attempt: requested model. If Bedrock rejects with ValidationException,
     # we silently fall back to the env default so a stale frontend never bricks chat.
