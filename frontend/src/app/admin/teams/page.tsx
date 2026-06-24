@@ -70,7 +70,11 @@ export default function AdminTeamsPage() {
   useEffect(() => {
     fetchAdminUsers()
       .then((d) => setAllUsers(d.items))
-      .catch(() => {});
+      .catch((e: unknown) =>
+        setError(
+          `멤버 후보 조회 실패: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
     fetchClusters()
       .then((d: unknown) => {
         const items = Array.isArray(d)
@@ -80,7 +84,13 @@ export default function AdminTeamsPage() {
             : [];
         setAllClusters(items);
       })
-      .catch(() => {});
+      .catch((e: unknown) =>
+        setError(
+          `클러스터 목록 조회 실패: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        ),
+      );
   }, []);
 
   const loadDetail = useCallback(async (teamId: string) => {

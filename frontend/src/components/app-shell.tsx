@@ -31,6 +31,7 @@ import {
   Sparkles,
   Target,
   UserCheck,
+  Users,
   Wand2,
   X,
 } from "lucide-react";
@@ -226,7 +227,7 @@ const NAV: NavGroup[] = [
       {
         href: "/admin/teams",
         label: "Teams",
-        icon: UserCheck,
+        icon: Users,
         adminOnly: true,
         hint: "팀 관리 — 멤버·클러스터 가시성 (관리자)",
       },
