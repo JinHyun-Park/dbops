@@ -288,23 +288,15 @@ async def invoke(payload, context):
     prompt = payload.get("prompt") if isinstance(payload, dict) else str(payload)
     requested_model = _resolve_model_id(payload)
 
-    headers = getattr(context, "request_headers", None) or {}
+    # The caller's Cognito ID token rides in the invocation payload (AgentCore's
+    # data plane does not forward the Authorization/custom headers to the
+    # container). tenancy verifies it against the pool JWKS before trusting it.
+    id_token = payload.get("id_token") if isinstance(payload, dict) else None
     try:
-        visible = tenancy.visible_cluster_ids_for(headers)
+        visible = tenancy.visible_cluster_ids_for(id_token)
     except Exception as e:
         log.warning(f"tenancy resolve failed: {type(e).__name__}")
         visible = None  # fail-open -- never break chat
-    try:
-        _c = tenancy._claims_from_headers(headers)
-        _u = (_c.get("cognito:username") or _c.get("sub") or "")
-        log.info(
-            "[tenancy-diag] hdr_keys=%s verified_claims=%s user=...%s groups=%s visible=%s",
-            [k for k in (headers or {}).keys()], bool(_c), _u[-6:],
-            _c.get("cognito:groups"),
-            ("None(all)" if visible is None else len(visible)),
-        )
-    except Exception as e:
-        log.warning(f"[tenancy-diag] failed: {type(e).__name__}: {e}")
 
     # First attempt: requested model. If Bedrock rejects with ValidationException,
     # we silently fall back to the env default so a stale frontend never bricks chat.

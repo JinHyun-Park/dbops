@@ -1,12 +1,13 @@
 """Agent-side cluster-visibility overlay.
 
 Resolves the caller's identity from a JWKS-VERIFIED Cognito ID token the
-frontend passes in a custom header (X-Amzn-Bedrock-AgentCore-Runtime-Custom-
-Authorization). AgentCore's Cognito authorizer consumes the inbound
-`Authorization` header and does NOT forward it to the container, so the agent
-re-verifies a client-supplied copy of the ID token.
+frontend passes in the INVOCATION PAYLOAD (`payload["id_token"]`). AgentCore's
+managed data plane does NOT forward the inbound `Authorization` header — nor any
+custom request header — to the agent container (verified empirically:
+`context.request_headers` is empty). The invocation body, however, always
+reaches the agent, so the ID token rides there as a dedicated field.
 
-SECURITY: the custom-header token is client-supplied, so it is verified against
+SECURITY: the payload token is client-supplied, so it is verified against
 Cognito's JWKS (signature + issuer + audience + expiry + token_use=id) before any
 claim is trusted. An unverifiable / forged / absent token yields no trusted
 claims, which the visibility logic treats as a no-team viewer (unassigned
@@ -25,10 +26,6 @@ import boto3
 from boto3.dynamodb.conditions import Key
 
 ADMIN_GROUP = "dbops-admin"
-# AgentCore forwards request headers whose name starts with this prefix to the
-# container (the bare Authorization header is consumed by the authorizer). The
-# frontend sends the ID token as "<prefix>Authorization: Bearer <id_token>".
-_CUSTOM_TOKEN_HEADER = "x-amzn-bedrock-agentcore-runtime-custom-authorization"
 
 log = logging.getLogger("dbops.agent.tenancy")
 
@@ -80,19 +77,6 @@ def _verify_token(token):
         return {}
 
 
-def _claims_from_headers(headers):
-    """Verified Cognito ID-token claims from the custom identity header, or {}."""
-    headers = headers or {}
-    raw = ""
-    for k, v in headers.items():
-        if isinstance(k, str) and k.lower() == _CUSTOM_TOKEN_HEADER:
-            raw = v or ""
-            break
-    if not raw.lower().startswith("bearer "):
-        return {}
-    return _verify_token(raw.split(" ", 1)[1])
-
-
 def _is_admin(claims):
     if not claims:
         return False
@@ -131,13 +115,15 @@ def _my_team_ids(username):
         return set()
 
 
-def visible_cluster_ids_for(headers):
-    """None => admin / all clusters (no restriction). Else the set of cluster_ids
-    the caller may see (unassigned + their teams'). Unverified / absent token =>
-    a non-admin with no teams (unassigned clusters only — the default-open
-    baseline; a forged token cannot escalate because verification fails).
-    Registry-scan failure => None (fail-open; never break chat on a DDB outage)."""
-    claims = _claims_from_headers(headers)
+def visible_cluster_ids_for(id_token):
+    """Resolve the caller's visible cluster set from their (JWKS-verified) Cognito
+    ID token, passed in the invocation payload. None => admin / all clusters (no
+    restriction). Else the set of cluster_ids the caller may see (unassigned +
+    their teams'). Unverified / absent token => a non-admin with no teams
+    (unassigned clusters only — the default-open baseline; a forged token cannot
+    escalate because verification fails). Registry-scan failure => None (fail-open;
+    never break chat on a DDB outage)."""
+    claims = _verify_token(id_token or "")
     if _is_admin(claims):
         return None
     username = claims.get("cognito:username") or claims.get("sub") or ""
