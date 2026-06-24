@@ -78,26 +78,30 @@ def collect_elasticache_findings(
         errors.append(f"meta: {e}")
     is_memcached = engine == "memcached"
 
-    agg = _execute(
-        rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
-        "SELECT "
-        "  SUM(CASE WHEN metric_type='evictions' THEN value ELSE 0 END) AS sum_evictions, "
-        "  SUM(CASE WHEN metric_type='cache_hits' THEN value ELSE 0 END) AS sum_cache_hits, "
-        "  SUM(CASE WHEN metric_type='cache_misses' THEN value ELSE 0 END) AS sum_cache_misses, "
-        "  SUM(CASE WHEN metric_type='get_hits' THEN value ELSE 0 END) AS sum_get_hits, "
-        "  SUM(CASE WHEN metric_type='get_misses' THEN value ELSE 0 END) AS sum_get_misses, "
-        "  MAX(CASE WHEN metric_type='memory_usage_pct' THEN value END) AS max_memory_pct, "
-        "  MAX(CASE WHEN metric_type='replication_lag' THEN value END) AS max_replication_lag, "
-        "  MAX(CASE WHEN metric_type='engine_cpu' THEN value END) AS max_engine_cpu, "
-        "  MAX(CASE WHEN metric_type='cache_cpu' THEN value END) AS max_cache_cpu, "
-        "  MAX(CASE WHEN metric_type='curr_connections' THEN value END) AS max_curr_connections, "
-        "  COUNT(CASE WHEN metric_type IN ('cache_hits','get_hits') THEN 1 END) AS hit_samples "
-        "FROM metric_snapshots "
-        "WHERE cluster_id = :cid "
-        "  AND ts > NOW() - (:hours || ' hours')::interval "
-        "  AND (dimensions IS NULL OR dimensions::text = '{}')",
-        {"cid": cluster_id, "hours": str(window_hours)},
-    )
+    try:
+        agg = _execute(
+            rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
+            "SELECT "
+            "  SUM(CASE WHEN metric_type='evictions' THEN value ELSE 0 END) AS sum_evictions, "
+            "  SUM(CASE WHEN metric_type='cache_hits' THEN value ELSE 0 END) AS sum_cache_hits, "
+            "  SUM(CASE WHEN metric_type='cache_misses' THEN value ELSE 0 END) AS sum_cache_misses, "
+            "  SUM(CASE WHEN metric_type='get_hits' THEN value ELSE 0 END) AS sum_get_hits, "
+            "  SUM(CASE WHEN metric_type='get_misses' THEN value ELSE 0 END) AS sum_get_misses, "
+            "  MAX(CASE WHEN metric_type='memory_usage_pct' THEN value END) AS max_memory_pct, "
+            "  MAX(CASE WHEN metric_type='replication_lag' THEN value END) AS max_replication_lag, "
+            "  MAX(CASE WHEN metric_type='engine_cpu' THEN value END) AS max_engine_cpu, "
+            "  MAX(CASE WHEN metric_type='cache_cpu' THEN value END) AS max_cache_cpu, "
+            "  MAX(CASE WHEN metric_type='curr_connections' THEN value END) AS max_curr_connections, "
+            "  COUNT(CASE WHEN metric_type IN ('cache_hits','get_hits') THEN 1 END) AS hit_samples "
+            "FROM metric_snapshots "
+            "WHERE cluster_id = :cid "
+            "  AND ts > NOW() - (:hours || ' hours')::interval "
+            "  AND (dimensions IS NULL OR dimensions::text = '{}')",
+            {"cid": cluster_id, "hours": str(window_hours)},
+        )
+    except Exception as e:
+        errors.append(f"agg: {e}")
+        return {"cluster_id": cluster_id, "findings_emitted": 0, "errors": errors}
     if not agg:
         return {"cluster_id": cluster_id, "findings_emitted": 0, "errors": errors}
     r = agg[0]

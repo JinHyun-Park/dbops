@@ -104,3 +104,12 @@ def test_low_hit_rate_skipped_below_min_samples():
                               "max_cache_cpu": 5, "max_curr_connections": 10, "hit_samples": 5})
     _run(rds)
     assert "elasticache_low_hit_rate" not in {i["check_type"] for i in rds._inserts}
+
+
+def test_connection_surge_warning():
+    rds = _fake_rds("redis", {"sum_evictions": 0, "sum_cache_hits": 1000, "sum_cache_misses": 0,
+                              "max_memory_pct": 10, "max_replication_lag": 0, "max_engine_cpu": 5,
+                              "max_cache_cpu": 5, "max_curr_connections": 70000, "hit_samples": 30})
+    _run(rds)
+    types = {i["check_type"]: i["severity"] for i in rds._inserts}
+    assert types.get("elasticache_connection_surge") == "warning"
