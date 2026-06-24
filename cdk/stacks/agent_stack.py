@@ -11,6 +11,9 @@ from aws_cdk import (
 )
 from aws_cdk import aws_bedrockagentcore as agentcore_cfn
 from aws_cdk import (
+    aws_ec2 as ec2,
+)
+from aws_cdk import (
     aws_iam as iam,
 )
 from aws_cdk import (
@@ -140,6 +143,17 @@ class AgentStack(cdk.Stack):
             )],
         ))
 
+        # Dedicated SG for the operations MCP Lambda. allow_all_outbound=True so
+        # the Lambda can reach in-VPC DB native protocols: DocDB 27017 (Mongo
+        # wire), ElastiCache 6379 (Redis/Valkey), and Memcached 11211. Mirrors
+        # the DocDBMongoCollectorSG pattern in data_stack.py.
+        ops_mcp_sg = ec2.SecurityGroup(
+            self, "OperationsMcpSG",
+            vpc=data.vpc,
+            description="operations MCP - egress to in-VPC DB native protocols (DocDB 27017, ElastiCache 6379/11211)",
+            allow_all_outbound=True,
+        )
+
         operations_mcp_lambda = lambda_.Function(
             self, "OperationsMCP",
             runtime=lambda_.Runtime.PYTHON_3_12,
@@ -168,6 +182,7 @@ class AgentStack(cdk.Stack):
             timeout=cdk.Duration.minutes(2),
             memory_size=512,
             vpc=data.vpc,
+            security_groups=[ops_mcp_sg],
             environment={
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
@@ -217,6 +232,17 @@ class AgentStack(cdk.Stack):
                 # cluster's spoke_role_arn (from the registry) so they target
                 # the right account+region instead of the hub.
                 "sts:AssumeRole",
+            ],
+            resources=["*"],
+        ))
+        # ElastiCache live deep-read (EC-3): describe replication groups and
+        # cache clusters to resolve endpoint + engine metadata before connecting.
+        # secretsmanager:GetSecretValue and sts:AssumeRole (for cross-account)
+        # are already granted above.
+        operations_mcp_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "elasticache:DescribeReplicationGroups",
+                "elasticache:DescribeCacheClusters",
             ],
             resources=["*"],
         ))
