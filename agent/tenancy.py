@@ -5,12 +5,17 @@ of cluster_ids the caller may see, or None for admins (no restriction)."""
 
 import base64
 import json
+import logging
 import os
 
 import boto3
 from boto3.dynamodb.conditions import Key
 
 ADMIN_GROUP = "dbops-admin"
+
+# AgentCore captures the `logging` logger into CloudWatch; bare print() does
+# NOT surface reliably, so tenancy diagnostics/errors use this logger.
+log = logging.getLogger("dbops.agent.tenancy")
 
 
 def _decode_jwt_payload(token):
@@ -64,9 +69,17 @@ def _my_team_ids(username):
                 ExclusiveStartKey=resp["LastEvaluatedKey"],
             )
             items.extend(resp.get("Items", []))
-        return {it["team_id"] for it in items if it.get("team_id")}
+        teams = {it["team_id"] for it in items if it.get("team_id")}
+        log.info(
+            "[tenancy] my_team_ids user=…%s index=%s items=%d teams=%s",
+            (username or "")[-6:], index, len(items), sorted(teams),
+        )
+        return teams
     except Exception as e:
-        print(f"[agent.tenancy] my_team_ids failed: {type(e).__name__}")
+        log.warning(
+            "[tenancy] my_team_ids failed user=…%s index=%s table=%s: %s: %s",
+            (username or "")[-6:], index, table_name, type(e).__name__, e,
+        )
         return set()
 
 
@@ -94,7 +107,7 @@ def visible_cluster_ids_for(headers):
             )
             items.extend(resp.get("Items", []))
     except Exception as e:
-        print(f"[agent.tenancy] registry scan failed: {type(e).__name__}")
+        log.warning("[tenancy] registry scan failed: %s: %s", type(e).__name__, e)
         return None
     visible = set()
     for it in items:
@@ -104,4 +117,8 @@ def visible_cluster_ids_for(headers):
         team = it.get("team_id")
         if not team or team in teams:
             visible.add(cid)
+    log.info(
+        "[tenancy] visible_cluster_ids_for user=…%s teams=%s scan=%d visible=%d",
+        (username or "")[-6:], sorted(teams), len(items), len(visible),
+    )
     return visible
