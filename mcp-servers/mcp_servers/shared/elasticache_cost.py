@@ -15,9 +15,13 @@ def _monthly(price, count):
 
 def compute_node_resize_cost(engine, region, current_node_type, current_node_count,
                              new_node_type, new_node_count):
+    # Clamp counts once at the top so displayed values match cost math
+    current_node_count = max(1, int(current_node_count or 1))
+    new_count = new_node_count if new_node_count else current_node_count
+    new_count = max(1, int(new_count))
+
     cur_price = price_per_node_hour(region, engine, current_node_type)
     new_price = price_per_node_hour(region, engine, new_node_type) if new_node_type else cur_price
-    new_count = new_node_count if new_node_count else current_node_count
     current_monthly = _monthly(cur_price, current_node_count)
     proposed_monthly = _monthly(new_price, new_count)
     status = "ok" if (current_monthly is not None and proposed_monthly is not None) else "partial"
