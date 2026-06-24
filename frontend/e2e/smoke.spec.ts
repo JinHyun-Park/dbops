@@ -70,7 +70,13 @@ test("헤더 클러스터 드롭다운: 실클릭으로 열고 전환하면 대�
     .filter({ hasText: CLUSTER_ID })
     .filter({ hasNotText: "현재" })
     .first();
-  const targetId = (await option.textContent())?.trim() ?? "";
+  // The cluster id lives in the option's name span (font-mono). The whole
+  // button textContent also includes the engine badge ("PG"/"MySQL") and a
+  // "현재" marker, so reading the button text would yield e.g. "sample-clusterPG"
+  // and the ?cluster= assertion would never match the real id "sample-cluster".
+  const targetId =
+    (await option.locator("span.font-mono").first().textContent())?.trim() ??
+    "";
   await option.click();
 
   // Selection propagates. The URL ?cluster= is written by the DASHBOARD's own
