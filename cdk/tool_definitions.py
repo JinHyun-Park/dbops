@@ -230,4 +230,7 @@ def simulation_schema():
         _tool("simulate_dynamodb_capacity_cost",
               "DynamoDB only: compare Provisioned vs On-Demand monthly cost from the table's actual consumed capacity, priced with the real AWS Price List API",
               {"cluster_id": "string", "headroom": "number", "window_hours": "number"}, ["cluster_id"]),
+        _tool("simulate_elasticache_node_resize",
+              "ElastiCache only: estimate the monthly cost of resizing an ElastiCache cluster node type / count using the AWS Price List API. Read-only, no approval required.",
+              {"cluster_id": "string", "new_node_type": "string", "new_node_count": "integer"}, ["cluster_id"]),
     ]

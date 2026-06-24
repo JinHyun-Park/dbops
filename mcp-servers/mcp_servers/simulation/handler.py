@@ -9,6 +9,7 @@ from mcp_servers.shared.engine_family import CAPABILITIES
 from mcp_servers.shared.engine_family import engine_family as _engine_family
 from mcp_servers.simulation.tools.capacity_cost import simulate_dynamodb_capacity_cost_impl
 from mcp_servers.simulation.tools.ddl_impact import simulate_ddl_impact_impl
+from mcp_servers.simulation.tools.elasticache_scaling_simulation import simulate_elasticache_node_resize_impl
 from mcp_servers.simulation.tools.parameter_simulation import simulate_parameter_change_impl
 from mcp_servers.simulation.tools.scaling_simulation import simulate_scaling_impl
 from mcp_servers.simulation.tools.upgrade_compatibility import check_upgrade_compatibility_impl
@@ -107,6 +108,19 @@ TOOLS = {
             "required": ["cluster_id"],
         },
     },
+    "simulate_elasticache_node_resize": {
+        "impl": simulate_elasticache_node_resize_impl,
+        "description": "ElastiCache only: estimate the monthly cost of resizing an ElastiCache cluster node type / count using the AWS Price List API. Read-only, no approval required.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target ElastiCache cluster ID"},
+                "new_node_type": {"type": "string", "description": "New node type, e.g. cache.r7g.large"},
+                "new_node_count": {"type": "integer", "description": "New node count (defaults to current count)"},
+            },
+            "required": ["cluster_id"],
+        },
+    },
 }
 
 
@@ -169,6 +183,17 @@ def lambda_handler(event, context):
                     "message": (
                         "용량/비용 비교(Provisioned↔On-Demand)는 DynamoDB 테이블 전용입니다."
                     ),
+                })}]}
+        elif tool_name == "simulate_elasticache_node_resize":
+            # POSITIVE gate: ElastiCache-only cost simulation. A None family →
+            # .get(None,{}) → False → refused; only a resolved elasticache cluster
+            # passes.
+            if not CAPABILITIES.get(fam, {}).get("elasticache_cost_simulation", False):
+                return {"content": [{"type": "text", "text": json.dumps({
+                    "status": "unsupported_engine",
+                    "engine_family": fam,
+                    "cluster_id": cluster_id,
+                    "message": "노드 리사이즈 비용 시뮬레이션은 ElastiCache 전용입니다.",
                 })}]}
         else:
             # Engine-family guard: the OTHER simulation tools (upgrade/parameter/
