@@ -73,6 +73,12 @@ def request_approval_impl(
         "enable_dynamodb_pitr",
         "set_docdb_profiler",
         "create_docdb_index",
+        # ElastiCache write tools (EC-4): approval enum must list these or
+        # request_approval rejects them and the approval loop dead-ends.
+        "modify_elasticache_node_type",
+        "create_elasticache_snapshot",
+        "reboot_elasticache",
+        "test_elasticache_failover",
         "other",
     ):
         return {
