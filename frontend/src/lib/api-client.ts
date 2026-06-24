@@ -2575,6 +2575,118 @@ export async function updateUserRole(
   return res.json();
 }
 
+// =====  Admin team management (admin-gated)  =====
+
+export interface AdminTeam {
+  team_id: string;
+  name: string;
+  created_at?: string;
+  created_by?: string;
+  member_count: number;
+}
+
+export interface TeamDetail {
+  team_id: string;
+  name: string;
+  members: string[];
+  clusters: string[];
+}
+
+export async function fetchAdminTeams(): Promise<{ teams: AdminTeam[] }> {
+  const res = await authedFetch(await apiUrl("/api/admin/teams"));
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) throw new Error(`팀 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function fetchTeamDetail(teamId: string): Promise<TeamDetail> {
+  const res = await authedFetch(
+    await apiUrl(`/api/admin/teams/${enc(teamId)}`),
+  );
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) throw new Error(`팀 상세 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function createTeam(
+  name: string,
+): Promise<{ team_id: string; name: string }> {
+  const res = await authedFetch(await apiUrl("/api/admin/teams"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) throw new Error(`팀 생성 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function deleteTeam(
+  teamId: string,
+): Promise<{ team_id: string; deleted: boolean }> {
+  const res = await authedFetch(
+    await apiUrl(`/api/admin/teams/${enc(teamId)}`),
+    { method: "DELETE" },
+  );
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) throw new Error(`팀 삭제 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+async function _teamMutate(
+  path: string,
+  method: "POST" | "DELETE",
+  failMsg: string,
+): Promise<void> {
+  const res = await authedFetch(await apiUrl(path), { method });
+  if (res.status === 403) throw new Error("admin only");
+  if (!res.ok) throw new Error(`${failMsg} (상태 ${res.status})`);
+}
+
+export async function addTeamMember(
+  teamId: string,
+  username: string,
+): Promise<void> {
+  return _teamMutate(
+    `/api/admin/teams/${enc(teamId)}/members/${enc(username)}`,
+    "POST",
+    "멤버 추가 실패",
+  );
+}
+
+export async function removeTeamMember(
+  teamId: string,
+  username: string,
+): Promise<void> {
+  return _teamMutate(
+    `/api/admin/teams/${enc(teamId)}/members/${enc(username)}`,
+    "DELETE",
+    "멤버 제거 실패",
+  );
+}
+
+export async function assignClusterToTeam(
+  teamId: string,
+  clusterId: string,
+): Promise<void> {
+  return _teamMutate(
+    `/api/admin/teams/${enc(teamId)}/clusters/${enc(clusterId)}`,
+    "POST",
+    "클러스터 할당 실패",
+  );
+}
+
+export async function unassignClusterFromTeam(
+  teamId: string,
+  clusterId: string,
+): Promise<void> {
+  return _teamMutate(
+    `/api/admin/teams/${enc(teamId)}/clusters/${enc(clusterId)}`,
+    "DELETE",
+    "클러스터 할당 해제 실패",
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Onboarding — spoke-account CloudFormation template
 // ---------------------------------------------------------------------------
