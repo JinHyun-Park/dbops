@@ -405,15 +405,19 @@ def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = 
     # (Memcached or non-cluster-mode Redis). Members of a replication group are
     # skipped in the cache-cluster pass to avoid duplicates.
     try:
-        ec = _session_for(region, role_arn).client("elasticache")
+        ec = _elasticache_client_for(region, role_arn)
         for rg in (ec.get_paginator("describe_replication_groups")
                    .paginate()):
             for g in rg.get("ReplicationGroups", []):
+                rgid = g["ReplicationGroupId"]
                 out.append({
-                    "cluster_id": g["ReplicationGroupId"],
+                    "cluster_id": rgid,
                     "engine": "redis", "engine_family": "elasticache",
+                    "resource_name": rgid,
                     "resource_type": "elasticache-redis",
-                    "account_id": account_id, "region": region,
+                    "status": g.get("Status", ""),
+                    "region": region,
+                    "secret_source": "n/a",
                 })
         for cc in (ec.get_paginator("describe_cache_clusters")
                    .paginate(ShowCacheNodeInfo=False)):
@@ -422,11 +426,15 @@ def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = 
                 if c.get("ReplicationGroupId"):
                     continue
                 eng = (c.get("Engine") or "redis").lower()
+                ccid = c["CacheClusterId"]
                 out.append({
-                    "cluster_id": c["CacheClusterId"],
+                    "cluster_id": ccid,
                     "engine": eng, "engine_family": "elasticache",
+                    "resource_name": ccid,
                     "resource_type": f"elasticache-{eng}",
-                    "account_id": account_id, "region": region,
+                    "status": c.get("CacheClusterStatus", ""),
+                    "region": region,
+                    "secret_source": "n/a",
                 })
     except Exception as e:
         print(f"[discover] elasticache failed in {region}: {e}")

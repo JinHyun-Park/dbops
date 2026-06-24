@@ -103,3 +103,24 @@ def test_handle_register_dispatches_elasticache():
 def test_register_missing_fields_400():
     r = handler._register_elasticache(_table(), {"engine": "redis"})
     assert r["statusCode"] == 400
+
+
+def test_register_redis_replicas_per_shard():
+    """2 node groups × 2 members each → replicas_per_node_group == 1."""
+    fake = MagicMock()
+    fake.describe_replication_groups.return_value = {
+        "ReplicationGroups": [{
+            "ReplicationGroupId": "my-redis-sharded", "Status": "available",
+            "ClusterEnabled": True,
+            "NodeGroups": [{"NodeGroupId": "0001"}, {"NodeGroupId": "0002"}],
+            "MemberClusters": ["r-0001-001", "r-0001-002", "r-0002-001", "r-0002-002"],
+            "CacheNodeType": "cache.r7g.large",
+        }]
+    }
+    table = _table()
+    with patch.object(handler, "_elasticache_client_for", return_value=fake):
+        r = handler._register_elasticache(table, _body(name="my-redis-sharded"))
+    assert r["statusCode"] in (201, 207)
+    rd = table.put_item.call_args.kwargs["Item"]["resource_details"]
+    assert rd["num_node_groups"] == 2
+    assert rd["replicas_per_node_group"] == 1
