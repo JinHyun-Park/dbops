@@ -274,6 +274,10 @@ def _docdb_client_for(region: str, role_arn: str = ""):
     return _session_for(region, role_arn).client("docdb")
 
 
+def _elasticache_client_for(region: str, role_arn: str = ""):
+    return _session_for(region, role_arn).client("elasticache")
+
+
 def _convention_secret_for(session: boto3.session.Session, cluster_id: str) -> str:
     """Look up the dbops convention secret for a cluster.
 
@@ -397,6 +401,36 @@ def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = 
     except Exception as e:
         print(f"[discover] docdb describe_db_clusters failed in {region}: {e}")
 
+    # ElastiCache — replication groups (Redis/Valkey) then standalone cache clusters
+    # (Memcached or non-cluster-mode Redis). Members of a replication group are
+    # skipped in the cache-cluster pass to avoid duplicates.
+    try:
+        ec = _session_for(region, role_arn).client("elasticache")
+        for rg in (ec.get_paginator("describe_replication_groups")
+                   .paginate()):
+            for g in rg.get("ReplicationGroups", []):
+                out.append({
+                    "cluster_id": g["ReplicationGroupId"],
+                    "engine": "redis", "engine_family": "elasticache",
+                    "resource_type": "elasticache-redis",
+                    "account_id": account_id, "region": region,
+                })
+        for cc in (ec.get_paginator("describe_cache_clusters")
+                   .paginate(ShowCacheNodeInfo=False)):
+            for c in cc.get("CacheClusters", []):
+                # replication-group members are already covered above; skip them
+                if c.get("ReplicationGroupId"):
+                    continue
+                eng = (c.get("Engine") or "redis").lower()
+                out.append({
+                    "cluster_id": c["CacheClusterId"],
+                    "engine": eng, "engine_family": "elasticache",
+                    "resource_type": f"elasticache-{eng}",
+                    "account_id": account_id, "region": region,
+                })
+    except Exception as e:
+        print(f"[discover] elasticache failed in {region}: {e}")
+
     return out
 
 
@@ -462,12 +496,80 @@ def _register_docdb(table, body):
                   "cluster_id": cluster_id, "connection_status": status})
 
 
+def _register_elasticache(table, body):
+    for f in ("account_id", "region", "resource_name"):
+        if not body.get(f):
+            return _resp(400, {"error": f"{f} required"})
+    account_id, region, name = body["account_id"], body["region"], body["resource_name"]
+    role_arn = body.get("spoke_role_arn", "")
+    cli = _elasticache_client_for(region, role_arn)
+    status, err = "ok", ""
+    engine = (body.get("engine") or "redis").lower()
+    details = {}
+    # Try a Redis/Valkey replication group first; fall back to a standalone /
+    # Memcached cache cluster (a name can be either).
+    try:
+        rg = (cli.describe_replication_groups(ReplicationGroupId=name)
+              .get("ReplicationGroups") or [])
+        if rg:
+            g = rg[0]
+            node_groups = g.get("NodeGroups") or []
+            members = g.get("MemberClusters") or []
+            details = {
+                "engine": engine, "status": g.get("Status", ""),
+                "cluster_mode": bool(g.get("ClusterEnabled", False)),
+                "num_node_groups": len(node_groups),
+                "replicas_per_node_group": max(0, (len(members) // max(1, len(node_groups))) - 1),
+                "node_type": g.get("CacheNodeType", ""),
+                "auth_enabled": bool(g.get("AuthTokenEnabled", False)),
+                "tls_enabled": bool(g.get("TransitEncryptionEnabled", False)),
+            }
+        else:
+            raise Exception("no replication group")
+    except Exception:
+        try:
+            cc = (cli.describe_cache_clusters(CacheClusterId=name, ShowCacheNodeInfo=True)
+                  .get("CacheClusters") or [])
+            if cc:
+                c = cc[0]
+                engine = (c.get("Engine") or engine).lower()
+                details = {
+                    "engine": engine, "status": c.get("CacheClusterStatus", ""),
+                    "engine_version": c.get("EngineVersion", ""),
+                    "node_type": c.get("CacheNodeType", ""),
+                    "num_cache_nodes": c.get("NumCacheNodes", 0),
+                    "cluster_mode": False,
+                    "auth_enabled": bool(c.get("AuthTokenEnabled", False)),
+                    "tls_enabled": bool(c.get("TransitEncryptionEnabled", False)),
+                }
+            else:
+                status, err = "failed", "not found"
+        except Exception as e:
+            status, err = "failed", str(e)[:300]
+    item = {
+        "cluster_id": name, "account_id": account_id, "region": region,
+        "engine": engine, "engine_family": "elasticache",
+        "resource_name": name, "resource_type": f"elasticache-{engine}",
+        "resource_details": details,
+        "requires_secret_for_foundation": False,
+        "spoke_role_arn": role_arn,
+        "registered_at": datetime.utcnow().isoformat() + "Z",
+        "connection_status": status, "connection_error": err,
+    }
+    table.put_item(Item=item)
+    return _resp(201 if status == "ok" else 207,
+                 {"status": "registered" if status == "ok" else "registered_with_warning",
+                  "cluster_id": name, "connection_status": status})
+
+
 def _handle_register(table, body: dict):
     fam = engine_family(body.get("engine", ""))
     if fam == "dynamodb":
         return _register_dynamodb(table, body)
     if fam == "documentdb":
         return _register_docdb(table, body)
+    if fam == "elasticache":
+        return _register_elasticache(table, body)
     # relational (Aurora) — existing path unchanged below
 
     required = ["cluster_id", "account_id", "region"]

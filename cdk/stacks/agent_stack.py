@@ -747,6 +747,13 @@ class AgentStack(cdk.Stack):
             actions=["dynamodb:ListTables", "dynamodb:DescribeTable"],
             resources=["*"],
         ))
+        clusters_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "elasticache:DescribeReplicationGroups",
+                "elasticache:DescribeCacheClusters",
+            ],
+            resources=["*"],
+        ))
 
         reports_lambda = lambda_.Function(
             self, "ReportsApi",
