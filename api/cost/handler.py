@@ -137,6 +137,28 @@ def _rds_services(ce, start, end):
     return keep
 
 
+_ELASTICACHE_SERVICE_DEFAULT = ("Amazon ElastiCache",)
+
+
+def _elasticache_services(ce, start, end):
+    """SERVICE dimension values that look like ElastiCache. Mirrors _rds_services."""
+    keep = []
+    try:
+        resp = ce.get_dimension_values(
+            TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
+            Dimension="SERVICE",
+        )
+        for v in resp.get("DimensionValues", []):
+            name = v.get("Value", "")
+            if "elasticache" in name.lower():
+                keep.append(name)
+    except Exception as e:
+        print(f"GetDimensionValues (ElastiCache) failed: {e}")
+    if not keep:
+        return list(_ELASTICACHE_SERVICE_DEFAULT)
+    return keep
+
+
 def _query_by_dimension(ce, start, end, services, dimension):
     """Roll up cost + usage by a CE DIMENSION (USAGE_TYPE / INSTANCE_TYPE)
     scoped to the RDS-family SERVICE values. Returns (rows, error_or_none)
@@ -260,6 +282,48 @@ def _handle_rds_view(ce, start, end, days):
     return _response(200, {
         "env": _ENV,
         "view": "rds",
+        "range_days": days,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "total": round(total, 4),
+        "currency": "USD",
+        "daily": daily,
+        "by_usage_type": by_usage_type,
+        "per_cluster": per_cluster,
+        "per_cluster_available": per_cluster_available,
+        "per_cluster_tag": cluster_tag,
+        "per_cluster_note": per_cluster_note,
+        "anomalies": anomalies,
+        "no_data_reason": no_data_reason,
+        "discovered_services": services,
+    })
+
+
+def _handle_elasticache_view(ce, start, end, days):
+    """ElastiCache spend (Cost Explorer). Same envelope as the RDS view."""
+    services = _elasticache_services(ce, start, end)
+    daily, total, total_err = _query_total(ce, start, end, services)
+    by_usage_type, _ut_err = _query_by_dimension(ce, start, end, services, "USAGE_TYPE")
+    per_cluster, cluster_tag, cluster_err = _query_per_cluster(ce, start, end, services)
+    per_cluster_available = len(per_cluster) > 0
+    per_cluster_note = None
+    if not per_cluster_available:
+        per_cluster_note = (
+            "클러스터별 비용 분리를 사용할 수 없습니다. AWS Billing 콘솔에서 "
+            "cost-allocation 태그를 활성화하고 ElastiCache 클러스터에 적용하면 약 "
+            "24시간 내에 Cost Explorer가 클러스터 단위로 비용을 분리합니다. 과거 "
+            "비용은 소급 반영되지 않습니다."
+        )
+    no_data_reason = None
+    if total == 0 and not daily:
+        no_data_reason = (
+            "이 기간에 기록된 ElastiCache 비용이 없습니다. ElastiCache를 운영 중이라면 "
+            "Cost Explorer 활성화 여부를 확인하세요 (반영까지 약 24시간 지연)."
+        )
+    anomalies = _detect_anomalies(daily)
+    return _response(200, {
+        "env": _ENV,
+        "view": "elasticache",
         "range_days": days,
         "start": start.isoformat(),
         "end": end.isoformat(),
@@ -453,6 +517,9 @@ def lambda_handler(event, context=None):
     # cluster (tag-based) attribution. Default view stays Bedrock.
     if view == "rds":
         return _handle_rds_view(ce, start, end, days)
+    # `?view=elasticache` — ElastiCache 클러스터 비용.
+    if view == "elasticache":
+        return _handle_elasticache_view(ce, start, end, days)
     # `?view=platform` — DBOps 플랫폼 자체 운영비 (Application=DBOps 태그 전체).
     if view == "platform":
         return _handle_platform_view(ce, start, end, days)
