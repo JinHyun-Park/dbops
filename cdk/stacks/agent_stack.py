@@ -246,6 +246,17 @@ class AgentStack(cdk.Stack):
             ],
             resources=["*"],
         ))
+        # ElastiCache write tools (EC-4): modify, snapshot, reboot, failover.
+        # All approval-gated via Cedar policy engine.
+        operations_mcp_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "elasticache:ModifyReplicationGroup",
+                "elasticache:CreateSnapshot",
+                "elasticache:RebootCacheCluster",
+                "elasticache:TestFailover",
+            ],
+            resources=["*"],
+        ))
 
         simulation_mcp_lambda = lambda_.Function(
             self, "SimulationMCP",
