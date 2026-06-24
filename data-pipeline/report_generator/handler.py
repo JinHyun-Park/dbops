@@ -97,6 +97,18 @@ def lambda_handler(event, context):
             except ClientError as e:
                 print(f"[report_generator] S3 put failed for {cid}: {e}")
 
+        if s3_bucket:
+            try:
+                from report_html import build_report_html
+                html_key = s3_key[:-5] + ".html" if s3_key.endswith(".json") else s3_key + ".html"
+                boto3.client("s3").put_object(
+                    Bucket=s3_bucket, Key=html_key,
+                    Body=build_report_html(cid, report_date, report_type, summary_text, report_data),
+                    ContentType="text/html; charset=utf-8",
+                )
+            except Exception as e:
+                print(f"[report_generator] HTML render/put failed for {cid}: {e}")
+
         cache_query(
             # RDS Data API parameters arrive as strings; cast :report_date
             # to DATE explicitly so PostgreSQL accepts it for the DATE column.
