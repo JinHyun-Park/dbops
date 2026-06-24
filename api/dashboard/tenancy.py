@@ -109,6 +109,33 @@ def visible_cluster_ids(event, cluster_items):
     return visible
 
 
+def visible_set_from_registry(event):
+    """Convenience for LIST handlers that don't already hold the cluster
+    registry: scan CLUSTERS_TABLE for {cluster_id, team_id} and return the
+    visible cluster_id set. None for admins (no filter). On a registry-scan
+    failure returns None (fail-open to current behavior — consistent with the
+    fleet filter; a transient DDB outage must not blank a list)."""
+    if is_admin(event):
+        return None
+    table_name = os.environ.get("CLUSTERS_TABLE", "")
+    if not table_name:
+        return None
+    try:
+        table = boto3.resource("dynamodb").Table(table_name)
+        resp = table.scan(ProjectionExpression="cluster_id, team_id")
+        items = resp.get("Items", [])
+        while resp.get("LastEvaluatedKey"):
+            resp = table.scan(
+                ProjectionExpression="cluster_id, team_id",
+                ExclusiveStartKey=resp["LastEvaluatedKey"],
+            )
+            items.extend(resp.get("Items", []))
+    except Exception as e:
+        print(f"[tenancy] visible_set_from_registry scan failed: {e}")
+        return None
+    return visible_cluster_ids(event, items)
+
+
 def cluster_visible(event, cluster_item):
     """Single-cluster visibility for per-cluster routes. Admin => True.
     Unassigned (or missing registry item) => True (default-open). Assigned =>

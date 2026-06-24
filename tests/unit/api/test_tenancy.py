@@ -85,3 +85,31 @@ def test_no_bearer_not_admin_restricted():
     with patch.object(t, "my_team_ids", return_value=set()):
         vis = t.visible_cluster_ids(_event(with_bearer=False), ITEMS)
     assert vis == {"c-open"}   # not admin => restricted, only unassigned
+
+
+def test_visible_set_from_registry_admin_returns_none(monkeypatch):
+    t = _load()
+    monkeypatch.setenv("CLUSTERS_TABLE", "clusters")
+    assert t.visible_set_from_registry(_event(groups=["dbops-admin"])) is None
+
+
+def test_visible_set_from_registry_filters_viewer(monkeypatch):
+    t = _load()
+    monkeypatch.setenv("CLUSTERS_TABLE", "clusters")
+    fake = MagicMock()
+    fake.scan.return_value = {"Items": [
+        {"cluster_id": "c-open"},
+        {"cluster_id": "c-teamA", "team_id": "tA"},
+        {"cluster_id": "c-teamB", "team_id": "tB"},
+    ]}
+    with patch.object(t.boto3, "resource", return_value=MagicMock(**{"Table.return_value": fake})), \
+         patch.object(t, "my_team_ids", return_value={"tA"}):
+        s = t.visible_set_from_registry(_event(groups=["dbops-viewer"]))
+    assert s == {"c-open", "c-teamA"}
+
+
+def test_visible_set_from_registry_scan_error_fails_open_none(monkeypatch):
+    t = _load()
+    monkeypatch.setenv("CLUSTERS_TABLE", "clusters")
+    with patch.object(t.boto3, "resource", side_effect=RuntimeError("ddb down")):
+        assert t.visible_set_from_registry(_event(groups=["dbops-viewer"])) is None
