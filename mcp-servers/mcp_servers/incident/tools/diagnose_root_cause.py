@@ -38,6 +38,7 @@ BASE_WEIGHTS = {
     "blocking": 3.0,
     "metric_spike": 2.0,
     "slow_query": 2.0,
+    "elasticache_spike": 2.5,
 }
 
 # event_log.severity -> multiplier. Failovers/OOM are usually logged as
@@ -186,6 +187,7 @@ def diagnose_root_cause_impl(
         _collect_metric_spikes(cache, cluster_id, start_iso, end_iso, baseline_start_iso, anchor, win, examined, skipped)
     )
     candidates.extend(_collect_slow_queries(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
+    candidates.extend(_collect_elasticache_signals(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
 
     # Rank by score desc, keep the top ~8 and assign 1-based ranks.
     candidates.sort(key=lambda c: c["score"], reverse=True)
@@ -525,6 +527,62 @@ def _collect_slow_queries(cache, cluster_id, start_iso, end_iso, anchor, win, ex
                 "suggested_action": "EXPLAIN the query; check for a missing index or a plan regression coinciding with the incident.",
             }
         )
+    return out
+
+
+def _collect_elasticache_signals(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped):
+    """ElastiCache cache-specific signals from metric_snapshots: eviction spikes
+    and replication-lag spikes near the incident. Engine-safe — non-ElastiCache
+    clusters have no such rows, so this yields nothing."""
+    out = []
+    sql = """
+        SELECT ts, metric_type, value
+        FROM metric_snapshots
+        WHERE cluster_id = :cluster_id
+          AND metric_type IN ('evictions', 'replication_lag')
+          AND ts >= :start_time::timestamptz AND ts < :end_time::timestamptz
+          AND (dimensions IS NULL OR dimensions::text = '{}')
+          AND ((metric_type = 'evictions' AND value > 100)
+               OR (metric_type = 'replication_lag' AND value >= 100))
+        ORDER BY value DESC
+    """
+    params = {"cluster_id": cluster_id, "start_time": start_iso, "end_time": end_iso}
+    try:
+        rows = cache.execute(sql, params).rows
+    except Exception as e:
+        print(f"[diagnose_root_cause] elasticache_signals source skipped: {e}")
+        skipped.append("elasticache_signals")
+        return out
+    examined["elasticache_signals"] = len(rows)
+    for row in rows:
+        when = row.get("ts")
+        mtype = row.get("metric_type")
+        value = row.get("value")
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = 0.0
+        rf = _recency_factor(when, anchor, win)
+        score = BASE_WEIGHTS["elasticache_spike"] * rf
+        if mtype == "replication_lag":
+            title = "ElastiCache Replication Lag Spike"
+            action = "Check write load / failover; replication lag often coincides with a primary failover or load surge."
+        else:
+            title = "ElastiCache Eviction Spike"
+            action = "Memory pressure — evictions spiking suggests the working set exceeds capacity; check maxmemory-policy and node size."
+        out.append({
+            "category": "elasticache_spike",
+            "score": score,
+            "score_breakdown": {
+                "base_weight": BASE_WEIGHTS["elasticache_spike"],
+                "recency_factor": round(rf, 3),
+                "formula": "base × recency",
+            },
+            "summary": title,
+            "evidence": {"metric_type": mtype, "value": value, "metric_time": when},
+            "when": when,
+            "suggested_action": action,
+        })
     return out
 
 
