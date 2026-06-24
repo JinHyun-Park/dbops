@@ -5,14 +5,45 @@ import sys
 import types
 from pathlib import Path
 
-import pytest
-
 # agent/tool_gate.py subclasses strands' HookProvider, so loading it needs the
-# Strands SDK. That ships in the agent runtime (agent/_deps) + local dev, but
-# the CI unit-test image installs only requirements-dev.txt (no agent runtime
-# deps) — skip there rather than fail collection. The gate is still exercised
-# locally and by the post-commit tester, which have Strands.
-pytest.importorskip("strands")
+# Strands hook API. Strands ships in the agent runtime (agent/_deps) + local
+# dev, but the CI unit-test image installs only requirements-dev.txt (no agent
+# runtime deps). Rather than SKIP these security-critical tenant-isolation tests
+# in CI (a regression could merge unsignaled), inject a minimal stub of the
+# Strands hook API when the real SDK is absent. The gate's authorization logic
+# is pure Python (reads tool_use, sets cancel_tool) and does not depend on any
+# Strands behavior, so the stub exercises it faithfully; the real
+# Strands-honors-cancel_tool integration is covered by the opus review + the
+# live smoke. When the real SDK IS present (local), it is used unchanged.
+if "strands" not in sys.modules:
+    try:
+        import strands  # noqa: F401
+    except ImportError:
+        _strands = types.ModuleType("strands")
+        _hooks = types.ModuleType("strands.hooks")
+        _events = types.ModuleType("strands.hooks.events")
+
+        class HookProvider:  # minimal base — register_hooks is overridden
+            pass
+
+        class HookRegistry:
+            def __init__(self):
+                self._registered_callbacks = {}
+
+            def add_callback(self, event_type, callback):
+                self._registered_callbacks.setdefault(event_type, []).append(callback)
+
+        class BeforeToolCallEvent:  # marker type used as the registry key
+            pass
+
+        _hooks.HookProvider = HookProvider
+        _hooks.HookRegistry = HookRegistry
+        _events.BeforeToolCallEvent = BeforeToolCallEvent
+        _hooks.events = _events
+        _strands.hooks = _hooks
+        sys.modules["strands"] = _strands
+        sys.modules["strands.hooks"] = _hooks
+        sys.modules["strands.hooks.events"] = _events
 
 # ---------------------------------------------------------------------------
 # Import agent/tool_gate.py via importlib (avoids sys.path pollution)
