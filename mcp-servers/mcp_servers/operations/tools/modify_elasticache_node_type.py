@@ -46,4 +46,6 @@ def modify_elasticache_node_type_impl(cache, cluster_id=None, node_type=None,
     except ClientError as e:
         code = e.response.get("Error", {}).get("Code", "")
         return {"status": "error", "reason": f"modify_replication_group 실패: {code or str(e)[:200]}", "cluster_id": cluster_id}
+    except Exception as e:
+        return {"status": "error", "reason": f"modify_replication_group 실패: {str(e)[:200]}", "cluster_id": cluster_id}
     return {"status": "ok", "cluster_id": cluster_id, "node_type": node_type}
