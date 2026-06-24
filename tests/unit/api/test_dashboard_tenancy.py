@@ -208,3 +208,23 @@ def test_fleet_registry_failure_leaves_rows_unfiltered(monkeypatch):
     ids = {c["cluster_id"] for c in result["clusters"]}
     # All rows pass through unfiltered
     assert ids == {"c-open", "c-teamA", "c-teamB"}
+
+
+def test_registered_clusters_projection_includes_team_id():
+    """Source-level guard (whole-branch review M1): the fleet filter is only
+    correct if _registered_clusters projects team_id. The mock-based fleet
+    tests above can't catch a projection regression (they mock the function
+    away), so assert the real ProjectionExpression carries team_id — dropping
+    it would silently turn the fleet filter into a no-op (cross-team leak)."""
+    src = _PATH.read_text()
+    proj_lines = [ln for ln in src.splitlines() if "ProjectionExpression" in ln]
+    assert proj_lines, "no ProjectionExpression found in dashboard handler"
+    # The registry projection (the one that selects cluster_id) MUST carry
+    # team_id; targeting the cluster_id signature avoids false failures if an
+    # unrelated projection is added later.
+    registry_projs = [ln for ln in proj_lines if "cluster_id" in ln]
+    assert registry_projs, "no cluster_id ProjectionExpression found (registry scan)"
+    assert all("team_id" in ln for ln in registry_projs), (
+        "the _registered_clusters ProjectionExpression dropped team_id — the fleet "
+        "visibility filter would silently leak other teams' clusters"
+    )
