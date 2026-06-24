@@ -15,6 +15,7 @@ from datetime import datetime
 
 import boto3
 import seeder
+import tenancy
 from botocore.exceptions import ClientError
 from engine_family import dynamodb_cluster_id, engine_family
 
@@ -442,8 +443,11 @@ def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = 
     return out
 
 
-def _handle_list(table):
+def _handle_list(table, event):
     items = _enrich_with_meta(_scan_all(table))
+    visible = tenancy.visible_cluster_ids(event, items)
+    if visible is not None:
+        items = [c for c in items if c.get("cluster_id") in visible]
     # 30s browser cache — cluster registry doesn't change between
     # admin actions, and EVERY page navigation hits this list.
     return _resp(200, items, max_age=30)
@@ -998,7 +1002,7 @@ def lambda_handler(event, context):
         return _handle_bulk_register(table, body)
 
     if method == "GET":
-        return _handle_list(table)
+        return _handle_list(table, event)
 
     if method == "POST":
         # Single-cluster registration — write, admin only.

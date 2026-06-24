@@ -765,9 +765,12 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
+                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
+                "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
             },
         )
         foundation.clusters_table.grant_read_write_data(clusters_lambda)
+        foundation.team_members_table.grant_read_data(clusters_lambda)
         data.cache_db.secret.grant_read(clusters_lambda)
         data.cache_db.grant_data_api_access(clusters_lambda)
         clusters_lambda.add_to_role_policy(iam.PolicyStatement(
