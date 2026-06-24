@@ -19,12 +19,14 @@ from mcp_servers.operations.tools.modify_elasticache_node_type import modify_ela
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
 from mcp_servers.operations.tools.modify_scaling import modify_scaling_impl
 from mcp_servers.operations.tools.query_activity_audit import query_activity_audit_impl
+from mcp_servers.operations.tools.reboot_elasticache import reboot_elasticache_impl
 from mcp_servers.operations.tools.request_approval import request_approval_impl
 from mcp_servers.operations.tools.restore_cluster import restore_cluster_impl
 from mcp_servers.operations.tools.review_sql import review_sql_impl
 from mcp_servers.operations.tools.schema_diff import get_schema_diff_impl
 from mcp_servers.operations.tools.schema_history import get_schema_history_impl
 from mcp_servers.operations.tools.set_docdb_profiler import set_docdb_profiler_impl
+from mcp_servers.operations.tools.test_elasticache_failover import test_elasticache_failover_impl
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.engine_family import CAPABILITIES
 from mcp_servers.shared.engine_family import engine_family as _engine_family
@@ -50,6 +52,8 @@ _ENGINE_GATED_TOOLS = {
     "elasticache_live_read": "live_read",
     "modify_elasticache_node_type": "elasticache_write",
     "create_elasticache_snapshot": "elasticache_write",
+    "reboot_elasticache": "elasticache_write",
+    "test_elasticache_failover": "elasticache_write",
 }
 
 _CAP_LABEL = {
@@ -342,6 +346,23 @@ TOOLS = {
             "cluster_id": {"type": "string"}, "snapshot_name": {"type": "string"},
             "approved": {"type": "boolean"}, "approval_id": {"type": "string"}},
             "required": ["cluster_id", "snapshot_name"]},
+    },
+    "reboot_elasticache": {
+        "impl": reboot_elasticache_impl,
+        "description": "ElastiCache only: reboot the primary cache cluster node (reboot_cache_cluster). Approval-gated write.",
+        "input_schema": {"type": "object", "properties": {
+            "cluster_id": {"type": "string"},
+            "approved": {"type": "boolean"}, "approval_id": {"type": "string"}},
+            "required": ["cluster_id"]},
+    },
+    "test_elasticache_failover": {
+        "impl": test_elasticache_failover_impl,
+        "description": "ElastiCache only: test failover for a replication group node group (requires a replica). Approval-gated write.",
+        "input_schema": {"type": "object", "properties": {
+            "cluster_id": {"type": "string"},
+            "node_group_id": {"type": "string"},
+            "approved": {"type": "boolean"}, "approval_id": {"type": "string"}},
+            "required": ["cluster_id"]},
     },
     "review_sql": {
         "impl": review_sql_impl,

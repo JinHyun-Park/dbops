@@ -187,6 +187,10 @@ def _project(action_type: str, details: dict) -> dict:
         return {"target": str(d.get("target") or "").strip(), "node_type": str(d.get("node_type") or "").strip()}
     if action_type == "create_elasticache_snapshot":
         return {"target": str(d.get("target") or "").strip(), "snapshot_name": str(d.get("snapshot_name") or "").strip()}
+    if action_type == "reboot_elasticache":
+        return {"target": str(d.get("target") or "").strip()}
+    if action_type == "test_elasticache_failover":
+        return {"target": str(d.get("target") or "").strip(), "node_group_id": str(d.get("node_group_id") or "").strip()}
     # other / unknown: bind the FULL detail set VERBATIM (no numeric coercion).
     # This closes the loose "other" bucket — an "other" approval now matches
     # only if the entire registered payload matches. We deliberately do NOT
