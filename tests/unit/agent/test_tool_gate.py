@@ -7,6 +7,13 @@ from pathlib import Path
 
 import pytest
 
+# agent/tool_gate.py subclasses strands' HookProvider, so loading it needs the
+# Strands SDK. That ships in the agent runtime (agent/_deps) + local dev, but
+# the CI unit-test image installs only requirements-dev.txt (no agent runtime
+# deps) — skip there rather than fail collection. The gate is still exercised
+# locally and by the post-commit tester, which have Strands.
+pytest.importorskip("strands")
+
 # ---------------------------------------------------------------------------
 # Import agent/tool_gate.py via importlib (avoids sys.path pollution)
 # ---------------------------------------------------------------------------
