@@ -216,7 +216,6 @@ const ELASTICACHE_METRICS = [
   "curr_connections",
   "new_connections",
   "evictions",
-  "reclaimed",
   "replication_lag",
   "swap_usage",
   "freeable_memory",
@@ -307,10 +306,13 @@ export function ElasticacheOverviewPanel({
     });
   })();
 
-  // Replication lag: hide the card entirely when the series is empty
-  // (Memcached / single-node Redis).
+  // Replication lag: hide the card entirely for Memcached (no replication) or
+  // when the series is empty (single-node Redis). isMemcached is known from
+  // details which loads independently, so gating on it avoids a flash while
+  // seriesLoading is true.
   const replicationLagPoints = series.replication_lag ?? [];
-  const showReplicationLag = replicationLagPoints.length > 0 || seriesLoading;
+  const showReplicationLag =
+    !isMemcached && (replicationLagPoints.length > 0 || seriesLoading);
 
   return (
     <div className="space-y-6">
@@ -392,6 +394,40 @@ export function ElasticacheOverviewPanel({
             loading={seriesLoading}
             colors={chart}
             unit="%"
+            type="area"
+          />
+          <MiniChart
+            title="Bytes Used"
+            series={[
+              {
+                name: "bytes_used",
+                color: "#a78bfa",
+                points: (series.bytes_used ?? []).map((p) => ({
+                  ...p,
+                  value: Number(p.value) / 1073741824,
+                })),
+              },
+            ]}
+            loading={seriesLoading}
+            colors={chart}
+            unit="GB"
+            type="area"
+          />
+          <MiniChart
+            title="Freeable Memory"
+            series={[
+              {
+                name: "freeable_memory",
+                color: "#34d399",
+                points: (series.freeable_memory ?? []).map((p) => ({
+                  ...p,
+                  value: Number(p.value) / 1073741824,
+                })),
+              },
+            ]}
+            loading={seriesLoading}
+            colors={chart}
+            unit="GB"
             type="area"
           />
         </div>
@@ -509,12 +545,15 @@ export function ElasticacheOverviewPanel({
               {
                 name: "net_in",
                 color: "#22d3ee",
-                points: series.net_in ?? [],
+                points: (series.net_in ?? []).map((p) => ({
+                  ...p,
+                  value: Number(p.value) / 1073741824,
+                })),
               },
             ]}
             loading={seriesLoading}
             colors={chart}
-            unit="bytes"
+            unit="GB"
             type="area"
           />
           <MiniChart
@@ -523,12 +562,15 @@ export function ElasticacheOverviewPanel({
               {
                 name: "net_out",
                 color: "#a78bfa",
-                points: series.net_out ?? [],
+                points: (series.net_out ?? []).map((p) => ({
+                  ...p,
+                  value: Number(p.value) / 1073741824,
+                })),
               },
             ]}
             loading={seriesLoading}
             colors={chart}
-            unit="bytes"
+            unit="GB"
             type="area"
           />
         </div>
@@ -558,12 +600,15 @@ export function ElasticacheOverviewPanel({
               {
                 name: "swap_usage",
                 color: "#fb7185",
-                points: series.swap_usage ?? [],
+                points: (series.swap_usage ?? []).map((p) => ({
+                  ...p,
+                  value: Number(p.value) / 1073741824,
+                })),
               },
             ]}
             loading={seriesLoading}
             colors={chart}
-            unit="bytes"
+            unit="GB"
             type="area"
           />
         </div>
