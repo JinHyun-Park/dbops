@@ -6,6 +6,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 
 import boto3
+import tenancy
 from engine_family import CAPABILITIES, engine_family
 
 
@@ -112,6 +113,18 @@ def _lookup_cluster(cluster_id: str) -> dict:
     except Exception as e:
         print(f"[dashboard] cluster lookup failed for {cluster_id}: {e}")
         return {}
+
+
+def _require_visible(event, cluster_id):
+    """Return a 403 response if the caller may not see this cluster, else None.
+    Admin / unassigned / member => None (allowed)."""
+    if tenancy.cluster_visible(event, _lookup_cluster(cluster_id)):
+        return None
+    return {
+        "statusCode": 403,
+        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        "body": json.dumps({"error": "forbidden", "reason": "이 클러스터에 대한 접근 권한이 없습니다."}),
+    }
 
 
 def _registry_engine(cluster_id: str):
@@ -1303,13 +1316,13 @@ def _registered_clusters() -> dict[str, dict] | None:
     try:
         tbl = boto3.resource("dynamodb").Table(_CLUSTERS_TABLE_NAME)
         out: dict[str, dict] = {}
-        kwargs: dict = {"ProjectionExpression": "cluster_id, engine"}
+        kwargs: dict = {"ProjectionExpression": "cluster_id, engine, team_id"}
         while True:
             resp = tbl.scan(**kwargs)
             for item in resp.get("Items", []):
                 cid = item.get("cluster_id")
                 if cid:
-                    out[cid] = {"engine": item.get("engine") or ""}
+                    out[cid] = {"engine": item.get("engine") or "", "team_id": item.get("team_id") or ""}
             last = resp.get("LastEvaluatedKey")
             if not last:
                 return out
@@ -1319,7 +1332,7 @@ def _registered_clusters() -> dict[str, dict] | None:
         return None
 
 
-def _multi_cluster_overview(query):
+def _multi_cluster_overview(query, event=None):
     rows = query(
         "WITH latest_metrics AS ("
         "  SELECT cluster_id, metric_type, "
@@ -1393,6 +1406,17 @@ def _multi_cluster_overview(query):
                 "deadlocks": None,
                 "blocking_count": 0,
             })
+    # Team-visibility filter: if registered is available, use it to build the
+    # cluster_items list for tenancy.visible_cluster_ids. If registered is None
+    # (DDB fetch failed), skip the filter to preserve fail-open behavior.
+    if registered is not None and event is not None:
+        items = [
+            {"cluster_id": cid, "team_id": (meta or {}).get("team_id") or ""}
+            for cid, meta in registered.items()
+        ]
+        visible = tenancy.visible_cluster_ids(event, items)
+        if visible is not None:  # None => admin => unfiltered
+            rows = [r for r in rows if r.get("cluster_id") in visible]
     return {"clusters": rows}
 
 
@@ -3245,7 +3269,7 @@ def lambda_handler(event, context):
             # (loaded on every sidebar nav). 20s browser cache means
             # rapid tab-switching stops re-hitting the lambda.
             return _response(
-                200, _multi_cluster_overview(query), max_age=20
+                200, _multi_cluster_overview(query, event), max_age=20
             )
         except Exception:
             print(f"Multi-cluster overview error: {traceback.format_exc()}")
@@ -3255,6 +3279,10 @@ def lambda_handler(event, context):
     cluster_id = path_params.get("cluster_id")
     if not cluster_id or not CLUSTER_ID_RE.match(cluster_id):
         return _response(400, {"error": "invalid cluster_id"})
+
+    forbid = _require_visible(event, cluster_id)
+    if forbid:
+        return forbid
 
     qs = event.get("queryStringParameters") or {}
     raw_path = raw_path_early

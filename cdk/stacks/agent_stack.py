@@ -648,11 +648,15 @@ class AgentStack(cdk.Stack):
                 # the live target cluster (not the cache DB), so the handler
                 # needs to resolve cluster_arn/secret_arn from the registry.
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                # Multi-team tenancy: per-cluster visibility gate + fleet filter.
+                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
+                "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
             },
         )
         data.cache_db.secret.grant_read(dashboard_lambda)
         data.cache_db.grant_data_api_access(dashboard_lambda)
         foundation.clusters_table.grant_read_data(dashboard_lambda)
+        foundation.team_members_table.grant_read_data(dashboard_lambda)
         dashboard_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=[
                 "rds-data:ExecuteStatement",
