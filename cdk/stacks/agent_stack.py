@@ -299,6 +299,10 @@ class AgentStack(cdk.Stack):
                 # Hub-spoke: assume the cluster's spoke role to describe it in its
                 # own account+region (same pattern as the operations write tools).
                 "sts:AssumeRole",
+                # ElastiCache node-resize cost sim (EC-5): resolve current node
+                # type + count before calling the Price List API. Read-only.
+                "elasticache:DescribeReplicationGroups",
+                "elasticache:DescribeCacheClusters",
             ],
             resources=["*"],
         ))
@@ -740,6 +744,10 @@ class AgentStack(cdk.Stack):
                 "pricing:GetProducts",
                 # Observed Serverless v2 ACU draw for the scaling cost sim.
                 "cloudwatch:GetMetricStatistics",
+                # ElastiCache node-resize cost sim (EC-5): resolve current node
+                # type + count before calling the Price List API. Read-only.
+                "elasticache:DescribeReplicationGroups",
+                "elasticache:DescribeCacheClusters",
             ],
             resources=["*"],
         ))
@@ -1320,6 +1328,7 @@ class AgentStack(cdk.Stack):
             ("/api/simulation/scaling", [apigwv2.HttpMethod.POST]),
             ("/api/simulation/ddl-impact", [apigwv2.HttpMethod.POST]),
             ("/api/simulation/dynamodb-capacity-cost", [apigwv2.HttpMethod.POST]),
+            ("/api/simulation/elasticache-node-resize", [apigwv2.HttpMethod.POST]),
         ]:
             self.api.add_routes(
                 path=sim_path, methods=sim_methods, integration=sim_integration

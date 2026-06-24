@@ -1616,6 +1616,45 @@ export function simulateDynamodbCapacityCost(
   });
 }
 
+// ElastiCache node-resize cost what-if. Dollar fields are null when the AWS
+// Price List API couldn't resolve a price (status "partial") — the UI must
+// render "n/a", never a fake $.
+export interface ElasticacheNodeResizeResponse {
+  status: "ok" | "partial";
+  cluster_id: string;
+  engine?: string;
+  region?: string;
+  current: {
+    node_type: string | null;
+    node_count: number | null;
+    price_per_hour: number | null;
+  };
+  proposed: {
+    node_type: string | null;
+    node_count: number | null;
+    price_per_hour: number | null;
+  };
+  current_monthly: number | null;
+  proposed_monthly: number | null;
+  delta_monthly: number | null;
+  delta_pct: number | null;
+  pricing_source?: "aws_pricing_api" | "fallback";
+  note?: string;
+}
+
+export function simulateElasticacheNodeResize(
+  clusterId: string,
+  opts?: { newNodeType?: string; newNodeCount?: number },
+): Promise<ElasticacheNodeResizeResponse> {
+  return simPost(`/api/simulation/elasticache-node-resize`, {
+    cluster_id: clusterId,
+    ...(opts?.newNodeType != null ? { new_node_type: opts.newNodeType } : {}),
+    ...(opts?.newNodeCount != null
+      ? { new_node_count: opts.newNodeCount }
+      : {}),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Runbooks API
 // ---------------------------------------------------------------------------

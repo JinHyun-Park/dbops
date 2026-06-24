@@ -22,6 +22,7 @@ from dynamodb_pricing import (
     price_per_rcu_hour,
     price_per_wcu_hour,
 )
+from elasticache_pricing import price_per_node_hour
 from parameter_estimator import (
     PARAMETER_INFO,
     build_live_result,
@@ -913,6 +914,162 @@ def _simulate_dynamodb_capacity_cost(
 
 
 # ---------------------------------------------------------------------------
+# Tool: simulate_elasticache_node_resize
+# ---------------------------------------------------------------------------
+
+# Hours billed per month (same convention as _HOURS_PER_MONTH for Aurora).
+_EC_HOURS_PER_MONTH = 730
+
+
+def _simulate_elasticache_node_resize(
+    cluster_id: str,
+    new_node_type: str | None = None,
+    new_node_count: int | None = None,
+) -> dict:
+    """Estimate the monthly cost impact of resizing an ElastiCache node type or
+    count using REAL AWS pricing (Price List API — same source as the MCP tool).
+
+    The cluster's current node type + count are resolved live from
+    DescribeReplicationGroups in the local account (the ElastiCache cluster
+    must be registered in cluster_meta with `engine=elasticache`). A pricing
+    miss or describe failure degrades to status=partial rather than crashing.
+
+    The REST arm works identically to the MCP tool but resolves the cluster
+    metadata from cluster_meta (cache DB) instead of the registry DDB table,
+    because this Lambda has Data API access but no CLUSTERS_TABLE env.
+    """
+    region = os.environ.get("AWS_REGION", "")
+
+    # Resolve engine + region from cluster_meta.
+    rows = _cache_query(
+        "SELECT engine, region, resource_name, resource_details "
+        "FROM cluster_meta WHERE cluster_id = :cluster_id",
+        {"cluster_id": cluster_id},
+    )
+    row = rows[0] if rows else {}
+
+    # engine field in cluster_meta for ElastiCache is stored as e.g.
+    # "elasticache" (top-level) or the cache engine in resource_details.
+    rd_raw = row.get("resource_details")
+    rd: dict = {}
+    if isinstance(rd_raw, str):
+        try:
+            import json as _json
+            rd = _json.loads(rd_raw)
+        except Exception:
+            pass
+    elif isinstance(rd_raw, dict):
+        rd = rd_raw
+
+    engine = (rd.get("engine") or row.get("engine") or "redis").lower()
+    # Strip "elasticache" wrapper — the underlying engine is redis/valkey/memcached.
+    if engine == "elasticache":
+        engine = "redis"
+    cluster_region = row.get("region") or region
+    resource_name = row.get("resource_name") or cluster_id
+
+    # Resolve current node type + count live from DescribeReplicationGroups.
+    cur_type: str | None = None
+    cur_count: int = 1
+    describe_err: str | None = None
+    try:
+        ec = boto3.client("elasticache")
+        rg_resp = ec.describe_replication_groups(ReplicationGroupId=resource_name)
+        rg_list = rg_resp.get("ReplicationGroups") or []
+        if rg_list:
+            rg = rg_list[0]
+            cur_type = rg.get("CacheNodeType") or None
+            cur_count = len(rg.get("MemberClusters") or []) or 1
+    except Exception as e:
+        describe_err = type(e).__name__
+
+    if cur_type is None and describe_err is None:
+        # describe succeeded but group not found
+        describe_err = "ReplicationGroupNotFoundFault"
+
+    if cur_type is None:
+        return {
+            "status": "partial",
+            "cluster_id": cluster_id,
+            "current": {"node_type": None, "node_count": None, "price_per_hour": None},
+            "proposed": {
+                "node_type": new_node_type,
+                "node_count": new_node_count,
+                "price_per_hour": None,
+            },
+            "current_monthly": None,
+            "proposed_monthly": None,
+            "delta_monthly": None,
+            "delta_pct": None,
+            "note": f"라이브 클러스터 조회 실패({describe_err})로 비용 비교를 생략합니다.",
+        }
+
+    eff_node_type = new_node_type or cur_type
+    eff_count = int(new_node_count) if new_node_count is not None else cur_count
+
+    cur_price = price_per_node_hour(cluster_region, engine, cur_type)
+    new_price = (
+        price_per_node_hour(cluster_region, engine, eff_node_type)
+        if new_node_type
+        else cur_price
+    )
+
+    def _monthly(price, count):
+        if price is None:
+            return None
+        return price * max(1, int(count)) * _EC_HOURS_PER_MONTH
+
+    current_monthly = _monthly(cur_price, cur_count)
+    proposed_monthly = _monthly(new_price, eff_count)
+    status = (
+        "ok"
+        if current_monthly is not None and proposed_monthly is not None
+        else "partial"
+    )
+    delta = (
+        round(proposed_monthly - current_monthly, 2)
+        if current_monthly is not None and proposed_monthly is not None
+        else None
+    )
+    delta_pct = (
+        round(delta / current_monthly * 100, 1)
+        if delta is not None and current_monthly
+        else None
+    )
+    note = (
+        "일부 노드 단가를 AWS Price List API에서 확인하지 못해 부분 추정입니다."
+        if status == "partial"
+        else (
+            "노드-시간 비용만 계산했습니다"
+            f"(데이터 전송·스냅샷 스토리지·예약 노드 제외, {_EC_HOURS_PER_MONTH}h/월)."
+        )
+    )
+
+    return {
+        "status": status,
+        "cluster_id": cluster_id,
+        "engine": engine,
+        "region": cluster_region,
+        "current": {
+            "node_type": cur_type,
+            "node_count": cur_count,
+            "price_per_hour": cur_price,
+        },
+        "proposed": {
+            "node_type": eff_node_type,
+            "node_count": eff_count,
+            "price_per_hour": new_price,
+        },
+        "current_monthly": round(current_monthly, 2) if current_monthly is not None else None,
+        "proposed_monthly": round(proposed_monthly, 2) if proposed_monthly is not None else None,
+        "delta_monthly": delta,
+        "delta_pct": delta_pct,
+        "pricing_source": "aws_pricing_api" if cur_price is not None else "fallback",
+        "note": note,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Lambda dispatcher
 # ---------------------------------------------------------------------------
 
@@ -1031,6 +1188,20 @@ def lambda_handler(event, context):
             return _response(
                 200,
                 _simulate_dynamodb_capacity_cost(cluster_id, **kwargs),
+                origin,
+            )
+
+        if raw_path.endswith("/elasticache-node-resize"):
+            new_node_type = body.get("new_node_type") or None
+            new_node_count = body.get("new_node_count")
+            if new_node_count is not None:
+                try:
+                    new_node_count = int(new_node_count)
+                except (TypeError, ValueError):
+                    new_node_count = None
+            return _response(
+                200,
+                _simulate_elasticache_node_resize(cluster_id, new_node_type, new_node_count),
                 origin,
             )
 

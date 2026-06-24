@@ -4,12 +4,14 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   fetchParameterCatalog,
   simulateDdlImpact,
+  simulateElasticacheNodeResize,
   simulateParameterChange,
   simulateScaling,
   simulateUpgradeCompatibility,
   simulateUpgradeImpact,
   simulateUpgradePlan,
   type DdlImpactResponse,
+  type ElasticacheNodeResizeResponse,
   type ParameterCatalogEntry,
   type ParameterChangeResponse,
   type ScalingResponse,
@@ -64,6 +66,8 @@ export default function SimulatorPage() {
         />
       ) : fam === "dynamodb" ? (
         <DynamoDbCapacitySimulator clusterId={selectedCluster} />
+      ) : fam === "elasticache" ? (
+        <ElasticacheNodeResizePanel clusterId={selectedCluster} />
       ) : fam !== "relational" ? (
         <EmptyState
           title="DocumentDB 시뮬레이션은 지원 예정"
@@ -1029,6 +1033,227 @@ function DdlPanel({
           <div className="p-6 text-zinc-500 text-sm">
             DDL SQL을 입력하면 테이블 크기 추정과 락/온라인 가능 여부를
             분석합니다.
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ElastiCache node-resize cost simulator
+// ---------------------------------------------------------------------------
+
+function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
+  const [nodeType, setNodeType] = useState("");
+  const [nodeCount, setNodeCount] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<ElasticacheNodeResizeResponse | null>(
+    null,
+  );
+
+  useEffect(() => {
+    setResult(null);
+    setErr(null);
+    setNodeType("");
+    setNodeCount("");
+  }, [clusterId]);
+
+  const run = async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const opts: { newNodeType?: string; newNodeCount?: number } = {};
+      if (nodeType.trim()) opts.newNodeType = nodeType.trim();
+      if (nodeCount.trim()) {
+        const n = parseInt(nodeCount, 10);
+        if (!isNaN(n) && n > 0) opts.newNodeCount = n;
+      }
+      const r = await simulateElasticacheNodeResize(clusterId, opts);
+      setResult(r);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "fetch failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const delta = result?.delta_monthly ?? null;
+  const deltaTone =
+    delta == null
+      ? "text-zinc-300"
+      : delta > 0
+        ? "text-rose-300"
+        : delta < 0
+          ? "text-emerald-300"
+          : "text-zinc-300";
+
+  return (
+    <Section
+      eyebrow="ElastiCache Cost"
+      title="노드 리사이즈 비용 시뮬레이션"
+      description="ElastiCache 노드 타입 · 노드 수를 변경했을 때의 월 비용 변화를 리전별 실시간 AWS Pricing 단가로 추정합니다. 노드-시간 비용만 대상이며 데이터 전송·스냅샷·예약 노드는 제외합니다."
+    >
+      <div className="bg-zinc-900/50 border border-zinc-800">
+        <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500">
+            새 노드 타입
+          </label>
+          <input
+            type="text"
+            value={nodeType}
+            onChange={(e) => setNodeType(e.target.value)}
+            placeholder="예: cache.r7g.large"
+            spellCheck={false}
+            className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-44"
+          />
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500 ml-2">
+            노드 수
+          </label>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            value={nodeCount}
+            onChange={(e) => setNodeCount(e.target.value)}
+            placeholder={result ? String(result.current.node_count ?? 1) : "1"}
+            className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-20 tabular-nums"
+          />
+          <button
+            onClick={run}
+            disabled={loading}
+            className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors ml-auto"
+          >
+            {loading ? "추정 중…" : "비용 추정"}
+          </button>
+        </div>
+
+        {err && (
+          <div className="p-4 text-xs text-rose-300 border-b border-zinc-800 bg-rose-500/5">
+            {err}
+          </div>
+        )}
+
+        {result && (
+          <div className="p-4 space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className={`border px-3 py-2 ${TONE_CLASSES["zinc"]}`}>
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+                  현재
+                </div>
+                <div className="text-base font-mono break-all">
+                  {result.current.node_type || "—"}
+                </div>
+                <div className="text-[11px] text-zinc-500 mt-0.5 font-mono">
+                  {result.current.node_count != null
+                    ? `× ${fmtExact(result.current.node_count)} 노드`
+                    : ""}
+                </div>
+                <div className="text-[11px] text-zinc-400 mt-1 font-mono">
+                  {result.current_monthly == null
+                    ? "n/a"
+                    : `$${fmtDecimal(result.current_monthly, 2)}/mo`}
+                </div>
+              </div>
+              <div
+                className={`border px-3 py-2 ${
+                  TONE_CLASSES[delta != null && delta > 0 ? "amber" : "emerald"]
+                }`}
+              >
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+                  제안
+                </div>
+                <div className="text-base font-mono break-all">
+                  {result.proposed.node_type || "—"}
+                </div>
+                <div className="text-[11px] text-zinc-500 mt-0.5 font-mono">
+                  {result.proposed.node_count != null
+                    ? `× ${fmtExact(result.proposed.node_count)} 노드`
+                    : ""}
+                </div>
+                <div className="text-[11px] text-zinc-400 mt-1 font-mono">
+                  {result.proposed_monthly == null
+                    ? "n/a"
+                    : `$${fmtDecimal(result.proposed_monthly, 2)}/mo`}
+                  {result.delta_pct != null &&
+                    Math.abs(result.delta_pct) > 0.1 && (
+                      <span
+                        className={`ml-2 ${
+                          result.delta_pct > 0
+                            ? "text-rose-300"
+                            : "text-emerald-300"
+                        }`}
+                      >
+                        ({result.delta_pct > 0 ? "+" : ""}
+                        {fmtDecimal(result.delta_pct, 1)}%)
+                      </span>
+                    )}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto] items-baseline border-t border-zinc-800 pt-2.5">
+              <div className="text-xs text-zinc-400">
+                <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
+                  월 차액
+                </span>
+                <span className={`font-mono ${deltaTone}`}>
+                  {delta == null
+                    ? "n/a"
+                    : `${delta > 0 ? "+" : ""}$${fmtDecimal(delta, 2)} / month`}
+                </span>
+              </div>
+              <div className="text-[10px] text-zinc-500 font-mono">
+                {result.region && <span>{result.region}</span>}
+              </div>
+            </div>
+
+            {result.status === "partial" && (
+              <div className="flex items-center gap-2 text-[10px]">
+                <span className="px-1.5 py-0.5 border text-amber-300 border-amber-500/40 bg-amber-500/10">
+                  부분 추정 — 일부 단가 미조회
+                </span>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-zinc-500 font-mono border-t border-zinc-800 pt-2.5">
+              <span
+                className={`px-1.5 py-0.5 border ${
+                  result.pricing_source === "aws_pricing_api"
+                    ? "text-emerald-300 border-emerald-500/40 bg-emerald-500/5"
+                    : "text-amber-300 border-amber-500/40 bg-amber-500/5"
+                }`}
+              >
+                {result.pricing_source === "aws_pricing_api"
+                  ? "Pricing API"
+                  : "fallback"}
+              </span>
+              {result.current.price_per_hour != null && (
+                <span>
+                  현재 ${fmtDecimal(result.current.price_per_hour, 4)}/hr·node
+                </span>
+              )}
+              {result.proposed.price_per_hour != null &&
+                result.proposed.node_type !== result.current.node_type && (
+                  <span>
+                    제안 ${fmtDecimal(result.proposed.price_per_hour, 4)}
+                    /hr·node
+                  </span>
+                )}
+            </div>
+
+            {result.note && (
+              <div className="text-[11px] text-zinc-500">{result.note}</div>
+            )}
+          </div>
+        )}
+
+        {!result && !loading && !err && (
+          <div className="p-6 text-zinc-500 text-sm">
+            노드 타입 또는 노드 수를 입력하고{" "}
+            <span className="text-amber-300">비용 추정</span>을 누르세요. 입력
+            없이 실행하면 현재 구성 기준 월 비용을 조회합니다.
           </div>
         )}
       </div>
