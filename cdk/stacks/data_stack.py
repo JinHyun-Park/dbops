@@ -215,6 +215,16 @@ class DataStack(cdk.Stack):
             actions=["dynamodb:ListTables", "dynamodb:DescribeTable"],
             resources=["*"],
         ))
+        # ElastiCache forward-compat: the EC-1 collector uses resource_name from
+        # the registry (no describe calls at metric-pull time), but grant describe
+        # here so future collectors can enumerate clusters without an IAM change.
+        self.etl_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "elasticache:DescribeReplicationGroups",
+                "elasticache:DescribeCacheClusters",
+            ],
+            resources=["*"],
+        ))
 
         events.Rule(
             self, "ETLSchedule",

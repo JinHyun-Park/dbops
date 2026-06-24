@@ -10,6 +10,7 @@ from collectors.docdb_cw_collector import collect_docdb_metrics
 from collectors.docdb_findings import collect_docdb_findings
 from collectors.dynamodb_cw_collector import collect_dynamodb_metrics
 from collectors.dynamodb_findings import collect_dynamodb_findings
+from collectors.elasticache_cw_collector import collect_elasticache_metrics
 from collectors.engine_family import engine_family
 from collectors.meta_collector import collect_cluster_meta
 from collectors.mysql_activity import collect_mysql_activity
@@ -129,6 +130,23 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         except Exception as e:
             result["documentdb_findings_error"] = str(e)
             print(f"[{cluster_id}] documentdb findings error: {e}")
+        return result
+
+    # ------------------------------------------------------------------
+    # ElastiCache path — no RDS/PI/SQL/findings calls
+    # ------------------------------------------------------------------
+    if family == "elasticache":
+        cw = get_client("cloudwatch", region)
+        ec = get_client("elasticache", region)
+        resource_name = resource.get("resource_name", cluster_id)
+        engine = resource.get("engine", "redis")
+        try:
+            result["elasticache"] = collect_elasticache_metrics(
+                cw, ec, cache_execute, cluster_id, resource_name, engine, region, account_id,
+            )
+        except Exception as e:
+            result["elasticache_error"] = str(e)
+            print(f"[{cluster_id}] elasticache error: {e}")
         return result
 
     # ------------------------------------------------------------------
