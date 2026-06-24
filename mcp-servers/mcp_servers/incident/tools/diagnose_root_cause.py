@@ -174,6 +174,7 @@ def diagnose_root_cause_impl(
         "blocking": 0,
         "metric_spikes": 0,
         "slow_queries": 0,
+        "elasticache_signals": 0,
     }
     # Sources whose cache table was unavailable (missing/errored). Surfaced
     # separately so a DBA can tell "0 because no rows" from "0 because the

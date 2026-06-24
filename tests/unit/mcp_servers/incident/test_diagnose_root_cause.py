@@ -126,6 +126,7 @@ def test_ranks_schema_change_event_and_metric_spike():
         "blocking": 0,
         "metric_spikes": 1,
         "slow_queries": 1,
+        "elasticache_signals": 0,
     }
 
 
@@ -143,6 +144,7 @@ def test_empty_cache_returns_no_candidates():
         "blocking": 0,
         "metric_spikes": 0,
         "slow_queries": 0,
+        "elasticache_signals": 0,
     }
 
 

@@ -14,7 +14,6 @@ from mcp_servers.incident.tools.diagnose_root_cause import (
     BASE_WEIGHTS,
     _collect_elasticache_signals,
 )
-from mcp_servers.shared.models import QueryResult
 
 # Anchor as a proper datetime (matching how diagnose_root_cause_impl calls collectors)
 _ANCHOR = datetime(2026, 6, 24, 0, 8, 0, tzinfo=timezone.utc)
