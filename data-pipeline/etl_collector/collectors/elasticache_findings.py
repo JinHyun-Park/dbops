@@ -64,16 +64,28 @@ def collect_elasticache_findings(
     ts = snapshot_ts or datetime.now(timezone.utc).isoformat()
     errors = []
 
-    # engine → hit-rate metric keys + which rules apply
+    # engine + node_type → hit-rate metric keys + which rules apply
     engine = "redis"
+    node_type = ""
     try:
         meta = _execute(
             rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
-            "SELECT engine FROM cluster_meta WHERE cluster_id = :cid",
+            "SELECT engine, resource_details FROM cluster_meta WHERE cluster_id = :cid",
             {"cid": cluster_id},
         )
-        if meta and meta[0].get("engine"):
-            engine = str(meta[0]["engine"]).lower()
+        if meta:
+            row = meta[0]
+            if row.get("engine"):
+                engine = str(row["engine"]).lower()
+            rd = row.get("resource_details")
+            if rd is not None:
+                if isinstance(rd, str):
+                    try:
+                        rd = json.loads(rd)
+                    except Exception:
+                        rd = {}
+                if isinstance(rd, dict):
+                    node_type = rd.get("node_type") or ""
     except Exception as e:
         errors.append(f"meta: {e}")
     is_memcached = engine == "memcached"
@@ -190,6 +202,35 @@ def collect_elasticache_findings(
             f"connections > {int(CONN_SURGE_WARNING)}",
             f"최근 {window_hours}시간 연결 수 peak이 {int(conn)}개입니다(Redis 한도 65000). connection pooling·클라이언트 누수 점검을 권장합니다.",
             {"max_curr_connections": conn, "window_hours": window_hours})
+
+    # Rule 7: cost right-sizing (oversized) — 7-day CPU, skip burstable nodes
+    if node_type and not node_type.startswith("cache.t"):
+        try:
+            cpu_rows = _execute(
+                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
+                "SELECT AVG(value) AS avg_cpu, "
+                "  PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value) AS p95_cpu, "
+                "  COUNT(*) AS n "
+                "FROM metric_snapshots "
+                "WHERE cluster_id = :cid AND metric_type IN ('engine_cpu','cache_cpu') "
+                "  AND ts > NOW() - INTERVAL '7 days' "
+                "  AND (dimensions IS NULL OR dimensions::text = '{}')",
+                {"cid": cluster_id},
+            )
+            if cpu_rows:
+                cr = cpu_rows[0]
+                avg_cpu = cr.get("avg_cpu")
+                p95_cpu = cr.get("p95_cpu")
+                n = int(cr.get("n") or 0)
+                if avg_cpu is not None and p95_cpu is not None and n >= 20 \
+                   and float(avg_cpu) < 30.0 and float(p95_cpu) < 60.0:
+                    add("elasticache_cost_oversized", "info", "ElastiCache Oversized (cost)",
+                        f"7일 CPU 평균 {float(avg_cpu):.1f}% / p95 {float(p95_cpu):.1f}%",
+                        "avg < 30% & p95 < 60% → 다운사이즈 검토",
+                        f"{node_type}의 7일 CPU 평균이 {float(avg_cpu):.1f}%입니다 — 한 단계 작은 노드 타입을 검토하세요(보통 월 30-50% 절감). 축소 후 1주 관찰 권장.",
+                        {"node_type": node_type, "avg_cpu": float(avg_cpu), "p95_cpu": float(p95_cpu), "window_days": 7})
+        except Exception as e:
+            errors.append(f"cost_oversized: {e}")
 
     for f in findings:
         _execute(

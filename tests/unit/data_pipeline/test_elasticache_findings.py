@@ -9,23 +9,40 @@ mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(mod)
 
 
-def _fake_rds(meta_engine="redis", agg=None):
-    """Mock rds_data so the FIRST execute_statement (cluster_meta engine) returns
-    the engine, the SECOND (metric aggregation) returns agg, and INSERTs record."""
+def _fake_rds(meta_engine="redis", agg=None, node_type=None, cpu7d=None):
+    """Mock rds_data so:
+    - cluster_meta SELECT returns engine + resource_details (with node_type if given)
+    - 7-day CPU aggregation (PERCENTILE_CONT / INTERVAL '7 days') returns cpu7d if given
+    - the 1-hour metric aggregation returns agg
+    - INSERTs into cluster_health_findings are recorded
+    """
     rds = MagicMock()
     inserts = []
-    calls = {"n": 0}
     agg = agg or {}
 
     def _exec(**kwargs):
         sql = kwargs.get("sql", "")
         if "FROM cluster_meta" in sql:
-            return {"columnMetadata": [{"name": "engine"}],
-                    "records": [[{"stringValue": meta_engine}]]}
+            import json as _json
+            rd_str = _json.dumps({"node_type": node_type}) if node_type is not None else "{}"
+            return {
+                "columnMetadata": [{"name": "engine"}, {"name": "resource_details"}],
+                "records": [[{"stringValue": meta_engine}, {"stringValue": rd_str}]],
+            }
         if "INSERT INTO cluster_health_findings" in sql:
             inserts.append({p["name"]: list(p["value"].values())[0] for p in kwargs.get("parameters", [])})
             return {"columnMetadata": [], "records": []}
-        # aggregation query
+        # 7-day CPU query (Rule 7) — distinguish by PERCENTILE_CONT
+        if "PERCENTILE_CONT" in sql and cpu7d is not None:
+            c7 = cpu7d
+            cols7 = ["avg_cpu", "p95_cpu", "n"]
+            rec7 = [
+                {"doubleValue": float(c7["avg_cpu"])},
+                {"doubleValue": float(c7["p95_cpu"])},
+                {"longValue": int(c7["n"])},
+            ]
+            return {"columnMetadata": [{"name": c} for c in cols7], "records": [rec7]}
+        # 1-hour aggregation query
         cols = list(agg.keys())
         rec = [({"isNull": True} if agg[c] is None else {"doubleValue": float(agg[c])}) for c in cols]
         return {"columnMetadata": [{"name": c} for c in cols], "records": [rec]}
@@ -113,3 +130,39 @@ def test_connection_surge_warning():
     _run(rds)
     types = {i["check_type"]: i["severity"] for i in rds._inserts}
     assert types.get("elasticache_connection_surge") == "warning"
+
+
+# Rule 7: cost oversized (7-day CPU right-sizing)
+
+_HEALTHY_AGG = {
+    "sum_evictions": 0, "sum_cache_hits": 1000, "sum_cache_misses": 0,
+    "max_memory_pct": 10, "max_replication_lag": 0, "max_engine_cpu": 5,
+    "max_cache_cpu": 5, "max_curr_connections": 10, "hit_samples": 30,
+}
+
+
+def test_cost_oversized_emitted_for_low_cpu_non_burstable():
+    """avg 12 / p95 25 / 30 samples on cache.r7g.large → elasticache_cost_oversized (info)."""
+    rds = _fake_rds("redis", _HEALTHY_AGG, node_type="cache.r7g.large",
+                    cpu7d={"avg_cpu": 12.0, "p95_cpu": 25.0, "n": 30})
+    res = _run(rds)
+    types = {i["check_type"]: i["severity"] for i in rds._inserts}
+    assert types.get("elasticache_cost_oversized") == "info"
+
+
+def test_cost_oversized_not_emitted_for_high_cpu():
+    """avg 55 / p95 70 → threshold not met, no finding."""
+    rds = _fake_rds("redis", _HEALTHY_AGG, node_type="cache.r7g.large",
+                    cpu7d={"avg_cpu": 55.0, "p95_cpu": 70.0, "n": 30})
+    _run(rds)
+    types = {i["check_type"] for i in rds._inserts}
+    assert "elasticache_cost_oversized" not in types
+
+
+def test_cost_oversized_skipped_for_burstable_node():
+    """cache.t4g.micro is burstable → rule skipped regardless of CPU."""
+    rds = _fake_rds("redis", _HEALTHY_AGG, node_type="cache.t4g.micro",
+                    cpu7d={"avg_cpu": 5.0, "p95_cpu": 10.0, "n": 30})
+    _run(rds)
+    types = {i["check_type"] for i in rds._inserts}
+    assert "elasticache_cost_oversized" not in types
