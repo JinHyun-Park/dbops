@@ -40,12 +40,14 @@ def _tokenize(symptoms: str) -> list[str]:
     return keywords
 
 
-def _search_events(cache: CacheClient, keywords: list[str], cluster_id: str = None) -> list[dict]:
-    """Return matching warning/critical event_log rows.
+def _search_events(cache: CacheClient, keywords: list[str], cluster_id: str) -> list[dict]:
+    """Return matching warning/critical event_log rows for ONE cluster.
 
-    Scopes to a single cluster when cluster_id is given, otherwise searches
-    fleet-wide. Each row is scored by how many keywords its message matched
-    (match_count) and ordered by score then recency.
+    ALWAYS cluster-scoped — there is no fleet-wide mode (a fleet search would
+    surface other teams' incident events to a caller who can't see those
+    clusters; this MCP tool has no caller identity to scope safely). cluster_id
+    is required; each row is scored by keyword matches (match_count) and ordered
+    by score then recency.
     """
     params: dict = {}
     like_clauses = []
@@ -62,10 +64,9 @@ def _search_events(cache: CacheClient, keywords: list[str], cluster_id: str = No
     conditions = [
         "severity IN ('warning', 'critical', 'error')",
         f"({or_block})",
+        "cluster_id = :cluster_id",
     ]
-    if cluster_id:
-        conditions.append("cluster_id = :cluster_id")
-        params["cluster_id"] = cluster_id
+    params["cluster_id"] = cluster_id
 
     sql = (
         f"SELECT cluster_id, event_time, event_type, severity, source, message, "
@@ -148,14 +149,13 @@ def find_similar_incidents_impl(
     # not be allowed to see those clusters, and this MCP tool has no caller
     # identity to scope a fleet search safely. No local history => empty events.
     event_rows = _search_events(cache, keywords, cluster_id=cluster_id)
-    scope = "cluster"
 
     for row in event_rows:
         message = row.get("message") or ""
         similar.append(
             {
                 "kind": "event",
-                "scope": scope if row.get("cluster_id") != cluster_id else "cluster",
+                "scope": "cluster",  # always cluster-scoped (no fleet fallback)
                 "cluster_id": row.get("cluster_id"),
                 "event_time": row.get("event_time"),
                 "event_type": row.get("event_type"),
@@ -196,7 +196,7 @@ def find_similar_incidents_impl(
     else:
         note = (
             f"Found {len(similar)} match(es) for keywords {keywords} "
-            f"(event scope: {scope})."
+            f"(event scope: cluster)."
         )
 
     return {
