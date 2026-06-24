@@ -16,6 +16,16 @@ try:
 except ImportError:
     from prompts.system_prompt import build_system_prompt
 
+try:
+    import agent.tenancy as tenancy
+except ImportError:
+    import tenancy  # type: ignore
+
+try:
+    from agent.tool_gate import ClusterVisibilityGate
+except ImportError:
+    from tool_gate import ClusterVisibilityGate  # type: ignore
+
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
@@ -278,6 +288,13 @@ async def invoke(payload, context):
     prompt = payload.get("prompt") if isinstance(payload, dict) else str(payload)
     requested_model = _resolve_model_id(payload)
 
+    headers = getattr(context, "request_headers", None) or {}
+    try:
+        visible = tenancy.visible_cluster_ids_for(headers)
+    except Exception as e:
+        log.warning(f"tenancy resolve failed: {type(e).__name__}")
+        visible = None  # fail-open -- never break chat
+
     # First attempt: requested model. If Bedrock rejects with ValidationException,
     # we silently fall back to the env default so a stale frontend never bricks chat.
     model_id = requested_model
@@ -328,7 +345,12 @@ async def invoke(payload, context):
         if knowledge_tools:
             log.info(f"Registered {len(knowledge_tools)} AWS Knowledge doc tools")
 
-        agent = Agent(model=model, system_prompt=build_system_prompt(_load_context_files()), tools=tools)
+        agent = Agent(
+            model=model,
+            system_prompt=build_system_prompt(_load_context_files(), visible_clusters=visible),
+            tools=tools,
+            hooks=[ClusterVisibilityGate(visible)],
+        )
         last_usage = None
         async for event in agent.stream_async(prompt):
             if isinstance(event, dict) and "data" in event and isinstance(event["data"], str):

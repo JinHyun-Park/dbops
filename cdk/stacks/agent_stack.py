@@ -556,6 +556,13 @@ class AgentStack(cdk.Stack):
                 # grant_context_files_read() is for Lambdas (calls fn.add_environment);
                 # the Runtime env is set here directly, and the role grant is below.
                 "CONTEXT_FILES_TABLE": foundation.context_files_table.table_name,
+                # Tenancy: cluster registry + team membership tables for per-caller
+                # visible-cluster resolution. The Runtime resolves identity from the
+                # inbound Cognito Authorization header (forwarded by AgentCore) and
+                # restricts tool calls to the caller's visible cluster set.
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
+                "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
             },
             network_configuration=agentcore.RuntimeNetworkConfiguration.using_public_network(),
             authorizer_configuration=agentcore.RuntimeAuthorizerConfiguration.using_cognito(
@@ -567,6 +574,9 @@ class AgentStack(cdk.Stack):
         # (grant_context_files_read() is for Lambda fns — it calls fn.add_environment
         # which is unsupported on the Runtime construct. Set env above; grant role here.)
         foundation.context_files_table.grant_read_data(self.runtime.role)
+        # Tenancy: allow the Runtime to read cluster registry + team membership.
+        foundation.clusters_table.grant_read_data(self.runtime.role)
+        foundation.team_members_table.grant_read_data(self.runtime.role)
 
         # ===== REST API =====
 
