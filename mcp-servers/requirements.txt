@@ -6,6 +6,6 @@
 # - pymemcache for Memcached inspection in ElastiCache live deep-read
 # The other MCP servers share the same asset and get these too (harmless, unused).
 # pymongo pin matches docdb_mongo_collector.
-pymongo>=4
+pymongo>=4.17.0
 redis>=5
 pymemcache>=4
