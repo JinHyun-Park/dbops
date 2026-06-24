@@ -5,6 +5,22 @@ import re
 import traceback
 
 import boto3
+import tenancy
+
+
+def _cluster_item(cluster_id: str) -> dict:
+    """Fetch {cluster_id, team_id} from the clusters registry for a single
+    cluster. Returns {} on miss or infra error (caller's cluster_visible treats
+    missing team_id as default-open)."""
+    table_name = os.environ.get("CLUSTERS_TABLE", "")
+    if not cluster_id or not table_name:
+        return {}
+    try:
+        table = boto3.resource("dynamodb").Table(table_name)
+        return table.get_item(Key={"cluster_id": cluster_id}).get("Item") or {}
+    except Exception as e:
+        print(f"[alerts] cluster lookup failed for {cluster_id}: {e}")
+        return {}
 
 
 def _decode_jwt_payload(token: str) -> dict:
@@ -604,10 +620,27 @@ def lambda_handler(event, context):
         # /api/alerts/{id}/impact — operational context around the rule's
         # most recent firing. Read-only; no admin gate needed.
         if method == "GET" and raw_path.rstrip("/").endswith("/impact"):
-            return _rule_impact(query, path_params.get("id"))
+            rule_id = path_params.get("id")
+            try:
+                rule_id_int = int(rule_id)
+            except (TypeError, ValueError):
+                return _response(400, {"error": "rule_id must be integer"})
+            rule_rows = query(
+                "SELECT id, cluster_id FROM alert_rules WHERE id = :id",
+                {"id": rule_id_int},
+            )
+            if rule_rows:
+                rule_cluster_id = rule_rows[0].get("cluster_id") or ""
+                if not tenancy.cluster_visible(event, _cluster_item(rule_cluster_id)):
+                    return _response(403, {"error": "이 클러스터에 대한 접근 권한이 없습니다."})
+            return _rule_impact(query, rule_id)
 
         if method == "GET":
-            return _response(200, _list_rules(query, qs.get("cluster_id")))
+            result = _list_rules(query, qs.get("cluster_id"))
+            visible = tenancy.visible_set_from_registry(event)
+            if visible is not None:
+                result["rules"] = [r for r in result.get("rules", []) if r.get("cluster_id") in visible]
+            return _response(200, result)
         if method == "POST":
             forbid = _forbid_viewer(event)
             if forbid:

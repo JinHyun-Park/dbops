@@ -6,6 +6,8 @@ _COPIES = [
     _ROOT / "api" / "dashboard" / "tenancy.py",
     _ROOT / "api" / "reports" / "tenancy.py",
     _ROOT / "api" / "saved_queries" / "tenancy.py",
+    _ROOT / "api" / "approvals" / "tenancy.py",
+    _ROOT / "api" / "alerts" / "tenancy.py",
 ]
 
 

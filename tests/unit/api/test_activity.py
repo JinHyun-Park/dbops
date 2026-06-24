@@ -3,9 +3,14 @@ through the approvals lambda."""
 
 import importlib.util
 import json
+import sys
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+_APPROVALS_DIR = str(Path(__file__).resolve().parents[3] / "api" / "approvals")
+if _APPROVALS_DIR not in sys.path:
+    sys.path.insert(0, _APPROVALS_DIR)
 
 _PATH = Path(__file__).resolve().parents[3] / "api" / "approvals" / "handler.py"
 _spec = importlib.util.spec_from_file_location("approvals_handler", _PATH)

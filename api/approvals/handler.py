@@ -5,7 +5,23 @@ import uuid
 from datetime import datetime, timezone
 
 import boto3
+import tenancy
 from botocore.exceptions import ClientError
+
+
+def _cluster_item(cluster_id: str) -> dict:
+    """Fetch {cluster_id, team_id} from the clusters registry for a single
+    cluster. Returns {} on miss or infra error (caller's cluster_visible treats
+    missing team_id as default-open)."""
+    table_name = os.environ.get("CLUSTERS_TABLE", "")
+    if not cluster_id or not table_name:
+        return {}
+    try:
+        table = boto3.resource("dynamodb").Table(table_name)
+        return table.get_item(Key={"cluster_id": cluster_id}).get("Item") or {}
+    except Exception as e:
+        print(f"[approvals] cluster lookup failed for {cluster_id}: {e}")
+        return {}
 
 
 def _decode_jwt_payload(token: str) -> dict:
@@ -269,7 +285,11 @@ def lambda_handler(event, context):
                     "body": json.dumps({"items": compact, "count": len(compact),
                                         "next_cursor": next_cursor}, default=str)}
 
-        items = sorted(_scan_all(table, **scan_kwargs), key=_created_ms, reverse=True)[:limit]
+        all_items = _scan_all(table, **scan_kwargs)
+        visible = tenancy.visible_set_from_registry(event)
+        if visible is not None:
+            all_items = [it for it in all_items if it.get("cluster_id") in visible]
+        items = sorted(all_items, key=_created_ms, reverse=True)[:limit]
         compact = _compact_activity(items)
         return {
             "statusCode": 200,
@@ -294,6 +314,9 @@ def lambda_handler(event, context):
                 FilterExpression="approval_status = :s",
                 ExpressionAttributeValues={":s": status_filter},
             )
+        visible = tenancy.visible_set_from_registry(event)
+        if visible is not None:
+            rows = [r for r in rows if r.get("cluster_id") in visible]
         items = sorted(rows, key=_created_ms, reverse=True)
         return {"statusCode": 200, "headers": headers, "body": json.dumps(items, default=str)}
 
@@ -307,6 +330,13 @@ def lambda_handler(event, context):
                 ExpressionAttributeValues={":aid": approval_id},
             )
             item = items[0] if items else None
+        if item:
+            if not tenancy.cluster_visible(event, _cluster_item(item.get("cluster_id", ""))):
+                return {
+                    "statusCode": 403,
+                    "headers": headers,
+                    "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."}),
+                }
         return {
             "statusCode": 200 if item else 404,
             "headers": headers,

@@ -843,10 +843,13 @@ class AgentStack(cdk.Stack):
                 # enable_data_api 승인-즉시-실행: 레지스트리에서 cluster_arn을
                 # 찾아 EnableHttpEndpoint를 호출한다.
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
+                "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
             },
         )
         foundation.approvals_table.grant_read_write_data(approvals_lambda)
         foundation.clusters_table.grant_read_data(approvals_lambda)
+        foundation.team_members_table.grant_read_data(approvals_lambda)
         foundation.grant_approval_policy_read(approvals_lambda)  # designated-approver enforcement
         # 의도적으로 rds:EnableHttpEndpoint 단일 액션만 — ModifyDBCluster를
         # 주면 마스터 패스워드 변경·삭제 보호 해제까지 가능한 광범위 권한이
@@ -1066,11 +1069,16 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
                 "ALERT_TOPIC_ARN": data.alert_topic.topic_arn,
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
+                "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
             },
         )
         data.cache_db.secret.grant_read(alerts_lambda)
         data.cache_db.grant_data_api_access(alerts_lambda)
         data.alert_topic.grant_publish(alerts_lambda)
+        foundation.clusters_table.grant_read_data(alerts_lambda)
+        foundation.team_members_table.grant_read_data(alerts_lambda)
         alerts_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=["sns:Subscribe", "sns:Unsubscribe", "sns:ListSubscriptionsByTopic"],
             resources=[data.alert_topic.topic_arn, "*"],

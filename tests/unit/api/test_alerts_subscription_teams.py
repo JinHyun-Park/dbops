@@ -15,6 +15,10 @@ from unittest.mock import MagicMock
 ROOT = Path(__file__).resolve().parents[3]
 HANDLER_PATH = ROOT / "api" / "alerts" / "handler.py"
 
+_ALERTS_DIR = str(ROOT / "api" / "alerts")
+if _ALERTS_DIR not in sys.path:
+    sys.path.insert(0, _ALERTS_DIR)
+
 
 def _load(module_name="api_alerts_handler_teams"):
     spec = importlib.util.spec_from_file_location(module_name, HANDLER_PATH)
