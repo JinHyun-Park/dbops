@@ -28,6 +28,7 @@ def test_resize_returns_cost():
         new_node_type="cache.r7g.large", new_node_count=1)
     assert r["status"] == "ok"
     assert r["proposed_monthly"] == 219.0
+    assert r["cluster_id"] == "my-redis"
 
 
 def test_resize_missing_cluster_id():

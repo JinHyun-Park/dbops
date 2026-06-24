@@ -127,3 +127,36 @@ def test_allows_when_no_cluster_id_default_permit():
     )
     assert body.get("status") != "unsupported_engine"
     impl.assert_called_once()
+
+
+def test_elasticache_positive_gate_refuses_none_family():
+    # elasticache_cost_simulation is a POSITIVE gate: only elasticache passes.
+    # A None family (missing/error → _resolve_family=None) → .get(None,{}) → False → unsupported_engine.
+    body, impl = _run(
+        "simulate_elasticache_node_resize", {"cluster_id": "not-registered"},
+        execute_return=[],  # empty rows → _resolve_family returns None
+    )
+    assert body["status"] == "unsupported_engine"
+    assert body["engine_family"] is None
+    impl.assert_not_called()
+
+
+def test_elasticache_positive_gate_refuses_relational():
+    # elasticache_cost_simulation POSITIVE gate: a resolved Aurora/MySQL cluster is refused.
+    body, impl = _run(
+        "simulate_elasticache_node_resize", {"cluster_id": "prod-aurora"},
+        execute_return=[{"engine": "aurora-postgresql"}],
+    )
+    assert body["status"] == "unsupported_engine"
+    assert body["engine_family"] == "relational"
+    impl.assert_not_called()
+
+
+def test_elasticache_positive_gate_allows_elasticache():
+    # elasticache_cost_simulation POSITIVE gate: a resolved elasticache cluster is allowed.
+    body, impl = _run(
+        "simulate_elasticache_node_resize", {"cluster_id": "my-redis"},
+        execute_return=[{"engine": "redis"}],
+    )
+    assert body.get("status") != "unsupported_engine"
+    impl.assert_called_once()
