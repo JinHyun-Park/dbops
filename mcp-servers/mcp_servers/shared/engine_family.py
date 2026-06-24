@@ -3,6 +3,8 @@
 No shared Lambda layer spans api/ · data-pipeline/ · mcp-servers/, so this file
 is duplicated VERBATIM in each package that needs it:
   - api/clusters/engine_family.py
+  - api/dashboard/engine_family.py
+  - data-pipeline/etl_collector/collectors/engine_family.py
   - mcp-servers/mcp_servers/shared/engine_family.py
 Keep all copies in sync. The frontend mirror lives in frontend/src/lib/engine.ts.
 """
