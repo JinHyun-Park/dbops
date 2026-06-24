@@ -48,6 +48,9 @@ def _is_admin(event):
     groups = claims.get("cognito:groups") or []
     if not isinstance(groups, list):
         return False
+    # Empty groups [] is treated as implicit admin — intentional single-admin-deploy
+    # fallback, mirroring api/admin_users/handler.py exactly. This also gates all
+    # team write operations (member add/remove, cluster assign/unassign).
     if groups and ADMIN_GROUP not in groups:
         return False
     return True

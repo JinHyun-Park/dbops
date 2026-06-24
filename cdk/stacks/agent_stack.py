@@ -1775,17 +1775,26 @@ class AgentStack(cdk.Stack):
         foundation.clusters_table.grant_read_write_data(admin_teams_lambda)
 
         _admin_teams_int = integrations.HttpLambdaIntegration("AdminTeamsIntegration", admin_teams_lambda)
-        for _p in (
-            "/api/admin/teams",
-            "/api/admin/teams/{team_id}",
-            "/api/admin/teams/{team_id}/members/{username}",
-            "/api/admin/teams/{team_id}/clusters/{cluster_id}",
-        ):
-            self.api.add_routes(
-                path=_p,
-                methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE],
-                integration=_admin_teams_int,
-            )
+        self.api.add_routes(
+            path="/api/admin/teams",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE],
+            integration=_admin_teams_int,
+        )
+        self.api.add_routes(
+            path="/api/admin/teams/{team_id}",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE],
+            integration=_admin_teams_int,
+        )
+        self.api.add_routes(
+            path="/api/admin/teams/{team_id}/members/{username}",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE],
+            integration=_admin_teams_int,
+        )
+        self.api.add_routes(
+            path="/api/admin/teams/{team_id}/clusters/{cluster_id}",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE],
+            integration=_admin_teams_int,
+        )
         # Runbooks — AI-generated playbooks
         runbooks_integration = integrations.HttpLambdaIntegration(
             "RunbooksIntegration", runbooks_lambda
