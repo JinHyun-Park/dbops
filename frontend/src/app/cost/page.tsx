@@ -77,9 +77,28 @@ interface RdsCostData {
   discovered_services?: string[];
 }
 
+interface ElastiCacheCostData {
+  env: string;
+  view: "elasticache";
+  range_days: number;
+  start: string;
+  end: string;
+  total: number;
+  currency: string;
+  daily: { date: string; amount: number }[];
+  by_usage_type: { usage_type: string; amount: number; quantity: number }[];
+  per_cluster: RdsClusterCost[];
+  per_cluster_available: boolean;
+  per_cluster_tag?: string | null;
+  per_cluster_note?: string | null;
+  anomalies?: CostAnomaly[];
+  no_data_reason?: string | null;
+  discovered_services?: string[];
+}
+
 const RANGES = [7, 14, 30, 60, 90];
 
-type CostTab = "bedrock" | "rds" | "platform" | "tokens";
+type CostTab = "bedrock" | "rds" | "platform" | "tokens" | "elasticache";
 
 interface PlatformServiceCost {
   service: string;
@@ -126,6 +145,15 @@ function platformServiceLabel(svc: string): string {
 // remaining segment so the table reads cleanly while keeping the raw value
 // visible underneath (matching the Bedrock breakdown's two-line cell).
 function rdsUsageLabel(ut: string): string {
+  const parts = ut.split(":");
+  const head = (parts[0] || ut).replace(/^[A-Z0-9]+-/, "");
+  const tail = parts.slice(1).join(":");
+  return tail ? `${head} · ${tail}` : head;
+}
+
+// ElastiCache usage-type labels are like "APN1-NodeUsage:cache.r6g.large" or
+// "APN1-ElastiCache:DataStorage" — same strip-prefix pattern as RDS.
+function elasticacheUsageLabel(ut: string): string {
   const parts = ut.split(":");
   const head = (parts[0] || ut).replace(/^[A-Z0-9]+-/, "");
   const tail = parts.slice(1).join(":");
@@ -183,7 +211,9 @@ export default function CostPage() {
               ? "DBOps 플랫폼 운영 비용"
               : tab === "tokens"
                 ? "Bedrock 토큰 사용량"
-                : "Bedrock 비용"
+                : tab === "elasticache"
+                  ? "ElastiCache 비용"
+                  : "Bedrock 비용"
         }
         description={
           tab === "rds"
@@ -192,7 +222,9 @@ export default function CostPage() {
               ? "DBOps 자체를 운영하는 데 드는 전체 비용 — Application=DBOps 태그가 붙은 모든 리소스(Lambda·캐시 Aurora·DynamoDB·CloudFront·AgentCore 등)를 서비스별로 분해합니다. 모니터링 대상 고객 DB 클러스터는 포함되지 않습니다."
               : tab === "tokens"
                 ? "계정 전체 Bedrock 토큰 사용량(모델별) — CloudWatch AWS/Bedrock 메트릭 기반. 태그 필터 불가로 계정 전체 집계입니다."
-                : "DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다."
+                : tab === "elasticache"
+                  ? "계정의 ElastiCache 비용 — Cost Explorer로 사용 유형(노드 시간·데이터 스토리지·I/O)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다."
+                  : "DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다."
         }
         actions={
           <div className="flex items-center gap-1">
@@ -221,6 +253,7 @@ export default function CostPage() {
           [
             { id: "bedrock", label: "Bedrock" },
             { id: "rds", label: "Aurora / RDS" },
+            { id: "elasticache", label: "ElastiCache" },
             { id: "platform", label: "DBOps 플랫폼" },
             { id: "tokens", label: "토큰" },
           ] as { id: CostTab; label: string }[]
@@ -241,6 +274,8 @@ export default function CostPage() {
 
       {isRds ? (
         <RdsCostView days={days} colors={colors} />
+      ) : tab === "elasticache" ? (
+        <ElastiCacheCostView days={days} colors={colors} />
       ) : tab === "platform" ? (
         <PlatformCostView days={days} colors={colors} />
       ) : tab === "tokens" ? (
@@ -971,6 +1006,324 @@ function RdsCostView({
           </p>
           <p className="mt-2">
             클러스터별 분리는 Aurora 클러스터가 DBOps 소유가 아니므로 자동
+            태깅되지 않습니다. AWS Billing console에서 cost-allocation 태그(예{" "}
+            <code className="mx-1 px-1 py-0.5 bg-zinc-800 text-zinc-300 text-[11px] font-mono">
+              dbops:cluster
+            </code>
+            )를 활성화하고 클러스터에 부여하면 ~24시간 후부터 클러스터별 비용이
+            채워집니다. 활성화 이전 비용은 소급 적용되지 않으며, resource-level
+            CE 데이터(추가 과금)는 사용하지 않습니다.
+          </p>
+        </div>
+      </Section>
+    </>
+  );
+}
+
+function ElastiCacheCostView({
+  days,
+  colors,
+}: {
+  days: number;
+  colors: ReturnType<typeof useChartColors>;
+}) {
+  const [data, setData] = useState<ElastiCacheCostData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErr(null);
+    (async () => {
+      try {
+        const url = await apiUrl(`/api/cost?view=elasticache&days=${days}`);
+        const res = await authedFetch(url);
+        if (!res.ok)
+          throw new Error(`ElastiCache cost fetch failed: ${res.status}`);
+        const d = (await res.json()) as ElastiCacheCostData;
+        if (!cancelled) setData(d);
+      } catch (e) {
+        if (!cancelled) setErr((e as Error).message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [days]);
+
+  const dailyAvg =
+    data && data.daily.length > 0 ? data.total / data.daily.length : 0;
+  const monthlyProjection = dailyAvg * 30;
+
+  return (
+    <>
+      {err && (
+        <div className="mb-6 px-4 py-3 border border-rose-500/30 bg-rose-500/10 text-rose-300 text-sm">
+          {err}
+        </div>
+      )}
+
+      {data?.no_data_reason && (!data || data.daily.length === 0) ? (
+        <EmptyState
+          eyebrow="데이터 없음"
+          title="ElastiCache 비용 데이터가 없습니다"
+          description={
+            <>
+              {data.no_data_reason}
+              <br />
+              <span className="text-zinc-600">
+                Cost Explorer가 활성화돼 있는지 확인한 뒤 ~24h 후 다시
+                확인하세요.
+              </span>
+            </>
+          }
+          primary={{
+            href: "https://console.aws.amazon.com/cost-management/home",
+            label: "Open Cost Management",
+          }}
+        />
+      ) : (
+        <>
+          <StatRow cols={3}>
+            <Stat
+              label={`Total ${days}d`}
+              value={loading ? "···" : `$${fmtDecimal(data?.total ?? 0, 2)}`}
+              hint={`USD · ${data?.range_days || days} day window`}
+              loading={loading}
+              accent="amber"
+            />
+            <Stat
+              label="Daily average"
+              value={loading ? "···" : `$${fmtDecimal(dailyAvg, 2)}`}
+              hint="avg over window"
+              loading={loading}
+            />
+            <Stat
+              label="Monthly projection"
+              value={loading ? "···" : `$${fmtDecimal(monthlyProjection, 2)}`}
+              hint="daily avg × 30"
+              loading={loading}
+            />
+          </StatRow>
+
+          {data?.anomalies && data.anomalies.length > 0 && (
+            <AnomalyPanel anomalies={data.anomalies} />
+          )}
+
+          <Section eyebrow="추이" title="일별 ElastiCache 사용액">
+            <div className="border border-zinc-800 bg-zinc-900/50 p-4 h-72">
+              {loading ? (
+                <div className="text-zinc-500 text-sm">loading…</div>
+              ) : !data || data.daily.length === 0 ? (
+                <div className="text-zinc-500 text-sm">
+                  no spend recorded yet
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={data.daily}
+                    margin={{ top: 4, right: 12, bottom: 0, left: -10 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke={colors.grid}
+                      vertical={false}
+                    />
+                    <XAxis dataKey="date" stroke={colors.axis} fontSize={10} />
+                    <YAxis
+                      stroke={colors.axis}
+                      fontSize={10}
+                      tickFormatter={(v) => `$${(Number(v) || 0).toFixed(2)}`}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: colors.tooltipBg,
+                        border: `1px solid ${colors.tooltipBorder}`,
+                        fontSize: 12,
+                      }}
+                      labelStyle={{ color: colors.tooltipText }}
+                      formatter={(v) => [
+                        `$${(Number(v) || 0).toFixed(4)}`,
+                        "spend",
+                      ]}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="amount"
+                      stroke={colors.sky}
+                      fill={colors.sky}
+                      fillOpacity={0.2}
+                    />
+                    {(data?.anomalies ?? []).map((a) => (
+                      <ReferenceDot
+                        key={a.date}
+                        x={a.date}
+                        y={a.amount}
+                        r={5}
+                        fill={
+                          a.severity === "critical" ? colors.rose : "#fb923c"
+                        }
+                        stroke={colors.tooltipBg}
+                        strokeWidth={1.5}
+                      />
+                    ))}
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </Section>
+
+          <Section
+            eyebrow="클러스터별"
+            title="ElastiCache 클러스터별 비용"
+            description="cost-allocation 태그가 활성화된 경우에만 클러스터 단위로 분리됩니다."
+          >
+            {loading ? (
+              <div className="text-zinc-500 text-sm">loading…</div>
+            ) : data?.per_cluster_available && data.per_cluster.length > 0 ? (
+              <div className="border border-zinc-800 overflow-x-auto">
+                <table className="w-full text-sm min-w-[480px]">
+                  <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
+                    <tr>
+                      <th className="text-left px-4 py-2.5 font-medium">
+                        cluster
+                        {data.per_cluster_tag && (
+                          <span className="ml-2 text-zinc-600 normal-case">
+                            tag: {data.per_cluster_tag}
+                          </span>
+                        )}
+                      </th>
+                      <th className="text-right px-4 py-2.5 font-medium">
+                        cost
+                      </th>
+                      <th className="text-right px-4 py-2.5 font-medium">
+                        share
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {data.per_cluster.map((row, i) => {
+                      const share =
+                        data.total > 0 ? (row.amount / data.total) * 100 : 0;
+                      return (
+                        <tr
+                          key={`${row.cluster}-${i}`}
+                          className="hover:bg-zinc-900/40"
+                        >
+                          <td className="px-4 py-2 text-zinc-200 font-mono text-xs">
+                            {row.cluster}
+                          </td>
+                          <td className="px-4 py-2 text-right text-zinc-100 font-mono text-xs tabular-nums">
+                            ${fmtDecimal(row.amount, 4)}
+                          </td>
+                          <td className="px-4 py-2 text-right text-sky-300 font-mono text-xs tabular-nums">
+                            {share.toFixed(1)}%
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="border border-zinc-800 bg-zinc-900/30 p-5 text-sm text-zinc-400 leading-relaxed">
+                <div className="font-mono text-[10px] tracking-[0.2em] uppercase text-zinc-500 mb-2">
+                  per-cluster attribution unavailable
+                </div>
+                <p>
+                  {data?.per_cluster_note ||
+                    "클러스터별 비용 분리는 cost-allocation 태그(예: dbops:cluster)를 활성화하고 ElastiCache 클러스터에 부여해야 합니다."}
+                </p>
+                <a
+                  href="https://console.aws.amazon.com/billing/home#/tags"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-block mt-3 text-xs font-medium px-3 py-1.5 border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 transition-colors"
+                >
+                  Activate cost-allocation tag →
+                </a>
+              </div>
+            )}
+          </Section>
+
+          <Section eyebrow="세부 분석" title="사용 유형별 비용">
+            {loading ? (
+              <div className="text-zinc-500 text-sm">loading…</div>
+            ) : !data || data.by_usage_type.length === 0 ? (
+              <div className="text-zinc-500 text-sm border border-zinc-800 p-6">
+                no usage-type breakdown yet
+              </div>
+            ) : (
+              <div className="border border-zinc-800 overflow-x-auto">
+                <table className="w-full text-sm min-w-[560px]">
+                  <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
+                    <tr>
+                      <th className="text-left px-4 py-2.5 font-medium">
+                        usage type
+                      </th>
+                      <th className="text-right px-4 py-2.5 font-medium">
+                        quantity
+                      </th>
+                      <th className="text-right px-4 py-2.5 font-medium">
+                        cost
+                      </th>
+                      <th className="text-right px-4 py-2.5 font-medium">
+                        share
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {data.by_usage_type.map((row, i) => {
+                      const share =
+                        data.total > 0 ? (row.amount / data.total) * 100 : 0;
+                      return (
+                        <tr
+                          key={`${row.usage_type}-${i}`}
+                          className="hover:bg-zinc-900/40"
+                        >
+                          <td className="px-4 py-2 text-zinc-200 font-mono text-xs">
+                            {elasticacheUsageLabel(row.usage_type)}
+                            <div className="text-[10px] text-zinc-600">
+                              {row.usage_type}
+                            </div>
+                          </td>
+                          <td className="px-4 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums">
+                            {row.quantity.toLocaleString(undefined, {
+                              maximumFractionDigits: 0,
+                            })}
+                          </td>
+                          <td className="px-4 py-2 text-right text-zinc-100 font-mono text-xs tabular-nums">
+                            ${fmtDecimal(row.amount, 4)}
+                          </td>
+                          <td className="px-4 py-2 text-right text-amber-400 font-mono text-xs tabular-nums">
+                            {share.toFixed(1)}%
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Section>
+        </>
+      )}
+
+      <Section eyebrow="동작 원리">
+        <div className="border border-zinc-800 bg-zinc-900/30 p-5 text-sm text-zinc-400 leading-relaxed">
+          <p>
+            ElastiCache 비용은 AWS Cost Explorer GetCostAndUsage를 SERVICE =
+            <code className="mx-1 px-1 py-0.5 bg-zinc-800 text-zinc-300 text-[11px] font-mono">
+              Amazon ElastiCache
+            </code>
+            로 필터링해 집계합니다. 사용 유형(USAGE_TYPE)별 분해는 추가 비용
+            없이 바로 제공됩니다.
+          </p>
+          <p className="mt-2">
+            클러스터별 분리는 ElastiCache 클러스터가 DBOps 소유가 아니므로 자동
             태깅되지 않습니다. AWS Billing console에서 cost-allocation 태그(예{" "}
             <code className="mx-1 px-1 py-0.5 bg-zinc-800 text-zinc-300 text-[11px] font-mono">
               dbops:cluster
