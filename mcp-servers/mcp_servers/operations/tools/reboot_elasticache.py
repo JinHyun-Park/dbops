@@ -46,4 +46,6 @@ def reboot_elasticache_impl(cache, cluster_id=None, approved=False, approval_id=
     except ClientError as e:
         code = e.response.get("Error", {}).get("Code", "")
         return {"status": "error", "reason": f"reboot_cache_cluster 실패: {code or str(e)[:200]}", "cluster_id": cluster_id}
+    except Exception as e:
+        return {"status": "error", "reason": f"reboot_cache_cluster 실패: {str(e)[:200]}", "cluster_id": cluster_id}
     return {"status": "ok", "cluster_id": cluster_id, "member": member}
