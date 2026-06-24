@@ -1,4 +1,4 @@
-import { getValidAccessToken } from "./auth";
+import { getValidAccessToken, getToken } from "./auth";
 
 const QUALIFIER = "DEFAULT";
 
@@ -176,14 +176,26 @@ export function streamChat(
     })
     .then(({ url, token }) => {
       console.log("[streamChat] invoke URL", url);
+      // AgentCore's Cognito authorizer validates + consumes the Authorization
+      // header (access token) and does NOT forward it to the agent. To let the
+      // agent identify the caller for team-scoped cluster visibility, also pass
+      // the ID token (carries cognito:username + cognito:groups) in a custom
+      // header — AgentCore forwards `...-Custom-*` headers to the container,
+      // where the agent re-verifies it against Cognito's JWKS before trusting it.
+      const idToken = getToken();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream, application/json",
+        Authorization: `Bearer ${token}`,
+        "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": sessionId,
+      };
+      if (idToken) {
+        headers["X-Amzn-Bedrock-AgentCore-Runtime-Custom-Authorization"] =
+          `Bearer ${idToken}`;
+      }
       return fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream, application/json",
-          Authorization: `Bearer ${token}`,
-          "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": sessionId,
-        },
+        headers,
         body: JSON.stringify(
           modelId
             ? { prompt: promptText, model: modelId }

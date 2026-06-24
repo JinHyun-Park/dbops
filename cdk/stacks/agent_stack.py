@@ -557,12 +557,17 @@ class AgentStack(cdk.Stack):
                 # the Runtime env is set here directly, and the role grant is below.
                 "CONTEXT_FILES_TABLE": foundation.context_files_table.table_name,
                 # Tenancy: cluster registry + team membership tables for per-caller
-                # visible-cluster resolution. The Runtime resolves identity from the
-                # inbound Cognito Authorization header (forwarded by AgentCore) and
-                # restricts tool calls to the caller's visible cluster set.
+                # visible-cluster resolution. The Runtime resolves identity from a
+                # JWKS-verified Cognito ID token the frontend passes in a custom
+                # header (AgentCore's authorizer consumes the inbound Authorization
+                # header and does NOT forward it), then restricts tool calls to the
+                # caller's visible cluster set. USER_POOL_ID/CLIENT_ID are the JWKS
+                # issuer + audience for verifying that ID token.
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
                 "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
                 "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
+                "USER_POOL_ID": foundation.user_pool.user_pool_id,
+                "USER_POOL_CLIENT_ID": foundation.user_pool_client.user_pool_client_id,
             },
             network_configuration=agentcore.RuntimeNetworkConfiguration.using_public_network(),
             authorizer_configuration=agentcore.RuntimeAuthorizerConfiguration.using_cognito(
