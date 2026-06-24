@@ -180,6 +180,43 @@ def test_approvals_activity_admin_sees_all(monkeypatch):
     assert cluster_ids == {"c-open", "c-teamA", "c-teamB"}
 
 
+def test_approvals_activity_export_arm_viewer_excludes_other_team(monkeypatch):
+    """Whole-branch review Minor-1: the ?export=true / cursor arm must apply the
+    SAME tenant filter as the normal arm — else a viewer bypasses visibility via
+    ?export=true and reads other teams' approval activity."""
+    monkeypatch.setattr(handler, "boto3", MagicMock(resource=lambda *a, **kw: _mock_dynamodb(_LIST_ROWS)))
+    monkeypatch.setattr(
+        handler.tenancy, "visible_set_from_registry",
+        lambda ev: {"c-open", "c-teamA"},
+    )
+
+    r = handler.lambda_handler(
+        _viewer_event(path="/api/approvals/activity", qsp={"export": "true"}), None
+    )
+    assert r["statusCode"] == 200
+    body = json.loads(r["body"])
+    cluster_ids = {row["cluster_id"] for row in body.get("items", [])}
+    assert "c-teamB" not in cluster_ids
+    assert cluster_ids == {"c-open", "c-teamA"}
+
+
+def test_approvals_activity_export_arm_admin_sees_all(monkeypatch):
+    """Admin export: visible_set_from_registry None => unfiltered."""
+    monkeypatch.setattr(handler, "boto3", MagicMock(resource=lambda *a, **kw: _mock_dynamodb(_LIST_ROWS)))
+    monkeypatch.setattr(
+        handler.tenancy, "visible_set_from_registry",
+        lambda ev: None,
+    )
+
+    r = handler.lambda_handler(
+        _admin_event(path="/api/approvals/activity", qsp={"export": "true"}), None
+    )
+    assert r["statusCode"] == 200
+    body = json.loads(r["body"])
+    cluster_ids = {row["cluster_id"] for row in body.get("items", [])}
+    assert cluster_ids == {"c-open", "c-teamA", "c-teamB"}
+
+
 # ---------------------------------------------------------------------------
 # GET /{id} tests
 # ---------------------------------------------------------------------------

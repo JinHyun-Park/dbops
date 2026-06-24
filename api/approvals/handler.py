@@ -271,7 +271,17 @@ def lambda_handler(event, context):
                             "body": json.dumps({"error": "invalid cursor"})}
             scan_kwargs["Limit"] = page
             resp = table.scan(**scan_kwargs)
-            compact = _compact_activity(resp.get("Items", []))
+            # Apply the same tenant filter as the normal arm — otherwise a
+            # viewer could bypass cluster visibility via ?export=true and read
+            # other teams' approval activity (cluster_id/action_type/requester).
+            # Admin → visible is None → unfiltered. Post-filter page size varies;
+            # acceptable for an export/audit feed (the cursor still advances by
+            # the underlying scan page).
+            export_items = resp.get("Items", [])
+            visible = tenancy.visible_set_from_registry(event)
+            if visible is not None:
+                export_items = [it for it in export_items if it.get("cluster_id") in visible]
+            compact = _compact_activity(export_items)
             lek = resp.get("LastEvaluatedKey")
             # NOTE: approvals keys are strings (approval_id, created_at), so the
             # json round-trip is lossless. default=str would coerce a Decimal/
