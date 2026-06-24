@@ -510,6 +510,7 @@ def _register_elasticache(table, body):
             return _resp(400, {"error": f"{f} required"})
     account_id, region, name = body["account_id"], body["region"], body["resource_name"]
     role_arn = body.get("spoke_role_arn", "")
+    auth_secret_arn = body.get("auth_secret_arn", "")
     cli = _elasticache_client_for(region, role_arn)
     status, err = "ok", ""
     engine = (body.get("engine") or "redis").lower()
@@ -531,6 +532,7 @@ def _register_elasticache(table, body):
                 "node_type": g.get("CacheNodeType", ""),
                 "auth_enabled": bool(g.get("AuthTokenEnabled", False)),
                 "tls_enabled": bool(g.get("TransitEncryptionEnabled", False)),
+                "auth_secret_arn": auth_secret_arn,
             }
         else:
             raise Exception("no replication group")
@@ -549,6 +551,7 @@ def _register_elasticache(table, body):
                     "cluster_mode": False,
                     "auth_enabled": bool(c.get("AuthTokenEnabled", False)),
                     "tls_enabled": bool(c.get("TransitEncryptionEnabled", False)),
+                    "auth_secret_arn": auth_secret_arn,
                 }
             else:
                 status, err = "failed", "not found"
@@ -561,6 +564,7 @@ def _register_elasticache(table, body):
         "resource_details": details,
         "requires_secret_for_foundation": False,
         "spoke_role_arn": role_arn,
+        "auth_secret_arn": auth_secret_arn,
         "registered_at": datetime.utcnow().isoformat() + "Z",
         "connection_status": status, "connection_error": err,
     }

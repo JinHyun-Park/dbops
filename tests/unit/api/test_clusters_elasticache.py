@@ -124,3 +124,32 @@ def test_register_redis_replicas_per_shard():
     rd = table.put_item.call_args.kwargs["Item"]["resource_details"]
     assert rd["num_node_groups"] == 2
     assert rd["replicas_per_node_group"] == 1
+
+
+def test_register_stores_auth_secret_arn():
+    fake = MagicMock()
+    fake.describe_replication_groups.return_value = {"ReplicationGroups": [
+        {"ReplicationGroupId": "my-redis", "Status": "available", "ClusterEnabled": False,
+         "MemberClusters": ["my-redis-001"], "CacheNodeType": "cache.t4g.micro",
+         "AuthTokenEnabled": True, "TransitEncryptionEnabled": True}]}
+    table = _table()
+    body = _body()
+    body["auth_secret_arn"] = "arn:aws:secretsmanager:ap-northeast-2:111122223333:secret:redis-auth"
+    with patch.object(handler, "_elasticache_client_for", return_value=fake):
+        r = handler._register_elasticache(table, body)
+    assert r["statusCode"] in (201, 207)
+    item = table.put_item.call_args.kwargs["Item"]
+    assert item["auth_secret_arn"] == "arn:aws:secretsmanager:ap-northeast-2:111122223333:secret:redis-auth"
+    assert item["resource_details"]["auth_secret_arn"].endswith("redis-auth")
+
+
+def test_register_without_auth_secret_arn_defaults_empty():
+    fake = MagicMock()
+    fake.describe_replication_groups.return_value = {"ReplicationGroups": [
+        {"ReplicationGroupId": "r", "Status": "available", "ClusterEnabled": False,
+         "MemberClusters": ["r-001"], "CacheNodeType": "cache.t4g.micro"}]}
+    table = _table()
+    with patch.object(handler, "_elasticache_client_for", return_value=fake):
+        handler._register_elasticache(table, _body(name="r"))
+    item = table.put_item.call_args.kwargs["Item"]
+    assert item.get("auth_secret_arn", "") == ""
