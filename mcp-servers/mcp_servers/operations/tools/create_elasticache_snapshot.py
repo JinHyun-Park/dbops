@@ -35,4 +35,6 @@ def create_elasticache_snapshot_impl(cache, cluster_id=None, snapshot_name=None,
     except ClientError as e:
         code = e.response.get("Error", {}).get("Code", "")
         return {"status": "error", "reason": f"create_snapshot 실패: {code or str(e)[:200]}", "cluster_id": cluster_id}
+    except Exception as e:
+        return {"status": "error", "reason": f"create_snapshot 실패: {str(e)[:200]}", "cluster_id": cluster_id}
     return {"status": "ok", "cluster_id": cluster_id, "snapshot_name": snapshot_name}

@@ -17,7 +17,7 @@ def _rg(client, name):
 def modify_elasticache_node_type_impl(cache, cluster_id=None, node_type=None,
                                       approved=False, approval_id=None, **_):
     if not cluster_id or not node_type:
-        return {"status": "invalid", "reason": "cluster_id와 node_type가 필요합니다", "cluster_id": cluster_id}
+        return {"status": "invalid", "reason": "cluster_id와 node_type이 필요합니다", "cluster_id": cluster_id}
     row = lookup_cluster(cluster_id) or {}
     name = row.get("resource_name") or cluster_id
     try:

@@ -81,6 +81,14 @@ def test_snapshot_executes_when_approved():
     assert ec.create_snapshot.call_args.kwargs["SnapshotName"] == "snap1"
 
 
+def test_snapshot_guard_denied_no_write():
+    ec = _wire(snapshot, guard_ok=False)
+    r = snapshot.create_elasticache_snapshot_impl(
+        None, cluster_id="my-redis", snapshot_name="snap1", approved=True, approval_id="a1")
+    assert r["status"] == "approval_denied"
+    ec.create_snapshot.assert_not_called()
+
+
 def test_snapshot_memcached_unsupported():
     ec = _wire(snapshot, engine="memcached")
     r = snapshot.create_elasticache_snapshot_impl(None, cluster_id="mc", snapshot_name="s")
