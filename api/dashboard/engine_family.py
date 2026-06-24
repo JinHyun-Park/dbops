@@ -12,6 +12,7 @@ import hashlib
 RELATIONAL = "relational"
 DOCUMENTDB = "documentdb"
 DYNAMODB = "dynamodb"
+ELASTICACHE = "elasticache"
 
 
 def engine_family(engine):
@@ -23,6 +24,8 @@ def engine_family(engine):
         return DOCUMENTDB
     if "dynamodb" in e:
         return DYNAMODB
+    if "redis" in e or "valkey" in e or "memcached" in e or "elasticache" in e:
+        return ELASTICACHE
     return RELATIONAL
 
 
@@ -48,6 +51,14 @@ CAPABILITIES = {
         "ddb_write": True,
         "cw_namespace": "AWS/DynamoDB",
         "findings": {"ddb"},
+    },
+    ELASTICACHE: {
+        "sql": False, "rds_meta": False, "perf_insights": False,
+        "simulation": True,
+        "elasticache_write": True,
+        "live_read": True,
+        "cw_namespace": "AWS/ElastiCache",
+        "findings": {"elasticache"},
     },
 }
 

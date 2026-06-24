@@ -285,12 +285,23 @@ export const ENGINE_GROUP_META: Record<EngineGroup, EngineGroupMeta> = {
 // DocumentDB (MongoDB protocol, cluster/instance); `dynamodb` = DynamoDB
 // (tables, capacity/throttle, no instances). Mirrors the backend
 // engine_family.py / CAPABILITIES so panel gating agrees across the stack.
-export type EngineFamily = "relational" | "documentdb" | "dynamodb";
+export type EngineFamily =
+  | "relational"
+  | "documentdb"
+  | "dynamodb"
+  | "elasticache";
 
 export function engineFamily(engine: string | null | undefined): EngineFamily {
   const e = (engine || "").toLowerCase();
   if (e.includes("docdb") || e.includes("documentdb")) return "documentdb";
   if (e.includes("dynamodb")) return "dynamodb";
+  if (
+    e.includes("redis") ||
+    e.includes("valkey") ||
+    e.includes("memcached") ||
+    e.includes("elasticache")
+  )
+    return "elasticache";
   return "relational";
 }
 
@@ -320,6 +331,12 @@ export const FAMILY_META: Record<EngineFamily, FamilyMeta> = {
     accent: "bg-violet-400",
     classes: "bg-violet-500/15 text-violet-300 border-violet-500/40",
   },
+  elasticache: {
+    label: "ElastiCache",
+    noun: "클러스터",
+    accent: "bg-rose-400",
+    classes: "bg-rose-500/15 text-rose-300 border-rose-500/40",
+  },
 };
 
 // Which dashboard panels a family renders. The `relational` sentinel means
@@ -338,4 +355,13 @@ export const FAMILY_PANELS: Record<EngineFamily, Set<string>> = {
     "backups",
   ]),
   dynamodb: new Set(["overview", "capacity", "throttles", "latency", "cost"]),
+  elasticache: new Set([
+    "overview",
+    "memory",
+    "hitRate",
+    "connections",
+    "evictions",
+    "throughput",
+    "replicationLag",
+  ]),
 };

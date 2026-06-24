@@ -16,6 +16,7 @@ export const FAMILY_ORDER: EngineFamily[] = [
   "relational",
   "documentdb",
   "dynamodb",
+  "elasticache",
 ];
 
 export function groupByEngineFamily<T extends HasEngine>(
@@ -25,6 +26,7 @@ export function groupByEngineFamily<T extends HasEngine>(
     relational: [],
     documentdb: [],
     dynamodb: [],
+    elasticache: [],
   };
   for (const it of items) groups[engineFamily(it.engine)].push(it);
   return groups;
