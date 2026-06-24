@@ -53,6 +53,7 @@ import {
 } from "@/lib/engine";
 import { DynamodbOverviewPanel } from "@/components/dashboard/dynamodb-overview-panel";
 import { DocdbOverviewPanel } from "@/components/dashboard/docdb-overview-panel";
+import { ElasticacheOverviewPanel } from "@/components/dashboard/elasticache-overview-panel";
 
 type TsPoint = { ts: string; value: number | string; dimensions?: string };
 
@@ -919,6 +920,32 @@ export default function DashboardPage() {
                     />
                     <ReplicationTopologyPanel clusterId={selectedCluster} />
                     <BackupPanel
+                      clusterId={selectedCluster}
+                      engine={activeEngine}
+                    />
+                    <EventsPanel
+                      events={dashboardData?.events || []}
+                      clusterId={selectedCluster}
+                    />
+                  </>
+                )}
+
+                {/* ── ElastiCache panels ── */}
+                {fam === "elasticache" && (
+                  <>
+                    <HealthScore
+                      clusterId={selectedCluster}
+                      engine={activeEngine}
+                    />
+                    <MaintenanceHealthPanel
+                      clusterId={selectedCluster}
+                      engine={activeEngine}
+                    />
+                    <ElasticacheOverviewPanel
+                      clusterId={selectedCluster}
+                      range={range}
+                    />
+                    <EngineConfigPanel
                       clusterId={selectedCluster}
                       engine={activeEngine}
                     />
