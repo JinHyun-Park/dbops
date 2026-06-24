@@ -2031,6 +2031,35 @@
         ]
       }
     },
+    "/api/reports/{id}/html": {
+      "get": {
+        "tags": ["reports"],
+        "summary": "GET /api/reports/{id}/html",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
     "/api/runbooks": {
       "get": {
         "tags": ["runbooks"],

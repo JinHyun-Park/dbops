@@ -3,6 +3,7 @@ import os
 import re
 
 import boto3
+from botocore.exceptions import ClientError
 
 _TZ_SUFFIX_RE = re.compile(r"(Z|[+-]\d{2}(:?\d{2})?)$")
 
@@ -65,10 +66,58 @@ def lambda_handler(event, context):
 
     path = event.get("pathParameters", {})
     report_id = path.get("id") if path else None
+    raw_path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path", "")
     qsp = event.get("queryStringParameters") or {}
     cluster_id = qsp.get("cluster_id")
 
     headers = {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}
+
+    # GET /api/reports/{id}/html — presigned URL for the HTML twin
+    if report_id and raw_path.endswith("/html"):
+        if not str(report_id).isdigit():
+            return {"statusCode": 400, "headers": headers,
+                    "body": json.dumps({"error": "invalid report id"})}
+        try:
+            rows = query("SELECT s3_key FROM reports WHERE id = :id::bigint", {"id": report_id})
+            if not rows:
+                return {"statusCode": 404, "headers": headers,
+                        "body": json.dumps({"error": "리포트를 찾을 수 없습니다."})}
+            s3_key = rows[0].get("s3_key")
+            if not s3_key or not str(s3_key).endswith(".json"):
+                return {
+                    "statusCode": 404,
+                    "headers": headers,
+                    "body": json.dumps({
+                        "error": "이 리포트는 HTML 생성 이전에 만들어졌습니다.",
+                    }),
+                }
+            html_key = s3_key[:-5] + ".html"
+            bucket = os.environ["ARCHIVE_BUCKET"]
+            s3 = boto3.client("s3")
+            try:
+                s3.head_object(Bucket=bucket, Key=html_key)
+            except ClientError as ce:
+                code = ce.response["Error"]["Code"]
+                if code in ("404", "NoSuchKey"):
+                    return {
+                        "statusCode": 404,
+                        "headers": headers,
+                        "body": json.dumps({
+                            "error": "HTML 리포트 파일이 아직 생성되지 않았습니다.",
+                        }),
+                    }
+                raise
+            url = s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": bucket, "Key": html_key},
+                ExpiresIn=300,
+            )
+            return {"statusCode": 200, "headers": headers,
+                    "body": json.dumps({"url": url})}
+        except Exception as e:
+            print(f"[reports] html presign failed (report_id={report_id}): {e}")
+            return {"statusCode": 500, "headers": headers,
+                    "body": json.dumps({"error": "HTML 리포트를 불러오지 못했습니다."})}
 
     try:
         if report_id:

@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { fmtBytes, fmtDecimal, fmtDuration, fmtNumber } from "@/lib/format";
 import { buildReportMarkdown } from "@/lib/report-download";
+import { apiUrl, authedFetch } from "@/lib/api-client";
 
 interface ReportRow {
   id: number;
@@ -144,6 +146,9 @@ function ReportDetailPanel({
   payload: ReportPayload | null;
   detail: ReportDetail | null;
 }) {
+  const [htmlLoading, setHtmlLoading] = useState(false);
+  const [htmlUnavailable, setHtmlUnavailable] = useState(false);
+
   function handleDownload() {
     if (!detail) return;
     const md = buildReportMarkdown({
@@ -162,6 +167,29 @@ function ReportDetailPanel({
     URL.revokeObjectURL(url);
   }
 
+  async function handleHtmlDownload() {
+    if (!detail || htmlLoading || htmlUnavailable) return;
+    setHtmlLoading(true);
+    try {
+      const url = await apiUrl(`/api/reports/${detail.id}/html`);
+      const res = await authedFetch(url);
+      if (res.status === 404) {
+        setHtmlUnavailable(true);
+        return;
+      }
+      if (!res.ok) {
+        console.error("[reports] html presign failed", res.status);
+        return;
+      }
+      const { url: presignedUrl } = await res.json();
+      window.open(presignedUrl, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      console.error("[reports] html download error", e);
+    } finally {
+      setHtmlLoading(false);
+    }
+  }
+
   return (
     <div className="space-y-8">
       <header>
@@ -175,12 +203,32 @@ function ReportDetailPanel({
             </h2>
           </div>
           {detail && (
-            <button
-              onClick={handleDownload}
-              className="shrink-0 px-3 py-1.5 text-xs font-medium border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 transition-colors"
-            >
-              다운로드
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={handleDownload}
+                className="px-3 py-1.5 text-xs font-medium border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 transition-colors"
+              >
+                다운로드
+              </button>
+              <button
+                onClick={handleHtmlDownload}
+                disabled={htmlLoading || htmlUnavailable}
+                title={
+                  htmlUnavailable
+                    ? "이 리포트는 HTML 미생성"
+                    : "HTML 파일을 새 탭에서 엽니다"
+                }
+                className={`px-3 py-1.5 text-xs font-medium border transition-colors ${
+                  htmlUnavailable
+                    ? "border-zinc-800 text-zinc-600 cursor-not-allowed"
+                    : htmlLoading
+                      ? "border-zinc-700 text-zinc-500 cursor-wait"
+                      : "border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
+                }`}
+              >
+                {htmlLoading ? "…" : "HTML 다운로드"}
+              </button>
+            </div>
           )}
         </div>
         {row.summary && (

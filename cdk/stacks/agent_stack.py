@@ -810,10 +810,15 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
+                "ARCHIVE_BUCKET": data.archive_bucket.bucket_name,
             },
         )
         data.cache_db.secret.grant_read(reports_lambda)
         data.cache_db.grant_data_api_access(reports_lambda)
+        # HTML presigned-URL arm: reports Lambda reads the .html twin from the
+        # archive bucket (report_generator already has grant_write on the same
+        # bucket). grant_read adds s3:GetObject + s3:ListBucket.
+        data.archive_bucket.grant_read(reports_lambda)
 
         approvals_lambda = lambda_.Function(
             self, "ApprovalsApi",
@@ -1615,6 +1620,11 @@ class AgentStack(cdk.Stack):
             path="/api/reports/{id}",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("ReportDetailIntegration", reports_lambda),
+        )
+        self.api.add_routes(
+            path="/api/reports/{id}/html",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("ReportHtmlIntegration", reports_lambda),
         )
         self.api.add_routes(
             path="/api/approvals",
