@@ -19,6 +19,7 @@ import os
 from datetime import datetime, timedelta
 
 import boto3
+import tenancy
 
 _ENV = os.environ.get("ENV", "dev")
 
@@ -239,7 +240,7 @@ def _query_per_cluster(ce, start, end, services):
     return [], None, last_err
 
 
-def _handle_rds_view(ce, start, end, days):
+def _handle_rds_view(ce, start, end, days, event=None):
     """Build the RDS/Aurora cost response. Same envelope conventions as the
     Bedrock path (total, currency, daily, by_usage_type, anomalies, ...) plus
     RDS-specific per-cluster fields."""
@@ -252,6 +253,15 @@ def _handle_rds_view(ce, start, end, days):
     by_usage_type, _ut_err = _query_by_dimension(ce, start, end, services, "USAGE_TYPE")
 
     per_cluster, cluster_tag, cluster_err = _query_per_cluster(ce, start, end, services)
+
+    # Tenant filter: restrict per-cluster rows to the caller's visible clusters.
+    # Totals and by_usage_type are account-level aggregates (not per-cluster) —
+    # intentionally left unfiltered; only the per-cluster breakdown is scoped.
+    if event is not None:
+        visible = tenancy.visible_set_from_registry(event)
+        if visible is not None:
+            per_cluster = [r for r in per_cluster if r.get("cluster") in visible]
+
     per_cluster_available = len(per_cluster) > 0
 
     per_cluster_note = None
@@ -299,12 +309,21 @@ def _handle_rds_view(ce, start, end, days):
     })
 
 
-def _handle_elasticache_view(ce, start, end, days):
+def _handle_elasticache_view(ce, start, end, days, event=None):
     """ElastiCache spend (Cost Explorer). Same envelope as the RDS view."""
     services = _elasticache_services(ce, start, end)
     daily, total, total_err = _query_total(ce, start, end, services)
     by_usage_type, _ut_err = _query_by_dimension(ce, start, end, services, "USAGE_TYPE")
     per_cluster, cluster_tag, cluster_err = _query_per_cluster(ce, start, end, services)
+
+    # Tenant filter: restrict per-cluster rows to the caller's visible clusters.
+    # Totals and by_usage_type are account-level aggregates — intentionally
+    # left unfiltered; only the per-cluster breakdown is tenant-scoped.
+    if event is not None:
+        visible = tenancy.visible_set_from_registry(event)
+        if visible is not None:
+            per_cluster = [r for r in per_cluster if r.get("cluster") in visible]
+
     per_cluster_available = len(per_cluster) > 0
     per_cluster_note = None
     if not per_cluster_available:
@@ -516,10 +535,10 @@ def lambda_handler(event, context=None):
     # same range windows; the RDS path has its own service discovery + per-
     # cluster (tag-based) attribution. Default view stays Bedrock.
     if view == "rds":
-        return _handle_rds_view(ce, start, end, days)
+        return _handle_rds_view(ce, start, end, days, event)
     # `?view=elasticache` — ElastiCache 클러스터 비용.
     if view == "elasticache":
-        return _handle_elasticache_view(ce, start, end, days)
+        return _handle_elasticache_view(ce, start, end, days, event)
     # `?view=platform` — DBOps 플랫폼 자체 운영비 (Application=DBOps 태그 전체).
     if view == "platform":
         return _handle_platform_view(ce, start, end, days)

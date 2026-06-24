@@ -730,10 +730,15 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
+                "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
             },
         )
         data.cache_db.secret.grant_read(simulation_lambda)
         data.cache_db.grant_data_api_access(simulation_lambda)
+        foundation.clusters_table.grant_read_data(simulation_lambda)
+        foundation.team_members_table.grant_read_data(simulation_lambda)
         simulation_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=[
                 "rds-data:ExecuteStatement",
@@ -1476,8 +1481,13 @@ class AgentStack(cdk.Stack):
             timeout=cdk.Duration.seconds(30),
             environment={
                 "ENV": Settings.ENV,
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
+                "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
             },
         )
+        foundation.clusters_table.grant_read_data(cost_lambda)
+        foundation.team_members_table.grant_read_data(cost_lambda)
         cost_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=[
                 "ce:GetCostAndUsage",

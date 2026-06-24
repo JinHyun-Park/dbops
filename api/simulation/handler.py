@@ -13,6 +13,7 @@ import os
 import traceback
 
 import boto3
+import tenancy
 from aurora_pricing import price_per_acu_hour, price_per_instance_hour
 from ddl_estimator import estimate_ddl, resolve_table
 from dynamodb_cost import compute_capacity_cost
@@ -83,6 +84,26 @@ def _cache_query(sql: str, params: dict | None = None) -> list[dict]:
                 )
         rows.append(row)
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Cluster registry lookup — for tenancy gate
+# ---------------------------------------------------------------------------
+
+
+def _cluster_item(cluster_id: str) -> dict:
+    """Fetch {cluster_id, team_id} from the clusters registry for a single
+    cluster. Returns {} on miss or infra error (caller's cluster_visible treats
+    missing team_id as default-open)."""
+    table_name = os.environ.get("CLUSTERS_TABLE", "")
+    if not cluster_id or not table_name:
+        return {}
+    try:
+        table = boto3.resource("dynamodb").Table(table_name)
+        return table.get_item(Key={"cluster_id": cluster_id}).get("Item") or {}
+    except Exception as e:
+        print(f"[simulation] cluster lookup failed for {cluster_id}: {e}")
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -1128,6 +1149,10 @@ def lambda_handler(event, context):
         cluster_id = body.get("cluster_id")
         if not cluster_id:
             return _response(400, {"error": "cluster_id required"}, origin)
+
+        # Tenancy gate: 403 if the caller cannot see this cluster.
+        if not tenancy.cluster_visible(event, _cluster_item(cluster_id)):
+            return _response(403, {"error": "이 클러스터에 대한 접근 권한이 없습니다."}, origin)
 
         if raw_path.endswith("/upgrade-compatibility"):
             target = body.get("target_version") or ""
