@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mcp_servers.operations.tools.audit_permissions import audit_permissions_impl
 from mcp_servers.operations.tools.create_docdb_index import create_docdb_index_impl
 from mcp_servers.operations.tools.create_snapshot import create_snapshot_impl
+from mcp_servers.operations.tools.elasticache_live_read import elasticache_live_read_impl
 from mcp_servers.operations.tools.enable_dynamodb_pitr import enable_dynamodb_pitr_impl
 from mcp_servers.operations.tools.execute_sql import execute_sql_impl
 from mcp_servers.operations.tools.get_runbook import get_runbook_impl
@@ -44,6 +45,7 @@ _ENGINE_GATED_TOOLS = {
     # unresolvable cluster — refuses before reaching the impl (review fix #3).
     "set_docdb_profiler": "docdb_write",
     "create_docdb_index": "docdb_write",
+    "elasticache_live_read": "live_read",
 }
 
 TOOLS = {
@@ -296,6 +298,22 @@ TOOLS = {
                 "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
             },
             "required": ["cluster_id", "db", "collection", "keys", "name"],
+        },
+    },
+    "elasticache_live_read": {
+        "impl": elasticache_live_read_impl,
+        "description": "ElastiCache only: live Redis/Valkey/Memcached deep-read — "
+                       "INFO, SLOWLOG, CLIENT LIST, MEMORY STATS (Redis) or stats "
+                       "(Memcached). Read-only; no mutation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Registered ElastiCache cluster id"},
+                "sections": {"type": "array", "items": {"type": "string"},
+                             "description": "Optional subset of Redis INFO sections "
+                                            "(server/clients/memory/stats/replication/keyspace)"},
+            },
+            "required": ["cluster_id"],
         },
     },
     "review_sql": {

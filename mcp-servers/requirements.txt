@@ -5,3 +5,5 @@
 # same asset and get pymongo too (harmless, unused). Same pin as the read-only
 # docdb_mongo_collector.
 pymongo>=4
+redis>=5
+pymemcache>=4

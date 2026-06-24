@@ -135,3 +135,47 @@ def test_gate_docdb_family_passes_to_impl():
         result = _invoke("set_docdb_profiler", {"cluster_id": "docdb-1", "level": 1})
     assert result["status"] == "approval_required"
     spy.assert_called_once()
+
+
+# ===== ElastiCache live_read gate =====
+
+
+def test_gate_elasticache_none_family_fail_closed():
+    """elasticache_live_read on an unresolvable cluster → unsupported_engine,
+    impl never invoked."""
+    spy = MagicMock()
+    with _patch_family(None), patch.dict(
+        handler.TOOLS["elasticache_live_read"], {"impl": spy}
+    ):
+        result = _invoke(
+            "elasticache_live_read",
+            {"cluster_id": "ghost-ec"},
+        )
+    assert result["status"] == "unsupported_engine"
+    assert "could not be resolved" in result["reason"]
+    spy.assert_not_called()
+
+
+def test_gate_elasticache_wrong_engine_relational_refused():
+    """elasticache_live_read on a relational (Aurora) cluster → refused."""
+    spy = MagicMock()
+    with _patch_family("relational"), patch.dict(
+        handler.TOOLS["elasticache_live_read"], {"impl": spy}
+    ):
+        result = _invoke(
+            "elasticache_live_read",
+            {"cluster_id": "prod-pg-1"},
+        )
+    assert result["status"] == "unsupported_engine"
+    spy.assert_not_called()
+
+
+def test_gate_elasticache_family_passes_to_impl():
+    """A resolved elasticache family passes the live_read gate and the impl runs."""
+    spy = MagicMock(return_value={"status": "ok", "engine": "redis"})
+    with _patch_family("elasticache"), patch.dict(
+        handler.TOOLS["elasticache_live_read"], {"impl": spy}
+    ):
+        result = _invoke("elasticache_live_read", {"cluster_id": "ec-redis-1"})
+    assert result["status"] == "ok"
+    spy.assert_called_once()
