@@ -11,6 +11,7 @@ from collectors.docdb_findings import collect_docdb_findings
 from collectors.dynamodb_cw_collector import collect_dynamodb_metrics
 from collectors.dynamodb_findings import collect_dynamodb_findings
 from collectors.elasticache_cw_collector import collect_elasticache_metrics
+from collectors.elasticache_findings import collect_elasticache_findings
 from collectors.engine_family import engine_family
 from collectors.meta_collector import collect_cluster_meta
 from collectors.mysql_activity import collect_mysql_activity
@@ -147,6 +148,14 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         except Exception as e:
             result["elasticache_error"] = str(e)
             print(f"[{cluster_id}] elasticache error: {e}")
+        try:
+            result["elasticache_findings"] = collect_elasticache_findings(
+                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
+                cluster_id, snapshot_ts=run_ts,
+            )
+        except Exception as e:
+            result["elasticache_findings_error"] = str(e)
+            print(f"[{cluster_id}] elasticache findings error: {e}")
         return result
 
     # ------------------------------------------------------------------
