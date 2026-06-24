@@ -37,3 +37,5 @@ def test_all_copies_classify_elasticache():
         assert caps["findings"] == {"elasticache"}
         assert caps["rds_meta"] is False
         assert caps["perf_insights"] is False
+        assert caps["simulation"] is False
+        assert caps["elasticache_cost_simulation"] is True

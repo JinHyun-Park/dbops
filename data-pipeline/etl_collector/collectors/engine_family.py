@@ -56,7 +56,8 @@ CAPABILITIES = {
     },
     ELASTICACHE: {
         "sql": False, "rds_meta": False, "perf_insights": False,
-        "simulation": True,
+        "simulation": False,
+        "elasticache_cost_simulation": True,
         "elasticache_write": True,
         "live_read": True,
         "cw_namespace": "AWS/ElastiCache",
