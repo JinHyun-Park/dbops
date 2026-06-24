@@ -127,6 +127,7 @@ export function ReportViewer({
           <div className="text-sm text-zinc-500">불러오는 중…</div>
         ) : (
           <ReportDetailPanel
+            key={detail?.id ?? selectedRow?.id}
             row={detail || selectedRow}
             payload={payload}
             detail={detail}

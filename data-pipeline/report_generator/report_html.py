@@ -79,7 +79,12 @@ def bar_chart(rows, label=""):
 
 
 def sparkline(values):
-    vals = [float(v) for v in (values or []) if isinstance(v, (int, float))]
+    vals = []
+    for v in (values or []):
+        try:
+            vals.append(float(v))
+        except (TypeError, ValueError):
+            pass
     if len(vals) < 2:
         return ""
     lo, hi = min(vals), max(vals)
@@ -104,25 +109,34 @@ def severity_badge(counts):
 def build_report_html(cluster_id, report_date, report_type, summary, data):
     data = data or {}
     aas_series = data.get("aas_series") or []
-    top_queries = data.get("top_queries") or []
-    findings = data.get("findings") or []
-    sev_counts = {}
-    for f in findings:
-        s = (f.get("severity") or "info").lower()
-        sev_counts[s] = sev_counts.get(s, 0) + 1
+    aas = data.get("aas") or {}
+    top_slow_queries = data.get("top_slow_queries") or []
+    top_alerts = data.get("top_alerts") or []
+    connections = data.get("connections") or {}
 
+    spark = sparkline([p.get("value") for p in aas_series])
     cards = ""
-    for k, lbl in (("aas_avg", "AAS 평균"), ("aas_max", "AAS 최대")):
-        if data.get(k) is not None:
-            cards += (f'<div class="card"><div class="card-lbl">{escape(lbl)}</div>'
-                      f'<div class="card-val">{_fmt(data[k])}</div>'
-                      f'{sparkline([p.get("value") for p in aas_series])}</div>')
+    if aas.get("avg_aas") is not None:
+        cards += (f'<div class="card"><div class="card-lbl">AAS 평균</div>'
+                  f'<div class="card-val">{_fmt(aas["avg_aas"])}</div>{spark}</div>')
+    if aas.get("max_aas") is not None:
+        cards += (f'<div class="card"><div class="card-lbl">AAS 최대</div>'
+                  f'<div class="card-val">{_fmt(aas["max_aas"])}</div>{spark}</div>')
+    if connections.get("max_conn") is not None:
+        cards += (f'<div class="card"><div class="card-lbl">최대 연결 수</div>'
+                  f'<div class="card-val">{_fmt(connections["max_conn"])}</div></div>')
 
-    findings_rows = "".join(
-        f'<tr><td>{escape((f.get("severity") or "").upper())}</td>'
-        f'<td>{escape(str(f.get("subject") or ""))}</td>'
-        f'<td>{escape(str(f.get("recommendation") or ""))}</td></tr>'
-        for f in findings) or '<tr><td colspan="3">발견된 항목 없음</td></tr>'
+    query_rows = [
+        {"label": (q.get("query_excerpt") or ""), "value": q.get("total_ms") or 0}
+        for q in top_slow_queries
+    ]
+
+    alerts_rows = "".join(
+        f'<tr><td>{escape(str(a.get("rule_id") or ""))}</td>'
+        f'<td>{escape(str(a.get("fired_count") or ""))}</td>'
+        f'<td>{escape(str(a.get("last_fired") or ""))}</td></tr>'
+        for a in top_alerts
+    ) or '<tr><td colspan="3">발생한 알림 없음</td></tr>'
 
     return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
@@ -144,7 +158,7 @@ table{{width:100%;border-collapse:collapse;font-size:13px}} td,th{{text-align:le
 <div class="cards">{cards or ''}</div>
 <div class="summary">{escape(str(summary or ''))}</div>
 <div class="section"><h2>활동 추이 (AAS)</h2>{line_chart(aas_series, "AAS")}</div>
-<div class="section"><h2>상위 쿼리</h2>{bar_chart(top_queries)}</div>
-<div class="section"><h2>진단 ({severity_badge(sev_counts)})</h2>
-<table><tr><th>심각도</th><th>대상</th><th>권장</th></tr>{findings_rows}</table></div>
+<div class="section"><h2>상위 쿼리</h2>{bar_chart(query_rows, "총 실행시간(ms)")}</div>
+<div class="section"><h2>알림</h2>
+<table><tr><th>규칙</th><th>발생 횟수</th><th>마지막 발생</th></tr>{alerts_rows}</table></div>
 </body></html>"""

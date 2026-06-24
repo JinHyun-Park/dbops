@@ -141,3 +141,14 @@ def test_write_nl_summary_falls_back_when_bedrock_returns_empty(mock_boto3):
     text = handler._write_nl_summary("prod-pg-1", "2026-05-28", _sample_data())
     assert text  # not empty — template kicked in
     assert "prod-pg-1" in text
+
+
+def test_build_report_data_includes_aas_series():
+    """_build_report_data must now return an 'aas_series' key for the HTML
+    line chart. Uses a generic cache_query mock that returns [] for every
+    query so only key presence matters."""
+    mock_cache_query = MagicMock(return_value=[])
+    result = handler._build_report_data(mock_cache_query, "prod-pg-1")
+    assert "aas_series" in result, (
+        "_build_report_data must include 'aas_series' key for the HTML line chart"
+    )

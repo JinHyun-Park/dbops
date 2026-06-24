@@ -161,6 +161,17 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
         "AND ts > NOW() - INTERVAL '24 hours'",
         {"cid": cluster_id, "threshold": str(AAS_BUSY_THRESHOLD)},
     )
+    aas_series = cache_query(
+        # Per-sample cluster-level AAS over the window for the report's line chart.
+        # Filter out per-instance dimensioned rows so the series is the cluster
+        # aggregate, not a mix of instances (same guard as the connections query).
+        "SELECT ts, value FROM metric_snapshots "
+        "WHERE cluster_id = :cid AND metric_type = 'aas' "
+        "AND ts > NOW() - INTERVAL '24 hours' "
+        "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance')) "
+        "ORDER BY ts ASC",
+        {"cid": cluster_id},
+    )
     # query_stats is the pg_stat_statements-derived table that actually has
     # call counts + total/mean execution time. The slow_queries table is a
     # raw log of individual slow executions and lacks the aggregated columns
@@ -226,6 +237,7 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
         "aas_peak": aas_peak[0] if aas_peak else {},
         "aas_busy_minutes_above_threshold": (aas_busy_minutes[0].get("cnt") if aas_busy_minutes else 0),
         "aas_busy_threshold": AAS_BUSY_THRESHOLD,
+        "aas_series": aas_series,
         "top_slow_queries": top_slow,
         "top_alerts": top_alerts,
         "storage": storage_delta[0] if storage_delta else {},
