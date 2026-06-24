@@ -86,6 +86,29 @@ def test_node_resize_happy_path(mod, monkeypatch):
     assert result["pricing_source"] == "aws_pricing_api"
 
 
+def test_node_resize_describes_in_cluster_region(mod, monkeypatch):
+    """The elasticache client must be region-scoped to the cluster's registered
+    region (cluster_region), NOT the Lambda's default — else a cross-region
+    cluster is described in the wrong region and mis-resolves to a misleading
+    partial while pricing used the real region."""
+    _patch_env(mod, monkeypatch, region="ap-northeast-2")  # Lambda default
+    _patch_cache(mod, monkeypatch, rows=[{
+        "engine": "redis", "region": "us-west-2",  # cluster registered elsewhere
+        "resource_name": "my-redis", "resource_details": None}])
+    captured = {}
+
+    def _capture_client(*a, **k):
+        captured["region_name"] = k.get("region_name")
+        return _ec_mock("cache.t4g.micro", 2)
+
+    monkeypatch.setattr(mod.boto3, "client", _capture_client)
+    monkeypatch.setattr(mod, "price_per_node_hour", lambda r, e, t: 0.017 if t == "cache.t4g.micro" else 0.182)
+
+    mod._simulate_elasticache_node_resize("my-redis", new_node_type="cache.r7g.large")
+
+    assert captured["region_name"] == "us-west-2"
+
+
 def test_node_count_change(mod, monkeypatch):
     _patch_env(mod, monkeypatch)
     _patch_cache(mod, monkeypatch)

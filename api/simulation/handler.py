@@ -973,7 +973,11 @@ def _simulate_elasticache_node_resize(
     cur_count: int = 1
     describe_err: str | None = None
     try:
-        ec = boto3.client("elasticache")
+        # Region-scope the client to the cluster's registered region — pricing
+        # already uses cluster_region, so describing in the Lambda's default
+        # region would mis-resolve a cross-region cluster (not found → a
+        # misleading "partial" while pricing was computed for the real region).
+        ec = boto3.client("elasticache", region_name=cluster_region)
         rg_resp = ec.describe_replication_groups(ReplicationGroupId=resource_name)
         rg_list = rg_resp.get("ReplicationGroups") or []
         if rg_list:
