@@ -224,6 +224,13 @@ const NAV: NavGroup[] = [
         hint: "사용자 역할 관리 — admin · viewer (관리자)",
       },
       {
+        href: "/admin/teams",
+        label: "Teams",
+        icon: UserCheck,
+        adminOnly: true,
+        hint: "팀 관리 — 멤버·클러스터 가시성 (관리자)",
+      },
+      {
         href: "/context-files",
         label: "Context files",
         icon: FileUp,
