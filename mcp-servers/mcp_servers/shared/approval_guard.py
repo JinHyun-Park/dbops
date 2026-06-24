@@ -182,6 +182,11 @@ def _project(action_type: str, details: dict) -> dict:
             "keys": keys,
             "name": str(d.get("name") or "").strip(),
         }
+    # ===== ElastiCache write tools (EC-4) =====
+    if action_type == "modify_elasticache_node_type":
+        return {"target": d.get("target"), "node_type": d.get("node_type")}
+    if action_type == "create_elasticache_snapshot":
+        return {"target": d.get("target"), "snapshot_name": d.get("snapshot_name")}
     # other / unknown: bind the FULL detail set VERBATIM (no numeric coercion).
     # This closes the loose "other" bucket — an "other" approval now matches
     # only if the entire registered payload matches. We deliberately do NOT

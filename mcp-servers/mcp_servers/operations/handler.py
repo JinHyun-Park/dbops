@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp_servers.operations.tools.audit_permissions import audit_permissions_impl
 from mcp_servers.operations.tools.create_docdb_index import create_docdb_index_impl
+from mcp_servers.operations.tools.create_elasticache_snapshot import create_elasticache_snapshot_impl
 from mcp_servers.operations.tools.create_snapshot import create_snapshot_impl
 from mcp_servers.operations.tools.elasticache_live_read import elasticache_live_read_impl
 from mcp_servers.operations.tools.enable_dynamodb_pitr import enable_dynamodb_pitr_impl
@@ -14,6 +15,7 @@ from mcp_servers.operations.tools.get_runbook import get_runbook_impl
 from mcp_servers.operations.tools.manage_maintenance import manage_maintenance_impl
 from mcp_servers.operations.tools.modify_dynamodb_capacity import modify_dynamodb_capacity_impl
 from mcp_servers.operations.tools.modify_dynamodb_ttl import modify_dynamodb_ttl_impl
+from mcp_servers.operations.tools.modify_elasticache_node_type import modify_elasticache_node_type_impl
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
 from mcp_servers.operations.tools.modify_scaling import modify_scaling_impl
 from mcp_servers.operations.tools.query_activity_audit import query_activity_audit_impl
@@ -46,12 +48,15 @@ _ENGINE_GATED_TOOLS = {
     "set_docdb_profiler": "docdb_write",
     "create_docdb_index": "docdb_write",
     "elasticache_live_read": "live_read",
+    "modify_elasticache_node_type": "elasticache_write",
+    "create_elasticache_snapshot": "elasticache_write",
 }
 
 _CAP_LABEL = {
     "ddb_write": "DynamoDB 테이블",
     "docdb_write": "DocumentDB 클러스터",
     "live_read": "ElastiCache 클러스터",
+    "elasticache_write": "ElastiCache 클러스터",
 }
 
 TOOLS = {
@@ -321,6 +326,22 @@ TOOLS = {
             },
             "required": ["cluster_id"],
         },
+    },
+    "modify_elasticache_node_type": {
+        "impl": modify_elasticache_node_type_impl,
+        "description": "ElastiCache only: scale the node type (modify_replication_group). Approval-gated write.",
+        "input_schema": {"type": "object", "properties": {
+            "cluster_id": {"type": "string"}, "node_type": {"type": "string"},
+            "approved": {"type": "boolean"}, "approval_id": {"type": "string"}},
+            "required": ["cluster_id", "node_type"]},
+    },
+    "create_elasticache_snapshot": {
+        "impl": create_elasticache_snapshot_impl,
+        "description": "ElastiCache (Redis/Valkey) only: create a backup snapshot. Approval-gated write.",
+        "input_schema": {"type": "object", "properties": {
+            "cluster_id": {"type": "string"}, "snapshot_name": {"type": "string"},
+            "approved": {"type": "boolean"}, "approval_id": {"type": "string"}},
+            "required": ["cluster_id", "snapshot_name"]},
     },
     "review_sql": {
         "impl": review_sql_impl,
