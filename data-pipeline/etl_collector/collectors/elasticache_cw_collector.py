@@ -130,6 +130,28 @@ def _upsert_cluster_meta(ec, cache_execute, cluster_id, resource_name, engine, a
         errors.append(f"describe_elasticache: {e}")
 
 
+def _resolve_node_ids(ec, resource_name, errors):
+    """Resolve the CloudWatch CacheClusterId dimension value(s) for a resource.
+
+    AWS/ElastiCache emits metrics per NODE, with CacheClusterId set to the node
+    id, NOT the replication-group id. For a Redis/Valkey replication group the
+    nodes are its MemberClusters (e.g. "<rg>-001", or "<rg>-0001-001" in cluster
+    mode); for a standalone / Memcached cache cluster the node id IS the resource
+    name. Returns the list of node ids to query CloudWatch under, falling back to
+    [resource_name] when neither describe resolves (collection degrades, never
+    raises)."""
+    try:
+        rg = (ec.describe_replication_groups(ReplicationGroupId=resource_name)
+              .get("ReplicationGroups") or [])
+        if rg:
+            members = rg[0].get("MemberClusters") or []
+            if members:
+                return members
+    except Exception:
+        pass  # not a replication group / no access — fall through to the name
+    return [resource_name]
+
+
 def collect_elasticache_metrics(cw, ec, cache_execute, cluster_id, resource_name, engine, region, account_id):
     end = datetime.utcnow()
     start = end - timedelta(minutes=10)
@@ -142,25 +164,36 @@ def collect_elasticache_metrics(cw, ec, cache_execute, cluster_id, resource_name
     _upsert_cluster_meta(ec, cache_execute, cluster_id, resource_name, engine, account_id, region, errors)
 
     metrics = _MEMCACHED_METRICS if eng == "memcached" else _REDIS_METRICS
-    dims = [{"Name": "CacheClusterId", "Value": resource_name}]
 
-    def pull(metric, stat):
+    # AWS/ElastiCache publishes metrics per NODE under CacheClusterId=<node-id>
+    # (e.g. "<rg>-001"), NOT under the replication-group id — querying the RG id
+    # returns zero datapoints. Resolve the member node ids and query each.
+    node_ids = _resolve_node_ids(ec, resource_name, errors)
+
+    def pull(node_id, metric, stat):
         try:
             return cw.get_metric_statistics(
-                Namespace="AWS/ElastiCache", MetricName=metric, Dimensions=dims,
+                Namespace="AWS/ElastiCache", MetricName=metric,
+                Dimensions=[{"Name": "CacheClusterId", "Value": node_id}],
                 StartTime=start, EndTime=end, Period=60, Statistics=[stat]
             ).get("Datapoints", [])
         except Exception as e:
-            errors.append(f"{metric}: {e}")
+            errors.append(f"{node_id}/{metric}: {e}")
             return []
 
     for metric, mtype, stat in metrics:
-        for dp in pull(metric, stat):
-            v = dp.get(stat)
-            if v is None:
-                continue
-            _insert(cache_execute, cluster_id, dp["Timestamp"].isoformat(), mtype, v)
+        # Aggregate across member nodes at each timestamp: Sum statistics sum
+        # (cluster total), the rest average (representative cluster level).
+        by_ts = {}
+        for node_id in node_ids:
+            for dp in pull(node_id, metric, stat):
+                v = dp.get(stat)
+                if v is not None:
+                    by_ts.setdefault(dp["Timestamp"].isoformat(), []).append(v)
+        for ts, vals in by_ts.items():
+            agg = sum(vals) if stat == "Sum" else sum(vals) / len(vals)
+            _insert(cache_execute, cluster_id, ts, mtype, agg)
             inserted += 1
 
-    return {"cluster_id": cluster_id, "engine": eng,
+    return {"cluster_id": cluster_id, "engine": eng, "nodes": node_ids,
             "metrics_inserted": inserted, "errors": errors}

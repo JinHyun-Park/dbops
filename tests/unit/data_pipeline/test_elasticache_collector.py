@@ -183,3 +183,61 @@ def test_empty_series_tolerated():
     ec = _ec_replication_group()
     res = mod.collect_elasticache_metrics(cw, ec, lambda *a, **k: None, "r", "r", "redis", "ap-northeast-2", "1")
     assert res["metrics_inserted"] == 0  # no rows, no raise
+
+
+# ── CloudWatch dimension = member NODE id, not replication-group id ───────────
+
+def _cw_dim_values(cw):
+    vals = set()
+    for call in cw.get_metric_statistics.call_args_list:
+        for d in call.kwargs["Dimensions"]:
+            if d["Name"] == "CacheClusterId":
+                vals.add(d["Value"])
+    return vals
+
+
+def test_cw_dimension_uses_member_node_ids_not_rg_id():
+    """REGRESSION: AWS/ElastiCache emits metrics per NODE (CacheClusterId=<rg>-001),
+    never under the replication-group id. The collector must query the member
+    node ids — querying the RG id (resource_name) returns zero datapoints, so a
+    replication-group cluster would silently collect nothing."""
+    cw = _cw_with()
+    ec = _ec_replication_group("my-redis")  # MemberClusters = my-redis-000{1,2}-00{1,2}
+    res = mod.collect_elasticache_metrics(
+        cw, ec, lambda *a, **k: None, "my-redis", "my-redis", "redis", "ap-northeast-2", "1")
+
+    dims = _cw_dim_values(cw)
+    assert dims, "no CacheClusterId dimension queried"
+    assert "my-redis" not in dims, "queried the RG id (the bug) instead of node ids"
+    assert dims <= {"my-redis-0001-001", "my-redis-0001-002",
+                    "my-redis-0002-001", "my-redis-0002-002"}
+    assert res["nodes"] == ["my-redis-0001-001", "my-redis-0001-002",
+                            "my-redis-0002-001", "my-redis-0002-002"]
+
+
+def test_cw_dimension_falls_back_to_resource_name_for_standalone():
+    """Standalone / Memcached cache cluster: describe_replication_groups misses,
+    so the node id IS the resource name and that is the CacheClusterId dimension."""
+    cw = _cw_with()
+    ec = _ec_cache_cluster("my-mc", "memcached")
+    res = mod.collect_elasticache_metrics(
+        cw, ec, lambda *a, **k: None, "my-mc", "my-mc", "memcached", "ap-northeast-2", "1")
+    assert _cw_dim_values(cw) == {"my-mc"}
+    assert res["nodes"] == ["my-mc"]
+
+
+def test_sum_metrics_aggregate_across_member_nodes():
+    """Sum-statistic metrics (e.g. NetworkBytesIn) total across member nodes at a
+    timestamp; one aggregated row is written per timestamp, not one per node."""
+    cw = _cw_with(value=10.0)  # every node/metric returns 10.0 at one timestamp
+    ec = _ec_replication_group("my-redis")  # 4 member nodes
+    rows = []
+
+    def cache_execute(sql, params=None):
+        if params and params.get("metric_type") == "net_in":  # NetworkBytesIn → Sum
+            rows.append(params["value"])
+
+    mod.collect_elasticache_metrics(
+        cw, ec, cache_execute, "my-redis", "my-redis", "redis", "ap-northeast-2", "1")
+    # 4 nodes × 10.0 summed = 40.0, written once (single timestamp)
+    assert rows == [40.0]
