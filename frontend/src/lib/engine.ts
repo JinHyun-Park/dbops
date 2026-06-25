@@ -9,6 +9,7 @@ export type EngineKind =
   | "mysql"
   | "docdb"
   | "dynamodb"
+  | "elasticache"
   | "unknown";
 
 export function engineKind(engine: string | null | undefined): EngineKind {
@@ -17,6 +18,13 @@ export function engineKind(engine: string | null | undefined): EngineKind {
   if (e.includes("mysql")) return "mysql";
   if (e.includes("docdb")) return "docdb";
   if (e.includes("dynamodb")) return "dynamodb";
+  if (
+    e.includes("redis") ||
+    e.includes("valkey") ||
+    e.includes("memcached") ||
+    e.includes("elasticache")
+  )
+    return "elasticache";
   return "unknown";
 }
 
@@ -65,6 +73,29 @@ export function engineBadge(engine: string | null | undefined): EngineBadge {
         classes: "bg-purple-500/15 text-purple-300 border-purple-500/40",
         accent: "bg-purple-400",
       };
+    case "elasticache": {
+      // ElastiCache covers Redis/Valkey/Memcached — reflect the specific engine
+      // in the badge while sharing the family's rose accent.
+      const e = (engine || "").toLowerCase();
+      const label = e.includes("memcached")
+        ? "Memcached"
+        : e.includes("valkey")
+          ? "Valkey"
+          : e.includes("redis")
+            ? "Redis"
+            : "ElastiCache";
+      const short = e.includes("memcached")
+        ? "MC"
+        : label === "ElastiCache"
+          ? "Cache"
+          : label;
+      return {
+        label,
+        short,
+        classes: "bg-rose-500/15 text-rose-300 border-rose-500/40",
+        accent: "bg-rose-400",
+      };
+    }
     default:
       return {
         label: engine || "unknown",
@@ -234,12 +265,14 @@ export type EngineGroup =
   | "aurora-postgresql"
   | "aurora-mysql"
   | "documentdb"
-  | "dynamodb";
+  | "dynamodb"
+  | "elasticache";
 
 export function engineGroup(engine: string | null | undefined): EngineGroup {
   const fam = engineFamily(engine);
   if (fam === "documentdb") return "documentdb";
   if (fam === "dynamodb") return "dynamodb";
+  if (fam === "elasticache") return "elasticache";
   // relational → split by PG/MySQL. Unknown relational → treat as PG group.
   return engineKind(engine) === "mysql" ? "aurora-mysql" : "aurora-postgresql";
 }
@@ -249,6 +282,7 @@ export const ENGINE_GROUP_ORDER: EngineGroup[] = [
   "aurora-mysql",
   "documentdb",
   "dynamodb",
+  "elasticache",
 ];
 
 export interface EngineGroupMeta {
@@ -276,6 +310,11 @@ export const ENGINE_GROUP_META: Record<EngineGroup, EngineGroupMeta> = {
     label: "DynamoDB",
     accent: "bg-violet-400",
     classes: "bg-violet-500/15 text-violet-300 border-violet-500/40",
+  },
+  elasticache: {
+    label: "ElastiCache",
+    accent: "bg-rose-400",
+    classes: "bg-rose-500/15 text-rose-300 border-rose-500/40",
   },
 };
 

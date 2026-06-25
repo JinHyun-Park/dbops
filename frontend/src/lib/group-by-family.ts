@@ -47,6 +47,7 @@ export function groupByEngineGroup<T extends HasEngine>(
     "aurora-mysql": [],
     documentdb: [],
     dynamodb: [],
+    elasticache: [],
   };
   for (const it of items) groups[engineGroup(it.engine)].push(it);
   return groups;
