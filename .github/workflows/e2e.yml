@@ -6,7 +6,8 @@ name: E2E smoke
 #
 # Requires repo secrets:
 #   DBOPS_E2E_EMAIL / DBOPS_E2E_PASSWORD  — the dedicated Cognito test user
-#   DBOPS_E2E_URL (optional)              — defaults to the dev CloudFront URL
+#   DBOPS_E2E_URL                         — the deployed dev frontend URL
+#     (required; playwright.config.ts throws if unset — no baked-in default)
 #
 # Runs nightly + on demand. NOT on every push: it hits live dev infra (and the
 # RCA spec invokes the agent once per run), so a deploy-then-test cadence fits
@@ -33,7 +34,7 @@ jobs:
       DBOPS_E2E_PASSWORD: ${{ secrets.DBOPS_E2E_PASSWORD }}
       DBOPS_E2E_URL: ${{ secrets.DBOPS_E2E_URL }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: 22

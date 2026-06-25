@@ -3,7 +3,7 @@
 # requirements.txt is what gets packaged).
 
 pytest>=9.1.0,<10
-pytest-cov>=5,<7
+pytest-cov>=7.1.0,<8
 
 # CDK synth tests
 aws-cdk-lib>=2.200,<3
