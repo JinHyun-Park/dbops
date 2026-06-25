@@ -3017,8 +3017,10 @@ def _engine_config_elasticache(cluster_id: str) -> dict:
         "snapshot_retention_limit": None,
         "snapshot_window": None,
         "at_rest_encryption_enabled": None,
+        "storage_encryption_type": None,
         "transit_encryption_enabled": None,
         "auth_enabled": None,
+        "rbac_enabled": None,
         "automatic_failover": None,
         "multi_az": None,
         "parameter_group": None,
@@ -3050,9 +3052,20 @@ def _engine_config_elasticache(cluster_id: str) -> dict:
         g = rg[0]
         result["snapshot_retention_limit"] = g.get("SnapshotRetentionLimit")
         result["snapshot_window"] = g.get("SnapshotWindow")
-        result["at_rest_encryption_enabled"] = bool(g.get("AtRestEncryptionEnabled"))
+        # At-rest: StorageEncryptionType is the authoritative posture — a node can
+        # be encrypted (e.g. "sse-elasticache") even when the legacy boolean flag
+        # reads false — so treat EITHER signal as encrypted and surface the type.
+        enc_type = g.get("StorageEncryptionType")
+        result["storage_encryption_type"] = enc_type
+        result["at_rest_encryption_enabled"] = bool(g.get("AtRestEncryptionEnabled")) or bool(
+            enc_type and str(enc_type).lower() != "none"
+        )
         result["transit_encryption_enabled"] = bool(g.get("TransitEncryptionEnabled"))
+        # AUTH posture covers BOTH a legacy auth token AND RBAC user groups — a
+        # cluster authenticated via RBAC (UserGroupIds) carries no auth token but
+        # is NOT open, so don't report it as "disabled".
         result["auth_enabled"] = bool(g.get("AuthTokenEnabled"))
+        result["rbac_enabled"] = bool(g.get("UserGroupIds") or [])
         # AutomaticFailover / MultiAZ are status strings (enabled/disabled/...).
         result["automatic_failover"] = g.get("AutomaticFailover")
         result["multi_az"] = g.get("MultiAZ")
@@ -3085,8 +3098,13 @@ def _engine_config_elasticache(cluster_id: str) -> dict:
                 result["snapshot_retention_limit"] = c0.get("SnapshotRetentionLimit")
             if result["snapshot_window"] is None:
                 result["snapshot_window"] = c0.get("SnapshotWindow")
+            if result["storage_encryption_type"] is None:
+                result["storage_encryption_type"] = c0.get("StorageEncryptionType")
             if result["at_rest_encryption_enabled"] is None:
-                result["at_rest_encryption_enabled"] = bool(c0.get("AtRestEncryptionEnabled"))
+                enc_type = result["storage_encryption_type"]
+                result["at_rest_encryption_enabled"] = bool(c0.get("AtRestEncryptionEnabled")) or bool(
+                    enc_type and str(enc_type).lower() != "none"
+                )
             if result["transit_encryption_enabled"] is None:
                 result["transit_encryption_enabled"] = bool(c0.get("TransitEncryptionEnabled"))
             if result["auth_enabled"] is None:

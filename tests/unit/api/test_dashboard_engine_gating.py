@@ -1055,9 +1055,11 @@ def test_engine_config_elasticache_replication_group(monkeypatch):
             "ReplicationGroupId": "my-valkey",
             "SnapshotRetentionLimit": 3,
             "SnapshotWindow": "03:00-04:00",
-            "AtRestEncryptionEnabled": True,
+            "AtRestEncryptionEnabled": False,  # legacy flag false…
+            "StorageEncryptionType": "sse-elasticache",  # …but encrypted by type
             "TransitEncryptionEnabled": False,
-            "AuthTokenEnabled": False,
+            "AuthTokenEnabled": False,  # no token…
+            "UserGroupIds": ["dbops-rbac"],  # …but authenticated via RBAC
             "AutomaticFailover": "enabled",
             "MultiAZ": "enabled",
             "MemberClusters": ["my-valkey-001", "my-valkey-002"],
@@ -1089,8 +1091,14 @@ def test_engine_config_elasticache_replication_group(monkeypatch):
     assert result["parameter_group"] == "default.valkey8"
     assert result["preferred_maintenance_window"] == "sun:05:00-sun:06:00"
     assert result["snapshot_retention_limit"] == 3
+    # StorageEncryptionType drives at-rest posture even when the legacy boolean
+    # flag is False (Codex finding) — and the type itself is surfaced.
     assert result["at_rest_encryption_enabled"] is True
+    assert result["storage_encryption_type"] == "sse-elasticache"
     assert result["transit_encryption_enabled"] is False
+    # RBAC user groups count as authenticated even without a legacy auth token.
+    assert result["auth_enabled"] is False
+    assert result["rbac_enabled"] is True
     assert result["automatic_failover"] == "enabled"
     assert result["multi_az"] == "enabled"
     assert result["parameters"]["maxmemory-policy"] == "volatile-lru"

@@ -659,8 +659,10 @@ export interface EngineConfigResponse {
   snapshot_retention_limit?: number | null;
   snapshot_window?: string | null;
   at_rest_encryption_enabled?: boolean | null;
+  storage_encryption_type?: string | null; // e.g. "sse-elasticache" | "kms"
   transit_encryption_enabled?: boolean | null;
-  auth_enabled?: boolean | null;
+  auth_enabled?: boolean | null; // legacy auth token
+  rbac_enabled?: boolean | null; // RBAC user groups (UserGroupIds)
   automatic_failover?: string | null; // "enabled" | "disabled" | "enabling" | ...
   multi_az?: string | null;
   parameter_group?: string | null;

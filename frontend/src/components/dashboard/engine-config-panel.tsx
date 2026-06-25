@@ -166,9 +166,23 @@ export function EngineConfigPanel({
   }
 
   if (fam === "elasticache") {
-    const atRest = onOff(data?.at_rest_encryption_enabled);
     const inTransit = onOff(data?.transit_encryption_enabled);
-    const auth = onOff(data?.auth_enabled);
+    // At-rest: prefer the encryption TYPE (authoritative — a node can be
+    // encrypted even when the legacy boolean reads false) and surface it.
+    const atRestOn = !!data?.at_rest_encryption_enabled;
+    const atRestText = atRestOn
+      ? data?.storage_encryption_type
+        ? `활성 · ${data.storage_encryption_type}`
+        : "활성"
+      : "비활성";
+    // AUTH: a legacy auth token OR RBAC user groups both mean "authenticated".
+    const authToken = !!data?.auth_enabled;
+    const rbac = !!data?.rbac_enabled;
+    const authText = authToken
+      ? "활성 (토큰)"
+      : rbac
+        ? "활성 (RBAC)"
+        : "비활성";
     const params = data?.parameters || {};
     const PARAM_LABELS: Record<string, string> = {
       "maxmemory-policy": "Eviction Policy (maxmemory-policy)",
@@ -222,15 +236,19 @@ export function EngineConfigPanel({
                 />
                 <ConfigCell
                   label="저장 시 암호화 (At-Rest)"
-                  value={atRest.text}
-                  tone={atRest.tone}
+                  value={atRestText}
+                  tone={atRestOn ? "good" : "muted"}
                 />
                 <ConfigCell
                   label="전송 중 암호화 (In-Transit / TLS)"
                   value={inTransit.text}
                   tone={inTransit.tone}
                 />
-                <ConfigCell label="AUTH" value={auth.text} tone={auth.tone} />
+                <ConfigCell
+                  label="AUTH"
+                  value={authText}
+                  tone={authToken || rbac ? "good" : "muted"}
+                />
                 <ConfigCell
                   label="자동 Failover"
                   value={data?.automatic_failover || "—"}
