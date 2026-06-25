@@ -165,6 +165,115 @@ export function EngineConfigPanel({
     );
   }
 
+  if (fam === "elasticache") {
+    const atRest = onOff(data?.at_rest_encryption_enabled);
+    const inTransit = onOff(data?.transit_encryption_enabled);
+    const auth = onOff(data?.auth_enabled);
+    const params = data?.parameters || {};
+    const PARAM_LABELS: Record<string, string> = {
+      "maxmemory-policy": "Eviction Policy (maxmemory-policy)",
+      "reserved-memory-percent": "Reserved Memory %",
+      "maxmemory-samples": "maxmemory-samples",
+      timeout: "Idle Timeout (timeout)",
+      "tcp-keepalive": "TCP Keepalive",
+      databases: "Databases",
+      "cluster-enabled": "Cluster Mode (cluster-enabled)",
+      "slowlog-log-slower-than": "Slowlog Threshold (µs)",
+      max_item_size: "Max Item Size",
+    };
+    const paramKeys = Object.keys(PARAM_LABELS).filter(
+      (k) => params[k] != null,
+    );
+    const retention = data?.snapshot_retention_limit;
+    return (
+      <div className="bg-zinc-900/50 border border-zinc-800 p-5">
+        {header}
+        {errorBox}
+        {notApplicable ? (
+          <div className="text-[11px] text-zinc-500 border border-zinc-800 bg-zinc-800/20 px-3 py-2">
+            이 클러스터의 구성 정보를 표시할 수 없습니다.
+          </div>
+        ) : (
+          !data?.error && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <ConfigCell
+                  label="파라미터 그룹"
+                  value={data?.parameter_group || "—"}
+                />
+                <ConfigCell
+                  label="유지보수 윈도우 (Maintenance Window)"
+                  value={data?.preferred_maintenance_window || "—"}
+                />
+                <ConfigCell
+                  label="스냅샷 보관 (Retention)"
+                  value={
+                    retention != null
+                      ? retention > 0
+                        ? `${retention}d`
+                        : "비활성"
+                      : "—"
+                  }
+                  tone={retention ? "neutral" : "muted"}
+                />
+                <ConfigCell
+                  label="스냅샷 윈도우 (Snapshot Window)"
+                  value={data?.snapshot_window || "—"}
+                />
+                <ConfigCell
+                  label="저장 시 암호화 (At-Rest)"
+                  value={atRest.text}
+                  tone={atRest.tone}
+                />
+                <ConfigCell
+                  label="전송 중 암호화 (In-Transit / TLS)"
+                  value={inTransit.text}
+                  tone={inTransit.tone}
+                />
+                <ConfigCell label="AUTH" value={auth.text} tone={auth.tone} />
+                <ConfigCell
+                  label="자동 Failover"
+                  value={data?.automatic_failover || "—"}
+                  tone={
+                    data?.automatic_failover === "enabled" ? "good" : "muted"
+                  }
+                />
+                <ConfigCell
+                  label="Multi-AZ"
+                  value={data?.multi_az || "—"}
+                  tone={data?.multi_az === "enabled" ? "good" : "muted"}
+                />
+              </div>
+              {paramKeys.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium mb-2 pt-2 border-t border-zinc-800/80">
+                    파라미터 (parameter group)
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {paramKeys.map((k) => {
+                      const v = params[k];
+                      // noeviction = writes fail once memory is full — flag it.
+                      const risky =
+                        k === "maxmemory-policy" && v === "noeviction";
+                      return (
+                        <ConfigCell
+                          key={k}
+                          label={PARAM_LABELS[k]}
+                          value={v ?? "—"}
+                          tone={risky ? "warn" : "neutral"}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        )}
+      </div>
+    );
+  }
+
   // ── DocumentDB ──
   const del = onOff(data?.deletion_protection);
   const encrypted = onOff(data?.storage_encrypted);

@@ -1031,3 +1031,98 @@ def test_engine_config_dynamodb_no_raw_boto_leak_on_error(monkeypatch):
     assert "raw secret leak" not in result.get("error", "")
     assert "AccessDenied" not in result.get("error", "")
     assert "구성" in result.get("error", "")
+
+
+# ===========================================================================
+# Engine-config — ElastiCache (replication group): parameter group + key
+# params (eviction policy) + maintenance/snapshot/encryption/auth/failover.
+# ===========================================================================
+
+def test_engine_config_elasticache_replication_group(monkeypatch):
+    """_engine_config for an ElastiCache replication group surfaces RG posture +
+    reads the maintenance window / parameter group from a MEMBER NODE (not the
+    RG id) + the key parameter values (maxmemory-policy), filtering to the
+    allowlist."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "redis")
+    monkeypatch.setattr(
+        handler, "_lookup_cluster",
+        lambda cid: {"resource_name": "my-valkey", "region": "ap-northeast-2"},
+    )
+
+    mock_ec = MagicMock()
+    mock_ec.describe_replication_groups.return_value = {
+        "ReplicationGroups": [{
+            "ReplicationGroupId": "my-valkey",
+            "SnapshotRetentionLimit": 3,
+            "SnapshotWindow": "03:00-04:00",
+            "AtRestEncryptionEnabled": True,
+            "TransitEncryptionEnabled": False,
+            "AuthTokenEnabled": False,
+            "AutomaticFailover": "enabled",
+            "MultiAZ": "enabled",
+            "MemberClusters": ["my-valkey-001", "my-valkey-002"],
+        }]
+    }
+    mock_ec.describe_cache_clusters.return_value = {
+        "CacheClusters": [{
+            "CacheClusterId": "my-valkey-001",
+            "PreferredMaintenanceWindow": "sun:05:00-sun:06:00",
+            "CacheParameterGroup": {"CacheParameterGroupName": "default.valkey8"},
+        }]
+    }
+    mock_ec.get_paginator.return_value.paginate.return_value = [{
+        "Parameters": [
+            {"ParameterName": "maxmemory-policy", "ParameterValue": "volatile-lru"},
+            {"ParameterName": "timeout", "ParameterValue": "0"},
+            {"ParameterName": "not-in-allowlist", "ParameterValue": "x"},
+        ]
+    }]
+
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_ec
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._engine_config("my-valkey")
+
+    assert result.get("engine_family") == "elasticache"
+    assert result.get("not_applicable") is not True
+    assert result["parameter_group"] == "default.valkey8"
+    assert result["preferred_maintenance_window"] == "sun:05:00-sun:06:00"
+    assert result["snapshot_retention_limit"] == 3
+    assert result["at_rest_encryption_enabled"] is True
+    assert result["transit_encryption_enabled"] is False
+    assert result["automatic_failover"] == "enabled"
+    assert result["multi_az"] == "enabled"
+    assert result["parameters"]["maxmemory-policy"] == "volatile-lru"
+    assert result["parameters"]["timeout"] == "0"
+    assert "not-in-allowlist" not in result["parameters"]
+    # CloudWatch-dimension lesson, again: maintenance window / PG come from the
+    # MEMBER NODE (my-valkey-001), never the replication-group id.
+    mock_ec.describe_cache_clusters.assert_called_once_with(CacheClusterId="my-valkey-001")
+
+
+def test_engine_config_elasticache_not_found_is_friendly(monkeypatch):
+    """A missing/unauthorized ElastiCache cluster returns a friendly notice
+    (info=True), never a raw boto3 fault string."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "redis")
+    monkeypatch.setattr(
+        handler, "_lookup_cluster",
+        lambda cid: {"resource_name": "ghost", "region": "ap-northeast-2"},
+    )
+    mock_ec = MagicMock()
+    mock_ec.describe_replication_groups.side_effect = Exception(
+        "ReplicationGroupNotFoundFault: not found"
+    )
+    mock_ec.describe_cache_clusters.side_effect = Exception(
+        "CacheClusterNotFoundFault: not found"
+    )
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_ec
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._engine_config("ghost")
+
+    assert result.get("engine_family") == "elasticache"
+    assert result.get("info") is True
+    assert "NotFoundFault" not in result.get("error", "")
+    assert "구성" in result.get("error", "")

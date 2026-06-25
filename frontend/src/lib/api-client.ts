@@ -655,6 +655,16 @@ export interface EngineConfigResponse {
   stream_view_type?: string | null;
   ttl_status?: string | null;
   ttl_attribute_name?: string | null;
+  // ── ElastiCache ──
+  snapshot_retention_limit?: number | null;
+  snapshot_window?: string | null;
+  at_rest_encryption_enabled?: boolean | null;
+  transit_encryption_enabled?: boolean | null;
+  auth_enabled?: boolean | null;
+  automatic_failover?: string | null; // "enabled" | "disabled" | "enabling" | ...
+  multi_az?: string | null;
+  parameter_group?: string | null;
+  parameters?: Record<string, string | null>; // key param name → value
 }
 
 export async function fetchEngineConfig(

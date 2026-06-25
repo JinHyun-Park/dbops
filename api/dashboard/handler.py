@@ -2973,13 +2973,154 @@ def _engine_config_dynamodb(cluster_id: str) -> dict:
     return result
 
 
+# Operationally meaningful parameter-group settings surfaced in the ElastiCache
+# Configuration panel. maxmemory-policy (eviction) + reserved-memory-percent are
+# the headline posture knobs; the rest are common Redis/Valkey tuning, plus one
+# Memcached field. We surface whichever of these the group actually declares.
+_ELASTICACHE_KEY_PARAMS = [
+    "maxmemory-policy",
+    "reserved-memory-percent",
+    "maxmemory-samples",
+    "timeout",
+    "tcp-keepalive",
+    "databases",
+    "cluster-enabled",
+    "slowlog-log-slower-than",
+    "max_item_size",  # Memcached
+]
+
+
+def _ec_not_found(e: Exception) -> bool:
+    msg = str(e)
+    return "NotFound" in msg or "not found" in msg.lower()
+
+
+def _engine_config_elasticache(cluster_id: str) -> dict:
+    """ElastiCache (Redis/Valkey/Memcached) engine-level config (read-only).
+
+    Surfaces config the ElastiCache overview panel does NOT already show: the
+    parameter group + its key parameters (eviction policy etc.), maintenance
+    window, snapshot retention/window, encryption (at-rest/in-transit), AUTH,
+    automatic failover and Multi-AZ. resource_name is the replication-group id
+    (Redis/Valkey) or the cache-cluster id (Memcached/standalone). Maintenance
+    window + parameter group live on the cache CLUSTER (node), not the
+    replication group, so they're read from a member node. Friendly-fallback
+    like the other engine-config helpers — never leak the raw boto3 fault."""
+    row = _lookup_cluster(cluster_id)
+    resource_name = (row.get("resource_name") if row else "") or cluster_id
+    ec = _cluster_session(cluster_id, row=row).client("elasticache")
+
+    result = {
+        "cluster_id": cluster_id,
+        "engine_family": "elasticache",
+        "preferred_maintenance_window": None,
+        "snapshot_retention_limit": None,
+        "snapshot_window": None,
+        "at_rest_encryption_enabled": None,
+        "transit_encryption_enabled": None,
+        "auth_enabled": None,
+        "automatic_failover": None,
+        "multi_az": None,
+        "parameter_group": None,
+        "parameters": {},
+    }
+    not_found = {
+        "cluster_id": cluster_id,
+        "engine_family": "elasticache",
+        "error": (
+            "이 ElastiCache 클러스터의 구성 정보를 조회할 수 없습니다 — 등록되지 "
+            "않았거나 접근 권한이 없습니다."
+        ),
+        "info": True,
+    }
+
+    node_id = None  # a member cache-cluster id to read maintenance window + PG from
+    # -- Redis/Valkey replication group --
+    try:
+        rg = (ec.describe_replication_groups(ReplicationGroupId=resource_name)
+              .get("ReplicationGroups") or [])
+    except Exception as e:
+        if _ec_not_found(e):
+            rg = []
+        else:
+            print(f"[engine-config] elasticache describe_replication_groups failed for {cluster_id}: {e}")
+            result["error"] = "구성 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요."
+            return result
+    if rg:
+        g = rg[0]
+        result["snapshot_retention_limit"] = g.get("SnapshotRetentionLimit")
+        result["snapshot_window"] = g.get("SnapshotWindow")
+        result["at_rest_encryption_enabled"] = bool(g.get("AtRestEncryptionEnabled"))
+        result["transit_encryption_enabled"] = bool(g.get("TransitEncryptionEnabled"))
+        result["auth_enabled"] = bool(g.get("AuthTokenEnabled"))
+        # AutomaticFailover / MultiAZ are status strings (enabled/disabled/...).
+        result["automatic_failover"] = g.get("AutomaticFailover")
+        result["multi_az"] = g.get("MultiAZ")
+        members = g.get("MemberClusters") or []
+        node_id = members[0] if members else None
+    else:
+        # -- Memcached / standalone cache cluster --
+        node_id = resource_name
+
+    # Maintenance window + parameter-group NAME live on the cache cluster (node),
+    # not the replication group — read them (and fill any unset standalone fields).
+    pg_name = None
+    if node_id:
+        try:
+            ccs = (ec.describe_cache_clusters(CacheClusterId=node_id)
+                   .get("CacheClusters") or [])
+        except Exception as e:
+            if not rg and _ec_not_found(e):
+                return not_found
+            print(f"[engine-config] elasticache describe_cache_clusters failed for {cluster_id}: {e}")
+            ccs = []
+        if not ccs and not rg:
+            return not_found
+        if ccs:
+            c0 = ccs[0]
+            result["preferred_maintenance_window"] = c0.get("PreferredMaintenanceWindow")
+            pg_name = (c0.get("CacheParameterGroup") or {}).get("CacheParameterGroupName")
+            # Standalone path: the RG fields above were never set — fill from the node.
+            if result["snapshot_retention_limit"] is None:
+                result["snapshot_retention_limit"] = c0.get("SnapshotRetentionLimit")
+            if result["snapshot_window"] is None:
+                result["snapshot_window"] = c0.get("SnapshotWindow")
+            if result["at_rest_encryption_enabled"] is None:
+                result["at_rest_encryption_enabled"] = bool(c0.get("AtRestEncryptionEnabled"))
+            if result["transit_encryption_enabled"] is None:
+                result["transit_encryption_enabled"] = bool(c0.get("TransitEncryptionEnabled"))
+            if result["auth_enabled"] is None:
+                result["auth_enabled"] = bool(c0.get("AuthTokenEnabled"))
+
+    result["parameter_group"] = pg_name
+
+    # Key parameters from the parameter group (eviction policy etc.).
+    if pg_name:
+        try:
+            params = {}
+            for page in ec.get_paginator("describe_cache_parameters").paginate(
+                CacheParameterGroupName=pg_name
+            ):
+                for p in page.get("Parameters") or []:
+                    name = p.get("ParameterName")
+                    if name in _ELASTICACHE_KEY_PARAMS:
+                        params[name] = p.get("ParameterValue")
+            result["parameters"] = params
+        except Exception as e:
+            print(f"[engine-config] elasticache describe_cache_parameters failed for {cluster_id}: {e}")
+
+    return result
+
+
 def _engine_config(cluster_id: str) -> dict:
     """Engine-level configuration for non-relational families (read-only).
 
     Surfaces config NOT already shown in the overview panels — DocumentDB
     cluster settings (maintenance window, deletion protection, encryption,
-    parameter group, retention) and DynamoDB table settings (table class,
-    deletion protection, SSE, streams, TTL).
+    parameter group, retention), DynamoDB table settings (table class,
+    deletion protection, SSE, streams, TTL), and ElastiCache settings
+    (parameter group + key params, maintenance/snapshot windows, encryption,
+    AUTH, failover).
 
     Relational clusters already have the SettingsPanel (cluster_settings),
     so they return not_applicable here. Same friendly-fallback contract as
@@ -2993,6 +3134,8 @@ def _engine_config(cluster_id: str) -> dict:
         return _engine_config_docdb(cluster_id)
     if fam == "dynamodb":
         return _engine_config_dynamodb(cluster_id)
+    if fam == "elasticache":
+        return _engine_config_elasticache(cluster_id)
     # relational already has the SettingsPanel — nothing engine-config-specific here.
     return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": fam}
 

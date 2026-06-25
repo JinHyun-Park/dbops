@@ -722,6 +722,11 @@ class AgentStack(cdk.Stack):
                 # deletion protection (read-only).
                 "dynamodb:DescribeTable",
                 "dynamodb:DescribeTimeToLive",
+                # ElastiCache engine-config panel — replication group / cache
+                # cluster settings + parameter-group values (read-only).
+                "elasticache:DescribeReplicationGroups",
+                "elasticache:DescribeCacheClusters",
+                "elasticache:DescribeCacheParameters",
                 "cloudwatch:GetMetricStatistics",
                 # Hub-spoke: topology/backup/log panels assume the cluster's
                 # spoke role to read in its OWN account (local when no role).
