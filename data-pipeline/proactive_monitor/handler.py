@@ -58,6 +58,16 @@ def lambda_handler(event, context):
                CASE WHEN b.baseline_std > 0 THEN (r.current_avg - b.baseline_avg) / b.baseline_std ELSE 0 END as z_score
         FROM recent r JOIN baseline b ON r.cluster_id = b.cluster_id AND r.metric_type = b.metric_type
         WHERE ABS(CASE WHEN b.baseline_std > 0 THEN (r.current_avg - b.baseline_avg) / b.baseline_std ELSE 0 END) > 3
+          -- ponytail: dedup via event_log cooldown — one alert per (cluster,metric)
+          -- per 60min even if the anomaly persists, so a sustained deviation
+          -- doesn't spam SNS every run. Reuses the anomaly_<metric> event_type
+          -- written below; no new table. Widen the interval if still too chatty.
+          AND NOT EXISTS (
+            SELECT 1 FROM event_log e
+            WHERE e.cluster_id = r.cluster_id
+              AND e.event_type = 'anomaly_' || r.metric_type
+              AND e.event_time > NOW() - INTERVAL '60 minutes'
+          )
     """
 
     anomalies = cache_query(anomaly_sql)
@@ -71,6 +81,7 @@ def lambda_handler(event, context):
             z_score = anomaly.get("z_score", 0)
             current = anomaly.get("current_avg", 0)
             baseline = anomaly.get("baseline_avg", 0)
+            sev = "critical" if abs(z_score) >= 5 else "warning"
 
             message = (
                 f"[DBOps Anomaly Detected]\n"
@@ -81,15 +92,15 @@ def lambda_handler(event, context):
 
             sns.publish(
                 TopicArn=sns_topic,
-                Subject=f"[DBOps ANOMALY] {cluster_id}: {metric} z={z_score:.1f}",
+                Subject=f"[DBOps {sev.upper()}] {cluster_id}: {metric} z={z_score:.1f}",
                 Message=message,
             )
             alerts_sent += 1
 
             cache_query(
                 "INSERT INTO event_log (cluster_id, event_time, event_type, source, message, severity) "
-                "VALUES (:cid, NOW(), :etype, 'dbops-monitor', :msg, 'warning')",
-                {"cid": cluster_id, "etype": f"anomaly_{metric}", "msg": message},
+                "VALUES (:cid, NOW(), :etype, 'dbops-monitor', :msg, :sev)",
+                {"cid": cluster_id, "etype": f"anomaly_{metric}", "msg": message, "sev": sev},
             )
 
     return {"statusCode": 200, "body": json.dumps({"anomalies_found": len(anomalies), "alerts_sent": alerts_sent})}
