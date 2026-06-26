@@ -29,6 +29,7 @@ from collectors.pg_locks import collect_pg_locks
 from collectors.pg_param_fitness import collect_param_fitness
 from collectors.pg_table_stats import collect_pg_table_stats
 from collectors.pi_collector import collect_pi_metrics
+from collectors.query_regression import collect_query_regression
 from collectors.stats_collector import collect_query_stats
 
 
@@ -345,6 +346,18 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
             print(f"[{cluster_id}] mysql innodb status error: {e}")
     else:
         result["stats"] = {"skipped": f"engine={engine} or no secret"}
+
+    # Query latency-regression findings — engine-agnostic, reads query_stats
+    # (which both the PG + MySQL stats collectors above populate this run).
+    if target_cluster_arn and target_secret_arn and ("postgresql" in engine or "mysql" in engine):
+        try:
+            result["query_regression"] = collect_query_regression(
+                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                snapshot_ts=run_ts,
+            )
+        except Exception as e:
+            result["query_regression_error"] = str(e)
+            print(f"[{cluster_id}] query regression error: {e}")
 
     # Seasonal baseline trainer — engine-agnostic, only reads cache DB
     # metric_snapshots. Time-gated to once per hour per cluster.
