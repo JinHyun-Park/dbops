@@ -166,23 +166,35 @@ export function EngineConfigPanel({
   }
 
   if (fam === "elasticache") {
-    const inTransit = onOff(data?.transit_encryption_enabled);
+    // Security posture: null/undefined → unknown ("—"), explicit false →
+    // "비활성". Rendering an unknown protection as "disabled" would misrepresent
+    // it, so the three states stay distinct.
+    const posture = (v: boolean | null | undefined) =>
+      v == null
+        ? { text: "—", tone: "muted" as const }
+        : v
+          ? { text: "활성", tone: "good" as const }
+          : { text: "비활성", tone: "muted" as const };
+    const inTransit = posture(data?.transit_encryption_enabled);
     // At-rest: prefer the encryption TYPE (authoritative — a node can be
     // encrypted even when the legacy boolean reads false) and surface it.
-    const atRestOn = !!data?.at_rest_encryption_enabled;
-    const atRestText = atRestOn
-      ? data?.storage_encryption_type
+    const atRest = posture(data?.at_rest_encryption_enabled);
+    const atRestText =
+      atRest.tone === "good" && data?.storage_encryption_type
         ? `활성 · ${data.storage_encryption_type}`
-        : "활성"
-      : "비활성";
-    // AUTH: a legacy auth token OR RBAC user groups both mean "authenticated".
-    const authToken = !!data?.auth_enabled;
-    const rbac = !!data?.rbac_enabled;
-    const authText = authToken
-      ? "활성 (토큰)"
-      : rbac
-        ? "활성 (RBAC)"
-        : "비활성";
+        : atRest.text;
+    // AUTH: a legacy auth token OR RBAC user groups both mean "authenticated";
+    // both absent → unknown.
+    const authToken = data?.auth_enabled === true;
+    const rbac = data?.rbac_enabled === true;
+    const authKnown = data?.auth_enabled != null || data?.rbac_enabled != null;
+    const authText = !authKnown
+      ? "—"
+      : authToken
+        ? "활성 (토큰)"
+        : rbac
+          ? "활성 (RBAC)"
+          : "비활성";
     const params = data?.parameters || {};
     const PARAM_LABELS: Record<string, string> = {
       "maxmemory-policy": "Eviction Policy (maxmemory-policy)",
@@ -237,7 +249,7 @@ export function EngineConfigPanel({
                 <ConfigCell
                   label="저장 시 암호화 (At-Rest)"
                   value={atRestText}
-                  tone={atRestOn ? "good" : "muted"}
+                  tone={atRest.tone}
                 />
                 <ConfigCell
                   label="전송 중 암호화 (In-Transit / TLS)"
