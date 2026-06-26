@@ -90,17 +90,23 @@ def lambda_handler(event, context):
                 f"Current: {current:.2f} (baseline: {baseline:.2f}, z-score: {z_score:.1f})\n"
             )
 
-            sns.publish(
-                TopicArn=sns_topic,
-                Subject=f"[DBOps {sev.upper()}] {cluster_id}: {metric} z={z_score:.1f}",
-                Message=message,
-            )
-            alerts_sent += 1
-
+            # Record the cooldown row FIRST so a publish failure or a Lambda retry
+            # can't re-alert the same anomaly — the next run's dedup query keys off
+            # this event_log row. Worst case is one missed alert (publish threw
+            # after the row was written) — the safe direction for an alert path.
             cache_query(
                 "INSERT INTO event_log (cluster_id, event_time, event_type, source, message, severity) "
                 "VALUES (:cid, NOW(), :etype, 'dbops-monitor', :msg, :sev)",
                 {"cid": cluster_id, "etype": f"anomaly_{metric}", "msg": message, "sev": sev},
             )
+            try:
+                sns.publish(
+                    TopicArn=sns_topic,
+                    Subject=f"[DBOps {sev.upper()}] {cluster_id}: {metric} z={z_score:.1f}",
+                    Message=message,
+                )
+                alerts_sent += 1
+            except Exception as e:
+                print(f"[proactive-monitor] SNS publish failed for {cluster_id}/{metric}: {type(e).__name__}: {e}")
 
     return {"statusCode": 200, "body": json.dumps({"anomalies_found": len(anomalies), "alerts_sent": alerts_sent})}
