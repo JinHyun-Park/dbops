@@ -15,12 +15,14 @@ from collectors.elasticache_findings import collect_elasticache_findings
 from collectors.engine_family import engine_family
 from collectors.meta_collector import collect_cluster_meta
 from collectors.mysql_activity import collect_mysql_activity
+from collectors.mysql_innodb_status import collect_mysql_innodb_status
 from collectors.mysql_locks import collect_mysql_locks
 from collectors.mysql_param_fitness import collect_mysql_param_fitness
 from collectors.mysql_query_stats import collect_mysql_query_stats
 from collectors.mysql_table_stats import collect_mysql_table_stats
 from collectors.pg_activity import collect_pg_activity
 from collectors.pg_baseline_trainer import collect_pg_baselines
+from collectors.pg_engine_internals import collect_pg_engine_internals
 from collectors.pg_extensions import collect_pg_extensions
 from collectors.pg_health_checks import collect_pg_health_checks
 from collectors.pg_locks import collect_pg_locks
@@ -277,6 +279,14 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         except Exception as e:
             result["extensions_error"] = str(e)
             print(f"[{cluster_id}] extensions error: {e}")
+        try:
+            result["engine_internals"] = collect_pg_engine_internals(
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn,
+                cluster_id, target_db, snapshot_ts=run_ts,
+            )
+        except Exception as e:
+            result["engine_internals_error"] = str(e)
+            print(f"[{cluster_id}] engine internals error: {e}")
     elif target_cluster_arn and target_secret_arn and "mysql" in engine:
         # MySQL counterparts — same cache tables, MySQL-flavored source queries.
         try:
@@ -325,6 +335,14 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         except Exception as e:
             result["capacity_forecast_error"] = str(e)
             print(f"[{cluster_id}] mysql capacity forecast error: {e}")
+        try:
+            result["innodb_status"] = collect_mysql_innodb_status(
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn,
+                cluster_id, target_db, snapshot_ts=run_ts,
+            )
+        except Exception as e:
+            result["innodb_status_error"] = str(e)
+            print(f"[{cluster_id}] mysql innodb status error: {e}")
     else:
         result["stats"] = {"skipped": f"engine={engine} or no secret"}
 
