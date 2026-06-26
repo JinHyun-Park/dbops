@@ -57,6 +57,27 @@ def test_register_redis_replication_group():
     assert rd["cluster_mode"] is True and rd["num_node_groups"] == 2
 
 
+def test_register_valkey_reads_actual_engine():
+    """A Valkey replication group registers as engine=valkey even when the
+    request body says redis — the actual Engine from describe wins, so the badge
+    + family grouping reflect Valkey rather than mislabeling it Redis."""
+    fake = MagicMock()
+    fake.describe_replication_groups.return_value = {
+        "ReplicationGroups": [{
+            "ReplicationGroupId": "my-valkey", "Status": "available",
+            "Engine": "valkey", "ClusterEnabled": False,
+            "MemberClusters": ["my-valkey-001"], "CacheNodeType": "cache.t4g.micro",
+        }]
+    }
+    table = _table()
+    with patch.object(handler, "_elasticache_client_for", return_value=fake):
+        handler._register_elasticache(table, _body(name="my-valkey", engine="redis"))
+    item = table.put_item.call_args.kwargs["Item"]
+    assert item["engine"] == "valkey"
+    assert item["resource_type"] == "elasticache-valkey"
+    assert item["resource_details"]["engine"] == "valkey"
+
+
 def test_register_memcached_cache_cluster_fallback():
     fake = MagicMock()
     # not a replication group → fall back to cache cluster

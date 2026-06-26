@@ -411,11 +411,14 @@ def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = 
                    .paginate()):
             for g in rg.get("ReplicationGroups", []):
                 rgid = g["ReplicationGroupId"]
+                # Actual engine (Valkey vs Redis); older botocore that doesn't
+                # surface the field falls back to redis.
+                eng = (g.get("Engine") or "redis").lower()
                 out.append({
                     "cluster_id": rgid,
-                    "engine": "redis", "engine_family": "elasticache",
+                    "engine": eng, "engine_family": "elasticache",
                     "resource_name": rgid,
-                    "resource_type": "elasticache-redis",
+                    "resource_type": f"elasticache-{eng}",
                     "status": g.get("Status", ""),
                     "region": region,
                     "secret_source": "n/a",
@@ -526,6 +529,8 @@ def _register_elasticache(table, body):
               .get("ReplicationGroups") or [])
         if rg:
             g = rg[0]
+            # Prefer the actual engine reported by the API (Valkey vs Redis).
+            engine = (g.get("Engine") or engine).lower()
             node_groups = g.get("NodeGroups") or []
             members = g.get("MemberClusters") or []
             details = {
