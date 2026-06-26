@@ -10,6 +10,7 @@ import { QueriesPanel } from "@/components/dashboard/queries-panel";
 import { HealthScore } from "@/components/dashboard/health-score";
 import { VacuumPanel } from "@/components/dashboard/vacuum-panel";
 import { MaintenanceHealthPanel } from "@/components/dashboard/maintenance-health-panel";
+import { EngineInternalsPanel } from "@/components/dashboard/engine-internals-panel";
 import { ExtensionsCard } from "@/components/dashboard/extensions-card";
 import { IndexRecsPanel } from "@/components/dashboard/index-recs-panel";
 import { RedundantIndexesPanel } from "@/components/dashboard/redundant-indexes-panel";
@@ -663,6 +664,14 @@ export default function DashboardPage() {
                       clusterId={selectedCluster}
                       engine={activeEngine}
                     />
+
+                    {selectedCluster && (
+                      <EngineInternalsPanel
+                        clusterId={selectedCluster}
+                        engine={activeEngine}
+                        range={range}
+                      />
+                    )}
 
                     {activeEngine.includes("postgresql") && (
                       <ExtensionsCard
