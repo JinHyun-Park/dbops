@@ -340,6 +340,40 @@ class DataStack(cdk.Stack):
             targets=[targets.LambdaFunction(self.alert_evaluator)],
         )
 
+        # High-resolution active-session sampler (~5s near-ASH). Like the ETL
+        # collector it's NOT in a VPC (RDS Data API only); it self-loops within
+        # each 1-min invocation to sample far faster than the 5-min ETL, writing
+        # to active_session_samples (which it also prunes to 7d).
+        self.ash_sampler = lambda_.Function(
+            self, "AshSampler",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../data-pipeline/ash_sampler"),
+            timeout=cdk.Duration.seconds(60),
+            memory_size=256,
+            environment={
+                "CACHE_DB_CLUSTER_ARN": self.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+            },
+        )
+        self.cache_db.secret.grant_read(self.ash_sampler)
+        self.cache_db.grant_data_api_access(self.ash_sampler)
+        foundation.clusters_table.grant_read_data(self.ash_sampler)
+        # Sample each relational target's pg_stat_activity / processlist via the
+        # Data API; target cluster ARNs + secrets are registry-defined, so this is
+        # resource "*" (same as the ETL collector's target access).
+        self.ash_sampler.add_to_role_policy(iam.PolicyStatement(
+            actions=["rds-data:ExecuteStatement", "secretsmanager:GetSecretValue"],
+            resources=["*"],
+        ))
+        events.Rule(
+            self, "AshSamplerSchedule",
+            schedule=events.Schedule.rate(cdk.Duration.minutes(1)),
+            targets=[targets.LambdaFunction(self.ash_sampler)],
+        )
+
         # Recurring agent work — reads due scheduled_tasks and enqueues a pending
         # agent-tasks row for each (the worker then runs the report). Public
         # endpoints only (Data API + DynamoDB), no agent-stack dependency.
