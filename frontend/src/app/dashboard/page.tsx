@@ -110,6 +110,12 @@ const RANGES = [
   { label: "1h", hours: 1 },
   { label: "6h", hours: 6 },
   { label: "24h", hours: 24 },
+  // Long-term trends: backend is uncapped and _bucket_seconds auto-downsamples
+  // wide windows to ~TS_TARGET_POINTS, so these need no backend change. ponytail:
+  // raw rows live in the hot cache (no purge); if growth ever bites, downsample
+  // old rows to hourly rollups — cheaper than an Athena/Iceberg cold layer.
+  { label: "7d", hours: 168 },
+  { label: "30d", hours: 720 },
 ];
 
 type TimeRange =
