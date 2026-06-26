@@ -669,6 +669,31 @@ export interface EngineConfigResponse {
   parameters?: Record<string, string | null>; // key param name → value
 }
 
+export interface ActiveSessionsResponse {
+  cluster_id: string;
+  hours: number;
+  samples: Array<{
+    ts: string;
+    active: number;
+    top_wait: string | null;
+    top_wait_count: number | null;
+  }>;
+}
+
+// High-resolution (~5s) active-session samples from the ASH sampler.
+export async function fetchActiveSessions(
+  clusterId: string,
+  hours = 1,
+): Promise<ActiveSessionsResponse> {
+  const res = await authedFetch(
+    await api(
+      `/api/dashboard/${enc(clusterId)}/active-sessions?hours=${hours}`,
+    ),
+  );
+  if (!res.ok) throw new Error(`활성 세션 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
 export async function fetchEngineConfig(
   clusterId: string,
 ): Promise<EngineConfigResponse> {

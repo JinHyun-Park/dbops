@@ -1587,6 +1587,25 @@ def _audit_log(query, cluster_id, days, action_type):
     return {"cluster_id": cluster_id, "days": days, "audit_entries": rows}
 
 
+def _active_sessions(query, cluster_id, hours):
+    """High-resolution (~5s) active-session samples from active_session_samples
+    (written by the ASH sampler). Most-recent-first, capped to bound the payload;
+    returned chronological for charting."""
+    rows = query(
+        "SELECT ts, active_sessions, top_wait, top_wait_count "
+        "FROM active_session_samples "
+        "WHERE cluster_id = :cid AND ts > NOW() - (:hours || ' hours')::interval "
+        "ORDER BY ts DESC LIMIT 2000",
+        {"cid": cluster_id, "hours": str(hours)},
+    )
+    samples = [
+        {"ts": r.get("ts"), "active": r.get("active_sessions"),
+         "top_wait": r.get("top_wait"), "top_wait_count": r.get("top_wait_count")}
+        for r in reversed(rows)
+    ]
+    return {"cluster_id": cluster_id, "hours": hours, "samples": samples}
+
+
 def _anomalies(query, cluster_id, hours, threshold):
     """Seasonal anomaly detection.
 
@@ -3535,6 +3554,9 @@ def lambda_handler(event, context):
             hours = _parse_int(qs.get("hours"), 4)
             threshold = _parse_float(qs.get("threshold"), 2.5)
             return _response(200, _anomalies(query, cluster_id, hours, threshold), max_age=30)
+        if raw_path.endswith("/active-sessions"):
+            hours = _parse_int(qs.get("hours"), 1, min_v=1, max_v=24)
+            return _response(200, _active_sessions(query, cluster_id, hours), max_age=10)
         if raw_path.endswith("/audit-log"):
             days = _parse_int(qs.get("days"), 7, min_v=1, max_v=90)
             action_type = qs.get("action_type")

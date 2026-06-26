@@ -23,7 +23,12 @@ import time
 import boto3
 
 INTERVAL_SEC = 5
-SAMPLES_PER_RUN = 10          # 9 sleeps × 5s ≈ 45s + query time, under the 60s budget
+SAMPLES_PER_RUN = 10
+# Hard wall-clock budget per run — must stay below the 60s Lambda timeout AND the
+# 1-min schedule so a run never gets killed mid-sample or overlaps the next. The
+# loop stops early when the budget is spent, so a large fleet just takes fewer
+# samples/run (graceful) instead of running over.
+MAX_RUN_SEC = 50
 RETENTION_DAYS = 7
 
 # Active sessions + the single dominant wait, one fast query.
@@ -101,7 +106,10 @@ def lambda_handler(event, context):
 
     targets = _scan_relational(table)
     inserted = 0
+    deadline = time.monotonic() + MAX_RUN_SEC
     for i in range(SAMPLES_PER_RUN):
+        if time.monotonic() >= deadline:
+            break
         for t in targets:
             try:
                 sql = PG_SQL if "postgresql" in t["engine"] else MYSQL_SQL
@@ -121,8 +129,11 @@ def lambda_handler(event, context):
                 inserted += 1
             except Exception as e:
                 print(f"[ash] sample failed for {t['cluster_id']}: {type(e).__name__}: {e}")
-        if i < SAMPLES_PER_RUN - 1:
+        # Sleep only if another full iteration still fits within the budget.
+        if i < SAMPLES_PER_RUN - 1 and time.monotonic() + INTERVAL_SEC < deadline:
             time.sleep(INTERVAL_SEC)
+        else:
+            break
 
     # Retention: keep ~7d of high-res samples.
     try:

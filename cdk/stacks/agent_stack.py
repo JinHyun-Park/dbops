@@ -1418,6 +1418,11 @@ class AgentStack(cdk.Stack):
             integration=integrations.HttpLambdaIntegration("DashboardAnomaliesIntegration", dashboard_alias),
         )
         self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/active-sessions",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardActiveSessionsIntegration", dashboard_alias),
+        )
+        self.api.add_routes(
             path="/api/dashboard/{cluster_id}/audit-log",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardAuditLogIntegration", dashboard_alias),
