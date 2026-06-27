@@ -6,7 +6,7 @@ AI-powered DBOps platform for DBAs managing Amazon Aurora MySQL/PostgreSQL. Buil
 
 ## Architecture Summary
 
-- **Single Agent + Gateway**: One AgentCore Runtime, one Gateway with 5 MCP Servers (42 tools total)
+- **Single Agent + Gateway**: One AgentCore Runtime, one Gateway with 4 MCP Servers (50 tools total), plus 2 agent-local AWS-docs tools
 - **2-Path Communication**: SSE Direct (AI chat) + REST API (dashboard/data)
 - **CDK-First**: All infrastructure via CDK. Never modify AWS resources directly.
 

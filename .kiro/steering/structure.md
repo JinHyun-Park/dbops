@@ -22,10 +22,10 @@ dbops/
 │   ├── tools/                    # Agent-local tools (classifier, etc.)
 │   └── Dockerfile
 ├── mcp-servers/                  # MCP Servers (each is a Lambda function)
-│   ├── performance/              # 15 tools: query analysis, metrics, monitoring
+│   ├── performance/              # 11 tools: query analysis, metrics, monitoring
 │   ├── incident/                 # 8 tools: RCA, signal correlation, logs
-│   ├── operations/               # 11 tools: params, schema, backup, SQL review
-│   ├── simulation/               # 6 tools: upgrade, scaling, DDL impact
+│   ├── operations/               # 23 tools: params, schema, backup, SQL review, NoSQL/ElastiCache writes
+│   ├── simulation/               # 8 tools: upgrade, scaling, DDL impact, NoSQL/cache cost
 │   └── shared/                   # Common utilities (DB connector, cache client)
 ├── data-pipeline/                # Data Collection Lambdas
 │   ├── etl_collector/            # Periodic metrics (1min/5min/1hr)
