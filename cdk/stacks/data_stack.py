@@ -198,13 +198,19 @@ class DataStack(cdk.Stack):
                      "pi:GetResourceMetrics", "pi:DescribeDimensionKeys",
                      "rds-data:ExecuteStatement", "rds-data:BatchExecuteStatement",
                      "cloudwatch:GetMetricStatistics", "cloudwatch:GetMetricData",
-                     "secretsmanager:GetSecretValue",
                      # Cost Explorer — Savings Plan / RI recommendations for the
                      # cost_savings_plan_opportunity finding. Cached 23h on the
                      # cache DB so the per-call $0.01 fee fires once per day at most.
                      "ce:GetSavingsPlansPurchaseRecommendation",
                      "ce:GetReservationPurchaseRecommendation"],
             resources=["*"],
+        ))
+        # Target DB secrets are registry-defined (arbitrary ARNs, incl. RDS-managed),
+        # so this can't be ARN-scoped, but it is bounded to the hub account: cross-
+        # account targets read their secret via the assumed spoke role, not this one.
+        self.etl_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
         # Multi-engine (DynamoDB/DocumentDB) discovery + metrics: the ETL collector
         # enumerates DynamoDB tables and DocumentDB clusters in each spoke account
@@ -291,7 +297,7 @@ class DataStack(cdk.Stack):
         # must be resource "*" — the deployer scopes each secret to one RO user.
         self.docdb_mongo_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
-            resources=["*"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
 
         events.Rule(
@@ -365,8 +371,12 @@ class DataStack(cdk.Stack):
         # Data API; target cluster ARNs + secrets are registry-defined, so this is
         # resource "*" (same as the ETL collector's target access).
         self.ash_sampler.add_to_role_policy(iam.PolicyStatement(
-            actions=["rds-data:ExecuteStatement", "secretsmanager:GetSecretValue"],
+            actions=["rds-data:ExecuteStatement"],
             resources=["*"],
+        ))
+        self.ash_sampler.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
         events.Rule(
             self, "AshSamplerSchedule",

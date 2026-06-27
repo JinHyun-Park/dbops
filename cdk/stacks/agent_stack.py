@@ -206,7 +206,6 @@ class AgentStack(cdk.Stack):
             actions=[
                 "rds-data:ExecuteStatement",
                 "rds-data:BatchExecuteStatement",
-                "secretsmanager:GetSecretValue",
                 "rds:DescribeDBClusters",
                 "rds:DescribeDBClusterParameterGroups",
                 "rds:DescribeDBClusterParameters",
@@ -234,6 +233,13 @@ class AgentStack(cdk.Stack):
                 "sts:AssumeRole",
             ],
             resources=["*"],
+        ))
+        # Target DB secrets are registry-defined (arbitrary ARNs), so this can't be
+        # ARN-scoped, but it is bounded to the hub account — cross-account targets
+        # read their secret via the assumed spoke role, not this one.
+        operations_mcp_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
         # ElastiCache live deep-read (EC-3): describe replication groups and
         # cache clusters to resolve endpoint + engine metadata before connecting.
@@ -674,11 +680,12 @@ class AgentStack(cdk.Stack):
         foundation.clusters_table.grant_read_data(dashboard_lambda)
         foundation.team_members_table.grant_read_data(dashboard_lambda)
         dashboard_lambda.add_to_role_policy(iam.PolicyStatement(
-            actions=[
-                "rds-data:ExecuteStatement",
-                "secretsmanager:GetSecretValue",
-            ],
+            actions=["rds-data:ExecuteStatement"],
             resources=["*"],
+        ))
+        dashboard_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
         # PG Log Insights panel hits CloudWatch Logs Insights directly via
         # start_query / get_query_results. Scoped to /aws/rds/cluster/* so
@@ -763,7 +770,6 @@ class AgentStack(cdk.Stack):
         simulation_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=[
                 "rds-data:ExecuteStatement",
-                "secretsmanager:GetSecretValue",
                 "rds:DescribeDBClusters",
                 "rds:DescribeDBInstances",
                 "rds:DescribeDBEngineVersions",
@@ -780,6 +786,10 @@ class AgentStack(cdk.Stack):
                 "elasticache:DescribeCacheClusters",
             ],
             resources=["*"],
+        ))
+        simulation_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
 
         clusters_lambda = lambda_.Function(
@@ -980,8 +990,12 @@ class AgentStack(cdk.Stack):
         data.cache_db.secret.grant_read(runbooks_lambda)
         data.cache_db.grant_data_api_access(runbooks_lambda)
         runbooks_lambda.add_to_role_policy(iam.PolicyStatement(
-            actions=["rds-data:ExecuteStatement", "secretsmanager:GetSecretValue"],
+            actions=["rds-data:ExecuteStatement"],
             resources=["*"],
+        ))
+        runbooks_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
 
         # Backups write API — manual snapshot creation (phase 2). Human-
@@ -1019,12 +1033,15 @@ class AgentStack(cdk.Stack):
                 "rds:DescribeDBClusters",
                 "rds:AddTagsToResource",
                 "rds-data:ExecuteStatement",
-                "secretsmanager:GetSecretValue",
                 # Hub-spoke: snapshot/restore assume the cluster's spoke role so
                 # they run in the cluster's OWN account (local when no role).
                 "sts:AssumeRole",
             ],
             resources=["*"],
+        ))
+        backups_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
 
         # Chat Sessions API — persists chat conversations across devices.
@@ -1063,8 +1080,12 @@ class AgentStack(cdk.Stack):
         foundation.clusters_table.grant_read_data(saved_queries_lambda)
         foundation.team_members_table.grant_read_data(saved_queries_lambda)
         saved_queries_lambda.add_to_role_policy(iam.PolicyStatement(
-            actions=["rds-data:ExecuteStatement", "secretsmanager:GetSecretValue"],
+            actions=["rds-data:ExecuteStatement"],
             resources=["*"],
+        ))
+        saved_queries_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
 
         # Agent Memory API — read + delete user's AgentCore Memory records
@@ -1203,11 +1224,12 @@ class AgentStack(cdk.Stack):
         data.cache_db.secret.grant_read(slack_interactive_lambda)
         data.cache_db.grant_data_api_access(slack_interactive_lambda)
         slack_interactive_lambda.add_to_role_policy(iam.PolicyStatement(
-            actions=[
-                "rds-data:ExecuteStatement",
-                "secretsmanager:GetSecretValue",
-            ],
+            actions=["rds-data:ExecuteStatement"],
             resources=["*"],
+        ))
+        slack_interactive_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
 
         # Zero-downtime deploys under load: point the API integrations at a
@@ -1573,11 +1595,12 @@ class AgentStack(cdk.Stack):
         )
         foundation.clusters_table.grant_read_data(explain_lambda)
         explain_lambda.add_to_role_policy(iam.PolicyStatement(
-            actions=[
-                "rds-data:ExecuteStatement",
-                "secretsmanager:GetSecretValue",
-            ],
+            actions=["rds-data:ExecuteStatement"],
             resources=["*"],
+        ))
+        explain_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
         self.api.add_routes(
             path="/api/explain",
