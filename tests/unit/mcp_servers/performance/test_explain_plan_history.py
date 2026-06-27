@@ -21,6 +21,16 @@ def test_signature_ignores_cost_but_tracks_structure():
     assert ep._plan_signature(a) != ep._plan_signature(c)
 
 
+def test_normalize_query_collapses_literals():
+    """The invariant Codex flagged: same logical query must hash the same across
+    runs regardless of literal values (numeric AND string)."""
+    n = ep._normalize_query
+    assert n("SELECT * FROM orders WHERE id = 1") == n("SELECT * FROM orders WHERE id = 2")
+    assert n("SELECT * FROM t WHERE name = 'alice'") == n("SELECT * FROM t WHERE name = 'bob'")
+    # genuinely different queries stay distinct
+    assert n("SELECT * FROM orders WHERE id = 1") != n("SELECT * FROM customers WHERE id = 1")
+
+
 def test_first_seen_when_no_prior():
     cache = MagicMock()
     cache.execute.side_effect = [QueryResult([], [], 0), {}]  # SELECT (none), INSERT

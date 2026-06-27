@@ -19,7 +19,7 @@ import json
 import re
 
 from mcp_servers.shared.cache_client import CacheClient
-from mcp_servers.shared.sql_safety import is_read_only_safe
+from mcp_servers.shared.sql_safety import is_read_only_safe, strip_sql_literals
 
 # A Seq Scan is normal on a small table; it only becomes a smell once the planner
 # expects to read a meaningful number of rows. 10k is a pragmatic line in the sand.
@@ -130,13 +130,24 @@ def _plan_signature(nodes: list) -> str:
     )
 
 
+def _normalize_query(sql: str) -> str:
+    """Normalize a query so the SAME LOGICAL query matches across runs regardless
+    of literal values: strip string literals / quoted idents / comments (shared
+    scanner), collapse numeric literals to '?', lowercase + collapse whitespace.
+    So `WHERE id = 1` and `WHERE id = 2` (and `name = 'a'` vs `'b'`) hash the same,
+    which is what makes plan-flip detection survive parameter changes."""
+    s = strip_sql_literals(sql)
+    s = re.sub(r"\b\d+(?:\.\d+)?\b", "?", s)  # numeric literals → ?
+    return " ".join(s.lower().split())
+
+
 def _capture_plan_history(cache: CacheClient, cluster_id: str, inner_sql: str, nodes: list) -> dict:
     """Record this plan's structural signature and compare it to the most recent
-    prior EXPLAIN of the same (normalized) query on this cluster, so the agent can
-    say whether a slowdown is a PLAN FLIP or just DATA GROWTH. Keyed by a
-    normalized-SQL md5. Writes to the cache (query_plan_history, schema_v22)."""
+    prior EXPLAIN of the same (literal-normalized) query on this cluster, so the
+    agent can say whether a slowdown is a PLAN FLIP or just DATA GROWTH. Writes to
+    the cache (query_plan_history, schema_v22)."""
     plan_hash = hashlib.md5(_plan_signature(nodes).encode()).hexdigest()
-    query_sig = hashlib.md5(" ".join(inner_sql.lower().split()).encode()).hexdigest()
+    query_sig = hashlib.md5(_normalize_query(inner_sql).encode()).hexdigest()
     summary = " > ".join(str(n.get("Node Type") or "?") for n in nodes[:8])
 
     prior = cache.execute(
@@ -159,7 +170,7 @@ def _capture_plan_history(cache: CacheClient, cluster_id: str, inner_sql: str, n
         return {
             "changed": False,
             "plan_hash": plan_hash,
-            "previous_seen": prev.get("captured_at"),
+            "previous_seen": str(prev.get("captured_at")),
             "note": "Same plan structure as the last EXPLAIN — a slowdown here points to "
                     "data growth / stale stats, not a plan flip.",
         }

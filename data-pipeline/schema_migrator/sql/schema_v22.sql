@@ -3,7 +3,8 @@
 -- signature (node types + relations/indexes/join types, costs/rows EXCLUDED).
 -- Re-EXPLAINing the same query later reveals whether the PLAN changed (a flip —
 -- index/join switch) vs the same plan just getting slower (data growth). Keyed
--- by a normalized-SQL hash so the same logical query matches across runs.
+-- by a LITERAL-normalized SQL hash (string + numeric literals stripped) so the
+-- same logical query matches across runs regardless of parameter values.
 -- ponytail: opportunistic capture from the EXPLAIN the tool already runs (zero
 -- extra target load, version-agnostic). Fully-automatic continuous plan capture
 -- for EVERY top query needs PG16 `EXPLAIN (GENERIC_PLAN)` to plan normalized $1
