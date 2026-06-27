@@ -10,7 +10,7 @@ def get_performance_summary_impl(
         SELECT
             (SELECT AVG(value) FROM metric_snapshots WHERE cluster_id = :cluster_id AND metric_type = 'aas' AND ts > NOW() - (:hours || ' hours')::interval AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))) as avg_aas,
             (SELECT MAX(value) FROM metric_snapshots WHERE cluster_id = :cluster_id AND metric_type = 'aas' AND ts > NOW() - (:hours || ' hours')::interval AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))) as max_aas,
-            (SELECT COUNT(*) FROM slow_queries WHERE cluster_id = :cluster_id AND ts > NOW() - (:hours || ' hours')::interval) as slow_count,
+            (SELECT COUNT(DISTINCT query_hash) FROM query_stats WHERE cluster_id = :cluster_id AND snapshot_time > NOW() - (:hours || ' hours')::interval AND mean_time_ms >= 1000) as slow_count,
             (SELECT MAX(value) FROM metric_snapshots WHERE cluster_id = :cluster_id AND metric_type = 'db_connections' AND ts > NOW() - (:hours || ' hours')::interval AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))) as peak_connections
     """
     params = {"cluster_id": cluster_id, "hours": hours}
