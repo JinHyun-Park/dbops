@@ -8,7 +8,7 @@ inclusion: always
 
 - **Framework**: Strands Agents SDK (Python 3.10+)
 - **Runtime**: Amazon Bedrock AgentCore Runtime (single instance, SSE streaming)
-- **Tool Integration**: AgentCore Gateway (MCP Protocol) with Cedar Policy Engine
+- **Tool Integration**: AgentCore Gateway (MCP Protocol) with a Cedar Policy Engine bound in LOG_ONLY (write enforcement lives in the tool-level `approval_guard`; Cedar is defense-in-depth)
 - **LLM**: Amazon Bedrock Claude (default), model-swappable via Strands SDK
 - **Memory**: AgentCore Memory (semantic + preference + summary)
 - **Knowledge**: Bedrock Knowledge Bases + S3 Vectors backend
@@ -45,7 +45,7 @@ Four MCP servers deployed as Lambda functions behind AgentCore Gateway:
 
 ## Key Constraints
 
-- All DB write operations require human approval (Cedar Policy enforced)
+- All DB write operations require human approval, enforced by the tool-level `approval_guard` (Cedar Policy Engine is LOG_ONLY defense-in-depth)
 - Cross-account access via IAM Hub-Spoke Role Chaining
 - RDS Data API for initial cross-account SQL connectivity
 - Agent queries must include `/* source=dbops-agent */` SQL comment for audit

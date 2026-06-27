@@ -91,12 +91,12 @@ Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
                   (hot cache)         (ETL · Event Processor · Report · Monitor)
 ```
 
-- **Custom 도구는 Gateway 경유** (Cedar Policy로 write 승인 강제), **공식 AWS 문서는 AWS MCP Server에 SigV4로 직접** — 읽기 전용 문서 도구만 노출
+- **Custom 도구는 Gateway 경유** (write 승인은 tool-level `approval_guard`가 강제 — Cedar Policy Engine은 게이트웨이에 LOG_ONLY로 바인딩된 방어심층), **공식 AWS 문서는 AWS MCP Server에 SigV4로 직접** — 읽기 전용 문서 도구만 노출
 - **Dashboard 데이터는 사전 수집 캐시에서** — 실시간 렌더링 중 AWS API를 직접 호출하지 않음 (라이브 패널만 예외: topology/backup)
 
 - **Single Agent + Gateway**: 단일 AgentCore Runtime + Gateway MCP로 지연/토큰 최적화
 - **CDK-First**: 모든 인프라는 CDK로만 관리. `cdk deploy --all`로 전체 배포
-- **Human-in-the-loop**: 조회는 자동, 변경은 DBA 승인 필수 (Cedar Policy 강제)
+- **Human-in-the-loop**: 조회는 자동, 변경은 DBA 승인 필수 (tool-level `approval_guard` 강제 — fail-closed·payload-hash 바인딩·single-use)
 
 ## Tech Stack
 

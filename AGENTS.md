@@ -19,9 +19,9 @@ All infrastructure changes MUST be made through CDK stacks in `cdk/stacks/`. Nev
 ### Safety
 
 - All DB read operations are automatic
-- All DB write/change operations require human approval (Cedar Policy enforced)
+- All DB write/change operations require human approval, enforced server-side by the tool-level `approval_guard` (fail-closed, payload-hash-bound, single-use). The Cedar Policy Engine is bound at the Gateway in LOG_ONLY mode — defense-in-depth, not the enforcement point (ENFORCE flip deferred pending AgentCore decision-log observability)
 - All agent SQL queries must include `/* source=dbops-agent */` comment
-- Cedar Policy blocks DROP/TRUNCATE without explicit force flag
+- `execute_sql` SQL classification blocks DROP/TRUNCATE without an explicit force flag
 
 ### Code Organization
 

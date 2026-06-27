@@ -30,4 +30,4 @@ AI-powered DBOps platform for DBAs managing Amazon Aurora MySQL/PostgreSQL clust
 
 ## Safety Model
 
-All read operations are automatic. All write/change operations require explicit DBA approval via the Approval Center UI. Cedar policies enforce this at the AgentCore Gateway level.
+All read operations are automatic. All write/change operations require explicit DBA approval via the Approval Center UI, enforced server-side by the tool-level `approval_guard` (fail-closed, payload-hash-bound, single-use consume). The Cedar Policy Engine is bound at the AgentCore Gateway in LOG_ONLY mode — it evaluates and logs every decision as defense-in-depth, but is not the enforcement point today (flipping to ENFORCE is deferred pending AgentCore decision-log observability).
