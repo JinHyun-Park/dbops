@@ -82,6 +82,9 @@ GATEWAY_CLIENT_SECRET = os.environ.get("GATEWAY_CLIENT_SECRET", "")
 GATEWAY_SCOPE = os.environ.get("GATEWAY_SCOPE", "")
 MODEL_ID = os.environ.get("AGENT_MODEL_ID", "apac.anthropic.claude-sonnet-4-20250514-v1:0")
 REGION = os.environ.get("AWS_REGION_OVERRIDE", os.environ.get("AWS_REGION", "ap-northeast-2"))
+# AgentCore Memory: when set, the agent persists turns + retrieves the caller's
+# long-term memory (facts/preferences/summaries). Empty disables it (fail-open).
+MEMORY_ID = os.environ.get("MEMORY_ID", "")
 # AWS MCP Server — AWS-MANAGED remote MCP (SigV4-authenticated) exposing
 # official AWS/Aurora documentation. We sign requests with the runtime's IAM
 # role and expose ONLY the read-only doc tools — never the AWS-API-execution
@@ -348,12 +351,50 @@ async def invoke(payload, context):
         if knowledge_tools:
             log.info(f"Registered {len(knowledge_tools)} AWS Knowledge doc tools")
 
-        agent = Agent(
+        # AgentCore Memory: persist this conversation's turns + auto-retrieve the
+        # caller's long-term memory (facts / preferences / cross-session summaries)
+        # via the bundled Strands session manager. Fail-open — any wiring error
+        # just runs the agent without Memory and never breaks chat. actor_id is the
+        # JWKS-verified user (LTM is per-user); session_id is the AgentCore runtime
+        # session. Both required, else we skip rather than mis-scope memory.
+        session_manager = None
+        if MEMORY_ID and id_token:
+            try:
+                actor_id = tenancy.actor_id_for(id_token)
+                session_id = getattr(context, "session_id", None)
+                if actor_id and session_id:
+                    from bedrock_agentcore.memory.integrations.strands.config import (
+                        AgentCoreMemoryConfig,
+                        RetrievalConfig,
+                    )
+                    from bedrock_agentcore.memory.integrations.strands.session_manager import (
+                        AgentCoreMemorySessionManager,
+                    )
+                    mem_config = AgentCoreMemoryConfig(
+                        memory_id=MEMORY_ID,
+                        session_id=session_id,
+                        actor_id=actor_id,
+                        retrieval_config={
+                            "/users/{actorId}/facts": RetrievalConfig(top_k=10),
+                            "/users/{actorId}/preferences": RetrievalConfig(top_k=5),
+                            "/summaries/{actorId}/{sessionId}": RetrievalConfig(top_k=5),
+                        },
+                    )
+                    session_manager = AgentCoreMemorySessionManager(mem_config, region_name=REGION)
+                    log.info("AgentCore Memory wired (actor=%s)", actor_id)
+            except Exception as e:
+                log.warning(f"AgentCore Memory wiring skipped: {type(e).__name__}: {e}")
+                session_manager = None
+
+        agent_kwargs = dict(
             model=model,
             system_prompt=build_system_prompt(_load_context_files(), visible_clusters=visible),
             tools=tools,
             hooks=[ClusterVisibilityGate(visible)],
         )
+        if session_manager is not None:
+            agent_kwargs["session_manager"] = session_manager
+        agent = Agent(**agent_kwargs)
         last_usage = None
         async for event in agent.stream_async(prompt):
             if isinstance(event, dict) and "data" in event and isinstance(event["data"], str):

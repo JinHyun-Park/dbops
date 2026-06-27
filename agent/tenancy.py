@@ -115,6 +115,17 @@ def _my_team_ids(username):
         return set()
 
 
+def actor_id_for(id_token):
+    """Stable per-user identity for AgentCore Memory (the ``actor_id`` that scopes
+    LTM facts/preferences/summaries). Returns the JWKS-verified Cognito
+    username/sub, or None when the token is absent/unverifiable — the caller then
+    skips Memory wiring rather than mis-attributing one user's memory to another."""
+    claims = _verify_token(id_token or "")
+    if not claims:
+        return None
+    return claims.get("cognito:username") or claims.get("sub") or None
+
+
 def visible_cluster_ids_for(id_token):
     """Resolve the caller's visible cluster set from their (JWKS-verified) Cognito
     ID token, passed in the invocation payload. None => admin / all clusters (no

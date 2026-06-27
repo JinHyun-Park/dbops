@@ -538,6 +538,10 @@ class AgentStack(cdk.Stack):
             environment_variables={
                 "AGENT_MODEL_ID": Settings.AGENT_MODEL_ID,
                 "AWS_REGION_OVERRIDE": Settings.REGION,
+                # AgentCore Memory: the runtime persists turns + retrieves the
+                # caller's LTM via this id. Without it server.py skips Memory
+                # (fail-open). The role grant for CreateEvent/Retrieve is below.
+                "MEMORY_ID": self.memory.memory_id,
                 "GATEWAY_MCP_URL": gateway_mcp_url,
                 # Outbound auth to the Gateway (OAuth2 client-credentials). The
                 # default Cognito M2M client the Gateway construct created for us
@@ -589,6 +593,18 @@ class AgentStack(cdk.Stack):
         # Tenancy: allow the Runtime to read cluster registry + team membership.
         foundation.clusters_table.grant_read_data(self.runtime.role)
         foundation.team_members_table.grant_read_data(self.runtime.role)
+        # AgentCore Memory: the runtime's Strands session manager persists turns
+        # (CreateEvent) + reads them back (List/GetEvent) + retrieves extracted LTM
+        # records (RetrieveMemoryRecords). Scoped to this memory resource.
+        self.runtime.role.add_to_principal_policy(iam.PolicyStatement(
+            actions=[
+                "bedrock-agentcore:CreateEvent",
+                "bedrock-agentcore:ListEvents",
+                "bedrock-agentcore:GetEvent",
+                "bedrock-agentcore:RetrieveMemoryRecords",
+            ],
+            resources=[self.memory.memory_arn],
+        ))
 
         # ===== REST API =====
 
