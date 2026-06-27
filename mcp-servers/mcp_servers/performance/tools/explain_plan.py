@@ -14,6 +14,7 @@ has a completely different shape; rather than build a second parser we detect it
 and return an explicit "unsupported engine" note instead of crashing.
 """
 
+import hashlib
 import json
 import re
 
@@ -112,6 +113,64 @@ def _walk(node: dict, nodes: list, depth: int = 0) -> None:
 def _node_relation(node: dict) -> str | None:
     # Scan/index nodes carry "Relation Name"; joins/aggregates don't.
     return node.get("Relation Name") or node.get("Alias")
+
+
+def _plan_signature(nodes: list) -> str:
+    """STRUCTURAL fingerprint of a plan: ordered (node type, relation, index,
+    join type) per node — costs/rows/timings EXCLUDED on purpose. Same signature
+    + worse latency = data growth; a different signature = a plan flip."""
+    return "\n".join(
+        "|".join(str(x or "") for x in (
+            n.get("Node Type"),
+            n.get("Relation Name") or n.get("Alias"),
+            n.get("Index Name"),
+            n.get("Join Type"),
+        ))
+        for n in nodes
+    )
+
+
+def _capture_plan_history(cache: CacheClient, cluster_id: str, inner_sql: str, nodes: list) -> dict:
+    """Record this plan's structural signature and compare it to the most recent
+    prior EXPLAIN of the same (normalized) query on this cluster, so the agent can
+    say whether a slowdown is a PLAN FLIP or just DATA GROWTH. Keyed by a
+    normalized-SQL md5. Writes to the cache (query_plan_history, schema_v22)."""
+    plan_hash = hashlib.md5(_plan_signature(nodes).encode()).hexdigest()
+    query_sig = hashlib.md5(" ".join(inner_sql.lower().split()).encode()).hexdigest()
+    summary = " > ".join(str(n.get("Node Type") or "?") for n in nodes[:8])
+
+    prior = cache.execute(
+        "SELECT plan_hash, captured_at FROM query_plan_history "
+        "WHERE cluster_id = :cid AND query_sig = :qs "
+        "ORDER BY captured_at DESC LIMIT 1",
+        {"cid": cluster_id, "qs": query_sig},
+    )
+    prev = prior.rows[0] if prior and prior.rows else None
+
+    cache.execute(
+        "INSERT INTO query_plan_history (cluster_id, query_sig, plan_hash, plan_summary) "
+        "VALUES (:cid, :qs, :ph, :ps)",
+        {"cid": cluster_id, "qs": query_sig, "ph": plan_hash, "ps": summary},
+    )
+
+    if not prev:
+        return {"first_seen": True, "plan_hash": plan_hash}
+    if prev.get("plan_hash") == plan_hash:
+        return {
+            "changed": False,
+            "plan_hash": plan_hash,
+            "previous_seen": prev.get("captured_at"),
+            "note": "Same plan structure as the last EXPLAIN — a slowdown here points to "
+                    "data growth / stale stats, not a plan flip.",
+        }
+    return {
+        "changed": True,
+        "plan_hash": plan_hash,
+        "previous_plan_hash": prev.get("plan_hash"),
+        "previous_seen": prev.get("captured_at"),
+        "note": "Plan STRUCTURE changed since the last EXPLAIN — likely a plan flip "
+                "(index/join switch), not just data growth.",
+    }
 
 
 def _analyze_node(node: dict, analyze: bool, findings: list) -> None:
@@ -296,6 +355,15 @@ def explain_plan_impl(cache: CacheClient, cluster_id: str, sql: str, analyze: bo
             entry["actual_rows"] = node.get("Actual Rows")
         expensive_nodes.append(entry)
 
+    # Plan-history (C3): structural signature capture + flip-vs-growth comparison
+    # against the last EXPLAIN of this query. Best-effort — a cache write failure
+    # must never break the analysis result.
+    plan_change = None
+    try:
+        plan_change = _capture_plan_history(cache, cluster_id, inner, nodes)
+    except Exception:
+        plan_change = None
+
     return {
         "status": "ok",
         "cluster_id": cluster_id,
@@ -304,4 +372,5 @@ def explain_plan_impl(cache: CacheClient, cluster_id: str, sql: str, analyze: bo
         "summary": summary,
         "findings": findings,
         "expensive_nodes": expensive_nodes,
+        "plan_change": plan_change,
     }
