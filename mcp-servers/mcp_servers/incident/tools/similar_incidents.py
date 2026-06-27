@@ -1,6 +1,71 @@
+import json
 import re
 
+import boto3
+
 from mcp_servers.shared.cache_client import CacheClient
+
+# Semantic search: amazon.titan-embed-text-v2 (1024-dim) into the pgvector
+# `embedding` columns (schema_v21). Embeddings are backfilled by the
+# incident_embeddings ETL collector; this tool embeds the query symptoms and
+# does a cosine search, FALLING BACK to keyword ILIKE when embedding fails or
+# nothing is embedded/similar yet.
+_EMBED_MODEL = "amazon.titan-embed-text-v2:0"
+_EMBED_DIM = 1024
+# Cosine-distance ceiling: rows farther than this (similarity < ~0.25) aren't
+# "similar" enough to surface — if none clear it, fall back to keyword search.
+_MAX_COS_DISTANCE = 0.75
+_bedrock = None
+
+
+def _embed(text: str):
+    """Embed text with Titan; return the pgvector string literal '[...]' (ready
+    for ``::vector``) or None on any failure (caller keyword-falls-back)."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    global _bedrock
+    try:
+        if _bedrock is None:
+            _bedrock = boto3.client("bedrock-runtime")
+        resp = _bedrock.invoke_model(
+            modelId=_EMBED_MODEL,
+            body=json.dumps({"inputText": text[:8000], "dimensions": _EMBED_DIM}),
+        )
+        vec = json.loads(resp["body"].read()).get("embedding")
+        if isinstance(vec, list) and len(vec) == _EMBED_DIM:
+            return "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
+    except Exception:
+        return None
+    return None
+
+
+def _vsearch_events(cache: CacheClient, qvec: str, cluster_id: str) -> list[dict]:
+    """Cosine-nearest warning/critical/error events for ONE cluster (cluster-scoped,
+    same tenancy rule as the keyword path)."""
+    sql = (
+        "SELECT cluster_id, event_time, event_type, severity, source, message, "
+        "1 - (embedding <=> :qvec::vector) AS similarity "
+        "FROM event_log "
+        "WHERE cluster_id = :cluster_id AND severity IN ('warning','critical','error') "
+        "AND embedding IS NOT NULL AND (embedding <=> :qvec::vector) < :maxd "
+        "ORDER BY embedding <=> :qvec::vector LIMIT 10"
+    )
+    return cache.execute(sql, {"qvec": qvec, "cluster_id": cluster_id, "maxd": _MAX_COS_DISTANCE}).rows
+
+
+def _vsearch_runbooks(cache: CacheClient, qvec: str, cluster_id: str) -> list[dict]:
+    """Cosine-nearest runbooks (cluster-specific or cluster-agnostic)."""
+    sql = (
+        "SELECT id, cluster_id, title, summary_md, tags, source, created_at, "
+        "1 - (embedding <=> :qvec::vector) AS similarity "
+        "FROM runbooks "
+        "WHERE (cluster_id = :cluster_id OR cluster_id IS NULL) "
+        "AND embedding IS NOT NULL AND (embedding <=> :qvec::vector) < :maxd "
+        "ORDER BY embedding <=> :qvec::vector LIMIT 5"
+    )
+    return cache.execute(sql, {"qvec": qvec, "cluster_id": cluster_id, "maxd": _MAX_COS_DISTANCE}).rows
+
 
 # Tokens shorter than this are dropped (e.g. "to", "is", "db").
 _MIN_KEYWORD_LEN = 3
@@ -127,82 +192,103 @@ def find_similar_incidents_impl(
 ) -> dict:
     """Find past incidents/events and saved runbooks similar to free-text symptoms.
 
-    Read-only. Tokenizes the symptoms into keywords and searches the Aurora PG
-    cache: warning/critical/error rows in event_log (this cluster first, then
-    fleet-wide if the cluster has none) plus any matching saved runbooks.
+    Read-only, cluster-scoped. Embeds the symptoms (Titan) and does a pgvector
+    cosine search over event_log + runbooks; falls back to keyword ILIKE search
+    when nothing is embedded yet, nothing is similar enough, or Bedrock is
+    unavailable. Always cluster-scoped for tenancy (no fleet-wide fallback — event
+    messages carry hostnames/query fragments the caller may not be allowed to see,
+    and this MCP tool has no caller identity to scope a fleet search safely).
     """
-    keywords = _tokenize(symptoms)
-    if not keywords:
+    if not symptoms or not symptoms.strip():
         return {
             "cluster_id": cluster_id,
             "symptoms": symptoms,
             "similar_incidents": [],
             "count": 0,
-            "note": "No searchable keywords could be extracted from the symptoms.",
+            "note": "No symptoms text provided.",
         }
 
+    keywords = _tokenize(symptoms)  # used by the keyword fallback + why_matched
+    method = "semantic"
+    event_rows: list[dict] = []
+    runbook_rows: list[dict] = []
+
+    qvec = _embed(symptoms)
+    if qvec is not None:
+        try:
+            event_rows = _vsearch_events(cache, qvec, cluster_id)
+            runbook_rows = _vsearch_runbooks(cache, qvec, cluster_id)
+        except Exception:
+            event_rows, runbook_rows = [], []
+
+    # Fall back to keyword ILIKE when semantic found nothing (no embeddings yet,
+    # nothing similar enough, or Bedrock unavailable).
+    if not event_rows and not runbook_rows:
+        method = "keyword"
+        if not keywords:
+            return {
+                "cluster_id": cluster_id,
+                "symptoms": symptoms,
+                "similar_incidents": [],
+                "count": 0,
+                "method": method,
+                "note": "No searchable keywords could be extracted from the symptoms.",
+            }
+        event_rows = _search_events(cache, keywords, cluster_id=cluster_id)
+        runbook_rows = _search_runbooks(cache, keywords, cluster_id)
+
     similar: list[dict] = []
-
-    # Events for THIS cluster only. A fleet-wide fallback (cluster_id=None) was
-    # removed for tenancy: it surfaced other teams' incident events (messages
-    # often carry hostnames / error text / query fragments) to a caller who may
-    # not be allowed to see those clusters, and this MCP tool has no caller
-    # identity to scope a fleet search safely. No local history => empty events.
-    event_rows = _search_events(cache, keywords, cluster_id=cluster_id)
-
     for row in event_rows:
         message = row.get("message") or ""
-        similar.append(
-            {
-                "kind": "event",
-                "scope": "cluster",  # always cluster-scoped (no fleet fallback)
-                "cluster_id": row.get("cluster_id"),
-                "event_time": row.get("event_time"),
-                "event_type": row.get("event_type"),
-                "severity": row.get("severity"),
-                "source": row.get("source"),
-                "message": message,
-                "match_count": int(row.get("match_count", 0) or 0),
-                "why_matched": _why_matched(keywords, message),
-            }
-        )
+        entry = {
+            "kind": "event",
+            "scope": "cluster",
+            "cluster_id": row.get("cluster_id"),
+            "event_time": row.get("event_time"),
+            "event_type": row.get("event_type"),
+            "severity": row.get("severity"),
+            "source": row.get("source"),
+            "message": message,
+        }
+        if method == "semantic":
+            entry["similarity"] = round(float(row.get("similarity") or 0), 3)
+        else:
+            entry["match_count"] = int(row.get("match_count", 0) or 0)
+            entry["why_matched"] = _why_matched(keywords, message)
+        similar.append(entry)
 
-    # 3) Saved runbooks (cluster-specific or cluster-agnostic).
-    for row in _search_runbooks(cache, keywords, cluster_id):
-        haystack = " ".join(
-            str(row.get(f) or "")
-            for f in ("title", "summary_md")
-        )
-        similar.append(
-            {
-                "kind": "runbook",
-                "runbook_id": row.get("id"),
-                "cluster_id": row.get("cluster_id"),
-                "title": row.get("title"),
-                "summary": row.get("summary_md"),
-                "tags": row.get("tags"),
-                "source": row.get("source"),
-                "created_at": row.get("created_at"),
-                "match_count": int(row.get("match_count", 0) or 0),
-                "why_matched": _why_matched(keywords, haystack),
-            }
-        )
+    for row in runbook_rows:
+        entry = {
+            "kind": "runbook",
+            "runbook_id": row.get("id"),
+            "cluster_id": row.get("cluster_id"),
+            "title": row.get("title"),
+            "summary": row.get("summary_md"),
+            "tags": row.get("tags"),
+            "source": row.get("source"),
+            "created_at": row.get("created_at"),
+        }
+        if method == "semantic":
+            entry["similarity"] = round(float(row.get("similarity") or 0), 3)
+        else:
+            haystack = " ".join(str(row.get(f) or "") for f in ("title", "summary_md"))
+            entry["match_count"] = int(row.get("match_count", 0) or 0)
+            entry["why_matched"] = _why_matched(keywords, haystack)
+        similar.append(entry)
 
     if not similar:
         note = (
-            f"No similar past incidents or runbooks found for keywords "
-            f"{keywords}. Try broader symptom terms or widen the time range."
+            f"No similar past incidents or runbooks found ({method} search). "
+            "Try broader symptom terms."
         )
     else:
-        note = (
-            f"Found {len(similar)} match(es) for keywords {keywords} "
-            f"(event scope: cluster)."
-        )
+        note = f"Found {len(similar)} match(es) via {method} search (cluster-scoped)."
 
     return {
         "cluster_id": cluster_id,
         "symptoms": symptoms,
-        "keywords": keywords,
+        "method": method,
+        "keywords": keywords if method == "keyword" else None,
         "similar_incidents": similar,
         "count": len(similar),
         "note": note,

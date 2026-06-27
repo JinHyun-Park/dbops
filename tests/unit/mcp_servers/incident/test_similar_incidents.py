@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock
 
+import mcp_servers.incident.tools.similar_incidents as si
+import pytest
 from mcp_servers.incident.tools.similar_incidents import (
     _tokenize,
     find_similar_incidents_impl,
@@ -9,6 +11,14 @@ from mcp_servers.shared.models import QueryResult
 
 def _empty():
     return QueryResult(columns=[], rows=[], row_count=0)
+
+
+@pytest.fixture(autouse=True)
+def _no_bedrock(monkeypatch):
+    """Default: embedding unavailable → the tool keyword-falls-back. Keeps the
+    keyword assertions below from making a real Bedrock call. The semantic test
+    overrides this to return a vector."""
+    monkeypatch.setattr(si, "_embed", lambda *_a, **_k: None)
 
 
 def test_tokenize_extracts_keywords():
@@ -44,7 +54,7 @@ def test_returns_matches_when_events_match_symptoms():
         ],
         row_count=1,
     )
-    # first call = event search (returns a hit), second call = runbook search (empty)
+    # keyword path (no embedding): event search (hit), then runbook search (empty)
     mock_cache.execute.side_effect = [event_rows, _empty()]
 
     result = find_similar_incidents_impl(
@@ -54,6 +64,7 @@ def test_returns_matches_when_events_match_symptoms():
     )
 
     assert result["cluster_id"] == "prod-pg-1"
+    assert result["method"] == "keyword"
     assert result["count"] == 1
     assert len(result["similar_incidents"]) == 1
     inc = result["similar_incidents"][0]
@@ -98,14 +109,9 @@ def test_includes_matching_runbooks():
 
 
 def test_no_fleet_fallback_when_cluster_has_no_events():
-    """Tenancy (whole-branch review C2): a cluster with no matching events must
-    NOT fall back to a fleet-wide search — that leaked other teams' incident
-    events to callers who can't see those clusters. No local history => empty
-    events, only the cluster query + the runbook query run (no 2nd event search)."""
+    """Tenancy: a cluster with no matching events must NOT fall back to a
+    fleet-wide search. Keyword path = exactly two queries (events + runbooks)."""
     mock_cache = MagicMock()
-    # cluster-scoped events empty -> (NO fleet search) -> runbooks empty.
-    # Only a 3rd side_effect would be consumed IF the removed fleet search still
-    # ran; with it gone, exactly two queries execute.
     mock_cache.execute.side_effect = [_empty(), _empty()]
 
     result = find_similar_incidents_impl(
@@ -116,14 +122,12 @@ def test_no_fleet_fallback_when_cluster_has_no_events():
 
     assert result["count"] == 0
     assert all(s.get("scope") != "fleet" for s in result["similar_incidents"])
-    # Exactly two queries: cluster-scoped events + runbooks. No fleet event search.
     assert mock_cache.execute.call_count == 2
 
 
 def test_empty_and_note_when_no_matches():
     mock_cache = MagicMock()
-    # cluster events empty, fleet events empty, runbooks empty
-    mock_cache.execute.side_effect = [_empty(), _empty(), _empty()]
+    mock_cache.execute.side_effect = [_empty(), _empty()]
 
     result = find_similar_incidents_impl(
         mock_cache,
@@ -146,13 +150,13 @@ def test_no_keywords_returns_graceful_note():
     assert result["count"] == 0
     assert result["similar_incidents"] == []
     assert "keyword" in result["note"].lower()
-    # must not hit the DB when there is nothing to search
+    # must not hit the DB when there is nothing to search (and embedding returned None)
     mock_cache.execute.assert_not_called()
 
 
 def test_uses_parameterized_ilike_query():
     mock_cache = MagicMock()
-    mock_cache.execute.side_effect = [_empty(), _empty(), _empty()]
+    mock_cache.execute.side_effect = [_empty(), _empty()]
     find_similar_incidents_impl(
         mock_cache,
         cluster_id="prod-pg-1",
@@ -164,3 +168,43 @@ def test_uses_parameterized_ilike_query():
     # keyword bound as a wildcarded, parameterized value (no string interpolation)
     assert any(v == "%deadlock%" for v in first_params.values())
     assert first_params["cluster_id"] == "prod-pg-1"
+
+
+def test_semantic_search_when_embedding_available(monkeypatch):
+    """When the symptoms embed, the tool does a pgvector cosine search (<=>) and
+    tags each hit with a similarity score — not the keyword ILIKE path."""
+    monkeypatch.setattr(si, "_embed", lambda *_a, **_k: "[0.1,0.2,0.3]")
+    mock_cache = MagicMock()
+    event_rows = QueryResult(
+        columns=["cluster_id", "event_time", "event_type", "severity", "source", "message", "similarity"],
+        rows=[
+            {
+                "cluster_id": "prod-pg-1",
+                "event_time": "2026-05-01T00:00:00Z",
+                "event_type": "alert",
+                "severity": "critical",
+                "source": "dbops-alert-evaluator",
+                "message": "Writer CPU saturated during batch job",
+                "similarity": 0.912,
+            }
+        ],
+        row_count=1,
+    )
+    mock_cache.execute.side_effect = [event_rows, _empty()]
+
+    result = find_similar_incidents_impl(
+        mock_cache,
+        cluster_id="prod-pg-1",
+        symptoms="high cpu on the primary",
+    )
+
+    assert result["method"] == "semantic"
+    assert result["count"] == 1
+    inc = result["similar_incidents"][0]
+    assert inc["kind"] == "event"
+    assert inc["similarity"] == 0.912
+    assert "why_matched" not in inc  # semantic rows carry similarity, not keyword info
+    # vector cosine operator was used, not ILIKE
+    first_sql = mock_cache.execute.call_args_list[0][0][0]
+    assert "<=>" in first_sql
+    assert "ILIKE" not in first_sql

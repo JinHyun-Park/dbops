@@ -13,6 +13,7 @@ from collectors.dynamodb_findings import collect_dynamodb_findings
 from collectors.elasticache_cw_collector import collect_elasticache_metrics
 from collectors.elasticache_findings import collect_elasticache_findings
 from collectors.engine_family import engine_family
+from collectors.incident_embeddings import collect_incident_embeddings
 from collectors.meta_collector import collect_cluster_meta
 from collectors.mysql_activity import collect_mysql_activity
 from collectors.mysql_innodb_status import collect_mysql_innodb_status
@@ -460,5 +461,13 @@ def lambda_handler(event, context):
         )
     except Exception as e:
         print(f"[etl] metric_snapshots purge failed: {type(e).__name__}: {e}")
+
+    # Incident-similarity embeddings: backfill a bounded batch of un-embedded
+    # event_log / runbook rows (Titan → pgvector) so find_similar_incidents can do
+    # semantic cosine search. Best-effort; the tool keyword-falls-back meanwhile.
+    try:
+        collect_incident_embeddings(cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name)
+    except Exception as e:
+        print(f"[etl] incident embeddings failed: {type(e).__name__}: {e}")
 
     return {"statusCode": 200, "body": json.dumps({"collected": len(results), "results": results}, default=str)}

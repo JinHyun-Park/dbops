@@ -212,6 +212,12 @@ class DataStack(cdk.Stack):
             actions=["secretsmanager:GetSecretValue"],
             resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
+        # Titan text embeddings for the incident-similarity backfill
+        # (incident_embeddings collector). Scoped to the embed model only.
+        self.etl_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=["arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0"],
+        ))
         # Multi-engine (DynamoDB/DocumentDB) discovery + metrics: the ETL collector
         # enumerates DynamoDB tables and DocumentDB clusters in each spoke account
         # to populate cluster_meta and collect CloudWatch metrics for non-Aurora engines.

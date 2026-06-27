@@ -84,6 +84,13 @@ class AgentStack(cdk.Stack):
             ],
             resources=["*"],
         ))
+        # Titan text embeddings for semantic incident similarity
+        # (find_similar_incidents embeds the query symptoms). Scoped to the embed
+        # model only; the tool keyword-falls-back if this is denied/unavailable.
+        incident_mcp_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=["arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0"],
+        ))
 
         # ===== Agent Tasks worker — stream-driven task executor =====
         # Runs the deterministic RCA (and, later, scheduled reports) for tasks
