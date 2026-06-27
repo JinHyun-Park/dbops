@@ -57,6 +57,49 @@ model. Nothing below weakens that; it only adds a second, gateway-level layer.
   approval-gated write actions in `AgentCore::Action::"<target>___<tool>"` form
   and the PITR force-rule).
 
+## Controlled verification (2026-06-27) — direct control-plane probe
+
+Asked to "directly verify" Cedar before closing the item, we probed the live
+engine via `bedrock-agentcore-control` / `bedrock-agentcore` (no traffic, no
+binding flip, fully reversible — all probe policies were created with
+`enforcementMode=LOG_ONLY` and deleted). Verified facts:
+
+1. **Engine ACTIVE + bound.** `dbops_dev_policy_engine-6dubd1jle0` is `ACTIVE`,
+   bound to gateway `dbops-dev-gateway-jrndurhosm` (4 targets: performance /
+   operations / incident / simulation).
+2. **All 4 policies are ACTIVE with `enforcementMode: ACTIVE`** — definition is
+   the coarse permit `permit(principal, action in AgentCore::Action::"<target>",
+resource == AgentCore::Gateway::"<gateway-arn>")`.
+3. **The enforcement gate is the gateway↔engine BINDING `Mode: LOG_ONLY`, NOT the
+   per-policy mode** (which is already `ACTIVE`). So the gateway evaluates + logs
+   every decision but never blocks. Flipping enforcement = flipping the _binding_
+   mode (`agent_stack.py` `cedar_mode`), not the policies — they are already
+   enforce-ready.
+4. **No synchronous authorization-test API exists.** `bedrock-agentcore` has only
+   `Evaluate` (agent-trajectory evaluation: expectedResponse / assertions /
+   toolNames / tokenUsage — NOT Cedar authz); `bedrock-agentcore-control` is
+   policy/engine CRUD only. So a decision cannot be probed directly — the only
+   ways to observe a DENY are (a) decision logs (absent, blocker #1) or (b) a
+   real gateway tool call under ENFORCE.
+5. **`CreatePolicy` validation is ASYNC and is the only schema check available.**
+   The synchronous call returns `status=CREATING`; the real result lands later as
+   `ACTIVE` or `CREATE_FAILED`. Observed: a rule on a **nonexistent** tool action
+   (`...___NONEXISTENT_TOOL_XYZ`) went `CREATE_FAILED` (action names ARE validated
+   against an auto-generated schema), and a conditional rule
+   (`operations___modify_parameter` with `when { context.input.approved == false }`)
+   went `ACTIVE` (the STEP-2 conditional form validates). Validation latency is
+   real (terminal status can take >40s) — STEP-4 must poll `get-policy` status,
+   not trust the create response.
+
+**Conclusion (reinforces the LOG_ONLY-permanent decision):** Cedar is real,
+deployed, with ACTIVE enforce-ready policies, gated to LOG_ONLY at the binding.
+The engine state is now directly verified, but the one thing that proves runtime
+enforcement — observing a gateway DENY — still requires the ENFORCE binding flip
+(Part 1), which remains risky without decision-log observability and is redundant
+with the tool-level `approval_guard` that already enforces writes. Per-tool
+STEP-2 rules validate (with async polling), so STEP-4 is mechanically ready; the
+gate is still blocker #1 (decision logs), unchanged since 2026-06-24.
+
 ## Part 1 — ENFORCE flip procedure (turnkey for the live session)
 
 Run these in order; do NOT skip the evidence gate (step 3).
