@@ -198,6 +198,13 @@ Signing Secret이 비어 있어도 outbound Slack 메시지(읽기) + 모든 다
 > `region`, `cognitoDomain`, `cognitoClientId`, and `agentRuntimeArn` into
 > the config object, resolved from the live stack outputs at deploy time.
 
+#### Optional post-deploy: Ticketing (Jira / ServiceNow / …)
+
+DBOps can file a ticket when an agent task completes. It ships as an inert
+integration seam — off by default, toggled per-deployment in the web UI under
+**Configure → Settings** (`TICKETING_PROVIDER`). Wiring your team's provider is
+a few lines: see [docs/ticketing-integration.md](docs/ticketing-integration.md).
+
 ### Cluster Credential Setup (production-recommended)
 
 DBOps reads cluster monitoring data over the RDS Data API. By default the
