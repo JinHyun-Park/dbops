@@ -446,4 +446,19 @@ def lambda_handler(event, context):
             datetime.now(timezone.utc).isoformat(),
         ))
 
+    # Retention: metric_snapshots has no purge and grows unbounded (PARTITION BY
+    # RANGE (ts) but only the DEFAULT partition exists). Keep ~90 days. The BRIN
+    # index on ts (schema_v20) makes this an instant block-range check, so running
+    # it every invocation is cheap — it matches 0 rows until data ages past the
+    # window. Best-effort: a purge failure must never break collection.
+    # ponytail: DELETE over partition rotation; revisit at large-fleet scale.
+    try:
+        cache_rds_data.execute_statement(
+            resourceArn=cache_cluster_arn, secretArn=cache_secret_arn, database=cache_db_name,
+            sql="/* source=dbops-etl */ DELETE FROM metric_snapshots "
+                "WHERE ts < NOW() - INTERVAL '90 days'",
+        )
+    except Exception as e:
+        print(f"[etl] metric_snapshots purge failed: {type(e).__name__}: {e}")
+
     return {"statusCode": 200, "body": json.dumps({"collected": len(results), "results": results}, default=str)}
