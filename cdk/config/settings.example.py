@@ -16,7 +16,9 @@ class Settings:
     AWS_MCP_URL = "https://aws-mcp.us-east-1.api.aws/mcp"
     AWS_MCP_REGION = "us-east-1"
 
-    PI_COLLECTION_INTERVAL_MIN = 1
+    # PI metrics are collected inside the stats/ETL cycle below — there is no
+    # separate Performance Insights cadence (the old PI_COLLECTION_INTERVAL_MIN
+    # was never read by any code).
     STATS_COLLECTION_INTERVAL_MIN = 5
 
     CACHE_DB_MIN_ACU = 0.5

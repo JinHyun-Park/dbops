@@ -33,12 +33,11 @@ from datetime import datetime, timezone
 CPU_AVG_THRESHOLD = 30.0
 CPU_P95_THRESHOLD = 60.0
 
-# Serverless v2 ACU heuristics. ACU correlates closely with CPU at low load
-# (1 ACU ≈ 2 GB RAM + proportional vCPU) so we treat low CPU as a proxy for
-# low ACU consumption. Raise max ACU only if there's been a spike in the
-# observation window; recommend lowering otherwise.
-SV2_MAX_LOWER_P95_CPU = 40.0   # p95 CPU below this → max ACU likely too high
-SV2_MAX_LOWER_FACTOR = 0.5     # suggest cutting max ACU to (current × this)
+# Serverless v2 ACU heuristics, driven by the OBSERVED serverless_acu metric
+# (ServerlessDatabaseCapacity) — ACU is exactly what Sv2 bills, so we compare
+# real consumed ACU against the configured min/max ceiling, not a CPU proxy.
+SV2_MAX_HEADROOM_FACTOR = 0.6  # 7d p95 ACU below (max × this) → ceiling overprovisioned
+SV2_SUGGEST_HEADROOM = 1.3     # suggested max = observed p95 ACU × this (burst headroom)
 SV2_MIN_RAISE_FACTOR = 0.5     # min ACU < (max × this) gives idle-but-not-too-low feel
 SP_SAVINGS_FLOOR_USD = 10.0    # only surface SP recommendations worth >$10/mo
 
@@ -138,58 +137,61 @@ def _check_oversized(rds_data, cache_arn, cache_secret, cache_db, cluster_id, me
     return 1
 
 
-def _check_serverless_v2_acu(rds_data, cache_arn, cache_secret, cache_db, cluster_id, meta, cpu):
-    """Serverless v2 max ACU rightsizing — fires if CPU never approached
-    the implied ceiling. Uses CPU as a proxy for ACU consumption (the actual
-    `serverless_database_capacity` CW metric isn't collected today)."""
+def _check_serverless_v2_acu(rds_data, cache_arn, cache_secret, cache_db, cluster_id, meta, acu):
+    """Serverless v2 ACU rightsizing from the OBSERVED serverless_acu metric
+    (ServerlessDatabaseCapacity). ACU is exactly what Sv2 bills, so we compare
+    real consumed ACU against the configured min/max ceiling — no CPU proxy.
+    Skips (returns 0) when there is no ACU history rather than guessing."""
     sv2_min = meta.get("serverlessv2_min_acu")
     sv2_max = meta.get("serverlessv2_max_acu")
     if sv2_max is None:
         return 0  # Not a Serverless v2 cluster.
     sv2_min = float(sv2_min or 0)
     sv2_max = float(sv2_max)
-    if sv2_max <= 0:
+    if sv2_max <= 0 or acu is None:
         return 0
 
     emitted = 0
-    p95_cpu, max_cpu = cpu["p95"], cpu["max"]
+    p95_acu, max_acu = acu["p95"], acu["max"]
 
-    if p95_cpu < SV2_MAX_LOWER_P95_CPU:
-        suggested_max = max(sv2_min + 2, round(sv2_max * SV2_MAX_LOWER_FACTOR, 1))
-        _emit_finding(
-            rds_data, cache_arn, cache_secret, cache_db,
-            cluster_id, "cost_serverless_max_too_high", "info",
-            f"Serverless v2 (max {sv2_max:.1f} ACU)",
-            value_str=f"7d p95 CPU {p95_cpu:.1f}% / max {max_cpu:.1f}%",
-            threshold_str=f"< {SV2_MAX_LOWER_P95_CPU:.0f}% p95 CPU → max ACU likely overprovisioned",
-            recommendation=(
-                f"max ACU가 {sv2_max:.1f}인데 관측된 p95 CPU는 {p95_cpu:.1f}%에 불과합니다. "
-                f"max ACU를 ~{suggested_max:.1f}로 낮추면 동일 처리량에 버스트 비용 노출만 줄어듭니다. "
-                "(Serverless v2는 피크 ACU-시간으로 과금됩니다.)"
-            ),
-            details={
-                "current_min_acu": sv2_min,
-                "current_max_acu": sv2_max,
-                "suggested_max_acu": suggested_max,
-                "p95_cpu": p95_cpu,
-                "max_cpu": max_cpu,
-            },
-        )
-        emitted += 1
+    # Max ceiling over-provisioned: observed p95 ACU stays well below the configured max.
+    if p95_acu < sv2_max * SV2_MAX_HEADROOM_FACTOR:
+        suggested_max = max(sv2_min + 2, round(p95_acu * SV2_SUGGEST_HEADROOM, 1))
+        suggested_max = min(suggested_max, sv2_max)  # never recommend raising the ceiling
+        if suggested_max < sv2_max:
+            _emit_finding(
+                rds_data, cache_arn, cache_secret, cache_db,
+                cluster_id, "cost_serverless_max_too_high", "info",
+                f"Serverless v2 (max {sv2_max:.1f} ACU)",
+                value_str=f"7d p95 ACU {p95_acu:.1f} / max {max_acu:.1f} (ceiling {sv2_max:.1f})",
+                threshold_str=f"p95 ACU < max × {SV2_MAX_HEADROOM_FACTOR:.0%} → ceiling overprovisioned",
+                recommendation=(
+                    f"max ACU 한도는 {sv2_max:.1f}인데 관측된 7일 p95 소비는 {p95_acu:.1f} ACU입니다. "
+                    f"max ACU를 ~{suggested_max:.1f}로 낮춰도 관측 피크를 커버하며, 폭주 시 비용 상한만 줄어듭니다. "
+                    "(Serverless v2는 소비 ACU-시간으로 과금됩니다.)"
+                ),
+                details={
+                    "current_min_acu": sv2_min,
+                    "current_max_acu": sv2_max,
+                    "suggested_max_acu": suggested_max,
+                    "p95_acu": p95_acu,
+                    "max_acu": max_acu,
+                },
+            )
+            emitted += 1
 
-    # Min ACU advice: if min is very low (< 50% of max), it may cause idle-to-active
-    # latency hits. We only nudge if the user also has a high p95 — implying
-    # they DO need responsive cold-start.
-    if sv2_min > 0 and sv2_min < sv2_max * SV2_MIN_RAISE_FACTOR and p95_cpu > 70.0:
+    # Min floor too low: cluster regularly runs near its ceiling (p95 ACU close to
+    # max) but min is set very low → scale-up latency on every cold spike.
+    if sv2_min > 0 and sv2_min < sv2_max * SV2_MIN_RAISE_FACTOR and p95_acu > sv2_max * 0.7:
         suggested_min = round(sv2_max * 0.5, 1)
         _emit_finding(
             rds_data, cache_arn, cache_secret, cache_db,
             cluster_id, "cost_serverless_min_too_low", "info",
             f"Serverless v2 (min {sv2_min:.1f} ACU)",
-            value_str=f"min={sv2_min:.1f} ACU, p95 CPU={p95_cpu:.1f}%",
-            threshold_str=f"min < max × {SV2_MIN_RAISE_FACTOR:.1f} AND p95 > 70% → cold-start risk",
+            value_str=f"min={sv2_min:.1f} ACU, 7d p95={p95_acu:.1f} ACU (ceiling {sv2_max:.1f})",
+            threshold_str=f"min < max × {SV2_MIN_RAISE_FACTOR:.1f} AND p95 ACU > max × 0.7 → cold-start risk",
             recommendation=(
-                f"min ACU {sv2_min:.1f}로는 부하 대비 여유가 없습니다 (p95 CPU {p95_cpu:.1f}%). "
+                f"min ACU {sv2_min:.1f}로는 부하 대비 여유가 없습니다 (7일 p95 {p95_acu:.1f} ACU, 한도 {sv2_max:.1f}). "
                 f"min ACU를 ~{suggested_min:.1f}로 올리면 트래픽 스파이크 시 스케일업 지연이 줄어듭니다. "
                 "대신 평시 비용 하한이 올라가는 트레이드오프입니다 — cold-start 지연이 아프다면 수용하세요."
             ),
@@ -197,7 +199,7 @@ def _check_serverless_v2_acu(rds_data, cache_arn, cache_secret, cache_db, cluste
                 "current_min_acu": sv2_min,
                 "current_max_acu": sv2_max,
                 "suggested_min_acu": suggested_min,
-                "p95_cpu": p95_cpu,
+                "p95_acu": p95_acu,
             },
         )
         emitted += 1
@@ -396,12 +398,37 @@ def collect_cost_findings(rds_data, cache_cluster_arn, cache_secret_arn, cache_d
         "max": float(cpu_rows[0]["max_cpu"] or 0),
     }
 
+    # Observed Serverless v2 ACU (ServerlessDatabaseCapacity) for ACU rightsizing.
+    # None when there is no/insufficient history (non-Sv2 or just-registered) — the
+    # Sv2 check then skips rather than guessing from CPU.
+    acu_rows = _execute(
+        rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
+        "SELECT "
+        "  AVG(value) AS avg_acu, "
+        "  PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value) AS p95_acu, "
+        "  MAX(value) AS max_acu, "
+        "  COUNT(*) AS samples "
+        "FROM metric_snapshots "
+        "WHERE cluster_id = :cid "
+        "  AND metric_type = 'serverless_acu' "
+        "  AND ts > NOW() - INTERVAL '7 days' "
+        "  AND (dimensions IS NULL OR dimensions::text = '{}')",
+        {"cid": cluster_id},
+    )
+    acu = None
+    if acu_rows and acu_rows[0]["samples"] is not None and int(acu_rows[0]["samples"] or 0) >= 20:
+        acu = {
+            "avg": float(acu_rows[0]["avg_acu"] or 0),
+            "p95": float(acu_rows[0]["p95_acu"] or 0),
+            "max": float(acu_rows[0]["max_acu"] or 0),
+        }
+
     emitted = 0
     emitted += _check_oversized(
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id, meta, cpu
     )
     emitted += _check_serverless_v2_acu(
-        rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id, meta, cpu
+        rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id, meta, acu
     )
     emitted += _check_storage_rightsize(
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id, meta
