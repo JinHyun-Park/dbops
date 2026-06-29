@@ -27,11 +27,13 @@ const STATUS_DOT: Record<StatusLevel, string> = {
   ok: "bg-emerald-400",
   warning: "bg-amber-400",
   critical: "bg-rose-500",
+  unknown: "bg-slate-600",
 };
 const STATUS_TITLE: Record<StatusLevel, string> = {
   ok: "정상 (available)",
   warning: "주의 — 상태 전이 중",
   critical: "위험 — 중단/실패 상태",
+  unknown: "상태 미수집",
 };
 const ENV_CHIP: Record<string, string> = {
   prod: "bg-rose-500/15 text-rose-300 border-rose-500/30",

@@ -41,7 +41,7 @@ export function inferEnv(
   return null;
 }
 
-export type StatusLevel = "ok" | "warning" | "critical";
+export type StatusLevel = "ok" | "warning" | "critical" | "unknown";
 
 const CRITICAL_STATUS =
   /(stopped|failed|deleting|inaccessible|incompatible|error)/i;
@@ -50,10 +50,14 @@ const WARNING_STATUS =
 
 /** Coarse availability level for the Map's status dot, from the registry/cache
  *  status (the Map reads /api/clusters, which carries status but not live
- *  metrics — full health is one click away on the dashboard). Unknown/healthy
- *  statuses read as ok so the Map never false-alarms. */
+ *  metrics — full health is one click away on the dashboard). An EMPTY status
+ *  (not collected yet) reads as "unknown" (neutral gray) rather than false-green;
+ *  a recognized non-critical/non-warning status reads as ok. */
 export function statusLevel(c: MapCluster): StatusLevel {
-  const s = `${c.status || ""} ${c.connection_status || ""}`.toLowerCase();
+  const s = `${c.status || ""} ${c.connection_status || ""}`
+    .trim()
+    .toLowerCase();
+  if (!s) return "unknown"; // no status signal yet (e.g., before the first collection)
   if (CRITICAL_STATUS.test(s)) return "critical";
   if (WARNING_STATUS.test(s)) return "warning";
   return "ok";

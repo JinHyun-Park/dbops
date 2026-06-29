@@ -112,17 +112,19 @@ def _upsert_cluster_meta(ec, cache_execute, cluster_id, resource_name, engine, a
         if details is not None:
             cache_execute(
                 "INSERT INTO cluster_meta "
-                "(cluster_id, account_id, region, engine, resource_details, updated_at) "
-                "VALUES (:cid, :account_id, :region, :engine, :details::jsonb, NOW()) "
+                "(cluster_id, account_id, region, engine, status, resource_details, updated_at) "
+                "VALUES (:cid, :account_id, :region, :engine, :status, :details::jsonb, NOW()) "
                 "ON CONFLICT (cluster_id) DO UPDATE SET "
                 "resource_details = EXCLUDED.resource_details, "
                 "engine = EXCLUDED.engine, "
+                "status = EXCLUDED.status, "
                 "updated_at = NOW()",
                 {
                     "cid": cluster_id,
                     "account_id": account_id,
                     "region": region,
                     "engine": details["engine"],
+                    "status": details.get("status", ""),
                     "details": json.dumps(details),
                 },
             )
