@@ -38,10 +38,18 @@ def test_sets_purpose_and_tags_trimmed_deduped():
 
 
 def test_404_when_cluster_absent():
-    t = _table_with(None)
+    # The conditional update (attribute_exists) fails atomically when the cluster
+    # is gone — translated to 404, never a phantom item.
+    from botocore.exceptions import ClientError
+
+    t = MagicMock()
+    t.update_item.side_effect = ClientError(
+        {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem"
+    )
     resp = handler._handle_update_meta(t, "nope", {"purpose": "x"})
     assert resp["statusCode"] == 404
-    t.update_item.assert_not_called()  # no phantom item created
+    # the update was ATTEMPTED with the existence guard (not skipped)
+    assert "ConditionExpression" in t.update_item.call_args.kwargs
 
 
 def test_rejects_non_list_service_tags():

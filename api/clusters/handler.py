@@ -848,11 +848,9 @@ _TAGS_MAX = 20
 def _handle_update_meta(table, cluster_id: str, body: dict):
     """PATCH /api/clusters/{id}/meta — admin sets the Map note: `purpose` (one
     line) and/or `service_tags` (connected services, also the Map grouping key).
-    Only the provided fields are updated; both optional. 404 if the cluster isn't
-    registered (so a bad id can't create a phantom item via update_item)."""
-    if not table.get_item(Key={"cluster_id": cluster_id}).get("Item"):
-        return _resp(404, {"error": "not_found", "cluster_id": cluster_id})
-
+    Only the provided fields are updated; both optional. The conditional update
+    (attribute_exists) is ATOMIC, so a missing — or just-deleted-in-a-race —
+    cluster yields 404 rather than creating a phantom registry item."""
     updates: dict = {}
     if "purpose" in body:
         purpose = body["purpose"] or ""
@@ -877,12 +875,18 @@ def _handle_update_meta(table, cluster_id: str, body: dict):
 
     names = {f"#{k}": k for k in updates}
     values = {f":{k}": v for k, v in updates.items()}
-    table.update_item(
-        Key={"cluster_id": cluster_id},
-        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in updates),
-        ExpressionAttributeNames=names,
-        ExpressionAttributeValues=values,
-    )
+    try:
+        table.update_item(
+            Key={"cluster_id": cluster_id},
+            UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in updates),
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+            ConditionExpression="attribute_exists(cluster_id)",
+        )
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return _resp(404, {"error": "not_found", "cluster_id": cluster_id})
+        raise
     return _resp(200, {"status": "updated", "cluster_id": cluster_id, **updates})
 
 
