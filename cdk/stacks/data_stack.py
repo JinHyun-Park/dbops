@@ -195,6 +195,7 @@ class DataStack(cdk.Stack):
 
         self.etl_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=["rds:DescribeDBClusters", "rds:DescribeDBInstances", "rds:ListTagsForResource",
+                     "rds:DescribeDBSubnetGroups",  # VPC/AZ context for the DB Map (meta_collector._vpc_info)
                      "pi:GetResourceMetrics", "pi:DescribeDimensionKeys",
                      "rds-data:ExecuteStatement", "rds-data:BatchExecuteStatement",
                      "cloudwatch:GetMetricStatistics", "cloudwatch:GetMetricData",

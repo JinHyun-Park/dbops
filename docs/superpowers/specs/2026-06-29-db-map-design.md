@@ -86,6 +86,26 @@ flagged it as possibly non-functional).
 - **CDK:** new route present in `tests/cdk/test_synth.py` expectations; openapi
   parity (`test_openapi_spec`) green after regen.
 
+## Revision (2026-06-29): architecture / VPC pivot
+
+First cut (service-grouped cards) read too much like a dashboard slice. Pivoted
+to an **architecture blueprint** per user feedback ("어느 VPC 있고 이런것까지"):
+
+- **Primary grouping is now Region → VPC** (nested containers, AWS-diagram feel),
+  with connected-service tags demoted to a **chip overlay** on each DB node.
+- **New infra data**: `cluster_meta.vpc_id` + `availability_zones`, collected by
+  `meta_collector._vpc_info` via `describe_db_subnet_groups` (Aurora + DocumentDB)
+  — schema_v23; ETL role gains `rds:DescribeDBSubnetGroups`; surfaced through the
+  `/api/clusters` cluster_meta enrich.
+- **UI**: `/map` renders Region headers → VPC container boxes (VpcId + AZ list +
+  count) → DB node grid. Clusters with no `vpc_id` (DynamoDB = serverless; or not
+  yet collected) fall into a per-region "Serverless / VPC 외" box. `groupByVpc`
+  in `lib/db-map.ts`.
+- **Follow-up (documented)**: ElastiCache + DocumentDB VPC collection (their
+  collectors use a different subnet-group API — `describe_cache_subnet_groups`);
+  until then they render in the serverless/other box. Aurora (the primary engines)
+  gets full VPC nesting now.
+
 ## Out of scope (YAGNI)
 
 - Node-graph / dependency edges (we only have service→DB grouping, not a real

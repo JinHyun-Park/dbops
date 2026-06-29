@@ -5,7 +5,7 @@
 // Clicking a card sets the GLOBAL selected cluster and opens its dashboard.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Boxes, Pencil, Check, X, Plug } from "lucide-react";
+import { Boxes, Pencil, Check, X, Globe, Network } from "lucide-react";
 import { fetchClusters, patchClusterMeta } from "@/lib/api-client";
 import { setSelectedCluster } from "@/lib/selected-cluster";
 import { isAdmin } from "@/lib/auth";
@@ -16,10 +16,9 @@ import {
   EmptyState,
 } from "@/components/design-system/page-shell";
 import {
-  groupByService,
+  groupByVpc,
   inferEnv,
   statusLevel,
-  UNASSIGNED,
   type MapCluster,
   type StatusLevel,
 } from "@/lib/db-map";
@@ -186,11 +185,17 @@ function DbCard({
             {env}
           </span>
         )}
-        {c.region && (
-          <span className="text-[10px] text-slate-500">{c.region}</span>
-        )}
+        {(c.service_tags || []).slice(0, 3).map((t) => (
+          <span
+            key={t}
+            title="연결 서비스"
+            className="rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-300"
+          >
+            {t}
+          </span>
+        ))}
         {c.team_id && (
-          <span className="text-[10px] text-slate-500">· {c.team_id}</span>
+          <span className="text-[10px] text-slate-500">{c.team_id}</span>
         )}
       </div>
 
@@ -228,7 +233,7 @@ export default function MapPage() {
     load();
   }, [load]);
 
-  const groups = useMemo(() => groupByService(clusters), [clusters]);
+  const groups = useMemo(() => groupByVpc(clusters), [clusters]);
 
   const open = useCallback(
     (id: string) => {
@@ -243,7 +248,7 @@ export default function MapPage() {
       <PageHeader
         eyebrow="Monitor"
         title="Map"
-        description="연결된 서비스별로 묶어 본 전체 DB 청사진 — 카드를 클릭하면 해당 대시보드로 이동하고 전역 선택이 바뀝니다."
+        description="계정의 DB를 Region → VPC로 묶어 본 아키텍처 청사진 — 노드를 클릭하면 해당 대시보드로 이동하고 전역 선택이 바뀝니다."
       />
       <PageBody>
         {loading ? (
@@ -261,40 +266,66 @@ export default function MapPage() {
             description="Clusters 페이지에서 클러스터를 먼저 등록하세요."
           />
         ) : (
-          <div className="space-y-8">
-            {groups.map((g) => {
-              const unassigned = g.service === UNASSIGNED;
+          <div className="space-y-6">
+            {groups.map((g, i) => {
+              const prev = groups[i - 1];
+              const newRegion = !prev || prev.region !== g.region;
+              const serverless = g.vpcId === null;
               return (
-                <section key={g.service}>
-                  <div className="mb-3 flex items-center gap-2">
-                    {unassigned ? (
-                      <Boxes size={15} className="text-slate-500" />
-                    ) : (
-                      <Plug size={15} className="text-sky-400" />
-                    )}
-                    <h2
-                      className={`text-sm font-semibold ${
-                        unassigned ? "text-slate-500" : "text-slate-200"
-                      }`}
-                    >
-                      {unassigned ? "Unassigned" : g.service}
-                    </h2>
-                    <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
-                      {g.clusters.length}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {g.clusters.map((c) => (
-                      <DbCard
-                        key={`${g.service}:${c.cluster_id}`}
-                        c={c}
-                        admin={admin}
-                        onOpen={open}
-                        onSaved={load}
-                      />
-                    ))}
-                  </div>
-                </section>
+                <div key={`${g.region}:${g.vpcId ?? "none"}`}>
+                  {newRegion && (
+                    <div className="mb-3 mt-1 flex items-center gap-2">
+                      <Globe size={14} className="text-emerald-400" />
+                      <h2 className="text-sm font-semibold tracking-tight text-emerald-300">
+                        {g.region}
+                      </h2>
+                      <span className="text-[10px] uppercase tracking-wider text-slate-600">
+                        region
+                      </span>
+                    </div>
+                  )}
+                  <section
+                    className={`rounded-xl border p-4 ${
+                      serverless
+                        ? "border-dashed border-slate-800 bg-slate-900/20"
+                        : "border-sky-900/50 bg-sky-950/10"
+                    }`}
+                  >
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      {serverless ? (
+                        <Boxes size={14} className="text-slate-500" />
+                      ) : (
+                        <Network size={14} className="text-sky-400" />
+                      )}
+                      <h3
+                        className={`font-mono text-xs font-medium ${
+                          serverless ? "text-slate-500" : "text-sky-300"
+                        }`}
+                      >
+                        {serverless ? "Serverless / VPC 외" : g.vpcId}
+                      </h3>
+                      {!serverless && g.azs.length > 0 && (
+                        <span className="text-[10px] text-slate-500">
+                          {g.azs.length} AZ · {g.azs.join(", ")}
+                        </span>
+                      )}
+                      <span className="ml-auto rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
+                        {g.clusters.length}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {g.clusters.map((c) => (
+                        <DbCard
+                          key={`${g.vpcId ?? "none"}:${c.cluster_id}`}
+                          c={c}
+                          admin={admin}
+                          onOpen={open}
+                          onSaved={load}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                </div>
               );
             })}
           </div>

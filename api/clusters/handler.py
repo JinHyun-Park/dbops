@@ -119,7 +119,7 @@ def _enrich_with_meta(clusters):
             resourceArn=cluster_arn,
             secretArn=secret_arn,
             database=db,
-            sql=f"SELECT cluster_id, status, engine_version, storage_size_gb FROM cluster_meta WHERE cluster_id IN ({in_clause})",
+            sql=f"SELECT cluster_id, status, engine_version, storage_size_gb, vpc_id, availability_zones FROM cluster_meta WHERE cluster_id IN ({in_clause})",
             parameters=params,
             includeResultMetadata=True,
         )
@@ -143,6 +143,10 @@ def _enrich_with_meta(clusters):
                 c["engine_version"] = m["engine_version"]
             if m.get("storage_size_gb") is not None:
                 c["storage_size_gb"] = m["storage_size_gb"]
+            if m.get("vpc_id"):
+                c["vpc_id"] = m["vpc_id"]
+            if m.get("availability_zones"):
+                c["availability_zones"] = m["availability_zones"]
     except Exception as e:
         print(f"enrich error: {e}")
 

@@ -10,6 +10,9 @@ export interface MapCluster {
   connection_status?: string;
   purpose?: string;
   service_tags?: string[];
+  vpc_id?: string;
+  availability_zones?: string; // comma-joined AZ names
+  resource_name?: string;
 }
 
 export type EnvKind = "prod" | "staging" | "dev";
@@ -87,6 +90,52 @@ export function groupByService(clusters: MapCluster[]): ServiceGroup[] {
     if (a.service === UNASSIGNED) return 1;
     if (b.service === UNASSIGNED) return -1;
     return a.service.localeCompare(b.service);
+  });
+  return groups;
+}
+
+export interface VpcGroup {
+  region: string;
+  vpcId: string | null; // null = serverless / no VPC (DynamoDB, or not yet collected)
+  azs: string[];
+  clusters: MapCluster[];
+}
+
+/** Nest clusters by region → VPC for the architecture view. Clusters with no
+ *  vpc_id (DynamoDB = serverless; or VPC not yet collected) bucket into a
+ *  per-region serverless group (vpcId = null). Sorted: region asc, then VPC id
+ *  asc with the serverless bucket last within each region. */
+export function groupByVpc(clusters: MapCluster[]): VpcGroup[] {
+  const map = new Map<string, VpcGroup>();
+  for (const c of clusters) {
+    const region = c.region || "unknown";
+    const vpcId = c.vpc_id || null;
+    const key = `${region}::${vpcId ?? ""}`;
+    let g = map.get(key);
+    if (!g) {
+      const azs = (c.availability_zones || "")
+        .split(",")
+        .map((a) => a.trim())
+        .filter(Boolean);
+      g = { region, vpcId, azs, clusters: [] };
+      map.set(key, g);
+    } else if (g.azs.length === 0 && c.availability_zones) {
+      g.azs = c.availability_zones
+        .split(",")
+        .map((a) => a.trim())
+        .filter(Boolean);
+    }
+    g.clusters.push(c);
+  }
+  const groups = Array.from(map.values());
+  for (const g of groups) {
+    g.clusters.sort((a, b) => a.cluster_id.localeCompare(b.cluster_id));
+  }
+  groups.sort((a, b) => {
+    if (a.region !== b.region) return a.region.localeCompare(b.region);
+    if (a.vpcId === null) return 1; // serverless bucket last within a region
+    if (b.vpcId === null) return -1;
+    return a.vpcId.localeCompare(b.vpcId);
   });
   return groups;
 }

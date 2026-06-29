@@ -46,9 +46,29 @@ def _writer_instance_class(rds_client, cluster_id: str, members: list) -> str:
         return ""
 
 
+def _vpc_info(rds_client, cluster):
+    """(vpc_id, comma-joined sorted AZs) for the cluster's DB subnet group — the
+    network context the DB Map nests by. Best-effort: returns ('', '') on any
+    failure so meta collection never breaks. Works for Aurora + DocumentDB (both
+    use the rds: DescribeDBSubnetGroups API)."""
+    sg = cluster.get("DBSubnetGroup")
+    if not sg:
+        return "", ""
+    try:
+        grp = (rds_client.describe_db_subnet_groups(DBSubnetGroupName=sg).get("DBSubnetGroups") or [{}])[0]
+        azs = sorted(
+            {(s.get("SubnetAvailabilityZone") or {}).get("Name", "") for s in grp.get("Subnets", [])} - {""}
+        )
+        return grp.get("VpcId", ""), ",".join(azs)
+    except Exception as e:
+        print(f"[meta] vpc lookup failed for {cluster.get('DBClusterIdentifier')}: {type(e).__name__}")
+        return "", ""
+
+
 def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, region):
     response = rds_client.describe_db_clusters(DBClusterIdentifier=cluster_id)
     cluster = response["DBClusters"][0]
+    vpc_id, availability_zones = _vpc_info(rds_client, cluster)
 
     # Serverless v2 carries ScalingConfiguration with MinCapacity/MaxCapacity
     # in ACUs (Aurora Capacity Units). Provisioned clusters return no such
@@ -72,6 +92,7 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
             multi_az, deletion_protection,
             engine_mode, serverlessv2_min_acu, serverlessv2_max_acu,
             instance_class, http_endpoint_enabled,
+            vpc_id, availability_zones,
             instances,
             updated_at
         )
@@ -85,6 +106,7 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
             :multi_az, :deletion_protection,
             :engine_mode, :sv2_min_acu, :sv2_max_acu,
             :instance_class, :http_endpoint_enabled,
+            :vpc_id, :availability_zones,
             :instances::jsonb,
             NOW()
         )
@@ -104,6 +126,8 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
             serverlessv2_max_acu = EXCLUDED.serverlessv2_max_acu,
             instance_class = COALESCE(NULLIF(EXCLUDED.instance_class, ''), cluster_meta.instance_class),
             http_endpoint_enabled = EXCLUDED.http_endpoint_enabled,
+            vpc_id = EXCLUDED.vpc_id,
+            availability_zones = EXCLUDED.availability_zones,
             instances = EXCLUDED.instances,
             updated_at = NOW()
     """
@@ -129,6 +153,8 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
         "sv2_max_acu": float(sv2["MaxCapacity"]) if sv2.get("MaxCapacity") is not None else None,
         "instance_class": instance_class,
         "http_endpoint_enabled": bool(cluster.get("HttpEndpointEnabled", False)),
+        "vpc_id": vpc_id,
+        "availability_zones": availability_zones,
         "instances": json.dumps(instances),
     }
     cache_execute(sql, params)
