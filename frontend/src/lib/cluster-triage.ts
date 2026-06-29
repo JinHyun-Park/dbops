@@ -31,6 +31,15 @@ export function n(v: unknown): number {
   return Number.isFinite(x) ? x : 0;
 }
 
+// Healthy lifecycle statuses across engines: RDS/Aurora/DocDB/ElastiCache report
+// "available"; DynamoDB reports "ACTIVE". Anything else (stopped/failed/modifying/
+// updating…) is treated as not-healthy. Compared case-insensitively.
+const HEALTHY_STATUS = new Set(["available", "active"]);
+
+function isHealthyStatus(status?: string | null): boolean {
+  return !!status && HEALTHY_STATUS.has(status.toLowerCase());
+}
+
 // Per-cluster triage from a single set of thresholds, so the summary band, the
 // row dot, the cell colors, and the dashboard card pill all agree.
 export function triage(c: TriageInput, eol: EolInfo | null): TriageResult {
@@ -41,7 +50,7 @@ export function triage(c: TriageInput, eol: EolInfo | null): TriageResult {
   let level: Level = "ok";
 
   const crit: string[] = [];
-  if (c.status && c.status !== "available") crit.push(`status=${c.status}`);
+  if (c.status && !isHealthyStatus(c.status)) crit.push(`status=${c.status}`);
   if (cpu !== null && cpu >= 90) crit.push(`CPU ${cpu.toFixed(0)}%`);
   if (aas !== null && aas >= 5) crit.push(`AAS ${aas.toFixed(1)}`);
   if (dlk >= 5) crit.push(`${dlk} deadlocks`);
@@ -71,7 +80,7 @@ export function triage(c: TriageInput, eol: EolInfo | null): TriageResult {
     (aas ?? 0) * 15 +
     dlk * 8 +
     blk * 12 +
-    (c.status && c.status !== "available" ? 100 : 0) +
+    (c.status && !isHealthyStatus(c.status) ? 100 : 0) +
     (eol?.status === "expired" ? 60 : eol?.status === "imminent" ? 30 : 0);
 
   return { level, heat, reasons };
