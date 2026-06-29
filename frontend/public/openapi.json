@@ -1110,6 +1110,35 @@
         ]
       }
     },
+    "/api/clusters/{id}/meta": {
+      "patch": {
+        "tags": ["clusters"],
+        "summary": "PATCH /api/clusters/{id}/meta",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
     "/api/config": {
       "get": {
         "tags": ["config"],

@@ -1724,6 +1724,12 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.DELETE],
             integration=clusters_integration,
         )
+        # Map blueprint note (purpose + service_tags), admin-gated in the handler.
+        self.api.add_routes(
+            path="/api/clusters/{id}/meta",
+            methods=[apigwv2.HttpMethod.PATCH],
+            integration=clusters_integration,
+        )
         self.api.add_routes(
             path="/api/reports",
             methods=[apigwv2.HttpMethod.GET],

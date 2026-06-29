@@ -910,6 +910,23 @@ export async function fetchClusters() {
   throw lastErr;
 }
 
+// Admin-only: set the DB Map note (purpose + connected-service tags). The
+// handler gates on the bearer token (viewer => 403).
+export async function patchClusterMeta(
+  clusterId: string,
+  meta: { purpose?: string; service_tags?: string[] },
+): Promise<void> {
+  const res = await authedFetch(
+    await api(`/api/clusters/${enc(clusterId)}/meta`),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(meta),
+    },
+  );
+  if (!res.ok) throw new Error(`메타 저장 실패 (상태 ${res.status})`);
+}
+
 // ── Agent Tasks — event-driven / scheduled / manual agent work ──────────────
 
 export interface TraceStep {

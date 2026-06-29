@@ -838,6 +838,54 @@ def _handle_delete(table, cluster_id: str):
     return _resp(200, {"status": "deleted", "cluster_id": cluster_id, "was_demo": bool(existing.get("is_demo"))})
 
 
+# Map blueprint note (admin-editable). Caps keep the registry item small + the UI
+# tidy; service_tags is also the Map's grouping key.
+_PURPOSE_MAX = 200
+_TAG_MAX_LEN = 60
+_TAGS_MAX = 20
+
+
+def _handle_update_meta(table, cluster_id: str, body: dict):
+    """PATCH /api/clusters/{id}/meta — admin sets the Map note: `purpose` (one
+    line) and/or `service_tags` (connected services, also the Map grouping key).
+    Only the provided fields are updated; both optional. 404 if the cluster isn't
+    registered (so a bad id can't create a phantom item via update_item)."""
+    if not table.get_item(Key={"cluster_id": cluster_id}).get("Item"):
+        return _resp(404, {"error": "not_found", "cluster_id": cluster_id})
+
+    updates: dict = {}
+    if "purpose" in body:
+        purpose = body["purpose"] or ""
+        if not isinstance(purpose, str):
+            return _resp(400, {"error": "purpose must be a string"})
+        updates["purpose"] = purpose.strip()[:_PURPOSE_MAX]
+    if "service_tags" in body:
+        tags = body["service_tags"]
+        if not isinstance(tags, list):
+            return _resp(400, {"error": "service_tags must be a list"})
+        clean: list = []
+        for t in tags:
+            if not isinstance(t, str):
+                return _resp(400, {"error": "service_tags entries must be strings"})
+            t = t.strip()[:_TAG_MAX_LEN]
+            if t and t not in clean and len(clean) < _TAGS_MAX:
+                clean.append(t)
+        updates["service_tags"] = clean
+
+    if not updates:
+        return _resp(400, {"error": "nothing to update (provide purpose and/or service_tags)"})
+
+    names = {f"#{k}": k for k in updates}
+    values = {f":{k}": v for k, v in updates.items()}
+    table.update_item(
+        Key={"cluster_id": cluster_id},
+        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in updates),
+        ExpressionAttributeNames=names,
+        ExpressionAttributeValues=values,
+    )
+    return _resp(200, {"status": "updated", "cluster_id": cluster_id, **updates})
+
+
 def _test_connection(body: dict) -> dict:
     """Pre-flight: AssumeRole + DescribeDBClusters without persisting
     anything. Returns a structured verdict so the UI can show which
@@ -982,6 +1030,20 @@ def lambda_handler(event, context):
         if forbid:
             return forbid
         return _handle_seed_sample(table)
+
+    # Sub-route: PATCH /api/clusters/{id}/meta — admin sets the Map blueprint note.
+    if method == "PATCH" and path.endswith("/meta"):
+        forbid = _forbid_viewer(event)
+        if forbid:
+            return forbid
+        cluster_id = (event.get("pathParameters") or {}).get("id")
+        if not cluster_id:
+            return _resp(400, {"error": "cluster_id required"})
+        try:
+            body = json.loads(event.get("body") or "{}")
+        except Exception:
+            return _resp(400, {"error": "invalid JSON"})
+        return _handle_update_meta(table, cluster_id, body)
 
     # Sub-route: DELETE /api/clusters/{cluster_id} — write, admin only
     if method == "DELETE":

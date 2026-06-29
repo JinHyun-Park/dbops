@@ -12,6 +12,7 @@ import {
   BookOpen,
   Bot,
   Boxes,
+  Map,
   Brain,
   Clock,
   Database,
@@ -73,6 +74,12 @@ const NAV: NavGroup[] = [
         label: "Fleet",
         icon: Boxes,
         hint: "전체 클러스터 한눈에 트리아지",
+      },
+      {
+        href: "/map",
+        label: "Map",
+        icon: Map,
+        hint: "서비스별 DB 청사진",
       },
       {
         href: "/dashboard",
