@@ -1807,6 +1807,8 @@ export interface ChatSessionDetail extends ChatSessionSummary {
     content: string;
     tool_calls?: unknown[];
     ts?: number;
+    followups?: string[];
+    incomplete?: boolean;
   }>;
 }
 

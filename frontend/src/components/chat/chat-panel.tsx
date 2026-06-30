@@ -617,6 +617,8 @@ export function ChatPanel() {
           role: m.role as Message["role"],
           content: m.content,
           toolCalls: (m.tool_calls as Message["toolCalls"]) || [],
+          followups: (m.followups as string[]) || undefined,
+          incomplete: m.incomplete || undefined,
         }));
         setConversations((prev) =>
           prev.map((c) =>
@@ -927,6 +929,20 @@ export function ChatPanel() {
           console.error("Stream error:", err);
           setStreamError(err?.message || "알 수 없는 스트림 오류");
           setIsStreaming(false);
+          // Mark the partial assistant message as incomplete so a reopened
+          // session shows the interruption notice (not a silently truncated answer).
+          persist((prev) =>
+            prev.map((c) => {
+              if (c.id !== convId) return c;
+              const msgs = [...c.messages];
+              const last = msgs[msgs.length - 1];
+              if (last && last.role === "assistant" && last.content) {
+                msgs[msgs.length - 1] = { ...last, incomplete: true };
+                return { ...c, messages: msgs };
+              }
+              return c;
+            }),
+          );
           // Record last error per session for server persistence.
           const prev = tokenTotalsRef.current.get(convId) ?? {
             total_input_tokens: 0,
@@ -1254,6 +1270,18 @@ export function ChatPanel() {
                   tags_csv: "",
                   cluster_id: clusterId || "",
                 });
+              }}
+              onRegenerate={(assistantMsgId) => {
+                // Find the user message that immediately preceded this assistant
+                // message and re-send it.
+                const idx = messages.findIndex((m) => m.id === assistantMsgId);
+                if (idx <= 0) return;
+                for (let i = idx - 1; i >= 0; i--) {
+                  if (messages[i].role === "user") {
+                    sendText(messages[i].content);
+                    break;
+                  }
+                }
               }}
             />
           )}

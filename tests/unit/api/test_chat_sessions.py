@@ -323,6 +323,45 @@ def test_put_without_token_fields_is_unchanged(mock_boto3):
     assert "last_error" not in put_item
 
 
+def test_normalize_messages_persists_followups_and_incomplete():
+    """followups (capped) and incomplete (bool-coerced) survive a round-trip."""
+    msgs = [
+        {
+            "role": "assistant",
+            "content": "ok",
+            "followups": ["q1", "q2", "q3", "q4", "q5", "q6"],  # 6 → capped to 5
+            "incomplete": True,
+        },
+        {
+            "role": "assistant",
+            "content": "done",
+            # No followups, no incomplete — must not appear in output.
+        },
+    ]
+    out = handler._normalize_messages(msgs)
+    # followups capped at 5
+    assert out[0]["followups"] == ["q1", "q2", "q3", "q4", "q5"]
+    assert out[0]["incomplete"] is True
+    # Clean message has neither field
+    assert "followups" not in out[1]
+    assert "incomplete" not in out[1]
+
+
+def test_normalize_messages_followup_length_capped():
+    """Each individual followup string is capped at 300 chars."""
+    long_q = "x" * 400
+    msgs = [{"role": "assistant", "content": "ok", "followups": [long_q]}]
+    out = handler._normalize_messages(msgs)
+    assert len(out[0]["followups"][0]) == 300
+
+
+def test_normalize_messages_incomplete_false_not_stored():
+    """incomplete=False (or falsy) must not appear in output."""
+    msgs = [{"role": "assistant", "content": "ok", "incomplete": False}]
+    out = handler._normalize_messages(msgs)
+    assert "incomplete" not in out[0]
+
+
 @patch.dict("os.environ", {"SESSIONS_TABLE": "sessions"})
 @patch.object(handler, "boto3")
 def test_put_rejects_non_int_token_fields(mock_boto3):

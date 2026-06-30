@@ -10,6 +10,7 @@ export interface Message {
   content: string;
   toolCalls?: { name: string; status: "running" | "done" }[];
   followups?: string[];
+  incomplete?: boolean;
 }
 
 interface MessageListProps {
@@ -17,6 +18,7 @@ interface MessageListProps {
   onFollowupClick?: (text: string) => void;
   followupsLoading?: boolean;
   onSaveAsRunbook?: (assistant: Message, question: string | null) => void;
+  onRegenerate?: (assistantMsgId: string) => void;
 }
 
 export function MessageList({
@@ -24,6 +26,7 @@ export function MessageList({
   onFollowupClick,
   followupsLoading,
   onSaveAsRunbook,
+  onRegenerate,
 }: MessageListProps) {
   const lastIdx = messages.length - 1;
   return (
@@ -106,6 +109,21 @@ export function MessageList({
                   ✓ Runbook 저장
                 </button>
               )}
+
+            {msg.role === "assistant" && msg.incomplete && (
+              <div className="mt-2 flex items-center gap-2 max-w-[80%] text-xs text-zinc-500">
+                <span>응답이 중단되었습니다</span>
+                {onRegenerate && (
+                  <button
+                    type="button"
+                    onClick={() => onRegenerate(msg.id)}
+                    className="px-2 py-0.5 border border-zinc-700 text-zinc-400 hover:border-amber-500/50 hover:text-amber-300 hover:bg-amber-500/5 transition-colors"
+                  >
+                    다시 생성
+                  </button>
+                )}
+              </div>
+            )}
 
             {showFollowups && (
               <div className="mt-2 flex flex-col gap-1.5 items-start max-w-[80%]">

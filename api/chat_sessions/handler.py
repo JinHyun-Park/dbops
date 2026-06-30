@@ -100,12 +100,21 @@ def _normalize_messages(messages: list) -> list:
     for m in messages or []:
         if not isinstance(m, dict):
             continue
-        out.append({
+        entry: dict = {
             "role": str(m.get("role", "user"))[:24],
             "content": str(m.get("content", ""))[:50_000],
             "tool_calls": m.get("toolCalls") or m.get("tool_calls") or [],
             "ts": int(m.get("ts") or time.time() * 1000),
-        })
+        }
+        # Follow-up suggestions: list of short strings generated post-response.
+        # Cap count and length so a runaway frontend can't blow the DDB limit.
+        raw_followups = m.get("followups")
+        if raw_followups and isinstance(raw_followups, list):
+            entry["followups"] = [str(x)[:300] for x in raw_followups][:5]
+        # Incomplete flag: set when a stream was interrupted before onDone.
+        if m.get("incomplete"):
+            entry["incomplete"] = True
+        out.append(entry)
     # Embed only the most recent N messages so we never blow the DDB row limit.
     if len(out) > MAX_EMBEDDED_MESSAGES:
         out = out[-MAX_EMBEDDED_MESSAGES:]
