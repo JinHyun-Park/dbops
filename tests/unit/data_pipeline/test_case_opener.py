@@ -1,4 +1,18 @@
-from outcome_evaluator import case_opener
+import importlib.util
+import sys
+from pathlib import Path
+
+PKG = Path(__file__).resolve().parents[3] / "data-pipeline" / "outcome_evaluator"
+if str(PKG) not in sys.path:
+    sys.path.insert(0, str(PKG))
+
+def _load(mod_name, file_name=None):
+    spec = importlib.util.spec_from_file_location(mod_name, PKG / f"{file_name or mod_name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+case_opener = _load("case_opener")
 
 
 def _capturing_query(finding_rows, anomaly_rows):

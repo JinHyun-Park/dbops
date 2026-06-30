@@ -1,7 +1,28 @@
+import importlib.util
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from outcome_evaluator import handler
+
+PKG = Path(__file__).resolve().parents[3] / "data-pipeline" / "outcome_evaluator"
+if str(PKG) not in sys.path:
+    sys.path.insert(0, str(PKG))
+
+def _load(mod_name, file_name=None):
+    spec = importlib.util.spec_from_file_location(mod_name, PKG / f"{file_name or mod_name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[mod_name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+# Load siblings first so handler's bare `import case_opener / import evaluator` resolves
+# to these exact objects (sys.modules hit). Load handler under a unique name to avoid
+# collision with other Lambda dirs' handler.py modules.
+_load("remediation_classify")
+_load("case_opener")
+_load("evaluator")
+handler = _load("outcome_evaluator_handler", "handler")
 
 
 def test_opens_then_evaluates_due_cases(monkeypatch):

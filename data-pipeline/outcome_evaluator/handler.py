@@ -6,8 +6,8 @@ data stack like proactive_monitor / alert_evaluator.
 import os
 
 import boto3
-
-from outcome_evaluator import case_opener, evaluator
+import case_opener
+import evaluator
 
 
 def _query(rds_data, cluster_arn, secret_arn, database, sql, params=None):

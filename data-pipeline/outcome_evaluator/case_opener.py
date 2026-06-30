@@ -3,7 +3,7 @@
 row per live symptom. Idempotent via the partial unique index — re-emission while
 a case is open only bumps last_seen_at.
 """
-from outcome_evaluator.remediation_classify import classify_action
+from remediation_classify import classify_action
 
 # How far back to scan each run. A little wider than the evaluator cadence so
 # nothing slips between runs; ON CONFLICT makes overlap harmless.
