@@ -11,7 +11,7 @@ inclusion: always
 - **Tool Integration**: AgentCore Gateway (MCP Protocol) with a Cedar Policy Engine bound in LOG_ONLY (write enforcement lives in the tool-level `approval_guard`; Cedar is defense-in-depth)
 - **LLM**: Amazon Bedrock Claude (default), model-swappable via Strands SDK
 - **Memory**: AgentCore Memory (semantic + preference + summary)
-- **Knowledge**: Bedrock Knowledge Bases + S3 Vectors backend
+- **Knowledge**: semantic search runs today on pgvector + Amazon Titan embeddings (see Data Layer). Bedrock Knowledge Bases + S3 Vectors are planned (not yet wired) for future RAG over customer-owned runbooks / best-practices; AWS/Aurora public docs are already covered by the agent-local AWS-docs tools.
 
 ## Frontend
 
@@ -33,7 +33,7 @@ inclusion: always
 - **Hot Cache**: Aurora PostgreSQL Serverless v2 (I/O-Optimized)
 - **Session/Approval State**: DynamoDB
 - **Archive**: S3 + S3 Tables (Apache Iceberg)
-- **Vector Store**: S3 Vectors (via Bedrock Knowledge Bases)
+- **Vector Store**: pgvector on the Aurora PG cache + Amazon Titan embeddings — the current backend for semantic incident search. S3 Vectors (via Bedrock Knowledge Bases) is planned for future customer runbook/best-practice RAG, not yet implemented.
 
 ## MCP Servers
 

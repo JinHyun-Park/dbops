@@ -13,7 +13,7 @@ dbops/
 │   │   └── settings.example.py   # Template for new deployments
 │   └── stacks/
 │       ├── foundation_stack.py   # Cognito, VPC, IAM, DynamoDB
-│       ├── data_stack.py         # Aurora PG Cache, S3, Bedrock KB, Collectors
+│       ├── data_stack.py         # Aurora PG Cache (+pgvector), S3, Collectors
 │       ├── agent_stack.py        # AgentCore Runtime, Gateway, MCP Lambdas, API GW
 │       └── frontend_stack.py     # S3 + CloudFront
 ├── agent/                        # AgentCore Runtime (Docker container)
