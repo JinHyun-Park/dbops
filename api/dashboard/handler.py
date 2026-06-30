@@ -1865,6 +1865,32 @@ def _health_findings(query, cluster_id):
         if sev in counts:
             counts[sev] += 1
     snapshot_time = rows[0]["snapshot_time"] if rows else None
+
+    # Remediation Outcome Loop: attach each finding's track record (this cluster,
+    # falling back to the '*' fleet rollup) and re-rank proven actions up.
+    SEV_RANK = {"critical": 2, "warning": 1, "info": 0}
+    for f in rows:
+        sclass = f"finding:{f.get('check_type')}"
+        agg = query(
+            "SELECT COALESCE(SUM(successes),0) AS successes, COALESCE(SUM(attempts),0) AS attempts "
+            "FROM remediation_outcomes_agg WHERE cluster_id = :cid AND symptom_class = :sc",
+            {"cid": cluster_id, "sc": sclass},
+        )
+        s, a = (int(agg[0]["successes"]), int(agg[0]["attempts"])) if agg and "successes" in agg[0] else (0, 0)
+        if a == 0:  # cold start → fleet prior
+            fleet = query(
+                "SELECT COALESCE(SUM(successes),0) AS successes, COALESCE(SUM(attempts),0) AS attempts "
+                "FROM remediation_outcomes_agg WHERE cluster_id = '*' AND symptom_class = :sc",
+                {"sc": sclass},
+            )
+            s, a = (int(fleet[0]["successes"]), int(fleet[0]["attempts"])) if fleet and "successes" in fleet[0] else (0, 0)
+        f["outcome"] = {"successes": s, "attempts": a}
+    rows.sort(
+        key=lambda f: (SEV_RANK.get(f.get("severity"), 0),
+                       f["outcome"]["successes"] / (f["outcome"]["attempts"] + 1)),
+        reverse=True,
+    )
+
     return {
         "cluster_id": cluster_id,
         "snapshot_time": snapshot_time,
