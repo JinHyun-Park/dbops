@@ -415,6 +415,29 @@ class DataStack(cdk.Stack):
             targets=[targets.LambdaFunction(self.task_scheduler)],
         )
 
+        # Remediation Outcome Loop — opens a case per emitted recommendation and
+        # judges whether the symptom resolved (baseline recovery / finding
+        # clearance), feeding remediation_outcomes_agg. Public endpoints only.
+        self.outcome_evaluator = lambda_.Function(
+            self, "OutcomeEvaluator",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../data-pipeline/outcome_evaluator"),
+            timeout=cdk.Duration.seconds(120),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": self.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+            },
+        )
+        self.cache_db.secret.grant_read(self.outcome_evaluator)
+        self.cache_db.grant_data_api_access(self.outcome_evaluator)
+        events.Rule(
+            self, "OutcomeEvaluatorSchedule",
+            schedule=events.Schedule.rate(cdk.Duration.minutes(20)),
+            targets=[targets.LambdaFunction(self.outcome_evaluator)],
+        )
+
         self.event_processor = lambda_.Function(
             self, "EventProcessor",
             runtime=lambda_.Runtime.PYTHON_3_12,
