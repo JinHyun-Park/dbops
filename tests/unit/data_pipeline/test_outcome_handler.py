@@ -22,18 +22,23 @@ def test_opens_then_evaluates_due_cases(monkeypatch):
 
 
 def test_opener_failure_still_evaluates(monkeypatch):
+    """Opener failure must: (a) raise so Lambda is marked failed (alarmable),
+    AND (b) still run evaluation for already-due cases before raising."""
     monkeypatch.setenv("CACHE_DB_CLUSTER_ARN", "arn:cluster")
     monkeypatch.setenv("CACHE_DB_SECRET_ARN", "arn:secret")
     due = [{"case_id": 2, "cluster_id": "c1", "symptom_class": "anomaly:cpu",
             "symptom_subject": "cpu", "watch_metric": "cpu", "action_class": "manual",
             "opened_at": "x"}]
+    import pytest
     with patch.object(handler.case_opener, "open_cases", side_effect=RuntimeError("db down")), \
          patch.object(handler, "_due_cases", return_value=due), \
-         patch.object(handler.evaluator, "evaluate_case", return_value="resolved"), \
-         patch.object(handler.evaluator, "apply_verdict"):
-        out = handler.lambda_handler({}, None)
-    assert out["opened"] == 0
-    assert out["evaluated"] == 1
+         patch.object(handler.evaluator, "evaluate_case", return_value="resolved") as me, \
+         patch.object(handler.evaluator, "apply_verdict") as ma:
+        with pytest.raises(RuntimeError, match="db down"):
+            handler.lambda_handler({}, None)
+    # Evaluation must have run for the due case before the raise
+    assert me.call_count == 1
+    assert ma.call_count == 1
 
 
 def test_per_case_failure_counted_and_isolated(monkeypatch):

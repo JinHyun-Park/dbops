@@ -65,11 +65,15 @@ def lambda_handler(event, context):
     def q(sql, params=None):
         return _query(rds_data, cluster_arn, secret_arn, database, sql, params)
 
+    # Opener failure is systemic (no new cases at all) → surface it for alarms/retry.
+    # Per-case failures are transient → soft-count only, never block evaluation.
+    opener_error = None
     try:
         opened = case_opener.open_cases(q)
     except Exception as e:
-        print(f"[outcome-eval] open_cases failed: {type(e).__name__}: {e}")
+        opener_error = e
         opened = 0
+        print(f"[outcome-eval] open_cases failed: {type(e).__name__}: {e}")
 
     evaluated = 0
     failed = 0
@@ -83,4 +87,6 @@ def lambda_handler(event, context):
             print(f"[outcome-eval] case {case.get('case_id')} failed: {type(e).__name__}: {e}")
 
     print(f"[outcome-eval] opened={opened} evaluated={evaluated} failed={failed}")
+    if opener_error is not None:
+        raise opener_error
     return {"opened": opened, "evaluated": evaluated, "failed": failed}
