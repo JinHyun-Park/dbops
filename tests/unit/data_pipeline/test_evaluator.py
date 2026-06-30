@@ -150,3 +150,28 @@ def test_evaluate_case_no_colon_symptom_class_is_inconclusive():
             "symptom_subject": "s", "watch_metric": None,
             "action_class": "manual", "opened_at": "x"}
     assert evaluator.evaluate_case(q, case) == "inconclusive"
+
+
+def test_finding_queries_cast_since_to_timestamptz():
+    """RDS Data API binds :since (opened_at) as TEXT; without an explicit
+    ::timestamptz cast real PostgreSQL raises 'operator does not exist:
+    timestamptz > text' and every finding-type case fails to evaluate. Mocks
+    can't catch the type error, so assert the cast is present in the SQL."""
+    seen = []
+
+    def query(sql, params=None):
+        seen.append(sql)
+        if "AS recurred" in sql:
+            return [{"recurred": 0}]
+        if "AS produced" in sql:
+            return [{"produced": 1}]
+        return []
+
+    case = {"cluster_id": "c1", "symptom_class": "finding:query_regression",
+            "symptom_subject": "s", "watch_metric": None,
+            "action_class": "index_add", "opened_at": "2026-06-30T00:00:00Z"}
+    assert evaluator.evaluate_case(query, case) == "resolved"
+    finding_sqls = [s for s in seen if "cluster_health_findings" in s]
+    assert len(finding_sqls) == 2, f"expected 2 finding queries, got {finding_sqls}"
+    assert all(":since::timestamptz" in s for s in finding_sqls), \
+        f"finding queries must cast :since to timestamptz: {finding_sqls}"

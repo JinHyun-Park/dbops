@@ -47,7 +47,8 @@ def _evaluate_finding(query, case) -> str:
     recurred = query(
         "SELECT COUNT(*) AS recurred FROM cluster_health_findings "
         "WHERE cluster_id = :cid AND check_type = :ct AND subject = :subj "
-        "AND snapshot_time > :since",
+        # opened_at is bound as text via RDS Data API — cast or `timestamptz > text` fails.
+        "AND snapshot_time > :since::timestamptz",
         {"cid": case["cluster_id"], "ct": parts[1],
          "subj": case["symptom_subject"], "since": case["opened_at"]},
     )
@@ -57,7 +58,7 @@ def _evaluate_finding(query, case) -> str:
     # i.e. the cluster produced ANY finding row since the case opened.
     produced = query(
         "SELECT COUNT(*) AS produced FROM cluster_health_findings "
-        "WHERE cluster_id = :cid AND snapshot_time > :since",
+        "WHERE cluster_id = :cid AND snapshot_time > :since::timestamptz",
         {"cid": case["cluster_id"], "since": case["opened_at"]},
     )
     return "resolved" if int(_first(produced, "produced", 0) or 0) > 0 else "inconclusive"
