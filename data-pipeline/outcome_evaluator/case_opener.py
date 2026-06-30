@@ -3,6 +3,9 @@
 row per live symptom. Idempotent via the partial unique index — re-emission while
 a case is open only bumps last_seen_at.
 """
+import time
+
+from boto3.dynamodb.conditions import Attr
 from remediation_classify import classify_action
 
 # How far back to scan each run. A little wider than the evaluator cadence so
@@ -10,6 +13,14 @@ from remediation_classify import classify_action
 SCAN_WINDOW = "INTERVAL '1 hour'"
 WIN_METRIC_MIN = 360    # 6h  — metric-symptom cases
 WIN_FINDING_MIN = 1440  # 24h — recurring-finding cases
+
+# DynamoDB scan window for completed RCA tasks. Must be SHORTER than WIN_METRIC_MIN
+# (6h = 360min) so a task ages out of the filter before its case is evaluated.
+# This prevents the partial unique index (WHERE status='open') from being free to
+# re-insert once a case resolves → no phantom re-opens.
+# agent-tasks rows store completed_at as epoch millis (13-digit string); lexicographic
+# >= on equal-width strings equals numeric compare for same-era values.
+RCA_SCAN_WINDOW_MS = 60 * 60 * 1000  # 1 hour in millis — well under the 6h minimum
 
 _INSERT = (
     "INSERT INTO remediation_cases "
@@ -76,7 +87,10 @@ def open_rca_cases(query, ddb_table) -> int:
     a missing/empty result just yields no case."""
     if ddb_table is None:
         return 0
-    items, scan_kwargs = [], {}
+    cutoff = str(int(time.time() * 1000) - RCA_SCAN_WINDOW_MS)
+    items, scan_kwargs = [], {
+        "FilterExpression": Attr("completed_at").gte(cutoff),
+    }
     while True:  # paginate — never trust a single scan page; no Limit+FilterExpression
         resp = ddb_table.scan(**scan_kwargs)
         items.extend(resp.get("Items", []))
@@ -97,7 +111,7 @@ def open_rca_cases(query, ddb_table) -> int:
         query(_INSERT, {
             "cluster_id": it.get("cluster_id"),
             "symptom_class": f"rca:{category}",
-            "symptom_subject": category,
+            "symptom_subject": (category or "")[:255],
             "watch_metric": metric,
             "severity_at_open": None,
             "recommendation_text": recs[0] if recs else None,

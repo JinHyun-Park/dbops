@@ -17,15 +17,18 @@ def teardown_module(module):
 
 class _FakeTable:
     def __init__(self, pages):
-        """pages: list of lists (each inner list = one scan page's Items)."""
+        """pages: list of lists (each inner list = one scan page's Items).
+        Records every scan call's kwargs for assertion."""
         self._pages = list(pages)
         self._call = 0
+        self.calls = []  # list of kwargs dicts passed to each scan()
 
     def scan(self, **kw):
-        page = self._pages[self._call % len(self._pages)]
+        self.calls.append(dict(kw))
+        page = self._pages[self._call]
         self._call += 1
         result = {"Items": page}
-        # Signal pagination for every page except the last
+        # Emit LastEvaluatedKey for all pages except the last — terminates correctly
         if self._call < len(self._pages):
             result["LastEvaluatedKey"] = {"task_id": {"S": f"page{self._call}"}}
         return result
@@ -41,6 +44,51 @@ def _capturing_query():
 
     query.inserts = inserts
     return query
+
+
+def test_completed_at_filter_is_passed_and_no_limit():
+    """Scan must carry a completed_at FilterExpression and must NOT carry a Limit."""
+    import time
+    q = _capturing_query()
+    item = {
+        "task_id": "t0", "kind": "auto_rca", "status": "done", "cluster_id": "c0",
+        "completed_at": str(int(time.time() * 1000)),
+        "result": {
+            "candidates": [{"category": "lock_contention", "metric": "blocking_count"}],
+            "recommendations": ["인덱스를 추가하세요"],
+        },
+    }
+    tbl = _FakeTable([[item]])
+    case_opener.open_rca_cases(q, tbl)
+
+    assert len(tbl.calls) >= 1, "scan was never called"
+    first_call = tbl.calls[0]
+    # FilterExpression must be present
+    assert "FilterExpression" in first_call, "completed_at FilterExpression not passed to scan"
+    # Limit must NOT be set (repo gotcha: Limit + FilterExpression silently drops rows)
+    assert "Limit" not in first_call, "Limit must not be passed alongside FilterExpression"
+
+
+def test_fakeable_pagination_terminates_and_collects_all():
+    """_FakeTable with 2 pages returns all items exactly once (not infinite loop)."""
+    q = _capturing_query()
+    page1 = [{
+        "task_id": "tp1", "kind": "auto_rca", "status": "done", "cluster_id": "c1",
+        "completed_at": "9999999999999",
+        "result": {"candidates": [{"category": "cat_a", "metric": "m_a"}], "recommendations": ["fix a"]},
+    }]
+    page2 = [{
+        "task_id": "tp2", "kind": "auto_rca", "status": "done", "cluster_id": "c2",
+        "completed_at": "9999999999999",
+        "result": {"candidates": [{"category": "cat_b", "metric": "m_b"}], "recommendations": ["fix b"]},
+    }]
+    tbl = _FakeTable([page1, page2])
+    n = case_opener.open_rca_cases(q, tbl)
+    assert n == 2
+    assert tbl._call == 2  # exactly 2 pages scanned, not stuck in a loop
+    classes = {p["symptom_class"] for p in q.inserts}
+    assert "rca:cat_a" in classes
+    assert "rca:cat_b" in classes
 
 
 def test_opens_rca_case_with_inferred_action():
