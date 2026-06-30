@@ -88,5 +88,11 @@ def lambda_handler(event, context):
 
     print(f"[outcome-eval] opened={opened} evaluated={evaluated} failed={failed}")
     if opener_error is not None:
+        # Retry is safe due to idempotency invariants:
+        # - open_cases uses INSERT … ON CONFLICT, so re-opening is a no-op.
+        # - _due_cases selects only status='open'; apply_verdict moves successful cases OUT of 'open'
+        #   (to resolved/persisted/inconclusive), so retry skips already-processed cases.
+        # - Residual: apply_verdict atomicity ceiling (agg writes but status update fails) is the
+        #   documented best-effort limitation already noted in evaluator.py.
         raise opener_error
     return {"opened": opened, "evaluated": evaluated, "failed": failed}

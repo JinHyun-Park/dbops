@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+import pytest
 from outcome_evaluator import handler
 
 
@@ -29,7 +30,6 @@ def test_opener_failure_still_evaluates(monkeypatch):
     due = [{"case_id": 2, "cluster_id": "c1", "symptom_class": "anomaly:cpu",
             "symptom_subject": "cpu", "watch_metric": "cpu", "action_class": "manual",
             "opened_at": "x"}]
-    import pytest
     with patch.object(handler.case_opener, "open_cases", side_effect=RuntimeError("db down")), \
          patch.object(handler, "_due_cases", return_value=due), \
          patch.object(handler.evaluator, "evaluate_case", return_value="resolved") as me, \
