@@ -32,6 +32,7 @@ def teardown_module(module):
 def test_opens_then_evaluates_due_cases(monkeypatch):
     monkeypatch.setenv("CACHE_DB_CLUSTER_ARN", "arn:cluster")
     monkeypatch.setenv("CACHE_DB_SECRET_ARN", "arn:secret")
+    monkeypatch.delenv("AGENT_TASKS_TABLE", raising=False)  # guard: other test files set this at module level
     due = [{"case_id": 1, "cluster_id": "c1", "symptom_class": "anomaly:cpu",
             "symptom_subject": "cpu", "watch_metric": "cpu", "action_class": "manual",
             "opened_at": "x"}]
@@ -52,6 +53,7 @@ def test_opener_failure_still_evaluates(monkeypatch):
     AND (b) still run evaluation for already-due cases before raising."""
     monkeypatch.setenv("CACHE_DB_CLUSTER_ARN", "arn:cluster")
     monkeypatch.setenv("CACHE_DB_SECRET_ARN", "arn:secret")
+    monkeypatch.delenv("AGENT_TASKS_TABLE", raising=False)  # guard: other test files set this at module level
     due = [{"case_id": 2, "cluster_id": "c1", "symptom_class": "anomaly:cpu",
             "symptom_subject": "cpu", "watch_metric": "cpu", "action_class": "manual",
             "opened_at": "x"}]
@@ -69,6 +71,7 @@ def test_opener_failure_still_evaluates(monkeypatch):
 def test_per_case_failure_counted_and_isolated(monkeypatch):
     monkeypatch.setenv("CACHE_DB_CLUSTER_ARN", "arn:cluster")
     monkeypatch.setenv("CACHE_DB_SECRET_ARN", "arn:secret")
+    monkeypatch.delenv("AGENT_TASKS_TABLE", raising=False)  # guard: other test files set this at module level
     due = [
         {"case_id": 10, "cluster_id": "c1", "symptom_class": "anomaly:cpu",
          "symptom_subject": "cpu", "watch_metric": "cpu", "action_class": "manual",

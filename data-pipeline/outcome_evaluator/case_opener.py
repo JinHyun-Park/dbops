@@ -14,13 +14,17 @@ SCAN_WINDOW = "INTERVAL '1 hour'"
 WIN_METRIC_MIN = 360    # 6h  — metric-symptom cases
 WIN_FINDING_MIN = 1440  # 24h — recurring-finding cases
 
-# DynamoDB scan window for completed RCA tasks. Must be SHORTER than WIN_METRIC_MIN
-# (6h = 360min) so a task ages out of the filter before its case is evaluated.
-# This prevents the partial unique index (WHERE status='open') from being free to
-# re-insert once a case resolves → no phantom re-opens.
+# DynamoDB scan window for completed RCA tasks.
+# Invariant: cadence (20 min) < RCA_SCAN_WINDOW < WIN_METRIC_MIN (6h = 360 min).
+# WHY the upper bound: if the window >= WIN_METRIC_MIN a task stays visible AFTER its
+# case has been evaluated and closed (status moves out of 'open'), freeing the partial
+# unique index to re-insert → phantom re-open. Staying strictly below 6h makes that
+# structurally impossible.
+# WHY 4h (not 1h): tolerates multi-hour evaluator outages; tasks remain scannable
+# even if the Lambda is down for up to ~4h before recovery.
 # agent-tasks rows store completed_at as epoch millis (13-digit string); lexicographic
 # >= on equal-width strings equals numeric compare for same-era values.
-RCA_SCAN_WINDOW_MS = 60 * 60 * 1000  # 1 hour in millis — well under the 6h minimum
+RCA_SCAN_WINDOW_MS = 4 * 60 * 60 * 1000  # 4 hours in millis — tolerates outages, < 6h minimum
 
 _INSERT = (
     "INSERT INTO remediation_cases "
