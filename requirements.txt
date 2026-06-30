@@ -1,5 +1,5 @@
 strands-agents>=1.0.0
-strands-agents-tools>=0.8.1
+strands-agents-tools>=0.8.2
 boto3>=1.43.30
 psycopg2-binary>=2.9.12
 pytest>=9.1.0
