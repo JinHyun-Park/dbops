@@ -194,6 +194,32 @@ def _maybe_create_ticket(task_id, cluster_id, kind, summary, result) -> Optional
         return None
 
 
+def _history_line(cache, cluster_id: str, category: str) -> str:
+    """One-line track record for an 'rca:<category>' symptom, cluster then fleet
+    fallback. Empty string when there's no history (caller omits the line)."""
+    sclass = f"rca:{category}"
+    try:
+        rows = cache.execute(
+            "SELECT action_class, successes, attempts FROM remediation_outcomes_agg "
+            "WHERE cluster_id = :cid AND symptom_class = :sc AND attempts > 0 "
+            "ORDER BY attempts DESC LIMIT 5",
+            {"cid": cluster_id, "sc": sclass},
+        ).rows
+        if not rows:
+            rows = cache.execute(
+                "SELECT action_class, successes, attempts FROM remediation_outcomes_agg "
+                "WHERE cluster_id = '*' AND symptom_class = :sc AND attempts > 0 "
+                "ORDER BY attempts DESC LIMIT 5",
+                {"sc": sclass},
+            ).rows
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+    parts = [f"{r['action_class']} {int(r['successes'])}/{int(r['attempts'])}" for r in rows]
+    return "과거 효과 이력(조치 성공/시도): " + ", ".join(parts)
+
+
 def _narrative(cluster_id: str, rca: dict):
     """Hybrid layer: turn the deterministic candidate signals into a Korean
     root-cause narrative + concrete recommendations via ONE Bedrock call.
@@ -211,12 +237,24 @@ def _narrative(cluster_id: str, rca: dict):
         f"- [{c.get('category')}] {c.get('summary')} (score {c.get('score')}, {c.get('when')})"
         for c in candidates[:8]
     ]
+    top_category = candidates[0].get("category", "") if candidates else ""
+    history = ""
+    if top_category:
+        try:
+            history = _history_line(_get_cache(), cluster_id, top_category)
+        except Exception:
+            history = ""
+    history_section = (
+        f"\n\n{history}\n위 '과거 효과 이력'을 근거로 우선순위를 정하되, 이력에 없는 효과는 단정하지 마세요."
+        if history else ""
+    )
     prompt = (
         f"클러스터 '{cluster_id}'의 근본원인 분석 후보 신호입니다 "
         "(상관관계 기반 증거, 점수 내림차순):\n"
         + "\n".join(lines)
-        + f"\n\n검사한 신호 수: {rca.get('signals_examined', {})}\n\n"
-        "위 신호만 근거로(신호에 없는 원인은 추측 금지) 한국어로 분석하세요. "
+        + f"\n\n검사한 신호 수: {rca.get('signals_examined', {})}"
+        + history_section
+        + "\n\n위 신호만 근거로(신호에 없는 원인은 추측 금지) 한국어로 분석하세요. "
         "반드시 아래 JSON 형식만 출력하세요:\n"
         '{"narrative": "가장 가능성 높은 근본 원인을 2-3문장으로", '
         '"recommendations": ["구체적이고 실행 가능한 권장 조치", "..."]}'
