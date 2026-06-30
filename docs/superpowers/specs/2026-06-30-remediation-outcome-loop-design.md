@@ -104,13 +104,19 @@ the `cluster_id = '*'` fleet row. `inconclusive` increments neither (no signal).
 
 ### 2.3 Attribution — no new table
 
-Change/approval context is read at evaluation time from existing stores:
+> **Status: deferred to a future increment (not in v1).** The `details` JSONB column
+> ships (default `'{}'`), but v1 does not populate `likely_change` hints — there is no
+> consumer wired to surface them yet (the Learning UI / MCP tool show verdicts + track
+> record, not per-case attribution), so writing them now would be a half-feature. The
+> design below is retained as the intended shape for when a consumer is added.
+
+Change/approval context would be read at evaluation time from existing stores:
 
 - `event_log` (cluster_id, event_time, event_type, source, message, raw_event) — schema
   changes, RDS events, alerts, anomalies, writes.
 - Approval records (DynamoDB) — what change was approved + executed and when.
 
-Any change in `[opened_at, evaluated_at]` is attached to `remediation_cases.details`
+Any change in `[opened_at, evaluated_at]` would be attached to `remediation_cases.details`
 as a `likely_change` hint. **Never asserted as the cause** (see §7).
 
 ---
@@ -190,7 +196,8 @@ the window. If there's no evidence the collector ran → `inconclusive`, not res
 
 ### 4.4 On verdict
 
-- Set `status`, `evaluated_at`, append `likely_change` hints to `details`.
+- Set `status`, `evaluated_at`. (Appending `likely_change` hints to `details` is
+  deferred — see §2.3; v1 leaves `details` at its `'{}'` default.)
 - `resolved` → `attempts += 1, successes += 1` on both the cluster row and `'*'` row.
   `persisted` → `attempts += 1`. `inconclusive` → no agg change; optionally re-arm
   (push `evaluate_after` out once) so a slow signal gets a second look before giving up.
