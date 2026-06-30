@@ -1,6 +1,6 @@
 bedrock-agentcore>=0.1.0
 strands-agents>=1.0.0
-mcp>=1.28.0
+mcp>=1.28.1
 # server.py SigV4-signs requests to the AWS MCP Server (doc tools) with
 # botocore directly — declare boto3 explicitly so the runtime never relies on
 # it only being pulled transitively via strands-agents.
