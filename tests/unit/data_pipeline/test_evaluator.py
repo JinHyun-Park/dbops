@@ -1,18 +1,17 @@
-import importlib.util
 import sys
-from pathlib import Path
 
-PKG = Path(__file__).resolve().parents[3] / "data-pipeline" / "outcome_evaluator"
-if str(PKG) not in sys.path:
-    sys.path.insert(0, str(PKG))
+from . import _oe_loader as _ldr
+
+_PATH_ADDED = _ldr.install_path()
 
 def _load(mod_name, file_name=None):
-    spec = importlib.util.spec_from_file_location(mod_name, PKG / f"{file_name or mod_name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return _ldr.load(mod_name, file_name)
 
 evaluator = _load("evaluator")
+
+
+def teardown_module(module):
+    _ldr.teardown(_PATH_ADDED, "evaluator")
 
 
 def _query_router(routes):

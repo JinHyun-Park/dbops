@@ -6,6 +6,10 @@ data stack like proactive_monitor / alert_evaluator.
 import os
 
 import boto3
+
+# Bare imports: Lambda asset bundles this directory's CONTENTS to /var/task, so
+# siblings (case_opener.py, evaluator.py, remediation_classify.py) are top-level
+# modules at runtime — same convention as etl_collector (from collectors.X import).
 import case_opener
 import evaluator
 
