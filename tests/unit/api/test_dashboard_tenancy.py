@@ -200,14 +200,15 @@ def test_fleet_admin_sees_all(monkeypatch):
     assert ids == {"c-open", "c-teamA", "c-teamB"}
 
 
-def test_fleet_registry_failure_leaves_rows_unfiltered(monkeypatch):
-    """If _registered_clusters returns None (DDB outage), rows stay unfiltered."""
+def test_fleet_registry_failure_failclosed_for_nonadmin(monkeypatch):
+    """If _registered_clusters returns None (DDB outage), non-admin sees nothing.
+    Fail-closed: registry unavailable must not leak other teams' clusters."""
     monkeypatch.setattr(dash, "_registered_clusters", lambda: None)
 
     result = dash._multi_cluster_overview(_make_fleet_query(_FLEET_ROWS), _viewer_event())
     ids = {c["cluster_id"] for c in result["clusters"]}
-    # All rows pass through unfiltered
-    assert ids == {"c-open", "c-teamA", "c-teamB"}
+    # Fail-closed: no clusters visible to non-admin when registry is unavailable
+    assert ids == set()
 
 
 def test_registered_clusters_projection_includes_team_id():

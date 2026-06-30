@@ -1340,10 +1340,12 @@ def _learning_overview(query, event=None):
     # Compute visible cluster_id set (mirrors _multi_cluster_overview pattern).
     # fleet rows (cluster_id == '*') are an anonymized aggregate with no real
     # cluster identity — always shown regardless of team membership.
-    visible = None  # None => unfiltered (admin or registry unavailable)
-    if event is not None:
+    visible = None  # None => admin => unfiltered
+    if event is not None and not tenancy.is_admin(event):
         registered = _registered_clusters()
-        if registered is not None:
+        if registered is None:
+            visible = set()  # fail-closed: registry unavailable + non-admin => no clusters visible
+        else:
             items = [
                 {"cluster_id": cid, "team_id": (meta or {}).get("team_id") or ""}
                 for cid, meta in registered.items()
@@ -1440,17 +1442,21 @@ def _multi_cluster_overview(query, event=None):
                 "deadlocks": None,
                 "blocking_count": 0,
             })
-    # Team-visibility filter: if registered is available, use it to build the
-    # cluster_items list for tenancy.visible_cluster_ids. If registered is None
-    # (DDB fetch failed), skip the filter to preserve fail-open behavior.
-    if registered is not None and event is not None:
-        items = [
-            {"cluster_id": cid, "team_id": (meta or {}).get("team_id") or ""}
-            for cid, meta in registered.items()
-        ]
-        visible = tenancy.visible_cluster_ids(event, items)
-        if visible is not None:  # None => admin => unfiltered
-            rows = [r for r in rows if r.get("cluster_id") in visible]
+    # Team-visibility filter. Admin sees all (visible stays None). Non-admin:
+    # if the registry is unavailable (None), fail-closed => empty set. Otherwise
+    # filter to the caller's visible set.
+    visible = None  # None => admin => unfiltered
+    if event is not None and not tenancy.is_admin(event):
+        if registered is None:
+            visible = set()  # fail-closed: registry unavailable + non-admin => no clusters visible
+        else:
+            items = [
+                {"cluster_id": cid, "team_id": (meta or {}).get("team_id") or ""}
+                for cid, meta in registered.items()
+            ]
+            visible = tenancy.visible_cluster_ids(event, items)
+    if visible is not None:  # None => admin => unfiltered
+        rows = [r for r in rows if r.get("cluster_id") in visible]
     return {"clusters": rows}
 
 
