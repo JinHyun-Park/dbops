@@ -432,6 +432,10 @@ class DataStack(cdk.Stack):
         )
         self.cache_db.secret.grant_read(self.outcome_evaluator)
         self.cache_db.grant_data_api_access(self.outcome_evaluator)
+        # Phase 2: RCA-sourced cases read recently completed agent tasks.
+        foundation.agent_tasks_table.grant_read_data(self.outcome_evaluator)
+        self.outcome_evaluator.add_environment(
+            "AGENT_TASKS_TABLE", foundation.agent_tasks_table.table_name)
         events.Rule(
             self, "OutcomeEvaluatorSchedule",
             schedule=events.Schedule.rate(cdk.Duration.minutes(20)),

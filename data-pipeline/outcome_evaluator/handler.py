@@ -69,7 +69,7 @@ def lambda_handler(event, context):
     def q(sql, params=None):
         return _query(rds_data, cluster_arn, secret_arn, database, sql, params)
 
-    # Opener failure is systemic (no new cases at all) → surface it for alarms/retry.
+    # Opener failures are systemic (no new cases at all) → surface for alarms/retry.
     # Per-case failures are transient → soft-count only, never block evaluation.
     opener_error = None
     try:
@@ -78,6 +78,17 @@ def lambda_handler(event, context):
         opener_error = e
         opened = 0
         print(f"[outcome-eval] open_cases failed: {type(e).__name__}: {e}")
+
+    # Phase 2: also open rca:<category> cases from recently-completed agent tasks.
+    # Isolated the same way as open_cases — failure does NOT block due-case evaluation.
+    tasks_table_name = os.environ.get("AGENT_TASKS_TABLE")
+    if tasks_table_name:
+        ddb_table = boto3.resource("dynamodb").Table(tasks_table_name)
+        try:
+            opened += case_opener.open_rca_cases(q, ddb_table)
+        except Exception as e:
+            opener_error = opener_error or e  # first error wins; evaluation still runs
+            print(f"[outcome-eval] open_rca_cases failed: {type(e).__name__}: {e}")
 
     evaluated = 0
     failed = 0

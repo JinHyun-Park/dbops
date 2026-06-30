@@ -69,3 +69,41 @@ def open_cases(query) -> int:
         opened += 1
 
     return opened
+
+
+def open_rca_cases(query, ddb_table) -> int:
+    """Open rca:<category> cases from recently-completed RCA tasks. Best-effort;
+    a missing/empty result just yields no case."""
+    if ddb_table is None:
+        return 0
+    items, scan_kwargs = [], {}
+    while True:  # paginate — never trust a single scan page; no Limit+FilterExpression
+        resp = ddb_table.scan(**scan_kwargs)
+        items.extend(resp.get("Items", []))
+        if "LastEvaluatedKey" not in resp:
+            break
+        scan_kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+    opened = 0
+    for it in items:
+        if it.get("kind") not in ("auto_rca", "manual_rca") or it.get("status") != "done":
+            continue
+        res = it.get("result") or {}
+        cands = res.get("candidates") or []
+        recs = res.get("recommendations") or []
+        if not cands:
+            continue
+        category = cands[0].get("category") or "unknown"
+        metric = cands[0].get("metric")
+        query(_INSERT, {
+            "cluster_id": it.get("cluster_id"),
+            "symptom_class": f"rca:{category}",
+            "symptom_subject": category,
+            "watch_metric": metric,
+            "severity_at_open": None,
+            "recommendation_text": recs[0] if recs else None,
+            "action_class": classify_action(recs[0] if recs else "", category),
+            "source": "rca_worker",
+            "win_min": WIN_METRIC_MIN if metric else WIN_FINDING_MIN,
+        })
+        opened += 1
+    return opened
