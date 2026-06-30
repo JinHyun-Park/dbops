@@ -1332,22 +1332,37 @@ def _registered_clusters() -> dict[str, dict] | None:
         return None
 
 
-def _learning_overview(query):
+def _learning_overview(query, event=None):
     rows = query(
         "SELECT cluster_id, symptom_class, action_class, successes, attempts, last_outcome "
         "FROM remediation_outcomes_agg ORDER BY attempts DESC LIMIT 500"
     ) or []
+    # Compute visible cluster_id set (mirrors _multi_cluster_overview pattern).
+    # fleet rows (cluster_id == '*') are an anonymized aggregate with no real
+    # cluster identity — always shown regardless of team membership.
+    visible = None  # None => unfiltered (admin or registry unavailable)
+    if event is not None:
+        registered = _registered_clusters()
+        if registered is not None:
+            items = [
+                {"cluster_id": cid, "team_id": (meta or {}).get("team_id") or ""}
+                for cid, meta in registered.items()
+            ]
+            visible = tenancy.visible_cluster_ids(event, items)
+            # None returned by visible_cluster_ids => admin => unfiltered
     fleet, clusters = [], {}
     for r in rows:
         if r["cluster_id"] == "*":
-            fleet.append(r)
-        else:
+            fleet.append(r)  # ponytail: fleet '*' has no real cluster_id, always visible
+        elif visible is None or r["cluster_id"] in visible:
             clusters.setdefault(r["cluster_id"], []).append(r)
     recent = query(
         "SELECT cluster_id, symptom_class, action_class, status, evaluated_at "
         "FROM remediation_cases WHERE status IN ('resolved','persisted') "
         "ORDER BY evaluated_at DESC LIMIT 50"
     ) or []
+    if visible is not None:
+        recent = [c for c in recent if c.get("cluster_id") in visible]
     return {"fleet": fleet, "clusters": clusters, "recent": recent}
 
 
@@ -3489,7 +3504,11 @@ def lambda_handler(event, context):
     query = _make_query(_rds_data(), cluster_arn, secret_arn, database)
 
     if raw_path_early.endswith("/api/learning"):
-        return _response(200, _learning_overview(query), max_age=30)
+        try:
+            return _response(200, _learning_overview(query, event), max_age=30)
+        except Exception:
+            print(f"Learning overview error: {traceback.format_exc()}")
+            return _response(500, {"error": "Internal server error"})
 
     if raw_path_early.endswith("/multi-cluster/overview"):
         try:
