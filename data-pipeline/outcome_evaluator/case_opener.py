@@ -110,12 +110,19 @@ def open_rca_cases(query, ddb_table) -> int:
         recs = res.get("recommendations") or []
         if not cands:
             continue
-        category = cands[0].get("category") or "unknown"
-        metric = (cands[0].get("evidence") or {}).get("metric_type")
-        if not metric:
+        # Pick the first candidate that carries a metric signal; skip if none do.
+        # ponytail: top-ranked candidate may be non-metric (e.g. "blocking"); a lower-ranked
+        # metric_spike candidate is still learnable — search all, don't require rank-1.
+        chosen = next(
+            (c for c in cands if (c.get("evidence") or {}).get("metric_type")),
+            None,
+        )
+        if chosen is None:
             # Non-metric RCA (schema_change, blocking, slow_query, event…) has no
             # automatic resolution signal — skip to avoid false-resolved verdicts.
             continue
+        category = chosen.get("category") or "unknown"
+        metric = chosen["evidence"]["metric_type"]
         query(_INSERT, {
             "cluster_id": it.get("cluster_id"),
             "symptom_class": f"rca:{category}",

@@ -220,6 +220,53 @@ def test_none_table_returns_zero():
     assert case_opener.open_rca_cases(q, None) == 0
 
 
+def test_metric_backed_non_top_candidate_opens_case():
+    """Top candidate is non-metric (blocking); second candidate is metric-backed.
+    Case must open anchored to the metric-backed candidate, not the top one."""
+    q = _capturing_query()
+    tbl = _FakeTable([[
+        {
+            "task_id": "t_mixed", "kind": "auto_rca", "status": "done", "cluster_id": "c9",
+            "completed_at": "9999999999999",
+            "result": {
+                "candidates": [
+                    # rank-1: non-metric (blocking) — no metric_type in evidence
+                    {"category": "blocking", "evidence": {"blocking_query": "SELECT 1 FOR UPDATE"}},
+                    # rank-2: metric-backed — should be chosen
+                    {"category": "metric_spike", "evidence": {"metric_type": "cpu"}},
+                ],
+                "recommendations": ["CPU 사용량을 줄이세요"],
+            },
+        }
+    ]])
+    n = case_opener.open_rca_cases(q, tbl)
+    assert n == 1, "should open exactly 1 case anchored to the metric-backed candidate"
+    p = q.inserts[0]
+    assert p["symptom_class"] == "rca:metric_spike"
+    assert p["watch_metric"] == "cpu"
+
+
+def test_all_non_metric_candidates_opens_no_case():
+    """All candidates are non-metric — must open 0 cases."""
+    q = _capturing_query()
+    tbl = _FakeTable([[
+        {
+            "task_id": "t_allnm", "kind": "auto_rca", "status": "done", "cluster_id": "c10",
+            "completed_at": "9999999999999",
+            "result": {
+                "candidates": [
+                    {"category": "blocking", "evidence": {"blocking_query": "SELECT 1"}},
+                    {"category": "slow_query", "evidence": {}},
+                ],
+                "recommendations": ["쿼리를 최적화하세요"],
+            },
+        }
+    ]])
+    n = case_opener.open_rca_cases(q, tbl)
+    assert n == 0
+    assert q.inserts == []
+
+
 def test_missing_evidence_metric_type_skips_case():
     """Candidate with no evidence.metric_type must be skipped — no false-resolved cases."""
     q = _capturing_query()
