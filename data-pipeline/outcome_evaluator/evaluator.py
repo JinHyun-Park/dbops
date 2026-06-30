@@ -16,6 +16,7 @@ def evaluate_case(query, case) -> str:
 
 def _evaluate_metric(query, case) -> str:
     recent = query(
+        # ponytail: EVAL_LOOKBACK_MIN is a module constant (not user input) — f-string is injection-safe
         "SELECT AVG(value) AS v FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = :m "
         f"AND ts > NOW() - INTERVAL '{EVAL_LOOKBACK_MIN} minutes' "
@@ -39,11 +40,15 @@ def _evaluate_metric(query, case) -> str:
 
 
 def _evaluate_finding(query, case) -> str:
+    parts = case["symptom_class"].split(":", 1)
+    if len(parts) < 2:
+        # F2: malformed/legacy symptom_class (no colon) — can't extract check_type
+        return "inconclusive"
     recurred = query(
         "SELECT COUNT(*) AS recurred FROM cluster_health_findings "
         "WHERE cluster_id = :cid AND check_type = :ct AND subject = :subj "
         "AND snapshot_time > :since",
-        {"cid": case["cluster_id"], "ct": case["symptom_class"].split(":", 1)[1],
+        {"cid": case["cluster_id"], "ct": parts[1],
          "subj": case["symptom_subject"], "since": case["opened_at"]},
     )
     if int(_first(recurred, "recurred", 0) or 0) > 0:
@@ -59,13 +64,18 @@ def _evaluate_finding(query, case) -> str:
 
 
 def apply_verdict(query, case, verdict) -> None:
-    query(
-        "UPDATE remediation_cases SET status = :st, evaluated_at = NOW() WHERE case_id = :id",
-        {"st": verdict, "id": case["case_id"]},
-    )
     if verdict == "inconclusive":
-        return  # no signal — don't move the aggregate
+        # No signal — don't move the aggregate; just close the case.
+        query(
+            "UPDATE remediation_cases SET status = :st, evaluated_at = NOW() WHERE case_id = :id",
+            {"st": verdict, "id": case["case_id"]},
+        )
+        return
     succ_inc = 1 if verdict == "resolved" else 0
+    # F1: agg upserts FIRST, case UPDATE last.
+    # ponytail: best-effort, not transactional — a failure between the two agg writes
+    # leaves the case status='open' so the next run retries (may double-count by 1);
+    # full atomicity via an RDS Data API transaction is the upgrade path.
     for cid in (case["cluster_id"], "*"):
         query(
             "INSERT INTO remediation_outcomes_agg "
@@ -83,3 +93,7 @@ def apply_verdict(query, case, verdict) -> None:
             {"cluster_id": cid, "symptom_class": case["symptom_class"],
              "action_class": case["action_class"], "succ_inc": succ_inc, "verdict": verdict},
         )
+    query(
+        "UPDATE remediation_cases SET status = :st, evaluated_at = NOW() WHERE case_id = :id",
+        {"st": verdict, "id": case["case_id"]},
+    )
