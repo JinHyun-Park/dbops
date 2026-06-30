@@ -10,6 +10,7 @@ from mcp_servers.incident.tools.health_status import get_health_status_impl
 from mcp_servers.incident.tools.incident_summary import get_incident_summary_impl
 from mcp_servers.incident.tools.maintenance_findings import get_maintenance_findings_impl
 from mcp_servers.incident.tools.recent_events import get_recent_events_impl
+from mcp_servers.incident.tools.remediation_history import get_remediation_history_impl
 from mcp_servers.incident.tools.search_logs import search_logs_impl
 from mcp_servers.incident.tools.similar_incidents import find_similar_incidents_impl
 from mcp_servers.shared.cache_client import CacheClient
@@ -127,6 +128,21 @@ TOOLS = {
             "type": "object",
             "properties": {
                 "cluster_id": {"type": "string", "description": "Target cluster ID"},
+            },
+            "required": ["cluster_id"],
+        },
+    },
+    "get_remediation_history": {
+        "impl": get_remediation_history_impl,
+        "description": (
+            "Get the learned remediation track record for a cluster — aggregated "
+            "success/attempt counts per action class and recent resolved/persisted cases"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target cluster ID"},
+                "symptom_class": {"type": "string", "description": "Filter by symptom class (optional)"},
             },
             "required": ["cluster_id"],
         },

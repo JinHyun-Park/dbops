@@ -83,6 +83,15 @@ def incident_schema():
             {"cluster_id": "string"},
             ["cluster_id"],
         ),
+        _tool(
+            "get_remediation_history",
+            "Get the learned remediation track record for a cluster — aggregated "
+            "success/attempt counts per action class (remediation_outcomes_agg) and "
+            "the 20 most recent resolved/persisted cases (remediation_cases). "
+            "Use this to advise DBAs on which remediations have worked before.",
+            {"cluster_id": "string", "symptom_class": "string"},
+            ["cluster_id"],
+        ),
     ]
 
 
