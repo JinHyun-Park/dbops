@@ -5,4 +5,4 @@ aws-cdk.aws-bedrock-agentcore-alpha
 # app.py — opt-in, never blocks a normal deploy. Pinned to the 2.x line: cdk-nag
 # 3.x needs aws-cdk-lib>=2.260 whose cloud-assembly schema (54) outruns the
 # pinned CDK CLI, breaking synth.
-cdk-nag>=2.28,<3
+cdk-nag>=3.0.1,<4
