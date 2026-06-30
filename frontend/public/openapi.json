@@ -61,6 +61,9 @@
       "name": "incident-webhook"
     },
     {
+      "name": "learning"
+    },
+    {
       "name": "memory"
     },
     {
@@ -2284,6 +2287,25 @@
             "description": "OK"
           }
         }
+      }
+    },
+    "/api/learning": {
+      "get": {
+        "tags": ["learning"],
+        "summary": "GET /api/learning",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
       }
     },
     "/api/memory": {
