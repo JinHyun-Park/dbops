@@ -52,6 +52,8 @@ def open_cases(query) -> int:
     )
     for a in anomalies or []:
         metric = (a["event_type"] or "")[len("anomaly_"):]  # 'anomaly_cpu' -> 'cpu'
+        if not metric:  # malformed 'anomaly_' with no suffix — skip, nothing to watch
+            continue
         query(_INSERT, {
             "cluster_id": a["cluster_id"],
             "symptom_class": f"anomaly:{metric}",

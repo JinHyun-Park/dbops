@@ -48,6 +48,27 @@ def test_opens_finding_and_anomaly_cases():
     assert by_class["finding:query_regression"]["watch_metric"] is None
     assert by_class["anomaly:cpu"]["watch_metric"] == "cpu"
     assert by_class["anomaly:cpu"]["symptom_subject"] == "cpu"
+    assert by_class["finding:query_regression"]["source"] == "finding_collector"
+    assert by_class["anomaly:cpu"]["source"] == "proactive_monitor"
+    assert by_class["finding:query_regression"]["severity_at_open"] == "warning"
+
+
+def test_malformed_anomaly_row_opens_no_case():
+    """event_type='anomaly_' (empty suffix) must not open any case."""
+    q = _capturing_query(
+        finding_rows=[],
+        anomaly_rows=[
+            {
+                "cluster_id": "c1",
+                "event_type": "anomaly_",
+                "message": "malformed",
+                "event_time": "2026-06-30T00:00:00Z",
+            }
+        ],
+    )
+    n = case_opener.open_cases(q)
+    assert n == 0
+    assert q.inserts == []
 
 
 def test_no_rows_opens_nothing():
