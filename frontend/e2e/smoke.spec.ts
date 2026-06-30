@@ -115,6 +115,11 @@ test("⌘K 팔레트: 페이지 검색 전용으로 열리고 이동한다", asy
   await expect(page).toHaveURL(/\/fleet/);
 });
 
+test("learning page renders", async ({ page }) => {
+  await page.goto("/learning");
+  await expect(page.getByRole("heading", { name: "Learning" })).toBeVisible();
+});
+
 test("RCA 드로어: 페이지를 떠나지 않고 인플레이스로 열린다", async ({
   page,
 }) => {

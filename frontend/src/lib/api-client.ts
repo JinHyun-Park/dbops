@@ -2754,6 +2754,33 @@ export interface OnboardingTemplate {
   region: string | null;
 }
 
+// ── Remediation outcome learning ────────────────────────────────────────────
+
+export interface AggRow {
+  cluster_id?: string;
+  symptom_class: string;
+  action_class: string;
+  successes: number;
+  attempts: number;
+  last_outcome: string | null;
+}
+
+export interface RecentCase {
+  cluster_id: string;
+  symptom_class: string;
+  action_class: string;
+  status: "success" | "failure" | "pending";
+  evaluated_at: string;
+}
+
+export async function fetchLearning(): Promise<{
+  fleet: AggRow[];
+  clusters: Record<string, AggRow[]>;
+  recent: RecentCase[];
+}> {
+  return authedFetch(await api(`/api/learning`)).then((r) => r.json());
+}
+
 export async function fetchOnboardingTemplate(opts?: {
   region?: string;
   remediation?: boolean;

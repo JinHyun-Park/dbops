@@ -22,6 +22,7 @@ import {
   FlaskConical,
   Gauge,
   GitCompare,
+  GraduationCap,
   HeartPulse,
   MessageSquare,
   Network,
@@ -80,6 +81,12 @@ const NAV: NavGroup[] = [
         label: "Map",
         icon: Map,
         hint: "서비스별 DB 청사진",
+      },
+      {
+        href: "/learning",
+        label: "Learning",
+        icon: GraduationCap,
+        hint: "조치 효과 이력 — 입증된 권장 조치 우선",
       },
       {
         href: "/dashboard",
