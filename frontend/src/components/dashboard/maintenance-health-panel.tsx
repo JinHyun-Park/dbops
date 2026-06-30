@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import { fetchHealthFindings, type HealthFinding } from "@/lib/api-client";
 import { streamChat } from "@/lib/agentcore-sse";
 import { fmtRelative } from "@/lib/format";
+import { confidence, trackRecordLabel } from "@/lib/remediation";
 
 const SEV_BADGE: Record<HealthFinding["severity"], string> = {
   critical: "bg-rose-500/20 text-rose-300 border border-rose-500/40",
@@ -291,6 +292,22 @@ export function MaintenanceHealthPanel({
                   <div className="text-xs text-zinc-300 mt-1 leading-snug">
                     {f.recommendation}
                   </div>
+                  {f.outcome && f.outcome.attempts > 0 && (
+                    <div className="mt-1.5">
+                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-400 border border-zinc-600/50">
+                        {trackRecordLabel(
+                          f.outcome.successes,
+                          f.outcome.attempts,
+                        )}
+                        {" · "}신뢰도{" "}
+                        {Math.round(
+                          confidence(f.outcome.successes, f.outcome.attempts) *
+                            100,
+                        )}
+                        %
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             </button>

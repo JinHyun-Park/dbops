@@ -215,6 +215,7 @@ export interface HealthFinding {
   recommendation: string;
   details: string | Record<string, unknown> | null;
   snapshot_time: string;
+  outcome?: { successes: number; attempts: number };
 }
 
 export interface InstalledExtension {
