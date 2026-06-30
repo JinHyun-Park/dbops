@@ -110,7 +110,7 @@ def _normalize_messages(messages: list) -> list:
         # Cap count and length so a runaway frontend can't blow the DDB limit.
         raw_followups = m.get("followups")
         if raw_followups and isinstance(raw_followups, list):
-            entry["followups"] = [str(x)[:300] for x in raw_followups][:5]
+            entry["followups"] = [x[:300] for x in raw_followups if isinstance(x, str)][:5]
         # Incomplete flag: set when a stream was interrupted before onDone.
         if m.get("incomplete"):
             entry["incomplete"] = True

@@ -35,6 +35,7 @@ export function MessageList({
         const isLast = idx === lastIdx;
         const showFollowups =
           msg.role === "assistant" &&
+          !msg.incomplete &&
           (msg.followups?.length || followupsLoading) &&
           isLast;
         return (

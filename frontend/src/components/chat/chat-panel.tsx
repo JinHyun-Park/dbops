@@ -799,6 +799,52 @@ export function ChatPanel() {
     [modelId, persist],
   );
 
+  // Track activeId in a ref so the unmount cleanup (which can't close over
+  // the latest state) always sees the current conversation.
+  const activeIdRef = useRef<string>("");
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
+
+  // Mark the last assistant message in convId as incomplete when a stream is
+  // aborted mid-flight (new send, unmount, navigation away). Must be called
+  // BEFORE any new user/assistant messages are appended so we target the OLD
+  // last message, not the freshly-created empty assistant bubble.
+  const markLastAssistantIncomplete = useCallback(
+    (convId: string) => {
+      persist((prev) =>
+        prev.map((c) => {
+          if (c.id !== convId) return c;
+          const msgs = [...c.messages];
+          const last = msgs[msgs.length - 1];
+          if (
+            last &&
+            last.role === "assistant" &&
+            last.content &&
+            !last.incomplete
+          ) {
+            msgs[msgs.length - 1] = { ...last, incomplete: true };
+            return { ...c, messages: msgs };
+          }
+          return c;
+        }),
+      );
+    },
+    [persist],
+  );
+
+  // On unmount, abort any in-flight stream and mark the partial message so
+  // a reopened session shows the interruption notice instead of silent truncation.
+  useEffect(() => {
+    return () => {
+      const convId = activeIdRef.current;
+      if (abortRef.current && convId) {
+        markLastAssistantIncomplete(convId);
+        abortRef.current.abort();
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const sendText = useCallback(
     (raw: string) => {
       const userText = raw.trim();
@@ -1272,16 +1318,39 @@ export function ChatPanel() {
                 });
               }}
               onRegenerate={(assistantMsgId) => {
-                // Find the user message that immediately preceded this assistant
-                // message and re-send it.
+                // Find the user message that immediately preceded this incomplete
+                // assistant message. Remove both (the truncated assistant bubble
+                // and its paired user turn) before re-sending so the conversation
+                // ends up with a single clean new turn, not a leftover truncated bubble.
                 const idx = messages.findIndex((m) => m.id === assistantMsgId);
                 if (idx <= 0) return;
+                let userIdx = -1;
                 for (let i = idx - 1; i >= 0; i--) {
                   if (messages[i].role === "user") {
-                    sendText(messages[i].content);
+                    userIdx = i;
                     break;
                   }
                 }
+                if (userIdx < 0) return;
+                const userText = messages[userIdx].content;
+                // Excise the incomplete assistant bubble AND the user turn that
+                // sendText is about to re-add — prevents duplication.
+                if (activeId) {
+                  persist((prev) =>
+                    prev.map((c) => {
+                      if (c.id !== activeId) return c;
+                      return {
+                        ...c,
+                        messages: c.messages.filter(
+                          (m) =>
+                            m.id !== assistantMsgId &&
+                            m.id !== messages[userIdx].id,
+                        ),
+                      };
+                    }),
+                  );
+                }
+                sendText(userText);
               }}
             />
           )}

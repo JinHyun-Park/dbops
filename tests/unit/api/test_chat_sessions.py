@@ -362,6 +362,28 @@ def test_normalize_messages_incomplete_false_not_stored():
     assert "incomplete" not in out[0]
 
 
+def test_normalize_messages_followups_drops_non_string():
+    """Non-string followup items (dict, int, None) must be DROPPED, not repr-coerced."""
+    msgs = [
+        {
+            "role": "assistant",
+            "content": "ok",
+            "followups": [
+                "valid string",
+                {"text": "a dict"},   # must be dropped
+                42,                   # must be dropped
+                None,                 # must be dropped
+                "another valid",
+            ],
+        }
+    ]
+    out = handler._normalize_messages(msgs)
+    followups = out[0]["followups"]
+    assert followups == ["valid string", "another valid"], (
+        f"Expected only string items, got {followups}"
+    )
+
+
 @patch.dict("os.environ", {"SESSIONS_TABLE": "sessions"})
 @patch.object(handler, "boto3")
 def test_put_rejects_non_int_token_fields(mock_boto3):
