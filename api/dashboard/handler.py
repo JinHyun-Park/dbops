@@ -1332,6 +1332,25 @@ def _registered_clusters() -> dict[str, dict] | None:
         return None
 
 
+def _learning_overview(query):
+    rows = query(
+        "SELECT cluster_id, symptom_class, action_class, successes, attempts, last_outcome "
+        "FROM remediation_outcomes_agg ORDER BY attempts DESC LIMIT 500"
+    ) or []
+    fleet, clusters = [], {}
+    for r in rows:
+        if r["cluster_id"] == "*":
+            fleet.append(r)
+        else:
+            clusters.setdefault(r["cluster_id"], []).append(r)
+    recent = query(
+        "SELECT cluster_id, symptom_class, action_class, status, evaluated_at "
+        "FROM remediation_cases WHERE status IN ('resolved','persisted') "
+        "ORDER BY evaluated_at DESC LIMIT 50"
+    ) or []
+    return {"fleet": fleet, "clusters": clusters, "recent": recent}
+
+
 def _multi_cluster_overview(query, event=None):
     rows = query(
         "WITH latest_metrics AS ("
@@ -3468,6 +3487,9 @@ def lambda_handler(event, context):
     secret_arn = os.environ["CACHE_DB_SECRET_ARN"]
     database = os.environ.get("CACHE_DB_NAME", "dbops")
     query = _make_query(_rds_data(), cluster_arn, secret_arn, database)
+
+    if raw_path_early.endswith("/api/learning"):
+        return _response(200, _learning_overview(query), max_age=30)
 
     if raw_path_early.endswith("/multi-cluster/overview"):
         try:

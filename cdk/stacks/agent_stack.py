@@ -1481,6 +1481,11 @@ class AgentStack(cdk.Stack):
             integration=integrations.HttpLambdaIntegration("DashboardChangeImpactIntegration", dashboard_alias),
         )
         self.api.add_routes(
+            path="/api/learning",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("LearningIntegration", dashboard_alias),
+        )
+        self.api.add_routes(
             path="/api/multi-cluster/overview",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("MultiClusterOverviewIntegration", dashboard_alias),
