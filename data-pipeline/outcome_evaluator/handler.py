@@ -65,15 +65,22 @@ def lambda_handler(event, context):
     def q(sql, params=None):
         return _query(rds_data, cluster_arn, secret_arn, database, sql, params)
 
-    opened = case_opener.open_cases(q)
+    try:
+        opened = case_opener.open_cases(q)
+    except Exception as e:
+        print(f"[outcome-eval] open_cases failed: {type(e).__name__}: {e}")
+        opened = 0
+
     evaluated = 0
+    failed = 0
     for case in _due_cases(q) or []:
         try:
             verdict = evaluator.evaluate_case(q, case)
             evaluator.apply_verdict(q, case, verdict)
             evaluated += 1
         except Exception as e:
+            failed += 1
             print(f"[outcome-eval] case {case.get('case_id')} failed: {type(e).__name__}: {e}")
 
-    print(f"[outcome-eval] opened={opened} evaluated={evaluated}")
-    return {"opened": opened, "evaluated": evaluated}
+    print(f"[outcome-eval] opened={opened} evaluated={evaluated} failed={failed}")
+    return {"opened": opened, "evaluated": evaluated, "failed": failed}
