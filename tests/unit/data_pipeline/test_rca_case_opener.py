@@ -54,7 +54,8 @@ def test_completed_at_filter_is_passed_and_no_limit():
         "task_id": "t0", "kind": "auto_rca", "status": "done", "cluster_id": "c0",
         "completed_at": str(int(time.time() * 1000)),
         "result": {
-            "candidates": [{"category": "lock_contention", "metric": "blocking_count"}],
+            # Real candidate shape: metric lives at evidence.metric_type
+            "candidates": [{"category": "lock_contention", "evidence": {"metric_type": "blocking_count"}}],
             "recommendations": ["인덱스를 추가하세요"],
         },
     }
@@ -75,12 +76,12 @@ def test_fakeable_pagination_terminates_and_collects_all():
     page1 = [{
         "task_id": "tp1", "kind": "auto_rca", "status": "done", "cluster_id": "c1",
         "completed_at": "9999999999999",
-        "result": {"candidates": [{"category": "cat_a", "metric": "m_a"}], "recommendations": ["fix a"]},
+        "result": {"candidates": [{"category": "cat_a", "evidence": {"metric_type": "m_a"}}], "recommendations": ["fix a"]},
     }]
     page2 = [{
         "task_id": "tp2", "kind": "auto_rca", "status": "done", "cluster_id": "c2",
         "completed_at": "9999999999999",
-        "result": {"candidates": [{"category": "cat_b", "metric": "m_b"}], "recommendations": ["fix b"]},
+        "result": {"candidates": [{"category": "cat_b", "evidence": {"metric_type": "m_b"}}], "recommendations": ["fix b"]},
     }]
     tbl = _FakeTable([page1, page2])
     n = case_opener.open_rca_cases(q, tbl)
@@ -92,13 +93,15 @@ def test_fakeable_pagination_terminates_and_collects_all():
 
 
 def test_opens_rca_case_with_inferred_action():
+    """Metric-backed candidate (evidence.metric_type set) opens a case with correct fields."""
     q = _capturing_query()
     tbl = _FakeTable([[
         {
             "task_id": "t1", "kind": "auto_rca", "status": "done", "cluster_id": "c1",
             "completed_at": "9999999999999",
             "result": {
-                "candidates": [{"category": "lock_contention", "metric": "blocking_count"}],
+                # Real shape: metric lives at evidence.metric_type, NOT top-level "metric"
+                "candidates": [{"category": "lock_contention", "evidence": {"metric_type": "blocking_count"}}],
                 "recommendations": ["인덱스를 추가해 잠금 경합을 줄이세요"],
             },
         }
@@ -111,14 +114,34 @@ def test_opens_rca_case_with_inferred_action():
     assert p["watch_metric"] == "blocking_count"
 
 
+def test_non_metric_candidate_opens_no_case():
+    """Non-metric RCA (no evidence.metric_type) must NOT open a case — false-resolved guard."""
+    q = _capturing_query()
+    tbl = _FakeTable([[
+        {
+            "task_id": "t1nm", "kind": "auto_rca", "status": "done", "cluster_id": "c1",
+            "completed_at": "9999999999999",
+            "result": {
+                # blocking category with evidence that has NO metric_type (e.g. only blocking_query)
+                "candidates": [{"category": "blocking", "evidence": {"blocking_query": "SELECT 1"}}],
+                "recommendations": ["킬 쿼리를 실행하세요"],
+            },
+        }
+    ]])
+    n = case_opener.open_rca_cases(q, tbl)
+    assert n == 0, "non-metric RCA must not open a case (no resolution signal)"
+    assert q.inserts == []
+
+
 def test_pagination_collects_all_pages():
+    """Pagination works across pages; non-metric candidate (slow_query page) is skipped."""
     q = _capturing_query()
     page1 = [
         {
             "task_id": "t2", "kind": "manual_rca", "status": "done", "cluster_id": "c2",
             "completed_at": "9999999999999",
             "result": {
-                "candidates": [{"category": "high_cpu", "metric": "cpu_utilization"}],
+                "candidates": [{"category": "high_cpu", "evidence": {"metric_type": "cpu_utilization"}}],
                 "recommendations": ["파라미터를 튜닝하세요"],
             },
         }
@@ -128,7 +151,8 @@ def test_pagination_collects_all_pages():
             "task_id": "t3", "kind": "auto_rca", "status": "done", "cluster_id": "c3",
             "completed_at": "9999999999999",
             "result": {
-                "candidates": [{"category": "slow_query", "metric": None}],
+                # slow_query has no metric_type in evidence → skipped
+                "candidates": [{"category": "slow_query", "evidence": {}}],
                 "recommendations": ["인덱스를 추가하세요"],
             },
         }
@@ -147,10 +171,11 @@ def test_pagination_collects_all_pages():
             return fake_scan(**kw)
 
     n = case_opener.open_rca_cases(q, _ManualPaginated())
-    assert n == 2
+    # only high_cpu (metric-backed) opens a case; slow_query (no metric) is skipped
+    assert n == 1
     classes = {p["symptom_class"] for p in q.inserts}
     assert "rca:high_cpu" in classes
-    assert "rca:slow_query" in classes
+    assert "rca:slow_query" not in classes
 
 
 def test_non_rca_kinds_skipped():
@@ -195,18 +220,20 @@ def test_none_table_returns_zero():
     assert case_opener.open_rca_cases(q, None) == 0
 
 
-def test_missing_metric_becomes_none():
+def test_missing_evidence_metric_type_skips_case():
+    """Candidate with no evidence.metric_type must be skipped — no false-resolved cases."""
     q = _capturing_query()
     tbl = _FakeTable([[
         {
             "task_id": "t7", "kind": "auto_rca", "status": "done", "cluster_id": "c1",
             "completed_at": "9999999999999",
             "result": {
-                "candidates": [{"category": "slow_query"}],  # no "metric" key
+                # No evidence key at all — metric_type is absent
+                "candidates": [{"category": "slow_query"}],
                 "recommendations": ["인덱스를 추가하세요"],
             },
         }
     ]])
     n = case_opener.open_rca_cases(q, tbl)
-    assert n == 1
-    assert q.inserts[0]["watch_metric"] is None
+    assert n == 0, "candidate without evidence.metric_type must not open a case"
+    assert q.inserts == []

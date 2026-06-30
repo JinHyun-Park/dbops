@@ -111,7 +111,11 @@ def open_rca_cases(query, ddb_table) -> int:
         if not cands:
             continue
         category = cands[0].get("category") or "unknown"
-        metric = cands[0].get("metric")
+        metric = (cands[0].get("evidence") or {}).get("metric_type")
+        if not metric:
+            # Non-metric RCA (schema_change, blocking, slow_query, event…) has no
+            # automatic resolution signal — skip to avoid false-resolved verdicts.
+            continue
         query(_INSERT, {
             "cluster_id": it.get("cluster_id"),
             "symptom_class": f"rca:{category}",
@@ -121,7 +125,7 @@ def open_rca_cases(query, ddb_table) -> int:
             "recommendation_text": recs[0] if recs else None,
             "action_class": classify_action(recs[0] if recs else "", category),
             "source": "rca_worker",
-            "win_min": WIN_METRIC_MIN if metric else WIN_FINDING_MIN,
+            "win_min": WIN_METRIC_MIN,
         })
         opened += 1
     return opened

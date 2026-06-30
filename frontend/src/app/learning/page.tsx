@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchLearning, type AggRow, type RecentCase } from "@/lib/api-client";
+import {
+  fetchLearning,
+  type AggRow,
+  type RecentCase,
+  type RecentStatus,
+} from "@/lib/api-client";
 import { confidence, trackRecordLabel } from "@/lib/remediation";
 import { fmtExact } from "@/lib/format";
 import {
@@ -80,15 +85,15 @@ function AggTable({ rows }: { rows: AggRow[] }) {
   );
 }
 
-const STATUS_CHIP: Record<RecentCase["status"], string> = {
-  success: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  failure: "bg-rose-500/15 text-rose-400 border-rose-500/30",
-  pending: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+const STATUS_CHIP: Record<RecentStatus, string> = {
+  resolved: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  persisted: "bg-rose-500/15 text-rose-400 border-rose-500/30",
+  inconclusive: "bg-slate-500/15 text-slate-400 border-slate-500/30",
 };
-const STATUS_LABEL: Record<RecentCase["status"], string> = {
-  success: "해결",
-  failure: "미해결",
-  pending: "평가 대기",
+const STATUS_LABEL: Record<RecentStatus, string> = {
+  resolved: "해결됨",
+  persisted: "미해결",
+  inconclusive: "판정 보류",
 };
 
 export default function LearningPage() {

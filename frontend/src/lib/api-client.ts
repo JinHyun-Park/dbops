@@ -2765,11 +2765,14 @@ export interface AggRow {
   last_outcome: string | null;
 }
 
+// Backend emits: resolved | persisted | inconclusive (evaluator.py)
+export type RecentStatus = "resolved" | "persisted" | "inconclusive";
+
 export interface RecentCase {
   cluster_id: string;
   symptom_class: string;
   action_class: string;
-  status: "success" | "failure" | "pending";
+  status: RecentStatus;
   evaluated_at: string;
 }
 
