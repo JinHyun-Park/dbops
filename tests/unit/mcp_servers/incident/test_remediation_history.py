@@ -41,10 +41,11 @@ def test_no_symptom_class_omits_filter():
     cache.execute.side_effect = [_empty(), _empty()]
     out = get_remediation_history_impl(cache, "c1")
     assert out == {"actions": [], "recent": []}
-    # first call must NOT contain a symptom_class WHERE filter param
-    first_sql, first_params = cache.execute.call_args_list[0][0]
-    assert ":sc" not in first_sql
-    assert "sc" not in first_params
+    # neither the agg nor the recent query should carry a symptom_class filter
+    for call in cache.execute.call_args_list:
+        sql, params = call[0]
+        assert ":sc" not in sql
+        assert "sc" not in params
 
 
 def test_symptom_class_filter_included_when_provided():
@@ -54,6 +55,29 @@ def test_symptom_class_filter_included_when_provided():
     first_sql, first_params = cache.execute.call_args_list[0][0]
     assert "symptom_class" in first_sql
     assert first_params.get("sc") == "finding:query_regression"
+
+
+def test_recent_scoped_by_symptom_class_when_provided():
+    """recent[] must carry the symptom_class filter — not return all symptoms for the cluster."""
+    cache = MagicMock()
+    cache.execute.side_effect = [_empty(), _empty()]
+    get_remediation_history_impl(cache, "c1", "finding:query_regression")
+    calls = cache.execute.call_args_list
+    assert len(calls) == 2
+    # second call = recent query
+    recent_sql, recent_params = calls[1][0]
+    assert ":sc" in recent_sql
+    assert recent_params.get("sc") == "finding:query_regression"
+
+
+def test_recent_cluster_wide_when_no_symptom_class():
+    """When symptom_class is omitted, recent query must NOT filter by symptom_class."""
+    cache = MagicMock()
+    cache.execute.side_effect = [_empty(), _empty()]
+    get_remediation_history_impl(cache, "c1")
+    recent_sql, recent_params = cache.execute.call_args_list[1][0]
+    assert ":sc" not in recent_sql
+    assert "sc" not in recent_params
 
 
 def test_cluster_id_always_bound():

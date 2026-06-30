@@ -2,6 +2,7 @@
 
 
 def get_remediation_history_impl(cache, cluster_id: str, symptom_class: str = "") -> dict:
+    # ponytail: `where` is assembled from string literals only; user input goes in params — no injection risk.
     where = "cluster_id = :cid"
     params = {"cid": cluster_id}
     if symptom_class:
@@ -12,9 +13,14 @@ def get_remediation_history_impl(cache, cluster_id: str, symptom_class: str = ""
         f"FROM remediation_outcomes_agg WHERE {where} AND attempts > 0 "
         f"ORDER BY attempts DESC LIMIT 50", params,
     ).rows
+    # ponytail: `recent_where` assembled from string literals only; user input only ever in recent_params.
+    recent_where = "cluster_id = :cid AND status IN ('resolved','persisted')"
+    recent_params: dict = {"cid": cluster_id}
+    if symptom_class:
+        recent_where += " AND symptom_class = :sc"
+        recent_params["sc"] = symptom_class
     recent = cache.execute(
-        "SELECT symptom_class, action_class, status, evaluated_at FROM remediation_cases "
-        "WHERE cluster_id = :cid AND status IN ('resolved','persisted') "
-        "ORDER BY evaluated_at DESC LIMIT 20", {"cid": cluster_id},
+        f"SELECT symptom_class, action_class, status, evaluated_at FROM remediation_cases "
+        f"WHERE {recent_where} ORDER BY evaluated_at DESC LIMIT 20", recent_params,
     ).rows
     return {"actions": actions, "recent": recent}
