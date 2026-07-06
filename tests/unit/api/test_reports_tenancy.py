@@ -250,3 +250,110 @@ def test_reports_html_allowed_when_visible(monkeypatch):
     )
     assert r["statusCode"] != 403
     mock_s3.generate_presigned_url.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Fleet ('*') rollup visibility — embeds real cluster names, so restricted
+# viewers must NOT see it; admins and unrestricted viewers may.
+# ---------------------------------------------------------------------------
+
+_FLEET_LIST_ROWS = [
+    {"id": "9", "cluster_id": "*",       "report_type": "daily", "report_date": "2026-07-06", "summary": "", "created_at": ""},
+    {"id": "1", "cluster_id": "c-open",  "report_type": "daily", "report_date": "2026-07-06", "summary": "", "created_at": ""},
+    {"id": "3", "cluster_id": "c-teamB", "report_type": "daily", "report_date": "2026-07-06", "summary": "", "created_at": ""},
+]
+
+
+def test_reports_list_admin_sees_fleet_row(monkeypatch):
+    mock_rds = MagicMock()
+    mock_rds.execute_statement.return_value = _rds_list_response(_FLEET_LIST_ROWS)
+    monkeypatch.setattr(handler, "boto3", MagicMock(**{"client.return_value": mock_rds}))
+    monkeypatch.setattr(handler.tenancy, "visible_set_from_registry", lambda ev: None)
+
+    r = handler.lambda_handler(_admin_event(), None)
+    ids = {row["cluster_id"] for row in json.loads(r["body"])}
+    assert "*" in ids
+
+
+def test_reports_list_restricted_viewer_hides_fleet_row(monkeypatch):
+    mock_rds = MagicMock()
+    mock_rds.execute_statement.return_value = _rds_list_response(_FLEET_LIST_ROWS)
+    monkeypatch.setattr(handler, "boto3", MagicMock(**{"client.return_value": mock_rds}))
+    monkeypatch.setattr(handler.tenancy, "visible_set_from_registry", lambda ev: {"c-open"})
+    monkeypatch.setattr(handler, "_is_unrestricted", lambda ev: False)
+
+    r = handler.lambda_handler(_viewer_event(), None)
+    ids = {row["cluster_id"] for row in json.loads(r["body"])}
+    assert "*" not in ids
+    assert "c-open" in ids
+    assert "c-teamB" not in ids
+
+
+def test_reports_list_unrestricted_viewer_sees_fleet_row(monkeypatch):
+    mock_rds = MagicMock()
+    mock_rds.execute_statement.return_value = _rds_list_response(_FLEET_LIST_ROWS)
+    monkeypatch.setattr(handler, "boto3", MagicMock(**{"client.return_value": mock_rds}))
+    monkeypatch.setattr(
+        handler.tenancy, "visible_set_from_registry",
+        lambda ev: {"c-open", "c-teamB"},
+    )
+    monkeypatch.setattr(handler, "_is_unrestricted", lambda ev: True)
+
+    r = handler.lambda_handler(_viewer_event(), None)
+    ids = {row["cluster_id"] for row in json.loads(r["body"])}
+    assert "*" in ids
+
+
+def test_reports_get_fleet_forbidden_for_restricted_viewer(monkeypatch):
+    mock_rds = MagicMock()
+    mock_rds.execute_statement.return_value = _rds_single_response("*", "99")
+    monkeypatch.setattr(handler, "boto3", MagicMock(**{"client.return_value": mock_rds}))
+    monkeypatch.setattr(handler, "_is_unrestricted", lambda ev: False)
+
+    r = handler.lambda_handler(_viewer_event("/api/reports/99", {"id": "99"}), None)
+    assert r["statusCode"] == 403
+
+
+def test_reports_get_fleet_allowed_for_admin(monkeypatch):
+    mock_rds = MagicMock()
+    mock_rds.execute_statement.return_value = _rds_single_response("*", "99")
+    monkeypatch.setattr(handler, "boto3", MagicMock(**{"client.return_value": mock_rds}))
+    # admin: _is_unrestricted short-circuits True via tenancy.is_admin
+
+    r = handler.lambda_handler(_admin_event("/api/reports/99", {"id": "99"}), None)
+    assert r["statusCode"] != 403
+
+
+# ---------------------------------------------------------------------------
+# _is_unrestricted itself
+# ---------------------------------------------------------------------------
+
+def test_is_unrestricted_admin_true():
+    assert handler._is_unrestricted(_admin_event()) is True
+
+
+def test_is_unrestricted_viewer_all_unassigned_true(monkeypatch):
+    """Non-admin viewing an all-unassigned registry sees every cluster => ok."""
+    monkeypatch.setattr(
+        handler, "_scan_cluster_registry",
+        lambda: [{"cluster_id": "c-open"}, {"cluster_id": "c-open2"}],
+    )
+    monkeypatch.setattr(handler.tenancy, "my_team_ids", lambda u: set())
+    assert handler._is_unrestricted(_viewer_event()) is True
+
+
+def test_is_unrestricted_viewer_with_hidden_cluster_false(monkeypatch):
+    """A cluster assigned to a team the viewer isn't in => restricted."""
+    monkeypatch.setattr(
+        handler, "_scan_cluster_registry",
+        lambda: [{"cluster_id": "c-open"}, {"cluster_id": "c-teamB", "team_id": "tB"}],
+    )
+    monkeypatch.setattr(handler.tenancy, "my_team_ids", lambda u: set())
+    assert handler._is_unrestricted(_viewer_event()) is False
+
+
+def test_is_unrestricted_scan_error_fails_closed(monkeypatch):
+    def _boom():
+        raise RuntimeError("ddb down")
+    monkeypatch.setattr(handler, "_scan_cluster_registry", _boom)
+    assert handler._is_unrestricted(_viewer_event()) is False

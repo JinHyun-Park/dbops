@@ -462,6 +462,20 @@ def lambda_handler(event, context):
     except Exception as e:
         print(f"[etl] metric_snapshots purge failed: {type(e).__name__}: {e}")
 
+    # query_stats grows unbounded the same way (per-query aggregates every
+    # collection cycle). Keep ~90 days: the SLO latency SLI reads up to 90d of
+    # query_stats, so do NOT shorten this window. Own try/except so a purge
+    # failure never breaks collection nor the metric_snapshots purge above.
+    # ponytail: DELETE over partition rotation; revisit at large-fleet scale.
+    try:
+        cache_rds_data.execute_statement(
+            resourceArn=cache_cluster_arn, secretArn=cache_secret_arn, database=cache_db_name,
+            sql="/* source=dbops-etl */ DELETE FROM query_stats "
+                "WHERE snapshot_time < NOW() - INTERVAL '90 days'",
+        )
+    except Exception as e:
+        print(f"[etl] query_stats purge failed: {type(e).__name__}: {e}")
+
     # Incident-similarity embeddings: backfill a bounded batch of un-embedded
     # event_log / runbook rows (Titan → pgvector) so find_similar_incidents can do
     # semantic cosine search. Best-effort; the tool keyword-falls-back meanwhile.

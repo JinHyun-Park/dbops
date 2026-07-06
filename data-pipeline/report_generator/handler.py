@@ -76,15 +76,17 @@ def lambda_handler(event, context):
             rows.append(row)
         return rows
 
-    clusters = cache_query("SELECT cluster_id FROM cluster_meta")
+    clusters = cache_query("SELECT cluster_id, engine FROM cluster_meta")
     report_date = datetime.utcnow().strftime("%Y-%m-%d")
     report_type = event.get("report_type", "daily")
     reports_generated = []
+    fleet_rows = []  # compact per-cluster records for the fleet rollup
 
     for cluster in clusters:
         cid = cluster["cluster_id"]
         report_data = _build_report_data(cache_query, cid)
         summary_text = _write_nl_summary(cid, report_date, report_data)
+        fleet_rows.append(_fleet_row(cid, cluster.get("engine"), report_data))
 
         s3_key = f"reports/{cid}/{report_date}-{report_type}.json"
         if s3_bucket:
@@ -125,6 +127,18 @@ def lambda_handler(event, context):
         )
         _deliver_report(cache_query, cid, report_date, report_type, summary_text)
         reports_generated.append(cid)
+
+    # Fleet rollup: one report across all clusters, generated after the
+    # per-cluster loop. Best-effort — a rollup failure must never fail the
+    # per-cluster reports already written. Skip entirely when 0 clusters.
+    if fleet_rows:
+        try:
+            _generate_fleet_rollup(
+                cache_query, s3_bucket, report_date, report_type, fleet_rows
+            )
+            reports_generated.append("*")
+        except Exception as e:
+            print(f"[report_generator] fleet rollup failed: {type(e).__name__}: {e}")
 
     return {
         "statusCode": 200,
@@ -334,6 +348,117 @@ def _template_summary(cluster_id: str, report_date: str, data: dict) -> str:
     return " ".join(pieces)
 
 
+def _fleet_row(cluster_id: str, engine, report_data: dict) -> dict:
+    """Compact per-cluster record for the fleet rollup, built from the numbers
+    _build_report_data already computed — NO extra queries.
+
+    alert_count sums fired_count over the (top-5) alert rules; slow_query_count
+    is the number of top slow queries surfaced (<=5). Both are report-scoped
+    headline numbers, not exhaustive counts. Health is a coarse rollup bucket
+    derived from alert_count (no severity is carried in the report data)."""
+    aas = report_data.get("aas") or {}
+    storage = report_data.get("storage") or {}
+    alerts = report_data.get("top_alerts") or []
+    total_alerts = sum(int(a.get("fired_count") or 0) for a in alerts)
+    return {
+        "cluster_id": cluster_id,
+        "engine": engine or "unknown",
+        "health": "주의" if total_alerts > 0 else "정상",
+        "aas_avg": aas.get("avg_aas"),
+        "aas_max": aas.get("max_aas"),
+        "slow_query_count": len(report_data.get("top_slow_queries") or []),
+        "alert_count": total_alerts,
+        "storage_delta_bytes": (storage.get("delta_bytes") if storage else None),
+    }
+
+
+def _build_fleet_data(rows: list[dict]) -> dict:
+    """Aggregate compact per-cluster records into the fleet rollup payload."""
+    from collections import Counter
+
+    engine_counts = dict(Counter((r.get("engine") or "unknown") for r in rows))
+    health_dist = dict(Counter((r.get("health") or "정상") for r in rows))
+    total_alerts = sum(int(r.get("alert_count") or 0) for r in rows)
+    total_slow = sum(int(r.get("slow_query_count") or 0) for r in rows)
+    worst = sorted(
+        rows,
+        key=lambda r: (int(r.get("alert_count") or 0), float(r.get("aas_max") or 0)),
+        reverse=True,
+    )[:5]
+    return {
+        "clusters_total": len(rows),
+        "engine_counts": engine_counts,
+        "health_distribution": health_dist,
+        "totals": {"alerts": total_alerts, "slow_queries": total_slow},
+        "worst_clusters": worst,
+        "clusters": rows,
+    }
+
+
+def _fleet_summary(report_date: str, fleet_data: dict) -> str:
+    """Deterministic Korean rollup summary — no Bedrock call. Mirrors the
+    _template_summary style."""
+    n = fleet_data.get("clusters_total", 0)
+    totals = fleet_data.get("totals") or {}
+    alerts = totals.get("alerts", 0)
+    slow = totals.get("slow_queries", 0)
+    worst = [
+        w.get("cluster_id")
+        for w in (fleet_data.get("worst_clusters") or [])
+        if int(w.get("alert_count") or 0) > 0
+    ]
+    pieces = [
+        f"Fleet 전체 요약 ({report_date})",
+        f"클러스터 {n}대 · 경보 {alerts}건 · 슬로우쿼리 {slow}건.",
+    ]
+    if worst:
+        pieces.append(f"주의가 필요한 클러스터: {', '.join(worst[:5])}.")
+    else:
+        pieces.append("주의가 필요한 클러스터는 없습니다.")
+    return " ".join(pieces)
+
+
+def _generate_fleet_rollup(cache_query, s3_bucket, report_date, report_type, fleet_rows):
+    """Build + persist the fleet rollup exactly like a cluster report but with
+    cluster_id='*'. Called best-effort by lambda_handler."""
+    fleet_data = _build_fleet_data(fleet_rows)
+    summary_text = _fleet_summary(report_date, fleet_data)
+
+    s3_key = f"reports/_fleet/{report_date}-{report_type}.json"
+    if s3_bucket:
+        try:
+            boto3.client("s3").put_object(
+                Bucket=s3_bucket, Key=s3_key,
+                Body=json.dumps(fleet_data, default=str),
+                ContentType="application/json",
+            )
+        except ClientError as e:
+            print(f"[report_generator] fleet S3 put failed: {e}")
+        try:
+            from report_html import build_fleet_report_html
+            boto3.client("s3").put_object(
+                Bucket=s3_bucket, Key=s3_key[:-5] + ".html",
+                Body=build_fleet_report_html(report_date, report_type, summary_text, fleet_data),
+                ContentType="text/html; charset=utf-8",
+            )
+        except Exception as e:
+            print(f"[report_generator] fleet HTML render/put failed: {e}")
+
+    cache_query(
+        "INSERT INTO reports (cluster_id, report_type, report_date, summary, data, s3_key) "
+        "VALUES (:cid, :report_type, (:report_date)::date, :summary, :data::jsonb, :s3_key)",
+        {
+            "cid": "*",
+            "report_type": report_type,
+            "report_date": report_date,
+            "summary": summary_text,
+            "data": json.dumps(fleet_data, default=str),
+            "s3_key": s3_key,
+        },
+    )
+    _deliver_report(cache_query, "*", report_date, report_type, summary_text)
+
+
 def _post_json(url: str, payload: dict, timeout: int = 5) -> tuple[int, str]:
     """POST JSON to a webhook URL. Returns (status_code, body_excerpt)."""
     req = urllib.request.Request(
@@ -387,12 +512,15 @@ def _deliver_report(cache_query, cluster_id, report_date, report_type, summary):
     enabled = get_config("REPORT_DELIVERY_ENABLED", os.environ.get("REPORT_DELIVERY_ENABLED", "false"))
     if str(enabled).strip().lower() not in ("true", "1", "yes", "on"):
         return
+    # Fleet rollup rows carry cluster_id='*'; render it as a human label in
+    # every delivery payload (the '*' stays as-is in S3/DB).
+    display_cid = "Fleet 전체" if cluster_id == "*" else cluster_id
     try:
         topic = os.environ.get("ALERT_TOPIC_ARN", "")
         if topic:
             boto3.client("sns").publish(
                 TopicArn=topic,
-                Subject=f"DBOps 리포트 · {cluster_id} · {report_date}"[:100],
+                Subject=f"DBOps 리포트 · {display_cid} · {report_date}"[:100],
                 Message=summary,
             )
         subs = cache_query(
@@ -402,9 +530,9 @@ def _deliver_report(cache_query, cluster_id, report_date, report_type, summary):
         for s in subs or []:
             try:
                 if s["protocol"] == "teams-webhook":
-                    payload = _build_report_teams_card(cluster_id, report_date, report_type, summary)
+                    payload = _build_report_teams_card(display_cid, report_date, report_type, summary)
                 else:
-                    payload = _build_report_slack_blocks(cluster_id, report_date, report_type, summary)
+                    payload = _build_report_slack_blocks(display_cid, report_date, report_type, summary)
                 _post_json(s["endpoint"], payload)
             except Exception as e:
                 print(f"[report-gen] deliver failed for sub {s.get('id')} ({s.get('protocol')}): {type(e).__name__}: {e}")

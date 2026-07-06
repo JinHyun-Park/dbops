@@ -24,6 +24,58 @@ def _cluster_item(cluster_id: str) -> dict:
         return {}
 
 
+def _scan_cluster_registry():
+    """Return every {cluster_id, team_id} in the registry, or None if there is
+    no CLUSTERS_TABLE. Raises on infra error (caller fails closed)."""
+    table_name = os.environ.get("CLUSTERS_TABLE", "")
+    if not table_name:
+        return None
+    table = boto3.resource("dynamodb").Table(table_name)
+    resp = table.scan(ProjectionExpression="cluster_id, team_id")
+    items = resp.get("Items", [])
+    while resp.get("LastEvaluatedKey"):
+        resp = table.scan(
+            ProjectionExpression="cluster_id, team_id",
+            ExclusiveStartKey=resp["LastEvaluatedKey"],
+        )
+        items.extend(resp.get("Items", []))
+    return items
+
+
+def _is_unrestricted(event):
+    """Fleet ('*') reports embed real cluster names, so only callers who can
+    already see every cluster may view them: admins, or non-admins whose
+    visible set covers all registered clusters. Fail-closed on any
+    doubt/infra error (hide '*').
+
+    ponytail: does its own registry scan (the LIST path already scanned via
+    visible_set_from_registry); tenancy's vendored API exposes no way to reuse
+    that scan, and this only runs for non-admin reports access — cheap enough.
+    """
+    if tenancy.is_admin(event):
+        return True
+    try:
+        items = _scan_cluster_registry()
+    except Exception as e:
+        print(f"[reports] unrestricted scan failed: {e}")
+        return False
+    if items is None:
+        return False
+    all_ids = {i["cluster_id"] for i in items if i.get("cluster_id")}
+    visible = tenancy.visible_cluster_ids(event, items)
+    if visible is None:            # admin sentinel (already handled, belt-and-braces)
+        return True
+    return bool(all_ids) and all_ids.issubset(visible)
+
+
+def _row_visible(event, row_cluster_id):
+    """Per-row visibility gate. '*' (fleet) passes only for unrestricted
+    callers; every other cluster_id uses the normal tenancy check."""
+    if row_cluster_id == "*":
+        return _is_unrestricted(event)
+    return tenancy.cluster_visible(event, _cluster_item(row_cluster_id))
+
+
 def _norm_ts(s):
     """Normalize an RDS Data API timestamp string to unambiguous ISO 8601 UTC.
 
@@ -99,7 +151,7 @@ def lambda_handler(event, context):
                 return {"statusCode": 404, "headers": headers,
                         "body": json.dumps({"error": "리포트를 찾을 수 없습니다."})}
             row_cluster_id = rows[0].get("cluster_id")
-            if not tenancy.cluster_visible(event, _cluster_item(row_cluster_id)):
+            if not _row_visible(event, row_cluster_id):
                 return {"statusCode": 403, "headers": headers,
                         "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
             s3_key = rows[0].get("s3_key")
@@ -153,7 +205,7 @@ def lambda_handler(event, context):
                 status = 404
             else:
                 row = rows[0]
-                if not tenancy.cluster_visible(event, _cluster_item(row.get("cluster_id"))):
+                if not _row_visible(event, row.get("cluster_id")):
                     return {"statusCode": 403, "headers": headers,
                             "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
                 body = row
@@ -168,7 +220,19 @@ def lambda_handler(event, context):
             rows = query(sql, params)
             visible = tenancy.visible_set_from_registry(event)
             if visible is not None:
-                rows = [r for r in rows if r.get("cluster_id") in visible]
+                # visible never contains '*'; keep the fleet row only for
+                # unrestricted callers (fail-closed for everyone else). Skip the
+                # unrestricted check (a registry scan) unless a '*' row is
+                # actually present.
+                include_fleet = (
+                    any(r.get("cluster_id") == "*" for r in rows)
+                    and _is_unrestricted(event)
+                )
+                rows = [
+                    r for r in rows
+                    if r.get("cluster_id") in visible
+                    or (r.get("cluster_id") == "*" and include_fleet)
+                ]
             body = rows
             status = 200
     except Exception as e:

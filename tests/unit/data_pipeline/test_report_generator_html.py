@@ -105,15 +105,21 @@ def test_lambda_handler_puts_json_and_html(monkeypatch):
     json_keys = [k for k in keys_put if k.endswith(".json")]
     html_keys = [k for k in keys_put if k.endswith(".html")]
 
-    assert len(json_keys) == 1, f"Expected 1 JSON put, got {json_keys}"
-    assert len(html_keys) == 1, f"Expected 1 HTML put, got {html_keys}"
+    # One per-cluster report + one fleet rollup => 2 JSON + 2 HTML puts.
+    cluster_json = [k for k in json_keys if "/_fleet/" not in k]
+    fleet_json = [k for k in json_keys if "/_fleet/" in k]
+    assert len(cluster_json) == 1, f"Expected 1 cluster JSON put, got {json_keys}"
+    assert len(fleet_json) == 1, f"Expected 1 fleet JSON put, got {json_keys}"
+    assert len(html_keys) == 2, f"Expected 2 HTML puts (cluster + fleet), got {html_keys}"
 
-    # JSON key and HTML key differ only in extension
-    assert json_keys[0][:-5] == html_keys[0][:-5], "JSON and HTML keys should share the same base"
+    # each JSON key has an HTML twin differing only in extension
+    for k in json_keys:
+        assert k[:-5] + ".html" in html_keys, f"missing HTML twin for {k}"
 
-    # HTML put must declare correct ContentType
-    html_call = next(c for c in put_calls if (c.kwargs.get("Key", "") or "").endswith(".html"))
-    assert html_call.kwargs.get("ContentType") == "text/html; charset=utf-8"
+    # HTML puts must declare correct ContentType
+    for c in put_calls:
+        if (c.kwargs.get("Key", "") or "").endswith(".html"):
+            assert c.kwargs.get("ContentType") == "text/html; charset=utf-8"
 
 
 # ---------------------------------------------------------------------------
@@ -150,16 +156,17 @@ def test_html_failure_does_not_block_json_insert_deliver(monkeypatch):
 
     assert result["statusCode"] == 200
 
-    # JSON put must still have happened
+    # Cluster JSON put must still have happened despite the HTML render failure.
     put_calls = mock_s3.put_object.call_args_list
-    json_keys = [
-        c.kwargs.get("Key", "") for c in put_calls if c.kwargs.get("Key", "").endswith(".json")
+    cluster_json_keys = [
+        c.kwargs.get("Key", "") for c in put_calls
+        if c.kwargs.get("Key", "").endswith(".json") and "/_fleet/" not in c.kwargs.get("Key", "")
     ]
-    assert len(json_keys) == 1, f"JSON put should still happen; got put_calls={put_calls}"
+    assert len(cluster_json_keys) == 1, f"cluster JSON put should still happen; got put_calls={put_calls}"
 
-    # DB INSERT must still have happened (execute_statement called for something other than SELECT)
+    # DB INSERT must still have happened (cluster report + fleet rollup).
     insert_calls = [
         c for c in mock_rds.execute_statement.call_args_list
         if "INSERT INTO reports" in (c.kwargs.get("sql") or "")
     ]
-    assert len(insert_calls) == 1, "INSERT must still execute when HTML render fails"
+    assert len(insert_calls) >= 1, "INSERT must still execute when HTML render fails"

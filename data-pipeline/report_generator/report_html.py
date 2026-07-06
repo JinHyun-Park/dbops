@@ -162,3 +162,95 @@ table{{width:100%;border-collapse:collapse;font-size:13px}} td,th{{text-align:le
 <div class="section"><h2>알림</h2>
 <table><tr><th>규칙</th><th>발생 횟수</th><th>마지막 발생</th></tr>{alerts_rows}</table></div>
 </body></html>"""
+
+
+def _fmt_bytes(n):
+    try:
+        f = float(n)
+    except (TypeError, ValueError):
+        return "—"
+    sign = "-" if f < 0 else ("+" if f > 0 else "")
+    f = abs(f)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if f < 1024:
+            return f"{sign}{f:.1f} {unit}"
+        f /= 1024
+    return f"{sign}{f:.1f} PB"
+
+
+def _cluster_row_cells(r):
+    return (
+        f'<td>{escape(str(r.get("cluster_id") or ""))}</td>'
+        f'<td>{escape(str(r.get("engine") or ""))}</td>'
+        f'<td>{escape(str(r.get("health") or ""))}</td>'
+        f'<td>{_fmt(r.get("aas_avg"))}</td>'
+        f'<td>{_fmt(r.get("aas_max"))}</td>'
+        f'<td>{_fmt(r.get("alert_count"))}</td>'
+        f'<td>{_fmt(r.get("slow_query_count"))}</td>'
+        f'<td>{_fmt_bytes(r.get("storage_delta_bytes"))}</td>'
+    )
+
+
+def build_fleet_report_html(report_date, report_type, summary, fleet_data):
+    """Self-contained fleet rollup HTML — same inline-SVG/no-deps style as
+    build_report_html. Renders across all clusters, not one."""
+    fleet_data = fleet_data or {}
+    totals = fleet_data.get("totals") or {}
+    engine_counts = fleet_data.get("engine_counts") or {}
+    health_dist = fleet_data.get("health_distribution") or {}
+    worst = fleet_data.get("worst_clusters") or []
+    clusters = fleet_data.get("clusters") or []
+
+    cards = (
+        f'<div class="card"><div class="card-lbl">클러스터 수</div>'
+        f'<div class="card-val">{_fmt(fleet_data.get("clusters_total"))}</div></div>'
+        f'<div class="card"><div class="card-lbl">총 경보</div>'
+        f'<div class="card-val">{_fmt(totals.get("alerts"))}</div></div>'
+        f'<div class="card"><div class="card-lbl">총 슬로우 쿼리</div>'
+        f'<div class="card-val">{_fmt(totals.get("slow_queries"))}</div></div>'
+    )
+
+    engine_badges = "".join(
+        f'<span style="background:#27272a;color:#e4e4e7;border-radius:9px;'
+        f'padding:2px 10px;font-size:12px;margin-right:6px">{escape(str(k))} · {_fmt(v)}</span>'
+        for k, v in engine_counts.items()
+    ) or '<span style="color:#71717a;font-size:12px">엔진 정보 없음</span>'
+
+    health_bars = bar_chart(
+        [{"label": k, "count": v} for k, v in health_dist.items()], "상태 분포"
+    )
+
+    worst_rows = "".join(f"<tr>{_cluster_row_cells(r)}</tr>" for r in worst) \
+        or '<tr><td colspan="8">데이터 없음</td></tr>'
+    cluster_rows = "".join(f"<tr>{_cluster_row_cells(r)}</tr>" for r in clusters) \
+        or '<tr><td colspan="8">데이터 없음</td></tr>'
+    thead = ("<tr><th>클러스터</th><th>엔진</th><th>상태</th><th>AAS avg</th>"
+             "<th>AAS max</th><th>경보</th><th>슬로우</th><th>스토리지 Δ</th></tr>")
+
+    return f"""<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DBOps Fleet 리포트 — Fleet 전체 {escape(str(report_date))}</title>
+<style>
+body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#18181b;margin:0;padding:24px;background:#fafafa}}
+h1{{font-size:20px;margin:0 0 4px}} .meta{{color:#71717a;font-size:13px;margin-bottom:20px}}
+.summary{{background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:16px;white-space:pre-wrap;line-height:1.6;margin-bottom:20px}}
+.cards{{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}}
+.card{{background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:12px 16px;min-width:120px}}
+.card-lbl{{color:#71717a;font-size:12px}} .card-val{{font-size:22px;font-weight:600}}
+.section{{background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:16px;margin-bottom:20px}}
+.section h2{{font-size:14px;margin:0 0 12px;color:#3f3f46}}
+.table-wrap{{overflow-x:auto}}
+table{{width:100%;border-collapse:collapse;font-size:13px}} td,th{{text-align:left;padding:6px 8px;border-bottom:1px solid #f4f4f5;white-space:nowrap}}
+</style></head><body>
+<h1>DBOps Fleet 운영 리포트</h1>
+<div class="meta">Fleet 전체 · {escape(str(report_date))} · {escape(str(report_type))}</div>
+<div class="cards">{cards}</div>
+<div class="summary">{escape(str(summary or ''))}</div>
+<div class="section"><h2>엔진 분포</h2>{engine_badges}</div>
+<div class="section"><h2>상태 분포</h2>{health_bars}</div>
+<div class="section"><h2>주의가 필요한 클러스터 (Top 5)</h2>
+<div class="table-wrap"><table>{thead}{worst_rows}</table></div></div>
+<div class="section"><h2>전체 클러스터</h2>
+<div class="table-wrap"><table>{thead}{cluster_rows}</table></div></div>
+</body></html>"""

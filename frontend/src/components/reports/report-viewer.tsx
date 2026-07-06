@@ -65,18 +65,48 @@ interface ReportPayload {
   events_by_type?: EventRow[];
 }
 
-function parseData(
-  raw: string | object | null | undefined,
-): ReportPayload | null {
+interface FleetClusterRow {
+  cluster_id?: string;
+  engine?: string;
+  health?: string;
+  aas_avg?: number;
+  aas_max?: number;
+  slow_query_count?: number;
+  alert_count?: number;
+  storage_delta_bytes?: number;
+}
+
+interface FleetPayload {
+  clusters_total?: number;
+  engine_counts?: Record<string, number>;
+  health_distribution?: Record<string, number>;
+  totals?: { alerts?: number; slow_queries?: number };
+  worst_clusters?: FleetClusterRow[];
+  clusters?: FleetClusterRow[];
+}
+
+const FLEET_ID = "*";
+
+function clusterLabel(clusterId: string): string {
+  return clusterId === FLEET_ID ? "Fleet 전체" : clusterId;
+}
+
+function parseJson<T>(raw: string | object | null | undefined): T | null {
   if (!raw) return null;
   if (typeof raw === "string") {
     try {
-      return JSON.parse(raw) as ReportPayload;
+      return JSON.parse(raw) as T;
     } catch {
       return null;
     }
   }
-  return raw as ReportPayload;
+  return raw as T;
+}
+
+function parseData(
+  raw: string | object | null | undefined,
+): ReportPayload | null {
+  return parseJson<ReportPayload>(raw);
 }
 
 export function ReportViewer({
@@ -110,7 +140,13 @@ export function ReportViewer({
                   <span className="text-zinc-500">{r.report_type}</span>
                 </div>
                 <div className="text-xs text-zinc-500 mt-1 truncate">
-                  {r.cluster_id}
+                  {r.cluster_id === FLEET_ID ? (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[10px] font-medium tracking-wide">
+                      Fleet 전체
+                    </span>
+                  ) : (
+                    r.cluster_id
+                  )}
                 </div>
               </button>
             );
@@ -149,6 +185,8 @@ function ReportDetailPanel({
 }) {
   const [htmlLoading, setHtmlLoading] = useState(false);
   const [htmlUnavailable, setHtmlUnavailable] = useState(false);
+  const isFleet = row.cluster_id === FLEET_ID;
+  const fleetPayload = isFleet ? parseJson<FleetPayload>(detail?.data) : null;
 
   function handleDownload() {
     if (!detail) return;
@@ -200,7 +238,7 @@ function ReportDetailPanel({
               {row.report_type} report
             </div>
             <h2 className="text-2xl font-semibold tracking-tight text-zinc-50">
-              {row.report_date} · {row.cluster_id}
+              {row.report_date} · {clusterLabel(row.cluster_id)}
             </h2>
           </div>
           {detail && (
@@ -239,15 +277,136 @@ function ReportDetailPanel({
         )}
       </header>
 
-      {payload && (
-        <>
-          <StatBlock payload={payload} />
-          <SlowQueriesBlock rows={payload.top_slow_queries || []} />
-          <AlertsBlock rows={payload.top_alerts || []} />
-          <EventsBlock rows={payload.events_by_type || []} />
-        </>
+      {isFleet
+        ? fleetPayload && <FleetDetailPanel payload={fleetPayload} />
+        : payload && (
+            <>
+              <StatBlock payload={payload} />
+              <SlowQueriesBlock rows={payload.top_slow_queries || []} />
+              <AlertsBlock rows={payload.top_alerts || []} />
+              <EventsBlock rows={payload.events_by_type || []} />
+            </>
+          )}
+    </div>
+  );
+}
+
+function FleetDetailPanel({ payload }: { payload: FleetPayload }) {
+  const totals = payload.totals || {};
+  const worst = payload.worst_clusters || [];
+  const clusters = payload.clusters || [];
+  const engineCounts = Object.entries(payload.engine_counts || {});
+  const healthDist = Object.entries(payload.health_distribution || {});
+
+  return (
+    <div className="space-y-8">
+      <section>
+        <div className="text-[11px] font-medium text-zinc-500 mb-3">
+          Fleet 요약
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-px bg-zinc-800 border border-zinc-800">
+          <Cell label="클러스터 수" value={fmtNumber(payload.clusters_total)} />
+          <Cell label="총 경보" value={fmtNumber(totals.alerts)} />
+          <Cell label="총 슬로우 쿼리" value={fmtNumber(totals.slow_queries)} />
+        </div>
+      </section>
+
+      {(engineCounts.length > 0 || healthDist.length > 0) && (
+        <section className="flex flex-wrap gap-2">
+          {engineCounts.map(([engine, n]) => (
+            <span
+              key={`e-${engine}`}
+              className="border border-zinc-800 px-3 py-1.5 text-xs text-zinc-300"
+            >
+              {engine}{" "}
+              <span className="text-zinc-500 tabular-nums">
+                · {fmtNumber(n)}
+              </span>
+            </span>
+          ))}
+          {healthDist.map(([bucket, n]) => (
+            <span
+              key={`h-${bucket}`}
+              className="border border-zinc-800 px-3 py-1.5 text-xs text-zinc-300"
+            >
+              {bucket}{" "}
+              <span className="text-zinc-500 tabular-nums">
+                · {fmtNumber(n)}
+              </span>
+            </span>
+          ))}
+        </section>
+      )}
+
+      {worst.length > 0 && (
+        <FleetClusterTable
+          title="주의가 필요한 클러스터 (Top 5)"
+          rows={worst}
+        />
+      )}
+      {clusters.length > 0 && (
+        <FleetClusterTable title="전체 클러스터" rows={clusters} />
       )}
     </div>
+  );
+}
+
+function FleetClusterTable({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: FleetClusterRow[];
+}) {
+  return (
+    <section>
+      <div className="text-[11px] font-medium text-zinc-500 mb-3">{title}</div>
+      <div className="border border-zinc-800 overflow-x-auto">
+        <table className="w-full text-xs text-zinc-300">
+          <thead>
+            <tr className="text-zinc-500 border-b border-zinc-800">
+              <th className="text-left font-medium px-3 py-2">클러스터</th>
+              <th className="text-left font-medium px-3 py-2">엔진</th>
+              <th className="text-left font-medium px-3 py-2">상태</th>
+              <th className="text-right font-medium px-3 py-2">AAS avg</th>
+              <th className="text-right font-medium px-3 py-2">AAS max</th>
+              <th className="text-right font-medium px-3 py-2">경보</th>
+              <th className="text-right font-medium px-3 py-2">슬로우</th>
+              <th className="text-right font-medium px-3 py-2">스토리지 Δ</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800">
+            {rows.map((r, i) => {
+              const delta = Number(r.storage_delta_bytes ?? 0);
+              return (
+                <tr key={(r.cluster_id || "") + i}>
+                  <td className="px-3 py-2 font-mono text-zinc-200">
+                    {r.cluster_id}
+                  </td>
+                  <td className="px-3 py-2">{r.engine}</td>
+                  <td className="px-3 py-2">{r.health}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {fmtDecimal(r.aas_avg, 2)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {fmtDecimal(r.aas_max, 2)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {fmtNumber(r.alert_count)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {fmtNumber(r.slow_query_count)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {(delta >= 0 ? "+" : "") + fmtBytes(Math.abs(delta))}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
