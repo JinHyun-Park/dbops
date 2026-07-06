@@ -55,7 +55,11 @@ def lambda_handler(event, context):
         sql_params = []
         if params:
             for k, v in params.items():
-                sql_params.append({"name": k, "value": {"stringValue": str(v)}})
+                # None => SQL NULL (isNull); str(None) would store the literal
+                # text "None". Lets callers persist a NULL s3_key when the S3
+                # object was never written.
+                val = {"isNull": True} if v is None else {"stringValue": str(v)}
+                sql_params.append({"name": k, "value": val})
         resp = rds_data.execute_statement(
             resourceArn=cluster_arn, secretArn=secret_arn, database=database,
             sql=f"/* source=dbops-report */ {sql}", parameters=sql_params,
@@ -89,6 +93,7 @@ def lambda_handler(event, context):
         fleet_rows.append(_fleet_row(cid, cluster.get("engine"), report_data))
 
         s3_key = f"reports/{cid}/{report_date}-{report_type}.json"
+        json_put_ok = False
         if s3_bucket:
             try:
                 boto3.client("s3").put_object(
@@ -96,6 +101,7 @@ def lambda_handler(event, context):
                     Body=json.dumps(report_data, default=str),
                     ContentType="application/json",
                 )
+                json_put_ok = True
             except ClientError as e:
                 print(f"[report_generator] S3 put failed for {cid}: {e}")
 
@@ -122,7 +128,9 @@ def lambda_handler(event, context):
                 "report_date": report_date,
                 "summary": summary_text,
                 "data": json.dumps(report_data, default=str),
-                "s3_key": s3_key,
+                # NULL when the JSON object wasn't written — never point the
+                # download link at a nonexistent S3 key.
+                "s3_key": s3_key if json_put_ok else None,
             },
         )
         _deliver_report(cache_query, cid, report_date, report_type, summary_text)
@@ -425,6 +433,7 @@ def _generate_fleet_rollup(cache_query, s3_bucket, report_date, report_type, fle
     summary_text = _fleet_summary(report_date, fleet_data)
 
     s3_key = f"reports/_fleet/{report_date}-{report_type}.json"
+    json_put_ok = False
     if s3_bucket:
         try:
             boto3.client("s3").put_object(
@@ -432,6 +441,7 @@ def _generate_fleet_rollup(cache_query, s3_bucket, report_date, report_type, fle
                 Body=json.dumps(fleet_data, default=str),
                 ContentType="application/json",
             )
+            json_put_ok = True
         except ClientError as e:
             print(f"[report_generator] fleet S3 put failed: {e}")
         try:
@@ -453,7 +463,7 @@ def _generate_fleet_rollup(cache_query, s3_bucket, report_date, report_type, fle
             "report_date": report_date,
             "summary": summary_text,
             "data": json.dumps(fleet_data, default=str),
-            "s3_key": s3_key,
+            "s3_key": s3_key if json_put_ok else None,
         },
     )
     _deliver_report(cache_query, "*", report_date, report_type, summary_text)

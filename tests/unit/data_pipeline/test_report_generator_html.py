@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
+from botocore.exceptions import ClientError
+
 _HANDLER_PATH = (
     Path(__file__).resolve().parents[3]
     / "data-pipeline"
