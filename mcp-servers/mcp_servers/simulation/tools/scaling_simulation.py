@@ -114,6 +114,156 @@ def _member_instance_classes(rds, cluster_id: str) -> dict:
         return {}
 
 
+# Provisioned instance-size ladder for the "upsize one class" comparison. Same
+# family (e.g. db.r6g.*), one step up the size axis. Missing/unknown size => no
+# next class (autoscale_vs_fixed is then omitted), never a fabricated guess.
+_SIZE_LADDER = [
+    "medium", "large", "xlarge", "2xlarge", "4xlarge", "8xlarge",
+    "12xlarge", "16xlarge", "24xlarge", "32xlarge", "48xlarge",
+]
+
+
+def _next_class_up(instance_class: str):
+    """The next larger instance class in the same family, or None if it can't
+    be resolved (unknown size token / top of the ladder / not a db.<fam>.<size>)."""
+    if not instance_class:
+        return None
+    prefix, _, size = instance_class.rpartition(".")
+    if not prefix:
+        return None
+    try:
+        i = _SIZE_LADDER.index(size)
+    except ValueError:
+        return None
+    if i + 1 >= len(_SIZE_LADDER):
+        return None
+    return f"{prefix}.{_SIZE_LADDER[i + 1]}"
+
+
+def _active_ris(rds) -> list:
+    """Active RDS Reserved Instances in the cluster's account+region (via the
+    same cross-account rds client the describe used). RDS RIs carry no end
+    field — end = StartTime + Duration. Fails soft to []; never raises."""
+    rows = []
+    try:
+        marker = None
+        while True:
+            kwargs = {"MaxRecords": 100}
+            if marker:
+                kwargs["Marker"] = marker
+            resp = rds.describe_reserved_db_instances(**kwargs)
+            for ri in resp.get("ReservedDBInstances", []):
+                if ri.get("State") != "active":
+                    continue
+                start = ri.get("StartTime")
+                end_date = None
+                if start is not None:
+                    end_date = (start + timedelta(seconds=ri.get("Duration") or 0)).date().isoformat()
+                rows.append({
+                    "instance_class": ri.get("DBInstanceClass", ""),
+                    "count": int(ri.get("DBInstanceCount") or 0),
+                    "end": end_date,
+                })
+            marker = resp.get("Marker")
+            # Real boto Markers are non-empty strings; anything else (None, or a
+            # bare Mock in tests) terminates paging so we never loop forever.
+            if not isinstance(marker, str) or not marker:
+                break
+    except Exception as e:  # pragma: no cover - defensive soft-fail
+        print(f"[scaling_simulation] describe_reserved_db_instances failed: {e}")
+    return rows
+
+
+def _ri_match(ris: list, instance_class: str) -> dict:
+    """RI coverage summary for one instance class: match flag, covered count,
+    and the latest expiry among matching RIs."""
+    matched = [r for r in ris if instance_class and r["instance_class"] == instance_class]
+    return {
+        "instance_class": instance_class,
+        "ri_match": bool(matched),
+        "ri_count": sum(r["count"] for r in matched),
+        "expires": max((r["end"] for r in matched if r.get("end")), default=None),
+    }
+
+
+def _commitment_context(rds, region, engine, io_optimized, result) -> dict:
+    """Best-effort RI-awareness annotation for a scaling result. Reports
+    whether the current/proposed instance classes are RI-covered, warns when a
+    resize would leave an RI stranded, and (provisioned) compares scale-out vs
+    scale-up on ON-DEMAND unit prices only — never a fabricated RI discount.
+    Output-only; any failure yields {"available": False}."""
+    ris = _active_ris(rds)
+    mode = result.get("mode")
+    current_class = (result.get("current") or {}).get("instance_class")
+    proposed_class = (result.get("proposed") or {}).get("instance_class")
+
+    if mode == "serverless":
+        note = None
+        if ris:
+            note = (
+                f"Aurora Serverless v2 용량(ACU)은 인스턴스 RI로 커버되지 않습니다. "
+                f"이 계정/리전의 보유 RI {sum(r['count'] for r in ris)}건은 프로비저닝 "
+                "인스턴스에만 적용됩니다."
+            )
+        return {
+            "available": True,
+            "region": region,
+            "current_class": None,
+            "proposed_class": None,
+            "note": note,
+            "autoscale_vs_fixed": None,
+        }
+
+    cur = _ri_match(ris, current_class)
+    prop = _ri_match(ris, proposed_class)
+
+    note = None
+    # A resize AWAY from a covered class onto an uncovered one strands the RI.
+    if (
+        proposed_class and current_class and proposed_class != current_class
+        and cur["ri_match"] and not prop["ri_match"]
+    ):
+        until = f" 만료 {cur['expires']}까지" if cur.get("expires") else ""
+        note = (
+            f"제안 클래스({proposed_class})는 보유 RI에 없음 — 변경분은 온디맨드로 "
+            f"과금되어 표시된 절감액이 실효 절감과 다를 수 있습니다.{until} 기존 RI는 "
+            "미사용으로 남습니다."
+        )
+
+    # Scale-out vs scale-up, ON-DEMAND unit prices only. RI-covered sides are
+    # flagged (not re-priced) so we never invent a contract rate.
+    autoscale_vs_fixed = None
+    reader_price = price_per_instance_hour(region, engine, current_class, io_optimized) if current_class else None
+    next_class = _next_class_up(current_class)
+    next_price = price_per_instance_hour(region, engine, next_class, io_optimized) if next_class else None
+    if reader_price is not None and next_price is not None:
+        autoscale_vs_fixed = {
+            "add_reader": {
+                "instance_class": current_class,
+                "monthly_on_demand_usd": round(reader_price * HOURS_PER_MONTH, 2),
+                "ri_covered": cur["ri_match"],
+            },
+            "upsize_writer": {
+                "instance_class": next_class,
+                "delta_monthly_on_demand_usd": round((next_price - reader_price) * HOURS_PER_MONTH, 2),
+                "ri_covered": _ri_match(ris, next_class)["ri_match"],
+            },
+            "note": (
+                "추정치이며 온디맨드 단가 기준입니다(리더 1대 추가 vs 라이터 한 단계 "
+                "상향). RI 보유분은 실효가가 계약 조건에 따라 달라집니다."
+            ),
+        }
+
+    return {
+        "available": True,
+        "region": region,
+        "current_class": cur,
+        "proposed_class": prop,
+        "note": note,
+        "autoscale_vs_fixed": autoscale_vs_fixed,
+    }
+
+
 def _degraded_result(cluster_id: str, new_min_acu, new_max_acu, new_instance_class, region, note: str) -> dict:
     """Build the graceful "live describe unavailable" payload. WHY a helper:
     keeps the no-data path honest — every cost is None, mode is best-effort, and
@@ -149,6 +299,7 @@ def _degraded_result(cluster_id: str, new_min_acu, new_max_acu, new_instance_cla
         },
         "data_source": "estimate (live describe unavailable)",
         "note": note,
+        "commitment_context": {"available": False},
     }
 
 
@@ -398,12 +549,21 @@ def simulate_scaling_impl(
     member_count = max(1, writers + readers)
 
     if cluster.get("ServerlessV2ScalingConfiguration"):
-        return _serverless_result(
+        result = _serverless_result(
             cluster_id, cluster, region, engine, io_optimized,
             writers, readers, member_count, new_min_acu, new_max_acu,
         )
+    else:
+        result = _provisioned_result(
+            cluster_id, rds, members, region, engine, io_optimized,
+            writers, readers, member_count, new_instance_class,
+        )
 
-    return _provisioned_result(
-        cluster_id, rds, members, region, engine, io_optimized,
-        writers, readers, member_count, new_instance_class,
-    )
+    # RI-aware annotation (output-only, best-effort). A failure here must never
+    # touch the existing result — the cost sim is authoritative on its own.
+    try:
+        result["commitment_context"] = _commitment_context(rds, region, engine, io_optimized, result)
+    except Exception as e:  # pragma: no cover - defensive soft-fail
+        print(f"[scaling_simulation] commitment_context failed for {cluster_id}: {e}")
+        result["commitment_context"] = {"available": False}
+    return result

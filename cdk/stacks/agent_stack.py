@@ -303,6 +303,9 @@ class AgentStack(cdk.Stack):
                 "rds:DescribeDBEngineVersions",
                 "rds:DescribeDBClusterParameters",
                 "rds:DescribeDBClusterParameterGroups",
+                # RI-aware scaling annotation (commitment_context): read active
+                # Reserved Instances in the cluster's account+region. Read-only.
+                "rds:DescribeReservedDBInstances",
                 # Real region/edition/instance pricing for scaling cost sims
                 # (replaces the hardcoded ACU rate). Price List API is read-only.
                 "pricing:GetProducts",
@@ -1573,12 +1576,29 @@ class AgentStack(cdk.Stack):
                 # AWS adds over time (e.g. "Claude Sonnet 4.6 (Amazon Bedrock
                 # Edition)") so the cost filter doesn't go stale.
                 "ce:GetDimensionValues",
+                # RI/SP commitments view (?view=commitments): hub-account
+                # reservation + Savings Plans coverage. All read-only.
+                "ce:GetReservationCoverage",
+                "ce:GetSavingsPlansCoverage",
             ],
             resources=["*"],
         ))
         cost_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=["cloudwatch:GetMetricData", "cloudwatch:ListMetrics"],
             resources=["*"],  # CloudWatch GetMetricData/ListMetrics don't support resource scoping
+        ))
+        cost_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                # RI/SP commitments view: enumerate active RDS RIs + running
+                # Aurora instances per account+region (read-only), list active
+                # Savings Plans, and assume spoke roles to read RIs in the
+                # cluster's own account. Mirrors the clusters/dashboard Lambdas.
+                "rds:DescribeReservedDBInstances",
+                "rds:DescribeDBInstances",
+                "savingsplans:DescribeSavingsPlans",
+                "sts:AssumeRole",
+            ],
+            resources=["*"],
         ))
         self.api.add_routes(
             path="/api/cost",

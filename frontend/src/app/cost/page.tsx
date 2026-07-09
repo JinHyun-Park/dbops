@@ -98,7 +98,41 @@ interface ElastiCacheCostData {
 
 const RANGES = [7, 14, 30, 60, 90];
 
-type CostTab = "bedrock" | "rds" | "platform" | "tokens" | "elasticache";
+type CostTab =
+  | "bedrock"
+  | "rds"
+  | "platform"
+  | "tokens"
+  | "elasticache"
+  | "commitments";
+
+interface CommitmentRi {
+  account: string;
+  region: string;
+  instance_class: string;
+  count: number;
+  multi_az: boolean;
+  offering_type: string;
+  product: string;
+  end: string | null;
+  remaining_days: number | null;
+}
+
+interface CommitmentsCostData {
+  env: string;
+  view: "commitments";
+  range_days: number;
+  start: string;
+  end: string;
+  ris: CommitmentRi[];
+  summary: { total: number; expiring_30d: number; unused_estimate: number };
+  coverage: {
+    reservation_pct: number | null;
+    savings_plans_pct: number | null;
+  } | null;
+  savings_plans: { type: string; commitment: string; end: string }[] | null;
+  note?: string | null;
+}
 
 interface PlatformServiceCost {
   service: string;
@@ -213,7 +247,9 @@ export default function CostPage() {
                 ? "Bedrock 토큰 사용량"
                 : tab === "elasticache"
                   ? "ElastiCache 비용"
-                  : "Bedrock 비용"
+                  : tab === "commitments"
+                    ? "커밋 할인 (RI / Savings Plan)"
+                    : "Bedrock 비용"
         }
         description={
           tab === "rds"
@@ -224,7 +260,9 @@ export default function CostPage() {
                 ? "계정 전체 Bedrock 토큰 사용량(모델별) — CloudWatch AWS/Bedrock 메트릭 기반. 태그 필터 불가로 계정 전체 집계입니다."
                 : tab === "elasticache"
                   ? "계정의 ElastiCache 비용 — Cost Explorer로 사용 유형(노드 시간·데이터 스토리지·I/O)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다."
-                  : "DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다."
+                  : tab === "commitments"
+                    ? "등록된 Aurora 계정의 Reserved Instance / Savings Plan 현황 — 스케일링 권장이 RI 커버리지를 깨뜨려 오히려 비용이 늘지 않는지 확인합니다. 만료 임박·미사용 RI를 함께 표시합니다."
+                    : "DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다."
         }
         actions={
           <div className="flex items-center gap-1">
@@ -254,6 +292,7 @@ export default function CostPage() {
             { id: "bedrock", label: "Bedrock" },
             { id: "rds", label: "Aurora / RDS" },
             { id: "elasticache", label: "ElastiCache" },
+            { id: "commitments", label: "커밋 할인 (RI/SP)" },
             { id: "platform", label: "DBOps 플랫폼" },
             { id: "tokens", label: "토큰" },
           ] as { id: CostTab; label: string }[]
@@ -276,6 +315,8 @@ export default function CostPage() {
         <RdsCostView days={days} colors={colors} />
       ) : tab === "elasticache" ? (
         <ElastiCacheCostView days={days} colors={colors} />
+      ) : tab === "commitments" ? (
+        <CommitmentsCostView days={days} />
       ) : tab === "platform" ? (
         <PlatformCostView days={days} colors={colors} />
       ) : tab === "tokens" ? (
@@ -1520,6 +1561,244 @@ function TokensCostView({
             </p>
           )}
         </>
+      )}
+    </>
+  );
+}
+
+function DDayBadge({ days }: { days: number | null }) {
+  if (days === null)
+    return <span className="text-zinc-600 font-mono text-xs">—</span>;
+  if (days < 0)
+    return (
+      <span className="text-[10px] px-1.5 py-0.5 border border-rose-500/40 bg-rose-500/10 text-rose-300 font-mono">
+        만료됨
+      </span>
+    );
+  const tone =
+    days <= 7
+      ? "border-rose-500/40 bg-rose-500/10 text-rose-300"
+      : days <= 30
+        ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+        : "border-zinc-700 text-zinc-400";
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 border font-mono ${tone}`}>
+      D-{days}
+    </span>
+  );
+}
+
+function CommitmentsCostView({ days }: { days: number }) {
+  const [data, setData] = useState<CommitmentsCostData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErr(null);
+    (async () => {
+      try {
+        const url = await apiUrl(`/api/cost?view=commitments&days=${days}`);
+        const res = await authedFetch(url);
+        if (!res.ok) throw new Error(`커밋 할인 현황 조회 실패: ${res.status}`);
+        const d = (await res.json()) as CommitmentsCostData;
+        if (!cancelled) setData(d);
+      } catch (e) {
+        if (!cancelled) setErr((e as Error).message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [days]);
+
+  const ris = data?.ris ?? [];
+
+  return (
+    <>
+      {err && (
+        <div className="mb-6 px-4 py-3 border border-rose-500/30 bg-rose-500/10 text-rose-300 text-sm">
+          {err}
+        </div>
+      )}
+
+      <StatRow cols={3}>
+        <Stat
+          label="보유 RI"
+          value={loading ? "···" : fmtDecimal(data?.summary.total ?? 0, 0)}
+          hint="활성 Reserved Instance 수량"
+          loading={loading}
+          accent="amber"
+        />
+        <Stat
+          label="만료 임박 (30일)"
+          value={
+            loading ? "···" : fmtDecimal(data?.summary.expiring_30d ?? 0, 0)
+          }
+          hint="30일 내 만료되는 RI 수량"
+          loading={loading}
+        />
+        <Stat
+          label="미사용 추정"
+          value={
+            loading ? "···" : fmtDecimal(data?.summary.unused_estimate ?? 0, 0)
+          }
+          hint="실행 인스턴스 없는 RI (추정)"
+          loading={loading}
+        />
+      </StatRow>
+
+      <Section
+        eyebrow="커버리지"
+        title="RI / Savings Plan 커버리지"
+        description="허브 계정 기준, 최근 30일 Cost Explorer 커버리지입니다."
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-zinc-800 border border-zinc-800">
+          <div className="bg-zinc-900/60 p-4">
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+              RDS Reserved Instance
+            </div>
+            {loading ? (
+              <div className="text-zinc-500 text-sm">loading…</div>
+            ) : data?.coverage?.reservation_pct != null ? (
+              <div className="text-2xl font-mono tabular-nums text-zinc-100">
+                {data.coverage.reservation_pct.toFixed(1)}%
+              </div>
+            ) : (
+              <div className="text-sm text-zinc-600">
+                CE 커버리지 미조회 — 권한/데이터 없음
+              </div>
+            )}
+          </div>
+          <div className="bg-zinc-900/60 p-4">
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+              Savings Plan (전체 컴퓨트)
+            </div>
+            {loading ? (
+              <div className="text-zinc-500 text-sm">loading…</div>
+            ) : data?.coverage?.savings_plans_pct != null ? (
+              <div className="text-2xl font-mono tabular-nums text-zinc-100">
+                {data.coverage.savings_plans_pct.toFixed(1)}%
+              </div>
+            ) : (
+              <div className="text-sm text-zinc-600">Savings Plan 미조회</div>
+            )}
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        eyebrow="Reserved Instance"
+        title="활성 RI 목록"
+        description="만료 임박순 — D-day가 amber(≤30일)/rose(≤7일)면 갱신 또는 스케일링 결정을 재검토하세요."
+      >
+        {loading ? (
+          <div className="text-zinc-500 text-sm">loading…</div>
+        ) : ris.length === 0 ? (
+          <EmptyState
+            eyebrow="RI 없음"
+            title="활성 Reserved Instance가 없습니다"
+            description={
+              data?.note ||
+              "등록된 Aurora 계정에서 활성 RI를 찾지 못했습니다. 모두 온디맨드 과금 중이거나, RI가 다른 계정/리전에 있습니다."
+            }
+          />
+        ) : (
+          <div className="border border-zinc-800 overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
+                <tr>
+                  <th className="text-left px-4 py-2.5 font-medium">계정</th>
+                  <th className="text-left px-4 py-2.5 font-medium">리전</th>
+                  <th className="text-left px-4 py-2.5 font-medium">클래스</th>
+                  <th className="text-right px-4 py-2.5 font-medium">수량</th>
+                  <th className="text-left px-4 py-2.5 font-medium">
+                    약정 유형
+                  </th>
+                  <th className="text-right px-4 py-2.5 font-medium">만료</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800">
+                {ris.map((r, i) => (
+                  <tr
+                    key={`${r.account}-${r.region}-${r.instance_class}-${i}`}
+                    className="hover:bg-zinc-900/40"
+                  >
+                    <td className="px-4 py-2 text-zinc-300 font-mono text-xs tabular-nums">
+                      {r.account || "—"}
+                    </td>
+                    <td className="px-4 py-2 text-zinc-300 font-mono text-xs">
+                      {r.region || "—"}
+                    </td>
+                    <td className="px-4 py-2 text-zinc-100 font-mono text-xs">
+                      {r.instance_class}
+                      {r.multi_az && (
+                        <span className="ml-1.5 text-[10px] text-zinc-500">
+                          Multi-AZ
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right text-zinc-100 font-mono text-xs tabular-nums">
+                      {fmtDecimal(r.count, 0)}
+                    </td>
+                    <td className="px-4 py-2 text-zinc-400 text-xs">
+                      {r.offering_type || "—"}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <DDayBadge days={r.remaining_days} />
+                        <span className="text-[10px] text-zinc-600 font-mono">
+                          {r.end ? r.end.slice(0, 10) : ""}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+
+      <Section eyebrow="Savings Plan" title="활성 Savings Plan">
+        {loading ? (
+          <div className="text-zinc-500 text-sm">loading…</div>
+        ) : data?.savings_plans == null ? (
+          <div className="border border-zinc-800 bg-zinc-900/30 p-5 text-sm text-zinc-600">
+            Savings Plan 미조회 — API/권한 없음 또는 이 계정에 Savings Plan이
+            없습니다.
+          </div>
+        ) : data.savings_plans.length === 0 ? (
+          <div className="border border-zinc-800 bg-zinc-900/30 p-5 text-sm text-zinc-500">
+            활성 Savings Plan이 없습니다.
+          </div>
+        ) : (
+          <div className="border border-zinc-800 divide-y divide-zinc-800">
+            {data.savings_plans.map((p, i) => (
+              <div
+                key={`${p.type}-${i}`}
+                className="px-4 py-2.5 flex items-center gap-4 text-sm"
+              >
+                <span className="text-zinc-200 flex-1">{p.type || "—"}</span>
+                <span className="text-zinc-400 font-mono text-xs tabular-nums">
+                  ${p.commitment}/hr
+                </span>
+                <span className="text-[10px] text-zinc-600 font-mono">
+                  {p.end ? p.end.slice(0, 10) : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {data?.note && ris.length > 0 && (
+        <p className="text-[11px] text-zinc-600 mt-3 leading-relaxed border-l-2 border-zinc-800 pl-3">
+          {data.note}
+        </p>
       )}
     </>
   );

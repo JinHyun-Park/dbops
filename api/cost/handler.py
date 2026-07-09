@@ -16,7 +16,7 @@ per Lambda invocation.
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import boto3
 import tenancy
@@ -361,6 +361,267 @@ def _handle_elasticache_view(ce, start, end, days, event=None):
 
 
 # ===========================================================================
+# RI / Savings Plan commitments path (?view=commitments)
+# ---------------------------------------------------------------------------
+# Compute Optimizer and our own scaling advice ignore Reserved Instances, so a
+# "cheaper" instance-class recommendation can actually cost MORE when it breaks
+# RI coverage (the RI keeps billing for a class you no longer run). This view
+# surfaces the operator's real commitment posture so they can sanity-check any
+# resize: active RDS RIs (per account+region derived from the clusters
+# registry), a coarse cover/over/unused estimate (running instances vs RI
+# count per class), and best-effort CE reservation/SP coverage for the hub
+# account. Every external call fails soft to null/empty — we never leak str(e).
+# ===========================================================================
+
+
+def _session_for(region: str, role_arn: str = "") -> boto3.session.Session:
+    """boto3 Session for a target account+region; assume `role_arn` when given
+    (hub-spoke chaining), else a local session. Copied from api/clusters —
+    api/ Lambdas are independent packages and cannot share imports."""
+    if not role_arn:
+        return boto3.session.Session(region_name=region or None)
+    creds = boto3.client("sts").assume_role(
+        RoleArn=role_arn,
+        RoleSessionName=f"dbops-cost-{datetime.utcnow().strftime('%H%M%S')}",
+        DurationSeconds=900,
+    )["Credentials"]
+    return boto3.session.Session(
+        region_name=region or None,
+        aws_access_key_id=creds["AccessKeyId"],
+        aws_secret_access_key=creds["SecretAccessKey"],
+        aws_session_token=creds["SessionToken"],
+    )
+
+
+def _account_from_arn(arn: str) -> str:
+    """Account id from an ARN (arn:aws:rds:region:ACCOUNT:...). '' if unparsable."""
+    parts = (arn or "").split(":")
+    return parts[4] if len(parts) > 4 else ""
+
+
+def _aurora_commitment_targets(event):
+    """Scan the clusters registry, keep Aurora/RDS clusters VISIBLE to the
+    caller, and return (targets, scan_failed) where targets is a list of
+    distinct {account, region, role_arn} dicts. Account is parsed from
+    cluster_arn (falls back to account_id); empty role = hub.
+
+    Fail CLOSED: a registry-scan failure returns ([], True) so we surface
+    nothing rather than risk leaking another tenant's accounts. (This is
+    stricter than the rds view's fail-open per-cluster filter — commitments
+    enumerate whole accounts, so a mis-scoped result is worse.)"""
+    table_name = os.environ.get("CLUSTERS_TABLE", "")
+    if not table_name:
+        return [], False
+    try:
+        table = boto3.resource("dynamodb").Table(table_name)
+        resp = table.scan()
+        items = resp.get("Items", [])
+        while resp.get("LastEvaluatedKey"):
+            resp = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
+            items.extend(resp.get("Items", []))
+    except Exception as e:
+        print(f"[cost] commitments registry scan failed: {e}")
+        return [], True
+
+    visible = tenancy.visible_cluster_ids(event, items)  # None => admin (all)
+    targets = {}
+    for it in items:
+        if not (it.get("engine") or "").lower().startswith("aurora"):
+            continue
+        if visible is not None and it.get("cluster_id") not in visible:
+            continue
+        region = it.get("region") or ""
+        role = it.get("spoke_role_arn") or ""
+        account = _account_from_arn(it.get("cluster_arn")) or it.get("account_id") or ""
+        targets.setdefault(
+            (account, region, role),
+            {"account": account, "region": region, "role_arn": role},
+        )
+    return list(targets.values()), False
+
+
+def _describe_active_ris(rds, account: str, region: str) -> list:
+    """Active RDS Reserved Instances in one account+region. RDS RIs carry no
+    end field — end = StartTime + Duration. Fails soft to []."""
+    rows = []
+    try:
+        marker = None
+        while True:
+            kwargs = {"MaxRecords": 100}
+            if marker:
+                kwargs["Marker"] = marker
+            resp = rds.describe_reserved_db_instances(**kwargs)
+            for ri in resp.get("ReservedDBInstances", []):
+                if ri.get("State") != "active":
+                    continue
+                start = ri.get("StartTime")
+                end_iso, remaining = None, None
+                if start is not None:
+                    end_dt = start + timedelta(seconds=ri.get("Duration") or 0)
+                    end_iso = end_dt.isoformat()
+                    remaining = (end_dt - datetime.now(timezone.utc)).days
+                rows.append({
+                    "account": account,
+                    "region": region,
+                    "instance_class": ri.get("DBInstanceClass", ""),
+                    "count": int(ri.get("DBInstanceCount") or 0),
+                    "multi_az": bool(ri.get("MultiAZ")),
+                    "offering_type": ri.get("OfferingType", ""),
+                    "product": ri.get("ProductDescription", ""),
+                    "end": end_iso,
+                    "remaining_days": remaining,
+                })
+            marker = resp.get("Marker")
+            # Real boto Markers are non-empty strings; anything else terminates.
+            if not isinstance(marker, str) or not marker:
+                break
+    except Exception as e:
+        print(f"[cost] describe_reserved_db_instances failed ({account}/{region}): {e}")
+    return rows
+
+
+def _running_aurora_counts(rds) -> dict:
+    """{instance_class: count} of running Aurora instances in one account+
+    region — the denominator for the coarse cover/over/unused estimate. Fails
+    soft to {}."""
+    counts = {}
+    try:
+        marker = None
+        while True:
+            kwargs = {"MaxRecords": 100}
+            if marker:
+                kwargs["Marker"] = marker
+            resp = rds.describe_db_instances(**kwargs)
+            for inst in resp.get("DBInstances", []):
+                if not (inst.get("Engine") or "").lower().startswith("aurora"):
+                    continue
+                cls = inst.get("DBInstanceClass") or ""
+                counts[cls] = counts.get(cls, 0) + 1
+            marker = resp.get("Marker")
+            if not isinstance(marker, str) or not marker:
+                break
+    except Exception as e:
+        print(f"[cost] describe_db_instances failed: {e}")
+    return counts
+
+
+def _reservation_coverage(ce, start, end):
+    """Hub-account RDS reservation + Savings Plans coverage %, best-effort.
+    Returns {reservation_pct, savings_plans_pct} (either may be None), or None
+    if BOTH CE calls fail. Never leaks str(e)."""
+    cov = {"reservation_pct": None, "savings_plans_pct": None}
+    got = False
+    try:
+        resp = ce.get_reservation_coverage(
+            TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
+            Filter={"Dimensions": {"Key": "SERVICE",
+                                   "Values": ["Amazon Relational Database Service"]}},
+        )
+        pct = (resp.get("Total") or {}).get("CoverageHours", {}).get("CoverageHoursPercentage")
+        cov["reservation_pct"] = round(float(pct), 1) if pct is not None else None
+        got = True
+    except Exception as e:
+        print(f"[cost] get_reservation_coverage failed: {e}")
+    try:
+        # SP doesn't cover RDS, but the operator may run committed compute
+        # (EC2/Lambda/Fargate) — surfaced account-wide for full context.
+        resp = ce.get_savings_plans_coverage(
+            TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
+        )
+        rows = resp.get("SavingsPlansCoverages") or []
+        pct = rows[0].get("Coverage", {}).get("CoveragePercentage") if rows else None
+        cov["savings_plans_pct"] = round(float(pct), 1) if pct is not None else None
+        got = True
+    except Exception as e:
+        print(f"[cost] get_savings_plans_coverage failed: {e}")
+    return cov if got else None
+
+
+def _savings_plans_list():
+    """Active Savings Plans (best-effort). None when the API/permission/bundled
+    botocore is unavailable — SP is optional context, not a hard dependency."""
+    try:
+        sp = boto3.client("savingsplans", region_name="us-east-1")
+        resp = sp.describe_savings_plans(states=["active"])
+    except Exception as e:
+        print(f"[cost] describe_savings_plans unavailable: {e}")
+        return None
+    return [
+        {
+            "type": p.get("savingsPlanType", ""),
+            "commitment": p.get("commitment", ""),
+            "end": p.get("end", ""),
+        }
+        for p in resp.get("savingsPlans", [])
+    ]
+
+
+def _handle_commitments_view(ce, start, end, days, event=None):
+    """RI/SP posture for the caller's visible Aurora accounts. Envelope:
+    {ris, summary:{total, expiring_30d, unused_estimate}, coverage|null,
+     savings_plans|null, note}."""
+    targets, scan_failed = _aurora_commitment_targets(event)
+
+    ris = []
+    running_by_ar = {}  # (account, region) -> {class: running_count}
+    for t in targets:
+        try:
+            rds = _session_for(t["region"], t["role_arn"]).client("rds")
+        except Exception as e:
+            print(f"[cost] assume/session failed ({t['account']}/{t['region']}): {e}")
+            continue
+        ris.extend(_describe_active_ris(rds, t["account"], t["region"]))
+        running_by_ar[(t["account"], t["region"])] = _running_aurora_counts(rds)
+
+    total = sum(r["count"] for r in ris)
+    expiring_30d = sum(
+        r["count"] for r in ris
+        if r.get("remaining_days") is not None and r["remaining_days"] <= 30
+    )
+    # Coarse unused estimate: per (account, region, class), RI count above the
+    # number of running instances of that class = RIs paying for nothing.
+    ri_by_class = {}
+    for r in ris:
+        key = (r["account"], r["region"], r["instance_class"])
+        ri_by_class[key] = ri_by_class.get(key, 0) + r["count"]
+    unused_estimate = 0
+    for (account, region, cls), ri_ct in ri_by_class.items():
+        running = running_by_ar.get((account, region), {}).get(cls, 0)
+        unused_estimate += max(0, ri_ct - running)
+
+    # RIs with the soonest expiry first so the UI D-day badges lead.
+    ris.sort(key=lambda r: (r["remaining_days"] if r.get("remaining_days") is not None else 10**9))
+
+    if scan_failed:
+        note = "클러스터 레지스트리 조회 실패로 커밋 할인 현황을 표시할 수 없습니다."
+    elif not targets:
+        note = "등록된 Aurora/RDS 클러스터가 없어 조회할 계정이 없습니다."
+    else:
+        note = (
+            "커버/초과/미사용 추정치는 계정·리전·클래스별 실행 중인 인스턴스 수와 "
+            "보유 RI 수량을 비교한 근사치입니다. RI 실효 절감은 계약 조건(선결제·기간)에 "
+            "따라 달라집니다. CE 커버리지는 허브 계정 기준입니다."
+        )
+
+    return _response(200, {
+        "env": _ENV,
+        "view": "commitments",
+        "range_days": days,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "ris": ris,
+        "summary": {
+            "total": total,
+            "expiring_30d": expiring_30d,
+            "unused_estimate": unused_estimate,
+        },
+        "coverage": _reservation_coverage(ce, start, end),
+        "savings_plans": _savings_plans_list(),
+        "note": note,
+    })
+
+
+# ===========================================================================
 # DBOps platform cost path (?view=platform)
 # ---------------------------------------------------------------------------
 # "DBOps 자체를 돌리는 데 얼마 드나" — every CDK-managed resource carries
@@ -539,6 +800,9 @@ def lambda_handler(event, context=None):
     # `?view=elasticache` — ElastiCache 클러스터 비용.
     if view == "elasticache":
         return _handle_elasticache_view(ce, start, end, days, event)
+    # `?view=commitments` — RI/Savings Plan 현황 (RI-aware 비용 분석).
+    if view == "commitments":
+        return _handle_commitments_view(ce, start, end, days, event)
     # `?view=platform` — DBOps 플랫폼 자체 운영비 (Application=DBOps 태그 전체).
     if view == "platform":
         return _handle_platform_view(ce, start, end, days)
