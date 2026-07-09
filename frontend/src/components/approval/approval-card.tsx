@@ -251,16 +251,17 @@ export function ApprovalCard({
       {/* Per-action_type detail renderer */}
       <ActionDetails action={action} details={details} />
 
-      {/* CLI preview — payload-supplied cli_preview wins; for the endpoint
-          actions we RECONSTRUCT it deterministically from action_details so
-          the block never depends on the agent remembering to forward it
-          (request_approval params are LLM-composed). Operators trust what
-          they can read. */}
+      {/* CLI preview. For the endpoint actions the reconstruction from the
+          hash-bound action_details ALWAYS wins — an agent-composed cli_preview
+          could misrepresent what approval actually enforces, so we never trust
+          the payload string for actions we can rebuild deterministically.
+          Other actions fall back to the payload's own cli_preview. */}
       {(() => {
-        const cli =
-          typeof details.cli_preview === "string" && details.cli_preview
+        const cli = ENDPOINT_ACTIONS.includes(action)
+          ? buildEndpointCli(action, details)
+          : typeof details.cli_preview === "string" && details.cli_preview
             ? details.cli_preview
-            : buildEndpointCli(action, details);
+            : null;
         return cli ? <CliPreview cli={cli} /> : null;
       })()}
 
@@ -575,17 +576,38 @@ function MemberRow({ label, members }: { label: string; members: unknown }) {
   return <DetailRow label={label} value={list.join(", ")} mono />;
 }
 
+// Action types whose CLI preview we reconstruct deterministically (and never
+// take from the payload — see the render gate above).
+const ENDPOINT_ACTIONS = [
+  "create_custom_endpoint",
+  "delete_custom_endpoint",
+  "modify_custom_endpoint",
+];
+
+// Shell-quote a value for the copyable command. RDS identifiers are plain
+// (alphanumeric/._:-), so those pass through clean; anything with shell
+// metacharacters gets single-quoted so a malformed/adversarial payload can't
+// produce a command whose shell semantics differ from the AWS arguments.
+function sh(v: string): string {
+  return /^[A-Za-z0-9._:/=-]+$/.test(v) ? v : `'${v.replace(/'/g, `'\\''`)}'`;
+}
+
 // Deterministic CLI reconstruction for the Aurora custom-endpoint actions.
 // request_approval params are composed by the LLM, so cli_preview may be
-// dropped from the stored payload — the card rebuilds the exact command from
-// the hash-bound action_details instead of trusting the agent to forward it.
+// dropped or wrong in the stored payload — the card rebuilds the exact command
+// from the hash-bound action_details instead of trusting the agent.
 function buildEndpointCli(
   action: string,
   d: Record<string, unknown>,
 ): string | null {
   const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   const members = (v: unknown) =>
-    Array.isArray(v) ? v.map((m) => String(m).trim()).filter(Boolean) : [];
+    Array.isArray(v)
+      ? v
+          .map((m) => String(m).trim())
+          .filter(Boolean)
+          .map(sh)
+      : [];
   const eid = s(d.endpoint_identifier);
   if (!eid) return null;
   if (action === "create_custom_endpoint") {
@@ -593,9 +615,9 @@ function buildEndpointCli(
     if (!cid) return null;
     const parts = [
       "aws rds create-db-cluster-endpoint",
-      `--db-cluster-identifier ${cid}`,
-      `--db-cluster-endpoint-identifier ${eid}`,
-      `--endpoint-type ${s(d.endpoint_type).toUpperCase() || "READER"}`,
+      `--db-cluster-identifier ${sh(cid)}`,
+      `--db-cluster-endpoint-identifier ${sh(eid)}`,
+      `--endpoint-type ${sh(s(d.endpoint_type).toUpperCase() || "READER")}`,
     ];
     const st = members(d.static_members);
     const ex = members(d.excluded_members);
@@ -604,12 +626,14 @@ function buildEndpointCli(
     return parts.join(" \\\n  ");
   }
   if (action === "delete_custom_endpoint") {
-    return `aws rds delete-db-cluster-endpoint \\\n  --db-cluster-endpoint-identifier ${eid}`;
+    return `aws rds delete-db-cluster-endpoint \\\n  --db-cluster-endpoint-identifier ${sh(
+      eid,
+    )}`;
   }
   if (action === "modify_custom_endpoint") {
     const parts = [
       "aws rds modify-db-cluster-endpoint",
-      `--db-cluster-endpoint-identifier ${eid}`,
+      `--db-cluster-endpoint-identifier ${sh(eid)}`,
     ];
     const st = members(d.static_members);
     const ex = members(d.excluded_members);
