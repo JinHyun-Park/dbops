@@ -172,3 +172,52 @@ def test_html_failure_does_not_block_json_insert_deliver(monkeypatch):
         if "INSERT INTO reports" in (c.kwargs.get("sql") or "")
     ]
     assert len(insert_calls) >= 1, "INSERT must still execute when HTML render fails"
+
+
+# ---------------------------------------------------------------------------
+# S3 JSON put failure => s3_key stored as NULL (never point a download link at
+# a nonexistent object). Root fix covers BOTH the per-cluster and fleet paths.
+# ---------------------------------------------------------------------------
+
+
+def test_json_put_failure_stores_null_s3_key(monkeypatch):
+    _make_env(monkeypatch)
+
+    mock_rds = _make_rds_client()
+    mock_bedrock = _make_bedrock_client()
+    mock_s3 = MagicMock()
+    mock_s3.put_object.side_effect = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": "denied"}}, "PutObject"
+    )
+
+    def _boto3_client(service, **kwargs):
+        if service == "s3":
+            return mock_s3
+        if service == "rds-data":
+            return mock_rds
+        if service == "bedrock-runtime":
+            return mock_bedrock
+        return MagicMock()
+
+    with patch.object(_handler, "boto3") as mock_boto3, \
+         patch.object(_handler, "get_config", return_value={}):
+        mock_boto3.client.side_effect = _boto3_client
+        result = _handler.lambda_handler({}, {})
+
+    assert result["statusCode"] == 200  # put failure must not crash the run
+
+    inserts = [
+        c for c in mock_rds.execute_statement.call_args_list
+        if "INSERT INTO reports" in (c.kwargs.get("sql") or "")
+    ]
+    s3_key_by_cid = {}
+    for c in inserts:
+        params = {p["name"]: p["value"] for p in c.kwargs.get("parameters", [])}
+        s3_key_by_cid[params["cid"]["stringValue"]] = params["s3_key"]
+
+    # per-cluster row
+    assert s3_key_by_cid["prod-pg-1"] == {"isNull": True}, \
+        "per-cluster s3_key must be NULL when the JSON put fails"
+    # fleet rollup row
+    assert s3_key_by_cid["*"] == {"isNull": True}, \
+        "fleet s3_key must be NULL when the JSON put fails"
