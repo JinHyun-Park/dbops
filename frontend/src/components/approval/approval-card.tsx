@@ -251,12 +251,18 @@ export function ApprovalCard({
       {/* Per-action_type detail renderer */}
       <ActionDetails action={action} details={details} />
 
-      {/* Generic CLI preview — any action_type whose payload carries a
-          cli_preview shows the exact equivalent command. Operators trust what
+      {/* CLI preview — payload-supplied cli_preview wins; for the endpoint
+          actions we RECONSTRUCT it deterministically from action_details so
+          the block never depends on the agent remembering to forward it
+          (request_approval params are LLM-composed). Operators trust what
           they can read. */}
-      {typeof details.cli_preview === "string" && details.cli_preview && (
-        <CliPreview cli={details.cli_preview} />
-      )}
+      {(() => {
+        const cli =
+          typeof details.cli_preview === "string" && details.cli_preview
+            ? details.cli_preview
+            : buildEndpointCli(action, details);
+        return cli ? <CliPreview cli={cli} /> : null;
+      })()}
 
       {/* 리스크·고려사항 — 승인 결정에 필요한 컨텍스트를 카드 안에서 바로
           제공한다. 기본 접힘(공간 절약), 클릭 시 펼침. */}
@@ -567,6 +573,51 @@ function MemberRow({ label, members }: { label: string; members: unknown }) {
   const list = Array.isArray(members) ? members.map(String) : [];
   if (list.length === 0) return null;
   return <DetailRow label={label} value={list.join(", ")} mono />;
+}
+
+// Deterministic CLI reconstruction for the Aurora custom-endpoint actions.
+// request_approval params are composed by the LLM, so cli_preview may be
+// dropped from the stored payload — the card rebuilds the exact command from
+// the hash-bound action_details instead of trusting the agent to forward it.
+function buildEndpointCli(
+  action: string,
+  d: Record<string, unknown>,
+): string | null {
+  const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const members = (v: unknown) =>
+    Array.isArray(v) ? v.map((m) => String(m).trim()).filter(Boolean) : [];
+  const eid = s(d.endpoint_identifier);
+  if (!eid) return null;
+  if (action === "create_custom_endpoint") {
+    const cid = s(d.cluster_id);
+    if (!cid) return null;
+    const parts = [
+      "aws rds create-db-cluster-endpoint",
+      `--db-cluster-identifier ${cid}`,
+      `--db-cluster-endpoint-identifier ${eid}`,
+      `--endpoint-type ${s(d.endpoint_type).toUpperCase() || "READER"}`,
+    ];
+    const st = members(d.static_members);
+    const ex = members(d.excluded_members);
+    if (st.length) parts.push(`--static-members ${st.join(" ")}`);
+    if (ex.length) parts.push(`--excluded-members ${ex.join(" ")}`);
+    return parts.join(" \\\n  ");
+  }
+  if (action === "delete_custom_endpoint") {
+    return `aws rds delete-db-cluster-endpoint \\\n  --db-cluster-endpoint-identifier ${eid}`;
+  }
+  if (action === "modify_custom_endpoint") {
+    const parts = [
+      "aws rds modify-db-cluster-endpoint",
+      `--db-cluster-endpoint-identifier ${eid}`,
+    ];
+    const st = members(d.static_members);
+    const ex = members(d.excluded_members);
+    if (st.length) parts.push(`--static-members ${st.join(" ")}`);
+    if (ex.length) parts.push(`--excluded-members ${ex.join(" ")}`);
+    return parts.join(" \\\n  ");
+  }
+  return null;
 }
 
 function CliPreview({ cli }: { cli: string }) {
