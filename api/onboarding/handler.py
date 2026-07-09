@@ -26,6 +26,9 @@ WRITE_ACTIONS = [
     "rds:ModifyDBParameterGroup", "rds:ModifyDBClusterParameterGroup",
     "rds:CreateDBClusterSnapshot", "rds:CreateDBSnapshot",
     "rds:RebootDBInstance", "rds:ApplyPendingMaintenanceAction",
+    # Aurora custom cluster endpoints (P2-⑤) — approval-gated in tool code.
+    # DescribeDBClusterEndpoints is already covered by rds:Describe* (READ_ACTIONS).
+    "rds:CreateDBClusterEndpoint", "rds:DeleteDBClusterEndpoint", "rds:ModifyDBClusterEndpoint",
     "dynamodb:UpdateTable", "dynamodb:UpdateContinuousBackups", "dynamodb:UpdateTimeToLive",
 ]
 # secretsmanager is resource-scoped (dbops/* only), kept as its own statement.

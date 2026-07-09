@@ -2129,6 +2129,41 @@ export async function fetchBackups(
   return res.json();
 }
 
+// Cluster endpoints panel (P2-⑤): built-in writer/reader + custom endpoints.
+export interface ClusterEndpoint {
+  identifier: string | null;
+  type: string | null; // WRITER | READER | CUSTOM
+  custom_type: string | null; // READER | ANY (custom only)
+  status: string | null;
+  endpoint: string | null;
+  static_members: string[];
+  excluded_members: string[];
+}
+
+export interface EndpointsResponse {
+  cluster_id: string;
+  engine?: string;
+  custom_count?: number;
+  endpoints: ClusterEndpoint[];
+  checked_at?: number;
+  error?: string;
+  info?: boolean;
+  not_applicable?: boolean;
+  engine_family?: string;
+  registry_unavailable?: boolean;
+}
+
+// Rides the base dashboard route via ?view=endpoints (no dedicated route).
+export async function fetchEndpoints(
+  clusterId: string,
+): Promise<EndpointsResponse> {
+  const res = await authedFetch(
+    await api(`/api/dashboard/${enc(clusterId)}?view=endpoints`),
+  );
+  if (!res.ok) throw new Error(`엔드포인트 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
 export interface CreateSnapshotResponse {
   ok: boolean;
   cluster_id: string;

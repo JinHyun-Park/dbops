@@ -1,13 +1,28 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchClusterSettings } from "@/lib/api-client";
+import { authedFetch, apiUrl, fetchClusterSettings } from "@/lib/api-client";
 
 interface Setting {
   name: string;
   value: string;
   unit: string;
   updated_at: string;
+}
+
+interface ParamDiffRow {
+  name: string;
+  current: string;
+  default: string | null;
+  source: string;
+  apply_type: string;
+}
+
+interface ParamDiffResponse {
+  available: boolean;
+  not_applicable?: boolean;
+  diffs?: ParamDiffRow[];
+  diff_count?: number;
 }
 
 type Rec = { value: string; why: string; severity: "warning" | "info" };
@@ -164,6 +179,43 @@ export function SettingsPanel({
       .finally(() => !cancelled && setLoading(false));
   }, [clusterId]);
 
+  // 디폴트 대비 변경 — 별도 sub-view. 백엔드가 이미 diff만 반환하므로 별도
+  // "전체/변경만" 토글은 불필요(rung 1: 존재할 필요 없는 기능은 생략) —
+  // 접이식 블록 하나로 충분하다.
+  const [diffOpen, setDiffOpen] = useState(true);
+  const [diffLoading, setDiffLoading] = useState(true);
+  const [diffAvailable, setDiffAvailable] = useState(false);
+  const [diffs, setDiffs] = useState<ParamDiffRow[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDiffLoading(true);
+    (async () => {
+      try {
+        const res = await authedFetch(
+          await apiUrl(
+            `/api/dashboard/${encodeURIComponent(clusterId)}/param-diff`,
+          ),
+        );
+        if (!res.ok) throw new Error(String(res.status));
+        const d: ParamDiffResponse = await res.json();
+        if (cancelled) return;
+        setDiffAvailable(!!d.available);
+        setDiffs(d.available ? d.diffs || [] : []);
+      } catch {
+        if (!cancelled) {
+          setDiffAvailable(false);
+          setDiffs([]);
+        }
+      } finally {
+        if (!cancelled) setDiffLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clusterId]);
+
   const engineLabel = (engine || "").includes("mysql")
     ? "MySQL"
     : (engine || "").includes("postgresql")
@@ -248,6 +300,67 @@ export function SettingsPanel({
           })}
         </div>
       )}
+
+      <div className="mt-4 pt-3 border-t border-zinc-800">
+        <button
+          type="button"
+          onClick={() => setDiffOpen((o) => !o)}
+          className="text-sm text-zinc-200 font-medium flex items-center gap-1.5"
+        >
+          <span className="text-zinc-500">{diffOpen ? "▾" : "▸"}</span>
+          디폴트 대비 변경{diffAvailable ? ` (${diffs.length})` : ""}
+        </button>
+        {diffOpen && (
+          <div className="mt-2">
+            {diffLoading ? (
+              <div className="text-zinc-500 text-sm">불러오는 중…</div>
+            ) : !diffAvailable ? (
+              <div className="text-zinc-500 text-sm">디폴트 비교 미조회</div>
+            ) : diffs.length === 0 ? (
+              <div className="text-zinc-500 text-sm">디폴트와 동일합니다</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-[11px] text-zinc-500 text-left">
+                      <th className="font-normal pb-1.5 pr-3">파라미터</th>
+                      <th className="font-normal pb-1.5 pr-3">현재값</th>
+                      <th className="font-normal pb-1.5 pr-3">디폴트값</th>
+                      <th className="font-normal pb-1.5">적용</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {diffs.map((d) => (
+                      <tr key={d.name} className="border-t border-zinc-800/60">
+                        <td className="py-1.5 pr-3 font-mono text-zinc-300 text-xs">
+                          {d.name}
+                        </td>
+                        <td className="py-1.5 pr-3 font-mono text-zinc-100 text-xs">
+                          {d.current}
+                        </td>
+                        <td className="py-1.5 pr-3 font-mono text-zinc-500 text-xs">
+                          {d.default ?? "—"}
+                        </td>
+                        <td className="py-1.5">
+                          <span
+                            className={`text-[9px] uppercase tracking-wider px-1 py-0.5 rounded border ${
+                              d.apply_type === "static"
+                                ? "border-amber-500/40 text-amber-300"
+                                : "border-zinc-700 text-zinc-400"
+                            }`}
+                          >
+                            {d.apply_type || "unknown"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

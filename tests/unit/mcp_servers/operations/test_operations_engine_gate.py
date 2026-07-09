@@ -179,3 +179,51 @@ def test_gate_elasticache_family_passes_to_impl():
         result = _invoke("elasticache_live_read", {"cluster_id": "ec-redis-1"})
     assert result["status"] == "ok"
     spy.assert_called_once()
+
+
+# ===== Aurora custom-endpoint tools — RELATIONAL-only positive gate (P2-⑤) =====
+
+
+def test_gate_custom_endpoint_wrong_engine_refused():
+    """create_custom_endpoint on a DynamoDB cluster (no custom_endpoint cap) →
+    unsupported_engine, impl never invoked even with a valid-looking approval."""
+    spy = MagicMock()
+    with _patch_family("dynamodb"), patch.dict(
+        handler.TOOLS["create_custom_endpoint"], {"impl": spy}
+    ):
+        result = _invoke(
+            "create_custom_endpoint",
+            {"cluster_id": "ddb-abc", "endpoint_identifier": "ep-x",
+             "approved": True, "approval_id": "x"},
+        )
+    assert result["status"] == "unsupported_engine"
+    spy.assert_not_called()
+
+
+def test_gate_custom_endpoint_none_family_fail_closed():
+    """delete_custom_endpoint on an unresolvable cluster → unsupported_engine."""
+    spy = MagicMock()
+    with _patch_family(None), patch.dict(
+        handler.TOOLS["delete_custom_endpoint"], {"impl": spy}
+    ):
+        result = _invoke(
+            "delete_custom_endpoint",
+            {"cluster_id": "ghost", "endpoint_identifier": "ep-x"},
+        )
+    assert result["status"] == "unsupported_engine"
+    assert "could not be resolved" in result["reason"]
+    spy.assert_not_called()
+
+
+def test_gate_custom_endpoint_relational_passes_to_impl():
+    """A resolved relational family passes the gate and the impl runs."""
+    spy = MagicMock(return_value={"status": "approval_required"})
+    with _patch_family("relational"), patch.dict(
+        handler.TOOLS["modify_custom_endpoint"], {"impl": spy}
+    ):
+        result = _invoke(
+            "modify_custom_endpoint",
+            {"cluster_id": "prod-pg-1", "endpoint_identifier": "ep-x", "static_members": ["i-1"]},
+        )
+    assert result["status"] == "approval_required"
+    spy.assert_called_once()

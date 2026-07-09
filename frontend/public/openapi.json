@@ -1726,6 +1726,35 @@
         ]
       }
     },
+    "/api/dashboard/{cluster_id}/param-diff": {
+      "get": {
+        "tags": ["dashboard"],
+        "summary": "GET /api/dashboard/{cluster_id}/param-diff",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
     "/api/dashboard/{cluster_id}/query-detail": {
       "get": {
         "tags": ["dashboard"],

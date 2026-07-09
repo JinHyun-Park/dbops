@@ -28,6 +28,7 @@ import { ChangeImpactPanel } from "@/components/dashboard/change-impact-panel";
 import { LogInsightsPanel } from "@/components/dashboard/log-insights-panel";
 import { TableSizesPanel } from "@/components/dashboard/table-sizes-panel";
 import { BackupPanel } from "@/components/dashboard/backup-panel";
+import { EndpointsPanel } from "@/components/dashboard/endpoints-panel";
 import { EngineConfigPanel } from "@/components/dashboard/engine-config-panel";
 import { CapacityForecastPanel } from "@/components/dashboard/capacity-forecast-panel";
 import { DataApiBanner } from "@/components/dashboard/data-api-banner";
@@ -1017,6 +1018,7 @@ export default function DashboardPage() {
                       />
                     )}
                     <BackupPanel clusterId={selectedCluster} />
+                    <EndpointsPanel clusterId={selectedCluster} />
                   </>
                 )}
                 {(fam === "dynamodb" || fam === "documentdb") && (

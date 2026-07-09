@@ -132,6 +132,24 @@ def _project(action_type: str, details: dict) -> dict:
             "restore_to_time": str(d.get("restore_to_time") or "").strip(),
             "use_latest": bool(d.get("use_latest")),
         }
+    # ===== Aurora custom cluster endpoints (P2-⑤) =====
+    # Member lists are an unordered SET (AWS ignores order), so sort before
+    # hashing — the agent may echo them in any order across request/execute.
+    if action_type == "create_custom_endpoint":
+        return {
+            "endpoint_identifier": str(d.get("endpoint_identifier") or "").strip(),
+            "endpoint_type": str(d.get("endpoint_type") or "").strip().upper(),
+            "static_members": sorted(str(m).strip() for m in (d.get("static_members") or []) if str(m).strip()),
+            "excluded_members": sorted(str(m).strip() for m in (d.get("excluded_members") or []) if str(m).strip()),
+        }
+    if action_type == "delete_custom_endpoint":
+        return {"endpoint_identifier": str(d.get("endpoint_identifier") or "").strip()}
+    if action_type == "modify_custom_endpoint":
+        return {
+            "endpoint_identifier": str(d.get("endpoint_identifier") or "").strip(),
+            "static_members": sorted(str(m).strip() for m in (d.get("static_members") or []) if str(m).strip()),
+            "excluded_members": sorted(str(m).strip() for m in (d.get("excluded_members") or []) if str(m).strip()),
+        }
     # ===== NoSQL write tools (multi-engine #P3.6 Group C) =====
     if action_type == "modify_dynamodb_capacity":
         # Bind the table target explicitly (fix #1 — no user-controllable target

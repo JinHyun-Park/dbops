@@ -60,6 +60,11 @@ const ACTION_RISK: Record<string, string> = {
   modify_dynamodb_capacity: "medium",
   modify_dynamodb_ttl: "medium",
   enable_dynamodb_pitr: "medium",
+  // Aurora custom endpoints. Create/modify are routing changes (medium);
+  // delete removes a DNS name clients may point at → high.
+  create_custom_endpoint: "medium",
+  modify_custom_endpoint: "medium",
+  delete_custom_endpoint: "high",
   other: "medium",
 };
 
@@ -178,6 +183,37 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
       "다운타임 없음 — 백업 설정 변경만",
     ],
   },
+  create_custom_endpoint: {
+    what: "Aurora 커스텀 클러스터 엔드포인트를 생성합니다 (선택한 리더 집합을 가리키는 안정적 DNS).",
+    risks: [
+      "잘못된 멤버 구성은 트래픽을 의도치 않은 인스턴스로 보낼 수 있습니다.",
+      "writer/reader 내장 엔드포인트는 건드리지 않습니다 (커스텀만 생성).",
+    ],
+    considerations: [
+      "static_members(포함) / excluded_members(제외)는 하나만 사용",
+      "endpoint_type은 READER 또는 ANY (WRITER 불가)",
+    ],
+  },
+  modify_custom_endpoint: {
+    what: "기존 커스텀 엔드포인트의 멤버 목록(StaticMembers/ExcludedMembers)을 변경합니다.",
+    risks: [
+      "멤버 변경은 이 엔드포인트로 가는 신규 커넥션의 라우팅을 즉시 바꿉니다.",
+    ],
+    considerations: [
+      "대상이 CUSTOM 엔드포인트인지 확인 (내장 엔드포인트는 보호됨)",
+      "변경 후 애플리케이션 커넥션 분포 확인",
+    ],
+  },
+  delete_custom_endpoint: {
+    what: "CUSTOM 클러스터 엔드포인트를 삭제합니다.",
+    risks: [
+      "이 DNS 이름을 사용하는 클라이언트는 연결이 끊깁니다 — 사용처 확인 필수.",
+      "내장 writer/reader 엔드포인트는 이 도구로 삭제할 수 없습니다.",
+    ],
+    considerations: [
+      "삭제 대상 엔드포인트를 참조하는 앱/커넥션 문자열이 없는지 확인",
+    ],
+  },
 };
 
 export function ApprovalCard({
@@ -214,6 +250,13 @@ export function ApprovalCard({
 
       {/* Per-action_type detail renderer */}
       <ActionDetails action={action} details={details} />
+
+      {/* Generic CLI preview — any action_type whose payload carries a
+          cli_preview shows the exact equivalent command. Operators trust what
+          they can read. */}
+      {typeof details.cli_preview === "string" && details.cli_preview && (
+        <CliPreview cli={details.cli_preview} />
+      )}
 
       {/* 리스크·고려사항 — 승인 결정에 필요한 컨텍스트를 카드 안에서 바로
           제공한다. 기본 접힘(공간 절약), 클릭 시 펼침. */}
@@ -460,11 +503,101 @@ function ActionDetails({
     );
   }
 
-  // Fallback: pretty-print whatever JSON was sent.
+  if (action === "create_custom_endpoint") {
+    return (
+      <div className="text-sm text-zinc-100 space-y-1.5">
+        <DetailRow
+          label="endpoint"
+          value={String(details.endpoint_identifier ?? "")}
+          mono
+        />
+        <DetailRow
+          label="type"
+          value={String(details.endpoint_type ?? "READER")}
+        />
+        <MemberRow label="static" members={details.static_members} />
+        <MemberRow label="excluded" members={details.excluded_members} />
+      </div>
+    );
+  }
+
+  if (action === "modify_custom_endpoint") {
+    return (
+      <div className="text-sm text-zinc-100 space-y-1.5">
+        <DetailRow
+          label="endpoint"
+          value={String(details.endpoint_identifier ?? "")}
+          mono
+        />
+        <MemberRow label="static" members={details.static_members} />
+        <MemberRow label="excluded" members={details.excluded_members} />
+      </div>
+    );
+  }
+
+  if (action === "delete_custom_endpoint") {
+    return (
+      <div className="text-sm text-zinc-100 space-y-1.5">
+        <DetailRow
+          label="endpoint"
+          value={String(details.endpoint_identifier ?? "")}
+          mono
+        />
+        <div className="text-[11px] text-rose-300/90">
+          ⚠ 이 커스텀 엔드포인트를 삭제합니다. 이 DNS 이름을 참조하는
+          클라이언트는 연결이 끊깁니다. writer/reader 내장 엔드포인트는 영향받지
+          않습니다.
+        </div>
+      </div>
+    );
+  }
+
+  // Fallback: pretty-print whatever JSON was sent (minus cli_preview, which
+  // the generic CliPreview block already renders).
+  const rest = { ...details };
+  delete rest.cli_preview;
   return (
     <pre className="bg-zinc-950 border border-zinc-800 p-3 text-[11px] text-zinc-300 font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
-      {JSON.stringify(details, null, 2)}
+      {JSON.stringify(rest, null, 2)}
     </pre>
+  );
+}
+
+function MemberRow({ label, members }: { label: string; members: unknown }) {
+  const list = Array.isArray(members) ? members.map(String) : [];
+  if (list.length === 0) return null;
+  return <DetailRow label={label} value={list.join(", ")} mono />;
+}
+
+function CliPreview({ cli }: { cli: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(cli);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard unavailable (insecure context) — the block is still
+      // selectable, so this is a nice-to-have, not a requirement.
+    }
+  };
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+          실행될 CLI (동등 명령)
+        </span>
+        <button
+          onClick={copy}
+          className="text-[10px] px-1.5 py-0.5 border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
+        >
+          {copied ? "복사됨" : "복사"}
+        </button>
+      </div>
+      <pre className="bg-zinc-950 border border-zinc-800 p-3 text-[11px] text-emerald-200/90 font-mono whitespace-pre-wrap break-all max-h-32 overflow-y-auto">
+        {cli}
+      </pre>
+    </div>
   );
 }
 

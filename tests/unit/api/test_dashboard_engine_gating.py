@@ -1134,3 +1134,95 @@ def test_engine_config_elasticache_not_found_is_friendly(monkeypatch):
     assert result.get("info") is True
     assert "NotFoundFault" not in result.get("error", "")
     assert "구성" in result.get("error", "")
+
+
+# ===========================================================================
+# 11. _endpoints — custom cluster endpoints panel (read-only, relational-only)
+# ===========================================================================
+
+def test_endpoints_relational_lists_builtin_and_custom(monkeypatch):
+    """_endpoints for an aurora cluster returns writer/reader built-ins + custom
+    endpoints (writer/reader first), via a single DescribeDBClusterEndpoints."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "aurora-postgresql")
+
+    mock_rds = MagicMock()
+    mock_rds.describe_db_cluster_endpoints.return_value = {
+        "DBClusterEndpoints": [
+            {"DBClusterEndpointIdentifier": "ep-analytics", "EndpointType": "CUSTOM",
+             "CustomEndpointType": "READER", "Status": "available",
+             "Endpoint": "ep-analytics.x.rds.amazonaws.com",
+             "StaticMembers": ["prod-pg-2"], "ExcludedMembers": []},
+            {"DBClusterEndpointIdentifier": "prod-pg", "EndpointType": "WRITER",
+             "Status": "available", "Endpoint": "prod-pg.cluster-x.rds.amazonaws.com"},
+            {"DBClusterEndpointIdentifier": "prod-pg-ro", "EndpointType": "READER",
+             "Status": "available", "Endpoint": "prod-pg.cluster-ro-x.rds.amazonaws.com"},
+        ]
+    }
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_rds
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._endpoints("prod-pg")
+
+    assert result.get("not_applicable") is not True
+    assert result["custom_count"] == 1
+    # writer, reader, then custom
+    assert [e["type"] for e in result["endpoints"]] == ["WRITER", "READER", "CUSTOM"]
+    custom = result["endpoints"][2]
+    assert custom["identifier"] == "ep-analytics"
+    assert custom["custom_type"] == "READER"
+    assert custom["static_members"] == ["prod-pg-2"]
+    mock_rds.describe_db_cluster_endpoints.assert_called_once()
+
+
+def test_endpoints_dynamodb_not_applicable_no_rds(monkeypatch):
+    """_endpoints for a non-relational cluster returns not_applicable without an
+    RDS call (relational-only panel)."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
+
+    mock_rds = MagicMock()
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_rds
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._endpoints("ddb-abc123")
+
+    assert result.get("not_applicable") is True
+    assert result.get("engine_family") == "dynamodb"
+    mock_rds.describe_db_cluster_endpoints.assert_not_called()
+
+
+def test_endpoints_registry_unavailable_fail_closed(monkeypatch):
+    """When _registry_engine returns None, _endpoints must fail closed."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: None)
+
+    mock_rds = MagicMock()
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_rds
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._endpoints("some-cluster")
+
+    assert result.get("not_applicable") is True
+    assert result.get("registry_unavailable") is True
+    mock_rds.describe_db_cluster_endpoints.assert_not_called()
+
+
+def test_endpoints_not_found_is_friendly(monkeypatch):
+    """A demo/unregistered cluster (DBClusterNotFoundFault) returns a friendly
+    info notice, not a raw boto fault."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "aurora-mysql")
+
+    mock_rds = MagicMock()
+    mock_rds.describe_db_cluster_endpoints.side_effect = Exception(
+        "DBClusterNotFoundFault: not found"
+    )
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_rds
+    monkeypatch.setattr(handler, "_cluster_session", lambda cid="", row=None: mock_session)
+
+    result = handler._endpoints("demo-cluster")
+
+    assert result.get("info") is True
+    assert result["endpoints"] == []
+    assert "NotFoundFault" not in result.get("error", "")

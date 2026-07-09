@@ -2952,6 +2952,70 @@ def _backups(cluster_id: str) -> dict:
     }
 
 
+def _endpoints(cluster_id: str) -> dict:
+    """Cluster endpoints inventory (read-only): built-in writer/reader + any
+    custom endpoints, with type/status/members. Aurora (relational) only.
+
+    Same live-describe + cross-account + friendly-fallback contract as _backups.
+    A single DescribeDBClusterEndpoints call returns every endpoint inline, so
+    there is no pagination loop.
+    """
+    from datetime import datetime, timezone
+
+    eng = _registry_engine(cluster_id)
+    if eng is None:
+        return {"cluster_id": cluster_id, "not_applicable": True, "registry_unavailable": True,
+                "endpoints": []}
+    fam = engine_family(eng)
+    if fam != "relational":
+        return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": fam, "endpoints": []}
+
+    rds = _cluster_session(cluster_id).client("rds")
+    not_real = {
+        "cluster_id": cluster_id,
+        "error": (
+            "이 클러스터의 엔드포인트 정보를 조회할 수 없습니다 — 데모(합성) "
+            "클러스터이거나 실제 Aurora로 등록되지 않았습니다."
+        ),
+        "info": True,
+        "endpoints": [],
+    }
+    try:
+        resp = rds.describe_db_cluster_endpoints(DBClusterIdentifier=cluster_id)
+    except Exception as e:
+        msg = str(e)
+        if "DBClusterNotFoundFault" in msg or "not found" in msg.lower():
+            return not_real
+        print(f"[endpoints] describe failed for {cluster_id}: {e}")
+        return {
+            "cluster_id": cluster_id,
+            "error": "엔드포인트 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
+            "endpoints": [],
+        }
+
+    endpoints = []
+    for ep in resp.get("DBClusterEndpoints", []):
+        endpoints.append({
+            "identifier": ep.get("DBClusterEndpointIdentifier"),
+            "type": ep.get("EndpointType"),            # WRITER | READER | CUSTOM
+            "custom_type": ep.get("CustomEndpointType"),  # READER | ANY (custom only)
+            "status": ep.get("Status"),
+            "endpoint": ep.get("Endpoint"),
+            "static_members": ep.get("StaticMembers") or [],
+            "excluded_members": ep.get("ExcludedMembers") or [],
+        })
+    # Built-in writer/reader first, then custom — a stable, readable order.
+    _rank = {"WRITER": 0, "READER": 1, "CUSTOM": 2}
+    endpoints.sort(key=lambda e: (_rank.get((e.get("type") or "").upper(), 3), e.get("identifier") or ""))
+    return {
+        "cluster_id": cluster_id,
+        "engine": eng,
+        "custom_count": sum(1 for e in endpoints if (e.get("type") or "").upper() == "CUSTOM"),
+        "endpoints": endpoints,
+        "checked_at": int(datetime.now(timezone.utc).timestamp() * 1000),
+    }
+
+
 def _engine_config_docdb(cluster_id: str) -> dict:
     """DocumentDB engine-level config (read-only). Surfaces cluster settings
     the DocDB overview panel does NOT already show (engine/version are shown
@@ -3241,6 +3305,106 @@ def _engine_config(cluster_id: str) -> dict:
         return _engine_config_elasticache(cluster_id)
     # relational already has the SettingsPanel — nothing engine-config-specific here.
     return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": fam}
+
+
+def _param_diff(cluster_id: str) -> dict:
+    """Diff a relational cluster's LIVE parameter group against the AWS engine
+    default for its family — surfaces only what an operator (or a prior
+    tuning pass) actually changed, instead of scrolling ~500 parameters.
+
+    Relational only — DocumentDB/DynamoDB/ElastiCache have their own config
+    surface via _engine_config. Two fully-paginated cross-account describes
+    (current values + the ~500-param engine-default catalog), so this is
+    always called through _cached_live with a multi-minute TTL — never
+    per-render. Same friendly-fallback contract as _topology/_backups: never
+    leak the raw boto3 fault string, `available: false` on any failure.
+    """
+    eng = _registry_engine(cluster_id)
+    if eng is None:
+        return {"cluster_id": cluster_id, "available": False, "registry_unavailable": True, "diffs": []}
+    fam = engine_family(eng)
+    if fam != "relational":
+        return {"cluster_id": cluster_id, "available": False, "not_applicable": True,
+                "engine_family": fam, "diffs": []}
+
+    rds = _cluster_session(cluster_id).client("rds")
+    try:
+        cl_resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
+        clusters = cl_resp.get("DBClusters") or []
+        pg_name = clusters[0].get("DBClusterParameterGroup") if clusters else None
+        if not pg_name:
+            return {"cluster_id": cluster_id, "available": False, "diffs": []}
+
+        fam_resp = rds.describe_db_cluster_parameter_groups(DBClusterParameterGroupName=pg_name)
+        groups = fam_resp.get("DBClusterParameterGroups") or []
+        family = groups[0].get("DBParameterGroupFamily") if groups else None
+        if not family:
+            return {"cluster_id": cluster_id, "available": False, "parameter_group": pg_name, "diffs": []}
+
+        # Current values — no Source filter (AWS docs: Filters isn't actually
+        # honored by this action), so pull the full group and diff in-memory.
+        current = []
+        marker = None
+        while True:
+            kwargs = {"DBClusterParameterGroupName": pg_name}
+            if marker:
+                kwargs["Marker"] = marker
+            resp = rds.describe_db_cluster_parameters(**kwargs)
+            current.extend(resp.get("Parameters") or [])
+            marker = resp.get("Marker")
+            # Real boto Markers are non-empty strings; anything else (or a
+            # MagicMock in tests) terminates the loop instead of hanging.
+            if not isinstance(marker, str) or not marker:
+                break
+
+        # Engine defaults nest one level under "EngineDefaults", Marker included.
+        defaults = {}
+        marker = None
+        while True:
+            kwargs = {"DBParameterGroupFamily": family}
+            if marker:
+                kwargs["Marker"] = marker
+            resp = rds.describe_engine_default_cluster_parameters(**kwargs)
+            eng_defaults = resp.get("EngineDefaults") or {}
+            for p in eng_defaults.get("Parameters") or []:
+                name = p.get("ParameterName")
+                if name:
+                    defaults[name] = p.get("ParameterValue", "")
+            marker = eng_defaults.get("Marker")
+            if not isinstance(marker, str) or not marker:
+                break
+
+        diffs = []
+        for p in current:
+            name = p.get("ParameterName")
+            cur_val = p.get("ParameterValue", "")
+            if not name or cur_val == "":
+                continue  # unset — already tracking the engine default
+            default_val = defaults.get(name, "")
+            if cur_val == default_val:
+                continue
+            diffs.append({
+                "name": name,
+                "current": cur_val,
+                "default": default_val or None,
+                "source": p.get("Source", ""),
+                "apply_type": (p.get("ApplyType") or "").lower(),
+            })
+        diffs.sort(key=lambda d: d["name"])
+
+        return {
+            "cluster_id": cluster_id,
+            "available": True,
+            "parameter_group": pg_name,
+            "family": family,
+            "total_params": len(current),
+            "diff_count": len(diffs),
+            "diffs": diffs,
+            "checked_at": int(time.time() * 1000),
+        }
+    except Exception as e:
+        print(f"[param-diff] failed for {cluster_id}: {e}")
+        return {"cluster_id": cluster_id, "available": False, "diffs": []}
 
 
 def _slo(
@@ -3549,6 +3713,15 @@ def lambda_handler(event, context):
     to_iso = (qs.get("to") or "").strip() or None
 
     try:
+        # Custom endpoints panel (P2-⑤) rides the base dashboard route via a
+        # ?view=endpoints sub-view param — no new API route to register/regen.
+        # Same live-describe throttle cache as topology/backups (25s server TTL).
+        if qs.get("view") == "endpoints":
+            return _response(
+                200,
+                _cached_live(f"endpoints:{cluster_id}", 25, lambda: _endpoints(cluster_id)),
+                max_age=30,
+            )
         if raw_path.endswith("/timeseries"):
             metric_type = qs.get("metric", "aas")
             hours = _parse_int(qs.get("hours"), 1)
@@ -3705,6 +3878,18 @@ def lambda_handler(event, context):
             return _response(
                 200,
                 _cached_live(f"engine-config:{cluster_id}", 55, lambda: _engine_config(cluster_id)),
+                max_age=60,
+            )
+        if raw_path.endswith("/param-diff"):
+            # 55s cache — same class as engine-config/backups: the ~500-param
+            # engine-default catalog is static per family, and current values
+            # only move through the approval-gated modify_parameter tool, so
+            # minute-grained staleness is fine. Server TTL (55s) caps the
+            # cross-account DescribeDBCluster*Parameters burst across
+            # concurrent pollers (two fully-paginated describes per miss).
+            return _response(
+                200,
+                _cached_live(f"param-diff:{cluster_id}", 55, lambda: _param_diff(cluster_id)),
                 max_age=60,
             )
         if raw_path.endswith("/slo"):

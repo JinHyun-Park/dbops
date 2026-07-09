@@ -38,6 +38,10 @@ def engine_family(engine):
 CAPABILITIES = {
     RELATIONAL: {
         "sql": True, "rds_meta": True, "perf_insights": True, "simulation": True,
+        # custom_endpoint: Aurora custom cluster endpoints (P2-⑤) are relational-
+        # only; the operations handler positive-gates the create/delete/modify
+        # tools on this key so non-relational engines get unsupported_engine.
+        "custom_endpoint": True,
         "cw_namespace": "AWS/RDS",
         "findings": {"health", "cost", "param_fitness", "capacity_forecast"},
     },

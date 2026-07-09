@@ -139,6 +139,27 @@ def operations_schema():
                "snapshot_id": "string", "restore_to_time": "string", "use_latest": "boolean",
                "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "new_cluster_id"]),
+        # Aurora custom cluster endpoints (P2-⑤). Approval-gated writes; each
+        # exposes approved/approval_id and returns cli_preview (the exact aws rds
+        # command) for the approval card. Every handler param must appear here or
+        # the impl<->schema parity test fails.
+        _tool("create_custom_endpoint",
+              "Aurora only: create a custom DB cluster endpoint (READER or ANY) routing a subset of readers; requires approval. Returns cli_preview",
+              {"cluster_id": "string", "endpoint_identifier": "string", "endpoint_type": "string",
+               "static_members": "array", "excluded_members": "array",
+               "approved": "boolean", "approval_id": "string"},
+              ["cluster_id", "endpoint_identifier"]),
+        _tool("delete_custom_endpoint",
+              "Aurora only: delete a CUSTOM DB cluster endpoint (built-in writer/reader are protected); requires approval. Returns cli_preview",
+              {"cluster_id": "string", "endpoint_identifier": "string",
+               "approved": "boolean", "approval_id": "string"},
+              ["cluster_id", "endpoint_identifier"]),
+        _tool("modify_custom_endpoint",
+              "Aurora only: change StaticMembers or ExcludedMembers of a CUSTOM DB cluster endpoint (mutually exclusive, one required); requires approval. Returns cli_preview",
+              {"cluster_id": "string", "endpoint_identifier": "string",
+               "static_members": "array", "excluded_members": "array",
+               "approved": "boolean", "approval_id": "string"},
+              ["cluster_id", "endpoint_identifier"]),
         # NoSQL write/remediation (multi-engine #P3.6 Group C). The 3 DynamoDB
         # tools + the 2 DocDB Mongo writes (set_docdb_profiler, create_docdb_index)
         # all ship with both their handler impl and this schema entry so the

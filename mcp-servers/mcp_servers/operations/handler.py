@@ -5,14 +5,17 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp_servers.operations.tools.audit_permissions import audit_permissions_impl
+from mcp_servers.operations.tools.create_custom_endpoint import create_custom_endpoint_impl
 from mcp_servers.operations.tools.create_docdb_index import create_docdb_index_impl
 from mcp_servers.operations.tools.create_elasticache_snapshot import create_elasticache_snapshot_impl
 from mcp_servers.operations.tools.create_snapshot import create_snapshot_impl
+from mcp_servers.operations.tools.delete_custom_endpoint import delete_custom_endpoint_impl
 from mcp_servers.operations.tools.elasticache_live_read import elasticache_live_read_impl
 from mcp_servers.operations.tools.enable_dynamodb_pitr import enable_dynamodb_pitr_impl
 from mcp_servers.operations.tools.execute_sql import execute_sql_impl
 from mcp_servers.operations.tools.get_runbook import get_runbook_impl
 from mcp_servers.operations.tools.manage_maintenance import manage_maintenance_impl
+from mcp_servers.operations.tools.modify_custom_endpoint import modify_custom_endpoint_impl
 from mcp_servers.operations.tools.modify_dynamodb_capacity import modify_dynamodb_capacity_impl
 from mcp_servers.operations.tools.modify_dynamodb_ttl import modify_dynamodb_ttl_impl
 from mcp_servers.operations.tools.modify_elasticache_node_type import modify_elasticache_node_type_impl
@@ -41,6 +44,14 @@ cache = CacheClient()
 # with a valid-looking approval (review fix #3 — opposite of simulation's read-side
 # DEFAULT-PERMIT).
 _ENGINE_GATED_TOOLS = {
+    # Aurora custom cluster endpoints (P2-⑤) are a relational-only feature. The
+    # gate is POSITIVE and FAIL-CLOSED just like the NoSQL writes: only the
+    # relational family has the custom_endpoint capability, so DynamoDB/DocDB/
+    # ElastiCache (or any unresolvable cluster) get unsupported_engine before the
+    # impl runs — no ugly RDS fault on a ddb-* slug.
+    "create_custom_endpoint": "custom_endpoint",
+    "delete_custom_endpoint": "custom_endpoint",
+    "modify_custom_endpoint": "custom_endpoint",
     "modify_dynamodb_capacity": "ddb_write",
     "modify_dynamodb_ttl": "ddb_write",
     "enable_dynamodb_pitr": "ddb_write",
@@ -57,6 +68,7 @@ _ENGINE_GATED_TOOLS = {
 }
 
 _CAP_LABEL = {
+    "custom_endpoint": "Aurora 클러스터",
     "ddb_write": "DynamoDB 테이블",
     "docdb_write": "DocumentDB 클러스터",
     "live_read": "ElastiCache 클러스터",
@@ -205,6 +217,72 @@ TOOLS = {
                 "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
             },
             "required": ["cluster_id", "new_cluster_id"],
+        },
+    },
+    "create_custom_endpoint": {
+        "impl": create_custom_endpoint_impl,
+        "description": (
+            "Aurora only: create a custom DB cluster endpoint (a stable DNS name "
+            "routing a chosen subset of readers). endpoint_type is READER or ANY "
+            "(never WRITER). static_members and excluded_members are mutually "
+            "exclusive. Requires approved=true AND approval_id=<uuid from "
+            "request_approval>. Returns cli_preview — the exact aws rds "
+            "create-db-cluster-endpoint command this will execute."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "endpoint_identifier": {"type": "string", "description": "New custom endpoint identifier (1-63 chars, letter-start, alphanumeric + hyphens)"},
+                "endpoint_type": {"type": "string", "enum": ["READER", "ANY"], "default": "READER", "description": "Custom endpoint type (WRITER is not allowed)"},
+                "static_members": {"type": "array", "items": {"type": "string"}, "description": "Instance IDs to INCLUDE (mutually exclusive with excluded_members)"},
+                "excluded_members": {"type": "array", "items": {"type": "string"}, "description": "Instance IDs to EXCLUDE (mutually exclusive with static_members)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id", "endpoint_identifier"],
+        },
+    },
+    "delete_custom_endpoint": {
+        "impl": delete_custom_endpoint_impl,
+        "description": (
+            "Aurora only: delete a CUSTOM DB cluster endpoint. Verifies the "
+            "endpoint exists and is CUSTOM first — the built-in writer/reader "
+            "endpoints can NEVER be deleted through this tool. Requires "
+            "approved=true AND approval_id=<uuid from request_approval>. Returns "
+            "cli_preview."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "endpoint_identifier": {"type": "string", "description": "Custom endpoint identifier to delete"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id", "endpoint_identifier"],
+        },
+    },
+    "modify_custom_endpoint": {
+        "impl": modify_custom_endpoint_impl,
+        "description": (
+            "Aurora only: change the StaticMembers or ExcludedMembers of an "
+            "existing CUSTOM DB cluster endpoint (mutually exclusive; at least "
+            "one required). Built-in writer/reader endpoints are protected. "
+            "Requires approved=true AND approval_id=<uuid from request_approval>. "
+            "Returns cli_preview."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "endpoint_identifier": {"type": "string", "description": "Custom endpoint identifier to modify"},
+                "static_members": {"type": "array", "items": {"type": "string"}, "description": "New INCLUDE list (mutually exclusive with excluded_members)"},
+                "excluded_members": {"type": "array", "items": {"type": "string"}, "description": "New EXCLUDE list (mutually exclusive with static_members)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id", "endpoint_identifier"],
         },
     },
     "modify_dynamodb_capacity": {
@@ -479,7 +557,7 @@ TOOLS = {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "action_type": {
                     "type": "string",
-                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "modify_dynamodb_capacity", "modify_dynamodb_ttl", "enable_dynamodb_pitr", "set_docdb_profiler", "create_docdb_index", "other"],
+                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "create_custom_endpoint", "delete_custom_endpoint", "modify_custom_endpoint", "modify_dynamodb_capacity", "modify_dynamodb_ttl", "enable_dynamodb_pitr", "set_docdb_profiler", "create_docdb_index", "other"],
                     "description": "Which write tool needs approval",
                 },
                 "action_details": {

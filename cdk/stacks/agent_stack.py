@@ -224,6 +224,13 @@ class AgentStack(cdk.Stack):
                 "rds:RestoreDBClusterFromSnapshot",
                 "rds:RestoreDBClusterToPointInTime",
                 "rds:AddTagsToResource",
+                # Aurora custom cluster endpoints (P2-⑤). Create/Delete/Modify are
+                # approval-gated in tool code; Describe validates the endpoint is
+                # CUSTOM before delete/modify (never touches writer/reader builtins).
+                "rds:CreateDBClusterEndpoint",
+                "rds:DeleteDBClusterEndpoint",
+                "rds:ModifyDBClusterEndpoint",
+                "rds:DescribeDBClusterEndpoints",
                 # NoSQL write/remediation (multi-engine #P3.6 Group C). The 3
                 # DynamoDB write tools (capacity/TTL/PITR) need Update* + the
                 # paired Describe* for the request-time + TOCTOU re-read. All
@@ -743,6 +750,14 @@ class AgentStack(cdk.Stack):
                 "rds:DescribeDBInstances",
                 # Backup inventory panel — read-only snapshot listing.
                 "rds:DescribeDBClusterSnapshots",
+                # Custom endpoints panel (P2-⑤) — read-only listing of built-in
+                # + custom cluster endpoints.
+                "rds:DescribeDBClusterEndpoints",
+                # Parameter-diff panel — compare cluster params vs engine
+                # defaults (single-account path; spoke uses rds:Describe* wildcard).
+                "rds:DescribeDBClusterParameters",
+                "rds:DescribeDBClusterParameterGroups",
+                "rds:DescribeEngineDefaultClusterParameters",
                 # DocumentDB backup + topology panels — DocDB mirrors the RDS
                 # cluster/snapshot API on its own namespace (read-only).
                 "docdb:DescribeDBClusters",
@@ -1298,6 +1313,11 @@ class AgentStack(cdk.Stack):
             path="/api/dashboard/{cluster_id}/query-detail",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardQueryDetailIntegration", dashboard_alias),
+        )
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/param-diff",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardParamDiffIntegration", dashboard_alias),
         )
         # Workload diff — pg_stat_statements snapshot delta between two
         # points in time (new / regressed / improved / disappeared
