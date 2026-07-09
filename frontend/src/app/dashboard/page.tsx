@@ -52,6 +52,7 @@ import {
   eolFor,
   EOL_STATUS_CLASSES,
   eolHint,
+  type EngineFamily,
 } from "@/lib/engine";
 import { DynamodbOverviewPanel } from "@/components/dashboard/dynamodb-overview-panel";
 import { DocdbOverviewPanel } from "@/components/dashboard/docdb-overview-panel";
@@ -148,6 +149,44 @@ function readInitialRange(): TimeRange {
   const m = r && /^(\d+)h$/.exec(r);
   if (m) return { kind: "preset", hours: parseInt(m[1], 10) };
   return DEFAULT_RANGE;
+}
+
+// ── Section tabs (AWS-console-style) ──────────────────────────────────────
+// The dashboard used to be one long scroll of 25+ panels; we split it into
+// section tabs. Range / Views / banners stay global (above the tabs); the tab
+// is NOT part of a saved view in v1.
+type TabKey =
+  | "overview"
+  | "perf"
+  | "advisory"
+  | "internals"
+  | "config"
+  | "audit";
+
+const TAB_DEFS: { key: TabKey; label: string }[] = [
+  { key: "overview", label: "개요" },
+  { key: "perf", label: "성능·쿼리" },
+  { key: "advisory", label: "AI 자문" },
+  { key: "internals", label: "엔진 내부" },
+  { key: "config", label: "구성·백업" },
+  { key: "audit", label: "변경·감사" },
+];
+
+// Which tabs each engine family renders — derived from the per-family panel
+// gating in the body below: a tab with zero applicable panels for a family is
+// omitted entirely (e.g. DynamoDB/DocDB/ElastiCache have no perf-SQL or PG
+// internals panels). Keep in sync with the fam-gated blocks in the return.
+const TABS_BY_FAMILY: Record<EngineFamily, TabKey[]> = {
+  relational: ["overview", "perf", "advisory", "internals", "config", "audit"],
+  dynamodb: ["overview", "advisory", "config", "audit"],
+  documentdb: ["overview", "advisory", "config", "audit"],
+  elasticache: ["overview", "advisory", "config", "audit"],
+};
+
+function readInitialTab(): TabKey {
+  if (typeof window === "undefined") return "overview";
+  const t = new URLSearchParams(window.location.search).get("tab");
+  return TAB_DEFS.some((d) => d.key === t) ? (t as TabKey) : "overview";
 }
 
 // Pretty short label for the current range (used on the Custom button).
@@ -254,6 +293,7 @@ export default function DashboardPage() {
   const [viewsOpen, setViewsOpen] = useState<boolean>(false);
   const [tsBatch, setTsBatch] = useState<Record<string, TsPoint[]>>({});
   const [tsLoading, setTsLoading] = useState<boolean>(true);
+  const [tab, setTab] = useState<TabKey>(readInitialTab);
 
   // Legacy panels still take `hours: number`; derive it once per render.
   const hours = rangeToHours(range);
@@ -346,6 +386,37 @@ export default function DashboardPage() {
     });
   }, []);
 
+  // Tab click = pushState (back/forward navigates tabs). Cluster/range params
+  // are preserved by reading the live query string. The cluster+range mirror
+  // effect above never touches ?tab, so tab survives cluster/range changes too.
+  const selectTab = (next: TabKey) => {
+    if (next === tab) return;
+    setTab(next);
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", next);
+    window.history.pushState(
+      null,
+      "",
+      `${window.location.pathname}?${params.toString()}`,
+    );
+  };
+
+  // Back/forward: re-read tab + cluster + range from the URL so history
+  // navigation moves between tabs (and shared windows) without a remount.
+  useEffect(() => {
+    const onPop = () => {
+      const params = new URLSearchParams(window.location.search);
+      const t = params.get("tab");
+      setTab(TAB_DEFS.some((d) => d.key === t) ? (t as TabKey) : "overview");
+      const c = params.get("cluster");
+      if (c) setSelectedCluster(c);
+      setRange(readInitialRange());
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   const loadTimeseries = useCallback(() => {
     if (!selectedCluster) return;
     fetchBatchTimeseries(selectedCluster, CHART_METRICS, range)
@@ -384,6 +455,20 @@ export default function DashboardPage() {
   }, [selectedCluster]);
 
   useSmartPoll(loadDashboard, 15000, [selectedCluster]);
+
+  // Prefer the richer /overview engine when it has arrived; fall back to the
+  // engine string already available from the clusters list so the layout (and
+  // the tab bar) render immediately on click without waiting for /overview.
+  const activeEngine =
+    dashboardData?.cluster?.engine ??
+    clusters.find((c) => c.cluster_id === selectedCluster)?.engine ??
+    "";
+  const ver = dashboardData?.cluster?.engine_version ?? "";
+  const fam = engineFamily(activeEngine);
+  // Tabs applicable to this engine family; an unknown/missing/out-of-family tab
+  // falls back to the overview render (design: unknown tab → overview).
+  const visibleTabs: TabKey[] = selectedCluster ? TABS_BY_FAMILY[fam] : [];
+  const activeTab: TabKey = visibleTabs.includes(tab) ? tab : "overview";
 
   return (
     <PageBody>
@@ -511,194 +596,179 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {selectedCluster && clusters.length > 0 && (
-        <div className="mt-6 space-y-6">
-          {(() => {
-            // Prefer the richer /overview engine when it has arrived; fall back
-            // to the engine string already available from the clusters list so
-            // the panel layout renders immediately on click without waiting for
-            // the /overview fetch to complete.
-            const activeEngine =
-              dashboardData?.cluster?.engine ??
-              clusters.find((c) => c.cluster_id === selectedCluster)?.engine ??
-              "";
-            const ver = dashboardData?.cluster?.engine_version ?? "";
-            const fam = engineFamily(activeEngine);
-            const badge = engineBadge(activeEngine);
-            const eol = eolFor(activeEngine, ver);
-            // "클러스터 정보" (instances / storage / Multi-AZ) and HealthScore
-            // (CPU / AAS / Connections gauge) are Aurora-relational concepts.
-            // For DynamoDB / DocumentDB the family panel below carries the
-            // relevant overview — render nothing here to avoid misleading "-"s.
-            if (fam !== "relational") return null;
+      {/* Data API disabled banner — global (above tabs) because it explains why
+          the live-SQL panels across 성능·쿼리 / 구성·백업 / 변경·감사 sit on
+          "수집 대기". false only — NULL(uncollected)/true stay hidden. */}
+      {selectedCluster &&
+        fam === "relational" &&
+        dashboardData?.cluster?.http_endpoint_enabled === false && (
+          <DataApiBanner clusterId={selectedCluster} />
+        )}
 
-            // /overview has not yet landed — render a same-dimension skeleton
-            // so there is no layout shift when the data arrives.
-            if (!dashboardData) {
-              return (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-3 gap-3">
-                      <div className="text-sm text-zinc-200 font-medium">
-                        클러스터 정보
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {/* Engine badge available immediately from clusters list */}
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 border text-[11px] font-mono uppercase tracking-wider ${badge.classes}`}
-                          title={`엔진: ${activeEngine || "unknown"}`}
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${badge.accent}`}
-                          />
-                          {badge.label}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                      {(
-                        ["상태", "인스턴스", "스토리지", "Multi-AZ"] as const
-                      ).map((label) => (
-                        <div key={label}>
-                          <div className="text-zinc-500 text-xs mb-1">
-                            {label}
-                          </div>
-                          <div className="h-4 w-20 rounded bg-zinc-700 animate-pulse" />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <HealthScore
-                    clusterId={selectedCluster}
-                    engine={activeEngine}
-                  />
-                </div>
-              );
-            }
+      {selectedCluster && clusters.length > 0 && visibleTabs.length > 0 && (
+        <>
+          {/* Section tabs — global, below the banners. Only the tabs that have
+              applicable panels for this engine family are shown; horizontal
+              scroll on narrow widths. Active tab uses the product's amber
+              accent (the same accent as the range/Views controls above). */}
+          <div className="mt-6 flex items-center gap-px bg-zinc-800 border border-zinc-800 w-fit max-w-full overflow-x-auto">
+            {TAB_DEFS.filter((d) => visibleTabs.includes(d.key)).map((d) => (
+              <button
+                key={d.key}
+                onClick={() => selectTab(d.key)}
+                className={`text-xs px-4 py-2 whitespace-nowrap transition-colors ${
+                  activeTab === d.key
+                    ? "bg-zinc-950 text-amber-400"
+                    : "bg-zinc-900/60 text-zinc-400 hover:text-zinc-100"
+                }`}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
 
-            return (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-3 gap-3">
-                    <div className="text-sm text-zinc-200 font-medium">
-                      클러스터 정보
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 border text-[11px] font-mono uppercase tracking-wider ${badge.classes}`}
-                        title={`엔진: ${activeEngine || "unknown"}`}
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${badge.accent}`}
-                        />
-                        {badge.label}
-                        {ver && (
-                          <span className="text-zinc-300/80 normal-case font-normal">
-                            {ver}
-                          </span>
-                        )}
-                      </span>
-                      {eol && (
-                        <span
-                          className={`px-2 py-1 border border-zinc-700 text-[10px] font-mono uppercase tracking-wider ${
-                            EOL_STATUS_CLASSES[eol.status]
-                          }`}
-                          title={eolHint(eol)}
-                        >
-                          {eol.status === "expired"
-                            ? `EOL · ${Math.abs(eol.days_remaining)}d past`
-                            : `EOL ${eol.eol} · ${eol.days_remaining}d`}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <div className="text-zinc-500 text-xs mb-1">상태</div>
-                      <div className="text-emerald-400">
-                        {dashboardData.cluster?.status || "-"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-zinc-500 text-xs mb-1">인스턴스</div>
-                      <div className="text-zinc-100 font-mono text-xs">
-                        {dashboardData.cluster?.instance_class || "-"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-zinc-500 text-xs mb-1">스토리지</div>
-                      <div className="text-zinc-100">
-                        {dashboardData.cluster?.storage_size_gb ?? "-"} GB
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-zinc-500 text-xs mb-1">Multi-AZ</div>
-                      <div className="text-zinc-100">
-                        {dashboardData.cluster?.multi_az ? "yes" : "no"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <HealthScore
-                  clusterId={selectedCluster}
-                  engine={activeEngine}
-                />
-              </div>
-            );
-          })()}
-
-          {/* Engine-family panel gating — derive engine from whichever source
-              has landed first: /overview response or the clusters list. */}
-          {(() => {
-            const activeEngine =
-              dashboardData?.cluster?.engine ??
-              clusters.find((c) => c.cluster_id === selectedCluster)?.engine ??
-              "";
-            const fam = engineFamily(activeEngine);
-            return (
+          <div className="mt-6 space-y-6">
+            {/* ═══════════════ 개요 (overview) ═══════════════ */}
+            {activeTab === "overview" && (
               <>
-                {/* ── Relational (Aurora MySQL / PostgreSQL) panels ── */}
                 {fam === "relational" && (
                   <>
-                    {/* false일 때만 — NULL(미수집)·true는 숨김. 라이브 SQL 패널들이
-                        영원히 "수집 대기"로 보이는 이유를 여기서 먼저 설명한다. */}
-                    {dashboardData?.cluster?.http_endpoint_enabled === false &&
-                      selectedCluster && (
-                        <DataApiBanner clusterId={selectedCluster} />
-                      )}
+                    {(() => {
+                      const badge = engineBadge(activeEngine);
+                      const eol = eolFor(activeEngine, ver);
+                      // /overview has not yet landed — render a same-dimension
+                      // skeleton so there is no layout shift when data arrives.
+                      if (!dashboardData) {
+                        return (
+                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">
+                              <div className="flex items-center justify-between mb-3 gap-3">
+                                <div className="text-sm text-zinc-200 font-medium">
+                                  클러스터 정보
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {/* Engine badge available immediately from clusters list */}
+                                  <span
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 border text-[11px] font-mono uppercase tracking-wider ${badge.classes}`}
+                                    title={`엔진: ${activeEngine || "unknown"}`}
+                                  >
+                                    <span
+                                      className={`w-1.5 h-1.5 rounded-full ${badge.accent}`}
+                                    />
+                                    {badge.label}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                {(
+                                  [
+                                    "상태",
+                                    "인스턴스",
+                                    "스토리지",
+                                    "Multi-AZ",
+                                  ] as const
+                                ).map((label) => (
+                                  <div key={label}>
+                                    <div className="text-zinc-500 text-xs mb-1">
+                                      {label}
+                                    </div>
+                                    <div className="h-4 w-20 rounded bg-zinc-700 animate-pulse" />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <HealthScore
+                              clusterId={selectedCluster}
+                              engine={activeEngine}
+                            />
+                          </div>
+                        );
+                      }
 
-                    <MaintenanceHealthPanel
-                      clusterId={selectedCluster}
-                      engine={activeEngine}
-                    />
-
-                    {selectedCluster && (
-                      <EngineInternalsPanel
-                        clusterId={selectedCluster}
-                        engine={activeEngine}
-                        range={range}
-                      />
-                    )}
-
-                    {selectedCluster && (
-                      <ActiveSessionsPanel clusterId={selectedCluster} />
-                    )}
-
-                    {activeEngine.includes("postgresql") && (
-                      <ExtensionsCard
-                        clusterId={selectedCluster}
-                        engine={activeEngine}
-                      />
-                    )}
-
-                    <BackupPanel clusterId={selectedCluster} />
-
-                    <ReplicationTopologyPanel clusterId={selectedCluster} />
-
-                    <CapacityForecastPanel
-                      clusterId={selectedCluster}
-                      engine={activeEngine}
-                    />
+                      return (
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                          <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">
+                            <div className="flex items-center justify-between mb-3 gap-3">
+                              <div className="text-sm text-zinc-200 font-medium">
+                                클러스터 정보
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 border text-[11px] font-mono uppercase tracking-wider ${badge.classes}`}
+                                  title={`엔진: ${activeEngine || "unknown"}`}
+                                >
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full ${badge.accent}`}
+                                  />
+                                  {badge.label}
+                                  {ver && (
+                                    <span className="text-zinc-300/80 normal-case font-normal">
+                                      {ver}
+                                    </span>
+                                  )}
+                                </span>
+                                {eol && (
+                                  <span
+                                    className={`px-2 py-1 border border-zinc-700 text-[10px] font-mono uppercase tracking-wider ${
+                                      EOL_STATUS_CLASSES[eol.status]
+                                    }`}
+                                    title={eolHint(eol)}
+                                  >
+                                    {eol.status === "expired"
+                                      ? `EOL · ${Math.abs(
+                                          eol.days_remaining,
+                                        )}d past`
+                                      : `EOL ${eol.eol} · ${eol.days_remaining}d`}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+                              <div>
+                                <div className="text-zinc-500 text-xs mb-1">
+                                  상태
+                                </div>
+                                <div className="text-emerald-400">
+                                  {dashboardData.cluster?.status || "-"}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-zinc-500 text-xs mb-1">
+                                  인스턴스
+                                </div>
+                                <div className="text-zinc-100 font-mono text-xs">
+                                  {dashboardData.cluster?.instance_class || "-"}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-zinc-500 text-xs mb-1">
+                                  스토리지
+                                </div>
+                                <div className="text-zinc-100">
+                                  {dashboardData.cluster?.storage_size_gb ??
+                                    "-"}{" "}
+                                  GB
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-zinc-500 text-xs mb-1">
+                                  Multi-AZ
+                                </div>
+                                <div className="text-zinc-100">
+                                  {dashboardData.cluster?.multi_az
+                                    ? "yes"
+                                    : "no"}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <HealthScore
+                            clusterId={selectedCluster}
+                            engine={activeEngine}
+                          />
+                        </div>
+                      );
+                    })()}
 
                     <TimeseriesChart
                       clusterId={selectedCluster}
@@ -825,70 +895,13 @@ export default function DashboardPage() {
                       />
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      <WaitEventsPanel
-                        clusterId={selectedCluster}
-                        hours={hours}
-                      />
-                      <AnomaliesPanel clusterId={selectedCluster} />
-                      <EventsPanel
-                        events={dashboardData?.events || []}
-                        clusterId={selectedCluster}
-                      />
-                    </div>
-
-                    <LocksPanel clusterId={selectedCluster} />
-
-                    <LongRunningPanel clusterId={selectedCluster} />
-
-                    {/* Vacuum is PG-only — MySQL InnoDB has no equivalent surface.
-                        For MySQL clusters the column is collapsed and the right panel
-                        takes the full width. */}
-                    <div
-                      className={`grid grid-cols-1 ${
-                        activeEngine.includes("postgresql")
-                          ? "md:grid-cols-2"
-                          : ""
-                      } gap-4`}
-                    >
-                      {activeEngine.includes("postgresql") && (
-                        <VacuumPanel clusterId={selectedCluster} />
-                      )}
-                      <IndexRecsPanel clusterId={selectedCluster} />
-
-                      <RedundantIndexesPanel clusterId={selectedCluster} />
-                    </div>
-
-                    <TableSizesPanel clusterId={selectedCluster} />
-
-                    <SchemaChangesPanel clusterId={selectedCluster} />
-
-                    <QueriesPanel
-                      clusterId={selectedCluster}
-                      topQueries={dashboardData?.top_queries || []}
-                    />
-
-                    <SettingsPanel
-                      clusterId={selectedCluster}
-                      engine={activeEngine}
-                    />
-
-                    <ChangeImpactPanel clusterId={selectedCluster} />
-
-                    <AuditLogPanel clusterId={selectedCluster} />
-
-                    <LogInsightsPanel clusterId={selectedCluster} />
+                    <ReplicationTopologyPanel clusterId={selectedCluster} />
                   </>
                 )}
 
-                {/* ── DynamoDB panels ── */}
                 {fam === "dynamodb" && (
                   <>
                     <HealthScore
-                      clusterId={selectedCluster}
-                      engine={activeEngine}
-                    />
-                    <MaintenanceHealthPanel
                       clusterId={selectedCluster}
                       engine={activeEngine}
                     />
@@ -896,33 +909,12 @@ export default function DashboardPage() {
                       clusterId={selectedCluster}
                       range={range}
                     />
-                    <EngineConfigPanel
-                      clusterId={selectedCluster}
-                      engine={activeEngine}
-                    />
-                    <CapacityForecastPanel
-                      clusterId={selectedCluster}
-                      engine={activeEngine}
-                    />
-                    <BackupPanel
-                      clusterId={selectedCluster}
-                      engine={activeEngine}
-                    />
-                    <EventsPanel
-                      events={dashboardData?.events || []}
-                      clusterId={selectedCluster}
-                    />
                   </>
                 )}
 
-                {/* ── DocumentDB panels ── */}
                 {fam === "documentdb" && (
                   <>
                     <HealthScore
-                      clusterId={selectedCluster}
-                      engine={activeEngine}
-                    />
-                    <MaintenanceHealthPanel
                       clusterId={selectedCluster}
                       engine={activeEngine}
                     />
@@ -930,34 +922,13 @@ export default function DashboardPage() {
                       clusterId={selectedCluster}
                       range={range}
                     />
-                    <EngineConfigPanel
-                      clusterId={selectedCluster}
-                      engine={activeEngine}
-                    />
-                    <CapacityForecastPanel
-                      clusterId={selectedCluster}
-                      engine={activeEngine}
-                    />
                     <ReplicationTopologyPanel clusterId={selectedCluster} />
-                    <BackupPanel
-                      clusterId={selectedCluster}
-                      engine={activeEngine}
-                    />
-                    <EventsPanel
-                      events={dashboardData?.events || []}
-                      clusterId={selectedCluster}
-                    />
                   </>
                 )}
 
-                {/* ── ElastiCache panels ── */}
                 {fam === "elasticache" && (
                   <>
                     <HealthScore
-                      clusterId={selectedCluster}
-                      engine={activeEngine}
-                    />
-                    <MaintenanceHealthPanel
                       clusterId={selectedCluster}
                       engine={activeEngine}
                     />
@@ -965,20 +936,134 @@ export default function DashboardPage() {
                       clusterId={selectedCluster}
                       range={range}
                     />
+                  </>
+                )}
+              </>
+            )}
+
+            {/* ═══════════════ 성능·쿼리 (perf) — relational only ═══════════════ */}
+            {activeTab === "perf" && fam === "relational" && (
+              <>
+                <QueriesPanel
+                  clusterId={selectedCluster}
+                  topQueries={dashboardData?.top_queries || []}
+                />
+                <WaitEventsPanel clusterId={selectedCluster} hours={hours} />
+                <ActiveSessionsPanel clusterId={selectedCluster} />
+                <LongRunningPanel clusterId={selectedCluster} />
+                <LocksPanel clusterId={selectedCluster} />
+                <TableSizesPanel clusterId={selectedCluster} />
+              </>
+            )}
+
+            {/* ═══════════════ AI 자문 (advisory) ═══════════════ */}
+            {activeTab === "advisory" && (
+              <>
+                <MaintenanceHealthPanel
+                  clusterId={selectedCluster}
+                  engine={activeEngine}
+                />
+                {fam === "relational" && (
+                  <>
+                    <AnomaliesPanel clusterId={selectedCluster} />
+                    <CapacityForecastPanel
+                      clusterId={selectedCluster}
+                      engine={activeEngine}
+                    />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <IndexRecsPanel clusterId={selectedCluster} />
+                      <RedundantIndexesPanel clusterId={selectedCluster} />
+                    </div>
+                    <ChangeImpactPanel clusterId={selectedCluster} />
+                  </>
+                )}
+                {(fam === "dynamodb" || fam === "documentdb") && (
+                  <CapacityForecastPanel
+                    clusterId={selectedCluster}
+                    engine={activeEngine}
+                  />
+                )}
+              </>
+            )}
+
+            {/* ═══════════════ 엔진 내부 (internals) — relational only ═══════════════ */}
+            {activeTab === "internals" && fam === "relational" && (
+              <>
+                <EngineInternalsPanel
+                  clusterId={selectedCluster}
+                  engine={activeEngine}
+                  range={range}
+                />
+                {/* Vacuum is PG-only — MySQL InnoDB has no equivalent surface. */}
+                {activeEngine.includes("postgresql") && (
+                  <VacuumPanel clusterId={selectedCluster} />
+                )}
+              </>
+            )}
+
+            {/* ═══════════════ 구성·백업 (config) ═══════════════ */}
+            {activeTab === "config" && (
+              <>
+                {fam === "relational" && (
+                  <>
+                    <SettingsPanel
+                      clusterId={selectedCluster}
+                      engine={activeEngine}
+                    />
+                    {activeEngine.includes("postgresql") && (
+                      <ExtensionsCard
+                        clusterId={selectedCluster}
+                        engine={activeEngine}
+                      />
+                    )}
+                    <BackupPanel clusterId={selectedCluster} />
+                  </>
+                )}
+                {(fam === "dynamodb" || fam === "documentdb") && (
+                  <>
                     <EngineConfigPanel
                       clusterId={selectedCluster}
                       engine={activeEngine}
                     />
+                    <BackupPanel
+                      clusterId={selectedCluster}
+                      engine={activeEngine}
+                    />
+                  </>
+                )}
+                {fam === "elasticache" && (
+                  <EngineConfigPanel
+                    clusterId={selectedCluster}
+                    engine={activeEngine}
+                  />
+                )}
+              </>
+            )}
+
+            {/* ═══════════════ 변경·감사 (audit) ═══════════════ */}
+            {activeTab === "audit" && (
+              <>
+                {fam === "relational" && (
+                  <>
+                    <SchemaChangesPanel clusterId={selectedCluster} />
                     <EventsPanel
                       events={dashboardData?.events || []}
                       clusterId={selectedCluster}
                     />
+                    <AuditLogPanel clusterId={selectedCluster} />
+                    <LogInsightsPanel clusterId={selectedCluster} />
                   </>
                 )}
+                {fam !== "relational" && (
+                  <EventsPanel
+                    events={dashboardData?.events || []}
+                    clusterId={selectedCluster}
+                  />
+                )}
               </>
-            );
-          })()}
-        </div>
+            )}
+          </div>
+        </>
       )}
     </PageBody>
   );
