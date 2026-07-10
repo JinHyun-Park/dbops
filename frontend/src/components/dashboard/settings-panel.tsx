@@ -212,9 +212,13 @@ export function SettingsPanel({
         const d: ParamDiffResponse = await res.json();
         if (cancelled) return;
         setDiffAvailable(!!d.available);
-        // Prefer the full `params` list; fall back to `diffs` (all differing)
-        // for backward-compat with an older backend.
-        const rows = d.available ? d.params || d.diffs || [] : [];
+        // Prefer the full `params` list; fall back to `diffs` for backward-compat
+        // with an older backend. `diffs` rows have no `differs` field but are all
+        // differing by definition, so normalize to differs:true — otherwise they
+        // wouldn't be highlighted and `변경만 보기` would filter every row out.
+        const rows = d.available
+          ? d.params || (d.diffs || []).map((r) => ({ ...r, differs: true }))
+          : [];
         setParams(rows);
         setDiffCount(d.diff_count ?? rows.filter((r) => r.differs).length);
       } catch {
