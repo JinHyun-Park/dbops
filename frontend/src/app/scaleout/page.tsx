@@ -26,6 +26,7 @@ const STATE_STYLE: Record<string, string> = {
   warmed: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
   cancelled: "bg-zinc-800/40 text-zinc-500 border-zinc-700",
   provision_failed: "bg-rose-500/15 text-rose-300 border-rose-500/40",
+  warm_failed: "bg-rose-500/15 text-rose-300 border-rose-500/40",
 };
 const STATE_LABEL: Record<string, string> = {
   reader_provisioning: "리더 생성 중",
@@ -35,6 +36,7 @@ const STATE_LABEL: Record<string, string> = {
   warmed: "예열 완료",
   cancelled: "취소됨",
   provision_failed: "리더 생성 실패",
+  warm_failed: "예열 실패",
 };
 // Only ops that haven't dispatched the warm yet can be cancelled.
 const CANCELLABLE = new Set(["reader_provisioning", "warm_pending_approval"]);

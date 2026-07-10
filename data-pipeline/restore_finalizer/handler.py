@@ -39,8 +39,19 @@ import re
 from datetime import datetime, timezone
 
 import boto3
+from botocore.config import Config
 
 _INSTANCE_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
+
+# The prewarm dispatch is a SYNCHRONOUS (RequestResponse) invoke that can run the
+# full operations Lambda timeout (120s). botocore's default read_timeout (~60s)
+# would fire first and raise mid-run — the finalizer would treat that as a
+# transient invoke error and retry next tick while the first prewarm is still
+# running server-side and may already have CONSUMED the approval → duplicate
+# attempts + noisy stuck states. So: read_timeout > operations timeout, and NO
+# auto-retry (a botocore retry would double-invoke). The finalizer Lambda timeout
+# is 150s (cdk/stacks/data_stack.py) — this matches.
+_LAMBDA_CFG = Config(read_timeout=150, connect_timeout=10, retries={"max_attempts": 0})
 
 # Base64-encoded ClientContext so the operations Lambda's _extract_tool_name reads
 # custom.tool_name == "prewarm_reader" (same shape a direct boto3 invoke sets).
@@ -338,7 +349,7 @@ def _advance_prewarm(table, ops_fn: str, row: dict, may_dispatch: bool = True) -
         # prewarm_reader — for RequestResponse, NOT for async Event invokes.
         # (The finalizer timeout is raised to accommodate the operations Lambda's
         # 120s, and we dispatch at most one warm per tick.)
-        resp = boto3.client("lambda").invoke(
+        resp = boto3.client("lambda", config=_LAMBDA_CFG).invoke(
             FunctionName=ops_fn,
             InvocationType="RequestResponse",
             Payload=json.dumps(payload).encode("utf-8"),
@@ -351,8 +362,9 @@ def _advance_prewarm(table, ops_fn: str, row: dict, may_dispatch: bool = True) -
 
     # We got a response → the operations handler ran and prewarm_reader's
     # verify_approval has consumed the approval (or refused it). Either way the
-    # attempt is made; set warm_dispatched so we never re-invoke a consumed
-    # approval (which would just come back approval_denied and loop forever).
+    # attempt is made; set warm_dispatched so we never re-invoke — a deterministic
+    # failure won't fix on retry, and a post-verify failure already consumed the
+    # approval so it can't be retried anyway (the DBA re-warms manually via chat).
     warm_status = "unknown"
     try:
         body = json.loads(resp["Payload"].read().decode("utf-8"))
@@ -361,14 +373,21 @@ def _advance_prewarm(table, ops_fn: str, row: dict, may_dispatch: bool = True) -
     except Exception:  # pragma: no cover - best effort result parse
         pass
     fn_error = resp.get("FunctionError")
-    _set_approval(table, approval_id, created_at, warm_dispatched=True)
+    # Record the ACTUAL outcome: only status=="prewarmed" is success. Anything
+    # else (FunctionError, malformed payload, or a non-prewarmed status like
+    # connect_failed / approval_denied) is a failed warm — surfaced as a terminal
+    # "warm_failed" state in the UI instead of an indefinite "warming".
+    prewarmed = warm_status == "prewarmed" and not fn_error
+    warm_result = "prewarmed" if prewarmed else "failed"
+    _set_approval(table, approval_id, created_at, warm_dispatched=True, warm_result=warm_result)
     _event_log(
         cluster_id,
-        "info" if warm_status == "prewarmed" else "warning",
+        "info" if prewarmed else "warning",
         f"리더 {reader_id} 예열 실행 결과: {warm_status}"
         + (f" (fn_error={fn_error})" if fn_error else "") + f" (approval {approval_id})",
     )
-    return {"approval_id": approval_id, "result": "warm_dispatched", "warm_status": warm_status}
+    return {"approval_id": approval_id, "result": "warm_dispatched",
+            "warm_status": warm_status, "warm_result": warm_result}
 
 
 def _process_scaleout_prewarms() -> dict:

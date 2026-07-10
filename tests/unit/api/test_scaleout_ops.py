@@ -134,6 +134,11 @@ def _wire(monkeypatch, table):
     ({"approval_status": "consumed", "warm_dispatched": True}, "warmed"),
     ({"approval_status": "cancelled"}, "cancelled"),
     ({"approval_status": "awaiting_instance_failed"}, "provision_failed"),
+    # A recorded failed warm is terminal regardless of the underlying status.
+    ({"approval_status": "approved", "warm_dispatched": True,
+      "warm_result": "failed"}, "warm_failed"),
+    ({"approval_status": "consumed", "warm_dispatched": True,
+      "warm_result": "failed"}, "warm_failed"),
 ])
 def test_state_mapping(row, expected):
     assert handler._scaleout_state(row) == expected
@@ -145,6 +150,18 @@ def test_state_consumed_wins_over_warm_dispatched():
     assert handler._scaleout_state(
         {"approval_status": "consumed", "warm_dispatched": True}
     ) == "warmed"
+
+
+def test_state_warm_failed_outranks_warming_and_warmed():
+    # A failed warm sets warm_dispatched=True (would read "warming") and may even
+    # carry status=consumed (would read "warmed") — warm_result=="failed" must
+    # win over both so a failed op never shows as still-warming or completed.
+    assert handler._scaleout_state(
+        {"approval_status": "approved", "warm_dispatched": True, "warm_result": "failed"}
+    ) == "warm_failed"
+    assert handler._scaleout_state(
+        {"approval_status": "consumed", "warm_dispatched": True, "warm_result": "failed"}
+    ) == "warm_failed"
 
 
 # ---------------------------------------------------------------------------

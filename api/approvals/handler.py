@@ -135,10 +135,18 @@ def _scaleout_state(item: dict) -> str:
     over `warm_dispatched` — a consumed row also carries warm_dispatched=True
     (the finalizer sets warm_dispatched while status is still `approved`, then
     prewarm_reader flips it to consumed), so warming must be checked AFTER
-    warmed or a completed op would read as still-warming."""
+    warmed or a completed op would read as still-warming.
+
+    A recorded FAILED warm (`warm_result == "failed"`) outranks consumed AND
+    warm_dispatched — the finalizer sets warm_dispatched=True for any response,
+    including a prewarm that ran but failed, so without this check the row would
+    show "warmed"/"warming" forever. A failed warm is terminal: the DBA re-warms
+    manually via chat, the finalizer never retries."""
     status = item.get("approval_status", "")
     if status == "cancelled":
         return "cancelled"
+    if item.get("warm_result") == "failed":
+        return "warm_failed"
     if status == "consumed":
         return "warmed"
     if status == "awaiting_instance_failed":
