@@ -547,14 +547,27 @@ class DataStack(cdk.Stack):
                 "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                # Scale-out + auto-warmup (N-④ Phase 1): the second pass drives
+                # prewarm approval rows (awaiting_instance→pending→approved) and
+                # invokes the operations Lambda's prewarm_reader on approval. The
+                # operations function NAME is a literal derived from Settings.ENV
+                # (the SAME literal agent_stack sets as its function_name) so this
+                # stack takes NO cross-stack reference on agent_stack — that would
+                # be a dependency cycle (agent already depends on data).
+                "APPROVALS_TABLE": foundation.approvals_table.table_name,
+                "OPERATIONS_FUNCTION_NAME": f"dbops-{Settings.ENV}-operations-mcp",
             },
         )
         self.cache_db.secret.grant_read(self.restore_finalizer)
         self.cache_db.grant_data_api_access(self.restore_finalizer)
         foundation.clusters_table.grant_read_write_data(self.restore_finalizer)
+        # Scale-out prewarm state machine lives in the approvals table.
+        foundation.approvals_table.grant_read_write_data(self.restore_finalizer)
         self.restore_finalizer.add_to_role_policy(iam.PolicyStatement(
             actions=[
                 "rds:DescribeDBClusters",
+                # Scale-out pass polls the new reader INSTANCE for `available`.
+                "rds:DescribeDBInstances",
                 # Adds the writer instance to the restored cluster once it is
                 # available. AddTags stamps dbops:type=restored on the instance.
                 "rds:CreateDBInstance",
@@ -565,6 +578,17 @@ class DataStack(cdk.Stack):
                 "sts:AssumeRole",
             ],
             resources=["*"],
+        ))
+        # Invoke the operations MCP Lambda's prewarm_reader on an approved
+        # scale-out warm. Scoped to the deterministic operations function name
+        # (built from Settings.ENV + pseudo account/region intrinsics — no
+        # agent_stack token, so no dependency cycle).
+        self.restore_finalizer.add_to_role_policy(iam.PolicyStatement(
+            actions=["lambda:InvokeFunction"],
+            resources=[
+                f"arn:aws:lambda:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}:"
+                f"function:dbops-{Settings.ENV}-operations-mcp"
+            ],
         ))
         events.Rule(self, "RestoreFinalizerSchedule",
             schedule=events.Schedule.rate(cdk.Duration.minutes(2)),

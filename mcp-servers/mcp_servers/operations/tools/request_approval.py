@@ -73,6 +73,9 @@ def request_approval_impl(
         # a billable Aurora reader instance; enum values must be listed here.
         "add_reader_instance",
         "remove_reader_instance",
+        # Reader scale-out + auto-warmup (N-④): approval #1 of the semi-automatic
+        # flow. Creates a billable reader and auto-queues the prewarm approval.
+        "scale_out_with_warmup",
         # enable_data_api는 replay 없는 승인-즉시-실행 액션: DBA가 Approval
         # Center에서 승인하는 순간 approvals API가 rds:EnableHttpEndpoint를
         # 직접 호출한다. 에이전트는 요청 등록까지만 하면 된다.

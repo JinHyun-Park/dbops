@@ -71,6 +71,28 @@ def remove_reader_instance_impl(
         return {"status": "cannot_remove_last_instance", "cluster_id": cluster_id,
                 "reason": "마지막 인스턴스는 삭제할 수 없습니다."}
 
+    # Re-verify on a FRESH member list immediately before delete: a failover in
+    # the window since the early guards could have promoted this reader to
+    # writer. This shrinks the writer-protection TOCTOU to the API-call minimum.
+    try:
+        fresh = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)["DBClusters"][0]
+    except Exception as e:
+        print(f"[remove_reader_instance] pre-delete re-describe failed for {cluster_id}: {e}")
+        return {"status": "remove_failed", "cluster_id": cluster_id,
+                "reason": "삭제 직전 클러스터 재확인에 실패했습니다 — 안전을 위해 삭제하지 않았습니다."}
+    fresh_members = fresh.get("DBClusterMembers") or []
+    fresh_target = next(
+        (m for m in fresh_members if m.get("DBInstanceIdentifier") == instance_id), None)
+    if fresh_target is None:
+        return {"status": "instance_not_found", "cluster_id": cluster_id,
+                "reason": f"{instance_id!r} 인스턴스가 이 클러스터의 멤버가 아닙니다."}
+    if fresh_target.get("IsClusterWriter"):
+        return {"status": "cannot_remove_writer", "cluster_id": cluster_id,
+                "reason": "writer 인스턴스는 삭제할 수 없습니다."}
+    if len(fresh_members) <= 1:
+        return {"status": "cannot_remove_last_instance", "cluster_id": cluster_id,
+                "reason": "마지막 인스턴스는 삭제할 수 없습니다."}
+
     try:
         # Aurora cluster instances take no final snapshot — do NOT pass
         # SkipFinalSnapshot (the API rejects it for cluster members).

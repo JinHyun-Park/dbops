@@ -165,6 +165,12 @@ class AgentStack(cdk.Stack):
             self, "OperationsMCP",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="mcp_servers.operations.handler.lambda_handler",
+            # Explicit, deterministic name so the restore_finalizer (in data_stack,
+            # which agent_stack depends on) can grant invoke + set its env by
+            # literal string — referencing this construct from data_stack would be
+            # a dependency cycle. Must match the OPERATIONS_FUNCTION_NAME literal
+            # in data_stack (both derive from Settings.ENV).
+            function_name=f"dbops-{Settings.ENV}-operations-mcp",
             # The operations server's DocDB write tools (set_docdb_profiler,
             # create_docdb_index) connect over the Mongo wire protocol, so the
             # asset must carry pymongo (not in the Lambda runtime) + the RDS/DocDB

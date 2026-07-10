@@ -182,6 +182,16 @@ def operations_schema():
               {"cluster_id": "string", "instance_id": "string",
                "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "instance_id"]),
+        # Reader scale-out + auto-warmup (N-④ Phase 1). Approval #1 of a
+        # semi-automatic, two-approval flow: creates a reader AND auto-queues a
+        # prewarm approval that becomes DBA-visible once the reader is available.
+        # Every handler param must appear here or the impl<->schema parity test fails.
+        _tool("scale_out_with_warmup",
+              "Aurora only (scale-out + auto-warmup): add a READER instance AND auto-queue its buffer-pool prewarm (semi-automatic, two approvals — this is approval #1; the prewarm auto-appears in the Approval Center once the reader is available); new_instance_id required; instance_class defaults to the writer's class; requires approval",
+              {"cluster_id": "string", "new_instance_id": "string", "instance_class": "string",
+               "endpoint_identifier": "string", "top_n": "integer",
+               "approved": "boolean", "approval_id": "string"},
+              ["cluster_id", "new_instance_id"]),
         # NoSQL write/remediation (multi-engine #P3.6 Group C). The 3 DynamoDB
         # tools + the 2 DocDB Mongo writes (set_docdb_profiler, create_docdb_index)
         # all ship with both their handler impl and this schema entry so the

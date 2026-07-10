@@ -29,6 +29,7 @@ from mcp_servers.operations.tools.remove_reader_instance import remove_reader_in
 from mcp_servers.operations.tools.request_approval import request_approval_impl
 from mcp_servers.operations.tools.restore_cluster import restore_cluster_impl
 from mcp_servers.operations.tools.review_sql import review_sql_impl
+from mcp_servers.operations.tools.scale_out_with_warmup import scale_out_with_warmup_impl
 from mcp_servers.operations.tools.schema_diff import get_schema_diff_impl
 from mcp_servers.operations.tools.schema_history import get_schema_history_impl
 from mcp_servers.operations.tools.set_docdb_profiler import set_docdb_profiler_impl
@@ -63,6 +64,9 @@ _ENGINE_GATED_TOOLS = {
     # (both PG and MySQL). Same positive, FAIL-CLOSED gate.
     "add_reader_instance": "scale_instance",
     "remove_reader_instance": "scale_instance",
+    # Reader scale-out + auto-warmup (N-④): same relational-only, instance-level
+    # write gate as add_reader_instance (it creates a reader).
+    "scale_out_with_warmup": "scale_instance",
     "modify_dynamodb_capacity": "ddb_write",
     "modify_dynamodb_ttl": "ddb_write",
     "enable_dynamodb_pitr": "ddb_write",
@@ -366,6 +370,33 @@ TOOLS = {
             "required": ["cluster_id", "instance_id"],
         },
     },
+    "scale_out_with_warmup": {
+        "impl": scale_out_with_warmup_impl,
+        "description": (
+            "Aurora only (scale-out + auto-warmup): add a new READER instance AND "
+            "auto-queue a buffer-pool prewarm for it (semi-automatic, TWO human "
+            "approvals). This tool is approval #1 (creates the reader). Once the "
+            "reader reaches 'available', a prewarm_reader approval auto-appears in "
+            "the Approval Center as approval #2 — after the DBA approves it, the "
+            "reader is warmed automatically before it takes traffic. new_instance_id "
+            "is required; instance_class defaults to the writer's class (Serverless "
+            "v2 → db.serverless). Requires approved=true AND approval_id=<uuid from "
+            "request_approval>."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "new_instance_id": {"type": "string", "description": "Identifier for the NEW reader instance (required)"},
+                "instance_class": {"type": "string", "description": "DB instance class (defaults to the writer's current class if omitted)"},
+                "endpoint_identifier": {"type": "string", "description": "Optional custom endpoint to exclude the reader from while the auto-warm runs (auto re-included)"},
+                "top_n": {"type": "integer", "default": 20, "description": "Number of largest relations to prewarm once the reader is available (capped)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id", "new_instance_id"],
+        },
+    },
     "modify_dynamodb_capacity": {
         "impl": modify_dynamodb_capacity_impl,
         "description": (
@@ -638,7 +669,7 @@ TOOLS = {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "action_type": {
                     "type": "string",
-                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "create_custom_endpoint", "delete_custom_endpoint", "modify_custom_endpoint", "prewarm_reader", "add_reader_instance", "remove_reader_instance", "modify_dynamodb_capacity", "modify_dynamodb_ttl", "enable_dynamodb_pitr", "set_docdb_profiler", "create_docdb_index", "other"],
+                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "create_custom_endpoint", "delete_custom_endpoint", "modify_custom_endpoint", "prewarm_reader", "add_reader_instance", "remove_reader_instance", "scale_out_with_warmup", "modify_dynamodb_capacity", "modify_dynamodb_ttl", "enable_dynamodb_pitr", "set_docdb_profiler", "create_docdb_index", "other"],
                     "description": "Which write tool needs approval",
                 },
                 "action_details": {

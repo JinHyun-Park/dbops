@@ -32,6 +32,8 @@ per-row RDS client from those — assuming the spoke role when present — so it
 can finalize restores in spoke accounts, not just the deploy account.
 """
 
+import base64
+import json
 import os
 import re
 from datetime import datetime, timezone
@@ -39,6 +41,12 @@ from datetime import datetime, timezone
 import boto3
 
 _INSTANCE_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
+
+# Base64-encoded ClientContext so the operations Lambda's _extract_tool_name reads
+# custom.tool_name == "prewarm_reader" (same shape a direct boto3 invoke sets).
+_PREWARM_CLIENT_CONTEXT = base64.b64encode(
+    json.dumps({"custom": {"tool_name": "prewarm_reader"}}).encode("utf-8")
+).decode("utf-8")
 
 
 def _rds_for(region: str = "", role_arn: str = ""):
@@ -210,11 +218,158 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# ===== Second pass: scale-out prewarm approvals (N-④ Phase 1) ================
+# The prewarm approval ROW is the whole state machine — this Lambda only moves it
+# between states and fires a Lambda invoke. It lives in its own package and CANNOT
+# import mcp_servers, so it never computes payload hashes and never connects to a
+# DB: awaiting_instance → (reader available) → pending → (DBA approves) →
+# approved → (invoke prewarm_reader) → consumed (by the prewarm tool itself).
+
+
+def _scan_scaleout_prewarms(table) -> list:
+    """Paginate the approvals table for scale-out prewarm rows. Guarded against
+    the bare-MagicMock infinite-scan: LastEvaluatedKey must be a real, non-empty
+    dict to continue (a MagicMock isn't a dict → we stop)."""
+    kwargs = {
+        "FilterExpression": "scaleout = :t AND action_type = :pw",
+        "ExpressionAttributeValues": {":t": True, ":pw": "prewarm_reader"},
+    }
+    items = []
+    try:
+        while True:
+            resp = table.scan(**kwargs)
+            page = resp.get("Items")
+            if isinstance(page, list):
+                items.extend(page)
+            lek = resp.get("LastEvaluatedKey")
+            if not isinstance(lek, dict) or not lek:
+                break
+            kwargs["ExclusiveStartKey"] = lek
+    except Exception as e:
+        print(f"[finalizer] approvals scan failed: {e}")
+    return items
+
+
+def _set_approval(table, approval_id: str, created_at: str, **attrs):
+    """Set arbitrary attributes on an approval row (composite key). Best-effort."""
+    if not attrs:
+        return
+    expr = ", ".join(f"#{k} = :{k}" for k in attrs)
+    names = {f"#{k}": ("approval_status" if k == "status" else k) for k in attrs}
+    values = {f":{k}": v for k, v in attrs.items()}
+    try:
+        table.update_item(
+            Key={"approval_id": approval_id, "created_at": created_at},
+            UpdateExpression="SET " + expr,
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+    except Exception as e:  # pragma: no cover - best effort
+        print(f"[finalizer] approval update failed for {approval_id}: {e}")
+
+
+def _advance_prewarm(table, ops_fn: str, row: dict) -> dict:
+    approval_id = row.get("approval_id", "")
+    created_at = row.get("created_at", "")
+    cluster_id = row.get("cluster_id", "")
+    reader_id = row.get("reader_instance_id", "")
+    status = row.get("approval_status", "")
+
+    # Never touch rejected/consumed (or anything unexpected) — only the two
+    # states this pass owns.
+    if status not in ("awaiting_instance", "approved"):
+        return {"approval_id": approval_id, "result": f"skip:{status}"}
+
+    if status == "awaiting_instance":
+        rds = _rds_for(row.get("region", ""), row.get("spoke_role_arn", ""))
+        try:
+            di = rds.describe_db_instances(DBInstanceIdentifier=reader_id)
+        except Exception as e:
+            msg = str(e)
+            # The reader vanished (deleted before it ever came up) → stop polling.
+            if "NotFound" in msg or "DBInstanceNotFound" in msg:
+                _set_approval(table, approval_id, created_at, status="awaiting_instance_failed")
+                _event_log(cluster_id, "warning",
+                           f"scale-out 예열 대상 리더 {reader_id} 소멸 — 예열 승인 취소")
+                return {"approval_id": approval_id, "result": "instance_vanished"}
+            # Transient describe error — leave for next tick.
+            return {"approval_id": approval_id, "result": f"describe_error:{msg[:60]}"}
+        insts = di.get("DBInstances") or []
+        if not insts:
+            _set_approval(table, approval_id, created_at, status="awaiting_instance_failed")
+            _event_log(cluster_id, "warning",
+                       f"scale-out 예열 대상 리더 {reader_id} 없음 — 예열 승인 취소")
+            return {"approval_id": approval_id, "result": "instance_vanished"}
+        inst_status = insts[0].get("DBInstanceStatus", "")
+        if inst_status == "available":
+            # Now DBA-visible in the Approval Center.
+            _set_approval(table, approval_id, created_at, status="pending")
+            _event_log(cluster_id, "info",
+                       f"리더 {reader_id} available — 예열 승인 대기열 등록")
+            return {"approval_id": approval_id, "result": "queued_pending"}
+        return {"approval_id": approval_id, "result": f"waiting:{inst_status}"}
+
+    # status == "approved" → dispatch the actual warm via the operations Lambda.
+    if row.get("warm_dispatched"):
+        return {"approval_id": approval_id, "result": "already_dispatched"}
+    if not ops_fn:
+        return {"approval_id": approval_id, "result": "no_operations_fn"}
+    ad = row.get("action_details")
+    if not isinstance(ad, dict):
+        ad = {}
+    # Pass the SAME endpoint_identifier + top_n that were hashed into the approval
+    # — prewarm_reader.verify_approval re-projects them and refuses any mismatch.
+    payload = {
+        "cluster_id": cluster_id,
+        "reader_instance_id": reader_id,
+        "endpoint_identifier": ad.get("endpoint_identifier", "") or "",
+        "top_n": int(ad.get("top_n", 20) or 20),
+        "approved": True,
+        "approval_id": approval_id,
+    }
+    try:
+        # Async (Event): prewarm can run up to the operations Lambda's 120s while
+        # this finalizer's own budget is 60s — a synchronous invoke could time the
+        # finalizer out mid-warm. prewarm_reader consumes the approval itself on
+        # success; warm_dispatched guards the window before that consume lands.
+        boto3.client("lambda").invoke(
+            FunctionName=ops_fn,
+            InvocationType="Event",
+            Payload=json.dumps(payload).encode("utf-8"),
+            ClientContext=_PREWARM_CLIENT_CONTEXT,
+        )
+    except Exception as e:
+        # Transient invoke error — leave warm_dispatched unset so we retry.
+        return {"approval_id": approval_id, "result": f"invoke_error:{str(e)[:60]}"}
+    _set_approval(table, approval_id, created_at, warm_dispatched=True)
+    _event_log(cluster_id, "info",
+               f"리더 {reader_id} 예열 작업 디스패치 (approval {approval_id})")
+    return {"approval_id": approval_id, "result": "warm_dispatched"}
+
+
+def _process_scaleout_prewarms() -> dict:
+    """Drive every scale-out prewarm approval one step. Independent of the
+    restore pass so a CLUSTERS_TABLE misconfig can't disable it."""
+    table_name = os.environ.get("APPROVALS_TABLE", "")
+    if not table_name:
+        return {"scanned": 0}
+    ops_fn = os.environ.get("OPERATIONS_FUNCTION_NAME", "")
+    table = boto3.resource("dynamodb").Table(table_name)
+    rows = _scan_scaleout_prewarms(table)
+    results = [_advance_prewarm(table, ops_fn, row) for row in rows]
+    if results:
+        print(f"[finalizer] scale-out prewarms: {results}")
+    return {"scanned": len(rows), "results": results}
+
+
 def lambda_handler(event, context):
+    # Independent second pass — runs even if the restore pass early-returns.
+    scaleout = _process_scaleout_prewarms()
+
     table_name = os.environ.get("CLUSTERS_TABLE", "")
     if not table_name:
         print("[finalizer] CLUSTERS_TABLE not configured")
-        return {"finalized": 0, "error": "CLUSTERS_TABLE missing"}
+        return {"finalized": 0, "error": "CLUSTERS_TABLE missing", "scaleout": scaleout}
 
     table = boto3.resource("dynamodb").Table(table_name)
 
@@ -229,7 +384,7 @@ def lambda_handler(event, context):
         pending = resp.get("Items", [])
     except Exception as e:
         print(f"[finalizer] scan failed: {e}")
-        return {"finalized": 0, "error": str(e)[:200]}
+        return {"finalized": 0, "error": str(e)[:200], "scaleout": scaleout}
 
     # Build the RDS client PER ROW from its account+region (cross-account
     # restores carry a spoke_role_arn) — a single hub client can't reach a
@@ -245,4 +400,5 @@ def lambda_handler(event, context):
     finalized = sum(1 for r in results if r.get("result") == "finalized")
     if results:
         print(f"[finalizer] processed {len(results)} pending: {results}")
-    return {"pending": len(pending), "finalized": finalized, "results": results}
+    return {"pending": len(pending), "finalized": finalized, "results": results,
+            "scaleout": scaleout}

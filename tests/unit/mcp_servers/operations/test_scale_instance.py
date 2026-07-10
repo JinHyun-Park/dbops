@@ -49,38 +49,68 @@ def test_add_requires_new_instance_id():
 
 
 @patch(f"{_A}.client_for_cluster")
-def test_add_requires_approval(mock_client):
-    rds = _rds_cluster([{"DBInstanceIdentifier": "w", "IsClusterWriter": True}])
+def test_add_preview_resolves_writer_class(mock_client):
+    """PREVIEW with empty class resolves the WRITER's concrete class so the DBA
+    approves the actual billable class; the returned approval_required and
+    cli_preview carry that concrete class, and nothing is created."""
+    rds = _rds_cluster(
+        members=[{"DBInstanceIdentifier": "w", "IsClusterWriter": True}],
+        instances=[{"DBInstanceIdentifier": "w", "DBInstanceClass": "db.serverless"}],
+    )
     mock_client.return_value = rds
     out = add_reader_instance_impl(
         MagicMock(), cluster_id="prod-pg-1", new_instance_id="r-new",
     )
     assert out["status"] == "approval_required"
     assert out["new_instance_id"] == "r-new"
-    assert "cli_preview" in out
+    assert out["instance_class"] == "db.serverless"  # concrete, resolved in preview
+    assert "db.serverless" in out["cli_preview"]
+    rds.create_db_instance.assert_not_called()
+
+
+@patch(f"{_A}.client_for_cluster")
+def test_add_preview_unresolvable_class_asks(mock_client):
+    """PREVIEW where the writer class can't be resolved → needs_instance_class,
+    NOT an approval_required carrying an empty class."""
+    rds = _rds_cluster(
+        members=[{"DBInstanceIdentifier": "w", "IsClusterWriter": True}],
+        instances=[],  # describe_db_instances yields nothing → unresolvable
+    )
+    mock_client.return_value = rds
+    out = add_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", new_instance_id="r-new",
+    )
+    assert out["status"] == "needs_instance_class"
     rds.create_db_instance.assert_not_called()
 
 
 @patch(f"{_A}.verify_approval")
 @patch(f"{_A}.client_for_cluster")
-def test_add_defaults_class_to_writer(mock_client, mock_guard):
-    """instance_class empty → resolves to the WRITER's current class, and
-    create_db_instance is called with the right cluster/engine/class/tags."""
-    rds = _rds_cluster(
-        members=[
-            {"DBInstanceIdentifier": "w", "IsClusterWriter": True},
-            {"DBInstanceIdentifier": "r1", "IsClusterWriter": False},
-        ],
-        instances=[
-            {"DBInstanceIdentifier": "w", "DBInstanceClass": "db.r6g.large"},
-            {"DBInstanceIdentifier": "r1", "DBInstanceClass": "db.r6g.large"},
-        ],
-    )
+def test_add_execute_requires_bound_class(mock_client, mock_guard):
+    """Approved but instance_class empty (never bound at approval) → add_failed
+    and NO create — execute never resolves a class the DBA didn't approve."""
+    rds = _rds_cluster([{"DBInstanceIdentifier": "w", "IsClusterWriter": True}])
     mock_client.return_value = rds
     mock_guard.return_value = {"ok": True}
     out = add_reader_instance_impl(
         MagicMock(), cluster_id="prod-pg-1", new_instance_id="r-new",
         approved=True, approval_id="aid-1",
+    )
+    assert out["status"] == "add_failed"
+    rds.create_db_instance.assert_not_called()
+
+
+@patch(f"{_A}.verify_approval")
+@patch(f"{_A}.client_for_cluster")
+def test_add_execute_uses_approved_class(mock_client, mock_guard):
+    """Approved with a concrete class → create_db_instance with that EXACT class;
+    execute does NO post-approval writer-class lookup."""
+    rds = _rds_cluster([{"DBInstanceIdentifier": "w", "IsClusterWriter": True}])
+    mock_client.return_value = rds
+    mock_guard.return_value = {"ok": True}
+    out = add_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", new_instance_id="r-new",
+        instance_class="db.r6g.large", approved=True, approval_id="aid-1",
     )
     assert out["status"] == "instance_added"
     assert out["instance_class"] == "db.r6g.large"
@@ -91,6 +121,7 @@ def test_add_defaults_class_to_writer(mock_client, mock_guard):
     assert call["DBInstanceClass"] == "db.r6g.large"
     assert call["Tags"] == [{"Key": "dbops:managed", "Value": "scale-out"}]
     assert "AvailabilityZone" not in call  # none passed
+    rds.describe_db_instances.assert_not_called()  # no post-approval class lookup
 
 
 @patch(f"{_A}.verify_approval")
@@ -259,6 +290,38 @@ def test_remove_failure_returns_friendly_no_leak(mock_client, mock_guard):
     )
     assert out["status"] == "remove_failed"
     assert "SECRET_INTERNAL_LEAK" not in json.dumps(out)
+
+
+@patch(f"{_R}.verify_approval")
+@patch(f"{_R}.client_for_cluster")
+def test_remove_rechecks_writer_before_delete_toctou(mock_client, mock_guard):
+    """A failover between the early guard and the delete promotes the target to
+    writer: describe returns it as a READER first (early guards pass) then as the
+    WRITER on the pre-delete re-check → refuse to delete."""
+    rds = _rds_cluster([])  # member list supplied via side_effect below
+    reader_view = {"DBClusters": [{
+        "DBClusterIdentifier": "prod-pg-1", "Engine": "aurora-postgresql",
+        "DBClusterMembers": [
+            {"DBInstanceIdentifier": "w", "IsClusterWriter": True},
+            {"DBInstanceIdentifier": "r1", "IsClusterWriter": False},
+        ],
+    }]}
+    writer_view = {"DBClusters": [{
+        "DBClusterIdentifier": "prod-pg-1", "Engine": "aurora-postgresql",
+        "DBClusterMembers": [
+            {"DBInstanceIdentifier": "w", "IsClusterWriter": False},
+            {"DBInstanceIdentifier": "r1", "IsClusterWriter": True},  # promoted
+        ],
+    }]}
+    rds.describe_db_clusters.side_effect = [reader_view, writer_view]
+    mock_client.return_value = rds
+    mock_guard.return_value = {"ok": True}
+    out = remove_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", instance_id="r1",
+        approved=True, approval_id="aid-1",
+    )
+    assert out["status"] == "cannot_remove_writer"
+    rds.delete_db_instance.assert_not_called()
 
 
 @patch(f"{_R}.client_for_cluster")

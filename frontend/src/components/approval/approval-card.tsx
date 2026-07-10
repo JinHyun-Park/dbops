@@ -25,6 +25,11 @@ interface Approval {
   // New shape
   action_type?: string;
   action_details?: Record<string, unknown> | string;
+
+  // Set by scale_out_with_warmup: this prewarm approval was auto-queued by a
+  // scale-out (N-④). Drives the "스케일아웃 자동 예열" badge so the DBA can tell
+  // it apart from a manually-requested prewarm.
+  scaleout?: boolean;
 }
 
 interface ApprovalCardProps {
@@ -72,6 +77,8 @@ const ACTION_RISK: Record<string, string> = {
   // irreversible → high for both.
   add_reader_instance: "high",
   remove_reader_instance: "high",
+  // Scale-out + auto-warmup creates a billable reader (approval #1) → high.
+  scale_out_with_warmup: "high",
   other: "medium",
 };
 
@@ -238,11 +245,10 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     what: "리더 인스턴스를 추가해 읽기 용량을 확장합니다 (scale-out).",
     risks: [
       "신규 인스턴스는 과금 대상이며 생성에 수 분이 걸립니다.",
-      "클래스 미지정 시 writer와 동일 클래스로 생성됩니다.",
+      "생성될 인스턴스 클래스가 아래에 명시되어 있습니다 — 이 클래스로 승인·생성됩니다.",
     ],
     considerations: [
-      "Serverless v2는 db.serverless로 자동 설정됩니다",
-      "필요한 읽기 용량·비용 대비 적정 클래스인지 확인",
+      "명시된 인스턴스 클래스가 필요한 읽기 용량·비용에 적정한지 확인",
     ],
   },
   remove_reader_instance: {
@@ -254,6 +260,18 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     considerations: [
       "삭제 대상 리더로 가는 커스텀 엔드포인트/커넥션이 없는지 확인",
       "삭제 후 남은 리더가 읽기 부하를 감당할 수 있는지 확인",
+    ],
+  },
+  scale_out_with_warmup: {
+    what: "리더를 추가하고, available되면 버퍼풀 예열 승인을 자동으로 대기열에 올립니다 (scale-out + 자동 예열, 2단계 승인 중 1단계).",
+    risks: [
+      "신규 인스턴스는 과금 대상이며 생성에 수 분이 걸립니다.",
+      "이 승인은 리더 생성만 합니다 — 예열은 별도 2차 승인이 필요합니다.",
+      "생성될 인스턴스 클래스가 아래에 명시되어 있습니다 — 이 클래스로 승인·생성됩니다.",
+    ],
+    considerations: [
+      "리더가 available되면 예열 승인이 자동으로 승인 대기열에 나타납니다",
+      "명시된 인스턴스 클래스가 필요한 읽기 용량·비용에 적정한지 확인",
     ],
   },
 };
@@ -282,6 +300,14 @@ export function ApprovalCard({
           >
             {risk}
           </span>
+          {approval.scaleout && (
+            <span
+              className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-sky-500/40 bg-sky-500/15 text-sky-300"
+              title="스케일아웃이 자동으로 대기열에 올린 예열 승인입니다"
+            >
+              스케일아웃 자동 예열
+            </span>
+          )}
         </div>
         <StatusPill status={approval.approval_status} />
       </div>

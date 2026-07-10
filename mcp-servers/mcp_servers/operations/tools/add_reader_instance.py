@@ -57,6 +57,20 @@ def add_reader_instance_impl(
                 "reason": "new_instance_id가 필요합니다."}
 
     if not approved:
+        # Resolve the concrete class NOW so the approval payload hash binds the
+        # exact billable class the DBA sees — execute never picks a class after
+        # approval.
+        if not instance_class:
+            try:
+                rds = client_for_cluster(cluster_id, "rds")
+                dbc = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)["DBClusters"][0]
+                instance_class = _writer_instance_class(rds, dbc)
+            except Exception as e:
+                print(f"[add_reader_instance] preview writer-class lookup failed for {cluster_id}: {e}")
+                instance_class = ""
+            if not instance_class:
+                return {"status": "needs_instance_class", "cluster_id": cluster_id,
+                        "reason": "instance_class를 결정할 수 없습니다 — 명시해 주세요 (예: db.serverless)."}
         return {
             "status": "approval_required",
             "cluster_id": cluster_id,
@@ -65,10 +79,7 @@ def add_reader_instance_impl(
             "availability_zone": availability_zone,
             "cli_preview": (
                 f"리더 인스턴스 추가 (scale-out): 클러스터 {cluster_id}에 "
-                f"{new_instance_id!r} 리더를 생성합니다"
-                + (f" (클래스 {instance_class})" if instance_class
-                   else " (클래스 미지정 → writer와 동일 클래스로 자동 설정, "
-                        "Serverless v2는 db.serverless)")
+                f"{new_instance_id!r} 리더를 생성합니다 (클래스 {instance_class})"
                 + (f", AZ {availability_zone}" if availability_zone else "")
                 + ". 신규 인스턴스는 과금 대상이며 생성에 수 분이 걸립니다."
             ),
@@ -83,6 +94,12 @@ def add_reader_instance_impl(
         return {"status": "approval_denied", "cluster_id": cluster_id,
                 "reason": guard.get("reason", "approval guard rejected the request")}
 
+    # The class was resolved in PREVIEW and hash-bound by the approval, so execute
+    # uses the exact class the DBA approved — never a post-approval lookup.
+    if not instance_class:
+        return {"status": "add_failed", "cluster_id": cluster_id,
+                "reason": "instance_class가 승인에 바인딩되지 않았습니다 — 미리보기가 제안한 클래스로 다시 승인 요청하세요."}
+
     rds = client_for_cluster(cluster_id, "rds")
     try:
         dbc = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)["DBClusters"][0]
@@ -94,22 +111,11 @@ def add_reader_instance_impl(
     real_cluster_id = dbc.get("DBClusterIdentifier") or cluster_id
     engine = dbc.get("Engine")
 
-    resolved_class = instance_class
-    if not resolved_class:
-        try:
-            resolved_class = _writer_instance_class(rds, dbc)
-        except Exception as e:
-            print(f"[add_reader_instance] writer-class lookup failed for {cluster_id}: {e}")
-            resolved_class = ""
-    if not resolved_class:
-        return {"status": "add_failed", "cluster_id": cluster_id,
-                "reason": "인스턴스 클래스를 결정할 수 없습니다 — instance_class를 명시하세요."}
-
     params = {
         "DBInstanceIdentifier": new_instance_id,
         "DBClusterIdentifier": real_cluster_id,
         "Engine": engine,
-        "DBInstanceClass": resolved_class,
+        "DBInstanceClass": instance_class,
         "Tags": [{"Key": "dbops:managed", "Value": "scale-out"}],
     }
     if availability_zone:
@@ -126,7 +132,7 @@ def add_reader_instance_impl(
         "status": "instance_added",
         "cluster_id": cluster_id,
         "instance_id": new_instance_id,
-        "instance_class": resolved_class,
+        "instance_class": instance_class,
         "availability_zone": availability_zone or None,
         "db_status": "creating",
     }
