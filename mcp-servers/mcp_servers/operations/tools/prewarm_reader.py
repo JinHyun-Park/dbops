@@ -171,6 +171,27 @@ def _set_reader_excluded(rds, endpoint_identifier, reader_instance_id, excluded)
     )
 
 
+def _reinclude_with_retry(rds, endpoint_identifier, reader_instance_id, attempts=4, delay=15):
+    """Re-include the reader, retrying while the endpoint is still settling from
+    the earlier exclude. A member-list change puts the endpoint in 'modifying'
+    for tens of seconds, so an immediate re-include races it and raises
+    InvalidDBClusterEndpointStateFault — which is exactly how a fast failure (or
+    a fast warm) could strand the reader OUT of the endpoint. Bounded so the
+    Lambda can't hang past its timeout (attempts*delay stays well under 120s)."""
+    for i in range(attempts):
+        try:
+            _set_reader_excluded(rds, endpoint_identifier, reader_instance_id, False)
+            return True
+        except Exception as e:  # noqa: BLE001 - want to inspect the fault code
+            transient = "modifying" in str(e) or "InvalidDBClusterEndpointStateFault" in str(e)
+            if transient and i < attempts - 1:
+                time.sleep(delay)
+                continue
+            print(f"[prewarm_reader] re-include of {reader_instance_id} failed: {e}")
+            return False
+    return False
+
+
 def _reader_creds(cache, cluster_id):
     """Resolve (creds, db_name) for the target cluster's master secret, read in
     the cluster's own account. Returns (None, reason) on any failure."""
@@ -318,9 +339,7 @@ def prewarm_reader_impl(
         }
     finally:
         # Safety net: whether we succeeded or bailed, never leave the reader
-        # stranded out of the endpoint. Best-effort re-include.
+        # stranded out of the endpoint. Bounded retry rides out the endpoint's
+        # post-exclude 'modifying' window instead of failing on the first race.
         if excluded:
-            try:
-                _set_reader_excluded(rds, endpoint_identifier, reader_instance_id, False)
-            except Exception as e:
-                print(f"[prewarm_reader] re-include of {reader_instance_id} failed: {e}")
+            _reinclude_with_retry(rds, endpoint_identifier, reader_instance_id)
