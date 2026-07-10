@@ -47,11 +47,17 @@ _WALL_BUDGET_SECONDS = 60
 # path injects it automatically, but this path does not.
 _SRC = "/* source=dbops-agent */ "
 
+# User relations only. Excluding just pg_catalog/information_schema is NOT
+# enough — pg_toast (and pg_temp*) are separate schemas whose largest members
+# (e.g. system-catalog TOAST indexes) sort to the top by size, and the Aurora
+# master user (rds_superuser, not a real superuser) can't pg_prewarm system
+# TOAST → the whole run aborts with "permission denied". `left(nspname,3) <>
+# 'pg_'` drops every pg_* schema; warming user data is the point anyway.
 _TOP_REL_SQL = (
     _SRC + "SELECT c.oid::regclass::text AS rel, pg_relation_size(c.oid) AS bytes "
     "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
     "WHERE c.relkind IN ('r','i') "
-    "AND n.nspname NOT IN ('pg_catalog','information_schema') "
+    "AND left(n.nspname, 3) <> 'pg_' AND n.nspname <> 'information_schema' "
     "ORDER BY bytes DESC LIMIT :n"
 )
 
@@ -307,11 +313,17 @@ def prewarm_reader_impl(
             for r in rels:
                 if time.time() > deadline:
                     break  # ponytail: budget exhausted — stop starting new prewarms
-                blocks = _one(
-                    pg_direct.query(conn, _SRC + "SELECT pg_prewarm(:rel) AS blocks", {"rel": r["rel"]}),
-                    "blocks",
-                )
-                blocks = int(blocks or 0)
+                # Per-relation guard: one relation we can't prewarm (permission,
+                # dropped mid-run) must not abort the whole warm. pg8000 runs in
+                # autocommit so a failed statement doesn't poison the next.
+                try:
+                    blocks = int(_one(
+                        pg_direct.query(conn, _SRC + "SELECT pg_prewarm(:rel) AS blocks", {"rel": r["rel"]}),
+                        "blocks",
+                    ) or 0)
+                except Exception as e:  # noqa: BLE001
+                    print(f"[prewarm_reader] skip relation {r.get('rel')}: {e}")
+                    continue
                 warmed.append({"rel": r["rel"], "blocks": blocks})
                 total_blocks += blocks
             buffers_after = _one(pg_direct.query(conn, _SRC + "SELECT count(*) AS n FROM pg_buffercache"), "n")
