@@ -186,6 +186,10 @@ export function SettingsPanel({
   const [diffLoading, setDiffLoading] = useState(true);
   const [diffAvailable, setDiffAvailable] = useState(false);
   const [diffs, setDiffs] = useState<ParamDiffRow[]>([]);
+  const [diffQuery, setDiffQuery] = useState("");
+  const [diffApplyType, setDiffApplyType] = useState<
+    "all" | "static" | "dynamic"
+  >("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -215,6 +219,13 @@ export function SettingsPanel({
       cancelled = true;
     };
   }, [clusterId]);
+
+  const filteredDiffs = diffs.filter(
+    (d) =>
+      d.name.toLowerCase().includes(diffQuery.toLowerCase()) &&
+      (diffApplyType === "all" || d.apply_type === diffApplyType),
+  );
+  const diffFilterActive = diffQuery !== "" || diffApplyType !== "all";
 
   const engineLabel = (engine || "").includes("mysql")
     ? "MySQL"
@@ -319,44 +330,84 @@ export function SettingsPanel({
             ) : diffs.length === 0 ? (
               <div className="text-zinc-500 text-sm">디폴트와 동일합니다</div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-[11px] text-zinc-500 text-left">
-                      <th className="font-normal pb-1.5 pr-3">파라미터</th>
-                      <th className="font-normal pb-1.5 pr-3">현재값</th>
-                      <th className="font-normal pb-1.5 pr-3">디폴트값</th>
-                      <th className="font-normal pb-1.5">적용</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {diffs.map((d) => (
-                      <tr key={d.name} className="border-t border-zinc-800/60">
-                        <td className="py-1.5 pr-3 font-mono text-zinc-300 text-xs">
-                          {d.name}
-                        </td>
-                        <td className="py-1.5 pr-3 font-mono text-zinc-100 text-xs">
-                          {d.current}
-                        </td>
-                        <td className="py-1.5 pr-3 font-mono text-zinc-500 text-xs">
-                          {d.default ?? "—"}
-                        </td>
-                        <td className="py-1.5">
-                          <span
-                            className={`text-[9px] uppercase tracking-wider px-1 py-0.5 rounded border ${
-                              d.apply_type === "static"
-                                ? "border-amber-500/40 text-amber-300"
-                                : "border-zinc-700 text-zinc-400"
-                            }`}
-                          >
-                            {d.apply_type || "unknown"}
-                          </span>
-                        </td>
-                      </tr>
+              <>
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <input
+                    value={diffQuery}
+                    onChange={(e) => setDiffQuery(e.target.value)}
+                    placeholder="파라미터 이름 검색"
+                    className="bg-zinc-900 border border-zinc-800 text-zinc-200 text-xs rounded px-2 py-1 w-48"
+                  />
+                  <div className="flex items-center gap-1">
+                    {(["all", "static", "dynamic"] as const).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setDiffApplyType(t)}
+                        className={`px-2 py-1 rounded text-xs transition ${
+                          diffApplyType === t
+                            ? "bg-zinc-100 text-zinc-900"
+                            : "text-zinc-400 hover:text-zinc-200"
+                        }`}
+                      >
+                        {t === "all" ? "전체" : t}
+                      </button>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </div>
+                  {diffFilterActive && (
+                    <span className="text-[11px] text-zinc-500">
+                      {diffs.length}개 중 {filteredDiffs.length}개 표시
+                    </span>
+                  )}
+                </div>
+                {filteredDiffs.length === 0 ? (
+                  <div className="text-zinc-500 text-sm">
+                    일치하는 파라미터가 없습니다
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-[11px] text-zinc-500 text-left">
+                          <th className="font-normal pb-1.5 pr-3">파라미터</th>
+                          <th className="font-normal pb-1.5 pr-3">현재값</th>
+                          <th className="font-normal pb-1.5 pr-3">디폴트값</th>
+                          <th className="font-normal pb-1.5">적용</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredDiffs.map((d) => (
+                          <tr
+                            key={d.name}
+                            className="border-t border-zinc-800/60"
+                          >
+                            <td className="py-1.5 pr-3 font-mono text-zinc-300 text-xs">
+                              {d.name}
+                            </td>
+                            <td className="py-1.5 pr-3 font-mono text-zinc-100 text-xs">
+                              {d.current}
+                            </td>
+                            <td className="py-1.5 pr-3 font-mono text-zinc-500 text-xs">
+                              {d.default ?? "—"}
+                            </td>
+                            <td className="py-1.5">
+                              <span
+                                className={`text-[9px] uppercase tracking-wider px-1 py-0.5 rounded border ${
+                                  d.apply_type === "static"
+                                    ? "border-amber-500/40 text-amber-300"
+                                    : "border-zinc-700 text-zinc-400"
+                                }`}
+                              >
+                                {d.apply_type || "unknown"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

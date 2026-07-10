@@ -3308,16 +3308,23 @@ def _engine_config(cluster_id: str) -> dict:
 
 
 def _param_diff(cluster_id: str) -> dict:
-    """Diff a relational cluster's LIVE parameter group against the AWS engine
-    default for its family — surfaces only what an operator (or a prior
+    """Diff a relational cluster's LIVE parameter group against the family's
+    DEFAULT parameter group — surfaces only what an operator (or a prior
     tuning pass) actually changed, instead of scrolling ~500 parameters.
+
+    Baseline is `default.<family>` fetched via the SAME
+    describe_db_cluster_parameters action as the current group, so both sides
+    share the identical materialized representation. (The engine-default
+    catalog, describe_engine_default_cluster_parameters, returns EMPTY values
+    for many params the group reports concretely, which produced pure
+    false-positive diffs — do not reintroduce it.)
 
     Relational only — DocumentDB/DynamoDB/ElastiCache have their own config
     surface via _engine_config. Two fully-paginated cross-account describes
-    (current values + the ~500-param engine-default catalog), so this is
-    always called through _cached_live with a multi-minute TTL — never
-    per-render. Same friendly-fallback contract as _topology/_backups: never
-    leak the raw boto3 fault string, `available: false` on any failure.
+    (current values + the default group), so this is always called through
+    _cached_live with a multi-minute TTL — never per-render. Same
+    friendly-fallback contract as _topology/_backups: never leak the raw
+    boto3 fault string, `available: false` on any failure.
     """
     eng = _registry_engine(cluster_id)
     if eng is None:
@@ -3357,20 +3364,22 @@ def _param_diff(cluster_id: str) -> dict:
             if not isinstance(marker, str) or not marker:
                 break
 
-        # Engine defaults nest one level under "EngineDefaults", Marker included.
+        # Baseline = the family's default cluster parameter group
+        # (default.<family>, AWS naming convention). Same describe action as
+        # the current group → identical materialized representation.
+        default_group = f"default.{family}"
         defaults = {}
         marker = None
         while True:
-            kwargs = {"DBParameterGroupFamily": family}
+            kwargs = {"DBClusterParameterGroupName": default_group}
             if marker:
                 kwargs["Marker"] = marker
-            resp = rds.describe_engine_default_cluster_parameters(**kwargs)
-            eng_defaults = resp.get("EngineDefaults") or {}
-            for p in eng_defaults.get("Parameters") or []:
+            resp = rds.describe_db_cluster_parameters(**kwargs)
+            for p in resp.get("Parameters") or []:
                 name = p.get("ParameterName")
                 if name:
                     defaults[name] = p.get("ParameterValue", "")
-            marker = eng_defaults.get("Marker")
+            marker = resp.get("Marker")
             if not isinstance(marker, str) or not marker:
                 break
 
@@ -3379,7 +3388,7 @@ def _param_diff(cluster_id: str) -> dict:
             name = p.get("ParameterName")
             cur_val = p.get("ParameterValue", "")
             if not name or cur_val == "":
-                continue  # unset — already tracking the engine default
+                continue  # unset — inherits the default, nothing to surface
             default_val = defaults.get(name, "")
             if cur_val == default_val:
                 continue
