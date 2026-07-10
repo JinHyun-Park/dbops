@@ -169,6 +169,19 @@ def operations_schema():
               {"cluster_id": "string", "reader_instance_id": "string", "endpoint_identifier": "string",
                "top_n": "integer", "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "reader_instance_id"]),
+        # Reader scale-out/scale-in (N-③). Aurora only (instance-level, PG+MySQL);
+        # approval-gated. Every handler param must appear here or the impl<->schema
+        # parity test fails.
+        _tool("add_reader_instance",
+              "Aurora only (scale-out): add a new READER instance to expand read capacity; new_instance_id required; instance_class defaults to the writer's class (Serverless v2 -> db.serverless); requires approval",
+              {"cluster_id": "string", "new_instance_id": "string", "instance_class": "string",
+               "availability_zone": "string", "approved": "boolean", "approval_id": "string"},
+              ["cluster_id", "new_instance_id"]),
+        _tool("remove_reader_instance",
+              "Aurora only (scale-in): remove a READER instance; the writer and the cluster's last instance are protected; irreversible; requires approval",
+              {"cluster_id": "string", "instance_id": "string",
+               "approved": "boolean", "approval_id": "string"},
+              ["cluster_id", "instance_id"]),
         # NoSQL write/remediation (multi-engine #P3.6 Group C). The 3 DynamoDB
         # tools + the 2 DocDB Mongo writes (set_docdb_profiler, create_docdb_index)
         # all ship with both their handler impl and this schema entry so the

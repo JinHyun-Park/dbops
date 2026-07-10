@@ -46,6 +46,10 @@ CAPABILITIES = {
         # (pg_prewarm is PG-specific; the tool additionally gates PG vs MySQL).
         # Positive gate like custom_endpoint.
         "prewarm": True,
+        # scale_instance: Aurora reader scale-out/scale-in (N-③) is instance-level
+        # (both PG and MySQL). Positive gate — non-relational engines can't add/
+        # remove an RDS DB instance this way.
+        "scale_instance": True,
         "cw_namespace": "AWS/RDS",
         "findings": {"health", "cost", "param_fitness", "capacity_forecast"},
     },

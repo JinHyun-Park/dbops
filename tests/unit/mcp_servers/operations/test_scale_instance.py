@@ -1,0 +1,294 @@
+"""Tests for the Aurora reader scale-out/scale-in write tools (N-③), approval-gated.
+
+Covers for BOTH tools: deny-by-default (preview → approval_required, no RDS
+write), payload-hash binding via the REAL guard (mismatch → no create/delete),
+and the execute path. add: writer-class defaulting, create args. remove: the
+writer/last-instance/not-found protections and the delete path. Failure paths
+return a friendly status with no str(e) leak.
+
+The handler engine-gate (unsupported_engine on non-relational) is exercised in
+test_operations_engine_gate.py; here we test the impls assuming the gate passed.
+Every describe_* MagicMock returns a real dict so a paginator/loop can't hang.
+"""
+
+import json
+import os
+from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
+
+from mcp_servers.operations.tools.add_reader_instance import add_reader_instance_impl
+from mcp_servers.operations.tools.remove_reader_instance import remove_reader_instance_impl
+from mcp_servers.shared.approval_guard import canonical_action_hash
+
+_A = "mcp_servers.operations.tools.add_reader_instance"
+_R = "mcp_servers.operations.tools.remove_reader_instance"
+
+
+def _rds_cluster(members, cluster_id="prod-pg-1", engine="aurora-postgresql", instances=None):
+    """An RDS MagicMock whose describe_* return real dicts (never bare mocks —
+    a bare MagicMock in a paginate/iter loop hangs)."""
+    rds = MagicMock()
+    rds.describe_db_clusters.return_value = {
+        "DBClusters": [{
+            "DBClusterIdentifier": cluster_id,
+            "Engine": engine,
+            "DBClusterMembers": members,
+        }]
+    }
+    rds.describe_db_instances.return_value = {"DBInstances": instances or []}
+    rds.create_db_instance.return_value = {"DBInstance": {"DBInstanceStatus": "creating"}}
+    rds.delete_db_instance.return_value = {"DBInstance": {"DBInstanceStatus": "deleting"}}
+    return rds
+
+
+# ───────────────────────── add (scale-out) ─────────────────────────
+
+def test_add_requires_new_instance_id():
+    out = add_reader_instance_impl(MagicMock(), cluster_id="prod-pg-1")
+    assert out["status"] == "invalid_instance"
+
+
+@patch(f"{_A}.client_for_cluster")
+def test_add_requires_approval(mock_client):
+    rds = _rds_cluster([{"DBInstanceIdentifier": "w", "IsClusterWriter": True}])
+    mock_client.return_value = rds
+    out = add_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", new_instance_id="r-new",
+    )
+    assert out["status"] == "approval_required"
+    assert out["new_instance_id"] == "r-new"
+    assert "cli_preview" in out
+    rds.create_db_instance.assert_not_called()
+
+
+@patch(f"{_A}.verify_approval")
+@patch(f"{_A}.client_for_cluster")
+def test_add_defaults_class_to_writer(mock_client, mock_guard):
+    """instance_class empty → resolves to the WRITER's current class, and
+    create_db_instance is called with the right cluster/engine/class/tags."""
+    rds = _rds_cluster(
+        members=[
+            {"DBInstanceIdentifier": "w", "IsClusterWriter": True},
+            {"DBInstanceIdentifier": "r1", "IsClusterWriter": False},
+        ],
+        instances=[
+            {"DBInstanceIdentifier": "w", "DBInstanceClass": "db.r6g.large"},
+            {"DBInstanceIdentifier": "r1", "DBInstanceClass": "db.r6g.large"},
+        ],
+    )
+    mock_client.return_value = rds
+    mock_guard.return_value = {"ok": True}
+    out = add_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", new_instance_id="r-new",
+        approved=True, approval_id="aid-1",
+    )
+    assert out["status"] == "instance_added"
+    assert out["instance_class"] == "db.r6g.large"
+    call = rds.create_db_instance.call_args.kwargs
+    assert call["DBInstanceIdentifier"] == "r-new"
+    assert call["DBClusterIdentifier"] == "prod-pg-1"
+    assert call["Engine"] == "aurora-postgresql"
+    assert call["DBInstanceClass"] == "db.r6g.large"
+    assert call["Tags"] == [{"Key": "dbops:managed", "Value": "scale-out"}]
+    assert "AvailabilityZone" not in call  # none passed
+
+
+@patch(f"{_A}.verify_approval")
+@patch(f"{_A}.client_for_cluster")
+def test_add_explicit_class_and_az(mock_client, mock_guard):
+    rds = _rds_cluster([{"DBInstanceIdentifier": "w", "IsClusterWriter": True}])
+    mock_client.return_value = rds
+    mock_guard.return_value = {"ok": True}
+    out = add_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", new_instance_id="r-new",
+        instance_class="db.serverless", availability_zone="ap-northeast-2a",
+        approved=True, approval_id="aid-1",
+    )
+    assert out["status"] == "instance_added"
+    assert out["availability_zone"] == "ap-northeast-2a"
+    call = rds.create_db_instance.call_args.kwargs
+    assert call["DBInstanceClass"] == "db.serverless"
+    assert call["AvailabilityZone"] == "ap-northeast-2a"
+    # writer-class lookup is skipped when the class is explicit
+    rds.describe_db_instances.assert_not_called()
+
+
+@patch(f"{_A}.verify_approval")
+@patch(f"{_A}.client_for_cluster")
+def test_add_failure_returns_friendly_no_leak(mock_client, mock_guard):
+    rds = _rds_cluster([{"DBInstanceIdentifier": "w", "IsClusterWriter": True}])
+    rds.create_db_instance.side_effect = Exception("SECRET_INTERNAL_LEAK")
+    mock_client.return_value = rds
+    mock_guard.return_value = {"ok": True}
+    out = add_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", new_instance_id="r-new",
+        instance_class="db.serverless", approved=True, approval_id="aid-1",
+    )
+    assert out["status"] == "add_failed"
+    assert "SECRET_INTERNAL_LEAK" not in json.dumps(out)
+
+
+@patch(f"{_A}.client_for_cluster")
+def test_add_payload_hash_mismatch_rejected(mock_client):
+    """A real approval minted for class '' cannot be consumed to add the reader
+    with a different class — the guard's payload_hash refuses it, no create."""
+    rds = _rds_cluster([{"DBInstanceIdentifier": "w", "IsClusterWriter": True}])
+    mock_client.return_value = rds
+    row = {
+        "approval_id": "aid-1", "created_at": "1", "approval_status": "approved",
+        "cluster_id": "prod-pg-1", "action_type": "add_reader_instance",
+        "payload_hash": canonical_action_hash("add_reader_instance", {
+            "cluster_id": "prod-pg-1", "new_instance_id": "r-new",
+            "instance_class": "", "availability_zone": "",
+        }),
+        "resolved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    table = MagicMock()
+    table.scan.return_value = {"Items": [row]}
+    resource = MagicMock()
+    resource.Table.return_value = table
+    with patch.dict(os.environ, {"APPROVALS_TABLE": "approvals"}, clear=False), \
+         patch("mcp_servers.shared.approval_guard.boto3.resource", return_value=resource):
+        out = add_reader_instance_impl(
+            MagicMock(), cluster_id="prod-pg-1", new_instance_id="r-new",
+            instance_class="db.big", approved=True, approval_id="aid-1",
+        )
+    assert out["status"] == "approval_denied"
+    rds.create_db_instance.assert_not_called()
+    table.update_item.assert_not_called()  # never consumed
+
+
+# ───────────────────────── remove (scale-in) ─────────────────────────
+
+def test_remove_requires_instance_id():
+    out = remove_reader_instance_impl(MagicMock(), cluster_id="prod-pg-1")
+    assert out["status"] == "invalid_instance"
+
+
+@patch(f"{_R}.client_for_cluster")
+def test_remove_requires_approval(mock_client):
+    out = remove_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", instance_id="r1",
+    )
+    assert out["status"] == "approval_required"
+    assert "cli_preview" in out
+    # preview returns before the RDS client is even used
+    mock_client.assert_not_called()
+
+
+@patch(f"{_R}.verify_approval")
+@patch(f"{_R}.client_for_cluster")
+def test_remove_protects_writer(mock_client, mock_guard):
+    rds = _rds_cluster([
+        {"DBInstanceIdentifier": "w", "IsClusterWriter": True},
+        {"DBInstanceIdentifier": "r1", "IsClusterWriter": False},
+    ])
+    mock_client.return_value = rds
+    mock_guard.return_value = {"ok": True}
+    out = remove_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", instance_id="w",
+        approved=True, approval_id="aid-1",
+    )
+    assert out["status"] == "cannot_remove_writer"
+    rds.delete_db_instance.assert_not_called()
+
+
+@patch(f"{_R}.verify_approval")
+@patch(f"{_R}.client_for_cluster")
+def test_remove_not_found(mock_client, mock_guard):
+    rds = _rds_cluster([
+        {"DBInstanceIdentifier": "w", "IsClusterWriter": True},
+        {"DBInstanceIdentifier": "r1", "IsClusterWriter": False},
+    ])
+    mock_client.return_value = rds
+    mock_guard.return_value = {"ok": True}
+    out = remove_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", instance_id="ghost",
+        approved=True, approval_id="aid-1",
+    )
+    assert out["status"] == "instance_not_found"
+    rds.delete_db_instance.assert_not_called()
+
+
+@patch(f"{_R}.verify_approval")
+@patch(f"{_R}.client_for_cluster")
+def test_remove_protects_last_instance(mock_client, mock_guard):
+    """Even a reader must not be deleted if it is the cluster's ONLY instance —
+    never leave a cluster with 0 instances."""
+    rds = _rds_cluster([{"DBInstanceIdentifier": "r-only", "IsClusterWriter": False}])
+    mock_client.return_value = rds
+    mock_guard.return_value = {"ok": True}
+    out = remove_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", instance_id="r-only",
+        approved=True, approval_id="aid-1",
+    )
+    assert out["status"] == "cannot_remove_last_instance"
+    rds.delete_db_instance.assert_not_called()
+
+
+@patch(f"{_R}.verify_approval")
+@patch(f"{_R}.client_for_cluster")
+def test_remove_executes_when_approved(mock_client, mock_guard):
+    rds = _rds_cluster([
+        {"DBInstanceIdentifier": "w", "IsClusterWriter": True},
+        {"DBInstanceIdentifier": "r1", "IsClusterWriter": False},
+    ])
+    mock_client.return_value = rds
+    mock_guard.return_value = {"ok": True}
+    out = remove_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", instance_id="r1",
+        approved=True, approval_id="aid-1",
+    )
+    assert out["status"] == "instance_removing"
+    rds.delete_db_instance.assert_called_once_with(DBInstanceIdentifier="r1")
+
+
+@patch(f"{_R}.verify_approval")
+@patch(f"{_R}.client_for_cluster")
+def test_remove_failure_returns_friendly_no_leak(mock_client, mock_guard):
+    rds = _rds_cluster([
+        {"DBInstanceIdentifier": "w", "IsClusterWriter": True},
+        {"DBInstanceIdentifier": "r1", "IsClusterWriter": False},
+    ])
+    rds.delete_db_instance.side_effect = Exception("SECRET_INTERNAL_LEAK")
+    mock_client.return_value = rds
+    mock_guard.return_value = {"ok": True}
+    out = remove_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", instance_id="r1",
+        approved=True, approval_id="aid-1",
+    )
+    assert out["status"] == "remove_failed"
+    assert "SECRET_INTERNAL_LEAK" not in json.dumps(out)
+
+
+@patch(f"{_R}.client_for_cluster")
+def test_remove_payload_hash_mismatch_rejected(mock_client):
+    """A real approval minted for r1 cannot be consumed to delete r2 — the
+    guard's payload_hash refuses it, no delete, no consume."""
+    rds = _rds_cluster([
+        {"DBInstanceIdentifier": "w", "IsClusterWriter": True},
+        {"DBInstanceIdentifier": "r1", "IsClusterWriter": False},
+        {"DBInstanceIdentifier": "r2", "IsClusterWriter": False},
+    ])
+    mock_client.return_value = rds
+    row = {
+        "approval_id": "aid-1", "created_at": "1", "approval_status": "approved",
+        "cluster_id": "prod-pg-1", "action_type": "remove_reader_instance",
+        "payload_hash": canonical_action_hash("remove_reader_instance", {
+            "cluster_id": "prod-pg-1", "instance_id": "r1",
+        }),
+        "resolved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    table = MagicMock()
+    table.scan.return_value = {"Items": [row]}
+    resource = MagicMock()
+    resource.Table.return_value = table
+    with patch.dict(os.environ, {"APPROVALS_TABLE": "approvals"}, clear=False), \
+         patch("mcp_servers.shared.approval_guard.boto3.resource", return_value=resource):
+        out = remove_reader_instance_impl(
+            MagicMock(), cluster_id="prod-pg-1", instance_id="r2",
+            approved=True, approval_id="aid-1",
+        )
+    assert out["status"] == "approval_denied"
+    rds.delete_db_instance.assert_not_called()
+    table.update_item.assert_not_called()

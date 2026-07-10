@@ -160,6 +160,22 @@ def _project(action_type: str, details: dict) -> dict:
             "endpoint_identifier": str(d.get("endpoint_identifier") or "").strip(),
             "top_n": _norm_val(d.get("top_n")),
         }
+    # ===== Aurora reader scale-out/scale-in (N-③) =====
+    # Bind the instance target so an approval for "add reader R (class C, AZ Z) on
+    # cluster X" can't be redirected to a different name/class/AZ, and a remove
+    # approval is pinned to the exact reader being deleted.
+    if action_type == "add_reader_instance":
+        return {
+            "cluster_id": str(d.get("cluster_id") or "").strip(),
+            "new_instance_id": str(d.get("new_instance_id") or "").strip(),
+            "instance_class": str(d.get("instance_class") or "").strip(),
+            "availability_zone": str(d.get("availability_zone") or "").strip(),
+        }
+    if action_type == "remove_reader_instance":
+        return {
+            "cluster_id": str(d.get("cluster_id") or "").strip(),
+            "instance_id": str(d.get("instance_id") or "").strip(),
+        }
     # ===== NoSQL write tools (multi-engine #P3.6 Group C) =====
     if action_type == "modify_dynamodb_capacity":
         # Bind the table target explicitly (fix #1 — no user-controllable target

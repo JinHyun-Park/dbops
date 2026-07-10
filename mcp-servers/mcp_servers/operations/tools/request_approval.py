@@ -69,6 +69,10 @@ def request_approval_impl(
         # Reader buffer-cache prewarm (P2-④): approval-gated write; its enum value
         # must be listed or request_approval rejects it and the loop dead-ends.
         "prewarm_reader",
+        # Reader scale-out/scale-in (N-③): approval-gated writes that create/delete
+        # a billable Aurora reader instance; enum values must be listed here.
+        "add_reader_instance",
+        "remove_reader_instance",
         # enable_data_api는 replay 없는 승인-즉시-실행 액션: DBA가 Approval
         # Center에서 승인하는 순간 approvals API가 rds:EnableHttpEndpoint를
         # 직접 호출한다. 에이전트는 요청 등록까지만 하면 된다.

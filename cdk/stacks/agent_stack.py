@@ -228,6 +228,11 @@ class AgentStack(cdk.Stack):
                 "rds:RestoreDBClusterFromSnapshot",
                 "rds:RestoreDBClusterToPointInTime",
                 "rds:AddTagsToResource",
+                # Reader scale-out/scale-in (N-③): add/remove an Aurora reader
+                # INSTANCE. Both approval-gated in tool code; writer + last
+                # instance are protected before delete.
+                "rds:CreateDBInstance",
+                "rds:DeleteDBInstance",
                 # Aurora custom cluster endpoints (P2-⑤). Create/Delete/Modify are
                 # approval-gated in tool code; Describe validates the endpoint is
                 # CUSTOM before delete/modify (never touches writer/reader builtins).

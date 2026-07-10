@@ -4,6 +4,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from mcp_servers.operations.tools.add_reader_instance import add_reader_instance_impl
 from mcp_servers.operations.tools.audit_permissions import audit_permissions_impl
 from mcp_servers.operations.tools.create_custom_endpoint import create_custom_endpoint_impl
 from mcp_servers.operations.tools.create_docdb_index import create_docdb_index_impl
@@ -24,6 +25,7 @@ from mcp_servers.operations.tools.modify_scaling import modify_scaling_impl
 from mcp_servers.operations.tools.prewarm_reader import prewarm_reader_impl
 from mcp_servers.operations.tools.query_activity_audit import query_activity_audit_impl
 from mcp_servers.operations.tools.reboot_elasticache import reboot_elasticache_impl
+from mcp_servers.operations.tools.remove_reader_instance import remove_reader_instance_impl
 from mcp_servers.operations.tools.request_approval import request_approval_impl
 from mcp_servers.operations.tools.restore_cluster import restore_cluster_impl
 from mcp_servers.operations.tools.review_sql import review_sql_impl
@@ -57,6 +59,10 @@ _ENGINE_GATED_TOOLS = {
     # PG-specific; the impl additionally gates PG-vs-MySQL). Same positive,
     # FAIL-CLOSED gate as custom_endpoint.
     "prewarm_reader": "prewarm",
+    # Reader scale-out/scale-in (N-③) is a relational-only, instance-level write
+    # (both PG and MySQL). Same positive, FAIL-CLOSED gate.
+    "add_reader_instance": "scale_instance",
+    "remove_reader_instance": "scale_instance",
     "modify_dynamodb_capacity": "ddb_write",
     "modify_dynamodb_ttl": "ddb_write",
     "enable_dynamodb_pitr": "ddb_write",
@@ -75,6 +81,7 @@ _ENGINE_GATED_TOOLS = {
 _CAP_LABEL = {
     "custom_endpoint": "Aurora 클러스터",
     "prewarm": "Aurora PostgreSQL 클러스터",
+    "scale_instance": "Aurora 클러스터",
     "ddb_write": "DynamoDB 테이블",
     "docdb_write": "DocumentDB 클러스터",
     "live_read": "ElastiCache 클러스터",
@@ -314,6 +321,49 @@ TOOLS = {
                 "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
             },
             "required": ["cluster_id", "reader_instance_id"],
+        },
+    },
+    "add_reader_instance": {
+        "impl": add_reader_instance_impl,
+        "description": (
+            "Aurora only (scale-out): add a new READER instance to a cluster to "
+            "expand read capacity. new_instance_id is required (names the new "
+            "reader). instance_class defaults to the WRITER's current class "
+            "(Serverless v2 → db.serverless) so it adds a same-shape reader; "
+            "availability_zone is optional. Requires approved=true AND "
+            "approval_id=<uuid from request_approval>."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "new_instance_id": {"type": "string", "description": "Identifier for the NEW reader instance (required)"},
+                "instance_class": {"type": "string", "description": "DB instance class (defaults to the writer's current class if omitted)"},
+                "availability_zone": {"type": "string", "description": "Optional AZ to place the new reader in"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id", "new_instance_id"],
+        },
+    },
+    "remove_reader_instance": {
+        "impl": remove_reader_instance_impl,
+        "description": (
+            "Aurora only (scale-in): remove a READER instance from a cluster. "
+            "The target must be a reader member of THIS cluster; the writer and "
+            "the cluster's last remaining instance are protected and can NEVER "
+            "be deleted through this tool. Deletion is irreversible. Requires "
+            "approved=true AND approval_id=<uuid from request_approval>."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "instance_id": {"type": "string", "description": "Reader instance to remove (writer/last instance are protected)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id", "instance_id"],
         },
     },
     "modify_dynamodb_capacity": {
@@ -588,7 +638,7 @@ TOOLS = {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "action_type": {
                     "type": "string",
-                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "create_custom_endpoint", "delete_custom_endpoint", "modify_custom_endpoint", "prewarm_reader", "modify_dynamodb_capacity", "modify_dynamodb_ttl", "enable_dynamodb_pitr", "set_docdb_profiler", "create_docdb_index", "other"],
+                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "create_custom_endpoint", "delete_custom_endpoint", "modify_custom_endpoint", "prewarm_reader", "add_reader_instance", "remove_reader_instance", "modify_dynamodb_capacity", "modify_dynamodb_ttl", "enable_dynamodb_pitr", "set_docdb_profiler", "create_docdb_index", "other"],
                     "description": "Which write tool needs approval",
                 },
                 "action_details": {

@@ -68,6 +68,10 @@ const ACTION_RISK: Record<string, string> = {
   // Reader prewarm runs DDL (CREATE EXTENSION) on the writer + heavy reader I/O
   // and can temporarily change endpoint routing → medium.
   prewarm_reader: "medium",
+  // Reader scale-out/scale-in creates/deletes a billable instance; deletion is
+  // irreversible → high for both.
+  add_reader_instance: "high",
+  remove_reader_instance: "high",
   other: "medium",
 };
 
@@ -228,6 +232,28 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
       "대상이 writer가 아닌 reader 인스턴스인지 확인",
       "엔드포인트를 지정하면 제외→예열→재편입이 자동으로 처리됩니다",
       "top_n이 과도하면 예열에 시간이 오래 걸립니다(상한 적용)",
+    ],
+  },
+  add_reader_instance: {
+    what: "리더 인스턴스를 추가해 읽기 용량을 확장합니다 (scale-out).",
+    risks: [
+      "신규 인스턴스는 과금 대상이며 생성에 수 분이 걸립니다.",
+      "클래스 미지정 시 writer와 동일 클래스로 생성됩니다.",
+    ],
+    considerations: [
+      "Serverless v2는 db.serverless로 자동 설정됩니다",
+      "필요한 읽기 용량·비용 대비 적정 클래스인지 확인",
+    ],
+  },
+  remove_reader_instance: {
+    what: "리더 인스턴스를 삭제해 읽기 용량을 축소합니다 (scale-in).",
+    risks: [
+      "삭제는 비가역입니다.",
+      "writer와 클러스터의 마지막 인스턴스는 보호되어 삭제되지 않습니다.",
+    ],
+    considerations: [
+      "삭제 대상 리더로 가는 커스텀 엔드포인트/커넥션이 없는지 확인",
+      "삭제 후 남은 리더가 읽기 부하를 감당할 수 있는지 확인",
     ],
   },
 };
