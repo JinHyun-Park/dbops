@@ -26,23 +26,22 @@ CONNECT_TIMEOUT_SECONDS = 10
 
 
 def _ssl_context():
-    """SSL context for the reader connection. Verifies against the RDS CA bundle
-    when it's present in the asset; otherwise falls back to an encrypted-but-
-    unverified context.
+    """SSL context that VERIFIES the server cert against the vendored RDS CA
+    bundle (create_default_context → check_hostname + CERT_REQUIRED).
 
-    # ponytail: unverified fallback when global-bundle.pem isn't vendored.
-    # Ceiling: MITM is NOT defended on that path — traffic is still encrypted but
-    # the server cert isn't checked. Upgrade path: ensure CDK bundling downloads
-    # global-bundle.pem into the operations asset (it already does for DocDB)."""
+    FAIL-CLOSED: if the CA bundle is missing we raise rather than downgrade to an
+    unverified connection. This path carries DB master credentials to a database
+    instance, so a silent fail-open (CERT_NONE) would be a security regression —
+    and it matches set_docdb_profiler, which also hard-requires the CA (tlsCAFile).
+    The CDK bundling vendors global-bundle.pem into the operations asset."""
     import ssl
 
-    ctx = ssl.create_default_context()
-    if os.path.exists(_CA_BUNDLE_PATH):
-        ctx.load_verify_locations(_CA_BUNDLE_PATH)
-    else:
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-    return ctx
+    if not os.path.exists(_CA_BUNDLE_PATH):
+        raise RuntimeError(
+            "RDS CA bundle (global-bundle.pem) not found in the asset — refusing "
+            "an unverified TLS connection to a database instance."
+        )
+    return ssl.create_default_context(cafile=_CA_BUNDLE_PATH)
 
 
 def connect(host, port, database, user, password):
@@ -70,11 +69,18 @@ def query(conn, sql, params=None):
 
 
 if __name__ == "__main__":
-    # ponytail self-check: SSL builder returns a context, and query() maps rows
-    # against a fake connection (no pg8000, no real DB).
+    # ponytail self-check: SSL builder VERIFIES when the CA is present and is
+    # FAIL-CLOSED (raises) when it isn't; query() maps rows against a fake conn.
     import ssl
 
-    assert isinstance(_ssl_context(), ssl.SSLContext)
+    if os.path.exists(_CA_BUNDLE_PATH):
+        assert isinstance(_ssl_context(), ssl.SSLContext)
+    else:
+        try:
+            _ssl_context()
+            raise AssertionError("expected _ssl_context to raise without the CA bundle")
+        except RuntimeError:
+            pass
 
     class _FakeConn:
         columns = [{"name": "rel"}, {"name": "bytes"}]

@@ -42,8 +42,13 @@ from mcp_servers.shared.cluster_targets import client_for_cluster
 _TOP_N_CAP = 50
 _WALL_BUDGET_SECONDS = 60
 
+# Direct-connection queries (pg8000, not routed through CacheClient) must carry
+# the /* source=dbops-agent */ audit marker themselves — the CacheClient Data-API
+# path injects it automatically, but this path does not.
+_SRC = "/* source=dbops-agent */ "
+
 _TOP_REL_SQL = (
-    "SELECT c.oid::regclass::text AS rel, pg_relation_size(c.oid) AS bytes "
+    _SRC + "SELECT c.oid::regclass::text AS rel, pg_relation_size(c.oid) AS bytes "
     "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
     "WHERE c.relkind IN ('r','i') "
     "AND n.nspname NOT IN ('pg_catalog','information_schema') "
@@ -274,7 +279,7 @@ def prewarm_reader_impl(
                             "(포트 5432)를 허용하는지 확인하세요"}
 
         try:
-            buffers_before = _one(pg_direct.query(conn, "SELECT count(*) AS n FROM pg_buffercache"), "n")
+            buffers_before = _one(pg_direct.query(conn, _SRC + "SELECT count(*) AS n FROM pg_buffercache"), "n")
             rels = pg_direct.query(conn, _TOP_REL_SQL, {"n": top_n})
             warmed, total_blocks = [], 0
             deadline = time.time() + _WALL_BUDGET_SECONDS
@@ -282,13 +287,13 @@ def prewarm_reader_impl(
                 if time.time() > deadline:
                     break  # ponytail: budget exhausted — stop starting new prewarms
                 blocks = _one(
-                    pg_direct.query(conn, "SELECT pg_prewarm(:rel) AS blocks", {"rel": r["rel"]}),
+                    pg_direct.query(conn, _SRC + "SELECT pg_prewarm(:rel) AS blocks", {"rel": r["rel"]}),
                     "blocks",
                 )
                 blocks = int(blocks or 0)
                 warmed.append({"rel": r["rel"], "blocks": blocks})
                 total_blocks += blocks
-            buffers_after = _one(pg_direct.query(conn, "SELECT count(*) AS n FROM pg_buffercache"), "n")
+            buffers_after = _one(pg_direct.query(conn, _SRC + "SELECT count(*) AS n FROM pg_buffercache"), "n")
         except Exception as e:
             print(f"[prewarm_reader] prewarm query failed on {reader_instance_id}: {e}")
             return {"status": "prewarm_failed", "cluster_id": cluster_id,
