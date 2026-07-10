@@ -306,7 +306,7 @@ def prewarm_reader_impl(
                             "(포트 5432)를 허용하는지 확인하세요"}
 
         try:
-            buffers_before = _one(pg_direct.query(conn, _SRC + "SELECT count(*) AS n FROM pg_buffercache"), "n")
+            buffers_before = _one(pg_direct.query(conn, _SRC + "SELECT count(*) AS n FROM pg_buffercache WHERE relfilenode IS NOT NULL"), "n")
             rels = pg_direct.query(conn, _TOP_REL_SQL, {"n": top_n})
             warmed, total_blocks = [], 0
             deadline = time.time() + _WALL_BUDGET_SECONDS
@@ -326,7 +326,7 @@ def prewarm_reader_impl(
                     continue
                 warmed.append({"rel": r["rel"], "blocks": blocks})
                 total_blocks += blocks
-            buffers_after = _one(pg_direct.query(conn, _SRC + "SELECT count(*) AS n FROM pg_buffercache"), "n")
+            buffers_after = _one(pg_direct.query(conn, _SRC + "SELECT count(*) AS n FROM pg_buffercache WHERE relfilenode IS NOT NULL"), "n")
         except Exception as e:
             print(f"[prewarm_reader] prewarm query failed on {reader_instance_id}: {e}")
             return {"status": "prewarm_failed", "cluster_id": cluster_id,
