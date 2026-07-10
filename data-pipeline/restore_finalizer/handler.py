@@ -268,7 +268,7 @@ def _set_approval(table, approval_id: str, created_at: str, **attrs):
         print(f"[finalizer] approval update failed for {approval_id}: {e}")
 
 
-def _advance_prewarm(table, ops_fn: str, row: dict) -> dict:
+def _advance_prewarm(table, ops_fn: str, row: dict, may_dispatch: bool = True) -> dict:
     approval_id = row.get("approval_id", "")
     created_at = row.get("created_at", "")
     cluster_id = row.get("cluster_id", "")
@@ -314,6 +314,11 @@ def _advance_prewarm(table, ops_fn: str, row: dict) -> dict:
         return {"approval_id": approval_id, "result": "already_dispatched"}
     if not ops_fn:
         return {"approval_id": approval_id, "result": "no_operations_fn"}
+    # One synchronous warm per tick (see caller): a sync invoke blocks this
+    # Lambda for the operations Lambda's runtime, so we cap to one and let the
+    # rest ride the next 5-min tick.
+    if not may_dispatch:
+        return {"approval_id": approval_id, "result": "dispatch_deferred"}
     ad = row.get("action_details")
     if not isinstance(ad, dict):
         ad = {}
@@ -328,23 +333,42 @@ def _advance_prewarm(table, ops_fn: str, row: dict) -> dict:
         "approval_id": approval_id,
     }
     try:
-        # Async (Event): prewarm can run up to the operations Lambda's 120s while
-        # this finalizer's own budget is 60s — a synchronous invoke could time the
-        # finalizer out mid-warm. prewarm_reader consumes the approval itself on
-        # success; warm_dispatched guards the window before that consume lands.
-        boto3.client("lambda").invoke(
+        # SYNCHRONOUS (RequestResponse): Lambda only delivers ClientContext —
+        # which carries custom.tool_name so the operations handler routes to
+        # prewarm_reader — for RequestResponse, NOT for async Event invokes.
+        # (The finalizer timeout is raised to accommodate the operations Lambda's
+        # 120s, and we dispatch at most one warm per tick.)
+        resp = boto3.client("lambda").invoke(
             FunctionName=ops_fn,
-            InvocationType="Event",
+            InvocationType="RequestResponse",
             Payload=json.dumps(payload).encode("utf-8"),
             ClientContext=_PREWARM_CLIENT_CONTEXT,
         )
     except Exception as e:
-        # Transient invoke error — leave warm_dispatched unset so we retry.
+        # The invoke itself failed (throttle/network) — prewarm never started,
+        # the approval is NOT consumed, so leave warm_dispatched unset to retry.
         return {"approval_id": approval_id, "result": f"invoke_error:{str(e)[:60]}"}
+
+    # We got a response → the operations handler ran and prewarm_reader's
+    # verify_approval has consumed the approval (or refused it). Either way the
+    # attempt is made; set warm_dispatched so we never re-invoke a consumed
+    # approval (which would just come back approval_denied and loop forever).
+    warm_status = "unknown"
+    try:
+        body = json.loads(resp["Payload"].read().decode("utf-8"))
+        text = (body.get("content") or [{}])[0].get("text") if isinstance(body, dict) else None
+        warm_status = (json.loads(text).get("status") if text else None) or warm_status
+    except Exception:  # pragma: no cover - best effort result parse
+        pass
+    fn_error = resp.get("FunctionError")
     _set_approval(table, approval_id, created_at, warm_dispatched=True)
-    _event_log(cluster_id, "info",
-               f"리더 {reader_id} 예열 작업 디스패치 (approval {approval_id})")
-    return {"approval_id": approval_id, "result": "warm_dispatched"}
+    _event_log(
+        cluster_id,
+        "info" if warm_status == "prewarmed" else "warning",
+        f"리더 {reader_id} 예열 실행 결과: {warm_status}"
+        + (f" (fn_error={fn_error})" if fn_error else "") + f" (approval {approval_id})",
+    )
+    return {"approval_id": approval_id, "result": "warm_dispatched", "warm_status": warm_status}
 
 
 def _process_scaleout_prewarms() -> dict:
@@ -356,7 +380,18 @@ def _process_scaleout_prewarms() -> dict:
     ops_fn = os.environ.get("OPERATIONS_FUNCTION_NAME", "")
     table = boto3.resource("dynamodb").Table(table_name)
     rows = _scan_scaleout_prewarms(table)
-    results = [_advance_prewarm(table, ops_fn, row) for row in rows]
+    # Cap to ONE synchronous warm dispatch per tick — each blocks this Lambda
+    # for the operations Lambda's runtime. State-only transitions
+    # (awaiting_instance → pending) are cheap and always run; only the
+    # approved → invoke step consumes the budget, so once one fires the rest
+    # defer to the next 5-min tick.
+    results = []
+    dispatched = False
+    for row in rows:
+        res = _advance_prewarm(table, ops_fn, row, may_dispatch=not dispatched)
+        results.append(res)
+        if res.get("result") == "warm_dispatched":
+            dispatched = True
     if results:
         print(f"[finalizer] scale-out prewarms: {results}")
     return {"scanned": len(rows), "results": results}

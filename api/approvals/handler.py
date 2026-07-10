@@ -129,6 +129,125 @@ def _compact_activity(items: list) -> list:
     return compact
 
 
+def _scaleout_state(item: dict) -> str:
+    """Derive the DBA-facing scale-out lifecycle state from a prewarm approval
+    row. `consumed`/`cancelled`/`awaiting_instance_failed` are terminal and win
+    over `warm_dispatched` — a consumed row also carries warm_dispatched=True
+    (the finalizer sets warm_dispatched while status is still `approved`, then
+    prewarm_reader flips it to consumed), so warming must be checked AFTER
+    warmed or a completed op would read as still-warming."""
+    status = item.get("approval_status", "")
+    if status == "cancelled":
+        return "cancelled"
+    if status == "consumed":
+        return "warmed"
+    if status == "awaiting_instance_failed":
+        return "provision_failed"
+    if item.get("warm_dispatched"):
+        return "warming"
+    return {
+        "awaiting_instance": "reader_provisioning",
+        "pending": "warm_pending_approval",
+        "approved": "warm_approved",
+    }.get(status, status or "unknown")
+
+
+def _handle_scaleout(event, table, method, path, path_params, headers) -> dict:
+    """N-④ Phase 2 — scale-out ops management. Scale-out ops ARE approval rows
+    (scaleout=true prewarm approvals); this resource surfaces them with a
+    derived lifecycle state + a cancel that only stops the auto-warm."""
+    # GET /api/scaleout-ops — every scale-out op visible to the caller,
+    # newest-first. Tenant-scoped exactly like the /api/approvals list.
+    if method == "GET":
+        rows = _scan_all(
+            table,
+            FilterExpression="scaleout = :t",
+            ExpressionAttributeValues={":t": True},
+        )
+        visible = tenancy.visible_set_from_registry(event)
+        if visible is not None:
+            rows = [r for r in rows if r.get("cluster_id") in visible]
+        rows = sorted(rows, key=_created_ms, reverse=True)
+        ops = []
+        for r in rows:
+            ad = r.get("action_details")
+            if not isinstance(ad, dict):
+                ad = {}
+            ops.append({
+                "approval_id": r.get("approval_id"),
+                "cluster_id": r.get("cluster_id"),
+                "reader_instance_id": r.get("reader_instance_id") or ad.get("reader_instance_id"),
+                "endpoint_identifier": ad.get("endpoint_identifier", ""),
+                "top_n": ad.get("top_n"),
+                "state": _scaleout_state(r),
+                "created_at": r.get("created_at"),
+                "warm_dispatched": bool(r.get("warm_dispatched")),
+            })
+        return {"statusCode": 200, "headers": headers,
+                "body": json.dumps({"ops": ops, "count": len(ops)}, default=str)}
+
+    # POST /api/scaleout-ops/{id}/cancel — cancel an op that hasn't warmed.
+    if method == "POST":
+        # Same admin gate the approve/reject path uses — fail-closed (no bearer
+        # => not admin => 403).
+        if not _is_admin(event):
+            return {"statusCode": 403, "headers": headers,
+                    "body": json.dumps({"error": "forbidden",
+                                        "reason": "admin role required to cancel a scale-out op"})}
+        approval_id = path_params.get("id")
+        if not approval_id:
+            return {"statusCode": 400, "headers": headers,
+                    "body": json.dumps({"error": "approval_id required"})}
+        items = _scan_all(
+            table,
+            FilterExpression="approval_id = :aid",
+            ExpressionAttributeValues={":aid": approval_id},
+        )
+        item = items[0] if items else None
+        if not item or not item.get("scaleout"):
+            return {"statusCode": 404, "headers": headers,
+                    "body": json.dumps({"error": "not found"})}
+        if not tenancy.cluster_visible(event, _cluster_item(item.get("cluster_id", ""))):
+            return {"statusCode": 403, "headers": headers,
+                    "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
+        # Only awaiting_instance / pending are cancellable — never an op that is
+        # already approved/warming/consumed. The ConditionExpression makes the
+        # check atomic (a concurrent finalizer transition loses the race → 409).
+        try:
+            table.update_item(
+                Key={"approval_id": item["approval_id"], "created_at": item["created_at"]},
+                UpdateExpression="SET approval_status = :c, resolved_at = :t, resolved_by = :by",
+                ConditionExpression="scaleout = :true AND approval_status IN (:aw, :pd)",
+                ExpressionAttributeValues={
+                    ":c": "cancelled",
+                    ":t": datetime.utcnow().isoformat() + "Z",
+                    ":by": _caller_name(event),
+                    ":true": True,
+                    ":aw": "awaiting_instance",
+                    ":pd": "pending",
+                },
+            )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                return {"statusCode": 409, "headers": headers,
+                        "body": json.dumps({
+                            "error": "cannot_cancel",
+                            "detail": f"현재 상태({_scaleout_state(item)})에서는 취소할 수 없습니다 — "
+                                      "이미 승인·예열·완료된 작업입니다.",
+                        })}
+            raise
+        return {"statusCode": 200, "headers": headers,
+                "body": json.dumps({
+                    "approval_id": approval_id,
+                    "state": "cancelled",
+                    "note": "자동 예열만 취소되었습니다 — 생성된 리더 인스턴스는 유지됩니다. "
+                            "필요하면 스케일 인으로 별도 제거하세요.",
+                })}
+
+    return {"statusCode": 405, "headers": headers,
+            "body": json.dumps({"error": "Method not allowed"})}
+
+
 def resolve_eligible_approvers(cluster_id, action_type, policies) -> set:
     """Return the designated-approver set for a request (lower-cased), or an
     EMPTY set when no policy matches (= policy not applicable → fallback).
@@ -224,6 +343,12 @@ def lambda_handler(event, context):
     qsp = event.get("queryStringParameters") or {}
 
     headers = {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}
+
+    # /api/scaleout-ops (+ /{id}/cancel) — scale-out op management. Must come
+    # BEFORE the generic GET-list arm: the list route also has no approval_id,
+    # so it would otherwise swallow GET /api/scaleout-ops.
+    if "/scaleout-ops" in path:
+        return _handle_scaleout(event, table, method, path, path_params, headers)
 
     # /api/activity — chronological feed of every approval (any status)
     # for compliance + retro queries ("what writes happened in cluster X

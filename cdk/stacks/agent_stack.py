@@ -1815,6 +1815,18 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PUT],
             integration=integrations.HttpLambdaIntegration("ApprovalDetailIntegration", approvals_lambda),
         )
+        # Scale-out ops (N-④ Phase 2) — same approvals table/Lambda; scale-out
+        # ops ARE scaleout=true prewarm approval rows. List + cancel-the-warm.
+        self.api.add_routes(
+            path="/api/scaleout-ops",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("ScaleoutOpsIntegration", approvals_lambda),
+        )
+        self.api.add_routes(
+            path="/api/scaleout-ops/{id}/cancel",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=integrations.HttpLambdaIntegration("ScaleoutOpsCancelIntegration", approvals_lambda),
+        )
         # Approval policies — admin-gated designated-approver routing
         approval_policies_integration = integrations.HttpLambdaIntegration(
             "ApprovalPoliciesIntegration", approval_policies_lambda

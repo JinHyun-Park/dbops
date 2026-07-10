@@ -541,7 +541,11 @@ class DataStack(cdk.Stack):
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="handler.lambda_handler",
             code=lambda_.Code.from_asset("../data-pipeline/restore_finalizer"),
-            timeout=cdk.Duration.seconds(60),
+            # 150s > the operations Lambda's 120s: the scale-out warm pass invokes
+            # prewarm_reader SYNCHRONOUSLY (Lambda only delivers ClientContext —
+            # which carries the tool name — on RequestResponse, not async Event),
+            # and dispatches at most one warm per tick.
+            timeout=cdk.Duration.seconds(150),
             environment={
                 "CACHE_DB_CLUSTER_ARN": self.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,

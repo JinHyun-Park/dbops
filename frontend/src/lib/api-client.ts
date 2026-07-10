@@ -1131,6 +1131,49 @@ export async function fetchModels() {
   }>;
 }
 
+// ── Scale-out ops (N-④ Phase 2) ─────────────────────────────────────────────
+// Scale-out ops are prewarm approval rows (scaleout=true). `state` is the
+// server-derived lifecycle; cancel only stops the auto-warm (the reader stays).
+export interface ScaleoutOp {
+  approval_id: string;
+  cluster_id: string;
+  reader_instance_id: string | null;
+  endpoint_identifier: string;
+  top_n: number | null;
+  state: string;
+  created_at: string;
+  warm_dispatched: boolean;
+}
+
+export async function fetchScaleoutOps(): Promise<{
+  ops: ScaleoutOp[];
+  count: number;
+}> {
+  const res = await authedFetch(await api(`/api/scaleout-ops`));
+  if (!res.ok) throw new Error(`스케일 작업 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function cancelScaleoutOp(
+  id: string,
+): Promise<{ approval_id: string; state: string; note?: string }> {
+  const res = await authedFetch(
+    await api(`/api/scaleout-ops/${enc(id)}/cancel`),
+    { method: "POST", headers: { "Content-Type": "application/json" } },
+  );
+  if (!res.ok) {
+    let msg = `취소 실패 (상태 ${res.status})`;
+    try {
+      const e = await res.json();
+      if (e?.detail || e?.error) msg = e.detail || e.error;
+    } catch {
+      // keep the status-based message
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
 export async function registerCluster(data: {
   cluster_id?: string;
   account_id: string;

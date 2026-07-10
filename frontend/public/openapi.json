@@ -85,6 +85,9 @@
       "name": "saved-queries"
     },
     {
+      "name": "scaleout-ops"
+    },
+    {
       "name": "scheduled-tasks"
     },
     {
@@ -2705,6 +2708,54 @@
       "delete": {
         "tags": ["saved-queries"],
         "summary": "DELETE /api/saved-queries/{id}",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/scaleout-ops": {
+      "get": {
+        "tags": ["scaleout-ops"],
+        "summary": "GET /api/scaleout-ops",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/scaleout-ops/{id}/cancel": {
+      "post": {
+        "tags": ["scaleout-ops"],
+        "summary": "POST /api/scaleout-ops/{id}/cancel",
         "responses": {
           "200": {
             "description": "OK"

@@ -24,6 +24,7 @@ import {
   GitCompare,
   GraduationCap,
   HeartPulse,
+  Layers,
   MessageSquare,
   Network,
   PlugZap,
@@ -134,6 +135,12 @@ const NAV: NavGroup[] = [
         label: "Approvals",
         icon: ShieldCheck,
         hint: "쓰기 작업 DBA 승인 게이트",
+      },
+      {
+        href: "/scaleout",
+        label: "Scale-out",
+        icon: Layers,
+        hint: "리더 추가·자동 예열 작업 상태 · 예열 전 취소",
       },
       {
         href: "/ask",
@@ -279,6 +286,7 @@ function humanize(segment: string): string {
     chat: "Chat",
     "query-lab": "Query Lab",
     approvals: "Approvals",
+    scaleout: "Scale-out",
     ask: "Ask the fleet",
     runbooks: "Runbooks",
     simulator: "Simulator",

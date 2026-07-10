@@ -10,6 +10,7 @@ against a bare MagicMock.
 
 import base64
 import importlib.util
+import io
 import json
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -85,6 +86,15 @@ def test_approved_invokes_operations_lambda(monkeypatch):
     fake_boto3 = MagicMock()
     lambda_client = MagicMock()
     fake_boto3.client.return_value = lambda_client
+    # Synchronous invoke returns a response whose Payload is the operations
+    # handler's MCP envelope wrapping the prewarm_reader result.
+    lambda_client.invoke.return_value = {
+        "StatusCode": 200,
+        "Payload": io.BytesIO(
+            json.dumps({"content": [{"type": "text",
+                        "text": json.dumps({"status": "prewarmed"})}]}).encode("utf-8")
+        ),
+    }
     monkeypatch.setattr(handler, "boto3", fake_boto3)
     # Stub the best-effort event_log so a leaked CACHE_DB_* env from another test
     # can't add a second boto3.client("rds-data") call and skew this assertion.
@@ -93,11 +103,14 @@ def test_approved_invokes_operations_lambda(monkeypatch):
 
     out = handler._advance_prewarm(table, "dbops-dev-operations-mcp", _row(status="approved"))
     assert out["result"] == "warm_dispatched"
+    assert out["warm_status"] == "prewarmed"
 
     fake_boto3.client.assert_called_once_with("lambda")
     kw = lambda_client.invoke.call_args.kwargs
     assert kw["FunctionName"] == "dbops-dev-operations-mcp"
-    assert kw["InvocationType"] == "Event"
+    # RequestResponse (NOT async Event): Lambda only delivers ClientContext —
+    # carrying the tool name — on synchronous invokes.
+    assert kw["InvocationType"] == "RequestResponse"
     # ClientContext decodes to the tool_name the operations handler reads.
     ctx = json.loads(base64.b64decode(kw["ClientContext"]))
     assert ctx["custom"]["tool_name"] == "prewarm_reader"
