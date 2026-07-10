@@ -10,20 +10,24 @@ interface Setting {
   updated_at: string;
 }
 
-interface ParamDiffRow {
+interface ParamRow {
   name: string;
   current: string;
   default: string | null;
   source: string;
   apply_type: string;
+  differs?: boolean;
 }
 
 interface ParamDiffResponse {
   available: boolean;
   not_applicable?: boolean;
-  diffs?: ParamDiffRow[];
+  params?: ParamRow[];
+  diffs?: ParamRow[];
   diff_count?: number;
 }
+
+const PARAM_PAGE_SIZE = 30;
 
 type Rec = { value: string; why: string; severity: "warning" | "info" };
 
@@ -179,17 +183,20 @@ export function SettingsPanel({
       .finally(() => !cancelled && setLoading(false));
   }, [clusterId]);
 
-  // 디폴트 대비 변경 — 별도 sub-view. 백엔드가 이미 diff만 반환하므로 별도
-  // "전체/변경만" 토글은 불필요(rung 1: 존재할 필요 없는 기능은 생략) —
-  // 접이식 블록 하나로 충분하다.
+  // 파라미터 목록 — 별도 sub-view. 백엔드가 값이 설정된 전체 파라미터를
+  // 반환하고 각 항목에 디폴트 대비 변경 여부(differs)를 표시한다. 이름 검색 +
+  // 정적/동적 + "변경만 보기" 필터에 30개 페이지네이션.
   const [diffOpen, setDiffOpen] = useState(true);
   const [diffLoading, setDiffLoading] = useState(true);
   const [diffAvailable, setDiffAvailable] = useState(false);
-  const [diffs, setDiffs] = useState<ParamDiffRow[]>([]);
+  const [params, setParams] = useState<ParamRow[]>([]);
+  const [diffCount, setDiffCount] = useState(0);
   const [diffQuery, setDiffQuery] = useState("");
   const [diffApplyType, setDiffApplyType] = useState<
     "all" | "static" | "dynamic"
   >("all");
+  const [changedOnly, setChangedOnly] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -205,11 +212,16 @@ export function SettingsPanel({
         const d: ParamDiffResponse = await res.json();
         if (cancelled) return;
         setDiffAvailable(!!d.available);
-        setDiffs(d.available ? d.diffs || [] : []);
+        // Prefer the full `params` list; fall back to `diffs` (all differing)
+        // for backward-compat with an older backend.
+        const rows = d.available ? d.params || d.diffs || [] : [];
+        setParams(rows);
+        setDiffCount(d.diff_count ?? rows.filter((r) => r.differs).length);
       } catch {
         if (!cancelled) {
           setDiffAvailable(false);
-          setDiffs([]);
+          setParams([]);
+          setDiffCount(0);
         }
       } finally {
         if (!cancelled) setDiffLoading(false);
@@ -220,12 +232,28 @@ export function SettingsPanel({
     };
   }, [clusterId]);
 
-  const filteredDiffs = diffs.filter(
-    (d) =>
-      d.name.toLowerCase().includes(diffQuery.toLowerCase()) &&
-      (diffApplyType === "all" || d.apply_type === diffApplyType),
+  const filteredParams = params.filter(
+    (p) =>
+      p.name.toLowerCase().includes(diffQuery.toLowerCase()) &&
+      (diffApplyType === "all" || p.apply_type === diffApplyType) &&
+      (!changedOnly || p.differs),
   );
-  const diffFilterActive = diffQuery !== "" || diffApplyType !== "all";
+
+  // Reset to page 1 whenever the search / toggle / apply-type filter changes.
+  useEffect(() => {
+    setPage(1);
+  }, [diffQuery, diffApplyType, changedOnly, clusterId]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredParams.length / PARAM_PAGE_SIZE),
+  );
+  // Clamp: a stale page past the end renders the last page, never blank.
+  const safePage = Math.min(page, totalPages);
+  const pageStart = (safePage - 1) * PARAM_PAGE_SIZE;
+  const pageRows = filteredParams.slice(pageStart, pageStart + PARAM_PAGE_SIZE);
+  const rangeFrom = filteredParams.length === 0 ? 0 : pageStart + 1;
+  const rangeTo = Math.min(pageStart + PARAM_PAGE_SIZE, filteredParams.length);
 
   const engineLabel = (engine || "").includes("mysql")
     ? "MySQL"
@@ -319,7 +347,7 @@ export function SettingsPanel({
           className="text-sm text-zinc-200 font-medium flex items-center gap-1.5"
         >
           <span className="text-zinc-500">{diffOpen ? "▾" : "▸"}</span>
-          디폴트 대비 변경{diffAvailable ? ` (${diffs.length})` : ""}
+          파라미터{diffAvailable ? ` (변경 ${diffCount})` : ""}
         </button>
         {diffOpen && (
           <div className="mt-2">
@@ -327,8 +355,10 @@ export function SettingsPanel({
               <div className="text-zinc-500 text-sm">불러오는 중…</div>
             ) : !diffAvailable ? (
               <div className="text-zinc-500 text-sm">디폴트 비교 미조회</div>
-            ) : diffs.length === 0 ? (
-              <div className="text-zinc-500 text-sm">디폴트와 동일합니다</div>
+            ) : params.length === 0 ? (
+              <div className="text-zinc-500 text-sm">
+                수집된 파라미터가 없습니다
+              </div>
             ) : (
               <>
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
@@ -338,6 +368,17 @@ export function SettingsPanel({
                     placeholder="파라미터 이름 검색"
                     className="bg-zinc-900 border border-zinc-800 text-zinc-200 text-xs rounded px-2 py-1 w-48"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setChangedOnly((v) => !v)}
+                    className={`px-2 py-1 rounded text-xs transition ${
+                      changedOnly
+                        ? "bg-amber-400/20 text-amber-200"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    변경만 보기
+                  </button>
                   <div className="flex items-center gap-1">
                     {(["all", "static", "dynamic"] as const).map((t) => (
                       <button
@@ -354,58 +395,106 @@ export function SettingsPanel({
                       </button>
                     ))}
                   </div>
-                  {diffFilterActive && (
-                    <span className="text-[11px] text-zinc-500">
-                      {diffs.length}개 중 {filteredDiffs.length}개 표시
-                    </span>
-                  )}
                 </div>
-                {filteredDiffs.length === 0 ? (
+                {filteredParams.length === 0 ? (
                   <div className="text-zinc-500 text-sm">
                     일치하는 파라미터가 없습니다
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-[11px] text-zinc-500 text-left">
-                          <th className="font-normal pb-1.5 pr-3">파라미터</th>
-                          <th className="font-normal pb-1.5 pr-3">현재값</th>
-                          <th className="font-normal pb-1.5 pr-3">디폴트값</th>
-                          <th className="font-normal pb-1.5">적용</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredDiffs.map((d) => (
-                          <tr
-                            key={d.name}
-                            className="border-t border-zinc-800/60"
+                  <>
+                    <div className="flex items-center justify-between mb-2 text-[11px] text-zinc-500">
+                      <span>
+                        {rangeFrom}–{rangeTo} / 총 {filteredParams.length}개
+                      </span>
+                      {totalPages > 1 && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setPage(safePage - 1)}
+                            disabled={safePage <= 1}
+                            className="px-2 py-0.5 rounded border border-zinc-800 text-zinc-300 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
                           >
-                            <td className="py-1.5 pr-3 font-mono text-zinc-300 text-xs">
-                              {d.name}
-                            </td>
-                            <td className="py-1.5 pr-3 font-mono text-zinc-100 text-xs">
-                              {d.current}
-                            </td>
-                            <td className="py-1.5 pr-3 font-mono text-zinc-500 text-xs">
-                              {d.default ?? "—"}
-                            </td>
-                            <td className="py-1.5">
-                              <span
-                                className={`text-[9px] uppercase tracking-wider px-1 py-0.5 rounded border ${
-                                  d.apply_type === "static"
-                                    ? "border-amber-500/40 text-amber-300"
-                                    : "border-zinc-700 text-zinc-400"
+                            이전
+                          </button>
+                          <span className="text-zinc-400">
+                            {safePage} / {totalPages}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setPage(safePage + 1)}
+                            disabled={safePage >= totalPages}
+                            className="px-2 py-0.5 rounded border border-zinc-800 text-zinc-300 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            다음
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-[11px] text-zinc-500 text-left">
+                            <th className="font-normal pb-1.5 pr-3">
+                              파라미터
+                            </th>
+                            <th className="font-normal pb-1.5 pr-3">현재값</th>
+                            <th className="font-normal pb-1.5 pr-3">
+                              디폴트값
+                            </th>
+                            <th className="font-normal pb-1.5">적용</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pageRows.map((p) => (
+                            <tr
+                              key={p.name}
+                              className={`border-t border-zinc-800/60 ${
+                                p.differs ? "bg-amber-500/[0.05]" : ""
+                              }`}
+                            >
+                              <td className="py-1.5 pr-3 font-mono text-xs">
+                                <span
+                                  className={
+                                    p.differs
+                                      ? "text-amber-200"
+                                      : "text-zinc-300"
+                                  }
+                                >
+                                  {p.name}
+                                </span>
+                                {p.differs && (
+                                  <span className="ml-2 text-[9px] px-1 py-0.5 rounded border border-amber-500/40 text-amber-300 align-middle">
+                                    변경됨
+                                  </span>
+                                )}
+                              </td>
+                              <td
+                                className={`py-1.5 pr-3 font-mono text-xs ${
+                                  p.differs ? "text-amber-100" : "text-zinc-100"
                                 }`}
                               >
-                                {d.apply_type || "unknown"}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                                {p.current}
+                              </td>
+                              <td className="py-1.5 pr-3 font-mono text-zinc-500 text-xs">
+                                {p.default ?? "—"}
+                              </td>
+                              <td className="py-1.5">
+                                <span
+                                  className={`text-[9px] uppercase tracking-wider px-1 py-0.5 rounded border ${
+                                    p.apply_type === "static"
+                                      ? "border-amber-500/40 text-amber-300"
+                                      : "border-zinc-700 text-zinc-400"
+                                  }`}
+                                >
+                                  {p.apply_type || "unknown"}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
                 )}
               </>
             )}

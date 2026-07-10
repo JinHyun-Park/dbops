@@ -3308,9 +3308,11 @@ def _engine_config(cluster_id: str) -> dict:
 
 
 def _param_diff(cluster_id: str) -> dict:
-    """Diff a relational cluster's LIVE parameter group against the family's
-    DEFAULT parameter group — surfaces only what an operator (or a prior
-    tuning pass) actually changed, instead of scrolling ~500 parameters.
+    """Surface a relational cluster's LIVE parameter group settings, each
+    annotated with whether it differs from the family's DEFAULT parameter
+    group. Returns ALL set parameters (`params`) so an operator can browse the
+    full config, plus `diffs` (the differing-only subset, kept for callers that
+    only want what changed) and `diff_count`.
 
     Baseline is `default.<family>` fetched via the SAME
     describe_db_cluster_parameters action as the current group, so both sides
@@ -3328,11 +3330,11 @@ def _param_diff(cluster_id: str) -> dict:
     """
     eng = _registry_engine(cluster_id)
     if eng is None:
-        return {"cluster_id": cluster_id, "available": False, "registry_unavailable": True, "diffs": []}
+        return {"cluster_id": cluster_id, "available": False, "registry_unavailable": True, "params": [], "diffs": []}
     fam = engine_family(eng)
     if fam != "relational":
         return {"cluster_id": cluster_id, "available": False, "not_applicable": True,
-                "engine_family": fam, "diffs": []}
+                "engine_family": fam, "params": [], "diffs": []}
 
     rds = _cluster_session(cluster_id).client("rds")
     try:
@@ -3340,13 +3342,13 @@ def _param_diff(cluster_id: str) -> dict:
         clusters = cl_resp.get("DBClusters") or []
         pg_name = clusters[0].get("DBClusterParameterGroup") if clusters else None
         if not pg_name:
-            return {"cluster_id": cluster_id, "available": False, "diffs": []}
+            return {"cluster_id": cluster_id, "available": False, "params": [], "diffs": []}
 
         fam_resp = rds.describe_db_cluster_parameter_groups(DBClusterParameterGroupName=pg_name)
         groups = fam_resp.get("DBClusterParameterGroups") or []
         family = groups[0].get("DBParameterGroupFamily") if groups else None
         if not family:
-            return {"cluster_id": cluster_id, "available": False, "parameter_group": pg_name, "diffs": []}
+            return {"cluster_id": cluster_id, "available": False, "parameter_group": pg_name, "params": [], "diffs": []}
 
         # Current values — no Source filter (AWS docs: Filters isn't actually
         # honored by this action), so pull the full group and diff in-memory.
@@ -3383,23 +3385,30 @@ def _param_diff(cluster_id: str) -> dict:
             if not isinstance(marker, str) or not marker:
                 break
 
-        diffs = []
+        # Every set parameter (non-empty current value), annotated with whether
+        # it differs from the default group. `params` is the full browsable
+        # list; `diffs` is the differing-only subset (same shape sans `differs`,
+        # kept for backward-compat).
+        params = []
         for p in current:
             name = p.get("ParameterName")
             cur_val = p.get("ParameterValue", "")
             if not name or cur_val == "":
                 continue  # unset — inherits the default, nothing to surface
             default_val = defaults.get(name, "")
-            if cur_val == default_val:
-                continue
-            diffs.append({
+            params.append({
                 "name": name,
                 "current": cur_val,
                 "default": default_val or None,
+                "differs": cur_val != default_val,
                 "source": p.get("Source", ""),
                 "apply_type": (p.get("ApplyType") or "").lower(),
             })
-        diffs.sort(key=lambda d: d["name"])
+        params.sort(key=lambda d: d["name"])
+        diffs = [
+            {k: v for k, v in p.items() if k != "differs"}
+            for p in params if p["differs"]
+        ]
 
         return {
             "cluster_id": cluster_id,
@@ -3408,12 +3417,13 @@ def _param_diff(cluster_id: str) -> dict:
             "family": family,
             "total_params": len(current),
             "diff_count": len(diffs),
+            "params": params,
             "diffs": diffs,
             "checked_at": int(time.time() * 1000),
         }
     except Exception as e:
         print(f"[param-diff] failed for {cluster_id}: {e}")
-        return {"cluster_id": cluster_id, "available": False, "diffs": []}
+        return {"cluster_id": cluster_id, "available": False, "params": [], "diffs": []}
 
 
 def _slo(

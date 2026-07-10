@@ -156,10 +156,26 @@ def test_param_diff_relational_filters_to_differing_only(monkeypatch):
     assert wm["current"] == "16384"
     assert wm["default"] == "4096"  # default field = default GROUP's value
     assert wm["apply_type"] == "dynamic"
+    assert "differs" not in wm  # diffs subset keeps the legacy shape
     mc = next(d for d in result["diffs"] if d["name"] == "max_connections")
     assert mc["apply_type"] == "static"
     # The buggy engine-default catalog must never be consulted again.
     mock_rds.describe_engine_default_cluster_parameters.assert_not_called()
+
+    # `params` = ALL set params annotated with `differs`. shared_buffers is
+    # unset (empty current) so it is excluded; random_page_cost equals the
+    # default group value so it appears with differs=False and NOT in diffs.
+    pnames = {p["name"] for p in result["params"]}
+    assert pnames == {"work_mem", "max_connections", "random_page_cost"}
+    assert "shared_buffers" not in pnames
+    rpc = next(p for p in result["params"] if p["name"] == "random_page_cost")
+    assert rpc["differs"] is False
+    assert rpc["current"] == "4"
+    assert rpc["name"] not in names  # not surfaced in the diffs subset
+    wm_p = next(p for p in result["params"] if p["name"] == "work_mem")
+    assert wm_p["differs"] is True
+    # params is sorted by name
+    assert [p["name"] for p in result["params"]] == sorted(pnames)
 
 
 def test_param_diff_paginates_current_params_with_marker_hang_guard(monkeypatch):
