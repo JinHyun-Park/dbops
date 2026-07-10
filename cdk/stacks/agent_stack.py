@@ -214,6 +214,10 @@ class AgentStack(cdk.Stack):
                 "rds-data:ExecuteStatement",
                 "rds-data:BatchExecuteStatement",
                 "rds:DescribeDBClusters",
+                # prewarm_reader (P2-④) resolves the target reader INSTANCE's
+                # endpoint address to connect to it directly (Data API is
+                # cluster-scoped and can't target one instance).
+                "rds:DescribeDBInstances",
                 "rds:DescribeDBClusterParameterGroups",
                 "rds:DescribeDBClusterParameters",
                 "rds:ModifyDBClusterParameterGroup",

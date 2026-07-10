@@ -65,6 +65,9 @@ const ACTION_RISK: Record<string, string> = {
   create_custom_endpoint: "medium",
   modify_custom_endpoint: "medium",
   delete_custom_endpoint: "high",
+  // Reader prewarm runs DDL (CREATE EXTENSION) on the writer + heavy reader I/O
+  // and can temporarily change endpoint routing → medium.
+  prewarm_reader: "medium",
   other: "medium",
 };
 
@@ -212,6 +215,19 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     ],
     considerations: [
       "삭제 대상 엔드포인트를 참조하는 앱/커넥션 문자열이 없는지 확인",
+    ],
+  },
+  prewarm_reader: {
+    what: "콜드 리더 인스턴스의 버퍼풀을 프로덕션 트래픽 전에 예열합니다.",
+    risks: [
+      "CREATE EXTENSION(pg_prewarm/pg_buffercache)은 writer에서 실행되는 DDL입니다.",
+      "pg_prewarm은 대상 리더에 상당한 읽기 I/O를 유발합니다.",
+      "엔드포인트 지정 시 예열 중 리더를 제외했다 재편입 — 라우팅이 잠시 바뀝니다.",
+    ],
+    considerations: [
+      "대상이 writer가 아닌 reader 인스턴스인지 확인",
+      "엔드포인트를 지정하면 제외→예열→재편입이 자동으로 처리됩니다",
+      "top_n이 과도하면 예열에 시간이 오래 걸립니다(상한 적용)",
     ],
   },
 };

@@ -150,6 +150,16 @@ def _project(action_type: str, details: dict) -> dict:
             "static_members": sorted(str(m).strip() for m in (d.get("static_members") or []) if str(m).strip()),
             "excluded_members": sorted(str(m).strip() for m in (d.get("excluded_members") or []) if str(m).strip()),
         }
+    # ===== Reader buffer-cache prewarm (P2-④) =====
+    # Bind the impactful inputs so an approval for "prewarm reader R on cluster X
+    # via endpoint E, top_n N" can't be redirected to a different reader/endpoint.
+    if action_type == "prewarm_reader":
+        return {
+            "cluster_id": str(d.get("cluster_id") or "").strip(),
+            "reader_instance_id": str(d.get("reader_instance_id") or "").strip(),
+            "endpoint_identifier": str(d.get("endpoint_identifier") or "").strip(),
+            "top_n": _norm_val(d.get("top_n")),
+        }
     # ===== NoSQL write tools (multi-engine #P3.6 Group C) =====
     if action_type == "modify_dynamodb_capacity":
         # Bind the table target explicitly (fix #1 — no user-controllable target

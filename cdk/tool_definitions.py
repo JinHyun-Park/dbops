@@ -160,6 +160,15 @@ def operations_schema():
                "static_members": "array", "excluded_members": "array",
                "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "endpoint_identifier"]),
+        # Reader buffer-cache prewarm (P2-④). Aurora PostgreSQL only; approval-
+        # gated. Exposes approved/approval_id and returns a step plan as
+        # cli_preview. Every handler param must appear here or the impl<->schema
+        # parity test fails.
+        _tool("prewarm_reader",
+              "Aurora PostgreSQL only: prewarm a COLD reader instance's buffer pool before it takes traffic (optional custom-endpoint exclude/include, pg_prewarm top-N relations, pg_buffercache before/after); requires approval. Returns a step plan as cli_preview",
+              {"cluster_id": "string", "reader_instance_id": "string", "endpoint_identifier": "string",
+               "top_n": "integer", "approved": "boolean", "approval_id": "string"},
+              ["cluster_id", "reader_instance_id"]),
         # NoSQL write/remediation (multi-engine #P3.6 Group C). The 3 DynamoDB
         # tools + the 2 DocDB Mongo writes (set_docdb_profiler, create_docdb_index)
         # all ship with both their handler impl and this schema entry so the

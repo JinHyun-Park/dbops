@@ -42,6 +42,10 @@ CAPABILITIES = {
         # only; the operations handler positive-gates the create/delete/modify
         # tools on this key so non-relational engines get unsupported_engine.
         "custom_endpoint": True,
+        # prewarm: Aurora reader buffer-cache prewarm (P2-④) is relational-only
+        # (pg_prewarm is PG-specific; the tool additionally gates PG vs MySQL).
+        # Positive gate like custom_endpoint.
+        "prewarm": True,
         "cw_namespace": "AWS/RDS",
         "findings": {"health", "cost", "param_fitness", "capacity_forecast"},
     },

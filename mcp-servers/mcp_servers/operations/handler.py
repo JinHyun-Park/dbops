@@ -21,6 +21,7 @@ from mcp_servers.operations.tools.modify_dynamodb_ttl import modify_dynamodb_ttl
 from mcp_servers.operations.tools.modify_elasticache_node_type import modify_elasticache_node_type_impl
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
 from mcp_servers.operations.tools.modify_scaling import modify_scaling_impl
+from mcp_servers.operations.tools.prewarm_reader import prewarm_reader_impl
 from mcp_servers.operations.tools.query_activity_audit import query_activity_audit_impl
 from mcp_servers.operations.tools.reboot_elasticache import reboot_elasticache_impl
 from mcp_servers.operations.tools.request_approval import request_approval_impl
@@ -52,6 +53,10 @@ _ENGINE_GATED_TOOLS = {
     "create_custom_endpoint": "custom_endpoint",
     "delete_custom_endpoint": "custom_endpoint",
     "modify_custom_endpoint": "custom_endpoint",
+    # Reader buffer-cache prewarm (P2-④) is relational-only (pg_prewarm is
+    # PG-specific; the impl additionally gates PG-vs-MySQL). Same positive,
+    # FAIL-CLOSED gate as custom_endpoint.
+    "prewarm_reader": "prewarm",
     "modify_dynamodb_capacity": "ddb_write",
     "modify_dynamodb_ttl": "ddb_write",
     "enable_dynamodb_pitr": "ddb_write",
@@ -69,6 +74,7 @@ _ENGINE_GATED_TOOLS = {
 
 _CAP_LABEL = {
     "custom_endpoint": "Aurora 클러스터",
+    "prewarm": "Aurora PostgreSQL 클러스터",
     "ddb_write": "DynamoDB 테이블",
     "docdb_write": "DocumentDB 클러스터",
     "live_read": "ElastiCache 클러스터",
@@ -283,6 +289,31 @@ TOOLS = {
                 "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
             },
             "required": ["cluster_id", "endpoint_identifier"],
+        },
+    },
+    "prewarm_reader": {
+        "impl": prewarm_reader_impl,
+        "description": (
+            "Aurora PostgreSQL only: prewarm a COLD reader instance's buffer "
+            "pool before it takes traffic. Optionally excludes the reader from a "
+            "custom endpoint while warming, runs CREATE EXTENSION pg_prewarm/"
+            "pg_buffercache on the writer, connects directly to the reader "
+            "instance endpoint, pg_prewarms the top-N largest relations, and "
+            "re-includes the reader. Requires approved=true AND "
+            "approval_id=<uuid from request_approval>. Returns a step plan as "
+            "cli_preview at the approval stage."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora PostgreSQL cluster ID"},
+                "reader_instance_id": {"type": "string", "description": "The COLD reader instance to warm (must be a reader, not the writer)"},
+                "endpoint_identifier": {"type": "string", "description": "Optional custom endpoint to exclude the reader from while warming (auto re-included)"},
+                "top_n": {"type": "integer", "default": 20, "description": "Number of largest relations to prewarm (capped)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id", "reader_instance_id"],
         },
     },
     "modify_dynamodb_capacity": {
@@ -557,7 +588,7 @@ TOOLS = {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "action_type": {
                     "type": "string",
-                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "create_custom_endpoint", "delete_custom_endpoint", "modify_custom_endpoint", "modify_dynamodb_capacity", "modify_dynamodb_ttl", "enable_dynamodb_pitr", "set_docdb_profiler", "create_docdb_index", "other"],
+                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "create_custom_endpoint", "delete_custom_endpoint", "modify_custom_endpoint", "prewarm_reader", "modify_dynamodb_capacity", "modify_dynamodb_ttl", "enable_dynamodb_pitr", "set_docdb_profiler", "create_docdb_index", "other"],
                     "description": "Which write tool needs approval",
                 },
                 "action_details": {
