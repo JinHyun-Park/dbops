@@ -11,6 +11,8 @@ import {
   createAlertSubscription,
   deleteAlertSubscription,
   fetchAlertImpact,
+  snoozeAlertRule,
+  snoozeAlertRulesByCluster,
   type AlertImpact,
   apiUrl,
 } from "@/lib/api-client";
@@ -46,6 +48,9 @@ interface Rule {
   // older acks are considered stale once the rule fires again.
   last_acked_at?: string | null;
   last_acked_by?: string | null;
+  // Snooze — evaluator skips firing while this is in the future. NULL/past
+  // means "not snoozed"; older payloads (pre-P2-⑦) omit the field entirely.
+  snooze_until?: string | null;
 }
 
 interface CompoundOperand {
@@ -469,6 +474,30 @@ export default function AlertsPage() {
 
   const remove = async (id: number) => {
     await deleteAlertRule(id);
+    reload();
+  };
+
+  // minutes <= 0 clears the snooze (evaluator resumes firing immediately).
+  const snoozeRule = async (id: number, minutes: number) => {
+    await snoozeAlertRule(id, minutes);
+    reload();
+  };
+
+  const [bulkSnoozeMinutes, setBulkSnoozeMinutes] = useState(60);
+  const bulkSnooze = async (minutes: number) => {
+    if (!newRule.cluster_id) return;
+    await snoozeAlertRulesByCluster(newRule.cluster_id, minutes);
+    reload();
+  };
+
+  const updateThreshold = async (
+    id: number,
+    patch: Partial<{
+      threshold: number;
+      comparison: (typeof COMP_OPS)[number];
+    }>,
+  ) => {
+    await updateAlertRule(id, patch);
     reload();
   };
 
@@ -1006,6 +1035,51 @@ export default function AlertsPage() {
         eyebrow="규칙"
         title={`등록된 알림 규칙 ${rules.length}개`}
         description="evaluator는 5분마다 실행되며, metric 데이터가 stale이거나 없는 규칙은 건너뜁니다."
+        actions={
+          admin && clusters.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <select
+                value={newRule.cluster_id}
+                onChange={(e) =>
+                  setNewRule({ ...newRule, cluster_id: e.target.value })
+                }
+                title="전체 스누즈 대상 클러스터"
+                className="bg-zinc-950 border border-zinc-800 text-zinc-300 text-[11px] px-2 py-1.5 focus:outline-none focus:border-amber-500/60"
+              >
+                {clusters.map((c) => (
+                  <option key={c.cluster_id} value={c.cluster_id}>
+                    {c.cluster_id}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={bulkSnoozeMinutes}
+                onChange={(e) => setBulkSnoozeMinutes(Number(e.target.value))}
+                className="bg-zinc-950 border border-zinc-800 text-zinc-300 text-[11px] px-2 py-1.5 focus:outline-none focus:border-amber-500/60"
+              >
+                <option value={30}>30분</option>
+                <option value={60}>1시간</option>
+                <option value={240}>4시간</option>
+                <option value={1440}>24시간</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => bulkSnooze(bulkSnoozeMinutes)}
+                className="text-[11px] uppercase tracking-wider px-2 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500 hover:text-amber-300 transition-colors whitespace-nowrap"
+                title="이 클러스터의 모든 규칙을 스누즈 (롤/인스턴스 단위 스누즈는 미지원 — 클러스터 단위)"
+              >
+                클러스터 전체 스누즈
+              </button>
+              <button
+                type="button"
+                onClick={() => bulkSnooze(0)}
+                className="text-[11px] uppercase tracking-wider px-2 py-1.5 border border-zinc-700 text-zinc-500 hover:border-rose-500 hover:text-rose-300 transition-colors whitespace-nowrap"
+              >
+                전체 해제
+              </button>
+            </div>
+          ) : undefined
+        }
       >
         {loading ? (
           <div className="text-zinc-500 text-sm">불러오는 중...</div>
@@ -1070,6 +1144,48 @@ export default function AlertsPage() {
                         {(() => {
                           const comp = parseConditions(r.conditions_json);
                           if (!comp) {
+                            // Legacy single-threshold rules are inline-editable
+                            // for admins — compound (AND/OR) rules aren't,
+                            // since their DSL lives in `conditions`, not the
+                            // comparison/threshold columns rendered here.
+                            if (admin) {
+                              return (
+                                <span className="inline-flex items-center gap-1">
+                                  {r.metric_type}
+                                  <select
+                                    value={r.comparison}
+                                    onChange={(e) =>
+                                      updateThreshold(r.id, {
+                                        comparison: e.target
+                                          .value as (typeof COMP_OPS)[number],
+                                      })
+                                    }
+                                    className="bg-zinc-950 border border-zinc-800 text-amber-400 text-xs px-1 py-0.5 focus:outline-none focus:border-amber-500/60"
+                                  >
+                                    {COMP_OPS.map((c) => (
+                                      <option key={c} value={c}>
+                                        {c}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    defaultValue={r.threshold}
+                                    onBlur={(e) => {
+                                      const v = Number(e.target.value);
+                                      if (
+                                        !Number.isNaN(v) &&
+                                        v !== Number(r.threshold)
+                                      ) {
+                                        updateThreshold(r.id, { threshold: v });
+                                      }
+                                    }}
+                                    className="w-20 bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-1 py-0.5 font-mono focus:outline-none focus:border-amber-500/60"
+                                  />
+                                </span>
+                              );
+                            }
                             return (
                               <>
                                 {r.metric_type}{" "}
@@ -1140,6 +1256,22 @@ export default function AlertsPage() {
                             </div>
                           );
                         })()}
+                        {r.snooze_until &&
+                          new Date(r.snooze_until) > new Date() && (
+                            <div
+                              className="mt-1 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 border border-sky-500/40 bg-sky-500/10 text-sky-300 font-mono"
+                              title={`snooze_until ${new Date(
+                                r.snooze_until,
+                              ).toLocaleString()}`}
+                            >
+                              스누즈됨 ~
+                              {new Date(r.snooze_until).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                              까지
+                            </div>
+                          )}
                       </td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-3">
@@ -1151,6 +1283,27 @@ export default function AlertsPage() {
                             >
                               {impactOpenId === r.id ? "닫기" : "영향도"}
                             </button>
+                          )}
+                          {admin && (
+                            <select
+                              defaultValue=""
+                              onChange={(e) => {
+                                if (e.target.value === "") return;
+                                snoozeRule(r.id, Number(e.target.value));
+                                e.target.value = "";
+                              }}
+                              title="알림 스누즈"
+                              className="bg-zinc-950 border border-zinc-800 text-zinc-400 text-[10px] px-1 py-0.5 focus:outline-none focus:border-amber-500/60"
+                            >
+                              <option value="" disabled>
+                                스누즈
+                              </option>
+                              <option value={30}>30분</option>
+                              <option value={60}>1시간</option>
+                              <option value={240}>4시간</option>
+                              <option value={1440}>24시간</option>
+                              <option value={0}>해제</option>
+                            </select>
                           )}
                           {admin && (
                             <button

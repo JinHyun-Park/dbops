@@ -551,6 +551,25 @@
         ]
       }
     },
+    "/api/alert-rules/snooze-bulk": {
+      "post": {
+        "tags": ["alert-rules"],
+        "summary": "POST /api/alert-rules/snooze-bulk",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
     "/api/alert-rules/{id}": {
       "patch": {
         "tags": ["alert-rules"],
@@ -611,6 +630,35 @@
       "get": {
         "tags": ["alert-rules"],
         "summary": "GET /api/alert-rules/{id}/impact",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/alert-rules/{id}/snooze": {
+      "post": {
+        "tags": ["alert-rules"],
+        "summary": "POST /api/alert-rules/{id}/snooze",
         "responses": {
           "200": {
             "description": "OK"

@@ -356,7 +356,8 @@ def lambda_handler(event, context):
 
     rules = q(
         "SELECT id, cluster_id, name, metric_type, comparison, threshold, conditions::text AS conditions_json "
-        "FROM alert_rules WHERE enabled = true"
+        "FROM alert_rules WHERE enabled = true "
+        "AND (snooze_until IS NULL OR snooze_until <= NOW())"
     )
 
     # Prefer the canonical ALERT_TOPIC_ARN name (used by every other

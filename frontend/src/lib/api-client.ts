@@ -784,6 +784,7 @@ export async function updateAlertRule(
   updates: Partial<{
     enabled: boolean;
     threshold: number;
+    comparison: AlertComparison;
     name: string;
   }>,
 ) {
@@ -793,6 +794,32 @@ export async function updateAlertRule(
     body: JSON.stringify(updates),
   });
   if (!res.ok) throw new Error(`알림 규칙 수정 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+// minutes <= 0 clears the snooze. The evaluator re-checks snooze_until on
+// every run, so there's no separate "unsnooze" job to run once it expires.
+export async function snoozeAlertRule(id: number, minutes: number) {
+  const res = await authedFetch(await api(`/api/alert-rules/${id}/snooze`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ minutes }),
+  });
+  if (!res.ok) throw new Error(`알림 스누즈 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function snoozeAlertRulesByCluster(
+  clusterId: string,
+  minutes: number,
+) {
+  const res = await authedFetch(await api(`/api/alert-rules/snooze-bulk`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ cluster_id: clusterId, minutes }),
+  });
+  if (!res.ok)
+    throw new Error(`클러스터 전체 스누즈 실패 (상태 ${res.status})`);
   return res.json();
 }
 

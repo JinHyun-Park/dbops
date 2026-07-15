@@ -178,7 +178,7 @@ def _list_rules(query, cluster_id):
     #   no_data  — no snapshot at all, likely a misconfigured cluster_id/metric pair
     base = (
         "SELECT r.id, r.cluster_id, r.name, r.metric_type, r.comparison, r.threshold, r.enabled, "
-        "  r.last_triggered_at, r.last_acked_at, r.last_acked_by, "
+        "  r.last_triggered_at, r.last_acked_at, r.last_acked_by, r.snooze_until, "
         "  r.created_at, r.conditions::text AS conditions_json, "
         "  m.latest_metric_ts, "
         "  CASE "
@@ -325,6 +325,11 @@ def _update_rule(query, rule_id, body):
             sets.append("threshold = :threshold")
         except (TypeError, ValueError):
             return _response(400, {"error": "threshold must be numeric"})
+    if "comparison" in body:
+        if body["comparison"] not in COMP_OPS:
+            return _response(400, {"error": f"comparison must be one of {sorted(COMP_OPS)}"})
+        params["comparison"] = body["comparison"]
+        sets.append("comparison = :comparison")
     if "name" in body:
         params["name"] = str(body["name"])[:255]
         sets.append("name = :name")
@@ -334,12 +339,75 @@ def _update_rule(query, rule_id, body):
 
     rows = query(
         f"UPDATE alert_rules SET {', '.join(sets)} WHERE id = :id "
-        "RETURNING id, cluster_id, name, metric_type, comparison, threshold, enabled",
+        "RETURNING id, cluster_id, name, metric_type, comparison, threshold, enabled, snooze_until",
         params,
     )
     if not rows:
         return _response(404, {"error": "not found"})
     return _response(200, {"rule": rows[0]})
+
+
+def _snooze_rule(query, rule_id, body):
+    """Snooze (minutes > 0) or clear (minutes <= 0) a single rule. The
+    evaluator re-checks snooze_until on every run, so no un-snooze job is
+    needed — it just fires again once the timestamp passes."""
+    try:
+        rule_id_int = int(rule_id)
+    except (TypeError, ValueError):
+        return _response(400, {"error": "invalid id"})
+    try:
+        minutes = int(body.get("minutes", 0))
+    except (TypeError, ValueError):
+        return _response(400, {"error": "minutes must be an integer"})
+
+    if minutes > 0:
+        rows = query(
+            "UPDATE alert_rules SET snooze_until = NOW() + (:mins || ' minutes')::interval, "
+            "updated_at = NOW() WHERE id = :id "
+            "RETURNING id, cluster_id, name, snooze_until",
+            {"id": rule_id_int, "mins": str(minutes)},
+        )
+    else:
+        rows = query(
+            "UPDATE alert_rules SET snooze_until = NULL, updated_at = NOW() WHERE id = :id "
+            "RETURNING id, cluster_id, name, snooze_until",
+            {"id": rule_id_int},
+        )
+    if not rows:
+        return _response(404, {"error": "not found"})
+    return _response(200, {"rule": rows[0]})
+
+
+def _snooze_bulk(event, query, body):
+    """Snooze (or clear) every rule for one cluster in one shot.
+
+    ponytail: alert_rules is keyed by (cluster_id, metric), not by instance
+    role, so there's no writer/reader-scoped snooze here — per-cluster is
+    the finest-grained bulk control the schema supports today.
+    """
+    cluster_id = body.get("cluster_id", "")
+    if not CLUSTER_ID_RE.match(cluster_id):
+        return _response(400, {"error": "invalid cluster_id"})
+    if not tenancy.cluster_visible(event, _cluster_item(cluster_id)):
+        return _response(403, {"error": "이 클러스터에 대한 접근 권한이 없습니다."})
+    try:
+        minutes = int(body.get("minutes", 0))
+    except (TypeError, ValueError):
+        return _response(400, {"error": "minutes must be an integer"})
+
+    if minutes > 0:
+        rows = query(
+            "UPDATE alert_rules SET snooze_until = NOW() + (:mins || ' minutes')::interval, "
+            "updated_at = NOW() WHERE cluster_id = :cid RETURNING id",
+            {"cid": cluster_id, "mins": str(minutes)},
+        )
+    else:
+        rows = query(
+            "UPDATE alert_rules SET snooze_until = NULL, updated_at = NOW() WHERE cluster_id = :cid "
+            "RETURNING id",
+            {"cid": cluster_id},
+        )
+    return _response(200, {"cluster_id": cluster_id, "updated": len(rows)})
 
 
 _MANAGED_PROTOCOLS = {"slack-webhook", "pagerduty-events-v2", "teams-webhook"}
@@ -634,6 +702,20 @@ def lambda_handler(event, context):
                 if not tenancy.cluster_visible(event, _cluster_item(rule_cluster_id)):
                     return _response(403, {"error": "이 클러스터에 대한 접근 권한이 없습니다."})
             return _rule_impact(query, rule_id)
+
+        # /api/alert-rules/snooze-bulk — snooze/clear every rule for a cluster.
+        if method == "POST" and raw_path.rstrip("/").endswith("/snooze-bulk"):
+            forbid = _forbid_viewer(event)
+            if forbid:
+                return forbid
+            return _snooze_bulk(event, query, body)
+
+        # /api/alert-rules/{id}/snooze — body {minutes}; minutes<=0 clears.
+        if method == "POST" and raw_path.rstrip("/").endswith("/snooze"):
+            forbid = _forbid_viewer(event)
+            if forbid:
+                return forbid
+            return _snooze_rule(query, path_params.get("id"), body)
 
         if method == "GET":
             result = _list_rules(query, qs.get("cluster_id"))

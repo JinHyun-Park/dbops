@@ -1710,6 +1710,18 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=alerts_integration,
         )
+        # Snooze (P2-⑦): per-rule and cluster-wide bulk. {id} route above only
+        # registers PATCH/DELETE, so /snooze-bulk can't collide with it.
+        self.api.add_routes(
+            path="/api/alert-rules/{id}/snooze",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=alerts_integration,
+        )
+        self.api.add_routes(
+            path="/api/alert-rules/snooze-bulk",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=alerts_integration,
+        )
         self.api.add_routes(
             path="/api/alert-subscriptions",
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE],
