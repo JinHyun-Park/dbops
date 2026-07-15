@@ -52,6 +52,9 @@
       "name": "dashboard"
     },
     {
+      "name": "endpoint-requests"
+    },
+    {
       "name": "explain"
     },
     {
@@ -2321,6 +2324,25 @@
             }
           }
         ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/endpoint-requests": {
+      "post": {
+        "tags": ["endpoint-requests"],
+        "summary": "POST /api/endpoint-requests",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
         "security": [
           {
             "cognitoJwt": []

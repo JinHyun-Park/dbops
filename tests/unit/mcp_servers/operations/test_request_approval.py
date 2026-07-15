@@ -94,3 +94,48 @@ def test_request_approval_rejects_unknown_action_type():
             )
             assert result["status"] == "error"
             assert "unknown action_type" in result["message"]
+
+
+# ===== N-①: origin is stamped by the API, NEVER by this tool =================
+
+
+def _put_item(action_type="create_custom_endpoint", details=None, **kw):
+    """Call request_approval and return the DDB Item that was put."""
+    details = details or {"endpoint_identifier": "ep1", "endpoint_type": "READER",
+                          "static_members": [], "excluded_members": []}
+    with patch.dict(os.environ, {"APPROVALS_TABLE": "approvals"}):
+        with patch.object(request_approval, "boto3") as mock_boto3:
+            table = MagicMock()
+            mock_boto3.resource.return_value.Table.return_value = table
+            result = request_approval.request_approval_impl(
+                None, cluster_id="c1", action_type=action_type,
+                action_details=details, **kw,
+            )
+    return table.put_item.call_args.kwargs["Item"], result
+
+
+def test_tool_never_writes_origin():
+    """Trust boundary: request_approval must NOT write an origin marker — the
+    auto-execute gate keys on origin=="ui", and only the trusted approvals API
+    Lambda stamps it (after this tool returns). If the tool wrote origin, the
+    agent could mint a UI-looking row via the gateway and get a chat-initiated
+    destructive write auto-executed."""
+    item, _ = _put_item()
+    assert "origin" not in item
+
+
+def test_tool_rejects_origin_kwarg():
+    """origin is not a parameter of this tool — passing it must raise, proving
+    the agent has no channel to set it through the tool."""
+    import pytest
+    with pytest.raises(TypeError):
+        _put_item(origin="ui")
+
+
+def test_created_at_returned_for_api_stamp():
+    """The API caller needs (approval_id, created_at) to address the row it just
+    created and stamp origin, so both must be in the return."""
+    item, result = _put_item()
+    assert result["status"] == "pending"
+    assert result["approval_id"] == item["approval_id"]
+    assert result["created_at"] == item["created_at"]

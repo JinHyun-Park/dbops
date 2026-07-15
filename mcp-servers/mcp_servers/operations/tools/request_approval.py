@@ -45,7 +45,16 @@ def request_approval_impl(
     requested_by: str = "agent",
 ) -> dict:
     """Create an approval row in the DDB approvals table and return its id
-    plus a deep link the agent can mention in chat."""
+    plus a deep link the agent can mention in chat.
+
+    NOTE: this tool DELIBERATELY does not accept/write an `origin` marker.
+    The approve handler auto-executes only rows carrying origin=="ui", and that
+    marker is stamped onto the row by the TRUSTED approvals API Lambda AFTER
+    this tool returns (see api/approvals/handler.py `_handle_endpoint_requests`).
+    Keeping origin out of the tool means the agent — whose only channel here is
+    the gateway — has no way to set it, so a chat-initiated row can never be
+    mistaken for a UI-initiated one and auto-executed. `created_at` is returned
+    so the API caller can address the row it just created to stamp origin."""
     table_name = os.environ.get("APPROVALS_TABLE", "")
     if not table_name:
         return {
@@ -105,30 +114,30 @@ def request_approval_impl(
     approval_id = str(uuid.uuid4())
     created_at = str(int(time.time() * 1000))  # ms epoch as string for sort key
 
+    item = {
+        "approval_id": approval_id,
+        "created_at": created_at,
+        # DynamoDB TTL (the table's ttl attribute): a pending request
+        # auto-expires 24h after creation so stale, never-acted-on
+        # requests don't linger in the Approval Center indefinitely.
+        # Well above the 60-min replay window, so a legitimately
+        # approved request always stays consumable.
+        "ttl": int(time.time()) + 24 * 60 * 60,
+        "approval_status": "pending",
+        "cluster_id": cluster_id,
+        "action_type": action_type,
+        "action_details": _ddb_safe(action_details),
+        # Bind the approval to this exact payload. verify_approval
+        # re-derives the same hash from the tool's real args at execute
+        # time and refuses any mismatch — so an approval for one SQL
+        # cannot be consumed for a different one on the same cluster.
+        "payload_hash": canonical_action_hash(action_type, action_details),
+        "requested_by": requested_by,
+    }
+
     try:
         ddb = boto3.resource("dynamodb").Table(table_name)
-        ddb.put_item(
-            Item={
-                "approval_id": approval_id,
-                "created_at": created_at,
-                # DynamoDB TTL (the table's ttl attribute): a pending request
-                # auto-expires 24h after creation so stale, never-acted-on
-                # requests don't linger in the Approval Center indefinitely.
-                # Well above the 60-min replay window, so a legitimately
-                # approved request always stays consumable.
-                "ttl": int(time.time()) + 24 * 60 * 60,
-                "approval_status": "pending",
-                "cluster_id": cluster_id,
-                "action_type": action_type,
-                "action_details": _ddb_safe(action_details),
-                # Bind the approval to this exact payload. verify_approval
-                # re-derives the same hash from the tool's real args at execute
-                # time and refuses any mismatch — so an approval for one SQL
-                # cannot be consumed for a different one on the same cluster.
-                "payload_hash": canonical_action_hash(action_type, action_details),
-                "requested_by": requested_by,
-            }
-        )
+        ddb.put_item(Item=item)
     except Exception as e:
         return {"status": "error", "message": str(e)[:300]}
 
@@ -138,6 +147,7 @@ def request_approval_impl(
     return {
         "status": "pending",
         "approval_id": approval_id,
+        "created_at": created_at,
         "cluster_id": cluster_id,
         "action_type": action_type,
         "action_details": action_details,

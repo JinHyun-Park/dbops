@@ -2234,6 +2234,55 @@ export async function fetchEndpoints(
   return res.json();
 }
 
+export type EndpointAction =
+  | "create_custom_endpoint"
+  | "modify_custom_endpoint"
+  | "delete_custom_endpoint";
+
+export interface EndpointRequestResponse {
+  approval_id: string;
+  cluster_id: string;
+  action: EndpointAction;
+  message: string;
+}
+
+// N-① console-initiated custom-endpoint write. Admin-gated. Does NOT mutate
+// the endpoint immediately — it mints a payload-hashed approval that runs when
+// the DBA approves it in the Approval Center. static_members and
+// excluded_members are mutually exclusive (send at most one).
+export async function createEndpointRequest(opts: {
+  clusterId: string;
+  action: EndpointAction;
+  endpointIdentifier: string;
+  endpointType?: "READER" | "ANY"; // create only
+  staticMembers?: string[];
+  excludedMembers?: string[];
+}): Promise<EndpointRequestResponse> {
+  const body: Record<string, unknown> = {
+    cluster_id: opts.clusterId,
+    action: opts.action,
+    endpoint_identifier: opts.endpointIdentifier,
+  };
+  if (opts.action === "create_custom_endpoint") {
+    body.endpoint_type = opts.endpointType;
+  }
+  if (opts.staticMembers?.length) body.static_members = opts.staticMembers;
+  if (opts.excludedMembers?.length)
+    body.excluded_members = opts.excludedMembers;
+  const res = await authedFetch(await api(`/api/endpoint-requests`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(
+      `승인 요청 실패 (상태 ${res.status}): ${detail.slice(0, 200)}`,
+    );
+  }
+  return res.json();
+}
+
 export interface CreateSnapshotResponse {
   ok: boolean;
   cluster_id: string;

@@ -937,12 +937,21 @@ class AgentStack(cdk.Stack):
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
                 "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
                 "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
+                # N-① console-initiated custom-endpoint writes: on POST
+                # /api/endpoint-requests this Lambda invokes the operations
+                # Lambda's request_approval (origin="ui"), and on approve it
+                # invokes the endpoint tool to auto-execute. Same operations
+                # function the restore_finalizer targets.
+                "OPERATIONS_FUNCTION_NAME": operations_mcp_lambda.function_name,
             },
         )
         foundation.approvals_table.grant_read_write_data(approvals_lambda)
         foundation.clusters_table.grant_read_data(approvals_lambda)
         foundation.team_members_table.grant_read_data(approvals_lambda)
         foundation.grant_approval_policy_read(approvals_lambda)  # designated-approver enforcement
+        # Invoke the operations MCP Lambda for the N-① endpoint request/execute
+        # flow (request_approval + create/modify/delete_custom_endpoint).
+        operations_mcp_lambda.grant_invoke(approvals_lambda)
         # 의도적으로 rds:EnableHttpEndpoint 단일 액션만 — ModifyDBCluster를
         # 주면 마스터 패스워드 변경·삭제 보호 해제까지 가능한 광범위 권한이
         # 플랫폼에 생긴다. 전용 API(설정 1비트)로 블래스트 반경을 좁히는 것이
@@ -1838,6 +1847,14 @@ class AgentStack(cdk.Stack):
             path="/api/scaleout-ops/{id}/cancel",
             methods=[apigwv2.HttpMethod.POST],
             integration=integrations.HttpLambdaIntegration("ScaleoutOpsCancelIntegration", approvals_lambda),
+        )
+        # Endpoint requests (N-①) — console-initiated custom-endpoint writes.
+        # Same approvals Lambda; it invokes the operations Lambda to mint the
+        # payload-hashed approval (origin="ui") and to auto-execute on approve.
+        self.api.add_routes(
+            path="/api/endpoint-requests",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=integrations.HttpLambdaIntegration("EndpointRequestsIntegration", approvals_lambda),
         )
         # Approval policies — admin-gated designated-approver routing
         approval_policies_integration = integrations.HttpLambdaIntegration(

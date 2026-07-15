@@ -6,7 +6,73 @@ from datetime import datetime, timezone
 
 import boto3
 import tenancy
+from botocore.config import Config
 from botocore.exceptions import ClientError
+
+# UI-initiated custom-endpoint writes (N-①). These action_types are executed
+# INLINE by this handler on approve — but ONLY when the row carries origin="ui".
+# Chat-initiated rows of the same action_type have NO origin and are replayed by
+# the agent, so auto-executing them here would double-execute the write.
+_ENDPOINT_ACTIONS = (
+    "create_custom_endpoint",
+    "modify_custom_endpoint",
+    "delete_custom_endpoint",
+)
+
+# Success statuses the endpoint tools return once the RDS mutation is accepted.
+_ENDPOINT_OK_STATUS = ("creating", "modifying", "deleting")
+
+# Endpoint create/modify/delete return in seconds and API Gateway caps at 29s,
+# so the default read_timeout is plenty. Set timeouts explicitly and DISABLE
+# botocore retries (max_attempts=0) so a slow/failed sync invoke can never
+# double-invoke — the tool's verify_approval consumes the approval single-use,
+# and a retry after a partial run would fail or double-execute.
+_OPS_LAMBDA_CFG = Config(read_timeout=25, connect_timeout=5, retries={"max_attempts": 0})
+
+
+def _client_context(tool_name: str) -> str:
+    """Base64 ClientContext so the operations Lambda's _extract_tool_name reads
+    custom.tool_name — Lambda only delivers ClientContext on a SYNCHRONOUS
+    (RequestResponse) invoke, so callers must invoke sync. Mirrors the
+    restore_finalizer's construction."""
+    return base64.b64encode(
+        json.dumps({"custom": {"tool_name": tool_name}}).encode("utf-8")
+    ).decode("utf-8")
+
+
+def _invoke_operations(tool_name: str, payload: dict) -> dict:
+    """Synchronously invoke the operations Lambda's <tool_name> and return the
+    parsed tool-result dict. The operations Lambda owns the endpoint tools +
+    approval_guard + cross-account access, so api/ (which cannot import
+    mcp_servers) delegates rather than duplicating that logic.
+
+    Returns the tool's own result dict, or an {"status": "invoke_error", ...}
+    shape on any transport/parse failure — never raises, never leaks str(e)
+    beyond a short reason so the approve/POST paths don't crash."""
+    ops_fn = os.environ.get("OPERATIONS_FUNCTION_NAME", "")
+    if not ops_fn:
+        return {"status": "invoke_error", "reason": "OPERATIONS_FUNCTION_NAME not configured"}
+    try:
+        resp = boto3.client("lambda", config=_OPS_LAMBDA_CFG).invoke(
+            FunctionName=ops_fn,
+            InvocationType="RequestResponse",
+            Payload=json.dumps(payload, default=str).encode("utf-8"),
+            ClientContext=_client_context(tool_name),
+        )
+    except Exception as e:
+        # Log the transport/fault detail server-side only; the client gets a
+        # static reason (str(e) can carry the function ARN, role, endpoint URL).
+        print(f"[approvals] operations invoke ({tool_name}) failed: {e}")
+        return {"status": "invoke_error", "reason": "operations 호출에 실패했습니다"}
+    if resp.get("FunctionError"):
+        return {"status": "invoke_error", "reason": "operations Lambda가 오류를 반환했습니다"}
+    try:
+        body = json.loads(resp["Payload"].read().decode("utf-8"))
+        text = (body.get("content") or [{}])[0].get("text") if isinstance(body, dict) else None
+        result = json.loads(text) if text else body
+    except Exception:
+        return {"status": "invoke_error", "reason": "operations 응답을 해석할 수 없습니다"}
+    return result if isinstance(result, dict) else {"status": "invoke_error", "reason": "unexpected result shape"}
 
 
 def _cluster_item(cluster_id: str) -> dict:
@@ -341,6 +407,150 @@ def _execute_enable_data_api(item: dict) -> dict:
     }
 
 
+def _handle_endpoint_requests(event, method, headers) -> dict:
+    """POST /api/endpoint-requests — console-initiated custom-endpoint write.
+
+    Admin-gated + tenant-scoped. Validates the action + its required fields,
+    then invokes the operations Lambda's request_approval tool (origin="ui") to
+    mint a correctly payload-hashed PENDING approval. api/ CANNOT import
+    mcp_servers, so the hash MUST be computed by the operations Lambda's
+    approval_guard — hence the invoke rather than writing the row directly.
+
+    The write itself does NOT run here; it runs when the DBA approves and the
+    approve path auto-executes the origin="ui" row (see below)."""
+    if method != "POST":
+        return {"statusCode": 405, "headers": headers,
+                "body": json.dumps({"error": "Method not allowed"})}
+    if not _is_admin(event):
+        return {"statusCode": 403, "headers": headers,
+                "body": json.dumps({"error": "forbidden",
+                                    "reason": "admin role required to request an endpoint change"})}
+    body = json.loads(event.get("body", "{}"))
+    cluster_id = str(body.get("cluster_id") or "").strip()
+    action = str(body.get("action") or "").strip()
+    if action not in _ENDPOINT_ACTIONS:
+        return {"statusCode": 400, "headers": headers,
+                "body": json.dumps({"error": "invalid_action",
+                                    "detail": f"action은 {_ENDPOINT_ACTIONS} 중 하나여야 합니다"})}
+    if not cluster_id:
+        return {"statusCode": 400, "headers": headers,
+                "body": json.dumps({"error": "cluster_id_required"})}
+    # Tenant scope — the caller must be able to see this cluster (same visibility
+    # check the write routes use). Non-visible → 403, never a silent pass.
+    if not tenancy.cluster_visible(event, _cluster_item(cluster_id)):
+        return {"statusCode": 403, "headers": headers,
+                "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
+
+    endpoint_identifier = str(body.get("endpoint_identifier") or "").strip()
+    if not endpoint_identifier:
+        return {"statusCode": 400, "headers": headers,
+                "body": json.dumps({"error": "endpoint_identifier_required"})}
+    static_members = [str(m).strip() for m in (body.get("static_members") or []) if str(m).strip()]
+    excluded_members = [str(m).strip() for m in (body.get("excluded_members") or []) if str(m).strip()]
+    if static_members and excluded_members:
+        return {"statusCode": 400, "headers": headers,
+                "body": json.dumps({"error": "invalid_members",
+                                    "detail": "static_members와 excluded_members는 상호 배타적입니다 — 하나만 지정하세요"})}
+
+    if action == "create_custom_endpoint":
+        etype = str(body.get("endpoint_type") or "").strip().upper()
+        if etype not in ("READER", "ANY"):
+            return {"statusCode": 400, "headers": headers,
+                    "body": json.dumps({"error": "invalid_endpoint_type",
+                                        "detail": "endpoint_type은 READER 또는 ANY 여야 합니다"})}
+        action_details = {"endpoint_identifier": endpoint_identifier, "endpoint_type": etype,
+                          "static_members": static_members, "excluded_members": excluded_members}
+    elif action == "modify_custom_endpoint":
+        if not static_members and not excluded_members:
+            return {"statusCode": 400, "headers": headers,
+                    "body": json.dumps({"error": "members_required",
+                                        "detail": "static_members 또는 excluded_members 중 하나는 지정해야 합니다"})}
+        action_details = {"endpoint_identifier": endpoint_identifier,
+                          "static_members": static_members, "excluded_members": excluded_members}
+    else:  # delete_custom_endpoint
+        action_details = {"endpoint_identifier": endpoint_identifier}
+
+    result = _invoke_operations("request_approval", {
+        "cluster_id": cluster_id,
+        "action_type": action,
+        "action_details": action_details,
+        "requested_by": _caller_name(event),
+    })
+    if result.get("status") != "pending" or not result.get("approval_id"):
+        return {"statusCode": 502, "headers": headers,
+                "body": json.dumps({"error": "request_failed",
+                                    "detail": result.get("reason") or result.get("message")
+                                    or "승인 요청 생성에 실패했습니다"})}
+    # Stamp origin="ui" onto the row HERE — from the trusted API Lambda, not the
+    # request_approval tool. The agent's only channel to request_approval is the
+    # gateway (which carries only declared-schema params, and origin is NOT in
+    # that schema), so it cannot mint an origin="ui" row; only this admin+tenant-
+    # gated API path can. That makes origin=="ui" a real trust boundary the
+    # approve-path auto-execute can rely on. Uses the (approval_id, created_at)
+    # key the tool just returned. Origin is metadata — not in payload_hash — so
+    # stamping it never invalidates the binding.
+    created_at = result.get("created_at")
+    if created_at:
+        try:
+            boto3.resource("dynamodb").Table(os.environ["APPROVALS_TABLE"]).update_item(
+                Key={"approval_id": result["approval_id"], "created_at": created_at},
+                UpdateExpression="SET #o = :ui",
+                ExpressionAttributeNames={"#o": "origin"},
+                ExpressionAttributeValues={":ui": "ui"},
+            )
+        except Exception as e:
+            # Fail-SAFE: without the origin stamp the row simply won't
+            # auto-execute (it stays a normal pending approval) — never
+            # fail-open. Surface a soft warning; the request row still exists.
+            print(f"[approvals] origin stamp failed for {result['approval_id']}: {e}")
+            return {"statusCode": 201, "headers": headers,
+                    "body": json.dumps({
+                        "approval_id": result["approval_id"],
+                        "cluster_id": cluster_id,
+                        "action": action,
+                        "origin_stamped": False,
+                        "message": "승인 요청은 생성됐지만 자동 실행 표식 기록에 실패했습니다 — 승인해도 자동 실행되지 않을 수 있습니다. 관리자에게 문의하세요.",
+                    })}
+    return {"statusCode": 201, "headers": headers,
+            "body": json.dumps({
+                "approval_id": result["approval_id"],
+                "cluster_id": cluster_id,
+                "action": action,
+                "message": "승인 요청이 생성되었습니다 — 승인 센터에서 검토·승인하면 실행됩니다.",
+            })}
+
+
+def _execute_endpoint_action(item: dict) -> dict:
+    """Auto-execute an approved, UI-originated endpoint write via the operations
+    Lambda. The tool's verify_approval sees status=approved, consumes the row
+    single-use, and runs the RDS mutation — so execution happens under the DBA's
+    authenticated approve click, exactly like enable_data_api.
+
+    ONLY origin=="ui" rows reach here (the caller gates on it): chat rows are
+    replayed by the agent, so auto-executing them would double-execute.
+
+    On a non-success status the row is left consumed-or-approved by the tool
+    (verify_approval only consumes on success), and the failure is surfaced so
+    the DBA sees it — the approve path never crashes."""
+    action_type = item.get("action_type") or item.get("tool_name")
+    ad = item.get("action_details")
+    if not isinstance(ad, dict):
+        ad = {}
+    payload = {
+        "cluster_id": item.get("cluster_id", ""),
+        "approved": True,
+        "approval_id": item.get("approval_id"),
+        **ad,
+    }
+    result = _invoke_operations(action_type, payload)
+    status = result.get("status", "unknown")
+    return {
+        "executed": status in _ENDPOINT_OK_STATUS,
+        "status": status,
+        "reason": result.get("reason") or result.get("error"),
+    }
+
+
 def lambda_handler(event, context):
     dynamodb = boto3.resource("dynamodb")
     table = dynamodb.Table(os.environ["APPROVALS_TABLE"])
@@ -357,6 +567,12 @@ def lambda_handler(event, context):
     # so it would otherwise swallow GET /api/scaleout-ops.
     if "/scaleout-ops" in path:
         return _handle_scaleout(event, table, method, path, path_params, headers)
+
+    # /api/endpoint-requests (N-①) — console-initiated custom-endpoint write.
+    # Must come BEFORE the generic POST arm below (which only allows
+    # enable_data_api), or that arm would reject the endpoint action_type.
+    if "/endpoint-requests" in path:
+        return _handle_endpoint_requests(event, method, headers)
 
     # /api/activity — chronological feed of every approval (any status)
     # for compliance + retro queries ("what writes happened in cluster X
@@ -685,10 +901,25 @@ def lambda_handler(event, context):
                     ExpressionAttributeValues={":e": execution.get("error", "unknown")[:300]},
                 )
 
+        # N-① custom-endpoint auto-execute — ONLY origin=="ui" rows. The write
+        # runs via the operations Lambda (which owns the tool + approval_guard);
+        # its verify_approval consumes the row single-use on success. Chat rows
+        # of the same action_type have NO origin → NOT executed here (the agent
+        # replays them), so this can never double-execute a write.
+        endpoint_execution = None
+        row_action = item.get("action_type") or item.get("tool_name")
+        if action == "approve" and row_action in _ENDPOINT_ACTIONS and item.get("origin") == "ui":
+            endpoint_execution = _execute_endpoint_action(item)
+
+        exec_failed = (execution and not execution.get("ok")) or (
+            endpoint_execution and not endpoint_execution.get("executed")
+        )
         return {
-            "statusCode": 200 if not (execution and not execution.get("ok")) else 502,
+            "statusCode": 502 if exec_failed else 200,
             "headers": headers,
-            "body": json.dumps({"approval_id": approval_id, "status": action + "d", "execution": execution}),
+            "body": json.dumps({"approval_id": approval_id, "status": action + "d",
+                                "execution": execution,
+                                "endpoint_execution": endpoint_execution}),
         }
 
     return {"statusCode": 405, "headers": headers, "body": json.dumps({"error": "Method not allowed"})}
