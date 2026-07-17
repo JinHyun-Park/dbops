@@ -303,3 +303,59 @@ def test_approve_ui_row_execute_failure_surfaced_no_crash(monkeypatch):
     assert ex["executed"] is False
     assert ex["status"] == "create_failed"
     lam.invoke.assert_called_once()
+
+
+# ===========================================================================
+# add_reader_instance auto-execute (P2-⑥ AZ scale-out runbook) — same gate:
+# origin=="ui" rows auto-execute; chat rows (no origin) must NOT (double-exec).
+# ===========================================================================
+
+def _reader_row(origin=None):
+    row = {
+        "approval_id": "aid-r", "created_at": "2026-07-16T00:00:00",
+        "approval_status": "pending", "cluster_id": "c1",
+        "action_type": "add_reader_instance",
+        "action_details": {"cluster_id": "c1", "new_instance_id": "c1-az1",
+                           "instance_class": "db.serverless",
+                           "availability_zone": "ap-northeast-2a"},
+        "requested_by": "requester",  # differs from approver → no self-approval 403
+    }
+    if origin:
+        row["origin"] = origin
+    return row
+
+
+def test_approve_ui_add_reader_row_auto_executes(monkeypatch):
+    """An origin="ui" add_reader_instance row (minted by /api/scaleout-az) is
+    auto-executed on approve: operations is invoked with approved=true."""
+    _, lam = _wire(monkeypatch, approvals_rows=[_reader_row(origin="ui")],
+                   tool_result={"status": "instance_added", "instance_id": "c1-az1"})
+    r = handler.lambda_handler(
+        _event(method="PUT", path="/api/approvals/aid-r", approval_id="aid-r",
+               body={"action": "approve"}), None)
+    assert r["statusCode"] == 200
+    ex = json.loads(r["body"])["endpoint_execution"]
+    assert ex["executed"] is True
+    assert ex["status"] == "instance_added"
+
+    lam.invoke.assert_called_once()
+    call = lam.invoke.call_args
+    payload = json.loads(call.kwargs["Payload"])
+    assert payload["approved"] is True
+    assert payload["approval_id"] == "aid-r"
+    assert payload["new_instance_id"] == "c1-az1"
+    assert payload["instance_class"] == "db.serverless"
+    cc = json.loads(base64.b64decode(call.kwargs["ClientContext"]))
+    assert cc["custom"]["tool_name"] == "add_reader_instance"
+
+
+def test_approve_chat_add_reader_row_does_not_execute(monkeypatch):
+    """A CHAT add_reader_instance row (N-③, NO origin) must NOT auto-execute —
+    the agent replays it. Prevents a double create_db_instance."""
+    _, lam = _wire(monkeypatch, approvals_rows=[_reader_row(origin=None)])
+    r = handler.lambda_handler(
+        _event(method="PUT", path="/api/approvals/aid-r", approval_id="aid-r",
+               body={"action": "approve"}), None)
+    assert r["statusCode"] == 200
+    assert json.loads(r["body"])["endpoint_execution"] is None
+    lam.invoke.assert_not_called()

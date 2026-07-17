@@ -22,6 +22,7 @@ from mcp_servers.operations.tools.modify_dynamodb_ttl import modify_dynamodb_ttl
 from mcp_servers.operations.tools.modify_elasticache_node_type import modify_elasticache_node_type_impl
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
 from mcp_servers.operations.tools.modify_scaling import modify_scaling_impl
+from mcp_servers.operations.tools.plan_az_scaleout import plan_az_scaleout_impl
 from mcp_servers.operations.tools.prewarm_reader import prewarm_reader_impl
 from mcp_servers.operations.tools.query_activity_audit import query_activity_audit_impl
 from mcp_servers.operations.tools.reboot_elasticache import reboot_elasticache_impl
@@ -64,6 +65,10 @@ _ENGINE_GATED_TOOLS = {
     # (both PG and MySQL). Same positive, FAIL-CLOSED gate.
     "add_reader_instance": "scale_instance",
     "remove_reader_instance": "scale_instance",
+    # AZ scale-out runbook planner (P2-⑥) is READ-ONLY but Aurora-relational
+    # only (it describes clusters/instances), so it shares the same positive,
+    # FAIL-CLOSED scale_instance gate.
+    "plan_az_scaleout": "scale_instance",
     # Reader scale-out + auto-warmup (N-④): same relational-only, instance-level
     # write gate as add_reader_instance (it creates a reader).
     "scale_out_with_warmup": "scale_instance",
@@ -395,6 +400,26 @@ TOOLS = {
                 "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
             },
             "required": ["cluster_id", "new_instance_id"],
+        },
+    },
+    "plan_az_scaleout": {
+        "impl": plan_az_scaleout_impl,
+        "description": (
+            "Aurora only (READ-ONLY): plan a preemptive AZ scale-out — N reader "
+            "instances spread round-robin over the cluster's healthy AZs, "
+            "EXCLUDING one chosen AZ. Resolves a concrete instance_class + AZ + "
+            "unique id for each planned reader. Creates nothing; the /scaleout-az "
+            "runbook turns each planned reader into an add_reader_instance approval."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
+                "exclude_az": {"type": "string", "description": "AZ to exclude from the spread (empty = spread over all cluster AZs)"},
+                "count": {"type": "integer", "default": 1, "description": "Number of readers to plan (1-10, clamped)"},
+                "instance_class": {"type": "string", "description": "DB instance class (defaults to the writer's current class if omitted)"},
+            },
+            "required": ["cluster_id"],
         },
     },
     "modify_dynamodb_capacity": {

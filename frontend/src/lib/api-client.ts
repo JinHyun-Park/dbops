@@ -1201,6 +1201,55 @@ export async function cancelScaleoutOp(
   return res.json();
 }
 
+// ── AZ scale-out runbook (P2-⑥) ─────────────────────────────────────────────
+// Plans N readers spread over the cluster's healthy AZs (excluding one chosen
+// AZ) and mints one add_reader_instance approval (origin="ui") per reader. The
+// readers are created only when each approval is approved in the Approval Center.
+export interface ScaleoutAzCreated {
+  approval_id: string;
+  new_instance_id: string;
+  availability_zone: string;
+  origin_stamped?: boolean;
+}
+
+export interface ScaleoutAzResult {
+  cluster_id: string;
+  exclude_az: string;
+  instance_class?: string;
+  healthy_azs?: string[];
+  created: ScaleoutAzCreated[];
+  failed: Array<{
+    new_instance_id?: string;
+    availability_zone?: string;
+    reason?: string;
+  }>;
+  message: string;
+}
+
+export async function scaleoutAz(input: {
+  cluster_id: string;
+  exclude_az?: string;
+  count: number;
+  instance_class?: string;
+}): Promise<ScaleoutAzResult> {
+  const res = await authedFetch(await api(`/api/scaleout-az`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    let msg = `AZ 스케일아웃 실패 (상태 ${res.status})`;
+    try {
+      const e = await res.json();
+      if (e?.detail || e?.error) msg = e.detail || e.error;
+    } catch {
+      // keep the status-based message
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
 export async function registerCluster(data: {
   cluster_id?: string;
   account_id: string;

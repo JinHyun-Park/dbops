@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   cancelScaleoutOp,
   fetchScaleoutOps,
+  fetchTopology,
+  scaleoutAz,
+  type ScaleoutAzResult,
   type ScaleoutOp,
 } from "@/lib/api-client";
 import { isAdmin } from "@/lib/auth";
@@ -14,6 +17,8 @@ import {
   Section,
 } from "@/components/design-system/page-shell";
 import { fmtRelative } from "@/lib/format";
+import { useSelectedCluster } from "@/lib/use-selected-cluster";
+import { engineFamily } from "@/lib/engine";
 
 // State strings come straight from the API's derived lifecycle; the badge
 // palette matches the operational severity (provisioning=neutral, awaiting
@@ -125,6 +130,8 @@ export default function ScaleoutPage() {
           </button>
         }
       />
+
+      {admin && <AzScaleoutRunbook />}
 
       <Section>
         <p className="text-xs text-zinc-500 mb-4 leading-relaxed">
@@ -253,5 +260,217 @@ export default function ScaleoutPage() {
         )}
       </Section>
     </PageBody>
+  );
+}
+
+// AZ 스케일아웃 (선점) — admin-only runbook. Adds N readers spread over the
+// cluster's healthy AZs, EXCLUDING one chosen AZ, as individually-approved
+// add_reader_instance requests. Preemptive spread away from an at-risk AZ.
+function AzScaleoutRunbook() {
+  const { clusters } = useSelectedCluster();
+  const relational = useMemo(
+    () => clusters.filter((c) => engineFamily(c.engine) === "relational"),
+    [clusters],
+  );
+
+  const [clusterId, setClusterId] = useState("");
+  const [excludeAz, setExcludeAz] = useState("");
+  const [count, setCount] = useState(2);
+  const [azs, setAzs] = useState<string[]>([]);
+  const [azLoading, setAzLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<ScaleoutAzResult | null>(null);
+
+  // Default to the first relational cluster once the list loads.
+  useEffect(() => {
+    if (!clusterId && relational.length) setClusterId(relational[0].cluster_id);
+  }, [relational, clusterId]);
+
+  // Populate the exclude-AZ dropdown from the cluster's current instance AZs
+  // (the AZs you'd want to steer away from). The backend spreads over the
+  // cluster's subnet AZs minus the excluded one and validates the choice.
+  useEffect(() => {
+    if (!clusterId) return;
+    let cancelled = false;
+    setAzLoading(true);
+    setExcludeAz("");
+    setAzs([]);
+    fetchTopology(clusterId)
+      .then((t) => {
+        if (cancelled) return;
+        const distinct = Array.from(
+          new Set(
+            (t.members || [])
+              .map((m) => m.availability_zone)
+              .filter((a): a is string => !!a),
+          ),
+        ).sort();
+        setAzs(distinct);
+      })
+      .catch(() => !cancelled && setAzs([]))
+      .finally(() => !cancelled && setAzLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [clusterId]);
+
+  const submit = useCallback(async () => {
+    if (!clusterId) return;
+    setBusy(true);
+    setErr(null);
+    setResult(null);
+    try {
+      const r = await scaleoutAz({
+        cluster_id: clusterId,
+        exclude_az: excludeAz || undefined,
+        count,
+      });
+      setResult(r);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [clusterId, excludeAz, count]);
+
+  return (
+    <Section>
+      <div className="mb-4">
+        <h2 className="text-sm font-medium text-zinc-200">
+          AZ 스케일아웃 (선점)
+        </h2>
+        <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
+          정상 AZ에 리더를 미리 분산 배치합니다 — 위험이 예상되는 AZ 하나를
+          제외하고, 나머지 AZ에 리더 {count}대를 라운드로빈으로 계획합니다. 각
+          리더는 과금 대상인 개별 인스턴스이며, 승인 센터에서 하나씩
+          검토·승인해야 실제로 생성됩니다.
+        </p>
+      </div>
+
+      {relational.length === 0 ? (
+        <EmptyState
+          eyebrow="AZ 스케일아웃"
+          title="Aurora 클러스터가 없습니다"
+          description="AZ 스케일아웃은 Aurora PostgreSQL/MySQL 클러스터 전용입니다."
+        />
+      ) : (
+        <>
+          <div className="flex flex-wrap items-end gap-4">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                클러스터
+              </span>
+              <select
+                value={clusterId}
+                onChange={(e) => setClusterId(e.target.value)}
+                className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm px-2 py-1.5 min-w-[16rem] focus:border-amber-500/50 focus:outline-none"
+              >
+                {relational.map((c) => (
+                  <option key={c.cluster_id} value={c.cluster_id}>
+                    {c.cluster_id}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                제외할 AZ
+              </span>
+              <select
+                value={excludeAz}
+                onChange={(e) => setExcludeAz(e.target.value)}
+                disabled={azLoading}
+                className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm px-2 py-1.5 min-w-[12rem] focus:border-amber-500/50 focus:outline-none disabled:opacity-50"
+              >
+                <option value="">
+                  {azLoading ? "AZ 불러오는 중…" : "(제외 없음)"}
+                </option>
+                {azs.map((az) => (
+                  <option key={az} value={az}>
+                    {az}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                리더 수 (1–10)
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={count}
+                onChange={(e) =>
+                  setCount(
+                    Math.max(1, Math.min(10, Number(e.target.value) || 1)),
+                  )
+                }
+                className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm px-2 py-1.5 w-24 focus:border-amber-500/50 focus:outline-none"
+              />
+            </label>
+
+            <button
+              onClick={submit}
+              disabled={busy || !clusterId}
+              className="text-xs px-4 py-2 border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+            >
+              {busy ? "생성 중…" : "리더 추가 승인 요청 생성"}
+            </button>
+          </div>
+
+          {err && (
+            <div className="mt-4 bg-rose-500/10 border border-rose-500/30 rounded-lg p-3 text-sm">
+              <span className="text-rose-300">{err}</span>
+            </div>
+          )}
+
+          {result && (
+            <div className="mt-4 border border-zinc-800 rounded-lg p-4">
+              <div className="text-sm text-zinc-200 mb-2">{result.message}</div>
+              {result.instance_class && (
+                <div className="text-xs text-zinc-500 mb-2 font-mono">
+                  클래스 {result.instance_class}
+                  {result.healthy_azs?.length
+                    ? ` · 대상 AZ ${result.healthy_azs.join(", ")}`
+                    : ""}
+                </div>
+              )}
+              {result.created.length > 0 && (
+                <ul className="text-xs text-zinc-300 space-y-1 mb-2">
+                  {result.created.map((c) => (
+                    <li key={c.approval_id} className="font-mono">
+                      <span className="text-emerald-400">✓</span>{" "}
+                      {c.new_instance_id}{" "}
+                      <span className="text-zinc-500">
+                        ({c.availability_zone})
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {result.failed.length > 0 && (
+                <ul className="text-xs text-rose-300 space-y-1 mb-2">
+                  {result.failed.map((f, i) => (
+                    <li key={i} className="font-mono">
+                      <span>✗</span> {f.new_instance_id} — {f.reason}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <a
+                href="/approvals"
+                className="text-xs text-amber-300 hover:underline"
+              >
+                승인 센터에서 검토·승인 →
+              </a>
+            </div>
+          )}
+        </>
+      )}
+    </Section>
   );
 }

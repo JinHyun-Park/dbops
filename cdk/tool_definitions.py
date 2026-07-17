@@ -192,6 +192,15 @@ def operations_schema():
                "endpoint_identifier": "string", "top_n": "integer",
                "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "new_instance_id"]),
+        # AZ scale-out runbook planner (P2-⑥). READ-ONLY — no approved/approval_id
+        # (it plans; the /scaleout-az API mints add_reader_instance approvals). Not
+        # in request_approval's enum. Every handler param must appear here or the
+        # impl<->schema parity test fails.
+        _tool("plan_az_scaleout",
+              "Aurora only (read-only): plan a preemptive AZ scale-out — N reader instances spread round-robin over the cluster's healthy AZs, EXCLUDING one chosen AZ, each with a concrete instance_class + AZ + unique id. Creates nothing",
+              {"cluster_id": "string", "exclude_az": "string", "count": "integer",
+               "instance_class": "string"},
+              ["cluster_id"]),
         # NoSQL write/remediation (multi-engine #P3.6 Group C). The 3 DynamoDB
         # tools + the 2 DocDB Mongo writes (set_docdb_profiler, create_docdb_index)
         # all ship with both their handler impl and this schema entry so the

@@ -1856,6 +1856,16 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.POST],
             integration=integrations.HttpLambdaIntegration("EndpointRequestsIntegration", approvals_lambda),
         )
+        # AZ scale-out runbook (P2-⑥) — same approvals Lambda. It invokes the
+        # operations Lambda's read-only plan_az_scaleout, then mints one
+        # add_reader_instance approval (origin="ui") per planned reader; the
+        # approve path auto-executes those origin="ui" rows. Reuses the existing
+        # OPERATIONS_FUNCTION_NAME env + grant_invoke wired below (N-①); no new IAM.
+        self.api.add_routes(
+            path="/api/scaleout-az",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=integrations.HttpLambdaIntegration("ScaleoutAzIntegration", approvals_lambda),
+        )
         # Approval policies — admin-gated designated-approver routing
         approval_policies_integration = integrations.HttpLambdaIntegration(
             "ApprovalPoliciesIntegration", approval_policies_lambda

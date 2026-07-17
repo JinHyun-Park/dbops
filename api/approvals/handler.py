@@ -19,8 +19,16 @@ _ENDPOINT_ACTIONS = (
     "delete_custom_endpoint",
 )
 
-# Success statuses the endpoint tools return once the RDS mutation is accepted.
-_ENDPOINT_OK_STATUS = ("creating", "modifying", "deleting")
+# UI-originated action_types the approve path auto-executes when origin=="ui":
+# the endpoint writes (N-①) PLUS add_reader_instance (P2-⑥ AZ scale-out runbook
+# mints these with origin="ui"). Chat-initiated add_reader_instance rows (N-③)
+# carry NO origin → the agent replays them → they must NOT auto-execute here, or
+# the write would run twice. The origin=="ui" gate below enforces that.
+_AUTO_EXECUTE_ACTIONS = _ENDPOINT_ACTIONS + ("add_reader_instance",)
+
+# Success statuses the auto-executed tools return once the mutation is accepted:
+# endpoint writes → creating/modifying/deleting; add_reader_instance → instance_added.
+_AUTO_EXEC_OK_STATUS = ("creating", "modifying", "deleting", "instance_added")
 
 # Endpoint create/modify/delete return in seconds and API Gateway caps at 29s,
 # so the default read_timeout is plenty. Set timeouts explicitly and DISABLE
@@ -407,6 +415,51 @@ def _execute_enable_data_api(item: dict) -> dict:
     }
 
 
+def _mint_ui_approval(cluster_id: str, action_type: str, action_details: dict,
+                      requested_by: str) -> dict:
+    """Invoke the operations Lambda's request_approval tool (WITHOUT origin) to
+    mint a payload-hashed PENDING approval, then stamp origin="ui" onto that row
+    from THIS trusted API Lambda.
+
+    origin is metadata (not in payload_hash) and is written ONLY here — the
+    agent's request_approval channel is the gateway, whose declared schema has
+    no `origin`, so it can never forge origin=="ui". That makes origin=="ui" the
+    trust boundary the approve-path auto-execute relies on. Shared by
+    /api/endpoint-requests (N-①) and /api/scaleout-az (P2-⑥) so both mint +
+    stamp with identical, correct code.
+
+    Returns {"ok": True, "approval_id", "created_at", "origin_stamped": bool} or
+    {"ok": False, "reason": <friendly, no str(e)>}. Never raises."""
+    result = _invoke_operations("request_approval", {
+        "cluster_id": cluster_id,
+        "action_type": action_type,
+        "action_details": action_details,
+        "requested_by": requested_by,
+    })
+    if result.get("status") != "pending" or not result.get("approval_id"):
+        return {"ok": False,
+                "reason": result.get("reason") or result.get("message")
+                or "승인 요청 생성에 실패했습니다"}
+    approval_id = result["approval_id"]
+    created_at = result.get("created_at")
+    origin_stamped = False
+    if created_at:
+        try:
+            boto3.resource("dynamodb").Table(os.environ["APPROVALS_TABLE"]).update_item(
+                Key={"approval_id": approval_id, "created_at": created_at},
+                UpdateExpression="SET #o = :ui",
+                ExpressionAttributeNames={"#o": "origin"},
+                ExpressionAttributeValues={":ui": "ui"},
+            )
+            origin_stamped = True
+        except Exception as e:
+            # Fail-SAFE: without the stamp the row simply won't auto-execute (it
+            # stays a normal pending approval) — never fail-open. Log, report soft.
+            print(f"[approvals] origin stamp failed for {approval_id}: {e}")
+    return {"ok": True, "approval_id": approval_id, "created_at": created_at,
+            "origin_stamped": origin_stamped}
+
+
 def _handle_endpoint_requests(event, method, headers) -> dict:
     """POST /api/endpoint-requests — console-initiated custom-endpoint write.
 
@@ -470,64 +523,131 @@ def _handle_endpoint_requests(event, method, headers) -> dict:
     else:  # delete_custom_endpoint
         action_details = {"endpoint_identifier": endpoint_identifier}
 
-    result = _invoke_operations("request_approval", {
-        "cluster_id": cluster_id,
-        "action_type": action,
-        "action_details": action_details,
-        "requested_by": _caller_name(event),
-    })
-    if result.get("status") != "pending" or not result.get("approval_id"):
+    minted = _mint_ui_approval(cluster_id, action, action_details, _caller_name(event))
+    if not minted.get("ok"):
         return {"statusCode": 502, "headers": headers,
                 "body": json.dumps({"error": "request_failed",
-                                    "detail": result.get("reason") or result.get("message")
-                                    or "승인 요청 생성에 실패했습니다"})}
-    # Stamp origin="ui" onto the row HERE — from the trusted API Lambda, not the
-    # request_approval tool. The agent's only channel to request_approval is the
-    # gateway (which carries only declared-schema params, and origin is NOT in
-    # that schema), so it cannot mint an origin="ui" row; only this admin+tenant-
-    # gated API path can. That makes origin=="ui" a real trust boundary the
-    # approve-path auto-execute can rely on. Uses the (approval_id, created_at)
-    # key the tool just returned. Origin is metadata — not in payload_hash — so
-    # stamping it never invalidates the binding.
-    created_at = result.get("created_at")
-    if created_at:
-        try:
-            boto3.resource("dynamodb").Table(os.environ["APPROVALS_TABLE"]).update_item(
-                Key={"approval_id": result["approval_id"], "created_at": created_at},
-                UpdateExpression="SET #o = :ui",
-                ExpressionAttributeNames={"#o": "origin"},
-                ExpressionAttributeValues={":ui": "ui"},
-            )
-        except Exception as e:
-            # Fail-SAFE: without the origin stamp the row simply won't
-            # auto-execute (it stays a normal pending approval) — never
-            # fail-open. Surface a soft warning; the request row still exists.
-            print(f"[approvals] origin stamp failed for {result['approval_id']}: {e}")
-            return {"statusCode": 201, "headers": headers,
-                    "body": json.dumps({
-                        "approval_id": result["approval_id"],
-                        "cluster_id": cluster_id,
-                        "action": action,
-                        "origin_stamped": False,
-                        "message": "승인 요청은 생성됐지만 자동 실행 표식 기록에 실패했습니다 — 승인해도 자동 실행되지 않을 수 있습니다. 관리자에게 문의하세요.",
-                    })}
+                                    "detail": minted.get("reason")})}
+    if not minted.get("origin_stamped"):
+        # The row exists but couldn't be marked for auto-execute — surface a soft
+        # warning (never fail-open; it just stays a normal pending approval).
+        return {"statusCode": 201, "headers": headers,
+                "body": json.dumps({
+                    "approval_id": minted["approval_id"],
+                    "cluster_id": cluster_id,
+                    "action": action,
+                    "origin_stamped": False,
+                    "message": "승인 요청은 생성됐지만 자동 실행 표식 기록에 실패했습니다 — 승인해도 자동 실행되지 않을 수 있습니다. 관리자에게 문의하세요.",
+                })}
     return {"statusCode": 201, "headers": headers,
             "body": json.dumps({
-                "approval_id": result["approval_id"],
+                "approval_id": minted["approval_id"],
                 "cluster_id": cluster_id,
                 "action": action,
                 "message": "승인 요청이 생성되었습니다 — 승인 센터에서 검토·승인하면 실행됩니다.",
             })}
 
 
-def _execute_endpoint_action(item: dict) -> dict:
-    """Auto-execute an approved, UI-originated endpoint write via the operations
-    Lambda. The tool's verify_approval sees status=approved, consumes the row
-    single-use, and runs the RDS mutation — so execution happens under the DBA's
-    authenticated approve click, exactly like enable_data_api.
+def _handle_scaleout_az(event, method, headers) -> dict:
+    """POST /api/scaleout-az (P2-⑥) — AZ scale-out runbook.
 
-    ONLY origin=="ui" rows reach here (the caller gates on it): chat rows are
-    replayed by the agent, so auto-executing them would double-execute.
+    Admin-gated + tenant-scoped (mirrors _handle_endpoint_requests). Body:
+    {cluster_id, exclude_az?, count?, instance_class?}.
+
+    1) Invoke the READ-ONLY plan_az_scaleout tool → N planned readers, each with
+       a CONCRETE instance_class + availability_zone.
+    2) For each planned reader, mint an add_reader_instance approval (origin="ui")
+       via the shared _mint_ui_approval helper — each approval's action_details
+       carries that reader's concrete class + AZ so its payload hash binds it.
+    3) Return the created approvals (partial-success shape if some minting fails).
+
+    Nothing is created here; each reader is created when the DBA approves its row
+    and the approve path auto-executes the origin=="ui" add_reader_instance row."""
+    if method != "POST":
+        return {"statusCode": 405, "headers": headers,
+                "body": json.dumps({"error": "Method not allowed"})}
+    if not _is_admin(event):
+        return {"statusCode": 403, "headers": headers,
+                "body": json.dumps({"error": "forbidden",
+                                    "reason": "admin role required to run the AZ scale-out runbook"})}
+    body = json.loads(event.get("body", "{}"))
+    cluster_id = str(body.get("cluster_id") or "").strip()
+    if not cluster_id:
+        return {"statusCode": 400, "headers": headers,
+                "body": json.dumps({"error": "cluster_id_required"})}
+    if not tenancy.cluster_visible(event, _cluster_item(cluster_id)):
+        return {"statusCode": 403, "headers": headers,
+                "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
+
+    exclude_az = str(body.get("exclude_az") or "").strip()
+    instance_class = str(body.get("instance_class") or "").strip()
+    try:
+        count = int(body.get("count") or 1)
+    except (TypeError, ValueError):
+        count = 1
+
+    plan = _invoke_operations("plan_az_scaleout", {
+        "cluster_id": cluster_id, "exclude_az": exclude_az,
+        "count": count, "instance_class": instance_class,
+    })
+    if plan.get("status") != "planned":
+        # invalid_az / no_healthy_az / needs_instance_class / unsupported_engine
+        # are the caller's fault (bad input) → 400; error / invoke_error are
+        # transport/infra → 502. Surface the plan's friendly reason (no str(e)).
+        client_faults = ("invalid_az", "no_healthy_az", "needs_instance_class", "unsupported_engine")
+        code = 400 if plan.get("status") in client_faults else 502
+        return {"statusCode": code, "headers": headers,
+                "body": json.dumps({"error": "plan_failed",
+                                    "detail": plan.get("reason") or "계획 생성에 실패했습니다",
+                                    "available_azs": plan.get("available_azs")}, default=str)}
+
+    requested_by = _caller_name(event)
+    created, failed = [], []
+    for r in plan.get("planned_readers") or []:
+        action_details = {
+            "cluster_id": cluster_id,
+            "new_instance_id": r.get("new_instance_id"),
+            "instance_class": r.get("instance_class"),
+            "availability_zone": r.get("availability_zone"),
+        }
+        minted = _mint_ui_approval(cluster_id, "add_reader_instance", action_details, requested_by)
+        if minted.get("ok"):
+            created.append({"approval_id": minted["approval_id"],
+                            "new_instance_id": r.get("new_instance_id"),
+                            "availability_zone": r.get("availability_zone"),
+                            "origin_stamped": minted.get("origin_stamped", False)})
+        else:
+            failed.append({"new_instance_id": r.get("new_instance_id"),
+                           "availability_zone": r.get("availability_zone"),
+                           "reason": minted.get("reason")})
+
+    # 201 if at least one approval was minted; 502 only when every mint failed.
+    code = 201 if created else 502
+    return {"statusCode": code, "headers": headers,
+            "body": json.dumps({
+                "cluster_id": cluster_id,
+                "exclude_az": exclude_az,
+                "instance_class": plan.get("instance_class"),
+                "healthy_azs": plan.get("healthy_azs"),
+                "created": created,
+                "failed": failed,
+                "message": (f"{len(created)}개 리더 추가 승인 요청이 생성되었습니다 — "
+                            "승인 센터에서 각각 검토·승인하면 실행됩니다."),
+            }, default=str)}
+
+
+def _execute_ui_approval(item: dict) -> dict:
+    """Auto-execute an approved, UI-originated write via the operations Lambda,
+    generic over the action_type. Invokes <action_type> with approved=true +
+    approval_id + the row's action_details (ClientContext tool_name=action_type);
+    the tool's verify_approval sees status=approved, consumes the row single-use,
+    and runs the mutation — so execution happens under the DBA's authenticated
+    approve click, exactly like enable_data_api. Covers the endpoint writes AND
+    add_reader_instance (the AZ scale-out runbook's readers).
+
+    ONLY origin=="ui" rows reach here (the caller gates on it): chat rows of the
+    same action_type are replayed by the agent, so auto-executing them would
+    double-execute the write.
 
     On a non-success status the row is left consumed-or-approved by the tool
     (verify_approval only consumes on success), and the failure is surfaced so
@@ -545,7 +665,7 @@ def _execute_endpoint_action(item: dict) -> dict:
     result = _invoke_operations(action_type, payload)
     status = result.get("status", "unknown")
     return {
-        "executed": status in _ENDPOINT_OK_STATUS,
+        "executed": status in _AUTO_EXEC_OK_STATUS,
         "status": status,
         "reason": result.get("reason") or result.get("error"),
     }
@@ -573,6 +693,13 @@ def lambda_handler(event, context):
     # enable_data_api), or that arm would reject the endpoint action_type.
     if "/endpoint-requests" in path:
         return _handle_endpoint_requests(event, method, headers)
+
+    # /api/scaleout-az (P2-⑥) — AZ scale-out runbook. Plans N readers via the
+    # read-only plan_az_scaleout tool, then mints one add_reader_instance
+    # approval (origin="ui") per reader. Must come BEFORE the generic POST arm
+    # (which only allows enable_data_api).
+    if "/scaleout-az" in path:
+        return _handle_scaleout_az(event, method, headers)
 
     # /api/activity — chronological feed of every approval (any status)
     # for compliance + retro queries ("what writes happened in cluster X
@@ -908,8 +1035,8 @@ def lambda_handler(event, context):
         # replays them), so this can never double-execute a write.
         endpoint_execution = None
         row_action = item.get("action_type") or item.get("tool_name")
-        if action == "approve" and row_action in _ENDPOINT_ACTIONS and item.get("origin") == "ui":
-            endpoint_execution = _execute_endpoint_action(item)
+        if action == "approve" and row_action in _AUTO_EXECUTE_ACTIONS and item.get("origin") == "ui":
+            endpoint_execution = _execute_ui_approval(item)
 
         exec_failed = (execution and not execution.get("ok")) or (
             endpoint_execution and not endpoint_execution.get("executed")

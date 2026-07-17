@@ -88,6 +88,9 @@
       "name": "saved-queries"
     },
     {
+      "name": "scaleout-az"
+    },
+    {
       "name": "scaleout-ops"
     },
     {
@@ -2796,6 +2799,25 @@
             }
           }
         ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/scaleout-az": {
+      "post": {
+        "tags": ["scaleout-az"],
+        "summary": "POST /api/scaleout-az",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
         "security": [
           {
             "cognitoJwt": []
