@@ -660,6 +660,156 @@ def _table_indexes(cluster_id: str, schema: str, table_name: str) -> dict:
     return {"schema": schema, "table": table_name, "indexes": rows}
 
 
+# On-demand LIVE top (P2-⑧). Unlike every other dashboard read, this does NOT
+# hit the pre-collected cache and is NOT a background collector — it queries the
+# TARGET cluster directly via RDS Data API, and ONLY while a DBA has the live
+# view open (the browser polls ~2s and clears the interval on close/unmount).
+# So the target sees load only while someone is actively watching. PostgreSQL
+# only: pg_stat_activity / pg_blocking_pids / pg_buffercache are PG surfaces.
+# MySQL SHOW PROCESSLIST is a different mechanism — out of v1 scope.
+_LIVE_SESSIONS_SQL = (
+    "SELECT pid, usename, state, "
+    "  COALESCE(wait_event_type || ':' || wait_event, 'CPU') AS wait, "
+    "  EXTRACT(EPOCH FROM (now() - query_start)) AS age_sec, "
+    "  left(query, 120) AS query, backend_type "
+    "FROM pg_stat_activity "
+    "WHERE state IS NOT NULL AND pid <> pg_backend_pid() "
+    "ORDER BY age_sec DESC NULLS LAST LIMIT 100"
+)
+# array_to_string keeps the pid[] out of Data API's arrayValue path (which the
+# generic scalar parser below ignores) — we split the CSV back into ints here.
+_LIVE_BLOCKING_SQL = (
+    "SELECT pid, array_to_string(pg_blocking_pids(pid), ',') AS blockers "
+    "FROM pg_stat_activity "
+    "WHERE cardinality(pg_blocking_pids(pid)) > 0"
+)
+_LIVE_COUNTERS_SQL = (
+    "SELECT xact_commit, xact_rollback, tup_returned, tup_fetched, "
+    "  tup_inserted, tup_updated, tup_deleted, blks_read, blks_hit "
+    "FROM pg_stat_database WHERE datname = current_database()"
+)
+# HEAVY — pg_buffercache scans the whole shared-buffer pool. Never in the poll;
+# only on the manual "버퍼풀" button (?buffers=true).
+_LIVE_BUFFERCACHE_SQL = (
+    "SELECT count(*) FILTER (WHERE relfilenode IS NOT NULL) AS used, "
+    "  count(*) AS total FROM pg_buffercache"
+)
+_LIVE_BUFFERCACHE_TOP_SQL = (
+    "SELECT c.relname AS relation, count(*) AS buffers "
+    "FROM pg_buffercache b "
+    "JOIN pg_class c ON b.relfilenode = pg_relation_filenode(c.oid) "
+    "GROUP BY c.relname ORDER BY buffers DESC LIMIT 10"
+)
+
+
+def _live_activity(cluster_id: str, buffers: bool = False) -> dict:
+    """One live snapshot of the target PG cluster's active sessions, blocking
+    chains and cumulative DB counters (the client computes per-second rates from
+    consecutive snapshots — no server-side state). buffers=True additionally runs
+    the heavy pg_buffercache summary. PG-only; graceful when the cluster isn't PG
+    or has no Data API. Never leaks str(e)."""
+    eng = _registry_engine(cluster_id)
+    if eng is None:
+        # Registry lookup failed — fail closed; do not create rds-data clients.
+        return {"cluster_id": cluster_id, "available": False, "registry_unavailable": True}
+    fam = engine_family(eng)
+    if fam != "relational" or "mysql" in (eng or "").lower():
+        # Non-relational, or MySQL (SHOW PROCESSLIST is a different mechanism,
+        # out of v1 scope) → friendly not_applicable, no Data API call.
+        return {
+            "cluster_id": cluster_id, "available": False, "not_applicable": True,
+            "engine_family": fam,
+            "reason": "라이브 top은 Aurora PostgreSQL 전용입니다",
+        }
+
+    cluster = _lookup_cluster(cluster_id)
+    cluster_arn = (cluster or {}).get("cluster_arn")
+    secret_arn = (cluster or {}).get("secret_arn")
+    db_name = (cluster or {}).get("db_name") or "postgres"
+    if not cluster_arn or not secret_arn:
+        return {
+            "cluster_id": cluster_id, "available": False,
+            "reason": "대상 클러스터에 RDS Data API가 없어 라이브 조회가 불가합니다 (활성화 필요)",
+        }
+
+    rds_data = boto3.client("rds-data")
+
+    def _run(sql: str) -> list[dict]:
+        resp = rds_data.execute_statement(
+            resourceArn=cluster_arn, secretArn=secret_arn, database=db_name,
+            sql=f"/* source=dbops-live */ {sql}",
+            includeResultMetadata=True,
+        )
+        cols = [(c.get("name") or c.get("label") or "") for c in resp.get("columnMetadata", [])]
+        out: list[dict] = []
+        for rec in resp.get("records", []):
+            row: dict = {}
+            for i, f in enumerate(rec):
+                col = cols[i] if i < len(cols) and cols[i] else f"col_{i}"
+                if f.get("isNull"):
+                    row[col] = None
+                    continue
+                for typ in ("stringValue", "longValue", "doubleValue", "booleanValue"):
+                    if typ in f:
+                        row[col] = f[typ]
+                        break
+                else:
+                    row[col] = None
+            out.append(row)
+        return out
+
+    try:
+        sessions = _run(_LIVE_SESSIONS_SQL)
+        blocking_rows = _run(_LIVE_BLOCKING_SQL)
+        counter_rows = _run(_LIVE_COUNTERS_SQL)
+    except Exception as e:
+        # Data API not enabled / cluster paused / connect fault — never surface
+        # the raw boto3 fault (it can carry ARNs / account ids). Log server-side.
+        print(f"[dashboard] live-activity query failed for {cluster_id}: {type(e).__name__}: {e}")
+        return {
+            "cluster_id": cluster_id, "available": False,
+            "reason": "대상 클러스터에 RDS Data API가 없어 라이브 조회가 불가합니다 (활성화 필요)",
+        }
+
+    blocking = []
+    for r in blocking_rows:
+        pid = r.get("pid")
+        raw = r.get("blockers") or ""
+        blockers = [int(x) for x in str(raw).split(",") if x.strip().isdigit()]
+        if pid is not None:
+            blocking.append({"pid": pid, "blockers": blockers})
+
+    buffercache = None
+    if buffers:
+        try:
+            summary = _run(_LIVE_BUFFERCACHE_SQL)
+            top = _run(_LIVE_BUFFERCACHE_TOP_SQL)
+            s0 = summary[0] if summary else {}
+            buffercache = {
+                "used": int(s0.get("used") or 0),
+                "total": int(s0.get("total") or 0),
+                "top_relations": top,
+            }
+        except Exception as e:
+            # pg_buffercache extension missing / no privilege — degrade only the
+            # buffer section, keep the rest of the snapshot usable.
+            print(f"[dashboard] live buffercache failed for {cluster_id}: {type(e).__name__}: {e}")
+            buffercache = {
+                "available": False,
+                "reason": "pg_buffercache 확장을 사용할 수 없습니다",
+            }
+
+    return {
+        "cluster_id": cluster_id,
+        "available": True,
+        "captured_at": int(time.time() * 1000),
+        "sessions": sessions,
+        "blocking": blocking,
+        "db_counters": counter_rows[0] if counter_rows else {},
+        "buffercache": buffercache,
+    }
+
+
 _ALLOWED_ORIGINS = {
     o.strip()
     for o in os.environ.get("ALLOWED_ORIGINS", "").split(",")
@@ -3822,6 +3972,22 @@ def lambda_handler(event, context):
         if raw_path.endswith("/active-sessions"):
             hours = _parse_int(qs.get("hours"), 1, min_v=1, max_v=24)
             return _response(200, _active_sessions(query, cluster_id, hours), max_age=10)
+        if raw_path.endswith("/live-activity"):
+            # On-demand LIVE top (P2-⑧): queries the TARGET cluster while the
+            # live view is open. Server-side min-interval throttle (1s TTL,
+            # keyed per cluster + buffers flag) so N concurrent viewers polling
+            # ~2s each still hit the target at most ~1×/s, not N×. No browser
+            # cache — every poll must reflect the latest snapshot; the throttle
+            # (not HTTP caching) is what bounds DB load.
+            buffers = (qs.get("buffers") or "").lower() == "true"
+            return _response(
+                200,
+                _cached_live(
+                    f"live-activity:{cluster_id}:{buffers}",
+                    1.0,
+                    lambda: _live_activity(cluster_id, buffers),
+                ),
+            )
         if raw_path.endswith("/audit-log"):
             days = _parse_int(qs.get("days"), 7, min_v=1, max_v=90)
             action_type = qs.get("action_type")

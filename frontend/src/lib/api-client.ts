@@ -311,6 +311,48 @@ export async function fetchBlockingLocks(clusterId: string) {
   return res.json();
 }
 
+export interface LiveActivity {
+  cluster_id: string;
+  available: boolean;
+  not_applicable?: boolean;
+  reason?: string;
+  engine_family?: string;
+  captured_at?: number;
+  sessions?: {
+    pid: number;
+    usename: string | null;
+    state: string | null;
+    wait: string | null;
+    age_sec: number | null;
+    query: string | null;
+    backend_type: string | null;
+  }[];
+  blocking?: { pid: number; blockers: number[] }[];
+  db_counters?: Record<string, number>;
+  buffercache?: {
+    available?: boolean;
+    reason?: string;
+    used?: number;
+    total?: number;
+    top_relations?: { relation: string; buffers: number }[];
+  } | null;
+}
+
+// On-demand LIVE top (P2-⑧). Polled ~2s ONLY while the live view is open;
+// `buffers:true` is a one-off manual fetch (the heavy pg_buffercache read) —
+// never in the poll loop.
+export async function fetchLiveActivity(
+  clusterId: string,
+  opts: { buffers?: boolean } = {},
+): Promise<LiveActivity> {
+  const q = opts.buffers ? "?buffers=true" : "";
+  const res = await authedFetch(
+    await api(`/api/dashboard/${enc(clusterId)}/live-activity${q}`),
+  );
+  if (!res.ok) throw new Error(`라이브 세션 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
 export async function fetchClusterSettings(clusterId: string) {
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/settings`),

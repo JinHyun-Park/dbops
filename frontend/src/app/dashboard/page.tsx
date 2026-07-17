@@ -19,6 +19,7 @@ import { ReplicationTopologyPanel } from "@/components/dashboard/replication-top
 import { LongRunningPanel } from "@/components/dashboard/long-running-panel";
 import { ConnectionBreakdown } from "@/components/dashboard/connection-breakdown";
 import { LocksPanel } from "@/components/dashboard/locks-panel";
+import { LiveTopPanel } from "@/components/dashboard/live-top-panel";
 import { SettingsPanel } from "@/components/dashboard/settings-panel";
 import { SchemaChangesPanel } from "@/components/dashboard/schema-changes-panel";
 import { AnomaliesPanel } from "@/components/dashboard/anomalies-panel";
@@ -945,6 +946,13 @@ export default function DashboardPage() {
             {/* ═══════════════ 성능·쿼리 (perf) — relational only ═══════════════ */}
             {activeTab === "perf" && fam === "relational" && (
               <>
+                {/* On-demand LIVE top — PG only (pg_stat_activity / pg_buffercache
+                    are PG surfaces; MySQL SHOW PROCESSLIST is out of v1 scope). */}
+                {activeEngine.includes("postgresql") && (
+                  <div className="flex justify-end">
+                    <LiveTopPanel clusterId={selectedCluster} />
+                  </div>
+                )}
                 <QueriesPanel
                   clusterId={selectedCluster}
                   topQueries={dashboardData?.top_queries || []}

@@ -1514,6 +1514,15 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardActiveSessionsIntegration", dashboard_alias),
         )
+        # On-demand LIVE top (P2-⑧) — queries the TARGET cluster via Data API
+        # while the live view is open. Uses the same dashboard Lambda IAM
+        # (rds-data:ExecuteStatement + GetSecretValue already granted above);
+        # server-side throttle bounds DB load.
+        self.api.add_routes(
+            path="/api/dashboard/{cluster_id}/live-activity",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integrations.HttpLambdaIntegration("DashboardLiveActivityIntegration", dashboard_alias),
+        )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/audit-log",
             methods=[apigwv2.HttpMethod.GET],

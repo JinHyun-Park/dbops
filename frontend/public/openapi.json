@@ -1725,6 +1725,35 @@
         ]
       }
     },
+    "/api/dashboard/{cluster_id}/live-activity": {
+      "get": {
+        "tags": ["dashboard"],
+        "summary": "GET /api/dashboard/{cluster_id}/live-activity",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
     "/api/dashboard/{cluster_id}/log-insights": {
       "get": {
         "tags": ["dashboard"],
