@@ -146,13 +146,49 @@ function PolicyForm({
             type="text"
             value={form.action_type}
             onChange={set("action_type")}
-            placeholder="* 또는 execute_sql, modify_parameter …"
+            placeholder="* 또는 execute_sql, create_custom_endpoint, add_reader_instance …"
             disabled={submitting}
             className={inputCls}
             aria-label="action_type"
+            list="action-type-options"
           />
+          <datalist id="action-type-options">
+            <option value="*" />
+            {/* SQL / 파라미터 */}
+            <option value="execute_sql" />
+            <option value="modify_parameter" />
+            {/* 스케일 / 엔드포인트 */}
+            <option value="modify_scaling" />
+            <option value="create_custom_endpoint" />
+            <option value="delete_custom_endpoint" />
+            <option value="modify_custom_endpoint" />
+            <option value="prewarm_reader" />
+            <option value="add_reader_instance" />
+            <option value="remove_reader_instance" />
+            <option value="scale_out_with_warmup" />
+            {/* 유지보수 / 백업·복원 */}
+            <option value="manage_maintenance" />
+            <option value="create_snapshot" />
+            <option value="restore_cluster" />
+            <option value="enable_data_api" />
+            {/* NoSQL / 캐시 */}
+            <option value="modify_dynamodb_capacity" />
+            <option value="modify_dynamodb_ttl" />
+            <option value="enable_dynamodb_pitr" />
+            <option value="set_docdb_profiler" />
+            <option value="create_docdb_index" />
+            <option value="modify_elasticache_node_type" />
+            <option value="create_elasticache_snapshot" />
+            <option value="reboot_elasticache" />
+            <option value="test_elasticache_failover" />
+            <option value="other" />
+          </datalist>
           <p className="mt-1 text-[11px] text-zinc-600">
-            승인 요청의 action_type / tool_name과 매칭
+            승인 요청의 action_type / tool_name과 매칭 — SQL·파라미터뿐 아니라
+            엔드포인트·스케일 변경(create_custom_endpoint, add_reader_instance
+            등)도 지정 가능. 값이 요청의 action_type과{" "}
+            <strong className="text-zinc-400">정확히 일치</strong>해야
+            적용됩니다 (오타 시 정책이 매칭되지 않아 미승인 상태로 남음).
           </p>
         </div>
 
