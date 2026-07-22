@@ -15,3 +15,9 @@ pg8000>=1.31
 # pymysql: direct TCP connection for execute_sql's ad-hoc chat SQL against RDS
 # MySQL (RDS for MySQL has no Data API). See mysql_direct.py.
 pymysql>=1.1
+# python-tds (pytds): direct TCP connection for execute_sql's ad-hoc chat SQL
+# against RDS SQL Server (no Data API). See mssql_direct.py. pyOpenSSL is
+# needed for pytds's TLS handshake (cafile/validate_host); wheels resolve
+# manylinux2014_x86_64 for the Lambda bundling target.
+python-tds>=1.17
+pyOpenSSL>=25
