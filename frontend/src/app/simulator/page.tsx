@@ -25,12 +25,15 @@ import {
   PageBody,
   Section,
   EmptyState,
+  Stat,
+  StatRow,
 } from "@/components/design-system/page-shell";
 import { fmtDecimal, fmtExact, fmtBytes } from "@/lib/format";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
 import { engineFamily } from "@/lib/engine";
 import { DynamoDbCapacitySimulator } from "@/components/dashboard/dynamodb-capacity-simulator";
+import { streamChat } from "@/lib/agentcore-sse";
 
 export default function SimulatorPage() {
   // Global selection (shared store) — switching via ⌘K/header persists here.
@@ -68,6 +71,11 @@ export default function SimulatorPage() {
         <DynamoDbCapacitySimulator clusterId={selectedCluster} />
       ) : fam === "elasticache" ? (
         <ElasticacheNodeResizePanel clusterId={selectedCluster} />
+      ) : fam === "rds_instance" ? (
+        <RdsRightsizingSimulator
+          clusterId={selectedCluster}
+          engine={current?.engine}
+        />
       ) : fam !== "relational" ? (
         <EmptyState
           title="DocumentDB 시뮬레이션은 지원 예정"
@@ -1254,6 +1262,365 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
             노드 타입 또는 노드 수를 입력하고{" "}
             <span className="text-amber-300">비용 추정</span>을 누르세요. 입력
             없이 실행하면 현재 구성 기준 월 비용을 조회합니다.
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// RDS instance (MySQL/SQL Server, non-Aurora) right-sizing + cost simulator.
+// No REST route exists for this tool (frontend-only task, gateway-tool-only
+// backend) — so unlike the sibling panels above it goes through the agent
+// over the same throwaway-session SSE mechanism the Maintenance Health "AI
+// 조치 제안" flow uses (streamChat). The agent is instructed to call the tool
+// exactly once and relay its JSON verbatim in a fenced block — we render the
+// tool's real numbers only; if parsing fails we show an error, never an
+// invented cost.
+// ---------------------------------------------------------------------------
+
+interface RdsRightsizingResponse {
+  status: "ok" | "insufficient_data" | "error";
+  message?: string;
+  reason?: string;
+  cluster_id?: string;
+  engine?: string;
+  region?: string;
+  current?: {
+    instance_class?: string | null;
+    storage_gb?: number | null;
+    storage_type?: string | null;
+    iops?: number | null;
+  };
+  utilization?: {
+    cpu_p95?: number | null;
+    conn_peak?: number | null;
+    read_iops_p95?: number | null;
+    write_iops_p95?: number | null;
+    window_hours?: number | null;
+  };
+  recommendation?: {
+    action?: "downsize" | "upsize" | "hold";
+    instance_class?: string | null;
+    reason?: string;
+  };
+  cost_impact?: {
+    current_monthly_usd?: number | null;
+    proposed_monthly_usd?: number | null;
+    delta_monthly_usd?: number | null;
+    change_pct?: number | null;
+    breakdown?: {
+      license_note?: string | null;
+    };
+    pricing_source?: "aws_price_list" | "fallback_estimate";
+  };
+}
+
+const RDS_ACTION_KO: Record<string, string> = {
+  downsize: "다운사이즈 권장",
+  upsize: "업사이즈 권장",
+  hold: "현재 유지",
+};
+
+function RdsActionBadge({ action }: { action?: string }) {
+  const tone =
+    action === "downsize"
+      ? "text-emerald-300 border-emerald-500/40 bg-emerald-500/10"
+      : action === "upsize"
+        ? "text-amber-300 border-amber-500/40 bg-amber-500/10"
+        : "text-zinc-400 border-zinc-700 bg-zinc-900/40";
+  return (
+    <span
+      className={`px-1.5 py-0.5 border text-[10px] font-mono uppercase tracking-wider whitespace-nowrap ${tone}`}
+    >
+      {action ? RDS_ACTION_KO[action] ?? action : "—"}
+    </span>
+  );
+}
+
+// Extract the tool's raw JSON from the agent's accumulated text response.
+// Prefers a fenced ```json block; falls back to the outermost {...} span.
+// Returns null (never a guessed object) when nothing parses.
+function extractToolJson(text: string): RdsRightsizingResponse | null {
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fence ? fence[1] : text;
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    return JSON.parse(
+      candidate.slice(start, end + 1),
+    ) as RdsRightsizingResponse;
+  } catch {
+    return null;
+  }
+}
+
+function RdsRightsizingSimulator({
+  clusterId,
+  engine,
+}: {
+  clusterId: string;
+  engine?: string;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<RdsRightsizingResponse | null>(null);
+
+  const run = () => {
+    setResult(null);
+    setErr(null);
+    setLoading(true);
+    let buffer = "";
+    let cancelled = false;
+    streamChat(
+      "simulate_rds_instance_rightsizing 툴을 이 클러스터로 정확히 한 번 호출해. " +
+        "다른 도구는 절대 호출하지 마(request_approval 등 쓰기/승인 도구 금지). " +
+        "툴이 반환한 JSON을 요약하거나 숫자를 고치지 말고, 그 원문 그대로 ```json 코드블록 " +
+        "하나에만 담아 출력해. 코드블록 앞뒤로 어떤 설명도 붙이지 마.",
+      clusterId,
+      (t) => {
+        buffer += t;
+      },
+      () => {},
+      () => {
+        if (cancelled) return;
+        const parsed = extractToolJson(buffer);
+        if (!parsed) {
+          setErr(
+            "에이전트 응답에서 결과를 읽지 못했습니다. 다시 시도해주세요.",
+          );
+        } else {
+          setResult(parsed);
+        }
+        setLoading(false);
+      },
+      (e) => {
+        if (cancelled) return;
+        setErr(e.message);
+        setLoading(false);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  };
+
+  useEffect(() => {
+    const cleanup = run();
+    return cleanup;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clusterId]);
+
+  const delta = result?.cost_impact?.delta_monthly_usd ?? null;
+  const deltaTone =
+    delta == null
+      ? "text-zinc-300"
+      : delta > 0
+        ? "text-rose-300"
+        : delta < 0
+          ? "text-emerald-300"
+          : "text-zinc-300";
+
+  return (
+    <Section
+      eyebrow="RDS Instance Cost"
+      title="인스턴스 라이트사이징 · 비용 시뮬레이션"
+      description="최근 CloudWatch 사용률(CPU · 연결 · IOPS)을 기준으로 인스턴스 클래스 적정성을 진단하고, AWS Price List 실시간 단가로 현재 대비 제안 인스턴스의 월 비용을 추정합니다."
+    >
+      <div className="bg-zinc-900/50 border border-zinc-800">
+        <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+            Engine
+          </span>
+          <span className="text-xs font-mono text-zinc-300">
+            {engine || "—"}
+          </span>
+          <button
+            onClick={run}
+            disabled={loading}
+            className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors ml-auto"
+          >
+            {loading ? "분석 중…" : result ? "다시 계산" : "지금 계산"}
+          </button>
+        </div>
+
+        {err && (
+          <div className="p-4 text-xs text-rose-300 border-b border-zinc-800 bg-rose-500/5">
+            {err}
+          </div>
+        )}
+
+        {loading && !result && !err && (
+          <div className="p-6 text-zinc-500 text-sm">
+            에이전트가 CloudWatch 사용률과 AWS Price List 단가를 조회하는
+            중입니다…
+          </div>
+        )}
+
+        {!loading && result && result.status === "insufficient_data" && (
+          <div className="p-4">
+            <EmptyState
+              eyebrow="데이터 부족"
+              title="사용률 데이터가 충분하지 않습니다"
+              description={
+                result.message ??
+                "right-sizing 권장을 산출하려면 CloudWatch 사용률 데이터가 더 필요합니다."
+              }
+            />
+          </div>
+        )}
+
+        {!loading && result && result.status === "error" && (
+          <div className="p-4 text-xs text-rose-300">
+            {result.message ?? result.reason ?? "시뮬레이션에 실패했습니다."}
+          </div>
+        )}
+
+        {!loading && result && result.status === "ok" && (
+          <div className="p-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500 font-mono">
+              <span className="px-1.5 py-0.5 border text-zinc-300 border-zinc-700 bg-zinc-900/60">
+                {result.current?.instance_class || "—"}
+              </span>
+              {result.current?.storage_gb != null && (
+                <span>
+                  {fmtDecimal(result.current.storage_gb, 0)} GB{" "}
+                  {result.current.storage_type || ""}
+                </span>
+              )}
+              {result.current?.iops != null && (
+                <span>{fmtDecimal(result.current.iops, 0)} IOPS</span>
+              )}
+              {result.region && (
+                <span className="ml-auto">{result.region}</span>
+              )}
+            </div>
+
+            <StatRow cols={3}>
+              <Stat
+                label="CPU p95"
+                value={
+                  result.utilization?.cpu_p95 != null
+                    ? `${fmtDecimal(result.utilization.cpu_p95, 1)}%`
+                    : "n/a"
+                }
+                hint={
+                  result.utilization?.window_hours != null
+                    ? `${fmtDecimal(
+                        result.utilization.window_hours,
+                        0,
+                      )}h 윈도우`
+                    : undefined
+                }
+              />
+              <Stat
+                label="피크 연결 수"
+                value={
+                  result.utilization?.conn_peak != null
+                    ? fmtDecimal(result.utilization.conn_peak, 0)
+                    : "n/a"
+                }
+              />
+              <Stat
+                label="Read/Write IOPS p95"
+                value={
+                  result.utilization?.read_iops_p95 != null ||
+                  result.utilization?.write_iops_p95 != null
+                    ? `${fmtDecimal(
+                        result.utilization?.read_iops_p95,
+                        0,
+                      )} / ${fmtDecimal(result.utilization?.write_iops_p95, 0)}`
+                    : "n/a"
+                }
+              />
+            </StatRow>
+
+            <div className="border border-zinc-800 bg-zinc-950/60 px-4 py-3 flex items-start gap-3">
+              <RdsActionBadge action={result.recommendation?.action} />
+              <div className="text-xs text-zinc-300 leading-relaxed">
+                {result.recommendation?.instance_class &&
+                  result.recommendation.instance_class !==
+                    result.current?.instance_class && (
+                    <span className="font-mono text-zinc-200 mr-1">
+                      → {result.recommendation.instance_class}
+                    </span>
+                  )}
+                {result.recommendation?.reason}
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className={`border px-3 py-2 ${TONE_CLASSES["zinc"]}`}>
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+                  현재
+                </div>
+                <div className="text-base font-mono break-all">
+                  {result.current?.instance_class || "—"}
+                </div>
+                <MonthlyLine
+                  monthly={result.cost_impact?.current_monthly_usd}
+                />
+              </div>
+              <div
+                className={`border px-3 py-2 ${
+                  TONE_CLASSES[delta != null && delta > 0 ? "amber" : "emerald"]
+                }`}
+              >
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+                  제안
+                </div>
+                <div className="text-base font-mono break-all">
+                  {result.recommendation?.instance_class ||
+                    result.current?.instance_class ||
+                    "—"}
+                </div>
+                <MonthlyLine
+                  monthly={result.cost_impact?.proposed_monthly_usd}
+                  deltaPct={result.cost_impact?.change_pct}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto] items-baseline border-t border-zinc-800 pt-2.5">
+              <div className="text-xs text-zinc-400">
+                <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
+                  월 차액
+                </span>
+                <span className={`font-mono ${deltaTone}`}>
+                  {delta == null
+                    ? "n/a"
+                    : `${delta > 0 ? "+" : ""}$${fmtDecimal(delta, 2)} / month`}
+                </span>
+              </div>
+            </div>
+
+            {result.cost_impact?.breakdown?.license_note && (
+              <div className="text-[11px] text-zinc-500">
+                {result.cost_impact.breakdown.license_note}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-zinc-500 font-mono border-t border-zinc-800 pt-2.5">
+              <span
+                className={`px-1.5 py-0.5 border ${
+                  result.cost_impact?.pricing_source === "aws_price_list"
+                    ? "text-emerald-300 border-emerald-500/40 bg-emerald-500/5"
+                    : "text-amber-300 border-amber-500/40 bg-amber-500/5"
+                }`}
+              >
+                {result.cost_impact?.pricing_source === "aws_price_list"
+                  ? "Price List API"
+                  : "fallback"}
+              </span>
+            </div>
+
+            {result.cost_impact?.pricing_source === "fallback_estimate" && (
+              <div className="text-[11px] text-amber-300/80">
+                실시간 가격을 가져오지 못해 추정치입니다.
+              </div>
+            )}
           </div>
         )}
       </div>
