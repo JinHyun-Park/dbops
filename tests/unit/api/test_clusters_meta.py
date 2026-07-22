@@ -82,3 +82,56 @@ def test_partial_update_only_provided_field():
 def test_patch_gate_fail_closed_for_non_admin():
     # The PATCH dispatch gates on _forbid_viewer; no bearer => 403 (fail-closed).
     assert handler._forbid_viewer({"headers": {}})["statusCode"] == 403
+
+
+def test_sets_db_secret_arn_and_write_secret_arn():
+    t = _table_with({"cluster_id": "c1"})
+    resp = handler._handle_update_meta(t, "c1", {
+        "db_secret_arn": "arn:aws:secretsmanager:us-east-1:1:secret:read",
+        "db_write_secret_arn": "arn:aws:secretsmanager:us-east-1:1:secret:write",
+    })
+    assert resp["statusCode"] == 200
+    vals = t.update_item.call_args.kwargs["ExpressionAttributeValues"]
+    assert vals[":db_secret_arn"] == "arn:aws:secretsmanager:us-east-1:1:secret:read"
+    assert vals[":db_write_secret_arn"] == "arn:aws:secretsmanager:us-east-1:1:secret:write"
+    assert vals[":db_secret_source"] == "override"
+    assert "ConditionExpression" in t.update_item.call_args.kwargs
+
+
+def test_rejects_invalid_secret_arn_with_static_message():
+    t = _table_with({"cluster_id": "c1"})
+    resp = handler._handle_update_meta(t, "c1", {"db_write_secret_arn": "not-an-arn"})
+    assert resp["statusCode"] == 400
+    assert "not-an-arn" not in resp["body"]
+    t.update_item.assert_not_called()
+
+
+def test_clearing_db_secret_arn_sets_source_missing():
+    t = _table_with({"cluster_id": "c1"})
+    resp = handler._handle_update_meta(t, "c1", {"db_secret_arn": ""})
+    assert resp["statusCode"] == 200
+    vals = t.update_item.call_args.kwargs["ExpressionAttributeValues"]
+    assert vals[":db_secret_arn"] == ""
+    assert vals[":db_secret_source"] == "missing"
+
+
+def test_clearing_write_secret_arn_leaves_source_untouched():
+    # db_secret_source tracks db_secret_arn only; write secret has no such field.
+    t = _table_with({"cluster_id": "c1"})
+    resp = handler._handle_update_meta(t, "c1", {"db_write_secret_arn": ""})
+    assert resp["statusCode"] == 200
+    vals = t.update_item.call_args.kwargs["ExpressionAttributeValues"]
+    assert vals[":db_write_secret_arn"] == ""
+    assert ":db_secret_source" not in vals
+
+
+def test_mixed_purpose_and_secret_arn_update():
+    t = _table_with({"cluster_id": "c1"})
+    resp = handler._handle_update_meta(t, "c1", {
+        "purpose": "checkout primary",
+        "db_write_secret_arn": "arn:aws:secretsmanager:us-east-1:1:secret:write",
+    })
+    assert resp["statusCode"] == 200
+    vals = t.update_item.call_args.kwargs["ExpressionAttributeValues"]
+    assert vals[":purpose"] == "checkout primary"
+    assert vals[":db_write_secret_arn"] == "arn:aws:secretsmanager:us-east-1:1:secret:write"

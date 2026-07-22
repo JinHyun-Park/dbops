@@ -948,8 +948,10 @@ _TAGS_MAX = 20
 def _handle_update_meta(table, cluster_id: str, body: dict):
     """PATCH /api/clusters/{id}/meta — admin sets the Map note: `purpose` (one
     line) and/or `service_tags` (connected services, also the Map grouping key).
-    Only the provided fields are updated; both optional. The conditional update
-    (attribute_exists) is ATOMIC, so a missing — or just-deleted-in-a-race —
+    Also backfills `db_secret_arn`/`db_write_secret_arn` for rds_instance rows
+    registered without them (R-3: the execute_sql fail-closed message points
+    here). Only the provided fields are updated; all optional. The conditional
+    update (attribute_exists) is ATOMIC, so a missing — or just-deleted-in-a-race —
     cluster yields 404 rather than creating a phantom registry item."""
     updates: dict = {}
     if "purpose" in body:
@@ -969,9 +971,17 @@ def _handle_update_meta(table, cluster_id: str, body: dict):
             if t and t not in clean and len(clean) < _TAGS_MAX:
                 clean.append(t)
         updates["service_tags"] = clean
+    for field in ("db_secret_arn", "db_write_secret_arn"):
+        if field in body:
+            val = body[field]
+            if not isinstance(val, str) or not (val == "" or val.startswith("arn:aws:secretsmanager:")):
+                return _resp(400, {"error": f"{field} must be empty or an arn:aws:secretsmanager: ARN"})
+            updates[field] = val
+            if field == "db_secret_arn":
+                updates["db_secret_source"] = "override" if val else "missing"
 
     if not updates:
-        return _resp(400, {"error": "nothing to update (provide purpose and/or service_tags)"})
+        return _resp(400, {"error": "nothing to update (provide purpose, service_tags, db_secret_arn, and/or db_write_secret_arn)"})
 
     names = {f"#{k}": k for k in updates}
     values = {f":{k}": v for k, v in updates.items()}
