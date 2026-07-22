@@ -413,3 +413,110 @@ def test_direct_mysql_approved_write_executes_with_write_secret(
     sm.get_secret_value.assert_called_once_with(SecretId="arn:db-write")
     mock_md.connect.assert_called_once()
     mock_boto3.client.assert_not_called()
+
+
+# ===== R-3 fix: system-schema default must not leak into direct writes =====
+
+
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql.mysql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mysql_safe_select_no_db_name_defaults_to_mysql_schema(
+    mock_lookup, mock_cfc, mock_md, mock_boto3
+):
+    """A safe read with no db_name set connects with database='mysql' — the
+    system schema is harmless for SELECT/SHOW/performance_schema reads."""
+    row = dict(_MYSQL_ROW)
+    row.pop("db_name")
+    mock_lookup.return_value = row
+    mock_cfc.return_value = _fake_sm()
+    adapter = MagicMock()
+    adapter.execute_statement.return_value = {"columnMetadata": [], "records": []}
+    mock_md.MySQLDataApiAdapter.return_value = adapter
+
+    execute_sql_impl(MagicMock(), cluster_id="rds-mysql-1", sql="SELECT 1")
+
+    assert mock_md.connect.call_args.kwargs["database"] == "mysql"
+
+
+@patch("mcp_servers.operations.tools.execute_sql.verify_approval")
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql.mysql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mysql_approved_write_no_db_name_connects_with_none(
+    mock_lookup, mock_cfc, mock_md, mock_boto3, mock_verify
+):
+    """An approved write with no db_name set must get database=None — NOT the
+    'mysql' system schema fallback (RDS denies unqualified writes there,
+    error 1044, live-verified — and burns the single-use approval)."""
+    mock_verify.return_value = {"ok": True}
+    row = dict(_MYSQL_ROW)
+    row.pop("db_name")
+    row["db_write_secret_arn"] = "arn:db-write"
+    mock_lookup.return_value = row
+    mock_cfc.return_value = _fake_sm()
+    adapter = MagicMock()
+    adapter.execute_statement.return_value = {"columnMetadata": [], "records": [], "numberOfRecordsUpdated": 1}
+    mock_md.MySQLDataApiAdapter.return_value = adapter
+
+    execute_sql_impl(
+        MagicMock(),
+        cluster_id="rds-mysql-1",
+        sql="UPDATE users SET name='x' WHERE id=1",
+        approved=True,
+        approval_id="appr-1",
+    )
+
+    assert mock_md.connect.call_args.kwargs["database"] is None
+
+
+@patch("mcp_servers.operations.tools.execute_sql.verify_approval")
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql.mysql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mysql_approved_write_with_db_name_connects_with_it(
+    mock_lookup, mock_cfc, mock_md, mock_boto3, mock_verify
+):
+    """An approved write on a cluster WITH db_name set connects with that
+    schema — the fix must not disturb the configured case."""
+    mock_verify.return_value = {"ok": True}
+    row = dict(_MYSQL_ROW)  # db_name="appdb"
+    row["db_write_secret_arn"] = "arn:db-write"
+    mock_lookup.return_value = row
+    mock_cfc.return_value = _fake_sm()
+    adapter = MagicMock()
+    adapter.execute_statement.return_value = {"columnMetadata": [], "records": [], "numberOfRecordsUpdated": 1}
+    mock_md.MySQLDataApiAdapter.return_value = adapter
+
+    execute_sql_impl(
+        MagicMock(),
+        cluster_id="rds-mysql-1",
+        sql="UPDATE users SET name='x' WHERE id=1",
+        approved=True,
+        approval_id="appr-1",
+    )
+
+    assert mock_md.connect.call_args.kwargs["database"] == "appdb"
+
+
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql.mysql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mysql_execution_failure_returns_actionable_static_message(
+    mock_lookup, mock_cfc, mock_md, mock_boto3
+):
+    """The execution-failure branch must return a static, actionable hint —
+    never str(e) — and must not leak the underlying exception text."""
+    mock_lookup.return_value = dict(_MYSQL_ROW)
+    mock_cfc.return_value = _fake_sm()
+    mock_md.connect.side_effect = Exception("secret internal detail 1044")
+
+    result = execute_sql_impl(MagicMock(), cluster_id="rds-mysql-1", sql="SELECT 1")
+
+    assert result["status"] == "execution_failed"
+    assert "secret internal detail" not in result["reason"]
+    assert "db_name" in result["reason"]

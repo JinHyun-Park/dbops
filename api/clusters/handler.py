@@ -943,6 +943,7 @@ def _handle_delete(table, cluster_id: str):
 _PURPOSE_MAX = 200
 _TAG_MAX_LEN = 60
 _TAGS_MAX = 20
+_DB_NAME_RE = re.compile(r"^[A-Za-z0-9_$]{1,64}$")
 
 
 def _handle_update_meta(table, cluster_id: str, body: dict):
@@ -950,9 +951,12 @@ def _handle_update_meta(table, cluster_id: str, body: dict):
     line) and/or `service_tags` (connected services, also the Map grouping key).
     Also backfills `db_secret_arn`/`db_write_secret_arn` for rds_instance rows
     registered without them (R-3: the execute_sql fail-closed message points
-    here). Only the provided fields are updated; all optional. The conditional
-    update (attribute_exists) is ATOMIC, so a missing — or just-deleted-in-a-race —
-    cluster yields 404 rather than creating a phantom registry item."""
+    here), and `db_name` — the session default schema for rds_instance direct-TCP
+    writes (R-3: without it, unqualified writes hit the 'mysql' system schema
+    and RDS denies them, error 1044, live-verified). Only the provided fields
+    are updated; all optional. The conditional update (attribute_exists) is
+    ATOMIC, so a missing — or just-deleted-in-a-race — cluster yields 404
+    rather than creating a phantom registry item."""
     updates: dict = {}
     if "purpose" in body:
         purpose = body["purpose"] or ""
@@ -979,9 +983,14 @@ def _handle_update_meta(table, cluster_id: str, body: dict):
             updates[field] = val
             if field == "db_secret_arn":
                 updates["db_secret_source"] = "override" if val else "missing"
+    if "db_name" in body:
+        db_name = body["db_name"]
+        if not isinstance(db_name, str) or not (db_name == "" or _DB_NAME_RE.match(db_name)):
+            return _resp(400, {"error": "db_name must be empty or match ^[A-Za-z0-9_$]{1,64}$"})
+        updates["db_name"] = db_name
 
     if not updates:
-        return _resp(400, {"error": "nothing to update (provide purpose, service_tags, db_secret_arn, and/or db_write_secret_arn)"})
+        return _resp(400, {"error": "nothing to update (provide purpose, service_tags, db_name, db_secret_arn, and/or db_write_secret_arn)"})
 
     names = {f"#{k}": k for k in updates}
     values = {f":{k}": v for k, v in updates.items()}

@@ -200,12 +200,19 @@ def execute_sql_impl(
                     "cluster_id": cluster_id,
                     "reason": "대상 인스턴스 자격증명 조회에 실패했습니다.",
                 }
+            # Session default schema: db_name if set. Reads fall back to the
+            # 'mysql' system schema (harmless for SELECT/SHOW/performance_schema);
+            # writes get NO fallback — an unqualified DDL/DML against the system
+            # schema is denied by RDS (error 1044, live-verified) and burns the
+            # single-use approval. With database=None MySQL raises a clear
+            # "No database selected" for unqualified writes instead.
+            database = cluster.get("db_name") or ("mysql" if is_safe else None)
             conn = None
             try:
                 conn = mysql_direct.connect(
                     host=cluster.get("endpoint"),
                     port=cluster.get("port"),
-                    database=cluster.get("db_name") or "mysql",
+                    database=database,
                     user=creds.get("username"),
                     password=creds.get("password"),
                 )
@@ -217,7 +224,10 @@ def execute_sql_impl(
                 return {
                     "status": "execution_failed",
                     "cluster_id": cluster_id,
-                    "reason": "직접 연결 SQL 실행에 실패했습니다.",
+                    "reason": (
+                        "직접 실행에 실패했습니다. 쓰기 SQL은 스키마를 명시(예: demo.orders)하거나 "
+                        "클러스터에 db_name을 설정하세요(PATCH /api/clusters/{id}/meta)."
+                    ),
                 }
             finally:
                 if conn is not None:

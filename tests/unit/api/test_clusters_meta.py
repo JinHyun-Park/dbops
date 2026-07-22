@@ -135,3 +135,27 @@ def test_mixed_purpose_and_secret_arn_update():
     vals = t.update_item.call_args.kwargs["ExpressionAttributeValues"]
     assert vals[":purpose"] == "checkout primary"
     assert vals[":db_write_secret_arn"] == "arn:aws:secretsmanager:us-east-1:1:secret:write"
+
+
+def test_sets_db_name():
+    t = _table_with({"cluster_id": "c1"})
+    resp = handler._handle_update_meta(t, "c1", {"db_name": "demo"})
+    assert resp["statusCode"] == 200
+    vals = t.update_item.call_args.kwargs["ExpressionAttributeValues"]
+    assert vals[":db_name"] == "demo"
+
+
+def test_clears_db_name():
+    t = _table_with({"cluster_id": "c1"})
+    resp = handler._handle_update_meta(t, "c1", {"db_name": ""})
+    assert resp["statusCode"] == 200
+    vals = t.update_item.call_args.kwargs["ExpressionAttributeValues"]
+    assert vals[":db_name"] == ""
+
+
+def test_rejects_invalid_db_name_with_static_message():
+    t = _table_with({"cluster_id": "c1"})
+    resp = handler._handle_update_meta(t, "c1", {"db_name": "bad name; drop"})
+    assert resp["statusCode"] == 400
+    assert "bad name; drop" not in resp["body"]
+    t.update_item.assert_not_called()
