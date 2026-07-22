@@ -268,3 +268,28 @@ def test_execute_sql_decodes_null_and_array_rows(mock_boto3):
     }
     result = execute_sql_impl(MagicMock(), cluster_id="prod-pg-1", sql="SELECT * FROM t")
     assert result["rows"][0] == {"id": 1, "tags": ["a", "b"], "deleted_at": None}
+
+
+@patch.dict(
+    "os.environ",
+    {"TARGET_CLUSTER_ARN": "arn:test", "TARGET_SECRET_ARN": "arn:secret", "TARGET_DB_NAME": "testdb"},
+)
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+def test_execute_sql_rds_instance_sql_via_direct_blocked(mock_boto3, mock_lookup):
+    """rds_instance (RDS for MySQL/SQL Server) has sql=True but sql_via="direct"
+    — direct-TCP execution ships in a later release (R-3). Even with legacy
+    TARGET_* env fallbacks set (the exact condition that let this slip through
+    to the wrong cluster before), it must fail closed and never reach the
+    RDS Data API."""
+    mock_rds_data = MagicMock()
+    mock_boto3.client.return_value = mock_rds_data
+    mock_lookup.return_value = {
+        "engine_family": "rds_instance",
+        "cluster_arn": "arn:test",
+        "secret_arn": "arn:secret",
+    }
+    result = execute_sql_impl(MagicMock(), cluster_id="rds-mysql-1", sql="SELECT * FROM users")
+    assert result["status"] == "unsupported_engine"
+    assert result["engine_family"] == "rds_instance"
+    mock_rds_data.execute_statement.assert_not_called()

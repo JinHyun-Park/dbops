@@ -149,6 +149,21 @@ def execute_sql_impl(
                     f"{fam} 리소스는 현재 단계(Phase 1)에서 챗 진단을 지원하지 않습니다."
                 ),
             }
+        # sql_via: Aurora reaches SQL via the RDS Data API; rds_instance (RDS
+        # for MySQL / SQL Server) has sql=True but sql_via="direct" — a
+        # direct-TCP path that ships in a later release (R-3). Fail closed
+        # until then: without this, the row has no cluster_arn and falls into
+        # a misleading no_target ("register it first"), or with legacy
+        # TARGET_* env fallbacks, silently runs against the WRONG cluster.
+        if isinstance(fam, str) and CAPABILITIES.get(fam, {}).get("sql_via", "data_api") != "data_api":
+            return {
+                "status": "unsupported_engine",
+                "engine_family": fam,
+                "cluster_id": cluster_id,
+                "message": (
+                    "이 엔진의 SQL 실행은 아직 지원되지 않습니다 — 직접 연결 실행 경로는 이후 릴리스에서 제공됩니다."
+                ),
+            }
 
     target_arn = cluster.get("cluster_arn") or os.environ.get("TARGET_CLUSTER_ARN", "")
     target_secret = cluster.get("secret_arn") or os.environ.get("TARGET_SECRET_ARN", "")
