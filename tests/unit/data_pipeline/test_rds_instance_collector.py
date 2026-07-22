@@ -32,7 +32,7 @@ def _mk_clients():
         "DBInstanceIdentifier": "dbops-demo-mysql", "Engine": "mysql",
         "EngineVersion": "8.0.42", "DBInstanceClass": "db.t4g.micro",
         "DBInstanceStatus": "available", "MultiAZ": False,
-        "StorageType": "gp3", "AllocatedStorage": 20,
+        "StorageType": "gp3", "AllocatedStorage": 20, "Iops": 3000,
         "LicenseModel": "general-public-license", "PubliclyAccessible": False,
         "PerformanceInsightsEnabled": True, "DbiResourceId": "db-ABC",
         "Endpoint": {"Address": "x.rds.amazonaws.com", "Port": 3306},
@@ -63,6 +63,8 @@ def test_collect_uses_instance_dimension_and_writes_meta():
     details = json.loads(meta_calls[0]["details"])
     assert details["instance_class"] == "db.t4g.micro"
     assert details["pi_enabled"] is True
+    # Provisioned IOPS captured for the right-sizing cost sim (gp3 baseline here).
+    assert details["iops"] == 3000
     metric_calls = [p for (s, p) in calls if "metric_snapshots" in s]
     assert {p["metric_type"] for p in metric_calls} >= {"cpu"}
 

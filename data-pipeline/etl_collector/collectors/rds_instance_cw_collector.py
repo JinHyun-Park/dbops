@@ -39,6 +39,11 @@ def collect_rds_instance_metrics(cw, rds_client, cache_execute, cluster_id, regi
             "multi_az": bool(inst.get("MultiAZ")),
             "storage_type": inst.get("StorageType"),
             "allocated_storage_gb": inst.get("AllocatedStorage"),
+            # Provisioned IOPS: present for io1/io2 and gp3 (gp3 baseline 3000).
+            # The right-sizing cost sim reads this to price PIOPS above the gp3
+            # baseline / full io1-io2 IOPS; None (gp2, or absent) → gp3-baseline.
+            "iops": inst.get("Iops"),
+            "storage_throughput": inst.get("StorageThroughput"),
             "license_model": inst.get("LicenseModel"),
             "publicly_accessible": bool(inst.get("PubliclyAccessible")),
             "pi_enabled": pi_enabled,

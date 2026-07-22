@@ -45,15 +45,32 @@ PROMPT="You are an adversarial code reviewer. Review ONLY the git diff below (co
 
 DIFF:
 ${DIFF}"
-CODEX_RAW="$(codex exec -m "$CODEX_MODEL" -s read-only "$PROMPT" 2>&1)"; CODEX_RC=$?
 # Codex prints: separator, prompt, a line 'codex', the response, 'tokens used', N.
+_has_verdict() { printf '%s' "$1" | grep -q 'VERDICT:'; }
+
+# Config 1 (default): toolbox `codex`, AWS-internal creds. Primary path.
+CODEX_RAW="$(codex exec -m "$CODEX_MODEL" -s read-only "$PROMPT" 2>&1)"; CODEX_RC=$?
+CODEX_VIA="toolbox(${CODEX_MODEL})"
+# Fallback → config 2 (personal Bedrock key): if config 1 produced no VERDICT
+# (e.g. AWS-internal creds expired → "failed to load AWS credentials"), retry
+# via the isolated CODEX_HOME + standalone binary — replicates the `codex-key`
+# zsh function (~/.codex-key/credentials.env + ~/.local/bin/codex). Uses that
+# config's own model (do NOT pass the toolbox -m, which is an internal model).
+if { [ "$CODEX_RC" -ne 0 ] || ! _has_verdict "$CODEX_RAW"; } \
+   && [ -x "$HOME/.local/bin/codex" ] && [ -f "$HOME/.codex-key/credentials.env" ]; then
+  CODEX_RAW="$( set -a; . "$HOME/.codex-key/credentials.env" 2>/dev/null; set +a
+                export CODEX_HOME="$HOME/.codex-key"
+                "$HOME/.local/bin/codex" exec -s read-only "$PROMPT" 2>&1 )"; CODEX_RC=$?
+  CODEX_VIA="bedrock-key(fallback)"
+fi
 CODEX_REVIEW="$(printf '%s\n' "$CODEX_RAW" | awk '/^codex$/{f=1;next} /^tokens used$/{f=0} f')"
 [ -z "${CODEX_REVIEW// }" ] && CODEX_REVIEW="$CODEX_RAW"
 # codex can exit 0 even on a model/auth error (e.g. a 404 with no VERDICT line).
-# Require an explicit VERDICT line: its absence (or a non-zero exit) means the
-# review did NOT actually run -> 'error' (surfaced, not a silent 'clean'), so a
-# broken adversarial gate never passes a commit unreviewed.
-if [ "$CODEX_RC" -ne 0 ] || ! printf '%s' "$CODEX_RAW" | grep -q 'VERDICT:'; then
+# Require an explicit VERDICT line: its absence (or a non-zero exit) after BOTH
+# configs means the review did NOT actually run -> 'error' (surfaced, not a
+# silent 'clean'). On 'error' the dev agent runs the Opus adversarial fallback
+# (see global memory: codex-adversarial-review-fallback).
+if [ "$CODEX_RC" -ne 0 ] || ! _has_verdict "$CODEX_RAW"; then
   CODEX_ST=error
 elif printf '%s' "$CODEX_REVIEW" | grep -q 'VERDICT: ISSUES'; then
   CODEX_ST=issues
@@ -88,9 +105,15 @@ STATUS=clean
   echo "status: $STATUS"
   echo ""
   echo "# 백그라운드 테스터 — ${SHORT} (${SUBJECT})"
-  echo "- Codex(${CODEX_MODEL}) 적대 리뷰: **${CODEX_ST}**"
+  echo "- Codex 적대 리뷰: **${CODEX_ST}** (via ${CODEX_VIA})"
   echo "- 유닛 테스트(tests/unit): **${TEST_ST}** — ${TEST_TAIL}"
   echo "- dev 스모크: **${SMOKE_ST}**"
+  if [ "$CODEX_ST" = error ]; then
+    echo ""
+    echo "> ⚠️ Codex 두 설정(toolbox + bedrock-key) 모두 실패 — 교차모델 적대 리뷰가 실행되지 않음."
+    echo "> **폴백:** dev 에이전트가 별도 Opus 서브에이전트로 이 diff의 적대적 리뷰를 수행할 것."
+    echo "> (기본 codex 복구: \`aws sso login\` 또는 mwinit; 폴백 상세는 전역 메모리 codex-adversarial-review-fallback.)"
+  fi
   echo ""
   echo "## Codex 적대 리뷰"
   printf '%s\n' "$CODEX_REVIEW"
