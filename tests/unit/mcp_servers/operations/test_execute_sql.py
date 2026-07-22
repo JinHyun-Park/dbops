@@ -276,24 +276,24 @@ def test_execute_sql_decodes_null_and_array_rows(mock_boto3):
 )
 @patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
 @patch("mcp_servers.operations.tools.execute_sql.boto3")
-def test_execute_sql_rds_instance_sqlserver_unsupported_r4(mock_boto3, mock_lookup):
-    """rds_instance SQL Server has sql=True but sql_via="direct". MySQL direct
-    execution lands in R-3; SQL Server direct execution ships in R-4. Even with
-    legacy TARGET_* env fallbacks set (the exact condition that let this slip
-    through to the wrong cluster before), it must fail closed with the R-4
-    message and never reach the RDS Data API."""
+def test_execute_sql_rds_instance_other_engine_unsupported(mock_boto3, mock_lookup):
+    """An rds_instance engine that is neither MySQL nor SQL Server (both direct
+    paths now shipped) returns a generic unsupported_engine message — no stale
+    "R-4" wording — and, even with legacy TARGET_* env fallbacks set (the exact
+    condition that let this slip through to the wrong cluster before), must
+    never reach the RDS Data API."""
     mock_rds_data = MagicMock()
     mock_boto3.client.return_value = mock_rds_data
     mock_lookup.return_value = {
-        "engine": "sqlserver-ex",
+        "engine": "oracle-ee",
         "engine_family": "rds_instance",
         "cluster_arn": "arn:test",
         "secret_arn": "arn:secret",
     }
-    result = execute_sql_impl(MagicMock(), cluster_id="rds-mssql-1", sql="SELECT * FROM sys.tables")
+    result = execute_sql_impl(MagicMock(), cluster_id="rds-oracle-1", sql="SELECT * FROM dual")
     assert result["status"] == "unsupported_engine"
     assert result["engine_family"] == "rds_instance"
-    assert "R-4" in result["message"]
+    assert "R-4" not in result["message"]
     mock_rds_data.execute_statement.assert_not_called()
 
 
@@ -520,3 +520,153 @@ def test_direct_mysql_execution_failure_returns_actionable_static_message(
     assert result["status"] == "execution_failed"
     assert "secret internal detail" not in result["reason"]
     assert "db_name" in result["reason"]
+
+
+# ===== R-4: rds_instance SQL Server direct-TCP path =====
+
+_MSSQL_ROW = {
+    "engine": "sqlserver-ex",
+    "engine_family": "rds_instance",
+    "endpoint": "rds-mssql-1.abc.us-east-1.rds.amazonaws.com",
+    "port": 1433,
+    "db_name": "appdb",
+    "db_secret_arn": "arn:db-read",
+}
+
+
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql.mssql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mssql_safe_select_executes(mock_lookup, mock_cfc, mock_ms, mock_boto3):
+    """Safe SELECT on an rds_instance SQL Server row runs over the direct-TCP
+    adapter, decoding rows by REAL column name, using the READ secret, never
+    touching the RDS Data API."""
+    mock_lookup.return_value = dict(_MSSQL_ROW)
+    sm = _fake_sm()
+    mock_cfc.return_value = sm
+    adapter = MagicMock()
+    adapter.execute_statement.return_value = {
+        "columnMetadata": [{"name": "id"}, {"name": "email"}],
+        "records": [[{"longValue": 7}, {"stringValue": "a@b.c"}]],
+    }
+    mock_ms.MSSQLDataApiAdapter.return_value = adapter
+
+    result = execute_sql_impl(MagicMock(), cluster_id="rds-mssql-1", sql="SELECT * FROM users")
+
+    assert result["status"] == "executed"
+    assert result["columns"] == ["id", "email"]
+    assert result["rows"] == [{"id": 7, "email": "a@b.c"}]
+    # read path used the READ secret
+    mock_cfc.assert_called_once_with("rds-mssql-1", "secretsmanager")
+    sm.get_secret_value.assert_called_once_with(SecretId="arn:db-read")
+    # RDS Data API must NOT be touched for a direct-TCP instance
+    mock_boto3.client.assert_not_called()
+    # audit marker prepended to the executed statement
+    assert adapter.execute_statement.call_args.kwargs["sql"].startswith(
+        "/* source=dbops-agent */ "
+    )
+
+
+@patch("mcp_servers.operations.tools.execute_sql.verify_approval")
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql.mssql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mssql_approved_write_without_write_secret_fails_closed(
+    mock_lookup, mock_cfc, mock_ms, mock_boto3, mock_verify
+):
+    """An approved write on a SQL Server row with NO db_write_secret_arn fails
+    closed with a static message — no secret fetch, no connect."""
+    mock_verify.return_value = {"ok": True}
+    mock_lookup.return_value = dict(_MSSQL_ROW)  # has db_secret_arn, no write secret
+
+    result = execute_sql_impl(
+        MagicMock(),
+        cluster_id="rds-mssql-1",
+        sql="UPDATE users SET name='x' WHERE id=1",
+        approved=True,
+        approval_id="appr-1",
+    )
+    assert result["status"] == "unsupported_engine"
+    assert "db_write_secret_arn" in result["reason"]
+    mock_cfc.assert_not_called()
+    mock_ms.connect.assert_not_called()
+
+
+@patch("mcp_servers.operations.tools.execute_sql.verify_approval")
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql.mssql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mssql_approved_write_executes_with_write_secret(
+    mock_lookup, mock_cfc, mock_ms, mock_boto3, mock_verify
+):
+    """An approved write with db_write_secret_arn set executes via the WRITE
+    secret and surfaces numberOfRecordsUpdated."""
+    mock_verify.return_value = {"ok": True}
+    row = dict(_MSSQL_ROW)
+    row["db_write_secret_arn"] = "arn:db-write"
+    mock_lookup.return_value = row
+    sm = _fake_sm()
+    mock_cfc.return_value = sm
+    adapter = MagicMock()
+    adapter.execute_statement.return_value = {
+        "records": [],
+        "columnMetadata": [],
+        "numberOfRecordsUpdated": 3,
+    }
+    mock_ms.MSSQLDataApiAdapter.return_value = adapter
+
+    result = execute_sql_impl(
+        MagicMock(),
+        cluster_id="rds-mssql-1",
+        sql="UPDATE appdb.dbo.users SET name='x' WHERE id=1",
+        approved=True,
+        approval_id="appr-1",
+    )
+    assert result["status"] == "executed"
+    assert result["rows_affected"] == 3
+    # write path used the WRITE secret
+    sm.get_secret_value.assert_called_once_with(SecretId="arn:db-write")
+    mock_ms.connect.assert_called_once()
+    mock_boto3.client.assert_not_called()
+
+
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql.mssql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.mysql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mysql_row_still_routes_to_mysql_not_mssql(
+    mock_lookup, mock_cfc, mock_md, mock_ms, mock_boto3
+):
+    """Regression: a MySQL row must keep routing to mysql_direct — never the
+    new SQL Server adapter."""
+    mock_lookup.return_value = dict(_MYSQL_ROW)
+    mock_cfc.return_value = _fake_sm()
+    adapter = MagicMock()
+    adapter.execute_statement.return_value = {"columnMetadata": [], "records": []}
+    mock_md.MySQLDataApiAdapter.return_value = adapter
+
+    execute_sql_impl(MagicMock(), cluster_id="rds-mysql-1", sql="SELECT 1")
+
+    mock_md.connect.assert_called_once()
+    mock_ms.connect.assert_not_called()
+
+
+@patch("mcp_servers.operations.tools.execute_sql.mssql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_side_effecting_tsql_on_mssql_row_needs_approval(mock_lookup, mock_cfc, mock_ms):
+    """A side-effecting T-SQL read (OPENQUERY reaches a remote server) on a SQL
+    Server row must require approval — not auto-execute over the direct path."""
+    mock_lookup.return_value = dict(_MSSQL_ROW)
+    out = execute_sql_impl(
+        MagicMock(),
+        cluster_id="rds-mssql-1",
+        sql="SELECT * FROM OPENQUERY(remote, 'SELECT 1')",
+    )
+    assert out["status"] == "approval_required"
+    assert "side-effecting" in out["reason"]
+    mock_ms.connect.assert_not_called()

@@ -5,7 +5,7 @@ import re
 
 import boto3
 
-from mcp_servers.shared import mysql_direct
+from mcp_servers.shared import mssql_direct, mysql_direct
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import client_for_cluster
@@ -55,6 +55,33 @@ def _decode_field(field: dict):
     if "arrayValue" in field:
         return _decode_array(field["arrayValue"])
     return None
+
+
+def _decode_rds_response(resp: dict, cluster_id: str) -> dict:
+    """Decode an RDS-Data-API-shaped response (columnMetadata/records) into the
+    tool's executed result. Shared by the Aurora Data API path and the
+    direct-TCP adapters (MySQL, SQL Server), which all return this same shape.
+    Non-SELECT (write) statements return no columns; surface the affected-row
+    count reported as numberOfRecordsUpdated. SELECTs always carry columns, so
+    that never fires for a read."""
+    cols = [c["name"] for c in resp.get("columnMetadata", [])]
+    rows = []
+    for rec in resp.get("records", []):
+        row = {}
+        for i, f in enumerate(rec):
+            col = cols[i] if i < len(cols) else f"col_{i}"
+            row[col] = _decode_field(f)
+        rows.append(row)
+    result = {
+        "status": "executed",
+        "cluster_id": cluster_id,
+        "columns": cols,
+        "rows": rows,
+        "row_count": len(rows),
+    }
+    if not cols and "numberOfRecordsUpdated" in resp:
+        result["rows_affected"] = resp["numberOfRecordsUpdated"]
+    return result
 
 
 _CLUSTERS_TABLE_NAME = os.environ.get("CLUSTERS_TABLE", "")
@@ -159,17 +186,82 @@ def execute_sql_impl(
             }
         # sql_via: Aurora reaches SQL via the RDS Data API; rds_instance (RDS for
         # MySQL / SQL Server) has sql=True but sql_via="direct" — a direct-TCP
-        # path. MySQL runs here (R-3); SQL Server direct ships in R-4. This runs
-        # AFTER all classification/approval logic above, so approval semantics
-        # are identical to the Aurora path.
+        # path. MySQL and SQL Server both run here. This runs AFTER all
+        # classification/approval logic above, so approval semantics are
+        # identical to the Aurora path.
         if isinstance(fam, str) and CAPABILITIES.get(fam, {}).get("sql_via", "data_api") != "data_api":
+            # Direct-TCP SQL Server (rds_instance sqlserver-ee/se/ex/web). Same
+            # shape as the MySQL branch below — read/write secret selection,
+            # client_for_cluster fetch, audit marker, shared decode — but over
+            # mssql_direct. Sets resp then returns via the shared decoder, so the
+            # T-SQL path never falls into the MySQL body.
+            if "sqlserver" in (cluster.get("engine") or ""):
+                secret_arn = cluster.get("db_secret_arn") if is_safe else cluster.get("db_write_secret_arn")
+                if not secret_arn:
+                    note = (
+                        "read credentials not configured — set db_secret_arn"
+                        if is_safe
+                        else "write credentials not configured — set db_write_secret_arn"
+                    )
+                    return {
+                        "status": "unsupported_engine",
+                        "cluster_id": cluster_id,
+                        "reason": f"{note} via PATCH /api/clusters/{{id}}/meta",
+                    }
+                try:
+                    raw = client_for_cluster(cluster_id, "secretsmanager").get_secret_value(
+                        SecretId=secret_arn
+                    ).get("SecretString") or "{}"
+                    creds = json.loads(raw)
+                except Exception as e:
+                    print(f"[execute_sql] secret fetch failed for {cluster_id}: {e}")
+                    return {
+                        "status": "execution_failed",
+                        "cluster_id": cluster_id,
+                        "reason": "대상 인스턴스 자격증명 조회에 실패했습니다.",
+                    }
+                # SQL Server has no 'mysql'-style catch-all schema. With no db_name
+                # the connection uses the login/server default (master); reads work,
+                # and unqualified writes land in master — so the agent must qualify
+                # with [db].[schema].[object]. database=None when db_name is unset.
+                database = cluster.get("db_name")
+                conn = None
+                try:
+                    conn = mssql_direct.connect(
+                        host=cluster.get("endpoint"),
+                        port=cluster.get("port"),
+                        database=database,
+                        user=creds.get("username"),
+                        password=creds.get("password"),
+                    )
+                    resp = mssql_direct.MSSQLDataApiAdapter(conn).execute_statement(
+                        sql=f"/* source=dbops-agent */ {sql}"
+                    )
+                except Exception as e:
+                    print(f"[execute_sql] direct SQL Server execution failed for {cluster_id}: {e}")
+                    return {
+                        "status": "execution_failed",
+                        "cluster_id": cluster_id,
+                        "reason": (
+                            "직접 실행에 실패했습니다. 쓰기 SQL은 [db].[schema].[object] 형식으로 "
+                            "정규화하거나 클러스터에 db_name을 설정하세요(PATCH /api/clusters/{id}/meta)."
+                        ),
+                    }
+                finally:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                return _decode_rds_response(resp, cluster_id)
             if "mysql" not in (cluster.get("engine") or ""):
                 return {
                     "status": "unsupported_engine",
                     "engine_family": fam,
                     "cluster_id": cluster_id,
                     "message": (
-                        "SQL Server 직접 실행은 이후 릴리스(R-4)에서 제공됩니다."
+                        "이 rds_instance 엔진은 직접 SQL 실행을 지원하지 않습니다 "
+                        "(MySQL·SQL Server만 지원)."
                     ),
                 }
             # Direct-TCP MySQL. Read (is_safe) statements use db_secret_arn;
@@ -281,24 +373,4 @@ def execute_sql_impl(
                 )
             return result
 
-    cols = [c["name"] for c in resp.get("columnMetadata", [])]
-    rows = []
-    for rec in resp.get("records", []):
-        row = {}
-        for i, f in enumerate(rec):
-            col = cols[i] if i < len(cols) else f"col_{i}"
-            row[col] = _decode_field(f)
-        rows.append(row)
-    result = {
-        "status": "executed",
-        "cluster_id": cluster_id,
-        "columns": cols,
-        "rows": rows,
-        "row_count": len(rows),
-    }
-    # Non-SELECT (write) statements return no columns; surface the affected-row
-    # count reported as numberOfRecordsUpdated. SELECTs always carry columns, so
-    # this never fires for a read — the Aurora read path is byte-for-byte unchanged.
-    if not cols and "numberOfRecordsUpdated" in resp:
-        result["rows_affected"] = resp["numberOfRecordsUpdated"]
-    return result
+    return _decode_rds_response(resp, cluster_id)
