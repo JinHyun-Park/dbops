@@ -447,6 +447,32 @@ def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = 
     except Exception as e:
         print(f"[discover] elasticache failed in {region}: {e}")
 
+    # RDS instance engines (non-Aurora MySQL / SQL Server) — best-effort.
+    try:
+        inst_paginator = rds.get_paginator("describe_db_instances")
+        for ipage in inst_paginator.paginate():
+            for i in ipage.get("DBInstances", []):
+                if i.get("DBClusterIdentifier"):
+                    # Aurora/DocDB cluster members are registered via their cluster.
+                    continue
+                iengine = i.get("Engine", "")
+                if iengine not in _RDS_INSTANCE_ENGINES:
+                    continue
+                iid = i.get("DBInstanceIdentifier", "")
+                out.append({
+                    "cluster_id": iid,
+                    "engine": iengine,
+                    "engine_family": "rds_instance",
+                    "engine_version": i.get("EngineVersion", ""),
+                    "resource_name": iid,
+                    "resource_type": f"rds-{iengine}",
+                    "status": i.get("DBInstanceStatus", ""),
+                    "region": region,
+                    "secret_source": "n/a",
+                })
+    except Exception as e:
+        print(f"[discover] rds instances failed in {region}: {e}")
+
     return out
 
 
@@ -587,6 +613,56 @@ def _register_elasticache(table, body):
                   "cluster_id": name, "connection_status": status})
 
 
+# RDS instance engines (non-Aurora). Engine strings from the RDS API.
+_RDS_INSTANCE_ENGINES = ("mysql", "sqlserver-ee", "sqlserver-se", "sqlserver-ex", "sqlserver-web")
+
+
+def _register_rds_instance(table, body):
+    """Standalone RDS DB instance (RDS for MySQL / SQL Server). Unlike the
+    Aurora path this HARD-FAILS (400, no registry row) on describe errors or
+    cluster members — a half-registered instance row is useless downstream
+    (no cluster_arn to fall back on)."""
+    for f in ("cluster_id", "account_id", "region"):
+        if not body.get(f):
+            return _resp(400, {"error": f"{f} required"})
+    cluster_id, account_id, region = body["cluster_id"], body["account_id"], body["region"]
+    spoke_role_arn = body.get("spoke_role_arn", "")
+    try:
+        resp = _rds_client_for(region, spoke_role_arn).describe_db_instances(
+            DBInstanceIdentifier=cluster_id)
+        insts = resp.get("DBInstances") or []
+    except Exception as e:
+        print(f"[register] describe_db_instances failed for {cluster_id}: {e}")
+        return _resp(400, {"error": "describe_db_instances failed - check identifier/region/permissions"})
+    if not insts:
+        return _resp(400, {"error": "db instance not found"})
+    inst = insts[0]
+    if inst.get("DBClusterIdentifier"):
+        return _resp(400, {"error": "instance belongs to a DB cluster - register the cluster instead"})
+    engine = inst.get("Engine", "")
+    if engine not in _RDS_INSTANCE_ENGINES:
+        return _resp(400, {"error": "unsupported instance engine"})
+    endpoint = inst.get("Endpoint") or {}
+    item = {
+        "cluster_id": cluster_id, "account_id": account_id, "region": region,
+        "engine": engine, "engine_family": "rds_instance",
+        "engine_version": inst.get("EngineVersion", ""),
+        "resource_name": cluster_id, "resource_type": f"rds-{engine}",
+        "endpoint": endpoint.get("Address", ""),
+        "port": int(endpoint.get("Port") or 0),
+        "requires_secret_for_foundation": False,
+        "spoke_role_arn": spoke_role_arn,
+        # R-2 (monitoring reads) / R-3 (writes) fill these; empty is valid now.
+        "db_secret_arn": body.get("db_secret_arn", ""),
+        "db_write_secret_arn": body.get("db_write_secret_arn", ""),
+        "registered_at": datetime.utcnow().isoformat() + "Z",
+        "connection_status": "ok", "connection_error": "",
+    }
+    table.put_item(Item=item)
+    return _resp(201, {"status": "registered", "cluster_id": cluster_id,
+                       "connection_status": "ok"})
+
+
 def _handle_register(table, body: dict):
     fam = engine_family(body.get("engine", ""))
     if fam == "dynamodb":
@@ -595,6 +671,8 @@ def _handle_register(table, body: dict):
         return _register_docdb(table, body)
     if fam == "elasticache":
         return _register_elasticache(table, body)
+    if fam == "rds_instance":
+        return _register_rds_instance(table, body)
     # relational (Aurora) — existing path unchanged below
 
     required = ["cluster_id", "account_id", "region"]

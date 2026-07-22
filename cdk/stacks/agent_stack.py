@@ -870,7 +870,7 @@ class AgentStack(cdk.Stack):
         data.cache_db.secret.grant_read(clusters_lambda)
         data.cache_db.grant_data_api_access(clusters_lambda)
         clusters_lambda.add_to_role_policy(iam.PolicyStatement(
-            actions=["rds:DescribeDBClusters", "sts:AssumeRole"],
+            actions=["rds:DescribeDBClusters", "rds:DescribeDBInstances", "sts:AssumeRole"],
             resources=["*"],
         ))
         # Convention-based credential discovery: probe Secrets Manager for
