@@ -255,6 +255,24 @@ def operations_schema():
               {"cluster_id": "string", "node_group_id": "string",
                "approved": "boolean", "approval_id": "string"},
               ["cluster_id"]),
+        # Standalone RDS instance write tools (R-3). Non-Aurora MySQL/SQL Server
+        # (rds_instance family); each is approval-gated and exposes approved/
+        # approval_id. Every handler kwarg must appear here or the impl<->schema
+        # parity test fails.
+        _tool("reboot_rds_instance",
+              "Standalone RDS instance only (non-Aurora): reboot the DB instance; Aurora cluster members are refused; requires approval",
+              {"cluster_id": "string", "approved": "boolean", "approval_id": "string"},
+              ["cluster_id"]),
+        _tool("create_rds_snapshot",
+              "Standalone RDS instance only (non-Aurora): create a manual DB instance snapshot; snapshot_id default is resolved+bound at approval time; requires approval",
+              {"cluster_id": "string", "snapshot_id": "string",
+               "approved": "boolean", "approval_id": "string"},
+              ["cluster_id"]),
+        _tool("modify_rds_instance_class",
+              "Standalone RDS instance only (non-Aurora): change the DB instance compute class (modify_db_instance, ApplyImmediately); current_class is bound at approval time and drift is refused; requires approval",
+              {"cluster_id": "string", "target_class": "string", "current_class": "string",
+               "approved": "boolean", "approval_id": "string"},
+              ["cluster_id", "target_class"]),
         _tool("review_sql", "Pre-execution SQL review with risk assessment",
               {"cluster_id": "string", "sql": "string"}, ["cluster_id", "sql"]),
         _tool("audit_permissions", "Audit DB user permissions",

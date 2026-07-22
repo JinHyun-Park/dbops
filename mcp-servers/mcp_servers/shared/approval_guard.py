@@ -246,6 +246,25 @@ def _project(action_type: str, details: dict) -> dict:
         return {"target": str(d.get("target") or "").strip()}
     if action_type == "test_elasticache_failover":
         return {"target": str(d.get("target") or "").strip(), "node_group_id": str(d.get("node_group_id") or "").strip()}
+    # ===== Standalone RDS instance write tools (R-3) =====
+    # Bind exactly the fields each tool binds into its approval payload so the
+    # hash pins the operation. reboot: the target instance only. snapshot: the
+    # resolved snapshot id too (a snapshot approval can't create a differently-
+    # named snapshot). modify-class: target AND the current-class baseline the
+    # TOCTOU re-check is bound to.
+    if action_type == "reboot_rds_instance":
+        return {"cluster_id": str(d.get("cluster_id") or "").strip()}
+    if action_type == "create_rds_snapshot":
+        return {
+            "cluster_id": str(d.get("cluster_id") or "").strip(),
+            "snapshot_id": str(d.get("snapshot_id") or "").strip(),
+        }
+    if action_type == "modify_rds_instance_class":
+        return {
+            "cluster_id": str(d.get("cluster_id") or "").strip(),
+            "target_class": str(d.get("target_class") or "").strip(),
+            "current_class": str(d.get("current_class") or "").strip(),
+        }
     # other / unknown: bind the FULL detail set VERBATIM (no numeric coercion).
     # This closes the loose "other" bucket — an "other" approval now matches
     # only if the entire registered payload matches. We deliberately do NOT

@@ -62,6 +62,11 @@ def test_rds_instance_capabilities():
     assert caps["custom_endpoint"] is False
     assert caps["prewarm"] is False
     assert caps["scale_instance"] is False
+    # R-3: instance-level writes (reboot/snapshot/modify-class) are rds_instance
+    # ONLY — the positive, FAIL-CLOSED capability the handler gates them on.
+    assert caps["instance_write"] is True
+    assert "instance_write" not in ef.CAPABILITIES["relational"]
+    assert "instance_write" not in ef.CAPABILITIES["dynamodb"]
     assert caps["cw_namespace"] == "AWS/RDS"
     # R-2: cache-only MySQL param_fitness now runs in the ETL collector.
     assert caps["findings"] == {"param_fitness"}

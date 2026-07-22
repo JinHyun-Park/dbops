@@ -104,6 +104,12 @@ def request_approval_impl(
         "create_elasticache_snapshot",
         "reboot_elasticache",
         "test_elasticache_failover",
+        # Standalone RDS instance write tools (R-3): approval-gated reboot /
+        # snapshot / instance-class resize. enum values must be listed here or
+        # request_approval rejects them and the approval loop dead-ends.
+        "reboot_rds_instance",
+        "create_rds_snapshot",
+        "modify_rds_instance_class",
         "other",
     ):
         return {

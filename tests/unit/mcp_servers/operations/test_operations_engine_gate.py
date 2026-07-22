@@ -227,3 +227,51 @@ def test_gate_custom_endpoint_relational_passes_to_impl():
         )
     assert result["status"] == "approval_required"
     spy.assert_called_once()
+
+
+# ===== Standalone RDS instance write tools — rds_instance-only positive gate (R-3) =====
+
+
+def test_gate_instance_write_none_family_fail_closed():
+    """reboot_rds_instance on an unresolvable cluster → unsupported_engine, impl
+    never invoked even with a valid-looking approval."""
+    spy = MagicMock()
+    with _patch_family(None), patch.dict(
+        handler.TOOLS["reboot_rds_instance"], {"impl": spy}
+    ):
+        result = _invoke(
+            "reboot_rds_instance",
+            {"cluster_id": "ghost", "approved": True, "approval_id": "x"},
+        )
+    assert result["status"] == "unsupported_engine"
+    assert "could not be resolved" in result["reason"]
+    spy.assert_not_called()
+
+
+def test_gate_instance_write_aurora_refused():
+    """A standalone-instance tool on an Aurora (relational) cluster → refused;
+    Aurora has no instance_write capability."""
+    spy = MagicMock()
+    with _patch_family("relational"), patch.dict(
+        handler.TOOLS["create_rds_snapshot"], {"impl": spy}
+    ):
+        result = _invoke(
+            "create_rds_snapshot",
+            {"cluster_id": "prod-pg-1", "approved": True, "approval_id": "x"},
+        )
+    assert result["status"] == "unsupported_engine"
+    spy.assert_not_called()
+
+
+def test_gate_instance_write_rds_instance_passes_to_impl():
+    """A resolved rds_instance family passes the gate and the impl runs."""
+    spy = MagicMock(return_value={"status": "approval_required"})
+    with _patch_family("rds_instance"), patch.dict(
+        handler.TOOLS["modify_rds_instance_class"], {"impl": spy}
+    ):
+        result = _invoke(
+            "modify_rds_instance_class",
+            {"cluster_id": "rds-mysql-1", "target_class": "db.r6g.large"},
+        )
+    assert result["status"] == "approval_required"
+    spy.assert_called_once()

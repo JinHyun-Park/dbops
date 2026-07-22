@@ -9,6 +9,7 @@ from mcp_servers.operations.tools.audit_permissions import audit_permissions_imp
 from mcp_servers.operations.tools.create_custom_endpoint import create_custom_endpoint_impl
 from mcp_servers.operations.tools.create_docdb_index import create_docdb_index_impl
 from mcp_servers.operations.tools.create_elasticache_snapshot import create_elasticache_snapshot_impl
+from mcp_servers.operations.tools.create_rds_snapshot import create_rds_snapshot_impl
 from mcp_servers.operations.tools.create_snapshot import create_snapshot_impl
 from mcp_servers.operations.tools.delete_custom_endpoint import delete_custom_endpoint_impl
 from mcp_servers.operations.tools.elasticache_live_read import elasticache_live_read_impl
@@ -21,11 +22,13 @@ from mcp_servers.operations.tools.modify_dynamodb_capacity import modify_dynamod
 from mcp_servers.operations.tools.modify_dynamodb_ttl import modify_dynamodb_ttl_impl
 from mcp_servers.operations.tools.modify_elasticache_node_type import modify_elasticache_node_type_impl
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
+from mcp_servers.operations.tools.modify_rds_instance_class import modify_rds_instance_class_impl
 from mcp_servers.operations.tools.modify_scaling import modify_scaling_impl
 from mcp_servers.operations.tools.plan_az_scaleout import plan_az_scaleout_impl
 from mcp_servers.operations.tools.prewarm_reader import prewarm_reader_impl
 from mcp_servers.operations.tools.query_activity_audit import query_activity_audit_impl
 from mcp_servers.operations.tools.reboot_elasticache import reboot_elasticache_impl
+from mcp_servers.operations.tools.reboot_rds_instance import reboot_rds_instance_impl
 from mcp_servers.operations.tools.remove_reader_instance import remove_reader_instance_impl
 from mcp_servers.operations.tools.request_approval import request_approval_impl
 from mcp_servers.operations.tools.restore_cluster import restore_cluster_impl
@@ -85,6 +88,13 @@ _ENGINE_GATED_TOOLS = {
     "create_elasticache_snapshot": "elasticache_write",
     "reboot_elasticache": "elasticache_write",
     "test_elasticache_failover": "elasticache_write",
+    # Standalone RDS instance write tools (R-3): reboot / snapshot / modify-class.
+    # POSITIVE, FAIL-CLOSED gate on the rds_instance-only instance_write cap —
+    # Aurora (relational) and every non-relational family lack it, so those
+    # clusters (and any unresolvable one) get unsupported_engine before the impl.
+    "reboot_rds_instance": "instance_write",
+    "create_rds_snapshot": "instance_write",
+    "modify_rds_instance_class": "instance_write",
 }
 
 _CAP_LABEL = {
@@ -95,6 +105,7 @@ _CAP_LABEL = {
     "docdb_write": "DocumentDB 클러스터",
     "live_read": "ElastiCache 클러스터",
     "elasticache_write": "ElastiCache 클러스터",
+    "instance_write": "RDS 인스턴스(비-Aurora)",
 }
 
 TOOLS = {
@@ -579,6 +590,63 @@ TOOLS = {
             "approved": {"type": "boolean"}, "approval_id": {"type": "string"}},
             "required": ["cluster_id"]},
     },
+    "reboot_rds_instance": {
+        "impl": reboot_rds_instance_impl,
+        "description": (
+            "Standalone RDS instance only (non-Aurora MySQL/SQL Server): reboot "
+            "the DB instance. Aurora cluster members are refused. Requires "
+            "approved=true AND approval_id=<uuid from request_approval>."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target RDS DB instance id"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id"],
+        },
+    },
+    "create_rds_snapshot": {
+        "impl": create_rds_snapshot_impl,
+        "description": (
+            "Standalone RDS instance only (non-Aurora): create a manual DB "
+            "instance snapshot. snapshot_id is optional — a dbops-<id>-<ts> "
+            "default is resolved at approval time and bound to it. Requires "
+            "approved=true AND approval_id=<uuid from request_approval>."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target RDS DB instance id"},
+                "snapshot_id": {"type": "string", "description": "Optional snapshot identifier (default resolved+bound at approval time)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id"],
+        },
+    },
+    "modify_rds_instance_class": {
+        "impl": modify_rds_instance_class_impl,
+        "description": (
+            "Standalone RDS instance only (non-Aurora): change the DB instance "
+            "compute class (modify_db_instance, ApplyImmediately). target_class "
+            "is required; the current class is bound at approval time and the "
+            "change is refused if it drifted since. Requires approved=true AND "
+            "approval_id=<uuid from request_approval>."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target RDS DB instance id"},
+                "target_class": {"type": "string", "description": "New DB instance class (e.g. db.r6g.large)"},
+                "current_class": {"type": "string", "description": "Current class bound at approval time (re-issue with the value from approval_required)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id", "target_class"],
+        },
+    },
     "review_sql": {
         "impl": review_sql_impl,
         "description": "Pre-execution SQL review with risk classification, issue detection, and rollback suggestion",
@@ -694,7 +762,7 @@ TOOLS = {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "action_type": {
                     "type": "string",
-                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "create_custom_endpoint", "delete_custom_endpoint", "modify_custom_endpoint", "prewarm_reader", "add_reader_instance", "remove_reader_instance", "scale_out_with_warmup", "modify_dynamodb_capacity", "modify_dynamodb_ttl", "enable_dynamodb_pitr", "set_docdb_profiler", "create_docdb_index", "other"],
+                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "create_custom_endpoint", "delete_custom_endpoint", "modify_custom_endpoint", "prewarm_reader", "add_reader_instance", "remove_reader_instance", "scale_out_with_warmup", "modify_dynamodb_capacity", "modify_dynamodb_ttl", "enable_dynamodb_pitr", "set_docdb_profiler", "create_docdb_index", "modify_elasticache_node_type", "create_elasticache_snapshot", "reboot_elasticache", "test_elasticache_failover", "reboot_rds_instance", "create_rds_snapshot", "modify_rds_instance_class", "other"],
                     "description": "Which write tool needs approval",
                 },
                 "action_details": {

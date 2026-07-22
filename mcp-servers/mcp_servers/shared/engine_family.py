@@ -91,6 +91,10 @@ CAPABILITIES = {
         # Cluster/reader-topology concepts — never applicable to a standalone
         # DB instance.
         "custom_endpoint": False, "prewarm": False, "scale_instance": False,
+        # Instance-level writes (reboot / snapshot / modify-class; R-3) apply
+        # ONLY to standalone RDS instances — Aurora uses cluster/reader tooling.
+        # Positive, FAIL-CLOSED gate: no other family carries this capability.
+        "instance_write": True,
         # Shared namespace with Aurora but instance-dimensioned
         # (DBInstanceIdentifier; the DBClusterIdentifier dimension does not
         # exist for these engines).

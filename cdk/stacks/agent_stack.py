@@ -239,6 +239,12 @@ class AgentStack(cdk.Stack):
                 # instance are protected before delete.
                 "rds:CreateDBInstance",
                 "rds:DeleteDBInstance",
+                # Standalone RDS instance write tools (R-3): reboot / snapshot /
+                # modify-class of a non-Aurora DB instance. All approval-gated in
+                # tool code; cross-account via assume-role.
+                "rds:RebootDBInstance",
+                "rds:CreateDBSnapshot",
+                "rds:ModifyDBInstance",
                 # Aurora custom cluster endpoints (P2-⑤). Create/Delete/Modify are
                 # approval-gated in tool code; Describe validates the endpoint is
                 # CUSTOM before delete/modify (never touches writer/reader builtins).
