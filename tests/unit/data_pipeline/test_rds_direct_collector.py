@@ -78,6 +78,14 @@ def test_adapter_decimal_maps_to_double():
     assert out["records"][0][0] == {"doubleValue": 7.5}
 
 
+def test_table_stats_long_tolerates_decimal_shapes():
+    m = _load("mysql_table_stats")
+    assert m._long({"longValue": 5}) == 5
+    assert m._long({"doubleValue": 7.0}) == 7
+    assert m._long({"stringValue": "9"}) == 9
+    assert m._long({"isNull": True}) == 0
+
+
 def test_handler_filters_rds_instance_mysql_with_secret():
     h = _load("handler")
     rows = [

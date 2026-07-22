@@ -57,7 +57,19 @@ def _str(field):
 
 
 def _long(field):
-    return field.get("longValue", 0) if not field.get("isNull") else 0
+    # n_dead_tup (FLOOR of a division) and the seq/idx scan SUM() columns are
+    # DECIMAL in MySQL, so the Data API sends stringValue and the pymysql
+    # adapter sends doubleValue — longValue-only silently zeroed them.
+    if field.get("isNull"):
+        return 0
+    v = field.get("longValue")
+    if v is not None:
+        return v
+    dv = field.get("doubleValue")
+    if dv is not None:
+        return int(dv)
+    sv = field.get("stringValue")
+    return int(float(sv)) if sv else 0
 
 
 def collect_mysql_table_stats(rds_data_client, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, database):

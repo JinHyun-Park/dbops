@@ -50,6 +50,7 @@ def _connect(host, port, user, password, database):
         user=user,
         password=password,
         database=database,
+        charset="utf8mb4",
         ssl_ca=_CA_BUNDLE_PATH,
         ssl_verify_cert=True,
         ssl_verify_identity=True,
