@@ -95,8 +95,10 @@ CAPABILITIES = {
         # (DBInstanceIdentifier; the DBClusterIdentifier dimension does not
         # exist for these engines).
         "cw_namespace": "AWS/RDS",
-        # R-2 adds MySQL findings; empty set = no family finding collectors yet.
-        "findings": set(),
+        # R-2: cache-only MySQL param_fitness runs in the ETL collector (reads
+        # the cache DB only, no VPC). InnoDB-status findings come from the
+        # VPC direct-TCP collector (rds_direct_collector), not tracked here.
+        "findings": {"param_fitness"},
     },
 }
 

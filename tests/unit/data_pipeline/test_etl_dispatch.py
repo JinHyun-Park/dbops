@@ -270,3 +270,62 @@ def test_rds_instance_runs_pi_when_enabled():
     # Aurora PI list fails the whole GetResourceMetrics call on SQL Server)
     assert mock_pi.call_args.kwargs["metrics"] is handler.PI_METRICS_RDS_INSTANCE
     assert "pi" in result
+
+
+def test_rds_instance_mysql_calls_param_fitness_with_cache_args():
+    """MySQL rds_instance runs the cache-only param_fitness finding using the
+    CACHE connection (not the target) and the shared run_ts as snapshot_ts."""
+    handler = _load_handler()
+
+    resource = {
+        "cluster_id": "dbops-demo-mysql",
+        "engine": "mysql",
+        "engine_family": "rds_instance",
+        "region": "ap-northeast-2",
+        "account_id": "111122223333",
+    }
+    mock_inst_collector = MagicMock(return_value={
+        "metrics_inserted": 7, "errors": [],
+        "resource_id": None, "pi_enabled": False})
+    mock_pf = MagicMock(return_value={"findings": []})
+
+    with (
+        patch.object(handler, "collect_rds_instance_metrics", mock_inst_collector),
+        patch.object(handler, "collect_mysql_param_fitness", mock_pf),
+    ):
+        result = handler._collect_one(resource, **_COMMON_KWARGS)
+
+    mock_pf.assert_called_once()
+    # First positional arg is the CACHE rds-data client, not any target conn.
+    assert mock_pf.call_args.args[0] is _COMMON_KWARGS["cache_rds_data"]
+    assert mock_pf.call_args.args[1] == _COMMON_KWARGS["cache_cluster_arn"]
+    assert mock_pf.call_args.args[2] == _COMMON_KWARGS["cache_secret_arn"]
+    assert mock_pf.call_args.args[3] == _COMMON_KWARGS["cache_db_name"]
+    assert mock_pf.call_args.args[4] == "dbops-demo-mysql"
+    assert mock_pf.call_args.kwargs["snapshot_ts"] == _COMMON_KWARGS["run_ts"]
+    assert "param_fitness" in result
+
+
+def test_rds_instance_sqlserver_does_not_call_param_fitness():
+    """SQL Server has no cache-only param_fitness finding — must not be called."""
+    handler = _load_handler()
+
+    resource = {
+        "cluster_id": "dbops-demo-mssql",
+        "engine": "sqlserver-ee",
+        "engine_family": "rds_instance",
+        "region": "ap-northeast-2",
+        "account_id": "111122223333",
+    }
+    mock_inst_collector = MagicMock(return_value={
+        "metrics_inserted": 4, "errors": [],
+        "resource_id": None, "pi_enabled": False})
+    mock_pf = MagicMock()
+
+    with (
+        patch.object(handler, "collect_rds_instance_metrics", mock_inst_collector),
+        patch.object(handler, "collect_mysql_param_fitness", mock_pf),
+    ):
+        handler._collect_one(resource, **_COMMON_KWARGS)
+
+    mock_pf.assert_not_called()

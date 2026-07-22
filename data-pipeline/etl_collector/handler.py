@@ -187,6 +187,18 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
             except Exception as e:
                 result["pi_error"] = str(e)
                 print(f"[{cluster_id}] pi error: {e}")
+        # MySQL param_fitness reads ONLY the cache DB (cluster_settings +
+        # metric_snapshots), so it runs here with no VPC/target connection.
+        # InnoDB-status findings need the target and live in rds_direct_collector.
+        # SQL Server has no cache-only finding.
+        if "mysql" in engine:
+            try:
+                result["param_fitness"] = collect_mysql_param_fitness(
+                    cache_rds_data, cache_cluster_arn, cache_secret_arn,
+                    cache_db_name, cluster_id, snapshot_ts=run_ts)
+            except Exception as e:
+                result["param_fitness_error"] = str(e)
+                print(f"[{cluster_id}] param_fitness error: {e}")
         return result
 
     # ------------------------------------------------------------------

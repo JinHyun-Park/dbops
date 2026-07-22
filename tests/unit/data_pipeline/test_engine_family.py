@@ -63,7 +63,8 @@ def test_rds_instance_capabilities():
     assert caps["prewarm"] is False
     assert caps["scale_instance"] is False
     assert caps["cw_namespace"] == "AWS/RDS"
-    assert caps["findings"] == set()
+    # R-2: cache-only MySQL param_fitness now runs in the ETL collector.
+    assert caps["findings"] == {"param_fitness"}
 
 def test_all_python_copies_are_verbatim_identical():
     root = Path(__file__).resolve().parents[3]

@@ -42,7 +42,7 @@ def mock_table():
     return t
 
 
-def _mk_instance(engine="mysql", cluster_member=None):
+def _mk_instance(engine="mysql", cluster_member=None, master_secret=None):
     inst = {
         "DBInstanceIdentifier": "dbops-demo-mysql",
         "Engine": engine, "EngineVersion": "8.0.42",
@@ -51,12 +51,17 @@ def _mk_instance(engine="mysql", cluster_member=None):
     }
     if cluster_member:
         inst["DBClusterIdentifier"] = cluster_member
+    if master_secret:
+        inst["MasterUserSecret"] = {"SecretArn": master_secret}
     return inst
 
 
 def test_register_rds_instance_happy_path(handler_module, mock_table):
     h = handler_module
-    with patch.object(h, "_rds_client_for") as rds:
+    with (
+        patch.object(h, "_rds_client_for") as rds,
+        patch.object(h, "_convention_secret_for", return_value=""),
+    ):
         rds.return_value.describe_db_instances.return_value = {"DBInstances": [_mk_instance()]}
         resp = h._register_rds_instance(mock_table, {
             "cluster_id": "dbops-demo-mysql", "account_id": "123", "region": "ap-northeast-2"})
@@ -66,6 +71,75 @@ def test_register_rds_instance_happy_path(handler_module, mock_table):
     assert item["engine"] == "mysql"
     assert item["resource_type"] == "rds-mysql"
     assert item["port"] == 3306
+
+
+def test_register_resolves_master_secret_when_body_omits_it(handler_module, mock_table):
+    """No body db_secret_arn, no convention secret → fall back to the instance's
+    MasterUserSecret.SecretArn from the describe response; source is recorded."""
+    h = handler_module
+    master = "arn:aws:secretsmanager:ap-northeast-2:123:secret:rds!db-master"
+    with (
+        patch.object(h, "_rds_client_for") as rds,
+        patch.object(h, "_convention_secret_for", return_value=""),
+    ):
+        rds.return_value.describe_db_instances.return_value = {
+            "DBInstances": [_mk_instance(master_secret=master)]}
+        resp = h._register_rds_instance(mock_table, {
+            "cluster_id": "dbops-demo-mysql", "account_id": "123", "region": "ap-northeast-2"})
+    assert resp["statusCode"] == 201
+    item = mock_table.put_item.call_args.kwargs["Item"]
+    assert item["db_secret_arn"] == master
+    assert item["db_secret_source"] == "master_fallback"
+
+
+def test_register_body_secret_overrides_master(handler_module, mock_table):
+    """An explicit body db_secret_arn wins over both convention and master."""
+    h = handler_module
+    override = "arn:aws:secretsmanager:ap-northeast-2:123:secret:dbops-readonly"
+    master = "arn:aws:secretsmanager:ap-northeast-2:123:secret:rds!db-master"
+    with (
+        patch.object(h, "_rds_client_for") as rds,
+        patch.object(h, "_convention_secret_for", return_value="arn:convention"),
+    ):
+        rds.return_value.describe_db_instances.return_value = {
+            "DBInstances": [_mk_instance(master_secret=master)]}
+        resp = h._register_rds_instance(mock_table, {
+            "cluster_id": "dbops-demo-mysql", "account_id": "123", "region": "ap-northeast-2",
+            "db_secret_arn": override})
+    assert resp["statusCode"] == 201
+    item = mock_table.put_item.call_args.kwargs["Item"]
+    assert item["db_secret_arn"] == override
+    assert item["db_secret_source"] == "override"
+
+
+def test_register_convention_secret_wins_over_master(handler_module, mock_table):
+    h = handler_module
+    master = "arn:aws:secretsmanager:ap-northeast-2:123:secret:rds!db-master"
+    with (
+        patch.object(h, "_rds_client_for") as rds,
+        patch.object(h, "_convention_secret_for", return_value="arn:convention"),
+    ):
+        rds.return_value.describe_db_instances.return_value = {
+            "DBInstances": [_mk_instance(master_secret=master)]}
+        resp = h._register_rds_instance(mock_table, {
+            "cluster_id": "dbops-demo-mysql", "account_id": "123", "region": "ap-northeast-2"})
+    item = mock_table.put_item.call_args.kwargs["Item"]
+    assert item["db_secret_arn"] == "arn:convention"
+    assert item["db_secret_source"] == "convention"
+
+
+def test_register_missing_secret_when_nothing_resolves(handler_module, mock_table):
+    h = handler_module
+    with (
+        patch.object(h, "_rds_client_for") as rds,
+        patch.object(h, "_convention_secret_for", return_value=""),
+    ):
+        rds.return_value.describe_db_instances.return_value = {"DBInstances": [_mk_instance()]}
+        resp = h._register_rds_instance(mock_table, {
+            "cluster_id": "dbops-demo-mysql", "account_id": "123", "region": "ap-northeast-2"})
+    item = mock_table.put_item.call_args.kwargs["Item"]
+    assert item["db_secret_arn"] == ""
+    assert item["db_secret_source"] == "missing"
 
 
 def test_register_rejects_cluster_member(handler_module, mock_table):

@@ -643,6 +643,22 @@ def _register_rds_instance(table, body):
     if engine not in _RDS_INSTANCE_ENGINES:
         return _resp(400, {"error": "unsupported instance engine"})
     endpoint = inst.get("Endpoint") or {}
+    # Read-secret precedence: explicit body override > dbops convention secret
+    # (dbops/<cluster_id>/readonly, mirrors the Aurora path) > the instance's
+    # own MasterUserSecret from describe > none. rds_direct_collector consumes
+    # db_secret_arn; db_secret_source is kept for UI transparency.
+    body_secret = body.get("db_secret_arn", "")
+    master_secret = (inst.get("MasterUserSecret") or {}).get("SecretArn", "")
+    if body_secret:
+        db_secret_arn, db_secret_source = body_secret, "override"
+    else:
+        convention = _convention_secret_for(_session_for(region, spoke_role_arn), cluster_id)
+        if convention:
+            db_secret_arn, db_secret_source = convention, "convention"
+        elif master_secret:
+            db_secret_arn, db_secret_source = master_secret, "master_fallback"
+        else:
+            db_secret_arn, db_secret_source = "", "missing"
     item = {
         "cluster_id": cluster_id, "account_id": account_id, "region": region,
         "engine": engine, "engine_family": "rds_instance",
@@ -652,8 +668,10 @@ def _register_rds_instance(table, body):
         "port": int(endpoint.get("Port") or 0),
         "requires_secret_for_foundation": False,
         "spoke_role_arn": spoke_role_arn,
-        # R-2 (monitoring reads) / R-3 (writes) fill these; empty is valid now.
-        "db_secret_arn": body.get("db_secret_arn", ""),
+        # R-2 auto-resolves the read secret (see precedence above); R-3 (writes)
+        # fills db_write_secret_arn. Empty db_secret_arn is valid ("missing").
+        "db_secret_arn": db_secret_arn,
+        "db_secret_source": db_secret_source,
         "db_write_secret_arn": body.get("db_write_secret_arn", ""),
         "registered_at": datetime.utcnow().isoformat() + "Z",
         "connection_status": "ok", "connection_error": "",
