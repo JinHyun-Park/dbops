@@ -15,6 +15,7 @@ RELATIONAL = "relational"
 DOCUMENTDB = "documentdb"
 DYNAMODB = "dynamodb"
 ELASTICACHE = "elasticache"
+RDS_INSTANCE = "rds_instance"
 
 
 def engine_family(engine):
@@ -28,6 +29,12 @@ def engine_family(engine):
         return DYNAMODB
     if "redis" in e or "valkey" in e or "memcached" in e or "elasticache" in e:
         return ELASTICACHE
+    # RDS instance engines (non-Aurora). Order matters: 'aurora-mysql' contains
+    # 'mysql', so the aurora guard keeps Aurora MySQL relational.
+    if "sqlserver" in e:
+        return RDS_INSTANCE
+    if "mysql" in e and "aurora" not in e:
+        return RDS_INSTANCE
     return RELATIONAL
 
 
@@ -37,7 +44,7 @@ def engine_family(engine):
 # pre-branch RDS calls and the dashboard backend endpoints.
 CAPABILITIES = {
     RELATIONAL: {
-        "sql": True, "rds_meta": True, "perf_insights": True, "simulation": True,
+        "sql": True, "sql_via": "data_api", "rds_meta": True, "perf_insights": True, "simulation": True,
         # custom_endpoint: Aurora custom cluster endpoints (P2-⑤) are relational-
         # only; the operations handler positive-gates the create/delete/modify
         # tools on this key so non-relational engines get unsupported_engine.
@@ -74,6 +81,22 @@ CAPABILITIES = {
         "live_read": True,
         "cw_namespace": "AWS/ElastiCache",
         "findings": {"elasticache"},
+    },
+    RDS_INSTANCE: {
+        # SQL-capable but NOT via RDS Data API (Aurora-only) — R-3 wires the
+        # direct-TCP path; until then execute_sql's Data API call must not be
+        # reached for this family (sql_via is the dispatch key).
+        "sql": True, "sql_via": "direct",
+        "rds_meta": True, "perf_insights": True, "simulation": False,
+        # Cluster/reader-topology concepts — never applicable to a standalone
+        # DB instance.
+        "custom_endpoint": False, "prewarm": False, "scale_instance": False,
+        # Shared namespace with Aurora but instance-dimensioned
+        # (DBInstanceIdentifier; the DBClusterIdentifier dimension does not
+        # exist for these engines).
+        "cw_namespace": "AWS/RDS",
+        # R-2 adds MySQL findings; empty set = no family finding collectors yet.
+        "findings": set(),
     },
 }
 

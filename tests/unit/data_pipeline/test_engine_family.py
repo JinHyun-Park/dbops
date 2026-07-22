@@ -38,3 +38,40 @@ def test_dynamodb_cluster_id_is_regex_safe():
     assert cid.startswith("ddb-")
     assert cid == ef.dynamodb_cluster_id("123456789012", "ap-northeast-2", "my_table.v2")
     assert cid != ef.dynamodb_cluster_id("123456789012", "us-east-1", "my_table.v2")
+
+def test_rds_instance_family_derivation():
+    assert ef.engine_family("mysql") == "rds_instance"
+    assert ef.engine_family("sqlserver-ex") == "rds_instance"
+    assert ef.engine_family("sqlserver-ee") == "rds_instance"
+    assert ef.engine_family("sqlserver-se") == "rds_instance"
+    assert ef.engine_family("sqlserver-web") == "rds_instance"
+    assert ef.engine_family("SQLServer-EX") == "rds_instance"
+    # Aurora stays relational — the 'aurora' guard must win over the bare
+    # 'mysql' substring.
+    assert ef.engine_family("aurora-mysql") == "relational"
+    assert ef.engine_family("aurora-postgresql") == "relational"
+
+def test_rds_instance_capabilities():
+    caps = ef.CAPABILITIES["rds_instance"]
+    assert caps["sql"] is True
+    assert caps["sql_via"] == "direct"
+    assert ef.CAPABILITIES["relational"]["sql_via"] == "data_api"
+    assert caps["rds_meta"] is True
+    assert caps["perf_insights"] is True
+    assert caps["simulation"] is False
+    assert caps["custom_endpoint"] is False
+    assert caps["prewarm"] is False
+    assert caps["scale_instance"] is False
+    assert caps["cw_namespace"] == "AWS/RDS"
+    assert caps["findings"] == set()
+
+def test_all_python_copies_are_verbatim_identical():
+    root = Path(__file__).resolve().parents[3]
+    paths = [
+        root / "api" / "clusters" / "engine_family.py",
+        root / "api" / "dashboard" / "engine_family.py",
+        root / "data-pipeline" / "etl_collector" / "collectors" / "engine_family.py",
+        root / "mcp-servers" / "mcp_servers" / "shared" / "engine_family.py",
+    ]
+    contents = [p.read_text() for p in paths]
+    assert all(c == contents[0] for c in contents[1:]), "engine_family.py copies diverged"
