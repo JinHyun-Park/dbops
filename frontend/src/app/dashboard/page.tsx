@@ -981,14 +981,7 @@ export default function DashboardPage() {
                     clusterId={selectedCluster}
                     topQueries={dashboardData?.top_queries || []}
                   />
-                  {/* Wait events are a PG surface (pg_stat_activity waits) — noise
-                    for MySQL, which has no equivalent collected yet. */}
-                  {isPostgres(activeEngine) && (
-                    <WaitEventsPanel
-                      clusterId={selectedCluster}
-                      hours={hours}
-                    />
-                  )}
+                  <WaitEventsPanel clusterId={selectedCluster} hours={hours} />
                   <ActiveSessionsPanel clusterId={selectedCluster} />
                   <LongRunningPanel clusterId={selectedCluster} />
                   <LocksPanel clusterId={selectedCluster} />
