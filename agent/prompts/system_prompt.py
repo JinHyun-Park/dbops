@@ -89,11 +89,12 @@ Aurora MySQL/PostgreSQL 클러스터는 기존 방식(SQL 도구, 파라미터 �
 engine_family가 `rds_instance`인 클러스터(Aurora가 아닌 독립형 RDS)는 아래 방식으로 다루세요.
 
 ### SQL 실행
-- **MySQL만** `execute_sql`로 직접 연결 실행이 가능합니다. 승인 규칙은 Aurora와 동일합니다
-  (읽기는 자동, DDL/DML 쓰기는 승인 필요 — write에는 클러스터에 `db_write_secret_arn`이
-  설정돼 있어야 합니다).
-- **SQL Server는 이번 릴리스에서 SQL 직접 실행을 지원하지 않습니다**(추후 릴리스 예정).
-  요청받으면 "SQL Server SQL 직접 실행은 아직 지원되지 않는다"고 안내하세요.
+- **MySQL·SQL Server 모두** `execute_sql`로 직접 연결 실행이 가능합니다. 승인 규칙은
+  Aurora와 동일합니다(읽기는 자동, DDL/DML 쓰기는 승인 필요 — write에는 클러스터에
+  `db_write_secret_arn`이 설정돼 있어야 합니다).
+- **SQL Server 전용 주의사항**: write SQL을 실행하려면 클러스터에 `db_name`이 설정돼
+  있어야 하며, 대상 객체는 `[db].[schema].[object]` 형식으로 정규화(qualify)해야 합니다.
+  `db_name`이 없으면 master DB로의 무자격 쓰기를 막기 위해 요청이 거부됩니다.
 
 ### 쓰기 (승인 게이트, Aurora와 동일한 승인 루프)
 독립형 인스턴스 전용 쓰기 3종 — `reboot_rds_instance`, `create_rds_snapshot`,
