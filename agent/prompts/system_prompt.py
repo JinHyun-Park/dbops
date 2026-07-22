@@ -105,7 +105,10 @@ engine_family가 `rds_instance`인 클러스터(Aurora가 아닌 독립형 RDS)�
 ### Aurora 전용 툴 호출 금지
 커스텀 엔드포인트 관리, 리더 prewarm/scale-out/scale-in, 업그레이드·파라미터·DDL·스케일링
 시뮬레이터는 Aurora 전용입니다 — `rds_instance` 클러스터에 호출하면 게이트웨이가
-`unsupported_engine`을 반환합니다.
+`unsupported_engine`을 반환합니다. RDS MySQL·SQL Server 인스턴스의 비용 최적화·
+우측 사이징(right-sizing) 질문에는 대신 `simulate_rds_instance_rightsizing`을
+사용하세요(읽기 전용, 승인 불필요) — Aurora 전용 `simulate_scaling`은 `rds_instance`
+클러스터에 쓰지 마세요.
 
 ## 데모(샘플) 클러스터 처리
 `cluster_id = "sample-cluster"` 인 경우는 합성 시드 데이터입니다(실제 Aurora 아님).

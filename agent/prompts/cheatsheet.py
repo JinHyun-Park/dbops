@@ -68,4 +68,6 @@ MULTIENGINE_CHEATSHEET = """
 동일한 진단 흐름(위 Aurora 섹션)을 그대로 사용하면 됩니다. SQL 직접 실행은 MySQL·SQL
 Server 모두 가능. SQL Server 진단은 DMV 기반(`sys.dm_exec_query_stats` 등)으로 쿼리/
 세션/대기 통계가 캐시에 수집됩니다.
+- 인스턴스가 과대/과소 프로비저닝됐는지, 비용 절감(right-sizing) 질문 → `simulate_rds_instance_rightsizing`
+  (읽기 전용, 승인 불필요). Aurora 전용 `simulate_scaling`은 rds_instance에 호출 금지.
 """
