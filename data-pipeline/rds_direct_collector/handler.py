@@ -19,6 +19,10 @@ import os
 from datetime import datetime, timezone
 
 import boto3
+from mssql_activity import collect_mssql_activity
+from mssql_adapter import MSSQLDataApiAdapter
+from mssql_query_stats import collect_mssql_query_stats
+from mssql_waits import collect_mssql_waits
 from mysql_activity import collect_mysql_activity
 from mysql_adapter import MySQLDataApiAdapter
 from mysql_innodb_status import collect_mysql_innodb_status
@@ -64,6 +68,36 @@ def _connect(host, port, user, password, database):
 _CONNECT_FACTORY = _connect
 
 
+def _connect_mssql(host, port, user, password, database):
+    """Default pytds connection factory for RDS SQL Server. Mirrors _connect:
+    imports pytds lazily and fails closed if the CA bundle is missing.
+
+    RDS SQL Server does NOT force SSL by default, so we always pass the vendored
+    CA bundle with validate_host=True for verified TLS regardless of the
+    instance's parameter group (matches shared/mssql_direct.connect)."""
+    import pytds  # lazy: not importable in the test env
+
+    if not os.path.exists(_CA_BUNDLE_PATH):
+        raise RuntimeError(
+            f"TLS CA bundle missing at {_CA_BUNDLE_PATH} — refusing to connect "
+            "without server certificate verification")
+    return pytds.connect(
+        server=host,
+        port=int(port),
+        database=database or None,
+        user=user,
+        password=password,
+        cafile=_CA_BUNDLE_PATH,
+        validate_host=True,
+        login_timeout=10,
+        timeout=30,
+        autocommit=True,
+    )
+
+
+_MSSQL_CONNECT_FACTORY = _connect_mssql
+
+
 def _scan_all(table):
     """Paginated DynamoDB scan — never truncate at the 1MB page boundary."""
     items = []
@@ -101,14 +135,16 @@ def _make_cache_execute(rds_data, cache_cluster_arn, cache_secret_arn, cache_db_
 
 
 def _eligible(rows):
-    """Rows this collector owns: rds_instance-family MySQL with a usable secret
-    and endpoint. SQL Server (R-4) and Aurora (etl_collector) rows are skipped;
-    a missing secret/endpoint means we can't connect, so skip too."""
+    """Rows this collector owns: rds_instance-family MySQL or SQL Server with a
+    usable secret and endpoint. Aurora (etl_collector) and other engines are
+    skipped; a missing secret/endpoint means we can't connect, so skip too.
+    Per-engine dispatch (mysql vs sqlserver) happens in _process_cluster."""
     out = []
     for row in rows:
         if row.get("engine_family") != "rds_instance":
             continue
-        if "mysql" not in (row.get("engine") or ""):
+        engine = row.get("engine") or ""
+        if "mysql" not in engine and "sqlserver" not in engine:
             continue
         if not row.get("db_secret_arn") or not row.get("endpoint"):
             continue
@@ -122,12 +158,37 @@ def _process_cluster(row, secrets, cache_execute, run_ts):
     marker so other clusters still run. Host/port come from the REGISTRY ROW
     (RDS-managed master secrets hold only username/password)."""
     cluster_id = row.get("cluster_id", "?")
+    engine = row.get("engine") or ""
     conn = None
     try:
         raw = secrets.get_secret_value(SecretId=row["db_secret_arn"]).get("SecretString") or "{}"
         creds = json.loads(raw)
         user = creds.get("username")
         password = creds.get("password")
+
+        if "sqlserver" in engine:
+            conn = _MSSQL_CONNECT_FACTORY(
+                host=row["endpoint"], port=row.get("port", 1433),
+                user=user, password=password,
+                database=row.get("db_name") or "master")
+            adapter = MSSQLDataApiAdapter(conn)
+            database = row.get("db_name") or "master"
+
+            collected = {}
+            # Per-collector try/except: one DMV read failing must not skip the
+            # rest. target arns unused by the adapter → empty strings.
+            for name, fn in (
+                ("query_stats", collect_mssql_query_stats),
+                ("activity", collect_mssql_activity),
+                ("waits", collect_mssql_waits),
+            ):
+                try:
+                    collected[name] = fn(adapter, cache_execute, "", "", cluster_id, database)
+                except Exception as e:
+                    collected[f"{name}_error"] = str(e)
+                    print(f"[rdsdirect] {cluster_id} mssql {name} error: {e}")
+            return {"cluster_id": cluster_id, "collected": collected}
+
         # system schema always exists — gives the session a default schema so
         # its own statements show up in the digest table.
         database = row.get("db_name") or "mysql"

@@ -1,1 +1,3 @@
 pymysql>=1.1
+python-tds>=1.17
+pyOpenSSL>=25
