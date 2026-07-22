@@ -633,6 +633,35 @@ def test_direct_mssql_approved_write_executes_with_write_secret(
     mock_boto3.client.assert_not_called()
 
 
+@patch("mcp_servers.operations.tools.execute_sql.verify_approval")
+@patch("mcp_servers.operations.tools.execute_sql.mssql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mssql_approved_write_no_db_name_fails_closed(
+    mock_lookup, mock_cfc, mock_ms, mock_verify
+):
+    """An approved SQL Server write with a write secret but NO db_name must fail
+    closed — SQL Server would otherwise silently write to the master system DB
+    (unlike MySQL, whose database=None errors out). No connect."""
+    mock_verify.return_value = {"ok": True}
+    row = dict(_MSSQL_ROW)
+    row.pop("db_name")
+    row["db_write_secret_arn"] = "arn:db-write"
+    mock_lookup.return_value = row
+    mock_cfc.return_value = _fake_sm()
+
+    result = execute_sql_impl(
+        MagicMock(),
+        cluster_id="rds-mssql-1",
+        sql="CREATE TABLE Orders(id INT)",
+        approved=True,
+        approval_id="appr-1",
+    )
+    assert result["status"] == "unsupported_engine"
+    assert "db_name" in result["reason"]
+    mock_ms.connect.assert_not_called()
+
+
 @patch("mcp_servers.operations.tools.execute_sql.boto3")
 @patch("mcp_servers.operations.tools.execute_sql.mssql_direct")
 @patch("mcp_servers.operations.tools.execute_sql.mysql_direct")

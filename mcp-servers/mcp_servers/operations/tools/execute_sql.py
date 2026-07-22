@@ -225,6 +225,19 @@ def execute_sql_impl(
                 # and unqualified writes land in master — so the agent must qualify
                 # with [db].[schema].[object]. database=None when db_name is unset.
                 database = cluster.get("db_name")
+                # Unlike MySQL (database=None → server error 1044 fail-safes an
+                # unqualified write), SQL Server would silently succeed against the
+                # master system DB. So reject an approved write with no target DB
+                # BEFORE connecting — reads are unaffected (master is harmless).
+                if not is_safe and not database:
+                    return {
+                        "status": "unsupported_engine",
+                        "cluster_id": cluster_id,
+                        "reason": (
+                            "SQL Server 쓰기는 대상 DB가 필요합니다 — db_name을 설정하세요 "
+                            "(PATCH /api/clusters/{id}/meta). master 기본 접속으로의 무자격 쓰기 방지."
+                        ),
+                    }
                 conn = None
                 try:
                     conn = mssql_direct.connect(
