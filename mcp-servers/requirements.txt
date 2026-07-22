@@ -12,3 +12,6 @@ pymemcache>=4
 # pg8000: pure-Python PG driver (no C build) for prewarm_reader's direct
 # connection to a reader INSTANCE endpoint (RDS Data API can't target one instance).
 pg8000>=1.31
+# pymysql: direct TCP connection for execute_sql's ad-hoc chat SQL against RDS
+# MySQL (RDS for MySQL has no Data API). See mysql_direct.py.
+pymysql>=1.1
