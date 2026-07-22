@@ -15,6 +15,7 @@ tests run without pymysql installed.
 """
 
 import importlib.util
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -93,8 +94,19 @@ def test_handler_filters_rds_instance_mysql_with_secret():
 
 def test_process_cluster_never_raises_and_isolates_failures():
     h = _load("handler")
-    h._CONNECT_FACTORY = lambda **kw: (_ for _ in ()).throw(RuntimeError("boom"))
+    # Real secret shape so json.loads succeeds — otherwise the parse dies first
+    # and the injected connect failure below is never reached (dead path).
+    secrets = MagicMock()
+    secrets.get_secret_value.return_value = {"SecretString": json.dumps({"username": "u", "password": "p"})}
+    called = {"n": 0}
+
+    def _boom(**kw):
+        called["n"] += 1
+        raise RuntimeError("boom")
+
+    h._CONNECT_FACTORY = _boom
     res = h._process_cluster(
         {"cluster_id": "a", "endpoint": "h", "port": 3306, "db_secret_arn": "arn:x"},
-        secrets=MagicMock(), cache_execute=lambda *a, **k: None, run_ts="2026-07-22T00:00:00+00:00")
-    assert res["cluster_id"] == "a" and "error" in res
+        secrets=secrets, cache_execute=lambda *a, **k: None, run_ts="2026-07-22T00:00:00+00:00")
+    assert res["cluster_id"] == "a" and "error" in res   # never raises, returns error marker
+    assert called["n"] == 1                               # the real connect path was reached
