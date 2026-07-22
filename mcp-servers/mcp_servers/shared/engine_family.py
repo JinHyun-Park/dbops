@@ -88,6 +88,7 @@ CAPABILITIES = {
         # reached for this family (sql_via is the dispatch key).
         "sql": True, "sql_via": "direct",
         "rds_meta": True, "perf_insights": True, "simulation": False,
+        "rds_cost_simulation": True,
         # Cluster/reader-topology concepts — never applicable to a standalone
         # DB instance.
         "custom_endpoint": False, "prewarm": False, "scale_instance": False,

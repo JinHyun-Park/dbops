@@ -117,8 +117,11 @@ def _member_instance_classes(rds, cluster_id: str) -> dict:
 # Provisioned instance-size ladder for the "upsize one class" comparison. Same
 # family (e.g. db.r6g.*), one step up the size axis. Missing/unknown size => no
 # next class (autoscale_vs_fixed is then omitted), never a fabricated guess.
+# "micro"/"small" are prepended for T-family (db.t3/db.t4g) RDS instances
+# (rds_instance family, R-5 right-sizing) — no Aurora r6g/etc class ever uses
+# those size tokens, so this is additive and doesn't change Aurora behavior.
 _SIZE_LADDER = [
-    "medium", "large", "xlarge", "2xlarge", "4xlarge", "8xlarge",
+    "micro", "small", "medium", "large", "xlarge", "2xlarge", "4xlarge", "8xlarge",
     "12xlarge", "16xlarge", "24xlarge", "32xlarge", "48xlarge",
 ]
 

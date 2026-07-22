@@ -11,6 +11,7 @@ from mcp_servers.simulation.tools.capacity_cost import simulate_dynamodb_capacit
 from mcp_servers.simulation.tools.ddl_impact import simulate_ddl_impact_impl
 from mcp_servers.simulation.tools.elasticache_scaling_simulation import simulate_elasticache_node_resize_impl
 from mcp_servers.simulation.tools.parameter_simulation import simulate_parameter_change_impl
+from mcp_servers.simulation.tools.rds_rightsizing import simulate_rds_instance_rightsizing_impl
 from mcp_servers.simulation.tools.scaling_simulation import simulate_scaling_impl
 from mcp_servers.simulation.tools.upgrade_compatibility import check_upgrade_compatibility_impl
 from mcp_servers.simulation.tools.upgrade_impact import estimate_upgrade_impact_impl
@@ -121,6 +122,20 @@ TOOLS = {
             "required": ["cluster_id"],
         },
     },
+    "simulate_rds_instance_rightsizing": {
+        "impl": simulate_rds_instance_rightsizing_impl,
+        "description": "RDS instance (MySQL/SQL Server) only: CW-driven right-sizing with real Price List cost delta (compute + storage/IOPS + SQL Server license). Read-only, no approval.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target RDS instance cluster ID"},
+                "window_hours": {"type": "number", "description": "Utilization lookback window in hours (default 168, cap 720)"},
+                "headroom": {"type": "number", "description": "Downsize sensitivity: scales the CPU p95 hold-vs-downsize threshold (default 0.5 -> 40%)"},
+                "new_instance_class": {"type": "string", "description": "Optional: price a specific target class instead of the auto recommendation"},
+            },
+            "required": ["cluster_id"],
+        },
+    },
 }
 
 
@@ -194,6 +209,16 @@ def lambda_handler(event, context):
                     "engine_family": fam,
                     "cluster_id": cluster_id,
                     "message": "노드 리사이즈 비용 시뮬레이션은 ElastiCache 전용입니다.",
+                })}]}
+        elif tool_name == "simulate_rds_instance_rightsizing":
+            # POSITIVE gate: rds_instance-only right-sizing/cost. A None family →
+            # .get(None,{}) → False → refused; only a resolved rds_instance passes.
+            if not CAPABILITIES.get(fam, {}).get("rds_cost_simulation", False):
+                return {"content": [{"type": "text", "text": json.dumps({
+                    "status": "unsupported_engine",
+                    "engine_family": fam,
+                    "cluster_id": cluster_id,
+                    "message": "인스턴스 우측 사이징/비용 시뮬레이션은 RDS MySQL·SQL Server 전용입니다.",
                 })}]}
         else:
             # Engine-family guard: the OTHER simulation tools (upgrade/parameter/

@@ -322,4 +322,7 @@ def simulation_schema():
         _tool("simulate_elasticache_node_resize",
               "ElastiCache only: estimate the monthly cost of resizing an ElastiCache cluster node type / count using the AWS Price List API. Read-only, no approval required.",
               {"cluster_id": "string", "new_node_type": "string", "new_node_count": "integer"}, ["cluster_id"]),
+        _tool("simulate_rds_instance_rightsizing",
+              "RDS instance (MySQL/SQL Server) only: CW-driven right-sizing with real Price List cost delta (compute + storage/IOPS + SQL Server license). Read-only, no approval.",
+              {"cluster_id": "string", "window_hours": "number", "headroom": "number", "new_instance_class": "string"}, ["cluster_id"]),
     ]
