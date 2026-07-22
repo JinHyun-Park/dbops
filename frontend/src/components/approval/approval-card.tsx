@@ -79,6 +79,12 @@ const ACTION_RISK: Record<string, string> = {
   remove_reader_instance: "high",
   // Scale-out + auto-warmup creates a billable reader (approval #1) → high.
   scale_out_with_warmup: "high",
+  // Standalone RDS instance writes (R-3, non-Aurora MySQL/SQL Server).
+  // Reboot causes a short outage; class change restarts via ApplyImmediately
+  // and changes billing → both high. Snapshot is non-destructive → low.
+  reboot_rds_instance: "high",
+  create_rds_snapshot: "low",
+  modify_rds_instance_class: "high",
   other: "medium",
 };
 
@@ -272,6 +278,38 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     considerations: [
       "리더가 available되면 예열 승인이 자동으로 승인 대기열에 나타납니다",
       "명시된 인스턴스 클래스가 필요한 읽기 용량·비용에 적정한지 확인",
+    ],
+  },
+  reboot_rds_instance: {
+    what: "독립형(비-Aurora) RDS 인스턴스를 재부팅합니다.",
+    risks: [
+      "재부팅 동안 짧은 다운타임이 발생합니다(수 분).",
+      "Multi-AZ가 아니면 재부팅 중 연결이 끊깁니다.",
+      "Aurora 클러스터 멤버 인스턴스는 이 툴로 재부팅할 수 없습니다(거부됨).",
+    ],
+    considerations: [
+      "Multi-AZ 여부 확인 — 아니라면 연결 끊김에 대비",
+      "저트래픽 시간대 권장",
+    ],
+  },
+  create_rds_snapshot: {
+    what: "독립형(비-Aurora) RDS 인스턴스의 수동 스냅샷(백업)을 생성합니다.",
+    risks: ["비파괴적 — 무중단, 데이터 변경 없음. 스토리지 비용만 소폭 발생."],
+    considerations: [
+      "스냅샷 식별자는 이 승인 시점에 고정됩니다(재승인 시 새 이름으로 생성)",
+      "대용량이면 생성에 시간 소요",
+    ],
+  },
+  modify_rds_instance_class: {
+    what: "독립형(비-Aurora) RDS 인스턴스의 컴퓨트 클래스를 변경합니다(ApplyImmediately).",
+    risks: [
+      "ApplyImmediately로 즉시 적용되며 인스턴스 재기동으로 짧은 다운타임 발생.",
+      "인스턴스 클래스 변경은 시간당 과금이 달라집니다.",
+      "승인 이후 클래스가 드리프트되면 안전을 위해 변경이 거부됩니다.",
+    ],
+    considerations: [
+      "target class / current class(아래 표시)를 확인 — 의도한 방향(업/다운사이즈)인지",
+      "Multi-AZ 여부 확인 — 아니라면 재기동 중 연결 끊김",
     ],
   },
 };

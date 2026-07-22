@@ -62,4 +62,9 @@ MULTIENGINE_CHEATSHEET = """
 4. 쓰기/구성 변경이 필요한 경우 권고안만 제공 (직접 remediation 불가)
 5. 시뮬레이션 도구(upgrade/parameter/DDL/scaling)는 Aurora 전용 — DocumentDB/DynamoDB엔
    호출 금지(게이트웨이가 unsupported_engine 반환). 용량/비용 what-if는 findings 권고안으로 대체.
+
+## 독립형 RDS 인스턴스 (비-Aurora MySQL/SQL Server) 참고
+쿼리 통계는 캐시 기반 `get_top_queries` 등이 엔진 무관하게 그대로 동작 — Aurora MySQL과
+동일한 진단 흐름(위 Aurora 섹션)을 그대로 사용하면 됩니다. SQL 직접 실행은 MySQL만
+가능(SQL Server는 추후 릴리스).
 """
