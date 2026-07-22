@@ -6,6 +6,9 @@ from mcp_servers.shared.sql_safety import (
     strip_sql_literals,
 )
 
+# is_read_only_safe() already strips literals + comments internally, so tests
+# below call it directly with raw SQL rather than pre-stripping.
+
 
 def test_read_only_safe_accepts_plain_select():
     assert is_read_only_safe("SELECT * FROM users WHERE id = 5") is True
@@ -56,3 +59,30 @@ def test_plain_block_comment_still_stripped():
     """비실행 주석은 종전대로 제거 — 주석 속 키워드로 인한 오탐 방지."""
     stripped = strip_sql_literals("SELECT 1 /* DROP TABLE users */")
     assert "DROP" not in stripped.upper()
+
+
+def test_mysql_side_effecting_patterns():
+    """MySQL equivalents of PG_TERMINATE_BACKEND/PG_SLEEP/advisory locks —
+    KILL, SLEEP(), GET_LOCK/RELEASE_LOCK, LOAD_FILE, LOCK TABLES, BENCHMARK
+    must classify as side-effecting (not safe) for the R-3 direct-TCP path."""
+    for sql in [
+        "KILL 1234",
+        "SELECT SLEEP(600)",
+        "SELECT GET_LOCK('x', 5)",
+        "SELECT RELEASE_LOCK('x')",
+        "SELECT LOAD_FILE('/etc/passwd')",
+        "LOCK TABLES t WRITE",
+        "SELECT BENCHMARK(100000000, MD5('x'))",
+    ]:
+        assert is_read_only_safe(sql) is False, sql
+
+
+def test_mysql_plain_reads_stay_safe():
+    """`'sleep(1)'` inside a string literal and `killed_count` as a column
+    name must NOT trip the new patterns (literal-stripping + word boundaries)."""
+    for sql in [
+        "SELECT * FROM t WHERE name = 'sleep(1)'",
+        "SHOW ENGINE INNODB STATUS",
+        "SELECT killed_count FROM stats",
+    ]:
+        assert is_read_only_safe(sql) is True, sql

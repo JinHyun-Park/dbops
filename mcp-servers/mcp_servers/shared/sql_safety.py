@@ -36,6 +36,12 @@ SIDE_EFFECTING_PATTERNS = [
     r"\bLO_IMPORT\b", r"\bLO_EXPORT\b",
     r"\bPG_READ_FILE\b", r"\bPG_READ_BINARY_FILE\b",
     r"\bDBLINK\w*\b", r"\bPG_SLEEP\w*\b",
+    r"\bKILL\b",                                  # MySQL: kill a connection/query
+    r"\bSLEEP\s*\(",                              # MySQL: blocks the connection
+    r"\bGET_LOCK\s*\(", r"\bRELEASE_LOCK\s*\(",   # MySQL: named locks
+    r"\bLOAD_FILE\s*\(",                          # MySQL: reads a server-side file
+    r"\bLOCK\s+TABLES\b",                         # MySQL: table-level lock
+    r"\bBENCHMARK\s*\(",                          # MySQL: CPU-burning loop
 ]
 
 # Command keywords that, when they appear AFTER a statement-separating ';',
