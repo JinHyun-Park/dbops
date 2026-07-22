@@ -78,7 +78,13 @@ def price_rds_instance_hour(region, engine, instance_class, edition=None, multi_
     if not instance_class or not label:
         return None
     deploy = "Multi-AZ" if multi_az else "Single-AZ"
-    key = ("inst", region, label, instance_class, deploy, edition)
+    # SQL Server: databaseEngine is the flat "SQL Server" for every edition, so
+    # `label` does NOT discriminate edition — the cache key MUST include the
+    # edition discriminator (edition_label), else e.g. sqlserver-ex and
+    # sqlserver-ee collide on one key and the second silently returns the first
+    # edition's price. Resolve edition_label BEFORE building the key.
+    edition_label = edition or _RDS_EDITION_LABEL.get(engine_key)
+    key = ("inst", region, engine_key, instance_class, deploy, edition_label)
     if key in _CACHE:
         return _CACHE[key]
     result = None
@@ -91,9 +97,6 @@ def price_rds_instance_hour(region, engine, instance_class, edition=None, multi_
             {"Type": "TERM_MATCH", "Field": "licenseModel",
              "Value": _RDS_LICENSE_MODEL.get(engine_key, _DEFAULT_LICENSE_MODEL)},
         ]
-        # SQL Server: databaseEngine is edition-agnostic, so edition needs its
-        # own filter. edition arg overrides the engine-derived default.
-        edition_label = edition or _RDS_EDITION_LABEL.get(engine_key)
         if edition_label:
             filters.append({"Type": "TERM_MATCH", "Field": "databaseEdition", "Value": edition_label})
         resp = _client().get_products(
