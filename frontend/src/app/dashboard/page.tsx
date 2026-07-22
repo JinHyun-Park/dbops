@@ -59,6 +59,7 @@ import {
 import { DynamodbOverviewPanel } from "@/components/dashboard/dynamodb-overview-panel";
 import { DocdbOverviewPanel } from "@/components/dashboard/docdb-overview-panel";
 import { ElasticacheOverviewPanel } from "@/components/dashboard/elasticache-overview-panel";
+import { RdsInstanceOverviewPanel } from "@/components/dashboard/rds-instance-overview-panel";
 
 type TsPoint = { ts: string; value: number | string; dimensions?: string };
 
@@ -938,6 +939,20 @@ export default function DashboardPage() {
                     <ElasticacheOverviewPanel
                       clusterId={selectedCluster}
                       range={range}
+                    />
+                  </>
+                )}
+
+                {fam === "rds_instance" && (
+                  <>
+                    <HealthScore
+                      clusterId={selectedCluster}
+                      engine={activeEngine}
+                    />
+                    <RdsInstanceOverviewPanel
+                      clusterId={selectedCluster}
+                      range={range}
+                      engineVersion={dashboardData?.cluster?.engine_version}
                     />
                   </>
                 )}
