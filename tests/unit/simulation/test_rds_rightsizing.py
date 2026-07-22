@@ -62,3 +62,50 @@ def test_insufficient_data_when_no_metrics():
     cache = _Cache(_meta(), [{"cpu_p95": None, "samples": 0}])
     out = rr.simulate_rds_instance_rightsizing_impl(cache, cluster_id="dbops-demo-mssql")
     assert out["status"] == "insufficient_data"
+
+
+def test_sqlserver_pricing_receives_resolvable_edition_not_raw_engine():
+    """Regression (CRITICAL): the tool must NOT pass the raw registry engine
+    string as `edition` — price_rds_instance_hour expects the Price-List label
+    (or None to self-resolve from engine). Passing "sqlserver-ex" matched zero
+    SKUs → every SQL Server price silently fell back."""
+    cache = _Cache(_meta("sqlserver-ex"), _metrics(cpu_p95=6.0))
+    seen = []
+
+    def spy(region, engine, ic, edition=None, multi_az=False):
+        seen.append(edition)
+        return 0.05
+
+    with patch.object(rr, "price_rds_instance_hour", side_effect=spy), \
+         patch.object(rr, "price_rds_storage_month", return_value={"storage_usd": 2.28, "iops_usd": 0.0}):
+        out = rr.simulate_rds_instance_rightsizing_impl(cache, cluster_id="dbops-demo-mssql")
+    assert seen, "price_rds_instance_hour was not called"
+    # Never the raw registry string; None (self-resolve) or the Price-List label only.
+    assert all(e in (None, "Express") for e in seen), seen
+    assert out["cost_impact"]["pricing_source"] == "aws_price_list"
+
+
+def test_explicit_override_to_smaller_class_labels_downsize():
+    """Regression (IMPORTANT-1): an explicit override to a SMALLER class must
+    read 'downsize', matching the negative cost delta — not a hardcoded 'upsize'."""
+    cache = _Cache(_meta("mysql"), _metrics(cpu_p95=50.0))
+    # cur db.t3.small = 0.045/hr, requested db.t3.micro = 0.022/hr → cheaper.
+    with patch.object(rr, "price_rds_instance_hour", side_effect=[0.045, 0.022]), \
+         patch.object(rr, "price_rds_storage_month", return_value={"storage_usd": 2.28, "iops_usd": 0.0}):
+        out = rr.simulate_rds_instance_rightsizing_impl(
+            cache, cluster_id="dbops-demo-mysql", new_instance_class="db.t3.micro")
+    assert out["recommendation"]["instance_class"] == "db.t3.micro"
+    assert out["cost_impact"]["delta_monthly_usd"] < 0
+    assert out["recommendation"]["action"] == "downsize"
+
+
+def test_headroom_out_of_range_cannot_downsize_a_busy_instance():
+    """Regression (IMPORTANT-2): an out-of-range headroom must not collapse/invert
+    the hold band. cpu_p95=78 with headroom=5 → clamped, threshold capped < 80 →
+    the instance stays 'hold', never 'downsize'."""
+    cache = _Cache(_meta("mysql"), _metrics(cpu_p95=78.0, conn_peak=10))
+    with patch.object(rr, "price_rds_instance_hour", side_effect=[0.045, 0.045]), \
+         patch.object(rr, "price_rds_storage_month", return_value={"storage_usd": 2.28, "iops_usd": 0.0}):
+        out = rr.simulate_rds_instance_rightsizing_impl(
+            cache, cluster_id="dbops-demo-mysql", headroom=5)
+    assert out["recommendation"]["action"] == "hold"

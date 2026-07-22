@@ -36,9 +36,23 @@ def _next_class_down(instance_class):
     return f"{prefix}.{_SIZE_LADDER[i - 1]}"
 
 
-def _edition(engine):
-    e = (engine or "").lower()
-    return e if e.startswith("sqlserver") else None
+def _ladder_direction(cur_class, target):
+    """'downsize'/'upsize'/'hold' by size position on _SIZE_LADDER (the size
+    token — micro/small/large/… — is shared across db families, so the family
+    prefix is irrelevant). 'hold' when equal, or when either token is unknown."""
+    if not target or target == cur_class:
+        return "hold"
+
+    def _idx(ic):
+        try:
+            return _SIZE_LADDER.index(ic.split(".")[2])
+        except (AttributeError, IndexError, ValueError):
+            return None
+
+    ci, ti = _idx(cur_class), _idx(target)
+    if ci is None or ti is None:
+        return "hold"
+    return "downsize" if ti < ci else "upsize" if ti > ci else "hold"
 
 
 def _license_note(engine):
@@ -58,6 +72,13 @@ def simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=
         window_hours = max(1, min(int(window_hours or 168), 720))
     except (TypeError, ValueError):
         window_hours = 168
+    # headroom is agent/caller-exposed; clamp to [0,1] so it can never collapse
+    # or invert the hold band (headroom>1 would push the downsize threshold at or
+    # past the 80% upsize threshold → recommending downsize on a hot instance).
+    try:
+        headroom = max(0.0, min(float(headroom), 1.0))
+    except (TypeError, ValueError):
+        headroom = 0.5
 
     meta_rows = cache.execute(
         "SELECT engine, instance_class, region, resource_details "
@@ -93,7 +114,7 @@ def simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=
         " PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value) FILTER (WHERE metric_type='read_iops') AS read_iops_p95, "
         " PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value) FILTER (WHERE metric_type='write_iops') AS write_iops_p95, "
         " MIN(value) FILTER (WHERE metric_type='freeable_memory') AS freeable_mem_min, "
-        " COUNT(*) AS samples "
+        " COUNT(*) FILTER (WHERE metric_type='cpu') AS samples "
         "FROM metric_snapshots "
         "WHERE cluster_id = :cid AND ts >= NOW() - (:h || ' hours')::interval "
         "  AND metric_type IN ('cpu','db_connections','read_iops','write_iops','freeable_memory')",
@@ -115,13 +136,16 @@ def simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=
 
     # Recommendation: explicit override wins; else CPU-p95-driven with a hold band.
     if new_instance_class:
-        target, action = new_instance_class, ("upsize" if new_instance_class != cur_class else "hold")
+        # Explicit override: the action label is resolved AFTER the cost delta
+        # (below) so it can never contradict the numbers — a smaller requested
+        # class must read "downsize", not a hardcoded "upsize".
+        target, action = new_instance_class, None
         reason = "요청한 인스턴스 클래스로 비용 비교"
     elif cpu_p95 >= 80:
         target = _next_class_up(cur_class) or cur_class
         action = "upsize" if target != cur_class else "hold"
         reason = f"CPU p95 {util['cpu_p95']}% — 한 단계 확대 권장"
-    elif cpu_p95 <= 40 * headroom / 0.5 and conn_peak < 50:
+    elif cpu_p95 <= min(40 * headroom / 0.5, 75) and conn_peak < 50:
         down = _next_class_down(cur_class)
         target, action = (down, "downsize") if down else (cur_class, "hold")
         reason = (f"CPU p95 {util['cpu_p95']}% · 커넥션 최대 {util['conn_peak']} — 한 단계 축소 여력"
@@ -129,9 +153,13 @@ def simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=
     else:
         target, action, reason = cur_class, "hold", f"CPU p95 {util['cpu_p95']}% — 현행 유지 적정"
 
-    edition = _edition(engine)
-    cur_hr = price_rds_instance_hour(region, engine, cur_class, edition, multi_az)
-    tgt_hr = price_rds_instance_hour(region, engine, target, edition, multi_az)
+    # edition is resolved INSIDE price_rds_instance_hour from the registry engine
+    # (via _RDS_EDITION_LABEL → the Price List `databaseEdition` value). Passing an
+    # edition here would have to be the Price-List label ("Express"), NOT the raw
+    # registry string — so leave it unset and let the helper map it, matching the
+    # pricing module's tested calling convention.
+    cur_hr = price_rds_instance_hour(region, engine, cur_class, multi_az=multi_az)
+    tgt_hr = price_rds_instance_hour(region, engine, target, multi_az=multi_az)
     stor = price_rds_storage_month(region, storage_type, storage_gb, iops)
     storage_usd, iops_usd = stor.get("storage_usd"), stor.get("iops_usd")
 
@@ -143,6 +171,14 @@ def simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=
     cur_monthly, tgt_monthly = _monthly(cur_hr), _monthly(tgt_hr)
     delta = round(tgt_monthly - cur_monthly, 2) if (cur_monthly is not None and tgt_monthly is not None) else None
     pct = round(delta / cur_monthly * 100, 1) if (delta is not None and cur_monthly) else None
+
+    # Explicit-override action (deferred above): label from the real cost
+    # direction; fall back to ladder position when pricing degraded (delta None).
+    if action is None:
+        if delta is not None and delta != 0:
+            action = "downsize" if delta < 0 else "upsize"
+        else:
+            action = _ladder_direction(cur_class, target)
 
     return {
         "status": "ok", "cluster_id": cluster_id, "engine": engine, "region": region,
