@@ -216,13 +216,19 @@ export function RdsInstanceOverviewPanel({
   const chart = useChartColors();
   const [details, setDetails] = useState<RdsInstanceDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(true);
+  const [detailsError, setDetailsError] = useState(false);
   const [series, setSeries] = useState<Record<Metric, Point[]>>(
     {} as Record<Metric, Point[]>,
   );
   const [seriesLoading, setSeriesLoading] = useState(true);
+  const [seriesError, setSeriesError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    // Clear the previous cluster's details up front so a slow or failed
+    // refetch can't leave stale data rendering under the new clusterId.
+    setDetails(null);
+    setDetailsError(false);
     Promise.resolve().then(() => {
       if (cancelled) return;
       setDetailsLoading(true);
@@ -233,7 +239,10 @@ export function RdsInstanceOverviewPanel({
           setDetailsLoading(false);
         })
         .catch(() => {
-          if (!cancelled) setDetailsLoading(false);
+          if (cancelled) return;
+          setDetails(null);
+          setDetailsError(true);
+          setDetailsLoading(false);
         });
     });
     return () => {
@@ -243,19 +252,35 @@ export function RdsInstanceOverviewPanel({
 
   useEffect(() => {
     let cancelled = false;
-    const load = () => {
+    // Clear stale series from the previous cluster/range up front — without
+    // this, a switch to a new cluster keeps rendering the old cluster's
+    // charts (unmasked, no loading indicator) until the new fetch resolves.
+    setSeries({} as Record<Metric, Point[]>);
+    setSeriesLoading(true);
+    setSeriesError(false);
+    // ponytail: only the first load (per clusterId/range) clears on failure
+    // and surfaces an error card; later 30s poll failures on the same
+    // cluster keep showing the last-good data and retry silently — a
+    // transient blip shouldn't blank out charts the DBA is actively reading.
+    const load = (isInitial: boolean) => {
       fetchBatchTimeseries(clusterId, [...METRICS], range)
         .then((d) => {
           if (cancelled) return;
           setSeries((d.series || {}) as Record<Metric, Point[]>);
+          setSeriesError(false);
           setSeriesLoading(false);
         })
         .catch(() => {
-          if (!cancelled) setSeriesLoading(false);
+          if (cancelled) return;
+          if (isInitial) {
+            setSeries({} as Record<Metric, Point[]>);
+            setSeriesError(true);
+          }
+          setSeriesLoading(false);
         });
     };
-    load();
-    const iv = setInterval(load, 30_000);
+    load(true);
+    const iv = setInterval(() => load(false), 30_000);
     return () => {
       cancelled = true;
       clearInterval(iv);
@@ -264,7 +289,9 @@ export function RdsInstanceOverviewPanel({
 
   const storageLabel =
     details?.storage_type && details?.allocated_storage_gb != null
-      ? `${details.storage_type} · ${details.allocated_storage_gb} GiB`
+      ? `${details.storage_type} · ${fmtDecimal(
+          details.allocated_storage_gb,
+        )} GiB`
       : "—";
 
   return (
@@ -276,6 +303,10 @@ export function RdsInstanceOverviewPanel({
         </div>
         {detailsLoading ? (
           <div className="text-zinc-500 text-sm">불러오는 중…</div>
+        ) : detailsError ? (
+          <div className="text-rose-300 text-sm">
+            인스턴스 상세 정보를 불러오지 못했습니다.
+          </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
             <StatTile
@@ -299,45 +330,51 @@ export function RdsInstanceOverviewPanel({
         <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
           리소스 사용률 (Resource Usage)
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <MiniChart
-            title="CPU Utilization"
-            points={series.cpu ?? []}
-            loading={seriesLoading}
-            colors={chart}
-            color="#34d399"
-            unit="%"
-            type="area"
-            formatValue={(v) => v.toFixed(1)}
-          />
-          <MiniChart
-            title="Connections"
-            points={series.db_connections ?? []}
-            loading={seriesLoading}
-            colors={chart}
-            color="#f472b6"
-            type="area"
-            formatValue={(v) => v.toFixed(0)}
-          />
-          <MiniChart
-            title="Freeable Memory"
-            points={series.freeable_memory ?? []}
-            loading={seriesLoading}
-            colors={chart}
-            color="#22d3ee"
-            type="area"
-            formatValue={(v) => fmtBytes(v)}
-          />
-          <MiniChart
-            title="Free Storage"
-            points={series.free_storage_bytes ?? []}
-            loading={seriesLoading}
-            colors={chart}
-            color="#60a5fa"
-            type="area"
-            formatValue={(v) => fmtBytes(v)}
-          />
-        </div>
+        {seriesError ? (
+          <div className="text-rose-300 text-sm bg-zinc-900/50 border border-zinc-800 p-5">
+            메트릭을 불러오지 못했습니다. 잠시 후 다시 시도합니다.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <MiniChart
+              title="CPU Utilization"
+              points={series.cpu ?? []}
+              loading={seriesLoading}
+              colors={chart}
+              color="#34d399"
+              unit="%"
+              type="area"
+              formatValue={(v) => v.toFixed(1)}
+            />
+            <MiniChart
+              title="Connections"
+              points={series.db_connections ?? []}
+              loading={seriesLoading}
+              colors={chart}
+              color="#f472b6"
+              type="area"
+              formatValue={(v) => fmtDecimal(v, 0)}
+            />
+            <MiniChart
+              title="Freeable Memory"
+              points={series.freeable_memory ?? []}
+              loading={seriesLoading}
+              colors={chart}
+              color="#22d3ee"
+              type="area"
+              formatValue={(v) => fmtBytes(v)}
+            />
+            <MiniChart
+              title="Free Storage"
+              points={series.free_storage_bytes ?? []}
+              loading={seriesLoading}
+              colors={chart}
+              color="#60a5fa"
+              type="area"
+              formatValue={(v) => fmtBytes(v)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
