@@ -225,21 +225,26 @@ export function RdsInstanceOverviewPanel({
 
   useEffect(() => {
     let cancelled = false;
+    // reqSeq: only the most recently *started* request may write state —
+    // guards against an out-of-order settle (distinct from `cancelled`,
+    // which guards against a stale effect instance after unmount/re-run).
+    let reqSeq = 0;
     // Clear the previous cluster's details up front so a slow or failed
     // refetch can't leave stale data rendering under the new clusterId.
     setDetails(null);
     setDetailsError(false);
+    const id = ++reqSeq;
     Promise.resolve().then(() => {
       if (cancelled) return;
       setDetailsLoading(true);
       fetchResourceDetails(clusterId)
         .then((d) => {
-          if (cancelled) return;
+          if (cancelled || id !== reqSeq) return;
           setDetails((d.resource_details as RdsInstanceDetails) ?? null);
           setDetailsLoading(false);
         })
         .catch(() => {
-          if (cancelled) return;
+          if (cancelled || id !== reqSeq) return;
           setDetails(null);
           setDetailsError(true);
           setDetailsLoading(false);
@@ -252,6 +257,12 @@ export function RdsInstanceOverviewPanel({
 
   useEffect(() => {
     let cancelled = false;
+    // reqSeq: the initial load and each 30s poll tick race independently —
+    // if the initial request is slow and a later poll tick settles first,
+    // the initial request's late arrival must not overwrite the fresher
+    // data with stale success or a stale error. Only the request whose id
+    // still matches the latest-started one may write state.
+    let reqSeq = 0;
     // Clear stale series from the previous cluster/range up front — without
     // this, a switch to a new cluster keeps rendering the old cluster's
     // charts (unmasked, no loading indicator) until the new fetch resolves.
@@ -263,15 +274,16 @@ export function RdsInstanceOverviewPanel({
     // cluster keep showing the last-good data and retry silently — a
     // transient blip shouldn't blank out charts the DBA is actively reading.
     const load = (isInitial: boolean) => {
+      const id = ++reqSeq;
       fetchBatchTimeseries(clusterId, [...METRICS], range)
         .then((d) => {
-          if (cancelled) return;
+          if (cancelled || id !== reqSeq) return;
           setSeries((d.series || {}) as Record<Metric, Point[]>);
           setSeriesError(false);
           setSeriesLoading(false);
         })
         .catch(() => {
-          if (cancelled) return;
+          if (cancelled || id !== reqSeq) return;
           if (isInitial) {
             setSeries({} as Record<Metric, Point[]>);
             setSeriesError(true);
