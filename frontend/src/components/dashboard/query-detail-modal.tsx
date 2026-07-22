@@ -94,7 +94,9 @@ export function QueryDetailModal({
           <div className="flex items-center gap-3">
             {latest && (
               <Link
-                href={`/chat?prompt=${encodeURIComponent(
+                href={`/chat?cluster=${encodeURIComponent(
+                  clusterId,
+                )}&prompt=${encodeURIComponent(
                   `클러스터 ${clusterId}에서 다음 쿼리에 대해 EXPLAIN (FORMAT JSON)을 실행하고, **한국어로** 실행 계획을 요약 + 가장 비싼 노드 강조 + 개선안을 제안해줘:\n\n${latest.query_text}`,
                 )}`}
                 className="text-xs bg-sky-600 hover:bg-sky-500 text-white rounded px-3 py-1.5 transition"

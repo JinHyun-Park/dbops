@@ -94,9 +94,18 @@ export default function RunbooksPage() {
   const runWithAgent = useCallback(
     (rb: RunbookListItem) => {
       const prompt = `다음 런북을 단계별로 검토하고 실행해줘: ${rb.title} (id=${rb.id})`;
-      router.push(`/chat?prompt=${encodeURIComponent(prompt)}`);
+      // Thread the cluster the user is working with (filter selection, else the
+      // global one) so the chat runs the runbook against the right cluster
+      // instead of the async fetchClusters default.
+      const cluster = filterCluster || getSelectedCluster() || "";
+      const qs = cluster
+        ? `cluster=${encodeURIComponent(cluster)}&prompt=${encodeURIComponent(
+            prompt,
+          )}`
+        : `prompt=${encodeURIComponent(prompt)}`;
+      router.push(`/chat?${qs}`);
     },
-    [router],
+    [router, filterCluster],
   );
 
   return (

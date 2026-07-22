@@ -8,6 +8,7 @@ import { MessageList, type Message } from "./message-list";
 import { streamChat } from "@/lib/agentcore-sse";
 import { takeRcaHandoff } from "@/lib/rca-handoff";
 import { SearchableClusterSelect } from "@/components/design-system/searchable-cluster-select";
+import { getSelectedCluster } from "@/lib/selected-cluster";
 import {
   fetchClusters,
   fetchModels,
@@ -421,6 +422,9 @@ export function ChatPanel() {
     // and as the newest entry it auto-activates.
     const handoff = takeRcaHandoff();
     if (handoff) {
+      // Pin the handoff cluster so the async fetchClusters default below can't
+      // clobber it with rows[0] (the deep-link path relies on the same ref).
+      deepLinkClusterRef.current = handoff.cluster_id;
       const conv: Conversation = {
         id: `dbops-session-${crypto.randomUUID()}`,
         title: `RCA · ${handoff.cluster_id}`.slice(0, 50),
@@ -447,7 +451,12 @@ export function ChatPanel() {
     // 아래 listChatSessions 머지의 setConversations에 덮이지 않는다.
     const dlParams = new URLSearchParams(window.location.search);
     const dlPrompt = dlParams.get("prompt");
-    const dlCluster = dlParams.get("cluster");
+    // Explicit ?cluster= wins; for a prompt-only deep-link (slow-query "Chat에서
+    // 분석", 런북 실행 등) fall back to the globally-selected cluster the user was
+    // working with, so the conversation continues on the right cluster instead
+    // of the async fetchClusters default (rows[0], first-alphabetical).
+    const dlCluster =
+      dlParams.get("cluster") || (dlPrompt ? getSelectedCluster() : null);
     if (dlCluster) deepLinkClusterRef.current = dlCluster;
     if (dlPrompt && !handoff) {
       const conv = newConversation(dlCluster || "");
@@ -541,8 +550,21 @@ export function ChatPanel() {
     fetchClusters()
       .then((rows: ClusterRow[]) => {
         setClusters(rows);
-        if (rows.length > 0 && !clusterId && !deepLinkClusterRef.current)
-          setClusterId(rows[0].cluster_id);
+        if (rows.length === 0) return;
+        // Only default the cluster if one hasn't already been established (by a
+        // restored conversation, a deep-link, or an RCA handoff). The functional
+        // updater reads the CURRENT clusterId — the effect closure captured the
+        // mount-time "" and would otherwise clobber a just-set cluster once this
+        // async fetch resolves (the bug behind chats "continuing" on the wrong
+        // cluster). Prefer the globally-selected cluster over rows[0] so a fresh
+        // chat still opens on the cluster the user was working with.
+        setClusterId((cur) => {
+          if (cur) return cur;
+          const global = getSelectedCluster();
+          if (global && rows.some((r) => r.cluster_id === global))
+            return global;
+          return rows[0].cluster_id;
+        });
       })
       .catch((e) => console.error("Failed to load clusters:", e));
   }, []);
