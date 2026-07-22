@@ -49,6 +49,7 @@ import {
 import {
   engineBadge,
   engineFamily,
+  engineKind,
   isPostgres,
   isMysql,
   eolFor,
@@ -476,7 +477,8 @@ export default function DashboardPage() {
         (t) =>
           fam !== "rds_instance" ||
           !["perf", "internals"].includes(t) ||
-          isMysql(activeEngine),
+          isMysql(activeEngine) ||
+          engineKind(activeEngine) === "sqlserver",
       )
     : [];
   const activeTab: TabKey = visibleTabs.includes(tab) ? tab : "overview";
