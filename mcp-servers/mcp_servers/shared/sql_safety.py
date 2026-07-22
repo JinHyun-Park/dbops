@@ -42,6 +42,17 @@ SIDE_EFFECTING_PATTERNS = [
     r"\bLOAD_FILE\s*\(",                          # MySQL: reads a server-side file
     r"\bLOCK\s+TABLES\b",                         # MySQL: table-level lock
     r"\bBENCHMARK\s*\(",                          # MySQL: CPU-burning loop
+    # T-SQL: pytds sends the whole `;`-separated batch and SQL Server runs
+    # ALL of it (no driver-side multi-statement guard like pymysql's), so
+    # these must be caught anywhere in the text, not just at a prefix.
+    r"\bWAITFOR\s+DELAY\b", r"\bWAITFOR\s+TIME\b",  # blocking
+    r"\bXP_CMDSHELL\b",                            # OS command execution
+    r"\bSP_CONFIGURE\b",                           # server config mutation
+    r"\bBULK\s+INSERT\b",                          # bulk load
+    r"\bOPENROWSET\b", r"\bOPENQUERY\b",           # ad-hoc remote access
+    r"\bSP_EXECUTESQL\b",                          # dynamic SQL
+    r"\bDBCC\b",                                   # admin/maintenance commands
+    r"\bEXEC(UTE)?\s+(SYS\.)?(SP_|XP_)",           # stored-proc invocation
 ]
 
 # Command keywords that, when they appear AFTER a statement-separating ';',

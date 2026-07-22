@@ -1,5 +1,7 @@
 """Tests for the shared SQL read-only/side-effect classifier."""
 
+import re
+
 from mcp_servers.shared.sql_safety import (
     is_multi_statement,
     is_read_only_safe,
@@ -84,5 +86,46 @@ def test_mysql_plain_reads_stay_safe():
         "SELECT * FROM t WHERE name = 'sleep(1)'",
         "SHOW ENGINE INNODB STATUS",
         "SELECT killed_count FROM stats",
+    ]:
+        assert is_read_only_safe(sql) is True, sql
+
+
+def test_tsql_side_effecting_patterns():
+    """T-SQL: pytds sends the whole batch and SQL Server runs ALL of it (no
+    multi-statement guard from the driver, unlike pymysql) — these must
+    classify as side-effecting regardless of statement position."""
+    for sql in [
+        "WAITFOR DELAY '00:00:10'",
+        "WAITFOR TIME '22:00'",
+        "EXEC xp_cmdshell 'dir'",
+        "EXEC sp_configure 'show advanced options', 1",
+        "BULK INSERT t FROM 'file.csv'",
+        "SELECT * FROM OPENROWSET('SQLNCLI', 'server'; 'user'; 'pw', 'SELECT 1')",
+        "SELECT * FROM OPENQUERY(linked, 'SELECT 1')",
+        "EXEC sp_executesql N'SELECT 1'",
+        "DBCC CHECKDB",
+        "EXECUTE sys.sp_helpdb",
+    ]:
+        assert is_read_only_safe(sql) is False, sql
+
+
+def test_tsql_batch_stacked_statement_is_dangerous_and_unsafe():
+    """T-SQL executes `;`-separated statements as one native batch — the
+    existing multi-statement + DANGEROUS_PATTERNS scan of the whole text must
+    still catch this (R-4 recon fact), not just a PG/MySQL-shaped payload."""
+    sql = "SELECT 1; DROP TABLE x"
+    assert is_read_only_safe(sql) is False
+    assert re.search(r"\bDROP\b", sql.upper()) is not None
+
+
+def test_tsql_word_boundaries_and_literal_stripping_stay_safe():
+    """`sp_configure` must not match a column named `sp_configured_flag`;
+    plain sys.* catalog reads and a string literal containing 'xp_cmdshell'
+    must stay safe."""
+    for sql in [
+        "SELECT sp_configured_flag FROM t",
+        "SELECT name FROM sys.databases",
+        "SELECT execution_count FROM sys.dm_exec_query_stats",
+        "SELECT * FROM t WHERE note = 'xp_cmdshell'",
     ]:
         assert is_read_only_safe(sql) is True, sql
