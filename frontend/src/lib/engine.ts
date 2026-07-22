@@ -7,6 +7,7 @@
 export type EngineKind =
   | "postgres"
   | "mysql"
+  | "sqlserver"
   | "docdb"
   | "dynamodb"
   | "elasticache"
@@ -15,6 +16,7 @@ export type EngineKind =
 export function engineKind(engine: string | null | undefined): EngineKind {
   const e = (engine || "").toLowerCase();
   if (e.includes("postgres")) return "postgres";
+  if (e.includes("sqlserver")) return "sqlserver";
   if (e.includes("mysql")) return "mysql";
   if (e.includes("docdb")) return "docdb";
   if (e.includes("dynamodb")) return "dynamodb";
@@ -58,6 +60,13 @@ export function engineBadge(engine: string | null | undefined): EngineBadge {
         short: "MySQL",
         classes: "bg-orange-500/15 text-orange-300 border-orange-500/40",
         accent: "bg-orange-400",
+      };
+    case "sqlserver":
+      return {
+        label: "SQL Server",
+        short: "MSSQL",
+        classes: "bg-indigo-500/15 text-indigo-300 border-indigo-500/40",
+        accent: "bg-indigo-400",
       };
     case "docdb":
       return {
@@ -264,6 +273,8 @@ export function eolHint(info: EolInfo): string {
 export type EngineGroup =
   | "aurora-postgresql"
   | "aurora-mysql"
+  | "rds-mysql"
+  | "rds-sqlserver"
   | "documentdb"
   | "dynamodb"
   | "elasticache";
@@ -273,6 +284,8 @@ export function engineGroup(engine: string | null | undefined): EngineGroup {
   if (fam === "documentdb") return "documentdb";
   if (fam === "dynamodb") return "dynamodb";
   if (fam === "elasticache") return "elasticache";
+  if (fam === "rds_instance")
+    return engineKind(engine) === "sqlserver" ? "rds-sqlserver" : "rds-mysql";
   // relational → split by PG/MySQL. Unknown relational → treat as PG group.
   return engineKind(engine) === "mysql" ? "aurora-mysql" : "aurora-postgresql";
 }
@@ -280,6 +293,8 @@ export function engineGroup(engine: string | null | undefined): EngineGroup {
 export const ENGINE_GROUP_ORDER: EngineGroup[] = [
   "aurora-postgresql",
   "aurora-mysql",
+  "rds-mysql",
+  "rds-sqlserver",
   "documentdb",
   "dynamodb",
   "elasticache",
@@ -300,6 +315,16 @@ export const ENGINE_GROUP_META: Record<EngineGroup, EngineGroupMeta> = {
     label: "Aurora MySQL",
     accent: "bg-orange-400",
     classes: "bg-orange-500/15 text-orange-300 border-orange-500/40",
+  },
+  "rds-mysql": {
+    label: "RDS MySQL",
+    accent: "bg-amber-400",
+    classes: "bg-amber-500/15 text-amber-300 border-amber-500/40",
+  },
+  "rds-sqlserver": {
+    label: "RDS SQL Server",
+    accent: "bg-indigo-400",
+    classes: "bg-indigo-500/15 text-indigo-300 border-indigo-500/40",
   },
   documentdb: {
     label: "DocumentDB",
@@ -328,7 +353,8 @@ export type EngineFamily =
   | "relational"
   | "documentdb"
   | "dynamodb"
-  | "elasticache";
+  | "elasticache"
+  | "rds_instance";
 
 export function engineFamily(engine: string | null | undefined): EngineFamily {
   const e = (engine || "").toLowerCase();
@@ -341,6 +367,10 @@ export function engineFamily(engine: string | null | undefined): EngineFamily {
     e.includes("elasticache")
   )
     return "elasticache";
+  // RDS instance engines (non-Aurora). 'aurora-mysql' contains 'mysql' — the
+  // aurora guard keeps Aurora MySQL relational. Mirrors engine_family.py.
+  if (e.includes("sqlserver")) return "rds_instance";
+  if (e.includes("mysql") && !e.includes("aurora")) return "rds_instance";
   return "relational";
 }
 
@@ -376,6 +406,12 @@ export const FAMILY_META: Record<EngineFamily, FamilyMeta> = {
     accent: "bg-rose-400",
     classes: "bg-rose-500/15 text-rose-300 border-rose-500/40",
   },
+  rds_instance: {
+    label: "RDS Instance",
+    noun: "인스턴스",
+    accent: "bg-indigo-400",
+    classes: "bg-indigo-500/15 text-indigo-300 border-indigo-500/40",
+  },
 };
 
 // Which dashboard panels a family renders. The `relational` sentinel means
@@ -403,4 +439,5 @@ export const FAMILY_PANELS: Record<EngineFamily, Set<string>> = {
     "throughput",
     "replicationLag",
   ]),
+  rds_instance: new Set(["overview"]),
 };

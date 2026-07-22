@@ -183,6 +183,7 @@ const TABS_BY_FAMILY: Record<EngineFamily, TabKey[]> = {
   dynamodb: ["overview", "advisory", "config", "audit"],
   documentdb: ["overview", "advisory", "config", "audit"],
   elasticache: ["overview", "advisory", "config", "audit"],
+  rds_instance: ["overview", "audit"],
 };
 
 function readInitialTab(): TabKey {

@@ -17,6 +17,7 @@ export const FAMILY_ORDER: EngineFamily[] = [
   "documentdb",
   "dynamodb",
   "elasticache",
+  "rds_instance",
 ];
 
 export function groupByEngineFamily<T extends HasEngine>(
@@ -27,6 +28,7 @@ export function groupByEngineFamily<T extends HasEngine>(
     documentdb: [],
     dynamodb: [],
     elasticache: [],
+    rds_instance: [],
   };
   for (const it of items) groups[engineFamily(it.engine)].push(it);
   return groups;
@@ -45,6 +47,8 @@ export function groupByEngineGroup<T extends HasEngine>(
   const groups: Record<EngineGroup, T[]> = {
     "aurora-postgresql": [],
     "aurora-mysql": [],
+    "rds-mysql": [],
+    "rds-sqlserver": [],
     documentdb: [],
     dynamodb: [],
     elasticache: [],

@@ -336,7 +336,7 @@ export default function ClustersPage() {
         });
         return;
       }
-    } else if (form.engine === "docdb") {
+    } else if (["docdb", "mysql", "sqlserver"].includes(form.engine)) {
       if (!form.cluster_id || !form.account_id || !form.region) {
         setFeedback({
           kind: "err",
@@ -365,9 +365,9 @@ export default function ClustersPage() {
           region: form.region,
           resource_name: form.resource_name,
         };
-      } else if (form.engine === "docdb") {
+      } else if (["docdb", "mysql", "sqlserver"].includes(form.engine)) {
         payload = {
-          engine: "docdb",
+          engine: form.engine,
           cluster_id: form.cluster_id,
           account_id: form.account_id,
           region: form.region,
@@ -853,6 +853,8 @@ export default function ClustersPage() {
               >
                 <option value="aurora-postgresql">Aurora PostgreSQL</option>
                 <option value="aurora-mysql">Aurora MySQL</option>
+                <option value="mysql">MySQL (RDS)</option>
+                <option value="sqlserver">SQL Server (RDS)</option>
                 <option value="dynamodb">DynamoDB</option>
                 <option value="docdb">DocumentDB</option>
               </select>
@@ -923,7 +925,9 @@ export default function ClustersPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Aurora: cluster ID */}
               {(form.engine === "aurora-postgresql" ||
-                form.engine === "aurora-mysql") && (
+                form.engine === "aurora-mysql" ||
+                form.engine === "mysql" ||
+                form.engine === "sqlserver") && (
                 <Field
                   label="Cluster ID"
                   value={form.cluster_id}
