@@ -31,6 +31,7 @@ from collectors.pg_param_fitness import collect_param_fitness
 from collectors.pg_table_stats import collect_pg_table_stats
 from collectors.pi_collector import collect_pi_metrics
 from collectors.query_regression import collect_query_regression
+from collectors.rds_instance_cw_collector import collect_rds_instance_metrics
 from collectors.stats_collector import collect_query_stats
 
 
@@ -160,6 +161,31 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         except Exception as e:
             result["elasticache_findings_error"] = str(e)
             print(f"[{cluster_id}] elasticache findings error: {e}")
+        return result
+
+    # ------------------------------------------------------------------
+    # RDS instance path (non-Aurora MySQL / SQL Server) — instance-dimensioned
+    # CW + meta + PI; no Aurora-cluster/Data-API calls
+    # ------------------------------------------------------------------
+    if family == "rds_instance":
+        cw = get_client("cloudwatch", region)
+        rds_client = get_client("rds", region)
+        try:
+            r = collect_rds_instance_metrics(
+                cw, rds_client, cache_execute, cluster_id, region, account_id)
+            result["rds_instance"] = r
+        except Exception as e:
+            result["rds_instance_error"] = str(e)
+            print(f"[{cluster_id}] rds_instance error: {e}")
+            return result
+        if r.get("pi_enabled") and r.get("resource_id"):
+            try:
+                pi_client = get_client("pi", region)
+                result["pi"] = collect_pi_metrics(
+                    pi_client, cache_execute, r["resource_id"], cluster_id)
+            except Exception as e:
+                result["pi_error"] = str(e)
+                print(f"[{cluster_id}] pi error: {e}")
         return result
 
     # ------------------------------------------------------------------

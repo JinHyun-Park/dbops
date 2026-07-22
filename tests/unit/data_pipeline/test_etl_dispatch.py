@@ -197,3 +197,73 @@ def test_relational_runs_meta_and_cost():
     mock_ddb_collector.assert_not_called()
     mock_docdb_collector.assert_not_called()
     assert result["cluster_id"] == "prod-pg-1"
+
+
+# ---------------------------------------------------------------------------
+# Test 4: RDS instance (non-Aurora) routes ONLY to collect_rds_instance_metrics
+# ---------------------------------------------------------------------------
+
+def test_rds_instance_routes_to_instance_collector_only():
+    handler = _load_handler()
+
+    resource = {
+        "cluster_id": "dbops-demo-mysql",
+        "engine": "mysql",
+        "engine_family": "rds_instance",
+        "region": "ap-northeast-2",
+        "account_id": "111122223333",
+    }
+
+    mock_inst_collector = MagicMock(return_value={
+        "metrics_inserted": 7, "errors": [],
+        "resource_id": None, "pi_enabled": False})
+    mock_meta = MagicMock()
+    mock_pi = MagicMock()
+    mock_cw = MagicMock()
+    mock_cost = MagicMock()
+
+    with (
+        patch.object(handler, "collect_rds_instance_metrics", mock_inst_collector),
+        patch.object(handler, "collect_cluster_meta", mock_meta),
+        patch.object(handler, "collect_pi_metrics", mock_pi),
+        patch.object(handler, "collect_cw_metrics", mock_cw),
+        patch.object(handler, "collect_cost_findings", mock_cost),
+    ):
+        result = handler._collect_one(resource, **_COMMON_KWARGS)
+
+    mock_inst_collector.assert_called_once()
+    # Aurora-cluster meta / cluster-dimension CW / cost must NOT run;
+    # PI must not run either (pi_enabled=False in the collector result).
+    mock_meta.assert_not_called()
+    mock_cw.assert_not_called()
+    mock_cost.assert_not_called()
+    mock_pi.assert_not_called()
+    assert result["cluster_id"] == "dbops-demo-mysql"
+
+
+def test_rds_instance_runs_pi_when_enabled():
+    handler = _load_handler()
+
+    resource = {
+        "cluster_id": "dbops-demo-mysql",
+        "engine": "mysql",
+        "engine_family": "rds_instance",
+        "region": "ap-northeast-2",
+        "account_id": "111122223333",
+    }
+
+    mock_inst_collector = MagicMock(return_value={
+        "metrics_inserted": 7, "errors": [],
+        "resource_id": "db-ABC", "pi_enabled": True})
+    mock_pi = MagicMock(return_value={"rows": 1})
+
+    with (
+        patch.object(handler, "collect_rds_instance_metrics", mock_inst_collector),
+        patch.object(handler, "collect_pi_metrics", mock_pi),
+    ):
+        result = handler._collect_one(resource, **_COMMON_KWARGS)
+
+    mock_pi.assert_called_once()
+    # resource_id from the collector (NOT a db-cluster-id filtered lookup)
+    assert mock_pi.call_args.args[2] == "db-ABC"
+    assert "pi" in result
