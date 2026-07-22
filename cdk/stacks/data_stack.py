@@ -313,6 +313,71 @@ class DataStack(cdk.Stack):
             targets=[targets.LambdaFunction(self.docdb_mongo_lambda)],
         )
 
+        # RDS-instance direct collector. Like the DocDB Mongo collector (and
+        # UNLIKE the ETL collector, which only calls public AWS APIs), this one
+        # connects to the target MySQL over the wire protocol on 3306, which
+        # lives inside the private VPC — so it MUST be in-VPC and bundle pymysql
+        # + the RDS CA (not in the Lambda runtime). It scans the registry for
+        # rows carrying a db_secret_arn and pulls activity/InnoDB/lock stats.
+        rds_direct_sg = ec2.SecurityGroup(
+            self, "RdsDirectCollectorSG",
+            vpc=self.vpc,
+            description="dbops rds-instance direct collector - egress to mysql 3306",
+            allow_all_outbound=True,
+        )
+        self.rds_direct_lambda = lambda_.Function(
+            self, "RdsDirectCollector",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset(
+                "../data-pipeline/rds_direct_collector",
+                bundling=cdk.BundlingOptions(
+                    image=lambda_.Runtime.PYTHON_3_12.bundling_image,
+                    # Prefer local pip bundling (Docker-free CI / demo host); CDK
+                    # falls back to the Docker command below if local returns False.
+                    local=_PipLocalBundling("../data-pipeline/rds_direct_collector"),
+                    command=[
+                        "bash", "-c",
+                        # pip-install pymysql + copy source, then fetch the
+                        # RDS CA bundle into the asset. The CA fetch is
+                        # best-effort (|| true): if the build host has no network
+                        # a committed global-bundle.pem fallback is used instead.
+                        "pip install -r requirements.txt -t /asset-output "
+                        "&& cp -au . /asset-output "
+                        "&& (curl -fsSL -o /asset-output/global-bundle.pem "
+                        "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem "
+                        "|| true)",
+                    ],
+                ),
+            ),
+            timeout=cdk.Duration.minutes(5),
+            memory_size=512,
+            vpc=self.vpc,
+            security_groups=[rds_direct_sg],
+            environment={
+                "CACHE_DB_CLUSTER_ARN": self.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+            },
+        )
+        self.cache_db.secret.grant_read(self.rds_direct_lambda)
+        self.cache_db.grant_data_api_access(self.rds_direct_lambda)
+        foundation.clusters_table.grant_read_data(self.rds_direct_lambda)
+        # Per-cluster DB creds live in arbitrary Secrets Manager secrets whose
+        # ARNs are on the registry rows (db_secret_arn), so this must be
+        # resource "*" — the deployer scopes each secret to one cluster.
+        self.rds_direct_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
+        ))
+
+        events.Rule(
+            self, "RdsDirectCollectorSchedule",
+            schedule=events.Schedule.rate(cdk.Duration.minutes(5)),
+            targets=[targets.LambdaFunction(self.rds_direct_lambda)],
+        )
+
         self.alert_topic = sns.Topic(self, "AlertTopic", topic_name=f"dbops-{Settings.ENV}-alerts", enforce_ssl=True)  # cdk-nag AwsSolutions-SNS3
 
         self.alert_evaluator = lambda_.Function(
