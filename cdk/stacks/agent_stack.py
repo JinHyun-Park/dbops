@@ -1489,6 +1489,7 @@ class AgentStack(cdk.Stack):
             ("/api/simulation/ddl-impact", [apigwv2.HttpMethod.POST]),
             ("/api/simulation/dynamodb-capacity-cost", [apigwv2.HttpMethod.POST]),
             ("/api/simulation/elasticache-node-resize", [apigwv2.HttpMethod.POST]),
+            ("/api/simulation/rds-instance-rightsizing", [apigwv2.HttpMethod.POST]),
         ]:
             self.api.add_routes(
                 path=sim_path, methods=sim_methods, integration=sim_integration

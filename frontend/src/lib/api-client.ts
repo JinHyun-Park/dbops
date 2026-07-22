@@ -1871,6 +1871,60 @@ export function simulateElasticacheNodeResize(
   });
 }
 
+// RDS instance (MySQL/SQL Server, non-Aurora) right-sizing + cost what-if.
+// Dollar fields are null when the AWS Price List API couldn't resolve a price
+// (pricing_source "fallback_estimate") — the UI must render "n/a", never a fake $.
+export interface RdsRightsizingResponse {
+  status: "ok" | "insufficient_data" | "error" | "unsupported_engine";
+  message?: string;
+  reason?: string;
+  cluster_id?: string;
+  engine?: string;
+  region?: string;
+  current?: {
+    instance_class?: string | null;
+    storage_gb?: number | null;
+    storage_type?: string | null;
+    iops?: number | null;
+  };
+  utilization?: {
+    cpu_p95?: number | null;
+    conn_peak?: number | null;
+    read_iops_p95?: number | null;
+    write_iops_p95?: number | null;
+    window_hours?: number | null;
+  };
+  recommendation?: {
+    action?: "downsize" | "upsize" | "hold";
+    instance_class?: string | null;
+    reason?: string;
+  };
+  cost_impact?: {
+    current_monthly_usd?: number | null;
+    proposed_monthly_usd?: number | null;
+    delta_monthly_usd?: number | null;
+    change_pct?: number | null;
+    breakdown?: {
+      license_note?: string | null;
+    };
+    pricing_source?: "aws_price_list" | "fallback_estimate";
+  };
+}
+
+export function simulateRdsInstanceRightsizing(
+  clusterId: string,
+  opts?: { windowHours?: number; headroom?: number; newInstanceClass?: string },
+): Promise<RdsRightsizingResponse> {
+  return simPost(`/api/simulation/rds-instance-rightsizing`, {
+    cluster_id: clusterId,
+    ...(opts?.windowHours != null ? { window_hours: opts.windowHours } : {}),
+    ...(opts?.headroom != null ? { headroom: opts.headroom } : {}),
+    ...(opts?.newInstanceClass != null
+      ? { new_instance_class: opts.newInstanceClass }
+      : {}),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Runbooks API
 // ---------------------------------------------------------------------------

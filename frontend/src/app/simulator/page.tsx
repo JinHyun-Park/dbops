@@ -6,6 +6,7 @@ import {
   simulateDdlImpact,
   simulateElasticacheNodeResize,
   simulateParameterChange,
+  simulateRdsInstanceRightsizing,
   simulateScaling,
   simulateUpgradeCompatibility,
   simulateUpgradeImpact,
@@ -14,6 +15,7 @@ import {
   type ElasticacheNodeResizeResponse,
   type ParameterCatalogEntry,
   type ParameterChangeResponse,
+  type RdsRightsizingResponse,
   type ScalingResponse,
   type ScalingUnitPricing,
   type UpgradeCompatibilityResponse,
@@ -33,7 +35,6 @@ import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
 import { engineFamily } from "@/lib/engine";
 import { DynamoDbCapacitySimulator } from "@/components/dashboard/dynamodb-capacity-simulator";
-import { streamChat } from "@/lib/agentcore-sse";
 
 export default function SimulatorPage() {
   // Global selection (shared store) — switching via ⌘K/header persists here.
@@ -1271,51 +1272,11 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
 
 // ---------------------------------------------------------------------------
 // RDS instance (MySQL/SQL Server, non-Aurora) right-sizing + cost simulator.
-// No REST route exists for this tool (frontend-only task, gateway-tool-only
-// backend) — so unlike the sibling panels above it goes through the agent
-// over the same throwaway-session SSE mechanism the Maintenance Health "AI
-// 조치 제안" flow uses (streamChat). The agent is instructed to call the tool
-// exactly once and relay its JSON verbatim in a fenced block — we render the
-// tool's real numbers only; if parsing fails we show an error, never an
-// invented cost.
+// Backed by the REST route POST /api/simulation/rds-instance-rightsizing (the
+// api/simulation Lambda replicates the pricing/cost logic), matching every
+// sibling cost-sim panel — exact AWS Price List numbers with no LLM relay.
+// RdsRightsizingResponse is defined in api-client.ts.
 // ---------------------------------------------------------------------------
-
-interface RdsRightsizingResponse {
-  status: "ok" | "insufficient_data" | "error";
-  message?: string;
-  reason?: string;
-  cluster_id?: string;
-  engine?: string;
-  region?: string;
-  current?: {
-    instance_class?: string | null;
-    storage_gb?: number | null;
-    storage_type?: string | null;
-    iops?: number | null;
-  };
-  utilization?: {
-    cpu_p95?: number | null;
-    conn_peak?: number | null;
-    read_iops_p95?: number | null;
-    write_iops_p95?: number | null;
-    window_hours?: number | null;
-  };
-  recommendation?: {
-    action?: "downsize" | "upsize" | "hold";
-    instance_class?: string | null;
-    reason?: string;
-  };
-  cost_impact?: {
-    current_monthly_usd?: number | null;
-    proposed_monthly_usd?: number | null;
-    delta_monthly_usd?: number | null;
-    change_pct?: number | null;
-    breakdown?: {
-      license_note?: string | null;
-    };
-    pricing_source?: "aws_price_list" | "fallback_estimate";
-  };
-}
 
 const RDS_ACTION_KO: Record<string, string> = {
   downsize: "다운사이즈 권장",
@@ -1339,24 +1300,6 @@ function RdsActionBadge({ action }: { action?: string }) {
   );
 }
 
-// Extract the tool's raw JSON from the agent's accumulated text response.
-// Prefers a fenced ```json block; falls back to the outermost {...} span.
-// Returns null (never a guessed object) when nothing parses.
-function extractToolJson(text: string): RdsRightsizingResponse | null {
-  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fence ? fence[1] : text;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
-  try {
-    return JSON.parse(
-      candidate.slice(start, end + 1),
-    ) as RdsRightsizingResponse;
-  } catch {
-    return null;
-  }
-}
-
 function RdsRightsizingSimulator({
   clusterId,
   engine,
@@ -1372,36 +1315,18 @@ function RdsRightsizingSimulator({
     setResult(null);
     setErr(null);
     setLoading(true);
-    let buffer = "";
     let cancelled = false;
-    streamChat(
-      "simulate_rds_instance_rightsizing 툴을 이 클러스터로 정확히 한 번 호출해. " +
-        "다른 도구는 절대 호출하지 마(request_approval 등 쓰기/승인 도구 금지). " +
-        "툴이 반환한 JSON을 요약하거나 숫자를 고치지 말고, 그 원문 그대로 ```json 코드블록 " +
-        "하나에만 담아 출력해. 코드블록 앞뒤로 어떤 설명도 붙이지 마.",
-      clusterId,
-      (t) => {
-        buffer += t;
-      },
-      () => {},
-      () => {
+    simulateRdsInstanceRightsizing(clusterId)
+      .then((res) => {
         if (cancelled) return;
-        const parsed = extractToolJson(buffer);
-        if (!parsed) {
-          setErr(
-            "에이전트 응답에서 결과를 읽지 못했습니다. 다시 시도해주세요.",
-          );
-        } else {
-          setResult(parsed);
-        }
+        setResult(res);
         setLoading(false);
-      },
-      (e) => {
+      })
+      .catch((e: unknown) => {
         if (cancelled) return;
-        setErr(e.message);
+        setErr(e instanceof Error ? e.message : String(e));
         setLoading(false);
-      },
-    );
+      });
     return () => {
       cancelled = true;
     };
@@ -1454,8 +1379,7 @@ function RdsRightsizingSimulator({
 
         {loading && !result && !err && (
           <div className="p-6 text-zinc-500 text-sm">
-            에이전트가 CloudWatch 사용률과 AWS Price List 단가를 조회하는
-            중입니다…
+            CloudWatch 사용률과 AWS Price List 단가를 조회하는 중입니다…
           </div>
         )}
 
@@ -1472,11 +1396,14 @@ function RdsRightsizingSimulator({
           </div>
         )}
 
-        {!loading && result && result.status === "error" && (
-          <div className="p-4 text-xs text-rose-300">
-            {result.message ?? result.reason ?? "시뮬레이션에 실패했습니다."}
-          </div>
-        )}
+        {!loading &&
+          result &&
+          (result.status === "error" ||
+            result.status === "unsupported_engine") && (
+            <div className="p-4 text-xs text-rose-300">
+              {result.message ?? result.reason ?? "시뮬레이션에 실패했습니다."}
+            </div>
+          )}
 
         {!loading && result && result.status === "ok" && (
           <div className="p-4 space-y-3">
