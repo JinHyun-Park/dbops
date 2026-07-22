@@ -184,7 +184,7 @@ const TABS_BY_FAMILY: Record<EngineFamily, TabKey[]> = {
   dynamodb: ["overview", "advisory", "config", "audit"],
   documentdb: ["overview", "advisory", "config", "audit"],
   elasticache: ["overview", "advisory", "config", "audit"],
-  rds_instance: ["overview", "audit"],
+  rds_instance: ["overview", "perf", "internals", "audit"],
 };
 
 function readInitialTab(): TabKey {
@@ -471,7 +471,14 @@ export default function DashboardPage() {
   const fam = engineFamily(activeEngine);
   // Tabs applicable to this engine family; an unknown/missing/out-of-family tab
   // falls back to the overview render (design: unknown tab → overview).
-  const visibleTabs: TabKey[] = selectedCluster ? TABS_BY_FAMILY[fam] : [];
+  const visibleTabs: TabKey[] = selectedCluster
+    ? TABS_BY_FAMILY[fam].filter(
+        (t) =>
+          fam !== "rds_instance" ||
+          !["perf", "internals"].includes(t) ||
+          isMysql(activeEngine),
+      )
+    : [];
   const activeTab: TabKey = visibleTabs.includes(tab) ? tab : "overview";
 
   return (
@@ -959,27 +966,35 @@ export default function DashboardPage() {
               </>
             )}
 
-            {/* ═══════════════ 성능·쿼리 (perf) — relational only ═══════════════ */}
-            {activeTab === "perf" && fam === "relational" && (
-              <>
-                {/* On-demand LIVE top — PG only (pg_stat_activity / pg_buffercache
+            {/* ═══════════════ 성능·쿼리 (perf) — relational + rds_instance ═══════════════ */}
+            {activeTab === "perf" &&
+              (fam === "relational" || fam === "rds_instance") && (
+                <>
+                  {/* On-demand LIVE top — PG only (pg_stat_activity / pg_buffercache
                     are PG surfaces; MySQL SHOW PROCESSLIST is out of v1 scope). */}
-                {activeEngine.includes("postgresql") && (
-                  <div className="flex justify-end">
-                    <LiveTopPanel clusterId={selectedCluster} />
-                  </div>
-                )}
-                <QueriesPanel
-                  clusterId={selectedCluster}
-                  topQueries={dashboardData?.top_queries || []}
-                />
-                <WaitEventsPanel clusterId={selectedCluster} hours={hours} />
-                <ActiveSessionsPanel clusterId={selectedCluster} />
-                <LongRunningPanel clusterId={selectedCluster} />
-                <LocksPanel clusterId={selectedCluster} />
-                <TableSizesPanel clusterId={selectedCluster} />
-              </>
-            )}
+                  {activeEngine.includes("postgresql") && (
+                    <div className="flex justify-end">
+                      <LiveTopPanel clusterId={selectedCluster} />
+                    </div>
+                  )}
+                  <QueriesPanel
+                    clusterId={selectedCluster}
+                    topQueries={dashboardData?.top_queries || []}
+                  />
+                  {/* Wait events are a PG surface (pg_stat_activity waits) — noise
+                    for MySQL, which has no equivalent collected yet. */}
+                  {isPostgres(activeEngine) && (
+                    <WaitEventsPanel
+                      clusterId={selectedCluster}
+                      hours={hours}
+                    />
+                  )}
+                  <ActiveSessionsPanel clusterId={selectedCluster} />
+                  <LongRunningPanel clusterId={selectedCluster} />
+                  <LocksPanel clusterId={selectedCluster} />
+                  <TableSizesPanel clusterId={selectedCluster} />
+                </>
+              )}
 
             {/* ═══════════════ AI 자문 (advisory) ═══════════════ */}
             {activeTab === "advisory" && (
@@ -1011,20 +1026,21 @@ export default function DashboardPage() {
               </>
             )}
 
-            {/* ═══════════════ 엔진 내부 (internals) — relational only ═══════════════ */}
-            {activeTab === "internals" && fam === "relational" && (
-              <>
-                <EngineInternalsPanel
-                  clusterId={selectedCluster}
-                  engine={activeEngine}
-                  range={range}
-                />
-                {/* Vacuum is PG-only — MySQL InnoDB has no equivalent surface. */}
-                {activeEngine.includes("postgresql") && (
-                  <VacuumPanel clusterId={selectedCluster} />
-                )}
-              </>
-            )}
+            {/* ═══════════════ 엔진 내부 (internals) — relational + rds_instance ═══════════════ */}
+            {activeTab === "internals" &&
+              (fam === "relational" || fam === "rds_instance") && (
+                <>
+                  <EngineInternalsPanel
+                    clusterId={selectedCluster}
+                    engine={activeEngine}
+                    range={range}
+                  />
+                  {/* Vacuum is PG-only — MySQL InnoDB has no equivalent surface. */}
+                  {isPostgres(activeEngine) && (
+                    <VacuumPanel clusterId={selectedCluster} />
+                  )}
+                </>
+              )}
 
             {/* ═══════════════ 구성·백업 (config) ═══════════════ */}
             {activeTab === "config" && (
