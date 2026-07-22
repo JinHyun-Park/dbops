@@ -78,6 +78,35 @@ def test_adapter_decimal_maps_to_double():
     assert out["records"][0][0] == {"doubleValue": 7.5}
 
 
+def test_query_stats_sql_divides_timer_wait_picoseconds_by_1e9():
+    # performance_schema TIMER columns are picoseconds (MySQL docs); dividing
+    # by 1e6 yields microseconds mislabeled as ms (1000x inflation).
+    m = _load("mysql_query_stats")
+    assert "SUM_TIMER_WAIT/1000000000" in m.QUERY_STATS_SQL
+    assert "AVG_TIMER_WAIT/1000000000" in m.QUERY_STATS_SQL
+
+
+def test_collect_mysql_query_stats_stores_correct_ms_from_picoseconds():
+    # 5_000_000_000 ps == 5.0 ms. The Data API record's doubleValue is what
+    # the (corrected) SQL's ROUND(TIMER_WAIT/1e9, 2) would return.
+    m = _load("mysql_query_stats")
+    client = MagicMock()
+    client.execute_statement.return_value = {"records": [[
+        {"stringValue": "digest1"},
+        {"stringValue": "SELECT 1"},
+        {"longValue": 10},
+        {"doubleValue": 5.0},
+        {"doubleValue": 5.0},
+        {"longValue": 100},
+    ]]}
+    captured = {}
+    m.collect_mysql_query_stats(
+        client, lambda sql, params: captured.update(params),
+        "arn:cluster", "arn:secret", "c1", "db")
+    assert captured["total_time_ms"] == 5.0
+    assert captured["mean_time_ms"] == 5.0
+
+
 def test_table_stats_long_tolerates_decimal_shapes():
     m = _load("mysql_table_stats")
     assert m._long({"longValue": 5}) == 5

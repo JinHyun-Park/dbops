@@ -11,8 +11,9 @@ SELECT
   COALESCE(DIGEST, 'UNKNOWN') AS query_hash,
   COALESCE(DIGEST_TEXT, '') AS query_text,
   COUNT_STAR AS calls,
-  ROUND(SUM_TIMER_WAIT/1000000, 2) AS total_time_ms,
-  ROUND(AVG_TIMER_WAIT/1000000, 2) AS mean_time_ms,
+  -- TIMER_WAIT is picoseconds; /1e9 -> ms (was /1e6 = us mislabeled as ms, 1000x inflation)
+  ROUND(SUM_TIMER_WAIT/1000000000, 2) AS total_time_ms,
+  ROUND(AVG_TIMER_WAIT/1000000000, 2) AS mean_time_ms,
   SUM_ROWS_SENT AS rows_returned
 FROM performance_schema.events_statements_summary_by_digest
 WHERE SCHEMA_NAME IS NOT NULL
