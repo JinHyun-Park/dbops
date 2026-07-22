@@ -568,6 +568,28 @@ def test_direct_mssql_safe_select_executes(mock_lookup, mock_cfc, mock_ms, mock_
     )
 
 
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql.mssql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mssql_stacked_batch_needs_approval_not_executed(
+    mock_lookup, mock_cfc, mock_ms, mock_boto3
+):
+    """R-4 C1: `SELECT 1; SHUTDOWN` on a SQL Server row must be classified as
+    multi-statement → approval_required, and the direct-TCP adapter must never
+    be built or connected. pytds runs the whole batch, so a dangerous verb the
+    old keyword allowlist did not list was auto-executing without approval."""
+    mock_lookup.return_value = dict(_MSSQL_ROW)
+
+    result = execute_sql_impl(
+        MagicMock(), cluster_id="rds-mssql-1", sql="SELECT 1; SHUTDOWN"
+    )
+
+    assert result["status"] == "approval_required"
+    mock_cfc.assert_not_called()
+    mock_ms.MSSQLDataApiAdapter.assert_not_called()
+
+
 @patch("mcp_servers.operations.tools.execute_sql.verify_approval")
 @patch("mcp_servers.operations.tools.execute_sql.boto3")
 @patch("mcp_servers.operations.tools.execute_sql.mssql_direct")

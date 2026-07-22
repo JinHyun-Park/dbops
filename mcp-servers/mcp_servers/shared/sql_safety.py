@@ -55,14 +55,6 @@ SIDE_EFFECTING_PATTERNS = [
     r"\bEXEC(UTE)?\s+(SYS\.)?(SP_|XP_)",           # stored-proc invocation
 ]
 
-# Command keywords that, when they appear AFTER a statement-separating ';',
-# indicate a stacked/multi-statement payload.
-_STACKED_STMT_RE = re.compile(
-    r";\s*(SELECT|INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE|"
-    r"COPY|EXPLAIN|WITH|VACUUM|ANALYZE|CALL|DO|SET|MERGE|COMMENT|REINDEX|CLUSTER)\b",
-    re.IGNORECASE,
-)
-
 # Data-modifying / DDL command keywords appearing ANYWHERE in the (literal-
 # stripped) statement. Catches data-modifying CTEs like
 # `WITH x AS (DELETE ... RETURNING *) SELECT ...` that a prefix check misses.
@@ -158,10 +150,18 @@ def strip_sql_literals(s: str) -> str:
 
 def is_multi_statement(sql: str) -> bool:
     """True if `sql` carries more than one statement. Pass the literal-stripped
-    form; we drop a single trailing ';' (the common, harmless case) and then
-    look for any ';' followed by a SQL command keyword."""
+    form (all callers do) so a ';' inside a string literal or comment is already
+    gone and can't count. We drop trailing ';' + whitespace (a single statement
+    with a trailing semicolon is harmless) and then flag on ANY interior ';'
+    followed by non-whitespace.
+
+    Dialect-agnostic on purpose: a keyword allowlist would only flag the second
+    statement when it STARTS with a recognized verb, so on engines whose driver
+    runs the whole ';'-batch (SQL Server via pytds) a dangerous verb not on the
+    list — SHUTDOWN, BACKUP, RESTORE, DENY, RECONFIGURE, DISABLE TRIGGER, a
+    custom EXEC — would slip through and auto-execute without approval."""
     body = sql.strip().rstrip(";").strip()
-    return bool(_STACKED_STMT_RE.search(body))
+    return bool(re.search(r";\s*\S", body))
 
 
 def is_read_only_safe(sql: str) -> bool:
