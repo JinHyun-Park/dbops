@@ -16,6 +16,15 @@ PI_METRIC_QUERIES = [
     {"Metric": "os.network.tx.avg", "metric_type": "net_tx"},
 ]
 
+# RDS instance engines (non-Aurora): only db.load.avg is universally supported
+# across MySQL AND SQL Server PI (SQL Server exposes NO os.* counters and no
+# PG-shaped db.* counters; one unknown metric fails the whole batched
+# GetResourceMetrics call — live-verified 2026-07-22). Engine-specific PI
+# depth lands in R-2 (MySQL) / R-4 (SQL Server).
+PI_METRICS_RDS_INSTANCE = [
+    {"Metric": "db.load.avg", "GroupBy": {"Group": "db.wait_event"}, "metric_type": "aas"},
+]
+
 
 INSERT_SQL = (
     "INSERT INTO metric_snapshots (cluster_id, ts, metric_type, value, dimensions) "
@@ -24,13 +33,14 @@ INSERT_SQL = (
 )
 
 
-def collect_pi_metrics(pi_client, cache_execute, resource_id, cluster_id):
+def collect_pi_metrics(pi_client, cache_execute, resource_id, cluster_id, metrics=None):
+    metrics = metrics if metrics is not None else PI_METRIC_QUERIES
     end_time = datetime.utcnow()
     start_time = end_time - timedelta(minutes=10)
 
     # PI supports up to 15 MetricQueries per call; batch all in one request.
     queries = []
-    for idx, q in enumerate(PI_METRIC_QUERIES):
+    for idx, q in enumerate(metrics):
         mq = {"Metric": q["Metric"]}
         if "GroupBy" in q:
             mq["GroupBy"] = q["GroupBy"]
@@ -49,7 +59,7 @@ def collect_pi_metrics(pi_client, cache_execute, resource_id, cluster_id):
         return {"cluster_id": cluster_id, "metrics_inserted": 0, "errors": [str(e)]}
 
     inserted = 0
-    metric_type_by_name = {q["Metric"]: q["metric_type"] for q in PI_METRIC_QUERIES}
+    metric_type_by_name = {q["Metric"]: q["metric_type"] for q in metrics}
 
     for metric_result in response.get("MetricList", []):
         key = metric_result.get("Key", {})

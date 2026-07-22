@@ -29,7 +29,7 @@ from collectors.pg_health_checks import collect_pg_health_checks
 from collectors.pg_locks import collect_pg_locks
 from collectors.pg_param_fitness import collect_param_fitness
 from collectors.pg_table_stats import collect_pg_table_stats
-from collectors.pi_collector import collect_pi_metrics
+from collectors.pi_collector import PI_METRICS_RDS_INSTANCE, collect_pi_metrics
 from collectors.query_regression import collect_query_regression
 from collectors.rds_instance_cw_collector import collect_rds_instance_metrics
 from collectors.stats_collector import collect_query_stats
@@ -182,7 +182,8 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
             try:
                 pi_client = get_client("pi", region)
                 result["pi"] = collect_pi_metrics(
-                    pi_client, cache_execute, r["resource_id"], cluster_id)
+                    pi_client, cache_execute, r["resource_id"], cluster_id,
+                    metrics=PI_METRICS_RDS_INSTANCE)
             except Exception as e:
                 result["pi_error"] = str(e)
                 print(f"[{cluster_id}] pi error: {e}")

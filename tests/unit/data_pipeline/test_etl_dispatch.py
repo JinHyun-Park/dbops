@@ -266,4 +266,7 @@ def test_rds_instance_runs_pi_when_enabled():
     mock_pi.assert_called_once()
     # resource_id from the collector (NOT a db-cluster-id filtered lookup)
     assert mock_pi.call_args.args[2] == "db-ABC"
+    # engine-safe reduced metric list (rds_instance is non-Aurora; the full
+    # Aurora PI list fails the whole GetResourceMetrics call on SQL Server)
+    assert mock_pi.call_args.kwargs["metrics"] is handler.PI_METRICS_RDS_INSTANCE
     assert "pi" in result
