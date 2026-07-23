@@ -114,6 +114,23 @@ def _lookup_cluster(cluster_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _missing_secret_reject(cluster_id: str, is_safe: bool) -> dict:
+    """Reject dict for a direct-TCP target with no configured secret. Pure
+    metadata (a dict-key presence check) — no Secrets Manager fetch — so the
+    write pre-check can use it BEFORE verify_approval without any resource
+    access. Shared with _direct_write_secret_and_creds (single reason source)."""
+    note = (
+        "read credentials not configured — set db_secret_arn"
+        if is_safe
+        else "write credentials not configured — set db_write_secret_arn"
+    )
+    return {
+        "status": "unsupported_engine",
+        "cluster_id": cluster_id,
+        "reason": f"{note} via PATCH /api/clusters/{{id}}/meta",
+    }
+
+
 def _direct_write_secret_and_creds(cluster: dict, cluster_id: str, is_safe: bool):
     """Resolve the direct-TCP secret ARN + decoded creds for an rds_instance
     target. Reads use db_secret_arn; approved writes use the separate
@@ -123,16 +140,7 @@ def _direct_write_secret_and_creds(cluster: dict, cluster_id: str, is_safe: bool
     secret selection and its reject reasons."""
     secret_arn = cluster.get("db_secret_arn") if is_safe else cluster.get("db_write_secret_arn")
     if not secret_arn:
-        note = (
-            "read credentials not configured — set db_secret_arn"
-            if is_safe
-            else "write credentials not configured — set db_write_secret_arn"
-        )
-        return {
-            "status": "unsupported_engine",
-            "cluster_id": cluster_id,
-            "reason": f"{note} via PATCH /api/clusters/{{id}}/meta",
-        }
+        return _missing_secret_reject(cluster_id, is_safe)
     try:
         raw = client_for_cluster(cluster_id, "secretsmanager").get_secret_value(
             SecretId=secret_arn
@@ -151,8 +159,8 @@ def _direct_write_secret_and_creds(cluster: dict, cluster_id: str, is_safe: bool
 def _direct_connect(cluster: dict, creds: dict, database):
     """Open a direct-TCP connection to the rds_instance target and return it
     (the CALLER closes). Raises on failure. Picks the engine-appropriate driver
-    (SQL Server vs MySQL). Single source of truth for the connect args, so the
-    pre-flight probe and the execute branch open identical connections."""
+    (SQL Server vs MySQL). Single source of truth for the connect args, shared by
+    the MySQL and SQL Server execute branches."""
     mod = mssql_direct if "sqlserver" in (cluster.get("engine") or "") else mysql_direct
     return mod.connect(
         host=cluster.get("endpoint"),
@@ -212,42 +220,35 @@ def _direct_exec_failed(cluster: dict, cluster_id: str) -> dict:
     }
 
 
-def _direct_write_preflight(cluster: dict, cluster_id: str, fam):
-    """PRE-FLIGHT for an APPROVED DIRECT-TCP write (rds_instance MySQL / SQL
-    Server), run BEFORE verify_approval. Reproduces the execute branch's
-    pre-connect guards — via the SAME shared helpers/builders — and opens+closes
-    a throwaway probe connection to prove the write can actually proceed.
+def _direct_write_precheck(cluster: dict, cluster_id: str, fam):
+    """Metadata-ONLY guards for an APPROVED DIRECT-TCP write (rds_instance MySQL /
+    SQL Server), run BEFORE verify_approval. Every check here is a pure
+    cluster_meta/dict inspection — NO Secrets Manager fetch, NO DB connection —
+    so an unauthorized caller cannot trigger any privileged resource access
+    before authz, and a metadata-rejectable write never burns the approval.
 
-    Returns a REJECT dict (identical to what the execute branch would return) if
-    any guard fails or the probe connect fails; the caller MUST then NOT consume
-    the approval. Returns None to allow the single consume + execute.
+    Returns a REJECT dict (identical to what the execute branch would return) for
+    the metadata-detectable cases; None to allow the single consume + execute.
 
-    SECURITY: this NEVER calls verify_approval. It only gates whether the single
-    consume downstream is reached."""
+    WHY metadata-only (deliberately NOT a connect probe): catching a genuine
+    connect/execute failure would require connecting BEFORE verify_approval —
+    i.e. a write-secret fetch + write-capable DB login on an as-yet-unauthorized
+    request — a worse security posture than the rare, re-approvable burn on an
+    actual connect failure. The SYSTEMATIC burns (missing write secret, SQL
+    Server master-write, unsupported engine) ARE metadata-detectable and are
+    caught here; a true connect failure stays AFTER the consume (accepted
+    trade-off, documented at the consume site). NEVER calls verify_approval."""
     engine = cluster.get("engine") or ""
     if "sqlserver" not in engine and "mysql" not in engine:
         return _unsupported_other_engine(fam, cluster_id)
-    res = _direct_write_secret_and_creds(cluster, cluster_id, is_safe=False)
-    if isinstance(res, dict):
-        return res
-    _secret_arn, creds = res
-    # Write database resolution mirrors the execute branch: db_name for both
-    # engines (MySQL's read-only 'mysql' fallback never applies to a write).
-    database = cluster.get("db_name")
-    if "sqlserver" in engine and not database:
+    # Presence check only (dict key) — the actual fetch happens post-consume.
+    if not cluster.get("db_write_secret_arn"):
+        return _missing_secret_reject(cluster_id, is_safe=False)
+    # SQL Server: an unqualified write with no db_name lands in master; reject
+    # here (MySQL's database=None instead errors at execute-time, which cannot be
+    # detected without executing, so it is not pre-checkable).
+    if "sqlserver" in engine and not cluster.get("db_name"):
         return _mssql_master_write_reject(cluster_id)
-    conn = None
-    try:
-        conn = _direct_connect(cluster, creds, database)
-    except Exception as e:
-        print(f"[execute_sql] direct write pre-flight connect failed for {cluster_id}: {e}")
-        return _direct_exec_failed(cluster, cluster_id)
-    finally:
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
     return None
 
 
@@ -298,19 +299,21 @@ def execute_sql_impl(
     # touch the single-use approval.
     cluster = _lookup_cluster(cluster_id)
 
-    # PRE-FLIGHT (approved DIRECT-TCP write only): run the execute branch's
-    # pre-connect guards and a throwaway probe connection BEFORE consuming the
-    # single-use approval, so a rejected or unconnectable write NEVER burns it —
-    # the DBA can retry without re-approving. This block NEVER calls
-    # verify_approval; it only decides whether the single consume below is
-    # reached. The Aurora / RDS-Data-API write path (sql_via="data_api") has NO
-    # pre-flight, so its verify_approval position is UNCHANGED.
+    # PRE-CHECK (approved DIRECT-TCP write only): run the metadata-only guards
+    # BEFORE consuming the single-use approval, so a metadata-rejectable write
+    # (unsupported engine / missing write secret / SQL Server master-write) NEVER
+    # burns it — the DBA can retry without re-approving. This is METADATA-ONLY
+    # (no secret fetch, no connect): touching resources before authz would be a
+    # worse posture than the rare burn on an actual connect failure. This block
+    # NEVER calls verify_approval; it only decides whether the single consume
+    # below is reached. The Aurora / RDS-Data-API write path (sql_via="data_api")
+    # has NO pre-check, so its verify_approval position is UNCHANGED.
     if not is_safe and approved and isinstance(cluster, dict) and cluster:
         _fam = cluster.get("engine_family") or _engine_family(cluster.get("engine", ""))
         if isinstance(_fam, str) and CAPABILITIES.get(_fam, {}).get("sql_via", "data_api") != "data_api":
-            _reject = _direct_write_preflight(cluster, cluster_id, _fam)
+            _reject = _direct_write_precheck(cluster, cluster_id, _fam)
             if _reject is not None:
-                # Approval NOT consumed — guard failed or probe connect failed.
+                # Approval NOT consumed — a metadata guard rejected the write.
                 return _reject
 
     # Server-side approval enforcement: a write tool that claims approved=true
@@ -319,10 +322,12 @@ def execute_sql_impl(
     #
     # SECURITY INVARIANT — the SINGLE consume. A write executes IFF exactly one
     # successful verify_approval runs HERE. For the direct-TCP write path this
-    # line is reached IFF the pre-flight guards passed AND the probe connect
-    # succeeded (otherwise the pre-flight returned above, unconsumed). A read
-    # (is_safe) NEVER reaches this. There is no other verify_approval call, so
-    # no write path can execute without exactly one consume.
+    # line is reached IFF the metadata pre-check passed (otherwise the pre-check
+    # returned above, unconsumed). A genuine connect/execute failure happens
+    # AFTER this line (accepted burn — see _direct_write_precheck for why we do
+    # NOT connect pre-authz). A read (is_safe) NEVER reaches this. There is no
+    # other verify_approval call, so no write path can execute without exactly
+    # one consume.
     if not is_safe and approved:
         guard = verify_approval(
             approval_id, cluster_id, "execute_sql", payload={"sql": sql}

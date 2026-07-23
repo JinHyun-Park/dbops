@@ -824,11 +824,13 @@ def test_aurora_http_endpoint_disabled_gives_enable_hint_without_leak(mock_boto3
     assert "error" not in result
 
 
-# ===== R-5 backlog: pre-flight connect BEFORE consuming the write approval =====
-# The single-use approval must be consumed ONLY when committed to executing:
-# after the pre-connect guards pass AND a real connection to the target
-# succeeds. A rejected / unconnectable direct write must leave the approval
-# UNCONSUMED so the DBA can retry without re-approving.
+# ===== R-5 backlog: metadata pre-check BEFORE consuming the write approval =====
+# The single-use approval must NOT be burned by a metadata-detectable reject
+# (unsupported engine / missing write secret / SQL Server master-write): those
+# are checked BEFORE verify_approval, with NO secret fetch and NO connect (so an
+# unauthorized request triggers zero privileged resource access before authz).
+# A genuine connect/execute failure still happens AFTER the consume — detecting
+# it pre-consume would require connecting before authz — an accepted trade-off.
 
 
 @patch("mcp_servers.operations.tools.execute_sql.verify_approval")
@@ -836,12 +838,15 @@ def test_aurora_http_endpoint_disabled_gives_enable_hint_without_leak(mock_boto3
 @patch("mcp_servers.operations.tools.execute_sql.mysql_direct")
 @patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
 @patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
-def test_direct_mysql_write_connect_failure_does_not_consume_approval(
+def test_direct_mysql_write_connect_failure_after_consume_is_accepted_tradeoff(
     mock_lookup, mock_cfc, mock_md, mock_boto3, mock_verify
 ):
-    """Pre-flight probe: an approved MySQL write whose connect fails must NOT
-    consume the single-use approval — verify_approval is never reached, so the
-    DBA can retry without re-approving. Static reason, no str(e) leak."""
+    """A GENUINE connect failure on an approved MySQL write happens in the
+    execute branch AFTER the single consume (the metadata pre-check passed:
+    write secret present, engine ok). Detecting it pre-consume would require
+    connecting before authz — a worse posture — so this rare burn is the accepted
+    trade-off: verify_approval WAS called. Still: static reason, no str(e) leak."""
+    mock_verify.return_value = {"ok": True}
     row = dict(_MYSQL_ROW)
     row["db_write_secret_arn"] = "arn:db-write"
     mock_lookup.return_value = row
@@ -856,7 +861,7 @@ def test_direct_mysql_write_connect_failure_does_not_consume_approval(
         approval_id="appr-1",
     )
     assert result["status"] == "execution_failed"
-    mock_verify.assert_not_called()
+    mock_verify.assert_called_once()  # consumed (accepted): connect fail is post-authz
     assert _LEAK not in str(result) and "hunter2" not in str(result)
 
 
@@ -897,9 +902,9 @@ def test_direct_mssql_master_write_no_db_does_not_consume_approval(
 def test_direct_mysql_write_happy_path_consumes_once_then_executes(
     mock_lookup, mock_cfc, mock_md, mock_boto3, mock_verify
 ):
-    """Happy path: pre-flight probe succeeds → verify_approval consumed EXACTLY
-    once → adapter executes. Probe + real connect ⇒ connect call_count == 2 is
-    accepted; the invariant is that the single consume ran and the write executed."""
+    """Happy path: metadata pre-check passes → verify_approval consumed EXACTLY
+    once → single connect (no probe) → adapter executes. The invariant is that
+    the single consume ran and the write executed."""
     mock_verify.return_value = {"ok": True}
     row = dict(_MYSQL_ROW)
     row["db_write_secret_arn"] = "arn:db-write"
@@ -923,7 +928,7 @@ def test_direct_mysql_write_happy_path_consumes_once_then_executes(
     assert result["status"] == "executed"
     assert result["rows_affected"] == 2
     mock_verify.assert_called_once()
-    assert mock_md.connect.call_count >= 1
+    assert mock_md.connect.call_count == 1  # single connect — no pre-check probe
     adapter.execute_statement.assert_called_once()
 
 
