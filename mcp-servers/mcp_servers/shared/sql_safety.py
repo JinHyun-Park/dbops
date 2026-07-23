@@ -41,6 +41,7 @@ SIDE_EFFECTING_PATTERNS = [
     r"\bGET_LOCK\s*\(", r"\bRELEASE_LOCK\s*\(",   # MySQL: named locks
     r"\bLOAD_FILE\s*\(",                          # MySQL: reads a server-side file
     r"\bLOCK\s+TABLES\b",                         # MySQL: table-level lock
+    r"\bUNLOCK\s+TABLES\b",                        # MySQL: releases session table locks
     r"\bBENCHMARK\s*\(",                          # MySQL: CPU-burning loop
     # T-SQL: pytds sends the whole `;`-separated batch and SQL Server runs
     # ALL of it (no driver-side multi-statement guard like pymysql's), so

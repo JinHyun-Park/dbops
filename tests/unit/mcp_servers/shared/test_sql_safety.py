@@ -110,7 +110,7 @@ def test_plain_block_comment_still_stripped():
 
 def test_mysql_side_effecting_patterns():
     """MySQL equivalents of PG_TERMINATE_BACKEND/PG_SLEEP/advisory locks —
-    KILL, SLEEP(), GET_LOCK/RELEASE_LOCK, LOAD_FILE, LOCK TABLES, BENCHMARK
+    KILL, SLEEP(), GET_LOCK/RELEASE_LOCK, LOAD_FILE, LOCK/UNLOCK TABLES, BENCHMARK
     must classify as side-effecting (not safe) for the R-3 direct-TCP path."""
     for sql in [
         "KILL 1234",
@@ -119,6 +119,7 @@ def test_mysql_side_effecting_patterns():
         "SELECT RELEASE_LOCK('x')",
         "SELECT LOAD_FILE('/etc/passwd')",
         "LOCK TABLES t WRITE",
+        "UNLOCK TABLES",
         "SELECT BENCHMARK(100000000, MD5('x'))",
     ]:
         assert is_read_only_safe(sql) is False, sql

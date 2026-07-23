@@ -721,3 +721,47 @@ def test_side_effecting_tsql_on_mssql_row_needs_approval(mock_lookup, mock_cfc, 
     assert out["status"] == "approval_required"
     assert "side-effecting" in out["reason"]
     mock_ms.connect.assert_not_called()
+
+
+# ===== direct-path no-leak contract: a driver exception must NOT reach the
+# caller's response (only a static Korean reason; detail goes to the log). =====
+
+_LEAK = "host=internal-db.corp user=svc password=hunter2 pwd-in-stacktrace"
+
+
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql.mysql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mysql_error_does_not_leak_exception_text(
+    mock_lookup, mock_cfc, mock_md, mock_boto3
+):
+    """A MySQL direct-TCP connect/execute failure must return a static reason —
+    the raw exception (host/creds/internal detail) must never appear in ANY
+    field of the response. Same no-str(e)-leak contract as the secret-fetch path."""
+    mock_lookup.return_value = dict(_MYSQL_ROW)
+    mock_cfc.return_value = _fake_sm()
+    mock_md.connect.side_effect = Exception(_LEAK)
+
+    result = execute_sql_impl(MagicMock(), cluster_id="rds-mysql-1", sql="SELECT 1")
+
+    assert result["status"] == "execution_failed"
+    assert _LEAK not in str(result) and "hunter2" not in str(result)
+
+
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql.mssql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mssql_error_does_not_leak_exception_text(
+    mock_lookup, mock_cfc, mock_ms, mock_boto3
+):
+    """Same no-leak contract on the SQL Server direct-TCP branch."""
+    mock_lookup.return_value = dict(_MSSQL_ROW)
+    mock_cfc.return_value = _fake_sm()
+    mock_ms.connect.side_effect = Exception(_LEAK)
+
+    result = execute_sql_impl(MagicMock(), cluster_id="rds-mssql-1", sql="SELECT 1")
+
+    assert result["status"] == "execution_failed"
+    assert _LEAK not in str(result) and "hunter2" not in str(result)

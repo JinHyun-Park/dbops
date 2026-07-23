@@ -166,6 +166,10 @@ function PolicyForm({
             <option value="add_reader_instance" />
             <option value="remove_reader_instance" />
             <option value="scale_out_with_warmup" />
+            {/* RDS 인스턴스(비-Aurora MySQL/SQL Server) write */}
+            <option value="reboot_rds_instance" />
+            <option value="create_rds_snapshot" />
+            <option value="modify_rds_instance_class" />
             {/* 유지보수 / 백업·복원 */}
             <option value="manage_maintenance" />
             <option value="create_snapshot" />
