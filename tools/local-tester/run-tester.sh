@@ -119,7 +119,7 @@ STATUS=clean
     echo ""
     echo "> ⚠️ Codex 두 설정(toolbox + bedrock-key) 모두 실패 — 교차모델 적대 리뷰가 실행되지 않음."
     echo "> **폴백:** dev 에이전트가 별도 Opus 서브에이전트로 이 diff의 적대적 리뷰를 수행할 것."
-    echo "> (기본 codex 복구: \`aws sso login\` 또는 mwinit; 폴백 상세는 전역 메모리 codex-adversarial-review-fallback.)"
+    echo "> (기본 codex 복구: \`mwinit\` — midway 쿠키 재발급; NOT aws sso login. 폴백 상세는 전역 메모리 codex-adversarial-review-fallback.)"
   fi
   echo ""
   echo "## Codex 적대 리뷰"
