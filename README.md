@@ -1,6 +1,6 @@
 # DBOps — AI-Powered Database Operations Platform
 
-AI 기반 종합 데이터베이스 운영 플랫폼. 자연어 대화로 Amazon Aurora MySQL/PostgreSQL 클러스터의 성능 분석, 장애 진단, 운영 자동화, 시뮬레이션을 수행합니다.
+AI 기반 종합 데이터베이스 운영 플랫폼. 자연어 대화로 Amazon Aurora(PostgreSQL·MySQL), RDS for MySQL·SQL Server(비-Aurora 독립형 인스턴스), DocumentDB, DynamoDB, ElastiCache(Redis/Valkey/Memcached)의 성능 분석, 장애 진단, 운영 자동화, 시뮬레이션을 수행합니다.
 
 ## Features
 
@@ -84,7 +84,7 @@ Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
               ▼            ▼              ▼               ▼
          Performance   Incident      Operations       Simulation
            MCP          MCP            MCP               MCP
-                       (4 custom MCP servers · 30+ tools)
+                       (4 custom MCP servers · 63 tools)
                                     │
                                     ▼
                   Aurora PG Cache ◀── Data Collection Pipeline
@@ -282,7 +282,7 @@ See `cdk/cross-account/README.md` for details.
 dbops/
 ├── cdk/                  # CDK infrastructure (4 stacks)
 ├── agent/                # Strands Agent + Dockerfile
-├── mcp-servers/          # 4 Custom MCP servers (30+ tools, incl. snapshot/restore + request_approval + query_activity_audit)
+├── mcp-servers/          # 4 Custom MCP servers (63 tools, incl. snapshot/restore + request_approval + query_activity_audit)
 ├── data-pipeline/        # ETL, Event Processor, Report Generator, Monitor
 ├── api/                  # REST API Lambdas
 ├── frontend/             # Next.js Web UI

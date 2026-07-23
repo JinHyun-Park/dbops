@@ -39,8 +39,8 @@ inclusion: always
 
 Four MCP servers deployed as Lambda functions behind AgentCore Gateway:
 
-- Performance (11 tools), Incident (8), Operations (23), Simulation (8)
-- Total: 50 gateway tools, managed via Gateway Semantic Search
+- Performance (11 tools), Incident (9), Operations (34), Simulation (9)
+- Total: 63 gateway tools, managed via Gateway Semantic Search
 - Plus 2 agent-local AWS-docs tools (SigV4 proxy to the AWS-managed docs MCP) — not a gateway server
 
 ## Key Constraints
