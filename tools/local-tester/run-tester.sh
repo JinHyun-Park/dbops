@@ -45,34 +45,41 @@ PROMPT="You are an adversarial code reviewer. Review ONLY the git diff below (co
 
 DIFF:
 ${DIFF}"
-# Codex prints: separator, prompt, a line 'codex', the response, 'tokens used', N.
+# Codex prints: separator, the ECHOED PROMPT (under a 'user' line), a line
+# 'codex', the model response, 'tokens used', N. The echoed prompt itself
+# contains the literal "VERDICT:" (from our instruction), so verdict detection
+# MUST run on the awk-EXTRACTED model response only — never on the raw output,
+# which would false-match the echo on an auth failure that exits 0.
+_extract() { printf '%s\n' "$1" | awk '/^codex$/{f=1;next} /^tokens used$/{f=0} f'; }
 _has_verdict() { printf '%s' "$1" | grep -q 'VERDICT:'; }
 
 # Config 1 (default): toolbox `codex`, AWS-internal creds. Primary path.
 CODEX_RAW="$(codex exec -m "$CODEX_MODEL" -s read-only "$PROMPT" 2>&1)"; CODEX_RC=$?
 CODEX_VIA="toolbox(${CODEX_MODEL})"
-# Fallback → config 2 (personal Bedrock key): if config 1 produced no VERDICT
-# (e.g. AWS-internal creds expired → "failed to load AWS credentials"), retry
-# via the isolated CODEX_HOME + standalone binary — replicates the `codex-key`
-# zsh function (~/.codex-key/credentials.env + ~/.local/bin/codex). Uses that
-# config's own model (do NOT pass the toolbox -m, which is an internal model).
-if { [ "$CODEX_RC" -ne 0 ] || ! _has_verdict "$CODEX_RAW"; } \
+REVIEW="$(_extract "$CODEX_RAW")"
+# Fallback → config 2 (personal Bedrock key): if config 1 produced no real model
+# verdict (e.g. AWS-internal creds expired → "failed to load AWS credentials"),
+# retry via the isolated CODEX_HOME + standalone binary — replicates the
+# `codex-key` zsh function (~/.codex-key/credentials.env + ~/.local/bin/codex).
+# Uses that config's own model (do NOT pass the toolbox -m, an internal model).
+# Gate on REVIEW (extracted), not CODEX_RAW (echoes the prompt's "VERDICT:").
+if { [ "$CODEX_RC" -ne 0 ] || ! _has_verdict "$REVIEW"; } \
    && [ -x "$HOME/.local/bin/codex" ] && [ -f "$HOME/.codex-key/credentials.env" ]; then
   CODEX_RAW="$( set -a; . "$HOME/.codex-key/credentials.env" 2>/dev/null; set +a
                 export CODEX_HOME="$HOME/.codex-key"
                 "$HOME/.local/bin/codex" exec -s read-only "$PROMPT" 2>&1 )"; CODEX_RC=$?
   CODEX_VIA="bedrock-key(fallback)"
+  REVIEW="$(_extract "$CODEX_RAW")"
 fi
-CODEX_REVIEW="$(printf '%s\n' "$CODEX_RAW" | awk '/^codex$/{f=1;next} /^tokens used$/{f=0} f')"
-[ -z "${CODEX_REVIEW// }" ] && CODEX_REVIEW="$CODEX_RAW"
-# codex can exit 0 even on a model/auth error (e.g. a 404 with no VERDICT line).
-# Require an explicit VERDICT line: its absence (or a non-zero exit) after BOTH
-# configs means the review did NOT actually run -> 'error' (surfaced, not a
-# silent 'clean'). On 'error' the dev agent runs the Opus adversarial fallback
-# (see global memory: codex-adversarial-review-fallback).
-if [ "$CODEX_RC" -ne 0 ] || ! _has_verdict "$CODEX_RAW"; then
+CODEX_REVIEW="$REVIEW"
+[ -z "${CODEX_REVIEW// }" ] && CODEX_REVIEW="$CODEX_RAW"   # display fallback only
+# Require an explicit VERDICT line IN THE EXTRACTED RESPONSE: its absence (or a
+# non-zero exit) after BOTH configs means the review did NOT actually run ->
+# 'error' (surfaced, not a silent 'clean'). On 'error' the dev agent runs the
+# Opus adversarial fallback (see global memory: codex-adversarial-review-fallback).
+if [ "$CODEX_RC" -ne 0 ] || ! _has_verdict "$REVIEW"; then
   CODEX_ST=error
-elif printf '%s' "$CODEX_REVIEW" | grep -q 'VERDICT: ISSUES'; then
+elif printf '%s' "$REVIEW" | grep -q 'VERDICT: ISSUES'; then
   CODEX_ST=issues
 else
   CODEX_ST=clean
