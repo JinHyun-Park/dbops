@@ -374,6 +374,9 @@ def test_direct_mysql_approved_write_without_write_secret_fails_closed(
     assert "db_write_secret_arn" in result["reason"]
     mock_cfc.assert_not_called()
     mock_md.connect.assert_not_called()
+    # R-5: the missing-secret guard now precedes the consume (via the pre-flight),
+    # so a rejected write must NOT burn the single-use approval.
+    mock_verify.assert_not_called()
 
 
 @patch("mcp_servers.operations.tools.execute_sql.verify_approval")
@@ -409,9 +412,13 @@ def test_direct_mysql_approved_write_executes_with_write_secret(
     )
     assert result["status"] == "executed"
     assert result["rows_affected"] == 3
-    # write path used the WRITE secret
-    sm.get_secret_value.assert_called_once_with(SecretId="arn:db-write")
-    mock_md.connect.assert_called_once()
+    # write path used the WRITE secret. R-5: the pre-flight probe + the execute
+    # branch may each fetch/connect, so every call must use the write secret and
+    # connect must run at least once (double-connect is the accepted probe cost).
+    assert sm.get_secret_value.call_args_list
+    for c in sm.get_secret_value.call_args_list:
+        assert c.kwargs["SecretId"] == "arn:db-write"
+    mock_md.connect.assert_called()
     mock_boto3.client.assert_not_called()
 
 
@@ -614,6 +621,8 @@ def test_direct_mssql_approved_write_without_write_secret_fails_closed(
     assert "db_write_secret_arn" in result["reason"]
     mock_cfc.assert_not_called()
     mock_ms.connect.assert_not_called()
+    # R-5: rejected before the consume (pre-flight) — approval not burned.
+    mock_verify.assert_not_called()
 
 
 @patch("mcp_servers.operations.tools.execute_sql.verify_approval")
@@ -649,9 +658,13 @@ def test_direct_mssql_approved_write_executes_with_write_secret(
     )
     assert result["status"] == "executed"
     assert result["rows_affected"] == 3
-    # write path used the WRITE secret
-    sm.get_secret_value.assert_called_once_with(SecretId="arn:db-write")
-    mock_ms.connect.assert_called_once()
+    # write path used the WRITE secret. R-5: pre-flight probe + execute may each
+    # fetch/connect, so every fetch must use the write secret and connect runs
+    # at least once.
+    assert sm.get_secret_value.call_args_list
+    for c in sm.get_secret_value.call_args_list:
+        assert c.kwargs["SecretId"] == "arn:db-write"
+    mock_ms.connect.assert_called()
     mock_boto3.client.assert_not_called()
 
 
@@ -682,6 +695,8 @@ def test_direct_mssql_approved_write_no_db_name_fails_closed(
     assert result["status"] == "unsupported_engine"
     assert "db_name" in result["reason"]
     mock_ms.connect.assert_not_called()
+    # R-5: master-write guard now precedes the consume (pre-flight) — not burned.
+    mock_verify.assert_not_called()
 
 
 @patch("mcp_servers.operations.tools.execute_sql.boto3")
@@ -765,3 +780,144 @@ def test_direct_mssql_error_does_not_leak_exception_text(
 
     assert result["status"] == "execution_failed"
     assert _LEAK not in str(result) and "hunter2" not in str(result)
+
+
+# ===== R-5 backlog: pre-flight connect BEFORE consuming the write approval =====
+# The single-use approval must be consumed ONLY when committed to executing:
+# after the pre-connect guards pass AND a real connection to the target
+# succeeds. A rejected / unconnectable direct write must leave the approval
+# UNCONSUMED so the DBA can retry without re-approving.
+
+
+@patch("mcp_servers.operations.tools.execute_sql.verify_approval")
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql.mysql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mysql_write_connect_failure_does_not_consume_approval(
+    mock_lookup, mock_cfc, mock_md, mock_boto3, mock_verify
+):
+    """Pre-flight probe: an approved MySQL write whose connect fails must NOT
+    consume the single-use approval — verify_approval is never reached, so the
+    DBA can retry without re-approving. Static reason, no str(e) leak."""
+    row = dict(_MYSQL_ROW)
+    row["db_write_secret_arn"] = "arn:db-write"
+    mock_lookup.return_value = row
+    mock_cfc.return_value = _fake_sm()
+    mock_md.connect.side_effect = Exception(_LEAK)
+
+    result = execute_sql_impl(
+        MagicMock(),
+        cluster_id="rds-mysql-1",
+        sql="UPDATE users SET name='x' WHERE id=1",
+        approved=True,
+        approval_id="appr-1",
+    )
+    assert result["status"] == "execution_failed"
+    mock_verify.assert_not_called()
+    assert _LEAK not in str(result) and "hunter2" not in str(result)
+
+
+@patch("mcp_servers.operations.tools.execute_sql.verify_approval")
+@patch("mcp_servers.operations.tools.execute_sql.mssql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mssql_master_write_no_db_does_not_consume_approval(
+    mock_lookup, mock_cfc, mock_ms, mock_verify
+):
+    """Pre-flight guard: an approved SQL Server write with no db_name is rejected
+    (master-write fail-closed) BEFORE verify_approval — approval not consumed,
+    no connect."""
+    row = dict(_MSSQL_ROW)
+    row.pop("db_name")
+    row["db_write_secret_arn"] = "arn:db-write"
+    mock_lookup.return_value = row
+    mock_cfc.return_value = _fake_sm()
+
+    result = execute_sql_impl(
+        MagicMock(),
+        cluster_id="rds-mssql-1",
+        sql="CREATE TABLE Orders(id INT)",
+        approved=True,
+        approval_id="appr-1",
+    )
+    assert result["status"] == "unsupported_engine"
+    assert "db_name" in result["reason"]
+    mock_verify.assert_not_called()
+    mock_ms.connect.assert_not_called()
+
+
+@patch("mcp_servers.operations.tools.execute_sql.verify_approval")
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql.mysql_direct")
+@patch("mcp_servers.operations.tools.execute_sql.client_for_cluster")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_direct_mysql_write_happy_path_consumes_once_then_executes(
+    mock_lookup, mock_cfc, mock_md, mock_boto3, mock_verify
+):
+    """Happy path: pre-flight probe succeeds → verify_approval consumed EXACTLY
+    once → adapter executes. Probe + real connect ⇒ connect call_count == 2 is
+    accepted; the invariant is that the single consume ran and the write executed."""
+    mock_verify.return_value = {"ok": True}
+    row = dict(_MYSQL_ROW)
+    row["db_write_secret_arn"] = "arn:db-write"
+    mock_lookup.return_value = row
+    mock_cfc.return_value = _fake_sm()
+    adapter = MagicMock()
+    adapter.execute_statement.return_value = {
+        "records": [],
+        "columnMetadata": [],
+        "numberOfRecordsUpdated": 2,
+    }
+    mock_md.MySQLDataApiAdapter.return_value = adapter
+
+    result = execute_sql_impl(
+        MagicMock(),
+        cluster_id="rds-mysql-1",
+        sql="UPDATE users SET name='x' WHERE id=1",
+        approved=True,
+        approval_id="appr-1",
+    )
+    assert result["status"] == "executed"
+    assert result["rows_affected"] == 2
+    mock_verify.assert_called_once()
+    assert mock_md.connect.call_count >= 1
+    adapter.execute_statement.assert_called_once()
+
+
+@patch("mcp_servers.operations.tools.execute_sql.verify_approval")
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+def test_aurora_data_api_approved_write_consumes_before_execute(
+    mock_lookup, mock_boto3, mock_verify
+):
+    """Aurora (Data API) write path is UNCHANGED: verify_approval is still
+    consumed before the Data API execute — no pre-flight connect for the
+    data_api path, so its consume position is exactly as before."""
+    mock_verify.return_value = {"ok": True}
+    mock_lookup.return_value = {
+        "engine": "aurora-postgresql",
+        "engine_family": "relational",
+        "cluster_arn": "arn:aurora",
+        "secret_arn": "arn:sec",
+        "db_name": "appdb",
+    }
+    rds = MagicMock()
+    mock_boto3.client.return_value = rds
+    rds.execute_statement.return_value = {
+        "columnMetadata": [],
+        "records": [],
+        "numberOfRecordsUpdated": 5,
+    }
+
+    result = execute_sql_impl(
+        MagicMock(),
+        cluster_id="aurora-pg-1",
+        sql="UPDATE users SET name='x' WHERE id=1",
+        approved=True,
+        approval_id="appr-1",
+    )
+    assert result["status"] == "executed"
+    assert result["rows_affected"] == 5
+    mock_verify.assert_called_once()
+    rds.execute_statement.assert_called_once()

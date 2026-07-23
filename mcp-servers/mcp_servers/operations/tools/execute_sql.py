@@ -104,6 +104,153 @@ def _lookup_cluster(cluster_id: str) -> dict:
         return {}
 
 
+# ---------------------------------------------------------------------------
+# Shared direct-TCP (rds_instance MySQL / SQL Server) helpers.
+#
+# These exist so the APPROVED-write PRE-FLIGHT PROBE and the post-consume
+# EXECUTE branch resolve the secret, decide the reject reasons, and build the
+# connection through EXACTLY ONE code path — a divergent second copy of the
+# guard/connect logic is the failure this extraction prevents.
+# ---------------------------------------------------------------------------
+
+
+def _direct_write_secret_and_creds(cluster: dict, cluster_id: str, is_safe: bool):
+    """Resolve the direct-TCP secret ARN + decoded creds for an rds_instance
+    target. Reads use db_secret_arn; approved writes use the separate
+    db_write_secret_arn. Returns ``(secret_arn, creds)`` on success, or a REJECT
+    dict (unsupported_engine for a missing secret; execution_failed for a fetch
+    failure — static reason, no str(e) leak). Single source of truth for the
+    secret selection and its reject reasons."""
+    secret_arn = cluster.get("db_secret_arn") if is_safe else cluster.get("db_write_secret_arn")
+    if not secret_arn:
+        note = (
+            "read credentials not configured — set db_secret_arn"
+            if is_safe
+            else "write credentials not configured — set db_write_secret_arn"
+        )
+        return {
+            "status": "unsupported_engine",
+            "cluster_id": cluster_id,
+            "reason": f"{note} via PATCH /api/clusters/{{id}}/meta",
+        }
+    try:
+        raw = client_for_cluster(cluster_id, "secretsmanager").get_secret_value(
+            SecretId=secret_arn
+        ).get("SecretString") or "{}"
+        creds = json.loads(raw)
+    except Exception as e:
+        print(f"[execute_sql] secret fetch failed for {cluster_id}: {e}")
+        return {
+            "status": "execution_failed",
+            "cluster_id": cluster_id,
+            "reason": "대상 인스턴스 자격증명 조회에 실패했습니다.",
+        }
+    return secret_arn, creds
+
+
+def _direct_connect(cluster: dict, creds: dict, database):
+    """Open a direct-TCP connection to the rds_instance target and return it
+    (the CALLER closes). Raises on failure. Picks the engine-appropriate driver
+    (SQL Server vs MySQL). Single source of truth for the connect args, so the
+    pre-flight probe and the execute branch open identical connections."""
+    mod = mssql_direct if "sqlserver" in (cluster.get("engine") or "") else mysql_direct
+    return mod.connect(
+        host=cluster.get("endpoint"),
+        port=cluster.get("port"),
+        database=database,
+        user=creds.get("username"),
+        password=creds.get("password"),
+    )
+
+
+def _unsupported_other_engine(fam, cluster_id: str) -> dict:
+    """Reject dict for an rds_instance whose engine is neither MySQL nor SQL
+    Server (the only two direct-TCP engines shipped)."""
+    return {
+        "status": "unsupported_engine",
+        "engine_family": fam,
+        "cluster_id": cluster_id,
+        "message": (
+            "이 rds_instance 엔진은 직접 SQL 실행을 지원하지 않습니다 "
+            "(MySQL·SQL Server만 지원)."
+        ),
+    }
+
+
+def _mssql_master_write_reject(cluster_id: str) -> dict:
+    """Reject dict for an approved SQL Server write with no target db_name — an
+    unqualified write would land in the master system DB (unlike MySQL, whose
+    database=None errors out), so it is fail-closed BEFORE connecting."""
+    return {
+        "status": "unsupported_engine",
+        "cluster_id": cluster_id,
+        "reason": (
+            "SQL Server 쓰기는 대상 DB가 필요합니다 — db_name을 설정하세요 "
+            "(PATCH /api/clusters/{id}/meta). master 기본 접속으로의 무자격 쓰기 방지."
+        ),
+    }
+
+
+def _direct_exec_failed(cluster: dict, cluster_id: str) -> dict:
+    """Engine-specific static execution_failed reject (no str(e) leak). Used by
+    both the pre-flight probe and the execute branch on any connect/execute
+    exception."""
+    if "sqlserver" in (cluster.get("engine") or ""):
+        hint = (
+            "쓰기 SQL은 [db].[schema].[object] 형식으로 정규화하거나 "
+            "클러스터에 db_name을 설정하세요(PATCH /api/clusters/{id}/meta)."
+        )
+    else:
+        hint = (
+            "쓰기 SQL은 스키마를 명시(예: demo.orders)하거나 "
+            "클러스터에 db_name을 설정하세요(PATCH /api/clusters/{id}/meta)."
+        )
+    return {
+        "status": "execution_failed",
+        "cluster_id": cluster_id,
+        "reason": f"직접 실행에 실패했습니다. {hint}",
+    }
+
+
+def _direct_write_preflight(cluster: dict, cluster_id: str, fam):
+    """PRE-FLIGHT for an APPROVED DIRECT-TCP write (rds_instance MySQL / SQL
+    Server), run BEFORE verify_approval. Reproduces the execute branch's
+    pre-connect guards — via the SAME shared helpers/builders — and opens+closes
+    a throwaway probe connection to prove the write can actually proceed.
+
+    Returns a REJECT dict (identical to what the execute branch would return) if
+    any guard fails or the probe connect fails; the caller MUST then NOT consume
+    the approval. Returns None to allow the single consume + execute.
+
+    SECURITY: this NEVER calls verify_approval. It only gates whether the single
+    consume downstream is reached."""
+    engine = cluster.get("engine") or ""
+    if "sqlserver" not in engine and "mysql" not in engine:
+        return _unsupported_other_engine(fam, cluster_id)
+    res = _direct_write_secret_and_creds(cluster, cluster_id, is_safe=False)
+    if isinstance(res, dict):
+        return res
+    _secret_arn, creds = res
+    # Write database resolution mirrors the execute branch: db_name for both
+    # engines (MySQL's read-only 'mysql' fallback never applies to a write).
+    database = cluster.get("db_name")
+    if "sqlserver" in engine and not database:
+        return _mssql_master_write_reject(cluster_id)
+    conn = None
+    try:
+        conn = _direct_connect(cluster, creds, database)
+    except Exception as e:
+        print(f"[execute_sql] direct write pre-flight connect failed for {cluster_id}: {e}")
+        return _direct_exec_failed(cluster, cluster_id)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return None
+
+
 def execute_sql_impl(
     cache: CacheClient,
     cluster_id: str,
@@ -144,9 +291,38 @@ def execute_sql_impl(
             reason = "Multiple SQL statements are not allowed on the read path — DBA approval required"
         return {"status": "approval_required", "reason": reason, "sql": sql}
 
+    # Resolve target cluster ARN/Secret from the DynamoDB clusters registry.
+    # Falls back to env-var TARGET_* for legacy single-cluster deployments.
+    # HOISTED ABOVE the verify_approval consume: this is a read-only lookup with
+    # no side effects, so the pre-flight below can inspect the target BEFORE we
+    # touch the single-use approval.
+    cluster = _lookup_cluster(cluster_id)
+
+    # PRE-FLIGHT (approved DIRECT-TCP write only): run the execute branch's
+    # pre-connect guards and a throwaway probe connection BEFORE consuming the
+    # single-use approval, so a rejected or unconnectable write NEVER burns it —
+    # the DBA can retry without re-approving. This block NEVER calls
+    # verify_approval; it only decides whether the single consume below is
+    # reached. The Aurora / RDS-Data-API write path (sql_via="data_api") has NO
+    # pre-flight, so its verify_approval position is UNCHANGED.
+    if not is_safe and approved and isinstance(cluster, dict) and cluster:
+        _fam = cluster.get("engine_family") or _engine_family(cluster.get("engine", ""))
+        if isinstance(_fam, str) and CAPABILITIES.get(_fam, {}).get("sql_via", "data_api") != "data_api":
+            _reject = _direct_write_preflight(cluster, cluster_id, _fam)
+            if _reject is not None:
+                # Approval NOT consumed — guard failed or probe connect failed.
+                return _reject
+
     # Server-side approval enforcement: a write tool that claims approved=true
     # must back it up with a verifiable approval_id. The guard refuses
     # mismatched cluster, stale/replayed approvals, and unapproved rows.
+    #
+    # SECURITY INVARIANT — the SINGLE consume. A write executes IFF exactly one
+    # successful verify_approval runs HERE. For the direct-TCP write path this
+    # line is reached IFF the pre-flight guards passed AND the probe connect
+    # succeeded (otherwise the pre-flight returned above, unconsumed). A read
+    # (is_safe) NEVER reaches this. There is no other verify_approval call, so
+    # no write path can execute without exactly one consume.
     if not is_safe and approved:
         guard = verify_approval(
             approval_id, cluster_id, "execute_sql", payload={"sql": sql}
@@ -157,10 +333,6 @@ def execute_sql_impl(
                 "reason": guard.get("reason", "approval guard rejected the request"),
                 "sql": sql,
             }
-
-    # Resolve target cluster ARN/Secret from the DynamoDB clusters registry.
-    # Falls back to env-var TARGET_* for legacy single-cluster deployments.
-    cluster = _lookup_cluster(cluster_id)
 
     # resp carries the RDS-Data-API-shaped result. The direct-TCP branch below
     # fills it for rds_instance MySQL; it stays None to fall through to the
@@ -196,30 +368,12 @@ def execute_sql_impl(
             # mssql_direct. Sets resp then returns via the shared decoder, so the
             # T-SQL path never falls into the MySQL body.
             if "sqlserver" in (cluster.get("engine") or ""):
-                secret_arn = cluster.get("db_secret_arn") if is_safe else cluster.get("db_write_secret_arn")
-                if not secret_arn:
-                    note = (
-                        "read credentials not configured — set db_secret_arn"
-                        if is_safe
-                        else "write credentials not configured — set db_write_secret_arn"
-                    )
-                    return {
-                        "status": "unsupported_engine",
-                        "cluster_id": cluster_id,
-                        "reason": f"{note} via PATCH /api/clusters/{{id}}/meta",
-                    }
-                try:
-                    raw = client_for_cluster(cluster_id, "secretsmanager").get_secret_value(
-                        SecretId=secret_arn
-                    ).get("SecretString") or "{}"
-                    creds = json.loads(raw)
-                except Exception as e:
-                    print(f"[execute_sql] secret fetch failed for {cluster_id}: {e}")
-                    return {
-                        "status": "execution_failed",
-                        "cluster_id": cluster_id,
-                        "reason": "대상 인스턴스 자격증명 조회에 실패했습니다.",
-                    }
+                # Secret + creds via the shared helper (same reject reasons as the
+                # pre-flight probe and the MySQL branch — one source of truth).
+                res = _direct_write_secret_and_creds(cluster, cluster_id, is_safe)
+                if isinstance(res, dict):
+                    return res
+                _secret_arn, creds = res
                 # SQL Server has no 'mysql'-style catch-all schema. With no db_name
                 # the connection uses the login/server default (master); reads work,
                 # and unqualified writes land in master — so the agent must qualify
@@ -229,37 +383,20 @@ def execute_sql_impl(
                 # unqualified write), SQL Server would silently succeed against the
                 # master system DB. So reject an approved write with no target DB
                 # BEFORE connecting — reads are unaffected (master is harmless).
+                # (For an APPROVED write this guard already fired in the pre-flight,
+                # before the consume — this is the same fail-closed check for the
+                # read path and defense-in-depth.)
                 if not is_safe and not database:
-                    return {
-                        "status": "unsupported_engine",
-                        "cluster_id": cluster_id,
-                        "reason": (
-                            "SQL Server 쓰기는 대상 DB가 필요합니다 — db_name을 설정하세요 "
-                            "(PATCH /api/clusters/{id}/meta). master 기본 접속으로의 무자격 쓰기 방지."
-                        ),
-                    }
+                    return _mssql_master_write_reject(cluster_id)
                 conn = None
                 try:
-                    conn = mssql_direct.connect(
-                        host=cluster.get("endpoint"),
-                        port=cluster.get("port"),
-                        database=database,
-                        user=creds.get("username"),
-                        password=creds.get("password"),
-                    )
+                    conn = _direct_connect(cluster, creds, database)
                     resp = mssql_direct.MSSQLDataApiAdapter(conn).execute_statement(
                         sql=f"/* source=dbops-agent */ {sql}"
                     )
                 except Exception as e:
                     print(f"[execute_sql] direct SQL Server execution failed for {cluster_id}: {e}")
-                    return {
-                        "status": "execution_failed",
-                        "cluster_id": cluster_id,
-                        "reason": (
-                            "직접 실행에 실패했습니다. 쓰기 SQL은 [db].[schema].[object] 형식으로 "
-                            "정규화하거나 클러스터에 db_name을 설정하세요(PATCH /api/clusters/{id}/meta)."
-                        ),
-                    }
+                    return _direct_exec_failed(cluster, cluster_id)
                 finally:
                     if conn is not None:
                         try:
@@ -268,72 +405,33 @@ def execute_sql_impl(
                             pass
                 return _decode_rds_response(resp, cluster_id)
             if "mysql" not in (cluster.get("engine") or ""):
-                return {
-                    "status": "unsupported_engine",
-                    "engine_family": fam,
-                    "cluster_id": cluster_id,
-                    "message": (
-                        "이 rds_instance 엔진은 직접 SQL 실행을 지원하지 않습니다 "
-                        "(MySQL·SQL Server만 지원)."
-                    ),
-                }
+                return _unsupported_other_engine(fam, cluster_id)
             # Direct-TCP MySQL. Read (is_safe) statements use db_secret_arn;
             # approved writes use the separate db_write_secret_arn (mirrors the
             # DocDB read/write secret split). Missing the needed secret → fail
-            # closed with a static message (no str(e) leak).
-            secret_arn = cluster.get("db_secret_arn") if is_safe else cluster.get("db_write_secret_arn")
-            if not secret_arn:
-                note = (
-                    "read credentials not configured — set db_secret_arn"
-                    if is_safe
-                    else "write credentials not configured — set db_write_secret_arn"
-                )
-                return {
-                    "status": "unsupported_engine",
-                    "cluster_id": cluster_id,
-                    "reason": f"{note} via PATCH /api/clusters/{{id}}/meta",
-                }
-            try:
-                raw = client_for_cluster(cluster_id, "secretsmanager").get_secret_value(
-                    SecretId=secret_arn
-                ).get("SecretString") or "{}"
-                creds = json.loads(raw)
-            except Exception as e:
-                print(f"[execute_sql] secret fetch failed for {cluster_id}: {e}")
-                return {
-                    "status": "execution_failed",
-                    "cluster_id": cluster_id,
-                    "reason": "대상 인스턴스 자격증명 조회에 실패했습니다.",
-                }
+            # closed with a static message (no str(e) leak). Shared helper — same
+            # reject reasons as the pre-flight probe and the SQL Server branch.
+            res = _direct_write_secret_and_creds(cluster, cluster_id, is_safe)
+            if isinstance(res, dict):
+                return res
+            _secret_arn, creds = res
             # Session default schema: db_name if set. Reads fall back to the
             # 'mysql' system schema (harmless for SELECT/SHOW/performance_schema);
             # writes get NO fallback — an unqualified DDL/DML against the system
             # schema is denied by RDS (error 1044, live-verified) and burns the
             # single-use approval. With database=None MySQL raises a clear
-            # "No database selected" for unqualified writes instead.
+            # "No database selected" for unqualified writes instead. (The pre-flight
+            # probe used this SAME database value.)
             database = cluster.get("db_name") or ("mysql" if is_safe else None)
             conn = None
             try:
-                conn = mysql_direct.connect(
-                    host=cluster.get("endpoint"),
-                    port=cluster.get("port"),
-                    database=database,
-                    user=creds.get("username"),
-                    password=creds.get("password"),
-                )
+                conn = _direct_connect(cluster, creds, database)
                 resp = mysql_direct.MySQLDataApiAdapter(conn).execute_statement(
                     sql=f"/* source=dbops-agent */ {sql}"
                 )
             except Exception as e:
                 print(f"[execute_sql] direct MySQL execution failed for {cluster_id}: {e}")
-                return {
-                    "status": "execution_failed",
-                    "cluster_id": cluster_id,
-                    "reason": (
-                        "직접 실행에 실패했습니다. 쓰기 SQL은 스키마를 명시(예: demo.orders)하거나 "
-                        "클러스터에 db_name을 설정하세요(PATCH /api/clusters/{id}/meta)."
-                    ),
-                }
+                return _direct_exec_failed(cluster, cluster_id)
             finally:
                 if conn is not None:
                     try:
