@@ -107,10 +107,10 @@ def _lookup_cluster(cluster_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # Shared direct-TCP (rds_instance MySQL / SQL Server) helpers.
 #
-# These exist so the APPROVED-write PRE-FLIGHT PROBE and the post-consume
-# EXECUTE branch resolve the secret, decide the reject reasons, and build the
-# connection through EXACTLY ONE code path — a divergent second copy of the
-# guard/connect logic is the failure this extraction prevents.
+# These exist so the metadata PRE-CHECK (pre-consume) and the post-consume
+# EXECUTE branch decide the reject reasons — and the execute branch resolves the
+# secret and builds the connection — through EXACTLY ONE code path each. A
+# divergent second copy of the guard/connect logic is the failure this prevents.
 # ---------------------------------------------------------------------------
 
 
@@ -201,8 +201,7 @@ def _mssql_master_write_reject(cluster_id: str) -> dict:
 
 def _direct_exec_failed(cluster: dict, cluster_id: str) -> dict:
     """Engine-specific static execution_failed reject (no str(e) leak). Used by
-    both the pre-flight probe and the execute branch on any connect/execute
-    exception."""
+    the execute branch on any connect/execute exception."""
     if "sqlserver" in (cluster.get("engine") or ""):
         hint = (
             "쓰기 SQL은 [db].[schema].[object] 형식으로 정규화하거나 "
@@ -374,7 +373,7 @@ def execute_sql_impl(
             # T-SQL path never falls into the MySQL body.
             if "sqlserver" in (cluster.get("engine") or ""):
                 # Secret + creds via the shared helper (same reject reasons as the
-                # pre-flight probe and the MySQL branch — one source of truth).
+                # metadata pre-check and the MySQL branch — one source of truth).
                 res = _direct_write_secret_and_creds(cluster, cluster_id, is_safe)
                 if isinstance(res, dict):
                     return res
@@ -415,7 +414,7 @@ def execute_sql_impl(
             # approved writes use the separate db_write_secret_arn (mirrors the
             # DocDB read/write secret split). Missing the needed secret → fail
             # closed with a static message (no str(e) leak). Shared helper — same
-            # reject reasons as the pre-flight probe and the SQL Server branch.
+            # reject reasons as the metadata pre-check and the SQL Server branch.
             res = _direct_write_secret_and_creds(cluster, cluster_id, is_safe)
             if isinstance(res, dict):
                 return res
@@ -425,8 +424,9 @@ def execute_sql_impl(
             # writes get NO fallback — an unqualified DDL/DML against the system
             # schema is denied by RDS (error 1044, live-verified) and burns the
             # single-use approval. With database=None MySQL raises a clear
-            # "No database selected" for unqualified writes instead. (The pre-flight
-            # probe used this SAME database value.)
+            # "No database selected" for unqualified writes instead. (This
+            # execute-time no-db failure is NOT metadata-detectable, so — unlike
+            # SQL Server master-write — it is not caught by the pre-check.)
             database = cluster.get("db_name") or ("mysql" if is_safe else None)
             conn = None
             try:
