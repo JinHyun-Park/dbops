@@ -462,11 +462,14 @@ def execute_sql_impl(
             )
         except Exception as e:
             err = str(e)
+            print(f"[execute_sql] Aurora Data API execution failed for {cluster_id}: {err}")
+            # Static reason only — never surface the raw boto exception in the
+            # response (no str(e) leak, per the project-wide contract). `err`
+            # stays LOCAL for the HttpEndpoint hint below + the log line above.
             result = {
                 "status": "execution_failed",
-                "error": err,
                 "cluster_id": cluster_id,
-                "target_arn": target_arn,
+                "reason": "SQL 실행에 실패했습니다. 자세한 원인은 서버 로그를 확인하세요.",
             }
             # 프로비저닝 클러스터가 가장 흔하게 밟는 케이스: Data API(HttpEndpoint)
             # 미활성. raw boto 에러만으로는 DBA가 다음 행동을 알 수 없으므로

@@ -782,6 +782,48 @@ def test_direct_mssql_error_does_not_leak_exception_text(
     assert _LEAK not in str(result) and "hunter2" not in str(result)
 
 
+@patch.dict(
+    "os.environ",
+    {"TARGET_CLUSTER_ARN": "arn:test", "TARGET_SECRET_ARN": "arn:secret", "TARGET_DB_NAME": "testdb"},
+)
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+def test_aurora_data_api_failure_does_not_leak_exception_text(mock_boto3):
+    """The Aurora RDS-Data-API path must return a STATIC reason on failure —
+    never the raw boto exception (no str(e) leak, project-wide contract). Detail
+    goes to the CloudWatch print, and the old `error` key is gone."""
+    rds = MagicMock()
+    mock_boto3.client.return_value = rds
+    leak = "BadRequestException: secret=arn:aws:secret:LEAK creds=topsecret-value"
+    rds.execute_statement.side_effect = Exception(leak)
+
+    result = execute_sql_impl(MagicMock(), cluster_id="prod-pg-1", sql="SELECT 1")
+
+    assert result["status"] == "execution_failed"
+    assert "error" not in result  # the str(e)-carrying key was removed
+    assert leak not in str(result) and "topsecret-value" not in str(result)
+
+
+@patch.dict(
+    "os.environ",
+    {"TARGET_CLUSTER_ARN": "arn:test", "TARGET_SECRET_ARN": "arn:secret", "TARGET_DB_NAME": "testdb"},
+)
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+def test_aurora_http_endpoint_disabled_gives_enable_hint_without_leak(mock_boto3):
+    """The HttpEndpoint-disabled case still yields the enable-data-api guidance
+    (the branch reads the LOCAL err), while never leaking the raw exception."""
+    rds = MagicMock()
+    mock_boto3.client.return_value = rds
+    rds.execute_statement.side_effect = Exception(
+        "BadRequestException: HttpEndpoint is not enabled for resource"
+    )
+
+    result = execute_sql_impl(MagicMock(), cluster_id="prod-pg-1", sql="SELECT 1")
+
+    assert result["status"] == "execution_failed"
+    assert "enable-http-endpoint" in result["reason"] or "enable_data_api" in result["reason"]
+    assert "error" not in result
+
+
 # ===== R-5 backlog: pre-flight connect BEFORE consuming the write approval =====
 # The single-use approval must be consumed ONLY when committed to executing:
 # after the pre-connect guards pass AND a real connection to the target
