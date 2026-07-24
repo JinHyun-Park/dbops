@@ -68,8 +68,14 @@ def test_rds_instance_capabilities():
     assert "instance_write" not in ef.CAPABILITIES["relational"]
     assert "instance_write" not in ef.CAPABILITIES["dynamodb"]
     assert caps["cw_namespace"] == "AWS/RDS"
-    # R-2: cache-only MySQL param_fitness now runs in the ETL collector.
-    assert caps["findings"] == {"param_fitness"}
+    # R-2/R-5: cache-only findings run in the ETL collector. health stays OUT
+    # (PG-only); InnoDB-status findings come from the direct-TCP collector.
+    assert caps["findings"] == {
+        "param_fitness",
+        "capacity_forecast",
+        "query_regression",
+        "cost",
+    }
 
 def test_all_python_copies_are_verbatim_identical():
     root = Path(__file__).resolve().parents[3]

@@ -8,6 +8,7 @@ import { fetchHealthFindings, type HealthFinding } from "@/lib/api-client";
 import { streamChat } from "@/lib/agentcore-sse";
 import { fmtRelative } from "@/lib/format";
 import { confidence, trackRecordLabel } from "@/lib/remediation";
+import { engineBadge } from "@/lib/engine";
 
 const SEV_BADGE: Record<HealthFinding["severity"], string> = {
   critical: "bg-rose-500/20 text-rose-300 border border-rose-500/40",
@@ -319,6 +320,7 @@ export function MaintenanceHealthPanel({
         <FindingDetailModal
           finding={active}
           clusterId={clusterId}
+          engine={engine}
           onClose={() => setActive(null)}
         />
       )}
@@ -329,10 +331,12 @@ export function MaintenanceHealthPanel({
 function FindingDetailModal({
   finding,
   clusterId,
+  engine,
   onClose,
 }: {
   finding: HealthFinding;
   clusterId: string;
+  engine?: string;
   onClose: () => void;
 }) {
   const [insight, setInsight] = useState("");
@@ -363,7 +367,9 @@ function FindingDetailModal({
     setLoading(true);
     const detailJson = JSON.stringify(details ?? {}, null, 2);
     const message =
-      `너는 시니어 PostgreSQL DBA야. 아래 유지보수 항목을 **한국어로** 다음 3개 섹션으로 짧고 명확하게 설명해줘:\n` +
+      `너는 시니어 ${
+        engineBadge(engine).label
+      } DBA야. 아래 유지보수 항목을 **한국어로** 다음 3개 섹션으로 짧고 명확하게 설명해줘:\n` +
       `1. **왜 중요한지** — 운영 리스크 한 문장.\n` +
       `2. **구체적 조치** — 실행해야 할 정확한 명령어 또는 파라미터 변경. schema.table 이름까지 포함해.\n` +
       `3. **검증 방법** — 조치가 반영됐는지 확인할 쿼리나 점검 한 가지.\n\n` +

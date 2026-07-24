@@ -153,3 +153,95 @@ def test_acu_flat_trend_no_finding():
     # 포화 아님 + slope ≤ 0 → 천장도 추세도 아님 → 침묵.
     emitted, _ = _run_acu(16.0, {"slope": -0.5, "latest_peak": 5.0, "max_peak": 6.0, "days": 6, "sat_days": 0})
     assert [e for e in emitted if e[2] == "ACU"] == []
+
+
+# ---- 스토리지 소진 예측 (standalone RDS instance, free_storage_bytes) ----
+_GB = 1024 ** 3
+
+
+def _mock_execute_storage(fs_agg, alloc_gb):
+    """standalone RDS instance 전용 mock.
+    connection/storage_bytes 루프와 ACU는 평탄/미상으로 둬 storage_exhaustion만 검증.
+    fs_agg: dict(slope, latest, samples) — free_storage_bytes 회귀 결과."""
+    def fake(rds, arn, secret, db, sql, params=None):
+        # allocated_storage_gb 조회 (resource_details) — cluster_meta 앞에서 먼저 매칭.
+        if "resource_details" in sql:
+            return [{"gb": str(alloc_gb)}] if alloc_gb else [{"gb": None}]
+        if "FROM cluster_meta" in sql:
+            return [{"max_connections": 100, "serverlessv2_max_acu": None}]
+        # free_storage_bytes 회귀 (REGR_SLOPE 포함하므로 일반 REGR 분기보다 먼저).
+        if "free_storage_bytes" in sql:
+            return [fs_agg]
+        if "REGR_SLOPE" in sql:  # storage_bytes / db_connections 루프 → 평탄
+            return [{"slope": 0.0, "latest": 1.0, "samples": 200}]
+        if "FROM cluster_settings" in sql:
+            return [{"value": "100"}]
+        return []
+    return fake
+
+
+def _run_storage(fs_agg, alloc_gb=200.0):
+    emitted = []
+    with patch.object(cf, "_execute") as m:
+        def capture(rds, arn, secret, db, sql, params=None):
+            if sql.strip().upper().startswith("INSERT"):
+                emitted.append((params["check_type"], params["severity"],
+                                params["subject"], params["details"]))
+            return _mock_execute_storage(fs_agg, alloc_gb)(rds, arn, secret, db, sql, params)
+        m.side_effect = capture
+        result = cf.collect_capacity_forecast(
+            MagicMock(), "a", "s", "d", "c1", snapshot_ts="2026-07-22T00:00:00Z", engine="mysql",
+        )
+    return emitted, result
+
+
+def test_storage_exhaustion_near_term_critical():
+    # 여유 100GB, 하루 10GB씩 감소 → 100/10 = 10일 후 소진 → ≤14 → critical.
+    emitted, _ = _run_storage({"slope": -10 * _GB, "latest": 100 * _GB, "samples": 200})
+    st = [e for e in emitted if e[0] == "capacity_forecast" and e[2] == "스토리지"]
+    assert len(st) == 1
+    assert st[0][1] == "critical"
+    import json
+    assert json.loads(st[0][3])["case"] == "storage_exhaustion"
+
+
+def test_storage_exhaustion_mid_term_warning():
+    # 여유 100GB, 하루 5GB씩 감소 → 20일 후 소진 → 14<20≤30 → warning.
+    emitted, _ = _run_storage({"slope": -5 * _GB, "latest": 100 * _GB, "samples": 200})
+    st = [e for e in emitted if e[0] == "capacity_forecast" and e[2] == "스토리지"]
+    assert len(st) == 1
+    assert st[0][1] == "warning"
+
+
+def test_storage_far_off_no_finding():
+    # 여유 100GB, 하루 1GB씩 감소 → 100일 후 → >30 → 경보 없음.
+    emitted, _ = _run_storage({"slope": -1 * _GB, "latest": 100 * _GB, "samples": 200})
+    assert [e for e in emitted if e[2] == "스토리지"] == []
+
+
+def test_storage_flat_no_finding():
+    # 여유 감소 없음(slope ≥ 0) → 소진 예측 불가 → 침묵.
+    emitted, _ = _run_storage({"slope": 0.0, "latest": 100 * _GB, "samples": 200})
+    assert [e for e in emitted if e[2] == "스토리지"] == []
+
+
+def test_storage_insufficient_samples_no_finding():
+    # 표본 < 20 → 추세 신뢰 불가 → 침묵.
+    emitted, _ = _run_storage({"slope": -10 * _GB, "latest": 100 * _GB, "samples": 5})
+    assert [e for e in emitted if e[2] == "스토리지"] == []
+
+
+def test_storage_usage_pct_when_allocated_known():
+    # allocated 200GB, 여유 50GB → 사용률 75% 가 value_str에 포함.
+    emitted = []
+    with patch.object(cf, "_execute") as m:
+        def capture(rds, arn, secret, db, sql, params=None):
+            if sql.strip().upper().startswith("INSERT"):
+                emitted.append(params["value_str"])
+            return _mock_execute_storage(
+                {"slope": -5 * _GB, "latest": 50 * _GB, "samples": 200}, 200.0
+            )(rds, arn, secret, db, sql, params)
+        m.side_effect = capture
+        cf.collect_capacity_forecast(MagicMock(), "a", "s", "d", "c1",
+                                     snapshot_ts="2026-07-22T00:00:00Z", engine="mysql")
+    assert any("75.0% 사용" in v for v in emitted)

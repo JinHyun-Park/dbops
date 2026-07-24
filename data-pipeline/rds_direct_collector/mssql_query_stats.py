@@ -1,10 +1,14 @@
 """SQL Server counterpart to mysql_query_stats.py.
 
 RDS SQL Server exposes cumulative statement aggregates via
-sys.dm_exec_query_stats (per compiled plan, since the plan entered cache) —
-same model as MySQL's events_statements_summary_by_digest / PG's
-pg_stat_statements, so the existing dashboard math works. Output goes to the
-SAME `query_stats` cache table the MySQL collector writes.
+sys.dm_exec_query_stats (one row per compiled plan, since the plan entered
+cache). That is FINER-grained than MySQL's events_statements_summary_by_digest
+/ PG's pg_stat_statements, which emit exactly ONE row per query_hash: a single
+query_hash can have multiple cached plans, so a raw DMV snapshot holds several
+rows sharing one hash. query_regression PARTITIONs BY query_hash and LAGs by
+snapshot_time, so duplicate same-tick hashes corrupt the per-interval delta —
+we GROUP BY query_hash here to emit exactly one row per hash per snapshot,
+matching the MySQL/PG shape. Output goes to the SAME `query_stats` cache table.
 
 UNIT: dm_exec_query_stats time columns are MICROSECONDS (µs) → /1000.0 = ms.
 (NOT picoseconds like MySQL perf_schema TIMER_WAIT, and NOT milliseconds like
@@ -13,16 +17,17 @@ dm_exec_requests — see mssql_activity.) The /1000.0 is done in SQL.
 
 QUERY_STATS_SQL = """
 SELECT TOP 100
-  CONVERT(VARCHAR(64), qs.query_hash, 2)                       AS query_hash,
-  SUBSTRING(st.text, (qs.statement_start_offset/2)+1, 500)     AS query_text,
-  qs.execution_count                                           AS calls,
-  qs.total_elapsed_time/1000.0                                 AS total_time_ms,
-  (qs.total_elapsed_time/NULLIF(qs.execution_count,0))/1000.0  AS mean_time_ms,
-  qs.total_rows                                                AS rows_returned
+  CONVERT(VARCHAR(64), qs.query_hash, 2)                              AS query_hash,
+  MAX(SUBSTRING(st.text, (qs.statement_start_offset/2)+1, 500))       AS query_text,
+  SUM(qs.execution_count)                                             AS calls,
+  SUM(qs.total_elapsed_time)/1000.0                                   AS total_time_ms,
+  (SUM(qs.total_elapsed_time)/NULLIF(SUM(qs.execution_count),0))/1000.0 AS mean_time_ms,
+  SUM(qs.total_rows)                                                  AS rows_returned
 FROM sys.dm_exec_query_stats qs
 CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
 WHERE st.text IS NOT NULL
-ORDER BY qs.total_elapsed_time DESC
+GROUP BY qs.query_hash
+ORDER BY SUM(qs.total_elapsed_time) DESC
 """
 
 

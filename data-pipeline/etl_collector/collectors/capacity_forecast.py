@@ -39,6 +39,12 @@ MIN_SAMPLES = 20         # 추세 신뢰를 위한 최소 표본
 SEV_CRIT_DAYS = 3
 SEV_WARN_DAYS = 7
 
+# 스토리지 소진(standalone RDS instance, FreeStorageSpace)은 커넥션·ACU보다
+# 느리게 차지만 디스크 full은 곧 인스턴스 다운이라 파급이 크다 — 더 긴 지평선
+# (30일)에서 경고하고, 임박(14일 이내)하면 critical로 올린다.
+STORAGE_ALERT_DAYS = 30
+STORAGE_SEV_CRIT_DAYS = 14
+
 # ACU 예측 — 부하에 휘둘리는 원시 표본 대신 일별 peak로 천장 접근을 본다.
 ACU_SAT_FRAC = 0.95      # 일별 peak가 max ACU의 95% 이상이면 "포화"로 카운트
 ACU_MIN_DAYS = 3         # 일별 peak가 최소 3일치는 있어야 추세를 믿는다
@@ -274,6 +280,74 @@ def collect_capacity_forecast(rds_data, cache_cluster_arn, cache_secret_arn, cac
                             "usage_pct": round(usage_pct, 1), "case": "trending_up",
                         }),
                     })
+
+    # === 스토리지 소진 예측 (standalone RDS instance 전용) ===
+    # 위 storage_bytes 루프는 Aurora 볼륨(증가 → 128 TiB)을 본다. rds_instance는
+    # 대신 감소하는 free_storage_bytes(FreeStorageSpace)를 쓰고 AllocatedStorage가
+    # 고정이므로, 여유 공간의 하강 기울기로 디스크 소진(=0) ETA를 예측한다.
+    # Aurora는 free_storage_bytes 표본이 없어(0개) 이 분기를 건너뛴다.
+    fs_rows = _execute(
+        rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
+        "SELECT REGR_SLOPE(value::float, EXTRACT(EPOCH FROM ts) / 86400) AS slope, "
+        "       (array_agg(value ORDER BY ts DESC))[1] AS latest, "
+        "       COUNT(*) AS samples "
+        "FROM metric_snapshots "
+        "WHERE cluster_id = :cid AND metric_type = 'free_storage_bytes' "
+        "  AND ts > NOW() - (:days || ' days')::interval "
+        "  AND (dimensions IS NULL OR dimensions::text = '{}')",
+        {"cid": cluster_id, "days": str(days_lookback)},
+    )
+    fs = fs_rows[0] if fs_rows else {}
+    fs_slope = float(fs.get("slope") or 0)   # bytes/일; 여유 감소 시 음수
+    fs_free = float(fs.get("latest") or 0)   # 현재 여유 바이트
+    fs_samples = int(fs.get("samples") or 0)
+
+    if fs_samples >= MIN_SAMPLES and fs_slope < 0 and fs_free > 0:
+        days_until = int(fs_free / -fs_slope)  # 여유 0까지 남은 일수
+        if days_until <= STORAGE_ALERT_DAYS:
+            severity = "critical" if days_until <= STORAGE_SEV_CRIT_DAYS else "warning"
+            # 퍼센트 컨텍스트(선택): AllocatedStorage로 사용률 계산. 없으면 생략.
+            alloc_gb = None
+            arows = _execute(
+                rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
+                "SELECT resource_details->>'allocated_storage_gb' AS gb "
+                "FROM cluster_meta WHERE cluster_id = :cid",
+                {"cid": cluster_id},
+            )
+            if arows and arows[0].get("gb"):
+                try:
+                    alloc_gb = float(arows[0]["gb"])
+                except (TypeError, ValueError):
+                    alloc_gb = None
+            value_str = f"여유 {_fmt('storage', fs_free)}"
+            usage_pct = None
+            if alloc_gb:
+                alloc_bytes = alloc_gb * 1024 ** 3
+                usage_pct = max(0.0, (alloc_bytes - fs_free) / alloc_bytes * 100)
+                value_str += f" / 할당 {alloc_gb:.0f}GB ({usage_pct:.1f}% 사용)"
+            findings.append({
+                "check_type": "capacity_forecast",
+                "severity": severity,
+                "subject": "스토리지",
+                "value_str": value_str,
+                "threshold_str": f"{STORAGE_ALERT_DAYS}일 이내 소진 예상",
+                "recommendation": (
+                    f"여유 스토리지가 하락 추세(약 {-fs_slope / 1024 ** 3:.2f}GB/일)로, 현 추세면 약 "
+                    f"{days_until}일 후 디스크가 가득 찰 것으로 예측됩니다. 디스크가 소진되면 쓰기가 "
+                    f"멈추고 인스턴스가 STORAGE_FULL 상태로 중단됩니다. AllocatedStorage 상향 또는 "
+                    f"Storage Autoscaling(최대 임계) 설정을 검토하고, 증가 원인(로그·임시파일·미사용 "
+                    f"데이터 누적)을 점검하세요. "
+                    f"추세는 최근 {days_lookback}일 선형 회귀 기반이라 워크로드 변화 시 달라질 수 있습니다."
+                ),
+                "details": json.dumps({
+                    "metric": "free_storage_bytes", "current_free": round(fs_free, 2),
+                    "slope_per_day": round(fs_slope, 4), "days_until_empty": days_until,
+                    "samples": fs_samples,
+                    "allocated_gb": alloc_gb,
+                    "usage_pct": round(usage_pct, 1) if usage_pct is not None else None,
+                    "case": "storage_exhaustion",
+                }),
+            })
 
     for f in findings:
         _execute(

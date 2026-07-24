@@ -199,6 +199,40 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
             except Exception as e:
                 result["param_fitness_error"] = str(e)
                 print(f"[{cluster_id}] param_fitness error: {e}")
+        # Engine-agnostic cache-only advisory collectors — same set the relational
+        # branch runs, all reading ONLY the hub cache DB (no target/VPC connection):
+        # cost, capacity/storage forecast, query regression, seasonal baselines.
+        # capacity_forecast picks up the DECREASING free_storage_bytes series that
+        # rds_instance writes (Aurora has none) → disk-exhaustion ETA. All share
+        # run_ts so this cycle's findings land in one MAX(snapshot_time) batch —
+        # EXCEPT baselines, which writes its own NOW() into metric_baselines.
+        try:
+            result["cost"] = collect_cost_findings(
+                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                snapshot_ts=run_ts)
+        except Exception as e:
+            result["cost_error"] = str(e)
+            print(f"[{cluster_id}] cost error: {e}")
+        try:
+            result["capacity_forecast"] = collect_capacity_forecast(
+                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                snapshot_ts=run_ts, engine=engine)
+        except Exception as e:
+            result["capacity_forecast_error"] = str(e)
+            print(f"[{cluster_id}] capacity_forecast error: {e}")
+        try:
+            result["query_regression"] = collect_query_regression(
+                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                snapshot_ts=run_ts)
+        except Exception as e:
+            result["query_regression_error"] = str(e)
+            print(f"[{cluster_id}] query_regression error: {e}")
+        try:
+            result["baselines"] = collect_pg_baselines(
+                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id)
+        except Exception as e:
+            result["baselines_error"] = str(e)
+            print(f"[{cluster_id}] baselines error: {e}")
         return result
 
     # ------------------------------------------------------------------

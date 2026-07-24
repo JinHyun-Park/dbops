@@ -220,7 +220,10 @@ def test_rds_instance_routes_to_instance_collector_only():
     mock_meta = MagicMock()
     mock_pi = MagicMock()
     mock_cw = MagicMock()
-    mock_cost = MagicMock()
+    mock_cost = MagicMock(return_value={})
+    mock_capforecast = MagicMock(return_value={})
+    mock_qregr = MagicMock(return_value={})
+    mock_baselines = MagicMock(return_value={})
 
     with (
         patch.object(handler, "collect_rds_instance_metrics", mock_inst_collector),
@@ -228,16 +231,35 @@ def test_rds_instance_routes_to_instance_collector_only():
         patch.object(handler, "collect_pi_metrics", mock_pi),
         patch.object(handler, "collect_cw_metrics", mock_cw),
         patch.object(handler, "collect_cost_findings", mock_cost),
+        patch.object(handler, "collect_capacity_forecast", mock_capforecast),
+        patch.object(handler, "collect_query_regression", mock_qregr),
+        patch.object(handler, "collect_pg_baselines", mock_baselines),
     ):
         result = handler._collect_one(resource, **_COMMON_KWARGS)
 
     mock_inst_collector.assert_called_once()
-    # Aurora-cluster meta / cluster-dimension CW / cost must NOT run;
-    # PI must not run either (pi_enabled=False in the collector result).
+    # Aurora-cluster meta / cluster-dimension CW must NOT run; PI must not run
+    # either (pi_enabled=False in the collector result).
     mock_meta.assert_not_called()
     mock_cw.assert_not_called()
-    mock_cost.assert_not_called()
     mock_pi.assert_not_called()
+    # Engine-agnostic cache-only advisory collectors DO run for rds_instance:
+    # cost, capacity/storage forecast, query regression, seasonal baselines.
+    mock_cost.assert_called_once()
+    mock_capforecast.assert_called_once()
+    mock_qregr.assert_called_once()
+    mock_baselines.assert_called_once()
+    # capacity_forecast gets the engine so its storage-exhaustion branch keys off it.
+    assert mock_capforecast.call_args.kwargs.get("engine") == "mysql"
+    # SHARED run_ts contract: cost/capacity_forecast/query_regression MUST all receive
+    # snapshot_ts=run_ts so the dashboard's per-check_type latest-in-window sees them as
+    # one batch. A regression dropping run_ts here would scatter them across snapshot_times.
+    _rt = _COMMON_KWARGS["run_ts"]
+    assert mock_cost.call_args.kwargs.get("snapshot_ts") == _rt
+    assert mock_capforecast.call_args.kwargs.get("snapshot_ts") == _rt
+    assert mock_qregr.call_args.kwargs.get("snapshot_ts") == _rt
+    # baselines writes its own NOW() — no snapshot_ts passed.
+    assert "snapshot_ts" not in mock_baselines.call_args.kwargs
     assert result["cluster_id"] == "dbops-demo-mysql"
 
 

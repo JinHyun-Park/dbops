@@ -185,7 +185,7 @@ const TABS_BY_FAMILY: Record<EngineFamily, TabKey[]> = {
   dynamodb: ["overview", "advisory", "config", "audit"],
   documentdb: ["overview", "advisory", "config", "audit"],
   elasticache: ["overview", "advisory", "config", "audit"],
-  rds_instance: ["overview", "perf", "internals", "audit"],
+  rds_instance: ["overview", "perf", "advisory", "internals", "audit"],
 };
 
 function readInitialTab(): TabKey {
@@ -1017,6 +1017,15 @@ export default function DashboardPage() {
                     clusterId={selectedCluster}
                     engine={activeEngine}
                   />
+                )}
+                {fam === "rds_instance" && (
+                  <>
+                    <AnomaliesPanel clusterId={selectedCluster} />
+                    <CapacityForecastPanel
+                      clusterId={selectedCluster}
+                      engine={activeEngine}
+                    />
+                  </>
                 )}
               </>
             )}

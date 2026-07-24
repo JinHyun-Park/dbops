@@ -100,10 +100,11 @@ CAPABILITIES = {
         # (DBInstanceIdentifier; the DBClusterIdentifier dimension does not
         # exist for these engines).
         "cw_namespace": "AWS/RDS",
-        # R-2: cache-only MySQL param_fitness runs in the ETL collector (reads
-        # the cache DB only, no VPC). InnoDB-status findings come from the
-        # VPC direct-TCP collector (rds_direct_collector), not tracked here.
-        "findings": {"param_fitness"},
+        # R-2: cache-only findings run in the ETL collector (reads the cache DB
+        # only, no VPC). health stays OUT — it's PG-only. InnoDB-status findings
+        # come from the VPC direct-TCP collector (rds_direct_collector), not
+        # tracked here.
+        "findings": {"param_fitness", "capacity_forecast", "query_regression", "cost"},
     },
 }
 

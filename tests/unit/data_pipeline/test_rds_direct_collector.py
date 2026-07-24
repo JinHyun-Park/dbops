@@ -188,8 +188,22 @@ def test_mssql_query_stats_sql_has_top100_and_microsecond_conversion():
     # dm_exec_query_stats.total_elapsed_time is MICROSECONDS → /1000.0 = ms.
     m = _load("mssql_query_stats")
     assert "TOP 100" in m.QUERY_STATS_SQL
-    assert "qs.total_elapsed_time/1000.0" in m.QUERY_STATS_SQL
+    assert "SUM(qs.total_elapsed_time)/1000.0" in m.QUERY_STATS_SQL
     assert "INSERT INTO query_stats" in m.INSERT_SQL
+
+
+def test_mssql_query_stats_sql_aggregates_one_row_per_query_hash():
+    # dm_exec_query_stats is per-cached-plan, so one query_hash can span several
+    # rows in a single snapshot. query_regression PARTITIONs BY query_hash and
+    # LAGs by snapshot_time — duplicate same-tick hashes corrupt the per-interval
+    # delta. GROUP BY query_hash collapses plans to one row/hash (MySQL/PG shape).
+    m = _load("mssql_query_stats")
+    assert "GROUP BY qs.query_hash" in m.QUERY_STATS_SQL
+    # counts must be SUMmed across plans, not taken from a single plan row.
+    assert "SUM(qs.execution_count)" in m.QUERY_STATS_SQL
+    assert "SUM(qs.total_rows)" in m.QUERY_STATS_SQL
+    # ordering/TOP N is over the aggregated total, not a per-plan value.
+    assert "ORDER BY SUM(qs.total_elapsed_time) DESC" in m.QUERY_STATS_SQL
 
 
 def test_mssql_query_stats_stores_ms_from_microseconds():
@@ -216,6 +230,27 @@ def test_mssql_query_stats_stores_ms_from_microseconds():
     assert captured["rows_returned"] == 100
     # marker present on the target read
     assert "/* source=dbops-etl */" in client.execute_statement.call_args.kwargs["sql"]
+
+
+def test_mssql_query_stats_emitted_rows_unique_by_query_hash():
+    # Given a snapshot with distinct hashes (the GROUP BY guarantee), every row
+    # inserted into query_stats carries a distinct query_hash and the ms units
+    # from the SQL's /1000.0 pass through untouched.
+    m = _load("mssql_query_stats")
+    client = MagicMock()
+    client.execute_statement.return_value = {"records": [
+        [{"stringValue": "0xAAAA"}, {"stringValue": "SELECT a"},
+         {"longValue": 30}, {"doubleValue": 900.0}, {"doubleValue": 30.0}, {"longValue": 300}],
+        [{"stringValue": "0xBBBB"}, {"stringValue": "SELECT b"},
+         {"longValue": 10}, {"doubleValue": 200.0}, {"doubleValue": 20.0}, {"longValue": 50}],
+    ]}
+    seen = []
+    m.collect_mssql_query_stats(
+        client, lambda sql, params: seen.append(dict(params)),
+        "", "", "c1", "db")
+    hashes = [p["query_hash"] for p in seen]
+    assert len(hashes) == len(set(hashes)) == 2   # no duplicate hash in one collection
+    assert seen[0]["total_time_ms"] == 900.0 and seen[0]["calls"] == 30   # units/counts preserved
 
 
 def test_mssql_activity_maps_state_long_running_and_blocking():

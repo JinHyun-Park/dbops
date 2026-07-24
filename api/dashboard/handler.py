@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 import tenancy
-from engine_family import CAPABILITIES, engine_family
+from engine_family import CAPABILITIES, RDS_INSTANCE, engine_family
 
 
 def _parse_int(value, default, min_v=1, max_v=168):
@@ -2037,18 +2037,48 @@ def _health_findings(query, cluster_id):
             "counts": {"critical": 0, "warning": 0, "info": 0},
             "findings": [],
         }
-    rows = query(
-        "WITH latest AS ("
-        "  SELECT MAX(snapshot_time) AS ts FROM cluster_health_findings WHERE cluster_id = :cid"
-        ") "
-        "SELECT id, check_type, severity, subject, value_str, threshold_str, recommendation, details, snapshot_time "
-        "FROM cluster_health_findings, latest "
-        "WHERE cluster_id = :cid AND snapshot_time = latest.ts "
-        "ORDER BY "
-        "  CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, "
-        "  check_type, subject",
-        {"cid": cluster_id},
-    )
+    _COLS = ("id, check_type, severity, subject, value_str, threshold_str, "
+            "recommendation, details, snapshot_time")
+    if fam == RDS_INSTANCE:
+        # rds_instance findings are written by TWO Lambdas on independent
+        # schedules with DISJOINT check_type sets: the ETL collector
+        # (cost/capacity_forecast/param_fitness/query_regression) and the
+        # VPC direct-TCP collector (InnoDB status). A single global
+        # MAX(snapshot_time) would surface only whichever Lambda ran last and
+        # hide the other set. So pick the latest snapshot *per check_type*
+        # within a freshness window: this shows both Lambdas' current findings
+        # and still auto-resolves (a finding no longer re-emitted ages out of
+        # the window). Window = 15 min: both Lambdas run every 5 min, so this
+        # is 3x the slowest cadence — comfortably covers one full cycle of each.
+        # ponytail: MAX(snapshot_time) OVER, not ROW_NUMBER()=1 — capacity_forecast
+        # emits several subjects at one snapshot; ROW_NUMBER would keep only one.
+        rows = query(
+            f"SELECT {_COLS} FROM ("
+            f"  SELECT {_COLS}, "
+            "    MAX(snapshot_time) OVER (PARTITION BY check_type) AS ct_latest "
+            "  FROM cluster_health_findings "
+            "  WHERE cluster_id = :cid "
+            "    AND snapshot_time >= NOW() - INTERVAL '15 minutes'"
+            ") ranked "
+            "WHERE snapshot_time = ct_latest "
+            "ORDER BY "
+            "  CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, "
+            "  check_type, subject",
+            {"cid": cluster_id},
+        )
+    else:
+        rows = query(
+            "WITH latest AS ("
+            "  SELECT MAX(snapshot_time) AS ts FROM cluster_health_findings WHERE cluster_id = :cid"
+            ") "
+            f"SELECT {_COLS} "
+            "FROM cluster_health_findings, latest "
+            "WHERE cluster_id = :cid AND snapshot_time = latest.ts "
+            "ORDER BY "
+            "  CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, "
+            "  check_type, subject",
+            {"cid": cluster_id},
+        )
     counts = {"critical": 0, "warning": 0, "info": 0}
     for r in rows:
         sev = r.get("severity", "info")

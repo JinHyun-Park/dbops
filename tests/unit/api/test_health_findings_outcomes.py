@@ -126,3 +126,73 @@ def test_findings_reranked_by_severity_then_success_rate():
         out = handler._health_findings(query, "c3")
     severities = [f["severity"] for f in out["findings"]]
     assert severities[0] == "critical", "critical must sort first"
+
+
+# ---------------------------------------------------------------------------
+# rds_instance family: two-Lambda findings surface via latest-per-check_type
+# within a freshness window (Postgres does the row filtering; these tests pin
+# the SQL contract + row pass-through, since the mock does not run SQL).
+# ---------------------------------------------------------------------------
+
+def _capture_findings_query(rows):
+    """Query stub that records the cluster_health_findings SQL it was asked to
+    run and returns the given rows for it. Outcome lookups return no history."""
+    captured = {"sql": None}
+
+    def query(sql, params=None):
+        if "remediation_outcomes_agg" in sql:
+            return [{"successes": 0, "attempts": 0}]
+        if "FROM cluster_health_findings" in sql:
+            captured["sql"] = sql
+            return rows
+        return []
+
+    return query, captured
+
+
+def test_rds_instance_two_snapshots_both_surface():
+    """(a) rds_instance: findings from two different snapshot_times (the ETL
+    Lambda and the direct-TCP Lambda) BOTH pass through, and the SQL selects
+    the latest snapshot per check_type within a freshness window."""
+    etl = _make_finding("capacity_forecast", "warning")
+    etl["snapshot_time"] = "2026-07-24T10:00:00Z"
+    innodb = _make_finding("innodb_history_list_high", "critical")
+    innodb["id"] = 2
+    innodb["snapshot_time"] = "2026-07-24T10:02:00Z"
+    stub, captured = _capture_findings_query([etl, innodb])
+    with patch(f"{_MODULE_NAME}._registry_engine", return_value="sqlserver-se"):
+        out = handler._health_findings(stub, "rds1")
+    check_types = {f["check_type"] for f in out["findings"]}
+    assert check_types == {"capacity_forecast", "innodb_history_list_high"}, \
+        "both Lambdas' findings must surface"
+    # SQL contract: latest per check_type within a freshness window.
+    sql = captured["sql"]
+    assert "PARTITION BY check_type" in sql
+    assert "INTERVAL '15 minutes'" in sql
+    # Must NOT collapse to a single global MAX snapshot (that hid one Lambda).
+    assert "latest.ts" not in sql
+
+
+def test_rds_instance_freshness_window_ages_out_stale():
+    """(b) auto-resolve preserved: the rds_instance SQL constrains rows to a
+    freshness window, so a finding older than the window drops out (Postgres
+    enforces the >= NOW() - INTERVAL bound)."""
+    stub, captured = _capture_findings_query([])
+    with patch(f"{_MODULE_NAME}._registry_engine", return_value="mysql"):
+        handler._health_findings(stub, "rds2")
+    sql = captured["sql"]
+    assert "snapshot_time >= NOW() - INTERVAL '15 minutes'" in sql, \
+        "freshness window is what ages out stale findings"
+
+
+def test_relational_uses_single_max_unchanged():
+    """(c) relational (Aurora) behavior UNCHANGED: single global
+    MAX(snapshot_time), no freshness window, no per-check_type partition."""
+    stub, captured = _capture_findings_query([_make_finding()])
+    with patch(f"{_MODULE_NAME}._registry_engine", return_value="aurora-postgresql"):
+        handler._health_findings(stub, "aur1")
+    sql = captured["sql"]
+    assert "MAX(snapshot_time)" in sql and "latest.ts" in sql, \
+        "relational must keep single-MAX snapshot query"
+    assert "PARTITION BY check_type" not in sql
+    assert "INTERVAL" not in sql
