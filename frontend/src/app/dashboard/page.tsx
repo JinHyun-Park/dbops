@@ -1019,14 +1019,14 @@ export default function DashboardPage() {
                   />
                 )}
                 {fam === "rds_instance" && (
-                  <>
-                    <AnomaliesPanel clusterId={selectedCluster} />
-                    <CapacityForecastPanel
-                      clusterId={selectedCluster}
-                      engine={activeEngine}
-                    />
-                  </>
+                  <AnomaliesPanel clusterId={selectedCluster} />
                 )}
+                {/* No manual CapacityForecastPanel for rds_instance: the
+                    /capacity-forecast endpoint models growing-toward-limit and
+                    has no rds_instance family (it would show a misleading
+                    "not applicable" notice). Storage-exhaustion + connection
+                    ETAs already surface as capacity_forecast findings in the
+                    MaintenanceHealthPanel above. */}
               </>
             )}
 

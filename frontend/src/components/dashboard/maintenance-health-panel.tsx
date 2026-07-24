@@ -45,6 +45,10 @@ const CHECK_LABELS: Record<string, string> = {
   param_mysql_conn_buffers: "Tuning", // MySQL: per-connection 버퍼 × max_conn OOM 위험
   // 고갈 예측 경보 — storage/connection/ACU 한계 도달 ETA.
   capacity_forecast: "Capacity",
+  // 쿼리 성능 회귀 (구간 평균 대비 악화) — 엔진 무관.
+  query_regression: "Tuning",
+  // MySQL InnoDB 내부 상태 (history list length 등) — rds_instance MySQL 딥리드.
+  innodb_history_list_high: "Tuning",
   // DynamoDB findings — ddb_* check_types from dynamodb_findings collector.
   ddb_throttling: "Throttling",
   ddb_capacity_underprovisioned: "Capacity",

@@ -53,7 +53,8 @@ const METRICS_BY_FAMILY: Record<string, MetricSpec[]> = {
   relational: [_storage, _connections, _aas],
   documentdb: [_connections, _storage],
   dynamodb: [_wcu, _rcu],
-  rds_instance: [_storage, _connections],
+  // rds_instance intentionally absent: the panel is not rendered for it (its
+  // capacity ETAs surface as findings in MaintenanceHealthPanel instead).
 };
 
 function metricsFor(engine?: string): MetricSpec[] {
