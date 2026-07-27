@@ -1,132 +1,131 @@
-# Implementation Plan: Phase 1 — Performance Analysis Agent
+# Phase 1 Performance Analysis Agent: AS-BUILT DEPLOY CHECKLIST
 
-- [ ] 1. Initialize project structure and CDK app
+> # THE BUILD IS DONE. THESE ARE DEPLOY STEPS, NOT BUILD STEPS.
+>
+> Phase 1 was built starting 2026-05-08 and has been live and deployed since.
+> Verified as shipped on 2026-07-27. The original 15-step implementation plan
+> that used to live in this file was deleted on purpose: it told an agent to run
+> `cdk init` inside an already populated `cdk/`, to create a Bedrock Knowledge
+> Base that no stack has, to implement an `explain_query` tool that does not
+> exist (it is `explain_plan`), to configure Cedar as READ-ONLY (it is LOG_ONLY,
+> and writes ship), and to scaffold Next.js 15 (`frontend/package.json` pins
+> 16.2.9). Executing it would have damaged a working codebase.
+>
+> **Do not scaffold, re-initialize, or re-implement anything in this repository
+> from this spec.** What follows is the only task list a newcomer needs: how to
+> deploy the existing system into a fresh AWS account. The boxes are unchecked
+> because a newcomer genuinely has not done them yet, not because code is
+> missing.
+>
+> If you were asked to change behavior rather than deploy, start from
+> `README.md`, `AGENTS.md`, and `.kiro/steering/`, then the newest matching spec
+> in `docs/superpowers/specs/`.
 
-  - Create directory structure matching structure.md
-  - Initialize CDK Python app with `cdk init`
-  - Create `settings.example.py` with all configurable values
-  - Set up Python virtual environment and requirements.txt
-  - _Requirements: 1.1_
+## Deploy checklist
 
-- [ ] 2. Implement Foundation CDK Stack
+Prerequisites (from `README.md`): an AWS account with AdministratorAccess,
+Node.js 20+, Python 3.10+, `npm install -g aws-cdk`, and Bedrock model access
+enabled for Claude Sonnet in your region.
 
-  - Create Cognito User Pool with PKCE client
-  - Create DynamoDB tables (sessions, clusters)
-  - Create IAM Hub Role for cross-account access
-  - Create VPC (if needed for Lambda-Aurora connectivity)
-  - _Requirements: 1.1, 7.1, 7.2_
+- [ ] 1. Configure the deployment
 
-- [ ] 3. Implement Data CDK Stack
+  - `cp cdk/config/settings.example.py cdk/config/settings.py`
+  - Set `ACCOUNT_ID` and `REGION`. Everything else in that file has a working
+    default, including `COGNITO_DOMAIN_PREFIX`, which must stay empty unless you
+    want a specific prefix (the stack derives a globally unique one).
+  - Check `AGENT_MODEL_ID` carries the inference-profile prefix for your region
+    (`apac.`, `us.`, `eu.`, or `global.`). A bare model ID fails every chat turn.
+  - `cdk/config/settings.py` is gitignored. It is your real config, never commit
+    or overwrite it.
 
-  - Create Aurora PostgreSQL Serverless v2 (I/O-Optimized)
-  - Run schema migrations (cluster_meta, metric_snapshots, query_stats, slow_queries)
-  - Create S3 bucket for EXPLAIN plans and archives
-  - Create Bedrock Knowledge Base with S3 Vectors backend
-  - Ingest Aurora documentation from knowledge/ directory
-  - _Requirements: 2.1, 6.4_
+- [ ] 2. Bootstrap CDK once per account and region
 
-- [ ] 4. Build ETL Collector Lambda
+  - `cd cdk && cdk bootstrap && cd ..`
 
-  - Implement PI metrics collector (GetResourceMetrics API)
-  - Implement pg_stat_statements collector (RDS Data API)
-  - Implement cluster metadata collector (DescribeDBClusters)
-  - Implement slow query log parser
-  - Create EventBridge schedule (5-minute interval)
-  - Add error handling with retry and logging
-  - _Requirements: 2.1, 2.2, 2.3, 2.5_
+- [ ] 3. Run the deployer from the repo root
 
-- [ ] 5. Build Performance MCP Server
+  - `./deploy.sh`
+  - It bundles the SQL schemas, builds the frontend (`npm install` plus
+    `npm run build`, required because the frontend stack ships a prebuilt
+    `out/`), builds the ARM64 agent dependencies via `agent/build-deps.sh`,
+    installs `cdk/requirements.txt`, then runs `cdk deploy --all` over the four
+    stacks in dependency order: `dbops-{ENV}-foundation`, `-data`, `-agent`,
+    `-frontend`.
+  - Schema migrations are automatic. The SchemaMigrator custom resource in the
+    data stack creates the tables idempotently. Do not run SQL by hand.
+  - Never run two `cdk deploy` processes at once. They collide in `cdk.out` and
+    one fails quietly.
+  - The final output prints your Web UI URL, API URL, Runtime ARN, and Gateway
+    ID, then runs `smoke-test.sh`. Some smoke checks are expected to fail before
+    the first cluster is registered.
 
-  - Implement `get_top_queries` tool with Aurora PG Cache queries
-  - Implement `explain_query` tool with RDS Data API call + S3 storage
-  - Implement `get_pi_metrics` tool with time-range filtering
-  - Implement `recommend_index` tool with index_usage + query_stats join
-  - Implement `get_slow_queries` tool with threshold filtering
-  - Implement `compare_periods` tool with two-period aggregation
-  - Package as Lambda deployment artifact
-  - _Requirements: 4.1, 4.2, 4.3, 4.4, 5.2_
+- [ ] 4. Create the first login
 
-- [ ] 6. Build shared MCP utilities
+  - Cognito self-signup is disabled (`cdk/stacks/foundation_stack.py`), so the
+    first user must be created with the AWS CLI. Get the pool ID from the
+    foundation stack's `UserPoolId` output:
 
-  - Implement `db_connector.py` with RDS Data API client and IAM role assumption
-  - Implement `cache_client.py` with Aurora PG Cache connection pooling
-  - Implement SQL audit comment injection (`/* source=dbops-agent */`)
-  - _Requirements: 4.2_
+    ```bash
+    aws cognito-idp admin-create-user \
+      --user-pool-id <UserPoolId> \
+      --username <you@example.com> \
+      --user-attributes Name=email,Value=<you@example.com> Name=email_verified,Value=true
+    aws cognito-idp admin-set-user-password \
+      --user-pool-id <UserPoolId> \
+      --username <you@example.com> \
+      --password '<password>' --permanent
+    ```
 
-- [ ] 7. Implement Agent CDK Stack
+  - Password policy: at least 8 characters with lowercase, uppercase, digit, and
+    symbol.
+  - No group assignment is needed for an admin. The RBAC model is opt-in
+    restriction: a user with no groups has full access, and `dbops-viewer` is
+    what makes someone read-only.
 
-  - Create AgentCore Runtime with Cognito auth and SSE
-  - Create AgentCore Gateway with Performance MCP Server as Lambda target
-  - Enable Gateway Semantic Search
-  - Configure Cedar Policy (READ-ONLY: SELECT and EXPLAIN only)
-  - Create API Gateway HTTP API with Cognito JWT authorizer
-  - Create REST API Lambdas (dashboard, clusters)
-  - _Requirements: 1.1, 3.1, 5.3_
+- [ ] 5. Log in and register a cluster
 
-- [ ] 8. Build Strands Agent
+  - Open the Web UI URL from step 3 and log in through the Cognito Hosted UI.
+    Callback URLs are auto-registered at deploy time, so no manual Cognito work
+    is required.
+  - Go to Clusters, then Register. Use "test connection only" first: it runs a
+    3-step pre-flight (STS AssumeRole, DescribeDBClusters, master secret).
+  - For cross-account targets, deploy the spoke role first
+    (`cdk/cross-account/spoke-role-template.yaml`) and register with its ARN. See
+    `README.md` and `cdk/cross-account/README.md`.
+  - Production hardening: create a dedicated `dbops_readonly` user per cluster
+    and store it as `dbops/<cluster_id>/readonly` in Secrets Manager so DBOps
+    stops using the master secret. The Clusters page has a setup guide button
+    with the exact SQL.
 
-  - Create `server.py` with BedrockModel + MCPClient + Gateway connection
-  - Write system prompt with Aurora cheatsheet (Tier 1 knowledge)
-  - Register Bedrock KB `retrieve` tool (Tier 2 knowledge)
-  - Configure AgentCore Memory for session persistence
-  - Build and push Docker container to ECR
-  - _Requirements: 3.1, 3.4, 6.1, 6.2, 6.3_
+- [ ] 6. Wait for the first ETL cycle
 
-- [ ] 9. Build REST API Lambdas
+  - The ETL collector runs on an EventBridge schedule every
+    `STATS_COLLECTION_INTERVAL_MIN` minutes (default 5), so the dashboard is
+    empty until the first cycle after registration completes. This is expected,
+    not a bug. The Fleet page shows an ETL freshness badge per cluster.
+  - Re-run `./smoke-test.sh` afterwards for a clean end-to-end result.
 
-  - Implement `GET /api/clusters` — list registered clusters from DynamoDB
-  - Implement `POST /api/clusters` — register new cluster with connection test
-  - Implement `GET /api/dashboard/{cluster_id}` — aggregated metrics from Aurora PG Cache
-  - Implement `GET /api/metrics/{cluster_id}` — time-series data for charts
-  - _Requirements: 5.1, 5.2, 5.3, 5.4_
+- [ ] 7. Optional post-deploy steps
 
-- [ ] 10. Initialize Next.js frontend project
+  - Activate the `Application` cost allocation tag in the billing console, or
+    the `/cost` page shows $0. Cost Explorer does not backfill.
+  - Set `SLACK_SIGNING_SECRET` and redeploy the agent stack if you want two-way
+    Slack ack. Outbound Slack alerts work without it.
+  - Tighten CORS by setting `ALLOWED_ORIGINS` on the dashboard and alerts
+    Lambdas for production.
+  - All detail is in `README.md` under Quick Start.
 
-  - Set up Next.js 15 with App Router and Static Export
-  - Configure Tailwind CSS and shadcn/ui
-  - Define design tokens (colors, typography, spacing) from Claude Design handoff
-  - Set up Cognito auth flow (login, callback, token refresh)
-  - _Requirements: 7.1, 7.2, 7.3_
+## What is actually running after this
 
-- [ ] 11. Build Chat page
-
-  - Implement SSE client for AgentCore Runtime connection
-  - Build message renderer with markdown and rich card support
-  - Build tool execution status display (tool name, spinner, result)
-  - Build cluster selector dropdown
-  - Implement auto-reconnect on SSE disconnect
-  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
-
-- [ ] 12. Build Dashboard page
-
-  - Build cluster overview grid with health status cards
-  - Build AAS time-series chart with wait event color coding
-  - Build top queries table component
-  - Build connection stats and storage usage panels
-  - Implement TanStack Query polling (5-second refresh)
-  - _Requirements: 5.1, 5.2, 5.3, 5.4_
-
-- [ ] 13. Implement Frontend CDK Stack
-
-  - Create S3 bucket for static hosting
-  - Create CloudFront distribution with S3 origin
-  - Configure CORS for AgentCore Runtime SSE and API Gateway
-  - Add build step to compile and upload frontend assets
-  - _Requirements: 1.1, 1.2_
-
-- [ ] 14. Write unit tests
-
-  - Test each Performance MCP tool with mocked DB responses
-  - Test ETL Collector with mocked AWS API responses
-  - Test REST API Lambdas with mocked DynamoDB/Aurora responses
-  - CDK snapshot tests for all stacks
-  - _Requirements: 4.1, 4.2, 4.3, 4.4_
-
-- [ ] 15. Integration and E2E testing
-  - Deploy to dev environment
-  - Register a test Aurora cluster
-  - Verify data collection pipeline (check Aurora PG Cache tables)
-  - Test chat flow end-to-end (ask slow query question, verify streamed response)
-  - Test dashboard rendering with real collected data
-  - Verify <500ms dashboard query latency
-  - _Requirements: 2.1, 3.1, 4.1, 5.4_
+- 4 MCP servers behind one AgentCore Gateway, 63 tools total: performance 11,
+  incident 9, operations 34, simulation 9 (`cdk/tool_definitions.py`). Official
+  AWS documentation comes live from the AWS-managed docs MCP server over SigV4,
+  not from a Bedrock Knowledge Base. No Knowledge Base or S3 Vectors resource
+  exists in any stack, and semantic incident search runs on pgvector plus
+  `amazon.titan-embed-text-v2:0` embeddings.
+- Reads are automatic. Writes and changes require human approval, enforced
+  server side by the tool-level `approval_guard` (fail closed, payload-hash
+  bound, single use). The Cedar Policy Engine is bound at the Gateway in
+  LOG_ONLY as defense in depth, so it is not the enforcement point.
+- Next.js 16 static export on CloudFront plus S3, fetching `/config.json` at
+  boot so the bundle stays portable.

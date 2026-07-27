@@ -1,4 +1,31 @@
-# Technical Design: Phase 1 — Performance Analysis Agent
+> # STATUS: SHIPPED. DO NOT EXECUTE THIS SPEC.
+>
+> Phase 1 was designed and built starting 2026-05-08 and has been live and
+> deployed since. Verified as shipped on 2026-07-27.
+>
+> **This file is a historical record of the original MVP design. It is not a
+> work order, and parts of it were never built or were built differently.** If
+> you are an AI agent asked to "build" or "deploy" this repository, read
+> `README.md`, `AGENTS.md`, `.kiro/steering/`, and the newer specs in
+> `docs/superpowers/specs/` instead. The as-built DEPLOY checklist is `tasks.md`
+> in this directory.
+>
+> Known differences between this document and the shipped system (verified
+> against the code on 2026-07-27):
+>
+> | This design says                        | As built                                                                                                                                                                                       |
+> | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | Performance MCP Server, 6 tools         | 4 MCP servers, 63 gateway tools: performance 11, incident 9, operations 34, simulation 9 (`cdk/tool_definitions.py`)                                                                           |
+> | `explain_query` tool                    | `explain_plan` (`cdk/tool_definitions.py`, `mcp-servers/mcp_servers/performance/tools/explain_plan.py`)                                                                                        |
+> | Cedar Policy: READ-ONLY, EXPLAIN/SELECT | Cedar is bound at the Gateway in LOG_ONLY (`cedar_mode = "LOG_ONLY"`, `cdk/stacks/agent_stack.py`). Writes are allowed and gated by human approval                                             |
+> | Read-only platform                      | Write and change operations ship, enforced server side by the tool-level `approval_guard` (fail closed, payload-hash bound, single use)                                                        |
+> | Bedrock KB plus S3 Vectors              | No Knowledge Base and no S3 Vectors resource in any stack. Semantic search is pgvector plus `amazon.titan-embed-text-v2:0`; AWS docs come live from the AWS-managed docs MCP server over SigV4 |
+> | Aurora MySQL and PostgreSQL only        | Also RDS MySQL and SQL Server (non-Aurora), DocumentDB, DynamoDB, ElastiCache                                                                                                                  |
+>
+> Do not "fix" the shipped code to match this document. The document is the
+> stale side.
+
+# Technical Design: Phase 1 Performance Analysis Agent
 
 ## Overview
 
@@ -64,9 +91,9 @@ Six tools, each a Python function:
 
 ### Frontend (Next.js)
 
-- `/chat` — SSE connection to AgentCore Runtime, message rendering with rich cards
-- `/dashboard` — REST API polling via TanStack Query (5-second refresh)
-- `/clusters` — cluster list and registration form
+- `/chat`: SSE connection to AgentCore Runtime, message rendering with rich cards
+- `/dashboard`: REST API polling via TanStack Query (5-second refresh)
+- `/clusters`: cluster list and registration form
 - Auth via Cognito Hosted UI, JWT stored in httpOnly cookie
 
 ## Data Models

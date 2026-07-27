@@ -1,4 +1,29 @@
-# Requirements: Phase 1 — Performance Analysis Agent (MVP)
+> # STATUS: SHIPPED. DO NOT EXECUTE THIS SPEC.
+>
+> Phase 1 was designed and built starting 2026-05-08 and has been live and
+> deployed since. Verified as shipped on 2026-07-27.
+>
+> **This file is a historical record of the original MVP requirements. It is not
+> a work order.** If you are an AI agent asked to "build" or "deploy" this
+> repository, do NOT plan work from this file: the code it describes already
+> exists, and the platform has grown far past this MVP scope (5 engine families,
+> 63 gateway tools, write automation with approvals, not just performance reads).
+>
+> Where to get the as-built truth instead:
+>
+> - `README.md` (features, real deploy steps, troubleshooting)
+> - `AGENTS.md` and `.kiro/steering/` (architecture and rules)
+> - `docs/superpowers/specs/` (per-feature design specs, newest wins)
+> - `tasks.md` in this directory (the as-built DEPLOY checklist)
+>
+> Requirements that no longer describe the system: section 6 (Knowledge Base)
+> was never built as specified. There is no Bedrock Knowledge Base and no
+> S3 Vectors resource in any CDK stack. Semantic incident search runs on
+> pgvector plus `amazon.titan-embed-text-v2:0` embeddings, and official AWS
+> documentation is retrieved live from the AWS-managed docs MCP server over
+> SigV4 (`AWS_MCP_URL` in `cdk/config/settings.py`), not from `knowledge/`.
+
+# Requirements: Phase 1 Performance Analysis Agent (MVP)
 
 ## Introduction
 
