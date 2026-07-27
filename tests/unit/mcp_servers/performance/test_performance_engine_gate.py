@@ -78,7 +78,9 @@ def test_gate_none_family_fail_closed():
         with _patch_family(None), patch.dict(handler.TOOLS[tool], {"impl": spy}):
             result = _invoke(tool, event)
         assert result["status"] == "unsupported_engine", tool
-        assert "could not be resolved" in result["reason"]
+        # actionable + static: names the two real causes, leaks no exception text
+        assert "엔진을 확인할 수 없습니다" in result["reason"]
+        assert "수집" in result["reason"]
         spy.assert_not_called()
 
 
@@ -113,6 +115,23 @@ def test_ungated_tools_stay_ungated():
     with _patch_family("dynamodb"), patch.dict(handler.TOOLS["get_pi_metrics"], {"impl": spy}):
         assert _invoke("get_pi_metrics", {"cluster_id": "ddb-1"})["status"] == "ok"
     spy.assert_called_once()
+
+
+def test_tool_exception_returns_a_static_reason_with_no_exception_text():
+    """A raising impl must never echo the exception into the RESPONSE: the text
+    carries SQL fragments, ARNs and internal paths straight to the chat UI.
+    Static reason + logger.exception only."""
+    secret = "relation cluster_meta does not exist at arn:aws:rds:secret"
+    spy = MagicMock(side_effect=RuntimeError(secret))
+    with _patch_family("relational"), patch.dict(handler.TOOLS["get_top_queries"], {"impl": spy}):
+        raw = handler.lambda_handler({"cluster_id": "x"}, _Ctx("get_top_queries"))
+    text = raw["content"][0]["text"]
+    assert secret not in text
+    assert "RuntimeError" not in text and "Traceback" not in text
+    result = json.loads(text)
+    assert result["status"] == "tool_error"
+    assert result["tool"] == "get_top_queries"
+    assert result["reason"]
 
 
 def test_resolve_family_fails_closed_on_lookup_error():

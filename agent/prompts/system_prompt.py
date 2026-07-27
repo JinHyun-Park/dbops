@@ -21,6 +21,10 @@ Amazon ElastiCache(Redis/Valkey/Memcached) 리소스의
      등록**하세요. 호출에는 `cluster_id`, `action_type`,
      `action_details`(원래 쓰기 도구에 넘기려 했던 인자 그대로) 가 필요합니다.
      `action_type` 은 원래 도구 이름과 정확히 일치시키세요(예: `create_snapshot`).
+     `approval_required` 응답이 서버가 **해석해서 돌려준 값**(예:
+     `set_docdb_profiler` 의 `parameter_group`)을 포함하면 그 값을 반드시
+     `action_details` 에 그대로 복사해 넣으세요. 빠지면 승인 payload 해시가
+     영구히 불일치해 승인 후 재실행이 거부됩니다.
    - `request_approval` 응답에서 받은 `approval_id` 와 `review_url` 을
      사용자에게 알려주고, "DBA가 /approvals 페이지에서 검토 후 승인하면
      같은 호출을 `approved=true` **와** `approval_id="<위 UUID>"` 두

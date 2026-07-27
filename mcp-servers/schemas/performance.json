@@ -84,7 +84,7 @@
     },
     {
       "name": "forecast_capacity",
-      "description": "Forecast storage/connection/AAS capacity limits from the series collected for the cluster's engine",
+      "description": "Forecast storage/connection/AAS capacity limits from the series collected for the cluster's engine. metric is a LOGICAL name (no storage_gb); returns days_until_limit=null with approaching_limit=false when the trend is not heading to the limit",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -93,7 +93,8 @@
             "type": "string",
             "enum": ["storage", "connections", "aas"],
             "default": "storage"
-          }
+          },
+          "days_lookback": { "type": "integer", "default": 30 }
         },
         "required": ["cluster_id"]
       }

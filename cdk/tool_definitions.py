@@ -1,10 +1,17 @@
-def _tool(name, desc, props, required=None):
+def _tool(name, desc, props, required=None, enums=None):
+    """enums={"param": [...]}로 허용값을 Gateway 스키마에 실어 보낸다. 에이전트는
+    이 스키마만 보므로, 여기에 값이 없으면 문서에만 있는 옛 값(예: forecast_capacity
+    metric='storage_gb')을 계속 보낸다. props는 flat 유지(핸들러↔스키마 parity
+    테스트가 `"name": "type"` 형태를 파싱한다)."""
+    properties = {k: {"type": v} for k, v in props.items()}
+    for param, values in (enums or {}).items():
+        properties[param]["enum"] = values
     return {
         "name": name,
         "description": desc,
         "inputSchema": {
             "type": "object",
-            "properties": {k: {"type": v} for k, v in props.items()},
+            "properties": properties,
             "required": required or [],
         },
     }
@@ -35,8 +42,18 @@ def performance_schema():
               {"cluster_id": "string", "change_point": "string", "hours_before": "integer",
                "hours_after": "integer", "min_change_pct": "number"},
               ["cluster_id", "change_point"]),
-        _tool("forecast_capacity", "Forecast storage/connection capacity limits",
-              {"cluster_id": "string", "metric": "string", "days_lookback": "integer"}, ["cluster_id"]),
+        _tool("forecast_capacity",
+              "Forecast when a metric reaches its limit by linear regression over the series "
+              "actually collected for the cluster's engine. metric is a LOGICAL name, one of "
+              "storage | connections | aas (there is no storage_gb): storage = Aurora/DocumentDB "
+              "volume growth toward the 128 TiB ceiling or standalone-RDS free space depleting "
+              "toward 0, connections = DatabaseConnections vs max_connections, aas = vs instance "
+              "vCPU. Returns days_until_limit=null with approaching_limit=false when the trend is "
+              "not heading to the limit, and no date at all when the limit cannot be grounded in "
+              "the cluster's real config",
+              {"cluster_id": "string", "metric": "string", "days_lookback": "integer"},
+              ["cluster_id"],
+              enums={"metric": ["storage", "connections", "aas"]}),
         _tool("get_performance_summary", "Get KPI summary for a time period",
               {"cluster_id": "string", "hours": "integer"}, ["cluster_id"]),
         _tool("recommend_index",
@@ -223,7 +240,7 @@ def operations_schema():
                "approved": "boolean", "approval_id": "string"},
               ["cluster_id"]),
         _tool("set_docdb_profiler",
-              "DocumentDB only: enable or disable the CLUSTER-wide profiler via the custom cluster parameter group (profiler, profiler_threshold_ms >= 50, profiler_sampling_rate 0.0-1.0) plus the profiler CloudWatch Logs export (per-cluster log group /aws/docdb/{cluster_id}/profiler). The parameter group is SHARED, so every cluster attached to it inherits the change, and the approval is bound to the resolved group. Refuses a default.* parameter group; requires approval",
+              "DocumentDB only: enable or disable the CLUSTER-wide profiler via the custom cluster parameter group (profiler, profiler_threshold_ms >= 50, profiler_sampling_rate 0.0-1.0) plus the profiler CloudWatch Logs export (per-cluster log group /aws/docdb/{cluster_id}/profiler). The parameter group is SHARED, so every cluster attached to it inherits the change, and the approval is bound to the resolved group. You MUST copy parameter_group from the approval_required response into request_approval's action_details, otherwise the approval payload hash will never match and the approved re-run is refused. Refuses a default.* parameter group; requires approval",
               {"cluster_id": "string", "enabled": "boolean", "threshold_ms": "integer",
                "sampling_rate": "number", "approved": "boolean", "approval_id": "string"},
               ["cluster_id"]),

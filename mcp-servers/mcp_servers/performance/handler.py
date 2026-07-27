@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import sys
 
@@ -18,6 +19,8 @@ from mcp_servers.performance.tools.vacuum_stats import get_vacuum_stats_impl
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.engine_family import CAPABILITIES
 from mcp_servers.shared.engine_family import engine_family as _engine_family
+
+logger = logging.getLogger(__name__)
 
 cache = CacheClient()
 
@@ -278,7 +281,9 @@ def lambda_handler(event, context):
                     "engine_family": fam,
                     "cluster_id": cluster_id,
                     "reason": (
-                        "cluster engine could not be resolved"
+                        "클러스터 엔진을 확인할 수 없습니다. 등록되지 않은 클러스터이거나 "
+                        "첫 메트릭 수집 전일 수 있습니다. 클러스터 등록·수집 상태를 확인한 뒤 "
+                        "다시 시도하세요."
                         if fam is None
                         else f"{tool_name}는 {engine_label} 전용입니다 (현재 엔진: {fam})."
                     ),
@@ -286,36 +291,18 @@ def lambda_handler(event, context):
         try:
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
-        except Exception as e:
-            print(f"TOOL ERROR ({tool_name}): {e}")
-            return {"content": [{"type": "text", "text": json.dumps({"error": str(e)})}]}
+        except Exception:
+            # 예외 텍스트는 응답에 절대 넣지 않는다(SQL·ARN·내부 경로 누출).
+            # 진단 정보는 CloudWatch 로그로만 보낸다.
+            logger.exception("TOOL ERROR (%s)", tool_name)
+            return {"content": [{"type": "text", "text": json.dumps({
+                "status": "tool_error",
+                "tool": tool_name,
+                "reason": (
+                    "도구 실행 중 내부 오류가 발생했습니다. 결과가 없으므로 이 호출로는 "
+                    "아무것도 단정할 수 없습니다. 잠시 후 다시 시도하거나 다른 도구로 확인하세요."
+                ),
+            })}]}
 
     print(f"NO MATCH tool_name={tool_name} method={method}")
     return {"error": f"Unknown tool: {tool_name}"}
-
-
-def _unused_old(event, context):
-    method = event.get("method")
-
-    if method == "tools/list":
-        tools_list = []
-        for name, tool in TOOLS.items():
-            tools_list.append({
-                "name": name,
-                "description": tool["description"],
-                "inputSchema": tool["input_schema"],
-            })
-        return {"tools": tools_list}
-
-    if method == "tools/call":
-        tool_name = event.get("params", {}).get("name")
-        arguments = event.get("params", {}).get("arguments", {})
-
-        if tool_name not in TOOLS:
-            return {"error": f"Unknown tool: {tool_name}"}
-
-        impl = TOOLS[tool_name]["impl"]
-        result = impl(cache, **arguments)
-        return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
-
-    return {"error": f"Unknown method: {method}"}

@@ -31,7 +31,10 @@ from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.engine_family import DOCUMENTDB, RDS_INSTANCE, RELATIONAL
 from mcp_servers.shared.engine_family import engine_family as _engine_family
 
-# Aurora/DocumentDB 클러스터 볼륨 상한(128 TiB), 추정이 아닌 실제 플랫폼 한계.
+# Aurora 클러스터 볼륨 상한(128 TiB), 추정이 아닌 실제 플랫폼 한계.
+# DocumentDB는 엔진 8.0 미만 인스턴스 기반 클러스터가 128 TiB, 8.0 이상은
+# 256 TiB이므로 128 TiB는 "정확"이 아니라 보수적으로 일찍 경고하는 값이다
+# (8.0 클러스터에는 실제 한계의 절반에서 알린다).
 # storage_bytes는 바이트 단위라 한계도 바이트로 둔다(대시보드 _CAPACITY_METRICS,
 # capacity_forecast collector와 같은 상수).
 _VOLUME_MAX_BYTES = 128 * 1024 ** 4
@@ -54,6 +57,24 @@ _STORAGE_SERIES = {
     RDS_INSTANCE: "free_storage_bytes",
 }
 
+# 허용된 논리 메트릭 이름. 이름이 틀린 것(예: 옛 문서의 storage_gb)과 "이 엔진에는
+# 그 시계열이 없음"은 전혀 다른 거부다: 전자를 엔진 탓으로 돌리면 에이전트가
+# DynamoDB 거부와 구분하지 못한다.
+_VALID_METRICS = ("storage", "connections", "aas")
+
+# metric_snapshots는 같은 metric_type을 여러 차원으로 저장한다. 반드시 클러스터
+# 단위 행(dimensions 없음/빈 객체)만 회귀해야 한다:
+#   * cw_collector: db_connections 등을 클러스터 단위(dimensions='{}')와
+#     인스턴스 단위(dimensions={instance,role})로 **두 번** 쓴다.
+#   * pi_collector: aas(db.load.avg)를 wait event별로 한 행씩 + 총합 '{}' 한 행.
+# 필터가 없으면 REGR_SLOPE/REGR_R2가 총량과 조각을 섞어 회귀하고,
+# current_value(최신 1행)가 인스턴스/대기이벤트 행일 수 있다. 이 함정은 이
+# 프로젝트에서 이미 두 번 터졌다(Instance Compare, 그리고 이 툴).
+# jsonb_exists(dimensions,'instance') 형태는 쓰지 말 것: aas의 wait-event 행에는
+# 'instance' 키가 없어 그대로 통과한다. 아래 STRICT 형태만 사용한다
+# (capacity_forecast collector · detect_anomalies와 동일).
+_CLUSTER_LEVEL_ONLY = "AND (dimensions IS NULL OR dimensions::text = '{}')"
+
 
 def _f(value, default=0.0) -> float:
     try:
@@ -72,7 +93,8 @@ def _vcpu_for(instance_class: str):
 
 def _resolve_series(metric: str, fam: str, cluster: dict):
     """(metric_type, limit, basis, grounded). metric_type=None → 이 엔진에서
-    예측 불가(수집되는 시계열이 없음)."""
+    예측 불가(수집되는 시계열이 없음). metric 이름은 호출자가 _VALID_METRICS로
+    이미 검증했으므로 여기서 이름 오류는 다루지 않는다."""
     if metric == "storage":
         metric_type = _STORAGE_SERIES.get(fam)
         if metric_type is None:
@@ -81,6 +103,10 @@ def _resolve_series(metric: str, fam: str, cluster: dict):
             # 여유 공간이 0으로 줄어드는 소진 ETA. 한계 0은 하드 플로어라
             # (0 bytes = STORAGE_FULL) 항상 grounded다. allocated_storage_gb는
             # 사용률 컨텍스트용이며 없어도 ETA 자체는 유효하다.
+            # 단, RDS 스토리지 오토스케일링(MaxAllocatedStorage)이 켜져 있으면
+            # 0에 닿는 대신 볼륨이 자동 확장되어 ETA가 지나 보수적일 수 있다.
+            # MaxAllocatedStorage는 현재 resource_details에 수집하지 않으므로
+            # 오토스케일링 여부를 여기서 알 수 없다.
             alloc = _f(cluster.get("allocated_storage_gb"))
             basis = "여유 스토리지 소진(0 bytes)"
             if alloc > 0:
@@ -92,12 +118,11 @@ def _resolve_series(metric: str, fam: str, cluster: dict):
         if mc:
             return "db_connections", _f(mc), f"cluster_meta.max_connections={int(_f(mc))}", True
         return "db_connections", float(_FALLBACK_CONNECTIONS), "max_connections 미상, 기본값 가정", False
-    if metric == "aas":
-        vcpu = _vcpu_for(cluster.get("instance_class"))
-        if vcpu:
-            return "aas", float(vcpu), f"인스턴스 {cluster.get('instance_class')} vCPU={vcpu} (AAS 포화 기준)", True
-        return "aas", float(_FALLBACK_AAS), "인스턴스 vCPU 미상(서버리스/미등록), 기본값 가정", False
-    return None, 0.0, "", False
+    # metric == "aas"
+    vcpu = _vcpu_for(cluster.get("instance_class"))
+    if vcpu:
+        return "aas", float(vcpu), f"인스턴스 {cluster.get('instance_class')} vCPU={vcpu} (AAS 포화 기준)", True
+    return "aas", float(_FALLBACK_AAS), "인스턴스 vCPU 미상(서버리스/미등록), 기본값 가정", False
 
 
 def forecast_capacity_impl(
@@ -106,6 +131,21 @@ def forecast_capacity_impl(
     metric: str = "storage",
     days_lookback: int = 30,
 ) -> dict:
+    if metric not in _VALID_METRICS:
+        return {
+            "cluster_id": cluster_id,
+            "metric": metric,
+            "status": "unknown_metric",
+            "samples": 0,
+            "days_until_limit": None,
+            "approaching_limit": False,
+            "grounded": False,
+            "reason": (
+                f"'{metric}' 는 지원하지 않는 메트릭 이름입니다. "
+                f"사용 가능한 값: {', '.join(_VALID_METRICS)}."
+            ),
+        }
+
     # 엔진 패밀리와 실제 한계를 먼저 읽는다. 어떤 metric_type을 조회할지가
     # 패밀리에 달려 있다(Aurora storage_bytes vs RDS free_storage_bytes).
     meta = cache.execute(
@@ -114,7 +154,25 @@ def forecast_capacity_impl(
         "FROM cluster_meta WHERE cluster_id = :cluster_id",
         {"cluster_id": cluster_id},
     )
-    cluster = meta.rows[0] if meta.rows else {}
+    if not meta.rows:
+        # FAIL-CLOSED: cluster_meta 행이 없으면 패밀리를 해석하지 않는다.
+        # engine_family(None)은 legacy 기본값으로 relational을 돌려주므로, 이대로
+        # 진행하면 미등록 클러스터에 storage_bytes/128 TiB를 적용해 표본 0개를
+        # "안정적, 한계 도달 없음"으로 보고한다. 그게 바로 거짓 안심 경로다.
+        return {
+            "cluster_id": cluster_id,
+            "metric": metric,
+            "status": "unknown_cluster",
+            "samples": 0,
+            "days_until_limit": None,
+            "approaching_limit": False,
+            "grounded": False,
+            "reason": (
+                "cluster_meta에 이 클러스터가 없습니다(미등록이거나 첫 메트릭 수집 전). "
+                "등록 및 수집 상태를 확인한 뒤 다시 예측하세요."
+            ),
+        }
+    cluster = meta.rows[0]
     fam = _engine_family(cluster.get("engine"))
     metric_type, limit, limit_basis, grounded = _resolve_series(metric, fam, cluster)
     if metric_type is None:
@@ -125,6 +183,7 @@ def forecast_capacity_impl(
             "status": "unsupported_metric",
             "samples": 0,
             "days_until_limit": None,
+            "approaching_limit": False,
             "grounded": False,
             "reason": f"{fam} 엔진에서는 {metric} 시계열이 수집되지 않아 예측할 수 없습니다.",
         }
@@ -132,16 +191,21 @@ def forecast_capacity_impl(
     # Trend + fit + sample count over the lookback. current = latest reading
     # (not MAX, which would overstate "current" for a bouncy metric like
     # connections). REGR_R2 gives how linear the trend actually is.
-    sql = """
+    # _CLUSTER_LEVEL_ONLY는 집계 WHERE와 current_value 서브셀렉트 **양쪽에** 필수다
+    # (이유는 상수 정의부 주석 참고). 한쪽만 걸면 회귀는 깨끗해도 "현재값"이
+    # 인스턴스 행일 수 있다.
+    sql = f"""
         SELECT
             REGR_SLOPE(value, EXTRACT(EPOCH FROM ts) / 86400) AS slope_per_day,
             REGR_R2(value, EXTRACT(EPOCH FROM ts) / 86400) AS r2,
             COUNT(*) AS n,
             (SELECT value FROM metric_snapshots m2
              WHERE m2.cluster_id = :cluster_id AND m2.metric_type = :metric
+               {_CLUSTER_LEVEL_ONLY}
              ORDER BY ts DESC LIMIT 1) AS current_value
         FROM metric_snapshots
         WHERE cluster_id = :cluster_id AND metric_type = :metric
+          {_CLUSTER_LEVEL_ONLY}
           AND ts > NOW() - (:days_lookback || ' days')::interval
     """
     params = {"cluster_id": cluster_id, "metric": metric_type, "days_lookback": days_lookback}
@@ -154,14 +218,16 @@ def forecast_capacity_impl(
     def _days(s):
         # 방향 무관: gap/slope가 양수일 때만 한계로 접근 중이다. 증가 메트릭은
         # gap>0 & slope>0, 감소(free_storage_bytes)는 gap<0 & slope<0.
+        # 접근 중이 아니면 None(센티넬 -1을 쓰면 에이전트가 "-1일 후 한계 도달"로
+        # 그대로 읽어 쓴다). 하루 미만은 0이 아니라 1로 올린다(가장 급한 케이스).
         if not s:
-            return -1
+            return None
         d = (limit - current) / s
-        return int(d) if d > 0 else -1
+        return max(1, int(d)) if d > 0 else None
 
     # 한계를 실제 설정에서 확인하지 못하면 날짜를 단정하지 않는다.
     days_until = _days(slope) if grounded else None
-    approaching = days_until is not None and days_until > 0
+    approaching = days_until is not None
     # Confidence from fit + samples; a poor fit / thin data widens the band and
     # lowers confidence so the number isn't mistaken for precision.
     if not grounded or n < 20 or not approaching:
@@ -179,7 +245,8 @@ def forecast_capacity_impl(
     if approaching:
         spread = max(0.15, 1.0 - max(0.0, min(r2, 1.0)))  # 0.15 (great fit) .. 1.0 (no fit)
         low = _days(slope * (1.0 + spread))   # 더 빠른 추세 → 더 이르게
-        high = _days(slope * (1.0 - spread)) if spread < 1.0 else -1  # 더 느리게(또는 never)
+        # 더 느린 추세 → 더 늦게, 또는 아예 도달 안 함(null)
+        high = _days(slope * (1.0 - spread)) if spread < 1.0 else None
         days_range = [low, high]
 
     result = {
@@ -194,16 +261,29 @@ def forecast_capacity_impl(
         "slope_per_day": round(slope, 4),
         "r2": round(r2, 3),
         "samples": n,
+        # days_until_limit는 두 값만 가진다: 정수(접근 중) 또는 null. null의
+        # 이유(추세가 한계로 향하지 않음 / 한계 근거 없음)는 note에 문장으로 남긴다.
         "days_until_limit": days_until,
+        "approaching_limit": approaching,
         "days_until_limit_range": days_range,
         "confidence": confidence,
-        "forecast": "growing" if slope > 0 else "stable" if slope == 0 else "shrinking",
+        # free_storage_bytes가 줄어드는 것은 소진(가장 위험)이므로 'shrinking'처럼
+        # 안심되는 단어를 붙이지 않는다.
+        "forecast": (
+            "growing" if slope > 0
+            else "stable" if slope == 0
+            else "depleting" if metric_type == "free_storage_bytes"
+            else "shrinking"
+        ),
         "note": (
-            f"한계값 기준: {limit_basis}. 선형 외삽은 현재 추세가 유지된다고 가정합니다(R²={round(r2, 2)}, "
-            f"표본 {n}개). days_until은 점 추정이며 range는 추세 적합도 기반 불확실성 밴드입니다."
-            if grounded else
             f"한계값을 클러스터 실제 설정에서 확인할 수 없어({limit_basis}) 도달 시점을 단정하지 "
             f"않습니다. 추세만 참고하세요(기울기 {round(slope, 4)}/일, 표본 {n}개)."
+            if not grounded else
+            f"한계값 기준: {limit_basis}. 선형 외삽은 현재 추세가 유지된다고 가정합니다(R²={round(r2, 2)}, "
+            f"표본 {n}개). days_until_limit은 점 추정이며 range는 추세 적합도 기반 불확실성 밴드입니다."
+            if approaching else
+            f"한계값 기준: {limit_basis}. 현재 추세(기울기 {round(slope, 4)}/일, 표본 {n}개)는 한계로 "
+            f"향하지 않아 도달 시점이 없습니다(days_until_limit=null, approaching_limit=false)."
         ),
     }
     if metric_type == "free_storage_bytes":
