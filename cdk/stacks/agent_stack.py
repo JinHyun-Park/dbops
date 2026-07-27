@@ -27,6 +27,21 @@ from config.settings import Settings
 from constructs import Construct
 from tool_definitions import incident_schema, operations_schema, performance_schema, simulation_schema
 
+# Findings-writer cadence, handed to the two consumers of the multi-writer
+# findings freshness window (api/dashboard/handler.py and the incident MCP
+# server's get_maintenance_findings). Both derive window = 3x this value with a
+# 15-minute floor, so the slower of a family's two writer Lambdas cannot fall
+# out of the window.
+#
+# The interval is the ETL findings collector's real schedule
+# (data_stack ETLSchedule uses the same Settings value); it is per-deployment and
+# gitignored, so a deployer raising it to save cost MUST widen the window or half
+# of every rds_instance / documentdb cluster's findings silently disappear. The
+# 15-minute floor is 3x the 5-minute rate that rds_direct_collector and
+# docdb_mongo_collector are pinned to in data_stack, which is why lowering the
+# ETL interval never needs to shrink the window.
+_FINDINGS_WRITER_INTERVAL_MIN = str(Settings.STATS_COLLECTION_INTERVAL_MIN)
+
 
 class AgentStack(cdk.Stack):
     def __init__(self, scope: Construct, construct_id: str, foundation, data, **kwargs):
@@ -66,6 +81,9 @@ class AgentStack(cdk.Stack):
                 # search_logs resolves the cluster's region/spoke_role_arn here
                 # so it queries the log group in the cluster's OWN account.
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                # get_maintenance_findings' freshness window for multi-writer
+                # families. See _FINDINGS_WRITER_INTERVAL_MIN above.
+                "FINDINGS_WRITER_INTERVAL_MIN": _FINDINGS_WRITER_INTERVAL_MIN,
             },
         )
         data.cache_db.secret.grant_read(incident_mcp_lambda)
@@ -749,6 +767,10 @@ class AgentStack(cdk.Stack):
                 # Multi-team tenancy: per-cluster visibility gate + fleet filter.
                 "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
                 "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
+                # Health-findings freshness window for multi-writer families.
+                # See _FINDINGS_WRITER_INTERVAL_MIN above; must match the value
+                # given to IncidentMCP or the panel and the agent disagree.
+                "FINDINGS_WRITER_INTERVAL_MIN": _FINDINGS_WRITER_INTERVAL_MIN,
             },
         )
         data.cache_db.secret.grant_read(dashboard_lambda)

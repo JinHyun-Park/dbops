@@ -8,10 +8,40 @@ SQL) plus the row pass-through, and pin that an unresolvable cluster returns an
 explicit error instead of an empty list the agent would read as "all healthy".
 """
 
+import re
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
+from mcp_servers.incident.tools import maintenance_findings
 from mcp_servers.incident.tools.maintenance_findings import get_maintenance_findings_impl
 from mcp_servers.shared.models import QueryResult
+
+
+def _apply_window(sql, rows):
+    """Do to `rows` what Postgres does for the multi-writer SQL: drop rows older
+    than the INTERVAL window measured from the cluster's OWN newest snapshot,
+    then keep the latest snapshot per check_type. Without this the stub returns
+    every row regardless of the window and the freshness window is untested,
+    which is how a window too small for the deployment's ETL cadence stayed
+    invisible. Non-multi-writer SQL (no INTERVAL) passes through."""
+    m = re.search(r"INTERVAL '(\d+) minutes'", sql)
+    if not m or not rows:
+        return rows
+    try:
+        ts = {r["snapshot_time"]: datetime.strptime(r["snapshot_time"], "%Y-%m-%dT%H:%M:%SZ")
+              for r in rows}
+    except (KeyError, TypeError, ValueError):
+        return rows
+    cutoff = max(ts.values()) - timedelta(minutes=int(m.group(1)))
+    kept = [r for r in rows if ts[r["snapshot_time"]] >= cutoff]
+    ct_latest = {}
+    for r in kept:
+        ct = r["check_type"]
+        if ct not in ct_latest or ts[r["snapshot_time"]] > ct_latest[ct]:
+            ct_latest[ct] = ts[r["snapshot_time"]]
+    # Latest snapshot per check_type, ALL its rows (one check_type can emit
+    # several subjects at one snapshot).
+    return [r for r in kept if ts[r["snapshot_time"]] == ct_latest[r["check_type"]]]
 
 
 def _make_row(check_type, severity, subject="s", value_str="v",
@@ -43,10 +73,11 @@ def _cache(engine, findings_rows, findings_raises=False):
                 "BadRequestException: relation cluster_health_findings does not exist; "
                 "secret arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:x"
             )
+        rows = _apply_window(sql, findings_rows)
         return QueryResult(
-            columns=list(findings_rows[0].keys()) if findings_rows else [],
-            rows=findings_rows,
-            row_count=len(findings_rows),
+            columns=list(rows[0].keys()) if rows else [],
+            rows=rows,
+            row_count=len(rows),
         )
 
     cache = MagicMock()
@@ -102,9 +133,10 @@ def test_dynamodb_stays_on_single_max():
 # Multi-writer families: both writers' findings must surface
 # ---------------------------------------------------------------------------
 
-def _assert_multi_writer_sql(sql):
+def _assert_multi_writer_sql(sql, window_min=15):
     assert "PARTITION BY check_type" in sql, "latest snapshot must be per check_type"
-    assert "INTERVAL '15 minutes'" in sql, "window must cover the slowest writer's cadence"
+    assert f"INTERVAL '{window_min} minutes'" in sql, \
+        "window must cover the slowest writer's cadence"
     # Window is measured from the cluster's own newest finding, NOT wall clock:
     # a NOW()-relative window blanks the seeded single-snapshot cluster.
     assert "NOW()" not in sql
@@ -157,6 +189,45 @@ def test_sqlserver_uses_multi_writer_path():
     out = get_maintenance_findings_impl(cache, cluster_id="rds-mssql-1")
     assert out["engine_family"] == "rds_instance"
     _assert_multi_writer_sql(captured["sql"])
+
+
+# ---------------------------------------------------------------------------
+# The window tracks the DEPLOYMENT's real ETL cadence, not a hardcoded 15
+# ---------------------------------------------------------------------------
+
+def test_window_scales_with_configured_etl_cadence(monkeypatch):
+    """A deployer who raises Settings.STATS_COLLECTION_INTERVAL_MIN to 20 to save
+    cost pushes the two writers 20 minutes apart. A hardcoded 15-minute window
+    drops the older writer's whole set and the agent tells the DBA the cluster has
+    one issue when it has six."""
+    monkeypatch.setenv("FINDINGS_WRITER_INTERVAL_MIN", "20")
+    cw = [
+        _make_row(ct, "warning", snapshot_time="2026-07-24T10:00:00Z")
+        for ct in ("docdb_connection_saturation", "docdb_low_cache_hit",
+                   "docdb_replica_lag", "docdb_cursor_timeout", "docdb_cost_oversized")
+    ]
+    mongo = [_make_row("docdb_mongo_long_running_ops", "critical",
+                       snapshot_time="2026-07-24T10:20:00Z")]
+    cache, captured = _cache("docdb", cw + mongo)
+    out = get_maintenance_findings_impl(cache, cluster_id="docdb-slow-etl")
+
+    assert out["status"] == "ok"
+    assert len(out["findings"]) == 6, \
+        "both writers must surface at the deployment's configured cadence"
+    _assert_multi_writer_sql(captured["sql"], window_min=60)
+
+
+def test_window_falls_back_to_floor_not_zero(monkeypatch):
+    """Unset / empty / non-numeric / absurd env can only WIDEN the window, never
+    shrink it below the 15 minutes that ships today (3x the 5-minute rate
+    rds_direct_collector and docdb_mongo_collector are pinned to)."""
+    monkeypatch.delenv("FINDINGS_WRITER_INTERVAL_MIN", raising=False)
+    assert maintenance_findings._window_min() == 15
+    for garbage in ("", "   ", "abc", "5.5", "0", "-30", "1", "5"):
+        monkeypatch.setenv("FINDINGS_WRITER_INTERVAL_MIN", garbage)
+        assert maintenance_findings._window_min() == 15, garbage
+    monkeypatch.setenv("FINDINGS_WRITER_INTERVAL_MIN", "20")
+    assert maintenance_findings._window_min() == 60
 
 
 # ---------------------------------------------------------------------------

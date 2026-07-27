@@ -164,6 +164,30 @@ def test_context_files_table_present(cdk_app):
     )
 
 
+def test_findings_writer_interval_reaches_both_consumers(cdk_app):
+    """The multi-writer findings freshness window is derived at runtime from the
+    ETL cadence, which only CDK knows (cdk/config/settings.py is gitignored). Both
+    consumers must actually receive it, or they silently fall back to the floor and
+    a deployer who raised the interval loses half of every rds_instance /
+    documentdb cluster's findings."""
+    agent = next(s for s in cdk_app.stacks if s.stack_name.endswith("-agent"))
+    fns = [
+        r["Properties"]
+        for r in (agent.template or {}).get("Resources", {}).values()
+        if r.get("Type") == "AWS::Lambda::Function"
+    ]
+    carrying = [
+        f for f in fns
+        if "FINDINGS_WRITER_INTERVAL_MIN" in f.get("Environment", {}).get("Variables", {})
+    ]
+    assert len(carrying) == 2, f"expected exactly 2 carriers, got {len(carrying)}"
+    carriers = {f.get("Handler") for f in carrying}
+    assert carriers == {
+        "handler.lambda_handler",            # api/dashboard
+        "mcp_servers.incident.handler.lambda_handler",
+    }, f"env var must reach the dashboard + incident MCP Lambdas, got {carriers}"
+
+
 def test_app_carries_application_tag(cdk_app):
     """Every stack must have Application=DBOps so Bedrock AIPs etc. inherit
     the cost-allocation tag at deploy time."""

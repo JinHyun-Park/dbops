@@ -1,3 +1,5 @@
+import os
+
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.engine_family import DOCUMENTDB, RDS_INSTANCE, engine_family
 
@@ -40,16 +42,36 @@ WHERE cluster_id = :cid
 # check_type inside a freshness window instead.
 _MULTI_WRITER_FAMILIES = frozenset({RDS_INSTANCE, DOCUMENTDB})
 
-# Window >= the longest writer interval of those families (all three writers run
-# on a 5-minute rate), so 15 min = 3x the slowest cadence and one writer can miss
-# two consecutive runs without its findings vanishing.
+# The window must be >= the longest writer interval of those families, so it is
+# derived from the writers' REAL cadence, never from a hardcoded assumption about
+# it: FINDINGS_WRITER_INTERVAL_MIN is the ETL findings collector's schedule
+# (Settings.STATS_COLLECTION_INTERVAL_MIN, wired by cdk/stacks/agent_stack.py).
+# That setting is per-deployment and gitignored, so a deployer who raises it to
+# save cost would otherwise silently hide half of every rds_instance / documentdb
+# cluster's findings again. 3x the cadence lets one writer miss two consecutive
+# runs without its findings vanishing. The floor is 3x the 5-minute rate that
+# rds_direct_collector and docdb_mongo_collector are pinned to in data_stack, so
+# an unset or garbage env var can only WIDEN the window, never shrink it.
+# Same derivation in api/dashboard/handler.py (api/ cannot import mcp_servers);
+# pinned by a parity test.
+#
 # The window is measured from the cluster's OWN newest finding, NOT from NOW():
 # api/clusters/seeder.py writes the demo cluster's findings once at seed time and
 # never re-emits them, so a NOW()-relative window would report a seeded cluster
 # as having no maintenance issues at all.
-_WINDOW_MIN = 15
+_WINDOW_FLOOR_MIN = 15
 
-_SQL_PER_CHECK_TYPE = f"""
+
+def _window_min():
+    try:
+        cadence = int(os.environ.get("FINDINGS_WRITER_INTERVAL_MIN", ""))
+    except ValueError:
+        return _WINDOW_FLOOR_MIN
+    return max(_WINDOW_FLOOR_MIN, cadence * 3)
+
+
+def _sql_per_check_type():
+    return f"""
 SELECT {_COLS}
 FROM (
     SELECT {_COLS}, snapshot_time,
@@ -60,7 +82,7 @@ FROM (
           SELECT MAX(snapshot_time)
           FROM cluster_health_findings
           WHERE cluster_id = :cid
-      ) - INTERVAL '{_WINDOW_MIN} minutes'
+      ) - INTERVAL '{_window_min()} minutes'
 ) ranked
 WHERE snapshot_time = ct_latest
 {_ORDER}
@@ -107,7 +129,7 @@ def get_maintenance_findings_impl(cache: CacheClient, cluster_id: str) -> dict:
             "reason": _UNRESOLVED_REASON,
         }
 
-    sql = _SQL_PER_CHECK_TYPE if fam in _MULTI_WRITER_FAMILIES else _SQL_LATEST_SNAPSHOT
+    sql = _sql_per_check_type() if fam in _MULTI_WRITER_FAMILIES else _SQL_LATEST_SNAPSHOT
     try:
         result = cache.execute(sql, {"cid": cluster_id})
     except Exception:

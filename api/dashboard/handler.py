@@ -2032,11 +2032,28 @@ _MULTI_WRITER_FINDING_FAMILIES = frozenset({RDS_INSTANCE, DOCUMENTDB})
 
 # Freshness window for the multi-writer path. Must be >= the LONGEST writer
 # interval of any family in the set, or the slower writer's set falls out of the
-# window and we are back to the bug. Every writer above runs on a 5-minute rate
-# (etl_collector via Settings.STATS_COLLECTION_INTERVAL_MIN = 5,
-# rds_direct_collector and docdb_mongo_collector hardcoded 5), so 15 min is 3x
-# the slowest cadence: it survives two consecutive missed runs of one writer.
-_FINDINGS_WINDOW_MIN = 15
+# window and we are back to the bug. So it is derived from the writers' REAL
+# cadence, never from a hardcoded assumption about it:
+#   FINDINGS_WRITER_INTERVAL_MIN is the ETL findings collector's schedule
+#   (Settings.STATS_COLLECTION_INTERVAL_MIN, wired by cdk/stacks/agent_stack.py).
+#   It is per-deployment and gitignored: a deployer who raises it to save cost
+#   would otherwise silently hide half of every rds_instance / documentdb
+#   cluster's findings again.
+# 3x the cadence survives two consecutive missed runs of one writer. The floor is
+# 3x the 5-minute rate that rds_direct_collector and docdb_mongo_collector are
+# pinned to in data_stack, so an unset or garbage env var can only WIDEN the
+# window relative to what ships today, never shrink it.
+# Same derivation in mcp_servers/incident/tools/maintenance_findings.py (api/
+# cannot import mcp_servers); pinned by a parity test.
+_FINDINGS_WINDOW_FLOOR_MIN = 15
+
+
+def _findings_window_min():
+    try:
+        cadence = int(os.environ.get("FINDINGS_WRITER_INTERVAL_MIN", ""))
+    except ValueError:
+        return _FINDINGS_WINDOW_FLOOR_MIN
+    return max(_FINDINGS_WINDOW_FLOOR_MIN, cadence * 3)
 
 
 def _health_findings(query, cluster_id):
@@ -2096,7 +2113,7 @@ def _health_findings(query, cluster_id):
             "    AND snapshot_time >= ("
             "      SELECT MAX(snapshot_time) FROM cluster_health_findings "
             "      WHERE cluster_id = :cid"
-            f"    ) - INTERVAL '{_FINDINGS_WINDOW_MIN} minutes'"
+            f"    ) - INTERVAL '{_findings_window_min()} minutes'"
             ") ranked "
             "WHERE snapshot_time = ct_latest "
             "ORDER BY "
