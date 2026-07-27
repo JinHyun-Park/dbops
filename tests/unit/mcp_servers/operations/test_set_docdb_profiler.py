@@ -170,7 +170,8 @@ def test_approved_enable_writes_parameter_group_and_log_export():
     assert result["status"] == "modified"
     assert result["profiler"] == "enabled"
     assert result["log_export"] is True
-    assert result["log_group"] == "/aws/docdb/profiler"
+    # AWS delivers profiler logs to a PER-CLUSTER group, not a shared one.
+    assert result["log_group"] == "/aws/docdb/docdb-1/profiler"
     assert _params(client) == {
         "profiler": "enabled",
         "profiler_threshold_ms": "500",
@@ -188,7 +189,9 @@ def test_approved_enable_writes_parameter_group_and_log_export():
 
 def test_approval_consumed_exactly_once_with_payload_binding():
     """verify_approval is called ONCE with the action name + the effective
-    {enabled, threshold_ms, sampling_rate} payload (hash binding unchanged)."""
+    {enabled, threshold_ms, sampling_rate} payload AND the RESOLVED parameter
+    group. The group is the actual write target and is shared across clusters,
+    so it must be inside the hash."""
     client = _FakeDocDB()
     guard = MagicMock(return_value={"ok": True})
     with _with_client(client), patch.object(mod, "verify_approval", guard):
@@ -198,8 +201,85 @@ def test_approval_consumed_exactly_once_with_payload_binding():
         )
     guard.assert_called_once_with(
         "appr-1", "docdb-1", "set_docdb_profiler",
-        payload={"enabled": True, "threshold_ms": 200, "sampling_rate": 0.25},
+        payload={
+            "enabled": True,
+            "threshold_ms": 200,
+            "sampling_rate": 0.25,
+            "parameter_group": _CUSTOM_PG,
+        },
     )
+
+
+def test_parameter_group_reassignment_between_approval_and_execute_is_refused():
+    """TOCTOU: a parameter group is SHARED by every cluster attached to it. If
+    the cluster is re-pointed at another group after the DBA approved, the
+    approval hash no longer matches and nothing is written.
+
+    Simulated the way the guard really behaves: canonical_action_hash over the
+    approved details vs over the details the tool submits at execute time."""
+    from mcp_servers.shared.approval_guard import canonical_action_hash
+
+    approved_details = {
+        "enabled": True,
+        "threshold_ms": 200,
+        "sampling_rate": 0.25,
+        "parameter_group": "pg-approved",
+    }
+    approved_hash = canonical_action_hash("set_docdb_profiler", approved_details)
+
+    # the live cluster now points at a DIFFERENT (shared) group
+    client = _FakeDocDB(pg="pg-someone-elses")
+
+    def fake_guard(approval_id, cluster_id, action_type, payload=None):
+        if canonical_action_hash(action_type, payload or {}) != approved_hash:
+            return {"ok": False, "reason": "payload_hash mismatch"}
+        return {"ok": True}
+
+    with _with_client(client), patch.object(mod, "verify_approval", fake_guard):
+        result = set_docdb_profiler_impl(
+            MagicMock(), cluster_id="docdb-1", enabled=True, threshold_ms=200,
+            sampling_rate=0.25, approved=True, approval_id="appr-1",
+        )
+    assert result["status"] == "approval_denied"
+    assert result["parameter_group"] == "pg-someone-elses"
+    # nothing was written to the unapproved group
+    assert client.modify_pg_calls == []
+    assert client.modify_cluster_calls == []
+
+
+def test_unchanged_parameter_group_still_passes_the_same_hash():
+    """Control for the test above: when the group is unchanged the hash matches
+    and the write proceeds, so the new binding does not break the happy path."""
+    from mcp_servers.shared.approval_guard import canonical_action_hash
+
+    approved_details = {
+        "enabled": True,
+        "threshold_ms": 200,
+        "sampling_rate": 0.25,
+        "parameter_group": _CUSTOM_PG,
+    }
+    approved_hash = canonical_action_hash("set_docdb_profiler", approved_details)
+    client = _FakeDocDB(log_exports=[])
+
+    def fake_guard(approval_id, cluster_id, action_type, payload=None):
+        if canonical_action_hash(action_type, payload or {}) != approved_hash:
+            return {"ok": False, "reason": "payload_hash mismatch"}
+        return {"ok": True}
+
+    with _with_client(client), patch.object(mod, "verify_approval", fake_guard):
+        result = set_docdb_profiler_impl(
+            MagicMock(), cluster_id="docdb-1", enabled=True, threshold_ms=200,
+            sampling_rate=0.25, approved=True, approval_id="appr-1",
+        )
+    assert result["status"] == "modified"
+    assert client.modify_pg_calls[0]["DBClusterParameterGroupName"] == _CUSTOM_PG
+
+
+def test_log_group_is_per_cluster():
+    """Regression: the constant used to be a single shared /aws/docdb/profiler,
+    which does not exist. AWS delivers to /aws/docdb/{cluster_id}/profiler."""
+    assert mod.profiler_log_group("my-cluster") == "/aws/docdb/my-cluster/profiler"
+    assert mod.profiler_log_group("other") == "/aws/docdb/other/profiler"
 
 
 def test_disable_turns_off_parameter_and_log_export():

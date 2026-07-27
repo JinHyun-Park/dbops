@@ -507,9 +507,13 @@ TOOLS = {
             "Managed DocumentDB has no Mongo-protocol profiler command, so this "
             "sets profiler / profiler_threshold_ms / profiler_sampling_rate in "
             "the cluster's CUSTOM cluster parameter group and turns the profiler "
-            "CloudWatch Logs export (/aws/docdb/profiler) on or off. A cluster on "
-            "a default.* parameter group is refused (create a custom group "
-            "first). Requires approved=true AND approval_id=<uuid from "
+            "CloudWatch Logs export on or off. Profiler output goes to the "
+            "PER-CLUSTER log group /aws/docdb/{cluster_id}/profiler, never to a "
+            "system.profile collection. The parameter group is SHARED, so every "
+            "cluster attached to it inherits the change, and the approval is "
+            "bound to the resolved group (a reassignment invalidates it). A "
+            "cluster on a default.* parameter group is refused (create a custom "
+            "group first). Requires approved=true AND approval_id=<uuid from "
             "request_approval>."
         ),
         "input_schema": {

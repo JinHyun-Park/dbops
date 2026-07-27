@@ -98,7 +98,7 @@
 
 1. 커스텀 클러스터 파라미터 그룹에서 `profiler`(enabled/disabled), `profiler_threshold_ms`(50~INT_MAX), `profiler_sampling_rate`(0.0~1.0) 수정
 2. 클러스터가 그 파라미터 그룹을 쓰도록 변경
-3. `profiler` 로그를 CloudWatch Logs로 내보내기 활성화(로그 그룹 `/aws/docdb/profiler`)
+3. `profiler` 로그를 CloudWatch Logs로 내보내기 활성화. 로그 그룹은 클러스터별이다: `/aws/docdb/{cluster_id}/profiler`(단일 공유 `/aws/docdb/profiler`가 아니다)
 
 또한 프로파일러 출력은 `system.profile` 컬렉션이 아니라 CloudWatch Logs로 간다. `system.*` 컬렉션은 DocumentDB에서 미지원이다.
 

@@ -219,10 +219,21 @@ def _project(action_type: str, details: dict) -> dict:
         # command, so the projection binds the three effective parameter values
         # the tool writes. There is no `db` any more: DocumentDB's profiler
         # applies to every database in the cluster.
+        #
+        # parameter_group is the RESOLVED WRITE TARGET and must be inside the
+        # hash. A cluster parameter group is SHARED: every cluster attached to it
+        # inherits the change. The tool resolves the group from the live cluster
+        # at execute time, so without binding it an approval for "profiler on
+        # cluster X (group pg-a)" could be consumed after the cluster was
+        # re-pointed at pg-b and silently modify an unapproved group plus every
+        # unrelated cluster sharing it. Same reasoning as the
+        # modify_rds_instance_class current-class baseline: bind what the TOCTOU
+        # re-check depends on so a reassignment fails the hash, fail-closed.
         return {
             "enabled": bool(d.get("enabled")),
             "threshold_ms": _norm_val(d.get("threshold_ms")),
             "sampling_rate": _norm_val(d.get("sampling_rate")),
+            "parameter_group": str(d.get("parameter_group") or "").strip(),
         }
     if action_type == "create_docdb_index":
         # stage 2: handler impl lands later. keys is an ORDERED list of

@@ -14,16 +14,22 @@ the profiler is a three-step, IAM-authorized change:
   2. The cluster must USE that custom group. This tool does NOT create or attach
      one: a cluster still on a default group is refused with that reason stated
      (creating + attaching a group is a heavier, separate operation).
-  3. Export the `profiler` log type to CloudWatch Logs (log group
-     /aws/docdb/profiler) via modify_db_cluster. Without step 3 the parameter is
-     on but nothing is delivered.
+  3. Export the `profiler` log type to CloudWatch Logs via modify_db_cluster.
+     Without step 3 the parameter is on but nothing is delivered. The log group
+     is PER CLUSTER: /aws/docdb/{cluster_id}/profiler (AWS docs, "Accessing your
+     Amazon DocumentDB profiler logs"), not a single shared /aws/docdb/profiler.
 
 Safety model (unchanged from the previous Mongo-protocol version):
   - FAIL-CLOSED engine gate in the handler (docdb_write capability). A None
     family never reaches this impl.
   - Approval-gated 3-state flow (approval_required -> verify_approval -> execute).
     verify_approval is consumed EXACTLY ONCE and is payload-hash bound to the
-    effective {enabled, threshold_ms, sampling_rate}.
+    effective {enabled, threshold_ms, sampling_rate} AND to the resolved
+    parameter_group. Binding the group matters because a cluster parameter group
+    is SHARED: if the cluster were re-pointed at a different group between
+    approval and execute, an unbound approval would modify a group the DBA never
+    reviewed, along with every other cluster attached to it. With the group in
+    the hash that reassignment fails verification (fail-closed).
   - NEVER raises, and NEVER returns raw exception text: static Korean reason +
     module logger.
 
@@ -45,7 +51,16 @@ logger = logging.getLogger(__name__)
 # profiler_sampling_rate is [0.0-1.0]. The profiler params are dynamic, so
 # ApplyMethod=immediate is valid (a static param would require pending-reboot).
 MIN_THRESHOLD_MS = 50
-PROFILER_LOG_GROUP = "/aws/docdb/profiler"
+
+
+def profiler_log_group(cluster_id: str) -> str:
+    """CloudWatch Logs group the profiler delivers to, PER CLUSTER.
+
+    AWS docs (Profiling Amazon DocumentDB operations, "Accessing your Amazon
+    DocumentDB profiler logs"): the group is /aws/docdb/{yourClusterName}/profiler.
+    There is no single shared /aws/docdb/profiler group, so pointing an operator
+    at that name sends them to a log group that does not exist."""
+    return f"/aws/docdb/{cluster_id}/profiler"
 
 
 def _as_bool(v) -> bool:
@@ -174,17 +189,33 @@ def set_docdb_profiler_impl(
             "warnings": warnings,
         }
 
+    # `pg_name` was resolved from the LIVE cluster a few lines above, so passing
+    # it here is what makes the group a bound target: if the cluster was
+    # re-pointed at another parameter group after the DBA approved, the hash no
+    # longer matches and the guard refuses instead of writing to a group nobody
+    # reviewed (and to every cluster sharing it).
     guard = verify_approval(
         approval_id,
         cluster_id,
         "set_docdb_profiler",
-        payload={"enabled": enabled_b, "threshold_ms": threshold_i, "sampling_rate": rate_f},
+        payload={
+            "enabled": enabled_b,
+            "threshold_ms": threshold_i,
+            "sampling_rate": rate_f,
+            "parameter_group": pg_name,
+        },
     )
     if not guard.get("ok"):
         return {
             "status": "approval_denied",
             "reason": guard.get("reason", "approval guard rejected the request"),
             "cluster_id": cluster_id,
+            "parameter_group": pg_name,
+            "hint": (
+                f"현재 클러스터가 사용하는 파라미터 그룹은 '{pg_name}'입니다. 승인 시점과 "
+                "다른 그룹이면 승인이 무효가 됩니다 (승인은 그룹까지 고정됩니다). "
+                "그룹이 바뀌었다면 다시 요청해 새로 승인받으세요."
+            ),
         }
 
     # --- step 1: the parameter-group write (absolute values, idempotent) ---
@@ -258,11 +289,12 @@ def set_docdb_profiler_impl(
         "parameter_group": pg_name,
         "profiler": "enabled" if enabled_b else "disabled",
         "log_export": log_export_on,
-        "log_group": PROFILER_LOG_GROUP,
+        "log_group": profiler_log_group(cluster_id),
         "note": (
             f"파라미터 그룹 '{pg_name}'에 profiler={'enabled' if enabled_b else 'disabled'}를 "
             "ApplyMethod=immediate로 적용했습니다 (반영까지 몇 분 걸릴 수 있습니다). "
-            f"프로파일러 출력은 CloudWatch Logs 로그 그룹 {PROFILER_LOG_GROUP}로 전송됩니다. "
+            f"프로파일러 출력은 CloudWatch Logs 로그 그룹 {profiler_log_group(cluster_id)}로 "
+            "전송됩니다 (로그 그룹은 첫 레코드가 생긴 뒤에 나타납니다). "
             "DocumentDB에는 system.profile 컬렉션이 없으므로 Mongo 셸로는 조회할 수 없습니다."
         ),
     }

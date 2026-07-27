@@ -223,7 +223,7 @@ def operations_schema():
                "approved": "boolean", "approval_id": "string"},
               ["cluster_id"]),
         _tool("set_docdb_profiler",
-              "DocumentDB only: enable or disable the CLUSTER-wide profiler via the custom cluster parameter group (profiler, profiler_threshold_ms >= 50, profiler_sampling_rate 0.0-1.0) plus the profiler CloudWatch Logs export (/aws/docdb/profiler). Refuses a default.* parameter group; requires approval",
+              "DocumentDB only: enable or disable the CLUSTER-wide profiler via the custom cluster parameter group (profiler, profiler_threshold_ms >= 50, profiler_sampling_rate 0.0-1.0) plus the profiler CloudWatch Logs export (per-cluster log group /aws/docdb/{cluster_id}/profiler). The parameter group is SHARED, so every cluster attached to it inherits the change, and the approval is bound to the resolved group. Refuses a default.* parameter group; requires approval",
               {"cluster_id": "string", "enabled": "boolean", "threshold_ms": "integer",
                "sampling_rate": "number", "approved": "boolean", "approval_id": "string"},
               ["cluster_id"]),
