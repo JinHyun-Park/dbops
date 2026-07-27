@@ -99,7 +99,12 @@ function handler(event) {
             "apiUrl": agent.api.api_endpoint,
             "frontendUrl": f"https://{distribution.distribution_domain_name}",
             "region": Settings.REGION,
-            "cognitoDomain": f"https://{Settings.COGNITO_DOMAIN_PREFIX}.auth.{Settings.REGION}.amazoncognito.com",
+            # foundation.cognito_domain_prefix, NOT Settings.COGNITO_DOMAIN_PREFIX:
+            # the setting is empty on the documented fresh-account path and
+            # FoundationStack derives the real prefix. Reading the raw setting
+            # here produced "https://.auth.<region>.amazoncognito.com", a host
+            # that resolves nowhere, so login was dead on every fresh deploy.
+            "cognitoDomain": f"https://{foundation.cognito_domain_prefix}.auth.{Settings.REGION}.amazoncognito.com",
             "cognitoClientId": foundation.user_pool_client.user_pool_client_id,
             "cognitoUserPoolId": foundation.user_pool.user_pool_id,
             "agentRuntimeArn": agent.runtime.agent_runtime_arn,

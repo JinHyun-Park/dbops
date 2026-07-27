@@ -66,13 +66,19 @@ class FoundationStack(cdk.Stack):
         # exists", so nothing downstream ever deployed. Empty setting = derive a
         # prefix that is unique by construction. An explicit value still wins, so
         # existing deployments keep the domain their Hosted UI URL already uses.
-        domain_prefix = (Settings.COGNITO_DOMAIN_PREFIX or "").strip()
-        if not domain_prefix:
-            domain_prefix = f"dbops-{Settings.ENV}-{str(Settings.ACCOUNT_ID)[-6:]}"
+        # Exported (not just local) because frontend_stack builds the Hosted-UI
+        # URL in /config.json from it. Reading Settings.COGNITO_DOMAIN_PREFIX
+        # there instead shipped "https://.auth.<region>.amazoncognito.com"
+        # whenever the setting was left empty (the documented fresh-account
+        # default): an unresolvable host, so nobody could log in while every
+        # stack deployed green.
+        self.cognito_domain_prefix = (Settings.COGNITO_DOMAIN_PREFIX or "").strip()
+        if not self.cognito_domain_prefix:
+            self.cognito_domain_prefix = f"dbops-{Settings.ENV}-{str(Settings.ACCOUNT_ID)[-6:]}"
         self.user_pool.add_domain(
             "Domain",
             cognito_domain=cognito.CognitoDomainOptions(
-                domain_prefix=domain_prefix,
+                domain_prefix=self.cognito_domain_prefix,
             ),
         )
 

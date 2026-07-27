@@ -315,6 +315,15 @@ To manage Aurora clusters in other AWS accounts:
    RDS/Aurora, DocumentDB (authorized under the `rds:` namespace), ElastiCache
    and DynamoDB. An untagged cluster is readable but not writable.
 
+   Tag the **cluster parameter group** too. `rds:ModifyDBClusterParameterGroup`
+   authorizes against the parameter group, not the cluster, so parameter tuning
+   is denied if only the cluster carries the tag.
+
+   Snapshot creation is the one exception: it is allowed without the tag. IAM
+   evaluates `aws:ResourceTag` against every resource in the request, and the
+   snapshot being created does not exist yet, so a tag condition would deny
+   every snapshot rather than scope it.
+
 3. Register in DBOps with the spoke role ARN
 
 See `cdk/cross-account/README.md` for details.

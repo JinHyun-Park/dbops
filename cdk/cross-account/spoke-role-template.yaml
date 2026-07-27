@@ -128,16 +128,16 @@ Resources:
                 Effect: Allow
                 Action:
                   - "rds:ModifyDBCluster"
+                  # NB: this one authorizes against the cluster-pg resource, NOT
+                  # the cluster, so the PARAMETER GROUP must carry
+                  # ManagedBy=dbops too or parameter tuning is denied. See
+                  # README "Tag clusters for write access".
                   - "rds:ModifyDBClusterParameterGroup"
                   - "rds:ModifyDBInstance"
                   - "rds:RebootDBInstance"
                   - "rds:DeleteDBInstance"
                   - "rds:ModifyDBClusterEndpoint"
                   - "rds:DeleteDBClusterEndpoint"
-                  # Snapshot creation authorizes against the tagged source
-                  # cluster/instance, so it belongs here.
-                  - "rds:CreateDBClusterSnapshot"
-                  - "rds:CreateDBSnapshot"
                   # Turning the RDS Data API on for an already-registered
                   # cluster. Scoped to this single action rather than
                   # ModifyDBCluster so approve-time activation cannot be reused
@@ -153,7 +153,6 @@ Resources:
                   - "elasticache:ModifyReplicationGroup"
                   - "elasticache:RebootCacheCluster"
                   - "elasticache:TestFailover"
-                  - "elasticache:CreateSnapshot"
                 Resource: "*"
                 Condition:
                   StringEquals:
@@ -168,6 +167,61 @@ Resources:
                 Condition:
                   StringEquals:
                     "aws:ResourceTag/ManagedBy": "dbops"
+              # Snapshot creation. UNCONDITIONED, and that is deliberate.
+              #
+              # These three actions were previously inside the
+              # aws:ResourceTag/ManagedBy=dbops statements above on the
+              # assumption that they authorize against the tagged SOURCE
+              # cluster/instance. They don't authorize against it ALONE. Per the
+              # AWS service authorization reference, the snapshot being created
+              # is itself a REQUIRED resource of the request:
+              #   rds:CreateDBClusterSnapshot -> cluster* AND cluster-snapshot*
+              #   rds:CreateDBSnapshot        -> db*      AND snapshot*
+              #   elasticache:CreateSnapshot  -> snapshot*  (cluster and
+              #                                  replicationgroup are OPTIONAL)
+              # A resource that does not exist yet carries no tags, so
+              # aws:ResourceTag/ManagedBy is absent, StringEquals fails, and the
+              # whole call is denied. The failure lands AFTER verify_approval has
+              # consumed the single-use approval, so the DBA's approval is burned
+              # and no snapshot is taken.
+              #
+              # aws:RequestTag/ManagedBy=dbops is the condition that WOULD work
+              # for a create action, but it is not usable here: the DBOps tools
+              # do not send that tag. create_snapshot.py sends only
+              # dbops:created-by + dbops:type; create_rds_snapshot.py and
+              # create_elasticache_snapshot.py send no tags at all. Requiring it
+              # would deny every snapshot instead of scoping it. These stay
+              # unconditioned rather than moving behind EnableProvisioningWrites:
+              # snapshotting a cluster you already manage is normal backup work,
+              # not provisioning, and it creates no compute.
+              - Sid: SnapshotCreate
+                Effect: Allow
+                Action:
+                  - "rds:CreateDBClusterSnapshot"
+                  - "rds:CreateDBSnapshot"
+                  - "elasticache:CreateSnapshot"
+                Resource: "*"
+              # RDS runs a SECOND authorization, on rds:AddTagsToResource, when a
+              # create call carries Tags (RDS User Guide, "Grant permission to tag
+              # Amazon RDS resources during creation"; the service authorization
+              # reference maps the CreateDBClusterSnapshot / CreateDBSnapshot
+              # operations to BOTH rds:CreateDB*Snapshot and
+              # rds:AddTagsToResource). create_snapshot.py passes Tags, so without
+              # this the snapshot fix above still ends in AccessDenied with the
+              # approval already consumed. Scoped by aws:TagKeys to exactly the
+              # keys that tool sends, so it cannot be used to relabel arbitrary
+              # resources. If create_snapshot.py's tag keys change, add them here
+              # or snapshots start failing.
+              - Sid: RDSTagOnCreate
+                Effect: Allow
+                Action:
+                  - "rds:AddTagsToResource"
+                Resource: "*"
+                Condition:
+                  "ForAllValues:StringEquals":
+                    "aws:TagKeys":
+                      - "dbops:created-by"
+                      - "dbops:type"
         # Resource-CREATING writes. The ManagedBy tag cannot gate these: IAM
         # evaluates aws:ResourceTag against the resource being acted on, and the
         # cluster/instance/endpoint being created does not exist yet. So they are

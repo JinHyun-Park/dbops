@@ -53,10 +53,23 @@ WEB_URL=${WEB_URL%/}
 # 2. /config.json delivered + has expected keys
 CONFIG=$(curl -fsS "$WEB_URL/config.json" 2>/dev/null)
 if [ -n "$CONFIG" ]; then
-  for key in apiUrl cognitoClientId region agentRuntimeArn; do
+  for key in apiUrl cognitoClientId region agentRuntimeArn cognitoDomain; do
     echo "$CONFIG" | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin).get('$key') else 1)" 2>/dev/null \
       && pass "/config.json has $key" || fail "/config.json missing $key"
   done
+  # cognitoDomain needs more than a truthiness check. An empty Hosted-UI prefix
+  # yields "https://.auth.<region>.amazoncognito.com": a truthy string whose
+  # first host label is EMPTY, so it resolves nowhere and login is dead while
+  # every other check stays green. Assert the host has no empty label.
+  echo "$CONFIG" | python3 -c "
+import json, sys
+from urllib.parse import urlparse
+host = urlparse(json.load(sys.stdin).get('cognitoDomain') or '').hostname or ''
+labels = host.split('.')
+sys.exit(0 if len(labels) >= 2 and all(labels) else 1)
+" 2>/dev/null \
+    && pass "/config.json cognitoDomain host is well-formed" \
+    || fail "/config.json cognitoDomain host is malformed (empty Hosted-UI prefix? nobody can log in)"
 else
   fail "/config.json not reachable"
 fi
