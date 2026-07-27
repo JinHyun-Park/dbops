@@ -32,6 +32,46 @@ echo "========================================="
 echo "  DBOps Smoke Test"
 echo "========================================="
 
+# Every /api route sits behind the API Gateway Cognito JWT authorizer (only the
+# two Slack webhooks and /health are public), so an unauthenticated curl gets 401
+# BEFORE the Lambda runs. The old checks used `curl -fsS ... || echo 0`, which
+# turned that 401 into CLUSTER_COUNT=0 and then reported
+# "/api/clusters: 0 clusters registered" as a PASS on a fleet of 11 clusters, and
+# skipped every per-cluster check as "nothing registered". A green smoke test
+# that never reached a single authenticated route is worse than a red one.
+#
+# So: acquire a real id token when local e2e credentials exist (the same
+# viewer-role user the Playwright suite uses; GET is all we need), and SKIP the
+# authenticated checks loudly when they do not. Never pass them blind.
+ID_TOKEN=""
+if [ -f "$SMOKE_DIR/frontend/.env.e2e" ]; then
+  # shellcheck disable=SC1091
+  set -a; . "$SMOKE_DIR/frontend/.env.e2e"; set +a
+  CLIENT_ID=$(aws cloudformation describe-stacks --region "$DBOPS_REGION" \
+    --stack-name "dbops-$DBOPS_ENV-foundation" \
+    --query "Stacks[0].Outputs[?OutputKey=='UserPoolClientId'].OutputValue" \
+    --output text 2>/dev/null)
+  if [ -n "${DBOPS_E2E_EMAIL:-}" ] && [ -n "${DBOPS_E2E_PASSWORD:-}" ] && [ -n "$CLIENT_ID" ]; then
+    ID_TOKEN=$(aws cognito-idp initiate-auth --region "$DBOPS_REGION" \
+      --auth-flow USER_PASSWORD_AUTH --client-id "$CLIENT_ID" \
+      --auth-parameters "USERNAME=$DBOPS_E2E_EMAIL,PASSWORD=$DBOPS_E2E_PASSWORD" \
+      --query 'AuthenticationResult.IdToken' --output text 2>/dev/null)
+    [ "$ID_TOKEN" = "None" ] && ID_TOKEN=""
+  fi
+fi
+if [ -n "$ID_TOKEN" ]; then
+  pass "authenticated as the e2e viewer user"
+else
+  warn "no id token (frontend/.env.e2e missing or auth failed) — authenticated API checks are SKIPPED, not passed"
+fi
+
+# GET an authenticated route. Echoes the body on success, empty on any failure,
+# and NEVER substitutes a default that a later test could read as success.
+api_get() {
+  [ -z "$ID_TOKEN" ] && return 1
+  curl -fsS -H "Authorization: Bearer $ID_TOKEN" "$API_URL$1" 2>/dev/null
+}
+
 # 1. Discover stack outputs
 API_URL=$(aws cloudformation describe-stacks \
   --region "$DBOPS_REGION" \
@@ -74,31 +114,57 @@ else
   fail "/config.json not reachable"
 fi
 
-# 3. /api/clusters (DynamoDB → REST)
-CLUSTER_COUNT=$(curl -fsS "$API_URL/api/clusters" 2>/dev/null | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
-[ "$CLUSTER_COUNT" -ge 0 ] && pass "/api/clusters: $CLUSTER_COUNT clusters registered" || fail "/api/clusters unreachable"
+# 3. /api/clusters (DynamoDB → REST). A failed call must NOT become a count of 0.
+if [ -z "$ID_TOKEN" ]; then
+  CLUSTER_COUNT=""
+  warn "/api/clusters skipped (no token)"
+else
+  CLUSTER_COUNT=$(api_get "/api/clusters" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "")
+  if [ -n "$CLUSTER_COUNT" ]; then
+    pass "/api/clusters: $CLUSTER_COUNT clusters registered"
+  else
+    fail "/api/clusters unreachable or not JSON"
+  fi
+fi
 
 # 4. /api/multi-cluster/overview
-MULTI=$(curl -fsS "$API_URL/api/multi-cluster/overview" 2>/dev/null | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('clusters',[])))" 2>/dev/null || echo "")
-[ -n "$MULTI" ] && pass "/api/multi-cluster/overview: $MULTI clusters" || fail "multi-cluster overview unreachable"
+if [ -z "$ID_TOKEN" ]; then
+  warn "/api/multi-cluster/overview skipped (no token)"
+else
+  MULTI=$(api_get "/api/multi-cluster/overview" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('clusters',[])))" 2>/dev/null || echo "")
+  [ -n "$MULTI" ] && pass "/api/multi-cluster/overview: $MULTI clusters" || fail "multi-cluster overview unreachable"
+fi
 
 # 5. /api/alert-rules + /api/alert-subscriptions
-curl -fsS "$API_URL/api/alert-rules" >/dev/null 2>&1 && pass "/api/alert-rules reachable" || fail "alert-rules unreachable"
-SUB_TOPIC=$(curl -fsS "$API_URL/api/alert-subscriptions" 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('topic_arn',''))" 2>/dev/null)
-[ -n "$SUB_TOPIC" ] && pass "alert SNS topic: $SUB_TOPIC" || fail "alert subscriptions endpoint missing topic_arn"
+if [ -z "$ID_TOKEN" ]; then
+  warn "/api/alert-rules and /api/alert-subscriptions skipped (no token)"
+else
+  api_get "/api/alert-rules" >/dev/null && pass "/api/alert-rules reachable" || fail "alert-rules unreachable"
+  SUB_TOPIC=$(api_get "/api/alert-subscriptions" | python3 -c "import json,sys; print(json.load(sys.stdin).get('topic_arn',''))" 2>/dev/null)
+  [ -n "$SUB_TOPIC" ] && pass "alert SNS topic: $SUB_TOPIC" || fail "alert subscriptions endpoint missing topic_arn"
+fi
 
 # 6. Pick first cluster and exercise dashboard endpoints
-FIRST_CID=$(curl -fsS "$API_URL/api/clusters" 2>/dev/null | python3 -c "
+# These are authenticated too, so without a token every one of them returned 401
+# and the whole section reported "no clusters registered yet" as a benign warning
+# on a fleet that had 11.
+FIRST_CID=""
+if [ -n "$ID_TOKEN" ]; then
+  FIRST_CID=$(api_get "/api/clusters" | python3 -c "
 import json,sys
 rows = json.load(sys.stdin)
 print(rows[0]['cluster_id'] if rows else '')
 " 2>/dev/null)
-if [ -z "$FIRST_CID" ]; then
-  warn "no clusters registered yet — skipping per-cluster checks. Register a cluster via the UI to complete the smoke test."
+fi
+if [ -z "$ID_TOKEN" ]; then
+  warn "per-cluster dashboard checks SKIPPED (no token)"
+elif [ -z "$FIRST_CID" ]; then
+  warn "no clusters visible to the smoke user — register a cluster, or check that the smoke user's team can see one"
 else
   pass "smoke testing against cluster: $FIRST_CID"
   for path in "" "/timeseries?metric=cpu&hours=1" "/wait-events?hours=1" "/slow-queries?hours=1" "/vacuum-stats" "/long-running" "/blocking-locks" "/settings" "/batch-timeseries?metrics=cpu,aas&hours=1"; do
-    STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/dashboard/$FIRST_CID$path")
+    STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+      -H "Authorization: Bearer $ID_TOKEN" "$API_URL/api/dashboard/$FIRST_CID$path")
     [ "$STATUS" = "200" ] && pass "GET /api/dashboard/{cid}$path → 200" || fail "GET /api/dashboard/{cid}$path → $STATUS"
   done
 fi
