@@ -57,12 +57,21 @@ CAPABILITIES = {
         # (both PG and MySQL). Positive gate — non-relational engines can't add/
         # remove an RDS DB instance this way.
         "scale_instance": True,
+        # query_stats: only relational (pg_stat_statements /
+        # events_statements_summary_by_digest) and rds_instance (direct-TCP
+        # collectors) ever write query_stats rows, so any other family answers
+        # query tools with a false empty state unless gated.
+        # explain / index_advice: PG-only implementations today; E-2 turns Aurora
+        # MySQL on. cluster_parameter: Aurora cluster parameter groups, which
+        # rds_instance does not have (it uses instance parameter groups, E-3).
+        "query_stats": True, "explain": True, "index_advice": True, "cluster_parameter": True,
         "cw_namespace": "AWS/RDS",
         "findings": {"health", "cost", "param_fitness", "capacity_forecast"},
     },
     DOCUMENTDB: {
         "sql": False, "rds_meta": True, "perf_insights": False, "simulation": False,
         "docdb_write": True,
+        "query_stats": False, "explain": False, "index_advice": False, "cluster_parameter": False,
         "cw_namespace": "AWS/DocDB",
         "findings": {"docdb"},
     },
@@ -70,6 +79,7 @@ CAPABILITIES = {
         "sql": False, "rds_meta": False, "perf_insights": False, "simulation": False,
         "ddb_cost_simulation": True,
         "ddb_write": True,
+        "query_stats": False, "explain": False, "index_advice": False, "cluster_parameter": False,
         "cw_namespace": "AWS/DynamoDB",
         "findings": {"ddb"},
     },
@@ -79,6 +89,7 @@ CAPABILITIES = {
         "elasticache_cost_simulation": True,
         "elasticache_write": True,
         "live_read": True,
+        "query_stats": False, "explain": False, "index_advice": False, "cluster_parameter": False,
         "cw_namespace": "AWS/ElastiCache",
         "findings": {"elasticache"},
     },
@@ -96,6 +107,11 @@ CAPABILITIES = {
         # ONLY to standalone RDS instances — Aurora uses cluster/reader tooling.
         # Positive, FAIL-CLOSED gate: no other family carries this capability.
         "instance_write": True,
+        # query_stats rows do arrive here (direct-TCP collectors). explain and
+        # index_advice stay off until the MySQL dialect lands (E-2), and
+        # cluster_parameter is Aurora-only: this family has instance parameter
+        # groups, handled separately in E-3.
+        "query_stats": True, "explain": False, "index_advice": False, "cluster_parameter": False,
         # Shared namespace with Aurora but instance-dimensioned
         # (DBInstanceIdentifier; the DBClusterIdentifier dimension does not
         # exist for these engines).

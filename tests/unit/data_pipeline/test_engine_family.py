@@ -77,6 +77,22 @@ def test_rds_instance_capabilities():
         "cost",
     }
 
+def test_task0_capability_matrix():
+    # E-0 Task 0. query_stats rows are only written for relational and
+    # rds_instance; explain/index_advice are PG-only today (E-2 adds MySQL);
+    # cluster_parameter is Aurora cluster parameter groups only (E-3 covers the
+    # rds_instance instance-parameter path).
+    keys = ("query_stats", "explain", "index_advice", "cluster_parameter")
+    expected = {
+        "relational": (True, True, True, True),
+        "rds_instance": (True, False, False, False),
+        "documentdb": (False, False, False, False),
+        "dynamodb": (False, False, False, False),
+        "elasticache": (False, False, False, False),
+    }
+    for fam, vals in expected.items():
+        assert tuple(ef.CAPABILITIES[fam][k] for k in keys) == vals, fam
+
 def test_all_python_copies_are_verbatim_identical():
     root = Path(__file__).resolve().parents[3]
     paths = [

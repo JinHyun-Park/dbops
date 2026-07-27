@@ -441,3 +441,52 @@ export const FAMILY_PANELS: Record<EngineFamily, Set<string>> = {
   ]),
   rds_instance: new Set(["overview"]),
 };
+
+// Query-path capability keys, mirroring backend CAPABILITIES (engine_family.py).
+// query_stats rows are only ever written for relational (pg_stat_statements /
+// events_statements_summary_by_digest) and rds_instance (direct-TCP collectors),
+// so every other family would render a false empty state. explain and
+// index_advice are PG-only implementations today (E-2 adds Aurora MySQL).
+// cluster_parameter is Aurora cluster parameter groups; rds_instance has
+// instance parameter groups instead (E-3). Keep in sync with the Python copies.
+export type EngineCapability =
+  | "query_stats"
+  | "explain"
+  | "index_advice"
+  | "cluster_parameter";
+
+export const FAMILY_CAPABILITIES: Record<
+  EngineFamily,
+  Record<EngineCapability, boolean>
+> = {
+  relational: {
+    query_stats: true,
+    explain: true,
+    index_advice: true,
+    cluster_parameter: true,
+  },
+  documentdb: {
+    query_stats: false,
+    explain: false,
+    index_advice: false,
+    cluster_parameter: false,
+  },
+  dynamodb: {
+    query_stats: false,
+    explain: false,
+    index_advice: false,
+    cluster_parameter: false,
+  },
+  elasticache: {
+    query_stats: false,
+    explain: false,
+    index_advice: false,
+    cluster_parameter: false,
+  },
+  rds_instance: {
+    query_stats: true,
+    explain: false,
+    index_advice: false,
+    cluster_parameter: false,
+  },
+};
