@@ -274,3 +274,40 @@ def test_unregistered_cluster_reports_unknown_family():
     assert out["status"] == "ok"
     assert out["engine_family"] == "unknown"
     assert "engine_family" in out["skipped_sources"]
+
+
+def test_one_throttle_storm_does_not_occupy_three_ranked_slots():
+    """A single DynamoDB throttle storm raises read_throttle_events,
+    write_throttle_events AND throttled_requests together. Ranking all three
+    independently produced three near-identical candidates for ONE event
+    (measured: ranks 2/3/4, all score 3.25, eating 3 of the 8 top slots).
+
+    throttled_requests therefore stays OFF the counter path and lives on the
+    correlation timeline instead, which also matches this project's own rule:
+    dynamodb_findings.py folds it into the write side rather than counting it
+    separately."""
+    cache = _cache(
+        "dynamodb",
+        grouped=[
+            _row("read_throttle_events", 2.0, 0.0, 61.0, 0.0),
+            _row("write_throttle_events", 4.7, 0.0, 142.0, 0.0),
+            # the same storm also shows up here; it must not become a 3rd signal
+            _row("throttled_requests", 6.7, 0.0, 203.0, 0.0),
+        ],
+    )
+    out = _run(cache)
+
+    counters = [c for c in out["candidates"] if c["category"] == "counter_spike"]
+    metrics = {c["evidence"]["metric_type"] for c in counters}
+    assert metrics == {"read_throttle_events", "write_throttle_events"}
+    assert out["signals_examined"]["counter_spikes"] == 2
+    # not even searched as a ranked signal, so it cannot be scored
+    assert "throttled_requests" not in _searched_metrics(cache)
+
+
+def test_throttled_requests_stays_on_the_correlation_timeline():
+    """Dropping it from the ranking must not hide it: an operator reading the
+    timeline still wants all three series."""
+    from mcp_servers.shared.incident_signals import timeline_metrics
+
+    assert "throttled_requests" in timeline_metrics("dynamodb")

@@ -103,14 +103,20 @@ SIGNAL_SETS = {
     # DynamoDB has no CPU/connection concept at all. consumed_rcu/wcu are Sum
     # metrics but are normally nonzero, so they belong on the ratio path;
     # throttles are the headline counters.
+    # throttled_requests is deliberately NOT a third counter. One throttle storm
+    # raises all three series at once, so ranking them independently produced
+    # three near-identical candidates for a single event (measured: ranks 2/3/4,
+    # all score 3.25, eating 3 of the 8 top slots). It also contradicts this
+    # project's own aggregation rule: dynamodb_findings.py folds
+    # throttled_requests into the WRITE side rather than counting it separately.
+    # It stays on the correlation timeline, where seeing all three is useful.
     DYNAMODB: {
         "gauges": ("consumed_rcu", "consumed_wcu", "returned_item_count"),
         "counters": {
             "read_throttle_events": 1.0,
             "write_throttle_events": 1.0,
-            "throttled_requests": 1.0,
         },
-        "timeline_extra": (),
+        "timeline_extra": ("throttled_requests",),
     },
     # ElastiCache has two CPU series: cache_cpu (host) and engine_cpu (the
     # single-threaded engine, the one that actually saturates).
