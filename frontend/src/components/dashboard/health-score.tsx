@@ -18,6 +18,7 @@ interface Signal {
   weight: number;
   current: number;
   status: "ok" | "warn" | "crit";
+  invert?: boolean;
 }
 
 interface SignalDef {
@@ -142,10 +143,129 @@ const SIGNALS_DYNAMODB: SignalDef[] = [
   },
 ];
 
+// RDS instance (non-Aurora MySQL / SQL Server): only the metric_types that
+// rds_instance_cw_collector.py actually writes. Aurora-only signals
+// (replica_lag_ms, deadlocks, buffer_cache_hit) are NEVER collected for a
+// standalone instance, so scoring against them left permanently blank rows.
+// free_storage_bytes is LOW-bad (invert); the exhaustion ETA itself is covered
+// by the capacity_forecast finding, this is just the "already tight" signal.
+// transform normalizes the collected unit to the threshold unit: CloudWatch
+// ReadLatency/WriteLatency are seconds, FreeStorageSpace is bytes.
+const SIGNALS_RDS_INSTANCE: SignalDef[] = [
+  { metric: "cpu", label: "CPU", warn: 70, crit: 90, weight: 30 },
+  {
+    metric: "db_connections",
+    label: "Connections",
+    warn: 100,
+    crit: 200,
+    weight: 20,
+  },
+  {
+    metric: "free_storage_bytes",
+    label: "Free Storage (GiB)",
+    warn: 5,
+    crit: 2,
+    weight: 20,
+    invert: true,
+    transform: (v) => v / 1024 ** 3,
+  },
+  {
+    metric: "read_latency",
+    label: "Read Latency (ms)",
+    warn: 20,
+    crit: 50,
+    weight: 15,
+    transform: (v) => v * 1000,
+  },
+  {
+    metric: "write_latency",
+    label: "Write Latency (ms)",
+    warn: 20,
+    crit: 50,
+    weight: 15,
+    transform: (v) => v * 1000,
+  },
+];
+
+// ElastiCache Redis/Valkey: metric_types from _REDIS_METRICS in
+// elasticache_cw_collector.py. engine_cpu (EngineCPUUtilization) is the real
+// saturation signal for the single-threaded engine thread, cache_cpu is the
+// whole node. Connections cap is maxclients (65000 default), so the thresholds
+// are far above the relational ones. Hit rate is derived (cache_hits /
+// cache_misses), not a collected metric_type, so it stays in the overview panel.
+const SIGNALS_ELASTICACHE_REDIS: SignalDef[] = [
+  { metric: "engine_cpu", label: "Engine CPU", warn: 70, crit: 90, weight: 25 },
+  {
+    metric: "memory_usage_pct",
+    label: "Memory Usage",
+    warn: 80,
+    crit: 90,
+    weight: 25,
+  },
+  {
+    metric: "evictions",
+    label: "Evictions/min",
+    warn: 1,
+    crit: 100,
+    weight: 20,
+  },
+  {
+    metric: "curr_connections",
+    label: "Connections",
+    warn: 5000,
+    crit: 20000,
+    weight: 15,
+  },
+  {
+    metric: "replication_lag",
+    label: "Replication Lag (s)",
+    warn: 5,
+    crit: 30,
+    weight: 15,
+  },
+];
+
+// ElastiCache Memcached: _MEMCACHED_METRICS is a subset, with no
+// EngineCPUUtilization, no DatabaseMemoryUsagePercentage and no replication.
+// Memory pressure shows up as evictions plus swap (AWS guidance: keep SwapUsage
+// under 50 MB).
+const SIGNALS_ELASTICACHE_MEMCACHED: SignalDef[] = [
+  { metric: "cache_cpu", label: "CPU", warn: 70, crit: 90, weight: 40 },
+  {
+    metric: "evictions",
+    label: "Evictions/min",
+    warn: 1,
+    crit: 100,
+    weight: 30,
+  },
+  {
+    metric: "curr_connections",
+    label: "Connections",
+    warn: 5000,
+    crit: 20000,
+    weight: 15,
+  },
+  {
+    metric: "swap_usage",
+    label: "Swap (MB)",
+    warn: 50,
+    crit: 100,
+    weight: 15,
+    transform: (v) => v / 1024 ** 2,
+  },
+];
+
 function signalsForEngine(engine?: string): SignalDef[] {
   const fam = engineFamily(engine);
   if (fam === "documentdb") return SIGNALS_DOCUMENTDB;
   if (fam === "dynamodb") return SIGNALS_DYNAMODB;
+  if (fam === "rds_instance") return SIGNALS_RDS_INSTANCE;
+  if (fam === "elasticache") {
+    // Registry engine is the AWS-reported "redis" | "valkey" | "memcached".
+    return (engine || "").toLowerCase().includes("memcached")
+      ? SIGNALS_ELASTICACHE_MEMCACHED
+      : SIGNALS_ELASTICACHE_REDIS;
+  }
   return SIGNALS_RELATIONAL;
 }
 
@@ -166,9 +286,13 @@ export function HealthScore({ clusterId, engine }: Props) {
         const results: Signal[] = signalDefs.map((s) => {
           const points = d.series[s.metric] || [];
           const hasData = points.length > 0;
-          const current = hasData
+          const raw = hasData
             ? Number(points[points.length - 1].value) || 0
             : 0;
+          // transform normalizes the collected unit to the threshold/display
+          // unit (seconds to ms, bytes to GiB) so the row never renders a
+          // rounded-to-zero latency or an ambiguous raw byte count.
+          const current = s.transform ? s.transform(raw) : raw;
           // Missing data → "ok": never penalize the score for an unpublished
           // metric (critical for inverted signals, where current=0 would
           // otherwise read as crit).
@@ -193,6 +317,7 @@ export function HealthScore({ clusterId, engine }: Props) {
             weight: s.weight,
             current,
             status,
+            invert: s.invert,
           };
         });
         if (!cancelled) {
@@ -291,7 +416,9 @@ export function HealthScore({ clusterId, engine }: Props) {
               </div>
               <span
                 className="text-zinc-400 font-mono tabular-nums"
-                title={`${fmtExact(s.current)} (warn ≥ ${s.threshold})`}
+                title={`${fmtExact(s.current)} (warn ${s.invert ? "≤" : "≥"} ${
+                  s.threshold
+                })`}
               >
                 {fmtNumber(s.current)}
               </span>
