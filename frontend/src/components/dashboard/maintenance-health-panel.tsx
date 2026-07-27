@@ -64,8 +64,6 @@ const CHECK_LABELS: Record<string, string> = {
   // DocumentDB Mongo-protocol deep diagnosis — docdb_mongo_* check_types from
   // the in-VPC docdb_mongo_collector (currentOp / serverStatus / profiler).
   docdb_mongo_long_running_ops: "Live Ops",
-  docdb_mongo_slow_ops: "Live Ops",
-  docdb_mongo_profiler_off: "Live Ops",
 };
 
 // Full PG tab set. MySQL exposes a trimmed list (VACUUM/Bloat/Extensions are

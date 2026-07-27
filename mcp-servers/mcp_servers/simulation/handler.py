@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import sys
 
@@ -16,6 +17,8 @@ from mcp_servers.simulation.tools.scaling_simulation import simulate_scaling_imp
 from mcp_servers.simulation.tools.upgrade_compatibility import check_upgrade_compatibility_impl
 from mcp_servers.simulation.tools.upgrade_impact import estimate_upgrade_impact_impl
 from mcp_servers.simulation.tools.upgrade_plan import generate_upgrade_plan_impl
+
+logger = logging.getLogger(__name__)
 
 cache = CacheClient()
 
@@ -240,7 +243,17 @@ def lambda_handler(event, context):
         try:
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
-        except Exception as e:
-            return {"content": [{"type": "text", "text": json.dumps({"error": str(e)})}]}
+        except Exception:
+            # 예외 텍스트는 응답에 절대 넣지 않는다(SQL·ARN·내부 경로 누출).
+            # 진단 정보는 CloudWatch 로그로만 보낸다.
+            logger.exception("TOOL ERROR (%s)", tool_name)
+            return {"content": [{"type": "text", "text": json.dumps({
+                "status": "tool_error",
+                "tool": tool_name,
+                "reason": (
+                    "도구 실행 중 내부 오류가 발생했습니다. 결과가 없으므로 이 호출로는 "
+                    "아무것도 단정할 수 없습니다. 잠시 후 다시 시도하거나 다른 도구로 확인하세요."
+                ),
+            })}]}
 
     return {"error": f"Unknown tool: {tool_name}"}

@@ -363,10 +363,17 @@ def test_threshold_above_int_max_rejected_no_aws():
     factory.assert_not_called()
 
 
-def test_note_does_not_claim_dbops_can_read_the_profiler_log():
-    """DBOps has no profiler-log surface (log search + dashboard read the cluster
-    error log), so the note must send the operator to the console / Logs Insights
-    instead of implying DBOps can query the group."""
+def test_note_tells_the_operator_how_to_actually_read_the_profiler_log():
+    """Enabling the profiler starts billable CloudWatch Logs ingestion, so the
+    note must say how to READ it, and say it accurately.
+
+    History: the note first claimed DBOps could not read the group at all. That
+    was wrong in both directions. The incident Lambda held logs:StartQuery on
+    resources=["*"] (its comment claimed /aws/rds/cluster/* but the scope was
+    never applied), so it could read ANY group; E-0 narrowed the IAM to the three
+    DB log-group prefixes, which INCLUDES /aws/docdb/*, and search_logs enforces
+    the same allowlist. So the profiler log IS readable, but only when log_group
+    is passed explicitly, because the default is the cluster error log."""
     client = _FakeDocDB(log_exports=[])
     with _with_client(client), patch.object(
         mod, "verify_approval", lambda *a, **k: {"ok": True}
@@ -376,8 +383,14 @@ def test_note_does_not_claim_dbops_can_read_the_profiler_log():
             approval_id="x",
         )
     note = result["note"]
-    assert "CloudWatch Logs Insights" in note
-    assert "DBOps는 아직 이 로그 그룹을 조회하지 못합니다" in note
+    assert "search_logs" in note
+    assert "/aws/docdb/docdb-1/profiler" in note
+    # must NOT resurrect the false claim
+    assert "조회하지 못합니다" not in note
+    # the group is inside the tool's own allowlist, so the advice is actionable
+    from mcp_servers.incident.tools.search_logs import ALLOWED_LOG_GROUP_PREFIXES
+
+    assert result["log_group"].startswith(ALLOWED_LOG_GROUP_PREFIXES)
 
 
 # ===== never-raise + no exception text in the response =====

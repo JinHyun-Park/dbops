@@ -599,3 +599,64 @@ def test_discover_flags_dbops_own_dynamodb_internal(mock_cache_env, mock_list, m
     # A real user/demo DynamoDB table and an Aurora cluster stay discoverable
     assert by_key["demo-daangn-products"]["is_internal"] is False
     assert by_key["prod-pg"]["is_internal"] is False
+
+
+# ===== re-registration must not inherit another account's secret ARNs =====
+
+
+def test_reregister_same_account_keeps_operator_arns():
+    """Same account+region: PATCH-set ARNs and labels survive a re-registration
+    (the merge that stops POST /api/clusters from wiping operator config)."""
+    table = MagicMock()
+    table.get_item.return_value = {"Item": {
+        "cluster_id": "docdb-1", "account_id": "111", "region": "ap-northeast-2",
+        "purpose": "주문 서비스", "mongo_secret_arn": "arn:aws:secretsmanager:x:111:secret:ro",
+        "mongo_write_secret_arn": "arn:aws:secretsmanager:x:111:secret:rw",
+    }}
+    handler._put_registry_item(table, {
+        "cluster_id": "docdb-1", "account_id": "111", "region": "ap-northeast-2",
+        "engine": "docdb",
+    })
+    stored = table.put_item.call_args.kwargs["Item"]
+    assert stored["mongo_secret_arn"] == "arn:aws:secretsmanager:x:111:secret:ro"
+    assert stored["mongo_write_secret_arn"] == "arn:aws:secretsmanager:x:111:secret:rw"
+    assert stored["purpose"] == "주문 서비스"
+
+
+def test_reregister_different_account_drops_secret_arns_but_keeps_labels():
+    """A bare identifier (DocumentDB cluster id, Aurora DBClusterIdentifier) can
+    repeat across accounts. Inheriting the old account's secret ARNs would point
+    the collectors and write tools at ANOTHER account's secrets, so the ARNs must
+    be dropped while account-neutral labels stay."""
+    table = MagicMock()
+    table.get_item.return_value = {"Item": {
+        "cluster_id": "docdb-1", "account_id": "111", "region": "ap-northeast-2",
+        "purpose": "주문 서비스", "team_id": "team-a",
+        "mongo_secret_arn": "arn:aws:secretsmanager:ap-northeast-2:111:secret:ro",
+        "db_secret_arn": "arn:aws:secretsmanager:ap-northeast-2:111:secret:db",
+        "cluster_arn": "arn:aws:rds:ap-northeast-2:111:cluster:docdb-1",
+    }}
+    handler._put_registry_item(table, {
+        "cluster_id": "docdb-1", "account_id": "222", "region": "ap-northeast-2",
+        "engine": "docdb",
+    })
+    stored = table.put_item.call_args.kwargs["Item"]
+    for arn_field in ("mongo_secret_arn", "db_secret_arn", "cluster_arn"):
+        assert not stored.get(arn_field), f"{arn_field} inherited across accounts"
+    assert stored["purpose"] == "주문 서비스"
+    assert stored["team_id"] == "team-a"
+
+
+def test_reregister_different_region_also_drops_secret_arns():
+    """Secrets Manager is regional, so a region change invalidates the ARNs too."""
+    table = MagicMock()
+    table.get_item.return_value = {"Item": {
+        "cluster_id": "docdb-1", "account_id": "111", "region": "ap-northeast-2",
+        "mongo_secret_arn": "arn:aws:secretsmanager:ap-northeast-2:111:secret:ro",
+    }}
+    handler._put_registry_item(table, {
+        "cluster_id": "docdb-1", "account_id": "111", "region": "us-east-1",
+        "engine": "docdb",
+    })
+    stored = table.put_item.call_args.kwargs["Item"]
+    assert not stored.get("mongo_secret_arn")

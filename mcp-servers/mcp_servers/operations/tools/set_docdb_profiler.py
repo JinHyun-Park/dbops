@@ -328,10 +328,9 @@ def set_docdb_profiler_impl(
             "ApplyMethod=immediate로 적용했습니다 (반영까지 몇 분 걸릴 수 있습니다). "
             f"프로파일러 출력은 CloudWatch Logs 로그 그룹 {profiler_log_group(cluster_id)}로 "
             "전송됩니다 (로그 그룹은 첫 레코드가 생긴 뒤에 나타납니다). "
-            "DBOps는 아직 이 로그 그룹을 조회하지 못합니다(로그 검색·대시보드는 클러스터 "
-            "error 로그만 봅니다). 프로파일러 기록은 AWS 콘솔이나 CloudWatch Logs Insights에서 "
-            "직접 조회하세요. DocumentDB에는 system.profile 컬렉션이 없으므로 Mongo 셸로도 "
-            "조회할 수 없습니다."
+            f"조회는 search_logs에 log_group=\"{profiler_log_group(cluster_id)}\"를 "
+            "넘기면 됩니다 (기본값은 클러스터 error 로그이므로 명시해야 합니다). "
+            "DocumentDB에는 system.profile 컬렉션이 없으므로 Mongo 셸로는 조회할 수 없습니다."
         ),
     }
     # Report only what was actually written: disabling touches the `profiler`

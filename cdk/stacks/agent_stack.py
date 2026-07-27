@@ -71,17 +71,34 @@ class AgentStack(cdk.Stack):
         data.cache_db.secret.grant_read(incident_mcp_lambda)
         data.cache_db.grant_data_api_access(incident_mcp_lambda)
         foundation.clusters_table.grant_read_data(incident_mcp_lambda)
-        # search_logs hits CloudWatch Logs Insights, cross-account-aware. Scoped
-        # to /aws/rds/cluster/* so a spoofed cluster_id can't read other groups.
-        # sts:AssumeRole lets it hop to the spoke account (local when no role).
+        # search_logs hits CloudWatch Logs Insights, cross-account-aware.
+        # The query actions are scoped to the DB log-group prefixes DBOps reads,
+        # so an agent-supplied log_group cannot reach unrelated groups (Lambda,
+        # application, CloudTrail...). This statement used to say "scoped to
+        # /aws/rds/cluster/*" while actually granting resources=["*"], which is
+        # how the over-grant survived review: the comment was the only scope.
+        # search_logs also enforces the same prefixes itself (defense in depth).
+        #   /aws/rds/cluster/*  Aurora error/slowquery/general/audit
+        #   /aws/rds/instance/* standalone RDS MySQL / SQL Server
+        #   /aws/docdb/*        DocumentDB profiler + audit
         incident_mcp_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=[
                 "logs:StartQuery",
                 "logs:GetQueryResults",
                 "logs:StopQuery",
-                "logs:DescribeLogGroups",
-                "sts:AssumeRole",
             ],
+            resources=[
+                f"arn:aws:logs:*:*:log-group:{prefix}*{suffix}"
+                for prefix in ("/aws/rds/cluster/", "/aws/rds/instance/", "/aws/docdb/")
+                for suffix in ("", ":*")
+            ],
+        ))
+        # DescribeLogGroups cannot be usefully resource-scoped (same AWS
+        # limitation already noted for the agent-tasks worker below), and
+        # sts:AssumeRole stays on "*" to match the hub-spoke role chaining
+        # pattern used by every other cross-account Lambda in this stack.
+        incident_mcp_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["logs:DescribeLogGroups", "sts:AssumeRole"],
             resources=["*"],
         ))
         # Titan text embeddings for semantic incident similarity

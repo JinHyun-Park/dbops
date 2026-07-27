@@ -78,7 +78,12 @@ def incident_schema():
               {"cluster_id": "string"}, ["cluster_id"]),
         _tool("get_recent_events", "Get recent RDS events and alarms; optional event_type filter",
               {"cluster_id": "string", "hours": "integer", "event_type": "string"}, ["cluster_id"]),
-        _tool("search_logs", "Search CloudWatch Logs via Insights; optional explicit log_group",
+        _tool("search_logs",
+              "Search DB logs via CloudWatch Logs Insights. Defaults to the Aurora cluster "
+              "error log; pass log_group explicitly for another DB log, e.g. "
+              "/aws/docdb/{cluster_id}/profiler (DocumentDB profiler output, enabled by "
+              "set_docdb_profiler) or /aws/rds/instance/{id}/slowquery. Only "
+              "/aws/rds/cluster/, /aws/rds/instance/ and /aws/docdb/ groups are allowed",
               {"cluster_id": "string", "query": "string", "hours": "integer",
                "log_group": "string"}, ["cluster_id"]),
         _tool("correlate_signals", "Correlate metrics and events on timeline",

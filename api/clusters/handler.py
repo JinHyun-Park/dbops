@@ -505,12 +505,24 @@ def _bad_secret_arn_field(body, fields):
 
 # Fields only an operator can set (PATCH /clusters/{id}/meta, or the admin teams
 # API for team_id) and that registration cannot re-derive from AWS.
-_OPERATOR_OWNED_FIELDS = (
-    "purpose", "service_tags", "team_id", "db_name",
+# Operator-set labels that mean the same thing wherever the cluster lives, so a
+# re-registration always keeps them.
+_OPERATOR_OWNED_LABELS = ("purpose", "service_tags", "team_id", "db_name")
+
+# Operator-set ARNs. These are ACCOUNT- AND REGION-SCOPED, so they may only be
+# carried over when the re-registration targets the same account+region. Several
+# families key the registry on the bare identifier (a DocumentDB cluster id, an
+# Aurora DBClusterIdentifier) rather than an account-qualified slug, so the same
+# cluster_id can legitimately be re-registered against a DIFFERENT account, and
+# inheriting the previous account's secret ARNs would point the collectors and
+# write tools at another account's secrets.
+_OPERATOR_OWNED_ARNS = (
     "db_secret_arn", "db_write_secret_arn",
     "mongo_secret_arn", "mongo_write_secret_arn",
     "auth_secret_arn", "cluster_arn", "secret_arn",
 )
+
+_OPERATOR_OWNED_FIELDS = _OPERATOR_OWNED_LABELS + _OPERATOR_OWNED_ARNS
 
 
 def _put_registry_item(table, item):
@@ -527,7 +539,14 @@ def _put_registry_item(table, item):
     re-derived from describe and is intentionally overwritten."""
     existing = table.get_item(Key={"cluster_id": item["cluster_id"]}).get("Item")
     if isinstance(existing, dict):  # not a dict => first registration
-        for f in _OPERATOR_OWNED_FIELDS:
+        # An ARN from another account/region must NOT be inherited (see
+        # _OPERATOR_OWNED_ARNS): the identifier can repeat across accounts.
+        same_place = (
+            str(existing.get("account_id") or "") == str(item.get("account_id") or "")
+            and str(existing.get("region") or "") == str(item.get("region") or "")
+        )
+        carry = _OPERATOR_OWNED_FIELDS if same_place else _OPERATOR_OWNED_LABELS
+        for f in carry:
             if not item.get(f) and existing.get(f):
                 item[f] = existing[f]
         # db_secret_source labels db_secret_arn: a preserved ARN must not keep

@@ -1,5 +1,7 @@
 # NoSQL write / remediation tools — Design Spec
 
+> **정정 (2026-07-24, E-0):** 관리형 Amazon DocumentDB는 Mongo 프로토콜 프로파일러(`getProfilingStatus`/`setProfilingLevel`)와 `system.profile` 컬렉션을 지원하지 않는다. 프로파일러는 커스텀 클러스터 파라미터 그룹(`profiler`, `profiler_threshold_ms`, `profiler_sampling_rate`) + CloudWatch Logs 내보내기로 켜고, 출력은 로그 그룹 `/aws/docdb/{cluster_id}/profiler`로 간다. 아래 설계의 프로파일러 부분은 구현에서 제거됐다. 근거: docs/superpowers/specs/2026-07-24-engine-parity-audit.md
+
 - **Date**: 2026-06-12
 - **Status**: Accepted (Codex adversarial safety review → FIX-FIRST; all 7 holes folded in)
 - **Program**: Multi-engine #P3.6 Group C — the FINAL remaining item (write/remediation).

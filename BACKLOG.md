@@ -278,16 +278,15 @@ by account/region. Delivered across 5 sequenced specs:
   network on the demo cluster). Connectivity = **Option A** (ADR 2026-06-12 update):
   a new in-VPC, pymongo-bundled, scheduled Lambda `data-pipeline/docdb_mongo_collector/`
   (NOT the AWS DocDB MCP). Read-only command allowlist only (`serverStatus`,
-  `currentOp(active)`, `getProfilingStatus`, `system.profile` reads — no generic
-  runCommand/eval). Emits `mongo_*` metric_snapshots + `docdb_mongo_long_running_ops`
-  / `docdb_mongo_slow_ops` / `docdb_mongo_profiler_off` findings (shared `run_ts`),
-  surfaced on the DocDB Maintenance Health panel's new **"Live Ops"** tab. Multi-layer
-  read-only: deployer-provisioned RO Mongo user + scoped per-cluster `mongo_secret_arn`
-  secret + in-VPC SG + command allowlist + `retryWrites=False`/`secondaryPreferred`.
-  Absent `mongo_secret_arn` the cluster no-ops (CW-based DocDB diagnosis unaffected).
-  `_PipLocalBundling` builds the asset Docker-free (manylinux py3.12 wheels) with a
-  Docker fallback. **Deployer setup to activate**: create RO Mongo user → store creds
-  in a secret → put ARN on the registry row → ensure SG reaches the cluster on 27017.
+  `currentOp(active)` — no generic runCommand/eval). Emits `mongo_*` metric_snapshots
+  - `docdb_mongo_long_running_ops` findings (shared `run_ts`),
+    surfaced on the DocDB Maintenance Health panel's new **"Live Ops"** tab. Multi-layer
+    read-only: deployer-provisioned RO Mongo user + scoped per-cluster `mongo_secret_arn`
+    secret + in-VPC SG + command allowlist + `retryWrites=False`/`secondaryPreferred`.
+    Absent `mongo_secret_arn` the cluster no-ops (CW-based DocDB diagnosis unaffected).
+    `_PipLocalBundling` builds the asset Docker-free (manylinux py3.12 wheels) with a
+    Docker fallback. **Deployer setup to activate**: create RO Mongo user → store creds
+    in a secret → put ARN on the registry row → ensure SG reaches the cluster on 27017.
 - ~~**DynamoDB capacity-mode cost simulator** (Provisioned↔On-Demand $ what-if)~~
   ✅ **shipped** (2026-06-12, live pricing confirmed for ap-northeast-2, Codex
   adversarial cost-math review → 3 findings all fixed). New `simulate_dynamodb_capacity_cost`

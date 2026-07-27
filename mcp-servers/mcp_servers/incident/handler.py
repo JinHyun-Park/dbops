@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import sys
 
@@ -14,6 +15,8 @@ from mcp_servers.incident.tools.remediation_history import get_remediation_histo
 from mcp_servers.incident.tools.search_logs import search_logs_impl
 from mcp_servers.incident.tools.similar_incidents import find_similar_incidents_impl
 from mcp_servers.shared.cache_client import CacheClient
+
+logger = logging.getLogger(__name__)
 
 cache = CacheClient()
 
@@ -44,7 +47,13 @@ TOOLS = {
     },
     "search_logs": {
         "impl": search_logs_impl,
-        "description": "Search CloudWatch Logs Insights for cluster error logs",
+        "description": (
+            "Search CloudWatch Logs Insights for DB logs. Defaults to the Aurora "
+            "cluster error log; pass log_group explicitly for another DB log, e.g. "
+            "/aws/docdb/{cluster_id}/profiler (DocumentDB profiler output) or "
+            "/aws/rds/instance/{id}/slowquery. Only /aws/rds/cluster/, "
+            "/aws/rds/instance/ and /aws/docdb/ groups are allowed."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -175,7 +184,17 @@ def lambda_handler(event, context):
         try:
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
-        except Exception as e:
-            return {"content": [{"type": "text", "text": json.dumps({"error": str(e)})}]}
+        except Exception:
+            # 예외 텍스트는 응답에 절대 넣지 않는다(SQL·ARN·내부 경로 누출).
+            # 진단 정보는 CloudWatch 로그로만 보낸다.
+            logger.exception("TOOL ERROR (%s)", tool_name)
+            return {"content": [{"type": "text", "text": json.dumps({
+                "status": "tool_error",
+                "tool": tool_name,
+                "reason": (
+                    "도구 실행 중 내부 오류가 발생했습니다. 결과가 없으므로 이 호출로는 "
+                    "아무것도 단정할 수 없습니다. 잠시 후 다시 시도하거나 다른 도구로 확인하세요."
+                ),
+            })}]}
 
     return {"error": f"Unknown tool: {tool_name}"}
