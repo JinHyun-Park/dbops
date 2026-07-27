@@ -95,7 +95,10 @@ impression decides whether someone sticks with the product.
   **Remaining:**
 - ✅ 알림 트리거 시 dashboard URL 자동 첨부 — `_dashboard_url()` 딥링크 + Slack Block Kit
   dashboard/alerts/timeline 버튼 (verified 2026-06-16)
-- 토픽 dedup 윈도우 조정 (현재 영구 dedup `dedup_key=dbops-rule-<id>`) — 미구현, minor
+- ✅ 토픽 dedup 윈도우 조정: shipped. `_build_pagerduty_payload`의 dedup_key가
+  TTL 버킷을 포함한다 (`dbops-rule-<id>-w<bucket>`, bucket = now // window), window는
+  `ALERT_DEDUP_WINDOW_MINUTES` (기본 30분, 최소 60초). 플래핑 룰이 영구 침묵되지 않고
+  윈도우마다 인시던트를 다시 연다 (`data-pipeline/alert_evaluator/handler.py`).
 
 ### P2.4 RBAC (admin / viewer) ✅ (frontend gate)
 
@@ -271,8 +274,16 @@ by account/region. Delivered across 5 sequenced specs:
   (NOT cluster_meta — caught live); separate RW Mongo secret (`mongo_write_secret_arn`).
   operations Lambda now bundles pymongo + CA (shared `cdk/bundling.py`). **Deployer
   setup to activate DocDB writes**: provision a read-write Mongo user + secret, put its
-  ARN on the registry row as `mongo_write_secret_arn`; re-run `agentcore policy create`
-  (Cedar is manually applied). This completes P3.6 Group C — the multi-engine program.
+  ARN on the registry row as `mongo_write_secret_arn`. ~~re-run `agentcore policy create`
+  (Cedar is manually applied)~~ **stale, corrected 2026-07-27:** Cedar is no longer
+  manually applied. `cdk/stacks/agent_stack.py` deploys one PolicyEngine plus one Policy
+  per statement from `cdk/policies/cedar/*.cedar` on every `cdk deploy`, so there is no
+  manual step. Note also that Cedar is bound **LOG_ONLY** (`cedar_mode = "LOG_ONLY"`):
+  the "Cedar `approved==true` at the Gateway" and "Cedar forbid-unless-force" halves
+  described in this entry are **not live** (they exist only as commented STEP-2 sketches
+  in `operations_policy.cedar`). The approval enforcement that IS live is entirely the
+  tool-level `approval_guard`: fail-closed, payload-hash-bound, atomic single-use
+  consume. See `cdk/policies/README.md`. This completes P3.6 Group C, the multi-engine program.
 - ~~**Mongo-protocol deep diagnosis** for DocumentDB~~ ✅ **shipped** (2026-06-12,
   unit + cdk-synth/bundling verified; **live deferred** — no RO Mongo user/secret/
   network on the demo cluster). Connectivity = **Option A** (ADR 2026-06-12 update):

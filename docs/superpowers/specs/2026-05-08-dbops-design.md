@@ -2,8 +2,83 @@
 
 > Version: 1.0
 > Date: 2026-05-08
-> Status: Draft
+> Status: **SUPERSEDED** (original design record, see the notice below)
 > Author: AI-assisted design (Claude Opus 4.6)
+
+---
+
+## SUPERSEDED NOTICE (2026-07-27)
+
+**Read this before anything below.** This document is the _original design record_
+from 2026-05-08, kept as the historical artifact of the decisions that started the
+project. It is **not** a description of the system that shipped, and it must not be
+used as an implementation reference. Several of its most load-bearing specifics
+(tool inventory, write enforcement, knowledge path, MCP topology) were changed
+during build.
+
+### Where the as-built truth lives
+
+| For                                                   | Read                                                                                 |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Current architecture, stack, safety model             | `.kiro/steering/product.md`, `.kiro/steering/tech.md`, `.kiro/steering/structure.md` |
+| Exact gateway tool inventory (names, counts, schemas) | `cdk/tool_definitions.py`, the deployed source of truth                              |
+| Per-engine capability depth and the honest gap list   | `docs/superpowers/specs/2026-07-24-engine-parity-audit.md`                           |
+| Every change since this document                      | the dated specs in this directory (`2026-06-*`, `2026-07-*`)                         |
+
+### Claims below that no longer hold
+
+Each was re-verified against the code on 2026-07-27.
+
+1. **Cedar does not enforce writes** (affects sections 2.3, 6.1, 6.2, 6.3). Cedar is
+   bound at the Gateway in **LOG_ONLY** mode (`cdk/stacks/agent_stack.py`,
+   `cedar_mode = "LOG_ONLY"`), and the only live statement per target is a coarse
+   permit (`cdk/policies/cedar/*.cedar`). The `context.input.approved == true` rule
+   shown in section 6.2 exists only as a commented STEP-2 sketch, never as a deployed
+   policy. Write enforcement is the tool-level `approval_guard`
+   (`mcp-servers/mcp_servers/shared/approval_guard.py`): fail-closed when
+   `APPROVALS_TABLE` is unset, bound to a SHA-256 hash of the approved payload, and
+   consumed atomically so an approval is single-use. Cedar is defense in depth.
+2. **63 gateway tools, not 30** (affects sections 2.3, 5.1 through 5.5, 11). The
+   deployed split is performance 11, incident 9, operations 34, simulation 9. Count
+   them in `cdk/tool_definitions.py`. Separately, the agent carries 2 agent-local
+   AWS-docs tools (`search_aws_documentation`, `read_aws_documentation` in
+   `agent/server.py`) that are Strands `@tool` functions on the Runtime, not gateway
+   tools.
+3. **No AWS-managed MCP server is a Gateway target** (affects sections 4.2, 5.1, 5.2
+   through 5.6, 11, 12). `agent_stack.py` creates exactly 4 `CfnGatewayTarget`s, one
+   Lambda each for performance / incident / operations / simulation. No Aurora
+   PostgreSQL MCP, Aurora MySQL MCP, CloudWatch MCP, AWS API MCP or AWS Knowledge MCP
+   target was ever created. Every capability this document delegates to an official
+   AWS MCP was either implemented first-party or dropped.
+4. **`explain_plan` is first-party** (affects section 5.2). It lives in
+   `mcp-servers/mcp_servers/performance/tools/explain_plan.py` (`explain_plan_impl`)
+   and is advertised by `performance_schema()`. Nothing moved to an official Aurora MCP.
+5. **The frontend is Next.js 16**, not 15 (affects sections 1.5, 7.1).
+   `frontend/package.json` pins `next: 16.2.9`.
+6. **Tier-2 knowledge is pgvector plus Titan, not Bedrock KB plus S3 Vectors**
+   (affects sections 1.5, 3.1, 4.3, 5.1, 5.6, 12). Semantic incident search runs on
+   pgvector columns in the Aurora PG cache with `amazon.titan-embed-text-v2:0`
+   embeddings and a cosine (`<=>`) search, falling back to keyword ILIKE
+   (`mcp-servers/mcp_servers/incident/tools/similar_incidents.py`). No Bedrock
+   Knowledge Base and no S3 Vectors resource exists in any CDK stack, and there is no
+   Strands `retrieve` tool on the agent. KB plus S3 Vectors remains a possible future
+   path for customer-owned runbook RAG only.
+7. **Capacity forecasting never used a `storage_gb` series** (affects section 5.2). No
+   collector writes that metric. The real series are `storage_bytes` (VolumeBytesUsed,
+   growing) for Aurora and DocumentDB, and `free_storage_bytes` (FreeStorageSpace,
+   depleting) for standalone RDS instances, selected per engine family in
+   `mcp-servers/mcp_servers/performance/tools/forecast_capacity.py`.
+8. **Scope is no longer Aurora MySQL/PostgreSQL only** (affects sections 1.4, 3.1, 3.3).
+   `engine_family.py` defines 5 families: `relational` (Aurora), `documentdb`,
+   `dynamodb`, `elasticache`, `rds_instance` (standalone RDS MySQL and SQL Server),
+   each with its own capability gate. Read the engine parity audit for what depth each
+   family actually has.
+
+Sections below carry inline `SUPERSEDED` notes at the specific claims. Everything
+un-annotated is either still accurate or historically interesting only. Verify against
+the code before relying on any of it.
+
+---
 
 ## 1. Overview
 
@@ -25,10 +100,19 @@ DBA를 위한 AI 기반 종합 데이터베이스 운영 플랫폼. 자연어 �
 
 ### 1.4 Target Database
 
+> **SUPERSEDED:** shipped scope is 5 engine families, not Aurora only. See
+> `engine_family.py` (`relational`, `documentdb`, `dynamodb`, `elasticache`,
+> `rds_instance`) and the engine parity audit for per-family depth.
+
 - Amazon Aurora MySQL
 - Amazon Aurora PostgreSQL
 
 ### 1.5 Tech Stack
+
+> **SUPERSEDED:** Frontend is Next.js **16** (`frontend/package.json` pins
+> `next: 16.2.9`). The Knowledge Base row never shipped: there is no Bedrock KB and no
+> S3 Vectors resource in any stack. Semantic search is pgvector on the Aurora PG cache
+> with Titan embeddings.
 
 | Layer            | Technology                                                           |
 | ---------------- | -------------------------------------------------------------------- |
@@ -99,6 +183,11 @@ Path A에서 브라우저가 AgentCore Runtime에 직접 SSE 연결한다. Cogni
 
 ### 2.3 Design Principles
 
+> **SUPERSEDED (items 4 and 5):** the gateway carries **63** tools, not 42
+> (`cdk/tool_definitions.py`). Semantic search is still the routing mechanism. And
+> "Cedar Policy로 강제" is wrong: Cedar is bound LOG_ONLY, the tool-level
+> `approval_guard` is the enforcement point. Principles 1, 2, 3, 6 held.
+
 1. **CDK-First**: 모든 인프라 변경은 CDK를 통해서만 수행. AWS CLI 직접 수정 금지.
 2. **Single Agent + Gateway**: Multi-Runtime 호출의 지연/토큰 문제를 피하기 위해 단일 AgentCore Runtime + Gateway MCP 구조 채택.
 3. **Shared Data Store**: AI 에이전트와 대시보드가 동일 데이터 저장소(Aurora PG Cache)를 조회. AI 전용 데이터 경로 없음.
@@ -111,6 +200,12 @@ Path A에서 브라우저가 AgentCore Runtime에 직접 SSE 연결한다. Cogni
 ## 3. Data Layer
 
 ### 3.1 Data Store Architecture
+
+> **SUPERSEDED:** the "Bedrock KB + S3 Vectors" row never shipped. RAG-style semantic
+> search lives in the Aurora PG cache itself (pgvector `embedding` columns plus Titan
+> embeddings). Retention numbers here are the original intent; the shipped
+> `metric_snapshots` and `query_stats` purge is 90 days, a `DELETE` at the end of every
+> ETL invocation (`data-pipeline/etl_collector/handler.py`), not partition rotation.
 
 | Store                       | 용도                                | 데이터                                                              | 보존             |
 | --------------------------- | ----------------------------------- | ------------------------------------------------------------------- | ---------------- |
@@ -227,6 +322,11 @@ Runtime 설정:
 
 ### 4.2 AgentCore Gateway
 
+> **SUPERSEDED:** the Gateway has **4** targets, all Lambda, one per custom MCP server
+> (`agent_stack.py`, `mcp_lambdas` dict). There is no fifth target and no external MCP
+> server target. The Cedar engine bound here is LOG_ONLY, so "세밀한 권한 제어" describes
+> an audit trail, not a control.
+
 Gateway는 5개 MCP Server를 단일 MCP 엔드포인트로 통합한다.
 
 기능:
@@ -236,6 +336,13 @@ Gateway는 5개 MCP Server를 단일 MCP 엔드포인트로 통합한다.
 - **MCP Sessions**: 세션 기반 연결로 후속 호출 레이턴시 감소
 
 ### 4.3 3-Tier Knowledge Strategy
+
+> **SUPERSEDED:** Tier 1 (system prompt cheatsheet) shipped. Tier 2 did **not** ship as
+> Bedrock KB plus S3 Vectors and there is no `retrieve` tool on the agent; the semantic
+> path that shipped is pgvector plus Titan inside the Aurora PG cache, reached through
+> `find_similar_incidents`. Tier 3 shipped as two agent-local tools proxying the
+> AWS-managed docs MCP (`search_aws_documentation`, `read_aws_documentation`), not as a
+> Gateway target, and `retrieve_skill` is not wired anywhere.
 
 ```
 Tier 1: System Prompt 치트시트 (항상 포함, ~2,000 토큰)
@@ -262,6 +369,15 @@ Tier 3: AWS Knowledge MCP (on-demand, 1-5초)
 ## 5. MCP Servers
 
 ### 5.1 Overview
+
+> **SUPERSEDED, the whole hybrid premise.** The Official-AWS half never shipped: no
+> awslabs MCP server is a Gateway target, and every capability this section delegates
+> to one was implemented first-party instead. The shipped inventory is **63 tools
+> across 4 Lambda targets**: performance **11**, incident **9**, operations **34**,
+> simulation **9** (`cdk/tool_definitions.py`). The only non-gateway tools are the 2
+> agent-local AWS-docs proxies in `agent/server.py`. The Cedar Policy column describes
+> LOG_ONLY audit intent, not enforcement. Treat the per-server tool lists in 5.2
+> through 5.6 as the original plan, not the API.
 
 MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하이브리드로 구성한다.
 공식 AWS MCP가 표준 DB/API 작업을 처리하고, Custom MCP는 캐시 기반 분석/시뮬레이션 등 부가가치 기능에 집중한다.
@@ -294,6 +410,17 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 
 ### 5.2 Performance MCP Server (10 tools, Custom)
 
+> **SUPERSEDED:** 11 tools shipped, and nothing was handed to an official Aurora MCP.
+> `explain_plan` is a first-party tool
+> (`mcp-servers/mcp_servers/performance/tools/explain_plan.py`), so the "공식 AWS
+> MCP로 이관된 기능" list at the end of this section describes work that either landed
+> here or was dropped, not work that moved.
+>
+> Also on `forecast_capacity`: there is no `storage_gb` metric and never was. The real
+> series are `storage_bytes` (VolumeBytesUsed, growing) for Aurora and DocumentDB and
+> `free_storage_bytes` (FreeStorageSpace, depleting) for standalone RDS instances,
+> picked per engine family in `forecast_capacity.py`.
+
 `explain_query`는 공식 Aurora MCP로 이관. 캐시 기반 분석과 사전 연산에 집중.
 
 **캐시 기반 조회 (4):**
@@ -325,6 +452,11 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 
 ### 5.3 Incident MCP Server (6 tools, Custom)
 
+> **SUPERSEDED:** 9 tools shipped. The 6 below all exist, plus `diagnose_root_cause`,
+> `get_maintenance_findings` and `get_remediation_history`. Nothing was handed to a
+> CloudWatch or Aurora MCP. `find_similar_incidents` searches pgvector in the Aurora PG
+> cache, not a Bedrock KB.
+
 `get_alarm_history`와 `get_connections`는 공식 CloudWatch/Aurora MCP로 이관.
 
 - `get_health_status` — 클러스터 건강 상태 종합 (캐시 기반 인스턴스 상태, 연결, 복제 지연)
@@ -340,6 +472,12 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 - 활성 세션 목록 → 공식 Aurora PG/MySQL MCP
 
 ### 5.4 Operations MCP Server (8 tools, Custom)
+
+> **SUPERSEDED:** 34 tools shipped, the largest server by far. Beyond the 8 below it
+> carries `request_approval`, snapshot/restore, Aurora custom endpoints, reader
+> scale-out and prewarm, the DynamoDB / DocumentDB / ElastiCache / standalone-RDS write
+> tools, `query_activity_audit` and `get_runbook`. Nothing was handed to an AWS API MCP.
+> Every write is gated by the tool-level `approval_guard`, not by Cedar.
 
 `get_parameters`, `get_backup_status`, `get_scaling_info`는 공식 AWS API MCP로 이관.
 
@@ -368,6 +506,10 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 
 ### 5.5 Simulation MCP Server (6 tools)
 
+> **SUPERSEDED:** 9 tools shipped. The 6 below plus
+> `simulate_dynamodb_capacity_cost`, `simulate_elasticache_node_resize` and
+> `simulate_rds_instance_rightsizing`.
+
 - `check_upgrade_compatibility` — 버전 업그레이드 호환성 체크 (deprecated 기능, 새 기능, 호환 SQL)
 - `estimate_upgrade_impact` — 업그레이드 방식별 예상 시간/다운타임/리스크 분석
 - `generate_upgrade_plan` — 업그레이드 실행 계획서 생성 (체크리스트, 절차, 롤백 계획)
@@ -376,6 +518,12 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 - `simulate_ddl_impact` — DDL 영향도 분석 (테이블 크기, 예상 락 시간, 온라인 DDL 가능 여부)
 
 ### 5.6 Knowledge (2 tools)
+
+> **SUPERSEDED:** neither tool shipped as described. There is no `retrieve` tool and no
+> Bedrock KB. `aws_knowledge` is not a Gateway target: the AWS docs surface is two
+> agent-local Strands tools, `search_aws_documentation` and `read_aws_documentation`,
+> which SigV4-proxy the AWS-managed docs MCP from inside the Runtime
+> (`agent/server.py`).
 
 - `retrieve` — Bedrock KB + S3 Vectors 검색 (Tier 2). Strands 네이티브 도구로 Agent에 직접 등록.
 - `aws_knowledge` — AWS Knowledge MCP Server 조회 (Tier 3). Gateway에 외부 MCP Server 타겟으로 등록. Documentation MCP보다 넓은 범위: 공식 문서 + What's New + 블로그 + Well-Architected + Skills(단계별 절차) + 리전 가용성 포함.
@@ -386,6 +534,15 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 
 ### 6.1 5-Layer Safety Model
 
+> **SUPERSEDED, this is the most misleading section in the document.** L3 is not a
+> control today: Cedar is bound at the Gateway in LOG_ONLY mode, and the only deployed
+> statement per target is a coarse permit. The layer that actually blocks unapproved
+> writes is a **sixth** one this design did not have: the tool-level `approval_guard`
+> (`mcp-servers/mcp_servers/shared/approval_guard.py`), which is fail-closed,
+> payload-hash-bound and single-use. L1, L2, L4, L5 shipped as described, plus
+> `execute_sql` SQL classification that blocks DROP/TRUNCATE without an explicit force
+> flag.
+
 | Layer                     | 구현                                                 | 역할                         |
 | ------------------------- | ---------------------------------------------------- | ---------------------------- |
 | **L1: Query Sandbox**     | MCP Server 내 read-only DB 연결 기본                 | 의도치 않은 쓰기 방지        |
@@ -395,6 +552,21 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 | **L5: Dry-run Mode**      | EXPLAIN만 실행, 결과 미리보기                        | 실행 전 영향 확인            |
 
 ### 6.2 Cedar Policy Examples
+
+> **SUPERSEDED, none of these policies is deployed.** The live files are
+> `cdk/policies/cedar/{performance,incident,operations,simulation}_policy.cedar`, and
+> each contains exactly one coarse `permit` over its target. The
+> `context.input.approved == true` rule and the DROP/TRUNCATE `forbid` survive only as
+> commented STEP-2 sketches inside `operations_policy.cedar`, to be written when the
+> binding flips to ENFORCE. Practical gotchas learned since: one statement per policy,
+> the action form is `<target>___<tool>` with three underscores, `context.input.<param>`
+> must be a real declared tool parameter, and AgentCore Cedar has no `toUpper` /
+> `startsWith` / `contains`, so the SQL prefix rule in the first example is not
+> expressible and lives in `execute_sql.py` instead. The third example is also unsound
+> as written: a pattern match on raw SQL is bypassable (MySQL executable comments
+> `/*!...*/` really execute on Aurora MySQL), which is why classification is done in
+> Python (`mcp-servers/mcp_servers/shared/sql_safety.py`). Read
+> `cdk/policies/README.md` for the current, accurate version of all of this.
 
 ```cedar
 // Performance MCP: SELECT/EXPLAIN만 허용
@@ -429,6 +601,16 @@ forbid(
 
 ### 6.3 Human-in-the-loop Approval Flow
 
+> **SUPERSEDED at step 3.** Cedar does not block the call: it logs a decision and lets
+> it through. The write tool itself refuses, because the agent must first call
+> `request_approval` (which mints a DynamoDB row carrying a hash of the exact payload),
+> and on the re-issue the tool calls `verify_approval` with the approval id, cluster id,
+> action type and the payload it is about to run. That check confirms the row exists,
+> is `approved`, matches the
+> cluster and action type, matches the payload hash, is inside the replay window, and
+> has not been consumed, then atomically consumes it so it cannot be replayed. Steps 1,
+> 2, 4, 5, 6, 7 are otherwise accurate.
+
 ```
 1. DBA가 변경 요청 (자연어)
 2. Agent가 변경 도구 호출 시도
@@ -444,6 +626,9 @@ forbid(
 ## 7. Web UI
 
 ### 7.1 Technology
+
+> **SUPERSEDED:** Next.js **16** (`frontend/package.json` pins `next: 16.2.9`, React
+> 19). Everything else in this list shipped.
 
 - Next.js 15 (App Router, Static Export)
 - CloudFront + S3 배포
@@ -524,6 +709,10 @@ DBA가 Web UI에서 클러스터를 등록하면:
 ## 9. CDK Infrastructure
 
 ### 9.1 Stack Structure
+
+> **SUPERSEDED, minor:** the 4 stacks and their dependency order shipped as designed,
+> but `data_stack.py` contains no Bedrock KB (it was never created), and there is no
+> `config/clusters.py`. Cluster registration is runtime-only, through DynamoDB.
 
 ```
 cdk/
@@ -699,6 +888,15 @@ dbops/
 
 ## 11. Phase Strategy
 
+> **SUPERSEDED, this whole section is a historical plan.** The 5 phases were delivered
+> but the tool-count table at the end never matched reality, and development continued
+> well past Phase 5 (multi-engine, ElastiCache, standalone RDS instances, tenancy,
+> agent tasks, the remediation outcome loop). Current tool counts are performance 11,
+> incident 9, operations 34, simulation 9, total 63, plus 2 agent-local AWS-docs tools.
+> The "공식 AWS MCP (Phase 1부터 Gateway에 등록)" line at the end is wrong: no AWS-managed
+> MCP server was ever registered as a Gateway target. For what actually landed and in
+> what order, read the dated specs in this directory.
+
 ### Phase 1: Foundation + 핵심 에이전트 (MVP)
 
 **목표:** 하나의 Aurora 클러스터에 대해 AI 대화로 성능 분석
@@ -802,6 +1000,15 @@ dbops/
 ## 12. Research References
 
 ### Architecture Decisions
+
+> **SUPERSEDED, 3 rows were reversed in build.** "Vector store: S3 Vectors" and "RAG
+> strategy: 3-Tier Hybrid" both lost their Bedrock KB leg: the semantic store that
+> shipped is pgvector on the Aurora PG cache with Titan embeddings, which needed no new
+> service and no new stack. "MCP tool source: Custom + Official AWS MCP 하이브리드" was
+> reversed outright: everything is first-party, and the only AWS-managed surface is the
+> docs MCP reached by two agent-local proxy tools. The remaining rows held, including
+> the two that mattered most (Single Agent + Gateway, and Aurora PG over Athena for the
+> metrics cache).
 
 | Decision              | Chosen                               | Rejected                | Reason                                                                                    |
 | --------------------- | ------------------------------------ | ----------------------- | ----------------------------------------------------------------------------------------- |
