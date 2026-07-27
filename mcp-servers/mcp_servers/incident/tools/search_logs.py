@@ -52,12 +52,51 @@ def search_logs_impl(
     # Cross-account-aware: the RDS log group lives in the cluster's own account,
     # so target it via the spoke role when registered (local otherwise).
     client = client_for_cluster(cluster_id, "logs")
-    start_response = client.start_query(
-        logGroupName=log_group,
-        startTime=int((time.time() - hours * 3600) * 1000),
-        endTime=int(time.time() * 1000),
-        queryString=f"/* source=dbops-agent */ {query}",
-    )
+    try:
+        start_response = client.start_query(
+            logGroupName=log_group,
+            startTime=int((time.time() - hours * 3600) * 1000),
+            endTime=int(time.time() * 1000),
+            # NO `/* source=dbops-agent */` prefix here. That marker is the audit
+            # convention for SQL sent to a TARGET DATABASE; CloudWatch Logs
+            # Insights is not SQL and rejects the comment outright with
+            # MalformedQueryException, before it even resolves the log group. It
+            # made every search_logs call fail for every cluster and engine
+            # (found by live verification 2026-07-24, the failure was masked as a
+            # generic tool error). Insights calls are attributable through
+            # CloudTrail, so nothing is lost by dropping it.
+            queryString=query,
+        )
+    except client.exceptions.ResourceNotFoundException:
+        # A missing group almost always means log exports are simply not enabled
+        # for this cluster, which is an operator action, not an internal error.
+        logger.info("log group not found for %s: %s", cluster_id, log_group)
+        return {
+            "cluster_id": cluster_id,
+            "log_group": log_group,
+            "status": "log_group_not_found",
+            "reason": (
+                f"로그 그룹 {log_group}이 없습니다. 이 클러스터에서 해당 로그 "
+                "내보내기가 켜져 있지 않거나(RDS/DocumentDB의 CloudWatch Logs "
+                "export 설정), 아직 첫 레코드가 생기지 않았습니다."
+            ),
+            "results": [],
+            "count": 0,
+        }
+    except client.exceptions.MalformedQueryException:
+        logger.warning("malformed Insights query for %s: %r", cluster_id, query)
+        return {
+            "cluster_id": cluster_id,
+            "log_group": log_group,
+            "status": "malformed_query",
+            "reason": (
+                "CloudWatch Logs Insights 문법 오류입니다. Insights는 SQL이 아니며 "
+                "`fields ... | filter ... | sort ... | limit N` 형태의 파이프 "
+                "구문을 씁니다(SQL 주석 /* */ 사용 불가)."
+            ),
+            "results": [],
+            "count": 0,
+        }
     query_id = start_response["queryId"]
 
     for _ in range(30):
