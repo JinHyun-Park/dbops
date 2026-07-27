@@ -146,6 +146,78 @@ def test_register_docdb_uses_docdb_api(mock_docdb_for, mock_rds_for):
 
 @patch.object(handler, "_rds_client_for")
 @patch.object(handler, "_docdb_client_for")
+def test_register_docdb_stores_mongo_secret_arns(mock_docdb_for, mock_rds_for):
+    """The in-VPC deep-read collector reads `mongo_secret_arn` and the Mongo write
+    tools read `mongo_write_secret_arn` off the registry row. Registration must
+    persist whatever the caller supplies, otherwise nothing in the product can
+    ever fill them and the collector skips every DocumentDB cluster."""
+    mock_docdb_client = MagicMock()
+    mock_docdb_client.describe_db_clusters.return_value = {"DBClusters": [{"EngineVersion": "5.0.0"}]}
+    mock_docdb_for.return_value = mock_docdb_client
+
+    table = _mock_table()
+    resp = handler._handle_register(table, {
+        "engine": "docdb",
+        "cluster_id": "my-docdb-cluster",
+        "account_id": "123456789012",
+        "region": "us-east-1",
+        "mongo_secret_arn": "arn:aws:secretsmanager:us-east-1:1:secret:mongo-ro",
+        "mongo_write_secret_arn": "arn:aws:secretsmanager:us-east-1:1:secret:mongo-rw",
+    })
+    assert resp["statusCode"] in (201, 207)
+
+    item = table.put_item.call_args[1]["Item"]
+    assert item["mongo_secret_arn"] == "arn:aws:secretsmanager:us-east-1:1:secret:mongo-ro"
+    assert item["mongo_write_secret_arn"] == "arn:aws:secretsmanager:us-east-1:1:secret:mongo-rw"
+
+
+@patch.object(handler, "_rds_client_for")
+@patch.object(handler, "_docdb_client_for")
+def test_register_docdb_mongo_secret_arns_default_empty(mock_docdb_for, mock_rds_for):
+    """Not supplied => empty string (a valid 'no deep read yet' state that
+    PATCH /meta can backfill), matching db_secret_arn on the other families."""
+    mock_docdb_client = MagicMock()
+    mock_docdb_client.describe_db_clusters.return_value = {"DBClusters": [{"EngineVersion": "5.0.0"}]}
+    mock_docdb_for.return_value = mock_docdb_client
+
+    table = _mock_table()
+    handler._handle_register(table, {
+        "engine": "docdb",
+        "cluster_id": "my-docdb-cluster",
+        "account_id": "123456789012",
+        "region": "us-east-1",
+    })
+    item = table.put_item.call_args[1]["Item"]
+    assert item["mongo_secret_arn"] == ""
+    assert item["mongo_write_secret_arn"] == ""
+
+
+@patch.object(handler, "_enrich_with_meta", side_effect=lambda c: c)
+def test_list_response_surfaces_mongo_secret_arns(_mock_enrich):
+    """GET /api/clusters must return the Mongo credential fields so an operator
+    can confirm the PATCH landed. The list returns whole registry items (no
+    ProjectionExpression), so this locks that in against a future projection."""
+    row = {
+        "cluster_id": "my-docdb-cluster",
+        "engine": "docdb",
+        "engine_family": "documentdb",
+        "mongo_secret_arn": "arn:aws:secretsmanager:us-east-1:1:secret:mongo-ro",
+        "mongo_write_secret_arn": "arn:aws:secretsmanager:us-east-1:1:secret:mongo-rw",
+    }
+    table = _mock_table()
+    table.scan.return_value = {"Items": [row]}
+
+    with patch.object(handler.tenancy, "visible_cluster_ids", return_value=None):
+        resp = handler._handle_list(table, {"headers": {}})
+
+    assert resp["statusCode"] == 200
+    out = {c["cluster_id"]: c for c in json.loads(resp["body"])}
+    assert out["my-docdb-cluster"]["mongo_secret_arn"].endswith("mongo-ro")
+    assert out["my-docdb-cluster"]["mongo_write_secret_arn"].endswith("mongo-rw")
+
+
+@patch.object(handler, "_rds_client_for")
+@patch.object(handler, "_docdb_client_for")
 def test_register_docdb_connectivity_failure_returns_207(mock_docdb_for, mock_rds_for):
     """DocDB register with describe_db_clusters failure → 207 + registered_with_warning."""
     mock_docdb_client = MagicMock()

@@ -137,6 +137,49 @@ def test_mixed_purpose_and_secret_arn_update():
     assert vals[":db_write_secret_arn"] == "arn:aws:secretsmanager:us-east-1:1:secret:write"
 
 
+def test_sets_mongo_secret_arns():
+    # The in-VPC Mongo collector (mongo_secret_arn) and the Mongo write tools
+    # (mongo_write_secret_arn) read these off the registry row; PATCH /meta is
+    # the only path that can fill them.
+    t = _table_with({"cluster_id": "docdb-1", "engine_family": "documentdb"})
+    resp = handler._handle_update_meta(t, "docdb-1", {
+        "mongo_secret_arn": "arn:aws:secretsmanager:us-east-1:1:secret:mongo-ro",
+        "mongo_write_secret_arn": "arn:aws:secretsmanager:us-east-1:1:secret:mongo-rw",
+    })
+    assert resp["statusCode"] == 200
+    kwargs = t.update_item.call_args.kwargs
+    vals = kwargs["ExpressionAttributeValues"]
+    assert vals[":mongo_secret_arn"] == "arn:aws:secretsmanager:us-east-1:1:secret:mongo-ro"
+    assert vals[":mongo_write_secret_arn"] == "arn:aws:secretsmanager:us-east-1:1:secret:mongo-rw"
+    # both actually land in the SET clause (not silently dropped)
+    assert "#mongo_secret_arn = :mongo_secret_arn" in kwargs["UpdateExpression"]
+    assert "#mongo_write_secret_arn = :mongo_write_secret_arn" in kwargs["UpdateExpression"]
+    assert kwargs["ExpressionAttributeNames"]["#mongo_secret_arn"] == "mongo_secret_arn"
+    # delete-race guard kept
+    assert kwargs["ConditionExpression"] == "attribute_exists(cluster_id)"
+    # and the response echoes the persisted values so an operator can confirm
+    import json as _json
+    assert _json.loads(resp["body"])["mongo_write_secret_arn"].endswith("mongo-rw")
+
+
+def test_rejects_invalid_mongo_secret_arn_with_static_message():
+    t = _table_with({"cluster_id": "docdb-1"})
+    resp = handler._handle_update_meta(t, "docdb-1", {"mongo_secret_arn": "not-an-arn"})
+    assert resp["statusCode"] == 400
+    assert "not-an-arn" not in resp["body"]
+    t.update_item.assert_not_called()
+
+
+def test_clearing_mongo_secret_arn_leaves_db_secret_source_untouched():
+    # db_secret_source tracks db_secret_arn only; the Mongo fields have no such field.
+    t = _table_with({"cluster_id": "docdb-1"})
+    resp = handler._handle_update_meta(t, "docdb-1", {"mongo_secret_arn": ""})
+    assert resp["statusCode"] == 200
+    vals = t.update_item.call_args.kwargs["ExpressionAttributeValues"]
+    assert vals[":mongo_secret_arn"] == ""
+    assert ":db_secret_source" not in vals
+
+
 def test_sets_db_name():
     t = _table_with({"cluster_id": "c1"})
     resp = handler._handle_update_meta(t, "c1", {"db_name": "demo"})

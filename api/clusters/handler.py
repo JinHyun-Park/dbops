@@ -532,6 +532,12 @@ def _register_docdb(table, body):
         "resource_name": cluster_id, "resource_type": "docdb",
         "requires_secret_for_foundation": False,
         "spoke_role_arn": body.get("spoke_role_arn", ""),
+        # In-VPC Mongo credentials. docdb_mongo_collector reads mongo_secret_arn
+        # (read-only user) and the Mongo write tools read mongo_write_secret_arn
+        # (RW user); both skip / fail closed when empty, which is a valid state.
+        # PATCH /meta backfills them later.
+        "mongo_secret_arn": body.get("mongo_secret_arn", ""),
+        "mongo_write_secret_arn": body.get("mongo_write_secret_arn", ""),
         "registered_at": datetime.utcnow().isoformat() + "Z",
         "connection_status": status, "connection_error": err,
     }
@@ -953,7 +959,11 @@ def _handle_update_meta(table, cluster_id: str, body: dict):
     registered without them (R-3: the execute_sql fail-closed message points
     here), and `db_name` — the session default schema for rds_instance direct-TCP
     writes (R-3: without it, unqualified writes hit the 'mysql' system schema
-    and RDS denies them, error 1044, live-verified). Only the provided fields
+    and RDS denies them, error 1044, live-verified). Same for
+    `mongo_secret_arn`/`mongo_write_secret_arn` on documentdb rows: the in-VPC
+    Mongo collector and the Mongo write tools read those, and registration has
+    no way to discover them (they are DB users, not RDS-managed secrets), so
+    this is the only path that fills them. Only the provided fields
     are updated; all optional. The conditional update (attribute_exists) is
     ATOMIC, so a missing — or just-deleted-in-a-race — cluster yields 404
     rather than creating a phantom registry item."""
@@ -975,7 +985,8 @@ def _handle_update_meta(table, cluster_id: str, body: dict):
             if t and t not in clean and len(clean) < _TAGS_MAX:
                 clean.append(t)
         updates["service_tags"] = clean
-    for field in ("db_secret_arn", "db_write_secret_arn"):
+    for field in ("db_secret_arn", "db_write_secret_arn",
+                  "mongo_secret_arn", "mongo_write_secret_arn"):
         if field in body:
             val = body[field]
             if not isinstance(val, str) or not (val == "" or val.startswith("arn:aws:secretsmanager:")):
@@ -990,7 +1001,7 @@ def _handle_update_meta(table, cluster_id: str, body: dict):
         updates["db_name"] = db_name
 
     if not updates:
-        return _resp(400, {"error": "nothing to update (provide purpose, service_tags, db_name, db_secret_arn, and/or db_write_secret_arn)"})
+        return _resp(400, {"error": "nothing to update (provide purpose, service_tags, db_name, db_secret_arn, db_write_secret_arn, mongo_secret_arn, and/or mongo_write_secret_arn)"})
 
     names = {f"#{k}": k for k in updates}
     values = {f":{k}": v for k, v in updates.items()}
