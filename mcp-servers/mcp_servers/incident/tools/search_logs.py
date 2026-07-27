@@ -84,7 +84,16 @@ def search_logs_impl(
             "count": 0,
         }
     except client.exceptions.MalformedQueryException:
-        logger.warning("malformed Insights query for %s: %r", cluster_id, query)
+        # Do NOT log the query text. An incident-investigation query routinely
+        # carries the value being hunted (`filter @message like /user@example.com/`,
+        # an account id, a token seen in a log line), so echoing it would copy
+        # that content into a second, longer-lived log group. The caller already
+        # knows its own query and the response says what is wrong with it, so the
+        # text adds nothing here: log only that it happened, plus the length,
+        # which is enough to tell a truncated query from a wrong-dialect one.
+        logger.warning(
+            "malformed Insights query for %s (length %d)", cluster_id, len(str(query))
+        )
         return {
             "cluster_id": cluster_id,
             "log_group": log_group,

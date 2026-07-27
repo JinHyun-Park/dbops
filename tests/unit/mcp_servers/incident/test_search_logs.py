@@ -168,3 +168,29 @@ def test_malformed_query_explains_the_insights_syntax(mock_client_for):
     assert "SQL" in result["reason"]
     blob = " ".join(str(v) for v in result.values())
     assert "boom" not in blob
+
+
+@patch("mcp_servers.incident.tools.search_logs.client_for_cluster")
+def test_malformed_query_is_not_echoed_into_the_logs(mock_client_for, caplog):
+    """An incident-investigation query carries the value being hunted (an email,
+    an account id, a token seen in a log line). Logging it would copy that
+    content into a second, longer-lived log group, and it is not needed: the
+    caller wrote the query and the response says what is wrong with it."""
+    import logging
+
+    client = _boto_error_client("MalformedQueryException")
+    mock_client_for.return_value = client
+    secret_term = "user@example.com"
+    with caplog.at_level(logging.WARNING):
+        result = search_logs_impl(
+            MagicMock(), cluster_id="prod-pg-1",
+            query=f"fields @timestamp | filter @message like /{secret_term}/ | limitt 5",
+        )
+    assert result["status"] == "malformed_query"
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert secret_term not in logged
+    assert "filter @message" not in logged
+    # but the event itself must still be observable, with enough shape to tell a
+    # truncated query from a wrong-dialect one
+    assert "malformed" in logged.lower()
+    assert "prod-pg-1" in logged
