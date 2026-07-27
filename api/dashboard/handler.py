@@ -1815,6 +1815,14 @@ def _active_sessions(query, cluster_id, hours):
 # the chat agent would disagree about whether the cluster is judgeable at all.
 # Scoring returns EVERY checked metric (threshold filtering happens in Python)
 # so that "0 anomalies" and "0 baselines" stay distinguishable.
+#
+# Deliberately UNLIMITED: `total_checked` and the seasonal/flat classification
+# are derived from every row this returns, so a SQL LIMIT would cap the count
+# and could hide the only seasonal baseline outside the top-N by |z| (a cluster
+# with engine-internals collection has well over 50 cluster-level
+# metric_types). One row per cluster-level metric_type, so the row count is
+# bounded in the tens to low hundreds. The display cap is applied in Python,
+# after threshold filtering, to the ROWS RETURNED to the caller.
 _ANOMALY_SQL = """
 SELECT * FROM (
     WITH current_hour AS (
@@ -1864,8 +1872,35 @@ SELECT * FROM (
 ) t
 WHERE z_score IS NOT NULL
 ORDER BY ABS(z_score) DESC
-LIMIT 50
 """
+
+# Existence probe, run ONLY when _ANOMALY_SQL scored nothing, so the normal path
+# costs no extra round trip. _ANOMALY_SQL is DRIVEN from its `recent` CTE, so an
+# empty result collapses two states whose operator actions are opposite: "no
+# recent samples at all" (collection stopped / cluster just registered / every
+# recent row is dimensioned) and "samples arrived but no baseline matched".
+#
+# Same :hours window as the scoring query, or the two answers could disagree.
+# CLUSTER_LEVEL_ONLY, never hand-written: this reads metric_snapshots at cluster
+# level, and per-instance / per-wait-event / per-GSI rows must NOT count as
+# "samples exist" (they are invisible to the scoring query).
+#
+# VERBATIM COPY of _RECENT_SAMPLES_SQL in the detect_anomalies MCP tool, same
+# contract as _ANOMALY_SQL above.
+_RECENT_SAMPLES_SQL = f"""
+SELECT 1
+FROM metric_snapshots
+WHERE cluster_id = :cluster_id
+  AND ts > NOW() - (:hours || ' hours')::interval
+  {CLUSTER_LEVEL_ONLY}
+LIMIT 1
+"""
+
+# How many anomalies to hand back. Applied AFTER threshold filtering to an
+# |z|-descending list, so the caller gets the strongest ones, not an arbitrary
+# slice. Keep in sync with the detect_anomalies copy (parity test compares the
+# derived output, not just the SQL).
+_MAX_REPORTED = 50
 
 
 def _anomalies(query, cluster_id, hours, threshold):
@@ -1882,10 +1917,25 @@ def _anomalies(query, cluster_id, hours, threshold):
     of history). The fallback rows are tagged `mode='flat'` so the UI can
     explain why a finding's confidence is lower.
 
-    `baseline_mode` + `total_checked` are the honesty signals: with no
-    baseline of either kind there is NOTHING to score, and an empty
-    `anomalies` list must not be rendered as "we checked and found nothing".
-    Both are derived exactly as detect_anomalies_impl derives them."""
+    `baseline_mode` + `total_checked` are the honesty signals, derived exactly
+    as detect_anomalies_impl derives them, off the FULL scored set:
+
+      `anomalies`      rows at or above `threshold`, |z| descending, capped at
+                       `_MAX_REPORTED`
+      `total_checked`  EVERY scored metric, including the ones below threshold
+                       and the ones past the display cap
+      `baseline_mode`  why the list can be empty, four answers:
+                       seasonal / flat  -> scored against that baseline kind
+                       none       -> recent cluster-level samples EXIST but no
+                                     baseline of either kind matched, nothing
+                                     could be scored. Waiting fixes it.
+                       no_samples -> no recent cluster-level samples at all
+                                     (collection stopped, cluster just
+                                     registered, or every recent row is
+                                     dimensioned). Waiting does NOT fix it.
+
+    `none` and `no_samples` used to be one state, so a dead collector was
+    rendered as "wait about two weeks for a baseline"."""
 
     def _f(v):
         try:
@@ -1894,15 +1944,20 @@ def _anomalies(query, cluster_id, hours, threshold):
             return 0.0
 
     rows = query(_ANOMALY_SQL, {"cluster_id": cluster_id, "hours": str(hours)}) or []
-    anomalies = [r for r in rows if abs(_f(r.get("z_score"))) >= _f(threshold)]
+    anomalies = [r for r in rows if abs(_f(r.get("z_score"))) >= _f(threshold)][:_MAX_REPORTED]
     has_seasonal = any(r.get("mode") == "seasonal" for r in rows)
+    if rows:
+        baseline_mode = "seasonal" if has_seasonal else "flat"
+    else:
+        probe = query(_RECENT_SAMPLES_SQL, {"cluster_id": cluster_id, "hours": str(hours)})
+        baseline_mode = "none" if probe else "no_samples"
     return {
         "cluster_id": cluster_id,
         "hours": hours,
         "threshold": threshold,
         "anomalies": anomalies,
         "total_checked": len(rows),
-        "baseline_mode": "seasonal" if has_seasonal else ("flat" if rows else "none"),
+        "baseline_mode": baseline_mode,
     }
 
 

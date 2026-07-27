@@ -225,9 +225,58 @@ def test_dashboard_capacity_forecast_regresses_only_cluster_level_rows(monkeypat
     assert STRICT in captured["sql"]
 
 
+# A cluster whose ONLY recent rows are dimensioned: per-instance rows plus PI
+# wait-event rows, for the same metric_type a cluster-level row would use. The
+# anomaly scoring query (strict filter) sees NOTHING here, so the reader's
+# recent-samples probe must see nothing either. With the weak filter the two
+# wait-event rows survive, the probe reports "samples exist", and the operator is
+# told to wait ~2 weeks for a baseline instead of checking why no cluster-level
+# row is being written.
+_DIMENSIONED_ONLY = [r for r in _AAS_ROWS if r["dimensions"]]
+
+assert [r for r in _DIMENSIONED_ONLY if "instance" not in r["dimensions"]], (
+    "fixture must keep rows that survive the WEAK filter, or it cannot discriminate"
+)
+
+
+def test_dashboard_anomaly_probe_counts_only_cluster_level_samples():
+    """/anomalies distinguishes "no baseline yet" (wait) from "no samples at all"
+    (fix collection) with an existence probe. Dimensioned rows are invisible to
+    the scoring query, so they must not count as samples."""
+    def _query(sql, params=None, mangle=lambda s: s):
+        if "metric_baselines" in sql:
+            return []                                   # nothing scored
+        return _apply_dim_filter(mangle(sql), _DIMENSIONED_ONLY)
+
+    assert _dashboard._anomalies(_query, "c", 4, 2.5)["baseline_mode"] == "no_samples"
+    weak = lambda sql, params=None: _query(sql, params, lambda s: s.replace(STRICT, WEAK))  # noqa: E731
+    assert _dashboard._anomalies(weak, "c", 4, 2.5)["baseline_mode"] == "none"
+
+
 # ===========================================================================
 # 4. RESULT tests: MCP server tools (agent-facing)
 # ===========================================================================
+
+
+def test_agent_anomaly_probe_counts_only_cluster_level_samples():
+    """The agent's twin of the probe above: same filter, or the chat answer and
+    the dashboard disagree about whether the cluster is judgeable at all."""
+    from mcp_servers.performance.tools.detect_anomalies import detect_anomalies_impl
+    from mcp_servers.shared.models import QueryResult
+
+    class _Cache:
+        def __init__(self, mangle=lambda s: s):
+            self._mangle = mangle
+
+        def execute(self, sql, params=None):
+            if "metric_baselines" in sql:
+                return QueryResult(columns=[], rows=[], row_count=0)
+            kept = _apply_dim_filter(self._mangle(sql), _DIMENSIONED_ONLY)
+            return QueryResult(columns=["?column?"], rows=kept, row_count=len(kept))
+
+    assert detect_anomalies_impl(_Cache(), "c")["baseline_mode"] == "no_samples"
+    weakened = _Cache(lambda s: s.replace(STRICT, WEAK))
+    assert detect_anomalies_impl(weakened, "c")["baseline_mode"] == "none"
 
 
 def test_agent_health_status_reports_the_cluster_level_average():
@@ -390,7 +439,8 @@ _CONST_USE = _re.compile(r"\b_?CLUSTER_LEVEL_ONLY\b|\bcluster_level_only\(")
 _ALIAS_ASSIGN = _re.compile(r"^\s*_?\w*CLUSTER_LEVEL_ONLY\s*=\s*[\w.]*CLUSTER_LEVEL_ONLY\s*$")
 
 _EXPECTED_CLUSTER_LEVEL_PREDICATES = {
-    "api/dashboard/handler.py": 8,
+    # 8 + the anomaly reader's recent-samples existence probe.
+    "api/dashboard/handler.py": 9,
     "api/simulation/handler.py": 4,
     "data-pipeline/alert_evaluator/handler.py": 2,
     "data-pipeline/etl_collector/collectors/capacity_forecast.py": 3,
@@ -408,7 +458,8 @@ _EXPECTED_CLUSTER_LEVEL_PREDICATES = {
     "mcp-servers/mcp_servers/incident/tools/diagnose_root_cause.py": 2,
     "mcp-servers/mcp_servers/incident/tools/health_status.py": 1,
     "mcp-servers/mcp_servers/performance/tools/compare_periods.py": 1,
-    "mcp-servers/mcp_servers/performance/tools/detect_anomalies.py": 2,
+    # 2 in the scoring SQL (recent + flat CTEs) + the recent-samples probe.
+    "mcp-servers/mcp_servers/performance/tools/detect_anomalies.py": 3,
     # 2 in the aggregate/current_value pair + 1 in the DocumentDB
     # db_connections_limit ceiling lookup.
     "mcp-servers/mcp_servers/performance/tools/forecast_capacity.py": 3,

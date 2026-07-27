@@ -4,7 +4,7 @@ Replaces the old flat 7-day mean/stddev z-score (which ignored daily/weekly
 seasonality and blew up on a cluster with a few legitimate spikes per day) with
 the SAME robust seasonal baseline the dashboard already uses: a per-hour-of-week
 median + IQR trained into ``metric_baselines`` by the pg_baseline_trainer
-collector. Robust z = (recent_max - median) / IQR — the IQR doesn't inflate on
+collector. Robust z = (recent_max - median) / IQR, the IQR doesn't inflate on
 outliers, so the score is stable.
 
 When no seasonal baseline exists yet for the current hour-of-week bucket
@@ -12,13 +12,26 @@ When no seasonal baseline exists yet for the current hour-of-week bucket
 and tag the row ``mode='flat'`` so the caller knows the finding is lower
 confidence. Each row carries its baseline + sample_count so the agent can
 explain WHY something is anomalous.
+
+An empty ``anomalies`` list has FOUR meanings and ``baseline_mode`` is what
+tells them apart. Getting this wrong told a DBA to wait two weeks while the
+collector was dead, so the states are spelled out in detect_anomalies_impl.
 """
 
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 
 # Robust seasonal baseline (median/IQR per hour-of-week) with a flat
 # mean/stddev fallback. Mirrors the dashboard's seasonal anomaly query so the
 # chat agent and the dashboard never disagree on what's anomalous.
+#
+# Deliberately UNLIMITED: `total_checked` and the seasonal/flat classification
+# are derived from every row this returns, so a SQL LIMIT would cap the count
+# and could hide the only seasonal baseline outside the top-N by |z| (a cluster
+# with engine-internals collection has well over 50 cluster-level
+# metric_types). One row per cluster-level metric_type, so the row count is
+# bounded in the tens to low hundreds. The display cap is applied in Python,
+# after threshold filtering, to the ROWS RETURNED to the caller.
 _ANOMALY_SQL = """
 SELECT * FROM (
     WITH current_hour AS (
@@ -68,8 +81,32 @@ SELECT * FROM (
 ) t
 WHERE z_score IS NOT NULL
 ORDER BY ABS(z_score) DESC
-LIMIT 50
 """
+
+# Existence probe, run ONLY when _ANOMALY_SQL scored nothing, so the normal path
+# costs no extra round trip. _ANOMALY_SQL is DRIVEN from its `recent` CTE, so an
+# empty result collapses two states whose operator actions are opposite: "no
+# recent samples at all" (collection stopped / cluster just registered / every
+# recent row is dimensioned) and "samples arrived but no baseline matched".
+#
+# Same :hours window as the scoring query, or the two answers could disagree.
+# CLUSTER_LEVEL_ONLY, never hand-written: this reads metric_snapshots at cluster
+# level, and per-instance / per-wait-event / per-GSI rows must NOT count as
+# "samples exist" (they are invisible to the scoring query).
+_RECENT_SAMPLES_SQL = f"""
+SELECT 1
+FROM metric_snapshots
+WHERE cluster_id = :cluster_id
+  AND ts > NOW() - (:hours || ' hours')::interval
+  {CLUSTER_LEVEL_ONLY}
+LIMIT 1
+"""
+
+# How many anomalies to hand back. Applied AFTER threshold filtering to an
+# |z|-descending list, so the caller gets the strongest ones, not an arbitrary
+# slice. Keep in sync with the api/dashboard copy (parity test compares the
+# derived output, not just the SQL).
+_MAX_REPORTED = 50
 
 
 def _f(value) -> float:
@@ -85,15 +122,42 @@ def detect_anomalies_impl(
     hours: int = 4,
     threshold: float = 2.0,
 ) -> dict:
+    """Score every cluster-level metric against its baseline.
+
+    `anomalies` holds the rows at or above `threshold`, |z| descending, capped
+    at `_MAX_REPORTED`. `total_checked` counts EVERY scored metric, including
+    the ones below threshold and the ones past the display cap.
+
+    `baseline_mode` says why the list can be empty, and there are four answers:
+
+      seasonal   scored against the per-hour-of-week median + IQR baseline
+      flat       no seasonal baseline for this bucket, scored against the
+                 7-day mean/stddev fallback (lower confidence)
+      none       recent cluster-level samples EXIST, but no baseline of either
+                 kind matched, so nothing could be scored. Waiting for history
+                 fixes it.
+      no_samples no recent cluster-level samples at all in the window: metric
+                 collection stopped, the cluster was just registered, or every
+                 recent row is dimensioned. Waiting does NOT fix it.
+
+    `none` and `no_samples` used to be one state, which reported a dead
+    collector as "wait about two weeks for a baseline".
+    """
     result = cache.execute(_ANOMALY_SQL, {"cluster_id": cluster_id, "hours": hours})
     rows = result.rows or []
-    anomalies = [r for r in rows if abs(_f(r.get("z_score"))) >= threshold]
+    anomalies = [r for r in rows if abs(_f(r.get("z_score"))) >= threshold][:_MAX_REPORTED]
 
-    # Confidence signal: did we score against the seasonal baseline or fall back
-    # to the flat one? If every row is flat, the cluster lacks a trained
-    # baseline yet (cold-start) and findings are lower confidence.
+    # Both signals are derived from the FULL scored set, never from `anomalies`:
+    # the threshold filter and the display cap both drop rows that are evidence
+    # scoring happened.
     has_seasonal = any(r.get("mode") == "seasonal" for r in rows)
-    baseline_mode = "seasonal" if has_seasonal else ("flat" if rows else "none")
+    if rows:
+        baseline_mode = "seasonal" if has_seasonal else "flat"
+    else:
+        probe = cache.execute(
+            _RECENT_SAMPLES_SQL, {"cluster_id": cluster_id, "hours": hours}
+        )
+        baseline_mode = "none" if (probe.rows or []) else "no_samples"
 
     return {
         "cluster_id": cluster_id,
@@ -105,6 +169,10 @@ def detect_anomalies_impl(
         "note": (
             "robust z = (recent_max − median) / IQR vs a per-hour-of-week baseline; "
             "rows with mode='flat' fall back to 7-day mean/stddev (no seasonal "
-            "baseline trained yet → lower confidence)."
+            "baseline trained yet → lower confidence). baseline_mode='none' means "
+            "samples arrived but no baseline matched (wait for history); "
+            "'no_samples' means no recent cluster-level samples at all (check "
+            "metric collection). total_checked counts every scored metric; "
+            f"anomalies is capped at {_MAX_REPORTED}, strongest first."
         ),
     }

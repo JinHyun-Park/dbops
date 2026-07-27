@@ -50,10 +50,14 @@ function prettyMetric(m: string): string {
   return METRIC_LABELS[k] || metricDef(k)?.label || m;
 }
 
-// "0 anomalies" has three different meanings and only one of them is good news.
+// "0 anomalies" has four different meanings and only one of them is good news.
 // baseline_mode comes from the API (same derivation as the detect_anomalies MCP
-// tool): 'none' = no seasonal AND no flat baseline, so nothing was scored at
-// all. Claiming "이상 징후 없음" there is a confident false negative, and it is
+// tool):
+//   'none'       = samples are arriving but no seasonal AND no flat baseline
+//                  matched, so nothing was scored. Waiting fixes it.
+//   'no_samples' = no cluster-level samples in the window at all, so nothing
+//                  COULD be scored. Waiting does not fix it, collection does.
+// Claiming "이상 징후 없음" for either is a confident false negative, and both are
 // reachable right after deploy for every family (the trainer discards buckets
 // with < 12 samples, and documentdb / dynamodb / elasticache only just started
 // getting baselines trained).
@@ -194,6 +198,22 @@ function EmptyState({ meta }: { meta: Meta }) {
       </div>
     );
   }
+  if (meta.mode === "no_samples") {
+    return (
+      <div className="text-sm">
+        <div className="text-amber-300 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-amber-500" />
+          최근 4시간 지표가 없어 판단할 수 없습니다
+        </div>
+        <div className="text-[11px] text-zinc-500 mt-1">
+          최근 4시간 구간에 이 클러스터의 클러스터 레벨 지표가 한 건도 없습니다.
+          baseline 학습을 기다리는 상태가 아니라 비교할 데이터 자체가 없는
+          상태입니다. 방금 등록한 클러스터라면 첫 수집 주기를 기다리고, 그렇지
+          않다면 이 클러스터의 지표 수집(ETL)이 도는지 확인해 주세요.
+        </div>
+      </div>
+    );
+  }
   if (meta.mode === "none") {
     return (
       <div className="text-sm">
@@ -202,14 +222,20 @@ function EmptyState({ meta }: { meta: Meta }) {
           baseline 학습 전이라 아직 판단할 수 없습니다
         </div>
         <div className="text-[11px] text-zinc-500 mt-1">
-          비교 기준이 되는 baseline이 아직 없습니다(요일·시간대별 seasonal, 7일
-          flat 모두). seasonal baseline은 이 시간대 지표가 약 2주치 쌓이면
-          자동으로 학습되니 그때까지 기다려 주세요. 며칠이 지나도 그대로면 이
-          클러스터의 지표 수집(ETL)이 도는지 확인이 필요합니다.
+          지표는 수집되고 있지만 비교 기준이 되는 baseline이 아직
+          없습니다(요일·시간대별 seasonal, 7일 flat 모두). seasonal baseline은
+          이 시간대 지표가 약 2주치 쌓이면 자동으로 학습되니 그때까지 기다려
+          주세요.
         </div>
       </div>
     );
   }
+  // Deploy skew: an api Lambda from before baseline_mode existed sends no mode
+  // at all, and undefined falls through to the all-clear below. That is
+  // DELIBERATE, degrading to the old (unqualified) copy for the few minutes of
+  // a rolling deploy, not an oversight: inventing a fourth alarming state for a
+  // field the old API never sent would alarm every operator on every deploy.
+  // Pinned by test_deploy_skew_undefined_mode_falls_through_to_the_all_clear.
   const note = [
     meta.checked ? `지표 ${meta.checked}개를 baseline과 비교했습니다.` : "",
     meta.mode === "flat"
