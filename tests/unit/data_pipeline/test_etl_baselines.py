@@ -8,7 +8,7 @@ relational and rds_instance branches only, and the other three branches
 `return result` early, so DocumentDB / DynamoDB / ElastiCache anomaly detection
 was permanently stuck on the low-confidence flat mean/stddev fallback.
 
-Three layers here:
+Four layers here:
 
   1. Dispatch: the trainer is invoked from every family branch, with the CACHE
      connection and no shared run_ts (it stamps its own NOW()).
@@ -25,6 +25,12 @@ Three layers here:
      median=20.1 / IQR=0.0999 and score a 21.0 reading at z=9.0. And the floors
      must not run the other way: a 99.5% cache hit ratio collapsing to 95% has to
      stay an anomaly at both default thresholds (agent 2.0, dashboard 2.5).
+  4. Boundary, added after a review found the docstring naming the wrong one: the
+     real IQR survives only from 5% of |median| upward (NOT 0.5%, which is merely
+     where the 10x cap stops binding), and the band the cap actually rescues for
+     that cache-hit collapse ends at a real IQR of 0.225. Both swept on real
+     PostgreSQL 14.18, and the disclosure text is pinned so a false sentence
+     cannot come back silently.
 """
 
 import contextlib
@@ -458,8 +464,11 @@ def test_relative_floor_cannot_inflate_a_real_iqr_without_bound():
     tight spread. 12 healthy BufferCacheHitRatio samples (median 99.50, real IQR
     0.125) floored at ABS(median) * 0.05 = 4.975, so a collapse to 95% scored
     z=-0.905, under BOTH default thresholds, while docdb_findings calls 95% a
-    warning. Capped at 10x the observed spread the floor is 1.250, and the real
-    IQR of a bucket survives whenever it is >= 0.5% of the median."""
+    warning. Capped at 10x the observed spread the floor is 1.250.
+
+    The cap does NOT move the survival boundary: a real IQR still has to reach 5%
+    of |median| to be kept, which is what
+    test_real_iqr_survives_only_at_five_percent_of_the_median pins."""
     fake, _ = _run_trainer("buffer_cache_hit", values=_CACHE_HIT)
     row = fake.trained[0]
     assert row["sample_count"] == 12               # a full hour, not a cold start
@@ -479,6 +488,91 @@ def test_relative_floor_cannot_inflate_a_real_iqr_without_bound():
     # A bucket with real spread is untouched by either floor, capped or not.
     real = _run_trainer("cpu_utilization")[0].trained[0]
     assert real["iqr"] == pytest.approx(_CLUSTER_IQR)
+
+
+def _bucket_at(median, target_iqr):
+    """12 samples whose PERCENTILE_CONT median is `median` and whose P75-P25 is
+    exactly `target_iqr`. N=12 puts the 0.25 interpolation at index 2.75 and the
+    0.75 at 8.25, so pinning v[2]==v[3]==P25 and v[8]==v[9]==P75 makes both exact,
+    and every filler offset is a multiple of the half-spread so the series stays
+    sorted at any scale. Verified against real PostgreSQL 14.18 PERCENTILE_CONT
+    for every fixture used below; each test also asserts the raw IQR it produced,
+    so a drift here cannot pass silently."""
+    h = target_iqr / 2.0
+    lo, hi = median - h, median + h
+    return [lo - 3 * h, lo - h, lo, lo, median - h / 2, median, median,
+            median + h / 2, hi, hi, hi + h, hi + 3 * h]
+
+
+# Swept on real PostgreSQL 14.18 through this trainer's own SQL: median 99.50,
+# 12 samples, the real IQR walked across BOTH candidate boundaries. 0.5% of 99.5
+# is 0.4975 and 5% is 4.975. The real IQR survives only from 5% upward; 0.5% is
+# merely where the 10x cap stops binding, which is the claim 180760f got wrong.
+_BOUNDARY_SWEEP = [
+    (0.125,  1.250, False),
+    (0.400,  4.000, False),
+    (0.4975, 4.975, False),
+    (0.600,  4.975, False),     # above 0.5% of the median and still NOT kept
+    (1.000,  4.975, False),
+    (4.900,  4.975, False),
+    (4.975,  4.975, True),      # the actual survival boundary: 5% of |median|
+    (5.500,  5.500, True),
+]
+
+
+@pytest.mark.parametrize("real_iqr,trained_iqr,kept", _BOUNDARY_SWEEP)
+def test_real_iqr_survives_only_at_five_percent_of_the_median(real_iqr, trained_iqr, kept):
+    """The boundary nothing tested before. A bucket keeps its real IQR exactly
+    when that IQR reaches MIN_IQR_MEDIAN_FRACTION of |median| (5%), NOT 0.5%: at
+    and above 0.5% the LEAST resolves to the flat 5% of |median|, so the GREATEST
+    keeps returning 4.975 for every real IQR from 0.4975 up to 4.975."""
+    fake, _ = _run_trainer("buffer_cache_hit", values=_bucket_at(99.5, real_iqr))
+    row = fake.trained[0]
+    assert row["median"] == pytest.approx(99.5)
+    q = statistics.quantiles(_bucket_at(99.5, real_iqr), n=4, method="inclusive")
+    assert q[2] - q[0] == pytest.approx(real_iqr)          # the fixture is honest
+    assert row["iqr"] == pytest.approx(trained_iqr)
+    assert (row["iqr"] == pytest.approx(real_iqr)) is kept
+
+
+# Measured on real PostgreSQL 14.18, median 20.1, 12 samples: the smallest move
+# above the median that reaches the agent's default threshold of 2.0, as a
+# fraction of the median. The "flat metric needs a >= 10% move" line 1da5f86 wrote
+# holds only where the relative floor is the binding branch; under 0.5% of the
+# median the cap lowers the floor, so a tighter bucket flags on LESS.
+_MOVE_TO_THRESHOLD = [
+    (0.0400, 0.400, 0.0398),      # 0.199% of the median: cap binds, 3.98% move
+    (0.1005, 1.005, 0.1000),      # 0.500%: the two branches meet, 10.00% move
+    (1.0000, 1.005, 0.1000),      # 4.975%: relative floor binds, 10.00% move
+]
+
+
+@pytest.mark.parametrize("real_iqr,trained_iqr,move_fraction", _MOVE_TO_THRESHOLD)
+def test_flat_metric_move_needed_depends_on_which_branch_binds(
+        real_iqr, trained_iqr, move_fraction):
+    """1da5f86's "a flat metric now needs a >= 10% move" is true only at or above
+    0.5% of |median|, where the LEAST resolves to the flat 5% of |median|. The cap
+    makes a tighter bucket MORE sensitive, not less, which is the whole point of
+    it, and the docstring now says so with these measured numbers."""
+    fake, _ = _run_trainer("memory_usage_pct", values=_bucket_at(20.1, real_iqr))
+    row = fake.trained[0]
+    assert row["median"] == pytest.approx(20.1)
+    q = statistics.quantiles(_bucket_at(20.1, real_iqr), n=4, method="inclusive")
+    assert q[2] - q[0] == pytest.approx(real_iqr)
+    assert row["iqr"] == pytest.approx(trained_iqr)
+    # smallest move above the median scoring |z| >= 2.0, as a fraction of it
+    assert (_AGENT_THRESHOLD * row["iqr"]) / row["median"] == pytest.approx(
+        move_fraction, abs=0.0001)
+
+
+def test_trainer_docstring_states_the_measured_survival_boundary():
+    """180760f's message and docstring both claimed the real IQR survives at
+    >= 0.5% of |median|. The sweep above disproves it. Pinned as text too, because
+    a wrong sentence in a docstring is what shipped twice already."""
+    doc = " ".join(sys.modules[_train.__module__].__doc__.split())
+    assert "keeps its real IQR exactly when that IQR is >= 5% of |median|" in doc
+    assert "keeps its real IQR exactly when that IQR is >= 0.5% of |median|" not in doc
+    assert "0.5% is only where the CAP stops binding" in doc
 
 
 def test_zero_median_counter_ceiling_is_documented_not_silently_fixed():
@@ -582,7 +676,10 @@ def test_thin_bucket_is_not_a_high_confidence_seasonal_anomaly():
     assert fake.trained == []
     out = detect_anomalies_impl(_cache_returning(), "docdb-1", hours=4, threshold=2.0)
     assert out["anomalies"] == []
-    assert out["baseline_mode"] == "none"
+    # The claim here is "no baseline was used", not how detect_anomalies spells
+    # the empty case: which not-scored mode it reports is that tool's own
+    # taxonomy, pinned by tests/unit/mcp_servers/performance/test_detect_anomalies.
+    assert out["baseline_mode"] not in ("seasonal", "flat")
 
     # Discriminating: the pre-fix trainer DID make that reading a seasonal anomaly.
     was = _model_training(_pre_fix(fake.insert_sql), _rows_for("memory_usage_pct", _THIN))
@@ -618,6 +715,56 @@ def test_cache_hit_collapse_is_flagged_on_both_anomaly_surfaces():
             "docdb-1", hours=4, threshold=threshold)
         assert muted["baseline_mode"] == "seasonal"
         assert muted["anomalies"] == []
+
+
+# Measured on real PostgreSQL 14.18 (trainer SQL) + the shipped
+# detect_anomalies_impl scoring, for the metric the review was filed on:
+# BufferCacheHitRatio, median 99.50, collapsing to 95.0, a drop of 4.5.
+# Flagging at the agent's 2.0 needs a trained IQR <= 2.25, and the trained IQR is
+# 10x the observed spread only while that spread is under 0.4975, so the band the
+# cap actually rescues ends at a real IQR of 0.225 (0.226% of the median).
+_RESCUE_BAND = [
+    (0.125, 1.250, -3.600, True,  True),      # the reported case, inside the band
+    (0.225, 2.250, -2.000, True,  False),     # last real IQR the agent still flags
+    (0.226, 2.260, -1.991, False, False),     # 1/1000th over, and it goes silent
+    (0.400, 4.000, -1.125, False, False),
+    (3.000, 4.975, -0.905, False, False),     # cap no longer binds: flat 5% floor
+]
+
+
+@pytest.mark.parametrize("real_iqr,trained_iqr,z,flag20,flag25", _RESCUE_BAND)
+def test_capped_floor_rescue_band_ends_around_two_tenths_of_a_percent(
+        real_iqr, trained_iqr, z, flag20, flag25):
+    """How narrow the cap's rescue really is. The 0.125 bucket the review reported
+    is genuinely fixed, but a healthy cache-hit hour with slightly more real
+    jitter is still muted by the relative floor: between roughly 0.2% and the 5%
+    survival boundary the SAME 4.5-point collapse scores under both thresholds.
+    Disclosed in the trainer docstring rather than fixed, because widening the cap
+    re-opens the median-20.1 false positive."""
+    from mcp_servers.performance.tools.detect_anomalies import detect_anomalies_impl
+
+    fake, _ = _run_trainer("buffer_cache_hit", values=_bucket_at(99.5, real_iqr))
+    row = fake.trained[0]
+    assert row["iqr"] == pytest.approx(trained_iqr)
+
+    scored = _anomaly_row(fake.trained, "buffer_cache_hit", recent_max=_CACHE_COLLAPSE)
+    assert scored["z_score"] == pytest.approx(z, abs=0.001)
+    for threshold, flagged in ((_AGENT_THRESHOLD, flag20), (_DASHBOARD_THRESHOLD, flag25)):
+        out = detect_anomalies_impl(
+            _cache_returning(scored), "docdb-1", hours=4, threshold=threshold)
+        assert out["baseline_mode"] == "seasonal"        # trained either way
+        assert bool(out["anomalies"]) is flagged
+
+
+def test_trainer_docstring_discloses_the_remaining_silence_zone():
+    """Honest-disclosure decision, pinned like the zero-median ceiling above: the
+    band is named in the docstring, so the next reader does not have to rediscover
+    that 0.226% of |median| is where the rescue stops."""
+    doc = " ".join(sys.modules[_train.__module__].__doc__.split())
+    assert "KNOWN CEILING (how narrow the cap's rescue really is)" in doc
+    assert "the rescued band is a real IQR up to 0.225, about 0.2% of |median|" in doc
+    # and it must say what happens in the zone above the band, not just below it
+    assert "Between roughly 0.2% and the 5% survival boundary" in doc
 
 
 def test_flat_but_well_sampled_bucket_needs_a_real_move():
