@@ -85,11 +85,25 @@ def lambda_handler(event, context):
         results.append({"file": fname, "ok": ok, "skipped": skipped, "errors": errors})
         print(f"[{fname}] ok={ok} skipped={skipped} errors={len(errors)}")
 
-    failed = any(r["errors"] for r in results)
+    failed = [r for r in results if r["errors"]]
+    if failed:
+        # RAISE. This runs as a CDK Provider on_event, and a Custom Resource that
+        # returns without raising is a CloudFormation SUCCESS no matter what it
+        # puts in Data. Returning Data.status="failed" therefore reported a
+        # migration failure as a successful deploy: the cache DB ends up missing
+        # tables while every stack shows CREATE/UPDATE_COMPLETE, and the first
+        # symptom is a REST route or collector failing much later on a table that
+        # was never created. Idempotent "already exists" conflicts are classified
+        # as `skipped` above, so `errors` only holds genuine failures.
+        detail = "; ".join(
+            f"{r['file']}: {len(r['errors'])} error(s), first: {r['errors'][0]}"
+            for r in failed
+        )
+        raise RuntimeError(f"schema migration failed for {len(failed)} file(s). {detail}")
     return {
         "PhysicalResourceId": "dbops-schema-migrator",
         "Data": {
             "results": str(results),
-            "status": "failed" if failed else "ok",
+            "status": "ok",
         },
     }

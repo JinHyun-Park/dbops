@@ -90,21 +90,29 @@ else
   done
 fi
 
-# 7. Schema migrator log presence (last successful run)
-MIG_FN=$(aws lambda list-functions --region "$DBOPS_REGION" \
-  --query "Functions[?contains(FunctionName, 'SchemaMigrator')].FunctionName" \
-  --output text 2>/dev/null | head -1)
+# 7. Schema migrator: NO file may report errors.
+# Two bugs used to make this check meaningless: (a) `grep -q "errors=0"` passed
+# whenever ANY of the last lines was clean, and the migrator prints one line per
+# SQL file across 25+ files, so a real failure was masked by its clean siblings;
+# (b) `head -1` often selected the CDK Provider *framework* function, which never
+# prints "errors=" at all, so the check silently degraded to the warn branch.
+# Exclude the framework function and fail on any nonzero error count.
+MIG_FN=$(aws lambda list-functions --region "$DBOPS_REGION" --max-items 1000 \
+  --query "Functions[?contains(FunctionName, 'SchemaMigrator') && !contains(FunctionName, 'Providerframework')].FunctionName" \
+  --output text 2>/dev/null | tr '\t' '\n' | head -1)
 if [ -n "$MIG_FN" ]; then
-  LAST=$(aws logs filter-log-events \
+  MIG_LINES=$(aws logs filter-log-events \
     --region "$DBOPS_REGION" \
     --log-group-name "/aws/lambda/$MIG_FN" \
     --start-time $(($(date +%s) * 1000 - 86400000)) \
     --query "events[?contains(message, 'errors=')].message" \
-    --output text 2>/dev/null | tr '\t' '\n' | tail -10)
-  if echo "$LAST" | grep -q "errors=0"; then
-    pass "SchemaMigrator most recent runs: errors=0"
+    --output text 2>/dev/null | tr '\t' '\n')
+  if [ -z "$MIG_LINES" ]; then
+    warn "SchemaMigrator has no run in the last 24h (it only runs when the asset changes)"
+  elif echo "$MIG_LINES" | grep -qE "errors=[1-9]"; then
+    fail "SchemaMigrator reported errors: $(echo "$MIG_LINES" | grep -E 'errors=[1-9]' | head -3 | tr '\n' ' ')"
   else
-    warn "SchemaMigrator last logs unclear (may be first deploy)"
+    pass "SchemaMigrator: $(echo "$MIG_LINES" | grep -c 'errors=') file(s), all errors=0"
   fi
 else
   fail "SchemaMigrator Lambda not found"

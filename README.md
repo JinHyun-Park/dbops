@@ -301,7 +301,19 @@ To manage Aurora clusters in other AWS accounts:
      --capabilities CAPABILITY_NAMED_IAM
    ```
 
+   Add `EnableProvisioningWrites=true` to the parameter overrides only if you
+   want DBOps to CREATE resources in that account (restore a cluster from a
+   snapshot or to a point in time, add a reader instance, create a custom cluster
+   endpoint). Those actions cannot be restricted by the `ManagedBy=dbops` tag,
+   because IAM evaluates the tag against the resource being acted on and the new
+   resource does not exist yet, so they are opt-in. With the flag off, the
+   restore and reader-scale-out tools return AccessDenied in that account.
+
 2. Tag clusters for write access: `ManagedBy=dbops`
+
+   Every write that acts on an existing resource is gated on this tag, across
+   RDS/Aurora, DocumentDB (authorized under the `rds:` namespace), ElastiCache
+   and DynamoDB. An untagged cluster is readable but not writable.
 
 3. Register in DBOps with the spoke role ARN
 

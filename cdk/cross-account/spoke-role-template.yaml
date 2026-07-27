@@ -5,6 +5,20 @@ Parameters:
   HubAccountId:
     Type: String
     Description: AWS Account ID where DBOps platform is deployed
+  EnableProvisioningWrites:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Allow DBOps to CREATE resources (restore a cluster from a snapshot or to a
+      point in time, add a reader instance, create a custom cluster endpoint).
+      These cannot be restricted by the ManagedBy=dbops tag, because the tag
+      condition is evaluated against the resource being acted on and the resource
+      does not exist yet. Leave "false" unless you want those workflows; the
+      corresponding DBOps tools will return AccessDenied while it is off.
+
+Conditions:
+  ProvisioningWritesEnabled: !Equals [!Ref EnableProvisioningWrites, "true"]
 
 Resources:
   DBOpsSpokeRole:
@@ -76,20 +90,106 @@ Resources:
                 # cross-account RDS Data API SQL collection failed with AccessDenied
                 # "Failed to fetch secret". Caught via live cross-account testing.)
                 Resource: "arn:aws:secretsmanager:*:*:secret:rds!*"
+              # DocumentDB is authorized under the rds: namespace (AWS docs:
+              # "To specify an action, use the rds: prefix followed by the API
+              # operation name"), so rds:Describe* above already covers it.
+              # ElastiCache and DynamoDB have their OWN namespaces and were
+              # missing entirely, so every cross-account read for those two
+              # families failed with AccessDenied.
+              - Sid: ElastiCacheReadOnly
+                Effect: Allow
+                Action:
+                  - "elasticache:Describe*"
+                  - "elasticache:ListTagsForResource"
+                Resource: "*"
+              - Sid: DynamoDBReadOnly
+                Effect: Allow
+                Action:
+                  - "dynamodb:DescribeTable"
+                  - "dynamodb:DescribeContinuousBackups"
+                  - "dynamodb:DescribeTimeToLive"
+                  - "dynamodb:ListTagsOfResource"
+                Resource: "*"
         - PolicyName: DBOpsWriteConditional
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Sid: RDSModify
+              # Writes that act on an EXISTING resource, so the ManagedBy=dbops
+              # tag condition is enforceable. This statement used to list only
+              # ModifyDBCluster / ModifyDBClusterParameterGroup /
+              # CreateDBClusterSnapshot while the operations MCP server actually
+              # calls 21 distinct write APIs across rds, elasticache and
+              # dynamodb. Every missing action failed with AccessDenied AFTER
+              # verify_approval had already CONSUMED the single-use approval, so
+              # the DBA's approval was burned and the change did not happen.
+              # Same-account deployments never hit this because they do not use a
+              # spoke role at all, which is why it went unnoticed.
+              - Sid: RDSModifyExisting
                 Effect: Allow
                 Action:
                   - "rds:ModifyDBCluster"
                   - "rds:ModifyDBClusterParameterGroup"
+                  - "rds:ModifyDBInstance"
+                  - "rds:RebootDBInstance"
+                  - "rds:DeleteDBInstance"
+                  - "rds:ModifyDBClusterEndpoint"
+                  - "rds:DeleteDBClusterEndpoint"
+                  # Snapshot creation authorizes against the tagged source
+                  # cluster/instance, so it belongs here.
                   - "rds:CreateDBClusterSnapshot"
+                  - "rds:CreateDBSnapshot"
+                  # Turning the RDS Data API on for an already-registered
+                  # cluster. Scoped to this single action rather than
+                  # ModifyDBCluster so approve-time activation cannot be reused
+                  # for arbitrary cluster changes.
+                  - "rds:EnableHttpEndpoint"
                 Resource: "*"
                 Condition:
                   StringEquals:
                     "aws:ResourceTag/ManagedBy": "dbops"
+              - Sid: ElastiCacheModifyExisting
+                Effect: Allow
+                Action:
+                  - "elasticache:ModifyReplicationGroup"
+                  - "elasticache:RebootCacheCluster"
+                  - "elasticache:TestFailover"
+                  - "elasticache:CreateSnapshot"
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    "aws:ResourceTag/ManagedBy": "dbops"
+              - Sid: DynamoDBModifyExisting
+                Effect: Allow
+                Action:
+                  - "dynamodb:UpdateTable"
+                  - "dynamodb:UpdateContinuousBackups"
+                  - "dynamodb:UpdateTimeToLive"
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    "aws:ResourceTag/ManagedBy": "dbops"
+        # Resource-CREATING writes. The ManagedBy tag cannot gate these: IAM
+        # evaluates aws:ResourceTag against the resource being acted on, and the
+        # cluster/instance/endpoint being created does not exist yet. So they are
+        # opt-in via the EnableProvisioningWrites parameter instead of being
+        # granted silently. Affected DBOps tools: restore_cluster (snapshot and
+        # PITR), add_reader_instance / scale_out_with_warmup, and the custom
+        # cluster endpoint creator.
+        - !If
+          - ProvisioningWritesEnabled
+          - PolicyName: DBOpsProvisioningWrites
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Sid: RDSCreateNewResources
+                  Effect: Allow
+                  Action:
+                    - "rds:RestoreDBClusterFromSnapshot"
+                    - "rds:RestoreDBClusterToPointInTime"
+                    - "rds:CreateDBInstance"
+                    - "rds:CreateDBClusterEndpoint"
+                  Resource: "*"
+          - !Ref "AWS::NoValue"
 
 Outputs:
   SpokeRoleArn:
