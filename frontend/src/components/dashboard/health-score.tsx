@@ -255,6 +255,30 @@ const SIGNALS_ELASTICACHE_MEMCACHED: SignalDef[] = [
   },
 ];
 
+// /batch-timeseries deliberately returns DIMENSIONED rows next to the
+// cluster-level one (`GROUP BY 1, metric_type, dimensions::text`) because the
+// stacked charts need the breakdown: `aas` is written once as the cluster total
+// (dimensions '{}') PLUS one row per Performance Insights wait event at the same
+// timestamp, and DynamoDB throttles are written per table AND per GSI. Taking
+// the LAST element of the series therefore handed a scalar signal whichever row
+// happened to sort last, e.g. one wait event's fraction as "Load (AAS)", and the
+// health GRADE moved with it. Scalars must read the cluster-level row only.
+// `dimensions` is `dimensions::text` from the API: null (legacy rows) or '{}'.
+type SeriesPoint = { value: number | string; dimensions?: string | null };
+
+const isClusterLevel = (p: SeriesPoint) =>
+  p.dimensions == null || p.dimensions === "{}";
+
+// Fall back to the raw series for metric_types that are ONLY ever published
+// dimensioned, never as a total: DynamoDB latency_ms_* carries
+// {"operation": "GetItem"} and has no cluster-level row, so filtering it away
+// would silently blank the signal. Such a metric has exactly one dimension
+// group, so its last element is unambiguous.
+function clusterLevelPoints(points: SeriesPoint[]): SeriesPoint[] {
+  const cl = points.filter(isClusterLevel);
+  return cl.length ? cl : points;
+}
+
 function signalsForEngine(engine?: string): SignalDef[] {
   const fam = engineFamily(engine);
   if (fam === "documentdb") return SIGNALS_DOCUMENTDB;
@@ -284,7 +308,7 @@ export function HealthScore({ clusterId, engine }: Props) {
           1,
         );
         const results: Signal[] = signalDefs.map((s) => {
-          const points = d.series[s.metric] || [];
+          const points = clusterLevelPoints(d.series[s.metric] || []);
           const hasData = points.length > 0;
           const raw = hasData
             ? Number(points[points.length - 1].value) || 0

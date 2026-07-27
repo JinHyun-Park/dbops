@@ -378,7 +378,16 @@ import re as _re
 
 _STRICT_LITERAL = "dimensions IS NULL OR dimensions::text = '{}'"
 _ALIASED_STRICT = _re.compile(r"\w+\.dimensions IS NULL OR \w+\.dimensions::text = '\{\}'")
-_CONST_USE = _re.compile(r"CLUSTER_LEVEL_ONLY|cluster_level_only\(")
+# Word-boundaried, and it accepts the leading-underscore module alias
+# (`_CLUSTER_LEVEL_ONLY = CLUSTER_LEVEL_ONLY`, used by forecast_capacity) because
+# that alias is what the f-string SQL interpolates. Unbounded, the alias
+# ASSIGNMENT line matched twice (once inside `_CLUSTER_LEVEL_ONLY`, once for the
+# right-hand side), so forecast_capacity's recorded 4 was really 2 SQL predicates
+# plus 2 phantom matches. The numbers have to BE predicate counts, otherwise the
+# next author adding a query cannot derive the new expected value.
+_CONST_USE = _re.compile(r"\b_?CLUSTER_LEVEL_ONLY\b|\bcluster_level_only\(")
+# `X = CLUSTER_LEVEL_ONLY` / `_X = mod.CLUSTER_LEVEL_ONLY`: a rebinding, not a query.
+_ALIAS_ASSIGN = _re.compile(r"^\s*_?\w*CLUSTER_LEVEL_ONLY\s*=\s*[\w.]*CLUSTER_LEVEL_ONLY\s*$")
 
 _EXPECTED_CLUSTER_LEVEL_PREDICATES = {
     "api/dashboard/handler.py": 8,
@@ -400,7 +409,9 @@ _EXPECTED_CLUSTER_LEVEL_PREDICATES = {
     "mcp-servers/mcp_servers/incident/tools/health_status.py": 1,
     "mcp-servers/mcp_servers/performance/tools/compare_periods.py": 1,
     "mcp-servers/mcp_servers/performance/tools/detect_anomalies.py": 2,
-    "mcp-servers/mcp_servers/performance/tools/forecast_capacity.py": 4,
+    # 2 in the aggregate/current_value pair + 1 in the DocumentDB
+    # db_connections_limit ceiling lookup.
+    "mcp-servers/mcp_servers/performance/tools/forecast_capacity.py": 3,
     "mcp-servers/mcp_servers/performance/tools/performance_summary.py": 3,
     "mcp-servers/mcp_servers/simulation/tools/capacity_cost.py": 3,
     "mcp-servers/mcp_servers/simulation/tools/rds_rightsizing.py": 1,
@@ -411,7 +422,7 @@ _IMPORT_LINE = _re.compile(r"^\s*(from\s+\S+\s+)?import\s")
 
 
 def _code_only(text):
-    """Drop import lines and comments before counting.
+    """Drop import lines, comments and alias-assignment lines before counting.
 
     Cross-model review (Codex) caught this: counting the bare symbol anywhere
     also counts `from ... import CLUSTER_LEVEL_ONLY`, an alias assignment and
@@ -424,6 +435,8 @@ def _code_only(text):
         if _IMPORT_LINE.match(line):
             continue
         line = _re.sub(r"#.*$", "", line)
+        if _ALIAS_ASSIGN.match(line):
+            continue
         if line.strip():
             kept.append(line)
     return "\n".join(kept)
