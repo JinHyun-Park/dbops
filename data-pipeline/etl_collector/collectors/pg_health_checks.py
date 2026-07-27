@@ -130,9 +130,16 @@ def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target
     # --- 2. Transaction ID age per table (top offenders) ---
     try:
         resp = _query(rds_data, target_cluster_arn, target_secret_arn, database,
-                      "SELECT schemaname, relname, age(c.relfrozenxid) AS table_age "
+                      # QUALIFY every column: pg_stat_user_tables and pg_class
+                      # BOTH have relname, so the unqualified form raised
+                      # `column reference "relname" is ambiguous` on every ETL
+                      # cycle and this check produced nothing for months. The
+                      # per-check try/except printed it to the Lambda log, where
+                      # nobody read it; it only surfaced once the Aurora
+                      # PostgreSQL log export was turned on (2026-07-24).
+                      "SELECT s.schemaname, s.relname, age(c.relfrozenxid) AS table_age "
                       "FROM pg_stat_user_tables s JOIN pg_class c ON c.oid = s.relid "
-                      "WHERE schemaname NOT IN ('pg_catalog','information_schema') "
+                      "WHERE s.schemaname NOT IN ('pg_catalog','information_schema') "
                       "ORDER BY age(c.relfrozenxid) DESC LIMIT 10")
         for rec in resp.get("records", []):
             schema = _str(rec[0])
