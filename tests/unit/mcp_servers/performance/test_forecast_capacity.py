@@ -17,12 +17,14 @@ _DIM_FILTER = "AND (dimensions IS NULL OR dimensions::text = '{}')"
 
 
 def _cache(slope, current, r2=0.9, n=200, max_connections=None, instance_class=None,
-           engine="aurora-postgresql", allocated_storage_gb=None, meta_rows=None):
-    """Two execute() calls: cluster_meta, then the metric trend. side_effect
-    routes each by which table the caller asked for. `seen` records the
-    metric_type the trend query was actually parameterized with AND the exact SQL
-    string the cache received (so the dimension filter can be asserted on the
-    EXECUTED text, not on a constant)."""
+           engine="aurora-postgresql", allocated_storage_gb=None, meta_rows=None,
+           serverlessv2_max_acu=None, settings_max_connections=None,
+           docdb_connections_limit=None):
+    """cluster_meta, optionally a limit-fallback lookup, then the metric trend.
+    side_effect routes each by which table/metric the caller asked for. `seen`
+    records the metric_type the trend query was actually parameterized with, the
+    exact SQL string the cache received (so the dimension filter can be asserted
+    on the EXECUTED text, not on a constant), and which fallback lookup ran."""
     metric_qr = QueryResult(
         columns=["slope_per_day", "r2", "n", "current_value"],
         rows=[{"slope_per_day": slope, "r2": r2, "n": n, "current_value": current}],
@@ -30,18 +32,32 @@ def _cache(slope, current, r2=0.9, n=200, max_connections=None, instance_class=N
     )
     rows = [{"engine": engine, "max_connections": max_connections,
              "instance_class": instance_class,
+             "serverlessv2_max_acu": serverlessv2_max_acu,
              "allocated_storage_gb": allocated_storage_gb}] if meta_rows is None else meta_rows
     meta_qr = QueryResult(
-        columns=["engine", "max_connections", "instance_class", "allocated_storage_gb"],
+        columns=["engine", "max_connections", "instance_class", "serverlessv2_max_acu",
+                 "allocated_storage_gb"],
         rows=rows,
         row_count=len(rows),
     )
+
+    def _single(value):
+        return QueryResult(columns=["value"],
+                           rows=[] if value is None else [{"value": value}],
+                           row_count=0 if value is None else 1)
+
     cache = MagicMock()
     cache.seen = {}
 
     def _exec(sql, params=None):
         if "cluster_meta" in sql:
             return meta_qr
+        if "cluster_settings" in sql:
+            cache.seen["settings_sql"] = sql
+            return _single(settings_max_connections)
+        if "db_connections_limit" in sql:
+            cache.seen["docdb_limit_sql"] = sql
+            return _single(docdb_connections_limit)
         cache.seen["metric_type"] = (params or {}).get("metric")
         cache.seen["sql"] = sql
         return metric_qr
@@ -259,7 +275,9 @@ def test_confidence_high_with_good_fit_and_grounded_limit():
 def test_gateway_schema_carries_the_metric_enum():
     """The agent only sees cdk/tool_definitions.py (mcp-servers/schemas/*.json is
     documentation read by nothing). Without the enum there it keeps sending the
-    old documented metric='storage_gb'."""
+    old documented metric='storage_gb'. The description is also the only place the
+    agent learns the payload contract, so the statuses it must branch on and the
+    fallback sources must be named there."""
     repo = Path(__file__).resolve().parents[4]
     spec = importlib.util.spec_from_file_location(
         "dbops_tool_definitions", repo / "cdk" / "tool_definitions.py")
@@ -268,6 +286,9 @@ def test_gateway_schema_carries_the_metric_enum():
     tool = {t["name"]: t for t in mod.performance_schema()}["forecast_capacity"]
     assert tool["inputSchema"]["properties"]["metric"]["enum"] == list(_VALID_METRICS)
     assert "storage_gb" in tool["description"]  # explicitly called out as gone
+    for contract in ("limit_reached", "no_data", "unsupported_metric",
+                     "cluster_settings", "serverlessv2_max_acu"):
+        assert contract in tool["description"], contract
 
 
 def test_low_fit_is_low_confidence():
@@ -320,3 +341,216 @@ def test_confidence_reflects_fit_not_the_horizon():
     assert result["confidence"] == "high"
     # the uncertainty band belongs to the estimate, so it is still present
     assert result["days_until_limit_range"] is not None
+
+
+# ===== ALREADY AT the limit is not the same as moving AWAY from it =====
+# _days() returned None for every gap <= 0, so a cluster pinned at its ceiling
+# got the identical payload to one trending away: no date, approaching_limit
+# false, confidence low, and a note saying the trend is not heading to the limit.
+# The calmest possible answer for the most urgent state.
+
+
+def test_connections_at_the_ceiling_is_limit_reached_not_a_calm_null():
+    cache = _cache(slope=0.5, current=2000.0, max_connections=2000)
+    result = forecast_capacity_impl(cache, cluster_id="c", metric="connections")
+    assert result["status"] == "limit_reached"
+    assert result["days_until_limit"] == 0
+    assert result["approaching_limit"] is True
+    # observed, not extrapolated: the fit does not get to downgrade a fact
+    assert result["confidence"] == "high"
+    assert "이미 한계" in result["note"]
+    assert "향하지 않아" not in result["note"]
+
+
+def test_connections_past_the_ceiling_stays_urgent_even_while_recovering():
+    """Over the ceiling with a FALLING trend: the trend is 'moving away', but the
+    cluster is refusing connections right now."""
+    cache = _cache(slope=-3.0, current=2100.0, max_connections=2000)
+    result = forecast_capacity_impl(cache, cluster_id="c", metric="connections")
+    assert result["status"] == "limit_reached"
+    assert result["approaching_limit"] is True
+    assert result["days_until_limit"] == 0
+
+
+def test_free_storage_at_zero_is_limit_reached_not_a_null_forecast():
+    """rds_instance with 0 free bytes IS storage-full. The limit for
+    free_storage_bytes is 0, so the gap is 0 and the old code called that 'not
+    heading to the limit'."""
+    cache = _cache(slope=-1.0 * _GIB, current=0.0, engine="mysql",
+                   allocated_storage_gb="100")
+    result = forecast_capacity_impl(cache, cluster_id="rds-mysql-1", metric="storage")
+    assert result["metric_type"] == "free_storage_bytes"
+    assert result["status"] == "limit_reached"
+    assert result["days_until_limit"] == 0
+    assert result["approaching_limit"] is True
+    assert "STORAGE_FULL" in result["note"]
+    assert result["usage_pct"] == 100.0
+
+
+def test_aurora_storage_at_the_volume_ceiling_is_limit_reached():
+    cache = _cache(slope=1.0 * _GIB, current=float(_VOLUME_MAX_BYTES))
+    result = forecast_capacity_impl(cache, cluster_id="c", metric="storage")
+    assert result["metric_type"] == "storage_bytes"
+    assert result["status"] == "limit_reached"
+    assert result["days_until_limit"] == 0
+    assert result["approaching_limit"] is True
+
+
+def test_zero_samples_never_reads_as_at_the_limit():
+    """The at-limit test must require real samples. free_storage_bytes has a limit
+    of 0 and current_value defaults to 0.0 when there is no row at all, so an
+    uncollected cluster would otherwise be declared STORAGE_FULL. Both no-row
+    shapes (NULL current, and 0.0 with zero samples) must land on no_data."""
+    for current in (None, 0.0):
+        cache = _cache(slope=0.0, current=current, n=0, engine="mysql")
+        result = forecast_capacity_impl(cache, cluster_id="rds-mysql-1", metric="storage")
+        assert result["status"] == "no_data", current
+        assert result["approaching_limit"] is False
+        assert result["days_until_limit"] is None
+        # samples==0 is not a trend, so it is never labelled the reassuring "stable"
+        assert result["forecast"] == "no_data"
+        assert "표본이 없어" in result["note"]
+
+
+def test_an_ungrounded_limit_cannot_be_declared_reached():
+    """No max_connections anywhere: the limit is a guessed 5000, so 'you are at
+    5000' would be a fabricated alarm. Stay ungrounded and dateless."""
+    cache = _cache(slope=1.0, current=9000.0)
+    result = forecast_capacity_impl(cache, cluster_id="c", metric="connections")
+    assert result["grounded"] is False
+    assert result["status"] == "ok"
+    assert result["days_until_limit"] is None
+    assert result["approaching_limit"] is False
+
+
+# ===== the limit must be resolvable on a REAL cluster (sibling parity) =====
+# cluster_meta.max_connections is written by api/clusters/seeder.py only (the demo
+# seeder), meta_collector's INSERT has no such column, and the vCPU ceiling is
+# None for instance_class db.serverless. Without these fallbacks 2 of the 3
+# advertised metrics never produced a date on a real cluster, while the dashboard
+# and the ETL collector both DID answer, so they contradicted each other.
+
+
+def test_connections_falls_back_to_cluster_settings_like_its_siblings():
+    """Same query and precedence as capacity_forecast.py / api/dashboard: latest
+    cluster_settings row named max_connections (pg_locks / mysql_locks write it)."""
+    cache = _cache(slope=5.0, current=100.0, settings_max_connections="1000")
+    result = forecast_capacity_impl(cache, cluster_id="c", metric="connections")
+    assert result["grounded"] is True
+    assert result["limit"] == 1000.0
+    assert "cluster_settings.max_connections" in result["limit_basis"]
+    assert result["days_until_limit"] == 180  # (1000 - 100) / 5
+    sql = cache.seen["settings_sql"]
+    assert "name = 'max_connections'" in sql
+    assert "ORDER BY updated_at DESC" in sql
+
+
+def test_cluster_meta_max_connections_wins_over_cluster_settings():
+    cache = _cache(slope=5.0, current=100.0, max_connections=2000,
+                   settings_max_connections="1000")
+    result = forecast_capacity_impl(cache, cluster_id="c", metric="connections")
+    assert result["limit"] == 2000.0
+    assert "cluster_meta" in result["limit_basis"]
+    assert "settings_sql" not in cache.seen  # no pointless second lookup
+
+
+def test_documentdb_connections_ceiling_comes_from_the_limit_metric():
+    """DocDB has no max_connections setting, so cluster_settings is the wrong
+    source. api/dashboard uses the latest DatabaseConnectionsLimit datapoint."""
+    cache = _cache(slope=1.0, current=100.0, engine="docdb",
+                   docdb_connections_limit=400)
+    result = forecast_capacity_impl(cache, cluster_id="docdb-1", metric="connections")
+    assert result["grounded"] is True
+    assert result["limit"] == 400.0
+    assert "DatabaseConnectionsLimit" in result["limit_basis"]
+    assert result["days_until_limit"] == 300  # (400 - 100) / 1
+    assert "settings_sql" not in cache.seen
+    # the ceiling lookup is a cluster-level scalar, so it needs the strict filter
+    assert _DIM_FILTER in cache.seen["docdb_limit_sql"]
+
+
+def test_serverless_v2_aas_ceiling_comes_from_max_acu():
+    """instance_class is db.serverless for every Serverless v2 cluster, so the
+    vCPU map always missed and aas was ungrounded fleet-wide. meta_collector DOES
+    populate serverlessv2_max_acu (the ETL collector's own ACU ceiling); 4 ACU per
+    vCPU (db.r6g.large = 2 vCPU / 16 GiB = 8 ACU)."""
+    cache = _cache(slope=0.1, current=2.0, instance_class="db.serverless",
+                   serverlessv2_max_acu=32)
+    result = forecast_capacity_impl(cache, cluster_id="c", metric="aas")
+    assert result["grounded"] is True
+    assert result["limit"] == 8.0  # 32 ACU / 4
+    assert "serverlessv2_max_acu" in result["limit_basis"]
+    assert result["days_until_limit"] == 60  # (8 - 2) / 0.1
+
+
+def test_provisioned_instance_class_outranks_max_acu():
+    """A cluster can carry a Serverless v2 scaling config while its instances are
+    provisioned; the real instance's vCPU is the better ceiling."""
+    cache = _cache(slope=0.1, current=2.0, instance_class="db.r6g.4xlarge",
+                   serverlessv2_max_acu=128)
+    result = forecast_capacity_impl(cache, cluster_id="c", metric="aas")
+    assert result["limit"] == 16
+    assert "vCPU=16" in result["limit_basis"]
+
+
+# ===== connections / aas are per-family too, not family-agnostic =====
+
+
+def test_connections_is_refused_on_engines_that_never_write_the_series():
+    """db_connections comes from cw_collector / docdb_cw_collector /
+    rds_instance_cw_collector only. DynamoDB has no connection concept and
+    ElastiCache's maxclients ceiling is not collected, so forecasting there
+    returned samples=0, forecast='stable' and a fabricated 5000 limit."""
+    for engine in ("dynamodb", "redis"):
+        cache = _cache(slope=0.0, current=0.0, n=0, engine=engine)
+        result = forecast_capacity_impl(cache, cluster_id="x", metric="connections")
+        assert result["status"] == "unsupported_metric", engine
+        assert result["days_until_limit"] is None
+        assert result["samples"] == 0
+        assert result["engine_family"] in result["reason"]
+        assert cache.seen == {}  # no trend query, no limit lookup
+
+
+def test_aas_is_refused_where_performance_insights_never_writes_it():
+    """`aas` has exactly one writer, pi_collector, so only the PI-capable families
+    (relational, rds_instance) have the series. DocumentDB has no PI at all."""
+    for engine in ("docdb", "dynamodb", "memcached"):
+        cache = _cache(slope=0.0, current=0.0, n=0, engine=engine)
+        result = forecast_capacity_impl(cache, cluster_id="x", metric="aas")
+        assert result["status"] == "unsupported_metric", engine
+        assert result["engine_family"] in result["reason"]
+        assert cache.seen == {}
+
+
+def test_rds_instance_aas_is_supported_via_pi_db_load():
+    """PI on standalone RDS collects db.load.avg (the only universally supported
+    metric there), so aas IS forecastable for this family."""
+    cache = _cache(slope=0.1, current=1.0, engine="mysql",
+                   instance_class="db.m5.large")
+    result = forecast_capacity_impl(cache, cluster_id="rds-mysql-1", metric="aas")
+    assert result["engine_family"] == "rds_instance"
+    assert cache.seen["metric_type"] == "aas"
+    assert result["limit"] == 2  # db.m5.large = 2 vCPU
+    assert result["status"] == "ok"
+
+
+# ===== regression pin: the Aurora/relational storage path must not move =====
+
+
+def test_aurora_storage_contract_is_unchanged_by_the_limit_fallbacks():
+    """The limit-fallback and at-limit work must not touch the relational
+    storage_bytes path: same series, same 128 TiB ceiling, same ETA math, and
+    still exactly two queries (cluster_meta + trend, no fallback lookups)."""
+    cache = _cache(slope=2.0 * _GIB, current=100.0 * _GIB, r2=0.85, n=300)
+    result = forecast_capacity_impl(cache, cluster_id="aurora-1", metric="storage")
+    assert result["metric_type"] == "storage_bytes"
+    assert result["limit"] == float(_VOLUME_MAX_BYTES)
+    assert result["grounded"] is True
+    assert result["status"] == "ok"
+    assert result["forecast"] == "growing"
+    assert result["confidence"] == "high"
+    assert result["days_until_limit"] == int(
+        (_VOLUME_MAX_BYTES - 100.0 * _GIB) / (2.0 * _GIB))
+    assert result["days_until_limit_range"] is not None
+    assert cache.execute.call_count == 2
+    assert "settings_sql" not in cache.seen and "docdb_limit_sql" not in cache.seen

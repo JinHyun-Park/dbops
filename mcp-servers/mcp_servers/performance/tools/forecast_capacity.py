@@ -20,11 +20,26 @@ Two historical wrong-answer paths, both fixed here:
      `metric` is therefore a LOGICAL name (storage/connections/aas) and the
      engine family decides which series and which direction to read. Same math
      as data-pipeline/etl_collector/collectors/capacity_forecast.py.
+  3. the limit lookup had no fallback, so 2 of the 3 metrics never produced a
+     date on a real cluster: cluster_meta.max_connections is written by the demo
+     seeder ONLY (meta_collector's INSERT has no such column), and the vCPU
+     ceiling resolves to None for instance_class db.serverless, i.e. every
+     Serverless v2 cluster. Both siblings already fall back, so the agent and
+     the dashboard disagreed about the same cluster+metric. The precedence here
+     now mirrors them (see _connections_limit / _aas_limit).
+  4. "already at/past the limit" answered exactly like "trend moving away from
+     the limit": no date, approaching_limit false, and a note saying the trend
+     is not heading to the limit. The calmest payload for the most urgent state.
+     gap<=0 in the APPROACH direction is now status=limit_reached (see at_limit).
 
 The linear slope (REGR_SLOPE) is kept but never reported as if it were precise:
 we also compute the fit (REGR_R2) and sample count and turn them into a
 ``confidence`` plus a days-until RANGE. When the limit cannot be grounded in
 real config we return ``grounded: False`` and NO date at all.
+
+``status`` is on every payload: unknown_metric / unknown_cluster (bad input),
+unsupported_metric (this engine has no such series), no_data (zero samples),
+limit_reached (already there), ok.
 """
 
 from mcp_servers.shared.cache_client import CacheClient
@@ -50,12 +65,39 @@ _VCPU_BY_SIZE = {
 _FALLBACK_CONNECTIONS = 5000
 _FALLBACK_AAS = 64
 
+# Serverless v2는 instance_class가 db.serverless라 vCPU 토큰이 없다. 대신
+# meta_collector가 채우는 serverlessv2_max_acu로 천장을 잡는다. ACU 1개는 약
+# 2 GiB 메모리 + 대응 CPU라 vCPU 1개가 약 4 ACU다(db.r6g.large = 2 vCPU/16 GiB
+# ≈ 8 ACU, db.r6g.4xlarge = 16 vCPU ≈ 64 ACU). AAS 천장은 vCPU 수이므로 max
+# ACU를 vCPU로 환산해서 쓴다.
+_ACU_PER_VCPU = 4.0
+
 # 논리 스토리지 메트릭 → 패밀리별 실제 metric_type. 매핑이 없는 패밀리
 # (DynamoDB/ElastiCache)는 스토리지 시계열 자체가 없어 예측 불가로 거부한다.
 _STORAGE_SERIES = {
     RELATIONAL: "storage_bytes",
     DOCUMENTDB: "storage_bytes",
     RDS_INSTANCE: "free_storage_bytes",
+}
+
+# db_connections(CloudWatch DatabaseConnections)를 쓰는 수집기는 cw_collector
+# (relational) · docdb_cw_collector · rds_instance_cw_collector 셋뿐이다.
+# DynamoDB에는 커넥션 개념이 없고(용량은 consumed_rcu/wcu), ElastiCache는
+# curr_connections를 쓰지만 maxclients 천장을 수집하지 않아 한계를 근거 있게
+# 잡을 수 없다. 스토리지와 마찬가지로 매핑 없는 패밀리는 거부한다: 매핑이 없는
+# 채로 진행하면 표본 0개를 "안정적, 한계 도달 없음"으로 보고한다.
+_CONNECTION_SERIES = {
+    RELATIONAL: "db_connections",
+    DOCUMENTDB: "db_connections",
+    RDS_INSTANCE: "db_connections",
+}
+
+# aas는 Performance Insights(pi_collector)만 쓴다 → PI를 켤 수 있는 패밀리
+# (relational, rds_instance)뿐이다. DocumentDB는 PI가 없다(CAPABILITIES
+# perf_insights=False).
+_AAS_SERIES = {
+    RELATIONAL: "aas",
+    RDS_INSTANCE: "aas",
 }
 
 # 허용된 논리 메트릭 이름. 이름이 틀린 것(예: 옛 문서의 storage_gb)과 "이 엔진에는
@@ -90,7 +132,79 @@ def _vcpu_for(instance_class: str):
     return _VCPU_BY_SIZE.get(token)
 
 
-def _resolve_series(metric: str, fam: str, cluster: dict):
+def _latest_value(cache, sql: str, params: dict) -> float:
+    """단일 컬럼(value) 1행 조회의 float. 없거나 숫자가 아니면 0.0 → 호출자가
+    '근거 없음'으로 처리한다(폴백은 절대 grounded=True로 넘기지 않는다)."""
+    rows = (cache.execute(sql, params).rows or [{}])
+    return _f(rows[0].get("value"))
+
+
+def _connections_limit(cache, cluster_id: str, fam: str, cluster: dict):
+    """(limit, basis, grounded). 두 형제 구현과 동일한 우선순위:
+
+      1. cluster_meta.max_connections. 이 컬럼을 쓰는 유일한 코드는
+         api/clusters/seeder.py(데모 시더)다. meta_collector INSERT에는 이
+         컬럼이 없으므로 실제 클러스터에서는 거의 항상 NULL이고, 그래서 이건
+         힌트일 뿐 단독 근거가 될 수 없다.
+      2. cluster_settings.max_connections 최신 행
+         (data-pipeline/etl_collector/collectors/capacity_forecast.py와 동일
+         쿼리). pg_locks / mysql_locks 수집기가 pg_settings ·
+         performance_schema.global_variables에서 실제 값을 채운다.
+      3. DocumentDB는 max_connections 설정이 없어 cluster_settings에 행이 없다.
+         대신 DatabaseConnectionsLimit(db_connections_limit) 최신 관측값을
+         천장으로 쓴다(api/dashboard/handler.py _capacity_forecast와 동일).
+
+    아무것도 못 찾으면 grounded=False + 폴백값(날짜는 보고하지 않는다)."""
+    mc = _f(cluster.get("max_connections"))
+    if mc > 0:
+        return mc, f"cluster_meta.max_connections={int(mc)}", True
+    if fam == DOCUMENTDB:
+        cl = _latest_value(
+            cache,
+            "SELECT value FROM metric_snapshots "
+            "WHERE cluster_id = :cluster_id AND metric_type = 'db_connections_limit' "
+            f"  {_CLUSTER_LEVEL_ONLY} "
+            "ORDER BY ts DESC LIMIT 1",
+            {"cluster_id": cluster_id},
+        )
+        if cl > 0:
+            return cl, f"DatabaseConnectionsLimit 최신 관측값={int(cl)}", True
+    else:
+        cs = _latest_value(
+            cache,
+            "SELECT value FROM cluster_settings "
+            "WHERE cluster_id = :cluster_id AND name = 'max_connections' "
+            "ORDER BY updated_at DESC LIMIT 1",
+            {"cluster_id": cluster_id},
+        )
+        if cs > 0:
+            return cs, f"cluster_settings.max_connections={int(cs)}", True
+    return float(_FALLBACK_CONNECTIONS), "max_connections 미상, 기본값 가정", False
+
+
+def _aas_limit(cluster: dict):
+    """(limit, basis, grounded). 프로비저닝 인스턴스는 instance_class의 vCPU,
+    Serverless v2는 serverlessv2_max_acu(meta_collector가 채운다)를 vCPU로
+    환산한다. 환산 없이 예전처럼 vCPU만 보면 db.serverless는 전부
+    grounded=False라 Serverless v2 클러스터에는 영원히 날짜가 안 나왔다."""
+    ic = cluster.get("instance_class")
+    vcpu = _vcpu_for(ic)
+    if vcpu:
+        return float(vcpu), f"인스턴스 {ic} vCPU={vcpu} (AAS 포화 기준)", True
+    # serverlessv2_max_acu는 Serverless v2 스케일링 설정이 있는 클러스터에만
+    # 채워지고, 프로비저닝 인스턴스는 위 vCPU 경로에서 이미 끝난다.
+    acu = _f(cluster.get("serverlessv2_max_acu"))
+    if acu > 0:
+        acu_vcpu = max(1.0, acu / _ACU_PER_VCPU)
+        return (
+            acu_vcpu,
+            f"serverlessv2_max_acu={round(acu, 1)} → vCPU≈{round(acu_vcpu, 1)} (AAS 포화 기준)",
+            True,
+        )
+    return float(_FALLBACK_AAS), "인스턴스 vCPU 미상(서버리스/미등록), 기본값 가정", False
+
+
+def _resolve_series(cache, cluster_id: str, metric: str, fam: str, cluster: dict):
     """(metric_type, limit, basis, grounded). metric_type=None → 이 엔진에서
     예측 불가(수집되는 시계열이 없음). metric 이름은 호출자가 _VALID_METRICS로
     이미 검증했으므로 여기서 이름 오류는 다루지 않는다."""
@@ -113,15 +227,15 @@ def _resolve_series(metric: str, fam: str, cluster: dict):
             return metric_type, 0.0, basis, True
         return metric_type, float(_VOLUME_MAX_BYTES), "클러스터 볼륨 상한 128 TiB", True
     if metric == "connections":
-        mc = cluster.get("max_connections")
-        if mc:
-            return "db_connections", _f(mc), f"cluster_meta.max_connections={int(_f(mc))}", True
-        return "db_connections", float(_FALLBACK_CONNECTIONS), "max_connections 미상, 기본값 가정", False
+        metric_type = _CONNECTION_SERIES.get(fam)
+        if metric_type is None:
+            return None, 0.0, "", False
+        return (metric_type, *_connections_limit(cache, cluster_id, fam, cluster))
     # metric == "aas"
-    vcpu = _vcpu_for(cluster.get("instance_class"))
-    if vcpu:
-        return "aas", float(vcpu), f"인스턴스 {cluster.get('instance_class')} vCPU={vcpu} (AAS 포화 기준)", True
-    return "aas", float(_FALLBACK_AAS), "인스턴스 vCPU 미상(서버리스/미등록), 기본값 가정", False
+    metric_type = _AAS_SERIES.get(fam)
+    if metric_type is None:
+        return None, 0.0, "", False
+    return (metric_type, *_aas_limit(cluster))
 
 
 def forecast_capacity_impl(
@@ -148,7 +262,7 @@ def forecast_capacity_impl(
     # 엔진 패밀리와 실제 한계를 먼저 읽는다. 어떤 metric_type을 조회할지가
     # 패밀리에 달려 있다(Aurora storage_bytes vs RDS free_storage_bytes).
     meta = cache.execute(
-        "SELECT engine, max_connections, instance_class, "
+        "SELECT engine, max_connections, instance_class, serverlessv2_max_acu, "
         "       resource_details->>'allocated_storage_gb' AS allocated_storage_gb "
         "FROM cluster_meta WHERE cluster_id = :cluster_id",
         {"cluster_id": cluster_id},
@@ -173,7 +287,8 @@ def forecast_capacity_impl(
         }
     cluster = meta.rows[0]
     fam = _engine_family(cluster.get("engine"))
-    metric_type, limit, limit_basis, grounded = _resolve_series(metric, fam, cluster)
+    metric_type, limit, limit_basis, grounded = _resolve_series(
+        cache, cluster_id, metric, fam, cluster)
     if metric_type is None:
         return {
             "cluster_id": cluster_id,
@@ -214,6 +329,11 @@ def forecast_capacity_impl(
     n = int(_f(row.get("n")))
     current = _f(row.get("current_value"))
 
+    # free_storage_bytes만 값이 내려가면서 한계(여유 0)에 닿는다. 나머지 메트릭은
+    # 올라가면서 천장에 닿는다. "이미 도달"과 "한계에서 멀어지는 추세"를 가르는
+    # 기준이 이 접근 방향이다.
+    approach_down = metric_type == "free_storage_bytes"
+
     def _days(s):
         # 방향 무관: gap/slope가 양수일 때만 한계로 접근 중이다. 증가 메트릭은
         # gap>0 & slope>0, 감소(free_storage_bytes)는 gap<0 & slope<0.
@@ -224,8 +344,22 @@ def forecast_capacity_impl(
         d = (limit - current) / s
         return max(1, int(d)) if d > 0 else None
 
+    # 이미 한계에 도달(또는 초과)했는가. _days는 gap<=0을 전부 None으로 뭉개므로,
+    # 커넥션 상한에 붙은 클러스터와 여유 0바이트 인스턴스가 "추세가 한계로 향하지
+    # 않습니다 / approaching_limit=false / confidence=low"라는 가장 안심되는 응답을
+    # 받아 왔다. 가장 급한 상태에 가장 조용한 payload였다.
+    # 표본이 있어야 한다: 표본 0개면 current_value는 조회 창 밖의 낡은 값이거나
+    # 행이 아예 없어 0.0인데, 여유 스토리지(한계 0)에서는 그 0.0이 "소진"으로
+    # 읽혀 데이터 없는 클러스터에 STORAGE_FULL 경보를 낸다.
+    at_limit = (
+        grounded
+        and n > 0
+        and row.get("current_value") is not None
+        and (current <= limit if approach_down else current >= limit)
+    )
+
     # 한계를 실제 설정에서 확인하지 못하면 날짜를 단정하지 않는다.
-    days_until = _days(slope) if grounded else None
+    days_until = 0 if at_limit else (_days(slope) if grounded else None)
     # approaching_limit은 "지금 조치가 필요한가"를 뜻해야 한다. 기울기가 한계
     # 방향이면 얼마나 멀든 True로 두면, 라이브에서 실제로 나온 것처럼
     # days_until_limit=80170(약 219년)에 approaching_limit=true가 붙는다. DBA는
@@ -234,12 +368,16 @@ def forecast_capacity_impl(
     # 추세가 한계로 향하는가(방향)와, 지금 조치할 사안인가(기간)는 별개다.
     # confidence와 불확실성 밴드는 "방향"에 걸어야 한다: 적합도가 좋은 먼 미래
     # 추정은 신뢰도 낮은 추정이 아니라 신뢰도 높은 먼 미래 추정이다.
-    heading_to_limit = days_until is not None
-    approaching = heading_to_limit and days_until <= _ACTIONABLE_HORIZON_DAYS
+    heading_to_limit = days_until is not None and not at_limit
+    approaching = at_limit or (heading_to_limit and days_until <= _ACTIONABLE_HORIZON_DAYS)
     beyond_horizon = heading_to_limit and not approaching
     # Confidence from fit + samples; a poor fit / thin data widens the band and
     # lowers confidence so the number isn't mistaken for precision.
-    if not grounded or n < 20 or not heading_to_limit:
+    if at_limit:
+        # 외삽이 아니라 관측된 상태다. 적합도가 나빠도 "이미 한계"는 사실이므로
+        # 적합도 기반 등급을 그대로 쓰면 가장 확실한 사실이 low로 내려간다.
+        confidence = "high"
+    elif not grounded or n < 20 or not heading_to_limit:
         confidence = "low"
     elif r2 >= 0.7 and n >= 100:
         confidence = "high"
@@ -258,11 +396,52 @@ def forecast_capacity_impl(
         high = _days(slope * (1.0 - spread)) if spread < 1.0 else None
         days_range = [low, high]
 
+    if n == 0:
+        note = (
+            f"최근 {days_lookback}일 동안 {metric_type} 표본이 없어 추세를 계산할 수 없습니다"
+            f"(수집 미시작이거나 이 클러스터에서 해당 메트릭이 올라오지 않음). 표본 0개는 "
+            f"'안정적(stable)'이 아니라 status=no_data, forecast=no_data입니다."
+        )
+    elif at_limit:
+        note = (
+            f"한계값 기준: {limit_basis}. 현재값이 이미 한계에 도달했거나 넘었습니다"
+            f"(현재 {round(current, 2)}, 한계 {round(limit, 2)}). 예측이 아니라 관측된 상태이므로 "
+            f"days_until_limit=0, approaching_limit=true입니다. 즉시 조치가 필요합니다."
+            + (" 여유 스토리지 0바이트는 쓰기 중단(STORAGE_FULL)을 의미합니다."
+               if approach_down else "")
+            + f" (기울기 {round(slope, 4)}/일, 표본 {n}개)"
+        )
+    elif not grounded:
+        note = (
+            f"한계값을 클러스터 실제 설정에서 확인할 수 없어({limit_basis}) 도달 시점을 단정하지 "
+            f"않습니다. 추세만 참고하세요(기울기 {round(slope, 4)}/일, 표본 {n}개)."
+        )
+    elif approaching:
+        note = (
+            f"한계값 기준: {limit_basis}. 선형 외삽은 현재 추세가 유지된다고 가정합니다(R²={round(r2, 2)}, "
+            f"표본 {n}개). days_until_limit은 점 추정이며 range는 추세 적합도 기반 불확실성 밴드입니다."
+        )
+    elif beyond_horizon:
+        note = (
+            f"한계값 기준: {limit_basis}. 추세는 한계로 향하지만 도달 시점이 약 {days_until}일 "
+            f"({round(days_until / 365.0, 1)}년) 뒤로, 실행 가능 기간 {_ACTIONABLE_HORIZON_DAYS}일을 "
+            f"넘습니다. 지금 조치할 사안이 아니라 approaching_limit=false입니다"
+            f"(기울기 {round(slope, 4)}/일, 표본 {n}개)."
+        )
+    else:
+        note = (
+            f"한계값 기준: {limit_basis}. 현재 추세(기울기 {round(slope, 4)}/일, 표본 {n}개)는 한계로 "
+            f"향하지 않아 도달 시점이 없습니다(days_until_limit=null, approaching_limit=false)."
+        )
+
     result = {
         "cluster_id": cluster_id,
         "metric": metric,
         "metric_type": metric_type,
         "engine_family": fam,
+        # 성공 경로도 거부 경로와 같은 status 키를 갖는다: no_data(표본 0개) ·
+        # limit_reached(이미 도달) · ok.
+        "status": "no_data" if n == 0 else "limit_reached" if at_limit else "ok",
         "current_value": current,
         "limit": limit,
         "limit_basis": limit_basis,
@@ -270,36 +449,25 @@ def forecast_capacity_impl(
         "slope_per_day": round(slope, 4),
         "r2": round(r2, 3),
         "samples": n,
-        # days_until_limit는 두 값만 가진다: 정수(추세가 한계로 향함) 또는 null.
-        # null의 이유(추세가 한계로 향하지 않음 / 한계 근거 없음)는 note에 문장으로
-        # 남긴다. 정수여도 실행 가능 기간을 넘으면 approaching_limit는 false다.
+        # days_until_limit: 0(status=limit_reached, 이미 도달) · 양의 정수(추세가
+        # 한계로 향함) · null. null의 이유(추세가 한계로 향하지 않음 / 한계 근거
+        # 없음)는 note에 문장으로 남긴다. 양의 정수여도 실행 가능 기간을 넘으면
+        # approaching_limit는 false다.
         "days_until_limit": days_until,
         "approaching_limit": approaching,
         "days_until_limit_range": days_range,
         "confidence": confidence,
         # free_storage_bytes가 줄어드는 것은 소진(가장 위험)이므로 'shrinking'처럼
-        # 안심되는 단어를 붙이지 않는다.
+        # 안심되는 단어를 붙이지 않는다. 표본 0개는 추세가 아니므로 'stable'로
+        # 라벨하지 않는다("안정적"으로 읽히는 거짓 안심).
         "forecast": (
-            "growing" if slope > 0
+            "no_data" if n == 0
+            else "growing" if slope > 0
             else "stable" if slope == 0
-            else "depleting" if metric_type == "free_storage_bytes"
+            else "depleting" if approach_down
             else "shrinking"
         ),
-        "note": (
-            f"한계값을 클러스터 실제 설정에서 확인할 수 없어({limit_basis}) 도달 시점을 단정하지 "
-            f"않습니다. 추세만 참고하세요(기울기 {round(slope, 4)}/일, 표본 {n}개)."
-            if not grounded else
-            f"한계값 기준: {limit_basis}. 선형 외삽은 현재 추세가 유지된다고 가정합니다(R²={round(r2, 2)}, "
-            f"표본 {n}개). days_until_limit은 점 추정이며 range는 추세 적합도 기반 불확실성 밴드입니다."
-            if approaching else
-            f"한계값 기준: {limit_basis}. 추세는 한계로 향하지만 도달 시점이 약 {days_until}일 "
-            f"({round(days_until / 365.0, 1)}년) 뒤로, 실행 가능 기간 {_ACTIONABLE_HORIZON_DAYS}일을 "
-            f"넘습니다. 지금 조치할 사안이 아니라 approaching_limit=false입니다"
-            f"(기울기 {round(slope, 4)}/일, 표본 {n}개)."
-            if beyond_horizon else
-            f"한계값 기준: {limit_basis}. 현재 추세(기울기 {round(slope, 4)}/일, 표본 {n}개)는 한계로 "
-            f"향하지 않아 도달 시점이 없습니다(days_until_limit=null, approaching_limit=false)."
-        ),
+        "note": note,
     }
     if metric_type == "free_storage_bytes":
         # 할당 용량이 있으면 사용률 컨텍스트를 붙인다(collector와 동일 계산).

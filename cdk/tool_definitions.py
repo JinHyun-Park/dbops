@@ -47,12 +47,20 @@ def performance_schema():
               "actually collected for the cluster's engine. metric is a LOGICAL name, one of "
               "storage | connections | aas (there is no storage_gb): storage = Aurora/DocumentDB "
               "volume growth toward the 128 TiB ceiling or standalone-RDS free space depleting "
-              "toward 0, connections = DatabaseConnections vs max_connections, aas = vs instance "
-              "vCPU. days_until_limit is an int when the trend heads to the limit, else null; "
-              "no date at all when the limit cannot be grounded in the cluster's real config. "
-              "approaching_limit is true ONLY when that ETA is within 365 days (actionable), so a "
-              "distant ETA reports its date with approaching_limit=false, and the note explains "
-              "why. confidence and days_until_limit_range describe the FIT, not the horizon",
+              "toward 0, connections = DatabaseConnections vs max_connections (cluster_meta, "
+              "else cluster_settings, else the DocumentDB DatabaseConnectionsLimit datapoint), "
+              "aas = vs instance vCPU (Serverless v2: serverlessv2_max_acu converted to vCPU). "
+              "Every metric is per-engine-family: an engine that collects no such series is "
+              "refused with status=unsupported_metric, never a zero-sample forecast. status is "
+              "always present: ok | limit_reached | no_data | unsupported_metric | "
+              "unknown_metric | unknown_cluster. days_until_limit is 0 with "
+              "status=limit_reached when the value is ALREADY at/past the limit (urgent, "
+              "observed not extrapolated), a positive int when the trend heads there, else "
+              "null; no date at all when the limit cannot be grounded in the cluster's real "
+              "config. approaching_limit is true when at the limit or when the ETA is within "
+              "365 days (actionable), so a distant ETA reports its date with "
+              "approaching_limit=false and the note explains why. confidence and "
+              "days_until_limit_range describe the FIT, not the horizon",
               {"cluster_id": "string", "metric": "string", "days_lookback": "integer"},
               ["cluster_id"],
               enums={"metric": ["storage", "connections", "aas"]}),

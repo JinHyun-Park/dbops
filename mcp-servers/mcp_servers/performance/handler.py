@@ -143,8 +143,15 @@ TOOLS = {
             "metric series that is actually collected for the cluster's engine: storage "
             "(Aurora/DocumentDB volume growth toward the 128 TiB ceiling, standalone RDS "
             "free-space shrinking toward exhaustion), connections (DatabaseConnections vs "
-            "max_connections), aas (vs instance vCPU). Returns no date when the limit "
-            "cannot be grounded in the cluster's real config."
+            "max_connections from cluster_meta / cluster_settings / the DocumentDB "
+            "DatabaseConnectionsLimit datapoint), aas (vs instance vCPU, or "
+            "serverlessv2_max_acu converted to vCPU on Serverless v2). Each metric is "
+            "per-engine-family: status=unsupported_metric when the engine collects no such "
+            "series. status is always present (ok | limit_reached | no_data | "
+            "unsupported_metric | unknown_metric | unknown_cluster); already at/past the "
+            "limit is status=limit_reached with days_until_limit=0 and "
+            "approaching_limit=true. Returns no date when the limit cannot be grounded in "
+            "the cluster's real config."
         ),
         "input_schema": {
             "type": "object",
