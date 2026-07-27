@@ -6,44 +6,75 @@ inclusion: always
 
 ```
 dbops/
+├── deploy.sh                     # Full deployment driver (reads ENV/REGION from cdk/config/settings.py)
+├── smoke-test.sh                 # Post-deploy smoke checks
 ├── cdk/                          # IaC (CDK Python)
-│   ├── app.py                    # CDK App entry point
+│   ├── app.py                    # CDK App entry point (stack names: dbops-{ENV}-*)
+│   ├── tool_definitions.py       # Gateway tool schemas: THE contract the agent sees (63 tools)
+│   ├── bundling.py               # Shared asset bundling (local pip, Docker fallback) for pymongo assets
 │   ├── config/
-│   │   ├── settings.py           # Environment config (edit this for deployment)
+│   │   ├── settings.py           # Environment config, gitignored (edit this for deployment)
 │   │   └── settings.example.py   # Template for new deployments
+│   ├── policies/
+│   │   ├── cedar/                # 4 .cedar policies bound at the Gateway (LOG_ONLY)
+│   │   └── README.md
+│   ├── cross-account/
+│   │   └── spoke-role-template.yaml  # Spoke-account IAM role for hub-spoke chaining
 │   └── stacks/
 │       ├── foundation_stack.py   # Cognito, VPC, IAM, DynamoDB
-│       ├── data_stack.py         # Aurora PG Cache (+pgvector), S3, Collectors
-│       ├── agent_stack.py        # AgentCore Runtime, Gateway, MCP Lambdas, API GW
-│       └── frontend_stack.py     # S3 + CloudFront
+│       ├── data_stack.py         # Aurora PG Cache (+pgvector), S3, data-pipeline Lambdas
+│       ├── agent_stack.py        # AgentCore Runtime, Gateway, MCP Lambdas, API GW + REST routes
+│       └── frontend_stack.py     # S3 + CloudFront (ships prebuilt frontend/out/)
 ├── agent/                        # AgentCore Runtime (Docker container)
-│   ├── server.py                 # Strands Agent entry point
-│   ├── prompts/                  # System prompt + cheatsheet
-│   ├── tools/                    # Agent-local tools (classifier, etc.)
+│   ├── server.py                 # Strands Agent entry point + 2 agent-local AWS-docs tools
+│   ├── prompts/                  # system_prompt.py + cheatsheet.py
+│   ├── tool_gate.py              # Per-request tool gating (tenancy, fleet-capable deny)
+│   ├── tenancy.py                # id_token JWKS verification + team scoping
+│   ├── _deps/                    # Vendored Python deps baked into the image (build-deps.sh)
 │   └── Dockerfile
-├── mcp-servers/                  # MCP Servers (each is a Lambda function)
-│   ├── performance/              # 11 tools: query analysis, metrics, monitoring
-│   ├── incident/                 # 9 tools: RCA, signal correlation, logs
-│   ├── operations/               # 34 tools: params, schema, backup, SQL review, NoSQL/ElastiCache/RDS-instance writes
-│   ├── simulation/               # 9 tools: upgrade, scaling, DDL impact, NoSQL/cache cost, RDS-instance right-sizing
-│   └── shared/                   # Common utilities (DB connector, cache client)
-├── data-pipeline/                # Data Collection Lambdas
-│   ├── etl_collector/            # Periodic metrics (1min/5min/1hr)
-│   ├── event_processor/          # Real-time RDS/CW events
-│   └── schema_tracker/           # Schema snapshot collector
-├── api/                          # REST API Lambdas (dashboard, clusters, approvals)
-├── frontend/                     # Next.js 16 Web UI
-│   └── src/
-│       ├── app/                  # App Router pages
-│       ├── components/           # design-system/, chat/, dashboard/, query-lab/, approval/
-│       ├── lib/                  # agentcore-sse.ts, api-client.ts, auth.ts
-│       └── styles/               # design-tokens.css
-├── knowledge/                    # Bedrock KB source documents
-│   ├── aurora-docs/
-│   ├── runbooks/
-│   └── best-practices/
-├── tests/                        # unit/, integration/, e2e/
-├── .kiro/                        # Kiro specs and steering
+├── mcp-servers/                  # CDK asset root; agent_stack does Code.from_asset("../mcp-servers")
+│   ├── mcp_servers/              # PYTHON IMPORT ROOT: handlers are mcp_servers.<server>.handler
+│   │   ├── performance/          # 11 tools: query analysis, metrics, forecast
+│   │   ├── incident/             # 9 tools: RCA, signal correlation, logs
+│   │   ├── operations/           # 34 tools: params, schema, backup, SQL review, NoSQL/ElastiCache/RDS-instance writes
+│   │   ├── simulation/           # 9 tools: upgrade, scaling, DDL impact, NoSQL/cache cost, RDS-instance right-sizing
+│   │   ├── workers/              # task_worker.py (agent-tasks queue), ticketing.py
+│   │   └── shared/               # DB connectors, cache_client, approval_guard, engine_family, metric_filters, pricing
+│   ├── schemas/*.json            # STALE DOCS, read by nothing. Gateway truth is cdk/tool_definitions.py
+│   └── requirements.txt
+├── data-pipeline/                # 13 Lambdas, each with handler.py (deployed by data_stack)
+│   ├── etl_collector/            # Periodic metrics; collectors/ holds ~30 per-signal collectors
+│   ├── event_processor/          # EventBridge RDS/CW events -> event_log
+│   ├── ash_sampler/              # ~5s active-session sampling (near-ASH)
+│   ├── rds_direct_collector/     # rds_instance family deep read over direct TCP (pymysql)
+│   ├── docdb_mongo_collector/    # DocumentDB Mongo-protocol deep read (in-VPC, read-only)
+│   ├── proactive_monitor/        # Findings -> SNS alerts (dedup cooldown)
+│   ├── alert_evaluator/          # Alert rule evaluation + notification delivery
+│   ├── outcome_evaluator/        # Remediation outcome verification / learning loop
+│   ├── report_generator/         # Per-cluster daily/weekly operations summaries
+│   ├── task_scheduler/           # Enqueues due recurring agent tasks
+│   ├── restore_finalizer/        # Async second half of the backup restore workflow
+│   ├── inference_profile_setup/  # Idempotent Application Inference Profile creation
+│   ├── schema_migrator/          # CDK Custom Resource; applies data-pipeline/sql/schema_v*.sql
+│   └── sql/                      # Cache DB schema migrations (schema.sql, schema_v*.sql)
+├── api/                          # REST API handlers, 29 dirs, one per route group (dashboard, clusters, approvals, ws_*, ...)
+├── frontend/                     # Next.js 16 Web UI (static export to out/)
+│   ├── src/
+│   │   ├── app/                  # App Router pages + globals.css (design tokens live here)
+│   │   ├── components/           # design-system/, chat/, dashboard/, query-lab/, approval/, clusters/, rca/, reports/
+│   │   └── lib/                  # agentcore-sse.ts, api-client.ts, auth.ts, engine.ts, ...
+│   ├── e2e/                      # Playwright UI smoke (npm run e2e)
+│   └── public/openapi.json       # Generated by tools/openapi_gen.py, parity-tested
+├── tools/
+│   ├── openapi_gen.py            # Regenerates frontend/public/openapi.json from the CDK route table
+│   └── local-tester/             # Post-commit adversarial review + unit + smoke pipeline
+├── knowledge/aurora-docs/        # Placeholder README only; no KB is wired today
+├── tests/                        # unit/ (pytest), cdk/ (synth snapshot), scenario/
+├── docs/                         # superpowers/{specs,plans}/, adr/, ticketing-integration.md
+├── demo/                         # Demo scripts and assets
+├── samples/                      # samples/cdk/ example target-DB stack
+├── DESIGN.md                     # Design system reference (tokens documented in frontend globals.css)
+├── BACKLOG.md
 ├── CLAUDE.md                     # Claude Code project instructions
 ├── AGENTS.md                     # Cross-IDE agent guide
 └── README.md
@@ -60,7 +91,10 @@ dbops/
 ## Architecture Rules
 
 - All infrastructure changes MUST go through CDK. Never modify AWS resources directly.
-- Each MCP server is an independent Lambda with its own `handler.py` and `tools/` directory.
-- Shared code lives in `mcp-servers/shared/` and is packaged as a Lambda layer.
-- Frontend is a static export (no SSR server needed).
+- Each MCP server is an independent Lambda with its own `handler.py` and `tools/` directory, one file per tool, under `mcp-servers/mcp_servers/`. A tool placed at `mcp-servers/<server>/` ships inside the asset but is not importable, so it goes silently dark.
+- Shared MCP code lives in `mcp-servers/mcp_servers/shared/`. There is no Lambda layer: the whole `mcp-servers/` tree is the asset, and cross-package sharing with `api/` or `data-pipeline/` is done by verbatim file copies plus a parity test.
+- Every new gateway tool must be registered in `cdk/tool_definitions.py` or the agent cannot see it. Read-only servers (performance, incident, simulation) also need the tool in `cdk/policies/cedar/<server>_policy.cedar`; `tests/unit/test_tool_schema_parity.py` enforces both plus handler-signature parity.
+- `engine_family.py` is 4 byte-identical Python copies (`mcp-servers/mcp_servers/shared/`, `api/clusters/`, `api/dashboard/`, `data-pipeline/etl_collector/collectors/`) plus a TypeScript mirror in `frontend/src/lib/engine.ts`. Edit all five together; `tests/unit/test_engine_family.py` asserts the four Python copies classify identically (the TS mirror is not covered by it).
+- Cluster-level `metric_snapshots` aggregates must use the shared strict dimension filter `CLUSTER_LEVEL_ONLY` from `mcp-servers/mcp_servers/shared/metric_filters.py` (verbatim copy at `api/dashboard/metric_filters.py`). Without it a cluster total silently mixes with its own per-instance / per-wait-event / per-GSI rows.
+- Frontend is a static export (no SSR server needed) and `frontend_stack` ships the prebuilt `frontend/out/`, so run `npm run build` before deploying it.
 - Environment-specific values ONLY in `cdk/config/settings.py`.
