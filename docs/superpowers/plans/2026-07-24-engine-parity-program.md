@@ -24,13 +24,13 @@
 
 ## 티어 구성
 
-| 티어 | 주제                                                                                     | 상태           |
-| ---- | ---------------------------------------------------------------------------------------- | -------------- |
-| E-0  | 정확성: 틀린 출력, 규칙 위반, dark 기능 제거                                             | 이 계획의 대상 |
-| E-1  | 엔진 중립 디스패치 패리티(용량 ETA, 시즌 베이스라인, RCA 메트릭, findings 윈도우)        | 예정           |
-| E-2  | Aurora MySQL 패리티(4 check_type, EXPLAIN 종단, 인덱스 dialect+데이터)                   | 예정           |
-| E-3  | rds_instance 패리티(인스턴스 파라미터 경로, 시뮬레이션 게이트 해제, SQL Server DMV 확장) | 예정           |
-| E-4  | schema_snapshots 구축(L), ElastiCache 딥리드 영속화                                      | 예정           |
+| 티어 | 주제                                                                                                                      | 상태                                                      |
+| ---- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| E-0  | 정확성: 틀린 출력, 규칙 위반, dark 기능 제거                                                                              | 완료(브랜치 feat/engine-parity-e0, 검수+수정 웨이브 종료) |
+| E-1  | 엔진 중립 디스패치 패리티(dimension 필터 공유화, RCA 메트릭, findings 윈도우, 시즌 베이스라인, 용량 ETA, 프로파일러 로그) | 진행 중                                                   |
+| E-2  | Aurora MySQL 패리티(4 check_type, EXPLAIN 종단, 인덱스 dialect+데이터)                                                    | 예정                                                      |
+| E-3  | rds_instance 패리티(인스턴스 파라미터 경로, 시뮬레이션 게이트 해제, SQL Server DMV 확장)                                  | 예정                                                      |
+| E-4  | schema_snapshots 구축(L), ElastiCache 딥리드 영속화                                                                       | 예정                                                      |
 
 ---
 
@@ -144,3 +144,140 @@
 ## 진행 원장
 
 `.superpowers/sdd/progress.md`에 태스크 완료를 한 줄씩 append 한다.
+
+---
+
+## E-1: 엔진 중립 디스패치 패리티
+
+E-0에서 확인된 구조적 원인 2번(엔진 중립 기계장치인데 디스패치 맵에 키가 없어 특정 패밀리만
+혜택을 못 받는 문제)을 닫는다. 새 수집은 최소화하고, 이미 `metric_snapshots`에 있는 계열을
+쓴다. **각 태스크의 blocker는 감사 문서의 "적대 검증 교정" 절에 이미 기록돼 있으니 먼저 읽을 것.**
+
+### Task E1-1: dimension 필터를 공유 헬퍼로 통일하고 모든 metric_snapshots 리더 감사 (선행, 단독)
+
+**왜 선행인가:** 이 함정은 이 프로젝트에서 **세 번 발생**했다. Instance Compare(2026-06-22),
+E-0의 forecast_capacity, 그리고 아래 감사에서 추가로 나올 리더들. `metric_snapshots`는 같은
+`metric_type`에 클러스터 레벨 행(`dimensions='{}'`)과 세부 행(인스턴스별 `{instance,role}`,
+PI 대기이벤트별 `{db.wait_event.name}`, DynamoDB GSI별)을 함께 담는다. 필터 없이 집계하면
+합계와 조각이 섞여 **조용히 틀린 숫자**가 나온다.
+
+**Files:**
+
+- Create: `mcp-servers/mcp_servers/shared/metric_filters.py` (상수 + 짧은 헬퍼)
+- Modify: 감사로 찾은 모든 리더. 최소 확인 대상: `api/dashboard/handler.py`(용량/포화/타임시리즈/
+  헬스스코어 경로), `mcp-servers/mcp_servers/performance/tools/*`, `mcp-servers/mcp_servers/incident/tools/*`,
+  `data-pipeline/etl_collector/collectors/*`(capacity_forecast, proactive_monitor, alert_evaluator,
+  pg_baseline_trainer, report_generator)
+- Test: 각 수정 지점에 실행 SQL 문자열 단정 + 혼합 행 fixture로 계산 결과 검증
+
+**핵심 규칙(반드시 준수):**
+
+- 클러스터 레벨 집계에는 **strict 형태** `AND (dimensions IS NULL OR dimensions::text = '{}')`를 쓴다.
+  `NOT jsonb_exists(dimensions,'instance')`는 **불충분**하다: PI 대기이벤트 행과 DynamoDB GSI 행에는
+  `instance` 키가 없어 통과한다. E-0에서 두 리뷰어가 이 지점에서 엇갈렸고 strict가 맞다.
+- 의도적으로 세부 행을 보는 리더(Instance Compare, per-GSI 패널, 대기이벤트 차트)는 **그대로 둔다.**
+  감사 결과에 "의도적으로 dimensioned를 읽는 곳" 목록을 남긴다.
+- `api/`는 `mcp_servers`를 임포트할 수 없다 → 상수를 복제하고 병렬 유닛테스트로 문자열 동일성을 가드한다.
+
+**Steps:**
+
+- [ ] `grep -rn "metric_snapshots" --include=*.py` 로 전 리더 목록화(테스트 제외)
+- [ ] 각 리더를 "클러스터 레벨 집계" / "의도적 세부 조회" 로 분류하고 근거를 표로 기록
+- [ ] 클러스터 레벨인데 필터 없는 곳을 전부 수정
+- [ ] 혼합 행(클러스터 합계 + 인스턴스 2행 + 대기이벤트 2행) fixture로 필터 유무에 따라 결과가
+      달라지는 것을 증명하는 테스트. 실행 SQL 문자열 단정만으로는 불충분
+- [ ] 감사 표를 `docs/superpowers/specs/2026-07-24-engine-parity-audit.md`에 부록으로 추가
+
+### Task E1-2: RCA와 신호 상관을 비관계형 엔진에서 동작시키기
+
+**문제:** `incident/tools/diagnose_root_cause.py`와 `correlate_signals.py`가 metric_type을
+`('aas','cpu','db_connections')`로 하드코딩한다. DocumentDB는 `cpu_utilization`, ElastiCache는
+`cache_cpu`/`engine_cpu`를 쓰므로 **DynamoDB/DocumentDB/ElastiCache RCA는 랭킹된 메트릭 신호가 0개**다.
+
+**Files:**
+
+- Modify: `mcp-servers/mcp_servers/incident/tools/diagnose_root_cause.py`, `correlate_signals.py`
+- Test: `tests/unit/mcp_servers/incident/*`
+
+**검증에서 나온 blocker(반드시 반영):**
+
+1. **zero-baseline 가드가 헤드라인 케이스를 죽인다.** `diagnose_root_cause.py`는 baseline 평균이 0인
+   메트릭을 건너뛴다. 그런데 throttle/eviction/cursors_timed_out은 정상시 0이고 사고 때 튀는
+   **카운터**다. 즉 allowlist만 넓히면 정작 원인 신호가 계속 스킵된다. 카운터 계열은 "0 -> 양수"
+   자체를 신호로 처리하는 별도 경로가 필요하다.
+2. **per-GSI dimension 충돌.** DynamoDB GSI 행은 테이블 레벨 행과 같은 metric_type이고 `instance`
+   키가 없어 기존 필터를 통과한다 → E1-1의 strict 필터를 쓸 것.
+3. 감사 원안이 말한 "consumed-vs-provisioned utilization" 계열은 **존재하지 않는다**. provisioned_rcu/wcu는
+   PROVISIONED 테이블만 수집되고 consumed와 별개 행이다. 없는 계열을 참조하지 말 것.
+4. 패밀리별 metric 이름 세트를 각각 정의한다(문자열 복붙 금지, 생산 수집기에서 확인).
+
+**Steps:**
+
+- [ ] 각 패밀리의 실제 metric_type을 수집기 소스에서 확인해 표로 만든다
+- [ ] 패밀리별 신호 세트 + 카운터 계열 구분(게이지 vs 카운터)
+- [ ] 카운터는 baseline 0에서도 스파이크를 신호로 올리는 경로 추가
+- [ ] `_collect_elasticache_signals`가 이미 있는 per-family 수집기 패턴이니 그것을 따른다
+- [ ] 패밀리별로 "사고 주입 -> 신호가 랭킹된다"를 증명하는 테스트
+
+### Task E1-3: findings 노출 윈도우 일반화 (DocumentDB 절반 숨김)
+
+**문제:** `api/dashboard/handler.py:_health_findings`는 rds_instance만 check_type별 최신 윈도우를
+쓰고 나머지는 단일 `MAX(snapshot_time)`이다. DocumentDB도 **서로 다른 주기의 두 라이터**(ETL +
+docdb_mongo_collector)가 서로 겹치지 않는 check_type 집합을 쓰므로, 한쪽이 항상 화면에서 사라진다.
+같은 버그가 `incident/tools/maintenance_findings.py`(에이전트 경로)에도 있어 **대시보드와 에이전트가
+서로 다른 답**을 준다.
+
+**검증에서 나온 blocker:**
+
+- 에이전트 툴은 대시보드 쿼리를 그대로 복사할 수 없다. 15분 윈도우를 일괄 적용하면 시드된 데모
+  findings(시드 시점 1회만 기록)가 통째로 사라진다.
+- fail-closed 의미도 다르다. 대시보드는 레지스트리 조회 실패 시 빈 배열을 반환하는데, 에이전트가
+  빈 배열을 받으면 "유지보수 이슈 없음"으로 단정한다. 에이전트 경로는 명시적 오류가 필요하다.
+
+**Steps:**
+
+- [ ] 두 라이터 이상을 가진 패밀리를 일반 규칙으로 처리(rds_instance 특례 제거, Aurora 동작 불변 확인)
+- [ ] 윈도우는 두 라이터의 최대 주기 이상으로 잡고 근거를 주석에 남긴다
+- [ ] 시드 데모 findings가 사라지지 않음을 테스트로 고정
+- [ ] 에이전트 경로는 조회 실패 시 빈 배열이 아니라 오류 상태를 반환
+
+### Task E1-4: 비관계형 3패밀리에 시즌 베이스라인
+
+**문제:** `collect_pg_baselines`는 엔진 무관(`metric_snapshots`만 읽음)인데 relational과
+rds_instance 분기에서만 호출된다. 그래서 DocumentDB/DynamoDB/ElastiCache 이상탐지는 영구적으로
+저신뢰 flat mean/stddev 모드에 머문다.
+
+**Steps:**
+
+- [ ] ETL 핸들러의 3개 분기에서도 호출(인자 스코프 확인, `run_ts` 공유 규칙 준수)
+- [ ] 학습기가 dimensions 빈 행만 학습하는지 재확인(per-wait-event 폭주 방지 기존 규칙)
+- [ ] 패밀리별로 baseline 행이 생기고 이상탐지가 seasonal 모드로 뜨는 것을 테스트
+
+### Task E1-5: 용량 예측 어휘 통일 + 누락 패밀리 추가
+
+**문제:** MCP 툴은 논리 이름(storage/connections/aas), REST 대시보드는 raw metric_type을 받는다.
+게다가 `_CAPACITY_METRICS_BY_FAMILY`에 rds_instance/elasticache 키가 없어 대시보드는
+"not applicable"인데 MCP 툴은 소진 ETA를 낸다(같은 제품이 서로 다른 답).
+
+**검증에서 나온 blocker:**
+
+- 키만 추가하면 no-op이다. `_CAPACITY_METRICS`에 limit + label 정의가 함께 있어야 한다.
+- 감소형(0으로 소진)은 분기가 아니라 **두 번째 응답 모드**다. 패널의 `(current/limit)*100` 막대 계산이
+  limit=0에서 깨진다.
+- ElastiCache 메모리는 패밀리 단일 답이 없다(`DatabaseMemoryUsagePercentage`는 Redis/Valkey 전용,
+  Memcached 목록에 없음).
+- LRU/TTL 정책 캐시는 설계상 maxmemory 근처에 붙어 있어 기울기가 0이고 "며칠 후 100%"가 무의미하다.
+  캐시는 eviction 발생을 신호로 쓰는 편이 정확하다.
+
+### Task E1-6: DocumentDB 프로파일러 로그 수집 (E-0에서 이월)
+
+E-0에서 프로파일러를 올바른 방식(파라미터 그룹 + CloudWatch Logs)으로 켜게 했고, IAM도
+`/aws/docdb/*`까지 정당하게 열었다. 이제 `/aws/docdb/{cluster_id}/profiler`를 실제로 읽어
+슬로우 op findings를 만든다(삭제된 `system.profile` 경로의 올바른 대체).
+
+**Steps:**
+
+- [ ] `logs:FilterLogEvents` 또는 Insights로 프로파일러 로그 파싱(millis, ns, planSummary, op)
+- [ ] `query_stats` 또는 전용 테이블에 적재해 엔진 중립 회귀 수집기가 그대로 쓰이게 한다
+- [ ] `docdb_mongo_slow_ops` finding 부활(라벨도 함께 복구)
+- [ ] 프로파일러가 꺼져 있으면 `set_docdb_profiler`를 안내하는 finding(파라미터 그룹으로 상태 확인)
