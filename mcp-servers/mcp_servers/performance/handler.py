@@ -16,8 +16,33 @@ from mcp_servers.performance.tools.slow_queries import get_slow_queries_impl
 from mcp_servers.performance.tools.top_queries import get_top_queries_impl
 from mcp_servers.performance.tools.vacuum_stats import get_vacuum_stats_impl
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.engine_family import CAPABILITIES
+from mcp_servers.shared.engine_family import engine_family as _engine_family
 
 cache = CacheClient()
+
+# 쿼리/플랜 툴 → 그 툴이 REQUIRE하는 per-family CAPABILITIES 키.
+# operations/handler.py와 같은 POSITIVE + FAIL-CLOSED 게이트다. 게이트가 없던
+# 동안 DynamoDB/ElastiCache에 get_top_queries를 물으면 unsupported_engine이
+# 아니라 빈 배열이 돌아왔다. DBA에게는 "무거운 쿼리 없음"으로 읽히는 거짓
+# 빈 상태. 해석 불가 클러스터(미등록·조회 실패)도 거부한다: 없는 데이터를
+# "정상"으로 보고하는 것보다 거부가 안전하다.
+_ENGINE_GATED_TOOLS = {
+    # query_stats 행을 쓰는 수집기는 relational(pg_stat_statements /
+    # events_statements_summary_by_digest)과 rds_instance(direct-TCP)뿐이다.
+    "get_top_queries": "query_stats",
+    "get_slow_queries": "query_stats",
+    "detect_regressions": "query_stats",
+    # explain / index_advice는 오늘 PG 전용 구현이라 relational만 True다.
+    "explain_plan": "explain",
+    "recommend_index": "index_advice",
+}
+
+_CAP_LABEL = {
+    "query_stats": "쿼리 통계가 수집되는 엔진(Aurora, RDS 인스턴스)",
+    "explain": "EXPLAIN 지원 엔진(Aurora)",
+    "index_advice": "인덱스 추천 지원 엔진(Aurora)",
+}
 
 TOOLS = {
     "get_top_queries": {
@@ -110,12 +135,19 @@ TOOLS = {
     },
     "forecast_capacity": {
         "impl": forecast_capacity_impl,
-        "description": "Forecast when a metric (storage, connections, AAS) will reach its limit using linear regression",
+        "description": (
+            "Forecast when a metric will reach its limit using linear regression over the "
+            "metric series that is actually collected for the cluster's engine: storage "
+            "(Aurora/DocumentDB volume growth toward the 128 TiB ceiling, standalone RDS "
+            "free-space shrinking toward exhaustion), connections (DatabaseConnections vs "
+            "max_connections), aas (vs instance vCPU). Returns no date when the limit "
+            "cannot be grounded in the cluster's real config."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
-                "metric": {"type": "string", "enum": ["storage_gb", "connections", "aas"], "default": "storage_gb"},
+                "metric": {"type": "string", "enum": ["storage", "connections", "aas"], "default": "storage"},
                 "days_lookback": {"type": "integer", "default": 30, "description": "Days of historical data for trend calculation"},
             },
             "required": ["cluster_id"],
@@ -200,6 +232,25 @@ def _extract_tool_name(context):
     return raw.split(delim, 1)[1] if delim in raw else raw
 
 
+def _resolve_family(cluster_id):
+    """cluster_meta에서 엔진 패밀리를 해석한다. cluster_id가 없거나, 행이
+    없거나, 조회가 실패하면 None. 게이트에서 None은 FAIL-CLOSED(거부)다."""
+    if not cluster_id:
+        return None
+    try:
+        rows = cache.execute(
+            "SELECT engine FROM cluster_meta WHERE cluster_id = :cid",
+            {"cid": cluster_id},
+        )
+    except Exception as e:
+        print(f"[performance] family lookup failed for {cluster_id}: {e}")
+        return None
+    rows = getattr(rows, "rows", rows)
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+        return _engine_family(rows[0].get("engine"))
+    return None
+
+
 def lambda_handler(event, context):
     tool_name = _extract_tool_name(context)
     method = event.get("method") if isinstance(event, dict) else None
@@ -214,6 +265,24 @@ def lambda_handler(event, context):
         }
 
     if tool_name and tool_name in TOOLS:
+        # POSITIVE, FAIL-CLOSED 엔진 게이트. 지원 capability가 없는 패밀리(그리고
+        # 해석 불가 클러스터)는 impl에 닿기 전에 unsupported_engine으로 거부한다.
+        cap_key = _ENGINE_GATED_TOOLS.get(tool_name)
+        if cap_key:
+            cluster_id = (event or {}).get("cluster_id") if isinstance(event, dict) else None
+            fam = _resolve_family(cluster_id)
+            if not CAPABILITIES.get(fam, {}).get(cap_key, False):
+                engine_label = _CAP_LABEL.get(cap_key, cap_key)
+                return {"content": [{"type": "text", "text": json.dumps({
+                    "status": "unsupported_engine",
+                    "engine_family": fam,
+                    "cluster_id": cluster_id,
+                    "reason": (
+                        "cluster engine could not be resolved"
+                        if fam is None
+                        else f"{tool_name}는 {engine_label} 전용입니다 (현재 엔진: {fam})."
+                    ),
+                })}]}
         try:
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}

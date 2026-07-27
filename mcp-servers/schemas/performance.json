@@ -84,12 +84,16 @@
     },
     {
       "name": "forecast_capacity",
-      "description": "Forecast storage/connection capacity limits",
+      "description": "Forecast storage/connection/AAS capacity limits from the series collected for the cluster's engine",
       "inputSchema": {
         "type": "object",
         "properties": {
           "cluster_id": { "type": "string" },
-          "metric": { "type": "string", "default": "storage_gb" }
+          "metric": {
+            "type": "string",
+            "enum": ["storage", "connections", "aas"],
+            "default": "storage"
+          }
         },
         "required": ["cluster_id"]
       }
