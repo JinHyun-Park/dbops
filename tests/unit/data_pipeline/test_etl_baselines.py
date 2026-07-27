@@ -1,5 +1,6 @@
-"""Seasonal baseline training for ALL five engine families (E1-4), and the two
-guards that keep a thin bucket from producing a confident-looking anomaly.
+"""Seasonal baseline training for ALL five engine families (E1-4), the two
+guards that keep a thin bucket from producing a confident-looking anomaly, and
+the cap that keeps the second guard from muting a real one.
 
 `collect_pg_baselines` reads only `metric_snapshots` and writes
 `metric_baselines`, so it is engine-agnostic. It used to be called from the
@@ -21,7 +22,9 @@ Three layers here:
   3. Consequence: a family with trained buckets makes `detect_anomalies` report
      mode='seasonal'; without them the same series reports 'flat'. A thin bucket
      must NOT reach seasonal mode: 3 samples of 20.0 / 20.1 / 20.2 used to train
-     median=20.1 / IQR=0.0999 and score a 21.0 reading at z=9.0.
+     median=20.1 / IQR=0.0999 and score a 21.0 reading at z=9.0. And the floors
+     must not run the other way: a 99.5% cache hit ratio collapsing to 95% has to
+     stay an anomaly at both default thresholds (agent 2.0, dashboard 2.5).
 """
 
 import contextlib
@@ -226,24 +229,32 @@ def _rows_for(metric_type, values=None):
     return rows
 
 
+_REL_RE = r"(ABS\(PERCENTILE_CONT\(0\.5\) WITHIN GROUP \(ORDER BY value\)\) \* )([0-9.]+)"
+_CAP_RE = r"\)\) \* ([0-9.]+) \)"      # the LEAST cap on the relative floor
+
+
 def _gates(sql):
-    """Read the trainer's two guards back OUT of its SQL, so a loosened gate
-    changes what this model trains instead of silently passing."""
+    """Read the trainer's guards back OUT of its SQL, so a loosened gate changes
+    what this model trains instead of silently passing: the sample floor, the
+    relative IQR floor, the cap on how far that floor may inflate the observed
+    spread, and the absolute IQR floor."""
     flat = " ".join(sql.split())
     having = re.search(r"HAVING COUNT\(\*\) >= (\d+)", flat)
     assert having, f"sample gate missing from the trainer SQL: {flat}"
-    rel = re.search(
-        r"ABS\(PERCENTILE_CONT\(0\.5\) WITHIN GROUP \(ORDER BY value\)\) \* ([0-9.]+)", flat)
+    rel = re.search(_REL_RE, flat)
+    cap = re.search(_CAP_RE, flat)
+    assert cap, f"the relative IQR floor is uncapped in the trainer SQL: {flat}"
     absolute = re.search(r", ([0-9.]+) \) AS iqr", flat)
     assert absolute, f"absolute IQR floor missing from the trainer SQL: {flat}"
-    return int(having.group(1)), float(rel.group(1)) if rel else 0.0, float(absolute.group(1))
+    return (int(having.group(1)), float(rel.group(2)) if rel else 0.0,
+            float(cap.group(1)), float(absolute.group(1)))
 
 
 def _model_training(sql, rows):
     """Model the parts of the trainer's INSERT..SELECT that decide what is
     learned, driven by the SQL the collector ACTUALLY issued."""
     flat = " ".join(sql.split())
-    sample_floor, rel_floor, abs_floor = _gates(flat)
+    sample_floor, rel_floor, cap, abs_floor = _gates(flat)
     kept = rows if _STRICT not in flat else [r for r in rows if not r["dimensions"]]
     if "14 days" in flat:
         kept = [r for r in kept if r["ts"] > _NOW - timedelta(days=14)]
@@ -261,8 +272,11 @@ def _model_training(sql, rows):
             continue
         q = statistics.quantiles(vals, n=4, method="inclusive")
         median = statistics.median(vals)
+        raw_iqr = q[2] - q[0]                   # PERCENTILE_CONT(0.75) - (0.25)
         out.append({"metric_type": metric_type, "hour_of_week": how, "median": median,
-                    "iqr": max(q[2] - q[0], abs(median) * rel_floor, abs_floor),
+                    "iqr": max(raw_iqr,
+                               min(abs(median) * rel_floor, raw_iqr * cap),
+                               abs_floor),
                     "sample_count": len(vals)})
     return out
 
@@ -364,18 +378,36 @@ def test_trainer_skips_when_a_fresh_baseline_exists():
 
 
 # ===========================================================================
-# 2b. The two guards on a thin bucket
+# 2b. The two guards on a thin bucket, and the cap that keeps the second one
+#     from silencing a high-median tight-spread metric
 # ===========================================================================
 
 _THIN = [20.0, 20.1, 20.2]      # the reviewer's reproduction, on real PostgreSQL
 _SPIKE = 21.0                   # 0.9 above the thin median of 20.1
+
+# A healthy Aurora BufferCacheHitRatio hour: 12 samples, high median, genuinely
+# tight spread. PERCENTILE_CONT gives median 99.50 and P75-P25 = 0.125 (verified
+# on PostgreSQL 14.18), i.e. a real spread far under 5% of the median.
+_CACHE_HIT = [99.3, 99.35, 99.4, 99.45, 99.45, 99.5,
+              99.5, 99.55, 99.55, 99.6, 99.7, 99.8]
+_CACHE_HIT_MEDIAN = 99.5
+_CACHE_HIT_IQR = 0.125
+# docdb_findings.CACHE_HIT_WARNING_PCT: the product itself calls this a warning.
+_CACHE_COLLAPSE = 95.0
+_AGENT_THRESHOLD, _DASHBOARD_THRESHOLD = 2.0, 2.5    # detect_anomalies / dashboard
 
 
 def _pre_fix(sql):
     """The same SQL with both guards removed: the >= 3 sample gate and the
     absolute-only IQR floor this trainer shipped with."""
     old = re.sub(r"HAVING COUNT\(\*\) >= \d+", "HAVING COUNT(*) >= 3", " ".join(sql.split()))
-    return re.sub(r"ABS\(PERCENTILE_CONT\(0\.5\)[^*]*\* [0-9.]+, ", "", old)
+    return re.sub(_REL_RE, r"\g<1>0.0", old)
+
+
+def _uncapped(sql):
+    """The same SQL with the relative floor's LEAST cap effectively lifted: the
+    one commit where `ABS(median) * 0.05` won outright over the observed spread."""
+    return re.sub(_CAP_RE, ")) * 1000000000 )", " ".join(sql.split()))
 
 
 def test_three_samples_in_one_hour_train_no_baseline():
@@ -408,7 +440,8 @@ def test_iqr_floor_is_relative_to_the_median():
     """A bucket CAN be flat and still clear the sample floor (12 near-identical
     samples), so the second guard carries it: 5% of the median 20.1 is 1.005, so
     a 0.9 move scores z=0.90 instead of z=9.0. The absolute 0.01 floor is
-    powerless at this median, and a bucket with real spread keeps its real IQR."""
+    powerless at this median, and here the 10x cap is not the binding constraint
+    (10 * the observed 0.2 spread is 2.0, above the relative floor)."""
     fake, _ = _run_trainer("memory_usage_pct", values=_THIN * 4)
     row = fake.trained[0]
     assert row["sample_count"] == 12
@@ -418,6 +451,54 @@ def test_iqr_floor_is_relative_to_the_median():
 
     was = _model_training(_pre_fix(fake.insert_sql), _rows_for("memory_usage_pct", _THIN * 4))
     assert (_SPIKE - was[0]["median"]) / was[0]["iqr"] == pytest.approx(4.5, abs=0.01)
+
+
+def test_relative_floor_cannot_inflate_a_real_iqr_without_bound():
+    """The class the unbounded floor silenced: a high median with a genuinely
+    tight spread. 12 healthy BufferCacheHitRatio samples (median 99.50, real IQR
+    0.125) floored at ABS(median) * 0.05 = 4.975, so a collapse to 95% scored
+    z=-0.905, under BOTH default thresholds, while docdb_findings calls 95% a
+    warning. Capped at 10x the observed spread the floor is 1.250, and the real
+    IQR of a bucket survives whenever it is >= 0.5% of the median."""
+    fake, _ = _run_trainer("buffer_cache_hit", values=_CACHE_HIT)
+    row = fake.trained[0]
+    assert row["sample_count"] == 12               # a full hour, not a cold start
+    assert row["median"] == pytest.approx(_CACHE_HIT_MEDIAN)
+    assert row["iqr"] == pytest.approx(_CACHE_HIT_IQR * _gates(fake.insert_sql)[2])
+    assert row["iqr"] == pytest.approx(1.25)
+    for observed, z in ((95.0, -3.6), (92.0, -6.0), (90.0, -7.6)):
+        assert (observed - row["median"]) / row["iqr"] == pytest.approx(z, abs=0.001)
+
+    # Discriminating: uncapped, the same fixture floors at 5% of the median and
+    # every one of those drops falls under both thresholds.
+    was = _model_training(_uncapped(fake.insert_sql), _rows_for("buffer_cache_hit", _CACHE_HIT))
+    assert was[0]["iqr"] == pytest.approx(4.975)
+    for observed, z in ((95.0, -0.905), (92.0, -1.508), (90.0, -1.910)):
+        assert (observed - was[0]["median"]) / was[0]["iqr"] == pytest.approx(z, abs=0.001)
+
+    # A bucket with real spread is untouched by either floor, capped or not.
+    real = _run_trainer("cpu_utilization")[0].trained[0]
+    assert real["iqr"] == pytest.approx(_CLUSTER_IQR)
+
+
+def test_zero_median_counter_ceiling_is_documented_not_silently_fixed():
+    """Pinned decision. An all-zero bucket is the HEALTHY shape for a counter like
+    deadlocks, and neither guard touches it: both relative branches are 0, so the
+    absolute 0.01 floor wins and one event scores z=100 as seasonal. A blanket
+    "one event" floor is NOT the fix: read_latency / write_latency are raw
+    CloudWatch SECONDS in this same table, so a 1.0 floor would score a 20 ms
+    spike on an idle cluster at z=0.02 and hide it forever, the same silencing
+    bug the cap above removes. The ceiling is disclosed in the trainer docstring
+    instead, and this test fails if either the behaviour or the disclosure moves."""
+    fake, _ = _run_trainer("deadlocks", values=[0.0] * 12)
+    row = fake.trained[0]
+    assert (row["sample_count"], row["median"]) == (12, 0.0)
+    assert row["iqr"] == pytest.approx(_gates(fake.insert_sql)[3])    # absolute floor
+    assert (1.0 - row["median"]) / row["iqr"] == pytest.approx(100.0)
+
+    doc = sys.modules[_train.__module__].__doc__
+    assert "KNOWN CEILING (zero-median counters)" in doc
+    assert "SECONDS" in doc         # the reason a 1.0 floor is not the fix
 
 
 def test_thin_baselines_trained_under_the_old_gate_are_retired():
@@ -510,6 +591,33 @@ def test_thin_bucket_is_not_a_high_confidence_seasonal_anomaly():
         "docdb-1", hours=4, threshold=2.0)
     assert before["baseline_mode"] == "seasonal"
     assert before["anomalies"][0]["z_score"] == pytest.approx(9.0, abs=1e-6)
+
+
+def test_cache_hit_collapse_is_flagged_on_both_anomaly_surfaces():
+    """The regression, end to end through the real tool: a 99.5% cache hit ratio
+    collapsing to 95% must be an anomaly at the agent's default threshold (2.0)
+    AND the dashboard's (2.5). Uncapped it was silent on both."""
+    from mcp_servers.performance.tools.detect_anomalies import detect_anomalies_impl
+
+    fake, _ = _run_trainer("buffer_cache_hit", values=_CACHE_HIT)
+    was = _model_training(_uncapped(fake.insert_sql), _rows_for("buffer_cache_hit", _CACHE_HIT))
+
+    for threshold in (_AGENT_THRESHOLD, _DASHBOARD_THRESHOLD):
+        out = detect_anomalies_impl(
+            _cache_returning(_anomaly_row(fake.trained, "buffer_cache_hit",
+                                          recent_max=_CACHE_COLLAPSE)),
+            "docdb-1", hours=4, threshold=threshold)
+        assert out["baseline_mode"] == "seasonal"
+        assert len(out["anomalies"]) == 1
+        assert out["anomalies"][0]["z_score"] == pytest.approx(-3.6, abs=0.001)
+
+        # Discriminating: the uncapped floor muted the identical collapse.
+        muted = detect_anomalies_impl(
+            _cache_returning(_anomaly_row(was, "buffer_cache_hit",
+                                          recent_max=_CACHE_COLLAPSE)),
+            "docdb-1", hours=4, threshold=threshold)
+        assert muted["baseline_mode"] == "seasonal"
+        assert muted["anomalies"] == []
 
 
 def test_flat_but_well_sampled_bucket_needs_a_real_move():
