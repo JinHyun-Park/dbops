@@ -6,13 +6,11 @@ from mcp_servers.shared.cluster_targets import client_for_cluster
 
 logger = logging.getLogger(__name__)
 
-# log_group is an AGENT-SUPPLIED parameter, so it is the one input here that can
-# point the Insights query anywhere. Restrict it to the DB log-group families
-# DBOps is meant to read; anything else (Lambda, application, CloudTrail, another
-# team's groups) is refused before the AWS call. The incident Lambda's IAM is
-# scoped to the same three prefixes in cdk/stacks/agent_stack.py, so this is
-# defense in depth rather than the only control, and it turns what would be an
-# opaque AccessDenied into an explicit, actionable refusal.
+# The DB log-group families DBOps reads. These are FAMILIES, not the allowlist:
+# the check below binds the group to the requested cluster inside one of them.
+# The incident Lambda's IAM is scoped to these same three prefixes
+# (cdk/stacks/agent_stack.py), but a prefix grant cannot tell one team's cluster
+# from another's inside it, which is exactly what the per-cluster binding adds.
 #   /aws/rds/cluster/*  Aurora error/slowquery/general/audit
 #   /aws/rds/instance/* standalone RDS MySQL / SQL Server
 #   /aws/docdb/*        DocumentDB profiler + audit
@@ -21,6 +19,30 @@ ALLOWED_LOG_GROUP_PREFIXES = (
     "/aws/rds/instance/",
     "/aws/docdb/",
 )
+
+
+def permitted_log_group_prefixes(cluster_id: str) -> tuple:
+    """The log-group prefixes the requested cluster's own logs live under.
+
+    log_group is an AGENT-SUPPLIED parameter, so it is the one input here that
+    steers WHERE the Insights query reads. Bounding it to a FAMILY was not
+    enough: agent/tool_gate.py's ClusterVisibilityGate inspects only
+    args["cluster_id"], and the hub IAM grant covers the whole
+    /aws/rds/cluster/* prefix, so a caller scoped to team A could pass a
+    cluster_id it is allowed to see PLUS team B's log group and read another
+    team's database logs. Both controls above the tool are cluster-blind, so the
+    binding has to happen here: the group must belong to the cluster the caller
+    was actually authorized for, the way api/dashboard/handler.py::_log_insights
+    builds its group from cluster_id rather than accepting one.
+
+    An unusable cluster_id yields ``()``, and ``startswith(())`` is always False,
+    so an unresolvable cluster refuses every group instead of widening back to a
+    family prefix.
+    """
+    cid = str(cluster_id or "").strip()
+    if not cid or "/" in cid:
+        return ()
+    return tuple(f"{family}{cid}/" for family in ALLOWED_LOG_GROUP_PREFIXES)
 
 
 def search_logs_impl(
@@ -32,7 +54,8 @@ def search_logs_impl(
 ) -> dict:
     if not log_group:
         log_group = f"/aws/rds/cluster/{cluster_id}/error"
-    if not str(log_group).startswith(ALLOWED_LOG_GROUP_PREFIXES):
+    permitted = permitted_log_group_prefixes(cluster_id)
+    if not str(log_group).startswith(permitted):
         logger.warning(
             "search_logs refused out-of-scope log group for %s: %r", cluster_id, log_group
         )
@@ -41,8 +64,8 @@ def search_logs_impl(
             "log_group": log_group,
             "status": "log_group_not_allowed",
             "reason": (
-                "DBOps는 데이터베이스 로그 그룹만 조회합니다. log_group은 "
-                + ", ".join(ALLOWED_LOG_GROUP_PREFIXES)
+                "DBOps는 요청한 클러스터의 데이터베이스 로그 그룹만 조회합니다. log_group은 "
+                + (", ".join(permitted) or "해당 클러스터의 DB 로그 그룹 경로")
                 + " 중 하나로 시작해야 합니다."
             ),
             "results": [],

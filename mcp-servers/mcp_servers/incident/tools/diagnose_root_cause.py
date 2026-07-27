@@ -482,7 +482,7 @@ def _collect_metric_spikes(
     for row in rows:
         metric_type = row.get("metric_type")
         if metric_type in counters:
-            cand = _counter_candidate(row, metric_type, counters[metric_type], rf, start_iso)
+            cand = _counter_candidate(row, metric_type, counters[metric_type], rf, start_iso, win)
             if cand is not None:
                 counter_spikes += 1
                 out.append(cand)
@@ -523,7 +523,7 @@ def _collect_metric_spikes(
     return out
 
 
-def _counter_candidate(row, metric_type, floor, rf, start_iso):
+def _counter_candidate(row, metric_type, floor, rf, start_iso, win):
     """Candidate for an event counter, or None when it is not a signal.
 
     Counters (DynamoDB ReadThrottleEvents, DocumentDB DatabaseCursorsTimedOut …)
@@ -536,23 +536,33 @@ def _counter_candidate(row, metric_type, floor, rf, start_iso):
         window total of 0, which is below every floor.
       * baseline already nonzero -> require the same SPIKE_RATIO jump as a gauge,
         so a counter that is *steadily* nonzero does not fire every window.
-      * magnitude = window_total / max(floor, baseline_total). The floor stands
+      * magnitude = window_rate / max(floor_rate, baseline_rate). The floor stands
         in for the baseline when the baseline is 0, so this never divides by
         zero, and it is capped like the gauge path so one enormous counter cannot
         outrank every other category.
 
-    The incident window is LOOKAHEAD_MINUTES longer than the baseline window, so
-    a perfectly steady counter reads ~1.17x here. That is far below SPIKE_RATIO,
-    which is why comparing totals (what a DBA wants to see: "142 throttled
-    requests, previously none") is safe without normalizing by duration.
+    RATES, not totals. The incident window is LOOKAHEAD_MINUTES longer than the
+    baseline window, so comparing raw totals compares windows of different
+    length. That is a fixed +5 minutes, which is negligible at the default
+    window_minutes=30 but not at a short one: a perfectly steady 2 events/min
+    counter read 30 vs 20 at window_minutes=10 (ratio 1.50) and 20 vs 10 at 5,
+    firing with score 3.25, exactly what a genuine from-zero throttle storm
+    scores. So every comparison here divides by its own window length while the
+    TOTALS stay in the evidence and in the summary, which is what a DBA wants to
+    read ("142 throttled requests, previously none"). The floor is a per-window
+    count, so it is scaled the same way and from-zero scoring is unchanged.
     """
     window_total = _to_float(row.get("window_sum")) or 0.0
     baseline_total = _to_float(row.get("baseline_sum")) or 0.0
     if window_total < floor:
         return None
-    if baseline_total > 0 and window_total < baseline_total * SPIKE_RATIO:
+    window_minutes = float(win + LOOKAHEAD_MINUTES)
+    baseline_minutes = float(win)
+    window_rate = window_total / window_minutes
+    baseline_rate = baseline_total / baseline_minutes
+    if baseline_rate > 0 and window_rate < baseline_rate * SPIKE_RATIO:
         return None
-    magnitude = min(window_total / max(floor, baseline_total), 2.0)
+    magnitude = min(window_rate / max(floor / window_minutes, baseline_rate), 2.0)
     score = BASE_WEIGHTS["counter_spike"] * rf * magnitude
     from_zero = baseline_total <= 0
     return {
@@ -563,16 +573,30 @@ def _counter_candidate(row, metric_type, floor, rf, start_iso):
             "recency_factor": round(rf, 3),
             "magnitude_factor": round(magnitude, 3),
             "noise_floor": floor,
-            "formula": "base × recency × (window_total / max(floor, baseline_total))",
+            "formula": "base × recency × (window_rate / max(floor_rate, baseline_rate)), rates per minute",
         },
         "summary": (
-            f"{metric_type} appeared during the incident: {round(window_total, 2)} in-window vs "
-            f"{round(baseline_total, 2)} in the prior baseline window"
+            (
+                f"{metric_type} appeared during the incident: {round(window_total, 2)} in-window vs "
+                "none in the prior baseline window"
+            )
+            if from_zero
+            else (
+                f"{metric_type} rose during the incident: {round(window_total, 2)} in-window vs "
+                f"{round(baseline_total, 2)} in the prior baseline window "
+                f"({round(window_rate / baseline_rate, 2)}x per minute)"
+            )
         ),
         "evidence": {
             "metric_type": metric_type,
             "window_total": round(window_total, 3),
             "baseline_total": round(baseline_total, 3),
+            # Rates are what the comparison actually used: the windows differ by
+            # LOOKAHEAD_MINUTES, so the totals alone do not explain the verdict.
+            "window_minutes": window_minutes,
+            "baseline_minutes": baseline_minutes,
+            "window_rate_per_min": round(window_rate, 3),
+            "baseline_rate_per_min": round(baseline_rate, 3),
             "noise_floor": floor,
             "from_zero_baseline": from_zero,
         },

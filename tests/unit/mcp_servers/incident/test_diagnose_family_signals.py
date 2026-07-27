@@ -305,6 +305,99 @@ def test_one_throttle_storm_does_not_occupy_three_ranked_slots():
     assert "throttled_requests" not in _searched_metrics(cache)
 
 
+def _minutes(a, b):
+    """Minutes between two ISO timestamps the impl bound into the query."""
+    from datetime import datetime
+
+    return (datetime.fromisoformat(b) - datetime.fromisoformat(a)).total_seconds() / 60.0
+
+
+def _counter_rate_cache(metric_type, per_min, baseline_per_min, emitted=None):
+    """Cache whose counter sums are DERIVED from the window the impl actually
+    bound, so the fixture cannot silently drift back to the default 30 minutes:
+    change window_minutes and the sums follow, exactly like the collector's rows
+    would. `emitted` collects the row that was served."""
+    cache = MagicMock()
+
+    def _side(sql, params=None):
+        if "cluster_meta" in sql:
+            return _qr([{"engine": "dynamodb"}])
+        if "GROUP BY metric_type" in sql:
+            win_min = _minutes(params["start_time"], params["end_time"])
+            base_min = _minutes(params["baseline_start"], params["start_time"])
+            row = _row(
+                metric_type, per_min, baseline_per_min,
+                per_min * win_min, baseline_per_min * base_min,
+            )
+            if emitted is not None:
+                emitted.append(row)
+            return _qr([row])
+        return _qr([])
+
+    cache.execute.side_effect = _side
+    return cache
+
+
+def test_steady_counter_is_not_a_signal_on_a_short_window():
+    """The counter path compared RAW TOTALS across windows of different length:
+    the incident window is win + LOOKAHEAD_MINUTES, the baseline is win. That
+    fixed +5 minutes is negligible at window_minutes=30 (70 vs 60, correctly
+    silent) but not on a short window: a perfectly steady 2 events/min counter
+    read 30 vs 20 at 10 minutes and 20 vs 10 at 5, firing with score 3.25, the
+    exact score a genuine from-zero throttle storm gets. So on any short window a
+    healthy steadily-nonzero counter tied or outranked real incidents."""
+    from mcp_servers.incident.tools.diagnose_root_cause import SPIKE_RATIO
+
+    for window in (1, 5, 10, 30):
+        emitted = []
+        cache = _counter_rate_cache("read_throttle_events", 2.0, 2.0, emitted)
+        out = diagnose_root_cause_impl(
+            cache, cluster_id="c1", around_time=ANCHOR, window_minutes=window
+        )
+        assert out["window_minutes"] == window
+        row = emitted[0]
+        # proof the fixture still exercises the bug: on the short windows the raw
+        # totals alone clear SPIKE_RATIO, which is what used to make it fire
+        if window <= 10:
+            assert row["window_sum"] >= row["baseline_sum"] * SPIKE_RATIO, window
+        assert out["candidates"] == [], window
+        assert out["signals_examined"]["counter_spikes"] == 0, window
+
+
+def test_a_real_from_zero_storm_still_fires_on_the_same_short_window():
+    """The other half: normalizing to a rate must not mute a real incident. Same
+    5-minute window, same scoring as before (base 2.5 x recency 0.65 x capped
+    magnitude 2.0), and the raw totals stay in the evidence and the summary."""
+    cache = _counter_rate_cache("write_throttle_events", 14.2, 0.0)
+    out = diagnose_root_cause_impl(
+        cache, cluster_id="c1", around_time=ANCHOR, window_minutes=5
+    )
+    cands = out["candidates"]
+    assert len(cands) == 1
+    assert cands[0]["category"] == "counter_spike"
+    assert cands[0]["score"] == 3.25
+    assert cands[0]["evidence"]["from_zero_baseline"] is True
+    assert cands[0]["evidence"]["window_total"] == 142.0
+    assert "142" in cands[0]["summary"]
+
+
+def test_counter_summary_only_claims_new_when_the_baseline_was_zero():
+    """The summary always read "<metric> appeared during the incident", telling
+    the DBA the throttling was NEW even when it had merely tripled."""
+    from_zero = _cache("dynamodb", grouped=[_row("write_throttle_events", 4.7, 0.0, 142.0, 0.0)])
+    summary = _run(from_zero)["candidates"][0]["summary"]
+    assert "appeared during the incident" in summary
+    assert "none in the prior baseline window" in summary
+
+    risen = _cache("dynamodb", grouped=[_row("read_throttle_events", 10.0, 3.3, 300.0, 100.0)])
+    cand = _run(risen)["candidates"][0]
+    assert cand["evidence"]["from_zero_baseline"] is False
+    assert "appeared during the incident" not in cand["summary"]
+    assert "rose during the incident" in cand["summary"]
+    # both raw totals stay readable, and the multiple is the per-minute one
+    assert "300" in cand["summary"] and "100" in cand["summary"]
+
+
 def test_throttled_requests_stays_on_the_correlation_timeline():
     """Dropping it from the ranking must not hide it: an operator reading the
     timeline still wants all three series."""

@@ -73,8 +73,63 @@ def test_out_of_scope_log_group_refused_without_calling_aws(mock_client_for):
 @patch("mcp_servers.incident.tools.search_logs.time")
 @patch("mcp_servers.incident.tools.search_logs.client_for_cluster")
 def test_allowed_engine_log_groups_pass_through(mock_client_for, mock_time):
-    """The three DB families DBOps reads must all be accepted, including the
-    DocumentDB profiler group the set_docdb_profiler tool enables."""
+    """The three DB families DBOps reads must all be accepted for the cluster
+    being investigated, including the DocumentDB profiler group the
+    set_docdb_profiler tool enables."""
+    mock_time.time.return_value = 1704067200.0
+    mock_time.sleep = MagicMock()
+    client = MagicMock()
+    mock_client_for.return_value = client
+    client.start_query.return_value = {"queryId": "q-1"}
+    client.get_query_results.return_value = {"status": "Complete", "results": []}
+
+    for cid, good in (
+        ("prod-pg-1", "/aws/rds/cluster/prod-pg-1/error"),
+        ("dbops-demo-mysql", "/aws/rds/instance/dbops-demo-mysql/slowquery"),
+        ("docdb-1", "/aws/docdb/docdb-1/profiler"),
+        ("docdb-1", "/aws/docdb/docdb-1/audit"),
+    ):
+        result = search_logs_impl(MagicMock(), cluster_id=cid, log_group=good)
+        assert result.get("status") != "log_group_not_allowed", good
+        assert result["log_group"] == good
+
+
+# ===== the allowlist must bind to the CLUSTER, not just the family =====
+
+
+@patch("mcp_servers.incident.tools.search_logs.client_for_cluster")
+def test_another_clusters_log_group_is_refused_even_when_cluster_id_is_visible(mock_client_for):
+    """TENANCY. agent/tool_gate.py's ClusterVisibilityGate inspects only
+    args["cluster_id"], and the hub IAM grant covers the whole
+    /aws/rds/cluster/* prefix, so a family-only allowlist let a caller scoped to
+    team A pass a cluster_id it CAN see plus team B's log group and read another
+    team's database logs. Nothing above this tool is cluster-aware for log_group,
+    so the binding must hold here."""
+    mock_client_for.side_effect = AssertionError("must not touch AWS")
+    for bad in (
+        "/aws/rds/cluster/team-b-pg/postgresql",
+        "/aws/rds/cluster/team-b-pg/slowquery",
+        "/aws/rds/instance/team-b-mysql/error",
+        "/aws/docdb/team-b-docdb/profiler",
+        # prefix-confusion attempts against the visible cluster's own name
+        "/aws/rds/cluster/team-a-pg-evil/postgresql",
+        "/aws/rds/cluster/team-a-pg",
+    ):
+        result = search_logs_impl(MagicMock(), cluster_id="team-a-pg", log_group=bad)
+        assert result["status"] == "log_group_not_allowed", bad
+        assert result["count"] == 0 and result["results"] == []
+        assert result["reason"]
+        # the refusal must not name another team's group as an acceptable option
+        assert "team-b" not in result["reason"]
+    mock_client_for.assert_not_called()
+
+
+@patch("mcp_servers.incident.tools.search_logs.time")
+@patch("mcp_servers.incident.tools.search_logs.client_for_cluster")
+def test_the_clusters_own_log_groups_still_pass(mock_client_for, mock_time):
+    """The other half of the same fix: every group belonging to the requested
+    cluster must still be readable, or the tool is useless for MySQL slowquery
+    and the DocumentDB profiler."""
     mock_time.time.return_value = 1704067200.0
     mock_time.sleep = MagicMock()
     client = MagicMock()
@@ -83,14 +138,30 @@ def test_allowed_engine_log_groups_pass_through(mock_client_for, mock_time):
     client.get_query_results.return_value = {"status": "Complete", "results": []}
 
     for good in (
-        "/aws/rds/cluster/prod-pg-1/error",
-        "/aws/rds/instance/dbops-demo-mysql/slowquery",
-        "/aws/docdb/docdb-1/profiler",
-        "/aws/docdb/docdb-1/audit",
+        "/aws/rds/cluster/team-a-pg/postgresql",
+        "/aws/rds/cluster/team-a-pg/slowquery",
+        "/aws/rds/cluster/team-a-pg/general",
+        "/aws/rds/cluster/team-a-pg/audit",
+        "/aws/rds/instance/team-a-pg/slowquery",
+        "/aws/docdb/team-a-pg/profiler",
     ):
-        result = search_logs_impl(MagicMock(), cluster_id="c", log_group=good)
+        result = search_logs_impl(MagicMock(), cluster_id="team-a-pg", log_group=good)
         assert result.get("status") != "log_group_not_allowed", good
         assert result["log_group"] == good
+
+
+@patch("mcp_servers.incident.tools.search_logs.client_for_cluster")
+def test_unusable_cluster_id_refuses_every_group(mock_client_for):
+    """Fail closed: with no usable cluster_id there is nothing to bind the group
+    to, so it must refuse rather than fall back to the family prefix."""
+    mock_client_for.side_effect = AssertionError("must not touch AWS")
+    for cid in ("", "   ", None, "../other-team"):
+        result = search_logs_impl(
+            MagicMock(), cluster_id=cid, log_group="/aws/rds/cluster/prod-pg-1/error"
+        )
+        assert result["status"] == "log_group_not_allowed", cid
+        assert result["reason"]
+    mock_client_for.assert_not_called()
 
 
 # ===== Insights is not SQL (live regression 2026-07-24) =====
