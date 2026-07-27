@@ -66,6 +66,50 @@ def test_modify_parameter_refuses_default_group(mock_rds_for):
     mock_rds.modify_db_cluster_parameter_group.assert_not_called()
 
 
+@patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_lookup_failure_returns_static_reason_no_exception_text(mock_rds_for):
+    """describe_db_clusters blowing up must NOT put the exception into the
+    response (project hard rule): static Korean reason + module logger only."""
+    mock_rds = MagicMock()
+    mock_rds_for.return_value = mock_rds
+    mock_rds.describe_db_clusters.side_effect = RuntimeError(
+        "AccessDenied boom: arn:aws:iam::123456789012:role/secret-ish"
+    )
+    result = modify_parameter_impl(
+        MagicMock(), cluster_id="prod-pg-1", parameter_name="work_mem", value="64MB",
+        approved=True,
+    )
+    assert result["status"] == "lookup_failed"
+    assert "error" not in result
+    blob = " ".join(str(v) for v in result.values())
+    for leak in ("boom", "AccessDenied", "arn:aws:iam", "RuntimeError"):
+        assert leak not in blob, f"raw exception text leaked: {result}"
+    mock_rds.modify_db_cluster_parameter_group.assert_not_called()
+
+
+@patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_modify_failure_returns_static_reason_no_exception_text(mock_rds_for):
+    mock_rds = MagicMock()
+    mock_rds_for.return_value = mock_rds
+    mock_rds.describe_db_clusters.return_value = {
+        "DBClusters": [{"DBClusterParameterGroup": "prod-pg-1-custom-pg15"}],
+    }
+    mock_rds.modify_db_cluster_parameter_group.side_effect = RuntimeError(
+        "InvalidParameterValue boom: internal-detail-42"
+    )
+    result = modify_parameter_impl(
+        MagicMock(), cluster_id="prod-pg-1", parameter_name="work_mem", value="64MB",
+        approved=True,
+    )
+    assert result["status"] == "modify_failed"
+    assert "error" not in result
+    blob = " ".join(str(v) for v in result.values())
+    for leak in ("boom", "InvalidParameterValue", "internal-detail-42"):
+        assert leak not in blob, f"raw exception text leaked: {result}"
+
+
 def test_modify_parameter_approved_without_id_rejected():
     """Bare `approved=True` (no approval_id) is rejected by the guard."""
     with patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"}, clear=True):

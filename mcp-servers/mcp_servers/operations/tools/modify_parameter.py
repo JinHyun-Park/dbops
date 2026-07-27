@@ -1,6 +1,21 @@
+"""modify_parameter: approval-gated Aurora CLUSTER parameter-group change.
+
+Aurora-relational only. The handler positive-gates this tool on the
+`cluster_parameter` capability (FAIL-CLOSED), so rds_instance (which has
+INSTANCE parameter groups), DocumentDB, DynamoDB and ElastiCache refuse with
+unsupported_engine instead of failing inside `rds.describe_db_clusters`.
+
+Failures return a STATIC Korean reason and log the detail with the module
+logger: raw exception text must never reach a tool response.
+"""
+
+import logging
+
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import rds_client_for_cluster
+
+logger = logging.getLogger(__name__)
 
 
 def modify_parameter_impl(
@@ -35,8 +50,13 @@ def modify_parameter_impl(
     try:
         resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
         cluster = (resp.get("DBClusters") or [{}])[0]
-    except Exception as e:
-        return {"status": "lookup_failed", "cluster_id": cluster_id, "error": str(e)}
+    except Exception:
+        logger.warning("describe_db_clusters failed for %s", cluster_id, exc_info=True)
+        return {
+            "status": "lookup_failed",
+            "cluster_id": cluster_id,
+            "reason": "클러스터의 파라미터 그룹을 조회할 수 없습니다 (자세한 원인은 서버 로그를 확인하세요).",
+        }
 
     pg_name = cluster.get("DBClusterParameterGroup") or ""
     if not pg_name:
@@ -61,8 +81,17 @@ def modify_parameter_impl(
                 "ApplyMethod": "pending-reboot",
             }],
         )
-    except Exception as e:
-        return {"status": "modify_failed", "cluster_id": cluster_id, "parameter_group": pg_name, "error": str(e)}
+    except Exception:
+        logger.warning(
+            "modify_db_cluster_parameter_group failed for %s (group=%s, param=%s)",
+            cluster_id, pg_name, parameter_name, exc_info=True,
+        )
+        return {
+            "status": "modify_failed",
+            "cluster_id": cluster_id,
+            "parameter_group": pg_name,
+            "reason": "파라미터 그룹 수정에 실패했습니다 (자세한 원인은 서버 로그를 확인하세요).",
+        }
 
     # 변경은 ApplyMethod=pending-reboot로 등록된다 — 파라미터 그룹에 값은
     # 들어가지만 실제 동작값(pg_settings)은 인스턴스 재시작 전까지 안 바뀐다.

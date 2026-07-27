@@ -52,6 +52,11 @@ cache = CacheClient()
 # with a valid-looking approval (review fix #3 — opposite of simulation's read-side
 # DEFAULT-PERMIT).
 _ENGINE_GATED_TOOLS = {
+    # Aurora CLUSTER parameter-group change (E-0). POSITIVE, FAIL-CLOSED gate on
+    # cluster_parameter: rds_instance uses INSTANCE parameter groups and the
+    # non-relational families have no Aurora cluster parameter group, so they
+    # refuse here instead of failing inside rds.describe_db_clusters.
+    "modify_parameter": "cluster_parameter",
     # Aurora custom cluster endpoints (P2-⑤) are a relational-only feature. The
     # gate is POSITIVE and FAIL-CLOSED just like the NoSQL writes: only the
     # relational family has the custom_endpoint capability, so DynamoDB/DocDB/
@@ -98,6 +103,7 @@ _ENGINE_GATED_TOOLS = {
 }
 
 _CAP_LABEL = {
+    "cluster_parameter": "Aurora 클러스터",
     "custom_endpoint": "Aurora 클러스터",
     "prewarm": "Aurora PostgreSQL 클러스터",
     "scale_instance": "Aurora 클러스터",
@@ -497,19 +503,22 @@ TOOLS = {
     "set_docdb_profiler": {
         "impl": set_docdb_profiler_impl,
         "description": (
-            "DocumentDB only: set the database profiler level via the Mongo "
-            "protocol (db.command profile). level 0=off, 1=slow ops (slowms "
-            "threshold), 2=all ops. Requires approved=true AND "
-            "approval_id=<uuid from request_approval>. Idempotent. Needs a "
-            "configured write credential (mongo_write_secret_arn)."
+            "DocumentDB only: enable or disable the CLUSTER-wide profiler. "
+            "Managed DocumentDB has no Mongo-protocol profiler command, so this "
+            "sets profiler / profiler_threshold_ms / profiler_sampling_rate in "
+            "the cluster's CUSTOM cluster parameter group and turns the profiler "
+            "CloudWatch Logs export (/aws/docdb/profiler) on or off. A cluster on "
+            "a default.* parameter group is refused (create a custom group "
+            "first). Requires approved=true AND approval_id=<uuid from "
+            "request_approval>."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "cluster_id": {"type": "string", "description": "Target DocumentDB cluster ID"},
-                "db": {"type": "string", "default": "admin", "description": "Target database name (defaults to admin)"},
-                "level": {"type": "integer", "default": 1, "description": "Profiler level: 0=off, 1=slow ops, 2=all ops"},
-                "slowms": {"type": "integer", "default": 100, "description": "slowms threshold in milliseconds (>=0)"},
+                "enabled": {"type": "boolean", "default": True, "description": "true=enable the profiler, false=disable it (cluster-wide)"},
+                "threshold_ms": {"type": "integer", "default": 100, "description": "profiler_threshold_ms: log operations slower than this (>=50)"},
+                "sampling_rate": {"type": "number", "default": 1.0, "description": "profiler_sampling_rate: fraction of slow operations logged (0.0-1.0)"},
                 "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
                 "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
             },

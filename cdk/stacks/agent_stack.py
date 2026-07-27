@@ -171,10 +171,11 @@ class AgentStack(cdk.Stack):
             # a dependency cycle. Must match the OPERATIONS_FUNCTION_NAME literal
             # in data_stack (both derive from Settings.ENV).
             function_name=f"dbops-{Settings.ENV}-operations-mcp",
-            # The operations server's DocDB write tools (set_docdb_profiler,
-            # create_docdb_index) connect over the Mongo wire protocol, so the
-            # asset must carry pymongo (not in the Lambda runtime) + the RDS/DocDB
-            # CA bundle. Reuse the collector's Docker-free local-pip bundling
+            # The operations server's DocDB index write tool (create_docdb_index)
+            # connects over the Mongo wire protocol, so the asset must carry
+            # pymongo (not in the Lambda runtime) + the RDS/DocDB CA bundle
+            # (set_docdb_profiler is control-plane only, see the IAM grant
+            # below). Reuse the collector's Docker-free local-pip bundling
             # (Docker fallback). The other MCP servers share this asset and get
             # pymongo too (harmless, unused).
             code=lambda_.Code.from_asset(
@@ -226,6 +227,10 @@ class AgentStack(cdk.Stack):
                 "rds:DescribeDBInstances",
                 "rds:DescribeDBClusterParameterGroups",
                 "rds:DescribeDBClusterParameters",
+                # modify_parameter (Aurora) AND set_docdb_profiler (DocumentDB
+                # profiler + its CloudWatch Logs export) both land here:
+                # DocumentDB authorizes its control plane with the rds: action
+                # prefix, so the docdb client needs no separate docdb:* grants.
                 "rds:ModifyDBClusterParameterGroup",
                 "rds:ModifyDBCluster",
                 # create_snapshot + restore_cluster (both approval-gated in tool

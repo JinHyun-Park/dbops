@@ -513,16 +513,30 @@ def test_docdb_index_direction_changes_hash():
     assert asc != desc
 
 
-def test_docdb_profiler_projection_binds_level_and_slowms():
+def test_docdb_profiler_projection_binds_profiler_parameters():
+    """E-0: the profiler is a cluster parameter-group change, so the projection
+    binds {enabled, threshold_ms, sampling_rate}: a different threshold or
+    sampling rate must NOT reuse an approval."""
     a = canonical_action_hash(
-        "set_docdb_profiler", {"db": "app", "level": 1, "slowms": 100}
+        "set_docdb_profiler",
+        {"enabled": True, "threshold_ms": 100, "sampling_rate": 1.0},
     )
-    b = canonical_action_hash(
-        "set_docdb_profiler", {"db": "app", "level": 2, "slowms": 100}
+    other_threshold = canonical_action_hash(
+        "set_docdb_profiler",
+        {"enabled": True, "threshold_ms": 500, "sampling_rate": 1.0},
     )
+    other_rate = canonical_action_hash(
+        "set_docdb_profiler",
+        {"enabled": True, "threshold_ms": 100, "sampling_rate": 0.5},
+    )
+    disabled = canonical_action_hash(
+        "set_docdb_profiler",
+        {"enabled": False, "threshold_ms": 100, "sampling_rate": 1.0},
+    )
+    assert len({a, other_threshold, other_rate, disabled}) == 4
     # _norm_val collapses numeric aliases so request/execute shapes agree.
     a_str = canonical_action_hash(
-        "set_docdb_profiler", {"db": "app", "level": "1", "slowms": "100"}
+        "set_docdb_profiler",
+        {"enabled": True, "threshold_ms": "100", "sampling_rate": "1.0"},
     )
-    assert a != b
     assert a == a_str

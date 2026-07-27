@@ -1,283 +1,275 @@
-"""set_docdb_profiler — approval-gated DocumentDB profiler-level change over the
-Mongo wire protocol (`db.command("profile", level, slowms=slowms)`).
+"""set_docdb_profiler: approval-gated Amazon DocumentDB profiler change via the
+CONTROL PLANE (cluster parameter group + CloudWatch Logs export).
 
-This executes what the read-only collector's `docdb_mongo_profiler_off` finding
-recommends: turn the database profiler on (level 1, slowms threshold) so slow ops
-land in system.profile. It is a hardcoded single-command WRITE — there is NO
-generic runCommand/eval surface, mirroring the read collector's allowlist.
+Managed Amazon DocumentDB does NOT support enabling the profiler over the Mongo
+wire protocol: there is no `db.command("profile", ...)` surface, and profiler
+output never lands in a `system.profile` collection (system.* collections are
+unsupported). Per
+https://docs.aws.amazon.com/documentdb/latest/devguide/profiling.html enabling
+the profiler is a three-step, IAM-authorized change:
 
-Safety model (mirrors the DynamoDB write tools + the spec's 7 fixes):
-  - Separate WRITE credentials: connect with `mongo_write_secret_arn` from the
-    registry row (NOT the collector's read-only `mongo_secret_arn`). A documentdb
-    cluster without that field → {"status":"unsupported_engine", ...} (no-op).
-  - FAIL-CLOSED engine gate is enforced in the handler (docdb_write capability);
-    a None family never reaches this impl.
-  - Approval-gated 3-state flow (approval_required → verify_approval → execute).
-  - Idempotent: a request-time read of the current profiling status returns a
-    no-change status when already at the requested level+slowms.
-  - TOCTOU (fix #6): re-read the profiling status IMMEDIATELY before the write;
-    if it drifted from what the approval was bound to, abort.
-  - NEVER raises into the caller — any pymongo/guard error degrades to
-    {"status":"error", reason}.
+  1. In a CUSTOM cluster parameter group set `profiler` (enabled|disabled),
+     `profiler_threshold_ms` (50..INT_MAX) and `profiler_sampling_rate`
+     (0.0..1.0). A `default.*` group CANNOT be modified.
+  2. The cluster must USE that custom group. This tool does NOT create or attach
+     one: a cluster still on a default group is refused with that reason stated
+     (creating + attaching a group is a heavier, separate operation).
+  3. Export the `profiler` log type to CloudWatch Logs (log group
+     /aws/docdb/profiler) via modify_db_cluster. Without step 3 the parameter is
+     on but nothing is delivered.
 
-pymongo is imported lazily inside `_client_factory` (NOT at module top) so the
-unit tests patch the module-level `_CLIENT_FACTORY` hook and run WITHOUT pymongo
-installed — identical to the read collector.
+Safety model (unchanged from the previous Mongo-protocol version):
+  - FAIL-CLOSED engine gate in the handler (docdb_write capability). A None
+    family never reaches this impl.
+  - Approval-gated 3-state flow (approval_required -> verify_approval -> execute).
+    verify_approval is consumed EXACTLY ONCE and is payload-hash bound to the
+    effective {enabled, threshold_ms, sampling_rate}.
+  - NEVER raises, and NEVER returns raw exception text: static Korean reason +
+    module logger.
+
+There are no Mongo credentials any more (the old `mongo_write_secret_arn`
+dependency is gone): the calls run as the operations Lambda's IAM role, cross
+account via the registry's spoke role. No TOCTOU re-read either: every call
+writes ABSOLUTE parameter values, so there is no read-modify-write window a
+re-read could protect (unlike the DynamoDB capacity tool).
 """
 
-import json
-import os
-
-import boto3
+import logging
 
 from mcp_servers.shared.approval_guard import verify_approval
-from mcp_servers.shared.cluster_targets import lookup_cluster
+from mcp_servers.shared.cluster_targets import client_for_cluster
 
-# TLS CA bundle for DocumentDB, vendored into the operations asset during CDK
-# bundling (downloaded from truststore.pki.rds.amazonaws.com) or committed as a
-# fallback. Resolved relative to this file so the path is valid when deployed.
-_CA_BUNDLE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "global-bundle.pem",
-)
+logger = logging.getLogger(__name__)
 
-# Mongo server-selection timeout — fail fast on an unreachable cluster.
-SERVER_SELECTION_TIMEOUT_MS = 5000
-
-# Allowed profiler levels (Mongo): 0=off, 1=slow ops only, 2=all ops.
-_VALID_LEVELS = (0, 1, 2)
+# DocumentDB parameter bounds (AWS docs): profiler_threshold_ms is [50-INT_MAX],
+# profiler_sampling_rate is [0.0-1.0]. The profiler params are dynamic, so
+# ApplyMethod=immediate is valid (a static param would require pending-reboot).
+MIN_THRESHOLD_MS = 50
+PROFILER_LOG_GROUP = "/aws/docdb/profiler"
 
 
-def _client_factory(host, port, username, password):
-    """Default MongoClient factory. Imports pymongo lazily so the module can be
-    loaded (and unit-tested) without pymongo installed. Tests patch this with a
-    fake-client factory via the module-level _CLIENT_FACTORY hook below.
-
-    A WRITE client: retryWrites=False (DocumentDB does not support retryable
-    writes), tls=True with the CA bundle, primary read preference (no secondary)."""
-    import pymongo  # lazy: not importable in the test env
-
-    return pymongo.MongoClient(
-        host=host,
-        port=int(port),
-        username=username,
-        password=password,
-        tls=True,
-        tlsCAFile=_CA_BUNDLE_PATH,
-        retryWrites=False,
-        serverSelectionTimeoutMS=SERVER_SELECTION_TIMEOUT_MS,
-        connectTimeoutMS=SERVER_SELECTION_TIMEOUT_MS,
-    )
-
-
-# Indirection so tests can inject a fake client without importing pymongo.
-_CLIENT_FACTORY = _client_factory
-
-
-def _write_creds(cluster_id: str):
-    """Resolve the RW Mongo secret for the cluster. Returns (creds, error) where
-    creds is {host, port, username, password} or error is a status dict (no-op /
-    error) that the caller returns verbatim. The write secret is a SEPARATE
-    registry field from the collector's read-only `mongo_secret_arn`."""
-    row = lookup_cluster(cluster_id)
-    secret_arn = row.get("mongo_write_secret_arn")
-    if not secret_arn:
-        return None, {
-            "status": "unsupported_engine",
-            "reason": "no write credentials configured",
-            "cluster_id": cluster_id,
-        }
-    try:
-        raw = boto3.client("secretsmanager").get_secret_value(SecretId=secret_arn).get(
-            "SecretString"
-        ) or "{}"
-        creds = json.loads(raw)
-    except Exception as e:
-        return None, {
-            "status": "error",
-            "reason": f"쓰기 자격증명 조회 실패: {str(e)[:200]}",
-            "cluster_id": cluster_id,
-        }
-    host = creds.get("host")
-    username = creds.get("username")
-    password = creds.get("password")
-    if not host or not username or not password:
-        return None, {
-            "status": "error",
-            "reason": "쓰기 자격증명이 불완전합니다 (host/username/password 누락).",
-            "cluster_id": cluster_id,
-        }
-    return (
-        {"host": host, "port": creds.get("port", 27017), "username": username, "password": password},
-        None,
-    )
-
-
-def _current_profiling(client, db: str) -> dict:
-    """Current profiling level + slowms via `profile: -1` (read-only — does NOT
-    change the level)."""
-    res = client[db].command("profile", -1)
-    level = res.get("was", res.get("level", 0))
-    try:
-        level = int(level)
-    except (TypeError, ValueError):
-        level = 0
-    slowms = res.get("slowms")
-    try:
-        slowms = int(slowms)
-    except (TypeError, ValueError):
-        slowms = None
-    return {"level": level, "slowms": slowms}
+def _as_bool(v) -> bool:
+    """Coerce a gateway-supplied flag. A JSON boolean arrives as a bool, but a
+    string "false" would be truthy under bare bool() and silently ENABLE the
+    profiler on a disable request."""
+    if isinstance(v, str):
+        return v.strip().lower() not in ("", "false", "0", "no")
+    return bool(v)
 
 
 def set_docdb_profiler_impl(
     cache,
     cluster_id: str,
-    db: str = "admin",
-    level: int = 1,
-    slowms: int = 100,
+    enabled: bool = True,
+    threshold_ms: int = 100,
+    sampling_rate: float = 1.0,
     approved: bool = False,
     approval_id: str = "",
     **_ignored,
 ) -> dict:
-    """db.command("profile", level, slowms=slowms) for the target DocumentDB db.
-    Approval-gated; never raises. The approval binds {db, level, slowms}."""
-    db = (db or "admin").strip() or "admin"
+    """Turn the DocumentDB profiler on/off for `cluster_id` (cluster-wide: the
+    profiler applies to every database and instance). Approval-gated; the
+    approval binds {enabled, threshold_ms, sampling_rate}. Never raises."""
+    enabled_b = _as_bool(enabled)
 
-    # --- validate BEFORE any connect/write (no partial writes) ---
+    # --- validate BEFORE any AWS call (no partial writes) ---
     try:
-        level_i = int(level)
+        threshold_i = int(threshold_ms)
     except (TypeError, ValueError):
         return {
             "status": "error",
-            "reason": "level은 정수여야 합니다 (0/1/2).",
+            "reason": "threshold_ms는 정수여야 합니다 (밀리초).",
             "cluster_id": cluster_id,
         }
-    if level_i not in _VALID_LEVELS:
+    if threshold_i < MIN_THRESHOLD_MS:
         return {
             "status": "error",
-            "reason": f"level은 0, 1, 2 중 하나여야 합니다 (받은 값: {level!r}).",
+            "reason": (
+                f"threshold_ms는 {MIN_THRESHOLD_MS} 이상이어야 합니다 "
+                "(DocumentDB 허용 범위: 50~INT_MAX)."
+            ),
             "cluster_id": cluster_id,
         }
     try:
-        slowms_i = int(slowms)
+        rate_f = float(sampling_rate)
     except (TypeError, ValueError):
         return {
             "status": "error",
-            "reason": "slowms는 정수여야 합니다 (밀리초).",
+            "reason": "sampling_rate는 0.0~1.0 사이의 실수여야 합니다.",
             "cluster_id": cluster_id,
         }
-    if slowms_i < 0:
+    if not 0.0 <= rate_f <= 1.0:
         return {
             "status": "error",
-            "reason": "slowms는 0 이상이어야 합니다.",
+            "reason": "sampling_rate는 0.0~1.0 범위여야 합니다.",
             "cluster_id": cluster_id,
         }
 
-    creds, err = _write_creds(cluster_id)
-    if err is not None:
-        return err
-
-    client = None
     try:
-        try:
-            client = _CLIENT_FACTORY(
-                creds["host"], creds["port"], creds["username"], creds["password"]
-            )
-        except Exception as e:
-            return {
-                "status": "error",
-                "reason": f"DocumentDB 연결 실패: {str(e)[:200]}",
-                "cluster_id": cluster_id,
-            }
+        client = client_for_cluster(cluster_id, "docdb")
+    except Exception:
+        logger.warning("docdb client init failed for %s", cluster_id, exc_info=True)
+        return {
+            "status": "error",
+            "reason": "DocumentDB 제어 플레인 클라이언트를 만들 수 없습니다 (자세한 원인은 서버 로그를 확인하세요).",
+            "cluster_id": cluster_id,
+        }
 
-        # --- request-time read: surface current state + idempotent skip ---
-        try:
-            state = _current_profiling(client, db)
-        except Exception as e:
-            return {
-                "status": "error",
-                "reason": f"프로파일러 상태 조회 실패 — 적용 전 현재 상태를 확인할 수 없어 중단합니다: {str(e)[:200]}",
-                "cluster_id": cluster_id,
-            }
+    # --- step 1/2: which parameter group does the cluster actually use? ---
+    try:
+        resp = client.describe_db_clusters(DBClusterIdentifier=cluster_id)
+        cluster = (resp.get("DBClusters") or [{}])[0]
+    except Exception:
+        logger.warning("describe_db_clusters failed for %s", cluster_id, exc_info=True)
+        return {
+            "status": "lookup_failed",
+            "reason": "클러스터 정보를 조회할 수 없습니다 (자세한 원인은 서버 로그를 확인하세요).",
+            "cluster_id": cluster_id,
+        }
 
-        # Idempotent: already at the requested level (+ slowms when level>0).
-        if state["level"] == level_i and (level_i == 0 or state["slowms"] == slowms_i):
-            return {
-                "status": "skipped",
-                "reason": "프로파일러가 이미 요청한 상태입니다 (변경 없음).",
-                "cluster_id": cluster_id,
-                "db": db,
-                "level": level_i,
-                "slowms": slowms_i,
-            }
+    pg_name = (cluster.get("DBClusterParameterGroup") or "").strip()
+    if not pg_name:
+        return {
+            "status": "no_parameter_group",
+            "reason": "클러스터의 파라미터 그룹을 확인할 수 없습니다.",
+            "cluster_id": cluster_id,
+        }
+    # AWS-managed default groups are immutable, so the profiler simply cannot be
+    # turned on without first creating a custom group. Say that instead of
+    # failing with an API error.
+    if pg_name.startswith("default."):
+        return {
+            "status": "default_group_refused",
+            "cluster_id": cluster_id,
+            "parameter_group": pg_name,
+            "reason": (
+                f"이 클러스터는 AWS 기본 클러스터 파라미터 그룹('{pg_name}')을 사용합니다. "
+                "기본 그룹은 수정할 수 없어 프로파일러를 켤 수 없습니다. 커스텀 클러스터 "
+                "파라미터 그룹을 만들어 클러스터에 연결한 뒤 다시 시도하세요 "
+                "(그룹 생성/연결은 이 도구의 범위가 아닙니다)."
+            ),
+        }
 
-        payload = {"db": db, "level": level_i, "slowms": slowms_i}
+    log_export_on = "profiler" in (cluster.get("EnabledCloudwatchLogsExports") or [])
 
-        warnings = []
-        if level_i == 2:
-            warnings.append(
-                "level 2는 모든 op을 기록합니다 (system.profile 쓰기 부하 + 디스크 사용 증가). "
-                "운영 환경에서는 level 1 + 적절한 slowms를 권장합니다."
-            )
-
-        if not approved:
-            return {
-                "status": "approval_required",
-                "cluster_id": cluster_id,
-                "db": db,
-                "level": level_i,
-                "slowms": slowms_i,
-                "current_state": state,
-                "warnings": warnings,
-            }
-
-        guard = verify_approval(
-            approval_id, cluster_id, "set_docdb_profiler", payload=payload
+    warnings = []
+    if enabled_b and threshold_i < 100:
+        warnings.append(
+            "threshold_ms를 100ms 미만으로 낮추면 처리량이 높은 클러스터에서 성능 문제가 "
+            "발생할 수 있습니다 (AWS 권장: 500ms에서 시작해 점진적으로 낮추기)."
         )
-        if not guard.get("ok"):
-            return {
-                "status": "approval_denied",
-                "reason": guard.get("reason", "approval guard rejected the request"),
-                "cluster_id": cluster_id,
-            }
+    warnings.append(
+        f"파라미터 그룹 '{pg_name}'을 공유하는 다른 클러스터에도 같은 변경이 적용됩니다."
+    )
 
-        # --- TOCTOU re-read (fix #6): re-check IMMEDIATELY before the write ---
-        try:
-            fresh = _current_profiling(client, db)
-        except Exception as e:
-            return {
-                "status": "error",
-                "reason": f"적용 직전 재조회 실패 — 안전을 위해 중단합니다: {str(e)[:200]}",
-                "cluster_id": cluster_id,
-            }
-        if fresh != state:
-            return {
-                "status": "approval_denied",
-                "reason": "profiler state changed since approval",
-                "cluster_id": cluster_id,
-            }
-
-        # --- the single allowlisted write ---
-        try:
-            client[db].command("profile", level_i, slowms=slowms_i)
-        except Exception as e:
-            return {
-                "status": "error",
-                "reason": f"프로파일러 설정 실패: {str(e)[:200]}",
-                "cluster_id": cluster_id,
-            }
-
+    if not approved:
         return {
-            "status": "modified",
+            "status": "approval_required",
             "cluster_id": cluster_id,
-            "db": db,
-            "level": level_i,
-            "slowms": slowms_i,
+            "parameter_group": pg_name,
+            "enabled": enabled_b,
+            "threshold_ms": threshold_i,
+            "sampling_rate": rate_f,
+            "current_log_export": log_export_on,
+            "warnings": warnings,
         }
-    finally:
-        if client is not None:
-            try:
-                client.close()
-            except Exception:
-                pass
+
+    guard = verify_approval(
+        approval_id,
+        cluster_id,
+        "set_docdb_profiler",
+        payload={"enabled": enabled_b, "threshold_ms": threshold_i, "sampling_rate": rate_f},
+    )
+    if not guard.get("ok"):
+        return {
+            "status": "approval_denied",
+            "reason": guard.get("reason", "approval guard rejected the request"),
+            "cluster_id": cluster_id,
+        }
+
+    # --- step 1: the parameter-group write (absolute values, idempotent) ---
+    params = [{
+        "ParameterName": "profiler",
+        "ParameterValue": "enabled" if enabled_b else "disabled",
+        "ApplyMethod": "immediate",
+    }]
+    if enabled_b:
+        params.append({
+            "ParameterName": "profiler_threshold_ms",
+            "ParameterValue": str(threshold_i),
+            "ApplyMethod": "immediate",
+        })
+        params.append({
+            "ParameterName": "profiler_sampling_rate",
+            "ParameterValue": str(rate_f),
+            "ApplyMethod": "immediate",
+        })
+
+    try:
+        client.modify_db_cluster_parameter_group(
+            DBClusterParameterGroupName=pg_name, Parameters=params
+        )
+    except Exception:
+        logger.warning(
+            "modify_db_cluster_parameter_group failed for %s (group=%s)",
+            cluster_id, pg_name, exc_info=True,
+        )
+        return {
+            "status": "error",
+            "reason": "클러스터 파라미터 그룹 수정에 실패했습니다 (자세한 원인은 서버 로그를 확인하세요).",
+            "cluster_id": cluster_id,
+            "parameter_group": pg_name,
+        }
+
+    # --- step 3: profiler log export. Skip when already in the wanted state:
+    # re-enabling an already-enabled log type is an API error.
+    log_cfg = None
+    if enabled_b and not log_export_on:
+        log_cfg = {"EnableLogTypes": ["profiler"]}
+    elif not enabled_b and log_export_on:
+        log_cfg = {"DisableLogTypes": ["profiler"]}
+    if log_cfg:
+        try:
+            client.modify_db_cluster(
+                DBClusterIdentifier=cluster_id, CloudwatchLogsExportConfiguration=log_cfg
+            )
+            log_export_on = enabled_b
+        except Exception:
+            logger.warning(
+                "modify_db_cluster log export failed for %s (%s)",
+                cluster_id, log_cfg, exc_info=True,
+            )
+            return {
+                "status": "partial",
+                "cluster_id": cluster_id,
+                "parameter_group": pg_name,
+                "enabled": enabled_b,
+                "log_export": log_export_on,
+                "reason": (
+                    "파라미터 그룹은 변경했지만 profiler 로그 내보내기 설정 변경에 "
+                    "실패했습니다. 로그 내보내기가 켜져 있지 않으면 프로파일러 출력이 "
+                    "CloudWatch Logs로 전달되지 않습니다 (자세한 원인은 서버 로그를 확인하세요)."
+                ),
+            }
+
+    result = {
+        "status": "modified",
+        "cluster_id": cluster_id,
+        "parameter_group": pg_name,
+        "profiler": "enabled" if enabled_b else "disabled",
+        "log_export": log_export_on,
+        "log_group": PROFILER_LOG_GROUP,
+        "note": (
+            f"파라미터 그룹 '{pg_name}'에 profiler={'enabled' if enabled_b else 'disabled'}를 "
+            "ApplyMethod=immediate로 적용했습니다 (반영까지 몇 분 걸릴 수 있습니다). "
+            f"프로파일러 출력은 CloudWatch Logs 로그 그룹 {PROFILER_LOG_GROUP}로 전송됩니다. "
+            "DocumentDB에는 system.profile 컬렉션이 없으므로 Mongo 셸로는 조회할 수 없습니다."
+        ),
+    }
+    # Report only what was actually written: disabling touches the `profiler`
+    # switch alone, so echoing a threshold/sampling value there would be a claim
+    # about parameters this call never set.
+    if enabled_b:
+        result["threshold_ms"] = threshold_i
+        result["sampling_rate"] = rate_f
+    return result

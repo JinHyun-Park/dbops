@@ -214,12 +214,15 @@ def _project(action_type: str, details: dict) -> dict:
             "force": bool(d.get("force")),
         }
     if action_type == "set_docdb_profiler":
-        # stage 2: handler impl + pymongo bundling land later; the projection is
-        # added now so the guard/Cedar stay coherent across the 5 NoSQL writes.
+        # E-0: the profiler is a CLUSTER-level control-plane change (custom
+        # cluster parameter group + CloudWatch Logs export), not a per-db Mongo
+        # command, so the projection binds the three effective parameter values
+        # the tool writes. There is no `db` any more: DocumentDB's profiler
+        # applies to every database in the cluster.
         return {
-            "db": str(d.get("db") or "").strip(),
-            "level": _norm_val(d.get("level")),
-            "slowms": _norm_val(d.get("slowms")),
+            "enabled": bool(d.get("enabled")),
+            "threshold_ms": _norm_val(d.get("threshold_ms")),
+            "sampling_rate": _norm_val(d.get("sampling_rate")),
         }
     if action_type == "create_docdb_index":
         # stage 2: handler impl lands later. keys is an ORDERED list of

@@ -92,7 +92,70 @@ def test_gate_aurora_tool_ungated():
     spy.assert_called_once()
 
 
-# ===== DocDB Mongo write tools — same FAIL-CLOSED gate (docdb_write) =====
+# ===== Aurora CLUSTER parameter group: cluster_parameter gate (E-0) =====
+
+
+def test_gate_modify_parameter_rds_instance_refused():
+    """modify_parameter on a standalone RDS instance → unsupported_engine. Those
+    engines have INSTANCE parameter groups, so describe_db_clusters would fail
+    (and used to leak the raw AWS exception into the response)."""
+    spy = MagicMock()
+    with _patch_family("rds_instance"), patch.dict(
+        handler.TOOLS["modify_parameter"], {"impl": spy}
+    ):
+        result = _invoke(
+            "modify_parameter",
+            {"cluster_id": "rds-mysql-1", "parameter_name": "max_connections",
+             "value": "200", "approved": True, "approval_id": "x"},
+        )
+    assert result["status"] == "unsupported_engine"
+    spy.assert_not_called()
+
+
+def test_gate_modify_parameter_nonrelational_refused():
+    """documentdb / dynamodb / elasticache all lack cluster_parameter."""
+    for fam in ("documentdb", "dynamodb", "elasticache"):
+        spy = MagicMock()
+        with _patch_family(fam), patch.dict(
+            handler.TOOLS["modify_parameter"], {"impl": spy}
+        ):
+            result = _invoke(
+                "modify_parameter",
+                {"cluster_id": "x-1", "parameter_name": "p", "value": "1"},
+            )
+        assert result["status"] == "unsupported_engine", fam
+        spy.assert_not_called()
+
+
+def test_gate_modify_parameter_none_family_fail_closed():
+    spy = MagicMock()
+    with _patch_family(None), patch.dict(
+        handler.TOOLS["modify_parameter"], {"impl": spy}
+    ):
+        result = _invoke(
+            "modify_parameter",
+            {"cluster_id": "ghost", "parameter_name": "p", "value": "1",
+             "approved": True, "approval_id": "x"},
+        )
+    assert result["status"] == "unsupported_engine"
+    assert "could not be resolved" in result["reason"]
+    spy.assert_not_called()
+
+
+def test_gate_modify_parameter_relational_passes_to_impl():
+    spy = MagicMock(return_value={"status": "approval_required"})
+    with _patch_family("relational"), patch.dict(
+        handler.TOOLS["modify_parameter"], {"impl": spy}
+    ):
+        result = _invoke(
+            "modify_parameter",
+            {"cluster_id": "prod-pg-1", "parameter_name": "work_mem", "value": "64MB"},
+        )
+    assert result["status"] == "approval_required"
+    spy.assert_called_once()
+
+
+# ===== DocDB write tools: same FAIL-CLOSED gate (docdb_write) =====
 
 
 def test_gate_docdb_none_family_fail_closed():
