@@ -2,7 +2,11 @@ import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from mcp_servers.performance.tools.forecast_capacity import _VALID_METRICS, forecast_capacity_impl
+from mcp_servers.performance.tools.forecast_capacity import (
+    _ACTIONABLE_HORIZON_DAYS,
+    _VALID_METRICS,
+    forecast_capacity_impl,
+)
 from mcp_servers.shared.models import QueryResult
 
 _GIB = 1024 ** 3
@@ -270,3 +274,49 @@ def test_low_fit_is_low_confidence():
     cache = _cache(slope=2.0 * _GIB, current=100.0 * _GIB, r2=0.1, n=300)
     result = forecast_capacity_impl(cache, cluster_id="c", metric="storage")
     assert result["confidence"] == "low"
+
+
+# ===== actionable horizon: a far-future ETA is not "approaching" =====
+
+
+def test_far_future_eta_reports_the_date_but_is_not_flagged_approaching():
+    """Live regression (dbops-demo-mysql, 2026-07-24): free space was declining a
+    few MB/day, so the ETA came out at 80170 days (about 219 years) and
+    approaching_limit was still true. A DBA reads that boolean and investigates.
+
+    The ETA itself is honest data and stays in the payload; only the flag is
+    bounded to an actionable horizon."""
+    # 20 GiB free, losing 1 MiB/day -> ~20480 days, far beyond a year.
+    cache = _cache(slope=-1.0 * 1024 ** 2, current=20.0 * _GIB,
+                   engine="mysql", allocated_storage_gb="20")
+    result = forecast_capacity_impl(cache, cluster_id="rds-mysql-1", metric="storage")
+    assert result["days_until_limit"] > _ACTIONABLE_HORIZON_DAYS
+    assert result["approaching_limit"] is False
+    # the trend direction is still reported truthfully
+    assert result["forecast"] == "depleting"
+    # and the note must explain WHY the flag is false, so the number is not read
+    # as a contradiction
+    assert "실행 가능 기간" in result["note"]
+    assert str(result["days_until_limit"]) in result["note"]
+
+
+def test_eta_inside_the_horizon_is_still_flagged():
+    """Control: the bound must not silence a genuinely urgent forecast."""
+    cache = _cache(slope=-2.0 * _GIB, current=20.0 * _GIB,
+                   engine="mysql", allocated_storage_gb="100")
+    result = forecast_capacity_impl(cache, cluster_id="rds-mysql-1", metric="storage")
+    assert result["days_until_limit"] == 10
+    assert result["approaching_limit"] is True
+
+
+def test_confidence_reflects_fit_not_the_horizon():
+    """confidence describes how well the line fits, so a far-future ETA with a
+    good fit is a confident far-future estimate, not a low-confidence one. This
+    decoupling is why the horizon bound could not simply reuse `approaching`."""
+    cache = _cache(slope=-1.0 * 1024 ** 2, current=20.0 * _GIB,
+                   engine="mysql", allocated_storage_gb="20", r2=0.95, n=500)
+    result = forecast_capacity_impl(cache, cluster_id="rds-mysql-1", metric="storage")
+    assert result["approaching_limit"] is False
+    assert result["confidence"] == "high"
+    # the uncertainty band belongs to the estimate, so it is still present
+    assert result["days_until_limit_range"] is not None

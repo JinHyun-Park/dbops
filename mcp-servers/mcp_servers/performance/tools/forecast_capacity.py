@@ -68,6 +68,12 @@ _VALID_METRICS = ("storage", "connections", "aas")
 # 이유와 반례는 shared/metric_filters.py 주석 참고.
 _CLUSTER_LEVEL_ONLY = CLUSTER_LEVEL_ONLY
 
+# approaching_limit을 붙일 실행 가능 기간. 라이브에서 rds_instance 여유 스토리지가
+# 하루 수 MB씩만 줄어 ETA가 약 219년으로 나왔는데 플래그는 true였다. 1년을 넘는
+# 도달 시점은 용량 계획 대상이지 지금 조치할 알림이 아니다. ETA 숫자는 그대로
+# 보고하고 플래그만 이 기간으로 제한한다.
+_ACTIONABLE_HORIZON_DAYS = 365
+
 
 def _f(value, default=0.0) -> float:
     try:
@@ -220,10 +226,20 @@ def forecast_capacity_impl(
 
     # 한계를 실제 설정에서 확인하지 못하면 날짜를 단정하지 않는다.
     days_until = _days(slope) if grounded else None
-    approaching = days_until is not None
+    # approaching_limit은 "지금 조치가 필요한가"를 뜻해야 한다. 기울기가 한계
+    # 방향이면 얼마나 멀든 True로 두면, 라이브에서 실제로 나온 것처럼
+    # days_until_limit=80170(약 219년)에 approaching_limit=true가 붙는다. DBA는
+    # 그 불리언만 보고 조사에 들어간다. 그래서 ETA 자체는 정직하게 그대로 두고,
+    # 플래그만 실행 가능한 기간으로 한정한다.
+    # 추세가 한계로 향하는가(방향)와, 지금 조치할 사안인가(기간)는 별개다.
+    # confidence와 불확실성 밴드는 "방향"에 걸어야 한다: 적합도가 좋은 먼 미래
+    # 추정은 신뢰도 낮은 추정이 아니라 신뢰도 높은 먼 미래 추정이다.
+    heading_to_limit = days_until is not None
+    approaching = heading_to_limit and days_until <= _ACTIONABLE_HORIZON_DAYS
+    beyond_horizon = heading_to_limit and not approaching
     # Confidence from fit + samples; a poor fit / thin data widens the band and
     # lowers confidence so the number isn't mistaken for precision.
-    if not grounded or n < 20 or not approaching:
+    if not grounded or n < 20 or not heading_to_limit:
         confidence = "low"
     elif r2 >= 0.7 and n >= 100:
         confidence = "high"
@@ -235,7 +251,7 @@ def forecast_capacity_impl(
     # Days-until band: slope uncertainty scales inversely with fit (R²). A
     # better fit → tighter band around the point estimate.
     days_range = None
-    if approaching:
+    if heading_to_limit:
         spread = max(0.15, 1.0 - max(0.0, min(r2, 1.0)))  # 0.15 (great fit) .. 1.0 (no fit)
         low = _days(slope * (1.0 + spread))   # 더 빠른 추세 → 더 이르게
         # 더 느린 추세 → 더 늦게, 또는 아예 도달 안 함(null)
@@ -254,8 +270,9 @@ def forecast_capacity_impl(
         "slope_per_day": round(slope, 4),
         "r2": round(r2, 3),
         "samples": n,
-        # days_until_limit는 두 값만 가진다: 정수(접근 중) 또는 null. null의
-        # 이유(추세가 한계로 향하지 않음 / 한계 근거 없음)는 note에 문장으로 남긴다.
+        # days_until_limit는 두 값만 가진다: 정수(추세가 한계로 향함) 또는 null.
+        # null의 이유(추세가 한계로 향하지 않음 / 한계 근거 없음)는 note에 문장으로
+        # 남긴다. 정수여도 실행 가능 기간을 넘으면 approaching_limit는 false다.
         "days_until_limit": days_until,
         "approaching_limit": approaching,
         "days_until_limit_range": days_range,
@@ -275,6 +292,11 @@ def forecast_capacity_impl(
             f"한계값 기준: {limit_basis}. 선형 외삽은 현재 추세가 유지된다고 가정합니다(R²={round(r2, 2)}, "
             f"표본 {n}개). days_until_limit은 점 추정이며 range는 추세 적합도 기반 불확실성 밴드입니다."
             if approaching else
+            f"한계값 기준: {limit_basis}. 추세는 한계로 향하지만 도달 시점이 약 {days_until}일 "
+            f"({round(days_until / 365.0, 1)}년) 뒤로, 실행 가능 기간 {_ACTIONABLE_HORIZON_DAYS}일을 "
+            f"넘습니다. 지금 조치할 사안이 아니라 approaching_limit=false입니다"
+            f"(기울기 {round(slope, 4)}/일, 표본 {n}개)."
+            if beyond_horizon else
             f"한계값 기준: {limit_basis}. 현재 추세(기울기 {round(slope, 4)}/일, 표본 {n}개)는 한계로 "
             f"향하지 않아 도달 시점이 없습니다(days_until_limit=null, approaching_limit=false)."
         ),

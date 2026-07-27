@@ -48,9 +48,11 @@ def performance_schema():
               "storage | connections | aas (there is no storage_gb): storage = Aurora/DocumentDB "
               "volume growth toward the 128 TiB ceiling or standalone-RDS free space depleting "
               "toward 0, connections = DatabaseConnections vs max_connections, aas = vs instance "
-              "vCPU. Returns days_until_limit=null with approaching_limit=false when the trend is "
-              "not heading to the limit, and no date at all when the limit cannot be grounded in "
-              "the cluster's real config",
+              "vCPU. days_until_limit is an int when the trend heads to the limit, else null; "
+              "no date at all when the limit cannot be grounded in the cluster's real config. "
+              "approaching_limit is true ONLY when that ETA is within 365 days (actionable), so a "
+              "distant ETA reports its date with approaching_limit=false, and the note explains "
+              "why. confidence and days_until_limit_range describe the FIT, not the horizon",
               {"cluster_id": "string", "metric": "string", "days_lookback": "integer"},
               ["cluster_id"],
               enums={"metric": ["storage", "connections", "aas"]}),
