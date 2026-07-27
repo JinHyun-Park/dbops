@@ -15,8 +15,12 @@ The agent only kicks off the restore and registers the new cluster with
 `pending_instance=true`; the restore_finalizer Lambda adds the writer
 instance and finalizes registration once the cluster is available
 (CreateDBInstance can't run until then — see that handler).
+
+Failures return a STATIC Korean reason and log the detail with the module
+logger: raw exception text must never reach a tool response.
 """
 
+import logging
 import os
 import re
 
@@ -25,6 +29,8 @@ import boto3
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import lookup_cluster, rds_client_for_cluster
+
+logger = logging.getLogger(__name__)
 
 _CLUSTER_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
 
@@ -87,8 +93,8 @@ def _register_pending(cluster_id: str, source_id: str, restore_source: str,
             }
         )
         return True
-    except Exception as e:
-        print(f"[restore_cluster] registry put failed: {e}")
+    except Exception:
+        logger.warning("registry put failed for %s", cluster_id, exc_info=True)
         return False
 
 
@@ -182,8 +188,18 @@ def restore_cluster_impl(
             restore_source = f"snapshot:{sid}"
     except rds.exceptions.DBClusterAlreadyExistsFault:
         return {"status": "already_exists", "new_cluster_id": nid}
-    except Exception as e:
-        return {"status": "restore_failed", "cluster_id": cluster_id, "error": str(e)[:300]}
+    except Exception:
+        logger.warning(
+            "restore failed for %s (mode=%s, new_cluster_id=%s)",
+            cluster_id, mode, nid, exc_info=True,
+        )
+        # mode/new_cluster_id are CALLER inputs, so they are safe to echo and are
+        # what the DBA needs to retry. The RDS error itself only goes to CloudWatch.
+        return {"status": "restore_failed", "cluster_id": cluster_id,
+                "new_cluster_id": nid, "mode": mode,
+                "reason": "복원 시작에 실패했습니다. 스냅샷 식별자·복원 시점이 유효한지, "
+                          "복원 대상 이름이 이미 사용 중이 아닌지 확인하세요 "
+                          "(자세한 원인은 서버 로그를 확인하세요)."}
 
     new_cluster = resp.get("DBCluster", {})
     new_arn = new_cluster.get("DBClusterArn", "")

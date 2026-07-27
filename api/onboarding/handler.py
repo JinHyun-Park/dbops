@@ -132,7 +132,8 @@ def lambda_handler(event, context=None):
     try:
         hub_account_id = boto3.client("sts").get_caller_identity()["Account"]
     except Exception as e:
-        return _resp(500, {"error": f"could not resolve hub account: {type(e).__name__}"})
+        print(f"[onboarding] get_caller_identity failed: {e}")
+        return _resp(500, {"error": "허브 계정 ID를 확인하지 못했습니다. 잠시 후 다시 시도하세요."})
 
     template = _build_template(hub_account_id, remediation)
     return _resp(200, {

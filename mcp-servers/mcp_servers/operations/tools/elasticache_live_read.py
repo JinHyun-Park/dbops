@@ -5,9 +5,18 @@ a FIXED allowlist of read-only inspector commands (Redis: INFO, SLOWLOG GET,
 CLIENT LIST, MEMORY STATS; Memcached: stats). No write/admin command and no
 free-form command from the caller. TLS + Secrets-Manager AUTH; cross-account
 secret + describe via assumed spoke role. Mirrors the DocDB native-protocol tool
-pattern (lazy client import + monkeypatchable factory)."""
+pattern (lazy client import + monkeypatchable factory).
+
+This tool is READ-ONLY, so it is reachable WITHOUT an approval by any caller who
+can see the cluster. Failure reasons therefore stay STATIC: an AssumeRole /
+Secrets-Manager / redis exception spells out the hub account id, the platform
+role name and the AUTH secret ARN. The bounded AWS error code is kept (it is an
+enum and it is what makes the reason actionable); the exception text goes to
+CloudWatch only."""
 
 import json
+
+from botocore.exceptions import ClientError
 
 from mcp_servers.shared.cluster_targets import lookup_cluster, session_for
 
@@ -116,7 +125,18 @@ def elasticache_live_read_impl(cache, cluster_id=None, sections=None, **_):
     try:
         sess = session_for(region, role_arn)
     except Exception as e:
-        return _resp("error", reason=f"session 생성 실패: {str(e)[:160]}", cluster_id=cluster_id)
+        # .get chain, not ["Error"]["Code"]: a KeyError raised INSIDE this
+        # handler would escape the tool instead of returning status=error.
+        code = str((e.response.get("Error") or {}).get("Code") or "")[:60] \
+            if isinstance(e, ClientError) else ""
+        code_part = f" ({code})" if code else ""
+        print(f"[elasticache_live_read] session_for failed for {cluster_id}: {type(e).__name__}: {e}")
+        return _resp(
+            "error",
+            reason="대상 계정 세션 생성(AssumeRole)에 실패했습니다. 스포크 역할 ARN과 신뢰 정책을 "
+                   f"확인하세요{code_part}. 자세한 원인은 서버 로그를 확인하세요.",
+            cluster_id=cluster_id,
+        )
 
     host, port = _resolve_endpoint(sess.client("elasticache"), resource_name)
     if not host:
@@ -127,7 +147,17 @@ def elasticache_live_read_impl(cache, cluster_id=None, sections=None, **_):
         try:
             token = _read_auth_token(secret_arn, sess)
         except Exception as e:
-            return _resp("error", reason=f"AUTH 시크릿 조회 실패: {str(e)[:160]}", cluster_id=cluster_id)
+            sec_code = str((e.response.get("Error") or {}).get("Code") or "")[:60] \
+                if isinstance(e, ClientError) else ""
+            sec_part = f" ({sec_code})" if sec_code else ""
+            print(f"[elasticache_live_read] auth secret read failed for {cluster_id}: {type(e).__name__}: {e}")
+            return _resp(
+                "error",
+                reason="AUTH 시크릿을 읽을 수 없습니다. 레지스트리의 시크릿 ARN과 스포크 역할의 "
+                       f"secretsmanager:GetSecretValue 권한을 확인하세요{sec_part}. "
+                       "자세한 원인은 서버 로그를 확인하세요.",
+                cluster_id=cluster_id,
+            )
 
     is_memcached = engine == "memcached"
     try:
@@ -172,4 +202,14 @@ def elasticache_live_read_impl(cache, cluster_id=None, sections=None, **_):
         return _resp("ok", engine=engine, host=host, info=info, slowlog=slow,
                      clients=clients, memory=mem, cluster_id=cluster_id)
     except Exception as e:
-        return _resp("error", reason=f"연결/조회 실패: {str(e)[:160]}", host=host, cluster_id=cluster_id)
+        # Native-protocol failure (redis/pymemcache), so there is no AWS error
+        # code here: the reason is fully static. The driver message is the worst
+        # leak of the three, it can echo the AUTH token back in a WRONGPASS.
+        print(f"[elasticache_live_read] live read failed for {cluster_id} ({engine}): {type(e).__name__}: {e}")
+        return _resp(
+            "error",
+            reason="캐시 노드 연결/조회에 실패했습니다. 보안 그룹(포트 6379/11211) 인바운드, "
+                   "TLS 설정, AUTH 토큰 값을 확인하세요. 자세한 원인은 서버 로그를 확인하세요.",
+            host=host,
+            cluster_id=cluster_id,
+        )

@@ -76,12 +76,34 @@ def test_modify_scaling_provisioned_refused_before_approval(mock_rds_for):
     mock_rds.modify_db_cluster.assert_not_called()
 
 
+# The describe below runs BEFORE any approval exists, so its failure message is
+# reachable by a plain chat user. An AWS error there carries the hub account id,
+# the platform role name and the target ARN, none of which may enter a response.
+_LEAKY = (
+    "AccessDeniedException: User: arn:aws:sts::123456789012:assumed-role/"
+    "dbops-dev-operations-role/boom is not authorized to perform "
+    "rds:DescribeDBClusters on arn:aws:rds:ap-northeast-2:123456789012:cluster:prod-pg-1"
+)
+
+
+def _no_exception_text(result):
+    """No response value may carry raw exception text (project hard rule)."""
+    blob = " ".join(str(v) for v in result.values())
+    for leak in ("123456789012", "arn:aws", "assumed-role", "AccessDeniedException",
+                 "boom", "Traceback", "Exception"):
+        assert leak not in blob, f"raw exception text leaked into response: {result}"
+
+
 @patch("mcp_servers.operations.tools.modify_scaling.rds_client_for_cluster")
 def test_modify_scaling_describe_failure_fails_closed(mock_rds_for):
-    """If the engine mode cannot be determined, refuse rather than modify."""
+    """If the engine mode cannot be determined, refuse rather than modify, and
+    say so WITHOUT echoing the AWS error into the response."""
     mock_rds = MagicMock()
-    mock_rds.describe_db_clusters.side_effect = Exception("boom")
+    mock_rds.describe_db_clusters.side_effect = Exception(_LEAKY)
     mock_rds_for.return_value = mock_rds
     result = modify_scaling_impl(MagicMock(), cluster_id="x", min_capacity=1.0, approved=True)
     assert result["status"] == "error"
     mock_rds.modify_db_cluster.assert_not_called()
+    _no_exception_text(result)
+    # still tells the operator WHICH step broke
+    assert "클러스터 조회" in result["reason"]

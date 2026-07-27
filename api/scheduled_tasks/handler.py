@@ -110,7 +110,9 @@ def lambda_handler(event, context):
                     "FROM scheduled_tasks ORDER BY created_at DESC LIMIT 200"
                 )
         except Exception as e:
-            return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
+            print(f"[scheduled_tasks] list query failed (cluster={cluster or '*'}): {e}")
+            return {"statusCode": 500, "headers": headers,
+                    "body": json.dumps({"error": "예약 작업 목록을 불러오지 못했습니다. 잠시 후 다시 시도하세요."})}
         visible = tenancy.visible_set_from_registry(event)
         if visible is not None:
             rows = [r for r in rows if r.get("cluster_id") in visible]
@@ -142,7 +144,9 @@ def lambda_handler(event, context):
                 {"cid": cluster_id, "kind": kind, "ival": interval_kind},
             )
         except Exception as e:
-            return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
+            print(f"[scheduled_tasks] insert failed for {cluster_id} ({kind}/{interval_kind}): {e}")
+            return {"statusCode": 500, "headers": headers,
+                    "body": json.dumps({"error": "예약 작업 생성에 실패했습니다. 잠시 후 다시 시도하세요."})}
         new_id = rows[0].get("id") if rows else None
         return {
             "statusCode": 201,
@@ -165,7 +169,9 @@ def lambda_handler(event, context):
                 {"id": sched_id_int},
             )
         except Exception as e:
-            return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
+            print(f"[scheduled_tasks] pre-delete select failed for {sched_id_int}: {e}")
+            return {"statusCode": 500, "headers": headers,
+                    "body": json.dumps({"error": "삭제할 예약 작업을 조회하지 못했습니다. 잠시 후 다시 시도하세요."})}
         if rows:
             row_cluster_id = rows[0].get("cluster_id") or ""
             if not tenancy.cluster_visible(event, _cluster_item(row_cluster_id)):
@@ -174,7 +180,9 @@ def lambda_handler(event, context):
         try:
             _query("DELETE FROM scheduled_tasks WHERE id = :id", {"id": sched_id_int})
         except Exception as e:
-            return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
+            print(f"[scheduled_tasks] delete failed for {sched_id_int}: {e}")
+            return {"statusCode": 500, "headers": headers,
+                    "body": json.dumps({"error": "예약 작업 삭제에 실패했습니다. 잠시 후 다시 시도하세요."})}
         return {"statusCode": 200, "headers": headers, "body": json.dumps({"deleted": sched_id})}
 
     return {"statusCode": 405, "headers": headers, "body": json.dumps({"error": "Method not allowed"})}

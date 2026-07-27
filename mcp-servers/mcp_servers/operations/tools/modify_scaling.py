@@ -1,6 +1,18 @@
+"""modify_scaling: approval-gated Aurora Serverless v2 ACU range change.
+
+Failures return a STATIC Korean reason and log the detail with the module
+logger: raw exception text must never reach a tool response (an AWS error
+carries the hub account id, the platform role name and the target ARN, and the
+pre-approval describe below is reachable by any chat user).
+"""
+
+import logging
+
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import rds_client_for_cluster
+
+logger = logging.getLogger(__name__)
 
 
 def modify_scaling_impl(
@@ -20,10 +32,14 @@ def modify_scaling_impl(
     # 승인 왕복(요청→DBA 검토→재실행)을 시키고 승인만 소비하는 낭비를 막는다.
     try:
         info = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)["DBClusters"][0]
-    except Exception as e:
+    except Exception:
+        logger.warning("describe_db_clusters failed for %s", cluster_id, exc_info=True)
         return {
             "status": "error",
-            "reason": f"클러스터 조회 실패 — 적용 전 엔진 모드를 확인할 수 없어 중단합니다: {str(e)[:200]}",
+            "reason": (
+                "클러스터 조회에 실패했습니다. 적용 전 엔진 모드(Serverless v2 여부)를 "
+                "확인할 수 없어 중단합니다 (자세한 원인은 서버 로그를 확인하세요)."
+            ),
             "cluster_id": cluster_id,
         }
     if not info.get("ServerlessV2ScalingConfiguration"):

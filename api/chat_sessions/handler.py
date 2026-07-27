@@ -169,7 +169,8 @@ def _list_sessions(table, user_id: str, qsp: dict) -> dict:
             ProjectionExpression="session_id, title, cluster_id, updated_at, message_count, created_at, total_input_tokens, total_output_tokens, last_error",
         )
     except ClientError as e:
-        return _response(500, {"error": str(e)[:300]})
+        print(f"[chat_sessions] list query failed for {user_id}: {e}")
+        return _response(500, {"error": "대화 목록을 불러오지 못했습니다. 잠시 후 다시 시도하세요."})
     return _response(200, {"sessions": resp.get("Items", [])})
 
 
@@ -177,7 +178,8 @@ def _get_session(table, user_id: str, session_id: str) -> dict:
     try:
         resp = table.get_item(Key={"session_id": session_id})
     except ClientError as e:
-        return _response(500, {"error": str(e)[:300]})
+        print(f"[chat_sessions] get_item failed for {session_id}: {e}")
+        return _response(500, {"error": "대화를 불러오지 못했습니다. 잠시 후 다시 시도하세요."})
     item = resp.get("Item")
     if not item:
         return _response(404, {"error": "session not found"})
@@ -202,7 +204,8 @@ def _put_session(table, user_id: str, session_id: str, event: dict) -> dict:
     try:
         existing = table.get_item(Key={"session_id": session_id}).get("Item") or {}
     except ClientError as e:
-        return _response(500, {"error": str(e)[:300]})
+        print(f"[chat_sessions] ownership read failed for {session_id}: {e}")
+        return _response(500, {"error": "대화 소유자 확인에 실패했습니다. 잠시 후 다시 시도하세요."})
     if existing and existing.get("user_id") != user_id:
         return _response(403, {"error": "not your session"})
 
@@ -226,7 +229,8 @@ def _put_session(table, user_id: str, session_id: str, event: dict) -> dict:
     try:
         table.put_item(Item=item)
     except ClientError as e:
-        return _response(500, {"error": str(e)[:300]})
+        print(f"[chat_sessions] put_item failed for {session_id}: {e}")
+        return _response(500, {"error": "대화 저장에 실패했습니다. 잠시 후 다시 시도하세요."})
     return _response(200, item)
 
 
@@ -234,7 +238,8 @@ def _delete_session(table, user_id: str, session_id: str) -> dict:
     try:
         existing = table.get_item(Key={"session_id": session_id}).get("Item") or {}
     except ClientError as e:
-        return _response(500, {"error": str(e)[:300]})
+        print(f"[chat_sessions] pre-delete read failed for {session_id}: {e}")
+        return _response(500, {"error": "삭제할 대화를 조회하지 못했습니다. 잠시 후 다시 시도하세요."})
     if not existing:
         return _response(404, {"error": "session not found"})
     if existing.get("user_id") != user_id:
@@ -242,5 +247,6 @@ def _delete_session(table, user_id: str, session_id: str) -> dict:
     try:
         table.delete_item(Key={"session_id": session_id})
     except ClientError as e:
-        return _response(500, {"error": str(e)[:300]})
+        print(f"[chat_sessions] delete_item failed for {session_id}: {e}")
+        return _response(500, {"error": "대화 삭제에 실패했습니다. 잠시 후 다시 시도하세요."})
     return _response(200, {"deleted": session_id})

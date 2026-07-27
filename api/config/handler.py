@@ -51,6 +51,15 @@ CONFIG_KEYS: dict = {
     "REPORT_DELIVERY_ENABLED": ("false", _v_bool),
 }
 
+# Caller-safe rejection text per key. The validator's own ValueError message is
+# for CloudWatch only: no exception text may reach a response payload, and a
+# future validator that echoes the rejected value into its message would leak it
+# straight into the browser. Keep this map in step with the validators above.
+_INVALID_VALUE_HINT = {
+    "TICKETING_PROVIDER": "[a-z0-9_-] 문자 1~32자여야 합니다.",
+    "REPORT_DELIVERY_ENABLED": "true 또는 false여야 합니다.",
+}
+
 
 # --- auth helpers (mirror api/saved_queries/handler.py) ---------------------
 
@@ -184,7 +193,10 @@ def lambda_handler(event, context=None):
             try:
                 normalized[key] = validator(raw)
             except ValueError as e:
-                return _resp(400, {"error": f"{key}: {e}"})
+                print(f"[config] rejected {key}: {e}")
+                return _resp(400, {"error": (
+                    f"{key}: " + _INVALID_VALUE_HINT.get(key, "값이 올바르지 않습니다.")
+                )})
 
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         who = _caller_name(event)

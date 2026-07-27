@@ -171,26 +171,36 @@ def lambda_handler(event, context):
             includeResultMetadata=True,
         )
     except Exception as e:
-        # Distinguish SQL errors (user input) from infrastructure errors
-        # (timeouts, IAM, network). DatabaseErrorException is the wrapper
-        # rds-data uses for anything Postgres/MySQL itself returned.
+        # Distinguish SQL errors (user input, 400) from infrastructure errors
+        # (timeouts, IAM, network, 502). DatabaseErrorException is the wrapper
+        # rds-data uses for anything Postgres/MySQL itself returned. That
+        # classification reads the exception; the RESPONSE never does.
+        #
+        # rds-data wraps the engine's "ERROR: ..." text TOGETHER with the secret
+        # ARN and the cluster ARN in one message, and the old "ERROR:" regex fell
+        # back to the whole message whenever it did not match, so there is no
+        # substring of it safe to hand a browser. The caller still gets the
+        # statement we ran (`explain_sql`, built from their own input) plus the
+        # 400/502 verdict; the engine's exact complaint goes to CloudWatch.
+        print(f"[explain] execute_statement failed for {cluster_id}: {e}")
         msg = str(e)
         is_db_error = "DatabaseErrorException" in msg or "BadRequestException" in msg
-        # Try to pull out just the "ERROR: ..." part the engine returned.
-        clean = msg
-        m = re.search(r"ERROR:\s*(.+?)(?:;\s*Position:|;\s*SQLState:|$)", msg)
-        if m:
-            clean = m.group(1).strip()
         if is_db_error:
             return _resp(400, {
                 "error": "sql_error",
-                "message": clean,
+                "message": (
+                    "데이터베이스가 이 문장을 거부했습니다. SQL 구문과 참조한 테이블·"
+                    "컬럼 이름을 확인하세요 (자세한 오류는 서버 로그에 기록됩니다)."
+                ),
                 "engine": engine,
                 "explain_sql": explain_sql,
             })
         return _resp(502, {
             "error": "execution_failed",
-            "message": clean[:500],
+            "message": (
+                "EXPLAIN 실행에 실패했습니다. 클러스터 연결·권한 문제일 수 있으니 "
+                "잠시 후 다시 시도하고, 계속되면 서버 로그를 확인하세요."
+            ),
             "engine": engine,
             "explain_sql": explain_sql,
         })

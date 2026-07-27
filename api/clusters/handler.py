@@ -503,6 +503,62 @@ def _bad_secret_arn_field(body, fields):
     return ""
 
 
+# botocore error code -> STATIC, actionable Korean reason.
+#
+# Raw exception text must never be stored in the registry or returned in a
+# response. An AWS describe/AssumeRole error routinely spells out the HUB ACCOUNT
+# ID, the PLATFORM IAM ROLE NAME and the target ARN, and `connection_error` is
+# the worst possible place to keep it: GET /api/clusters returns registry rows
+# UNPROJECTED, and tenancy filters WHICH clusters a caller sees, not which
+# FIELDS. So a single failed registration would hand the hub account id and the
+# platform role name to every viewer who can see that cluster. The error CODE is
+# a short AWS enum (no identifiers), so it is safe to surface and is what makes
+# the reason actionable; the full exception goes to CloudWatch only.
+_CONN_ERROR_REASONS = {
+    # authz: by far the most common real failure (spoke role trust policy)
+    "AccessDenied": "권한이 부족합니다. 스포크 역할의 신뢰 정책과 연결된 권한을 확인하세요.",
+    "AccessDeniedException": "권한이 부족합니다. 스포크 역할의 신뢰 정책과 연결된 권한을 확인하세요.",
+    "UnauthorizedOperation": "권한이 부족합니다. 스포크 역할의 신뢰 정책과 연결된 권한을 확인하세요.",
+    "InvalidClientTokenId": "자격 증명이 유효하지 않습니다. 스포크 역할 ARN을 확인하세요.",
+    "ExpiredToken": "자격 증명이 만료되었습니다. 잠시 후 다시 시도하세요.",
+    "ExpiredTokenException": "자격 증명이 만료되었습니다. 잠시 후 다시 시도하세요.",
+    # not found: wrong identifier, wrong region, or wrong account
+    "DBClusterNotFoundFault": "해당 계정/리전에서 클러스터를 찾을 수 없습니다. 식별자와 리전을 확인하세요.",
+    "DBInstanceNotFoundFault": "해당 계정/리전에서 DB 인스턴스를 찾을 수 없습니다. 식별자와 리전을 확인하세요.",
+    "ReplicationGroupNotFoundFault": "해당 계정/리전에서 replication group을 찾을 수 없습니다. 이름과 리전을 확인하세요.",
+    "CacheClusterNotFoundFault": "해당 계정/리전에서 cache cluster를 찾을 수 없습니다. 이름과 리전을 확인하세요.",
+    "ResourceNotFoundException": "해당 계정/리전에서 리소스를 찾을 수 없습니다. 이름과 리전을 확인하세요.",
+    # transient / input
+    "ThrottlingException": "AWS API 호출이 제한되었습니다. 잠시 후 다시 시도하세요.",
+    "Throttling": "AWS API 호출이 제한되었습니다. 잠시 후 다시 시도하세요.",
+    "RequestLimitExceeded": "AWS API 호출이 제한되었습니다. 잠시 후 다시 시도하세요.",
+    "ValidationException": "요청 값이 올바르지 않습니다. 식별자 형식을 확인하세요.",
+    "InvalidParameterValue": "요청 값이 올바르지 않습니다. 식별자 형식을 확인하세요.",
+    "EndpointConnectionError": "AWS 엔드포인트에 연결할 수 없습니다. 리전 값을 확인하세요.",
+}
+
+
+def _conn_error(e: Exception, context: str) -> str:
+    """Caller-safe reason for a failed registration / connection probe.
+
+    Logs the full exception to CloudWatch and returns a STATIC Korean reason
+    keyed by the AWS error code. Never returns exception text: see
+    _CONN_ERROR_REASONS for why this field in particular must stay clean."""
+    code = ""
+    resp = getattr(e, "response", None)
+    if isinstance(resp, dict):
+        code = str((resp.get("Error") or {}).get("Code") or "")
+    if not code:
+        code = type(e).__name__
+    # An AWS error code is a short enum, but slice anyway so a non-botocore
+    # exception class name can never turn this field into a payload.
+    code = code[:60]
+    print(f"[{context}] failed ({code}): {e}")
+    return _CONN_ERROR_REASONS.get(code) or (
+        f"연결 확인에 실패했습니다 ({code}). 자세한 원인은 서버 로그를 확인하세요."
+    )
+
+
 # Fields only an operator can set (PATCH /clusters/{id}/meta, or the admin teams
 # API for team_id) and that registration cannot re-derive from AWS.
 # Operator-set labels that mean the same thing wherever the cluster lives, so a
@@ -565,7 +621,7 @@ def _register_dynamodb(table, body):
     try:
         _ddb_client_for(region, body.get("spoke_role_arn", "")).describe_table(TableName=name)
     except Exception as e:
-        status, err = "failed", str(e)[:300]
+        status, err = "failed", _conn_error(e, f"register dynamodb {name} in {region}")
     cid = dynamodb_cluster_id(account_id, region, name)
     item = {
         "cluster_id": cid, "account_id": account_id, "region": region,
@@ -598,7 +654,7 @@ def _register_docdb(table, body):
         if cl:
             version = cl[0].get("EngineVersion", "")
     except Exception as e:
-        status, err = "failed", str(e)[:300]
+        status, err = "failed", _conn_error(e, f"register docdb {cluster_id} in {region}")
     item = {
         "cluster_id": cluster_id, "account_id": account_id, "region": region,
         "engine": "docdb", "engine_family": "documentdb", "engine_version": version,
@@ -675,9 +731,12 @@ def _register_elasticache(table, body):
                     "auth_secret_arn": auth_secret_arn,
                 }
             else:
-                status, err = "failed", "not found"
+                status, err = "failed", (
+                    "해당 계정/리전에서 replication group도 cache cluster도 찾을 수 없습니다. "
+                    "이름과 리전을 확인하세요."
+                )
         except Exception as e:
-            status, err = "failed", str(e)[:300]
+            status, err = "failed", _conn_error(e, f"register elasticache {name} in {region}")
     item = {
         "cluster_id": name, "account_id": account_id, "region": region,
         "engine": engine, "engine_family": "elasticache",
@@ -813,7 +872,7 @@ def _handle_register(table, body: dict):
         connection_status = "ok"
     except Exception as e:
         connection_status = "failed"
-        connection_error = str(e)[:300]
+        connection_error = _conn_error(e, f"register aurora {cluster_id} in {region}")
 
     item = {
         "cluster_id": cluster_id,
@@ -905,10 +964,8 @@ def _handle_discover(table, body: dict):
                 )
                 row["is_internal"] = is_cache or is_dbops_ddb
             all_clusters.extend(rows)
-        except ClientError as e:
-            errors_by_region[r] = e.response.get("Error", {}).get("Code", str(e))
         except Exception as e:
-            errors_by_region[r] = str(e)[:200]
+            errors_by_region[r] = _conn_error(e, f"discover in {r}")
 
     return _resp(200, {
         "clusters": all_clusters,
@@ -954,7 +1011,8 @@ def _handle_bulk_register(table, body: dict):
                 "connection_status": payload.get("connection_status"),
             })
         except Exception as e:
-            failed.append({"cluster_id": c.get("cluster_id", "?"), "error": str(e)[:200]})
+            cid = c.get("cluster_id", "?")
+            failed.append({"cluster_id": cid, "error": _conn_error(e, f"bulk register {cid}")})
 
     return _resp(200, {
         "registered": registered,
@@ -987,7 +1045,10 @@ def _handle_seed_sample(table):
     try:
         counts = seeder.seed_demo_data(rds_data, cluster_arn, secret_arn, db_name, cluster_id)
     except Exception as e:
-        return _resp(500, {"error": "seed_failed", "detail": str(e)[:300]})
+        # The seeder runs SQL, so its exception text can carry statement
+        # fragments on top of the cache-cluster ARN. Log it, return the code.
+        return _resp(500, {"error": "seed_failed",
+                           "detail": _conn_error(e, "seed sample data")})
 
     item = {
         "cluster_id": cluster_id,
@@ -1133,7 +1194,7 @@ def _test_connection(body: dict) -> dict:
             steps.append({
                 "name": "assume_role",
                 "status": "failed",
-                "error": str(e)[:300],
+                "error": _conn_error(e, f"test_connection assume_role {spoke_role_arn}"),
             })
             return _resp(200, {"ok": False, "steps": steps})
     else:
@@ -1168,7 +1229,7 @@ def _test_connection(body: dict) -> dict:
         steps.append({
             "name": "describe_cluster",
             "status": "failed",
-            "error": str(e)[:300],
+            "error": _conn_error(e, f"test_connection describe {cluster_id} in {region}"),
         })
         return _resp(200, {"ok": False, "steps": steps})
 

@@ -15,6 +15,24 @@ from mcp_servers.operations.tools.create_docdb_index import create_docdb_index_i
 
 _CREDS = {"host": "docdb.local", "port": 27017, "username": "rw", "password": "pw"}
 
+# A driver/AWS error carries the cluster endpoint, the write-secret ARN and the
+# platform role name. None of it may reach a response field: the request-time
+# list_indexes runs BEFORE any approval exists, so a plain chat user can surface
+# these messages just by asking for an index.
+_LEAK_MSG = (
+    "connection refused: docdb-prod.cluster-abc123.ap-northeast-2.docdb.amazonaws.com:27017 "
+    "(secret arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:mongo-rw, "
+    "role dbops-dev-operations-role) boom"
+)
+
+
+def _no_exception_text(result):
+    """No response value may carry raw exception text (project hard rule)."""
+    blob = " ".join(str(v) for v in result.values())
+    for leak in ("123456789012", "arn:aws", "docdb.amazonaws.com", "dbops-dev-operations-role",
+                 "connection refused", "boom", "Traceback", "RuntimeError"):
+        assert leak not in blob, f"raw exception text leaked into response: {result}"
+
 
 class _FakeCollection:
     def __init__(self, existing_seq, create_spy, raise_on_create=False):
@@ -28,7 +46,7 @@ class _FakeCollection:
 
     def create_index(self, keys, **kwargs):
         if self._raise_on_create:
-            raise RuntimeError("create boom")
+            raise RuntimeError(_LEAK_MSG)
         self._create_spy(keys, kwargs)
         return kwargs.get("name")
 
@@ -44,7 +62,7 @@ class _FakeDB:
 class _FakeClient:
     def __init__(self, existing_seq, create_spy, raise_on_create=False, raise_on_connect=False):
         if raise_on_connect:
-            raise RuntimeError("connection refused")
+            raise RuntimeError(_LEAK_MSG)
         self._db = _FakeDB(_FakeCollection(existing_seq, create_spy, raise_on_create))
         self.closed = False
 
@@ -214,12 +232,14 @@ def test_toctou_index_appeared_denied():
 
 
 def test_connect_failure_is_error_not_raise():
+    """Reachable BEFORE any approval: static reason, driver detail to the log."""
     with _with_creds(), patch.object(
         mod, "_CLIENT_FACTORY", _factory([], MagicMock(), raise_on_connect=True)
     ):
         result = create_docdb_index_impl(MagicMock(), **_args())
     assert result["status"] == "error"
     assert "연결 실패" in result["reason"]
+    _no_exception_text(result)
 
 
 @patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
@@ -230,6 +250,48 @@ def test_create_failure_is_error_not_raise():
         result = create_docdb_index_impl(MagicMock(), approved=True, **_args())
     assert result["status"] == "error"
     assert "인덱스 생성 실패" in result["reason"]
+    # the caller still gets the target it asked for, built from ITS OWN input
+    assert "app.events" in result["reason"] and "ix_user_created" in result["reason"]
+    _no_exception_text(result)
+
+
+def test_list_indexes_failure_no_exception_text():
+    """The request-time read fails (empty seq → IndexError): abort, no leak. This
+    path is pre-approval too."""
+    with _with_creds(), patch.object(mod, "_CLIENT_FACTORY", _factory([], MagicMock())):
+        result = create_docdb_index_impl(MagicMock(), **_args())
+    assert result["status"] == "error"
+    assert "인덱스 목록 조회 실패" in result["reason"]  # which step broke
+    _no_exception_text(result)
+
+
+@patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
+def test_pre_write_reread_failure_no_exception_text():
+    """The TOCTOU re-read fails → abort without creating, and without leaking."""
+    create_spy = MagicMock()
+    with _with_creds(), patch.object(mod, "_CLIENT_FACTORY", _factory([[]], create_spy)):
+        result = create_docdb_index_impl(MagicMock(), approved=True, **_args())
+    assert result["status"] == "error"
+    assert "재조회" in result["reason"]
+    create_spy.assert_not_called()
+    _no_exception_text(result)
+
+
+def test_secret_fetch_failure_no_exception_text():
+    """A Secrets Manager error names the secret ARN and the platform role, so the
+    reason must be static. Also pre-approval."""
+    boto3_mock = MagicMock()
+    boto3_mock.client.return_value.get_secret_value.side_effect = RuntimeError(_LEAK_MSG)
+    factory = MagicMock(side_effect=AssertionError("must not connect"))
+    with patch.object(
+        mod, "lookup_cluster",
+        lambda cid: {"mongo_write_secret_arn": "arn:aws:secretsmanager:x:1:secret:s"},
+    ), patch.object(mod, "boto3", boto3_mock), patch.object(mod, "_CLIENT_FACTORY", factory):
+        result = create_docdb_index_impl(MagicMock(), **_args())
+    assert result["status"] == "error"
+    assert "쓰기 자격증명" in result["reason"]  # which step broke
+    _no_exception_text(result)
+    factory.assert_not_called()
 
 
 def test_dict_keys_accepted_and_ordered():

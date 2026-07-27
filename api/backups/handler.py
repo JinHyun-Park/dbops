@@ -35,6 +35,7 @@ import re
 import time
 
 import boto3
+from botocore.exceptions import ClientError
 
 # RDS snapshot identifier rules: 1-63 chars, must start with a letter,
 # alphanumeric + hyphens, no consecutive hyphens, no trailing hyphen.
@@ -299,9 +300,19 @@ def _handle_snapshot(cluster_id: str, username: str, body: dict):
     except rds.exceptions.DBClusterSnapshotAlreadyExistsFault:
         return _resp(409, {"error": f"snapshot id '{snapshot_id}' already exists"})
     except Exception as e:
+        # The audit row keeps the raw detail (server-side trail, same role as
+        # CloudWatch); the RESPONSE gets a static reason plus the bounded AWS
+        # error CODE. RDS exception text names the cluster ARN, the hub account
+        # and the platform role, and this body renders in the browser.
+        code = e.response.get("Error", {}).get("Code", "") if isinstance(e, ClientError) else ""
+        print(f"[backups] create_db_cluster_snapshot failed for {cluster_id} ({code}): {e}")
         _audit(cluster_id, username, "create_snapshot", {"snapshot_id": snapshot_id},
                "failed", str(e)[:300], f"Manual snapshot {snapshot_id} failed by {username}")
-        return _resp(502, {"error": "create_snapshot failed", "message": str(e)[:300]})
+        return _resp(502, {"error": "create_snapshot failed", "message": (
+            f"스냅샷 '{snapshot_id}' 생성 요청이 실패했습니다"
+            + (f" (AWS 오류 코드: {code})" if code else "")
+            + ". 자세한 원인은 서버 로그를 확인하세요."
+        )})
 
     snap = resp.get("DBClusterSnapshot", {})
     _audit(cluster_id, username, "create_snapshot", {"snapshot_id": snapshot_id},
@@ -392,10 +403,20 @@ def _handle_restore(cluster_id: str, username: str, body: dict):
     except rds.exceptions.DBClusterAlreadyExistsFault:
         return _resp(409, {"error": f"cluster id '{new_id}' already exists"})
     except Exception as e:
+        # Response = static reason + bounded AWS error CODE (the actionable bit
+        # here is which quota/state/KMS check RDS refused on); raw detail goes to
+        # the audit row and CloudWatch only. `mode` keeps the pitr-vs-snapshot
+        # distinction the old exception text used to carry.
+        code = e.response.get("Error", {}).get("Code", "") if isinstance(e, ClientError) else ""
+        print(f"[backups] restore ({mode}) to {new_id} from {cluster_id} failed ({code}): {e}")
         _audit(cluster_id, username, "restore_cluster",
                {"new_cluster_id": new_id, "mode": mode}, "failed", str(e)[:300],
                f"Restore to {new_id} failed by {username}")
-        return _resp(502, {"error": "restore failed", "message": str(e)[:300]})
+        return _resp(502, {"error": "restore failed", "message": (
+            f"'{new_id}'(으)로 복원({mode}) 요청이 실패했습니다"
+            + (f" (AWS 오류 코드: {code})" if code else "")
+            + ". 자세한 원인은 서버 로그를 확인하세요."
+        )})
 
     new_cluster = resp.get("DBCluster", {})
     new_arn = new_cluster.get("DBClusterArn", "")

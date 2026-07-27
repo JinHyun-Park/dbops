@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+from botocore.exceptions import ClientError
 from mcp_servers.operations.tools.create_snapshot import (
     _make_snapshot_id,
     create_snapshot_impl,
@@ -86,17 +87,44 @@ def test_invalid_snapshot_id_rejected(mock_guard):
 
 @patch("mcp_servers.operations.tools.create_snapshot.rds_client_for_cluster")
 @patch("mcp_servers.operations.tools.create_snapshot.verify_approval")
-def test_create_failure_surfaced(mock_guard, mock_rds_for):
+def test_create_failure_surfaced_without_exception_text(mock_guard, mock_rds_for):
+    """create_failed keeps its status, but the reason is STATIC: a real RDS error
+    names the hub account, the platform role and the cluster ARN."""
     mock_guard.return_value = {"ok": True}
     rds = MagicMock()
-    rds.create_db_cluster_snapshot.side_effect = RuntimeError("boom")
+    rds.create_db_cluster_snapshot.side_effect = RuntimeError(
+        "User: arn:aws:sts::123456789012:assumed-role/dbops-dev-mcp-role/x is not authorized"
+    )
     mock_rds_for.return_value = rds
     cache = MagicMock()
     out = create_snapshot_impl(
         cache, cluster_id="prod-pg-1", approved=True, approval_id="aid-1"
     )
     assert out["status"] == "create_failed"
-    assert "boom" in out["error"]
+    assert out["cluster_id"] == "prod-pg-1"
+    assert "123456789012" not in out["error"]
+    assert "assumed-role" not in out["error"]
+    assert "스냅샷 생성 요청이 실패했습니다" in out["error"]
+
+
+@patch("mcp_servers.operations.tools.create_snapshot.rds_client_for_cluster")
+@patch("mcp_servers.operations.tools.create_snapshot.verify_approval")
+def test_create_failure_keeps_the_aws_error_code(mock_guard, mock_rds_for):
+    """The CODE is a bounded enum and is the actionable part, so it stays."""
+    mock_guard.return_value = {"ok": True}
+    rds = MagicMock()
+    rds.create_db_cluster_snapshot.side_effect = ClientError(
+        {"Error": {"Code": "DBClusterSnapshotAlreadyExistsFault",
+                   "Message": "snapshot arn:aws:rds:ap-northeast-2:123456789012:x exists"}},
+        "CreateDBClusterSnapshot",
+    )
+    mock_rds_for.return_value = rds
+    out = create_snapshot_impl(
+        MagicMock(), cluster_id="prod-pg-1", approved=True, approval_id="aid-1"
+    )
+    assert out["status"] == "create_failed"
+    assert "DBClusterSnapshotAlreadyExistsFault" in out["error"]
+    assert "123456789012" not in out["error"]
 
 
 def test_make_snapshot_id_is_valid():

@@ -10,13 +10,20 @@ Aurora-only: the operations handler engine-gate (custom_endpoint capability)
 refuses this tool on any non-relational engine before the impl runs. It also
 validates that requested members are real cluster instances so a doomed create
 never burns a consumed approval.
+
+Failures return a STATIC Korean reason and log the detail with the module
+logger: raw exception text must never reach a tool response (an AWS error
+carries the hub account id, the platform role name and target ARNs).
 """
 
+import logging
 import re
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import rds_client_for_cluster
+
+logger = logging.getLogger(__name__)
 
 _ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
 _VALID_TYPES = ("READER", "ANY")
@@ -72,9 +79,11 @@ def create_custom_endpoint_impl(
     rds = rds_client_for_cluster(cluster_id)
     try:
         cl = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)["DBClusters"][0]
-    except Exception as e:
+    except Exception:
+        logger.warning("describe_db_clusters failed for %s", cluster_id, exc_info=True)
         return {"status": "error", "cluster_id": cluster_id,
-                "reason": f"클러스터 조회 실패 — 멤버를 확인할 수 없어 중단합니다: {str(e)[:200]}",
+                "reason": "클러스터 조회에 실패해 멤버를 확인할 수 없어 중단했습니다. "
+                          "cluster_id를 확인하세요 (자세한 원인은 서버 로그를 확인하세요).",
                 "cli_preview": cli}
     members = {m.get("DBInstanceIdentifier") for m in cl.get("DBClusterMembers", [])}
     bad = [m for m in (static_members + excluded_members) if m not in members]
@@ -115,8 +124,20 @@ def create_custom_endpoint_impl(
         params["ExcludedMembers"] = excluded_members
     try:
         resp = rds.create_db_cluster_endpoint(**params)
-    except Exception as e:
-        return {"status": "create_failed", "cluster_id": cluster_id, "error": str(e)[:300], "cli_preview": cli}
+    except Exception:
+        logger.warning(
+            "create_db_cluster_endpoint failed for %s (endpoint=%s)",
+            cluster_id, endpoint_identifier, exc_info=True,
+        )
+        # endpoint_identifier/type come from the CALLER, so echoing them is safe
+        # and tells the DBA which create failed. cli_preview is likewise built
+        # from known inputs, never from the exception.
+        return {"status": "create_failed", "cluster_id": cluster_id,
+                "endpoint_identifier": endpoint_identifier,
+                "reason": "커스텀 엔드포인트 생성에 실패했습니다. 동일 이름의 엔드포인트가 이미 있거나 "
+                          "클러스터가 available 상태가 아닐 수 있습니다 "
+                          "(자세한 원인은 서버 로그를 확인하세요).",
+                "cli_preview": cli}
 
     return {
         "status": "creating",

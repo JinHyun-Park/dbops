@@ -10,12 +10,17 @@ mutating AWS API call and a cost-incurring resource, so it stays behind
 the guard for consistency and auditability.
 """
 
+import logging
 import re
 import time
+
+from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import rds_client_for_cluster
+
+logger = logging.getLogger(__name__)
 
 _SNAPSHOT_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
 
@@ -71,7 +76,31 @@ def create_snapshot_impl(
             ],
         )
     except Exception as e:
-        return {"status": "create_failed", "cluster_id": cluster_id, "error": str(e)[:300]}
+        # The approval is ALREADY consumed at this point, so this path only
+        # reports: it must not re-run the guard or change the status.
+        #
+        # RDS exception TEXT spells out the hub account id, the platform role and
+        # the cluster ARN, and this reason lands in the agent transcript the DBA
+        # reads. The error CODE is a bounded AWS enum and is the actionable part
+        # (id collision vs cluster mid-modify vs quota), so keep the code and
+        # send the full exception to CloudWatch only.
+        # .get chain, not ["Error"]["Code"]: a KeyError raised INSIDE this
+        # handler would escape the tool and lose the create_failed status.
+        code = str((e.response.get("Error") or {}).get("Code") or "")[:60] \
+            if isinstance(e, ClientError) else ""
+        code_part = f" ({code})" if code else ""
+        logger.warning(
+            "create_db_cluster_snapshot failed for %s (snapshot=%s)", cluster_id, sid, exc_info=True
+        )
+        return {
+            "status": "create_failed",
+            "cluster_id": cluster_id,
+            "error": (
+                f"스냅샷 생성 요청이 실패했습니다{code_part}. "
+                "스냅샷 식별자 중복, 클러스터 상태(변경 중), 스냅샷 할당량을 확인하세요 "
+                "(자세한 원인은 서버 로그를 확인하세요)."
+            ),
+        }
 
     snap = resp.get("DBClusterSnapshot", {})
     return {

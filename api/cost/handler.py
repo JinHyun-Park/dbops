@@ -81,10 +81,14 @@ def _query_total(ce, start, end, services, tag_filter=None):
             total += amount
         return daily, total, None
     except Exception as e:
+        # The error string this returns is a BOUNDED token the callers branch on,
+        # never the exception message: CE/STS text carries the hub account id, the
+        # platform role name and ARNs, and `no_data_reason` is browser-facing.
+        print(f"[cost] get_cost_and_usage (total) failed: {e}")
         msg = str(e).lower()
         if "is not currently activated" in msg or "data is not available" in msg or "not activated" in msg:
             return daily, total, "cost_allocation_tag_not_activated"
-        return daily, total, str(e)[:200]
+        return daily, total, "cost_explorer_query_failed"
 
 
 # ===========================================================================
@@ -184,7 +188,8 @@ def _query_by_dimension(ce, start, end, services, dimension):
         rows = sorted(rollup.values(), key=lambda x: x["amount"], reverse=True)
         return rows, None
     except Exception as e:
-        return [], str(e)[:200]
+        print(f"[cost] get_cost_and_usage (by {dimension}) failed: {e}")
+        return [], "cost_explorer_query_failed"
 
 
 def _query_per_cluster(ce, start, end, services):
@@ -214,11 +219,12 @@ def _query_per_cluster(ce, start, end, services):
                 Filter={"Dimensions": {"Key": "SERVICE", "Values": services}},
             )
         except Exception as e:
+            print(f"[cost] per-cluster grouping on tag {tag_key} failed: {e}")
             msg = str(e).lower()
             if "is not currently activated" in msg or "not activated" in msg:
                 last_err = "cost_allocation_tag_not_activated"
             else:
-                last_err = str(e)[:200]
+                last_err = "cost_explorer_query_failed"
             continue
         for r in resp.get("ResultsByTime", []):
             for g in r.get("Groups", []):
@@ -649,11 +655,12 @@ def _handle_platform_view(ce, start, end, days):
             daily.append({"date": r["TimePeriod"]["Start"], "amount": amount})
             total += amount
     except Exception as e:
+        print(f"[cost] platform total failed: {e}")
         msg = str(e).lower()
         if "not activated" in msg or "is not currently activated" in msg:
             total_err = "cost_allocation_tag_not_activated"
         else:
-            total_err = str(e)[:200]
+            total_err = "cost_explorer_query_failed"
 
     # Service-level breakdown over the same window.
     by_service = []
@@ -720,8 +727,10 @@ def _handle_tokens_view(start, end, days):
     try:
         metrics = cw.list_metrics(Namespace="AWS/Bedrock", MetricName="InputTokenCount").get("Metrics", [])
     except Exception as e:
+        print(f"[cost] list_metrics (AWS/Bedrock InputTokenCount) failed: {e}")
         return _response(200, {"view": "tokens", "days": days, "by_model": [], "daily": [],
-                               "note": f"CloudWatch 토큰 메트릭 조회 실패: {type(e).__name__}"})
+                               "note": "CloudWatch 토큰 메트릭 목록 조회에 실패했습니다 "
+                                       "(자세한 원인은 서버 로그를 확인하세요)."})
     model_ids = sorted({
         d["Value"] for m in metrics for d in m.get("Dimensions", []) if d["Name"] == "ModelId"
     })
@@ -761,8 +770,10 @@ def _handle_tokens_view(start, end, days):
                 day = ts.date().isoformat() if hasattr(ts, "date") else str(ts)[:10]
                 daily.setdefault(day, {"input": 0.0, "output": 0.0})[kind] += val
     except Exception as e:
+        print(f"[cost] get_metric_data (Bedrock token counts) failed: {e}")
         return _response(200, {"view": "tokens", "days": days, "by_model": [], "daily": [],
-                               "note": f"CloudWatch 메트릭 조회 실패: {type(e).__name__}"})
+                               "note": "CloudWatch 토큰 사용량 조회에 실패했습니다 "
+                                       "(자세한 원인은 서버 로그를 확인하세요)."})
     by_model = [{"model": mid, "input": int(t["input"]), "output": int(t["output"]),
                  "total": int(t["input"] + t["output"])}
                 for mid, t in totals.items()]

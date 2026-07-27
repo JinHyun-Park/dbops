@@ -119,7 +119,10 @@ def _list_records(agentcore, memory_id: str, namespace: str, kind: str) -> dict:
         # that's fine, just return an empty list rather than 500ing.
         if code in ("ResourceNotFoundException", "ValidationException"):
             return _resp(200, {"namespace": namespace, "kind": kind, "records": []})
-        return _resp(500, {"error": f"{code}: {str(e)[:200]}"})
+        # The AWS error CODE is a bounded enum and is what makes this actionable;
+        # the exception MESSAGE carries the memory ARN and the hub account id.
+        print(f"[memory] list_memory_records failed for {kind} ({code}): {e}")
+        return _resp(500, {"error": f"메모리 목록을 불러오지 못했습니다 ({code}). 잠시 후 다시 시도하세요."})
 
     records = []
     for r in resp.get("memoryRecordSummaries", []) or resp.get("records", []) or []:
@@ -148,5 +151,6 @@ def _delete_record(
         code = e.response.get("Error", {}).get("Code", "")
         if code == "ResourceNotFoundException":
             return _resp(404, {"error": "record not found"})
-        return _resp(500, {"error": f"{code}: {str(e)[:200]}"})
+        print(f"[memory] delete_memory_record failed for {record_id} ({code}): {e}")
+        return _resp(500, {"error": f"메모리 레코드를 삭제하지 못했습니다 ({code}). 잠시 후 다시 시도하세요."})
     return _resp(200, {"deleted": record_id, "kind": kind})

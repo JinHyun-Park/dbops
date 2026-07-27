@@ -1,9 +1,13 @@
+import logging
+
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import rds_client_for_cluster
 from mcp_servers.shared.upgrade_estimator import (
     classify_upgrade,
     estimate_upgrade,
 )
+
+logger = logging.getLogger(__name__)
 
 # Back-compat re-exports: upgrade_plan.py and existing tests import these names
 # from this module. The real implementations now live in the shared estimator
@@ -18,6 +22,10 @@ def _resolve_reader_count(cluster_id: str) -> tuple[int, str]:
     if the describe fails (cluster not reachable, perms, table unset in tests)
     we degrade to 0 readers and surface a note rather than failing the tool —
     a missing reader count must not block an upgrade estimate.
+
+    The note is interpolated into the response's ``reason``, so it is STATIC:
+    an RDS describe error carries the hub account id, the platform role name and
+    the cluster ARN, and belongs only in the log.
     """
     try:
         rds = rds_client_for_cluster(cluster_id)
@@ -25,8 +33,9 @@ def _resolve_reader_count(cluster_id: str) -> tuple[int, str]:
         members = resp["DBClusters"][0].get("DBClusterMembers", [])
         readers = sum(1 for m in members if not m.get("IsClusterWriter", False))
         return readers, ""
-    except Exception as e:  # pragma: no cover - defensive, exercised via mocks
-        return 0, f"reader count unavailable (assumed 0): {e}"
+    except Exception:  # pragma: no cover - defensive, exercised via mocks
+        logger.warning("reader count lookup failed for %s", cluster_id, exc_info=True)
+        return 0, "reader count unavailable (assumed 0)"
 
 
 def _resolve_table_count(cache: CacheClient, cluster_id: str):

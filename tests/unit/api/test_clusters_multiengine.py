@@ -354,8 +354,16 @@ def test_list_response_surfaces_mongo_secret_arns(_mock_enrich):
 @patch.object(handler, "_docdb_client_for")
 def test_register_docdb_connectivity_failure_returns_207(mock_docdb_for, mock_rds_for):
     """DocDB register with describe_db_clusters failure → 207 + registered_with_warning."""
+    from botocore.exceptions import ClientError
+
     mock_docdb_client = MagicMock()
-    mock_docdb_client.describe_db_clusters.side_effect = Exception("AccessDenied")
+    # A real botocore fault, because the stored reason is now derived from the
+    # AWS error CODE (see _conn_error): the exception MESSAGE must never be
+    # persisted, since GET /api/clusters returns this row to every viewer.
+    mock_docdb_client.describe_db_clusters.side_effect = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": "arn:aws:sts::999988887777:assumed-role/hub"}},
+        "DescribeDBClusters",
+    )
     mock_docdb_for.return_value = mock_docdb_client
 
     table = _mock_table()
@@ -373,7 +381,10 @@ def test_register_docdb_connectivity_failure_returns_207(mock_docdb_for, mock_rd
 
     item = table.put_item.call_args[1]["Item"]
     assert item["connection_status"] == "failed"
-    assert "AccessDenied" in item["connection_error"]
+    # The AccessDenied code becomes a static Korean reason; the fault text (and
+    # the hub account id it carries) stays out of the registry row.
+    assert "권한" in item["connection_error"]
+    assert "999988887777" not in item["connection_error"]
 
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,13 @@ cluster's parameter group, paginate its parameters) and delegates all the
 derivation (dynamic vs static, validation, recommendation) + the graceful
 fallback to the shared :mod:`parameter_estimator`, which the REST mirror also
 uses so the two can't drift.
+
+The fallback `reason` becomes the response's ``data_source`` label, so it stays
+a STATIC string: an RDS describe error carries the hub account id, the platform
+role name and the parameter-group ARN, and must only reach the module logger.
 """
+
+import logging
 
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import rds_client_for_cluster
@@ -15,6 +21,8 @@ from mcp_servers.shared.parameter_estimator import (
     describe_all_parameters,
     static_fallback,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def simulate_parameter_change_impl(cache: CacheClient, cluster_id: str, parameter_name: str, new_value: str) -> dict:
@@ -25,8 +33,9 @@ def simulate_parameter_change_impl(cache: CacheClient, cluster_id: str, paramete
         rds = rds_client_for_cluster(cluster_id)
         resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
         cluster = (resp.get("DBClusters") or [{}])[0]
-    except Exception as e:
-        return static_fallback(cluster_id, parameter_name, new_value, f"live describe unavailable: {e}")
+    except Exception:
+        logger.warning("describe_db_clusters failed for %s", cluster_id, exc_info=True)
+        return static_fallback(cluster_id, parameter_name, new_value, "live describe unavailable")
 
     pg_name = cluster.get("DBClusterParameterGroup") or ""
     if not pg_name:
@@ -38,8 +47,12 @@ def simulate_parameter_change_impl(cache: CacheClient, cluster_id: str, paramete
 
     try:
         params = describe_all_parameters(rds, pg_name)
-    except Exception as e:
-        return static_fallback(cluster_id, parameter_name, new_value, f"live describe unavailable: {e}")
+    except Exception:
+        logger.warning(
+            "describe_all_parameters failed for %s (group=%s)",
+            cluster_id, pg_name, exc_info=True,
+        )
+        return static_fallback(cluster_id, parameter_name, new_value, "live describe unavailable")
 
     row = next((p for p in params if p.get("ParameterName") == parameter_name), None)
     if row is None:

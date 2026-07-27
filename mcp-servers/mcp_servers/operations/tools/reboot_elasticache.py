@@ -1,11 +1,22 @@
 """reboot_elasticache — approval-gated reboot of the primary cache cluster of a
 replication group (reboot_cache_cluster). Brief disruption. Mirrors the write
-model; never raises out."""
+model; never raises out.
+
+Failures return a STATIC Korean reason and log the detail with the module
+logger: the raw exception MESSAGE must never reach a tool response (an AWS error
+carries the hub account id, the platform role name and the target ARN, and the
+pre-approval describe below is reachable by any chat user). The post-approval
+write path additionally reports the bounded AWS error CODE, because by then the
+single-use approval is spent."""
+
+import logging
 
 from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cluster_targets import client_for_cluster, lookup_cluster
+
+logger = logging.getLogger(__name__)
 
 
 def _primary_member(client, name):
@@ -24,8 +35,19 @@ def reboot_elasticache_impl(cache, cluster_id=None, approved=False, approval_id=
     try:
         client = client_for_cluster(cluster_id, "elasticache")
         member = _primary_member(client, name)
-    except Exception as e:
-        return {"status": "error", "reason": f"조회 실패: {str(e)[:200]}", "cluster_id": cluster_id}
+    except Exception:
+        logger.warning(
+            "elasticache describe_replication_groups failed for %s (rg=%s)",
+            cluster_id, name, exc_info=True,
+        )
+        return {
+            "status": "error",
+            "reason": (
+                "재부팅 대상 노드를 찾기 위한 replication group 조회에 실패했습니다 "
+                "(자세한 원인은 서버 로그를 확인하세요)."
+            ),
+            "cluster_id": cluster_id,
+        }
     if not member:
         return {"status": "error", "reason": "재부팅할 노드를 찾지 못했습니다", "cluster_id": cluster_id}
 
@@ -43,9 +65,29 @@ def reboot_elasticache_impl(cache, cluster_id=None, approved=False, approval_id=
         if not node_ids:
             node_ids = ["0001"]
         client.reboot_cache_cluster(CacheClusterId=member, CacheNodeIdsToReboot=node_ids)
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code", "")
-        return {"status": "error", "reason": f"reboot_cache_cluster 실패: {code or str(e)[:200]}", "cluster_id": cluster_id}
+    # One handler for ClientError and everything else. The approval is ALREADY
+    # consumed here, so the short AWS error CODE stays in the response: it is a
+    # bounded enum (InvalidCacheClusterState vs AccessDenied vs
+    # CacheClusterNotFound) and without it the DBA has to burn a second approval
+    # to learn which one it was. The exception MESSAGE, which carries the hub
+    # account id, the platform role name and the target ARN, is logged only.
     except Exception as e:
-        return {"status": "error", "reason": f"reboot_cache_cluster 실패: {str(e)[:200]}", "cluster_id": cluster_id}
+        code = (
+            e.response.get("Error", {}).get("Code", "")
+            if isinstance(e, ClientError)
+            else ""
+        )
+        code_part = f" ({code})" if code else ""
+        logger.warning(
+            "reboot_cache_cluster failed for %s (member=%s)",
+            cluster_id, member, exc_info=True,
+        )
+        return {
+            "status": "error",
+            "reason": (
+                f"재부팅 요청이 실패했습니다{code_part} (대상 노드={member}, 노드 목록 조회 또는 "
+                "reboot_cache_cluster 호출 단계). 자세한 원인은 서버 로그를 확인하세요."
+            ),
+            "cluster_id": cluster_id,
+        }
     return {"status": "ok", "cluster_id": cluster_id, "member": member}

@@ -412,7 +412,13 @@ def lambda_handler(event, context):
                     task_id,
                     status="failed",
                     summary=f"작업 실패: {type(e).__name__}",
-                    error=str(e),
+                    # `error` is persisted on the task row and rendered verbatim
+                    # in the Tasks UI (app/tasks/page.tsx), so it must be STATIC:
+                    # a Data API / boto exception here carries the cache cluster
+                    # ARN, the secret ARN and SQL. `summary` already carries the
+                    # exception CLASS, which is the failure distinction the DBA
+                    # needs; the full detail is in the print above (CloudWatch).
+                    error="작업 실행 중 오류가 발생했습니다. 자세한 원인은 서버 로그(CloudWatch)를 확인하세요.",
                     duration_ms=int((time.time() - t0) * 1000),
                 )
             except Exception as e2:

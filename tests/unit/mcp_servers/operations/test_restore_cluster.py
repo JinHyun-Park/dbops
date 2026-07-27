@@ -1,8 +1,27 @@
 """Tests for the agent-side restore_cluster MCP tool (approval-gated, high risk)."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 from mcp_servers.operations.tools.restore_cluster import restore_cluster_impl
+
+# A realistic RDS error: it carries the hub account id, the platform role name and
+# the target ARN. All of it belongs in CloudWatch, none of it in a tool response.
+_LEAKY = (
+    "An error occurred (AccessDenied) when calling the RestoreDBClusterFromSnapshot "
+    "operation: User: arn:aws:sts::123456789012:assumed-role/dbops-dev-operations-role/"
+    "dbops-dev-operations is not authorized to perform: rds:RestoreDBClusterFromSnapshot "
+    "on resource: arn:aws:rds:ap-northeast-2:123456789012:cluster-snapshot:snap-1"
+)
+_LEAK_TOKENS = ("123456789012", "dbops-dev-operations-role", "AccessDenied", "arn:aws")
+
+
+def _assert_no_leak(out):
+    """No RESPONSE field may carry exception text (project-wide rule)."""
+    blob = json.dumps(out, ensure_ascii=False, default=str)
+    for token in _LEAK_TOKENS:
+        assert token not in blob, f"exception text leaked into response: {token!r} in {blob!r}"
+    assert "error" not in out, "raw exception field must be gone"
 
 
 def _rds_mock():
@@ -163,13 +182,19 @@ def test_already_exists_surfaced(mock_guard, mock_rds_for):
 @patch("mcp_servers.operations.tools.restore_cluster.rds_client_for_cluster")
 @patch("mcp_servers.operations.tools.restore_cluster.verify_approval")
 def test_restore_failure_surfaced(mock_guard, mock_rds_for):
+    """The failure is still reported, but with a STATIC reason: the RDS exception
+    (hub account id, platform role name, snapshot ARN) never enters the response."""
     mock_guard.return_value = {"ok": True}
     rds = _rds_mock()
-    rds.restore_db_cluster_from_snapshot.side_effect = RuntimeError("boom")
+    rds.restore_db_cluster_from_snapshot.side_effect = RuntimeError(_LEAKY)
     mock_rds_for.return_value = rds
     out = restore_cluster_impl(
         MagicMock(), cluster_id="prod-pg-1", new_cluster_id="restored-1",
         mode="snapshot", snapshot_id="snap-1", approved=True, approval_id="aid",
     )
     assert out["status"] == "restore_failed"
-    assert "boom" in out["error"]
+    _assert_no_leak(out)
+    # caller inputs are what the DBA needs to retry, and they are safe to echo
+    assert out["new_cluster_id"] == "restored-1"
+    assert out["mode"] == "snapshot"
+    assert out["reason"]

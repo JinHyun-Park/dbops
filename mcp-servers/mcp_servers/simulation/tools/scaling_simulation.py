@@ -70,7 +70,7 @@ def _observed_avg_acu(cluster_id: str):
         return sum(pts) / len(pts), f"CloudWatch {_ACU_LOOKBACK_DAYS}일 평균 ACU ({len(pts)} 포인트)"
     except Exception as e:  # pragma: no cover - defensive soft-fail
         print(f"[scaling_simulation] observed ACU lookup failed for {cluster_id}: {e}")
-        return None, f"관측 ACU 조회 실패({type(e).__name__})"
+        return None, "관측 ACU 조회 실패 (자세한 원인은 서버 로그를 확인하세요)"
 
 
 def _change_pct(current, proposed):
@@ -519,7 +519,10 @@ def simulate_scaling_impl(
         cluster = clusters[0] if clusters else None
     except Exception as e:
         # Cross-account / unregistered / unreachable: degrade gracefully. Do NOT
-        # emit fabricated numbers or raise.
+        # emit fabricated numbers or raise. The reason is STATIC (not even the
+        # exception class): this string reaches the agent transcript, and the
+        # DBA cannot act on a Python class name. Full detail to CloudWatch.
+        print(f"[scaling_simulation] describe_db_clusters failed for {cluster_id}: {e}")
         return _degraded_result(
             cluster_id,
             new_min_acu,
@@ -527,7 +530,7 @@ def simulate_scaling_impl(
             new_instance_class,
             region,
             "라이브 클러스터 조회 실패로 현재 구성을 확인할 수 없습니다 "
-            f"({type(e).__name__}). 비용 비교를 생략합니다.",
+            "(자세한 원인은 서버 로그를 확인하세요). 비용 비교를 생략합니다.",
         )
 
     if cluster is None:

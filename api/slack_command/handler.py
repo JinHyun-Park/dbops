@@ -158,7 +158,14 @@ def _cmd_status(args: list[str]) -> dict:
         ddb = boto3.resource("dynamodb").Table(table_name)
         item = ddb.get_item(Key={"cluster_id": cluster_id}).get("Item")
     except Exception as e:
-        return _slack_text(f"⚠ lookup failed: {str(e)[:200]}")
+        # Unauthenticated (signature-verified only) webhook route: a DynamoDB /
+        # STS error message here would post the hub account id and the platform
+        # role name into a Slack workspace. Static text, detail to CloudWatch.
+        print(f"[slack_command] status lookup failed for {cluster_id}: {e}")
+        return _slack_text(
+            f"⚠ `{cluster_id}` 조회에 실패했습니다 (클러스터 레지스트리 접근 오류). "
+            "자세한 원인은 서버 로그를 확인하세요."
+        )
     if not item:
         return _slack_text(
             f"❓ `{cluster_id}` not registered. Try `/dbops clusters`."
@@ -243,7 +250,11 @@ def _cmd_clusters() -> dict:
         resp = ddb.scan(ProjectionExpression="cluster_id, engine, connection_status")
         items = resp.get("Items", [])
     except Exception as e:
-        return _slack_text(f"⚠ scan failed: {str(e)[:200]}")
+        print(f"[slack_command] clusters scan failed: {e}")
+        return _slack_text(
+            "⚠ 클러스터 목록 조회에 실패했습니다 (클러스터 레지스트리 접근 오류). "
+            "자세한 원인은 서버 로그를 확인하세요."
+        )
     if not items:
         return _slack_text("(no clusters registered)")
     lines = []

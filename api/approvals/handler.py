@@ -393,7 +393,17 @@ def _execute_enable_data_api(item: dict) -> dict:
             or {}
         )
     except Exception as e:
-        return {"ok": False, "error": f"registry lookup failed: {str(e)[:200]}"}
+        # `error` reaches the DBA twice (PUT response body + the execution_error
+        # column the Approval Center reads back), so it carries a STATIC reason
+        # plus the bounded AWS error CODE. Never the exception text: a DDB/STS
+        # failure here names the hub account and the platform role.
+        code = e.response.get("Error", {}).get("Code", "") if isinstance(e, ClientError) else ""
+        print(f"[approvals] enable_data_api registry lookup failed for {cluster_id} ({code}): {e}")
+        return {"ok": False, "error": (
+            f"클러스터 레지스트리에서 {cluster_id} 조회에 실패했습니다"
+            + (f" (AWS 오류 코드: {code})" if code else "")
+            + ". 자세한 원인은 서버 로그를 확인하세요."
+        )}
     arn = row.get("cluster_arn", "")
     if not arn:
         return {"ok": False, "error": f"cluster_arn not found in registry for {cluster_id!r}"}
@@ -406,7 +416,17 @@ def _execute_enable_data_api(item: dict) -> dict:
     try:
         resp = rds.enable_http_endpoint(ResourceArn=arn)
     except Exception as e:
-        return {"ok": False, "error": str(e)[:300]}
+        # Same rule as the lookup above, and this one is the step a DBA retries:
+        # the AWS error CODE (AccessDeniedException / InvalidDBClusterStateFault)
+        # is the actionable bit, the message is not.
+        code = e.response.get("Error", {}).get("Code", "") if isinstance(e, ClientError) else ""
+        print(f"[approvals] enable_http_endpoint failed for {cluster_id} ({code}): {e}")
+        return {"ok": False, "error": (
+            "Data API 활성화(EnableHttpEndpoint) 호출이 실패했습니다"
+            + (f" (AWS 오류 코드: {code})" if code else "")
+            + ". rds:EnableHttpEndpoint 권한과 클러스터 상태(available)를 확인하세요. "
+            "자세한 원인은 서버 로그를 확인하세요."
+        )}
     return {
         "ok": True,
         "cluster_arn": arn,

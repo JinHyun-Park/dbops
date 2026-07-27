@@ -398,13 +398,18 @@ def _simulate_parameter_change(
     """REST mirror — reads the cluster's LIVE parameter group (same shared
     derivation as the MCP tool) instead of a static catalog, so the dashboard
     reports the real ApplyType/IsModifiable/AllowedValues. Degrades to the
-    coarse heuristic only when the live describe is unavailable."""
+    coarse heuristic only when the live describe is unavailable.
+
+    The fallback `reason` becomes the response's ``data_source`` label, so it
+    stays a STATIC string: an RDS describe error carries the hub account id, the
+    platform role name and the parameter-group ARN, and goes to CloudWatch only."""
     try:
         rds = boto3.client("rds")
         resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
         cluster = (resp.get("DBClusters") or [{}])[0]
     except Exception as e:
-        return static_fallback(cluster_id, parameter_name, new_value, f"live describe unavailable: {e}")
+        print(f"[simulation] describe_db_clusters failed for {cluster_id}: {e}")
+        return static_fallback(cluster_id, parameter_name, new_value, "live describe unavailable")
 
     pg_name = cluster.get("DBClusterParameterGroup") or ""
     if not pg_name:
@@ -415,7 +420,8 @@ def _simulate_parameter_change(
     try:
         params = describe_all_parameters(rds, pg_name)
     except Exception as e:
-        return static_fallback(cluster_id, parameter_name, new_value, f"live describe unavailable: {e}")
+        print(f"[simulation] describe_all_parameters failed for {cluster_id} (group={pg_name}): {e}")
+        return static_fallback(cluster_id, parameter_name, new_value, "live describe unavailable")
 
     row = next((p for p in params if p.get("ParameterName") == parameter_name), None)
     if row is None:
@@ -485,9 +491,13 @@ def _simulate_scaling(
         cluster = clusters[0] if clusters else None
     except Exception as e:
         cluster = None
-        _describe_err = type(e).__name__
+        # Keep the raised-vs-empty distinction (the caller acts on it differently)
+        # but as a STATIC flag: neither the message nor the exception class goes
+        # into the response. Full detail to CloudWatch.
+        print(f"[simulation] scaling describe_db_clusters failed for {cluster_id}: {e}")
+        _describe_failed = True
     else:
-        _describe_err = None
+        _describe_failed = False
     if cluster is None:
         mode = "provisioned" if new_instance_class else "serverless"
         cur = {"instance_class": None} if mode == "provisioned" else {"min_acu": None, "max_acu": None}
@@ -497,8 +507,8 @@ def _simulate_scaling(
             else {"min_acu": new_min_acu, "max_acu": new_max_acu}
         )
         why = (
-            f"라이브 클러스터 조회 실패({_describe_err})"
-            if _describe_err
+            "라이브 클러스터 조회에 실패했습니다 (자세한 원인은 서버 로그를 확인하세요)"
+            if _describe_failed
             else "describe_db_clusters가 해당 cluster_id를 반환하지 않았습니다"
         )
         return {
@@ -584,7 +594,8 @@ def _observed_avg_acu(cluster_id):
             return None, "CloudWatch ServerlessDatabaseCapacity 데이터포인트 없음"
         return sum(pts) / len(pts), "CloudWatch 14일 평균 ACU"
     except Exception as e:
-        return None, f"관측 ACU 조회 실패({type(e).__name__})"
+        print(f"[simulation] observed ACU lookup failed for {cluster_id}: {e}")
+        return None, "관측 ACU 조회 실패 (자세한 원인은 서버 로그를 확인하세요)"
 
 
 def _scaling_serverless(
@@ -1007,11 +1018,16 @@ def _simulate_elasticache_node_resize(
             cur_type = rg.get("CacheNodeType") or None
             cur_count = len(rg.get("MemberClusters") or []) or 1
     except Exception as e:
-        describe_err = type(e).__name__
+        # STATIC reason only: the exception class name is a diagnostic, not
+        # something the caller can act on, and the message carries the hub
+        # account id / role name. Full detail to CloudWatch.
+        print(f"[simulation] elasticache describe failed for {resource_name}: {e}")
+        describe_err = "라이브 클러스터 조회에 실패했습니다 (자세한 원인은 서버 로그를 확인하세요)"
 
     if cur_type is None and describe_err is None:
-        # describe succeeded but group not found
-        describe_err = "ReplicationGroupNotFoundFault"
+        # describe succeeded but group not found — a genuinely different, and
+        # more actionable, verdict than a failed describe.
+        describe_err = "해당 이름의 replication group을 찾을 수 없습니다"
 
     if cur_type is None:
         return {
@@ -1027,7 +1043,7 @@ def _simulate_elasticache_node_resize(
             "proposed_monthly": None,
             "delta_monthly": None,
             "delta_pct": None,
-            "note": f"라이브 클러스터 조회 실패({describe_err})로 비용 비교를 생략합니다.",
+            "note": f"{describe_err}. 비용 비교를 생략합니다.",
         }
 
     eff_node_type = new_node_type or cur_type

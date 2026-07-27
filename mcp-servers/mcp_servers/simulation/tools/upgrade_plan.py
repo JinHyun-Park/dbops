@@ -1,7 +1,11 @@
+import logging
+
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import rds_client_for_cluster
 from mcp_servers.shared.upgrade_estimator import classify_upgrade, estimate_upgrade
 from mcp_servers.simulation.tools.upgrade_impact import _resolve_table_count
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_reader_count(cluster_id: str) -> tuple[int, str]:
@@ -11,6 +15,10 @@ def _resolve_reader_count(cluster_id: str) -> tuple[int, str]:
     a missing reader count must not block plan generation, so on any failure we
     degrade to 0 readers and surface a note. Mirrors the helper in
     upgrade_impact so both tools see the same topology signal.
+
+    The note is returned as the response's ``reader_note``, so it is STATIC: an
+    RDS describe error carries the hub account id, the platform role name and the
+    cluster ARN, and belongs only in the log.
     """
     try:
         rds = rds_client_for_cluster(cluster_id)
@@ -18,8 +26,9 @@ def _resolve_reader_count(cluster_id: str) -> tuple[int, str]:
         members = resp["DBClusters"][0].get("DBClusterMembers", [])
         readers = sum(1 for m in members if not m.get("IsClusterWriter", False))
         return readers, ""
-    except Exception as e:  # pragma: no cover - defensive, exercised via mocks
-        return 0, f"리더 수 확인 불가 (0으로 가정): {e}"
+    except Exception:  # pragma: no cover - defensive, exercised via mocks
+        logger.warning("reader count lookup failed for %s", cluster_id, exc_info=True)
+        return 0, "리더 수를 확인할 수 없어 0으로 가정했습니다 (자세한 원인은 서버 로그를 확인하세요)."
 
 
 def generate_upgrade_plan_impl(cache: CacheClient, cluster_id: str, target_version: str, method: str = "blue_green") -> dict:

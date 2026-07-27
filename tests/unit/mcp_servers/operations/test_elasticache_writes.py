@@ -163,6 +163,150 @@ def test_failover_no_replica_rejected():
     ec.test_failover.assert_not_called()
 
 
+# ===== no raw exception text in any response field =====
+#
+# The describes below run BEFORE any approval exists, so a plain chat user can
+# reach these failure messages. An AWS error there carries the hub account id,
+# the platform role name and the target ARN, so the response must stay static and
+# the detail must go to CloudWatch via the module logger.
+
+_LEAK_MSG = (
+    "User: arn:aws:sts::123456789012:assumed-role/dbops-dev-operations-role/boom "
+    "is not authorized to perform elasticache:ModifyReplicationGroup on "
+    "arn:aws:elasticache:ap-northeast-2:123456789012:replicationgroup:my-redis"
+)
+
+
+def _client_error():
+    """A realistic AccessDenied ClientError: str(e) carries the account id, the
+    platform role name and the target ARN, and .response carries the Code."""
+    from botocore.exceptions import ClientError
+
+    return ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": _LEAK_MSG}},
+        "ModifyReplicationGroup",
+    )
+
+
+def _no_exception_text(result, allow_code=""):
+    """No response value may carry the raw exception MESSAGE (project hard rule).
+
+    `allow_code` exempts the bounded AWS error CODE, which the POST-WRITE path
+    keeps on purpose: the approval is already consumed there, so without the code
+    the DBA cannot tell AccessDenied from an invalid replication-group state
+    without minting and burning a second approval. The pre-approval describes pass
+    nothing, so the code must be absent there.
+    """
+    blob = " ".join(str(v) for v in result.values())
+    for leak in ("123456789012", "arn:aws", "assumed-role", "AccessDeniedException",
+                 "boom", "not authorized", "Traceback", "ClientError"):
+        if leak == allow_code:
+            continue
+        assert leak not in blob, f"raw exception text leaked into response: {result}"
+
+
+def test_node_type_lookup_failure_no_exception_text():
+    """Pre-approval describe failure: static reason, no leak."""
+    ec = _wire(nodetype)
+    ec.describe_replication_groups.side_effect = _client_error()
+    r = nodetype.modify_elasticache_node_type_impl(
+        None, cluster_id="my-redis", node_type="cache.r7g.large")
+    assert r["status"] == "error"
+    _no_exception_text(r)
+    assert "replication group 조회" in r["reason"]  # which step broke
+    ec.modify_replication_group.assert_not_called()
+
+
+def test_node_type_modify_failure_no_exception_text():
+    """Post-write path: the approval is already consumed, so the bounded AWS error
+    CODE stays in the reason (the DBA must not have to burn a second approval to
+    learn it was AccessDenied). The exception MESSAGE still must not appear."""
+    ec = _wire(nodetype)
+    ec.modify_replication_group.side_effect = _client_error()
+    r = nodetype.modify_elasticache_node_type_impl(
+        None, cluster_id="my-redis", node_type="cache.r7g.large", approved=True, approval_id="a1")
+    assert r["status"] == "error"
+    _no_exception_text(r, allow_code="AccessDeniedException")
+    assert "AccessDeniedException" in r["reason"]  # the actionable AWS code
+    assert _LEAK_MSG not in r["reason"]  # but never the message
+    assert "modify_replication_group" in r["reason"]  # which step broke
+
+
+def test_snapshot_failure_no_exception_text():
+    """Post-write path: AWS error CODE kept, exception MESSAGE never."""
+    ec = _wire(snapshot)
+    ec.create_snapshot.side_effect = _client_error()
+    r = snapshot.create_elasticache_snapshot_impl(
+        None, cluster_id="my-redis", snapshot_name="snap1", approved=True, approval_id="a1")
+    assert r["status"] == "error"
+    _no_exception_text(r, allow_code="AccessDeniedException")
+    assert "AccessDeniedException" in r["reason"]
+    assert _LEAK_MSG not in r["reason"]
+    assert "create_snapshot" in r["reason"]
+
+
+def test_reboot_lookup_failure_no_exception_text():
+    """Pre-approval describe failure: static reason, no leak."""
+    ec = _wire_reboot(reboot)
+    ec.describe_replication_groups.side_effect = _client_error()
+    r = reboot.reboot_elasticache_impl(None, cluster_id="my-redis")
+    assert r["status"] == "error"
+    _no_exception_text(r)
+    assert "replication group 조회" in r["reason"]
+    ec.reboot_cache_cluster.assert_not_called()
+
+
+def test_reboot_failure_no_exception_text():
+    """Post-write path: AWS error CODE kept, exception MESSAGE never."""
+    ec = _wire_reboot(reboot)
+    ec.reboot_cache_cluster.side_effect = _client_error()
+    r = reboot.reboot_elasticache_impl(None, cluster_id="my-redis", approved=True, approval_id="a1")
+    assert r["status"] == "error"
+    _no_exception_text(r, allow_code="AccessDeniedException")
+    assert "AccessDeniedException" in r["reason"]
+    assert _LEAK_MSG not in r["reason"]
+    assert "재부팅" in r["reason"]
+
+
+def test_failover_lookup_failure_no_exception_text():
+    """Pre-approval describe failure: static reason, no leak."""
+    ec = _wire_failover(failover)
+    ec.describe_replication_groups.side_effect = _client_error()
+    r = failover.test_elasticache_failover_impl(None, cluster_id="my-redis")
+    assert r["status"] == "error"
+    _no_exception_text(r)
+    assert "replication group 조회" in r["reason"]
+    ec.test_failover.assert_not_called()
+
+
+def test_post_write_non_clienterror_still_returns_error_not_raise():
+    """A NON-ClientError on the post-write path must not crash inside the except
+    block. The four tools read `e.response["Error"]["Code"]`, which only exists on
+    a ClientError, so the isinstance guard is load-bearing: drop it and a plain
+    Exception raises AttributeError out of the handler on a path where the
+    single-use approval is ALREADY consumed, losing the error status entirely."""
+    ec = _wire(nodetype)
+    ec.modify_replication_group.side_effect = RuntimeError(_LEAK_MSG)
+    r = nodetype.modify_elasticache_node_type_impl(
+        None, cluster_id="my-redis", node_type="cache.r7g.large", approved=True, approval_id="a1")
+    assert r["status"] == "error"
+    _no_exception_text(r)  # no code to allow: there is no AWS code on a RuntimeError
+    assert "modify_replication_group" in r["reason"]
+
+
+def test_failover_failure_no_exception_text():
+    """Post-write path: AWS error CODE kept, exception MESSAGE never."""
+    ec = _wire_failover(failover)
+    ec.test_failover.side_effect = _client_error()
+    r = failover.test_elasticache_failover_impl(
+        None, cluster_id="my-redis", approved=True, approval_id="a1")
+    assert r["status"] == "error"
+    _no_exception_text(r, allow_code="AccessDeniedException")
+    assert "AccessDeniedException" in r["reason"]
+    assert _LEAK_MSG not in r["reason"]
+    assert "test_failover" in r["reason"]
+
+
 # Engine-gate checks: all 4 EC-4 write tools must be in _ENGINE_GATED_TOOLS
 def test_ec4_write_tools_are_engine_gated():
     import importlib.util as _iu

@@ -13,13 +13,22 @@ Two reads bracket the (approval-gated) write:
 Effective values are validated (RCU/WCU >= 1, fix #4) BEFORE hashing/verification so
 the hashed value == the executed value — never floored after the hash. All AWS calls
 go through `client_for_cluster` (hub-spoke cross-account aware). Never raises into the
-caller — any boto3/guard error degrades to `{"status":"error", reason}`.
+caller: any boto3/guard error degrades to `{"status":"error", reason}` with a STATIC
+Korean reason, and the detail goes to the module logger. The raw exception MESSAGE must
+never reach a tool response (an AWS error carries the hub account id, the platform role
+name and the target table ARN, and the request-time describe below is reachable by any
+chat user before an approval exists). The post-approval update_table path additionally
+reports the bounded AWS error CODE, because by then the single-use approval is spent.
 """
+
+import logging
 
 from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cluster_targets import client_for_cluster, table_name_for_cluster
+
+logger = logging.getLogger(__name__)
 
 _VALID_MODES = ("PROVISIONED", "PAY_PER_REQUEST")
 
@@ -98,16 +107,16 @@ def modify_dynamodb_capacity_impl(
     try:
         client = client_for_cluster(cluster_id, "dynamodb")
         state = _current_state(client, table)
-    except ClientError as e:
+    # One handler for ClientError and everything else: both returned the same
+    # status, and the only difference in the message was the exception text.
+    except Exception:
+        logger.warning("describe_table failed for %s (table=%s)", cluster_id, table, exc_info=True)
         return {
             "status": "error",
-            "reason": f"테이블 조회 실패 — 적용 전 현재 상태를 확인할 수 없어 중단합니다: {str(e)[:200]}",
-            "cluster_id": cluster_id,
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "reason": f"테이블 조회 실패: {str(e)[:200]}",
+            "reason": (
+                f"테이블 조회에 실패했습니다 (대상 테이블={table}). 적용 전 현재 상태를 "
+                "확인할 수 없어 중단합니다 (자세한 원인은 서버 로그를 확인하세요)."
+            ),
             "cluster_id": cluster_id,
         }
 
@@ -183,10 +192,16 @@ def modify_dynamodb_capacity_impl(
     # --- TOCTOU re-read (fix #6): re-describe IMMEDIATELY before the write ---
     try:
         fresh = _current_state(client, table)
-    except Exception as e:
+    except Exception:
+        logger.warning(
+            "pre-write describe_table failed for %s (table=%s)", cluster_id, table, exc_info=True
+        )
         return {
             "status": "error",
-            "reason": f"적용 직전 재조회 실패 — 안전을 위해 중단합니다: {str(e)[:200]}",
+            "reason": (
+                "적용 직전 재조회에 실패했습니다. 안전을 위해 변경하지 않고 중단합니다 "
+                "(자세한 원인은 서버 로그를 확인하세요)."
+            ),
             "cluster_id": cluster_id,
         }
     if fresh["gsi_names"]:
@@ -228,17 +243,31 @@ def modify_dynamodb_capacity_impl(
 
     try:
         client.update_table(**params)
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code", "")
-        return {
-            "status": "error",
-            "reason": f"update_table 실패: {code or str(e)[:200]}",
-            "cluster_id": cluster_id,
-        }
+    # One handler for ClientError and everything else. The approval is ALREADY
+    # consumed here, so the short AWS error CODE stays in the response: it is a
+    # bounded enum (LimitExceededException vs AccessDenied vs
+    # InvalidParameterCombination) and without it the DBA has to burn a second
+    # approval to learn which one it was. The exception MESSAGE, which carries the
+    # hub account id and the table ARN, goes to CloudWatch only.
     except Exception as e:
+        code = (
+            e.response.get("Error", {}).get("Code", "")
+            if isinstance(e, ClientError)
+            else ""
+        )
+        code_part = f" ({code})" if code else ""
+        logger.warning(
+            "update_table failed for %s (table=%s, mode=%s, rcu=%s, wcu=%s)",
+            cluster_id, table, target_mode, eff_rcu, eff_wcu, exc_info=True,
+        )
         return {
             "status": "error",
-            "reason": f"update_table 실패: {str(e)[:200]}",
+            "reason": (
+                f"용량 변경(update_table) 요청이 실패했습니다{code_part} (대상 테이블={table}, "
+                f"모드={target_mode}, RCU={eff_rcu}, WCU={eff_wcu}). 자세한 원인은 서버 "
+                "로그를 확인하세요. 빌링 모드 전환 rate-limit 또는 계정 용량 한도일 수 "
+                "있습니다."
+            ),
             "cluster_id": cluster_id,
         }
 

@@ -163,13 +163,17 @@ def lambda_handler(event, context):
         try:
             return {"statusCode": 200, "headers": headers, "body": json.dumps(_stats(), default=str)}
         except Exception as e:
-            return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
+            print(f"[tasks] stats query failed: {e}")
+            return {"statusCode": 500, "headers": headers,
+                    "body": json.dumps({"error": "작업 통계를 집계하지 못했습니다. 잠시 후 다시 시도하세요."})}
 
     if method == "GET" and task_id:
         try:
             item = _table().get_item(Key={"task_id": task_id}).get("Item")
         except Exception as e:
-            return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
+            print(f"[tasks] get_item failed for {task_id}: {e}")
+            return {"statusCode": 500, "headers": headers,
+                    "body": json.dumps({"error": "작업을 불러오지 못했습니다. 잠시 후 다시 시도하세요."})}
         if item and not tenancy.cluster_visible(event, _cluster_item(item.get("cluster_id", ""))):
             return {"statusCode": 403, "headers": headers,
                     "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
@@ -183,7 +187,9 @@ def lambda_handler(event, context):
         try:
             items = _list(qsp)
         except Exception as e:
-            return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
+            print(f"[tasks] list query failed: {e}")
+            return {"statusCode": 500, "headers": headers,
+                    "body": json.dumps({"error": "작업 목록을 불러오지 못했습니다. 잠시 후 다시 시도하세요."})}
         visible = tenancy.visible_set_from_registry(event)
         if visible is not None:
             items = [it for it in items if it.get("cluster_id") in visible]
@@ -222,7 +228,9 @@ def lambda_handler(event, context):
         try:
             _table().put_item(Item=item)
         except ClientError as e:
-            return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)[:200]})}
+            print(f"[tasks] put_item failed for {cluster_id} ({kind}): {e}")
+            return {"statusCode": 500, "headers": headers,
+                    "body": json.dumps({"error": "작업 생성에 실패했습니다. 잠시 후 다시 시도하세요."})}
         return {"statusCode": 201, "headers": headers, "body": json.dumps(item, default=str)}
 
     return {"statusCode": 405, "headers": headers, "body": json.dumps({"error": "Method not allowed"})}

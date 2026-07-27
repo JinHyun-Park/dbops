@@ -270,6 +270,27 @@ def test_failed_task_still_records_trace_and_duration():
     assert ":dur" in finish  # duration recorded even on failure
 
 
+def test_failed_task_error_field_is_static():
+    """`error` is persisted and rendered verbatim in the Tasks UI, so the stored
+    text must not be the exception message (a Data API failure there carries the
+    cache cluster ARN, the secret ARN and SQL). The class stays in `summary`."""
+    table = MagicMock()
+    leak = ("BadRequestException: relation \"cluster_meta\" does not exist; secret "
+            "arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:dbops-cache-AbCdEf")
+    with patch.object(tw, "_table", return_value=table), \
+         patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw, "diagnose_root_cause_impl", side_effect=RuntimeError(leak)), \
+         patch.object(tw, "_broadcast"):
+        tw.lambda_handler({"Records": [_insert()]}, None)
+    finish = table.update_item.call_args_list[-1].kwargs["ExpressionAttributeValues"]
+    assert finish[":s"] == "failed"
+    stored = finish[":e"]
+    assert "cluster_meta" not in stored and "secretsmanager" not in stored
+    assert "123456789012" not in stored
+    assert "서버 로그" in stored
+    assert finish[":sum"] == "작업 실패: RuntimeError"  # failure class still visible
+
+
 def test_ticket_provider_failure_does_not_break_completion():
     """A provider that raises must not fail the task: it completes 'done' with
     no ticket_url (the seam is isolated)."""

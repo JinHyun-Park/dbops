@@ -196,32 +196,93 @@ def test_capacity_toctou_inplace_capacity_drift_denied(mock_client_for):
     client.update_table.assert_not_called()
 
 
+# ===== no raw exception text in any response field =====
+#
+# The request-time describe runs BEFORE any approval exists, so a plain chat user
+# can reach its failure message. An AWS error there carries the hub account id,
+# the platform role name and the target table ARN, so the response stays static
+# and the detail goes to CloudWatch via the module logger.
+
+_LEAK_MSG = (
+    "User: arn:aws:sts::123456789012:assumed-role/dbops-dev-operations-role/boom "
+    "is not authorized to perform dynamodb:DescribeTable on "
+    "arn:aws:dynamodb:ap-northeast-2:123456789012:table/orders"
+)
+
+
+def _no_exception_text(result, allow_code=""):
+    """No response value may carry the raw exception MESSAGE (project hard rule).
+
+    `allow_code` exempts the bounded AWS error CODE, which the POST-WRITE path
+    keeps on purpose: the approval is already consumed there, so without the code
+    the DBA cannot tell AccessDenied from a throttle from an invalid parameter
+    without minting and burning a second approval. Pre-approval read paths pass
+    nothing, so the code must be absent there.
+    """
+    blob = " ".join(str(v) for v in result.values())
+    for leak in ("123456789012", "arn:aws", "assumed-role", "AccessDeniedException",
+                 "LimitExceededException", "boom", "not authorized", "Traceback"):
+        if leak == allow_code:
+            continue
+        assert leak not in blob, f"raw exception text leaked into response: {result}"
+
+
 @patch("mcp_servers.operations.tools.modify_dynamodb_capacity.client_for_cluster")
 def test_capacity_describe_failure_is_error_not_raise(mock_client_for):
-    """Never raises: a describe failure degrades to {status: error}."""
+    """Never raises: a describe failure degrades to {status: error}, and the AWS
+    error text never reaches the response."""
     client = MagicMock()
-    client.describe_table.side_effect = Exception("boom")
+    client.describe_table.side_effect = Exception(_LEAK_MSG)
     mock_client_for.return_value = client
     result = modify_dynamodb_capacity_impl(
         _cache_with_name(), cluster_id="ddb-abc", rcu=20, wcu=10, approved=True
     )
     assert result["status"] == "error"
     client.update_table.assert_not_called()
+    _no_exception_text(result)
+    assert "테이블 조회" in result["reason"]  # which step broke
 
 
 @patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
 @patch("mcp_servers.operations.tools.modify_dynamodb_capacity.client_for_cluster")
 def test_capacity_limit_exceeded_clean_error(mock_client_for):
-    """A LimitExceededException from update_table → clean error, never crash."""
+    """A LimitExceededException from update_table → clean error, never crash, and
+    the bounded AWS error CODE IS in the reason. This is the post-write path: the
+    approval is already consumed, so 'throttle/quota' vs 'AccessDenied' vs
+    'invalid parameter' has to be readable without burning a second approval. The
+    exception MESSAGE (account id, role name, table ARN) still must not appear."""
     from botocore.exceptions import ClientError
 
     client = _ddb_client(billing_mode="PROVISIONED", rcu=5, wcu=5)
     client.update_table.side_effect = ClientError(
-        {"Error": {"Code": "LimitExceededException", "Message": "rate"}}, "UpdateTable"
+        {"Error": {"Code": "LimitExceededException", "Message": _LEAK_MSG}}, "UpdateTable"
     )
     mock_client_for.return_value = client
     result = modify_dynamodb_capacity_impl(
         _cache_with_name(), cluster_id="ddb-abc", rcu=20, wcu=10, approved=True
     )
     assert result["status"] == "error"
-    assert "LimitExceededException" in result["reason"]
+    _no_exception_text(result, allow_code="LimitExceededException")
+    assert "LimitExceededException" in result["reason"]  # the actionable AWS code
+    assert _LEAK_MSG not in result["reason"]  # but never the message
+    assert "update_table" in result["reason"]  # which step broke
+    assert "orders" in result["reason"]  # the target, built from known input
+
+
+@patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
+@patch("mcp_servers.operations.tools.modify_dynamodb_capacity.client_for_cluster")
+def test_capacity_pre_write_reread_failure_no_exception_text(mock_client_for):
+    """The TOCTOU re-read fails → abort without writing, and without leaking."""
+    client = _ddb_client(billing_mode="PROVISIONED", rcu=5, wcu=5)
+    client.describe_table.side_effect = [
+        client.describe_table.return_value,
+        Exception(_LEAK_MSG),
+    ]
+    mock_client_for.return_value = client
+    result = modify_dynamodb_capacity_impl(
+        _cache_with_name(), cluster_id="ddb-abc", rcu=20, wcu=10, approved=True
+    )
+    assert result["status"] == "error"
+    client.update_table.assert_not_called()
+    _no_exception_text(result)
+    assert "재조회" in result["reason"]

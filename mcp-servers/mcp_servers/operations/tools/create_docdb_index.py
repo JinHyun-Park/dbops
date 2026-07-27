@@ -15,19 +15,26 @@ Safety model (mirrors set_docdb_profiler + the DynamoDB write tools):
   - Ordered keys (fix #2): compound-index field ORDER is semantically significant,
     so keys is an ORDERED list of (field, direction) tuples — NEVER sorted. The
     approval binds the exact ordered list, and we execute that same ordered list.
-  - NEVER raises into the caller — any pymongo/guard error → {"status":"error", ...}.
+  - NEVER raises into the caller: any pymongo/guard error → {"status":"error", ...}
+    with a STATIC Korean reason; the detail goes to the module logger. Raw exception
+    text must never reach a tool response: a pymongo/Secrets Manager error carries the
+    cluster endpoint, the secret ARN and the platform role name, and the request-time
+    list_indexes below is reachable by any chat user before an approval exists.
 
 pymongo is imported lazily inside `_client_factory` so the unit tests patch the
 module-level `_CLIENT_FACTORY` hook and run WITHOUT pymongo installed.
 """
 
 import json
+import logging
 import os
 
 import boto3
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cluster_targets import lookup_cluster
+
+logger = logging.getLogger(__name__)
 
 _CA_BUNDLE_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -76,10 +83,14 @@ def _write_creds(cluster_id: str):
             "SecretString"
         ) or "{}"
         creds = json.loads(raw)
-    except Exception as e:
+    except Exception:
+        logger.warning("mongo write secret fetch failed for %s", cluster_id, exc_info=True)
         return None, {
             "status": "error",
-            "reason": f"쓰기 자격증명 조회 실패: {str(e)[:200]}",
+            "reason": (
+                "쓰기 자격증명(Secrets Manager) 조회에 실패했습니다 "
+                "(자세한 원인은 서버 로그를 확인하세요)."
+            ),
             "cluster_id": cluster_id,
         }
     host = creds.get("host")
@@ -199,20 +210,28 @@ def create_docdb_index_impl(
             client = _CLIENT_FACTORY(
                 creds["host"], creds["port"], creds["username"], creds["password"]
             )
-        except Exception as e:
+        except Exception:
+            logger.warning("docdb write connect failed for %s", cluster_id, exc_info=True)
             return {
                 "status": "error",
-                "reason": f"DocumentDB 연결 실패: {str(e)[:200]}",
+                "reason": "DocumentDB 연결 실패 (자세한 원인은 서버 로그를 확인하세요).",
                 "cluster_id": cluster_id,
             }
 
         # --- request-time read: idempotent skip if the named index exists ---
         try:
             existing = _index_names(client, db, collection)
-        except Exception as e:
+        except Exception:
+            logger.warning(
+                "list_indexes failed for %s (db=%s, collection=%s)",
+                cluster_id, db, collection, exc_info=True,
+            )
             return {
                 "status": "error",
-                "reason": f"인덱스 목록 조회 실패 — 적용 전 현재 상태를 확인할 수 없어 중단합니다: {str(e)[:200]}",
+                "reason": (
+                    f"인덱스 목록 조회 실패 ({db}.{collection}). 적용 전 현재 상태를 "
+                    "확인할 수 없어 중단합니다 (자세한 원인은 서버 로그를 확인하세요)."
+                ),
                 "cluster_id": cluster_id,
             }
 
@@ -255,10 +274,17 @@ def create_docdb_index_impl(
         # --- TOCTOU re-read (fix #6): re-check IMMEDIATELY before the write ---
         try:
             fresh = _index_names(client, db, collection)
-        except Exception as e:
+        except Exception:
+            logger.warning(
+                "pre-write list_indexes failed for %s (db=%s, collection=%s)",
+                cluster_id, db, collection, exc_info=True,
+            )
             return {
                 "status": "error",
-                "reason": f"적용 직전 재조회 실패 — 안전을 위해 중단합니다: {str(e)[:200]}",
+                "reason": (
+                    "적용 직전 재조회 실패. 안전을 위해 인덱스를 만들지 않고 중단합니다 "
+                    "(자세한 원인은 서버 로그를 확인하세요)."
+                ),
                 "cluster_id": cluster_id,
             }
         if name in fresh:
@@ -275,10 +301,17 @@ def create_docdb_index_impl(
             client[db][collection].create_index(
                 list(keys_list), background=True, name=name
             )
-        except Exception as e:
+        except Exception:
+            logger.warning(
+                "create_index failed for %s (db=%s, collection=%s, name=%s)",
+                cluster_id, db, collection, name, exc_info=True,
+            )
             return {
                 "status": "error",
-                "reason": f"인덱스 생성 실패: {str(e)[:200]}",
+                "reason": (
+                    f"인덱스 생성 실패 ({db}.{collection}, 인덱스={name}). "
+                    "자세한 원인은 서버 로그를 확인하세요."
+                ),
                 "cluster_id": cluster_id,
             }
 

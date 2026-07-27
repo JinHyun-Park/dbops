@@ -6,6 +6,7 @@ content. The engine-gate (unsupported_engine on non-relational) is exercised in
 test_operations_engine_gate.py where the handler env is already set up.
 """
 
+import json
 import os
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -18,6 +19,25 @@ from mcp_servers.shared.approval_guard import canonical_action_hash
 _CE = "mcp_servers.operations.tools.create_custom_endpoint"
 _DE = "mcp_servers.operations.tools.delete_custom_endpoint"
 _ME = "mcp_servers.operations.tools.modify_custom_endpoint"
+
+# A realistic AWS error: it carries the hub account id, the platform role name
+# and the target ARN. Every one of those must stay in CloudWatch and NEVER reach
+# a tool response the DBA reads in the agent transcript.
+_LEAKY = (
+    "An error occurred (AccessDenied) when calling the CreateDBClusterEndpoint "
+    "operation: User: arn:aws:sts::123456789012:assumed-role/dbops-dev-operations-role/"
+    "dbops-dev-operations is not authorized to perform: rds:CreateDBClusterEndpoint "
+    "on resource: arn:aws:rds:ap-northeast-2:123456789012:cluster:prod-pg-1"
+)
+_LEAK_TOKENS = ("123456789012", "dbops-dev-operations-role", "AccessDenied", "arn:aws")
+
+
+def _assert_no_leak(out):
+    """No RESPONSE field may carry exception text (project-wide rule)."""
+    blob = json.dumps(out, ensure_ascii=False, default=str)
+    for token in _LEAK_TOKENS:
+        assert token not in blob, f"exception text leaked into response: {token!r} in {blob!r}"
+    assert "error" not in out, "raw exception field must be gone"
 
 
 def _rds_with_members(ids):
@@ -237,3 +257,99 @@ def test_modify_executes_when_approved(mock_rds_for, mock_guard):
     call = rds.modify_db_cluster_endpoint.call_args.kwargs
     assert call["DBClusterEndpointIdentifier"] == "ep-analytics"
     assert call["ExcludedMembers"] == ["i-3"]
+
+
+# ──────────────── no exception text in any response field ────────────────
+
+@patch(f"{_CE}.rds_client_for_cluster")
+def test_create_describe_failure_leaks_no_exception(mock_rds_for):
+    rds = MagicMock()
+    rds.describe_db_clusters.side_effect = RuntimeError(_LEAKY)
+    mock_rds_for.return_value = rds
+    out = create_custom_endpoint_impl(
+        MagicMock(), cluster_id="prod-pg-1", endpoint_identifier="ep-x",
+        endpoint_type="READER",
+    )
+    assert out["status"] == "error"
+    _assert_no_leak(out)
+    assert "cli_preview" in out  # built from known inputs, kept
+
+
+@patch(f"{_CE}.verify_approval")
+@patch(f"{_CE}.rds_client_for_cluster")
+def test_create_failure_leaks_no_exception(mock_rds_for, mock_guard):
+    rds = _rds_with_members(["i-1"])
+    rds.create_db_cluster_endpoint.side_effect = RuntimeError(_LEAKY)
+    mock_rds_for.return_value = rds
+    mock_guard.return_value = {"ok": True}
+    out = create_custom_endpoint_impl(
+        MagicMock(), cluster_id="prod-pg-1", endpoint_identifier="ep-analytics",
+        endpoint_type="READER", static_members=["i-1"], approved=True, approval_id="aid-1",
+    )
+    assert out["status"] == "create_failed"
+    _assert_no_leak(out)
+    assert out["endpoint_identifier"] == "ep-analytics"
+    assert out["cli_preview"].startswith("aws rds create-db-cluster-endpoint")
+
+
+@patch(f"{_ME}.verify_approval")
+@patch(f"{_ME}.rds_client_for_cluster")
+def test_modify_failure_leaks_no_exception(mock_rds_for, mock_guard):
+    rds = _rds_with_endpoint("CUSTOM")
+    rds.modify_db_cluster_endpoint.side_effect = RuntimeError(_LEAKY)
+    mock_rds_for.return_value = rds
+    mock_guard.return_value = {"ok": True}
+    out = modify_custom_endpoint_impl(
+        MagicMock(), cluster_id="prod-pg-1", endpoint_identifier="ep-analytics",
+        excluded_members=["i-3"], approved=True, approval_id="aid-1",
+    )
+    assert out["status"] == "modify_failed"
+    _assert_no_leak(out)
+    assert out["cli_preview"].startswith("aws rds modify-db-cluster-endpoint")
+
+
+@patch(f"{_DE}.verify_approval")
+@patch(f"{_DE}.rds_client_for_cluster")
+def test_delete_failure_leaks_no_exception(mock_rds_for, mock_guard):
+    rds = _rds_with_endpoint("CUSTOM")
+    rds.delete_db_cluster_endpoint.side_effect = RuntimeError(_LEAKY)
+    mock_rds_for.return_value = rds
+    mock_guard.return_value = {"ok": True}
+    out = delete_custom_endpoint_impl(
+        MagicMock(), cluster_id="prod-pg-1", endpoint_identifier="ep-analytics",
+        approved=True, approval_id="aid-1",
+    )
+    assert out["status"] == "delete_failed"
+    _assert_no_leak(out)
+    assert out["cli_preview"].startswith("aws rds delete-db-cluster-endpoint")
+
+
+@patch(f"{_DE}.rds_client_for_cluster")
+def test_lookup_failure_leaks_no_exception(mock_rds_for):
+    """find_custom_endpoint is shared by delete + modify: the describe failure
+    reason must be static too."""
+    rds = MagicMock()
+    rds.describe_db_cluster_endpoints.side_effect = RuntimeError(_LEAKY)
+    mock_rds_for.return_value = rds
+    out = delete_custom_endpoint_impl(
+        MagicMock(), cluster_id="prod-pg-1", endpoint_identifier="ep-analytics",
+    )
+    assert out["status"] == "error"
+    _assert_no_leak(out)
+
+
+@patch(f"{_DE}.rds_client_for_cluster")
+def test_lookup_notfound_classification_survives(mock_rds_for):
+    """str(e) still classifies NotFound (control flow unchanged) while the
+    response stays free of exception text."""
+    rds = MagicMock()
+    rds.describe_db_cluster_endpoints.side_effect = RuntimeError(
+        "EndpointNotFoundFault: arn:aws:rds:ap-northeast-2:123456789012:cluster-endpoint:ghost"
+    )
+    mock_rds_for.return_value = rds
+    out = delete_custom_endpoint_impl(
+        MagicMock(), cluster_id="prod-pg-1", endpoint_identifier="ghost",
+    )
+    assert out["status"] == "not_found"
+    _assert_no_leak(out)
+    assert "ghost" in out["reason"]  # caller-supplied identifier, safe to echo

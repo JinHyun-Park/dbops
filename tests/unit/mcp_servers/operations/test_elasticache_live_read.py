@@ -3,7 +3,9 @@ import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock
 
-_T = Path(__file__).resolve().parents[4] / "mcp-servers/mcp_servers/operations/tools/elasticache_live_read.py"
+from botocore.exceptions import ClientError
+
+_T =Path(__file__).resolve().parents[4] / "mcp-servers/mcp_servers/operations/tools/elasticache_live_read.py"
 _spec = importlib.util.spec_from_file_location("ec_live_read", _T)
 mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(mod)
@@ -91,11 +93,53 @@ def test_missing_endpoint_unavailable():
 
 def test_connection_error_no_token_leak():
     class _Boom:
-        def info(self, s): raise Exception("connection refused")
+        # A real WRONGPASS/timeout echoes the AUTH token and the endpoint back.
+        def info(self, s): raise Exception("WRONGPASS invalid password SUPERSECRET")
     _patch(None, redis_client=_Boom(), token="SUPERSECRET")
     r = mod.elasticache_live_read_impl(None, cluster_id="my-redis")
     assert r["status"] == "error"
     assert "SUPERSECRET" not in str(r)
+    assert "WRONGPASS" not in r["reason"]
+    assert "연결/조회에 실패" in r["reason"]
+    assert r["host"] == "my-redis.cache.amazonaws.com"  # known input, kept
+
+
+def test_session_error_reason_is_static_with_aws_code():
+    """AssumeRole failure: the exception names the hub account and platform role,
+    so only the bounded AWS error CODE survives into the reason."""
+    _patch(None, redis_client=_FakeRedis())
+    boom = ClientError(
+        {"Error": {"Code": "AccessDenied",
+                   "Message": "User arn:aws:sts::123456789012:assumed-role/dbops-dev-mcp-role/s "
+                              "is not authorized to perform sts:AssumeRole"}},
+        "AssumeRole",
+    )
+
+    def _raise(region, role_arn):
+        raise boom
+
+    mod.session_for = _raise
+    r = mod.elasticache_live_read_impl(None, cluster_id="my-redis")
+    assert r["status"] == "error"
+    assert "123456789012" not in r["reason"] and "assumed-role" not in r["reason"]
+    assert "AccessDenied" in r["reason"]
+    assert "AssumeRole" in r["reason"]  # which STEP failed
+
+
+def test_secret_error_reason_is_static():
+    """Secret read failure must not echo the secret ARN back to the caller."""
+    _patch(None, redis_client=_FakeRedis())
+    sm = mod.session_for("x", "").client("secretsmanager")
+    sm.get_secret_value.side_effect = ClientError(
+        {"Error": {"Code": "AccessDeniedException",
+                   "Message": "not authorized on arn:aws:secretsmanager:ap-northeast-2:"
+                              "123456789012:secret:dbops-redis-auth-AbCdEf"}},
+        "GetSecretValue",
+    )
+    r = mod.elasticache_live_read_impl(None, cluster_id="my-redis")
+    assert r["status"] == "error"
+    assert "123456789012" not in r["reason"] and "AbCdEf" not in r["reason"]
+    assert "AUTH 시크릿" in r["reason"] and "AccessDeniedException" in r["reason"]
 
 
 def test_missing_cluster_id():
