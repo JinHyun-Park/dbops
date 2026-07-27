@@ -12,6 +12,7 @@ The handoff is intentionally explicit (two tool calls) so:
   - Replay (re-issuing after approval) is auditable.
 """
 
+import logging
 import os
 import time
 import uuid
@@ -19,7 +20,10 @@ from decimal import Decimal
 
 import boto3
 
+from mcp_servers.operations.tools.set_docdb_profiler import validate_profiler_params
 from mcp_servers.shared.approval_guard import canonical_action_hash
+
+logger = logging.getLogger(__name__)
 
 
 def _ddb_safe(value):
@@ -117,6 +121,19 @@ def request_approval_impl(
             "message": f"unknown action_type {action_type!r}",
         }
 
+    # Range-check what the write tool will range-check, with the SAME helper, on
+    # the registration path too: this path mints the payload_hash the write is
+    # bound to, so an out-of-range value would otherwise be shown to the DBA,
+    # approved, and only then refused at execute time (a burnt approval and a
+    # confusing dead-end).
+    if action_type == "set_docdb_profiler":
+        details = action_details or {}
+        _, _, param_error = validate_profiler_params(
+            details.get("threshold_ms"), details.get("sampling_rate")
+        )
+        if param_error:
+            return {"status": "error", "message": param_error}
+
     approval_id = str(uuid.uuid4())
     created_at = str(int(time.time() * 1000))  # ms epoch as string for sort key
 
@@ -144,8 +161,16 @@ def request_approval_impl(
     try:
         ddb = boto3.resource("dynamodb").Table(table_name)
         ddb.put_item(Item=item)
-    except Exception as e:
-        return {"status": "error", "message": str(e)[:300]}
+    except Exception:
+        # Static reason only: a DDB error message can carry the table ARN, the
+        # account id or the full item, and this string lands in the chat.
+        logger.exception("[request_approval] put_item failed for %s", cluster_id)
+        return {
+            "status": "error",
+            "message": (
+                "승인 요청 등록에 실패했습니다 (자세한 원인은 서버 로그를 확인하세요)."
+            ),
+        }
 
     frontend = os.environ.get("FRONTEND_URL", "").rstrip("/")
     deep_link = f"{frontend}/approvals" if frontend else "/approvals"

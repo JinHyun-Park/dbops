@@ -14,6 +14,7 @@ import pytest
 from botocore.exceptions import ClientError
 from mcp_servers.shared.approval_guard import (
     REPLAY_WINDOW_SECONDS,
+    as_bool,
     canonical_action_hash,
     verify_approval,
 )
@@ -540,3 +541,39 @@ def test_docdb_profiler_projection_binds_profiler_parameters():
         {"enabled": True, "threshold_ms": "100", "sampling_rate": "1.0"},
     )
     assert a == a_str
+
+
+def test_docdb_profiler_enabled_flag_uses_one_coercion_on_both_sides():
+    """Regression: the projection used bare bool(), so a registered
+    action_details {"enabled": "false"} hashed like an ENABLE. The DBA approved a
+    DISABLE, the tool derived the DISABLE hash, and the guard denied the write
+    (and in the other direction a string could have matched an enable).
+
+    With the shared as_bool the string collapses onto the SAME hash as the bool
+    it means, and the enable/disable hashes stay distinct."""
+    def h(enabled):
+        return canonical_action_hash(
+            "set_docdb_profiler",
+            {
+                "enabled": enabled,
+                "threshold_ms": 100,
+                "sampling_rate": 1.0,
+                "parameter_group": "pg-a",
+            },
+        )
+
+    assert h(True) != h(False)
+    assert h("false") == h(False)
+    assert h("true") == h(True)
+    for falsy in ("0", "no", "", "  FALSE  "):
+        assert h(falsy) == h(False), falsy
+
+
+def test_as_bool_is_the_shared_coercion():
+    """as_bool lives in the guard so the request side and the tools cannot each
+    keep their own copy (that divergence is what reopened the binding hole)."""
+    assert as_bool(True) is True and as_bool(False) is False
+    assert as_bool("false") is False and as_bool("0") is False
+    assert as_bool("no") is False and as_bool("") is False
+    assert as_bool("false ") is False and as_bool("FALSE") is False
+    assert as_bool("true") is True and as_bool("disabled") is True

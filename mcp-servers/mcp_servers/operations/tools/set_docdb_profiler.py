@@ -19,6 +19,12 @@ the profiler is a three-step, IAM-authorized change:
      is PER CLUSTER: /aws/docdb/{cluster_id}/profiler (AWS docs, "Accessing your
      Amazon DocumentDB profiler logs"), not a single shared /aws/docdb/profiler.
 
+DBOps has NO profiler-log surface yet: the log search tool and the dashboard log
+panel both target the cluster ERROR log (/aws/rds/cluster/{id}/error), and
+nothing ingests or indexes profiler records. So the tool tells the operator to
+read the group in the AWS console / CloudWatch Logs Insights directly instead of
+implying DBOps can query it. Ingesting profiler records is E-1 work.
+
 Safety model (unchanged from the previous Mongo-protocol version):
   - FAIL-CLOSED engine gate in the handler (docdb_write capability). A None
     family never reaches this impl.
@@ -51,6 +57,41 @@ logger = logging.getLogger(__name__)
 # profiler_sampling_rate is [0.0-1.0]. The profiler params are dynamic, so
 # ApplyMethod=immediate is valid (a static param would require pending-reboot).
 MIN_THRESHOLD_MS = 50
+MAX_THRESHOLD_MS = 2147483647  # INT_MAX, the upper end AWS documents
+DEFAULT_THRESHOLD_MS = 100
+DEFAULT_SAMPLING_RATE = 1.0
+
+
+def validate_profiler_params(threshold_ms=None, sampling_rate=None):
+    """Coerce + range-check the two profiler knobs against the range the tool
+    description advertises. Returns (threshold_int, rate_float, error_reason);
+    error_reason is "" when both are in range. None means "not supplied" and
+    takes the tool default.
+
+    request_approval calls this too: the registration path mints the
+    payload_hash the write is bound to, so a value the write would refuse must
+    never reach the Approval Center in the first place. One definition for both
+    paths, so the two can't drift."""
+    if threshold_ms is None:
+        threshold_ms = DEFAULT_THRESHOLD_MS
+    if sampling_rate is None:
+        sampling_rate = DEFAULT_SAMPLING_RATE
+    try:
+        threshold_i = int(threshold_ms)
+    except (TypeError, ValueError):
+        return 0, 0.0, "threshold_ms는 정수여야 합니다 (밀리초)."
+    if not MIN_THRESHOLD_MS <= threshold_i <= MAX_THRESHOLD_MS:
+        return 0, 0.0, (
+            f"threshold_ms는 {MIN_THRESHOLD_MS} 이상 {MAX_THRESHOLD_MS} 이하여야 합니다 "
+            "(DocumentDB 허용 범위: 50~INT_MAX)."
+        )
+    try:
+        rate_f = float(sampling_rate)
+    except (TypeError, ValueError):
+        return 0, 0.0, "sampling_rate는 0.0~1.0 사이의 실수여야 합니다."
+    if not 0.0 <= rate_f <= 1.0:
+        return 0, 0.0, "sampling_rate는 0.0~1.0 범위여야 합니다."
+    return threshold_i, rate_f, ""
 
 
 def profiler_log_group(cluster_id: str) -> str:
@@ -63,60 +104,42 @@ def profiler_log_group(cluster_id: str) -> str:
     return f"/aws/docdb/{cluster_id}/profiler"
 
 
-def _as_bool(v) -> bool:
-    """Coerce a gateway-supplied flag. A JSON boolean arrives as a bool, but a
-    string "false" would be truthy under bare bool() and silently ENABLE the
-    profiler on a disable request."""
-    if isinstance(v, str):
-        return v.strip().lower() not in ("", "false", "0", "no")
-    return bool(v)
-
-
 def set_docdb_profiler_impl(
     cache,
     cluster_id: str,
     enabled: bool = True,
-    threshold_ms: int = 100,
-    sampling_rate: float = 1.0,
+    threshold_ms: int = DEFAULT_THRESHOLD_MS,
+    sampling_rate: float = DEFAULT_SAMPLING_RATE,
     approved: bool = False,
     approval_id: str = "",
     **_ignored,
 ) -> dict:
     """Turn the DocumentDB profiler on/off for `cluster_id` (cluster-wide: the
     profiler applies to every database and instance). Approval-gated; the
-    approval binds {enabled, threshold_ms, sampling_rate}. Never raises."""
-    enabled_b = _as_bool(enabled)
-
+    approval binds {enabled, threshold_ms, sampling_rate, parameter_group}.
+    Never raises."""
     # --- validate BEFORE any AWS call (no partial writes) ---
-    try:
-        threshold_i = int(threshold_ms)
-    except (TypeError, ValueError):
-        return {
-            "status": "error",
-            "reason": "threshold_ms는 정수여야 합니다 (밀리초).",
-            "cluster_id": cluster_id,
-        }
-    if threshold_i < MIN_THRESHOLD_MS:
+    # `enabled` must be a real JSON boolean. A string flag is REFUSED instead of
+    # coerced: an ambiguous value must not reach the approval hash on either side
+    # (the approval projection coerces action_details with the shared as_bool, so
+    # a registered "false" binds the DISABLE payload, and the tool then only
+    # ever executes a real bool, which as_bool maps to itself).
+    if not isinstance(enabled, bool):
         return {
             "status": "error",
             "reason": (
-                f"threshold_ms는 {MIN_THRESHOLD_MS} 이상이어야 합니다 "
-                "(DocumentDB 허용 범위: 50~INT_MAX)."
+                "enabled는 JSON boolean(true/false)이어야 합니다. 문자열 플래그는 "
+                "승인된 값과 실제 실행 값이 어긋날 수 있어 거부합니다."
             ),
             "cluster_id": cluster_id,
         }
-    try:
-        rate_f = float(sampling_rate)
-    except (TypeError, ValueError):
+    enabled_b = enabled
+
+    threshold_i, rate_f, param_error = validate_profiler_params(threshold_ms, sampling_rate)
+    if param_error:
         return {
             "status": "error",
-            "reason": "sampling_rate는 0.0~1.0 사이의 실수여야 합니다.",
-            "cluster_id": cluster_id,
-        }
-    if not 0.0 <= rate_f <= 1.0:
-        return {
-            "status": "error",
-            "reason": "sampling_rate는 0.0~1.0 범위여야 합니다.",
+            "reason": param_error,
             "cluster_id": cluster_id,
         }
 
@@ -152,7 +175,17 @@ def set_docdb_profiler_impl(
     # AWS-managed default groups are immutable, so the profiler simply cannot be
     # turned on without first creating a custom group. Say that instead of
     # failing with an API error.
-    if pg_name.startswith("default."):
+    #
+    # Why the name prefix is the test: RDS/DocDB expose no IsDefault flag on a
+    # parameter group, and AWS names every managed default group exactly
+    # `default.<family>` (default.docdb5.0, ...). Group names are unique per
+    # account+region and the managed default already holds that name, so a custom
+    # group cannot occupy it. Names are stored lowercase, hence .lower(). This is
+    # a pre-check to avoid burning the approval on an impossible change, not the
+    # only line of defense: if it ever missed, ModifyDBClusterParameterGroup
+    # itself refuses a default group and we return a static error below
+    # (fail-closed, nothing is written).
+    if pg_name.lower().startswith("default."):
         return {
             "status": "default_group_refused",
             "cluster_id": cluster_id,
@@ -295,7 +328,10 @@ def set_docdb_profiler_impl(
             "ApplyMethod=immediate로 적용했습니다 (반영까지 몇 분 걸릴 수 있습니다). "
             f"프로파일러 출력은 CloudWatch Logs 로그 그룹 {profiler_log_group(cluster_id)}로 "
             "전송됩니다 (로그 그룹은 첫 레코드가 생긴 뒤에 나타납니다). "
-            "DocumentDB에는 system.profile 컬렉션이 없으므로 Mongo 셸로는 조회할 수 없습니다."
+            "DBOps는 아직 이 로그 그룹을 조회하지 못합니다(로그 검색·대시보드는 클러스터 "
+            "error 로그만 봅니다). 프로파일러 기록은 AWS 콘솔이나 CloudWatch Logs Insights에서 "
+            "직접 조회하세요. DocumentDB에는 system.profile 컬렉션이 없으므로 Mongo 셸로도 "
+            "조회할 수 없습니다."
         ),
     }
     # Report only what was actually written: disabling touches the `profiler`

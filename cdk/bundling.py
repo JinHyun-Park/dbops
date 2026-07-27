@@ -3,8 +3,11 @@
 Two Lambda assets need pymongo (not in the Lambda runtime) + the RDS/DocDB CA
 bundle baked into the asset:
   - the read-only DocumentDB Mongo collector (data_stack)
-  - the operations MCP server, whose DocDB write tools (set_docdb_profiler,
-    create_docdb_index) connect over the Mongo wire protocol (agent_stack)
+  - the operations MCP server, whose DocDB index write (create_docdb_index)
+    connects over the Mongo wire protocol (agent_stack). set_docdb_profiler is
+    NOT one of them any more: it drives the cluster parameter group + the
+    CloudWatch Logs export over the control plane (boto3), no Mongo. pymongo
+    still ships because create_docdb_index and the collector need it.
 
 Both reuse `_PipLocalBundling` (Docker-free local pip, Docker fallback) so the
 class lives here instead of being duplicated across stack files.

@@ -85,6 +85,21 @@ def _norm_val(v):
         return s
 
 
+def as_bool(v) -> bool:
+    """Coerce a flag the way the write tools contract on it: a JSON boolean
+    arrives as a bool, but a string "false"/"0"/"no"/"" must NOT be truthy
+    (bare bool("false") is True).
+
+    This is the ONE definition of that coercion. It lives here so the request
+    side (action_details, which the agent fills freely) and the execute side
+    hash the same operation: without it, hash({"enabled": "false"}) equalled
+    hash({"enabled": True}) and a DBA-approved DISABLE could never be executed
+    (or worse, matched an ENABLE)."""
+    if isinstance(v, str):
+        return v.strip().lower() not in ("", "false", "0", "no")
+    return bool(v)
+
+
 def _project(action_type: str, details: dict) -> dict:
     """Reduce an action payload to the fields that DEFINE the operation, so
     the approval is bound to *what* gets executed, not just (cluster, action).
@@ -229,8 +244,15 @@ def _project(action_type: str, details: dict) -> dict:
         # unrelated cluster sharing it. Same reasoning as the
         # modify_rds_instance_class current-class baseline: bind what the TOCTOU
         # re-check depends on so a reassignment fails the hash, fail-closed.
+        #
+        # `enabled` goes through as_bool, NOT bare bool(): the agent registers
+        # action_details verbatim, so a string "false" must project to the
+        # DISABLE payload the tool actually executes. The tool itself refuses a
+        # non-bool `enabled` outright, so the only values that can reach a write
+        # are real bools, where as_bool is the identity: one coercion, both
+        # sides, no ambiguous flag in either hash.
         return {
-            "enabled": bool(d.get("enabled")),
+            "enabled": as_bool(d.get("enabled")),
             "threshold_ms": _norm_val(d.get("threshold_ms")),
             "sampling_rate": _norm_val(d.get("sampling_rate")),
             "parameter_group": str(d.get("parameter_group") or "").strip(),

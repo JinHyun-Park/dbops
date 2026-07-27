@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import sys
 
@@ -41,6 +42,8 @@ from mcp_servers.operations.tools.test_elasticache_failover import test_elastica
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.engine_family import CAPABILITIES
 from mcp_servers.shared.engine_family import engine_family as _engine_family
+
+logger = logging.getLogger(__name__)
 
 cache = CacheClient()
 
@@ -509,7 +512,10 @@ TOOLS = {
             "the cluster's CUSTOM cluster parameter group and turns the profiler "
             "CloudWatch Logs export on or off. Profiler output goes to the "
             "PER-CLUSTER log group /aws/docdb/{cluster_id}/profiler, never to a "
-            "system.profile collection. The parameter group is SHARED, so every "
+            "system.profile collection. DBOps CANNOT query that log group yet "
+            "(log search and the dashboard read the cluster error log only), so "
+            "tell the operator to read it in the AWS console or CloudWatch Logs "
+            "Insights directly. The parameter group is SHARED, so every "
             "cluster attached to it inherits the change, and the approval is "
             "bound to the resolved group (a reassignment invalidates it). A "
             "cluster on a default.* parameter group is refused (create a custom "
@@ -856,7 +862,18 @@ def lambda_handler(event, context):
         try:
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
-        except Exception as e:
-            return {"content": [{"type": "text", "text": json.dumps({"error": str(e)})}]}
+        except Exception:
+            # No raw exception text in a tool response (project hard rule): the
+            # message can carry ARNs, secret names, SQL fragments or host names
+            # straight into the chat transcript. Static reason, details to the
+            # Lambda log.
+            logger.exception("[operations] tool %s raised", tool_name)
+            return {"content": [{"type": "text", "text": json.dumps({
+                "status": "error",
+                "error": (
+                    f"{tool_name} 실행이 실패했습니다 "
+                    "(자세한 원인은 서버 로그를 확인하세요)."
+                ),
+            })}]}
 
     return {"error": f"Unknown tool: {tool_name}"}

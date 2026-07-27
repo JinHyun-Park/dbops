@@ -139,3 +139,67 @@ def test_created_at_returned_for_api_stamp():
     assert result["status"] == "pending"
     assert result["approval_id"] == item["approval_id"]
     assert result["created_at"] == item["created_at"]
+
+
+# ===== E-0: no exception text in the response, profiler range on both paths ===
+
+
+def test_put_item_failure_has_no_exception_text():
+    """The DDB error message can carry the table ARN / account id / the whole
+    item, and this string is shown in chat. Static reason, details to the log."""
+    with patch.dict(os.environ, {"APPROVALS_TABLE": "approvals"}):
+        with patch.object(request_approval, "boto3") as mock_boto3:
+            table = MagicMock()
+            table.put_item.side_effect = RuntimeError(
+                "ValidationException: arn:aws:dynamodb:ap-northeast-2:123456789012:table/secret"
+            )
+            mock_boto3.resource.return_value.Table.return_value = table
+            result = request_approval.request_approval_impl(
+                None, cluster_id="c1", action_type="execute_sql",
+                action_details={"sql": "SELECT 1"},
+            )
+    assert result["status"] == "error"
+    blob = " ".join(str(v) for v in result.values())
+    for leak in ("arn:aws", "123456789012", "ValidationException", "RuntimeError"):
+        assert leak not in blob, f"raw exception text leaked: {result}"
+
+
+def test_profiler_registration_rejects_out_of_range_threshold():
+    """FINDING 3: this path mints the payload_hash the write is bound to, so a
+    value set_docdb_profiler would refuse must never reach the Approval Center
+    (the DBA would approve a change that then dead-ends at execute time)."""
+    with patch.dict(os.environ, {"APPROVALS_TABLE": "approvals"}):
+        with patch.object(request_approval, "boto3") as mock_boto3:
+            table = MagicMock()
+            mock_boto3.resource.return_value.Table.return_value = table
+            result = request_approval.request_approval_impl(
+                None, cluster_id="docdb-1", action_type="set_docdb_profiler",
+                action_details={"enabled": True, "threshold_ms": 10, "sampling_rate": 1.0},
+            )
+    assert result["status"] == "error"
+    assert "threshold_ms" in result["message"]
+    table.put_item.assert_not_called()
+
+
+def test_profiler_registration_rejects_out_of_range_sampling_rate():
+    with patch.dict(os.environ, {"APPROVALS_TABLE": "approvals"}):
+        with patch.object(request_approval, "boto3") as mock_boto3:
+            table = MagicMock()
+            mock_boto3.resource.return_value.Table.return_value = table
+            result = request_approval.request_approval_impl(
+                None, cluster_id="docdb-1", action_type="set_docdb_profiler",
+                action_details={"enabled": True, "sampling_rate": 1.5},
+            )
+    assert result["status"] == "error"
+    assert "sampling_rate" in result["message"]
+    table.put_item.assert_not_called()
+
+
+def test_profiler_registration_accepts_in_range_and_defaults():
+    """Control: an in-range payload (and an omitted knob, which takes the tool
+    default) still registers."""
+    item, result = _put_item(
+        "set_docdb_profiler", {"enabled": False, "threshold_ms": 500}
+    )
+    assert result["status"] == "pending"
+    assert item["action_type"] == "set_docdb_profiler"

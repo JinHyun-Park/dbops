@@ -316,17 +316,68 @@ def test_log_export_already_enabled_is_not_re_enabled():
     assert client.modify_cluster_calls == []
 
 
-def test_string_false_disables():
-    """A gateway-supplied "false" must not be truthy: bool("false") is True."""
-    client = _FakeDocDB()
-    with _with_client(client), patch.object(
-        mod, "verify_approval", lambda *a, **k: {"ok": True}
+def test_string_flag_refused_before_any_aws_call():
+    """An ambiguous `enabled` must never reach a hash or a write. A string flag
+    is REFUSED (it used to be coerced locally, while the approval projection used
+    bare bool(), so hash("false") == hash(True) and a DBA-approved DISABLE could
+    not be executed)."""
+    factory = MagicMock(side_effect=AssertionError("must not call AWS"))
+    guard = MagicMock(return_value={"ok": True})
+    with patch.object(mod, "client_for_cluster", factory), patch.object(
+        mod, "verify_approval", guard
     ):
         result = set_docdb_profiler_impl(
             MagicMock(), cluster_id="docdb-1", enabled="false", approved=True,
             approval_id="x",
         )
-    assert result["profiler"] == "disabled"
+    assert result["status"] == "error"
+    assert "boolean" in result["reason"]
+    factory.assert_not_called()
+    guard.assert_not_called()
+
+
+def test_string_true_flag_also_refused():
+    """Both directions: "true" is just as ambiguous as "false"."""
+    factory = MagicMock(side_effect=AssertionError("must not call AWS"))
+    with patch.object(mod, "client_for_cluster", factory):
+        result = set_docdb_profiler_impl(
+            MagicMock(), cluster_id="docdb-1", enabled="true", approved=True,
+            approval_id="x",
+        )
+    assert result["status"] == "error"
+    factory.assert_not_called()
+
+
+def test_threshold_above_int_max_rejected_no_aws():
+    """The advertised range is 50..INT_MAX; the upper end is enforced too, so an
+    out-of-range value is refused with a stated reason instead of surfacing as an
+    opaque AWS API failure."""
+    factory = MagicMock(side_effect=AssertionError("must not call AWS"))
+    with patch.object(mod, "client_for_cluster", factory):
+        result = set_docdb_profiler_impl(
+            MagicMock(), cluster_id="docdb-1", enabled=True,
+            threshold_ms=mod.MAX_THRESHOLD_MS + 1,
+        )
+    assert result["status"] == "error"
+    assert "threshold_ms" in result["reason"]
+    factory.assert_not_called()
+
+
+def test_note_does_not_claim_dbops_can_read_the_profiler_log():
+    """DBOps has no profiler-log surface (log search + dashboard read the cluster
+    error log), so the note must send the operator to the console / Logs Insights
+    instead of implying DBOps can query the group."""
+    client = _FakeDocDB(log_exports=[])
+    with _with_client(client), patch.object(
+        mod, "verify_approval", lambda *a, **k: {"ok": True}
+    ):
+        result = set_docdb_profiler_impl(
+            MagicMock(), cluster_id="docdb-1", enabled=True, approved=True,
+            approval_id="x",
+        )
+    note = result["note"]
+    assert "CloudWatch Logs Insights" in note
+    assert "DBOps는 아직 이 로그 그룹을 조회하지 못합니다" in note
 
 
 # ===== never-raise + no exception text in the response =====
