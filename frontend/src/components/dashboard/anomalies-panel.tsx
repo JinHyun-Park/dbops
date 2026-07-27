@@ -50,8 +50,18 @@ function prettyMetric(m: string): string {
   return METRIC_LABELS[k] || metricDef(k)?.label || m;
 }
 
+// "0 anomalies" has three different meanings and only one of them is good news.
+// baseline_mode comes from the API (same derivation as the detect_anomalies MCP
+// tool): 'none' = no seasonal AND no flat baseline, so nothing was scored at
+// all. Claiming "이상 징후 없음" there is a confident false negative, and it is
+// reachable right after deploy for every family (the trainer discards buckets
+// with < 12 samples, and documentdb / dynamodb / elasticache only just started
+// getting baselines trained).
+type Meta = { mode?: string; checked?: number; failed?: boolean };
+
 export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
   const [items, setItems] = useState<Anomaly[]>([]);
+  const [meta, setMeta] = useState<Meta>({});
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<Anomaly | null>(null);
 
@@ -59,8 +69,16 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
     let cancelled = false;
     const load = () =>
       fetchAnomalies(clusterId, 4, 2.5)
-        .then((d) => !cancelled && setItems(d.anomalies || []))
-        .catch(() => !cancelled && setItems([]))
+        .then((d) => {
+          if (cancelled) return;
+          setItems(d.anomalies || []);
+          setMeta({ mode: d.baseline_mode, checked: d.total_checked });
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setItems([]);
+          setMeta({ failed: true });
+        })
         .finally(() => !cancelled && setLoading(false));
     load();
     const iv = setInterval(load, 60000);
@@ -88,10 +106,7 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
       {loading ? (
         <div className="text-zinc-500 text-sm">불러오는 중…</div>
       ) : items.length === 0 ? (
-        <div className="text-emerald-400 text-sm flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-500" />
-          최근 4시간 동안 이상 징후 없음
-        </div>
+        <EmptyState meta={meta} />
       ) : (
         <div className="space-y-2">
           {items.map((a) => {
@@ -159,6 +174,57 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
           onClose={() => setActive(null)}
         />
       )}
+    </div>
+  );
+}
+
+function EmptyState({ meta }: { meta: Meta }) {
+  if (meta.failed) {
+    return (
+      <div className="text-sm">
+        <div className="text-amber-300 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-amber-500" />
+          이상 징후를 조회하지 못했습니다
+        </div>
+        <div className="text-[11px] text-zinc-500 mt-1">
+          1분 뒤 자동으로 다시 조회합니다. 계속 실패하면 새로 고쳐 주세요. 지금
+          화면은 &quot;이상 없음&quot;이 아니라 &quot;확인하지 못한
+          상태&quot;입니다.
+        </div>
+      </div>
+    );
+  }
+  if (meta.mode === "none") {
+    return (
+      <div className="text-sm">
+        <div className="text-amber-300 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-amber-500" />
+          baseline 학습 전이라 아직 판단할 수 없습니다
+        </div>
+        <div className="text-[11px] text-zinc-500 mt-1">
+          비교 기준이 되는 baseline이 아직 없습니다(요일·시간대별 seasonal, 7일
+          flat 모두). seasonal baseline은 이 시간대 지표가 약 2주치 쌓이면
+          자동으로 학습되니 그때까지 기다려 주세요. 며칠이 지나도 그대로면 이
+          클러스터의 지표 수집(ETL)이 도는지 확인이 필요합니다.
+        </div>
+      </div>
+    );
+  }
+  const note = [
+    meta.checked ? `지표 ${meta.checked}개를 baseline과 비교했습니다.` : "",
+    meta.mode === "flat"
+      ? "이 시간대의 seasonal baseline이 아직 없어 7일 flat 평균±σ 기준으로 판정했습니다(신뢰도 낮음)."
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <div className="text-sm">
+      <div className="text-emerald-400 flex items-center gap-2">
+        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+        최근 4시간 동안 이상 징후 없음
+      </div>
+      {note && <div className="text-[11px] text-zinc-500 mt-1">{note}</div>}
     </div>
   );
 }

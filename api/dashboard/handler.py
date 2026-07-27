@@ -1805,6 +1805,69 @@ def _active_sessions(query, cluster_id, hours):
     return {"cluster_id": cluster_id, "hours": hours, "samples": samples}
 
 
+# VERBATIM COPY of _ANOMALY_SQL in
+# mcp-servers/mcp_servers/performance/tools/detect_anomalies.py. api/ cannot
+# import mcp_servers (no shared Lambda layer), so this is the same
+# verbatim-copy + parity-test contract engine_family.py has; byte identity is
+# asserted by tests/unit/api/test_dashboard_anomalies.py. It matters here
+# because the panel now reports "no baseline trained yet" as a distinct state:
+# if the two surfaces classified seasonal/flat differently, the dashboard and
+# the chat agent would disagree about whether the cluster is judgeable at all.
+# Scoring returns EVERY checked metric (threshold filtering happens in Python)
+# so that "0 anomalies" and "0 baselines" stay distinguishable.
+_ANOMALY_SQL = """
+SELECT * FROM (
+    WITH current_hour AS (
+        SELECT (EXTRACT(DOW FROM NOW())::int * 24 + EXTRACT(HOUR FROM NOW())::int) AS how
+    ),
+    recent AS (
+        SELECT metric_type, MAX(value) AS recent_max, AVG(value) AS recent_avg
+        FROM metric_snapshots
+        WHERE cluster_id = :cluster_id
+          AND ts > NOW() - (:hours || ' hours')::interval
+          AND (dimensions IS NULL OR dimensions::text = '{}')
+        GROUP BY metric_type
+    ),
+    seasonal AS (
+        SELECT b.metric_type, b.median, b.iqr, b.sample_count
+        FROM metric_baselines b, current_hour c
+        WHERE b.cluster_id = :cluster_id AND b.hour_of_week = c.how
+    ),
+    flat AS (
+        SELECT metric_type, AVG(value) AS mean, STDDEV(value) AS stddev
+        FROM metric_snapshots
+        WHERE cluster_id = :cluster_id
+          AND ts BETWEEN NOW() - INTERVAL '7 days' AND NOW() - (:hours || ' hours')::interval
+          AND (dimensions IS NULL OR dimensions::text = '{}')
+        GROUP BY metric_type
+        HAVING STDDEV(value) > 0 AND COUNT(*) > 50
+    )
+    SELECT
+        r.metric_type,
+        r.recent_max,
+        r.recent_avg,
+        -- A seasonal row with iqr <= 0 (a metric that's constant at this hour)
+        -- can't yield a robust z, so treat it like "no seasonal" and fall back
+        -- to the flat baseline instead of dropping the metric entirely.
+        CASE WHEN s.iqr > 0 THEN s.median ELSE f.mean END AS baseline_mean,
+        CASE WHEN s.iqr > 0 THEN s.iqr ELSE f.stddev END AS baseline_stddev,
+        CASE WHEN s.iqr > 0
+            THEN (r.recent_max - s.median) / s.iqr
+            ELSE (r.recent_max - f.mean) / NULLIF(f.stddev, 0)
+        END AS z_score,
+        CASE WHEN s.iqr > 0 THEN 'seasonal' ELSE 'flat' END AS mode,
+        CASE WHEN s.iqr > 0 THEN s.sample_count ELSE NULL END AS sample_count
+    FROM recent r
+    LEFT JOIN seasonal s ON s.metric_type = r.metric_type
+    LEFT JOIN flat     f ON f.metric_type = r.metric_type
+    WHERE (s.iqr > 0 OR f.stddev IS NOT NULL)
+) t
+WHERE z_score IS NOT NULL
+ORDER BY ABS(z_score) DESC
+LIMIT 50
+"""
+
+
 def _anomalies(query, cluster_id, hours, threshold):
     """Seasonal anomaly detection.
 
@@ -1817,61 +1880,30 @@ def _anomalies(query, cluster_id, hours, threshold):
     Falls back to the legacy flat-mean+stddev baseline when no seasonal
     baseline exists for the current bucket (cold-start: less than ~14 days
     of history). The fallback rows are tagged `mode='flat'` so the UI can
-    explain why a finding's confidence is lower."""
-    rows = query(
-        "WITH "
-        "current_hour AS ( "
-        "  SELECT (EXTRACT(DOW FROM NOW())::int * 24 + EXTRACT(HOUR FROM NOW())::int) AS how "
-        "), "
-        "recent AS ( "
-        "  SELECT metric_type, MAX(value) AS recent_max, AVG(value) AS recent_avg "
-        "  FROM metric_snapshots "
-        "  WHERE cluster_id = :cid "
-        "    AND ts > NOW() - (:hours || ' hours')::interval "
-        "    AND (dimensions IS NULL OR dimensions::text = '{}') "
-        "  GROUP BY metric_type "
-        "), "
-        "seasonal AS ( "
-        "  SELECT b.metric_type, b.median, b.iqr, b.sample_count "
-        "  FROM metric_baselines b, current_hour c "
-        "  WHERE b.cluster_id = :cid AND b.hour_of_week = c.how "
-        "), "
-        "flat AS ( "
-        "  SELECT metric_type, AVG(value) AS mean, STDDEV(value) AS stddev "
-        "  FROM metric_snapshots "
-        "  WHERE cluster_id = :cid "
-        "    AND ts BETWEEN NOW() - INTERVAL '7 days' AND NOW() - (:hours || ' hours')::interval "
-        "    AND (dimensions IS NULL OR dimensions::text = '{}') "
-        "  GROUP BY metric_type "
-        "  HAVING STDDEV(value) > 0 AND COUNT(*) > 50 "
-        ") "
-        "SELECT "
-        "  r.metric_type, "
-        "  r.recent_max, "
-        "  r.recent_avg, "
-        "  COALESCE(s.median, f.mean) AS baseline_mean, "
-        "  COALESCE(s.iqr, f.stddev) AS baseline_stddev, "
-        "  CASE WHEN s.iqr IS NOT NULL "
-        "    THEN (r.recent_max - s.median) / NULLIF(s.iqr, 0) "
-        "    ELSE (r.recent_max - f.mean) / NULLIF(f.stddev, 0) "
-        "  END AS z_score, "
-        "  CASE WHEN s.iqr IS NOT NULL THEN 'seasonal' ELSE 'flat' END AS mode, "
-        "  s.sample_count "
-        "FROM recent r "
-        "LEFT JOIN seasonal s ON s.metric_type = r.metric_type "
-        "LEFT JOIN flat     f ON f.metric_type = r.metric_type "
-        "WHERE (s.iqr IS NOT NULL OR f.stddev IS NOT NULL) "
-        "  AND ABS( "
-        "    CASE WHEN s.iqr IS NOT NULL "
-        "      THEN (r.recent_max - s.median) / NULLIF(s.iqr, 0) "
-        "      ELSE (r.recent_max - f.mean) / NULLIF(f.stddev, 0) "
-        "    END "
-        "  ) >= :threshold "
-        "ORDER BY 6 DESC "  # ABS of z_score column
-        "LIMIT 20",
-        {"cid": cluster_id, "hours": str(hours), "threshold": float(threshold)},
-    )
-    return {"cluster_id": cluster_id, "hours": hours, "threshold": threshold, "anomalies": rows}
+    explain why a finding's confidence is lower.
+
+    `baseline_mode` + `total_checked` are the honesty signals: with no
+    baseline of either kind there is NOTHING to score, and an empty
+    `anomalies` list must not be rendered as "we checked and found nothing".
+    Both are derived exactly as detect_anomalies_impl derives them."""
+
+    def _f(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+
+    rows = query(_ANOMALY_SQL, {"cluster_id": cluster_id, "hours": str(hours)}) or []
+    anomalies = [r for r in rows if abs(_f(r.get("z_score"))) >= _f(threshold)]
+    has_seasonal = any(r.get("mode") == "seasonal" for r in rows)
+    return {
+        "cluster_id": cluster_id,
+        "hours": hours,
+        "threshold": threshold,
+        "anomalies": anomalies,
+        "total_checked": len(rows),
+        "baseline_mode": "seasonal" if has_seasonal else ("flat" if rows else "none"),
+    }
 
 
 def _schema_changes(query, cluster_id, days):
