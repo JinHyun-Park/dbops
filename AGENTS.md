@@ -19,6 +19,7 @@ This is not Aurora-only. Registering a DynamoDB table, a DocumentDB cluster, an 
 ## Architecture Summary
 
 - **Single Agent + Gateway**: One AgentCore Runtime, one Gateway with 4 MCP Servers (63 tools total), plus 2 agent-local AWS-docs tools
+  - 63 is the advertised gateway contract in `cdk/tool_definitions.py`. Two of them, `get_schema_diff` and `get_schema_history`, are currently NON-FUNCTIONAL: they read a `schema_snapshots` table that has no producer anywhere in the repo. Do not cite 63 as 63 working tools, and do not try to "fix" those two without first building the snapshot collector.
 - **2-Path Communication**: SSE Direct (AI chat) + REST API (dashboard/data)
 - **CDK-First**: All infrastructure via CDK. Never modify AWS resources directly.
 
@@ -62,5 +63,8 @@ All infrastructure changes MUST be made through CDK stacks in `cdk/stacks/`. Nev
 ## Specs
 
 - Main design spec: `docs/superpowers/specs/2026-05-08-dbops-design.md`
-- Kiro specs: `.kiro/specs/phase{N}-*/` (requirements.md, design.md, tasks.md)
+- Kiro specs: `.kiro/specs/phase1-performance-agent/` is the only spec directory
+  (requirements.md, design.md, tasks.md). requirements/design are the SHIPPED
+  historical record and carry a do-not-execute banner; tasks.md is the as-built
+  DEPLOY checklist, not a build plan.
 - Kiro steering: `.kiro/steering/` (product.md, tech.md, structure.md)

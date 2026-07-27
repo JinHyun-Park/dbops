@@ -29,14 +29,18 @@ enabled for Claude Sonnet in your region.
 
 - [ ] 1. Configure the deployment
 
-  - `cp cdk/config/settings.example.py cdk/config/settings.py`
+  - **STOP if `cdk/config/settings.py` already exists.** It is gitignored real
+    deployment config (account, region, secrets, ACU limits) and overwriting it
+    cannot be undone from git. If it exists, skip the copy and only review the
+    values below.
+  - Create it only when absent: `cp -n cdk/config/settings.example.py cdk/config/settings.py`
+    (the `-n` is load-bearing: an agent executing this checklist top to bottom
+    would otherwise clobber a live config, and the next step deploys from it).
   - Set `ACCOUNT_ID` and `REGION`. Everything else in that file has a working
     default, including `COGNITO_DOMAIN_PREFIX`, which must stay empty unless you
     want a specific prefix (the stack derives a globally unique one).
   - Check `AGENT_MODEL_ID` carries the inference-profile prefix for your region
     (`apac.`, `us.`, `eu.`, or `global.`). A bare model ID fails every chat turn.
-  - `cdk/config/settings.py` is gitignored. It is your real config, never commit
-    or overwrite it.
 
 - [ ] 2. Bootstrap CDK once per account and region
 
@@ -88,7 +92,9 @@ enabled for Claude Sonnet in your region.
     Callback URLs are auto-registered at deploy time, so no manual Cognito work
     is required.
   - Go to Clusters, then Register. Use "test connection only" first: it runs a
-    3-step pre-flight (STS AssumeRole, DescribeDBClusters, master secret).
+    4-step pre-flight (STS AssumeRole, DescribeDBClusters, master secret, RDS
+    Data API / HttpEndpoint). The Data API step is the one that usually fails
+    first: it is off by default on a cluster you did not create through DBOps.
   - For cross-account targets, deploy the spoke role first
     (`cdk/cross-account/spoke-role-template.yaml`) and register with its ARN. See
     `README.md` and `cdk/cross-account/README.md`.

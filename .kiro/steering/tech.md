@@ -41,6 +41,7 @@ Four MCP servers deployed as Lambda functions behind AgentCore Gateway:
 
 - Performance (11 tools), Incident (9), Operations (34), Simulation (9)
 - Total: 63 gateway tools, managed via Gateway Semantic Search
+- Of those 63, `get_schema_diff` and `get_schema_history` do NOT work: they query `schema_snapshots`, which no collector writes (there is no `data-pipeline/schema_tracker/`). `diagnose_root_cause` also drops its DDL-change signal for the same reason. Treat 63 as the advertised contract, not the working count.
 - Plus 2 agent-local AWS-docs tools (SigV4 proxy to the AWS-managed docs MCP), not a gateway server
 - Tool schemas live in `cdk/tool_definitions.py`. That file is the only tool contract the agent sees; `mcp-servers/schemas/*.json` is stale documentation read by nothing.
 
