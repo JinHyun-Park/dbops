@@ -3,8 +3,16 @@ from unittest.mock import MagicMock, patch
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
 
 
-def test_modify_parameter_requires_approval():
-    """No approved=True → always returns approval_required, no RDS call."""
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_modify_parameter_requires_approval(mock_rds_for):
+    """No approved=True → approval_required, and nothing is written. The
+    parameter group is resolved first (so an impossible change is refused before
+    the DBA is asked) and reported on the card."""
+    mock_rds = MagicMock()
+    mock_rds_for.return_value = mock_rds
+    mock_rds.describe_db_clusters.return_value = {
+        "DBClusters": [{"DBClusterParameterGroup": "prod-pg-1-custom-pg15"}],
+    }
     mock_cache = MagicMock()
     result = modify_parameter_impl(
         mock_cache, cluster_id="prod-pg-1", parameter_name="max_connections", value="200"
@@ -12,6 +20,8 @@ def test_modify_parameter_requires_approval():
     assert result["status"] == "approval_required"
     assert result["parameter"] == "max_connections"
     assert result["value"] == "200"
+    assert result["parameter_group"] == "prod-pg-1-custom-pg15"
+    mock_rds.modify_db_cluster_parameter_group.assert_not_called()
 
 
 @patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
@@ -110,8 +120,59 @@ def test_modify_failure_returns_static_reason_no_exception_text(mock_rds_for):
         assert leak not in blob, f"raw exception text leaked: {result}"
 
 
-def test_modify_parameter_approved_without_id_rejected():
+@patch("mcp_servers.operations.tools.modify_parameter.verify_approval")
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_static_refusals_do_not_burn_the_approval(mock_rds_for, mock_verify):
+    """FINDING 3: the approval is SINGLE-USE. Refusing on a static precondition
+    (default.* parameter group, describe failure) AFTER consuming it burnt the
+    approval and the retry died with "already consumed". Every refusal now runs
+    BEFORE verify_approval, mirroring set_docdb_profiler."""
+    mock_rds = MagicMock()
+    mock_rds_for.return_value = mock_rds
+    mock_rds.describe_db_clusters.return_value = {
+        "DBClusters": [{"DBClusterParameterGroup": "default.aurora-postgresql15"}],
+    }
+    result = modify_parameter_impl(
+        MagicMock(), cluster_id="prod-pg-1", parameter_name="max_connections",
+        value="200", approved=True, approval_id="appr-1",
+    )
+    assert result["status"] == "default_group_refused"
+    mock_verify.assert_not_called()
+    mock_rds.modify_db_cluster_parameter_group.assert_not_called()
+
+    # same for a lookup failure: the approval must survive for the retry
+    mock_verify.reset_mock()
+    mock_rds.describe_db_clusters.side_effect = RuntimeError("boom")
+    result = modify_parameter_impl(
+        MagicMock(), cluster_id="prod-pg-1", parameter_name="max_connections",
+        value="200", approved=True, approval_id="appr-1",
+    )
+    assert result["status"] == "lookup_failed"
+    mock_verify.assert_not_called()
+
+
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_client_init_failure_is_static_error(mock_rds_for):
+    """The client factory now runs on the unapproved path too, so its failure has
+    to be a static reason instead of an exception escaping the tool."""
+    mock_rds_for.side_effect = RuntimeError("assume-role boom: arn:aws:iam::123456789012:role/x")
+    result = modify_parameter_impl(
+        MagicMock(), cluster_id="prod-pg-1", parameter_name="work_mem", value="64MB",
+    )
+    assert result["status"] == "error"
+    blob = " ".join(str(v) for v in result.values())
+    for leak in ("boom", "arn:aws:iam", "123456789012", "RuntimeError"):
+        assert leak not in blob, f"raw exception text leaked: {result}"
+
+
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_modify_parameter_approved_without_id_rejected(mock_rds_for):
     """Bare `approved=True` (no approval_id) is rejected by the guard."""
+    mock_rds = MagicMock()
+    mock_rds_for.return_value = mock_rds
+    mock_rds.describe_db_clusters.return_value = {
+        "DBClusters": [{"DBClusterParameterGroup": "prod-pg-1-custom-pg15"}],
+    }
     with patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"}, clear=True):
         mock_cache = MagicMock()
         result = modify_parameter_impl(

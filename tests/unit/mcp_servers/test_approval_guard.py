@@ -15,6 +15,7 @@ from botocore.exceptions import ClientError
 from mcp_servers.shared.approval_guard import (
     REPLAY_WINDOW_SECONDS,
     as_bool,
+    boolean_flag_error,
     canonical_action_hash,
     verify_approval,
 )
@@ -567,6 +568,68 @@ def test_docdb_profiler_enabled_flag_uses_one_coercion_on_both_sides():
     assert h("true") == h(True)
     for falsy in ("0", "no", "", "  FALSE  "):
         assert h(falsy) == h(False), falsy
+
+
+def test_ddb_flag_projections_use_the_same_one_coercion():
+    """FINDING 2: modify_dynamodb_ttl / enable_dynamodb_pitr projected their flags
+    with bare bool(), so a registered "false" hashed byte-identically to an
+    executed True while the DBA card read false. Same as_bool coercion as
+    set_docdb_profiler now, so a string collapses onto the hash it MEANS and
+    enable/disable stay distinct."""
+    def ttl(enabled):
+        return canonical_action_hash(
+            "modify_dynamodb_ttl", {"attribute": "expires_at", "enabled": enabled}
+        )
+
+    def pitr(enabled, force):
+        return canonical_action_hash(
+            "enable_dynamodb_pitr", {"enabled": enabled, "force": force}
+        )
+
+    assert ttl("false") == ttl(False) and ttl("false") != ttl(True)
+    assert pitr(False, "false") == pitr(False, False)
+    assert pitr(False, "false") != pitr(False, True)
+
+
+def test_boolean_flag_error_refuses_ambiguous_flags_at_registration():
+    """The request side is where the hash is minted, so an ambiguous flag is
+    refused there rather than silently coerced. Only PRESENT flags are checked:
+    an omitted one takes the tool default."""
+    assert boolean_flag_error(
+        "modify_dynamodb_ttl", {"attribute": "expires_at", "enabled": "false"}
+    )
+    assert "enabled" in boolean_flag_error("set_docdb_profiler", {"enabled": "true"})
+    assert "force" in boolean_flag_error(
+        "enable_dynamodb_pitr", {"enabled": False, "force": "0"}
+    )
+    # clean payloads (real bools, or the flag omitted) pass
+    assert boolean_flag_error(
+        "modify_dynamodb_ttl", {"attribute": "expires_at", "enabled": False}
+    ) == ""
+    assert boolean_flag_error("enable_dynamodb_pitr", {"enabled": True}) == ""
+    assert boolean_flag_error("execute_sql", {"sql": "SELECT 1"}) == ""
+    assert boolean_flag_error("other", {"note": "false"}) == ""
+
+
+@patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
+@patch("mcp_servers.shared.approval_guard.boto3")
+def test_consume_failure_reason_carries_no_raw_exception_text(mock_boto3):
+    """The guard's reason string is rendered in chat, and a DDB error message can
+    carry the table ARN + account id. Only the short error code is echoed."""
+    table = _scan_returning(_fresh_row())
+    table.update_item.side_effect = ClientError(
+        {"Error": {"Code": "ProvisionedThroughputExceededException",
+                   "Message": "arn:aws:dynamodb:ap-northeast-2:123456789012:table/approvals"}},
+        "UpdateItem",
+    )
+    mock_boto3.resource.return_value.Table.return_value = table
+
+    res = verify_approval("aid-1", "prod-pg-1", "execute_sql")
+
+    assert res["ok"] is False
+    assert "ProvisionedThroughputExceededException" in res["reason"]
+    for leak in ("arn:aws", "123456789012"):
+        assert leak not in res["reason"], res
 
 
 def test_as_bool_is_the_shared_coercion():

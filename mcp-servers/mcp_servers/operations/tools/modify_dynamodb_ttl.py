@@ -4,13 +4,20 @@ Enables or disables an attribute TTL. Idempotent: if the table is already in the
 requested state the tool reports `skipped` without burning the write (AWS also
 rejects re-enabling an already-enabled TTL). Approval-gated and TOCTOU-safe — the
 execute-time re-read confirms the table hasn't drifted from the approved state.
-Cross-account via `client_for_cluster`. Never raises into the caller.
+Cross-account via `client_for_cluster`. Never raises into the caller, and never
+returns raw exception text: static Korean reason + module logger (an AWS error
+message can carry the hub account id and the target table ARN, and this string is
+rendered in chat).
 """
+
+import logging
 
 from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cluster_targets import client_for_cluster, table_name_for_cluster
+
+logger = logging.getLogger(__name__)
 
 
 def _ttl_state(client, table: str) -> dict:
@@ -35,8 +42,21 @@ def modify_dynamodb_ttl_impl(
 ) -> dict:
     """update_time_to_live for `attribute`. enabled=True turns TTL on for the
     attribute; enabled=False turns it off. Approval-gated; never raises."""
+    # `enabled` must be a real JSON boolean. A string flag is REFUSED, not
+    # coerced: bare bool("false") is True, so an ambiguous value could make the
+    # approved payload and the executed payload disagree while hashing the same.
+    # request_approval refuses it on the registration side for the same reason.
+    if not isinstance(enabled, bool):
+        return {
+            "status": "error",
+            "reason": (
+                "enabled는 JSON boolean(true/false)이어야 합니다. 문자열 플래그는 "
+                "승인된 값과 실제 실행 값이 어긋날 수 있어 거부합니다."
+            ),
+            "cluster_id": cluster_id,
+        }
+
     table = table_name_for_cluster(cluster_id)
-    enabled = bool(enabled)
     attribute = (attribute or "").strip()
 
     if not attribute:
@@ -49,16 +69,14 @@ def modify_dynamodb_ttl_impl(
     try:
         client = client_for_cluster(cluster_id, "dynamodb")
         state = _ttl_state(client, table)
-    except ClientError as e:
+    except Exception:
+        logger.warning("TTL describe failed for %s (table=%s)", cluster_id, table, exc_info=True)
         return {
             "status": "error",
-            "reason": f"TTL 상태 조회 실패 — 적용 전 현재 상태를 확인할 수 없어 중단합니다: {str(e)[:200]}",
-            "cluster_id": cluster_id,
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "reason": f"TTL 상태 조회 실패: {str(e)[:200]}",
+            "reason": (
+                "TTL 상태 조회에 실패했습니다. 적용 전 현재 상태를 확인할 수 없어 "
+                "중단합니다 (자세한 원인은 서버 로그를 확인하세요)."
+            ),
             "cluster_id": cluster_id,
         }
 
@@ -101,10 +119,14 @@ def modify_dynamodb_ttl_impl(
     # TOCTOU re-read (fix #6): confirm the table hasn't already reached/changed state.
     try:
         fresh = _ttl_state(client, table)
-    except Exception as e:
+    except Exception:
+        logger.warning("TTL re-read failed for %s (table=%s)", cluster_id, table, exc_info=True)
         return {
             "status": "error",
-            "reason": f"적용 직전 재조회 실패 — 안전을 위해 중단합니다: {str(e)[:200]}",
+            "reason": (
+                "적용 직전 재조회에 실패해 안전을 위해 중단했습니다 "
+                "(자세한 원인은 서버 로그를 확인하세요)."
+            ),
             "cluster_id": cluster_id,
         }
     if fresh != state:
@@ -119,17 +141,21 @@ def modify_dynamodb_ttl_impl(
             TableName=table,
             TimeToLiveSpecification={"Enabled": enabled, "AttributeName": attribute},
         )
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code", "")
-        return {
-            "status": "error",
-            "reason": f"update_time_to_live 실패: {code or str(e)[:200]}",
-            "cluster_id": cluster_id,
-        }
     except Exception as e:
+        # Only the short AWS error code (e.g. ValidationException) is echoed,
+        # never the message, which carries the table ARN and the account id.
+        code = (
+            e.response.get("Error", {}).get("Code", "")
+            if isinstance(e, ClientError)
+            else ""
+        )
+        logger.warning("update_time_to_live failed for %s (table=%s)", cluster_id, table, exc_info=True)
         return {
             "status": "error",
-            "reason": f"update_time_to_live 실패: {str(e)[:200]}",
+            "reason": (
+                f"update_time_to_live 실패 ({code})" if code
+                else "update_time_to_live 실패 (자세한 원인은 서버 로그를 확인하세요)."
+            ),
             "cluster_id": cluster_id,
         }
 

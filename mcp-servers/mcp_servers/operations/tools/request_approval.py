@@ -21,7 +21,7 @@ from decimal import Decimal
 import boto3
 
 from mcp_servers.operations.tools.set_docdb_profiler import validate_profiler_params
-from mcp_servers.shared.approval_guard import canonical_action_hash
+from mcp_servers.shared.approval_guard import boolean_flag_error, canonical_action_hash
 
 logger = logging.getLogger(__name__)
 
@@ -121,18 +121,38 @@ def request_approval_impl(
             "message": f"unknown action_type {action_type!r}",
         }
 
+    # An ambiguous flag must never enter the payload_hash: bare bool("false") is
+    # True, so a card reading `enabled: "false"` hashed identically to an
+    # executed enabled=True. Refuse here (registration boundary) the same way the
+    # write tools refuse a non-bool flag at execute time.
+    flag_error = boolean_flag_error(action_type, action_details)
+    if flag_error:
+        return {"status": "error", "message": flag_error}
+
     # Range-check what the write tool will range-check, with the SAME helper, on
     # the registration path too: this path mints the payload_hash the write is
     # bound to, so an out-of-range value would otherwise be shown to the DBA,
     # approved, and only then refused at execute time (a burnt approval and a
     # confusing dead-end).
+    #
+    # Then NORMALIZE: the tool hashes the EFFECTIVE values (its own defaults
+    # already applied), so an omitted knob registered as None hashed to a
+    # different payload than the one executed and EVERY default-path approval was
+    # permanently deniable (approval burnt, retry impossible). Writing the
+    # validated effective values back fixes the hash AND shows the DBA the real
+    # numbers on the approval card. Same rule as the modify_dynamodb_capacity
+    # projection: hash the effective value, not the requested one.
     if action_type == "set_docdb_profiler":
-        details = action_details or {}
-        _, _, param_error = validate_profiler_params(
+        details = dict(action_details or {})
+        threshold_i, rate_f, param_error = validate_profiler_params(
             details.get("threshold_ms"), details.get("sampling_rate")
         )
         if param_error:
             return {"status": "error", "message": param_error}
+        details["enabled"] = details.get("enabled", True)  # tool/schema default
+        details["threshold_ms"] = threshold_i
+        details["sampling_rate"] = rate_f
+        action_details = details
 
     approval_id = str(uuid.uuid4())
     created_at = str(int(time.time() * 1000))  # ms epoch as string for sort key

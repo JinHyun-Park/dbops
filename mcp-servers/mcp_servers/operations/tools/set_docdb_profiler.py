@@ -19,11 +19,13 @@ the profiler is a three-step, IAM-authorized change:
      is PER CLUSTER: /aws/docdb/{cluster_id}/profiler (AWS docs, "Accessing your
      Amazon DocumentDB profiler logs"), not a single shared /aws/docdb/profiler.
 
-DBOps has NO profiler-log surface yet: the log search tool and the dashboard log
-panel both target the cluster ERROR log (/aws/rds/cluster/{id}/error), and
-nothing ingests or indexes profiler records. So the tool tells the operator to
-read the group in the AWS console / CloudWatch Logs Insights directly instead of
-implying DBOps can query it. Ingesting profiler records is E-1 work.
+The profiler log group IS readable from DBOps: `search_logs` allows the
+/aws/docdb/ prefix, so the operator queries it with
+log_group="/aws/docdb/{cluster_id}/profiler". It must be passed explicitly,
+because search_logs defaults to the cluster ERROR log
+(/aws/rds/cluster/{id}/error), and the dashboard log panel still shows only that
+error log. The tool's `note` says exactly this. Indexing profiler records into
+the cache (so they show up without an explicit query) is E-1 work.
 
 Safety model (unchanged from the previous Mongo-protocol version):
   - FAIL-CLOSED engine gate in the handler (docdb_write capability). A None

@@ -203,3 +203,127 @@ def test_profiler_registration_accepts_in_range_and_defaults():
     )
     assert result["status"] == "pending"
     assert item["action_type"] == "set_docdb_profiler"
+
+
+# ===== FINDING 1: the registered hash must equal the EXECUTE-side hash ========
+
+
+class _FakeDocDB:
+    """Only the describe the profiler tool needs before verify_approval."""
+
+    def describe_db_clusters(self, **kw):
+        return {"DBClusters": [{
+            "DBClusterParameterGroup": "pg-a",
+            "EnabledCloudwatchLogsExports": [],
+        }]}
+
+
+def _execute_side_payload(**tool_kwargs):
+    """The payload set_docdb_profiler actually binds its approval to, captured
+    from the real impl (defaults applied) without letting it write anything."""
+    import mcp_servers.operations.tools.set_docdb_profiler as prof
+
+    captured = {}
+
+    def fake_guard(approval_id, cluster_id, action_type, payload=None):
+        captured["payload"] = payload
+        return {"ok": False, "reason": "captured, stop before any write"}
+
+    with patch.object(prof, "client_for_cluster", lambda cid, service: _FakeDocDB()), \
+            patch.object(prof, "verify_approval", fake_guard):
+        prof.set_docdb_profiler_impl(
+            MagicMock(), approved=True, approval_id="appr-1", **tool_kwargs
+        )
+    return captured["payload"]
+
+
+def test_profiler_default_registration_hash_equals_execute_side_hash():
+    """FINDING 1: set_docdb_profiler applies its defaults (threshold_ms=100,
+    sampling_rate=1.0) BEFORE hashing, so a registration that omits those knobs
+    must materialize the SAME effective values. Before the fix the omitted knob
+    projected as None, the two hashes differed, and every default-path approval
+    was permanently deniable: the DBA approves, the agent re-runs, the guard
+    burns the row and returns approval_denied."""
+    from mcp_servers.shared.approval_guard import canonical_action_hash
+
+    item, _ = _put_item(
+        "set_docdb_profiler",
+        # exactly what the agent registers when it copies the approval_required
+        # response and the operator never mentioned the two knobs
+        {"cluster_id": "docdb-1", "enabled": True, "parameter_group": "pg-a"},
+    )
+    payload = _execute_side_payload(cluster_id="docdb-1", enabled=True)
+
+    assert item["payload_hash"] == canonical_action_hash("set_docdb_profiler", payload)
+
+
+def test_profiler_registration_card_shows_effective_numbers():
+    """Same fix, DBA-visible half: the stored action_details must carry the
+    effective values, otherwise the approval card hides what will be written."""
+    item, _ = _put_item(
+        "set_docdb_profiler", {"cluster_id": "docdb-1", "parameter_group": "pg-a"}
+    )
+    details = item["action_details"]
+    assert details["enabled"] is True
+    assert int(details["threshold_ms"]) == 100
+    assert float(details["sampling_rate"]) == 1.0
+
+
+# ===== FINDING 2: an ambiguous (non-bool) flag never enters a hash ============
+
+
+def test_registration_refuses_string_flag_for_ttl():
+    """bare bool("false") is True, so a card reading enabled:"false" hashed
+    byte-identically to an executed enabled=True: the DBA approves a DISABLE and
+    the agent consumes it for an ENABLE. Refuse at the registration boundary."""
+    with patch.dict(os.environ, {"APPROVALS_TABLE": "approvals"}):
+        with patch.object(request_approval, "boto3") as mock_boto3:
+            table = MagicMock()
+            mock_boto3.resource.return_value.Table.return_value = table
+            result = request_approval.request_approval_impl(
+                None, cluster_id="ddb-1", action_type="modify_dynamodb_ttl",
+                action_details={"attribute": "expires_at", "enabled": "false"},
+            )
+    assert result["status"] == "error"
+    assert "enabled" in result["message"]
+    table.put_item.assert_not_called()
+
+
+def test_registration_refuses_string_flag_for_pitr_force():
+    """force is hashed too (it gates the PITR disable), so a string force is
+    equally ambiguous."""
+    with patch.dict(os.environ, {"APPROVALS_TABLE": "approvals"}):
+        with patch.object(request_approval, "boto3") as mock_boto3:
+            table = MagicMock()
+            mock_boto3.resource.return_value.Table.return_value = table
+            result = request_approval.request_approval_impl(
+                None, cluster_id="ddb-1", action_type="enable_dynamodb_pitr",
+                action_details={"enabled": False, "force": "false"},
+            )
+    assert result["status"] == "error"
+    assert "force" in result["message"]
+    table.put_item.assert_not_called()
+
+
+def test_registration_refuses_string_flag_for_profiler():
+    with patch.dict(os.environ, {"APPROVALS_TABLE": "approvals"}):
+        with patch.object(request_approval, "boto3") as mock_boto3:
+            table = MagicMock()
+            mock_boto3.resource.return_value.Table.return_value = table
+            result = request_approval.request_approval_impl(
+                None, cluster_id="docdb-1", action_type="set_docdb_profiler",
+                action_details={"enabled": "true", "parameter_group": "pg-a"},
+            )
+    assert result["status"] == "error"
+    assert "enabled" in result["message"]
+    table.put_item.assert_not_called()
+
+
+def test_registration_accepts_real_booleans():
+    """Control: real JSON booleans (including False, which must not be read as
+    'missing') still register."""
+    item, result = _put_item(
+        "modify_dynamodb_ttl", {"attribute": "expires_at", "enabled": False}
+    )
+    assert result["status"] == "pending"
+    assert item["action_details"]["enabled"] is False

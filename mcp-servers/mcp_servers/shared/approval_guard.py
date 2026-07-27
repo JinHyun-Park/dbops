@@ -216,17 +216,19 @@ def _project(action_type: str, details: dict) -> dict:
             "force": bool(d.get("force")),
         }
     if action_type == "modify_dynamodb_ttl":
+        # as_bool, NOT bare bool(): a registered string "false" must project to
+        # the DISABLE payload the tool executes, not collide with an ENABLE.
         return {
             "attribute": str(d.get("attribute") or "").strip(),
-            "enabled": bool(d.get("enabled")),
+            "enabled": as_bool(d.get("enabled")),
         }
     if action_type == "enable_dynamodb_pitr":
         # force is required to DISABLE (fix #7) and is hashed so the DBA approves
         # the forceful variant specifically — a disable approval can't be reused
         # for a different (enable) shape and vice-versa.
         return {
-            "enabled": bool(d.get("enabled")),
-            "force": bool(d.get("force")),
+            "enabled": as_bool(d.get("enabled")),
+            "force": as_bool(d.get("force")),
         }
     if action_type == "set_docdb_profiler":
         # E-0: the profiler is a CLUSTER-level control-plane change (custom
@@ -307,6 +309,34 @@ def _project(action_type: str, details: dict) -> dict:
     # run _norm_val here: collapsing distinct strings like "001" and 1 would
     # let two different "other" operations share a hash.
     return {k: d[k] for k in sorted(d.keys())}
+
+
+def boolean_flag_error(action_type: str, details: dict) -> str:
+    """Refuse an AMBIGUOUS (non-bool) value for any flag this action's projection
+    hashes as a boolean. Returns "" when the payload is clean.
+
+    This runs at the REGISTRATION boundary (request_approval), because that is
+    where the payload_hash is minted: bare `bool("false")` is True, so an
+    approval card reading `enabled: "false"` used to hash byte-identically to an
+    executed `enabled=True`, i.e. the DBA approved a DISABLE and the agent could
+    consume it for an ENABLE. The write tools refuse a non-bool flag on the
+    execute side for the same reason; this is the request side of that one rule,
+    so an ambiguous flag never enters a hash at all.
+
+    Only flags PRESENT in `details` are checked: an omitted flag takes the
+    tool's documented default and is not ambiguous."""
+    d = details or {}
+    bad = sorted(
+        k
+        for k, v in _project(action_type, d).items()
+        if isinstance(v, bool) and k in d and not isinstance(d[k], bool)
+    )
+    if not bad:
+        return ""
+    return (
+        f"{', '.join(bad)}는 JSON boolean(true/false)이어야 합니다. 문자열 플래그는 "
+        "승인된 값과 실제 실행 값이 어긋날 수 있어 거부합니다."
+    )
 
 
 def canonical_action_hash(action_type: str, details: dict) -> str:
@@ -503,7 +533,13 @@ def verify_approval(
         code = e.response.get("Error", {}).get("Code", "")
         if code == "ConditionalCheckFailedException":
             return {"ok": False, "reason": "approval was just consumed by a concurrent call"}
+        # `code` is a short AWS error code (no ARNs / account ids); the raw
+        # message can carry the table ARN and the account id, and this reason is
+        # rendered in chat, so it goes to the log only.
         print(f"[approval_guard] consume failed: {e}")
-        return {"ok": False, "reason": f"consume failed: {code or str(e)[:200]}"}
+        return {
+            "ok": False,
+            "reason": f"consume failed: {code}" if code else "consume failed (see server logs)",
+        }
 
     return {"ok": True}

@@ -26,25 +26,19 @@ def modify_parameter_impl(
     approved: bool = False,
     approval_id: str = "",
 ) -> dict:
-    if not approved:
-        return {"status": "approval_required", "cluster_id": cluster_id, "parameter": parameter_name, "value": value}
-
-    guard = verify_approval(
-        approval_id,
-        cluster_id,
-        "modify_parameter",
-        payload={"parameter_name": parameter_name, "value": value},
-    )
-    if not guard.get("ok"):
+    # Every static refusal happens BEFORE verify_approval (same ordering as
+    # set_docdb_profiler). The approval is SINGLE-USE: consuming it and then
+    # refusing on a precondition that was already true at approval time burnt the
+    # approval, and the retry died with "already consumed".
+    try:
+        rds = rds_client_for_cluster(cluster_id)
+    except Exception:
+        logger.warning("rds client init failed for %s", cluster_id, exc_info=True)
         return {
-            "status": "approval_denied",
-            "reason": guard.get("reason", "approval guard rejected the request"),
+            "status": "error",
             "cluster_id": cluster_id,
-            "parameter": parameter_name,
-            "value": value,
+            "reason": "RDS 제어 플레인 클라이언트를 만들 수 없습니다 (자세한 원인은 서버 로그를 확인하세요).",
         }
-
-    rds = rds_client_for_cluster(cluster_id)
 
     # Look up the cluster's actual parameter group rather than guessing a name.
     try:
@@ -70,6 +64,33 @@ def modify_parameter_impl(
             "cluster_id": cluster_id,
             "parameter_group": pg_name,
             "reason": "Cluster uses an AWS-default parameter group; create a custom group first.",
+        }
+
+    if not approved:
+        return {
+            "status": "approval_required",
+            "cluster_id": cluster_id,
+            "parameter": parameter_name,
+            "value": value,
+            "parameter_group": pg_name,
+        }
+
+    # parameter_group is informational here: the approval projection binds
+    # {parameter_name, value} only, so echoing the group into action_details
+    # cannot break the hash.
+    guard = verify_approval(
+        approval_id,
+        cluster_id,
+        "modify_parameter",
+        payload={"parameter_name": parameter_name, "value": value},
+    )
+    if not guard.get("ok"):
+        return {
+            "status": "approval_denied",
+            "reason": guard.get("reason", "approval guard rejected the request"),
+            "cluster_id": cluster_id,
+            "parameter": parameter_name,
+            "value": value,
         }
 
     try:

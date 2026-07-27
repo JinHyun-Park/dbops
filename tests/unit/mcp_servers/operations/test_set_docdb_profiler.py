@@ -440,6 +440,32 @@ def test_client_creation_failure_is_error_without_exception_text():
     _no_exception_text(result)
 
 
+def _profiler_tool_description() -> str:
+    """The set_docdb_profiler description block from the handler registry, read as
+    TEXT so the handler's import-time CacheClient() is not needed."""
+    from pathlib import Path
+
+    src = (Path(mod.__file__).resolve().parents[2] / "operations" / "handler.py").read_text()
+    start = src.index('"set_docdb_profiler": {')
+    return src[start : src.index('"input_schema"', start)]
+
+
+def test_agent_facing_docs_do_not_claim_the_profiler_log_is_unreadable():
+    """FINDING 4: search_logs gained the /aws/docdb/ prefix, but the handler
+    description (served to the agent via tools/list) and this module's docstring
+    still told the operator to go to the AWS console. The runtime note was already
+    corrected, so the three were contradicting each other."""
+    desc = _profiler_tool_description()
+    assert "search_logs" in desc
+    assert "CANNOT query" not in desc
+    assert "console" not in desc.lower()
+
+    with open(mod.__file__) as f:
+        docstring = f.read().split('"""')[1]
+    assert "search_logs" in docstring
+    assert "NO profiler-log surface" not in docstring
+
+
 def test_no_mongo_path_left_in_module():
     """The Mongo-protocol path is gone: no pymongo factory hook, no write-secret
     resolution, no pymongo import."""

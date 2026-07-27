@@ -6,13 +6,20 @@ data-protection DEGRADATION, so disabling requires `force=true` (review fix #7) 
 the force flag is ALSO hashed into the approval payload so the DBA approves the
 forceful (disable) variant specifically, and Cedar `forbid`s the disable unless
 force==true at the Gateway. Idempotent. TOCTOU-safe (execute-time re-read).
-Cross-account via `client_for_cluster`. Never raises into the caller.
+Cross-account via `client_for_cluster`. Never raises into the caller, and never
+returns raw exception text: static Korean reason + module logger (an AWS error
+message can carry the hub account id and the target table ARN, and this string is
+rendered in chat).
 """
+
+import logging
 
 from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cluster_targets import client_for_cluster, table_name_for_cluster
+
+logger = logging.getLogger(__name__)
 
 
 def _pitr_enabled(client, table: str) -> bool:
@@ -34,9 +41,23 @@ def enable_dynamodb_pitr_impl(
 ) -> dict:
     """update_continuous_backups to turn PITR on (enabled=True) or off
     (enabled=False, requires force=true). Approval-gated; never raises."""
+    # Both flags must be real JSON booleans. A string flag is REFUSED, not
+    # coerced: bare bool("false") is True, so an ambiguous value could make the
+    # approved payload and the executed payload disagree while hashing the same
+    # (and "false" would satisfy the force-to-disable rule below). request_approval
+    # refuses it on the registration side for the same reason.
+    for name, flag in (("enabled", enabled), ("force", force)):
+        if not isinstance(flag, bool):
+            return {
+                "status": "error",
+                "reason": (
+                    f"{name}는 JSON boolean(true/false)이어야 합니다. 문자열 플래그는 "
+                    "승인된 값과 실제 실행 값이 어긋날 수 있어 거부합니다."
+                ),
+                "cluster_id": cluster_id,
+            }
+
     table = table_name_for_cluster(cluster_id)
-    enabled = bool(enabled)
-    force = bool(force)
 
     # Disabling PITR degrades data protection — refuse without an explicit force
     # (fix #7). Checked before the approval round-trip so we never burn an approval
@@ -51,16 +72,14 @@ def enable_dynamodb_pitr_impl(
     try:
         client = client_for_cluster(cluster_id, "dynamodb")
         current = _pitr_enabled(client, table)
-    except ClientError as e:
+    except Exception:
+        logger.warning("PITR describe failed for %s (table=%s)", cluster_id, table, exc_info=True)
         return {
             "status": "error",
-            "reason": f"PITR 상태 조회 실패 — 적용 전 현재 상태를 확인할 수 없어 중단합니다: {str(e)[:200]}",
-            "cluster_id": cluster_id,
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "reason": f"PITR 상태 조회 실패: {str(e)[:200]}",
+            "reason": (
+                "PITR 상태 조회에 실패했습니다. 적용 전 현재 상태를 확인할 수 없어 "
+                "중단합니다 (자세한 원인은 서버 로그를 확인하세요)."
+            ),
             "cluster_id": cluster_id,
         }
 
@@ -105,10 +124,14 @@ def enable_dynamodb_pitr_impl(
     # TOCTOU re-read (fix #6): confirm PITR hasn't already toggled since approval.
     try:
         fresh = _pitr_enabled(client, table)
-    except Exception as e:
+    except Exception:
+        logger.warning("PITR re-read failed for %s (table=%s)", cluster_id, table, exc_info=True)
         return {
             "status": "error",
-            "reason": f"적용 직전 재조회 실패 — 안전을 위해 중단합니다: {str(e)[:200]}",
+            "reason": (
+                "적용 직전 재조회에 실패해 안전을 위해 중단했습니다 "
+                "(자세한 원인은 서버 로그를 확인하세요)."
+            ),
             "cluster_id": cluster_id,
         }
     if fresh != current:
@@ -123,17 +146,23 @@ def enable_dynamodb_pitr_impl(
             TableName=table,
             PointInTimeRecoverySpecification={"PointInTimeRecoveryEnabled": enabled},
         )
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code", "")
-        return {
-            "status": "error",
-            "reason": f"update_continuous_backups 실패: {code or str(e)[:200]}",
-            "cluster_id": cluster_id,
-        }
     except Exception as e:
+        # Only the short AWS error code (e.g. ValidationException) is echoed,
+        # never the message, which carries the table ARN and the account id.
+        code = (
+            e.response.get("Error", {}).get("Code", "")
+            if isinstance(e, ClientError)
+            else ""
+        )
+        logger.warning(
+            "update_continuous_backups failed for %s (table=%s)", cluster_id, table, exc_info=True
+        )
         return {
             "status": "error",
-            "reason": f"update_continuous_backups 실패: {str(e)[:200]}",
+            "reason": (
+                f"update_continuous_backups 실패 ({code})" if code
+                else "update_continuous_backups 실패 (자세한 원인은 서버 로그를 확인하세요)."
+            ),
             "cluster_id": cluster_id,
         }
 
