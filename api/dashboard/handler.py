@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 import tenancy
-from engine_family import CAPABILITIES, RDS_INSTANCE, engine_family
+from engine_family import CAPABILITIES, DOCUMENTDB, RDS_INSTANCE, engine_family
 from metric_filters import CLUSTER_LEVEL_ONLY, EXCLUDE_PER_INSTANCE
 
 
@@ -2014,15 +2014,42 @@ def _extensions(query, cluster_id):
     }
 
 
+# Families whose cluster_health_findings rows come from MORE THAN ONE writer
+# Lambda, each on its own EventBridge schedule and each owning a DISJOINT set of
+# check_types:
+#   rds_instance: etl_collector (cost / capacity_forecast / param_fitness /
+#                  query_regression) + rds_direct_collector (InnoDB status)
+#   documentdb:   etl_collector docdb_findings (connection_saturation /
+#                  cost_oversized / cursor_timeout / low_cache_hit / replica_lag)
+#                  + docdb_mongo_collector (docdb_mongo_long_running_ops)
+# For these, one global MAX(snapshot_time) returns only whichever Lambda wrote
+# last and silently drops the other writer's entire set.
+# relational / dynamodb / elasticache each have exactly ONE writer (the ETL
+# collector, whose findings collectors all share the cycle's run_ts), so
+# MAX(snapshot_time) is exactly right there and stays: it resolves a finding the
+# moment the next cycle stops emitting it.
+_MULTI_WRITER_FINDING_FAMILIES = frozenset({RDS_INSTANCE, DOCUMENTDB})
+
+# Freshness window for the multi-writer path. Must be >= the LONGEST writer
+# interval of any family in the set, or the slower writer's set falls out of the
+# window and we are back to the bug. Every writer above runs on a 5-minute rate
+# (etl_collector via Settings.STATS_COLLECTION_INTERVAL_MIN = 5,
+# rds_direct_collector and docdb_mongo_collector hardcoded 5), so 15 min is 3x
+# the slowest cadence: it survives two consecutive missed runs of one writer.
+_FINDINGS_WINDOW_MIN = 15
+
+
 def _health_findings(query, cluster_id):
-    """Return the *latest* snapshot of maintenance health findings for this
-    cluster. Older snapshots stay in the table for trend analysis but the
-    dashboard panel only ever shows the most recent one.
+    """Return the current maintenance health findings for this cluster. Older
+    snapshots stay in the table for trend analysis; the dashboard panel only
+    shows what is current.
 
     Gating is capability-driven: any engine family whose CAPABILITIES["findings"]
-    set is non-empty gets findings returned. This lets relational (Aurora) AND
-    dynamodb both surface their respective findings, while documentdb (empty set)
-    still returns an empty response.
+    set is non-empty gets findings returned.
+
+    Single-writer families read one global MAX(snapshot_time). Families with two
+    writer Lambdas (see _MULTI_WRITER_FINDING_FAMILIES) need the per-check_type
+    window instead.
 
     Registry lookup failure (None) → fail closed: return empty, signal
     registry_unavailable so the UI can show a neutral placeholder."""
@@ -2039,7 +2066,7 @@ def _health_findings(query, cluster_id):
     fam = engine_family(eng)
     cap = CAPABILITIES.get(fam, {})
     if not cap.get("findings"):
-        # Family has no findings capability (e.g. documentdb) — return empty.
+        # Family has no findings collector at all, return empty.
         return {
             "cluster_id": cluster_id,
             "snapshot_time": None,
@@ -2048,17 +2075,16 @@ def _health_findings(query, cluster_id):
         }
     _COLS = ("id, check_type, severity, subject, value_str, threshold_str, "
             "recommendation, details, snapshot_time")
-    if fam == RDS_INSTANCE:
-        # rds_instance findings are written by TWO Lambdas on independent
-        # schedules with DISJOINT check_type sets: the ETL collector
-        # (cost/capacity_forecast/param_fitness/query_regression) and the
-        # VPC direct-TCP collector (InnoDB status). A single global
-        # MAX(snapshot_time) would surface only whichever Lambda ran last and
-        # hide the other set. So pick the latest snapshot *per check_type*
-        # within a freshness window: this shows both Lambdas' current findings
-        # and still auto-resolves (a finding no longer re-emitted ages out of
-        # the window). Window = 15 min: both Lambdas run every 5 min, so this
-        # is 3x the slowest cadence — comfortably covers one full cycle of each.
+    if fam in _MULTI_WRITER_FINDING_FAMILIES:
+        # Two independent writer Lambdas → pick the latest snapshot *per
+        # check_type* inside a freshness window instead of one global
+        # MAX(snapshot_time), which would surface only whichever Lambda ran
+        # last and hide the other's whole set. Still auto-resolves: a finding
+        # no longer re-emitted ages out of the window.
+        # Window basis is the cluster's OWN newest finding, not NOW(): a
+        # single-snapshot cluster (the seeded demo writes findings once and
+        # never re-emits) must keep showing them, and this is also what the
+        # agent's get_maintenance_findings does, so the two never disagree.
         # ponytail: MAX(snapshot_time) OVER, not ROW_NUMBER()=1 — capacity_forecast
         # emits several subjects at one snapshot; ROW_NUMBER would keep only one.
         rows = query(
@@ -2067,7 +2093,10 @@ def _health_findings(query, cluster_id):
             "    MAX(snapshot_time) OVER (PARTITION BY check_type) AS ct_latest "
             "  FROM cluster_health_findings "
             "  WHERE cluster_id = :cid "
-            "    AND snapshot_time >= NOW() - INTERVAL '15 minutes'"
+            "    AND snapshot_time >= ("
+            "      SELECT MAX(snapshot_time) FROM cluster_health_findings "
+            "      WHERE cluster_id = :cid"
+            f"    ) - INTERVAL '{_FINDINGS_WINDOW_MIN} minutes'"
             ") ranked "
             "WHERE snapshot_time = ct_latest "
             "ORDER BY "
@@ -2093,7 +2122,11 @@ def _health_findings(query, cluster_id):
         sev = r.get("severity", "info")
         if sev in counts:
             counts[sev] += 1
-    snapshot_time = rows[0]["snapshot_time"] if rows else None
+    # Newest of the returned rows, not rows[0]: on the multi-writer path the rows
+    # carry two different snapshot_times and the panel's "as of" must be the
+    # freshest one (rows are ordered by severity, so rows[0] is arbitrary).
+    snapshot_time = max((r["snapshot_time"] for r in rows if r.get("snapshot_time")),
+                        default=None)
 
     # Remediation Outcome Loop: attach each finding's track record (this cluster,
     # falling back to the '*' fleet rollup) and re-rank proven actions up.
