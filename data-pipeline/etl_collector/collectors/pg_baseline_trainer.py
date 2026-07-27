@@ -7,6 +7,19 @@ z-score that ignores flat means and doesn't false-positive on daily cycles.
 
 Recomputed at most once per hour per cluster (the bucket SQL is cheap but
 running it every 5-minute ETL cycle is wasteful and creates timestamp churn).
+
+Engine-agnostic: it reads `metric_snapshots` and writes `metric_baselines`,
+nothing else, so every engine family is trained by the same SQL. Callers: all
+five family branches of the ETL handler.
+
+KNOWN CEILING (thin buckets). `HAVING COUNT(*) >= 3` accepts a bucket that a
+single hour of one day filled: the 5-minute ETL puts ~12 samples in one
+hour-of-week bucket per WEEK, so after a day of history a bucket's median/IQR
+describe the spread WITHIN one hour on one day, not the week-over-week spread
+the seasonal model assumes. The IQR is then near 0 (floored at 0.01), and
+`detect_anomalies` reports mode='seasonal' with a huge robust z for a small
+deviation, i.e. a confident-looking false positive. This is pre-existing
+behaviour for every family, unchanged here.
 """
 
 RECOMPUTE_INTERVAL_HOURS = 1
@@ -69,8 +82,12 @@ def collect_pg_baselines(rds_data, cache_cluster_arn, cache_secret_arn, cache_db
     # Bucket-by-hour-of-week median + IQR over LOOKBACK_DAYS.
     # `IQR = P75 - P25`; floor at 0.01 so divide-by-zero in z-score is impossible
     # for metrics that don't vary at all (e.g. connections=0 on a sample cluster).
-    # We restrict to the "total" rows (dimensions empty) — per-wait-event metrics
-    # would explode the row count.
+    # We restrict to the "total" rows (dimensions empty): per-wait-event, per-GSI
+    # and per-instance rows carry the SAME metric_type and would both explode the
+    # row count and poison every baseline with fractions of the cluster total.
+    # ponytail: the >= 3 sample gate accepts a one-day-old thin bucket (see the
+    # module docstring). Tightening it to >= 2 distinct days moves Aurora's
+    # trained baselines, so it belongs in its own change, not here.
     _execute(
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
         "INSERT INTO metric_baselines "

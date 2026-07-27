@@ -73,6 +73,30 @@ def _scan_all(table):
         kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
 
 
+def _train_baselines(result, cache_rds_data, cache_cluster_arn, cache_secret_arn,
+                     cache_db_name, cluster_id):
+    """Seasonal baseline trainer, called from EVERY family branch.
+
+    Engine-agnostic by construction: it reads only cache-DB `metric_snapshots`
+    cluster-level rows and writes `metric_baselines`, so nothing in it is
+    Aurora- or SQL-specific. Without this call a family stays permanently on the
+    low-confidence flat mean/stddev anomaly fallback (`mode='flat'`) even though
+    its series are already in the cache.
+
+    Takes NO snapshot_ts: unlike the finding collectors (which must share the
+    cycle's run_ts so the dashboard's MAX(snapshot_time) batch holds them all),
+    the trainer stamps its own NOW() into metric_baselines.updated_at, which is
+    also its once-per-hour recompute gate.
+    """
+    try:
+        result["baselines"] = collect_pg_baselines(
+            cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+        )
+    except Exception as e:
+        result["baselines_error"] = str(e)
+        print(f"[{cluster_id}] baseline trainer error: {e}")
+
+
 def _collect_one(resource, get_client, cache_rds_data, cache_execute,
                  cache_cluster_arn, cache_secret_arn, cache_db_name, run_ts):
     """Collect metrics/findings for a single registered resource.
@@ -113,6 +137,9 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         except Exception as e:
             result["dynamodb_findings_error"] = str(e)
             print(f"[{cluster_id}] dynamodb findings error: {e}")
+        # BEFORE the early return: this branch never reaches the shared tail.
+        _train_baselines(result, cache_rds_data, cache_cluster_arn, cache_secret_arn,
+                         cache_db_name, cluster_id)
         return result
 
     # ------------------------------------------------------------------
@@ -136,6 +163,8 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         except Exception as e:
             result["documentdb_findings_error"] = str(e)
             print(f"[{cluster_id}] documentdb findings error: {e}")
+        _train_baselines(result, cache_rds_data, cache_cluster_arn, cache_secret_arn,
+                         cache_db_name, cluster_id)
         return result
 
     # ------------------------------------------------------------------
@@ -161,6 +190,8 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         except Exception as e:
             result["elasticache_findings_error"] = str(e)
             print(f"[{cluster_id}] elasticache findings error: {e}")
+        _train_baselines(result, cache_rds_data, cache_cluster_arn, cache_secret_arn,
+                         cache_db_name, cluster_id)
         return result
 
     # ------------------------------------------------------------------
@@ -227,12 +258,8 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         except Exception as e:
             result["query_regression_error"] = str(e)
             print(f"[{cluster_id}] query_regression error: {e}")
-        try:
-            result["baselines"] = collect_pg_baselines(
-                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id)
-        except Exception as e:
-            result["baselines_error"] = str(e)
-            print(f"[{cluster_id}] baselines error: {e}")
+        _train_baselines(result, cache_rds_data, cache_cluster_arn, cache_secret_arn,
+                         cache_db_name, cluster_id)
         return result
 
     # ------------------------------------------------------------------
@@ -433,15 +460,8 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
             result["query_regression_error"] = str(e)
             print(f"[{cluster_id}] query regression error: {e}")
 
-    # Seasonal baseline trainer — engine-agnostic, only reads cache DB
-    # metric_snapshots. Time-gated to once per hour per cluster.
-    try:
-        result["baselines"] = collect_pg_baselines(
-            cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
-        )
-    except Exception as e:
-        result["baselines_error"] = str(e)
-        print(f"[{cluster_id}] baseline trainer error: {e}")
+    _train_baselines(result, cache_rds_data, cache_cluster_arn, cache_secret_arn,
+                     cache_db_name, cluster_id)
 
     try:
         result["cost"] = collect_cost_findings(
