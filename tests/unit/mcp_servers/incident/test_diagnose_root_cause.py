@@ -4,15 +4,19 @@ The impl issues several cache.execute calls IN THIS ORDER when ``around_time``
 is supplied (passing around_time skips the NOW() probe, keeping the order
 deterministic):
 
-    1. schema_snapshots  (schema/DDL changes)
-    2. event_log         (operational events)
-    3. blocking_locks    (lock contention)
-    4. metric_snapshots  (metric spikes, grouped per metric_type)
-    5. query_stats       (top slow queries)
+    1. cluster_meta      (engine family -> which metric_type names to look for)
+    2. schema_snapshots  (schema/DDL changes)
+    3. event_log         (operational events)
+    4. blocking_locks    (lock contention)
+    5. metric_snapshots  (metric spikes, grouped per metric_type)
+    6. query_stats       (top slow queries)
 
-So ``cache.execute.side_effect`` is a 5-element list matching that order.
+So ``cache.execute.side_effect`` is a 6-element list matching that order.
 Assertions target the RETURN structure (ranks/categories/scores/
 signals_examined), never the SQL strings, so they survive SQL tweaks.
+
+Per-family metric sets and the zero-baseline counter path have their own file:
+test_diagnose_family_signals.py.
 """
 
 from unittest.mock import MagicMock
@@ -33,8 +37,9 @@ def _empty():
 
 def test_ranks_schema_change_event_and_metric_spike():
     cache = MagicMock()
-    # Order: schema_changes, events, blocking, metric_spikes, slow_queries
+    # Order: cluster_meta, schema_changes, events, blocking, metric_spikes, slow_queries
     cache.execute.side_effect = [
+        _qr([{"engine": "aurora-postgresql"}]),
         # schema change right at the anchor -> should rank at/near the top
         _qr([
             {
@@ -125,6 +130,7 @@ def test_ranks_schema_change_event_and_metric_spike():
         "events": 1,
         "blocking": 0,
         "metric_spikes": 1,
+        "counter_spikes": 0,
         "slow_queries": 1,
         "elasticache_signals": 0,
     }
@@ -132,7 +138,7 @@ def test_ranks_schema_change_event_and_metric_spike():
 
 def test_empty_cache_returns_no_candidates():
     cache = MagicMock()
-    cache.execute.side_effect = [_empty(), _empty(), _empty(), _empty(), _empty()]
+    cache.execute.side_effect = [_qr([{"engine": "aurora-postgresql"}]), _empty(), _empty(), _empty(), _empty(), _empty()]
 
     result = diagnose_root_cause_impl(cache, cluster_id="prod-pg-1", around_time=ANCHOR)
 
@@ -143,6 +149,7 @@ def test_empty_cache_returns_no_candidates():
         "events": 0,
         "blocking": 0,
         "metric_spikes": 0,
+        "counter_spikes": 0,
         "slow_queries": 0,
         "elasticache_signals": 0,
     }
@@ -150,8 +157,9 @@ def test_empty_cache_returns_no_candidates():
 
 def test_missing_table_on_one_source_still_ranks_others():
     cache = MagicMock()
-    # schema_snapshots table is absent -> first execute raises; the rest succeed.
+    # schema_snapshots table is absent -> that execute raises; the rest succeed.
     cache.execute.side_effect = [
+        _qr([{"engine": "aurora-postgresql"}]),
         Exception('relation "schema_snapshots" does not exist'),
         _qr([
             {

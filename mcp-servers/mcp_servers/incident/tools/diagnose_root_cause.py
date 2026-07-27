@@ -21,6 +21,7 @@ scores rank *suspects*, they do not prove guilt.
 from datetime import datetime, timedelta, timezone
 
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.incident_signals import metric_in_clause, resolve_family, signals_for
 from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 
 # ---------------------------------------------------------------------------
@@ -40,6 +41,9 @@ BASE_WEIGHTS = {
     "metric_spike": 2.0,
     "slow_query": 2.0,
     "elasticache_spike": 2.5,
+    # An event counter leaving zero (throttles, timed-out cursors) is a discrete
+    # abnormal occurrence, not a load fluctuation, so it outweighs a gauge spike.
+    "counter_spike": 2.5,
 }
 
 # event_log.severity -> multiplier. Failovers/OOM are usually logged as
@@ -174,6 +178,7 @@ def diagnose_root_cause_impl(
         "events": 0,
         "blocking": 0,
         "metric_spikes": 0,
+        "counter_spikes": 0,
         "slow_queries": 0,
         "elasticache_signals": 0,
     }
@@ -182,11 +187,22 @@ def diagnose_root_cause_impl(
     # collector for that signal isn't deployed".
     skipped = []
 
+    # Which metric_type names to look for depends on the engine: DocumentDB
+    # writes cpu_utilization, ElastiCache cache_cpu/engine_cpu, DynamoDB
+    # throttle/consumed series. See shared/incident_signals.py.
+    family, family_resolved = resolve_family(cache, cluster_id)
+    if not family_resolved:
+        # Not fatal (events/locks/queries still rank), but the metric set is now
+        # a guess, so say so instead of reporting a silent zero.
+        skipped.append("engine_family")
+
     candidates.extend(_collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
     candidates.extend(_collect_events(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
     candidates.extend(_collect_blocking(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
     candidates.extend(
-        _collect_metric_spikes(cache, cluster_id, start_iso, end_iso, baseline_start_iso, anchor, win, examined, skipped)
+        _collect_metric_spikes(
+            cache, cluster_id, start_iso, end_iso, baseline_start_iso, anchor, win, examined, skipped, family
+        )
     )
     candidates.extend(_collect_slow_queries(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
     candidates.extend(_collect_elasticache_signals(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
@@ -201,6 +217,9 @@ def diagnose_root_cause_impl(
     return {
         "status": "ok",
         "cluster_id": cluster_id,
+        # "unknown" (not the relational fallback name) when cluster_meta could
+        # not be read: the metric set used was a guess.
+        "engine_family": family if family_resolved else "unknown",
         "anchor_time": anchor.isoformat(),
         "window_minutes": win,
         "candidates": top,
@@ -395,15 +414,29 @@ def _collect_blocking(cache, cluster_id, start_iso, end_iso, anchor, win, examin
     return out
 
 
-def _collect_metric_spikes(cache, cluster_id, start_iso, end_iso, baseline_start_iso, anchor, win, examined, skipped):
-    """Metric spikes vs the immediately-prior baseline window.
+def _collect_metric_spikes(
+    cache, cluster_id, start_iso, end_iso, baseline_start_iso, anchor, win, examined, skipped, family=None
+):
+    """Metric movement vs the immediately-prior baseline window, engine-aware.
 
-    For each of aas/cpu/connections we compare the in-window average to the
-    average of the window immediately BEFORE it. A jump of >= SPIKE_RATIO (and a
-    positive baseline) is a spike candidate. We compute both averages in a
-    single grouped query per metric to keep round-trips down.
+    Which metric_type names exist depends on the engine family (Aurora `cpu` vs
+    DocumentDB `cpu_utilization` vs ElastiCache `cache_cpu`), so the names come
+    from shared/incident_signals.py. Two paths, one query:
+
+    * GAUGES (cpu, connections, memory, latency): in-window average / prior
+      window average. Needs a positive baseline (it is a ratio).
+    * COUNTERS (DynamoDB throttles, DocumentDB cursors_timed_out): totals, and
+      the baseline is legitimately 0 in healthy operation. Leaving zero IS the
+      signal, so these must NOT be dropped by the positive-baseline guard;
+      magnitude divides by the metric's noise floor, never by the baseline.
+
+    Both averages/totals come from one grouped query to keep round-trips down.
     """
     out = []
+    sets = signals_for(family)
+    counters = sets["counters"]
+    metric_names = tuple(sets["gauges"]) + tuple(counters)
+    in_clause, name_params = metric_in_clause(metric_names)
     sql = f"""
         SELECT metric_type,
                AVG(value) FILTER (
@@ -411,12 +444,18 @@ def _collect_metric_spikes(cache, cluster_id, start_iso, end_iso, baseline_start
                ) AS window_avg,
                AVG(value) FILTER (
                    WHERE ts >= :baseline_start::timestamptz AND ts < :start_time::timestamptz
-               ) AS baseline_avg
+               ) AS baseline_avg,
+               SUM(value) FILTER (
+                   WHERE ts >= :start_time::timestamptz AND ts < :end_time::timestamptz
+               ) AS window_sum,
+               SUM(value) FILTER (
+                   WHERE ts >= :baseline_start::timestamptz AND ts < :start_time::timestamptz
+               ) AS baseline_sum
         FROM metric_snapshots
         WHERE cluster_id = :cluster_id
           AND ts >= :baseline_start::timestamptz
           AND ts < :end_time::timestamptz
-          AND metric_type IN ('aas', 'cpu', 'db_connections')
+          AND metric_type {in_clause}
           {CLUSTER_LEVEL_ONLY}
         GROUP BY metric_type
     """
@@ -425,6 +464,7 @@ def _collect_metric_spikes(cache, cluster_id, start_iso, end_iso, baseline_start
         "start_time": start_iso,
         "end_time": end_iso,
         "baseline_start": baseline_start_iso,
+        **name_params,
     }
     try:
         rows = cache.execute(sql, params).rows
@@ -433,8 +473,20 @@ def _collect_metric_spikes(cache, cluster_id, start_iso, end_iso, baseline_start
         skipped.append("metric_spikes")
         return out
     spikes = 0
+    counter_spikes = 0
+    # A spike is a window AGGREGATE, so score its recency at the window midpoint
+    # rather than the far edge: using start_iso would floor every spike for a
+    # full look-back window and unfairly bury it.
+    midpoint = anchor - timedelta(minutes=win / 2.0)
+    rf = _recency_factor(midpoint, anchor, win)
     for row in rows:
         metric_type = row.get("metric_type")
+        if metric_type in counters:
+            cand = _counter_candidate(row, metric_type, counters[metric_type], rf, start_iso)
+            if cand is not None:
+                counter_spikes += 1
+                out.append(cand)
+            continue
         window_avg = _to_float(row.get("window_avg"))
         baseline_avg = _to_float(row.get("baseline_avg"))
         if window_avg is None or baseline_avg is None or baseline_avg <= 0:
@@ -443,11 +495,6 @@ def _collect_metric_spikes(cache, cluster_id, start_iso, end_iso, baseline_start
         if ratio < SPIKE_RATIO:
             continue
         spikes += 1
-        # A spike is an in-window AVERAGE, so score its recency at the window
-        # midpoint rather than the far edge — using start_iso would floor every
-        # spike for a full look-back window and unfairly bury it.
-        midpoint = anchor - timedelta(minutes=win / 2.0)
-        rf = _recency_factor(midpoint, anchor, win)
         spike_factor = min(ratio / SPIKE_RATIO, 2.0)
         score = BASE_WEIGHTS["metric_spike"] * rf * spike_factor
         out.append(
@@ -472,7 +519,71 @@ def _collect_metric_spikes(cache, cluster_id, start_iso, end_iso, baseline_start
             }
         )
     examined["metric_spikes"] = spikes
+    examined["counter_spikes"] = counter_spikes
     return out
+
+
+def _counter_candidate(row, metric_type, floor, rf, start_iso):
+    """Candidate for an event counter, or None when it is not a signal.
+
+    Counters (DynamoDB ReadThrottleEvents, DocumentDB DatabaseCursorsTimedOut …)
+    sit at exactly 0 when the cluster is healthy, so the gauge path's
+    positive-baseline requirement skipped the very metrics a DBA is chasing.
+    Here the transition itself is the signal:
+
+      * below the noise floor in the window -> not a signal. This is what stops
+        the path from becoming an always-firing alarm: a flat-zero counter has a
+        window total of 0, which is below every floor.
+      * baseline already nonzero -> require the same SPIKE_RATIO jump as a gauge,
+        so a counter that is *steadily* nonzero does not fire every window.
+      * magnitude = window_total / max(floor, baseline_total). The floor stands
+        in for the baseline when the baseline is 0, so this never divides by
+        zero, and it is capped like the gauge path so one enormous counter cannot
+        outrank every other category.
+
+    The incident window is LOOKAHEAD_MINUTES longer than the baseline window, so
+    a perfectly steady counter reads ~1.17x here. That is far below SPIKE_RATIO,
+    which is why comparing totals (what a DBA wants to see: "142 throttled
+    requests, previously none") is safe without normalizing by duration.
+    """
+    window_total = _to_float(row.get("window_sum")) or 0.0
+    baseline_total = _to_float(row.get("baseline_sum")) or 0.0
+    if window_total < floor:
+        return None
+    if baseline_total > 0 and window_total < baseline_total * SPIKE_RATIO:
+        return None
+    magnitude = min(window_total / max(floor, baseline_total), 2.0)
+    score = BASE_WEIGHTS["counter_spike"] * rf * magnitude
+    from_zero = baseline_total <= 0
+    return {
+        "category": "counter_spike",
+        "score": score,
+        "score_breakdown": {
+            "base_weight": BASE_WEIGHTS["counter_spike"],
+            "recency_factor": round(rf, 3),
+            "magnitude_factor": round(magnitude, 3),
+            "noise_floor": floor,
+            "formula": "base × recency × (window_total / max(floor, baseline_total))",
+        },
+        "summary": (
+            f"{metric_type} appeared during the incident: {round(window_total, 2)} in-window vs "
+            f"{round(baseline_total, 2)} in the prior baseline window"
+        ),
+        "evidence": {
+            "metric_type": metric_type,
+            "window_total": round(window_total, 3),
+            "baseline_total": round(baseline_total, 3),
+            "noise_floor": floor,
+            "from_zero_baseline": from_zero,
+        },
+        "when": start_iso,
+        "suggested_action": (
+            f"{metric_type} is an event counter that is normally 0, so treat any nonzero window as real. "
+            "Check capacity/limits (throttling), long-lived cursors or memory pressure depending on the metric."
+            if from_zero
+            else f"{metric_type} rose sharply above its usual level; check capacity/limits around this window."
+        ),
+    }
 
 
 def _collect_slow_queries(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped):
