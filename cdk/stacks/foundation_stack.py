@@ -59,10 +59,20 @@ class FoundationStack(cdk.Stack):
             id_token_validity=cdk.Duration.hours(12),
         )
 
+        # A Cognito Hosted UI prefix is GLOBALLY UNIQUE PER REGION. Shipping a
+        # literal in settings.example.py meant every newcomer deploying to the
+        # example's own default region collided with the first deployment and the
+        # FIRST stack in the dependency chain rolled back with "domain already
+        # exists", so nothing downstream ever deployed. Empty setting = derive a
+        # prefix that is unique by construction. An explicit value still wins, so
+        # existing deployments keep the domain their Hosted UI URL already uses.
+        domain_prefix = (Settings.COGNITO_DOMAIN_PREFIX or "").strip()
+        if not domain_prefix:
+            domain_prefix = f"dbops-{Settings.ENV}-{str(Settings.ACCOUNT_ID)[-6:]}"
         self.user_pool.add_domain(
             "Domain",
             cognito_domain=cognito.CognitoDomainOptions(
-                domain_prefix=Settings.COGNITO_DOMAIN_PREFIX,
+                domain_prefix=domain_prefix,
             ),
         )
 

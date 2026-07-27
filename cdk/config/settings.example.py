@@ -3,10 +3,23 @@ class Settings:
     REGION = "ap-northeast-2"
     ACCOUNT_ID = "123456789012"
 
-    COGNITO_DOMAIN_PREFIX = "dbops-dev"
+    # Cognito Hosted UI domain prefix. GLOBALLY UNIQUE PER REGION, so a shared
+    # literal makes the foundation stack fail with "domain already exists" for
+    # everyone except whoever deployed it first. Leave EMPTY and the stack
+    # derives dbops-{ENV}-{last 6 of ACCOUNT_ID}, which is unique by
+    # construction. Set it only if you want a specific prefix.
+    COGNITO_DOMAIN_PREFIX = ""
     CALLBACK_URLS = ["http://localhost:3000/callback"]
 
-    AGENT_MODEL_ID = "anthropic.claude-sonnet-4-20250514-v1:0"
+    # Bedrock model for the agent. Claude Sonnet 4 has NO bare on-demand model
+    # ID: it must be invoked through a cross-region inference profile, so the ID
+    # needs a region-family prefix or every chat turn fails with
+    # ValidationException. Pick the prefix for YOUR region:
+    #   apac.   ap-* regions (this file defaults to ap-northeast-2)
+    #   us.     us-* regions
+    #   eu.     eu-* regions
+    #   global. any region, routed globally
+    AGENT_MODEL_ID = "apac.anthropic.claude-sonnet-4-20250514-v1:0"
     GATEWAY_SEMANTIC_SEARCH = True
 
     # AWS MCP Server (AWS-managed, SigV4) — official AWS/Aurora docs. The agent

@@ -3,6 +3,19 @@
 # the platform is end-to-end functional. Returns non-zero on any failure.
 set -u
 
+# ENV and REGION come from cdk/config/settings.py, the same source cdk/app.py
+# uses to name the stacks. Hardcoding dev + ap-northeast-2 made every
+# describe-stacks miss on any other deployment, so the smoke test exited 1 and
+# reported a red result for a deployment that had actually succeeded.
+SMOKE_DIR="$(cd "$(dirname "$0")" && pwd)"
+read -r DBOPS_ENV DBOPS_REGION <<EOF
+$(cd "$SMOKE_DIR/cdk" && python3 -c "from config.settings import Settings; print(Settings.ENV, Settings.REGION)")
+EOF
+: "${DBOPS_ENV:?could not read ENV from cdk/config/settings.py}"
+: "${DBOPS_REGION:?could not read REGION from cdk/config/settings.py}"
+export AWS_REGION="$DBOPS_REGION"
+
+
 PASS=0
 FAIL=0
 WARN=0
@@ -21,13 +34,13 @@ echo "========================================="
 
 # 1. Discover stack outputs
 API_URL=$(aws cloudformation describe-stacks \
-  --region "${AWS_REGION:-ap-northeast-2}" \
-  --stack-name dbops-dev-agent \
+  --region "$DBOPS_REGION" \
+  --stack-name "dbops-$DBOPS_ENV-agent" \
   --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
   --output text 2>/dev/null)
 WEB_URL=$(aws cloudformation describe-stacks \
-  --region "${AWS_REGION:-ap-northeast-2}" \
-  --stack-name dbops-dev-frontend \
+  --region "$DBOPS_REGION" \
+  --stack-name "dbops-$DBOPS_ENV-frontend" \
   --query "Stacks[0].Outputs[?OutputKey=='DistributionUrl'].OutputValue" \
   --output text 2>/dev/null)
 
@@ -78,12 +91,12 @@ else
 fi
 
 # 7. Schema migrator log presence (last successful run)
-MIG_FN=$(aws lambda list-functions --region "${AWS_REGION:-ap-northeast-2}" \
+MIG_FN=$(aws lambda list-functions --region "$DBOPS_REGION" \
   --query "Functions[?contains(FunctionName, 'SchemaMigrator')].FunctionName" \
   --output text 2>/dev/null | head -1)
 if [ -n "$MIG_FN" ]; then
   LAST=$(aws logs filter-log-events \
-    --region "${AWS_REGION:-ap-northeast-2}" \
+    --region "$DBOPS_REGION" \
     --log-group-name "/aws/lambda/$MIG_FN" \
     --start-time $(($(date +%s) * 1000 - 86400000)) \
     --query "events[?contains(message, 'errors=')].message" \

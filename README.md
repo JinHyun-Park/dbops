@@ -120,11 +120,18 @@ Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
 ### Deployment (Quickstart)
 
 ```bash
-# 1. Clone + configure (two values: ACCOUNT_ID + REGION)
+# 1. Clone + configure
 git clone https://github.com/JinHyun-Park/dbops.git
 cd dbops
 cp cdk/config/settings.example.py cdk/config/settings.py
-$EDITOR cdk/config/settings.py     # set ACCOUNT_ID, REGION (rest is optional)
+$EDITOR cdk/config/settings.py
+#   REQUIRED: ACCOUNT_ID, REGION
+#   CHECK:    AGENT_MODEL_ID must carry the inference-profile prefix for YOUR
+#             region (apac. / us. / eu. / global.). Claude Sonnet 4 has no bare
+#             on-demand model ID, so a wrong prefix fails every chat turn.
+#   OPTIONAL: COGNITO_DOMAIN_PREFIX. Leave it EMPTY and the stack derives a
+#             prefix unique to your account (the Hosted UI prefix is globally
+#             unique per region, so a shared literal collides).
 
 # 2. Bootstrap CDK once per account/region
 cd cdk && cdk bootstrap && cd ..
@@ -138,9 +145,33 @@ cd cdk && cdk bootstrap && cd ..
 # /config.json deployed with your apiUrl, region, cognitoClientId, agentRuntimeArn.
 ```
 
-The final output shows your Web UI URL. Open it, log in (Cognito Hosted UI),
-and register your Aurora cluster from the Clusters page (cross-account spoke
-roles are validated via STS AssumeRole at registration time).
+```bash
+# 4. Create the first user. Self sign-up is DISABLED by design, so without this
+#    step the app deploys successfully and nobody can log in.
+ENV=$(cd cdk && python3 -c "from config.settings import Settings; print(Settings.ENV)")
+POOL=$(aws cloudformation describe-stacks --stack-name "dbops-$ENV-foundation" \
+  --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" --output text)
+
+aws cognito-idp admin-create-user --user-pool-id "$POOL" \
+  --username you@example.com \
+  --user-attributes Name=email,Value=you@example.com Name=email_verified,Value=true \
+  --message-action SUPPRESS
+
+aws cognito-idp admin-set-user-password --user-pool-id "$POOL" \
+  --username you@example.com --password 'ChangeMe123!' --permanent
+```
+
+Every user is an admin unless you add them to the `dbops-viewer` group, so no
+extra step is needed to get full access. Omit `--permanent` if you would rather
+be forced to set a new password at first login: the login page handles that
+flow. Later users can be invited the same way, and roles are managed in the app
+under Settings.
+
+The final output of `./deploy.sh` shows your Web UI URL. Open it, log in with
+the user you just created (the app has its own `/login` page, it does not use
+the Cognito Hosted UI), then register a cluster from the Clusters page
+(cross-account spoke roles are validated via STS AssumeRole at registration
+time). Metrics appear after the first ETL cycle, which runs every 5 minutes.
 
 #### One-time post-deploy: activate Bedrock cost-allocation tags
 
