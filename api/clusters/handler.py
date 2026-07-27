@@ -486,6 +486,57 @@ def _handle_list(table, event):
     return _resp(200, items, max_age=30)
 
 
+# Secrets Manager ARN prefix. Every registry field that later becomes a
+# SecretId in get_secret_value is checked against it, on BOTH the register and
+# the PATCH /meta path (they used to disagree).
+_SECRET_ARN_PREFIX = "arn:aws:secretsmanager:"
+
+
+def _bad_secret_arn_field(body, fields):
+    """First field in `fields` whose supplied value is neither empty nor a
+    Secrets Manager ARN, or "" when they all pass. Empty stays legal: it is the
+    'not configured yet' state every consumer already fails closed on."""
+    for f in fields:
+        val = body.get(f, "")
+        if val and (not isinstance(val, str) or not val.startswith(_SECRET_ARN_PREFIX)):
+            return f
+    return ""
+
+
+# Fields only an operator can set (PATCH /clusters/{id}/meta, or the admin teams
+# API for team_id) and that registration cannot re-derive from AWS.
+_OPERATOR_OWNED_FIELDS = (
+    "purpose", "service_tags", "team_id", "db_name",
+    "db_secret_arn", "db_write_secret_arn",
+    "mongo_secret_arn", "mongo_write_secret_arn",
+    "auth_secret_arn", "cluster_arn", "secret_arn",
+)
+
+
+def _put_registry_item(table, item):
+    """Registration write that MERGES with the stored row instead of blindly
+    replacing it.
+
+    POST /api/clusters has no already-registered guard (unlike bulk-register),
+    and the UI exposes a manual register form, so re-registering an existing
+    cluster_id used to full-item-overwrite every operator-set field: the secret
+    ARNs (whose ONLY channel is PATCH /meta), purpose/service_tags, db_name, and
+    the team_id that scopes visibility. None of those are recoverable from a
+    describe call, so the stored value wins whenever this request did not supply
+    one. Everything else (engine, version, endpoint, connection status) IS
+    re-derived from describe and is intentionally overwritten."""
+    existing = table.get_item(Key={"cluster_id": item["cluster_id"]}).get("Item")
+    if isinstance(existing, dict):  # not a dict => first registration
+        for f in _OPERATOR_OWNED_FIELDS:
+            if not item.get(f) and existing.get(f):
+                item[f] = existing[f]
+        # db_secret_source labels db_secret_arn: a preserved ARN must not keep
+        # the "missing" label this run's resolution computed.
+        if item.get("db_secret_arn") and item.get("db_secret_source") in (None, "", "missing"):
+            item["db_secret_source"] = existing.get("db_secret_source") or "override"
+    table.put_item(Item=item)
+
+
 def _register_dynamodb(table, body):
     for f in ("account_id", "region", "resource_name"):
         if not body.get(f):
@@ -506,7 +557,7 @@ def _register_dynamodb(table, body):
         "registered_at": datetime.utcnow().isoformat() + "Z",
         "connection_status": status, "connection_error": err,
     }
-    table.put_item(Item=item)
+    _put_registry_item(table, item)
     return _resp(201 if status == "ok" else 207,
                  {"status": "registered" if status == "ok" else "registered_with_warning",
                   "cluster_id": cid, "connection_status": status})
@@ -516,6 +567,9 @@ def _register_docdb(table, body):
     for f in ("cluster_id", "account_id", "region"):
         if not body.get(f):
             return _resp(400, {"error": f"{f} required"})
+    bad = _bad_secret_arn_field(body, ("mongo_secret_arn", "mongo_write_secret_arn"))
+    if bad:
+        return _resp(400, {"error": f"{bad} must be empty or an arn:aws:secretsmanager: ARN"})
     cluster_id, account_id, region = body["cluster_id"], body["account_id"], body["region"]
     status, err, version = "ok", "", ""
     try:
@@ -541,7 +595,7 @@ def _register_docdb(table, body):
         "registered_at": datetime.utcnow().isoformat() + "Z",
         "connection_status": status, "connection_error": err,
     }
-    table.put_item(Item=item)
+    _put_registry_item(table, item)
     return _resp(201 if status == "ok" else 207,
                  {"status": "registered" if status == "ok" else "registered_with_warning",
                   "cluster_id": cluster_id, "connection_status": status})
@@ -551,6 +605,9 @@ def _register_elasticache(table, body):
     for f in ("account_id", "region", "resource_name"):
         if not body.get(f):
             return _resp(400, {"error": f"{f} required"})
+    bad = _bad_secret_arn_field(body, ("auth_secret_arn",))
+    if bad:
+        return _resp(400, {"error": f"{bad} must be empty or an arn:aws:secretsmanager: ARN"})
     account_id, region, name = body["account_id"], body["region"], body["resource_name"]
     role_arn = body.get("spoke_role_arn", "")
     auth_secret_arn = body.get("auth_secret_arn", "")
@@ -613,7 +670,7 @@ def _register_elasticache(table, body):
         "registered_at": datetime.utcnow().isoformat() + "Z",
         "connection_status": status, "connection_error": err,
     }
-    table.put_item(Item=item)
+    _put_registry_item(table, item)
     return _resp(201 if status == "ok" else 207,
                  {"status": "registered" if status == "ok" else "registered_with_warning",
                   "cluster_id": name, "connection_status": status})
@@ -631,6 +688,9 @@ def _register_rds_instance(table, body):
     for f in ("cluster_id", "account_id", "region"):
         if not body.get(f):
             return _resp(400, {"error": f"{f} required"})
+    bad = _bad_secret_arn_field(body, ("db_secret_arn", "db_write_secret_arn"))
+    if bad:
+        return _resp(400, {"error": f"{bad} must be empty or an arn:aws:secretsmanager: ARN"})
     cluster_id, account_id, region = body["cluster_id"], body["account_id"], body["region"]
     spoke_role_arn = body.get("spoke_role_arn", "")
     try:
@@ -682,7 +742,7 @@ def _register_rds_instance(table, body):
         "registered_at": datetime.utcnow().isoformat() + "Z",
         "connection_status": "ok", "connection_error": "",
     }
-    table.put_item(Item=item)
+    _put_registry_item(table, item)
     return _resp(201, {"status": "registered", "cluster_id": cluster_id,
                        "connection_status": "ok"})
 
@@ -703,6 +763,9 @@ def _handle_register(table, body: dict):
     for field in required:
         if field not in body:
             return _resp(400, {"error": f"{field} required"})
+    bad = _bad_secret_arn_field(body, ("secret_arn",))
+    if bad:
+        return _resp(400, {"error": f"{bad} must be empty or an arn:aws:secretsmanager: ARN"})
 
     cluster_id = body["cluster_id"]
     account_id = body["account_id"]
@@ -756,7 +819,7 @@ def _handle_register(table, body: dict):
     if db_name:
         item["db_name"] = db_name
 
-    table.put_item(Item=item)
+    _put_registry_item(table, item)
 
     status_code = 201 if connection_status != "failed" else 207
     return _resp(status_code, {
@@ -919,7 +982,7 @@ def _handle_seed_sample(table):
         "connection_validated_at": datetime.utcnow().isoformat() + "Z",
         "is_demo": True,
     }
-    table.put_item(Item=item)
+    _put_registry_item(table, item)
     return _resp(201, {
         "status": "seeded",
         "cluster_id": cluster_id,
@@ -989,7 +1052,7 @@ def _handle_update_meta(table, cluster_id: str, body: dict):
                   "mongo_secret_arn", "mongo_write_secret_arn"):
         if field in body:
             val = body[field]
-            if not isinstance(val, str) or not (val == "" or val.startswith("arn:aws:secretsmanager:")):
+            if not isinstance(val, str) or not (val == "" or val.startswith(_SECRET_ARN_PREFIX)):
                 return _resp(400, {"error": f"{field} must be empty or an arn:aws:secretsmanager: ARN"})
             updates[field] = val
             if field == "db_secret_arn":

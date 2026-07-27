@@ -85,6 +85,19 @@ const ACTION_RISK: Record<string, string> = {
   reboot_rds_instance: "high",
   create_rds_snapshot: "low",
   modify_rds_instance_class: "high",
+  // DocumentDB. 프로파일러는 Mongo 명령이 아니라 CUSTOM 클러스터 파라미터
+  // 그룹 변경 + CloudWatch Logs export다. 그룹은 여러 클러스터가 공유할 수
+  // 있어 blast radius가 이 클러스터를 넘어간다 → high.
+  set_docdb_profiler: "high",
+  // 인덱스 생성은 background=true라 primary를 막지 않지만, 대형 컬렉션에서는
+  // I/O·스토리지 부담이 있고 삭제는 별도 작업 → medium.
+  create_docdb_index: "medium",
+  // ElastiCache. 노드 타입 변경·재부팅·failover 테스트는 모두 중단 또는
+  // 페일오버를 유발(high); 스냅샷은 비파괴적(low).
+  modify_elasticache_node_type: "high",
+  create_elasticache_snapshot: "low",
+  reboot_elasticache: "high",
+  test_elasticache_failover: "high",
   other: "medium",
 };
 
@@ -298,6 +311,80 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     considerations: [
       "스냅샷 식별자는 이 승인 시점에 고정됩니다(재승인 시 새 이름으로 생성)",
       "대용량이면 생성에 시간 소요",
+    ],
+  },
+  set_docdb_profiler: {
+    what: "DocumentDB 프로파일러를 켜거나 끕니다. 커스텀 클러스터 파라미터 그룹의 profiler / profiler_threshold_ms / profiler_sampling_rate를 변경하고, profiler 로그 타입을 CloudWatch Logs(/aws/docdb/<cluster>/profiler)로 export합니다.",
+    risks: [
+      "클러스터 파라미터 그룹은 공유 자원입니다. 같은 그룹을 쓰는 다른 모든 클러스터에 같은 변경이 적용됩니다(아래 parameter_group 확인 필수).",
+      "threshold_ms를 100ms 미만으로 낮추면 처리량이 높은 클러스터에서 성능 문제가 발생할 수 있습니다(AWS 권장: 500ms에서 시작).",
+      "프로파일러 로그는 CloudWatch Logs 수집·보관 비용이 발생합니다.",
+      "AWS 기본(default.*) 파라미터 그룹은 수정할 수 없어 거부됩니다. 커스텀 그룹을 먼저 연결해야 합니다.",
+    ],
+    considerations: [
+      "아래 parameter_group이 이 클러스터 전용 그룹인지 확인, 공유 그룹이면 영향 범위를 먼저 파악",
+      "승인은 {enabled, threshold_ms, sampling_rate}와 파라미터 그룹까지 묶여 있어, 승인 후 그룹이 바뀌면 실행이 거부됩니다",
+      "느린 op는 Mongo의 system.profile이 아니라 /aws/docdb/<cluster>/profiler 로그 그룹에서 확인합니다",
+    ],
+  },
+  create_docdb_index: {
+    what: "DocumentDB 컬렉션에 인덱스를 생성합니다 (background=true).",
+    risks: [
+      "background 빌드라 primary를 차단하지는 않지만, 대형 컬렉션에서는 I/O와 스토리지 사용이 늘어납니다.",
+      "복합 인덱스의 필드 순서는 의미가 있습니다. 승인된 순서 그대로 생성됩니다.",
+      "인덱스 삭제는 이 도구의 범위가 아닙니다(되돌리려면 별도 작업).",
+    ],
+    considerations: [
+      "같은 이름의 인덱스가 이미 있으면 변경 없이 종료됩니다(멱등)",
+      "키 순서·방향이 실제 쿼리 패턴과 맞는지 확인",
+    ],
+  },
+  modify_elasticache_node_type: {
+    what: "ElastiCache replication group의 노드 타입(인스턴스 클래스)을 변경합니다.",
+    risks: [
+      "스케일 업/다운 중 페일오버가 발생해 짧은 연결 끊김이 생길 수 있습니다.",
+      "노드 타입에 따라 시간당 비용이 달라집니다.",
+      "다운사이즈는 메모리가 줄어 eviction·OOM 위험이 커집니다.",
+    ],
+    considerations: [
+      "현재 사용 메모리·evictions 대비 목표 노드의 메모리가 충분한지 확인",
+      "저트래픽 시간대 권장 (Multi-AZ면 페일오버로 흡수)",
+    ],
+  },
+  create_elasticache_snapshot: {
+    what: "ElastiCache(Redis/Valkey) 수동 스냅샷을 생성합니다.",
+    risks: [
+      "비파괴적입니다(데이터 변경 없음). 스냅샷 스토리지 비용만 발생합니다.",
+      "단일 노드 클러스터에서는 스냅샷 중 메모리·성능에 일시적 영향이 있을 수 있습니다.",
+      "Memcached는 스냅샷을 지원하지 않습니다.",
+    ],
+    considerations: [
+      "가능하면 replica가 있는 구성에서 실행(replica에서 백업)",
+      "스냅샷 이름은 이 승인 시점에 고정됩니다",
+    ],
+  },
+  reboot_elasticache: {
+    what: "replication group의 primary 노드를 재부팅합니다.",
+    risks: [
+      "재부팅 동안 짧은 중단이 발생합니다.",
+      "Redis는 재부팅 시 캐시가 비워질 수 있어(구성에 따라) 재예열 동안 백엔드 부하가 늘어납니다.",
+      "파라미터 변경 적용 목적이면 대상 노드가 맞는지 확인해야 합니다.",
+    ],
+    considerations: [
+      "캐시 미스 폭주를 감당할 수 있는 시간대인지 확인",
+      "Multi-AZ 자동 페일오버 여부 확인",
+    ],
+  },
+  test_elasticache_failover: {
+    what: "replication group의 노드 그룹에 대해 자동 페일오버를 테스트합니다.",
+    risks: [
+      "실제 페일오버입니다. primary가 replica로 승격되며 수 초간 쓰기가 실패할 수 있습니다.",
+      "replica가 없는 노드 그룹에서는 실행되지 않습니다.",
+      "Memcached는 페일오버를 지원하지 않습니다.",
+    ],
+    considerations: [
+      "애플리케이션의 재연결·재시도 로직이 준비됐는지 확인",
+      "DR 훈련 목적이면 저트래픽 시간대 권장",
     ],
   },
   modify_rds_instance_class: {

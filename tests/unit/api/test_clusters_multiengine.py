@@ -40,6 +40,38 @@ def _mock_table():
     return t
 
 
+class _FakeTable:
+    """Minimal DynamoDB table double with REAL dict storage.
+
+    A MagicMock cannot show the re-registration data-loss bug: put_item is a
+    no-op there, so nothing is ever read back. This stores items, replaces the
+    whole item on put_item (exactly like DynamoDB), and applies the SET values
+    _handle_update_meta builds on update_item."""
+
+    def __init__(self):
+        self.items: dict = {}
+
+    def get_item(self, Key):
+        item = self.items.get(Key["cluster_id"])
+        return {"Item": dict(item)} if item else {}
+
+    def put_item(self, Item):
+        self.items[Item["cluster_id"]] = dict(Item)
+
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeNames,
+                    ExpressionAttributeValues, ConditionExpression=None):
+        from botocore.exceptions import ClientError
+
+        cid = Key["cluster_id"]
+        if ConditionExpression and cid not in self.items:
+            raise ClientError(
+                {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem"
+            )
+        row = self.items[cid]
+        for placeholder, value in ExpressionAttributeValues.items():
+            row[placeholder.lstrip(":")] = value
+
+
 # ---------------------------------------------------------------------------
 # Test 1 — DynamoDB registration
 # ---------------------------------------------------------------------------
@@ -190,6 +222,108 @@ def test_register_docdb_mongo_secret_arns_default_empty(mock_docdb_for, mock_rds
     item = table.put_item.call_args[1]["Item"]
     assert item["mongo_secret_arn"] == ""
     assert item["mongo_write_secret_arn"] == ""
+
+
+@patch.object(handler, "_rds_client_for")
+@patch.object(handler, "_docdb_client_for")
+def test_reregister_preserves_operator_set_fields(mock_docdb_for, mock_rds_for):
+    """Registration is a FULL-ITEM put_item and POST /api/clusters has no
+    already-registered guard, so re-registering an existing cluster_id must NOT
+    erase what only PATCH /meta (or the admin teams API) can write. Otherwise the
+    Mongo credentials, whose ONLY channel is that PATCH, are silently reset to ""
+    while the response says 201 registered."""
+    mock_docdb_client = MagicMock()
+    mock_docdb_client.describe_db_clusters.return_value = {"DBClusters": [{"EngineVersion": "5.0.0"}]}
+    mock_docdb_for.return_value = mock_docdb_client
+
+    table = _FakeTable()
+    body = {
+        "engine": "docdb",
+        "cluster_id": "my-docdb-cluster",
+        "account_id": "123456789012",
+        "region": "us-east-1",
+    }
+    assert handler._handle_register(table, body)["statusCode"] in (201, 207)
+
+    # Operator config: PATCH /meta for the secrets + Map note, admin teams API
+    # for team_id (stamped straight onto the row, as that handler does).
+    assert handler._handle_update_meta(table, "my-docdb-cluster", {
+        "mongo_secret_arn": "arn:aws:secretsmanager:us-east-1:1:secret:mongo-ro",
+        "mongo_write_secret_arn": "arn:aws:secretsmanager:us-east-1:1:secret:mongo-rw",
+        "purpose": "checkout catalog",
+        "service_tags": ["checkout"],
+    })["statusCode"] == 200
+    table.items["my-docdb-cluster"]["team_id"] = "team-checkout"
+
+    # Same admin re-registers the same identifier (fixing a typo elsewhere in the
+    # form, re-running discovery, whatever). Engine metadata may be refreshed.
+    mock_docdb_client.describe_db_clusters.return_value = {"DBClusters": [{"EngineVersion": "5.0.1"}]}
+    assert handler._handle_register(table, body)["statusCode"] in (201, 207)
+
+    row = table.items["my-docdb-cluster"]
+    assert row["mongo_secret_arn"].endswith("mongo-ro"), "mongo read secret was erased"
+    assert row["mongo_write_secret_arn"].endswith("mongo-rw"), "mongo write secret was erased"
+    assert row["purpose"] == "checkout catalog"
+    assert row["service_tags"] == ["checkout"]
+    assert row["team_id"] == "team-checkout", "cluster fell out of its team (default-open exposure)"
+    # ...while describe-derived fields ARE refreshed.
+    assert row["engine_version"] == "5.0.1"
+
+
+@patch.object(handler, "_convention_secret_for", return_value="")
+@patch.object(handler, "_session_for")
+@patch.object(handler, "_rds_client_for")
+def test_reregister_preserves_rds_instance_secrets_and_db_name(
+    mock_rds_for, _mock_session, _mock_convention
+):
+    """Same guarantee on the rds_instance path, plus the paired label: a
+    preserved db_secret_arn must not keep this run's "missing" db_secret_source,
+    or the UI would show a configured secret as missing."""
+    inst = {
+        "DBInstanceIdentifier": "rds-mysql-1", "Engine": "mysql",
+        "EngineVersion": "8.0.35", "Endpoint": {"Address": "h", "Port": 3306},
+    }
+    mock_rds_client = MagicMock()
+    mock_rds_client.describe_db_instances.return_value = {"DBInstances": [inst]}
+    mock_rds_for.return_value = mock_rds_client
+
+    table = _FakeTable()
+    body = {"engine": "mysql", "cluster_id": "rds-mysql-1",
+            "account_id": "123456789012", "region": "ap-northeast-2"}
+    assert handler._handle_register(table, body)["statusCode"] == 201
+    assert table.items["rds-mysql-1"]["db_secret_source"] == "missing"
+
+    assert handler._handle_update_meta(table, "rds-mysql-1", {
+        "db_secret_arn": "arn:aws:secretsmanager:ap-northeast-2:1:secret:ro",
+        "db_write_secret_arn": "arn:aws:secretsmanager:ap-northeast-2:1:secret:rw",
+        "db_name": "appdb",
+    })["statusCode"] == 200
+
+    assert handler._handle_register(table, body)["statusCode"] == 201
+    row = table.items["rds-mysql-1"]
+    assert row["db_secret_arn"].endswith("secret:ro"), "read secret was erased"
+    assert row["db_write_secret_arn"].endswith("secret:rw"), "write secret was erased"
+    assert row["db_name"] == "appdb", "session default schema was erased"
+    assert row["db_secret_source"] == "override", "preserved ARN kept the 'missing' label"
+
+
+@patch.object(handler, "_rds_client_for")
+@patch.object(handler, "_docdb_client_for")
+def test_register_rejects_invalid_mongo_secret_arn(mock_docdb_for, mock_rds_for):
+    """Registration must apply the SAME prefix check as PATCH /meta: the value
+    later becomes a SecretId in get_secret_value. Static message, no echo."""
+    table = _FakeTable()
+    resp = handler._handle_register(table, {
+        "engine": "docdb",
+        "cluster_id": "my-docdb-cluster",
+        "account_id": "123456789012",
+        "region": "us-east-1",
+        "mongo_secret_arn": "not-an-arn",
+    })
+    assert resp["statusCode"] == 400
+    assert "not-an-arn" not in resp["body"]
+    assert table.items == {}, "must not register a row with an unusable secret"
+    mock_docdb_for.assert_not_called()
 
 
 @patch.object(handler, "_enrich_with_meta", side_effect=lambda c: c)

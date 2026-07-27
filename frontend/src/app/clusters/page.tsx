@@ -165,6 +165,10 @@ export default function ClustersPage() {
     engine: "aurora-postgresql",
     spoke_role_arn: "",
     resource_name: "", // DynamoDB table name
+    // DocumentDB only: Secrets Manager ARNs for the Mongo-protocol users.
+    // Optional. Empty means CloudWatch metrics only (deep read stays off).
+    mongo_secret_arn: "",
+    mongo_write_secret_arn: "",
   });
   const [submitting, setSubmitting] = useState(false);
   // Pre-flight: separate state from feedback because we want both
@@ -371,6 +375,14 @@ export default function ClustersPage() {
           cluster_id: form.cluster_id,
           account_id: form.account_id,
           region: form.region,
+          // Mongo credentials are DocumentDB-only and optional; send them only
+          // when filled so the merge on the backend keeps any existing value.
+          ...(form.engine === "docdb" && form.mongo_secret_arn.trim()
+            ? { mongo_secret_arn: form.mongo_secret_arn.trim() }
+            : {}),
+          ...(form.engine === "docdb" && form.mongo_write_secret_arn.trim()
+            ? { mongo_write_secret_arn: form.mongo_write_secret_arn.trim() }
+            : {}),
         };
       } else {
         payload = {
@@ -405,6 +417,8 @@ export default function ClustersPage() {
         engine: "aurora-postgresql",
         spoke_role_arn: "",
         resource_name: "",
+        mongo_secret_arn: "",
+        mongo_write_secret_arn: "",
       });
       loadClusters();
     } catch (e) {
@@ -847,6 +861,8 @@ export default function ClustersPage() {
                     // reset resource-specific fields on engine change
                     cluster_id: "",
                     resource_name: "",
+                    mongo_secret_arn: "",
+                    mongo_write_secret_arn: "",
                   })
                 }
                 className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 focus:outline-none focus:border-amber-500/60"
@@ -858,10 +874,17 @@ export default function ClustersPage() {
                 <option value="dynamodb">DynamoDB</option>
                 <option value="docdb">DocumentDB</option>
               </select>
-              {(form.engine === "dynamodb" || form.engine === "docdb") && (
+              {form.engine === "dynamodb" && (
                 <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">
-                  DynamoDB·DocumentDB는 CloudWatch 메트릭만 수집합니다 (시크릿
-                  불필요).
+                  DynamoDB는 CloudWatch 메트릭만 수집합니다 (시크릿 불필요).
+                </p>
+              )}
+              {form.engine === "docdb" && (
+                <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">
+                  기본은 CloudWatch 메트릭 수집입니다. Mongo 읽기 시크릿을
+                  넣으면 서버 상태·장기 실행 op 딥 리드까지 수집합니다. 선택
+                  항목이며, 이후 PATCH /api/clusters/{"{id}"}/meta 로도 채울 수
+                  있습니다.
                 </p>
               )}
             </div>
@@ -957,6 +980,34 @@ export default function ClustersPage() {
                   placeholder="my-docdb-cluster"
                   mono
                 />
+              )}
+
+              {/* DocumentDB deep read / index write, both optional. Without
+                  the read secret the in-VPC Mongo collector skips the cluster
+                  (CloudWatch metrics only); the write secret is only needed for
+                  approval-gated index creation. Backfillable later via
+                  PATCH /api/clusters/{id}/meta. */}
+              {form.engine === "docdb" && (
+                <>
+                  <Field
+                    label="Mongo 읽기 시크릿 ARN (선택)"
+                    value={form.mongo_secret_arn}
+                    onChange={(v) => setForm({ ...form, mongo_secret_arn: v })}
+                    placeholder="arn:aws:secretsmanager:...:secret:docdb-readonly"
+                    mono
+                    fullWidth
+                  />
+                  <Field
+                    label="Mongo 쓰기 시크릿 ARN (선택)"
+                    value={form.mongo_write_secret_arn}
+                    onChange={(v) =>
+                      setForm({ ...form, mongo_write_secret_arn: v })
+                    }
+                    placeholder="arn:aws:secretsmanager:...:secret:docdb-write"
+                    mono
+                    fullWidth
+                  />
+                </>
               )}
 
               <Field

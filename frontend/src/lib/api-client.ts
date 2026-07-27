@@ -982,9 +982,22 @@ export async function fetchClusters() {
 
 // Admin-only: set the DB Map note (purpose + connected-service tags). The
 // handler gates on the bearer token (viewer => 403).
+// The secret-ARN fields are the ONLY channel for the credentials the backend
+// whitelists here: db_secret_arn / db_write_secret_arn (rds_instance direct TCP)
+// and mongo_secret_arn / mongo_write_secret_arn (DocumentDB deep read + Mongo
+// writes). Registration cannot discover them (they are in-DB users), so leaving
+// them out of this type made the feature unreachable from the product.
 export async function patchClusterMeta(
   clusterId: string,
-  meta: { purpose?: string; service_tags?: string[] },
+  meta: {
+    purpose?: string;
+    service_tags?: string[];
+    db_name?: string;
+    db_secret_arn?: string;
+    db_write_secret_arn?: string;
+    mongo_secret_arn?: string;
+    mongo_write_secret_arn?: string;
+  },
 ): Promise<void> {
   const res = await authedFetch(
     await api(`/api/clusters/${enc(clusterId)}/meta`),
@@ -1299,6 +1312,11 @@ export async function registerCluster(data: {
   engine?: string;
   spoke_role_arn?: string;
   resource_name?: string;
+  // DocumentDB only: Mongo-protocol credentials for the in-VPC deep-read
+  // collector (read-only user) and the approval-gated Mongo index write.
+  // Optional: empty means "no deep read yet", backfillable via PATCH /meta.
+  mongo_secret_arn?: string;
+  mongo_write_secret_arn?: string;
 }) {
   const res = await authedFetch(await api(`/api/clusters`), {
     method: "POST",

@@ -1,10 +1,18 @@
 """DocumentDB Mongo-protocol deep-diagnosis collector (in-VPC, read-only).
 
-CloudWatch can't see DocumentDB internals — live operations (currentOp),
-server status (connections/opcounters/mem), and slow-op profiling
-(getProfilingStatus + system.profile). This Lambda connects over the Mongo
+CloudWatch can't see DocumentDB internals: live operations (currentOp) and
+server status (connections/opcounters/mem). This Lambda connects over the Mongo
 wire protocol (TLS 27017) with a least-privilege read-only user and emits
 metric_snapshots rows + cluster_health_findings into the cache DB.
+
+NOT here: slow-op profiling. Managed Amazon DocumentDB implements neither the
+`profile` command nor `system.*` collections, so the profiler level cannot be
+read and slow ops cannot be listed over the wire protocol. The profiler is a
+CUSTOM cluster-parameter-group feature (`profiler`, `profiler_threshold_ms`,
+`profiler_sampling_rate`) whose output is exported to CloudWatch Logs at
+/aws/docdb/{cluster_id}/profiler; the approval-gated `set_docdb_profiler` tool
+turns it on. Reading those log events is E-1 work (logs:FilterLogEvents), not
+something this Mongo connection can do.
 
 Design (docs/superpowers/specs/2026-06-12-docdb-mongo-deep-diagnosis-design.md):
   - Separate from the ETL collector: that Lambda is NOT in a VPC and packages
@@ -34,11 +42,6 @@ _CA_BUNDLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "glob
 LONG_RUNNING_SECS = 10
 LONG_RUNNING_WARNING = 1   # ≥1 long op → warning
 LONG_RUNNING_CRITICAL = 5  # ≥5 long ops → critical
-
-# Slow-op profile read window (minutes) — only recent system.profile entries.
-SLOW_OPS_WINDOW_MIN = 15
-# Cap on system.profile docs scanned per cluster (read-only, bounded).
-SLOW_OPS_LIMIT = 200
 
 # Mongo server-selection timeout — fail fast on an unreachable cluster.
 SERVER_SELECTION_TIMEOUT_MS = 5000
@@ -150,18 +153,12 @@ def _run_current_op(client):
     return client.admin.command("currentOp", **{"$ownOps": False, "active": True})
 
 
-def _run_profiling_status(client, db_name):
-    """`profile: -1` returns the current profiling level + slowms without changing it."""
-    return client[db_name].command("profile", -1)
-
-
-def _read_system_profile(client, db_name, slowms, since_dt):
-    """Read recent slow ops from <db>.system.profile (read-only find)."""
-    coll = client[db_name]["system.profile"]
-    cursor = coll.find(
-        {"millis": {"$gte": int(slowms)}, "ts": {"$gte": since_dt}}
-    ).sort("ts", -1).limit(SLOW_OPS_LIMIT)
-    return list(cursor)
+# NOTE: there is deliberately NO profiling helper here. `profile: -1` and
+# <db>.system.profile are MongoDB-only; on managed DocumentDB the first is not a
+# supported command and the second is not a supported collection, so the old
+# branch could only ever log an error every 5 minutes per cluster. See the module
+# docstring for the mechanism that actually works (parameter group + CloudWatch
+# Logs export, driven by the set_docdb_profiler tool).
 
 
 def _emit_server_status_metrics(cache_execute, cluster_id, ts, status):
@@ -235,72 +232,6 @@ def _build_long_running_finding(current_op):
     }
 
 
-def _build_profiling_findings(profiling_status, slow_samples, slowms):
-    """getProfilingStatus → either docdb_mongo_slow_ops (profiler on, slow ops
-    found) or docdb_mongo_profiler_off (profiler off, info). Returns a list
-    (possibly empty)."""
-    level = profiling_status.get("was", profiling_status.get("level", 0))
-    try:
-        level = int(level)
-    except (TypeError, ValueError):
-        level = 0
-
-    if level <= 0:
-        return [
-            {
-                "check_type": "docdb_mongo_profiler_off",
-                "severity": "info",
-                "subject": "DocumentDB Profiler Disabled",
-                "value_str": "프로파일러 OFF (level 0)",
-                "threshold_str": "느린 쿼리 가시성을 위해 profiler level 1 권장",
-                "recommendation": (
-                    "데이터베이스 프로파일러가 꺼져 있어 느린 쿼리를 추적할 수 없습니다. "
-                    "`db.setProfilingLevel(1, { slowms: 100 })`로 slowms 임계값을 넘는 op만 "
-                    "기록하도록 활성화하면 system.profile에서 느린 쿼리를 진단할 수 있습니다."
-                ),
-                "details": {"profiling_level": level},
-            }
-        ]
-
-    count = len(slow_samples)
-    if count == 0:
-        return []
-
-    ns_counts = {}
-    max_millis = 0
-    for doc in slow_samples:
-        ns = doc.get("ns") or "?"
-        ns_counts[ns] = ns_counts.get(ns, 0) + 1
-        try:
-            max_millis = max(max_millis, int(doc.get("millis") or 0))
-        except (TypeError, ValueError):
-            pass
-    top = sorted(ns_counts.items(), key=lambda kv: kv[1], reverse=True)[:5]
-    top_str = ", ".join(f"{ns} ({n})" for ns, n in top)
-    severity = "critical" if count >= LONG_RUNNING_CRITICAL else "warning"
-    return [
-        {
-            "check_type": "docdb_mongo_slow_ops",
-            "severity": severity,
-            "subject": "DocumentDB Slow Operations",
-            "value_str": f"{count}건 (최대 {max_millis}ms)",
-            "threshold_str": f"system.profile millis ≥ {int(slowms)}ms (최근 {SLOW_OPS_WINDOW_MIN}분)",
-            "recommendation": (
-                f"최근 {SLOW_OPS_WINDOW_MIN}분간 slowms({int(slowms)}ms) 임계값을 넘는 op이 "
-                f"{count}건 기록됐습니다. 상위 네임스페이스: {top_str}. 해당 컬렉션의 인덱스와 "
-                "쿼리 패턴을 점검하세요."
-            ),
-            "details": {
-                "slow_op_count": count,
-                "max_millis": max_millis,
-                "slowms": int(slowms),
-                "window_minutes": SLOW_OPS_WINDOW_MIN,
-                "top_namespaces": [{"ns": ns, "count": n} for ns, n in top],
-            },
-        }
-    ]
-
-
 def _diagnose_cluster(client, cache_execute, cluster_id, run_ts):
     """Run the read-only allowlist against one connected cluster and write
     metrics + findings. Returns a small result dict. Individual command
@@ -324,35 +255,9 @@ def _diagnose_cluster(client, cache_execute, cluster_id, run_ts):
     except Exception as e:
         print(f"[docdb_mongo] {cluster_id} currentOp failed: {e}")
 
-    # --- getProfilingStatus (+ system.profile) → slow-ops / profiler-off ---
-    try:
-        prof = _run_profiling_status(client, "admin")
-        level = prof.get("was", prof.get("level", 0))
-        try:
-            level_int = int(level)
-        except (TypeError, ValueError):
-            level_int = 0
-        slowms = prof.get("slowms", 100) or 100
-        slow_samples = []
-        if level_int > 0:
-            since_dt = datetime.now(timezone.utc) - _timedelta_minutes(SLOW_OPS_WINDOW_MIN)
-            try:
-                slow_samples = _read_system_profile(client, "admin", slowms, since_dt)
-            except Exception as e:
-                print(f"[docdb_mongo] {cluster_id} system.profile read failed: {e}")
-        for finding in _build_profiling_findings(prof, slow_samples, slowms):
-            _insert_finding(cache_execute, cluster_id, run_ts, finding)
-            findings_emitted += 1
-    except Exception as e:
-        print(f"[docdb_mongo] {cluster_id} getProfilingStatus failed: {e}")
-
+    # No profiling branch: see the module docstring. Slow ops come from the
+    # CloudWatch profiler log export, not from this connection.
     return {"cluster_id": cluster_id, "findings_emitted": findings_emitted}
-
-
-def _timedelta_minutes(minutes):
-    from datetime import timedelta
-
-    return timedelta(minutes=minutes)
 
 
 def _process_cluster(resource, secrets, cache_execute, run_ts):

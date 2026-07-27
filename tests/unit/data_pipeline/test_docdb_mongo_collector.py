@@ -7,15 +7,15 @@ level so lambda_handler runs with no AWS.
 
 Strategy:
   - Load the handler via importlib (mirrors test_docdb_findings._load).
-  - Fake MongoClient whose .admin.command / [db].command / system.profile.find
-    return injected fixtures for serverStatus / currentOp / profile.
+  - Fake MongoClient whose .admin.command returns injected fixtures for
+    serverStatus / currentOp, and which RECORDS every command / collection it is
+    asked for (so the removed, DocumentDB-unsupported profiler calls stay gone).
   - Capture cache writes by patching the module's cache-execute helper, and
     assert which check_types were emitted.
 """
 
 import importlib.util
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -43,47 +43,35 @@ _RUN_TS = "2026-06-12T00:00:00+00:00"
 
 
 class _FakeDB:
-    def __init__(self, command_results, profile_docs):
+    """Records every command / collection access so a test can assert the
+    collector never issues one DocumentDB does not support (`profile`,
+    <db>.system.profile). Unknown commands return {} rather than raising: the
+    collector swallows command errors by design, so a raise here would be
+    invisible and the assertion has to be on the RECORD, not on the exception."""
+
+    def __init__(self, command_results, calls):
         self._command_results = command_results
-        self._profile_docs = profile_docs
+        self.calls = calls
 
     def command(self, name, *args, **kwargs):
+        self.calls.append(name)
         if name == "serverStatus":
             return self._command_results.get("serverStatus", {})
         if name == "currentOp":
             return self._command_results.get("currentOp", {"inprog": []})
-        if name == "profile":
-            return self._command_results.get("profile", {"was": 0, "slowms": 100})
-        raise AssertionError(f"unexpected command: {name}")
+        return {}
 
     def __getitem__(self, name):
-        # <db>["system.profile"] → a fake collection with find().sort().limit()
-        assert name == "system.profile"
-        return _FakeProfileCollection(self._profile_docs)
-
-
-class _FakeProfileCollection:
-    def __init__(self, docs):
-        self._docs = docs
-
-    def find(self, *args, **kwargs):
-        return self
-
-    def sort(self, *args, **kwargs):
-        return self
-
-    def limit(self, *args, **kwargs):
-        return self
-
-    def __iter__(self):
-        return iter(self._docs)
+        self.calls.append(f"collection:{name}")
+        return MagicMock()
 
 
 class _FakeClient:
-    def __init__(self, command_results=None, profile_docs=None, raise_on_connect=False):
+    def __init__(self, command_results=None, calls=None, raise_on_connect=False):
         if raise_on_connect:
             raise RuntimeError("connection refused")
-        self._db = _FakeDB(command_results or {}, profile_docs or [])
+        self.calls = calls if calls is not None else []
+        self._db = _FakeDB(command_results or {}, self.calls)
         self.closed = False
 
     @property
@@ -97,12 +85,14 @@ class _FakeClient:
         self.closed = True
 
 
-def _run_handler(clusters, command_results=None, profile_docs=None,
-                 connect_errors=None):
+def _run_handler(clusters, command_results=None, connect_errors=None,
+                 mongo_calls=None):
     """Run lambda_handler with fakes. Returns (emitted_findings, result_dict).
 
     clusters: list of registry rows.
     connect_errors: set of cluster_ids whose client factory should raise.
+    mongo_calls: optional list that collects every Mongo command / collection
+      name the collector touched.
     """
     connect_errors = connect_errors or set()
     emitted = []
@@ -133,7 +123,7 @@ def _run_handler(clusters, command_results=None, profile_docs=None,
         # cluster_id isn't passed to the factory; map by host (we set host=cluster_id).
         if host in connect_errors:
             raise RuntimeError("connection refused")
-        return _FakeClient(command_results=command_results, profile_docs=profile_docs)
+        return _FakeClient(command_results=command_results, calls=mongo_calls)
 
     table = MagicMock()
     table.scan.return_value = {"Items": clusters}
@@ -193,7 +183,6 @@ def test_long_running_ops_warning_fires():
             {"secs_running": 12, "ns": "appdb.orders"},
             {"secs_running": 3, "ns": "appdb.users"},  # below threshold → ignored
         ]},
-        "profile": {"was": 0, "slowms": 100},
     }
     emitted, _, _ = _run_handler([_docdb_row("docdb-a")], command_results=cmd)
     fin = next((e for e in emitted if e["check_type"] == "docdb_mongo_long_running_ops"), None)
@@ -206,7 +195,6 @@ def test_long_running_ops_critical_when_five_or_more():
     cmd = {
         "serverStatus": {},
         "currentOp": {"inprog": [{"secs_running": 20, "ns": f"db.c{i}"} for i in range(5)]},
-        "profile": {"was": 0, "slowms": 100},
     }
     emitted, _, _ = _run_handler([_docdb_row("docdb-a")], command_results=cmd)
     fin = next((e for e in emitted if e["check_type"] == "docdb_mongo_long_running_ops"), None)
@@ -218,66 +206,48 @@ def test_no_long_running_ops_when_all_short():
     cmd = {
         "serverStatus": {},
         "currentOp": {"inprog": [{"secs_running": 2, "ns": "db.c"}]},
-        "profile": {"was": 0, "slowms": 100},
     }
     emitted, _, _ = _run_handler([_docdb_row("docdb-a")], command_results=cmd)
     assert not any(e["check_type"] == "docdb_mongo_long_running_ops" for e in emitted)
 
 
 # ---------------------------------------------------------------------------
-# Test 2 — slow_ops finding when profiling on with slow samples
+# Test 2/3: the profiler path is GONE (E-0)
+#
+# Managed Amazon DocumentDB supports neither the `profile` command nor
+# <db>.system.profile, so the old branch issued an unsupported command every
+# 5 minutes per cluster and its docdb_mongo_profiler_off recommendation told the
+# DBA to run db.setProfilingLevel(...) on an engine that has no such call. Both
+# the call and the advice are removed; slow ops arrive via the CloudWatch
+# profiler log export (E-1) instead.
 # ---------------------------------------------------------------------------
 
 
-def test_slow_ops_finding_when_profiling_on_with_samples():
-    cmd = {
-        "serverStatus": {},
-        "currentOp": {"inprog": []},
-        "profile": {"was": 1, "slowms": 100},
-    }
-    profile_docs = [
-        {"ns": "appdb.orders", "millis": 450, "ts": datetime.now(timezone.utc)},
-        {"ns": "appdb.orders", "millis": 300, "ts": datetime.now(timezone.utc)},
-        {"ns": "appdb.users", "millis": 200, "ts": datetime.now(timezone.utc)},
-    ]
-    emitted, _, _ = _run_handler(
-        [_docdb_row("docdb-a")], command_results=cmd, profile_docs=profile_docs
+def test_collector_never_issues_unsupported_profiler_commands():
+    calls = []
+    cmd = {"serverStatus": {}, "currentOp": {"inprog": [{"secs_running": 12, "ns": "db.c"}]}}
+    emitted, metric_writes, _ = _run_handler(
+        [_docdb_row("docdb-a")], command_results=cmd, mongo_calls=calls
     )
-    fin = next((e for e in emitted if e["check_type"] == "docdb_mongo_slow_ops"), None)
-    assert fin is not None, f"expected slow_ops, got {[e['check_type'] for e in emitted]}"
-    assert "3" in fin["value_str"]
-    # profiler is ON → must NOT emit profiler_off
-    assert not any(e["check_type"] == "docdb_mongo_profiler_off" for e in emitted)
+    assert "profile" not in calls, f"unsupported `profile` command issued: {calls}"
+    assert not any(c.startswith("collection:") for c in calls), (
+        f"touched a collection (system.profile is unsupported): {calls}"
+    )
+    assert calls == ["serverStatus", "currentOp"], calls
+    # The supported branches still work.
+    assert any(e["check_type"] == "docdb_mongo_long_running_ops" for e in emitted)
+    assert not any(
+        e["check_type"] in ("docdb_mongo_slow_ops", "docdb_mongo_profiler_off")
+        for e in emitted
+    ), f"profiler findings must be gone, got {[e['check_type'] for e in emitted]}"
 
 
-def test_no_slow_ops_when_profiling_on_but_no_samples():
-    cmd = {
-        "serverStatus": {},
-        "currentOp": {"inprog": []},
-        "profile": {"was": 1, "slowms": 100},
-    }
-    emitted, _, _ = _run_handler([_docdb_row("docdb-a")], command_results=cmd, profile_docs=[])
-    assert not any(e["check_type"] == "docdb_mongo_slow_ops" for e in emitted)
-    assert not any(e["check_type"] == "docdb_mongo_profiler_off" for e in emitted)
-
-
-# ---------------------------------------------------------------------------
-# Test 3 — profiler_off info finding when profiling level 0
-# ---------------------------------------------------------------------------
-
-
-def test_profiler_off_info_when_level_zero():
-    cmd = {
-        "serverStatus": {},
-        "currentOp": {"inprog": []},
-        "profile": {"was": 0, "slowms": 100},
-    }
-    emitted, _, _ = _run_handler([_docdb_row("docdb-a")], command_results=cmd)
-    fin = next((e for e in emitted if e["check_type"] == "docdb_mongo_profiler_off"), None)
-    assert fin is not None, f"expected profiler_off, got {[e['check_type'] for e in emitted]}"
-    assert fin["severity"] == "info"
-    # profiler off → no slow_ops finding
-    assert not any(e["check_type"] == "docdb_mongo_slow_ops" for e in emitted)
+def test_no_profiler_setprofilinglevel_advice_in_source():
+    """The impossible recommendation must not survive in the source either."""
+    src = (_ROOT / "handler.py").read_text()
+    assert "setProfilingLevel" not in src
+    assert "_read_system_profile" not in src
+    assert "_run_profiling_status" not in src
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +263,6 @@ def test_server_status_emits_metrics():
             "mem": {"resident": 2048},
         },
         "currentOp": {"inprog": []},
-        "profile": {"was": 0, "slowms": 100},
     }
     _, metric_writes, _ = _run_handler([_docdb_row("docdb-a")], command_results=cmd)
     mtypes = {m["metric_type"] for m in metric_writes}
@@ -333,7 +302,6 @@ def test_connection_error_is_isolated_other_clusters_still_run():
     cmd = {
         "serverStatus": {},
         "currentOp": {"inprog": [{"secs_running": 30, "ns": "db.c"}]},
-        "profile": {"was": 0, "slowms": 100},
     }
     clusters = [_docdb_row("docdb-bad"), _docdb_row("docdb-good")]
     # docdb-bad's host == "docdb-bad" → factory raises for it only.
@@ -361,7 +329,6 @@ def test_shared_run_ts_across_findings():
     cmd = {
         "serverStatus": {},
         "currentOp": {"inprog": [{"secs_running": 30, "ns": "db.c"}]},
-        "profile": {"was": 0, "slowms": 100},
     }
     emitted, _, _ = _run_handler([_docdb_row("docdb-a")], command_results=cmd)
     ts_values = {e["ts"] for e in emitted}
@@ -377,7 +344,6 @@ def test_non_documentdb_rows_skipped():
     cmd = {
         "serverStatus": {},
         "currentOp": {"inprog": [{"secs_running": 99, "ns": "db.c"}]},
-        "profile": {"was": 0, "slowms": 100},
     }
     clusters = [
         {"cluster_id": "pg-1", "engine_family": "relational", "mongo_secret_arn": "secret:pg-1"},

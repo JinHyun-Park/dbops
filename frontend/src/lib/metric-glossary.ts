@@ -102,6 +102,117 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
     what: "초당 커밋된 트랜잭션 수.",
     why: "처리량(throughput)의 직접 지표. rollback 비율이 높이 동반되면 애플리케이션 오류 의심.",
   },
+
+  // ── RDS instance (비-Aurora MySQL / SQL Server) health-score 시그널 ──
+  free_storage_bytes: {
+    label: "Free Storage",
+    what: "인스턴스 스토리지 잔여 용량 (CloudWatch FreeStorageSpace).",
+    why: "Aurora와 달리 RDS 인스턴스 볼륨은 자동 확장되지 않는다(storage autoscaling 미설정 시). 소진되면 STORAGE_FULL로 쓰기가 멈추므로 낮을수록 위험.",
+    unit: "bytes",
+  },
+  read_latency: {
+    label: "Read Latency",
+    what: "읽기 I/O 1건당 평균 소요 시간 (CloudWatch ReadLatency, 수집은 초 단위).",
+    why: "스토리지 포화·IOPS 한계 신호. 20ms를 넘어 지속되면 쿼리 응답 시간이 그대로 늘어난다.",
+    unit: "ms",
+  },
+  write_latency: {
+    label: "Write Latency",
+    what: "쓰기 I/O 1건당 평균 소요 시간 (CloudWatch WriteLatency, 수집은 초 단위).",
+    why: "커밋 지연의 직접 원인. gp2 버스트 소진, 프로비저닝 IOPS 부족, 대량 쓰기 시 상승.",
+    unit: "ms",
+  },
+
+  // ── ElastiCache (Redis/Valkey/Memcached) health-score 시그널 ──
+  engine_cpu: {
+    label: "Engine CPU",
+    what: "Redis/Valkey 엔진 스레드의 CPU 사용률 (EngineCPUUtilization).",
+    why: "명령 처리는 단일 스레드다. 노드 전체 CPU가 여유로워도 이 값이 높으면 이미 포화. 스케일업/샤딩 판단의 실제 기준.",
+    unit: "%",
+  },
+  cache_cpu: {
+    label: "CPU",
+    what: "캐시 노드 전체 CPU 사용률 (CPUUtilization).",
+    why: "멀티스레드인 Memcached에서는 이 값이 주 포화 지표. Redis에서는 복제·스냅샷 같은 백그라운드 작업까지 포함한다.",
+    unit: "%",
+  },
+  memory_usage_pct: {
+    label: "Memory Usage",
+    what: "maxmemory 대비 사용 중 메모리 비율 (DatabaseMemoryUsagePercentage).",
+    why: "100%에 가까우면 eviction 정책이 키를 버리기 시작하고, noeviction이면 쓰기가 거부된다.",
+    unit: "%",
+  },
+  evictions: {
+    label: "Evictions/min",
+    what: "메모리 확보를 위해 삭제된 키 수.",
+    why: "0이 정상. 계속 발생하면 working set이 노드 메모리를 초과한 상태다. 스케일업 또는 TTL·키 정리가 필요하다.",
+    unit: "/min",
+  },
+  curr_connections: {
+    label: "Connections",
+    what: "캐시 노드의 현재 클라이언트 커넥션 수 (CurrConnections).",
+    why: "maxclients(기본 65000)에 근접하면 신규 연결이 거부된다. 급증은 커넥션 풀 누수 신호.",
+  },
+  replication_lag: {
+    label: "Replication Lag",
+    what: "replica가 primary를 따라잡지 못한 지연.",
+    why: "replica 읽기에서 stale 값을 반환할 수 있는 시간. 쓰기 폭주·네트워크 지연·대형 키 복제 시 증가.",
+    unit: "s",
+  },
+  swap_usage: {
+    label: "Swap",
+    what: "노드가 사용 중인 swap 크기 (SwapUsage).",
+    why: "AWS 권장은 50MB 미만. 그 이상은 메모리가 부족해 디스크를 쓰는 상태로, 레이턴시가 급격히 나빠진다.",
+    unit: "MB",
+  },
+
+  // ── DocumentDB health-score 시그널 ──
+  cpu_utilization: {
+    label: "CPU",
+    what: "인스턴스 CPU 사용률 (CloudWatch CPUUtilization).",
+    why: "지속적으로 높으면 쿼리 비효율 또는 인스턴스 under-provisioning. 70% 경고, 90% 위험.",
+    unit: "%",
+  },
+  buffer_cache_hit: {
+    label: "Buffer Cache Hit",
+    what: "요청 블록을 버퍼 캐시에서 처리한 비율.",
+    why: "DocumentDB는 보통 95%+ 가 정상. 떨어지면 working set이 인스턴스 메모리를 초과했다는 의미다. 인덱스 추가나 스케일업을 검토한다.",
+    unit: "%",
+  },
+  cursors_timed_out: {
+    label: "Cursor Timeouts",
+    what: "타임아웃으로 정리된 커서 수.",
+    why: "0이 정상. 증가하면 애플리케이션이 커서를 끝까지 읽지 않고 방치해 서버 리소스를 잡고 있다는 신호.",
+  },
+
+  // ── DynamoDB health-score 시그널 ──
+  read_throttle_events: {
+    label: "Read Throttles",
+    what: "프로비저닝된 읽기 용량을 초과해 스로틀된 이벤트 수.",
+    why: "0이 정상. 발생하면 읽기가 지연·거부된다. 파티션 편중(hot key)이거나 RCU가 부족한 상태.",
+  },
+  write_throttle_events: {
+    label: "Write Throttles",
+    what: "프로비저닝된 쓰기 용량을 초과해 스로틀된 이벤트 수.",
+    why: "0이 정상. 발생하면 쓰기가 실패한다(재시도 필요). WCU 증설 또는 On-Demand 전환 검토.",
+  },
+  throttled_requests: {
+    label: "Throttled Requests",
+    what: "용량 초과로 거부된 요청 수 (ProvisionedThroughputExceeded).",
+    why: "테이블·인덱스 단위 스로틀의 총량. 지속되면 애플리케이션에 그대로 에러로 노출된다.",
+  },
+  latency_ms_getitem: {
+    label: "GetItem Latency",
+    what: "GetItem 요청의 평균 응답 시간 (SuccessfulRequestLatency).",
+    why: "단일 항목 조회는 보통 한 자리 ms. 상승하면 항목 크기 증가나 스로틀 재시도를 의심.",
+    unit: "ms",
+  },
+  latency_ms_query: {
+    label: "Query Latency",
+    what: "Query 요청의 평균 응답 시간 (SuccessfulRequestLatency).",
+    why: "스캔 범위가 넓거나 필터로 대량 항목을 버리면 상승한다. 키 설계·GSI 재검토 신호.",
+    unit: "ms",
+  },
 };
 
 /** Lookup with graceful fallback — unknown metric returns null so
