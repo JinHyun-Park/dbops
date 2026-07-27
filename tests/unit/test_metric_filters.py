@@ -381,7 +381,7 @@ _ALIASED_STRICT = _re.compile(r"\w+\.dimensions IS NULL OR \w+\.dimensions::text
 _CONST_USE = _re.compile(r"CLUSTER_LEVEL_ONLY|cluster_level_only\(")
 
 _EXPECTED_CLUSTER_LEVEL_PREDICATES = {
-    "api/dashboard/handler.py": 10,
+    "api/dashboard/handler.py": 8,
     "api/simulation/handler.py": 4,
     "data-pipeline/alert_evaluator/handler.py": 2,
     "data-pipeline/etl_collector/collectors/capacity_forecast.py": 3,
@@ -395,23 +395,46 @@ _EXPECTED_CLUSTER_LEVEL_PREDICATES = {
     "data-pipeline/outcome_evaluator/evaluator.py": 1,
     "data-pipeline/proactive_monitor/handler.py": 2,
     "data-pipeline/report_generator/handler.py": 7,
-    "mcp-servers/mcp_servers/incident/tools/correlate_signals.py": 2,
-    "mcp-servers/mcp_servers/incident/tools/diagnose_root_cause.py": 3,
-    "mcp-servers/mcp_servers/incident/tools/health_status.py": 2,
-    "mcp-servers/mcp_servers/performance/tools/compare_periods.py": 2,
+    "mcp-servers/mcp_servers/incident/tools/correlate_signals.py": 1,
+    "mcp-servers/mcp_servers/incident/tools/diagnose_root_cause.py": 2,
+    "mcp-servers/mcp_servers/incident/tools/health_status.py": 1,
+    "mcp-servers/mcp_servers/performance/tools/compare_periods.py": 1,
     "mcp-servers/mcp_servers/performance/tools/detect_anomalies.py": 2,
-    "mcp-servers/mcp_servers/performance/tools/forecast_capacity.py": 6,
-    "mcp-servers/mcp_servers/performance/tools/performance_summary.py": 4,
+    "mcp-servers/mcp_servers/performance/tools/forecast_capacity.py": 4,
+    "mcp-servers/mcp_servers/performance/tools/performance_summary.py": 3,
     "mcp-servers/mcp_servers/simulation/tools/capacity_cost.py": 3,
-    "mcp-servers/mcp_servers/simulation/tools/rds_rightsizing.py": 2,
+    "mcp-servers/mcp_servers/simulation/tools/rds_rightsizing.py": 1,
 }
 
 
+_IMPORT_LINE = _re.compile(r"^\s*(from\s+\S+\s+)?import\s")
+
+
+def _code_only(text):
+    """Drop import lines and comments before counting.
+
+    Cross-model review (Codex) caught this: counting the bare symbol anywhere
+    also counts `from ... import CLUSTER_LEVEL_ONLY`, an alias assignment and
+    any comment that merely NAMES the constant. The census is supposed to count
+    QUERY PREDICATES, so with those included someone could delete a real SQL
+    predicate, add a comment mentioning the constant, and keep the total stable,
+    which is exactly the deletion this guard exists to catch."""
+    kept = []
+    for line in text.splitlines():
+        if _IMPORT_LINE.match(line):
+            continue
+        line = _re.sub(r"#.*$", "", line)
+        if line.strip():
+            kept.append(line)
+    return "\n".join(kept)
+
+
 def _count_strict(text):
+    code = _code_only(text)
     return (
-        text.count(_STRICT_LITERAL)
-        + len(_ALIASED_STRICT.findall(text))
-        + len(_CONST_USE.findall(text))
+        code.count(_STRICT_LITERAL)
+        + len(_ALIASED_STRICT.findall(code))
+        + len(_CONST_USE.findall(code))
     )
 
 
