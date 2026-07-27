@@ -1012,14 +1012,20 @@ export default function DashboardPage() {
                     <ChangeImpactPanel clusterId={selectedCluster} />
                   </>
                 )}
+                {/* Anomalies is engine-agnostic on both sides: /anomalies is not
+                    family-gated, and the ETL now trains metric_baselines for
+                    every family, so gating it to relational + rds_instance hid
+                    seasonal anomalies from DocumentDB / DynamoDB / ElastiCache
+                    operators. engineFamily() has no unknown bucket (it defaults
+                    to relational), so this covers exactly the other four. */}
+                {fam !== "relational" && (
+                  <AnomaliesPanel clusterId={selectedCluster} />
+                )}
                 {(fam === "dynamodb" || fam === "documentdb") && (
                   <CapacityForecastPanel
                     clusterId={selectedCluster}
                     engine={activeEngine}
                   />
-                )}
-                {fam === "rds_instance" && (
-                  <AnomaliesPanel clusterId={selectedCluster} />
                 )}
                 {/* No manual CapacityForecastPanel for rds_instance: the
                     /capacity-forecast endpoint models growing-toward-limit and

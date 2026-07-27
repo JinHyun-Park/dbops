@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { fetchAnomalies } from "@/lib/api-client";
 import { streamChat } from "@/lib/agentcore-sse";
 import { fmtDecimal } from "@/lib/format";
+import { metricDef } from "@/lib/metric-glossary";
 
 interface Anomaly {
   metric_type: string;
@@ -38,9 +39,15 @@ const METRIC_LABELS: Record<string, string> = {
   replication_lag_ms: "복제 지연",
 };
 
+// The panel renders for every engine family, so a relational-only label table
+// would show a DocumentDB / DynamoDB / ElastiCache operator raw metric_type
+// strings. METRIC_LABELS stays first (relational wording unchanged), then the
+// shared glossary, which already labels every family's metric_types.
+// ponytail: no second label table, METRIC_GLOSSARY is the one that exists.
 function prettyMetric(m: string): string {
   if (!m) return "지표";
-  return METRIC_LABELS[m.toLowerCase()] || m;
+  const k = m.toLowerCase();
+  return METRIC_LABELS[k] || metricDef(k)?.label || m;
 }
 
 export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
@@ -183,8 +190,13 @@ function AnomalyDetailModal({
     setInsightLoading(true);
     const message =
       `이 데이터베이스에서 이상 징후가 감지됐어. **한국어로** 다음 3개 섹션으로 짧고 명확하게 진단해줘:\n` +
+      // Cause hints stay engine-neutral: this panel now renders for DocumentDB,
+      // DynamoDB and ElastiCache too, and naming planner regressions or lock
+      // storms to a Redis operator biases the diagnosis. The agent resolves the
+      // engine family from cluster_id and picks the mechanisms itself.
       `1. **추정 원인** — 메트릭 종류와 패턴을 보고 가장 그럴듯한 설명 ` +
-      `(애플리케이션 워크로드 급증, 폭주 쿼리, 배포, 플래너 회귀, 락 스톰 등).\n` +
+      `(워크로드 급증, 비효율 접근 패턴, 배포·설정 변경, 용량 한계·스로틀, 경합 등). ` +
+      `이 엔진에 실제로 해당하는 원인만 제시해줘.\n` +
       `2. **운영 영향** — 지금 사용자나 애플리케이션이 어떤 경험을 하고 있을지.\n` +
       `3. **다음 점검 단계** — 원인을 확정하기 위해 실행할 구체적인 쿼리 1건 또는 MCP 도구 1개. ` +
       `안전하다면 직접 실행해서 결과까지 포함해줘.\n\n` +
