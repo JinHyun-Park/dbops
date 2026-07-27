@@ -357,3 +357,115 @@ def test_outcome_evaluator_compares_cluster_level_to_cluster_level_baselines():
 
     verdict = ev._evaluate_metric(_query, {"cluster_id": "c", "watch_metric": "aas"})
     assert verdict == "resolved"
+
+
+# ===== deletion guard (E1-1 verification gap) =====
+#
+# The grep guard above forbids the WEAK literal, and the mixed-row result tests
+# cover 9 readers numerically. Neither catches a filter being DELETED at one of
+# the other sites: the adversarial verifier proved it by removing the strict
+# filter from pg_baseline_trainer and from proactive_monitor and watching the
+# whole suite stay green. Those two are the worst places for it to go unnoticed,
+# because the trainer feeds every seasonal anomaly score and the monitor raises
+# the alerts.
+#
+# So this is a census: how many cluster-level predicates each reader file is
+# known to need. Deleting one drops the count and fails here. Adding a new
+# cluster-level query raises it, which fails too and forces the author to record
+# the new site deliberately (and, better, to add a result test for it).
+import pathlib as _pathlib
+import re as _re
+
+_STRICT_LITERAL = "dimensions IS NULL OR dimensions::text = '{}'"
+_ALIASED_STRICT = _re.compile(r"\w+\.dimensions IS NULL OR \w+\.dimensions::text = '\{\}'")
+_CONST_USE = _re.compile(r"CLUSTER_LEVEL_ONLY|cluster_level_only\(")
+
+_EXPECTED_CLUSTER_LEVEL_PREDICATES = {
+    "api/dashboard/handler.py": 10,
+    "api/simulation/handler.py": 4,
+    "data-pipeline/alert_evaluator/handler.py": 2,
+    "data-pipeline/etl_collector/collectors/capacity_forecast.py": 3,
+    "data-pipeline/etl_collector/collectors/cost_check.py": 2,
+    "data-pipeline/etl_collector/collectors/docdb_findings.py": 3,
+    "data-pipeline/etl_collector/collectors/dynamodb_findings.py": 6,
+    "data-pipeline/etl_collector/collectors/elasticache_findings.py": 2,
+    "data-pipeline/etl_collector/collectors/mysql_param_fitness.py": 2,
+    "data-pipeline/etl_collector/collectors/pg_baseline_trainer.py": 1,
+    "data-pipeline/etl_collector/collectors/pg_param_fitness.py": 2,
+    "data-pipeline/outcome_evaluator/evaluator.py": 1,
+    "data-pipeline/proactive_monitor/handler.py": 2,
+    "data-pipeline/report_generator/handler.py": 7,
+    "mcp-servers/mcp_servers/incident/tools/correlate_signals.py": 2,
+    "mcp-servers/mcp_servers/incident/tools/diagnose_root_cause.py": 3,
+    "mcp-servers/mcp_servers/incident/tools/health_status.py": 2,
+    "mcp-servers/mcp_servers/performance/tools/compare_periods.py": 2,
+    "mcp-servers/mcp_servers/performance/tools/detect_anomalies.py": 2,
+    "mcp-servers/mcp_servers/performance/tools/forecast_capacity.py": 6,
+    "mcp-servers/mcp_servers/performance/tools/performance_summary.py": 4,
+    "mcp-servers/mcp_servers/simulation/tools/capacity_cost.py": 3,
+    "mcp-servers/mcp_servers/simulation/tools/rds_rightsizing.py": 2,
+}
+
+
+def _count_strict(text):
+    return (
+        text.count(_STRICT_LITERAL)
+        + len(_ALIASED_STRICT.findall(text))
+        + len(_CONST_USE.findall(text))
+    )
+
+
+def test_every_known_cluster_level_reader_still_carries_its_filters():
+    """Census guard: catches DELETION, which the weak-literal grep cannot."""
+    root = _pathlib.Path(_ROOT)
+    drift = []
+    for rel, expected in sorted(_EXPECTED_CLUSTER_LEVEL_PREDICATES.items()):
+        path = root / rel
+        assert path.exists(), f"reader moved or was deleted: {rel}"
+        found = _count_strict(path.read_text(encoding="utf-8"))
+        if found != expected:
+            drift.append(f"{rel}: expected {expected} cluster-level predicates, found {found}")
+    assert not drift, (
+        "cluster-level dimension filter census changed:\n  "
+        + "\n  ".join(drift)
+        + "\n\nIf you REMOVED a query, lower the number. If you ADDED a cluster-level "
+        "query, raise it and add a mixed-row result test for the new reader. If a "
+        "filter went missing, restore it: an unfiltered aggregate mixes a cluster "
+        "total with its per-instance / per-wait-event / per-GSI rows and returns a "
+        "silently wrong number."
+    )
+
+
+def test_the_census_covers_every_file_that_reads_metric_snapshots():
+    """A new reader file must not slip in unrecorded.
+
+    Detection is `FROM metric_snapshots`, not the bare table name: every
+    collector INSERTs into the table and would otherwise be flagged. Files that
+    touch the table without aggregating a VALUE (freshness MAX(ts), row counts,
+    the retention purge) are listed as dimension-agnostic with the reason."""
+    root = _pathlib.Path(_ROOT)
+    reads_from = _re.compile(r"FROM\s+metric_snapshots", _re.I)
+    dimension_agnostic = {
+        # per-rule MAX(ts) freshness only, no value aggregate
+        "api/alerts/handler.py",
+        # ETL freshness MAX(ts) + total row count
+        "api/clusters/handler.py",
+        # 90-day retention purge (DELETE), not a read
+        "data-pipeline/etl_collector/handler.py",
+    }
+    unrecorded = []
+    for sub in ("api", "mcp-servers/mcp_servers", "data-pipeline"):
+        for path in (root / sub).rglob("*.py"):
+            rel = str(path.relative_to(root))
+            if "__pycache__" in rel or rel in dimension_agnostic:
+                continue
+            if not reads_from.search(path.read_text(encoding="utf-8")):
+                continue
+            if rel not in _EXPECTED_CLUSTER_LEVEL_PREDICATES:
+                unrecorded.append(rel)
+    assert not unrecorded, (
+        "these files SELECT from metric_snapshots but are not in the census: "
+        + ", ".join(sorted(unrecorded))
+        + "\nAdd them with their cluster-level predicate count, or list them as "
+        "dimension-agnostic with a one-line reason."
+    )
