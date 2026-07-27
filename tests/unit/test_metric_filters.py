@@ -1,0 +1,359 @@
+"""metric_snapshots dimension-filter contract (E1-1).
+
+`metric_snapshots` stores the SAME `metric_type` at several dimensionalities:
+a cluster-level row (dimensions '{}'), per-instance rows ({instance,role}), per
+PI wait-event rows ({db.wait_event.name}) and per-GSI rows ({gsi}). A
+cluster-level aggregate that does not filter mixes a total with its own
+fractions: no error, just a wrong number. This has bitten the project three
+times.
+
+Two layers of guard here:
+
+  1. Drift guards: the api/ copy of the constants stays byte-identical to the
+     canonical mcp-servers module, and no reader may resurrect the WEAK form
+     `NOT jsonb_exists(dimensions,'instance')` (PI wait-event and GSI rows carry
+     no 'instance' key, so they survive it).
+
+  2. RESULT tests: a MIXED-row fixture (cluster total + 2 per-instance rows +
+     2 wait-event rows for the same metric_type) is pushed through the REAL
+     production SQL of the highest-value readers, and the computed number is
+     asserted to be the cluster-level answer. `_apply_dim_filter` models the two
+     predicates faithfully and picks the one the executed SQL actually contains,
+     so dropping or weakening the filter changes the returned NUMBER and the
+     assertion fails. Every result test also asserts the fixture is
+     discriminating (the weak/no-filter answer differs), so the test cannot
+     silently degrade into a tautology.
+"""
+
+import importlib.util
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+_ROOT = Path(__file__).resolve().parents[2]
+
+_CANONICAL = _ROOT / "mcp-servers" / "mcp_servers" / "shared" / "metric_filters.py"
+_API_COPY = _ROOT / "api" / "dashboard" / "metric_filters.py"
+
+STRICT = "AND (dimensions IS NULL OR dimensions::text = '{}')"
+WEAK = "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))"
+
+
+# ===========================================================================
+# 1. Drift guards
+# ===========================================================================
+
+
+def _load(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_api_copy_of_the_constants_is_identical_to_the_canonical_module():
+    """api/ cannot import mcp_servers (no shared Lambda layer), so the constants
+    are duplicated. If the two ever drift, the dashboard and the agent answer the
+    same question differently."""
+    canonical = _load(_CANONICAL, "metric_filters_canonical")
+    api_copy = _load(_API_COPY, "metric_filters_api_copy")
+    assert canonical.CLUSTER_LEVEL_ONLY == api_copy.CLUSTER_LEVEL_ONLY
+    assert canonical.EXCLUDE_PER_INSTANCE == api_copy.EXCLUDE_PER_INSTANCE
+    assert canonical.CLUSTER_LEVEL_ONLY == STRICT
+    assert canonical.EXCLUDE_PER_INSTANCE == WEAK
+    # Same verbatim-duplication contract engine_family.py has.
+    assert _CANONICAL.read_text() == _API_COPY.read_text()
+
+
+def test_no_reader_uses_the_weak_per_instance_only_filter():
+    """The weak form is INSUFFICIENT for a cluster-level aggregate: PI
+    wait-event rows ({db.wait_event.name}) and DynamoDB GSI rows ({gsi}) have no
+    'instance' key, so they pass it. It survives only as the named
+    EXCLUDE_PER_INSTANCE constant, for the readers that deliberately return the
+    dimensioned detail rows (wait-event stacked chart, per-GSI panel)."""
+    hits = subprocess.run(
+        ["grep", "-rln", "--include=*.py", "NOT jsonb_exists(dimensions, 'instance')",
+         "api", "data-pipeline", "mcp-servers", "agent"],
+        cwd=_ROOT, capture_output=True, text=True,
+    ).stdout.split()
+    allowed = {"mcp-servers/mcp_servers/shared/metric_filters.py",
+               "api/dashboard/metric_filters.py"}
+    assert set(hits) <= allowed, f"weak dimension filter resurrected in: {sorted(set(hits) - allowed)}"
+
+
+# ===========================================================================
+# 2. Mixed-row fixture + faithful predicate model
+# ===========================================================================
+
+# One metric_type ('aas'), five writers' worth of rows, as production stores them:
+#   ts=10 / ts=20  cw-style: cluster total '{}' + two per-instance rows
+#   ts=30          pi_collector: '{}' total + one row per wait event
+# Cluster-level truth: [2.0, 6.0, 6.0] -> avg 4.666.., max 6.0, n=3, latest 6.0
+_AAS_ROWS = [
+    {"ts": 10, "metric_type": "aas", "value": 2.0, "dimensions": {}},
+    {"ts": 10, "metric_type": "aas", "value": 1.2, "dimensions": {"instance": "i-1", "role": "writer"}},
+    {"ts": 10, "metric_type": "aas", "value": 0.8, "dimensions": {"instance": "i-2", "role": "reader"}},
+    {"ts": 20, "metric_type": "aas", "value": 6.0, "dimensions": {}},
+    {"ts": 20, "metric_type": "aas", "value": 4.0, "dimensions": {"instance": "i-1", "role": "writer"}},
+    {"ts": 20, "metric_type": "aas", "value": 2.0, "dimensions": {"instance": "i-2", "role": "reader"}},
+    {"ts": 30, "metric_type": "aas", "value": 6.0, "dimensions": {}},
+    {"ts": 30, "metric_type": "aas", "value": 5.0, "dimensions": {"db.wait_event.name": "CPU"}},
+    {"ts": 30, "metric_type": "aas", "value": 1.0, "dimensions": {"db.wait_event.name": "IO:DataFileRead"}},
+]
+
+_CLUSTER_AAS = [2.0, 6.0, 6.0]
+_CLUSTER_AVG = sum(_CLUSTER_AAS) / len(_CLUSTER_AAS)   # 4.666...
+_CLUSTER_MAX = 6.0
+
+# What the WEAK filter would have produced (wait-event rows survive it).
+_WEAK_AAS = [2.0, 6.0, 6.0, 5.0, 1.0]
+_WEAK_AVG = sum(_WEAK_AAS) / len(_WEAK_AAS)            # 4.0
+
+assert _CLUSTER_AVG != _WEAK_AVG, "fixture must discriminate strict from weak"
+
+
+def _apply_dim_filter(sql, rows=_AAS_ROWS):
+    """Apply the dimension predicate the SQL ACTUALLY contains. This is the one
+    place the two predicates are modelled; every result test below goes through
+    it, so a dropped/weakened filter in production SQL changes the numbers the
+    tests assert on."""
+    flat = " ".join(sql.split())
+    if STRICT in flat:
+        keep = lambda d: d is None or d == {}                       # noqa: E731
+    elif WEAK in flat:
+        keep = lambda d: d is None or "instance" not in d           # noqa: E731
+    else:
+        keep = lambda d: True                                       # noqa: E731
+    return [r for r in rows if keep(r["dimensions"])]
+
+
+def _agg(sql, rows=_AAS_ROWS):
+    """(avg, max, min, count, latest_candidates) of the surviving 'aas' rows."""
+    kept = [r for r in _apply_dim_filter(sql, rows) if r["metric_type"] == "aas"]
+    if not kept:
+        return None
+    vals = [r["value"] for r in kept]
+    top_ts = max(r["ts"] for r in kept)
+    return {
+        "avg": sum(vals) / len(vals),
+        "max": max(vals),
+        "min": min(vals),
+        "count": len(vals),
+        "latest_candidates": sorted(r["value"] for r in kept if r["ts"] == top_ts),
+    }
+
+
+def test_the_predicate_model_itself_discriminates():
+    """Guard the guard: if _apply_dim_filter stopped distinguishing the forms,
+    every result test below would pass vacuously."""
+    base = "SELECT AVG(value) FROM metric_snapshots WHERE cluster_id = :cid "
+    assert _agg(base + STRICT)["avg"] == pytest.approx(_CLUSTER_AVG)
+    assert _agg(base + WEAK)["avg"] == pytest.approx(_WEAK_AVG)
+    assert _agg(base)["avg"] == pytest.approx(sum(r["value"] for r in _AAS_ROWS) / len(_AAS_ROWS))
+
+
+# ===========================================================================
+# 3. RESULT tests: api/dashboard
+# ===========================================================================
+
+_DASHBOARD_DIR = _ROOT / "api" / "dashboard"
+sys.path.insert(0, str(_DASHBOARD_DIR))
+os.environ.setdefault("CLUSTERS_TABLE", "clusters-stub")
+os.environ.setdefault("CACHE_DB_CLUSTER_ARN", "arn:aws:rds:ap-northeast-2:123:cluster:cache")
+os.environ.setdefault("CACHE_DB_SECRET_ARN", "arn:aws:secretsmanager:ap-northeast-2:123:secret:cache")
+os.environ.setdefault("CACHE_DB_NAME", "dbops")
+_dashboard = _load(_DASHBOARD_DIR / "handler.py", "dashboard_handler_metric_filters")
+
+
+def test_dashboard_overview_metrics_report_the_cluster_level_average():
+    """/overview headline cards. Before E1-1 this used the weak filter, so the
+    PI wait-event rows were averaged in alongside the cluster total."""
+    def _query(sql, params=None):
+        if "cluster_meta" in sql:
+            return [{"cluster_id": "c", "engine": "aurora-postgresql", "status": "available"}]
+        if "metric_snapshots" in sql:
+            a = _agg(sql)
+            return [{"metric_type": "aas", "avg_val": a["avg"], "max_val": a["max"]}]
+        return []
+
+    row = _dashboard._overview(_query, "c")["metrics"][0]
+    assert row["avg_val"] == pytest.approx(_CLUSTER_AVG)
+    assert row["avg_val"] != pytest.approx(_WEAK_AVG)
+    assert row["max_val"] == pytest.approx(_CLUSTER_MAX)
+
+
+def test_fleet_latest_value_has_exactly_one_candidate_row():
+    """Fleet cards read `(array_agg(value ORDER BY ts DESC))[1]`, "the latest
+    value". With the weak filter the newest timestamp holds THREE rows (total +
+    two wait events), so PostgreSQL is free to hand the card a single wait
+    event's 5.0 as the cluster's AAS. Strict leaves exactly one candidate, so
+    the number is well-defined."""
+    captured = {}
+
+    def _query(sql, params=None):
+        if "latest_metrics" in sql:
+            captured["sql"] = sql
+        return []
+
+    _dashboard._multi_cluster_overview(_query)
+    a = _agg(captured["sql"])
+    assert a["latest_candidates"] == [_CLUSTER_MAX]
+    assert len(_agg(captured["sql"].replace(STRICT, WEAK))["latest_candidates"]) == 3
+
+
+def test_dashboard_capacity_forecast_regresses_only_cluster_level_rows(monkeypatch):
+    """The api/ twin of the Performance MCP `forecast_capacity` that was fixed in
+    E-0. Sample count and `latest` must come from the cluster-level series."""
+    captured = {}
+
+    def _query(sql, params=None):
+        if "metric_snapshots" in sql:
+            captured["sql"] = sql
+            a = _agg(sql)
+            return [{"slope": 0.1, "latest": a["latest_candidates"][-1],
+                     "first_ts": "2026-07-01", "last_ts": "2026-07-24", "samples": a["count"]}]
+        return []
+
+    monkeypatch.setattr(_dashboard, "_registry_engine", lambda _cid: "aurora-postgresql")
+    out = _dashboard._capacity_forecast(_query, "c", "aas", 30)
+    assert out["samples"] == len(_CLUSTER_AAS)
+    assert out["samples"] != len(_WEAK_AAS)
+    assert out["current"] == pytest.approx(_CLUSTER_MAX)
+    assert STRICT in captured["sql"]
+
+
+# ===========================================================================
+# 4. RESULT tests: MCP server tools (agent-facing)
+# ===========================================================================
+
+
+def test_agent_health_status_reports_the_cluster_level_average():
+    """The agent's health tool must not disagree with the dashboard card."""
+    from mcp_servers.incident.tools.health_status import get_health_status_impl
+    from mcp_servers.shared.models import QueryResult
+
+    class _Cache:
+        def execute(self, sql, params=None):
+            if "cluster_meta" in sql:
+                return QueryResult(columns=["status"],
+                                   rows=[{"cluster_id": "c", "status": "available",
+                                          "engine": "aurora-postgresql"}], row_count=1)
+            a = _agg(sql)
+            return QueryResult(columns=["metric_type", "avg_val", "max_val"],
+                               rows=[{"metric_type": "aas", "avg_val": a["avg"],
+                                      "max_val": a["max"]}], row_count=1)
+
+    metrics = get_health_status_impl(_Cache(), "c")["current_metrics"][0]
+    assert metrics["avg_val"] == pytest.approx(_CLUSTER_AVG)
+    assert metrics["avg_val"] != pytest.approx(_WEAK_AVG)
+
+
+def test_agent_performance_summary_kpis_are_cluster_level():
+    """avg_aas / max_aas / peak_connections are three separate subselects, each
+    one needs the filter, so the aggregate is computed per subselect here."""
+    from mcp_servers.performance.tools.performance_summary import get_performance_summary_impl
+    from mcp_servers.shared.models import QueryResult
+
+    class _Cache:
+        def execute(self, sql, params=None):
+            # One statement, three metric_snapshots subselects: each must carry
+            # the filter, so model them by counting occurrences.
+            assert sql.count(STRICT) == 3, sql
+            a = _agg(sql)
+            return QueryResult(columns=["avg_aas", "max_aas", "slow_count", "peak_connections"],
+                               rows=[{"avg_aas": a["avg"], "max_aas": a["max"],
+                                      "slow_count": 0, "peak_connections": a["max"]}],
+                               row_count=1)
+
+    kpis = get_performance_summary_impl(_Cache(), "c")["kpis"]
+    assert kpis["avg_aas"] == pytest.approx(_CLUSTER_AVG)
+    assert kpis["avg_aas"] != pytest.approx(_WEAK_AVG)
+
+
+def test_agent_compare_periods_averages_cluster_level_rows():
+    from mcp_servers.performance.tools.compare_periods import compare_periods_impl
+    from mcp_servers.shared.models import QueryResult
+
+    class _Cache:
+        def execute(self, sql, params=None):
+            a = _agg(sql)
+            return QueryResult(
+                columns=["avg_value", "max_value", "min_value", "sample_count"],
+                rows=[{"avg_value": a["avg"], "max_value": a["max"],
+                       "min_value": a["min"], "sample_count": a["count"]}], row_count=1)
+
+    out = compare_periods_impl(_Cache(), "c", "a1", "a2", "b1", "b2", metric_type="aas")
+    assert out["period_a"]["avg_value"] == pytest.approx(_CLUSTER_AVG)
+    assert out["period_a"]["sample_count"] == len(_CLUSTER_AAS)
+
+
+# ===========================================================================
+# 5. RESULT tests: data-pipeline
+# ===========================================================================
+
+
+def test_daily_report_aas_stats_are_cluster_level():
+    """report_generator._build_report_data read `aas` with NO dimension filter at
+    all, so avg/max/p95/samples in every daily report mixed the cluster total
+    with its own per-wait-event fractions."""
+    handler_path = _ROOT / "data-pipeline" / "report_generator" / "handler.py"
+    sys.path.insert(0, str(handler_path.parent))
+    rg = _load(handler_path, "report_generator_metric_filters")
+
+    def _cache_query(sql, params=None):
+        if "metric_snapshots" not in sql:
+            return []
+        a = _agg(sql)
+        if a is None:
+            return []
+        return [{"avg_aas": a["avg"], "max_aas": a["max"], "p95_aas": a["max"],
+                 "samples": a["count"], "ts": "2026-07-24T00:00:00Z", "value": a["max"],
+                 "cnt": a["count"], "max_conn": a["max"], "avg_conn": a["avg"],
+                 "start_bytes": 1.0, "end_bytes": 2.0, "delta_bytes": 1.0}]
+
+    data = rg._build_report_data(_cache_query, "c")
+    assert data["aas"]["avg_aas"] == pytest.approx(_CLUSTER_AVG)
+    assert data["aas"]["avg_aas"] != pytest.approx(_WEAK_AVG)
+    assert data["aas"]["samples"] == len(_CLUSTER_AAS)
+    assert data["aas_busy_minutes_above_threshold"] == len(_CLUSTER_AAS)
+
+
+def test_alert_operand_evaluates_the_cluster_level_aggregate():
+    """An alert firing on a single PI wait event instead of the cluster total is
+    a false page. MAX over the window must be the cluster series' max."""
+    handler_path = _ROOT / "data-pipeline" / "alert_evaluator" / "handler.py"
+    sys.path.insert(0, str(handler_path.parent))
+    ae = _load(handler_path, "alert_evaluator_metric_filters")
+
+    def _query(sql, params=None):
+        return [{"v": _agg(sql)["avg"]}]
+
+    matched, obs, _summary = ae._evaluate_operand(
+        _query, "c", {"metric_type": "aas", "comparison": ">", "threshold": 4.5, "agg": "avg"})
+    assert obs == pytest.approx(_CLUSTER_AVG)
+    assert matched is True          # 4.67 > 4.5
+    # With the weak filter the observed average is 4.0 and the alert would NOT
+    # have fired: the wrong number changes the decision, not just the display.
+    assert _WEAK_AVG < 4.5
+
+
+def test_outcome_evaluator_compares_cluster_level_to_cluster_level_baselines():
+    """metric_baselines is trained cluster-level only (pg_baseline_trainer), so
+    the observed value must be cluster-level too or the learning loop grades
+    remediations against a mismatched scale."""
+    ev_path = _ROOT / "data-pipeline" / "outcome_evaluator" / "evaluator.py"
+    sys.path.insert(0, str(ev_path.parent))
+    ev = _load(ev_path, "outcome_evaluator_metric_filters")
+
+    def _query(sql, params=None):
+        if "metric_baselines" in sql:
+            # median/iqr tuned so the CLUSTER answer (4.67) is inside the band
+            # and the WEAK answer (4.0) is outside it.
+            return [{"median": 4.6, "iqr": 0.2}]
+        return [{"v": _agg(sql)["avg"]}]
+
+    verdict = ev._evaluate_metric(_query, {"cluster_id": "c", "watch_metric": "aas"})
+    assert verdict == "resolved"

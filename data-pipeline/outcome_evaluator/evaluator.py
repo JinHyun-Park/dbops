@@ -20,7 +20,9 @@ def _evaluate_metric(query, case) -> str:
         "SELECT AVG(value) AS v FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = :m "
         f"AND ts > NOW() - INTERVAL '{EVAL_LOOKBACK_MIN} minutes' "
-        "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))",
+        # Strict: metric_baselines is trained cluster-level only
+        # (pg_baseline_trainer), so the observed value must be too.
+        "AND (dimensions IS NULL OR dimensions::text = '{}')",
         {"cid": case["cluster_id"], "m": case["watch_metric"]},
     )
     v = _first(recent, "v")

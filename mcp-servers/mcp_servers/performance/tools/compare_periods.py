@@ -1,4 +1,5 @@
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 
 
 def compare_periods_impl(
@@ -17,7 +18,7 @@ def compare_periods_impl(
             "FROM metric_snapshots "
             "WHERE cluster_id = :cluster_id AND metric_type = :metric_type "
             "AND ts >= :start_time AND ts < :end_time "
-            "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))"
+            f"{CLUSTER_LEVEL_ONLY}"
         )
         params = {
             "cluster_id": cluster_id,

@@ -1249,7 +1249,10 @@ def _simulate_rds_instance_rightsizing(
         " COUNT(*) FILTER (WHERE metric_type='cpu') AS samples "
         "FROM metric_snapshots "
         "WHERE cluster_id = :cid AND ts >= NOW() - (:h || ' hours')::interval "
-        "  AND metric_type IN ('cpu','db_connections','read_iops','write_iops','freeable_memory')",
+        "  AND metric_type IN ('cpu','db_connections','read_iops','write_iops','freeable_memory') "
+        # Cluster/instance-level rows only (same strict filter as the MCP twin
+        # simulation/tools/rds_rightsizing.py and _cache_query sites above).
+        "  AND (dimensions IS NULL OR dimensions::text = '{}')",
         {"cid": cluster_id, "h": window_hours},
     )
     row = agg[0] if isinstance(agg, list) and agg and isinstance(agg[0], dict) else {}

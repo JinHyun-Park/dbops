@@ -143,7 +143,7 @@ def collect_mysql_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, c
         "SELECT MAX(value) AS peak, COUNT(*) AS samples FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = 'db_connections' "
         "  AND ts > NOW() - INTERVAL '7 days' "
-        "  AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))", {"cid": cluster_id},
+        "  AND (dimensions IS NULL OR dimensions::text = '{}')", {"cid": cluster_id},
     )
     peak_conn = float(conn_rows[0]["peak"]) if conn_rows and conn_rows[0]["peak"] is not None else None
     conn_samples = int(conn_rows[0]["samples"] or 0) if conn_rows else 0
@@ -201,7 +201,7 @@ def collect_mysql_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, c
         "SELECT AVG(value) AS avg_hit, COUNT(*) AS samples FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = 'buffer_cache_hit' "
         "  AND ts > NOW() - INTERVAL '7 days' "
-        "  AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))", {"cid": cluster_id},
+        "  AND (dimensions IS NULL OR dimensions::text = '{}')", {"cid": cluster_id},
     )
     avg_hit = float(hit_rows[0]["avg_hit"]) if hit_rows and hit_rows[0]["avg_hit"] is not None else None
     hit_samples = int(hit_rows[0]["samples"] or 0) if hit_rows else 0

@@ -1,4 +1,5 @@
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 
 
 def correlate_signals_impl(
@@ -7,12 +8,12 @@ def correlate_signals_impl(
     start_time: str,
     end_time: str,
 ) -> dict:
-    metrics_sql = """
+    metrics_sql = f"""
         SELECT ts as event_time, 'metric' as signal_type, metric_type as detail, value::text as value
         FROM metric_snapshots
         WHERE cluster_id = :cluster_id AND ts >= :start_time::timestamptz AND ts < :end_time::timestamptz
         AND metric_type IN ('aas', 'cpu', 'db_connections')
-        AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))
+        {CLUSTER_LEVEL_ONLY}
     """
     events_sql = """
         SELECT event_time, 'event' as signal_type, event_type as detail, message as value

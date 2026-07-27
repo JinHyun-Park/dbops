@@ -30,6 +30,7 @@ real config we return ``grounded: False`` and NO date at all.
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.engine_family import DOCUMENTDB, RDS_INSTANCE, RELATIONAL
 from mcp_servers.shared.engine_family import engine_family as _engine_family
+from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 
 # Aurora 클러스터 볼륨 상한(128 TiB), 추정이 아닌 실제 플랫폼 한계.
 # DocumentDB는 엔진 8.0 미만 인스턴스 기반 클러스터가 128 TiB, 8.0 이상은
@@ -62,18 +63,10 @@ _STORAGE_SERIES = {
 # DynamoDB 거부와 구분하지 못한다.
 _VALID_METRICS = ("storage", "connections", "aas")
 
-# metric_snapshots는 같은 metric_type을 여러 차원으로 저장한다. 반드시 클러스터
-# 단위 행(dimensions 없음/빈 객체)만 회귀해야 한다:
-#   * cw_collector: db_connections 등을 클러스터 단위(dimensions='{}')와
-#     인스턴스 단위(dimensions={instance,role})로 **두 번** 쓴다.
-#   * pi_collector: aas(db.load.avg)를 wait event별로 한 행씩 + 총합 '{}' 한 행.
-# 필터가 없으면 REGR_SLOPE/REGR_R2가 총량과 조각을 섞어 회귀하고,
-# current_value(최신 1행)가 인스턴스/대기이벤트 행일 수 있다. 이 함정은 이
-# 프로젝트에서 이미 두 번 터졌다(Instance Compare, 그리고 이 툴).
-# jsonb_exists(dimensions,'instance') 형태는 쓰지 말 것: aas의 wait-event 행에는
-# 'instance' 키가 없어 그대로 통과한다. 아래 STRICT 형태만 사용한다
-# (capacity_forecast collector · detect_anomalies와 동일).
-_CLUSTER_LEVEL_ONLY = "AND (dimensions IS NULL OR dimensions::text = '{}')"
+# metric_snapshots는 같은 metric_type을 여러 차원으로 저장한다(인스턴스별·PI
+# 대기이벤트별·GSI별). 클러스터 단위 회귀는 반드시 strict 필터를 써야 한다.
+# 이유와 반례는 shared/metric_filters.py 주석 참고.
+_CLUSTER_LEVEL_ONLY = CLUSTER_LEVEL_ONLY
 
 
 def _f(value, default=0.0) -> float:

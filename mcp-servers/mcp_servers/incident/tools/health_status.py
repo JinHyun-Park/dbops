@@ -1,6 +1,7 @@
 import json
 
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 
 # Engines that are NOT relational Aurora clusters — for these we surface
 # engine + parsed resource_details so the agent has billing mode, capacity,
@@ -12,11 +13,11 @@ def get_health_status_impl(cache: CacheClient, cluster_id: str) -> dict:
     meta_sql = "SELECT * FROM cluster_meta WHERE cluster_id = :cluster_id"
     meta = cache.execute(meta_sql, {"cluster_id": cluster_id})
 
-    metrics_sql = """
+    metrics_sql = f"""
         SELECT metric_type, AVG(value) as avg_val, MAX(value) as max_val
         FROM metric_snapshots
         WHERE cluster_id = :cluster_id AND ts > NOW() - INTERVAL '10 minutes'
-          AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))
+          {CLUSTER_LEVEL_ONLY}
         GROUP BY metric_type
     """
     metrics = cache.execute(metrics_sql, {"cluster_id": cluster_id})

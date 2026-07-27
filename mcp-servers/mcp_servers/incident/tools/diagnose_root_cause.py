@@ -21,6 +21,7 @@ scores rank *suspects*, they do not prove guilt.
 from datetime import datetime, timedelta, timezone
 
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 
 # ---------------------------------------------------------------------------
 # Scoring weights. Kept as module constants so the ranking is transparent and
@@ -403,7 +404,7 @@ def _collect_metric_spikes(cache, cluster_id, start_iso, end_iso, baseline_start
     single grouped query per metric to keep round-trips down.
     """
     out = []
-    sql = """
+    sql = f"""
         SELECT metric_type,
                AVG(value) FILTER (
                    WHERE ts >= :start_time::timestamptz AND ts < :end_time::timestamptz
@@ -416,7 +417,7 @@ def _collect_metric_spikes(cache, cluster_id, start_iso, end_iso, baseline_start
           AND ts >= :baseline_start::timestamptz
           AND ts < :end_time::timestamptz
           AND metric_type IN ('aas', 'cpu', 'db_connections')
-          AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))
+          {CLUSTER_LEVEL_ONLY}
         GROUP BY metric_type
     """
     params = {

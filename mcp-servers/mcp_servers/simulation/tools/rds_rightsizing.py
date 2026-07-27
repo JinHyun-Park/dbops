@@ -6,6 +6,7 @@ recommended (compute + storage/IOPS + SQL Server license). Never fabricates a
 price: any null unit price → pricing_source='fallback_estimate' and null costs.
 """
 
+from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 from mcp_servers.shared.rds_instance_pricing import (
     price_rds_instance_hour,
     price_rds_storage_month,
@@ -117,7 +118,11 @@ def simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=
         " COUNT(*) FILTER (WHERE metric_type='cpu') AS samples "
         "FROM metric_snapshots "
         "WHERE cluster_id = :cid AND ts >= NOW() - (:h || ' hours')::interval "
-        "  AND metric_type IN ('cpu','db_connections','read_iops','write_iops','freeable_memory')",
+        "  AND metric_type IN ('cpu','db_connections','read_iops','write_iops','freeable_memory') "
+        # Cluster/instance-level rows only. Aurora writes the SAME metric_types
+        # per instance too, so an Aurora cluster (or a future per-dimension
+        # writer) would otherwise mix a total with its fractions in the p95.
+        f"  {CLUSTER_LEVEL_ONLY}",
         {"cid": cluster_id, "h": window_hours})
     row = agg[0] if isinstance(agg, list) and agg and isinstance(agg[0], dict) else {}
     cpu_p95 = row.get("cpu_p95")

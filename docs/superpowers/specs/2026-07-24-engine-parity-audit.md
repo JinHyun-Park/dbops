@@ -727,3 +727,121 @@ LAZY VERSION THAT ACTUALLY HOLDS AT M: schema_v26.sql + one collector for PG and
 - A DocumentDB cluster-write suite (reboot, snapshot, failover, instance class, replica add/remove): defer. Largest write-parity gap on paper, but nothing in our diagnosis chain drives those actions except a single cost_oversized finding, and the console covers them. Build the write when a finding recommends it, which is the pattern that made the ElastiCache and rds_instance write sets defensible.
 - Reserved-node and reserved-capacity purchase modelling for ElastiCache and DynamoDB: marginal. Cost Explorer already surfaces Savings Plan and reservation recommendations, and cost_check already pulls the real CE recommendation for the RDS families.
 - A generic cross-engine plan or index abstraction layer: YAGNI and actively harmful. PG plan JSON, MySQL query_block and SQL Server showplan XML are three genuinely different shapes. Three small parsers behind one dispatch stay readable; one unified plan model will not.
+
+---
+
+# 부록 A: metric_snapshots 리더 전수 분류 (Task E1-1, 2026-07-27)
+
+`metric_snapshots`는 **같은 `metric_type`을 여러 차원으로 동시에 저장한다.**
+
+| 차원                 | `dimensions`                                  | 라이터                                                                                                             |
+| -------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 클러스터/테이블 레벨 | `NULL` 또는 `{}`                              | cw_collector, pi_collector(총합 행), pg/mysql/mssql_activity, docdb/dynamodb/elasticache/rds_instance_cw_collector |
+| 인스턴스별           | `{"instance","role"}`                         | cw_collector `collect_cw_instance_metrics`                                                                         |
+| PI 대기이벤트별      | `{"db.wait_event.name","db.wait_event.type"}` | pi_collector (`aas`)                                                                                               |
+| DynamoDB GSI별       | `{"gsi"}`                                     | dynamodb_cw_collector                                                                                              |
+| SQL Server 대기별    | `{"wait_type"}`                               | rds_direct_collector/mssql_waits                                                                                   |
+
+필터 없이 집계하면 총합과 그 조각이 섞여 **조용히 틀린 숫자**가 나온다.
+
+## 규칙
+
+클러스터 레벨 집계는 **strict 형태만** 쓴다.
+
+```sql
+AND (dimensions IS NULL OR dimensions::text = '{}')
+```
+
+`NOT jsonb_exists(dimensions, 'instance')`(weak 형태)는 **불충분하다.** PI 대기이벤트
+행과 GSI 행에는 `instance` 키가 없어 그대로 통과한다. E-0에서 리뷰어 둘이 엇갈린
+지점이며 strict가 맞다.
+
+정본: `mcp-servers/mcp_servers/shared/metric_filters.py`
+(`CLUSTER_LEVEL_ONLY`, 세부 행을 의도적으로 남기는 리더용 `EXCLUDE_PER_INSTANCE`).
+`api/`는 `mcp_servers`를 임포트할 수 없어 `api/dashboard/metric_filters.py`에
+**verbatim 복제**하고, `tests/unit/test_metric_filters.py`가 두 파일의 동일성을 단정한다.
+나머지 패키지(`api/simulation`, `data-pipeline/*`)는 람다 asset이 각각 분리돼 있어
+한 줄 상수를 5번 더 복제하는 대신 **리터럴을 인라인**하고, 같은 테스트의 repo 전역
+grep 가드가 weak 형태의 부활을 막는다.
+
+## 분류 결과 (리더 SQL 문장 59개)
+
+- **클러스터 레벨로 수정 24** (weak -> strict 18, 필터 전무 -> strict 6)
+- **의도적으로 세부 행을 읽음 5** (건드리지 않음)
+- **이미 올바름 30** (strict 26 + 차원 무관 4)
+
+### A-1. 수정한 클러스터 레벨 집계 (24)
+
+| 파일 : 함수                                                              | 무엇을 계산하나                                       | 수정 전       | 증상                                                                                  |
+| ------------------------------------------------------------------------ | ----------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------- |
+| `api/dashboard/handler.py : _overview`                                   | 1시간 metric AVG/MAX (대시보드 헤드라인 카드)         | weak          | `aas` 대기이벤트 행이 평균에 섞임                                                     |
+| `api/dashboard/handler.py : _multi_cluster_overview`                     | Fleet 카드 최신값 `(array_agg ORDER BY ts DESC)[1]`   | weak          | 최신 ts에 후보가 3행 -> 단일 대기이벤트 값이 클러스터 AAS로 표시될 수 있음            |
+| `api/dashboard/handler.py : _capacity_forecast`                          | REGR_SLOPE + latest + samples                         | weak          | E-0에서 고친 MCP `forecast_capacity`와 같은 함정의 api/ 쌍둥이                        |
+| `api/simulation/handler.py : simulate_rds_instance_rightsizing_impl`     | cpu p95 / conn peak / iops p95 / mem min              | **필터 없음** | 차원 행이 p95에 섞임                                                                  |
+| `mcp .../incident/tools/correlate_signals.py`                            | 신호 타임라인(aas/cpu/db_connections)                 | weak          | 대기이벤트 행이 별개 신호로 중복 등장                                                 |
+| `mcp .../incident/tools/diagnose_root_cause.py : _collect_metric_spikes` | 윈도 평균 vs 직전 baseline 평균                       | weak          | 스파이크 비율이 조각으로 희석                                                         |
+| `mcp .../incident/tools/health_status.py`                                | 10분 metric AVG/MAX (에이전트 헬스)                   | weak          | 대시보드 카드와 다른 답                                                               |
+| `mcp .../performance/tools/compare_periods.py`                           | 구간 A/B AVG·MAX·MIN·samples                          | weak          | 두 구간 모두 조각 섞임                                                                |
+| `mcp .../performance/tools/performance_summary.py`                       | avg_aas / max_aas / peak_connections (서브셀렉트 3개) | weak x3       | KPI 3개 전부                                                                          |
+| `mcp .../simulation/tools/rds_rightsizing.py`                            | cpu p95 / conn peak / iops p95 / mem min              | **필터 없음** | api/ 쌍둥이와 동일                                                                    |
+| `data-pipeline/alert_evaluator/handler.py : _evaluate_operand`           | 복합 조건 DSL의 MAX/AVG/MIN                           | weak          | **단일 대기이벤트로 알림이 오발/미발**                                                |
+| `data-pipeline/alert_evaluator/handler.py` (legacy 단일 임계)            | 10분 MAX                                              | weak          | 동일                                                                                  |
+| `data-pipeline/proactive_monitor/handler.py`                             | 이상탐지 z-score(recent CTE + baseline CTE)           | weak x2       | 두 윈도 모두 오염 -> z-score 자체가 틀림                                              |
+| `data-pipeline/outcome_evaluator/evaluator.py : _evaluate_metric`        | watch_metric 평균 vs `metric_baselines`               | weak          | baseline은 strict로 학습(pg_baseline_trainer) -> **스케일 불일치로 학습 루프 오채점** |
+| `data-pipeline/etl_collector/collectors/pg_param_fitness.py` (2곳)       | 7일 peak 커넥션, 평균 buffer hit                      | weak x2       | 파라미터 적합성 판정                                                                  |
+| `data-pipeline/etl_collector/collectors/mysql_param_fitness.py` (2곳)    | 동일                                                  | weak x2       | 동일                                                                                  |
+| `data-pipeline/report_generator/handler.py : aas_stats`                  | 24h avg/max/p95/samples                               | **필터 없음** | 일간 리포트의 모든 AAS 통계                                                           |
+| `... : aas_peak`                                                         | `ORDER BY value DESC LIMIT 1`                         | **필터 없음** | 피크가 대기이벤트 행일 수 있음                                                        |
+| `... : aas_busy_minutes`                                                 | 임계 초과 행 COUNT                                    | **필터 없음** | 대기이벤트 행을 "바쁜 분"으로 카운트                                                  |
+| `... : aas_series`                                                       | 리포트 차트 시계열                                    | weak          | 같은 ts에 여러 점 -> 이중 계상                                                        |
+| `... : storage_delta`                                                    | 24h 시작/종료 storage_bytes                           | **필터 없음** | 오늘은 클러스터 레벨뿐이지만 방어적으로 고정                                          |
+| `... : conn_peak`                                                        | 24h MAX/AVG db_connections                            | weak          | 커넥션 피크                                                                           |
+
+### A-2. 의도적으로 dimensioned 행을 읽는 리더 (5, 건드리지 않음)
+
+| 파일 : 함수                                                                  | 왜 세부 행이 필요한가                                                                                                                                                                                                                                                                               | 쓰는 필터                                                       |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `api/dashboard/handler.py : _batch_timeseries`                               | `dimensions::text`를 그대로 반환하고 GROUP BY에 넣는다. AAS 대기이벤트 스택 차트, SQL Server `wait_type` 패널(`engine-internals-panel.tsx`), DynamoDB per-GSI 패널(`dynamodb-overview-panel.tsx`의 `gsiOf`)이 이 값으로 시리즈를 쪼갠다. `instance` 인자가 오면 그 인스턴스 행만(Instance Compare). | `EXCLUDE_PER_INSTANCE` (또는 `dimensions->>'instance' = :inst`) |
+| `api/dashboard/handler.py : _timeseries`                                     | 단일 metric 버전, 위와 동일 계약                                                                                                                                                                                                                                                                    | `EXCLUDE_PER_INSTANCE`                                          |
+| `api/dashboard/handler.py : _wait_events`                                    | 대기이벤트 Top-N 자체. `dimensions ? 'db.wait_event.name'`을 **요구**한다                                                                                                                                                                                                                           | 대기이벤트 키 존재 조건                                         |
+| `data-pipeline/etl_collector/collectors/dynamodb_findings.py` (per-GSI 블록) | GSI별 스로틀/사용량 finding. `dimensions->>'gsi' IS NOT NULL`을 **요구**한다                                                                                                                                                                                                                        | GSI 키 존재 조건                                                |
+| `mcp .../performance/tools/pi_metrics.py`                                    | PI 원본 행을 그대로 돌려주는 툴(`get_pi_metrics`). 대기이벤트 분해가 결과물                                                                                                                                                                                                                         | 없음(의도)                                                      |
+
+**Instance Compare(2026-06-22)** 는 `_batch_timeseries(instance=...)` 경로다. 위 두
+timeseries 리더의 계약을 바꾸면 대기이벤트 차트, 엔진 내부 패널, GSI 패널, Compare가
+한꺼번에 죽는다.
+
+### A-3. 이미 올바른 리더 (30)
+
+strict 형태를 이미 쓰고 있던 26곳:
+
+- `api/dashboard`: `_change_impact`, `_anomalies`(reads x2), `_capacity_forecast`의 `db_connections_limit` / provisioned 상한 조회
+- `api/simulation`: DynamoDB 소비용량 p99, 최신 소비용량
+- `mcp performance`: `detect_anomalies`(recent + baseline), `forecast_capacity`(집계 + current 서브셀렉트, 이제 공유 상수를 임포트)
+- `mcp incident`: `diagnose_root_cause._collect_elasticache_signals`
+- `mcp simulation`: `capacity_cost` p99 + 최신값
+- `data-pipeline`: `capacity_forecast`(3), `cost_check`(cpu, serverless_acu), `docdb_findings`(2), `dynamodb_findings`(테이블 레벨 4), `elasticache_findings`(2), `pg_baseline_trainer`
+
+차원 무관이라 필터가 불필요한 4곳(값을 집계하지 않음):
+
+- `api/alerts/handler.py` 룰별 `MAX(ts)` 신선도
+- `api/clusters/handler.py` ETL 신선도 `MAX(ts)` + 총 행수
+- `api/dashboard/handler.py : _slo` 가용성/타임라인. `uptime_sec`는 cw_collector가 클러스터 레벨로만 쓰고, 쿼리도 `date_trunc('minute'|'day')`로 그룹핑해 중복이 접힌다
+
+라이터(`INSERT`), ETL 90일 purge(`DELETE`), `api/clusters/seeder.py`는 리더가 아니라 분류 대상에서 제외했다.
+
+## 테스트
+
+`tests/unit/test_metric_filters.py` (12 케이스)
+
+1. **드리프트 가드**: 정본 모듈과 `api/` 복제본의 상수 및 파일 내용 동일성, repo 전역
+   grep으로 weak 형태 부활 차단(허용 목록은 상수 정의 2파일뿐).
+2. **결과 테스트**: 같은 `metric_type`에 클러스터 총합 3행 + 인스턴스 4행 + 대기이벤트
+   2행이 섞인 fixture를 **실제 프로덕션 SQL**에 통과시켜 계산된 숫자가 클러스터 레벨
+   답(avg 4.667, samples 3)인지 단정한다. `_apply_dim_filter`가 실행 SQL에 실제로
+   들어있는 술어를 골라 적용하므로 필터를 빼거나 weak로 되돌리면 **숫자가 바뀌어**
+   실패한다(weak 답은 avg 4.0). 대상: `_overview`, `_multi_cluster_overview`,
+   `_capacity_forecast`, `health_status`, `performance_summary`, `compare_periods`,
+   `report_generator._build_report_data`, `alert_evaluator._evaluate_operand`,
+   `outcome_evaluator._evaluate_metric`. fixture가 판별력을 갖는지도 매 케이스에서
+   함께 단정해 항진명제로 퇴화하지 못하게 했다.

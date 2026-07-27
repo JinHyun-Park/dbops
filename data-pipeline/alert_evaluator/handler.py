@@ -37,7 +37,10 @@ def _evaluate_operand(query_fn, cluster_id: str, op: dict) -> tuple[bool, float 
         "FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = :mt "
         "AND ts > NOW() - (:win || ' minutes')::interval "
-        "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))",
+        # Cluster-level only: `aas` (and any PI/GSI-dimensioned metric) also has
+        # one row per wait event, which the weak per-instance filter let through:
+        # an alert could fire on a single wait event, not the cluster total.
+        "AND (dimensions IS NULL OR dimensions::text = '{}')",
         {"cid": cluster_id, "mt": metric, "win": str(window_min)},
     )
     if not rows or rows[0].get("v") is None:
@@ -406,7 +409,7 @@ def lambda_handler(event, context):
                 "WHERE cluster_id = :cid "
                 "AND metric_type = :mt "
                 "AND ts > NOW() - INTERVAL '10 minutes' "
-                "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))",
+                "AND (dimensions IS NULL OR dimensions::text = '{}')",
                 {"cid": rule["cluster_id"], "mt": rule["metric_type"]},
             )
             if not metric_rows or metric_rows[0].get("latest_value") is None:

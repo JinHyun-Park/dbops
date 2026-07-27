@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import boto3
 import tenancy
 from engine_family import CAPABILITIES, RDS_INSTANCE, engine_family
+from metric_filters import CLUSTER_LEVEL_ONLY, EXCLUDE_PER_INSTANCE
 
 
 def _parse_int(value, default, min_v=1, max_v=168):
@@ -965,7 +966,7 @@ def _overview(query, cluster_id):
             "metrics",
             "SELECT metric_type, AVG(value) as avg_val, MAX(value) as max_val "
             "FROM metric_snapshots WHERE cluster_id = :cid AND ts > NOW() - INTERVAL '1 hour' "
-            "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance')) "
+            f"{CLUSTER_LEVEL_ONLY} "
             "GROUP BY metric_type",
             {"cid": cluster_id},
         ),
@@ -1024,12 +1025,17 @@ def _timeseries(query, cluster_id, metric_type, hours, from_iso=None, to_iso=Non
     bounded point count (see _bucket_seconds) so a wide window doesn't return
     thousands of sub-pixel raw points."""
     bucket = _bucket_seconds(hours, from_iso, to_iso)
+    # INTENTIONALLY dimensioned: the row's `dimensions` text is returned and the
+    # GROUP BY keeps it, so the AAS per-wait-event / SQL-Server per-wait_type /
+    # per-GSI breakdowns survive for the stacked charts. EXCLUDE_PER_INSTANCE (not
+    # CLUSTER_LEVEL_ONLY) is the correct filter here: drop the per-instance
+    # duplicates, keep the detail rows the chart splits on.
     head = (
         f"SELECT {_BUCKET_TS_EXPR} AS ts, AVG(value)::double precision AS value, "
         f"dimensions::text as dimensions "
         f"FROM metric_snapshots "
         f"WHERE cluster_id = :cid AND metric_type = :mt "
-        f"AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance')) "
+        f"{EXCLUDE_PER_INSTANCE} "
     )
     tail = (
         "GROUP BY 1, dimensions::text "
@@ -1407,7 +1413,7 @@ def _batch_timeseries(
     inst_clause = (
         " AND dimensions->>'instance' = :inst"
         if instance
-        else " AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))"
+        else f" {EXCLUDE_PER_INSTANCE}"
     )
     select_head = (
         f"SELECT {_BUCKET_TS_EXPR} AS ts, metric_type, "
@@ -1532,7 +1538,10 @@ def _multi_cluster_overview(query, event=None):
         # read HEALTHY. Same now-boundary on both = the two surfaces agree.
         "  WHERE ts > NOW() - INTERVAL '15 minutes' AND ts <= NOW() "
         "  AND metric_type IN ('cpu', 'aas', 'conn_active', 'conn_idle', 'storage_bytes', 'deadlocks') "
-        "  AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance')) "
+        # Cluster-level only: `aas` also lands as one row per PI wait event, so the
+        # weak per-instance-only filter used to let a single wait event become the
+        # fleet card's "latest AAS" and flip a cluster CRITICAL.
+        f"  {CLUSTER_LEVEL_ONLY} "
         "  GROUP BY cluster_id, metric_type"
         "), "
         "agg AS ("
@@ -2280,7 +2289,10 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
         "FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = :mt "
         "AND ts > NOW() - (:days || ' days')::interval "
-        "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))",
+        # Same trap the Performance MCP `forecast_capacity` hit in E-0: without the
+        # STRICT filter the regression mixes the cluster total with its per-wait-event
+        # / per-GSI fractions and `latest` can be a fraction row.
+        f"{CLUSTER_LEVEL_ONLY}",
         {"cid": cluster_id, "mt": metric, "days": str(days_lookback)},
     )
     row = rows[0] if rows else {}

@@ -1,4 +1,5 @@
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 
 
 def get_performance_summary_impl(
@@ -6,12 +7,12 @@ def get_performance_summary_impl(
     cluster_id: str,
     hours: int = 24,
 ) -> dict:
-    sql = """
+    sql = f"""
         SELECT
-            (SELECT AVG(value) FROM metric_snapshots WHERE cluster_id = :cluster_id AND metric_type = 'aas' AND ts > NOW() - (:hours || ' hours')::interval AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))) as avg_aas,
-            (SELECT MAX(value) FROM metric_snapshots WHERE cluster_id = :cluster_id AND metric_type = 'aas' AND ts > NOW() - (:hours || ' hours')::interval AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))) as max_aas,
+            (SELECT AVG(value) FROM metric_snapshots WHERE cluster_id = :cluster_id AND metric_type = 'aas' AND ts > NOW() - (:hours || ' hours')::interval {CLUSTER_LEVEL_ONLY}) as avg_aas,
+            (SELECT MAX(value) FROM metric_snapshots WHERE cluster_id = :cluster_id AND metric_type = 'aas' AND ts > NOW() - (:hours || ' hours')::interval {CLUSTER_LEVEL_ONLY}) as max_aas,
             (SELECT COUNT(DISTINCT query_hash) FROM query_stats WHERE cluster_id = :cluster_id AND snapshot_time > NOW() - (:hours || ' hours')::interval AND mean_time_ms >= 1000) as slow_count,
-            (SELECT MAX(value) FROM metric_snapshots WHERE cluster_id = :cluster_id AND metric_type = 'db_connections' AND ts > NOW() - (:hours || ' hours')::interval AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))) as peak_connections
+            (SELECT MAX(value) FROM metric_snapshots WHERE cluster_id = :cluster_id AND metric_type = 'db_connections' AND ts > NOW() - (:hours || ' hours')::interval {CLUSTER_LEVEL_ONLY}) as peak_connections
     """
     params = {"cluster_id": cluster_id, "hours": hours}
     result = cache.execute(sql, params)

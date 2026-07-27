@@ -163,13 +163,17 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
         "COUNT(*) AS samples "
         "FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = 'aas' "
-        "AND ts > NOW() - INTERVAL '24 hours'",
+        "AND ts > NOW() - INTERVAL '24 hours' "
+        # `aas` is stored once per PI wait event PLUS one cluster total row.
+        # Unfiltered, avg/p95 mixed the total with its own fractions.
+        "AND (dimensions IS NULL OR dimensions::text = '{}')",
         {"cid": cluster_id},
     )
     aas_peak = cache_query(
         "SELECT ts, value FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = 'aas' "
         "AND ts > NOW() - INTERVAL '24 hours' "
+        "AND (dimensions IS NULL OR dimensions::text = '{}') "
         "ORDER BY value DESC NULLS LAST LIMIT 1",
         {"cid": cluster_id},
     )
@@ -180,7 +184,8 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
         "SELECT COUNT(*) AS cnt FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = 'aas' "
         "AND value > (:threshold)::double precision "
-        "AND ts > NOW() - INTERVAL '24 hours'",
+        "AND ts > NOW() - INTERVAL '24 hours' "
+        "AND (dimensions IS NULL OR dimensions::text = '{}')",
         {"cid": cluster_id, "threshold": str(AAS_BUSY_THRESHOLD)},
     )
     aas_series = cache_query(
@@ -190,7 +195,7 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
         "SELECT ts, value FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = 'aas' "
         "AND ts > NOW() - INTERVAL '24 hours' "
-        "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance')) "
+        "AND (dimensions IS NULL OR dimensions::text = '{}') "
         "ORDER BY ts ASC",
         {"cid": cluster_id},
     )
@@ -226,9 +231,11 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
         "    (SELECT value FROM metric_snapshots "
         "       WHERE cluster_id = :cid AND metric_type = 'storage_bytes' "
         "       AND ts > NOW() - INTERVAL '24 hours' "
+        "       AND (dimensions IS NULL OR dimensions::text = '{}') "
         "       ORDER BY ts ASC LIMIT 1) AS start_bytes, "
         "    (SELECT value FROM metric_snapshots "
         "       WHERE cluster_id = :cid AND metric_type = 'storage_bytes' "
+        "       AND (dimensions IS NULL OR dimensions::text = '{}') "
         "       ORDER BY ts DESC LIMIT 1) AS end_bytes "
         ") SELECT start_bytes, end_bytes, (end_bytes - start_bytes) AS delta_bytes "
         "FROM endpoints",
@@ -242,7 +249,7 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
         "SELECT MAX(value) AS max_conn, AVG(value) AS avg_conn FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = 'db_connections' "
         "AND ts > NOW() - INTERVAL '24 hours' "
-        "AND (dimensions IS NULL OR NOT jsonb_exists(dimensions, 'instance'))",
+        "AND (dimensions IS NULL OR dimensions::text = '{}')",
         {"cid": cluster_id},
     )
     events_by_type = cache_query(
