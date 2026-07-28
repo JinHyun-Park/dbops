@@ -188,6 +188,82 @@ def test_findings_writer_interval_reaches_both_consumers(cdk_app):
     }, f"env var must reach the dashboard + incident MCP Lambdas, got {carriers}"
 
 
+def _data_resources(cdk_app, resource_type):
+    data = next(s for s in cdk_app.stacks if s.stack_name.endswith("-data"))
+    return {
+        logical_id: r
+        for logical_id, r in (data.template or {}).get("Resources", {}).items()
+        if r.get("Type") == resource_type
+    }
+
+
+def test_docdb_collector_window_matches_its_own_schedule(cdk_app):
+    """The DocDB collector derives its CloudWatch profiler-log read window from
+    COLLECTOR_INTERVAL_MIN. If that value and the EventBridge rate ever disagree,
+    consecutive windows overlap (inflating the cumulative query_stats counters it
+    writes) or gap (silently dropping slow ops), and nothing else would fail."""
+    fns = _data_resources(cdk_app, "AWS::Lambda::Function")
+    carrying = {
+        logical_id: r["Properties"]
+        for logical_id, r in fns.items()
+        if "COLLECTOR_INTERVAL_MIN"
+        in r["Properties"].get("Environment", {}).get("Variables", {})
+    }
+    assert len(carrying) == 1, f"expected exactly 1 carrier, got {sorted(carrying)}"
+    fn_id, props = next(iter(carrying.items()))
+    interval = props["Environment"]["Variables"]["COLLECTOR_INTERVAL_MIN"]
+
+    rules = [
+        r["Properties"]
+        for r in _data_resources(cdk_app, "AWS::Events::Rule").values()
+        if fn_id in str(r["Properties"].get("Targets", []))
+    ]
+    assert len(rules) == 1, f"expected exactly 1 schedule for {fn_id}, got {len(rules)}"
+    assert rules[0]["ScheduleExpression"] == f"rate({interval} minutes)", (
+        f"schedule {rules[0]['ScheduleExpression']} disagrees with "
+        f"COLLECTOR_INTERVAL_MIN={interval}"
+    )
+    # The findings freshness window is floored at 15 minutes on the basis that
+    # this collector runs every 5 (commit 67d1c3e). Raising the rate past that
+    # floor would hide this writer's findings again.
+    assert int(interval) * 3 <= 15, (
+        "raising the DocDB collector cadence past 5 minutes breaks the 15-minute "
+        "findings freshness floor in api/dashboard + maintenance_findings"
+    )
+
+
+def test_docdb_collector_log_read_is_prefix_scoped(cdk_app):
+    """Profiler-log ingestion must be able to read /aws/docdb/* and nothing else.
+    The same over-grant ("scoped" in a comment, resources=["*"] in the policy) has
+    already shipped once in this repo for these exact log actions."""
+    statements = [
+        stmt
+        for policy in _data_resources(cdk_app, "AWS::IAM::Policy").values()
+        for stmt in policy["Properties"]["PolicyDocument"]["Statement"]
+        if "logs:FilterLogEvents" in (
+            stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]]
+        )
+    ]
+    assert statements, "no logs:FilterLogEvents grant found in the data stack"
+    for stmt in statements:
+        resources = stmt["Resource"]
+        resources = resources if isinstance(resources, list) else [resources]
+        for resource in resources:
+            assert isinstance(resource, str) and "/aws/docdb/" in resource, (
+                f"FilterLogEvents granted on {resource!r}"
+            )
+    # The profiler state itself is a cluster-parameter-group read, and DocumentDB
+    # authorizes its control plane under the rds: prefix.
+    actions = {
+        action
+        for policy in _data_resources(cdk_app, "AWS::IAM::Policy").values()
+        for stmt in policy["Properties"]["PolicyDocument"]["Statement"]
+        for action in (stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]])
+    }
+    assert "rds:DescribeDBClusterParameters" in actions
+    assert "rds:DescribeDBClusters" in actions
+
+
 def test_app_carries_application_tag(cdk_app):
     """Every stack must have Application=DBOps so Bedrock AIPs etc. inherit
     the cost-allocation tag at deploy time."""

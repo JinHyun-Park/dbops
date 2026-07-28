@@ -33,6 +33,16 @@ from bundling import _PipLocalBundling
 from config.settings import Settings
 from constructs import Construct
 
+# DocDB Mongo collector cadence, in minutes. ONE definition for both its
+# EventBridge rate and the COLLECTOR_INTERVAL_MIN env var it derives its
+# CloudWatch profiler-log read window from.
+#
+# Do NOT raise this without also revisiting the multi-writer findings freshness
+# window: api/dashboard/handler.py and mcp_servers/incident/tools/
+# maintenance_findings.py floor that window at 15 minutes precisely because this
+# collector and rds_direct_collector are pinned to 5 (see commit 67d1c3e).
+_DOCDB_MONGO_INTERVAL_MIN = 5
+
 
 def _hash_schema_dir(rel_path: str) -> str:
     """Concatenate every .sql file in `rel_path` (sorted by name) and
@@ -294,11 +304,43 @@ class DataStack(cdk.Stack):
                 "CACHE_DB_SECRET_ARN": self.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
+                # The collector derives its CloudWatch profiler-log read window
+                # from its own cadence, so the schedule below and this value MUST
+                # come from the same constant: a mismatch would make consecutive
+                # windows overlap (inflating cumulative query_stats counters) or
+                # gap (silently dropping slow ops).
+                "COLLECTOR_INTERVAL_MIN": str(_DOCDB_MONGO_INTERVAL_MIN),
             },
         )
         self.cache_db.secret.grant_read(self.docdb_mongo_lambda)
         self.cache_db.grant_data_api_access(self.docdb_mongo_lambda)
         foundation.clusters_table.grant_read_data(self.docdb_mongo_lambda)
+        # Profiler ingestion (E1-6). DocumentDB slow ops are not reachable over
+        # the Mongo wire protocol; they are exported to CloudWatch Logs at
+        # /aws/docdb/{cluster}/profiler, and whether they are exported AT ALL is
+        # a cluster-parameter-group + log-export question. Both reads are scoped:
+        # the log grant to the /aws/docdb/ prefix (same prefix the incident MCP
+        # Lambda already reads), and DocumentDB authorizes its control plane
+        # under the rds: action prefix, so no docdb:* actions are needed.
+        self.docdb_mongo_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["logs:FilterLogEvents"],
+            resources=[
+                f"arn:aws:logs:*:*:log-group:/aws/docdb/*{suffix}"
+                for suffix in ("", ":*")
+            ],
+        ))
+        self.docdb_mongo_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "rds:DescribeDBClusters",
+                "rds:DescribeDBClusterParameters",
+                # Registered clusters can live in spoke accounts; the profiler
+                # reads above must run in the CLUSTER'S account or they read the
+                # hub and find nothing. Same hub-spoke chaining every other
+                # cross-account Lambda in this project uses.
+                "sts:AssumeRole",
+            ],
+            resources=["*"],
+        ))
         # Per-cluster read-only Mongo creds live in arbitrary Secrets Manager
         # secrets whose ARNs are on the registry rows (mongo_secret_arn), so this
         # must be resource "*" — the deployer scopes each secret to one RO user.
@@ -309,7 +351,7 @@ class DataStack(cdk.Stack):
 
         events.Rule(
             self, "DocDBMongoCollectorSchedule",
-            schedule=events.Schedule.rate(cdk.Duration.minutes(5)),
+            schedule=events.Schedule.rate(cdk.Duration.minutes(_DOCDB_MONGO_INTERVAL_MIN)),
             targets=[targets.LambdaFunction(self.docdb_mongo_lambda)],
         )
 
