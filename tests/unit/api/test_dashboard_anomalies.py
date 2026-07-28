@@ -182,12 +182,23 @@ def test_the_documented_iqr_to_sigma_ratio_is_not_inverted():
                         ("detect_anomalies.py", _MCP_TOOL.read_text(encoding="utf-8"))):
         flat = " ".join(text.split())
         assert f"IQR is ≈ {round(iqr_in_stddev, 3)} stddev" in flat, where
-        assert f"q(0.75) - q(0.25) = {round(iqr_in_stddev, 5)} exactly" in flat, where
+        assert (
+            f"q(0.75) - q(0.25) = {iqr_in_stddev:.6f} to 6 significant figures" in flat
+        ), where
         assert "a robust z of 2.0 is about 2.7 sigma and 2.5 is about 3.4" in flat, where
         # The retracted wording, in both the multiplication-sign and the ASCII form.
         for inverted in ("1.349×IQR ≈ 1 stddev", "1.349xIQR ≈ 1 stddev",
                          "1.349 x IQR ≈ 1 stddev"):
             assert inverted not in flat, f"{where}: {inverted}"
+        # The ratio is irrational, so no decimal reading of it is "exactly" that
+        # value. A review caught the earlier wording asserting a 5-decimal round
+        # as an equality, which is the same overclaim class as the inverted
+        # sentence above: keep that exact phrasing out. Scoped to the phrase, not
+        # to the bare word: "returns exactly 7 rows" elsewhere in the MCP file is
+        # a legitimate use, and a bare-word ban flagged it.
+        assert f"= {round(iqr_in_stddev, 5)} exactly" not in flat, (
+            f"{where}: an irrational ratio is never 'exactly' a 5-decimal value"
+        )
 
 
 def test_both_surfaces_execute_the_same_sql_text():
