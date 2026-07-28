@@ -158,7 +158,15 @@ def incident_schema():
 
 def operations_schema():
     return [
-        _tool("get_schema_diff", "Compare schemas between two snapshots (ISO timestamps); omit both for latest-vs-previous",
+        _tool("get_schema_diff",
+              "Compare schemas between two snapshots. snapshot_a = the EARLIER "
+              "(before) time, snapshot_b = the LATER (after) time, both exact "
+              "snapshot_time values from get_schema_history; passed out of order "
+              "they are normalized chronologically, so `added` is always what "
+              "appeared later. Omit both for latest-vs-previous. Snapshots are "
+              "stored only when the schema CHANGES, so the newest diff can be "
+              "months old: read snapshot_time in the response before calling it "
+              "recent.",
               {"cluster_id": "string", "snapshot_a": "string", "snapshot_b": "string"},
               ["cluster_id"]),
         _tool("get_schema_history", "Track schema change history",

@@ -85,12 +85,31 @@ def test_rows_in_the_window_skip_the_probe_entirely():
     assert cache.execute.call_count == 1  # no probe on the happy path
 
 
-def test_probe_failure_falls_back_to_skipped_not_to_a_clean_zero():
+def test_probe_failure_is_labelled_apart_from_a_healthy_no_history_skip():
+    """A probe that RAISED and a probe that ran and said "no history" are both
+    "we did not look", but only one of them is normal. Sharing the single label
+    `schema_changes` is what let a column typo inside the probe survive a green
+    suite: every assertion on this path passed either way."""
     cache = MagicMock()
     cache.execute.side_effect = [_EMPTY, RuntimeError("cache unavailable")]
     examined, skipped = {}, []
     out = _collect_schema_changes(cache, "prod-pg-1", ANCHOR_START, ANCHOR_END,
                                   None, 60, examined, skipped)
     assert out == []
-    assert skipped == ["schema_changes"]
+    assert skipped == ["schema_changes_probe_error"]
     assert "schema_changes" not in examined
+
+    # And the healthy no-history skip must NOT borrow that label.
+    _, _, healthy_skipped, _ = _run(_EMPTY, _probe(3, 3))
+    assert healthy_skipped == ["schema_changes"]
+
+
+def test_probe_sql_is_a_module_constant_so_a_test_can_execute_it():
+    """It was an inline string, and it was the one statement in this tier that no
+    test ever ran. test_schema_snapshot_real_pg.py executes this constant against
+    a real server."""
+    from mcp_servers.incident.tools.diagnose_root_cause import SCHEMA_PRODUCER_PROBE_SQL
+
+    assert "COUNT(DISTINCT schema_name) AS schemas" in SCHEMA_PRODUCER_PROBE_SQL
+    assert "COUNT(*) AS snapshots" in SCHEMA_PRODUCER_PROBE_SQL
+    assert ":cluster_id" in SCHEMA_PRODUCER_PROBE_SQL

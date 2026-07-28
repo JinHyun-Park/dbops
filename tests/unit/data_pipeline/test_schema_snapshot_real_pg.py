@@ -26,6 +26,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -75,15 +76,34 @@ pytestmark = pytest.mark.skipif(
     reason="no local PostgreSQL (initdb/pg_ctl/psql), real-engine E-4 test skipped",
 )
 
-_PORT = "55433"
+def _free_port():
+    """Ask the kernel. A hardcoded port collides with a sibling real-PG fixture
+    in the same run and with a postmaster an aborted run left behind."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return str(s.getsockname()[1])
+
+
+_PORT = _free_port()
 # A unix socket path over ~103 bytes is refused, and the pytest tmp path is much
 # longer than that, so the data dir goes somewhere short and we talk TCP.
-_PGDATA = os.path.join(tempfile.gettempdir(), "dbops_e4_pg")
+# PID-scoped: two concurrent runs must not share one datadir, and the teardown of
+# one must not delete the datadir the other is still serving from.
+_PGDATA = os.path.join(tempfile.gettempdir(), f"dbops_e4_pg_{os.getpid()}")
+
+
+def _stop_and_remove():
+    """Stop FIRST, then remove. rmtree under a live postmaster leaves it running
+    on a datadir that no longer exists, and every later fixture in that process
+    then fails to start: 34 fixture ERRORs once got written off as flake."""
+    subprocess.run([_PGCTL, "-D", _PGDATA, "-m", "immediate", "stop"],
+                   capture_output=True)
+    shutil.rmtree(_PGDATA, ignore_errors=True)
 
 
 @pytest.fixture(scope="module")
 def pg():
-    shutil.rmtree(_PGDATA, ignore_errors=True)
+    _stop_and_remove()
     os.makedirs(_PGDATA, exist_ok=True)
     subprocess.run([_INITDB, "-D", _PGDATA, "-U", "dbops", "--auth=trust"],
                    check=True, capture_output=True)
@@ -94,9 +114,7 @@ def pg():
     try:
         yield _Server()
     finally:
-        subprocess.run([_PGCTL, "-D", _PGDATA, "-m", "immediate", "stop"],
-                       capture_output=True)
-        shutil.rmtree(_PGDATA, ignore_errors=True)
+        _stop_and_remove()
 
 
 # `:name` binds, but NOT the `::type` cast that follows one. The lookbehind makes
@@ -405,3 +423,207 @@ def test_purge_keeps_the_latest_snapshot_per_schema(pg):
     assert before > len(rows), "purge deleted nothing, so it proves nothing"
     # Exactly one row survives per (cluster, schema): the latest.
     assert rows and all(int(r["n"]) == 1 for r in rows)
+
+
+# ===========================================================================
+# A schema that goes to ZERO tables, and a schema that disappears entirely.
+# Store-on-change means the last blob written stands as `latest` until something
+# replaces it, so a schema the collector stops SEEING keeps serving its dropped
+# tables as existing, forever, on all three readers.
+# ===========================================================================
+
+
+def _run_collector(pg, cluster_id, ts):
+    api = _DataApi(pg)
+    return collect_pg_schema_snapshot(api, _cache_execute(api), "arn:x", "arn:y",
+                                      cluster_id, "postgres", snapshot_ts=ts)
+
+
+def _latest(pg, cluster_id, schema_name):
+    return pg.execute(
+        "SELECT tables_json::text AS t, diff_from_previous_json::text AS d "
+        "FROM schema_snapshots WHERE cluster_id = :c AND schema_name = :s "
+        "ORDER BY snapshot_time DESC LIMIT 1",
+        {"c": cluster_id, "s": schema_name}).rows[0]
+
+
+def test_dropping_the_last_table_is_seen_by_all_three_readers(pg):
+    """Measured before the fix: the second run reported
+    {"schemas_seen": 3, "snapshots_written": 0, "baselines": 0, "unchanged": 3}
+    and the stored row still listed only_table. PG_SCHEMA_SQL now drives off
+    pg_namespace, so an emptied schema returns a row carrying '{}' and the drop is
+    OBSERVED rather than inferred from absence."""
+    pg.raw("DROP SCHEMA IF EXISTS zeroed CASCADE; CREATE SCHEMA zeroed")
+    pg.raw("CREATE TABLE zeroed.only_table (id int, payload text)")
+    assert _run_collector(pg, "zero-1", "2026-07-20T00:00:00+00:00")["baselines"] >= 1
+    assert "only_table" in _latest(pg, "zero-1", "zeroed")["t"]
+
+    pg.raw("DROP TABLE zeroed.only_table")
+    out = _run_collector(pg, "zero-1", "2026-07-20T00:05:00+00:00")
+    assert out["snapshots_written"] == 1
+    assert out["vanished"] == 0  # the schema still exists; nothing was inferred
+    row = _latest(pg, "zero-1", "zeroed")
+    assert json.loads(row["t"]) == {}
+    assert json.loads(row["d"])["dropped"] == ["only_table"]
+
+    # All three readers, on the rows the real collector wrote.
+    diff = sd.get_schema_diff_impl(pg, cluster_id="zero-1")
+    zeroed = [d for d in diff["diffs"] if d["schema_name"] == "zeroed"]
+    assert zeroed and zeroed[0]["dropped"] == ["only_table"]
+    hist = sh.get_schema_history_impl(pg, cluster_id="zero-1", days=36500)
+    assert any(json.loads(c["changes"]).get("dropped") == ["only_table"]
+               for c in hist["changes"])
+    examined, skipped = {}, []
+    got = drc._collect_schema_changes(pg, "zero-1", "2026-07-20T00:04:00+00:00",
+                                      "2026-07-20T00:06:00+00:00", None, 60,
+                                      examined, skipped)
+    assert skipped == []
+    assert examined["schema_changes"] == 1
+    assert got[0]["evidence"]["schema_name"] == "zeroed"
+
+    # 288 runs a day: an already-empty schema must not be re-recorded.
+    assert _run_collector(pg, "zero-1", "2026-07-20T00:10:00+00:00")["snapshots_written"] == 0
+
+
+def test_a_dropped_schema_is_recorded_as_dropped(pg):
+    """DROP SCHEMA leaves no row to iterate at all, so this one IS inferred from
+    absence against TRACKED_SQL."""
+    pg.raw("DROP SCHEMA IF EXISTS wiped CASCADE; CREATE SCHEMA wiped")
+    pg.raw("CREATE TABLE wiped.t1 (id int); CREATE TABLE wiped.t2 (id int)")
+    assert _run_collector(pg, "wipe-1", "2026-07-21T00:00:00+00:00")["baselines"] >= 1
+
+    pg.raw("DROP SCHEMA wiped CASCADE")
+    out = _run_collector(pg, "wipe-1", "2026-07-21T00:05:00+00:00")
+    assert out["vanished"] == 1
+    assert out["vanished_unconfirmed"] == 0
+    row = _latest(pg, "wipe-1", "wiped")
+    assert json.loads(row["t"]) == {}
+    assert json.loads(row["d"])["dropped"] == ["t1", "t2"]
+    # And it stays dropped without filing a change row every 5 minutes.
+    assert _run_collector(pg, "wipe-1", "2026-07-21T00:10:00+00:00")["vanished"] == 0
+
+
+def test_a_catalog_read_that_returned_nothing_never_invents_a_mass_drop(pg):
+    """Zero schemas returned is what a wrong database, a dead session or a total
+    privilege loss looks like, and it cannot be told apart from "every schema was
+    dropped". Inventing a mass drop out of it would be worse than the bug."""
+    pg.raw("DROP SCHEMA IF EXISTS blind CASCADE; CREATE SCHEMA blind")
+    pg.raw("CREATE TABLE blind.keeper (id int)")
+    _run_collector(pg, "blind-1", "2026-07-22T00:00:00+00:00")
+    before = _latest(pg, "blind-1", "blind")["t"]
+
+    class _NoSchemas:
+        def execute_statement(self, **kw):
+            return {"records": []}
+
+    api = _DataApi(pg)
+    out = collect_pg_schema_snapshot(_NoSchemas(), _cache_execute(api), "arn:x", "arn:y",
+                                     "blind-1", "postgres",
+                                     snapshot_ts="2026-07-22T00:05:00+00:00")
+    assert out["vanished"] == 0
+    assert out["vanished_unconfirmed"] >= 1
+    assert out["snapshots_written"] == 0
+    assert _latest(pg, "blind-1", "blind")["t"] == before
+
+
+# ===========================================================================
+# The RCA producer probe, EXECUTED. It was the one new statement in this tier
+# that no test ran: a column rename inside it left the suite green at 89 passed.
+# ===========================================================================
+
+
+def test_rca_producer_probe_executes_and_a_broken_probe_is_labelled_apart(pg):
+    rows = pg.execute(drc.SCHEMA_PRODUCER_PROBE_SQL, {"cluster_id": "zero-1"}).rows
+    assert rows and {"snapshots", "schemas"} <= set(rows[0])
+    assert int(rows[0]["snapshots"]) > 0
+
+    # A window with no rows so the probe actually runs, on a baseline-only cluster.
+    pg.raw("DROP SCHEMA IF EXISTS lonely CASCADE; CREATE SCHEMA lonely")
+    pg.raw("CREATE TABLE lonely.t (id int)")
+    _run_collector(pg, "probe-1", "2026-07-23T00:00:00+00:00")
+    examined, skipped = {}, []
+    drc._collect_schema_changes(pg, "probe-1", "2026-07-23T01:00:00+00:00",
+                                "2026-07-23T02:00:00+00:00", None, 60,
+                                examined, skipped)
+    assert skipped == ["schema_changes"]
+
+    class _BrokenProbe:
+        """What a column typo in the probe does live: the window query is fine and
+        the probe raises."""
+
+        def execute(self, sql, params=None):
+            if "COUNT(DISTINCT schema_name)" in sql:
+                return pg.execute(sql.replace("schema_name)", "schema_nameX)"), params)
+            return pg.execute(sql, params)
+
+    broken_examined, broken_skipped = {}, []
+    drc._collect_schema_changes(_BrokenProbe(), "probe-1", "2026-07-23T01:00:00+00:00",
+                                "2026-07-23T02:00:00+00:00", None, 60,
+                                broken_examined, broken_skipped)
+    assert broken_skipped == ["schema_changes_probe_error"]
+    assert broken_skipped != skipped, (
+        "a broken probe must not be indistinguishable from a cluster that simply "
+        "has no comparable history"
+    )
+
+
+# ===========================================================================
+# get_schema_diff: the payload has to say WHEN, and the argument order must not
+# decide WHICH WAY the diff runs.
+# ===========================================================================
+
+
+def test_explicit_diff_runs_the_same_way_round_either_way(pg):
+    """Measured before the fix: the same cluster answered added 2 / dropped 0 or
+    dropped 2 / added 0 depending purely on argument order, status ok both times,
+    so a CREATE was reported to a DBA as a DROP."""
+    pg.raw("DROP SCHEMA IF EXISTS dated CASCADE; CREATE SCHEMA dated")
+    # Different column signatures on purpose: two single-`id` tables are a
+    # rename_candidate pair, which is the correct answer to a different question.
+    pg.raw("CREATE TABLE dated.customers (id int, email text)")
+    _run_collector(pg, "dated-1", "2026-07-01T00:00:00+00:00")
+    pg.raw("CREATE TABLE dated.invoices (id int)")
+    pg.raw("DROP TABLE dated.customers")
+    _run_collector(pg, "dated-1", "2026-07-18T23:50:46+00:00")
+
+    def _dated(result):
+        return [d for d in result["diffs"] if d["schema_name"] == "dated"][0]
+
+    forward = _dated(sd.get_schema_diff_impl(
+        pg, cluster_id="dated-1",
+        snapshot_a="2026-07-01T00:00:00+00:00",
+        snapshot_b="2026-07-18T23:50:46+00:00"))
+    reversed_ = _dated(sd.get_schema_diff_impl(
+        pg, cluster_id="dated-1",
+        snapshot_a="2026-07-18T23:50:46+00:00",
+        snapshot_b="2026-07-01T00:00:00+00:00"))
+    assert forward["added"] == ["invoices"]
+    assert forward["dropped"] == ["customers"]
+    assert forward == reversed_
+
+
+def test_successful_diff_is_dated_on_the_real_engine(pg):
+    """The success payload used to carry no timestamp of any kind, while the
+    producer is store-on-change: the implicit diff is the newest DDL EVENT
+    whenever it happened, and the agent presented it as recent."""
+    out = sd.get_schema_diff_impl(pg, cluster_id="dated-1")
+    dated = [d for d in out["diffs"] if d["schema_name"] == "dated"][0]
+    # The '+09'-rendered server text of 2026-07-18T23:50:46Z.
+    assert dated["snapshot_time"].startswith("2026-07-1")
+    assert dated["previous_snapshot_time"].startswith("2026-07-0")
+    assert out["collection_coverage"]["last_snapshot"]
+    assert dated["snapshot_time"] in out["note"]
+
+
+def test_explicit_miss_names_the_snapshots_that_do_exist(pg):
+    """A baseline-only cluster used to answer "only a baseline exists" to a caller
+    who asked about two specific timestamps, dropping the coverage range."""
+    miss = sd.get_schema_diff_impl(
+        pg, cluster_id="probe-1",
+        snapshot_a="2020-01-01T00:00:00+00:00",
+        snapshot_b="2020-01-02T00:00:00+00:00")
+    assert miss["status"] == "snapshots_not_found"
+    assert miss["collection_coverage"]["first_snapshot"] in miss["note"]
+    # The implicit call on that same cluster still reports the baseline honestly.
+    assert sd.get_schema_diff_impl(
+        pg, cluster_id="probe-1")["status"] == "insufficient_snapshots"

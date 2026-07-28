@@ -37,11 +37,20 @@ class _FakeTarget:
 
 
 class _FakeCache:
-    def __init__(self, prev=None):
+    """Two SELECTs to answer: the per-schema previous blob (PREV_SQL) and the
+    tracked-schema list (TRACKED_SQL), which is what makes a schema that
+    DISAPPEARED from the catalog noticeable at all. `tracked` defaults to the keys
+    of `prev`, which is what the real TRACKED_SQL returns for a cluster whose
+    stored blobs are all non-empty."""
+
+    def __init__(self, prev=None, tracked=None):
         self.prev = prev or {}
+        self.tracked = list(self.prev) if tracked is None else list(tracked)
         self.writes = []
 
     def __call__(self, sql, params):
+        if "schema_name" not in params:
+            return {"records": [[{"stringValue": s}] for s in self.tracked]}
         if sql.strip().upper().startswith("SELECT"):
             blob = self.prev.get(params["schema_name"])
             if blob is None:
@@ -51,8 +60,8 @@ class _FakeCache:
         return {"records": []}
 
 
-def _run(rows, prev=None):
-    target, cache = _FakeTarget(rows), _FakeCache(prev)
+def _run(rows, prev=None, tracked=None):
+    target, cache = _FakeTarget(rows), _FakeCache(prev, tracked)
     out = collect_mysql_schema_snapshot(
         target, cache, "arn:x", "arn:y", "rds-mysql-1", "appdb",
         snapshot_ts="2026-07-10T00:00:00+00:00")
@@ -94,7 +103,8 @@ def test_target_read_carries_the_etl_audit_marker():
 def test_first_snapshot_is_a_baseline_with_no_diff():
     out, cache, _ = _run([("appdb", 2, '{"users": ["id"], "orders": ["id"]}')])
     assert out == {"cluster_id": "rds-mysql-1", "schemas_seen": 1,
-                   "snapshots_written": 1, "baselines": 1, "unchanged": 0}
+                   "snapshots_written": 1, "baselines": 1, "unchanged": 0,
+                   "vanished": 0, "vanished_unconfirmed": 0}
     assert len(cache.writes) == 1
     # Empty string -> NULLIF -> NULL. Never a fabricated "everything was added".
     assert cache.writes[0]["diff_json"] == ""
@@ -152,6 +162,98 @@ def test_empty_blob_row_is_skipped_not_stored_as_an_empty_schema():
     out, cache, _ = _run([("appdb", 0, "")], prev={"appdb": '{"users": ["id"]}'})
     assert out["snapshots_written"] == 0
     assert cache.writes == []
+
+
+# ===========================================================================
+# A schema that goes to zero tables, and a schema that disappears entirely
+# ===========================================================================
+
+
+def test_mysql_sql_also_returns_databases_that_hold_no_table():
+    """Grouping the table list by schema returns NO ROW for a database with zero
+    tables, and the collector can only diff the schemas the read returned, so
+    dropping the LAST table used to make the whole database invisible while its
+    stale blob stood as `latest` forever.
+
+    The statement itself was executed against a real MySQL 9.3.0 rather than only
+    asserted on as text: appdb with 2 tables + 1 view returned
+    {"users": [...], "orders": [...]} with the view excluded, emptydb returned
+    '{}', and after dropping every table in appdb it returned appdb -> '{}',
+    which is the whole point of the UNION ALL half. A MySQL fixture is
+    deliberately NOT added to this suite: it costs a ~40s server start on every
+    run and the structural assertions below fail if the half is removed.
+    """
+    assert "information_schema.schemata" in MYSQL_SCHEMA_SQL
+    assert "UNION ALL" in MYSQL_SCHEMA_SQL
+    assert "JSON_OBJECT() AS tables_json" in MYSQL_SCHEMA_SQL
+    # Not a LEFT JOIN: JSON_OBJECTAGG rejects a NULL member name
+    # (ER_JSON_DOCUMENT_NULL_KEY), so an outer-joined empty row would abort the
+    # whole statement instead of aggregating to an empty object.
+    assert "NOT EXISTS" in MYSQL_SCHEMA_SQL
+    assert "pg_namespace" in PG_SCHEMA_SQL  # the PG counterpart, real-engine tested
+
+
+def test_zero_table_schema_is_stored_as_an_empty_map_with_the_drop_diff():
+    out, cache, _ = _run([("appdb", 0, "{}")], prev={"appdb": '{"users": ["id"]}'})
+    assert out["snapshots_written"] == 1
+    assert cache.writes[0]["tables_json"] == "{}"
+    assert json.loads(cache.writes[0]["diff_json"])["dropped"] == ["users"]
+
+
+def test_a_schema_absent_from_the_catalog_is_recorded_as_dropped():
+    """DROP SCHEMA / DROP DATABASE: there is no row to iterate, so it can only be
+    noticed by comparing the tracked set against what the read returned."""
+    out, cache, _ = _run(
+        [("appdb", 1, '{"users": ["id"]}')],
+        prev={"appdb": '{"users": ["id"]}', "gone": '{"only_table": ["id"]}'})
+    assert out["vanished"] == 1
+    assert out["vanished_unconfirmed"] == 0
+    assert len(cache.writes) == 1
+    assert cache.writes[0]["schema_name"] == "gone"
+    assert cache.writes[0]["tables_json"] == "{}"
+    assert json.loads(cache.writes[0]["diff_json"])["dropped"] == ["only_table"]
+
+
+def test_a_catalog_read_that_returned_nothing_never_invents_a_mass_drop():
+    """Zero schemas returned is what a wrong database, a dead session or a total
+    privilege loss looks like, and it is indistinguishable from "every schema was
+    dropped". Recording drops from it would be worse than the bug it fixes."""
+    out, cache, _ = _run([], prev={"appdb": '{"users": ["id"]}', "other": '{"t": ["id"]}'})
+    assert out["vanished"] == 0
+    assert out["vanished_unconfirmed"] == 2
+    assert cache.writes == []
+
+
+def test_a_schema_whose_aggregate_came_back_null_is_not_treated_as_dropped():
+    """The row was RETURNED, only its blob was unusable: "we do not know" must not
+    become a DROP claim."""
+    out, cache, _ = _run(
+        [("appdb", 0, ""), ("other", 1, '{"t": ["id"]}')],
+        prev={"appdb": '{"users": ["id"]}', "other": '{"t": ["id"]}'})
+    assert out["vanished"] == 0
+    assert out["vanished_unconfirmed"] == 0
+    assert cache.writes == []
+
+
+def test_an_already_empty_schema_is_not_rewritten_every_run():
+    """288 runs a day: once a schema's emptiness is recorded, re-recording it
+    would file a change row every 5 minutes. TRACKED_SQL excludes a schema whose
+    latest blob is already '{}', and the diff guard covers the rest."""
+    out, cache, _ = _run([("appdb", 1, '{"users": ["id"]}')],
+                         prev={"appdb": '{"users": ["id"]}', "gone": "{}"},
+                         tracked=["appdb"])
+    assert out["vanished"] == 0
+    assert cache.writes == []
+
+
+def test_tracked_sql_excludes_schemas_whose_latest_blob_is_empty():
+    from collectors.schema_snapshot import TRACKED_SQL
+
+    assert "DISTINCT ON (schema_name)" in TRACKED_SQL
+    assert "tables_json <> '{}'::jsonb" in TRACKED_SQL
+    # Names only. Prefetching every blob at once could exceed the cache's own
+    # 1 MiB Data API response on a cluster with several large schemas.
+    assert "SELECT schema_name FROM (" in TRACKED_SQL
 
 
 def test_insert_uses_nullif_not_case_for_the_null_diff():

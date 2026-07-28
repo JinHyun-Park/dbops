@@ -238,6 +238,24 @@ def diagnose_root_cause_impl(
     }
 
 
+# Hoisted out of the function body so a test can EXECUTE it against a real
+# engine. It used to be an inline string, and it was the one new statement in
+# this tier that no test ran: a column rename inside it left the whole suite
+# green while the probe raised on every live call.
+SCHEMA_PRODUCER_PROBE_SQL = (
+    "SELECT COUNT(*) AS snapshots, COUNT(DISTINCT schema_name) AS schemas "
+    "FROM schema_snapshots WHERE cluster_id = :cluster_id"
+)
+
+# The probe answers "could this source have detected a DDL change at all?", so a
+# probe that FAILED must not be filed under the same label as a probe that ran
+# and said no. Both are "we did not look", which is why both belong in
+# skipped_sources, but only one of them is a normal state of a young cluster; the
+# other is a defect that stays invisible for as long as they share a name.
+_SKIP_NO_HISTORY = "schema_changes"
+_SKIP_PROBE_ERROR = "schema_changes_probe_error"
+
+
 def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped):
     """Schema/DDL changes near the window — the highest-weight category.
 
@@ -256,6 +274,12 @@ def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, 
     under-ranks the most common real cause. So an empty window is qualified by a
     producer probe: fewer than two snapshots for this cluster means no change
     could have been detected at all, and the source is SKIPPED, not examined.
+
+    A probe that RAISES is reported as ``schema_changes_probe_error``, not as the
+    ordinary ``schema_changes`` skip. Under one shared label a broken probe read
+    exactly like a young cluster with no history, which is how a column typo in
+    the probe survived a full-suite run: every assertion on the negative path
+    passed either way.
     """
     out = []
     sql = """
@@ -281,15 +305,12 @@ def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, 
         # under 2 snapshots means this source had no detection capability.
         # Comparability is PER SCHEMA: `snapshots > schemas` holds exactly when at
         # least one schema has a second snapshot to have been diffed against.
-        probe = (
-            "SELECT COUNT(*) AS snapshots, COUNT(DISTINCT schema_name) AS schemas "
-            "FROM schema_snapshots WHERE cluster_id = :cluster_id"
-        )
         try:
-            prows = cache.execute(probe, {"cluster_id": cluster_id}).rows
+            prows = cache.execute(SCHEMA_PRODUCER_PROBE_SQL,
+                                  {"cluster_id": cluster_id}).rows
         except Exception as e:
             print(f"[diagnose_root_cause] schema_changes producer probe failed: {e}")
-            skipped.append("schema_changes")
+            skipped.append(_SKIP_PROBE_ERROR)
             return out
         prow = prows[0] if prows else {}
         stored = int(prow.get("snapshots") or 0)
@@ -298,7 +319,7 @@ def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, 
             print(f"[diagnose_root_cause] schema_changes source skipped: "
                   f"{stored} snapshot(s) over {schemas} schema(s) for {cluster_id} "
                   "(no comparable history)")
-            skipped.append("schema_changes")
+            skipped.append(_SKIP_NO_HISTORY)
             return out
     examined["schema_changes"] = len(rows)
     for row in rows:

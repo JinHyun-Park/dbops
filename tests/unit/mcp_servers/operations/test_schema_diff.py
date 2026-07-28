@@ -265,6 +265,97 @@ def test_two_snapshots_with_no_change_is_a_supportable_negative():
     assert result["totals"] == {"added": 0, "dropped": 0, "modified": 0, "rename_candidates": 0}
 
 
+def test_explicit_miss_is_not_reported_as_baseline_only():
+    """The `explicit` branch is tested BEFORE the baseline-only branch. A cluster
+    with at most one snapshot per schema used to answer "only a baseline exists"
+    to a caller who asked about two specific timestamps, which answers a question
+    they did not ask and drops the coverage range naming the snapshots that DO
+    exist."""
+    mock_cache = _cache(_EMPTY, _coverage(1, 1))
+    result = get_schema_diff_impl(
+        mock_cache, cluster_id="prod-pg-1",
+        snapshot_a="2020-01-01T00:00:00Z", snapshot_b="2020-01-02T00:00:00Z")
+    assert result["status"] == "snapshots_not_found"
+    assert "2026-07-01T00:00:00Z" in result["note"]  # the range that DOES exist
+    # The implicit call on that same cluster still says baseline.
+    implicit = get_schema_diff_impl(_cache(_EMPTY, _coverage(1, 1)),
+                                    cluster_id="prod-pg-1")
+    assert implicit["status"] == "insufficient_snapshots"
+
+
+def test_explicit_miss_on_an_uncollected_cluster_is_still_not_collected():
+    """not_collected must stay ahead of snapshots_not_found: with zero rows the
+    honest answer is that nothing was ever collected, not that two timestamps
+    missed."""
+    result = get_schema_diff_impl(
+        _cache(_EMPTY, _coverage(0, 0)), cluster_id="prod-pg-1",
+        snapshot_a="2020-01-01T00:00:00Z", snapshot_b="2020-01-02T00:00:00Z")
+    assert result["status"] == "not_collected"
+
+
+def test_successful_diff_carries_the_snapshot_times_and_the_coverage():
+    """Store-on-change: the implicit latest-vs-previous diff is the most recent
+    DDL EVENT whenever it happened, so an undated payload gets presented as
+    recent. collection_coverage used to be attached ONLY when there was nothing
+    to report."""
+    mock_cache = _cache(
+        QueryResult(
+            columns=["schema_name", "tables_before", "tables_after",
+                     "snapshot_before", "snapshot_after"],
+            rows=[{"schema_name": "public",
+                   "tables_before": '{"customers": ["id"]}',
+                   "tables_after": '{"invoices": ["id"]}',
+                   "snapshot_before": "2026-02-01T00:00:00+00:00",
+                   "snapshot_after": "2026-07-18T23:50:46+00:00"}],
+            row_count=1,
+        ),
+        _coverage(9, 1),
+    )
+    result = get_schema_diff_impl(mock_cache, cluster_id="prod-pg-1")
+    assert result["status"] == "ok"
+    d = result["diffs"][0]
+    assert d["snapshot_time"] == "2026-07-18T23:50:46+00:00"
+    assert d["previous_snapshot_time"] == "2026-02-01T00:00:00+00:00"
+    assert result["collection_coverage"]["snapshots_stored"] == 9
+    assert "2026-07-18T23:50:46+00:00" in result["note"]
+    # And it must not let the agent read the diff as recent by default.
+    assert "최근에 발생한 변경이라는 뜻은 아닙니다" in result["note"]
+
+
+def test_explicit_sql_normalizes_the_two_timestamps_chronologically():
+    """Reversing the arguments used to swap `added` and `dropped`, reporting a
+    CREATE to a DBA as a DROP with status ok and no warning. The SQL decides
+    which side is the before, so argument order cannot invert the verdict."""
+    from mcp_servers.operations.tools.schema_diff import EXPLICIT_SQL
+
+    assert "LEAST(:snapshot_a::timestamptz, :snapshot_b::timestamptz)" in EXPLICIT_SQL
+    assert "GREATEST(:snapshot_a::timestamptz, :snapshot_b::timestamptz)" in EXPLICIT_SQL
+    # a is the before side, and the payload says so out loud.
+    assert "a.tables_json AS tables_before" in EXPLICIT_SQL
+    assert "a.snapshot_time::text AS snapshot_before" in EXPLICIT_SQL
+
+
+def test_explicit_ok_payload_states_the_normalization():
+    mock_cache = _cache(
+        QueryResult(
+            columns=["schema_name", "tables_before", "tables_after",
+                     "snapshot_before", "snapshot_after"],
+            rows=[{"schema_name": "public",
+                   "tables_before": '{"a": ["id"]}',
+                   "tables_after": '{"a": ["id"], "b": ["id"]}',
+                   "snapshot_before": "2026-07-01T00:00:00+00:00",
+                   "snapshot_after": "2026-07-02T00:00:00+00:00"}],
+            row_count=1,
+        ),
+        _coverage(4, 1),
+    )
+    result = get_schema_diff_impl(mock_cache, cluster_id="prod-pg-1",
+                                  snapshot_a="2026-07-02T00:00:00+00:00",
+                                  snapshot_b="2026-07-01T00:00:00+00:00")
+    assert result["diffs"][0]["added"] == ["b"]
+    assert "이른 쪽이 before" in result["note"]
+
+
 def test_diff_impl_latest_modified_column():
     """Latest snapshot path: row carries before/after as JSON. ALTER
     TABLE ADD COLUMN should land in modified, not added/dropped."""
