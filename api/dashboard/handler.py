@@ -2219,22 +2219,44 @@ _SC_PARTIAL = (
     "판정되지 않은 쪽은 변경이 없다는 뜻이 아닙니다."
 )
 
-# THE STATE MATRIX. Four INDEPENDENT signals feed this panel, and three passes
+# THE STATE MATRIX. Four INDEPENDENT signals feed this panel, and FOUR passes
 # over this surface each fixed one cell and broke or missed another, so the
-# enumeration lives here rather than in a review comment.
+# enumeration lives here rather than in a review comment, and it is written as a
+# PRODUCT: a signal VALUE that appears in no row is how every one of those passes
+# escaped, most recently `partial_window`.
 #
 #   fetch       ok | failed              (failed never reaches this function:
 #                                         the PANEL owns that cell, and
 #                                         schema-changes-panel.tsx renders it as
-#                                         its own error branch)
-#   ddl         ok | ok+blind | not_collected | baseline_only | outside_window
-#               | unavailable            ddl_detection.status; "ok+blind" is
-#                                        status ok with a non-empty
-#                                        baseline_only_schemas /
-#                                        outside_window_schemas, i.e. SOME
-#                                        schema was not compared
+#                                         its own error branch. It multiplies the
+#                                         product by a constant, so it is
+#                                         enumerated once, in the panel test.)
+#   ddl         EIGHT values, not five: ddl_detection.status is
+#                 ok | not_collected | baseline_only | outside_window | unavailable
+#               and `ok` splits by WHICH schemas went unanswered, because
+#               `ok` means "at least one schema compared", never "all of them,
+#               over the whole window":
+#                 ok                  every schema, whole window (ddl_complete)
+#                 ok + baseline_only   some schema has 1 snapshot: no pair
+#                 ok + partial_window  some schema's history STARTS inside the
+#                                      window: the pair is real but spans less
+#                                      than :days
+#                 ok + outside_window  some schema's whole history predates the
+#                                      window
+#               The three blind lists are `ddl_blind` at the derivation below and
+#               the `*_schemas` keys in the payload. partial_window IMPLIES
+#               ddl=ok: the schema is appended and then compared, so it cannot
+#               occur under any other ddl value.
 #   rows        ok | insufficient_history | no_data          row_deltas.status
 #   collection  fresh | stale | no_data                      collection.status
+#
+# rows and collection are NOT independent of each other, which is why the
+# product is 8 x 5 and not 8 x 9: `no_data` on either side means table_stats has
+# no row for this cluster at all, so rows=no_data <-> collection=no_data, and the
+# five reachable (rows, collection) pairs are (ok, fresh), (ok, stale),
+# (insufficient_history, fresh), (insufficient_history, stale) and
+# (no_data, no_data). All 40 of the resulting cells are reachable by a human and
+# every one appears in a row of the enumeration test.
 #
 # The top-level `status` is the HEADLINE, and it exists to stop an empty
 # `changes` list reading as "nothing changed". Its whole contract is:
@@ -2246,8 +2268,12 @@ _SC_PARTIAL = (
 #   partial               at least one source compared and at least one could
 #                         not (or could not for every schema). A real negative
 #                         for part of the question and silence for the rest.
-#   insufficient_history  NOTHING compared, but rows exist somewhere.
-#   not_collected         nothing has ever been collected for this cluster.
+#   insufficient_history  NOTHING compared. Either nothing spans the window, or
+#                         the source that could have answered was unreadable.
+#   not_collected         nothing has ever been collected for this cluster. It
+#                         requires the snapshot read to have SUCCEEDED and
+#                         returned zero rows: `snapshots_stored == 0` after a
+#                         failed read means "unknown", not "empty".
 #
 # `partial` is what FINDING 3 of the fourth review pass is about: with
 # ddl=outside_window and rows=ok the old derivation hit
@@ -2257,12 +2283,18 @@ _SC_PARTIAL = (
 # outside_window: ddl=ok-with-blind-schemas, ddl=baseline_only+rows=ok,
 # ddl=unavailable+rows=ok and ddl=ok+rows=insufficient_history are the same
 # defect in a different cell, and special-casing one is how the previous three
-# passes relocated this bug.
+# passes relocated this bug. `partial_window` was the fifth pass's proof that the
+# warning was right: it was not special-cased either, it was simply MISSING from
+# the blindness test, so it took the `no_changes` branch.
 #
 # tests/unit/api/test_schema_changes_panel_states.py holds the machine-readable
-# copy of this matrix and asserts each cell reaches a DISTINCT sentence in the
-# panel; the real-engine cells are driven end to end in
-# tests/unit/api/test_dashboard_schema_changes_real_pg.py.
+# copy of this matrix: the 8 x 5 product driven cell by cell, plus a structural
+# test that no `*_schemas` list can be non-empty under `no_changes`, which is
+# what makes a SIXTH blindness list fail loudly instead of quietly. The
+# real-engine cells are driven end to end in
+# tests/unit/api/test_dashboard_schema_changes_real_pg.py, including the
+# OPERATOR-FACING half: a real DROP followed to the cell that prints how many
+# rows it lost.
 
 
 def _schema_changes(query, cluster_id, days):
@@ -2417,11 +2449,24 @@ def _schema_changes(query, cluster_id, days):
     else:
         rows_status = "insufficient_history"
 
-    # A source that answered for EVERY schema it holds. `ddl_status == "ok"` only
-    # means at least one schema compared, so a cluster with 3 schemas of which 1
-    # sits entirely outside the window is "ok" AND blind, and calling that a
-    # negative reports the blind schema as unchanged.
-    ddl_complete = ddl_status == "ok" and not baseline_only and not outside_window
+    # EVERY WAY THE DDL SOURCE FELL SHORT, IN ONE LIST. This is one list and not
+    # three named conditions because three named conditions is how the fifth
+    # review pass found this: the blindness test read `not baseline_only and not
+    # outside_window` and simply did not mention `partial_window`, so a 30-day
+    # question answered from 7 days of snapshots reached `no_changes`, the one
+    # status licensed to read as an absence of change. Measured on a real
+    # PostgreSQL before the fix: 3 snapshots starting 7 days ago, days=30,
+    # baseline_outside_window TRUE, row deltas ok, collection fresh -> status
+    # "no_changes" and the panel headline "이 구간에서 감지된 변경 없음".
+    # ANY new way a schema can go unanswered belongs in this list and in the
+    # `*_schemas` keys of the payload below; the enumeration test asserts that a
+    # non-empty `*_schemas` list can never coexist with `no_changes`, so the next
+    # one cannot be forgotten the way this one was.
+    ddl_blind = baseline_only + partial_window + outside_window
+    # A source that answered for EVERY schema it holds, for the WHOLE window it
+    # was asked about. `ddl_status == "ok"` only means at least one schema
+    # compared over whatever span happened to exist.
+    ddl_complete = ddl_status == "ok" and not ddl_blind
     rows_ok = rows_status == "ok"
 
     if changes or renames:
@@ -2436,7 +2481,14 @@ def _schema_changes(query, cluster_id, days):
         # real negative and the rest was not answered at all. "no_changes" here
         # is the defect this branch exists to prevent.
         status = "partial"
-    elif snapshots_stored == 0 and collection == "no_data":
+    elif ddl_available and snapshots_stored == 0 and collection == "no_data":
+        # `not_collected` claims BOTH sources hold nothing for this cluster, and
+        # _SC_NO_HISTORY says so in those words. When the schema_snapshots read
+        # RAISED, `snapshots_stored` is 0 because nothing was read, not because
+        # nothing is there, so that sentence would be a negative the data cannot
+        # support. Measured before this guard: ddl unavailable + no table_stats
+        # row returned status "not_collected" with _SC_NO_HISTORY and
+        # _SC_DDL_UNAVAILABLE in the same note, contradicting each other.
         status = "not_collected"
     else:
         status = "insufficient_history"

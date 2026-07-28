@@ -10,6 +10,13 @@ cell and broke or missed another:
   pass 3  fixed, and the vanished-schema guard was made unreachable by another
           change in the same commit. Two further findings were "the fix stops at
           the API boundary and the operator still reads the old sentence".
+  pass 4  fixed, and `partial_window` was left out of the blindness test and out
+          of the matrix, so a 30-day question answered from 7 days of snapshots
+          reached `no_changes`. The enumeration was written to stop exactly that
+          and it did not, because it was a LIST of interesting cells and not a
+          PRODUCT. It is a product now, and `test_every_blindness_list_in_the_
+          payload_forbids_no_changes` derives the guard from the payload's own
+          shape so a SIXTH blindness list needs no test edit to be covered.
 
 So this module enumerates every cell and asserts each one is DISTINGUISHABLE all
 the way to what a human reads:
@@ -28,13 +35,18 @@ the way to what a human reads:
                from real DDL. Neither test is sufficient alone: this one would
                pass against SQL that cannot parse, that one cannot enumerate.
 
-  PANEL half   the branch chain of `EmptyVerdict` in
-               frontend/src/components/dashboard/schema-changes-panel.tsx is
-               PARSED and MODELLED, so the assertion is about the JSX a status
-               REACHES. The previous round guarded this with `assert field in
-               src`, which cannot tell a rendered branch from a type-map key or
-               a comment, and it also claimed a payload/panel contract test that
-               did not exist. Same idiom as
+  PANEL half   BOTH branch chains of
+               frontend/src/components/dashboard/schema-changes-panel.tsx are
+               PARSED and MODELLED, so the assertion is about the JSX something
+               REACHES: `EmptyVerdict` for an empty list (`panel_verdict`) and
+               `ChangeRow`'s per-type cells for a change row
+               (`panel_change_row`). The previous round modelled only the empty
+               half, which excluded `status: ok` by construction and left the
+               branch that renders the changes themselves covered by nothing.
+               An earlier round guarded this with `assert field in src`, which
+               cannot tell a rendered branch from a type-map key or a comment,
+               and it also claimed a payload/panel contract test that did not
+               exist. Same idiom as
                tests/unit/test_anomalies_panel_empty_state.py (branch chain),
                test_capacity_panel_family_table.py (a table out of tsx) and
                test_metric_filters.py (SQL predicates); there is no JS runtime in
@@ -72,6 +84,54 @@ restored from a backup. Counts are what pytest reported:
        -> _PREDICATES refused it: every parametrized case failed.
  12. add a payload field the panel does not read
        -> 1 failed: test_no_payload_field_reaches_the_operator_by_accident.
+
+FIFTH PASS. Its two findings were "the empty half is modelled and the POSITIVE
+half is modelled by NOTHING" and "partial_window appears in no row of the matrix".
+Both were REPRODUCED first. Pre-fix, against the shipped panel and the whole
+`pytest tests/unit` (baseline 2331 passed):
+  * delete the `{c.change_type === "dropped" && ...}` cell      -> 2331 passed
+  * replace the list-branch operand with an empty <div>, i.e.
+    changes.map AND renames.map deleted                         -> 2331 passed
+so pass 1's original defect, a real DROP rendered as nothing at all, was
+reintroducible green in both halves.
+And on a real PostgreSQL (tests/unit/api/test_dashboard_schema_changes_real_pg.py
+harness), 3 snapshots starting 7 days ago asked about days=30, i.e.
+baseline_outside_window TRUE with row deltas ok and collection fresh:
+  status "no_changes", panel headline "이 구간에서 감지된 변경 없음".
+
+Mutation-checked after the fix. Counts are what pytest reported for this module
+plus test_dashboard_schema_changes_real_pg.py on 13/14/19/20 (138 passed clean),
+this module alone on the rest (103 passed clean):
+ 13. delete the dropped-row cell from ChangeRow
+       -> 7 failed, incl. test_a_dropped_row_shows_the_count_it_lost,
+          test_every_change_type_the_server_emits_renders_something and
+          real_pg::test_real_drop_is_reported_and_the_old_sql_could_not_see_it.
+ 14. dropped cell reads `value={current}`, which is None for every drop
+       -> 3 failed.
+ 15. delete the unknown-change_type fallthrough
+       -> 1 failed: test_an_unknown_change_type_is_marked_unknown_and_not_silent.
+ 16. list-branch operand replaced with an empty <div>
+       -> 1 failed: test_the_list_branch_renders_both_kinds_of_change.
+ 17. `const shown = changes.length`, so renames stop counting
+       -> 1 failed: test_the_list_branch_renders_both_kinds_of_change.
+ 18. smuggle a ONE-LINE cell into ChangeRow
+     (`{c.baseline_rows === 0 && <span>zero</span>}`)
+       -> 7 failed. It passed 103 until _row_cells claimed EVERY expression at
+          the cells' indentation instead of only lines ending in ` && (`.
+ 19. handler: `ddl_blind = baseline_only + outside_window`, i.e. forget
+     partial_window again
+       -> 11 failed, incl. both partial_window matrix cells, product cells
+          ok+partial_window__ok_fresh / __ok_stale,
+          test_no_changes_appears_exactly_where_the_product_says_it_does and
+          test_every_blindness_list_in_the_payload_forbids_no_changes.
+ 20. handler: drop `ddl_available and` from the not_collected guard
+       -> 4 failed, incl. product cell unavailable__no_data_no_data.
+ 21. delete the `ok+partial_window` constructor from _DDL_CASES: take a signal
+     VALUE back out of the product, which is how all four previous passes escaped
+       -> 1 failed: test_every_blindness_list_in_the_payload_forbids_no_changes.
+ 22. handler grows a SIXTH `*_schemas` list, non-empty under `no_changes`
+       -> 2 failed with NO test edit: the structural guard plus
+          test_no_payload_field_reaches_the_operator_by_accident.
 
 NOT pinned: branch ORDER in the panel (the guards are mutually exclusive equality
 tests on one field, so any order is the same function), and the exact Korean
@@ -117,6 +177,19 @@ def _verdict_body() -> str:
     return _PANEL[start:_PANEL.index("\nfunction ", start + 1)]
 
 
+def _changerow_body() -> str:
+    """The ChangeRow component, declaration to the next top-level one."""
+    start = _PANEL.index("function ChangeRow(")
+    return _PANEL[start:_PANEL.index("\nexport function ", start + 1)]
+
+
+def _list_branch() -> str:
+    """The NON-empty operand of the `shown === 0 ? ... : ...` ternary: the JSX that
+    renders the changes themselves."""
+    s = _PANEL[_PANEL.index("{shown === 0 ? ("):]
+    return _flat(s[s.index(") : ("):s.index("\n          )}")])
+
+
 # Each guard EmptyVerdict may carry, as a predicate over the payload. Parsing
 # REFUSES anything not listed, so a new branch cannot appear without a test here
 # saying which payload reaches it, and a guard rewritten to test some other field
@@ -152,6 +225,69 @@ def _branches():
     tail = body.index("\n  }", guards[-1].end())
     out.append((None, lambda _p: True, body[tail:]))
     return out
+
+
+# The POSITIVE half, modelled the same way. The previous round modelled only the
+# EMPTY half, so the branch that renders the changes THEMSELVES was covered by
+# nothing: with `changes.map` and `renames.map` both deleted the suite reported
+# 2331 passed, i.e. pass 1's original defect (a real DROP rendered as nothing at
+# all) was reintroducible green. One predicate per cell of ChangeRow's row-count
+# container, including the unknown-type fallthrough, and parsing REFUSES anything
+# not listed here.
+_ROW_PREDICATES = {
+    'c.change_type === "created"': lambda c: c.get("change_type") == "created",
+    'c.change_type === "dropped"': lambda c: c.get("change_type") == "dropped",
+    'c.change_type === "changed"': lambda c: c.get("change_type") == "changed",
+    "!KNOWN_CHANGE.includes(c.change_type)":
+        lambda c: c.get("change_type") not in ("created", "dropped", "changed"),
+}
+
+
+def _row_cells() -> dict:
+    """{guard_source: cell_jsx} for ChangeRow's row-count container.
+
+    EVERY expression at the cells' indentation is claimed, not just the ones
+    shaped like a cell: matching `\\{(.*?) && \\($` alone let a ONE-LINE
+    conditional slip in unmodelled (measured: `{c.baseline_rows === 0 &&
+    <span>zero</span>}` added to ChangeRow and the suite still reported 103
+    passed), and an unmodelled cell can render a second reading of one event."""
+    body = _changerow_body()
+    out = {}
+    for m in re.finditer(r"^ {10}\{(.+)$", body, re.M):
+        line = m.group(1)
+        assert line.endswith(" && ("), (
+            f"unrecognized expression in ChangeRow's cell container: {{{line}}}. "
+            "Cells are `{<guard> && (` on their own line so this model can see "
+            "them; anything else could be rendering a change row nothing here "
+            "asserts."
+        )
+        cond = line[:-len(" && (")]
+        assert cond in _ROW_PREDICATES, (
+            f"unrecognized ChangeRow cell guard {cond!r}. Add it to _ROW_PREDICATES "
+            "and assert which change row reaches it."
+        )
+        out[cond] = _flat(body[m.start():body.index("\n          )}", m.end())])
+    assert out, (
+        "ChangeRow renders no per-type cell at all: every change row now shows its "
+        "name and nothing about what happened to it"
+    )
+    return out
+
+
+def panel_change_row(change: dict) -> str:
+    """The JSX a CHANGE row reaches, flattened. Exactly one cell must match: zero
+    means the row renders as nothing (the pass-1 defect), two means two readings
+    of one event.
+
+    Exported for tests/unit/api/test_dashboard_schema_changes_real_pg.py, which
+    feeds it rows the SHIPPED derivation produced from real DDL on a real
+    engine."""
+    hit = [jsx for cond, jsx in _row_cells().items() if _ROW_PREDICATES[cond](change)]
+    assert len(hit) == 1, (
+        f"change_type {change.get('change_type')!r} reaches {len(hit)} cells of "
+        "ChangeRow, expected exactly 1", sorted(_row_cells())
+    )
+    return hit[0]
 
 
 def panel_verdict(payload: dict) -> str:
@@ -261,6 +397,29 @@ _MATRIX = [
      dict(snaps_fail=True, stats=[_stat(base=None, cur=5)]),
      ("insufficient_history", "unavailable", "insufficient_history", "fresh"),
      "비교 가능한 이력이 부족해", [_NEUTRAL]),
+    # A FAILED read leaves snapshots_stored at 0 for want of a read, not because
+    # the table is empty, so this may not headline "not_collected": that status
+    # and _SC_NO_HISTORY both assert both sources hold nothing for this cluster.
+    ("no_schema_v26_and_nothing_in_table_stats_either",
+     dict(snaps_fail=True, age_sec=_DEAD),
+     ("insufficient_history", "unavailable", "no_data", "no_data"),
+     "비교 가능한 이력이 부족해", [_NEUTRAL]),
+
+    # --- history STARTS inside the window (FINDING 2's cell) --------------
+    # 30 days asked, 7 days of snapshots. The pair is real and the diff is
+    # empty, but only over the span that existed, so this is not a negative for
+    # the 30 days. It reached `no_changes` until `partial_window` was added to
+    # the blindness test.
+    ("partial_window_history_shorter_than_the_window",
+     dict(snaps=[_snap(outside=True)], stats=[_stat(base=1000, cur=1000)], days=30),
+     ("partial", "ok", "ok", "fresh"),
+     "일부 신호만 판정됨", [_NEUTRAL]),
+    ("one_schema_compared_one_partial_window",
+     dict(snaps=[_snap(schema="full_s", stored=4),
+                 _snap(schema="short_s", outside=True, stored=4)],
+          stats=[_stat(base=1000, cur=1000)], days=30),
+     ("partial", "ok", "ok", "fresh"),
+     "일부 신호만 판정됨", [_NEUTRAL]),
 
     # --- snapshots entirely outside the window (FINDING 3's cell) --------
     ("outside_window_but_rows_compare",
@@ -356,6 +515,130 @@ def test_a_change_is_never_rendered_by_the_empty_verdict_at_all():
         else:
             assert not got["changes"], (cid, got["changes"])
             assert not got["ddl_detection"]["rename_candidates"], cid
+
+
+# ===========================================================================
+# THE PRODUCT. Every value of every signal, crossed.
+# ===========================================================================
+# The hand-written cells above are the interesting states. They are not a
+# PRODUCT, and every pass over this surface escaped through a signal value that
+# appeared in no cell: pass 5 through `partial_window`, which was in the payload
+# and in the note and in NO row of the matrix, and therefore in no row of the
+# blindness test either. So the product is built here mechanically, from one
+# constructor per signal value, and the expectation is a LITERAL table.
+#
+# DDL has EIGHT values, not five: `ddl_detection.status == "ok"` means "at least
+# one schema compared", so it splits by WHICH schemas went unanswered.
+_DDL_CASES = {
+    # complete: every schema, over the whole window
+    "ok": dict(snaps=[_snap()]),
+    # ok, and blind for one schema, one way per blindness list in the payload
+    "ok+baseline_only": dict(snaps=[_snap(schema="ok_s", stored=3),
+                                    _snap(schema="one_snap_s", n=1, stored=3)]),
+    "ok+partial_window": dict(snaps=[_snap(outside=True)], days=30),
+    "ok+outside_window": dict(snaps=[_snap(schema="ok_s", stored=4),
+                                     _snap(schema="ancient_s", is_latest=True,
+                                           stored=4)]),
+    # nothing compared at all, one row per ddl_detection.status
+    "not_collected": dict(snaps=[]),
+    "baseline_only": dict(snaps=[_snap(n=1, stored=1)]),
+    "outside_window": dict(snaps=[_snap(is_latest=True)]),
+    "unavailable": dict(snaps_fail=True),
+}
+
+# rows and collection are NOT independent: `no_data` on either side means
+# table_stats holds no row for this cluster at all, so rows=no_data <->
+# collection=no_data and the 3 x 3 is really these FIVE pairs. Asserted below
+# rather than asserted here, so the claim is measured and not just written down.
+_ROW_CASES = {
+    ("ok", "fresh"): dict(stats=[_stat(base=1000, cur=1000)], age_sec=_FRESH),
+    ("ok", "stale"): dict(stats=[_stat(base=1000, cur=1000)], age_sec=_STALE_SEC),
+    ("insufficient_history", "fresh"): dict(stats=[_stat(base=None, cur=7)],
+                                            age_sec=_FRESH),
+    ("insufficient_history", "stale"): dict(stats=[_stat(in_window=False)],
+                                            age_sec=_STALE_SEC),
+    ("no_data", "no_data"): dict(stats=[], age_sec=_DEAD),
+}
+
+# THE EXPECTED TOP-LEVEL STATUS FOR ALL 8 x 5 = 40 CELLS, written out rather than
+# recomputed from the handler's rules: a test that re-derives the derivation
+# passes for exactly the reasons the derivation is wrong.
+#   `no_changes` appears TWICE in this whole table, and only on the row where DDL
+#   answered for every schema over the whole window.
+_PRODUCT = {
+    #                        (ok,fresh)    (ok,stale)    (insuf,fresh)          (insuf,stale)          (no_data,no_data)
+    "ok":               ["no_changes", "no_changes", "partial",             "partial",             "partial"],
+    "ok+baseline_only": ["partial",    "partial",    "partial",             "partial",             "partial"],
+    "ok+partial_window": ["partial",   "partial",    "partial",             "partial",             "partial"],
+    "ok+outside_window": ["partial",   "partial",    "partial",             "partial",             "partial"],
+    "not_collected":    ["partial",    "partial",    "insufficient_history", "insufficient_history", "not_collected"],
+    "baseline_only":    ["partial",    "partial",    "insufficient_history", "insufficient_history", "insufficient_history"],
+    "outside_window":   ["partial",    "partial",    "insufficient_history", "insufficient_history", "insufficient_history"],
+    "unavailable":      ["partial",    "partial",    "insufficient_history", "insufficient_history", "insufficient_history"],
+}
+
+_PRODUCT_CELLS = [(d, r, i) for d in _DDL_CASES for i, r in enumerate(_ROW_CASES)]
+
+
+@pytest.mark.parametrize("ddl,rows,i", _PRODUCT_CELLS,
+                         ids=[f"{d}__{r[0]}_{r[1]}" for d, r, _ in _PRODUCT_CELLS])
+def test_the_whole_product_of_the_four_signals(ddl, rows, i):
+    """Every combination a human can reach, and what the operator reads there."""
+    got = drive(**{**_DDL_CASES[ddl], **_ROW_CASES[rows]})
+    expected_status = _PRODUCT[ddl][i]
+    assert signals(got) == (expected_status, ddl.split("+")[0], rows[0], rows[1]), got
+    # The property the whole surface exists for, asserted on every cell rather
+    # than on the cells someone remembered to list.
+    assert (_NEUTRAL in panel_verdict(got)) == (expected_status == "no_changes"), (
+        ddl, rows, got["status"])
+
+
+def test_no_changes_appears_exactly_where_the_product_says_it_does():
+    """Two cells out of forty. If a change to the derivation widens that, this
+    fails with the cells it added."""
+    licensed = {(d, r) for d in _DDL_CASES for i, r in enumerate(_ROW_CASES)
+                if _PRODUCT[d][i] == "no_changes"}
+    assert licensed == {("ok", ("ok", "fresh")), ("ok", ("ok", "stale"))}
+    got = {(d, r) for d in _DDL_CASES for r in _ROW_CASES
+           if drive(**{**_DDL_CASES[d], **_ROW_CASES[r]})["status"] == "no_changes"}
+    assert got == licensed, sorted(got ^ licensed)
+
+
+def test_the_two_no_data_signals_are_the_same_signal():
+    """Why the product is 8 x 5 and not 8 x 9, measured instead of asserted in a
+    comment: rows=no_data and collection=no_data are one condition (table_stats
+    holds no row for this cluster), so neither can occur without the other."""
+    for d in _DDL_CASES:
+        for r in _ROW_CASES:
+            got = drive(**{**_DDL_CASES[d], **_ROW_CASES[r]})
+            assert (got["row_deltas"]["status"] == "no_data") == \
+                   (got["collection"]["status"] == "no_data"), (d, r, got)
+
+
+def test_every_blindness_list_in_the_payload_forbids_no_changes():
+    """THE ANTI-RELOCATION GUARD, and the reason this round did not add a fifth
+    named condition. Any `*_schemas` key of ddl_detection is a set of schemas the
+    DDL source could not answer for, so a non-empty one may never coexist with the
+    status that reads as an absence of change. A SIXTH blindness list added later
+    is covered by this the moment it appears in the payload, with no test edit."""
+    exercised = set()
+    for d in _DDL_CASES:
+        for r in _ROW_CASES:
+            got = drive(**{**_DDL_CASES[d], **_ROW_CASES[r]})
+            blind = {k: v for k, v in got["ddl_detection"].items()
+                     if k.endswith("_schemas") and v}
+            exercised |= set(blind)
+            if blind:
+                assert got["status"] != "no_changes", (d, r, blind)
+                assert _NEUTRAL not in panel_verdict(got), (d, r, blind)
+                # and the operator is told WHICH schemas, by name
+                for key, names in blind.items():
+                    for n in names:
+                        assert n in got["note"], (d, r, key, got["note"])
+    # Not vacuous: every list the payload can carry is actually driven non-empty
+    # somewhere in the product.
+    assert exercised == {"baseline_only_schemas", "partial_window_schemas",
+                         "outside_window_schemas"}, sorted(exercised)
 
 
 def test_outside_window_does_not_headline_as_no_changes():
@@ -483,6 +766,126 @@ def test_a_failed_fetch_is_its_own_branch_and_not_an_absence_of_change():
     # The .catch must clear the data, or a stale successful payload would still
     # be rendered underneath an error.
     assert "setData(null)" in _PANEL and "setError(true)" in _PANEL
+
+
+# ===========================================================================
+# THE POSITIVE HALF: the branch that renders the changes THEMSELVES
+# ===========================================================================
+# Everything above this line is about an EMPTY list. FINDING 1 of the fifth pass:
+# the empty half was modelled and the positive half was modelled by NOTHING, so
+# the defect pass 1 started from (a real DROP rendered as nothing at all) was
+# reintroducible with a green suite. Measured before these tests existed:
+#   * delete the `{c.change_type === "dropped" && ...}` cell  -> 2331 passed
+#   * replace the whole list branch with an empty <div>       -> 2331 passed
+# i.e. both halves of the pass-1 defect, green.
+
+
+def _emitted_change_types() -> set:
+    """Every `change_type` the handler puts in `changes`."""
+    start = _HANDLER_SRC.index("def _schema_changes(")
+    body = _HANDLER_SRC[start:_HANDLER_SRC.index("\ndef ", start + 1)]
+    found = set(re.findall(r'"change_type": "(\w+)"', body))
+    assert found, "no change_type literals found in _schema_changes"
+    return found
+
+
+def test_every_change_type_the_server_emits_renders_something():
+    """The server emits three. Each has to reach exactly one cell of ChangeRow AND
+    have a TYPE_STYLES entry, or a real change reaches the operator as a row with
+    no icon, no colour and no counts."""
+    styles = set(re.findall(r"^    (\w+): \{ color:", _PANEL, re.M))
+    for t in _emitted_change_types():
+        jsx = panel_change_row({"change_type": t})
+        assert jsx, t
+        assert t in styles, (f"{t} has no TYPE_STYLES entry", sorted(styles))
+
+
+def test_a_dropped_row_shows_the_count_it_lost():
+    """The pass-1 cell, pinned at the point the operator reads it. `current_rows`
+    is None for every dropped row by construction, so a cell reading `current`
+    would render "행 수 미상" for every DROP that ever happens."""
+    cell = panel_change_row({"change_type": "dropped"})
+    assert "value={baseline}" in cell, cell
+    assert "value={current}" not in cell, cell
+    assert "행 손실" in cell, cell
+
+
+def test_the_three_change_types_read_differently_from_each_other():
+    seen = {}
+    for t in ("created", "dropped", "changed"):
+        cell = panel_change_row({"change_type": t})
+        assert cell not in seen, f"{t} renders the same cell as {seen[cell]}"
+        seen[cell] = t
+    assert len(seen) == 3
+
+
+def test_an_unknown_change_type_is_marked_unknown_and_not_silent():
+    """Deploy skew in the positive half, the same way EmptyVerdict handles it in
+    the empty half: this is a static export, so an api Lambda newer than the
+    bundle can send a change_type it has never heard of (compute_diff already
+    computes a `modified` list this tier does not surface yet). Before the
+    fallthrough existed, such a row rendered its name and NOTHING else."""
+    for t in ("modified", "renamed", "some_future_type"):
+        cell = panel_change_row({"change_type": t})
+        assert "{UNKNOWN_TYPE}" in cell, (t, cell)
+    for t in ("created", "dropped", "changed"):
+        assert "{UNKNOWN_TYPE}" not in panel_change_row({"change_type": t}), t
+    # and the const it renders says so in words the operator reads
+    assert 'const UNKNOWN_TYPE = "알 수 없는 변경 유형";' in _PANEL
+    assert 'const KNOWN_CHANGE = ["created", "dropped", "changed"];' in _PANEL, (
+        "the fallthrough is keyed to KNOWN_CHANGE, so that list has to be exactly "
+        "the change types the cells above cover"
+    )
+
+
+def test_a_change_row_always_carries_its_identity():
+    """The counts are the cells; the NAME is outside them. A row that lost its
+    name would be a change nobody can act on."""
+    body = _flat(_changerow_body())
+    assert "{c.schema_name}" in body and "{c.table_name}" in body
+    assert "{c.change_type}" in body, "the row never prints which kind of change"
+
+
+def test_the_list_branch_renders_both_kinds_of_change():
+    """The other half of the mutation that stayed green: the ternary's non-empty
+    operand. `changes` and `rename_candidates` are two different shapes and both
+    are schema changes, so both have to be mapped, and `shown` has to count both
+    or a rename-only window falls into EmptyVerdict and reads as undeterminable."""
+    branch = _list_branch()
+    assert "changes.map" in branch, branch
+    assert "<ChangeRow" in branch, branch
+    assert "renames.map" in branch, branch
+    flat = _flat(_PANEL)
+    assert "const shown = changes.length + renames.length;" in flat
+    assert "const renames = ddl?.rename_candidates ?? [];" in flat
+
+
+@pytest.mark.parametrize("cell", [c for c in _MATRIX if c[2][0] == "ok"],
+                         ids=[c[0] for c in _MATRIX if c[2][0] == "ok"])
+def test_a_real_change_reaches_a_cell_that_says_what_happened(cell):
+    """End to end for the POSITIVE half: the rows the SHIPPED derivation produced,
+    each followed to the JSX ChangeRow reaches for it. This is the assertion that
+    goes red when the branch rendering a dropped row is deleted."""
+    _id, kwargs, _expected, _p, _f = cell
+    got = drive(**kwargs)
+    assert got["changes"] or got["ddl_detection"]["rename_candidates"], got
+    for c in got["changes"]:
+        jsx = panel_change_row(c)
+        assert jsx and "알 수 없는 변경 유형" not in jsx, (c, jsx)
+
+
+def test_a_dropped_row_from_the_shipped_derivation_shows_its_lost_rows():
+    """The full pass-1 path in one test: a table present in the baseline snapshot
+    and absent from the latest one, through compute_diff, to the cell that prints
+    how many rows went with it."""
+    got = drive(snaps=[_snap(before={"users": ["id"], "orders": ["id"]},
+                             after={"users": ["id"]})],
+                stats=[_stat(table="orders", base=9000, cur=9000)])
+    row = [c for c in got["changes"] if c["table_name"] == "orders"]
+    assert row and row[0]["change_type"] == "dropped", got["changes"]
+    assert row[0]["baseline_rows"] == 9000, row[0]
+    cell = panel_change_row(row[0])
+    assert "행 손실" in cell and "value={baseline}" in cell, cell
 
 
 # ===========================================================================

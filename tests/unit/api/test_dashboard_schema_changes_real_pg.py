@@ -27,6 +27,21 @@ sentence an operator reads. The full cross-product of the four signals lives in
 tests/unit/api/test_schema_changes_panel_states.py, which also holds the panel
 model this file imports.
 
+Two cells were added by the fifth pass and both were reproduced on this harness
+before being fixed:
+  5. `partial_window`: a snapshot history that STARTS inside the window. Measured
+     pre-fix with 3 snapshots from 7 days ago and days=30, baseline_outside_window
+     TRUE, row deltas ok, collection fresh -> status "no_changes" and the panel
+     headline "이 구간에서 감지된 변경 없음", i.e. a 30-day question answered from 7
+     days of data reached the one status licensed to read as an absence of change.
+  6. an UNREADABLE schema_snapshots plus an empty table_stats reported
+     "not_collected", whose note says both sources hold no row for this cluster.
+     The snapshot read had raised, so that sentence was a negative the data could
+     not support.
+This file also follows a real DROP all the way to the CELL of the panel that
+prints how many rows it lost (`panel_change_row`): the operator-facing half of the
+positive branch, which nothing modelled until the fifth pass.
+
 ENGINE: PostgreSQL from the local install. The production DDL in
 data-pipeline/schema_migrator/sql/ is applied in the migrator's own numeric
 order. Skipped, not faked, when no initdb/pg_ctl/psql is on the machine.
@@ -82,6 +97,7 @@ from collectors.schema_snapshot import collect_pg_schema_snapshot  # noqa: E402
 # and a drifted copy is how "the fix stops at the API boundary" survives a suite.
 from tests.unit.api.test_schema_changes_panel_states import (  # noqa: E402
     _NEUTRAL,
+    panel_change_row,
     panel_verdict,
 )
 
@@ -366,6 +382,16 @@ def test_real_drop_is_reported_and_the_old_sql_could_not_see_it(pg):
     assert row["baseline_rows"] == 9000
     assert row["current_rows"] is None
     assert row["source"] == "schema_snapshots"
+    # ...and reaches the CELL of the panel that prints it. The payload half of
+    # this was already asserted; the operator-facing half was modelled by nothing,
+    # so the whole positive branch of the panel could be deleted green. Same
+    # single panel model as the empty-verdict chain, so a real DROP on a real
+    # engine is followed to the text a DBA reads.
+    cell = panel_change_row(row)
+    assert "행 손실" in cell, cell
+    assert "value={baseline}" in cell, (
+        "the dropped cell must render the LAST OBSERVED count; current_rows is "
+        "None for every drop, so a cell reading it prints 행 수 미상 always")
 
     # DEFECT 1, measured: the shipped statement returns no `dropped` row for the
     # same table on the same rows, because `baseline` is a subset of `latest`.
@@ -954,6 +980,18 @@ _CELLS = [
      ("partial", "outside_window", "ok", "fresh"),
      "일부 신호만 판정됨", [_NEUTRAL]),
 
+    # The neighbouring cell to the one above, and the fifth pass's finding: the
+    # history STARTS inside the window (a cluster registered 5 days ago, asked
+    # about 7), so there is no snapshot at or before the window start and the pair
+    # spans less than :days. The diff is real over the span it had, which is why
+    # this reached ddl=ok, ddl_complete and `no_changes` before `partial_window`
+    # was added to the blindness test.
+    ("snapshot_history_starts_inside_the_window",
+     [(5 * _H, ["a"]), (3 * _H, ["a", "b"]), (1.0, ["a"])],
+     [("t", 1000, 10), ("t", 1000, 0)],
+     ("partial", "ok", "ok", "fresh"),
+     "일부 신호만 판정됨", [_NEUTRAL]),
+
     ("stale_collection_with_a_real_change",
      [(10 * _H, ["a"]), (2 * _H, ["a", "b"])], [("t", 1000, 10), ("t", 1000, 2)],
      ("ok", "ok", "ok", "stale"), None, None),
@@ -1001,6 +1039,74 @@ def test_the_cache_db_without_schema_v26_is_its_own_cell(pg):
     assert "schema_v26" in got["note"]
 
 
+def test_a_30_day_question_answered_from_7_days_of_snapshots(pg):
+    """FINDING 2 of the fifth pass, in the words the finding used, with the pair
+    resolution MEASURED on the server.
+
+    Pre-fix observation on this harness: baseline_outside_window TRUE,
+    partial_window_schemas ['mx'], row deltas ok, collection fresh, and
+    status "no_changes" with the panel headline "이 구간에서 감지된 변경 없음". A DDL
+    change 20 days ago is invisible to that answer, and the headline said the
+    window was quiet."""
+    cid = "mx-30d-from-7d"
+    _mx_setup(pg, cid, [(7 * _H, ["users", "orders"]),
+                        (3 * _H, ["users", "orders", "tmp_x"]),
+                        (0.5, ["users", "orders"])],
+              [("t", 1000, 40), ("t", 1000, 0)])
+
+    rows = pg.query(handler._SCHEMA_SNAPSHOT_PAIRS_SQL, {"cid": cid, "days": "30"})
+    assert rows and rows[0]["baseline_outside_window"] is True, rows
+    assert rows[0]["baseline_is_latest"] is False, rows[0]
+    assert int(rows[0]["snapshots_for_schema"]) == 3, rows[0]
+
+    got = handler._schema_changes(pg.query, cid, 30)
+    assert got["ddl_detection"]["status"] == "ok"
+    assert got["ddl_detection"]["schemas_compared"] == 1
+    assert got["ddl_detection"]["partial_window_schemas"] == [_MX]
+    assert got["row_deltas"]["status"] == "ok"
+    assert got["collection"]["status"] == "fresh"
+    assert got["changes"] == []
+    assert got["status"] == "partial", got["status"]
+    assert _NEUTRAL not in panel_verdict(got)
+    assert "구간만" in got["note"] and _MX in got["note"]
+
+    # THE MUTATION GUARD. A window the history DOES span must still be able to
+    # reach a real negative, or "partial" means nothing. Same rows, days=7: the
+    # 7-day-old snapshot is at or before the window start, so the pair spans the
+    # whole window and the endpoint diff is genuinely empty (tmp_x came and went
+    # inside it, which is what the store-on-change endpoint diff means).
+    got7 = handler._schema_changes(pg.query, cid, 7)
+    assert got7["ddl_detection"]["partial_window_schemas"] == []
+    assert got7["status"] == "no_changes", got7["status"]
+    assert _NEUTRAL in panel_verdict(got7)
+
+
+def test_an_unreadable_snapshot_table_is_not_evidence_of_a_new_cluster(pg):
+    """`not_collected` and its note claim BOTH sources hold nothing for this
+    cluster. When the schema_snapshots read raises, snapshots_stored is 0 for want
+    of a read, so that sentence would be a negative the data cannot support.
+    Measured before the guard: status "not_collected" with _SC_NO_HISTORY and
+    _SC_DDL_UNAVAILABLE contradicting each other in one note."""
+    def query(sql, params=None):
+        if "schema_snapshots" in sql:
+            raise RuntimeError('relation "schema_snapshots" does not exist')
+        return pg.query(sql, params)
+
+    got = handler._schema_changes(query, "mx-unreadable-and-no-stats", 7)
+    assert got["ddl_detection"]["status"] == "unavailable"
+    assert got["collection"]["status"] == "no_data"
+    assert got["row_deltas"]["status"] == "no_data"
+    assert got["status"] == "insufficient_history", got["status"]
+    assert "모두 이 클러스터 행이 없음" not in got["note"], got["note"]
+    assert "schema_v26" in got["note"]
+    assert _NEUTRAL not in panel_verdict(got)
+
+    # A cluster that really has nothing, on the same server, still says so.
+    clean = handler._schema_changes(pg.query, "mx-unreadable-and-no-stats", 7)
+    assert clean["status"] == "not_collected", clean["status"]
+    assert "모두 이 클러스터 행이 없음" in clean["note"]
+
+
 def test_every_matrix_cell_reads_differently_from_every_other(pg):
     """The property three passes over this surface kept losing: two cells that
     render the same thing. Compared as (signal tuple, headline sentence) so a cell
@@ -1025,7 +1131,7 @@ def test_every_matrix_cell_reads_differently_from_every_other(pg):
         key = (_signals(got), head)
         assert key not in seen, f"{cid} is indistinguishable from {seen[key]}: {key}"
         seen[key] = cid
-    assert len(seen) == 7
+    assert len(seen) == 8
 
 
 def test_no_changes_is_reachable_against_a_real_server(pg):

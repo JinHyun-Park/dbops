@@ -364,7 +364,13 @@ export async function fetchClusterSettings(clusterId: string) {
 export interface SchemaChangeRow {
   schema_name: string;
   table_name: string;
-  change_type: "created" | "dropped" | "changed";
+  /** `created` | `dropped` | `changed` are what api/dashboard/handler.py emits
+   * today. Declared as a plain string because this bundle is a static export
+   * deployed separately from the api Lambda: a closed union would make the
+   * panel's unknown-type cell dead code to the compiler while it is still
+   * reachable at runtime, and that cell is the difference between an
+   * unrecognised change row and a row that renders nothing at all. */
+  change_type: string;
   /** null when the table was never among the 100 largest: UNKNOWN, not zero. */
   baseline_rows: number | string | null;
   current_rows: number | string | null;
@@ -383,9 +389,10 @@ export interface SchemaChangesResponse {
   /** The HEADLINE. `no_changes` is the only value that means an absence of
    * change, and it requires EVERY source to have compared, across every schema
    * it holds. `partial` is a real negative from one source and silence from the
-   * other (a schema whose whole history predates the window, a cache DB without
-   * schema_v26, row deltas with only one endpoint). See the state matrix beside
-   * the `status` derivation in api/dashboard/handler.py. */
+   * other (a schema whose whole history predates the window, a schema whose
+   * history starts inside it, a cache DB without schema_v26, row deltas with only
+   * one endpoint). See the state matrix beside the `status` derivation in
+   * api/dashboard/handler.py. */
   status:
     | "ok"
     | "no_changes"
@@ -409,6 +416,9 @@ export interface SchemaChangesResponse {
     first_snapshot: string | null;
     last_snapshot: string | null;
     baseline_only_schemas: string[];
+    /** Schemas whose snapshot history STARTS inside the window: the pair is real
+     * but spans less than `days`, so the answer covers a shorter period than the
+     * one asked about. Non-empty here forbids `status: "no_changes"`. */
     partial_window_schemas: string[];
     /** Schemas whose newest snapshot predates the window: the pair would be a
      * row against itself, so nothing inside the window was observed. */

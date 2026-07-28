@@ -18,6 +18,16 @@ function num(v: unknown): number | null {
 }
 
 const UNKNOWN_ROWS = "행 수 미상";
+const UNKNOWN_TYPE = "알 수 없는 변경 유형";
+
+// Every `change_type` api/dashboard/handler.py puts in `changes`. ChangeRow has
+// one cell per entry plus a fallthrough, for the same reason EmptyVerdict has
+// one: this is a static export deployed separately from the api Lambda, so it can
+// meet a row whose type it has never heard of (compute_diff already computes a
+// `modified` list this tier does not surface yet). Without the fallthrough such a
+// row rendered its NAME and nothing else, which is pass 1's "a real change
+// rendered as nothing" in the positive half.
+const KNOWN_CHANGE = ["created", "dropped", "changed"];
 
 const TYPE_STYLES: Record<string, { color: string; bg: string; icon: string }> =
   {
@@ -210,6 +220,14 @@ function ChangeRow({ c }: { c: SchemaChangeRow }) {
                 </span>
               )}
             </>
+          )}
+          {!KNOWN_CHANGE.includes(c.change_type) && (
+            <span
+              className="text-amber-300"
+              title="이 변경 유형을 해석할 수 있는 화면 버전이 아닙니다. 위 유형 이름과 테이블 이름은 서버가 보낸 값입니다."
+            >
+              {UNKNOWN_TYPE}
+            </span>
           )}
         </div>
       </div>
