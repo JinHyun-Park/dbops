@@ -1069,7 +1069,7 @@ export function ChatPanel() {
 
   return (
     <div className="flex h-[calc(100vh-3.25rem)]">
-      <aside className="hidden lg:flex w-64 flex-col border-r border-zinc-800 bg-zinc-950/60 chat-sidebar">
+      <aside className="flex max-lg:hidden w-64 flex-col border-r border-zinc-800 bg-zinc-950/60 chat-sidebar">
         <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
           <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
             conversations

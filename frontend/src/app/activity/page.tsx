@@ -473,7 +473,7 @@ function TimelineEvent({
               </span>
 
               {/* action_type identifier — monospace, for DBA scanning */}
-              <span className="text-[10px] font-mono text-zinc-600 truncate hidden sm:inline">
+              <span className="text-[10px] font-mono text-zinc-600 truncate inline max-sm:hidden">
                 {item.action_type}
               </span>
 

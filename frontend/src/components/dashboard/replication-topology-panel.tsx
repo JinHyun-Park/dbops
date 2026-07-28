@@ -182,7 +182,7 @@ export function ReplicationTopologyPanel({ clusterId }: { clusterId: string }) {
                 </div>
               )}
             </div>
-            <div className="hidden md:flex flex-col items-center justify-center text-zinc-600 pt-8 font-mono text-xs">
+            <div className="flex max-md:hidden flex-col items-center justify-center text-zinc-600 pt-8 font-mono text-xs">
               ──▶
             </div>
             <div>

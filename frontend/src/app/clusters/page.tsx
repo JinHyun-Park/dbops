@@ -1337,7 +1337,7 @@ export default function ClustersPage() {
                   </div>
 
                   {/* Desktop table */}
-                  <div className="hidden md:block border border-zinc-800 overflow-hidden">
+                  <div className="block max-md:hidden border border-zinc-800 overflow-hidden">
                     <table className="w-full text-sm">
                       <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
                         <tr>

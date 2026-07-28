@@ -715,7 +715,7 @@ function PlatformCostView({
                           {row.service}
                         </div>
                       </div>
-                      <div className="w-40 h-1.5 bg-zinc-800 rounded overflow-hidden hidden sm:block">
+                      <div className="w-40 h-1.5 bg-zinc-800 rounded overflow-hidden block max-sm:hidden">
                         <div
                           className="h-full bg-amber-500/70"
                           style={{ width: `${Math.min(100, pct)}%` }}

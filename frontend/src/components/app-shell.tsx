@@ -561,7 +561,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <RcaProvider>
         <div className="flex h-screen bg-zinc-950 text-zinc-100">
           <MobileTabBar pathname={pathname} />
-          <aside className="hidden md:flex w-60 flex-col border-r border-zinc-800 bg-zinc-950/95 backdrop-blur-xl">
+          {/* `flex max-md:hidden`, NOT `hidden md:flex`. Both express the same
+              intent, but the second one only works if `md:flex` out-ranks
+              `hidden` in the cascade, and anything that injects CSS into the
+              page (a browser extension did exactly this) can flip that and
+              erase the whole sidebar. This form only ever declares
+              display:none when we actually want it hidden, so nothing has to
+              win a fight. Same reason for the other max-* sites in this repo:
+              do not "simplify" it back. */}
+          <aside className="flex max-md:hidden w-60 flex-col border-r border-zinc-800 bg-zinc-950/95 backdrop-blur-xl">
             <Link
               href="/"
               className="px-5 py-4 hover:bg-zinc-900/50 transition-colors flex items-center gap-2.5"

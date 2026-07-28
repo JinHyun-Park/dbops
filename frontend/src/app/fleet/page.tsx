@@ -601,7 +601,7 @@ export default function FleetPage() {
           </div>
 
           {/* Desktop table — severity column leads; default sort is severity. */}
-          <div className="hidden md:block bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden">
+          <div className="block max-md:hidden bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-zinc-900/50 border-b border-zinc-700">
                 <tr>
