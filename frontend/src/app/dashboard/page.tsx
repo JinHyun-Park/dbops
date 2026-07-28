@@ -1021,18 +1021,21 @@ export default function DashboardPage() {
                 {fam !== "relational" && (
                   <AnomaliesPanel clusterId={selectedCluster} />
                 )}
-                {(fam === "dynamodb" || fam === "documentdb") && (
+                {/* E1-5 gave /capacity-forecast an rds_instance and an
+                    elasticache family and a second response mode (depleting
+                    toward 0), so the panel now answers for all five families and
+                    speaks the same logical metric vocabulary as the agent tool.
+                    rds_instance was previously excluded because the endpoint
+                    modelled only growing-toward-limit and would have shown a
+                    misleading "not applicable"; its storage-exhaustion ETA also
+                    still surfaces as a capacity_forecast finding above, which is
+                    the proactive path, not a substitute for the panel. */}
+                {fam !== "relational" && (
                   <CapacityForecastPanel
                     clusterId={selectedCluster}
                     engine={activeEngine}
                   />
                 )}
-                {/* No manual CapacityForecastPanel for rds_instance: the
-                    /capacity-forecast endpoint models growing-toward-limit and
-                    has no rds_instance family (it would show a misleading
-                    "not applicable" notice). Storage-exhaustion + connection
-                    ETAs already surface as capacity_forecast findings in the
-                    MaintenanceHealthPanel above. */}
               </>
             )}
 

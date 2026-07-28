@@ -145,19 +145,30 @@ TOOLS = {
             "free-space shrinking toward exhaustion), connections (DatabaseConnections vs "
             "max_connections from cluster_meta / cluster_settings / the DocumentDB "
             "DatabaseConnectionsLimit datapoint), aas (vs instance vCPU, or "
-            "serverlessv2_max_acu converted to vCPU on Serverless v2). Each metric is "
+            "serverlessv2_max_acu converted to vCPU on Serverless v2), read_capacity / "
+            "write_capacity (DynamoDB consumed RCU/WCU per minute vs the latest provisioned "
+            "rate x 60; on-demand tables have no provisioned row, so grounded=false and no "
+            "date), memory (ElastiCache Redis/Valkey DatabaseMemoryUsagePercentage vs 100; "
+            "Memcached does not publish it and is refused). Each metric is "
             "per-engine-family: status=unsupported_metric when the engine collects no such "
-            "series. status is always present (ok | limit_reached | no_data | "
+            "series. status is always present (ok | limit_reached | evicting | no_data | "
             "unsupported_metric | unknown_metric | unknown_cluster); already at/past the "
             "limit is status=limit_reached with days_until_limit=0 and "
-            "approaching_limit=true. Returns no date when the limit cannot be grounded in "
-            "the cluster's real config."
+            "approaching_limit=true. direction is up or down and usage_pct is precomputed, "
+            "so never divide by limit (it is legitimately 0 in the down mode). "
+            "status=evicting means an LRU/TTL cache is already recycling memory so a "
+            "days-to-100% number would be meaningless: it is not an all-clear, the accurate "
+            "signal is the elasticache eviction findings. Returns no date when the limit "
+            "cannot be grounded in the cluster's real config."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
-                "metric": {"type": "string", "enum": ["storage", "connections", "aas"], "default": "storage"},
+                "metric": {"type": "string",
+                           "enum": ["storage", "connections", "aas", "read_capacity",
+                                    "write_capacity", "memory"],
+                           "default": "storage"},
                 "days_lookback": {"type": "integer", "default": 30, "description": "Days of historical data for trend calculation"},
             },
             "required": ["cluster_id"],

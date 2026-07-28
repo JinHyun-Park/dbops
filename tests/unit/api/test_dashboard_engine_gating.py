@@ -202,25 +202,50 @@ def test_backups_documentdb_returns_snapshots_via_docdb_client(monkeypatch):
 # 3. Capacity-forecast — non-relational → not_applicable, no SQL executed
 # ===========================================================================
 
-def test_capacity_forecast_dynamodb_invalid_metric_returns_not_applicable(monkeypatch):
+def test_capacity_forecast_dynamodb_invalid_metric_returns_unsupported(monkeypatch):
     """_capacity_forecast for a dynamodb cluster asked for a metric OUTSIDE its
-    engine family (storage_bytes is relational/docdb-only) must return
-    not_applicable=True without executing any SQL — the metric is not valid
-    for DynamoDB, whose capacity forecasts are consumed_rcu/consumed_wcu."""
+    engine family (storage is relational/docdb/rds_instance-only) must refuse
+    without executing any SQL. DynamoDB forecasts read_capacity/write_capacity."""
     monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
 
     query_called = []
 
     def _spy_query(sql, params=None):
         query_called.append(sql)
+        if "cluster_meta" in sql:
+            return [{"engine": "dynamodb"}]
         return []
 
-    result = handler._capacity_forecast(_spy_query, "ddb-abc123", "storage_bytes", 30)
+    result = handler._capacity_forecast(_spy_query, "ddb-abc123", "storage", 30)
 
+    assert result["status"] == "unsupported_metric"
     assert result.get("not_applicable") is True
     assert result.get("engine_family") == "dynamodb"
-    # The SQL regression query must NOT have been executed for an invalid metric
-    assert not query_called, "SQL query should not run for a metric outside the engine family"
+    # The cheap cluster_meta PK lookup runs first (it has to, so this endpoint
+    # fails closed on an uncollected cluster in the same order the MCP tool does),
+    # but the expensive regression must not.
+    assert not any("REGR_SLOPE" in s for s in query_called), \
+        "the trend regression must not run for a metric outside the engine family"
+
+
+def test_capacity_forecast_rejects_a_raw_metric_type_as_unknown_metric(monkeypatch):
+    """E1-5 unified both surfaces on LOGICAL names. A raw metric_type is now a bad
+    NAME, not an engine problem, and it must be told apart from an engine refusal:
+    the panel and the agent both branch on that distinction."""
+    monkeypatch.setattr(handler, "_registry_engine", lambda cid: "aurora-postgresql")
+
+    called = []
+
+    def _spy_query(sql, params=None):
+        called.append(sql)
+        return []
+
+    result = handler._capacity_forecast(_spy_query, "prod-pg", "storage_bytes", 30)
+    assert result["status"] == "unknown_metric"
+    for valid in ("storage", "connections", "aas", "read_capacity",
+                  "write_capacity", "memory"):
+        assert valid in result["reason"]
+    assert not called, "a bad metric name must not reach the registry or any SQL"
 
 
 # ===========================================================================
@@ -364,11 +389,15 @@ def test_capacity_forecast_relational_executes_sql(monkeypatch):
 
     def _spy_query(sql, params=None):
         query_called.append(sql)
+        if "cluster_meta" in sql:
+            return [{"engine": "aurora-postgresql"}]
         return [{"slope": 0.0, "latest": 1000.0, "first_ts": None, "last_ts": None, "samples": 10}]
 
-    result = handler._capacity_forecast(_spy_query, "prod-pg", "storage_bytes", 30)
+    result = handler._capacity_forecast(_spy_query, "prod-pg", "storage", 30)
 
     assert result.get("not_applicable") is None or result.get("not_applicable") is False
+    assert result["metric_type"] == "storage_bytes"
+    assert result["status"] == "ok"
     assert len(query_called) > 0, "SQL query must be executed for relational clusters"
 
 
@@ -381,6 +410,8 @@ def test_capacity_forecast_documentdb_db_connections_resolves_limit_from_metric(
     seen = {}
 
     def _spy_query(sql, params=None):
+        if "cluster_meta" in sql:
+            return [{"engine": "docdb"}]
         if "REGR_SLOPE" in sql:
             # Growing connections, well below the limit.
             return [{"slope": 1.0, "latest": 100.0, "first_ts": None,
@@ -393,23 +424,25 @@ def test_capacity_forecast_documentdb_db_connections_resolves_limit_from_metric(
         seen["unexpected"] = sql
         return []
 
-    result = handler._capacity_forecast(_spy_query, "docdb-abc123", "db_connections", 30)
+    result = handler._capacity_forecast(_spy_query, "docdb-abc123", "connections", 30)
 
     assert result.get("not_applicable") is not True
     assert result["engine_family"] == "documentdb"
     assert result["limit"] == 1700.0
-    assert result["current"] == 100.0
+    assert result["current_value"] == 100.0
     assert "limit_query" in seen, "db_connections_limit metric must be queried"
     assert "max_connections" not in seen.get("limit_query", "")
     assert "unexpected" not in seen, "cluster_settings must not be consulted for docdb"
 
 
-def test_capacity_forecast_dynamodb_consumed_wcu_resolves_limit_from_provisioned(monkeypatch):
-    """_capacity_forecast for a dynamodb cluster forecasting consumed_wcu must
+def test_capacity_forecast_dynamodb_write_capacity_resolves_limit_from_provisioned(monkeypatch):
+    """_capacity_forecast for a dynamodb cluster forecasting write_capacity must
     resolve the limit as the LATEST provisioned_wcu × 60 (per-minute ceiling)."""
     monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
 
     def _spy_query(sql, params=None):
+        if "cluster_meta" in sql:
+            return [{"engine": "dynamodb"}]
         if "REGR_SLOPE" in sql:
             return [{"slope": 5.0, "latest": 1000.0, "first_ts": None,
                      "last_ts": None, "samples": 30}]
@@ -418,32 +451,42 @@ def test_capacity_forecast_dynamodb_consumed_wcu_resolves_limit_from_provisioned
             return [{"value": 50.0}]  # 50 WCU/s provisioned
         return []
 
-    result = handler._capacity_forecast(_spy_query, "ddb-abc123", "consumed_wcu", 30)
+    result = handler._capacity_forecast(_spy_query, "ddb-abc123", "write_capacity", 30)
 
     assert result.get("not_applicable") is not True
     assert result["engine_family"] == "dynamodb"
+    assert result["metric_type"] == "consumed_wcu"
     assert result["limit"] == 50.0 * 60.0  # 3000 WCU/min
-    assert result["current"] == 1000.0
+    assert result["current_value"] == 1000.0
 
 
-def test_capacity_forecast_dynamodb_ondemand_no_provisioned_not_applicable(monkeypatch):
-    """_capacity_forecast for a dynamodb cluster with NO provisioned_* datapoint
-    (on-demand table) must return not_applicable — there is no ceiling to
-    forecast toward."""
+def test_capacity_forecast_dynamodb_ondemand_reports_the_trend_with_no_date(monkeypatch):
+    """A dynamodb table with NO provisioned_* datapoint is on-demand: there is no
+    grounded ceiling, so no ETA and no percentage. The measured consumption trend
+    is real data and is still returned (the old code discarded it as
+    not_applicable), and nothing divides by the absent limit."""
     monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
 
     def _spy_query(sql, params=None):
+        if "cluster_meta" in sql:
+            return [{"engine": "dynamodb"}]
         if "REGR_SLOPE" in sql:
             return [{"slope": 5.0, "latest": 1000.0, "first_ts": None,
                      "last_ts": None, "samples": 30}]
         # provisioned_rcu query returns no rows → on-demand
         return []
 
-    result = handler._capacity_forecast(_spy_query, "ddb-abc123", "consumed_rcu", 30)
+    result = handler._capacity_forecast(_spy_query, "ddb-abc123", "read_capacity", 30)
 
-    assert result.get("not_applicable") is True
+    assert result["status"] == "ok"
     assert result["engine_family"] == "dynamodb"
-    assert "on-demand" in result.get("reason", "")
+    assert result["grounded"] is False
+    assert result["limit"] == 0.0
+    assert result["days_until_limit"] is None
+    assert result["approaching_limit"] is False
+    assert result["usage_pct"] is None
+    assert result["forecast"] == "growing"
+    assert "온디맨드" in result["reason"]
 
 
 def test_health_findings_relational_returns_data(monkeypatch):
@@ -513,8 +556,9 @@ def test_capacity_forecast_registry_unavailable_fail_closed(monkeypatch):
         query_called.append(sql)
         return []
 
-    result = handler._capacity_forecast(_spy_query, "some-cluster", "storage_bytes", 30)
+    result = handler._capacity_forecast(_spy_query, "some-cluster", "storage", 30)
 
+    assert result["status"] == "unknown_cluster"
     assert result.get("not_applicable") is True
     assert result.get("registry_unavailable") is True
     assert not query_called

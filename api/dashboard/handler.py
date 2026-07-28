@@ -2378,67 +2378,341 @@ def _wait_events(query, cluster_id, hours):
     return {"cluster_id": cluster_id, "hours": hours, "wait_events": rows}
 
 
-# Capacity forecasting: simple linear regression on the last N days of
-# metric_snapshots. The Performance MCP server has a `forecast_capacity`
-# tool already, but invoking it through the agent for a dashboard panel is
-# heavy + slow. We replicate the math directly against the cache DB so the
-# panel renders in one round trip.
+# Capacity forecasting: the REST twin of the Performance MCP `forecast_capacity`
+# tool (mcp-servers/mcp_servers/performance/tools/forecast_capacity.py).
+# Invoking the agent for a dashboard panel is heavy + slow, so the math runs
+# directly against the cache DB and the panel renders in one round trip.
 #
-# Limits are deliberately conservative defaults — Aurora autoscales
-# storage (cluster cap is 128 TB) so the storage value is a "well past
-# any sane operator" ceiling. Connections / AAS limits come from typical
-# saturation points for the popular instance classes; when cluster_settings
-# carries the actual max_connections we'll override below.
-_CAPACITY_METRICS = {
-    # metric_type, display unit, hard cap (in stored units)
-    "storage_bytes": {"limit": 128 * 1024**4, "label": "Storage"},  # 128 TiB
-    # Canonical total-connections metric = db_connections (CloudWatch
-    # DatabaseConnections), collected for every cluster. The PI-only
-    # "connections" was empty whenever Performance Insights was off.
-    "db_connections": {"limit": 5000, "label": "Connections"},
-    "aas": {"limit": 64.0, "label": "Active Sessions"},
-    # DynamoDB provisioned throughput — consumed_* are per-minute Sums; the
-    # ceiling is the provisioned per-second rate × 60. Default limits below are
-    # placeholders only — _capacity_forecast OVERRIDES them from the latest
-    # provisioned_rcu/provisioned_wcu datapoint (and returns not_applicable when
-    # there is none, i.e. on-demand tables).
-    "consumed_rcu": {"limit": 60000.0, "label": "Read Capacity (RCU/min)"},
-    "consumed_wcu": {"limit": 60000.0, "label": "Write Capacity (WCU/min)"},
+# ONE VOCABULARY (E1-5). `metric` is a LOGICAL name here too, not a raw
+# metric_type. Before this, the tool took storage/connections/aas while this
+# endpoint took storage_bytes/db_connections/aas, and `_CAPACITY_METRICS_BY_FAMILY`
+# had no rds_instance / elasticache key: the panel answered "not applicable" for a
+# cluster the agent handed an exhaustion ETA for. Logical won because the raw name
+# is per-family (Aurora storage GROWS as storage_bytes, standalone RDS storage
+# DEPLETES as free_storage_bytes), so a caller picking the raw name has to know the
+# family first. Statuses, `direction` and `usage_pct` match the tool field for
+# field; tests/unit/api/test_capacity_parity.py seeds one series and asserts both
+# surfaces return the same verdict.
+#
+# Every series below was verified against its writer (file:line in the tool's
+# docstring). Nothing is enabled on a series no collector writes: the tool once
+# defaulted to `storage_gb`, which has no writer, and reported the resulting zero
+# samples as a flat trend.
+_VOLUME_MAX_BYTES = 128 * 1024**4  # Aurora / DocumentDB cluster volume ceiling
+_CAPACITY_FALLBACK_CONNECTIONS = 5000
+_CAPACITY_FALLBACK_AAS = 64
+_ACU_PER_VCPU = 4.0
+_MEMORY_LIMIT_PCT = 100.0
+# A far-future ETA is real data but not an alert: bound the flag, not the number.
+_ACTIONABLE_HORIZON_DAYS = 365
+_VCPU_BY_SIZE = {
+    "medium": 2, "large": 2, "xlarge": 4, "2xlarge": 8, "4xlarge": 16,
+    "8xlarge": 32, "12xlarge": 48, "16xlarge": 64, "24xlarge": 96, "32xlarge": 128,
 }
 
-# Which metrics are valid per engine family. Relational keeps the full
-# (storage/connections/aas) set; the new engines forecast only the things that
-# "grow toward a limit" — DocDB connections + storage, DynamoDB provisioned
-# throughput. A metric outside its family's set → not_applicable (no SQL).
-_CAPACITY_METRICS_BY_FAMILY = {
-    "relational": {"storage_bytes", "db_connections", "aas"},
-    "documentdb": {"db_connections", "storage_bytes"},
-    "dynamodb": {"consumed_rcu", "consumed_wcu"},
+# Logical metric -> display label. The LIMIT no longer lives here: it is
+# per-family and resolved in _capacity_resolve_series, which is why adding a
+# family key below is no longer a no-op the way it was when this dict owned both.
+_CAPACITY_METRICS = {
+    "storage": "Storage",
+    "connections": "Connections",
+    "aas": "Active Sessions",
+    "read_capacity": "Read Capacity (RCU/min)",
+    "write_capacity": "Write Capacity (WCU/min)",
+    "memory": "Memory",
 }
+
+# Logical metric -> family -> the metric_type that family actually collects.
+_CAPACITY_STORAGE_SERIES = {
+    "relational": "storage_bytes",      # cw_collector.py:5 (VolumeBytesUsed)
+    "documentdb": "storage_bytes",      # docdb_cw_collector.py:10
+    "rds_instance": "free_storage_bytes",  # rds_instance_cw_collector.py:14
+}
+_CAPACITY_CONNECTION_SERIES = {
+    "relational": "db_connections",     # cw_collector.py:7,26
+    "documentdb": "db_connections",     # docdb_cw_collector.py:14
+    "rds_instance": "db_connections",   # rds_instance_cw_collector.py:12
+}
+# `aas` has exactly one writer, pi_collector.py:5,25 (db.load.avg), so only the
+# Performance-Insights-capable families have the series.
+_CAPACITY_AAS_SERIES = {"relational": "aas", "rds_instance": "aas"}
+# consumed_* are per-minute Sums (dynamodb_cw_collector.py:11,12,24,25); the
+# ceiling is the latest provisioned_* per-second rate (:19,20) x 60.
+_CAPACITY_THROUGHPUT_SERIES = {
+    "read_capacity": {"dynamodb": ("consumed_rcu", "provisioned_rcu")},
+    "write_capacity": {"dynamodb": ("consumed_wcu", "provisioned_wcu")},
+}
+# DatabaseMemoryUsagePercentage (elasticache_cw_collector.py:12) is in the
+# Redis/Valkey list only. Memcached is refused below: that metric is absent from
+# _MEMCACHED_METRICS and its FreeableMemory is host memory, not cache fill.
+_CAPACITY_MEMORY_SERIES = {"elasticache": "memory_usage_pct"}
+
+# Which LOGICAL metrics are valid per engine family. A metric outside its
+# family's set is status=unsupported_metric with no SQL run.
+_CAPACITY_METRICS_BY_FAMILY = {
+    "relational": {"storage", "connections", "aas"},
+    "documentdb": {"storage", "connections"},
+    "rds_instance": {"storage", "connections", "aas"},
+    "dynamodb": {"read_capacity", "write_capacity"},
+    "elasticache": {"memory"},
+}
+
+
+def _capacity_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _capacity_scalar(query, sql, params):
+    """Single `value` column, first row, as a float. Missing row or a
+    non-numeric value is 0.0, which every caller treats as "no grounded
+    limit" (a fallback is never promoted to grounded=True)."""
+    rows = query(sql, params) or [{}]
+    return _capacity_float((rows[0] or {}).get("value"))
+
+
+def _capacity_vcpu_for(instance_class):
+    ic = (instance_class or "").lower()
+    if not ic or "serverless" in ic:
+        return None
+    return _VCPU_BY_SIZE.get(ic.rsplit(".", 1)[-1])
+
+
+def _capacity_connections_limit(query, cluster_id, fam, meta):
+    """(limit, basis, grounded). Same precedence as the MCP tool and
+    data-pipeline/etl_collector/collectors/capacity_forecast.py:
+    cluster_meta.max_connections (demo seeder only), then the latest
+    cluster_settings row, then the DocumentDB DatabaseConnectionsLimit
+    datapoint (DocDB has no max_connections setting at all)."""
+    mc = _capacity_float(meta.get("max_connections"))
+    if mc > 0:
+        return mc, f"cluster_meta.max_connections={int(mc)}", True
+    if fam == "documentdb":
+        cl = _capacity_scalar(
+            query,
+            "SELECT value FROM metric_snapshots "
+            "WHERE cluster_id = :cid AND metric_type = 'db_connections_limit' "
+            f"  {CLUSTER_LEVEL_ONLY} "
+            "ORDER BY ts DESC LIMIT 1",
+            {"cid": cluster_id},
+        )
+        if cl > 0:
+            return cl, f"DatabaseConnectionsLimit 최신 관측값={int(cl)}", True
+    else:
+        cs = _capacity_scalar(
+            query,
+            "SELECT value FROM cluster_settings "
+            "WHERE cluster_id = :cid AND name = 'max_connections' "
+            "ORDER BY updated_at DESC LIMIT 1",
+            {"cid": cluster_id},
+        )
+        if cs > 0:
+            return cs, f"cluster_settings.max_connections={int(cs)}", True
+    return float(_CAPACITY_FALLBACK_CONNECTIONS), "max_connections 미상, 기본값 가정", False
+
+
+def _capacity_aas_limit(meta):
+    """(limit, basis, grounded). Provisioned instances use the instance_class
+    vCPU count; Serverless v2 is db.serverless with no vCPU token, so its
+    ceiling comes from serverlessv2_max_acu converted at 4 ACU per vCPU."""
+    ic = meta.get("instance_class")
+    vcpu = _capacity_vcpu_for(ic)
+    if vcpu:
+        return float(vcpu), f"인스턴스 {ic} vCPU={vcpu} (AAS 포화 기준)", True
+    acu = _capacity_float(meta.get("serverlessv2_max_acu"))
+    if acu > 0:
+        acu_vcpu = max(1.0, acu / _ACU_PER_VCPU)
+        return (acu_vcpu,
+                f"serverlessv2_max_acu={round(acu, 1)} → vCPU≈{round(acu_vcpu, 1)} (AAS 포화 기준)",
+                True)
+    return float(_CAPACITY_FALLBACK_AAS), "인스턴스 vCPU 미상(서버리스/미등록), 기본값 가정", False
+
+
+def _capacity_throughput_limit(query, cluster_id, provisioned_metric):
+    """(limit, basis, grounded). provisioned_* is only collected for
+    billing_mode == PROVISIONED tables (dynamodb_cw_collector.py:134), so an
+    on-demand table has no row and therefore no grounded ceiling. The
+    consumption trend is still real data, so it is reported with no date rather
+    than refused."""
+    prov = _capacity_scalar(
+        query,
+        "SELECT value FROM metric_snapshots "
+        "WHERE cluster_id = :cid AND metric_type = :pm "
+        f"  {CLUSTER_LEVEL_ONLY} "
+        "ORDER BY ts DESC LIMIT 1",
+        {"cid": cluster_id, "pm": provisioned_metric},
+    )
+    if prov > 0:
+        return (prov * 60.0,
+                f"{provisioned_metric} 최신값 {round(prov, 1)}/초 × 60초 = {int(prov * 60)}/분",
+                True)
+    return 0.0, "온디맨드(프로비저닝 용량 없음), 근거 있는 천장 없음", False
+
+
+def _capacity_evictions(query, cluster_id, days_lookback):
+    """Eviction total inside the window. Greater than 0 means the cache is
+    already recycling memory, and "days until 100%" is meaningless for a cache
+    pinned near maxmemory by an LRU/TTL policy. evictions is in BOTH the
+    Redis/Valkey and Memcached metric lists (elasticache_cw_collector.py:18,33)."""
+    return _capacity_scalar(
+        query,
+        "SELECT COALESCE(SUM(value), 0) AS value FROM metric_snapshots "
+        "WHERE cluster_id = :cid AND metric_type = 'evictions' "
+        f"  {CLUSTER_LEVEL_ONLY} "
+        "  AND ts > NOW() - (:days || ' days')::interval",
+        {"cid": cluster_id, "days": str(days_lookback)},
+    )
+
+
+def _capacity_resolve_series(query, cluster_id, metric, fam, engine, meta):
+    """(metric_type, limit, basis, grounded). metric_type None means this engine
+    collects no such series, so the answer is a refusal rather than a
+    zero-sample forecast."""
+    if metric == "storage":
+        metric_type = _CAPACITY_STORAGE_SERIES.get(fam)
+        if metric_type is None:
+            return None, 0.0, "", False
+        if metric_type == "free_storage_bytes":
+            # Free space DEPLETING to a hard floor of 0 bytes = STORAGE_FULL, so
+            # the limit is grounded without any config lookup. allocated_storage_gb
+            # only adds usage context. RDS storage autoscaling
+            # (MaxAllocatedStorage) would push the real date out, but it is not
+            # collected into resource_details so it cannot be checked here.
+            alloc = _capacity_float(meta.get("allocated_storage_gb"))
+            basis = "여유 스토리지 소진(0 bytes)"
+            if alloc > 0:
+                basis += f", 할당 {int(alloc)}GB"
+            return metric_type, 0.0, basis, True
+        return metric_type, float(_VOLUME_MAX_BYTES), "클러스터 볼륨 상한 128 TiB", True
+    if metric == "connections":
+        metric_type = _CAPACITY_CONNECTION_SERIES.get(fam)
+        if metric_type is None:
+            return None, 0.0, "", False
+        return (metric_type, *_capacity_connections_limit(query, cluster_id, fam, meta))
+    if metric == "aas":
+        metric_type = _CAPACITY_AAS_SERIES.get(fam)
+        if metric_type is None:
+            return None, 0.0, "", False
+        return (metric_type, *_capacity_aas_limit(meta))
+    if metric in _CAPACITY_THROUGHPUT_SERIES:
+        pair = _CAPACITY_THROUGHPUT_SERIES[metric].get(fam)
+        if pair is None:
+            return None, 0.0, "", False
+        metric_type, provisioned_metric = pair
+        return (metric_type, *_capacity_throughput_limit(query, cluster_id, provisioned_metric))
+    # metric == "memory"
+    metric_type = _CAPACITY_MEMORY_SERIES.get(fam)
+    if metric_type is None or "memcached" in (engine or "").lower():
+        return None, 0.0, "", False
+    return metric_type, _MEMORY_LIMIT_PCT, "메모리 사용률 상한 100%", True
+
+
+def _capacity_usage_pct(approach_down, current, limit, alloc_gb):
+    """0-100 or None, computed server-side so no consumer divides by `limit`.
+    The depleting mode's limit is legitimately 0 (free bytes exhausted) and an
+    on-demand DynamoDB table has no ceiling at all, so (current/limit)*100
+    divides by zero or invents a percentage. Depleting usage is only defined
+    against the ALLOCATED size, not against the limit."""
+    if approach_down:
+        if alloc_gb > 0:
+            total = alloc_gb * 1024**3
+            return round(max(0.0, min(100.0, (total - current) / total * 100)), 1)
+        return None
+    if limit > 0:
+        return round(max(0.0, min(100.0, current / limit * 100)), 1)
+    return None
+
+
+def _capacity_reject(cluster_id, metric, status, reason, fam=None):
+    out = {
+        "cluster_id": cluster_id,
+        "metric": metric,
+        "status": status,
+        "not_applicable": True,
+        "reason": reason,
+        "samples": 0,
+        "days_until_limit": None,
+        "approaching_limit": False,
+        "grounded": False,
+        "usage_pct": None,
+    }
+    if fam is not None:
+        out["engine_family"] = fam
+    return out
 
 
 def _capacity_forecast(query, cluster_id, metric, days_lookback):
+    if metric not in _CAPACITY_METRICS:
+        return _capacity_reject(
+            cluster_id, metric, "unknown_metric",
+            f"'{metric}' 는 지원하지 않는 메트릭 이름입니다. "
+            f"사용 가능한 값: {', '.join(_CAPACITY_METRICS)}.")
     eng = _registry_engine(cluster_id)
     if eng is None:
-        return {"cluster_id": cluster_id, "metric": metric, "not_applicable": True,
-                "registry_unavailable": True}
+        out = _capacity_reject(
+            cluster_id, metric, "unknown_cluster",
+            "클러스터 레지스트리를 조회할 수 없어 엔진을 확인하지 못했습니다.")
+        out["registry_unavailable"] = True
+        return out
     fam = engine_family(eng)
-    # Engine-aware dispatch: relational, documentdb and dynamodb all forecast
-    # against metric_snapshots — only the valid metric set + limit resolution
-    # differ. Any other family is genuinely not applicable.
-    allowed = _CAPACITY_METRICS_BY_FAMILY.get(fam)
-    if allowed is None:
-        return {"cluster_id": cluster_id, "metric": metric, "not_applicable": True, "engine_family": fam}
-    # Metric must be both globally known AND valid for this engine family.
-    if metric not in _CAPACITY_METRICS or metric not in allowed:
-        return {"cluster_id": cluster_id, "metric": metric, "not_applicable": True,
-                "engine_family": fam}
-    # RDS Data API params come through as strings — we cast to interval the
-    # same way the other lookback queries in this file do, instead of using
-    # MAKE_INTERVAL which would need an integer-typed param. Float-cast
-    # value to keep REGR_SLOPE happy when the metric is stored as integer.
+    # cluster_meta carries every limit input (max_connections, instance_class,
+    # serverlessv2_max_acu, allocated_storage_gb). No row means the first ETL
+    # cycle has not run, and the MCP tool fail-closes on exactly this condition
+    # with the same status: without it the aas / connections ceilings silently
+    # become the fleet-wide fallbacks and the two surfaces stop agreeing.
+    #
+    # This read comes BEFORE the family gate on purpose. The MCP tool derives the
+    # family FROM cluster_meta.engine, so it cannot reach a family verdict without
+    # the row; if this endpoint rejected the metric first it would answer
+    # unsupported_metric where the tool answers unknown_cluster for the same
+    # uncollected cluster. Ordering the checks the same way is what keeps the two
+    # answers identical. It costs one cheap PK lookup on an already-rejected
+    # request, and the expensive regression still never runs.
+    meta_rows = query(
+        "SELECT engine, max_connections, instance_class, serverlessv2_max_acu, "
+        "       resource_details->>'allocated_storage_gb' AS allocated_storage_gb "
+        "FROM cluster_meta WHERE cluster_id = :cid",
+        {"cid": cluster_id},
+    )
+    if not meta_rows:
+        return _capacity_reject(
+            cluster_id, metric, "unknown_cluster",
+            "cluster_meta에 이 클러스터가 없습니다(미등록이거나 첫 메트릭 수집 전). "
+            "등록 및 수집 상태를 확인한 뒤 다시 예측하세요.")
+    meta = meta_rows[0] or {}
+    allowed = _CAPACITY_METRICS_BY_FAMILY.get(fam) or set()
+    if metric not in allowed:
+        return _capacity_reject(
+            cluster_id, metric, "unsupported_metric",
+            f"{fam} 엔진(engine={eng or '미상'})에서는 {metric} 시계열이 수집되지 않아 "
+            f"예측할 수 없습니다."
+            + (" Memcached는 DatabaseMemoryUsagePercentage를 발행하지 않습니다."
+               if metric == "memory" and fam == "elasticache" else ""),
+            fam)
+    metric_type, limit, limit_basis, grounded = _capacity_resolve_series(
+        query, cluster_id, metric, fam, eng, meta)
+    if metric_type is None:
+        # Family key allowed the metric but the engine inside the family does
+        # not collect it (Memcached memory today).
+        return _capacity_reject(
+            cluster_id, metric, "unsupported_metric",
+            f"{fam} 엔진(engine={eng or '미상'})에서는 {metric} 시계열이 수집되지 않아 "
+            f"예측할 수 없습니다."
+            + (" Memcached는 DatabaseMemoryUsagePercentage를 발행하지 않습니다."
+               if metric == "memory" else ""),
+            fam)
+
+    # RDS Data API params come through as strings, so the lookback is cast to an
+    # interval the same way the other lookback queries in this file do.
+    # Float-cast value keeps REGR_SLOPE happy on integer-stored metrics.
+    # CLUSTER_LEVEL_ONLY on both the aggregate and `latest`: without the STRICT
+    # filter the regression mixes the cluster total with its per-instance /
+    # per-wait-event / per-GSI fractions and `latest` can be a fraction row.
     rows = query(
         "SELECT REGR_SLOPE(value::float, EXTRACT(EPOCH FROM ts) / 86400) AS slope, "
+        "       REGR_R2(value::float, EXTRACT(EPOCH FROM ts) / 86400)    AS r2, "
         "       (array_agg(value ORDER BY ts DESC))[1]                 AS latest, "
         "       MIN(ts)                                                 AS first_ts, "
         "       MAX(ts)                                                 AS last_ts, "
@@ -2446,104 +2720,122 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
         "FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = :mt "
         "AND ts > NOW() - (:days || ' days')::interval "
-        # Same trap the Performance MCP `forecast_capacity` hit in E-0: without the
-        # STRICT filter the regression mixes the cluster total with its per-wait-event
-        # / per-GSI fractions and `latest` can be a fraction row.
         f"{CLUSTER_LEVEL_ONLY}",
-        {"cid": cluster_id, "mt": metric, "days": str(days_lookback)},
+        {"cid": cluster_id, "mt": metric_type, "days": str(days_lookback)},
     )
     row = rows[0] if rows else {}
-    slope = float(row.get("slope") or 0)
-    current = float(row.get("latest") or 0)
-    samples = int(row.get("samples") or 0)
-    spec = _CAPACITY_METRICS[metric]
-    limit = float(spec["limit"])
+    slope = _capacity_float(row.get("slope"))
+    r2 = _capacity_float(row.get("r2"))
+    current = _capacity_float(row.get("latest"))
+    samples = int(_capacity_float(row.get("samples")))
 
-    # --- Dynamic limit resolution (engine-aware) ---------------------------
-    # Relational: connection limit comes from cluster_settings.max_connections
-    # when present; otherwise the conservative default ceiling stands.
-    if fam == "relational" and metric == "db_connections":
-        cfg = query(
-            "SELECT value FROM cluster_settings "
-            "WHERE cluster_id = :cid AND name = 'max_connections' "
-            "ORDER BY updated_at DESC LIMIT 1",
-            {"cid": cluster_id},
-        )
-        try:
-            mc = int(cfg[0]["value"]) if cfg else 0
-            if mc > 0:
-                limit = float(mc)
-        except (ValueError, KeyError, TypeError):
-            pass
+    # free_storage_bytes is the one series that reaches its limit by SHRINKING.
+    # This is the second response mode, not a sign flip: it decides the at-limit
+    # test, the ETA sign and how a consumer draws the bar.
+    approach_down = metric_type == "free_storage_bytes"
 
-    # DocumentDB: connection ceiling is the LATEST DatabaseConnectionsLimit
-    # metric (db_connections_limit), NOT cluster_settings — DocDB has no
-    # max_connections setting. storage_bytes keeps the Aurora-style ceiling
-    # (DocDB storage auto-scales the same way), so no override there.
-    if fam == "documentdb" and metric == "db_connections":
-        lim_rows = query(
-            "SELECT value FROM metric_snapshots "
-            "WHERE cluster_id = :cid AND metric_type = 'db_connections_limit' "
-            "AND (dimensions IS NULL OR dimensions::text = '{}') "
-            "ORDER BY ts DESC LIMIT 1",
-            {"cid": cluster_id},
-        )
-        try:
-            cl = float(lim_rows[0]["value"]) if lim_rows else 0.0
-            if cl > 0:
-                limit = cl
-        except (ValueError, KeyError, TypeError):
-            pass
+    def _days(s):
+        # Direction-agnostic: only a positive gap/slope ratio is approaching the
+        # limit. Growing needs gap>0 & slope>0, depleting needs gap<0 & slope<0.
+        # Sub-day rounds up to 1, never 0 (0 is reserved for "already there").
+        if not s:
+            return None
+        d = (limit - current) / s
+        return max(1, int(d)) if d > 0 else None
 
-    # DynamoDB: per-minute capacity ceiling = LATEST provisioned_* × 60
-    # (consumed_* are per-minute Sums). No provisioned datapoint means the
-    # table is on-demand (or capacity unknown) — there is no limit to forecast
-    # toward, so we return not_applicable rather than a misleading default.
-    if fam == "dynamodb" and metric in ("consumed_rcu", "consumed_wcu"):
-        prov_metric = "provisioned_rcu" if metric == "consumed_rcu" else "provisioned_wcu"
-        prov_rows = query(
-            "SELECT value FROM metric_snapshots "
-            "WHERE cluster_id = :cid AND metric_type = :pm "
-            "AND (dimensions IS NULL OR dimensions::text = '{}') "
-            "ORDER BY ts DESC LIMIT 1",
-            {"cid": cluster_id, "pm": prov_metric},
-        )
-        provisioned = 0.0
-        try:
-            provisioned = float(prov_rows[0]["value"]) if prov_rows else 0.0
-        except (ValueError, KeyError, TypeError):
-            provisioned = 0.0
-        if provisioned <= 0:
-            return {
-                "cluster_id": cluster_id,
-                "metric": metric,
-                "not_applicable": True,
-                "engine_family": fam,
-                "reason": "on-demand or no provisioned capacity",
-            }
-        limit = provisioned * 60.0
+    # Already AT/PAST the limit is not the same as trending away from it: both
+    # used to produce no date and approaching_limit=false, the calmest payload
+    # for the most urgent state. Samples are required because `latest` is 0.0
+    # when there is no row at all, and 0.0 free bytes reads as STORAGE_FULL.
+    at_limit = (
+        grounded
+        and samples > 0
+        and row.get("latest") is not None
+        and (current <= limit if approach_down else current >= limit)
+    )
+    # An LRU/TTL cache sits near maxmemory BY DESIGN, so its slope is about 0 and
+    # a "days to 100%" number is noise. If evictions happened the cache is
+    # already recycling, so report that instead of an ETA, and do NOT raise the
+    # actionable flag (a healthy cache evicting on policy is not exhausting).
+    # A cache with ZERO evictions and a rising trend is genuinely filling up
+    # (the noeviction-policy case) and keeps the ordinary growing forecast.
+    evicting = (
+        metric == "memory" and samples > 0
+        and _capacity_evictions(query, cluster_id, days_lookback) > 0
+    )
 
-    days_until = None
-    if slope > 0 and current < limit:
-        days_until = max(0, int((limit - current) / slope))
-    forecast = "growing" if slope > 0.01 else "shrinking" if slope < -0.01 else "stable"
+    days_until = 0 if at_limit else (_days(slope) if grounded else None)
+    heading_to_limit = days_until is not None and not at_limit
+    approaching = at_limit or (heading_to_limit and days_until <= _ACTIONABLE_HORIZON_DAYS)
+    if evicting:
+        days_until = None
+        heading_to_limit = False
+        approaching = False
+
+    reason = None
+    if samples == 0:
+        reason = (f"최근 {days_lookback}일 동안 {metric_type} 표본이 없어 추세를 계산할 수 "
+                  f"없습니다(수집 미시작이거나 이 클러스터에서 해당 메트릭이 올라오지 않음).")
+    elif evicting:
+        reason = ("eviction이 발생 중입니다. eviction 정책(LRU/TTL)이 걸린 캐시는 설계상 "
+                  "메모리 상한 근처에서 동작하므로 '100% 도달까지 며칠'은 의미가 없습니다. "
+                  "정확한 신호는 eviction 양과 hit rate이며 Maintenance Health의 "
+                  "elasticache_evictions_spike · elasticache_memory_pressure finding이 "
+                  "이를 임계로 관리합니다.")
+    elif not grounded:
+        reason = (f"한계값을 클러스터 실제 설정에서 확인할 수 없어({limit_basis}) 도달 시점을 "
+                  f"단정하지 않습니다. 추세만 참고하세요.")
 
     return {
         "cluster_id": cluster_id,
         "metric": metric,
+        "metric_type": metric_type,
         "engine_family": fam,
-        "label": spec["label"],
-        "current": current,
-        "slope_per_day": slope,
+        "label": _CAPACITY_METRICS[metric],
+        # Same status vocabulary as the MCP tool: ok | limit_reached | evicting |
+        # no_data | unsupported_metric | unknown_metric | unknown_cluster.
+        "status": (
+            "no_data" if samples == 0
+            else "evicting" if evicting
+            else "limit_reached" if at_limit
+            else "ok"
+        ),
+        # `current_value` on BOTH surfaces: the MCP tool has always called it
+        # that, and two names for the same number is the dual-vocabulary smell
+        # E1-5 exists to remove.
+        "current_value": current,
+        # Same rounding as the MCP tool so a parity check compares values, not
+        # float formatting.
+        "slope_per_day": round(slope, 4),
+        "r2": round(r2, 3),
         "limit": limit,
+        "limit_basis": limit_basis,
+        "grounded": grounded,
+        # up = growing toward a ceiling, down = depleting toward 0.
+        "direction": "down" if approach_down else "up",
+        # Precomputed: a consumer must never divide by `limit`, which is 0 in the
+        # depleting mode and 0 for an on-demand DynamoDB table.
+        "usage_pct": _capacity_usage_pct(
+            approach_down, current, limit,
+            _capacity_float(meta.get("allocated_storage_gb"))),
         "days_until_limit": days_until,
-        "forecast": forecast,
+        "approaching_limit": approaching,
+        "forecast": (
+            "no_data" if samples == 0
+            else "growing" if slope > 0
+            else "stable" if slope == 0
+            else "depleting" if approach_down
+            else "shrinking"
+        ),
+        "reason": reason,
         "samples": samples,
         "days_lookback": days_lookback,
+        # Clamped at 0: no metric here can go negative, and an unclamped
+        # depleting projection renders as negative free bytes.
         "projections": {
-            "d30": current + slope * 30,
-            "d60": current + slope * 60,
-            "d90": current + slope * 90,
+            "d30": max(0.0, current + slope * 30),
+            "d60": max(0.0, current + slope * 60),
+            "d90": max(0.0, current + slope * 90),
         },
     }
 
@@ -4228,7 +4520,10 @@ def lambda_handler(event, context):
                 max_age=30,
             )
         if raw_path.endswith("/capacity-forecast"):
-            metric = (qs.get("metric") or "storage_bytes").strip()
+            # LOGICAL metric name, same vocabulary as the forecast_capacity MCP
+            # tool (raw metric_type values like storage_bytes are rejected with
+            # status=unknown_metric).
+            metric = (qs.get("metric") or "storage").strip()
             days_lookback = _parse_int(qs.get("days_lookback"), 30, min_v=7, max_v=90)
             return _response(
                 200, _capacity_forecast(query, cluster_id, metric, days_lookback), max_age=30

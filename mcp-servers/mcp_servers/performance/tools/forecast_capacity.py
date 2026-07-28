@@ -2,35 +2,61 @@
 grounded in the CLUSTER'S real config (not a fleet-wide constant) and the trend
 read from the metric series the cluster's engine ACTUALLY collects.
 
-Two historical wrong-answer paths, both fixed here:
+`metric` is a LOGICAL name and the engine family decides which metric_type and
+which direction to read. That is the SAME vocabulary the REST dashboard endpoint
+(api/dashboard/handler.py `_capacity_forecast`) takes, so the agent and the panel
+answer the same question the same way for the same cluster. Before E1-5 the two
+surfaces took different inputs (logical here, raw metric_type there) and the REST
+family map had no rds_instance / elasticache key, so the dashboard said "not
+applicable" while this tool produced an exhaustion ETA for the same cluster.
+Logical won because the raw name is per-family (Aurora storage GROWS as
+storage_bytes, standalone RDS storage DEPLETES as free_storage_bytes): a caller
+that has to pick the raw name has to know the family first, and that is exactly
+the mistake the `storage_gb` default made.
 
-  1. hardcoded limits (connections=5000, aas=64, storage_gb=128000) applied to
-     every cluster, wrong for a db.r6g.large. Limits now come from
-     cluster_meta (max_connections / instance_class / allocated_storage_gb).
-  2. the DEFAULT metric was `storage_gb`, which NO collector ever writes, so
-     the default path returned zero samples for every engine and reported it as
-     a flat trend. The real series are:
-       * Aurora / DocumentDB: `storage_bytes` (VolumeBytesUsed), GROWING
-         toward the 128 TiB volume ceiling.
-       * standalone RDS instance: `free_storage_bytes` (FreeStorageSpace),
-         SHRINKING toward 0 (disk exhaustion → STORAGE_FULL).
-       * connections: `db_connections` (CloudWatch DatabaseConnections,
-         collected for every engine). The PI-only `connections` series is empty
-         whenever Performance Insights is off.
-     `metric` is therefore a LOGICAL name (storage/connections/aas) and the
-     engine family decides which series and which direction to read. Same math
-     as data-pipeline/etl_collector/collectors/capacity_forecast.py.
-  3. the limit lookup had no fallback, so 2 of the 3 metrics never produced a
-     date on a real cluster: cluster_meta.max_connections is written by the demo
-     seeder ONLY (meta_collector's INSERT has no such column), and the vCPU
-     ceiling resolves to None for instance_class db.serverless, i.e. every
-     Serverless v2 cluster. Both siblings already fall back, so the agent and
-     the dashboard disagreed about the same cluster+metric. The precedence here
-     now mirrors them (see _connections_limit / _aas_limit).
-  4. "already at/past the limit" answered exactly like "trend moving away from
-     the limit": no date, approaching_limit false, and a note saying the trend
-     is not heading to the limit. The calmest payload for the most urgent state.
-     gap<=0 in the APPROACH direction is now status=limit_reached (see at_limit).
+Logical name -> series, per family, every one verified against its writer:
+  * storage      relational / documentdb -> storage_bytes (VolumeBytesUsed),
+                 GROWING toward the 128 TiB volume ceiling
+                 (cw_collector.py:5, docdb_cw_collector.py:10)
+                 rds_instance -> free_storage_bytes (FreeStorageSpace),
+                 DEPLETING toward 0 = STORAGE_FULL
+                 (rds_instance_cw_collector.py:14)
+  * connections  relational / documentdb / rds_instance -> db_connections
+                 (cw_collector.py:7,26, docdb_cw_collector.py:14,
+                 rds_instance_cw_collector.py:12)
+  * aas          relational / rds_instance -> aas, written only by
+                 pi_collector.py:5,25 (db.load.avg), so PI-capable families only
+  * read_capacity / write_capacity
+                 dynamodb -> consumed_rcu / consumed_wcu
+                 (dynamodb_cw_collector.py:11,12,24,25), ceiling from the latest
+                 provisioned_rcu / provisioned_wcu (:19,20) x 60s
+  * memory       elasticache Redis/Valkey -> memory_usage_pct
+                 (DatabaseMemoryUsagePercentage, elasticache_cw_collector.py:12).
+                 Memcached is refused: that metric is NOT in
+                 _MEMCACHED_METRICS (elasticache_cw_collector.py:28-41) and its
+                 FreeableMemory is host memory, not cache fill, so there is no
+                 honest substitute.
+
+Families with no series for a logical metric are REFUSED
+(status=unsupported_metric), never answered with a zero-sample forecast: the
+history here is a default metric of `storage_gb`, which NO collector writes, so
+every engine got zero samples reported as a flat trend.
+
+Two response MODES, not one shape with a sign flip:
+  * direction="up"   value grows toward a ceiling (storage_bytes, db_connections,
+                     aas, consumed_*, memory_usage_pct)
+  * direction="down" value shrinks toward a floor of 0 (free_storage_bytes).
+`usage_pct` is computed HERE for both modes (0-100 or null) so no consumer has to
+divide by `limit`, which is legitimately 0 in the "down" mode and 0/ungrounded
+for an on-demand DynamoDB table.
+
+An LRU/TTL cache sits pinned near maxmemory BY DESIGN, so its slope is about 0
+and "days until 100%" is meaningless. When evictions occurred in the window the
+cache is already recycling memory and status is `evicting` with NO date: the
+accurate signal there is eviction volume, which elasticache_findings.py already
+thresholds (EVICTIONS_WARNING = 100 per window). A cache with zero evictions and
+a rising memory trend IS forecastable (that is the noeviction-policy case, where
+filling up means write failures), and it keeps the ordinary "up" mode.
 
 The linear slope (REGR_SLOPE) is kept but never reported as if it were precise:
 we also compute the fit (REGR_R2) and sample count and turn them into a
@@ -39,11 +65,17 @@ real config we return ``grounded: False`` and NO date at all.
 
 ``status`` is on every payload: unknown_metric / unknown_cluster (bad input),
 unsupported_metric (this engine has no such series), no_data (zero samples),
-limit_reached (already there), ok.
+limit_reached (already there), evicting (cache recycling at capacity), ok.
 """
 
 from mcp_servers.shared.cache_client import CacheClient
-from mcp_servers.shared.engine_family import DOCUMENTDB, RDS_INSTANCE, RELATIONAL
+from mcp_servers.shared.engine_family import (
+    DOCUMENTDB,
+    DYNAMODB,
+    ELASTICACHE,
+    RDS_INSTANCE,
+    RELATIONAL,
+)
 from mcp_servers.shared.engine_family import engine_family as _engine_family
 from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 
@@ -72,8 +104,8 @@ _FALLBACK_AAS = 64
 # ACU를 vCPU로 환산해서 쓴다.
 _ACU_PER_VCPU = 4.0
 
-# 논리 스토리지 메트릭 → 패밀리별 실제 metric_type. 매핑이 없는 패밀리
-# (DynamoDB/ElastiCache)는 스토리지 시계열 자체가 없어 예측 불가로 거부한다.
+# 논리 이름 → 패밀리별 실제 metric_type. 매핑이 없는 패밀리는 그 시계열 자체가
+# 없어 예측 불가로 거부한다(라이터는 모듈 docstring에 파일:줄로 적어 두었다).
 _STORAGE_SERIES = {
     RELATIONAL: "storage_bytes",
     DOCUMENTDB: "storage_bytes",
@@ -84,8 +116,8 @@ _STORAGE_SERIES = {
 # (relational) · docdb_cw_collector · rds_instance_cw_collector 셋뿐이다.
 # DynamoDB에는 커넥션 개념이 없고(용량은 consumed_rcu/wcu), ElastiCache는
 # curr_connections를 쓰지만 maxclients 천장을 수집하지 않아 한계를 근거 있게
-# 잡을 수 없다. 스토리지와 마찬가지로 매핑 없는 패밀리는 거부한다: 매핑이 없는
-# 채로 진행하면 표본 0개를 "안정적, 한계 도달 없음"으로 보고한다.
+# 잡을 수 없다. 매핑 없는 패밀리는 거부한다: 매핑이 없는 채로 진행하면 표본
+# 0개를 "안정적, 한계 도달 없음"으로 보고한다.
 _CONNECTION_SERIES = {
     RELATIONAL: "db_connections",
     DOCUMENTDB: "db_connections",
@@ -100,10 +132,28 @@ _AAS_SERIES = {
     RDS_INSTANCE: "aas",
 }
 
+# DynamoDB 처리량. consumed_*는 분당 Sum이고 provisioned_*는 초당 rate라
+# 천장은 provisioned × 60이다. provisioned_*는 billing_mode == PROVISIONED인
+# 테이블에만 수집되므로(dynamodb_cw_collector.py:134) 온디맨드 테이블은 천장이
+# 없다 → grounded=False(추세는 보고하되 날짜는 단정하지 않는다).
+# (논리 이름, 패밀리) → (소비 series, 프로비저닝 series)
+_THROUGHPUT_SERIES = {
+    "read_capacity": {DYNAMODB: ("consumed_rcu", "provisioned_rcu")},
+    "write_capacity": {DYNAMODB: ("consumed_wcu", "provisioned_wcu")},
+}
+
+# ElastiCache 메모리. memory_usage_pct(DatabaseMemoryUsagePercentage)는
+# Redis/Valkey 목록에만 있고 Memcached 목록에는 없다. 퍼센트라 천장 100은
+# 정의상 확정값이므로 node_type→메모리 맵(레포에 없음) 없이도 grounded다.
+_MEMORY_SERIES = {ELASTICACHE: "memory_usage_pct"}
+_MEMORY_LIMIT_PCT = 100.0
+
 # 허용된 논리 메트릭 이름. 이름이 틀린 것(예: 옛 문서의 storage_gb)과 "이 엔진에는
 # 그 시계열이 없음"은 전혀 다른 거부다: 전자를 엔진 탓으로 돌리면 에이전트가
 # DynamoDB 거부와 구분하지 못한다.
-_VALID_METRICS = ("storage", "connections", "aas")
+_VALID_METRICS = (
+    "storage", "connections", "aas", "read_capacity", "write_capacity", "memory",
+)
 
 # metric_snapshots는 같은 metric_type을 여러 차원으로 저장한다(인스턴스별·PI
 # 대기이벤트별·GSI별). 클러스터 단위 회귀는 반드시 strict 필터를 써야 한다.
@@ -122,6 +172,10 @@ def _f(value, default=0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _is_memcached(engine) -> bool:
+    return "memcached" in (engine or "").lower()
 
 
 def _vcpu_for(instance_class: str):
@@ -204,6 +258,43 @@ def _aas_limit(cluster: dict):
     return float(_FALLBACK_AAS), "인스턴스 vCPU 미상(서버리스/미등록), 기본값 가정", False
 
 
+def _throughput_limit(cache, cluster_id: str, provisioned_metric: str):
+    """(limit, basis, grounded). consumed_*는 분당 Sum이므로 천장은 최신
+    provisioned_* (초당 rate) × 60이다. 온디맨드 테이블은 provisioned_* 행이
+    아예 없어(수집 조건이 billing_mode == PROVISIONED) 근거 있는 천장이 없다 →
+    grounded=False. 추세 자체는 실데이터이므로 보고하고 날짜만 보류한다."""
+    prov = _latest_value(
+        cache,
+        "SELECT value FROM metric_snapshots "
+        "WHERE cluster_id = :cluster_id AND metric_type = :provisioned_metric "
+        f"  {_CLUSTER_LEVEL_ONLY} "
+        "ORDER BY ts DESC LIMIT 1",
+        {"cluster_id": cluster_id, "provisioned_metric": provisioned_metric},
+    )
+    if prov > 0:
+        return (
+            prov * 60.0,
+            f"{provisioned_metric} 최신값 {round(prov, 1)}/초 × 60초 = {int(prov * 60)}/분",
+            True,
+        )
+    return 0.0, "온디맨드(프로비저닝 용량 없음), 근거 있는 천장 없음", False
+
+
+def _evictions_in_window(cache, cluster_id: str, days_lookback: int) -> float:
+    """조회 창 안의 eviction 총합. >0이면 캐시가 이미 메모리를 회수하며 돌고
+    있다는 뜻이고, 그 상태의 "100% 도달까지 며칠"은 의미가 없다.
+    evictions는 Redis/Valkey · Memcached 양쪽 목록에 다 있다
+    (elasticache_cw_collector.py:18,33)."""
+    return _latest_value(
+        cache,
+        "SELECT COALESCE(SUM(value), 0) AS value FROM metric_snapshots "
+        "WHERE cluster_id = :cluster_id AND metric_type = 'evictions' "
+        f"  {_CLUSTER_LEVEL_ONLY} "
+        "  AND ts > NOW() - (:days_lookback || ' days')::interval",
+        {"cluster_id": cluster_id, "days_lookback": days_lookback},
+    )
+
+
 def _resolve_series(cache, cluster_id: str, metric: str, fam: str, cluster: dict):
     """(metric_type, limit, basis, grounded). metric_type=None → 이 엔진에서
     예측 불가(수집되는 시계열이 없음). metric 이름은 호출자가 _VALID_METRICS로
@@ -231,11 +322,40 @@ def _resolve_series(cache, cluster_id: str, metric: str, fam: str, cluster: dict
         if metric_type is None:
             return None, 0.0, "", False
         return (metric_type, *_connections_limit(cache, cluster_id, fam, cluster))
-    # metric == "aas"
-    metric_type = _AAS_SERIES.get(fam)
-    if metric_type is None:
+    if metric == "aas":
+        metric_type = _AAS_SERIES.get(fam)
+        if metric_type is None:
+            return None, 0.0, "", False
+        return (metric_type, *_aas_limit(cluster))
+    if metric in _THROUGHPUT_SERIES:
+        pair = _THROUGHPUT_SERIES[metric].get(fam)
+        if pair is None:
+            return None, 0.0, "", False
+        metric_type, provisioned_metric = pair
+        return (metric_type, *_throughput_limit(cache, cluster_id, provisioned_metric))
+    # metric == "memory"
+    metric_type = _MEMORY_SERIES.get(fam)
+    if metric_type is None or _is_memcached(cluster.get("engine")):
+        # Memcached는 DatabaseMemoryUsagePercentage를 발행하지 않고
+        # (elasticache_cw_collector.py의 _MEMCACHED_METRICS에 없음), FreeableMemory는
+        # 캐시 적재량이 아니라 호스트 여유 메모리라 대체할 수 없다.
         return None, 0.0, "", False
-    return (metric_type, *_aas_limit(cluster))
+    return metric_type, _MEMORY_LIMIT_PCT, "메모리 사용률 상한 100%", True
+
+
+def _usage_pct(approach_down: bool, current: float, limit: float, alloc_gb: float):
+    """0-100 사용률 또는 None. 소비자가 limit으로 나누지 않게 서버에서 계산한다:
+    감소 모드의 limit은 정당하게 0이고(여유 0바이트 = 소진) 온디맨드 DynamoDB는
+    천장 자체가 없어서, (current/limit)*100은 0으로 나누거나 무의미한 퍼센트를
+    만든다. 감소 모드의 사용률은 한계가 아니라 할당량 대비로만 정의된다."""
+    if approach_down:
+        if alloc_gb > 0:
+            total = alloc_gb * 1024 ** 3
+            return round(max(0.0, min(100.0, (total - current) / total * 100)), 1)
+        return None
+    if limit > 0:
+        return round(max(0.0, min(100.0, current / limit * 100)), 1)
+    return None
 
 
 def forecast_capacity_impl(
@@ -299,7 +419,12 @@ def forecast_capacity_impl(
             "days_until_limit": None,
             "approaching_limit": False,
             "grounded": False,
-            "reason": f"{fam} 엔진에서는 {metric} 시계열이 수집되지 않아 예측할 수 없습니다.",
+            "reason": (
+                f"{fam} 엔진(engine={cluster.get('engine') or '미상'})에서는 {metric} "
+                f"시계열이 수집되지 않아 예측할 수 없습니다."
+                + (" Memcached는 DatabaseMemoryUsagePercentage를 발행하지 않습니다."
+                   if metric == "memory" and fam == ELASTICACHE else "")
+            ),
         }
 
     # Trend + fit + sample count over the lookback. current = latest reading
@@ -331,7 +456,7 @@ def forecast_capacity_impl(
 
     # free_storage_bytes만 값이 내려가면서 한계(여유 0)에 닿는다. 나머지 메트릭은
     # 올라가면서 천장에 닿는다. "이미 도달"과 "한계에서 멀어지는 추세"를 가르는
-    # 기준이 이 접근 방향이다.
+    # 기준이 이 접근 방향이고, 소비자가 막대/사용률을 그리는 기준도 이것이다.
     approach_down = metric_type == "free_storage_bytes"
 
     def _days(s):
@@ -358,6 +483,16 @@ def forecast_capacity_impl(
         and (current <= limit if approach_down else current >= limit)
     )
 
+    # LRU/TTL 캐시는 설계상 maxmemory 근처에 붙어 있어 기울기가 0에 가깝고
+    # "며칠 후 100%"가 무의미하다. eviction이 실제로 발생했다면 캐시는 이미
+    # 메모리를 회수하며 돌고 있으므로 ETA 대신 그 사실을 보고한다. eviction이
+    # 0인데 메모리가 오르는 캐시는 진짜 채워지는 중(noeviction 정책)이라 일반
+    # 증가 모드를 그대로 쓴다.
+    evicting = (
+        metric == "memory" and n > 0
+        and _evictions_in_window(cache, cluster_id, days_lookback) > 0
+    )
+
     # 한계를 실제 설정에서 확인하지 못하면 날짜를 단정하지 않는다.
     days_until = 0 if at_limit else (_days(slope) if grounded else None)
     # approaching_limit은 "지금 조치가 필요한가"를 뜻해야 한다. 기울기가 한계
@@ -371,9 +506,18 @@ def forecast_capacity_impl(
     heading_to_limit = days_until is not None and not at_limit
     approaching = at_limit or (heading_to_limit and days_until <= _ACTIONABLE_HORIZON_DAYS)
     beyond_horizon = heading_to_limit and not approaching
+    if evicting:
+        # eviction 중인 캐시의 ETA는 보고하지 않는다. 그리고 정상 LRU 캐시를
+        # 매번 경보로 올리지도 않는다(그게 "건강한 캐시를 소진 임박으로 읽는"
+        # 오답이다). 정확한 신호는 eviction 양이고, 그건 이미
+        # elasticache_findings.py가 임계로 관리한다.
+        days_until = None
+        heading_to_limit = False
+        approaching = False
+        beyond_horizon = False
     # Confidence from fit + samples; a poor fit / thin data widens the band and
     # lowers confidence so the number isn't mistaken for precision.
-    if at_limit:
+    if at_limit or evicting:
         # 외삽이 아니라 관측된 상태다. 적합도가 나빠도 "이미 한계"는 사실이므로
         # 적합도 기반 등급을 그대로 쓰면 가장 확실한 사실이 low로 내려간다.
         confidence = "high"
@@ -401,6 +545,16 @@ def forecast_capacity_impl(
             f"최근 {days_lookback}일 동안 {metric_type} 표본이 없어 추세를 계산할 수 없습니다"
             f"(수집 미시작이거나 이 클러스터에서 해당 메트릭이 올라오지 않음). 표본 0개는 "
             f"'안정적(stable)'이 아니라 status=no_data, forecast=no_data입니다."
+        )
+    elif evicting:
+        note = (
+            f"최근 {days_lookback}일 동안 eviction이 발생했습니다. eviction 정책(LRU/TTL)이 "
+            f"걸린 캐시는 설계상 메모리 상한 근처에서 동작하므로 '100% 도달까지 며칠'은 "
+            f"의미가 없습니다(현재 {round(current, 1)}%, 기울기 {round(slope, 4)}/일, "
+            f"표본 {n}개). 정확한 신호는 eviction 양과 hit rate이며 "
+            f"elasticache_evictions_spike · elasticache_memory_pressure finding이 이를 "
+            f"임계로 관리합니다. days_until_limit=null, approaching_limit=false는 "
+            f"'문제 없음'이 아니라 '이 지표로는 소진 시점을 말할 수 없음'입니다."
         )
     elif at_limit:
         note = (
@@ -434,25 +588,36 @@ def forecast_capacity_impl(
             f"향하지 않아 도달 시점이 없습니다(days_until_limit=null, approaching_limit=false)."
         )
 
+    alloc = _f(cluster.get("allocated_storage_gb"))
     result = {
         "cluster_id": cluster_id,
         "metric": metric,
         "metric_type": metric_type,
         "engine_family": fam,
         # 성공 경로도 거부 경로와 같은 status 키를 갖는다: no_data(표본 0개) ·
-        # limit_reached(이미 도달) · ok.
-        "status": "no_data" if n == 0 else "limit_reached" if at_limit else "ok",
+        # evicting(캐시가 상한 근처에서 eviction 중) · limit_reached(이미 도달) · ok.
+        "status": (
+            "no_data" if n == 0
+            else "evicting" if evicting
+            else "limit_reached" if at_limit
+            else "ok"
+        ),
         "current_value": current,
         "limit": limit,
         "limit_basis": limit_basis,
         "grounded": grounded,
+        # 두 응답 모드: up = 천장으로 증가, down = 0으로 소진. 소비자는 이 값으로
+        # 라벨과 막대를 고르고, 퍼센트는 usage_pct를 그대로 쓴다(직접 나누면
+        # limit=0인 감소 모드와 천장 없는 온디맨드에서 깨진다).
+        "direction": "down" if approach_down else "up",
+        "usage_pct": _usage_pct(approach_down, current, limit, alloc),
         "slope_per_day": round(slope, 4),
         "r2": round(r2, 3),
         "samples": n,
         # days_until_limit: 0(status=limit_reached, 이미 도달) · 양의 정수(추세가
         # 한계로 향함) · null. null의 이유(추세가 한계로 향하지 않음 / 한계 근거
-        # 없음)는 note에 문장으로 남긴다. 양의 정수여도 실행 가능 기간을 넘으면
-        # approaching_limit는 false다.
+        # 없음 / eviction 중)는 note에 문장으로 남긴다. 양의 정수여도 실행 가능
+        # 기간을 넘으면 approaching_limit는 false다.
         "days_until_limit": days_until,
         "approaching_limit": approaching,
         "days_until_limit_range": days_range,
@@ -469,11 +634,7 @@ def forecast_capacity_impl(
         ),
         "note": note,
     }
-    if metric_type == "free_storage_bytes":
+    if approach_down and alloc > 0:
         # 할당 용량이 있으면 사용률 컨텍스트를 붙인다(collector와 동일 계산).
-        alloc = _f(cluster.get("allocated_storage_gb"))
-        if alloc > 0:
-            total = alloc * 1024 ** 3
-            result["allocated_gb"] = alloc
-            result["usage_pct"] = round(max(0.0, (total - current) / total * 100), 1)
+        result["allocated_gb"] = alloc
     return result

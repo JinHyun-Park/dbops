@@ -474,31 +474,65 @@ export async function fetchLogInsights(
   return res.json();
 }
 
+// LOGICAL metric names, the same vocabulary the forecast_capacity MCP tool takes
+// (E1-5). Raw metric_type values like storage_bytes are rejected by the endpoint
+// with status "unknown_metric": which raw series backs a logical name is
+// per-family (Aurora storage GROWS as storage_bytes, standalone RDS storage
+// DEPLETES as free_storage_bytes) and the server decides.
 export type CapacityMetric =
-  | "storage_bytes"
-  | "db_connections"
+  | "storage"
+  | "connections"
   | "aas"
-  | "consumed_rcu"
-  | "consumed_wcu";
+  | "read_capacity"
+  | "write_capacity"
+  | "memory";
+
+export type CapacityStatus =
+  | "ok"
+  | "limit_reached"
+  // An LRU/TTL cache is already recycling memory, so a days-to-100% number would
+  // be meaningless. NOT an all-clear: the accurate signal is the eviction findings.
+  | "evicting"
+  | "no_data"
+  | "unsupported_metric"
+  | "unknown_metric"
+  | "unknown_cluster";
 
 export interface CapacityForecastResponse {
   cluster_id: string;
   metric: CapacityMetric;
+  status: CapacityStatus;
   label?: string;
-  current: number;
+  // The raw metric_type the server resolved for this cluster's engine.
+  metric_type?: string;
+  current_value: number;
   slope_per_day: number;
+  r2?: number;
   limit: number;
+  limit_basis?: string;
+  // false means the ceiling could not be read from the cluster's real config, so
+  // no date is asserted.
+  grounded?: boolean;
+  // Two response modes: "up" grows toward a ceiling, "down" depletes toward 0.
+  direction?: "up" | "down";
+  // Server-computed 0-100, or null when there is no denominator. NEVER divide by
+  // `limit`: it is legitimately 0 in the "down" mode and 0 for an on-demand
+  // DynamoDB table.
+  usage_pct: number | null;
   days_until_limit: number | null;
-  forecast: "growing" | "stable" | "shrinking";
+  // "Act now?", bounded to an actionable horizon, so a distant ETA reports its
+  // date with this false.
+  approaching_limit?: boolean;
+  forecast: "growing" | "stable" | "shrinking" | "depleting" | "no_data";
   samples: number;
-  days_lookback: number;
-  projections: { d30: number; d60: number; d90: number };
+  days_lookback?: number;
+  projections?: { d30: number; d60: number; d90: number };
   error?: string;
-  // Engine-aware: dynamodb on-demand tables (no provisioned capacity) and
-  // metrics outside the cluster's engine family return not_applicable.
+  // Set alongside every refusing status (unsupported_metric / unknown_metric /
+  // unknown_cluster) so an older consumer still renders a notice.
   not_applicable?: boolean;
   engine_family?: string;
-  reason?: string;
+  reason?: string | null;
 }
 
 export type RedundantIndexKind = "prefix" | "duplicate" | "unused";
@@ -749,7 +783,7 @@ export async function fetchEngineConfig(
 
 export async function fetchCapacityForecast(
   clusterId: string,
-  metric: CapacityMetric = "storage_bytes",
+  metric: CapacityMetric = "storage",
   daysLookback = 30,
 ): Promise<CapacityForecastResponse> {
   const res = await authedFetch(

@@ -44,26 +44,37 @@ def performance_schema():
               ["cluster_id", "change_point"]),
         _tool("forecast_capacity",
               "Forecast when a metric reaches its limit by linear regression over the series "
-              "actually collected for the cluster's engine. metric is a LOGICAL name, one of "
-              "storage | connections | aas (there is no storage_gb): storage = Aurora/DocumentDB "
-              "volume growth toward the 128 TiB ceiling or standalone-RDS free space depleting "
-              "toward 0, connections = DatabaseConnections vs max_connections (cluster_meta, "
-              "else cluster_settings, else the DocumentDB DatabaseConnectionsLimit datapoint), "
-              "aas = vs instance vCPU (Serverless v2: serverlessv2_max_acu converted to vCPU). "
-              "Every metric is per-engine-family: an engine that collects no such series is "
-              "refused with status=unsupported_metric, never a zero-sample forecast. status is "
-              "always present: ok | limit_reached | no_data | unsupported_metric | "
-              "unknown_metric | unknown_cluster. days_until_limit is 0 with "
-              "status=limit_reached when the value is ALREADY at/past the limit (urgent, "
-              "observed not extrapolated), a positive int when the trend heads there, else "
-              "null; no date at all when the limit cannot be grounded in the cluster's real "
-              "config. approaching_limit is true when at the limit or when the ETA is within "
-              "365 days (actionable), so a distant ETA reports its date with "
+              "actually collected for the cluster's engine. metric is a LOGICAL name (there is "
+              "no storage_gb), and the SAME vocabulary the dashboard /capacity-forecast endpoint "
+              "takes, so tool and panel agree: storage = Aurora/DocumentDB volume growth toward "
+              "the 128 TiB ceiling or standalone-RDS free space depleting toward 0, connections = "
+              "DatabaseConnections vs max_connections (cluster_meta, else cluster_settings, else "
+              "the DocumentDB DatabaseConnectionsLimit datapoint), aas = vs instance vCPU "
+              "(Serverless v2: serverlessv2_max_acu converted to vCPU), read_capacity / "
+              "write_capacity = DynamoDB consumed_rcu/wcu per minute vs the latest provisioned "
+              "rate x 60 (an on-demand table has no provisioned row, so grounded=false and no "
+              "date), memory = ElastiCache Redis/Valkey DatabaseMemoryUsagePercentage vs 100 "
+              "(Memcached does not publish it and is refused). Every metric is "
+              "per-engine-family: an engine that collects no such series is refused with "
+              "status=unsupported_metric, never a zero-sample forecast. status is always "
+              "present: ok | limit_reached | evicting | no_data | unsupported_metric | "
+              "unknown_metric | unknown_cluster. direction is up (growing toward a ceiling) or "
+              "down (depleting toward 0), and usage_pct is precomputed 0-100 or null, so never "
+              "divide by limit: it is legitimately 0 in the down mode. status=evicting means an "
+              "LRU/TTL cache is already recycling memory, where a days-to-100% number would be "
+              "meaningless; that is NOT an all-clear, the accurate signal is the "
+              "elasticache_evictions_spike / elasticache_memory_pressure findings. "
+              "days_until_limit is 0 with status=limit_reached when the value is ALREADY at/past "
+              "the limit (urgent, observed not extrapolated), a positive int when the trend "
+              "heads there, else null; no date at all when the limit cannot be grounded in the "
+              "cluster's real config. approaching_limit is true when at the limit or when the "
+              "ETA is within 365 days (actionable), so a distant ETA reports its date with "
               "approaching_limit=false and the note explains why. confidence and "
               "days_until_limit_range describe the FIT, not the horizon",
               {"cluster_id": "string", "metric": "string", "days_lookback": "integer"},
               ["cluster_id"],
-              enums={"metric": ["storage", "connections", "aas"]}),
+              enums={"metric": ["storage", "connections", "aas", "read_capacity",
+                                "write_capacity", "memory"]}),
         _tool("get_performance_summary", "Get KPI summary for a time period",
               {"cluster_id": "string", "hours": "integer"}, ["cluster_id"]),
         _tool("recommend_index",

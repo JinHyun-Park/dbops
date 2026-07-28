@@ -19,7 +19,7 @@ _DIM_FILTER = "AND (dimensions IS NULL OR dimensions::text = '{}')"
 def _cache(slope, current, r2=0.9, n=200, max_connections=None, instance_class=None,
            engine="aurora-postgresql", allocated_storage_gb=None, meta_rows=None,
            serverlessv2_max_acu=None, settings_max_connections=None,
-           docdb_connections_limit=None):
+           docdb_connections_limit=None, provisioned=None, evictions=None):
     """cluster_meta, optionally a limit-fallback lookup, then the metric trend.
     side_effect routes each by which table/metric the caller asked for. `seen`
     records the metric_type the trend query was actually parameterized with, the
@@ -58,6 +58,13 @@ def _cache(slope, current, r2=0.9, n=200, max_connections=None, instance_class=N
         if "db_connections_limit" in sql:
             cache.seen["docdb_limit_sql"] = sql
             return _single(docdb_connections_limit)
+        if (params or {}).get("provisioned_metric"):
+            cache.seen["provisioned_sql"] = sql
+            cache.seen["provisioned_metric"] = params["provisioned_metric"]
+            return _single(provisioned)
+        if "'evictions'" in sql:
+            cache.seen["evictions_sql"] = sql
+            return _single(evictions)
         cache.seen["metric_type"] = (params or {}).get("metric")
         cache.seen["sql"] = sql
         return metric_qr
@@ -78,14 +85,33 @@ def test_trend_sql_filters_out_per_instance_and_wait_event_rows():
     row) can be an instance row. The filter must be on BOTH the aggregate WHERE
     and the current_value subselect, and must be the STRICT form: the
     jsonb_exists(dimensions,'instance') form would let the aas wait-event rows
-    through (they carry no 'instance' key)."""
-    for metric in ("storage", "connections", "aas"):
+    through (they carry no 'instance' key).
+
+    Every metric of every family, because the per-GSI DynamoDB rows are the
+    sharpest case: dynamodb_cw_collector.py:160-167 writes consumed_rcu/wcu under
+    the SAME metric_type as the table-level row with dimensions={"gsi": name}, so
+    the weak filter would regress the table total plus each index summed."""
+    for metric, engine in (("storage", "aurora-postgresql"),
+                           ("connections", "aurora-postgresql"),
+                           ("aas", "aurora-postgresql"),
+                           ("storage", "mysql"),
+                           ("read_capacity", "dynamodb"),
+                           ("write_capacity", "dynamodb"),
+                           ("memory", "redis")):
         cache = _cache(slope=1.0, current=1.0, max_connections=1000,
-                       instance_class="db.r6g.large")
+                       instance_class="db.r6g.large", engine=engine,
+                       provisioned=100.0, evictions=0.0)
         forecast_capacity_impl(cache, cluster_id="c", metric=metric)
         sql = cache.seen["sql"]
-        assert sql.count(_DIM_FILTER) == 2, (metric, sql)
-        assert "jsonb_exists" not in sql, metric
+        assert sql.count(_DIM_FILTER) == 2, (metric, engine, sql)
+        assert "jsonb_exists" not in sql, (metric, engine)
+    # the per-family ceiling / eviction lookups are cluster-level scalars too
+    cache = _cache(slope=1.0, current=1.0, engine="dynamodb", provisioned=100.0)
+    forecast_capacity_impl(cache, cluster_id="c", metric="read_capacity")
+    assert _DIM_FILTER in cache.seen["provisioned_sql"]
+    cache = _cache(slope=1.0, current=1.0, engine="redis", evictions=5.0)
+    forecast_capacity_impl(cache, cluster_id="c", metric="memory")
+    assert _DIM_FILTER in cache.seen["evictions_sql"]
 
 
 # ===== fail-closed: no cluster_meta row =====
@@ -184,7 +210,11 @@ def test_rds_instance_without_allocated_storage_still_forecasts_exhaustion():
     result = forecast_capacity_impl(cache, cluster_id="rds-mysql-2", metric="storage")
     assert result["days_until_limit"] == 5
     assert "allocated_gb" not in result
-    assert "usage_pct" not in result
+    # usage_pct is on every payload so a consumer never has to divide by `limit`
+    # (0 here), but the depleting mode has no denominator without allocated size,
+    # so the honest value is null, not a fabricated percentage.
+    assert result["usage_pct"] is None
+    assert result["direction"] == "down"
 
 
 def test_storage_unsupported_engine_refuses_instead_of_zero_forecast():
@@ -532,6 +562,164 @@ def test_rds_instance_aas_is_supported_via_pi_db_load():
     assert cache.seen["metric_type"] == "aas"
     assert result["limit"] == 2  # db.m5.large = 2 vCPU
     assert result["status"] == "ok"
+
+
+# ===== E1-5: DynamoDB throughput =====
+
+
+def test_dynamodb_write_capacity_ceiling_is_provisioned_times_sixty():
+    """consumed_wcu is a per-MINUTE Sum (dynamodb_cw_collector.py:12,24) while
+    provisioned_wcu is a per-SECOND rate (:20), so the ceiling is x60. 1000/min
+    now, +100/min per day, ceiling 50/s = 3000/min -> (3000-1000)/100 = 20 days."""
+    cache = _cache(slope=100.0, current=1000.0, engine="dynamodb", provisioned=50.0)
+    result = forecast_capacity_impl(cache, cluster_id="ddb-1", metric="write_capacity")
+    assert result["engine_family"] == "dynamodb"
+    assert cache.seen["metric_type"] == "consumed_wcu"
+    assert cache.seen["provisioned_metric"] == "provisioned_wcu"
+    assert result["limit"] == 3000.0
+    assert result["grounded"] is True
+    assert result["direction"] == "up"
+    assert result["status"] == "ok"
+    assert result["days_until_limit"] == 20
+    assert result["approaching_limit"] is True
+    assert result["usage_pct"] == 33.3           # 1000 / 3000, rounded to 1dp
+
+
+def test_dynamodb_read_capacity_uses_the_read_pair():
+    cache = _cache(slope=10.0, current=100.0, engine="dynamodb", provisioned=20.0)
+    result = forecast_capacity_impl(cache, cluster_id="ddb-1", metric="read_capacity")
+    assert cache.seen["metric_type"] == "consumed_rcu"
+    assert cache.seen["provisioned_metric"] == "provisioned_rcu"
+    assert result["limit"] == 1200.0
+
+
+def test_dynamodb_ondemand_table_reports_the_trend_without_a_date():
+    """provisioned_* rows exist only for billing_mode == PROVISIONED
+    (dynamodb_cw_collector.py:134), so an on-demand table has no grounded
+    ceiling. The consumption trend is still real data: report it, claim no date,
+    and never divide by the absent limit."""
+    cache = _cache(slope=50.0, current=1000.0, engine="dynamodb", provisioned=None)
+    result = forecast_capacity_impl(cache, cluster_id="ddb-2", metric="read_capacity")
+    assert result["status"] == "ok"
+    assert result["grounded"] is False
+    assert result["limit"] == 0.0
+    assert result["days_until_limit"] is None
+    assert result["approaching_limit"] is False
+    assert result["usage_pct"] is None          # limit 0 -> no percentage, no ZeroDivisionError
+    assert result["forecast"] == "growing"       # the measured trend is still reported
+    assert "온디맨드" in result["note"]
+
+
+def test_dynamodb_at_the_provisioned_ceiling_is_limit_reached():
+    cache = _cache(slope=1.0, current=3000.0, engine="dynamodb", provisioned=50.0)
+    result = forecast_capacity_impl(cache, cluster_id="ddb-1", metric="write_capacity")
+    assert result["status"] == "limit_reached"
+    assert result["days_until_limit"] == 0
+    assert result["approaching_limit"] is True
+    assert result["usage_pct"] == 100.0
+
+
+def test_dynamodb_has_no_storage_connections_or_aas_series():
+    for metric in ("storage", "connections", "aas", "memory"):
+        cache = _cache(slope=0.0, current=0.0, n=0, engine="dynamodb")
+        result = forecast_capacity_impl(cache, cluster_id="ddb-1", metric=metric)
+        assert result["status"] == "unsupported_metric", metric
+        assert result["days_until_limit"] is None
+        assert cache.seen == {}
+
+
+# ===== E1-5: ElastiCache memory, and the cache that is at capacity BY DESIGN =====
+
+
+def test_elasticache_memory_forecasts_toward_the_definitional_100_pct_ceiling():
+    """A cache with ZERO evictions and a rising memory trend really is filling up
+    (the noeviction-policy case, where full means write errors). 60% now, +2%/day,
+    ceiling 100 -> 20 days. The 100 ceiling needs no node-type -> memory map
+    (there is none in this repo): the metric IS a percentage."""
+    cache = _cache(slope=2.0, current=60.0, engine="redis", evictions=0.0)
+    result = forecast_capacity_impl(cache, cluster_id="cache-1", metric="memory")
+    assert result["engine_family"] == "elasticache"
+    assert cache.seen["metric_type"] == "memory_usage_pct"
+    assert result["limit"] == 100.0
+    assert result["grounded"] is True
+    assert result["status"] == "ok"
+    assert result["days_until_limit"] == 20
+    assert result["approaching_limit"] is True
+    assert result["usage_pct"] == 60.0
+
+
+def test_valkey_uses_the_same_memory_series():
+    cache = _cache(slope=1.0, current=50.0, engine="valkey", evictions=0.0)
+    result = forecast_capacity_impl(cache, cluster_id="cache-2", metric="memory")
+    assert result["engine_family"] == "elasticache"
+    assert cache.seen["metric_type"] == "memory_usage_pct"
+    assert result["status"] == "ok"
+
+
+def test_a_healthy_lru_cache_pinned_at_maxmemory_is_not_reported_as_exhausting():
+    """An LRU/TTL cache sits at 97% BY DESIGN with a slope of about 0. Reporting
+    "days until 100%" there is noise, and reporting it as at/near exhaustion is a
+    false alarm on a perfectly healthy cache. Evictions are the accurate signal,
+    so their presence switches the answer to status=evicting with NO date, and
+    approaching_limit stays false: a cache evicting on policy is not an
+    incident."""
+    cache = _cache(slope=0.01, current=97.0, engine="redis", evictions=4200.0)
+    result = forecast_capacity_impl(cache, cluster_id="cache-1", metric="memory")
+    assert result["status"] == "evicting"
+    assert result["days_until_limit"] is None
+    assert result["approaching_limit"] is False
+    assert result["days_until_limit_range"] is None
+    # 97% is real and still reported: this is "cannot date the exhaustion", not
+    # "nothing to see". The note must send the operator to the eviction findings.
+    assert result["usage_pct"] == 97.0
+    assert result["current_value"] == 97.0
+    assert "eviction" in result["note"]
+    assert "elasticache_evictions_spike" in result["note"]
+    assert "문제 없음" in result["note"]  # explicitly disclaims the all-clear reading
+
+
+def test_evicting_outranks_the_at_limit_verdict():
+    """At exactly 100% WITH evictions is still the recycling case, not a
+    write-stopping wall: the LRU policy is doing its job. Without this ordering
+    the calmer at_limit prose would claim immediate action on a healthy cache."""
+    cache = _cache(slope=0.0, current=100.0, engine="redis", evictions=10.0)
+    result = forecast_capacity_impl(cache, cluster_id="cache-1", metric="memory")
+    assert result["status"] == "evicting"
+    assert result["days_until_limit"] is None
+
+
+def test_memory_with_no_samples_is_no_data_not_evicting():
+    """Zero memory samples means we cannot say anything, and the eviction probe
+    must not be allowed to invent a verdict from another metric's rows."""
+    cache = _cache(slope=0.0, current=None, n=0, engine="redis", evictions=999.0)
+    result = forecast_capacity_impl(cache, cluster_id="cache-1", metric="memory")
+    assert result["status"] == "no_data"
+    assert result["forecast"] == "no_data"
+    assert "evictions_sql" not in cache.seen
+
+
+def test_memcached_memory_is_refused_by_engine_not_answered_by_family():
+    """DatabaseMemoryUsagePercentage is in the Redis/Valkey list only
+    (elasticache_cw_collector.py:12); _MEMCACHED_METRICS has no equivalent, and
+    its FreeableMemory is HOST memory, not cache fill, so there is no honest
+    substitute. Memcached is in the elasticache family, so the refusal has to key
+    off the engine, not the family."""
+    cache = _cache(slope=1.0, current=50.0, n=0, engine="memcached")
+    result = forecast_capacity_impl(cache, cluster_id="cache-mc", metric="memory")
+    assert result["engine_family"] == "elasticache"
+    assert result["status"] == "unsupported_metric"
+    assert result["days_until_limit"] is None
+    assert result["samples"] == 0
+    assert "Memcached" in result["reason"]
+    assert cache.seen == {}          # no trend query, no eviction probe
+
+
+def test_elasticache_has_no_storage_connections_or_aas_series():
+    for metric in ("storage", "connections", "aas", "read_capacity"):
+        cache = _cache(slope=0.0, current=0.0, n=0, engine="redis")
+        result = forecast_capacity_impl(cache, cluster_id="cache-1", metric=metric)
+        assert result["status"] == "unsupported_metric", metric
+        assert cache.seen == {}
 
 
 # ===== regression pin: the Aurora/relational storage path must not move =====

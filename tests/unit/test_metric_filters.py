@@ -210,6 +210,8 @@ def test_dashboard_capacity_forecast_regresses_only_cluster_level_rows(monkeypat
     captured = {}
 
     def _query(sql, params=None):
+        if "cluster_meta" in sql:
+            return [{"engine": "aurora-postgresql", "instance_class": "db.r6g.large"}]
         if "metric_snapshots" in sql:
             captured["sql"] = sql
             a = _agg(sql)
@@ -221,7 +223,7 @@ def test_dashboard_capacity_forecast_regresses_only_cluster_level_rows(monkeypat
     out = _dashboard._capacity_forecast(_query, "c", "aas", 30)
     assert out["samples"] == len(_CLUSTER_AAS)
     assert out["samples"] != len(_WEAK_AAS)
-    assert out["current"] == pytest.approx(_CLUSTER_MAX)
+    assert out["current_value"] == pytest.approx(_CLUSTER_MAX)
     assert STRICT in captured["sql"]
 
 
@@ -251,6 +253,60 @@ def test_dashboard_anomaly_probe_counts_only_cluster_level_samples():
     assert _dashboard._anomalies(_query, "c", 4, 2.5)["baseline_mode"] == "no_samples"
     weak = lambda sql, params=None: _query(sql, params, lambda s: s.replace(STRICT, WEAK))  # noqa: E731
     assert _dashboard._anomalies(weak, "c", 4, 2.5)["baseline_mode"] == "none"
+
+
+# E1-5 opened the capacity forecast to DynamoDB, and dynamodb_cw_collector.py
+# writes consumed_rcu/consumed_wcu at TWO dimensionalities under the SAME
+# metric_type: table-level (dimensions '{}', line 127-131) and per-GSI
+# (dimensions {"gsi": name}, line 160-167). No 'instance' key, so the weak filter
+# would let every GSI row into the regression: the slope and `latest` would
+# describe the table total plus each index summed together, and the ETA toward the
+# provisioned ceiling would be too early by whatever the indexes consume.
+_WCU_ROWS = [
+    {"ts": 10, "metric_type": "consumed_wcu", "value": 100.0, "dimensions": {}},
+    {"ts": 10, "metric_type": "consumed_wcu", "value": 40.0, "dimensions": {"gsi": "by-status"}},
+    {"ts": 10, "metric_type": "consumed_wcu", "value": 20.0, "dimensions": {"gsi": "by-owner"}},
+    {"ts": 20, "metric_type": "consumed_wcu", "value": 200.0, "dimensions": {}},
+    {"ts": 20, "metric_type": "consumed_wcu", "value": 80.0, "dimensions": {"gsi": "by-status"}},
+    {"ts": 20, "metric_type": "consumed_wcu", "value": 30.0, "dimensions": {"gsi": "by-owner"}},
+]
+_TABLE_WCU_COUNT = 2      # the two dimensions='{}' rows
+_TABLE_WCU_LATEST = 200.0
+_WEAK_WCU_COUNT = 6       # every GSI row survives NOT jsonb_exists(.., 'instance')
+
+assert _TABLE_WCU_COUNT != _WEAK_WCU_COUNT, "fixture must discriminate strict from weak"
+
+
+def _wcu_agg(sql):
+    kept = _apply_dim_filter(sql, _WCU_ROWS)
+    top_ts = max(r["ts"] for r in kept)
+    return {"count": len(kept),
+            "latest_candidates": sorted(r["value"] for r in kept if r["ts"] == top_ts)}
+
+
+def test_dashboard_capacity_forecast_excludes_per_gsi_rows_for_dynamodb(monkeypatch):
+    """The new dynamodb branch of /capacity-forecast. `latest` must be the table
+    total, not one index's slice of it."""
+    captured = {}
+
+    def _query(sql, params=None):
+        if "cluster_meta" in sql:
+            return [{"engine": "dynamodb"}]
+        if (params or {}).get("pm") == "provisioned_wcu":
+            return [{"value": 100.0}]          # 100 WCU/s -> 6000 WCU/min ceiling
+        if "REGR_SLOPE" in sql:
+            captured["sql"] = sql
+            a = _wcu_agg(sql)
+            return [{"slope": 1.0, "r2": 0.9, "latest": a["latest_candidates"][-1],
+                     "samples": a["count"]}]
+        return []
+
+    monkeypatch.setattr(_dashboard, "_registry_engine", lambda _cid: "dynamodb")
+    out = _dashboard._capacity_forecast(_query, "ddb-1", "write_capacity", 30)
+    assert out["samples"] == _TABLE_WCU_COUNT
+    assert out["samples"] != _WEAK_WCU_COUNT
+    assert out["current_value"] == pytest.approx(_TABLE_WCU_LATEST)
+    assert STRICT in captured["sql"]
 
 
 # ===========================================================================
@@ -439,8 +495,11 @@ _CONST_USE = _re.compile(r"\b_?CLUSTER_LEVEL_ONLY\b|\bcluster_level_only\(")
 _ALIAS_ASSIGN = _re.compile(r"^\s*_?\w*CLUSTER_LEVEL_ONLY\s*=\s*[\w.]*CLUSTER_LEVEL_ONLY\s*$")
 
 _EXPECTED_CLUSTER_LEVEL_PREDICATES = {
-    # 8 + the anomaly reader's recent-samples existence probe.
-    "api/dashboard/handler.py": 9,
+    # 8 + the anomaly reader's recent-samples existence probe + E1-5's capacity
+    # rewrite. The capacity endpoint's share is 4: the trend aggregate, the
+    # DocumentDB db_connections_limit ceiling, the DynamoDB provisioned_* ceiling
+    # and the ElastiCache eviction probe.
+    "api/dashboard/handler.py": 10,
     "api/simulation/handler.py": 4,
     "data-pipeline/alert_evaluator/handler.py": 2,
     "data-pipeline/etl_collector/collectors/capacity_forecast.py": 3,
@@ -461,8 +520,9 @@ _EXPECTED_CLUSTER_LEVEL_PREDICATES = {
     # 2 in the scoring SQL (recent + flat CTEs) + the recent-samples probe.
     "mcp-servers/mcp_servers/performance/tools/detect_anomalies.py": 3,
     # 2 in the aggregate/current_value pair + 1 in the DocumentDB
-    # db_connections_limit ceiling lookup.
-    "mcp-servers/mcp_servers/performance/tools/forecast_capacity.py": 3,
+    # db_connections_limit ceiling lookup + E1-5's 2 new per-family lookups
+    # (DynamoDB provisioned_* ceiling, ElastiCache eviction probe).
+    "mcp-servers/mcp_servers/performance/tools/forecast_capacity.py": 5,
     "mcp-servers/mcp_servers/performance/tools/performance_summary.py": 3,
     "mcp-servers/mcp_servers/simulation/tools/capacity_cost.py": 3,
     "mcp-servers/mcp_servers/simulation/tools/rds_rightsizing.py": 1,
