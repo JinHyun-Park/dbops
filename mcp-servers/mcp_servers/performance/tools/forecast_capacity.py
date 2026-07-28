@@ -48,7 +48,11 @@ Two response MODES, not one shape with a sign flip:
   * direction="down" value shrinks toward a floor of 0 (free_storage_bytes).
 `usage_pct` is computed HERE for both modes (0-100 or null) so no consumer has to
 divide by `limit`, which is legitimately 0 in the "down" mode and 0/ungrounded
-for an on-demand DynamoDB table.
+for an on-demand DynamoDB table. It is also null whenever `samples` is 0: with no
+row inside the window `current_value` is 0.0 for lack of data, and in the "down"
+mode that 0.0 computes as "storage 100% used" on a cluster where nothing was
+measured (the shape a reviewer measured: status no_data, samples 0, usage_pct
+100.0). A denominator is not enough, a measurement is required.
 
 An LRU/TTL cache sits pinned near maxmemory BY DESIGN, so its slope is about 0
 and "days until 100%" is meaningless. When evictions occurred in the window the
@@ -343,11 +347,20 @@ def _resolve_series(cache, cluster_id: str, metric: str, fam: str, cluster: dict
     return metric_type, _MEMORY_LIMIT_PCT, "메모리 사용률 상한 100%", True
 
 
-def _usage_pct(approach_down: bool, current: float, limit: float, alloc_gb: float):
+def _usage_pct(approach_down: bool, current: float, limit: float, alloc_gb: float,
+               samples: int):
     """0-100 사용률 또는 None. 소비자가 limit으로 나누지 않게 서버에서 계산한다:
     감소 모드의 limit은 정당하게 0이고(여유 0바이트 = 소진) 온디맨드 DynamoDB는
     천장 자체가 없어서, (current/limit)*100은 0으로 나누거나 무의미한 퍼센트를
-    만든다. 감소 모드의 사용률은 한계가 아니라 할당량 대비로만 정의된다."""
+    만든다. 감소 모드의 사용률은 한계가 아니라 할당량 대비로만 정의된다.
+
+    표본이 0개면 None이다. 분모(limit 또는 alloc_gb)가 있어도 마찬가지다: 그때
+    current는 '측정된 0'이 아니라 조회 창 안에 행이 없어서 0.0이고, 감소 모드에서는
+    그 0.0이 (alloc - 0)/alloc = 100%가 되어 아무것도 측정되지 않은 클러스터에
+    '스토리지 100% 사용'을 붙인다. 리뷰가 실제로 받은 응답이
+    {status: no_data, samples: 0, current_value: 0.0, usage_pct: 100.0}였다."""
+    if samples <= 0:
+        return None
     if approach_down:
         if alloc_gb > 0:
             total = alloc_gb * 1024 ** 3
@@ -433,6 +446,14 @@ def forecast_capacity_impl(
     # _CLUSTER_LEVEL_ONLY는 집계 WHERE와 current_value 서브셀렉트 **양쪽에** 필수다
     # (이유는 상수 정의부 주석 참고). 한쪽만 걸면 회귀는 깨끗해도 "현재값"이
     # 인스턴스 행일 수 있다.
+    # 조회 창(:days_lookback)도 **양쪽에** 걸어야 한다. REST 쌍둥이는 "현재값"을
+    # 창 안 집계 안에서 (array_agg(value ORDER BY ts DESC))[1]로 뽑으므로, 이
+    # 서브셀렉트에 창이 없으면 두 구현이 서로 다른 질문에 답한다. 실제로 PG 14.18에
+    # 30일 창 밖(60~90일 전) free_storage_bytes 행만 넣고 두 SQL을 그대로 돌렸을 때
+    # 에이전트는 current_value=107374182400.0, REST는 0.0을 냈다. 창 안에 행이
+    # 하나라도 있으면 전체 최신 행이 곧 창 안 최신 행이므로 이 조건이 값을 바꾸는
+    # 경우는 표본 0개뿐이고, 그때 낡은 값을 "현재값"으로 보고하는 것은 samples=0과
+    # 모순이다("수집이 멈춘 클러스터의 6개월 전 여유 스토리지"가 현재값이 된다).
     sql = f"""
         SELECT
             REGR_SLOPE(value, EXTRACT(EPOCH FROM ts) / 86400) AS slope_per_day,
@@ -441,6 +462,7 @@ def forecast_capacity_impl(
             (SELECT value FROM metric_snapshots m2
              WHERE m2.cluster_id = :cluster_id AND m2.metric_type = :metric
                {_CLUSTER_LEVEL_ONLY}
+               AND m2.ts > NOW() - (:days_lookback || ' days')::interval
              ORDER BY ts DESC LIMIT 1) AS current_value
         FROM metric_snapshots
         WHERE cluster_id = :cluster_id AND metric_type = :metric
@@ -610,7 +632,7 @@ def forecast_capacity_impl(
         # 라벨과 막대를 고르고, 퍼센트는 usage_pct를 그대로 쓴다(직접 나누면
         # limit=0인 감소 모드와 천장 없는 온디맨드에서 깨진다).
         "direction": "down" if approach_down else "up",
-        "usage_pct": _usage_pct(approach_down, current, limit, alloc),
+        "usage_pct": _usage_pct(approach_down, current, limit, alloc, n),
         "slope_per_day": round(slope, 4),
         "r2": round(r2, 3),
         "samples": n,

@@ -114,6 +114,29 @@ def test_trend_sql_filters_out_per_instance_and_wait_event_rows():
     assert _DIM_FILTER in cache.seen["evictions_sql"]
 
 
+def test_the_current_value_subselect_is_bounded_by_the_same_lookback_window():
+    """`current_value` must describe the same rows `n` counts. The subselect used to
+    carry no lookback predicate, so the two clauses answered different questions
+    and this tool disagreed with its REST twin (api/dashboard/handler.py, whose
+    latest value comes from array_agg INSIDE the windowed aggregate). Measured by
+    running both statements verbatim on PostgreSQL 14.18 against free_storage_bytes
+    rows 60 to 90 days old: this tool returned current_value=107374182400.0 with
+    n=0, the endpoint returned 0.0.
+
+    The bound only changes the answer when the window is EMPTY: if any row is
+    inside it, the newest row overall IS that row. And samples=0 next to a
+    months-old "current value" is the contradiction, since that stale reading is
+    what makes an uncollected cluster look measured."""
+    cache = _cache(slope=1.0, current=1.0)
+    forecast_capacity_impl(cache, cluster_id="c", metric="storage")
+    sql = cache.seen["sql"]
+    subselect = sql[sql.index("(SELECT"):sql.index("AS current_value")]
+    window = "ts > NOW() - (:days_lookback || ' days')::interval"
+    assert window in " ".join(subselect.split()), subselect
+    # once in the subselect, once in the aggregate WHERE
+    assert " ".join(sql.split()).count(window) == 2
+
+
 # ===== fail-closed: no cluster_meta row =====
 
 
@@ -430,9 +453,16 @@ def test_zero_samples_never_reads_as_at_the_limit():
     """The at-limit test must require real samples. free_storage_bytes has a limit
     of 0 and current_value defaults to 0.0 when there is no row at all, so an
     uncollected cluster would otherwise be declared STORAGE_FULL. Both no-row
-    shapes (NULL current, and 0.0 with zero samples) must land on no_data."""
+    shapes (NULL current, and 0.0 with zero samples) must land on no_data.
+
+    allocated_storage_gb is set here deliberately. A known allocated size gives the
+    depleting mode a denominator, and with it usage_pct came out as
+    (allocated - 0)/allocated = 100.0: "storage 100% used" on a cluster where
+    nothing was measured, next to status=no_data and samples=0 in the same payload.
+    A denominator is not a measurement."""
     for current in (None, 0.0):
-        cache = _cache(slope=0.0, current=current, n=0, engine="mysql")
+        cache = _cache(slope=0.0, current=current, n=0, engine="mysql",
+                       allocated_storage_gb="100")
         result = forecast_capacity_impl(cache, cluster_id="rds-mysql-1", metric="storage")
         assert result["status"] == "no_data", current
         assert result["approaching_limit"] is False
@@ -440,6 +470,7 @@ def test_zero_samples_never_reads_as_at_the_limit():
         # samples==0 is not a trend, so it is never labelled the reassuring "stable"
         assert result["forecast"] == "no_data"
         assert "표본이 없어" in result["note"]
+        assert result["usage_pct"] is None, current
 
 
 def test_an_ungrounded_limit_cannot_be_declared_reached():

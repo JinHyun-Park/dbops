@@ -2609,12 +2609,22 @@ def _capacity_resolve_series(query, cluster_id, metric, fam, engine, meta):
     return metric_type, _MEMORY_LIMIT_PCT, "메모리 사용률 상한 100%", True
 
 
-def _capacity_usage_pct(approach_down, current, limit, alloc_gb):
+def _capacity_usage_pct(approach_down, current, limit, alloc_gb, samples):
     """0-100 or None, computed server-side so no consumer divides by `limit`.
     The depleting mode's limit is legitimately 0 (free bytes exhausted) and an
     on-demand DynamoDB table has no ceiling at all, so (current/limit)*100
     divides by zero or invents a percentage. Depleting usage is only defined
-    against the ALLOCATED size, not against the limit."""
+    against the ALLOCATED size, not against the limit.
+
+    With ZERO samples the answer is None even when a denominator exists: `current`
+    is then 0.0 because no row is inside the window, not because 0 was measured,
+    and in the depleting mode that 0.0 works out to (alloc - 0)/alloc = 100%, i.e.
+    "storage 100% used" for a cluster nothing was measured on. A reviewer got
+    exactly that: {status: no_data, samples: 0, current_value: 0.0,
+    usage_pct: 100.0} on an rds_instance with allocated_storage_gb 100 and no
+    free_storage_bytes rows at all. A denominator is not a measurement."""
+    if samples <= 0:
+        return None
     if approach_down:
         if alloc_gb > 0:
             total = alloc_gb * 1024**3
@@ -2656,12 +2666,12 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
             "클러스터 레지스트리를 조회할 수 없어 엔진을 확인하지 못했습니다.")
         out["registry_unavailable"] = True
         return out
-    fam = engine_family(eng)
     # cluster_meta carries every limit input (max_connections, instance_class,
-    # serverlessv2_max_acu, allocated_storage_gb). No row means the first ETL
-    # cycle has not run, and the MCP tool fail-closes on exactly this condition
-    # with the same status: without it the aas / connections ceilings silently
-    # become the fleet-wide fallbacks and the two surfaces stop agreeing.
+    # serverlessv2_max_acu, allocated_storage_gb) AND the engine the family is
+    # derived from. No row means the first ETL cycle has not run, and the MCP tool
+    # fail-closes on exactly this condition with the same status: without it the
+    # aas / connections ceilings silently become the fleet-wide fallbacks and the
+    # two surfaces stop agreeing.
     #
     # This read comes BEFORE the family gate on purpose. The MCP tool derives the
     # family FROM cluster_meta.engine, so it cannot reach a family verdict without
@@ -2682,23 +2692,37 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
             "cluster_meta에 이 클러스터가 없습니다(미등록이거나 첫 메트릭 수집 전). "
             "등록 및 수집 상태를 확인한 뒤 다시 예측하세요.")
     meta = meta_rows[0] or {}
+    # ONE source for the engine family, and it is cluster_meta.engine: the engine
+    # the COLLECTOR observed, not the registry string an operator typed at
+    # registration. The MCP tool derives the family from this same column, and the
+    # family decides which metric_type is read (Aurora storage_bytes vs standalone
+    # RDS free_storage_bytes), so it has to be the engine that wrote the rows. A
+    # registry value that disagrees (typo, engine changed under the same
+    # cluster_id) would otherwise send this endpoint to a series nobody writes
+    # while the agent reads the real one: measured on the pair, cluster_meta.engine
+    # 'mysql' with a registry 'aurora-mysql' made the two answers differ on 7
+    # shared keys (family, metric_type, limit, direction, usage_pct, limit_basis,
+    # days_until_limit). `eng` survives only as the fail-closed check above: None
+    # means the registry lookup itself failed.
+    engine = meta.get("engine")
+    fam = engine_family(engine)
     allowed = _CAPACITY_METRICS_BY_FAMILY.get(fam) or set()
     if metric not in allowed:
         return _capacity_reject(
             cluster_id, metric, "unsupported_metric",
-            f"{fam} 엔진(engine={eng or '미상'})에서는 {metric} 시계열이 수집되지 않아 "
+            f"{fam} 엔진(engine={engine or '미상'})에서는 {metric} 시계열이 수집되지 않아 "
             f"예측할 수 없습니다."
             + (" Memcached는 DatabaseMemoryUsagePercentage를 발행하지 않습니다."
                if metric == "memory" and fam == "elasticache" else ""),
             fam)
     metric_type, limit, limit_basis, grounded = _capacity_resolve_series(
-        query, cluster_id, metric, fam, eng, meta)
+        query, cluster_id, metric, fam, engine, meta)
     if metric_type is None:
         # Family key allowed the metric but the engine inside the family does
         # not collect it (Memcached memory today).
         return _capacity_reject(
             cluster_id, metric, "unsupported_metric",
-            f"{fam} 엔진(engine={eng or '미상'})에서는 {metric} 시계열이 수집되지 않아 "
+            f"{fam} 엔진(engine={engine or '미상'})에서는 {metric} 시계열이 수집되지 않아 "
             f"예측할 수 없습니다."
             + (" Memcached는 DatabaseMemoryUsagePercentage를 발행하지 않습니다."
                if metric == "memory" else ""),
@@ -2786,7 +2810,7 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
         reason = (f"한계값을 클러스터 실제 설정에서 확인할 수 없어({limit_basis}) 도달 시점을 "
                   f"단정하지 않습니다. 추세만 참고하세요.")
 
-    return {
+    out = {
         "cluster_id": cluster_id,
         "metric": metric,
         "metric_type": metric_type,
@@ -2817,7 +2841,7 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
         # depleting mode and 0 for an on-demand DynamoDB table.
         "usage_pct": _capacity_usage_pct(
             approach_down, current, limit,
-            _capacity_float(meta.get("allocated_storage_gb"))),
+            _capacity_float(meta.get("allocated_storage_gb")), samples),
         "days_until_limit": days_until,
         "approaching_limit": approaching,
         "forecast": (
@@ -2838,6 +2862,15 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
             "d90": max(0.0, current + slope * 90),
         },
     }
+    if samples == 0:
+        # Same rule as usage_pct: with no samples `current` is 0.0 for lack of a
+        # row and `slope` is 0.0 for lack of a trend, so current + slope*d is a
+        # fabricated flat line starting at zero (the measured shape was
+        # {d30: 0.0, d60: 0.0, d90: 0.0} on an uncollected cluster). The key is
+        # dropped rather than zeroed, and `projections` is optional in the client
+        # type, so the panel simply renders no projection tiles.
+        out.pop("projections")
+    return out
 
 
 # PG log filter patterns per category. The model that drives the AI panel

@@ -18,10 +18,24 @@ db_connections / aas), and the endpoint's family map had no rds_instance or
 elasticache key. So for one standalone RDS instance the agent produced a
 storage-exhaustion ETA while the panel said "not applicable" for the same
 cluster, at the same moment, from the same rows.
+
+Two things this suite could NOT see at first, both found by review and both fixed:
+
+  * the family SOURCE. Comparing verdicts is blind to the two surfaces resolving
+    the engine family from two different places (the tool from
+    cluster_meta.engine, the endpoint from the DynamoDB registry) for as long as
+    the two sources agree. `_both` now lets them DISAGREE.
+  * the SQL. A stub that hands the same canned trend row to both implementations
+    cannot see a divergence living in the SQL text, and there was one: the tool's
+    current_value subselect carried no lookback predicate while the endpoint's
+    array_agg latest sits inside the windowed aggregate. So `_trend_row` models
+    the lookback predicate each clause ACTUALLY carries, the same way
+    tests/unit/test_metric_filters.py models the dimension predicate.
 """
 
 import importlib.util
 import os
+import re
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -50,8 +64,16 @@ def _facts(engine, slope, current, samples=200, r2=0.9, meta_present=True,
            max_connections=None, settings_max_connections=None,
            docdb_connections_limit=None, instance_class=None,
            serverlessv2_max_acu=None, allocated_storage_gb=None,
-           provisioned=None, evictions=None):
-    """One description of the world, handed to both surfaces."""
+           provisioned=None, evictions=None, stale_current=None):
+    """One description of the world, handed to both surfaces.
+
+    `slope` / `current` / `samples` describe the rows INSIDE the lookback window.
+    `stale_current` is the newest value of a series whose rows all fall OUTSIDE it
+    (collection stopped): a query bounded by the window cannot see it, an
+    unbounded one can, which is the only way the two clauses can differ."""
+    assert stale_current is None or samples == 0, (
+        "stale_current means every row is older than the window, so the in-window "
+        "sample count must be 0")
     return {
         "engine": engine, "slope": slope, "current": current, "samples": samples,
         "r2": r2, "meta_present": meta_present,
@@ -62,6 +84,7 @@ def _facts(engine, slope, current, samples=200, r2=0.9, meta_present=True,
         "serverlessv2_max_acu": serverlessv2_max_acu,
         "allocated_storage_gb": allocated_storage_gb,
         "provisioned": provisioned, "evictions": evictions,
+        "stale_current": stale_current,
     }
 
 
@@ -93,6 +116,70 @@ def _route(sql, params, f):
     return "trend"
 
 
+# `ts > NOW() - (:days || ' days')::interval`, whatever the param is named and
+# whatever table alias qualifies ts. Its PRESENCE in a clause is what decides
+# which rows that clause may see.
+_WINDOW = re.compile(r"ts\s*>\s*NOW\(\)\s*-\s*\(:\w+\s*\|\|\s*' days'\)::interval")
+
+
+def _split_latest_clause(sql):
+    """(aggregate_text, latest_clause_text or None).
+
+    The two surfaces get "current" two different ways: the tool from a nested
+    `(SELECT value ... ORDER BY ts DESC LIMIT 1)` subselect, the endpoint from
+    `(array_agg(value ORDER BY ts DESC))[1]` inside the aggregate itself. Cut the
+    subselect out so each part can be inspected for its own predicates; None means
+    the latest value comes from the aggregate and is therefore windowed by
+    construction."""
+    i = sql.find("(SELECT")
+    if i < 0:
+        return sql, None
+    depth = 0
+    for j in range(i, len(sql)):
+        if sql[j] == "(":
+            depth += 1
+        elif sql[j] == ")":
+            depth -= 1
+            if depth == 0:
+                return sql[:i] + sql[j + 1:], sql[i:j + 1]
+    raise AssertionError(f"unbalanced subselect in trend SQL: {sql}")
+
+
+def _trend_row(sql, f):
+    """The trend row the seeded world owes THIS statement.
+
+    Handing both implementations the same canned row is what made this suite
+    blind to the SQL: the tool's current_value subselect had no lookback bound
+    while the endpoint's latest value sits inside the windowed aggregate. Executed
+    verbatim on PostgreSQL 14.18 against free_storage_bytes rows that all lay 60
+    to 90 days back, the tool returned current_value=107374182400.0 and the
+    endpoint 0.0, both alongside samples=0.
+
+    So the lookback predicate is MODELLED per clause (the dimension predicate is
+    not: tests/unit/test_metric_filters.py owns that with a mixed-row fixture).
+    The aggregate must carry it, and the latest-value clause only sees in-window
+    rows when it carries it too.
+
+    The returned dict carries both surfaces' column aliases (slope_per_day/n/
+    current_value for the tool, slope/samples/latest for the endpoint). Each
+    implementation reads only its own, and reading the wrong one would show up as
+    a mismatch."""
+    agg, latest_clause = _split_latest_clause(sql)
+    assert _WINDOW.search(agg), f"trend aggregate is not bounded by the lookback: {agg}"
+    n = f["samples"]
+    # PostgreSQL over an empty window: REGR_SLOPE / REGR_R2 and the latest value
+    # are all NULL, COUNT(*) is 0.
+    slope = None if n == 0 else f["slope"]
+    r2 = None if n == 0 else f["r2"]
+    latest = None if n == 0 else f["current"]
+    if latest_clause is not None and not _WINDOW.search(latest_clause):
+        # Unwindowed: this clause reaches rows the aggregate cannot count.
+        latest = f["current"] if f["stale_current"] is None else f["stale_current"]
+    return {"slope_per_day": slope, "slope": slope, "r2": r2,
+            "n": n, "samples": n, "current_value": latest, "latest": latest,
+            "first_ts": None, "last_ts": None}
+
+
 def _mcp_cache(f):
     seen = {}
 
@@ -114,12 +201,8 @@ def _mcp_cache(f):
             return _single(f["provisioned"])
         if kind == "evictions":
             return _single(f["evictions"])
-        return QueryResult(
-            columns=["slope_per_day", "r2", "n", "current_value"],
-            rows=[{"slope_per_day": f["slope"], "r2": f["r2"], "n": f["samples"],
-                   "current_value": f["current"]}],
-            row_count=1,
-        )
+        row = _trend_row(sql, f)
+        return QueryResult(columns=list(row), rows=[row], row_count=1)
 
     cache = MagicMock()
     cache.execute.side_effect = _exec
@@ -144,13 +227,20 @@ def _rest_query(f):
         if kind == "evictions":
             v = f["evictions"]
             return [] if v is None else [{"value": v}]
-        return [{"slope": f["slope"], "r2": f["r2"], "latest": f["current"],
-                 "first_ts": None, "last_ts": None, "samples": f["samples"]}]
+        return [_trend_row(sql, f)]
     return _q
 
 
-def _both(f, metric, monkeypatch, cluster_id="c", days_lookback=30):
-    monkeypatch.setattr(_dash, "_registry_engine", lambda _cid: f["engine"])
+def _both(f, metric, monkeypatch, cluster_id="c", days_lookback=30,
+          registry_engine=None):
+    """Run both surfaces over the same seeded world.
+
+    `registry_engine` defaults to the cluster_meta engine, which is the ordinary
+    case. Pass a different string to make the two POSSIBLE sources of the engine
+    family disagree: the registry holds what an operator typed at registration,
+    cluster_meta.engine holds what the collector observed writing the rows."""
+    reg = f["engine"] if registry_engine is None else registry_engine
+    monkeypatch.setattr(_dash, "_registry_engine", lambda _cid: reg)
     agent = forecast_capacity_impl(_mcp_cache(f), cluster_id=cluster_id, metric=metric,
                                    days_lookback=days_lookback)
     rest = _dash._capacity_forecast(_rest_query(f), cluster_id, metric, days_lookback)
@@ -168,6 +258,56 @@ def _assert_same_verdict(agent, rest):
     mismatch = {k: (agent[k], rest[k]) for k in shared if agent[k] != rest[k]}
     assert not mismatch, f"agent vs REST disagree on {mismatch}"
     return {k: agent[k] for k in shared}
+
+
+# ===========================================================================
+# ONE source for the engine family
+# ===========================================================================
+
+
+def test_the_engine_family_comes_from_cluster_meta_on_both_surfaces(monkeypatch):
+    """The dual-source defect, in its last hiding place. The tool derives the
+    family from cluster_meta.engine; the endpoint used to derive it from the
+    DynamoDB registry and then read the cluster_meta row while IGNORING its engine
+    column, so the two surfaces still resolved the family from two different
+    places. Verdict comparison could not see it while the sources agreed, and they
+    are allowed to disagree: the registry holds what an operator typed at
+    registration, cluster_meta.engine holds what the collector observed.
+
+    cluster_meta wins because it is the engine that WROTE the rows: the family
+    picks the metric_type (Aurora storage_bytes vs standalone-RDS
+    free_storage_bytes), so a stale or mistyped registry value sends a surface to a
+    series nobody writes. Measured on this exact world before the fix: the agent
+    read free_storage_bytes and withheld the date while the endpoint read
+    storage_bytes and reported days_until_limit=65486, disagreeing on 7 shared
+    keys (engine_family, metric_type, limit, limit_basis, direction, usage_pct,
+    days_until_limit)."""
+    f = _facts("mysql", slope=2.0 * _GIB, current=100.0 * _GIB,
+               allocated_storage_gb="200")
+    agent, rest = _both(f, "storage", monkeypatch, cluster_id="rds-mysql-1",
+                        registry_engine="aurora-mysql")
+    v = _assert_same_verdict(agent, rest)
+    assert v["engine_family"] == "rds_instance"
+    assert v["metric_type"] == "free_storage_bytes"
+    assert v["direction"] == "down"
+    # free space GROWING is moving away from the 0-byte floor, so no date.
+    assert v["days_until_limit"] is None
+
+
+def test_an_absent_registry_row_does_not_make_the_endpoint_relational(monkeypatch):
+    """A cluster missing from the registry reads back as engine "" (the registry
+    row was legitimately absent, which is NOT the failed-lookup None), and
+    engine_family("") is relational by legacy default. Deriving the family there
+    silently turned every such cluster into an Aurora one: measured before the fix,
+    a DynamoDB table answered status=ok/engine_family=dynamodb on the agent and
+    unsupported_metric/relational on the endpoint."""
+    f = _facts("dynamodb", slope=1.0, current=10.0, provisioned=50.0)
+    agent, rest = _both(f, "read_capacity", monkeypatch, cluster_id="ddb-1",
+                        registry_engine="")
+    v = _assert_same_verdict(agent, rest)
+    assert v["engine_family"] == "dynamodb"
+    assert v["status"] == "ok"
+    assert v["metric_type"] == "consumed_rcu"
 
 
 # ===========================================================================
@@ -436,14 +576,69 @@ def test_an_unsupported_metric_on_an_uncollected_cluster_still_agrees(engine, me
 def test_zero_samples_is_no_data_on_both_surfaces_never_at_the_limit(monkeypatch):
     """free_storage_bytes has a limit of 0 and `latest` is null with no rows, so an
     uncollected cluster would otherwise be declared STORAGE_FULL by whichever
-    surface got there first."""
-    f = _facts("mysql", slope=0.0, current=None, samples=0)
+    surface got there first.
+
+    allocated_storage_gb is SET here on purpose: a known allocated size is a
+    denominator, and with it both surfaces used to answer usage_pct=100.0 for a
+    cluster nothing was measured on, because the depleting mode reads
+    (allocated - current)/allocated and `current` is 0.0 for lack of a row rather
+    than because 0 bytes were observed. "Storage 100% used" is the worst possible
+    thing to invent out of no data, and the REST projections were a matching flat
+    line at zero. A measurement is required, not just a denominator."""
+    f = _facts("mysql", slope=0.0, current=None, samples=0,
+               allocated_storage_gb="100")
     agent, rest = _both(f, "storage", monkeypatch, cluster_id="rds-mysql-1")
     v = _assert_same_verdict(agent, rest)
     assert v["status"] == "no_data"
     assert v["forecast"] == "no_data"
     assert v["approaching_limit"] is False
     assert v["days_until_limit"] is None
+    assert v["usage_pct"] is None
+    assert v["current_value"] == 0.0
+    # and nothing is projected from a trend that does not exist
+    assert "projections" not in rest
+
+
+def test_a_series_older_than_the_window_is_no_data_on_both_surfaces(monkeypatch):
+    """SQL parity, not just verdict parity. The rows exist but every one of them is
+    older than the lookback, so the window holds nothing: both surfaces owe
+    samples=0 AND a current_value that describes the same rows the count does.
+
+    This is the divergence the canned-row stub could not see. The tool read
+    `current` from a subselect with no lookback bound while the endpoint read it
+    from array_agg INSIDE the windowed aggregate, so on PostgreSQL 14.18 with
+    free_storage_bytes rows 60 to 90 days back the tool answered
+    current_value=107374182400.0 (usage_pct 50.0 against a 200 GB allocation) and
+    the endpoint 0.0, both reporting samples=0. A stale reading presented as
+    "current" is how a cluster whose collection stopped months ago gets a storage
+    verdict from data nobody is collecting."""
+    f = _facts("mysql", slope=0.0, current=None, samples=0,
+               stale_current=100.0 * _GIB, allocated_storage_gb="200")
+    agent, rest = _both(f, "storage", monkeypatch, cluster_id="rds-mysql-stale")
+    v = _assert_same_verdict(agent, rest)
+    assert v["status"] == "no_data"
+    assert v["samples"] == 0
+    assert v["current_value"] == 0.0
+    assert v["usage_pct"] is None
+
+
+def test_serverless_v2_aas_ceiling_agrees_on_both_surfaces(monkeypatch):
+    """Every other aas case seeds a provisioned instance_class, so the ACU
+    conversion (instance_class db.serverless has no vCPU token, so the ceiling
+    comes from serverlessv2_max_acu at 4 ACU per vCPU) was pinned on the tool side
+    only. Measured: with this case deselected, changing the endpoint's
+    _ACU_PER_VCPU from 4.0 to 1.0 leaves 2096 unit tests green, while the same
+    mutation in the tool fails test_serverless_v2_aas_ceiling_comes_from_max_acu.
+    Serverless v2 is the default shape for new Aurora clusters, so this pair is not
+    an edge case."""
+    f = _facts("aurora-postgresql", slope=0.1, current=2.0,
+               instance_class="db.serverless", serverlessv2_max_acu=64.0)
+    agent, rest = _both(f, "aas", monkeypatch)
+    v = _assert_same_verdict(agent, rest)
+    assert v["limit"] == 16.0                 # 64 ACU / 4 ACU per vCPU
+    assert "serverlessv2_max_acu=64.0" in v["limit_basis"]
+    assert v["grounded"] is True
+    assert v["days_until_limit"] == 140       # (16 - 2) / 0.1
 
 
 def test_ungrounded_limit_withholds_the_date_on_both_surfaces(monkeypatch):
