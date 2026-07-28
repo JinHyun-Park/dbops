@@ -62,11 +62,23 @@ DocumentDB, DynamoDB, ElastiCache(Redis/Valkey/Memcached) 클러스터는 아래
   - DocumentDB: 인스턴스 목록, 연결 수, replica lag 등.
   - ElastiCache: 노드 타입/수, 엔진(Redis/Valkey/Memcached)+버전, RBAC user group, 암호화(at-rest/in-transit) 등.
 - `elasticache_live_read(cluster_id)` — ElastiCache 복제 그룹/노드 구성을 라이브로 조회.
+- **DocumentDB 느린 op**: `get_top_queries`, `get_slow_queries`, `detect_regressions` 는
+  DocumentDB에서도 동작합니다. 수집기가 profiler 로그 창을 `query_stats`에 누적하기
+  때문입니다. 응답의 `data_source` 라벨을 읽고 그 의미를 그대로 전달하세요:
+  `query_text` 는 SQL이 아니라 Mongo op shape이고, `calls`/`total_time_ms` 는
+  profiler_threshold_ms를 넘긴 op만 집계한 값이며, `mean_time_ms` 는 그 느린 op들만의
+  평균이라 그 op의 평균 응답시간이 아닙니다. 행이 없는 것은 "느린 op이 없다"는 뜻이
+  아닙니다(profiler OFF / sampling / 로그 읽기 실패도 같은 모양이며, 그때는
+  `docdb_mongo_profiler_off` 또는 `docdb_mongo_profiler_read_failed` finding이 있습니다).
+  DynamoDB/ElastiCache에는 이 도구들이 없습니다(`unsupported_engine`).
 
 ### SQL 도구 사용 금지
 `execute_sql` 및 SQL 기반 도구는 이 엔진들(MongoDB 프로토콜 / NoSQL / 키-값 캐시)에서
 동작하지 않습니다. SQL 직접 실행을 요청받으면 "이 엔진은 SQL 직접 실행을 지원하지
 않습니다"라고 설명하고, 위 진단 도구 + 아래 치트시트로 진단/권고하세요.
+여기서 말하는 SQL 도구는 대상 DB에 SQL을 실행하는 `execute_sql` 과 SQL 플랜 도구
+(`explain_plan`, `recommend_index`)입니다. 캐시 테이블을 읽는 위 DocumentDB 쿼리 도구는
+여기에 해당하지 않습니다.
 
 ### 시뮬레이션 (엔진별로 다름)
 Aurora 전용 시뮬레이션 — `check_upgrade_compatibility`, `estimate_upgrade_impact`,

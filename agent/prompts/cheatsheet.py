@@ -54,6 +54,12 @@ MULTIENGINE_CHEATSHEET = """
   대응: 쿼리 최적화, 애플리케이션에서 cursor 명시적 close.
 - Buffer cache hit ratio: 낮으면(< 90%) 메모리 부족 → 인스턴스 클래스 업그레이드 고려.
   DocumentDB는 메모리 바운드 엔진 — 작업 셋이 RAM에 들어와야 성능 유지.
+- 느린 op: profiler 로그가 `query_stats`에 누적되므로 `get_top_queries` /
+  `get_slow_queries` / `detect_regressions` 로 조회합니다. 숫자는 profiler_threshold_ms를
+  넘긴 op만의 집계이고 `query_text` 는 op shape(op + namespace + 필터 키)이라 EXPLAIN
+  대상이 아닙니다. 조치는 해당 컬렉션 인덱스와 쿼리 패턴 점검, 필요하면
+  `create_docdb_index`(승인 필요). 기록이 없으면 먼저 profiler 상태를 확인하세요
+  (`set_docdb_profiler`, 승인 필요).
 
 ## Non-Relational 엔진 공통 진단 워크플로
 1. `get_health_status(cluster_id)` 호출 → engine + resource_details 확인

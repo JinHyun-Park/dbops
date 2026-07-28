@@ -78,15 +78,18 @@ def test_rds_instance_capabilities():
     }
 
 def test_task0_capability_matrix():
-    # E-0 Task 0. query_stats rows are only written for relational and
-    # rds_instance; explain/index_advice are PG-only today (E-2 adds MySQL);
-    # cluster_parameter is Aurora cluster parameter groups only (E-3 covers the
-    # rds_instance instance-parameter path).
+    # E-0 Task 0. query_stats rows are written for relational, rds_instance and
+    # (since ee0a63c/ff48098) documentdb, whose profiler-log collector accumulates
+    # into the same table. dynamodb/elasticache have no producer. explain/
+    # index_advice are PG-only today (E-2 adds MySQL); cluster_parameter is Aurora
+    # cluster parameter groups only (E-3 covers the rds_instance path).
+    # documentdb keeps explain/index_advice False on purpose: its rows carry a
+    # Mongo op shape, which is not EXPLAIN input, and sql stays False.
     keys = ("query_stats", "explain", "index_advice", "cluster_parameter")
     expected = {
         "relational": (True, True, True, True),
         "rds_instance": (True, False, False, False),
-        "documentdb": (False, False, False, False),
+        "documentdb": (True, False, False, False),
         "dynamodb": (False, False, False, False),
         "elasticache": (False, False, False, False),
     }

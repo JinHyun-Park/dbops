@@ -57,10 +57,16 @@ CAPABILITIES = {
         # (both PG and MySQL). Positive gate — non-relational engines can't add/
         # remove an RDS DB instance this way.
         "scale_instance": True,
-        # query_stats: only relational (pg_stat_statements /
-        # events_statements_summary_by_digest) and rds_instance (direct-TCP
-        # collectors) ever write query_stats rows, so any other family answers
-        # query tools with a false empty state unless gated.
+        # query_stats: does this family have a PRODUCER for the query_stats
+        # table. relational (pg_stat_statements /
+        # events_statements_summary_by_digest), rds_instance (direct-TCP
+        # collectors) and documentdb (profiler log, docdb_mongo_collector) all
+        # write rows; dynamodb and elasticache have none, so their query tools
+        # would answer with a false empty state unless gated.
+        # This is NOT a stand-in for a SQL surface: documentdb has sql=False and
+        # its rows carry a Mongo op shape, not a statement. Anything that needs
+        # SQL gates on `sql`/`sql_via` (execute_sql) or `explain`/`index_advice`,
+        # never on this key.
         # explain / index_advice: PG-only implementations today; E-2 turns Aurora
         # MySQL on. cluster_parameter: Aurora cluster parameter groups, which
         # rds_instance does not have (it uses instance parameter groups, E-3).
@@ -71,7 +77,16 @@ CAPABILITIES = {
     DOCUMENTDB: {
         "sql": False, "rds_meta": True, "perf_insights": False, "simulation": False,
         "docdb_write": True,
-        "query_stats": False, "explain": False, "index_advice": False, "cluster_parameter": False,
+        # query_stats: True. docdb_mongo_collector accumulates each profiler log
+        # window into query_stats, so the rows exist and the agent's query tools
+        # must be able to read them. The columns are the same as the SQL
+        # families' and the MEANING is not: counters cover only the ops that
+        # crossed profiler_threshold_ms, mean_time_ms is that censored subset's
+        # mean, and query_text is an op shape. performance/handler.py labels
+        # every row it returns for this family. explain / index_advice stay False
+        # (an op shape is not EXPLAIN input) and so does cluster_parameter,
+        # DocumentDB parameter groups are handled by their own tools.
+        "query_stats": True, "explain": False, "index_advice": False, "cluster_parameter": False,
         "cw_namespace": "AWS/DocDB",
         "findings": {"docdb"},
     },

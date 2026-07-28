@@ -58,9 +58,11 @@ def test_gate_map_matches_capability_keys():
 
 
 def test_unsupported_families_get_unsupported_engine_not_empty_list():
-    """DynamoDB / ElastiCache / DocumentDB must be REFUSED for every gated tool,
-    never handed an empty result set."""
-    for fam in ("dynamodb", "elasticache", "documentdb"):
+    """DynamoDB / ElastiCache have no query_stats producer at all, so every gated
+    tool must REFUSE them rather than hand back an empty result set. DocumentDB
+    has a producer (the profiler-log collector) but no SQL surface, so it is
+    refused for the SQL-shaped tools only."""
+    for fam in ("dynamodb", "elasticache"):
         for tool, event in _GATED.items():
             spy = MagicMock(return_value={"queries": []})
             with _patch_family(fam), patch.dict(handler.TOOLS[tool], {"impl": spy}):
@@ -68,6 +70,13 @@ def test_unsupported_families_get_unsupported_engine_not_empty_list():
             assert result["status"] == "unsupported_engine", (fam, tool)
             assert result["engine_family"] == fam
             spy.assert_not_called()
+    for tool in ("explain_plan", "recommend_index"):
+        spy = MagicMock(return_value={"queries": []})
+        with _patch_family("documentdb"), patch.dict(handler.TOOLS[tool], {"impl": spy}):
+            result = _invoke(tool, _GATED[tool])
+        assert result["status"] == "unsupported_engine", tool
+        assert result["engine_family"] == "documentdb"
+        spy.assert_not_called()
 
 
 def test_gate_none_family_fail_closed():

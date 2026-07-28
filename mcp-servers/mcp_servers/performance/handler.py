@@ -17,7 +17,7 @@ from mcp_servers.performance.tools.slow_queries import get_slow_queries_impl
 from mcp_servers.performance.tools.top_queries import get_top_queries_impl
 from mcp_servers.performance.tools.vacuum_stats import get_vacuum_stats_impl
 from mcp_servers.shared.cache_client import CacheClient
-from mcp_servers.shared.engine_family import CAPABILITIES
+from mcp_servers.shared.engine_family import CAPABILITIES, DOCUMENTDB
 from mcp_servers.shared.engine_family import engine_family as _engine_family
 
 logger = logging.getLogger(__name__)
@@ -31,8 +31,11 @@ cache = CacheClient()
 # 빈 상태. 해석 불가 클러스터(미등록·조회 실패)도 거부한다: 없는 데이터를
 # "정상"으로 보고하는 것보다 거부가 안전하다.
 _ENGINE_GATED_TOOLS = {
-    # query_stats 행을 쓰는 수집기는 relational(pg_stat_statements /
-    # events_statements_summary_by_digest)과 rds_instance(direct-TCP)뿐이다.
+    # query_stats 행을 쓰는 수집기가 있는 패밀리: relational(pg_stat_statements /
+    # events_statements_summary_by_digest), rds_instance(direct-TCP),
+    # documentdb(profiler 로그, docdb_mongo_collector). dynamodb/elasticache는
+    # 생산자가 없다. documentdb 행은 컬럼만 같고 의미가 다르므로
+    # _annotate_documentdb가 출처를 붙인다.
     "get_top_queries": "query_stats",
     "get_slow_queries": "query_stats",
     "detect_regressions": "query_stats",
@@ -42,10 +45,76 @@ _ENGINE_GATED_TOOLS = {
 }
 
 _CAP_LABEL = {
-    "query_stats": "쿼리 통계가 수집되는 엔진(Aurora, RDS 인스턴스)",
+    "query_stats": "쿼리 통계가 수집되는 엔진(Aurora, RDS 인스턴스, DocumentDB)",
     "explain": "EXPLAIN 지원 엔진(Aurora)",
     "index_advice": "인덱스 추천 지원 엔진(Aurora)",
 }
+
+# documentdb의 query_stats 행은 엔진 카운터가 아니다: docdb_mongo_collector가
+# profiler 로그 창을 누적해 넣은 것이라(ee0a63c/ff48098) 컬럼은 같고 의미가
+# 다르다. 라벨 없이 내보내면 "느린 op만의 평균"이 "그 op의 평균 응답시간"으로
+# 인용된다. impl이 아니라 핸들러에 두는 이유: 패밀리는 게이트가 이미 해석했고,
+# impl 세 개는 패밀리를 모르는 캐시 리더다.
+_DOCDB_QUERY_STATS_NOTE = {
+    "origin": "documentdb profiler log (docdb_mongo_collector), not an engine counter",
+    "query_text": (
+        "SQL이 아니라 MongoDB op shape입니다 (op + namespace + filter/pipeline 키). "
+        "EXPLAIN이나 인덱스 추천 도구의 입력으로 쓸 수 없습니다."
+    ),
+    "counters": (
+        "calls / total_time_ms / rows_returned 는 profiler_threshold_ms를 넘긴 op만 "
+        "누적한 값입니다. 그 op의 전체 호출 수나 전체 실행시간이 아닙니다."
+    ),
+    "mean_time_ms": (
+        "느린 op만의 평균이라 항상 profiler_threshold_ms 이상입니다. 그 op의 평균 "
+        "응답시간으로 인용하지 마세요."
+    ),
+    "coverage": (
+        "임계값을 넘긴 op이 없던 구간에는 행이 아예 없습니다. 행이 없다는 것은 "
+        "'느린 op이 없다'는 근거가 아닙니다 (profiler OFF, sampling, 로그 읽기 실패 "
+        "모두 같은 모양입니다). docdb_mongo_profiler_off / "
+        "docdb_mongo_profiler_read_failed finding을 함께 확인하세요."
+    ),
+}
+
+# get_slow_queries가 relational 기준으로 붙이는 source 문구는 이 패밀리에서
+# 사실과 반대다("슬로우 쿼리 로그가 아니다" → documentdb는 정확히 그것이다).
+_DOCDB_SLOW_QUERIES_SOURCE = (
+    "documentdb profiler log에서 누적한 query_stats.mean_time_ms "
+    "(profiler_threshold_ms를 넘긴 op만의 평균)"
+)
+
+# detect_regressions는 before/after를 query_hash로 INNER JOIN한다. relational에서
+# before 쪽 행이 없다는 것은 "그때는 없던 쿼리"지만, documentdb에서는 "그때는
+# 느리지 않았던 op", 즉 찾고 있던 바로 그 리그레션이다. 그 행은 결과에서 빠지므로
+# 빈 결과를 "리그레션 없음"으로 읽으면 안 된다.
+# ponytail: after 구간에만 나타난 shape을 따로 세어 돌려주는 게 다음 단계다.
+# 오탐이 아니라 누락이 실제로 문제가 될 때 추가할 것.
+_DOCDB_REGRESSION_CAVEAT = (
+    "이 패밀리에서는 두 가지를 먼저 확인하세요. (1) 변경 시점 전에 느리지 않았던 op은 "
+    "before 쪽 행이 없어 결과에서 빠집니다. regressions가 비어 있는 것은 '리그레션이 "
+    "없다'는 근거가 아니며, 같은 창의 get_top_queries와 docdb_mongo_slow_ops finding을 "
+    "함께 보세요. (2) 두 구간 사이에 profiler_threshold_ms가 바뀌었다면 변화량은 "
+    "워크로드가 아니라 계측 변경일 수 있습니다. before_calls / after_calls로 표본 "
+    "크기를 먼저 확인하세요."
+)
+
+
+def _annotate_documentdb(tool_name, fam, result):
+    """documentdb의 query_stats 결과에 출처 라벨을 붙인다. 다른 패밀리와 다른 값을
+    돌려주지는 않는다: 같은 숫자에 그 숫자가 무엇인지를 덧붙일 뿐이다."""
+    if fam != DOCUMENTDB or not isinstance(result, dict):
+        return result
+    if _ENGINE_GATED_TOOLS.get(tool_name) != "query_stats":
+        return result
+    note = dict(_DOCDB_QUERY_STATS_NOTE)
+    if tool_name == "get_slow_queries":
+        result["source"] = _DOCDB_SLOW_QUERIES_SOURCE
+    elif tool_name == "detect_regressions":
+        note["caveat"] = _DOCDB_REGRESSION_CAVEAT
+    result["data_source"] = note
+    return result
+
 
 TOOLS = {
     "get_top_queries": {
@@ -289,6 +358,7 @@ def lambda_handler(event, context):
         # POSITIVE, FAIL-CLOSED 엔진 게이트. 지원 capability가 없는 패밀리(그리고
         # 해석 불가 클러스터)는 impl에 닿기 전에 unsupported_engine으로 거부한다.
         cap_key = _ENGINE_GATED_TOOLS.get(tool_name)
+        fam = None
         if cap_key:
             cluster_id = (event or {}).get("cluster_id") if isinstance(event, dict) else None
             fam = _resolve_family(cluster_id)
@@ -308,6 +378,7 @@ def lambda_handler(event, context):
                 })}]}
         try:
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))
+            result = _annotate_documentdb(tool_name, fam, result)
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
         except Exception:
             # 예외 텍스트는 응답에 절대 넣지 않는다(SQL·ARN·내부 경로 누출).
