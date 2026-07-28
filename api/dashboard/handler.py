@@ -1645,6 +1645,53 @@ def _timeline_category(raw_type: str) -> str:
     return "rds_event"
 
 
+def _ddl_name(v) -> str:
+    """One changed object's display name, for each shape compute_diff emits:
+    a bare table name, a {"table": ...} modified entry, a {"from","to"} rename."""
+    if isinstance(v, dict):
+        if "from" in v:
+            return f"{v.get('from')} -> {v.get('to')}"
+        return str(v.get("table") or "?")
+    return str(v)
+
+
+# (diff bucket, label) in the order a DBA reads a migration.
+_DDL_BUCKETS = (
+    ("added", "created"),
+    ("dropped", "dropped"),
+    ("modified", "altered"),
+    ("rename_candidates", "renamed"),
+)
+
+
+def _ddl_summary(blob) -> tuple[str, str]:
+    """Collapse ONE stored schema diff into (title summary, detail).
+
+    ponytail: one timeline item per stored diff, not one per changed table. A
+    migration touching 500 tables would otherwise push every alert next to it
+    out of the 500-item cap, and a deploy is the unit a DBA correlates against
+    an incident anyway. The names are in `detail`, capped at 8 per bucket then
+    counted, so the item stays bounded whatever the migration did.
+    """
+    if isinstance(blob, str):
+        try:
+            blob = json.loads(blob)
+        except (json.JSONDecodeError, TypeError):
+            return "", ""
+    if not isinstance(blob, dict):
+        return "", ""
+    parts, detail = [], []
+    for key, label in _DDL_BUCKETS:
+        vals = blob.get(key) or []
+        if not isinstance(vals, list) or not vals:
+            continue
+        parts.append(f"{label} {len(vals)}")
+        names = [_ddl_name(v) for v in vals[:8]]
+        more = f" +{len(vals) - 8}" if len(vals) > 8 else ""
+        detail.append(f"{label}: {', '.join(names)}{more}")
+    return " / ".join(parts), " | ".join(detail)
+
+
 def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) -> dict:
     """Unified chronological timeline for one cluster.
 
@@ -1656,7 +1703,8 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
                         or whatever event_processor wrote)
       - proactive     — proactive_monitor findings
       - ack           — Slack acks of alerts
-      - schema_change — schema_changes table (DDL detected by schema_tracker)
+      - schema_change : DDL from schema_snapshots (schema_v26), one item per
+                        stored diff, i.e. per detected schema change
       - audit         — audit_log (executed write operations)
       - slow_peak     — query_stats rows whose total_time_ms jumped past
                         the per-cluster p95 in this window (the "what got
@@ -1666,9 +1714,14 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
     Frontend renders that as a vertical timeline + category filter chips.
 
     Window is `hours` back from now. Caller can pass `categories=...` to
-    restrict — useful during retro where you only want changes + alerts."""
+    restrict, useful during retro where you only want changes + alerts.
+
+    A source whose query fails is named in `degraded_sources`. An empty category
+    otherwise reads as "that signal did not fire", which is exactly how the DDL
+    category stayed permanently empty against a table no migration creates."""
     cats = set(categories or [])
     items: list[dict] = []
+    degraded: list[str] = []
 
     # event_log already aggregates alerts + RDS events + proactive findings
     # + acks. Pull everything in the window and stamp category from
@@ -1705,31 +1758,40 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
             "source_id": f"event_log:{r.get('id')}",
         })
 
-    # schema_changes table — DDL detected by the schema_tracker pipeline.
+    # DDL from schema_snapshots (schema_v26), the same rows get_schema_history and
+    # diagnose_root_cause replay. This block used to read `schema_changes`, a
+    # table NO migration creates, and swallow the missing relation with a "skip
+    # silently" comment: the category was permanently empty, which on a timeline
+    # reads as "no DDL happened during the incident".
     try:
         schema_rows = query(
-            "SELECT detected_at, change_type, object_name, "
-            "       LEFT(old_definition, 200) AS old_def, "
-            "       LEFT(new_definition, 200) AS new_def "
-            "FROM schema_changes "
+            "SELECT snapshot_time, schema_name, diff_from_previous_json AS diff "
+            "FROM schema_snapshots "
             "WHERE cluster_id = :cid "
-            "  AND detected_at > NOW() - (:hours || ' hours')::interval "
-            "ORDER BY detected_at DESC LIMIT 100",
+            "  AND snapshot_time > NOW() - (:hours || ' hours')::interval "
+            "  AND diff_from_previous_json IS NOT NULL "
+            "  AND diff_from_previous_json::text NOT IN ('{}', '') "
+            "ORDER BY snapshot_time DESC LIMIT 100",
             {"cid": cluster_id, "hours": str(hours)},
         )
         for r in schema_rows:
+            summary, detail = _ddl_summary(r.get("diff"))
+            if not summary:
+                continue  # a stored diff with no bucket populated: nothing to say
             items.append({
-                "ts": r.get("detected_at"),
+                "ts": r.get("snapshot_time"),
                 "category": "schema_change",
                 "severity": "info",
-                "title": f"{r.get('change_type')} · {r.get('object_name')}",
-                "detail": (r.get("new_def") or r.get("old_def") or "")[:200],
-                "source": "schema_tracker",
+                "title": f"{r.get('schema_name')} · {summary}",
+                "detail": detail[:400],
+                "source": "schema_snapshots",
                 "source_id": "",
             })
     except Exception as e:
-        # schema_changes may not exist on partial deploys; skip silently.
-        print(f"[timeline] schema_changes skipped: {e}")
+        # Missing relation (a cache DB without schema_v26) or any other read
+        # failure: NAME it. Detail to CloudWatch only, never into the payload.
+        print(f"[timeline] schema_change source degraded: {type(e).__name__}: {e}")
+        degraded.append("schema_change")
 
     # audit_log — executed write operations (DDL via execute_sql,
     # parameter changes, scaling). Empty in most deployments today;
@@ -1758,7 +1820,8 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
                 "source_id": f"audit_log:{r.get('id')}",
             })
     except Exception as e:
-        print(f"[timeline] audit_log skipped: {e}")
+        print(f"[timeline] audit source degraded: {type(e).__name__}: {e}")
+        degraded.append("audit")
 
     # Sort by ts DESC — most recent first.
     items.sort(key=lambda x: str(x.get("ts") or ""), reverse=True)
@@ -1773,6 +1836,9 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
         "categories": sorted({i["category"] for i in items}),
         "count": len(items),
         "items": items[:500],
+        # Non-empty means a signal stream could not be read, so an absent
+        # category here is "unknown", not "did not happen".
+        "degraded_sources": degraded,
     }
 
 
@@ -2043,6 +2109,14 @@ _SCHEMA_SNAPSHOT_PAIRS_SQL = (
     "  COALESCE(b.tables_json, o.tables_json) AS tables_before, "
     "  COALESCE(b.snapshot_time, o.snapshot_time) AS baseline_time, "
     "  (b.schema_name IS NULL) AS baseline_outside_window, "
+    # When EVERY snapshot of a schema predates the window, `base` (newest at or
+    # before the window start) and `latest` (newest overall) are the SAME ROW.
+    # compute_diff(X, X) is empty by construction, and `baseline_outside_window`
+    # is FALSE there, so nothing else in this row marks it. Comparing the
+    # RESOLVED pair, not `l.snapshot_time <= NOW() - :days`, keeps the flag tied
+    # to the computation it guards however base is resolved in future.
+    "  (COALESCE(b.snapshot_time, o.snapshot_time) = l.snapshot_time) "
+    "    AS baseline_is_latest, "
     "  l.tables_json AS tables_after, "
     "  l.snapshot_time AS current_time, "
     # Uncorrelated scalar subqueries: PostgreSQL evaluates each once as an
@@ -2122,6 +2196,11 @@ _SC_DDL_BASELINE_ONLY = (
     "baseline 스냅샷만 있어 DDL 비교 대상이 없습니다 (판정에는 스냅샷 2개가 "
     "필요합니다). 다음 스키마 변경이 감지되면 그 시점의 스냅샷과 비교됩니다."
 )
+_SC_DDL_OUTSIDE_WINDOW = (
+    "이 스키마의 스냅샷이 모두 요청 구간보다 오래되어, 구간 안에서 비교할 스냅샷 쌍이 "
+    "없습니다 (가장 최근 스냅샷조차 구간 시작보다 이전). DDL 변경이 없다는 뜻이 "
+    "아닙니다. 구간을 늘리면 그 이전 이력끼리 비교할 수 있습니다."
+)
 _SC_DDL_UNAVAILABLE = (
     "schema_snapshots를 조회할 수 없어 이번 응답에서는 테이블 생성·삭제(DDL)를 "
     "판정하지 못했습니다 (schema_v26 마이그레이션 적용 여부를 확인하세요). DDL "
@@ -2177,7 +2256,7 @@ def _schema_changes(query, cluster_id, days):
 
     created, dropped, renames = [], [], []
     snapshotted_schemas, live_keys = set(), set()
-    baseline_only, partial_window = [], []
+    baseline_only, partial_window, outside_window = [], [], []
     schemas_compared = 0
     snapshots_stored = 0
     first_snapshot = last_snapshot = None
@@ -2194,6 +2273,13 @@ def _schema_changes(query, cluster_id, days):
             # One snapshot is a baseline, not a history. Diffing it against
             # itself would report zero changes for a schema never compared.
             baseline_only.append(schema)
+            continue
+        if r.get("baseline_is_latest"):
+            # base and latest are the SAME ROW: every snapshot of this schema
+            # predates the window. compute_diff(X, X) is empty by construction,
+            # so counting it as a comparison turns "we observed nothing inside
+            # the window" into "nothing changed".
+            outside_window.append(schema)
             continue
         if r.get("baseline_outside_window"):
             partial_window.append(schema)
@@ -2268,6 +2354,10 @@ def _schema_changes(query, cluster_id, days):
         ddl_status = "not_collected"
     elif schemas_compared:
         ddl_status = "ok"
+    elif outside_window:
+        # More specific than baseline_only: history exists and is comparable,
+        # just not inside the requested window. Both notes are emitted below.
+        ddl_status = "outside_window"
     else:
         ddl_status = "baseline_only"
 
@@ -2278,7 +2368,10 @@ def _schema_changes(query, cluster_id, days):
     else:
         rows_status = "insufficient_history"
 
-    if changes:
+    if changes or renames:
+        # A rename is a schema change the panel has to show. It is not in
+        # `changes` (it is a pair, not a row with counts), so without it here a
+        # window containing nothing but a RENAME reported "no_changes".
         status = "ok"
     elif ddl_status == "ok" or rows_status == "ok":
         status = "no_changes"
@@ -2298,6 +2391,12 @@ def _schema_changes(query, cluster_id, days):
         notes.append(_SC_DDL_BASELINE_ONLY)
     elif ddl_status == "unavailable":
         notes.append(_SC_DDL_UNAVAILABLE)
+    if outside_window:
+        # Also fires when other schemas DID compare (ddl_status "ok"): the ones
+        # that did not must not disappear behind that.
+        notes.append(
+            f"{_SC_DDL_OUTSIDE_WINDOW} 해당 스키마: {', '.join(sorted(outside_window))}."
+        )
     if partial_window and first_snapshot:
         notes.append(
             f"요청 구간({days}일)보다 스냅샷 이력이 짧아 {first_snapshot} 이후 구간만 "
@@ -2334,6 +2433,7 @@ def _schema_changes(query, cluster_id, days):
             "last_snapshot": last_snapshot,
             "baseline_only_schemas": sorted(baseline_only),
             "partial_window_schemas": sorted(partial_window),
+            "outside_window_schemas": sorted(outside_window),
             "rename_candidates": renames,
         },
         "row_deltas": {

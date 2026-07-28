@@ -87,10 +87,15 @@ pytestmark = pytest.mark.skipif(
     reason="no local PostgreSQL (initdb/pg_ctl/psql), real-engine test skipped",
 )
 
-# Own port + own data dir: the schema_snapshot real-engine test runs its own
-# postmaster on 55433 and both fixtures rmtree what they created.
-_PORT = "55437"
-_PGDATA = os.path.join(tempfile.gettempdir(), "dbops_schema_changes_pg")
+# Own port + own data dir, BOTH derived from the PID. A hardcoded port and a
+# fixed datadir meant a second pytest process (or an aborted run whose
+# postmaster was still up) collided on both: the rmtree below deleted the data
+# directory out from under a live postmaster, and every test in the module then
+# ERRORed on fixture setup. Two of these harnesses did exactly that and produced
+# 34 fixture errors that were written off as flake.
+# 56000+ keeps clear of the schema_snapshot harness's fixed 55433.
+_PORT = str(56000 + os.getpid() % 3000)
+_PGDATA = os.path.join(tempfile.gettempdir(), f"dbops_schema_changes_pg_{os.getpid()}")
 
 # `:name` binds, but NOT the `::type` cast that follows one.
 _BIND = re.compile(r"(?<!:):([a-z_][a-z0-9_]*)")
@@ -172,6 +177,10 @@ def _cache_execute(api):
 
 @pytest.fixture(scope="module")
 def pg():
+    # Self-healing: stop whatever a previous aborted run left behind BEFORE
+    # removing its datadir. Deleting the directory under a live postmaster is
+    # how this harness family produced "flaky" fixture errors.
+    subprocess.run([_PGCTL, "-D", _PGDATA, "-m", "immediate", "stop"], capture_output=True)
     shutil.rmtree(_PGDATA, ignore_errors=True)
     os.makedirs(_PGDATA, exist_ok=True)
     subprocess.run([_INITDB, "-D", _PGDATA, "-U", "dbops", "--auth=trust"],
@@ -619,6 +628,9 @@ def test_rename_is_a_rename_candidate_not_a_drop(pg):
         got["ddl_detection"]["rename_candidates"], got["ddl_detection"]
     assert "ren.audit_old" not in _by_type(got).get("changed", set()), got
     assert not [c for c in got["changes"] if c["table_name"] == "audit_old"], got
+    # A rename is a schema CHANGE. It is not in `changes` (it is a pair, not a
+    # row with counts), so the status must not fall through to "no_changes".
+    assert got["status"] == "ok", got["status"]
 
 
 def test_missing_schema_snapshots_table_degrades_instead_of_500(pg):
@@ -645,3 +657,195 @@ def test_missing_schema_snapshots_table_degrades_instead_of_500(pg):
     assert "does not exist" not in blob
     assert "RuntimeError" not in blob
     assert "schema_v26" in got["note"]  # the actionable hint, not the exception
+
+
+# ===========================================================================
+# 6. A ROW COMPARED AGAINST ITSELF IS NOT A NEGATIVE
+# ===========================================================================
+
+
+def _snapshot_pair(pg, cid, days="7"):
+    return pg.query(handler._SCHEMA_SNAPSHOT_PAIRS_SQL, {"cid": cid, "days": days})
+
+
+def test_every_snapshot_older_than_the_window_is_not_a_comparison(pg):
+    """When EVERY snapshot predates the window, `base` (newest at or before the
+    window start) and `latest` (newest overall) are the SAME ROW, so
+    compute_diff(X, X) is empty by construction. That is not evidence of an
+    unchanged schema, and `baseline_outside_window` is FALSE there, so the
+    partial-window note does not fire either."""
+    cid = "b4b"
+    pg.raw("DROP SCHEMA IF EXISTS b4b CASCADE; CREATE SCHEMA b4b")
+    pg.raw("CREATE TABLE b4b.t (id int)")
+    _stat(pg, cid, "t", 10, 60, schema="b4b")
+    _stat(pg, cid, "t", 20, 40, schema="b4b")
+
+    api = _DataApi(pg)
+    collect_pg_schema_snapshot(api, _cache_execute(api), "arn:x", "arn:y", cid,
+                               "postgres", snapshot_ts=_ago(60))
+    pg.raw("CREATE TABLE b4b.t2 (id int)")
+    collect_pg_schema_snapshot(api, _cache_execute(api), "arn:x", "arn:y", cid,
+                               "postgres", snapshot_ts=_ago(40))
+
+    # MEASURED on the server: the pair the statement resolves for schema b4b is
+    # one row against itself.
+    rows = [r for r in _snapshot_pair(pg, cid) if r["schema_name"] == "b4b"]
+    assert rows, "fixture wrote no snapshot pair row for schema b4b"
+    assert rows[0]["baseline_time"] == rows[0]["current_time"], rows[0]
+    assert rows[0]["baseline_outside_window"] is False, rows[0]
+    assert int(rows[0]["snapshots_for_schema"]) == 2, rows[0]
+
+    got = handler._schema_changes(pg.query, cid, 7)
+    assert got["changes"] == []
+    assert got["ddl_detection"]["status"] == "outside_window", got["ddl_detection"]
+    assert got["ddl_detection"]["schemas_compared"] == 0, got["ddl_detection"]
+    assert "b4b" in got["ddl_detection"]["outside_window_schemas"], got["ddl_detection"]
+    assert got["ddl_detection"]["partial_window_schemas"] == []
+    # The headline may not be "no_changes": nothing inside the window was seen.
+    assert got["status"] == "insufficient_history", got
+    assert "변경이 없다는 뜻이 아닙니다" in got["note"]
+    assert "구간보다 오래되어" in got["note"]
+
+
+def test_a_real_in_window_comparison_still_reports_ok(pg):
+    """Mutation guard for the self-comparison skip: it must not swallow a schema
+    whose newest snapshot IS inside the window. Self-contained so it fails on the
+    guard rather than on test ordering."""
+    cid = "in-window-1"
+    pg.raw("DROP SCHEMA IF EXISTS inwin CASCADE; CREATE SCHEMA inwin")
+    pg.raw("CREATE TABLE inwin.t (id int)")
+    _stat(pg, cid, "t", 10, 10, schema="inwin")
+    _stat(pg, cid, "t", 20, 0, schema="inwin")
+    api = _DataApi(pg)
+    collect_pg_schema_snapshot(api, _cache_execute(api), "arn:x", "arn:y", cid,
+                               "postgres", snapshot_ts=_ago(10))
+    pg.raw("CREATE TABLE inwin.t2 (id int)")
+    collect_pg_schema_snapshot(api, _cache_execute(api), "arn:x", "arn:y", cid,
+                               "postgres", snapshot_ts=_ago(1 / 24.0))
+
+    got = handler._schema_changes(pg.query, cid, 7)
+    assert got["ddl_detection"]["status"] == "ok", got["ddl_detection"]
+    assert got["ddl_detection"]["outside_window_schemas"] == []
+    assert got["ddl_detection"]["schemas_compared"] >= 1
+    assert "inwin.t2" in _by_type(got).get("created", set()), got
+
+
+# ===========================================================================
+# 7. THE INCIDENT TIMELINE READS THE TABLE THAT EXISTS
+# ===========================================================================
+
+
+def _snap(pg, cid, schema, hours_ago, tables, diff):
+    pg.raw(
+        "INSERT INTO schema_snapshots (cluster_id, snapshot_time, schema_name, "
+        " tables_json, diff_from_previous_json) VALUES ("
+        f"{_lit(cid)}, NOW() - INTERVAL '1 hour' * {float(hours_ago)}, {_lit(schema)}, "
+        f"{_lit(json.dumps(tables))}::jsonb, {_lit(json.dumps(diff))}::jsonb)"
+    )
+
+
+def test_timeline_ddl_comes_from_schema_snapshots(pg):
+    """`schema_changes` is a table NO migration creates, so the timeline's DDL
+    category was permanently empty and the failure was swallowed with a "skip
+    silently" comment. schema_snapshots is where this tier's DDL lives."""
+    cid = "tl-1"
+    _snap(pg, cid, "app", 2, {"users": ["id"], "orders": ["id"]},
+          {"added": ["orders"], "dropped": ["legacy"], "modified": [],
+           "rename_candidates": [{"from": "aud_old", "to": "aud_new"}]})
+
+    got = handler._timeline(pg.query, cid, 24, None)
+    assert got["count"] == 1, got
+    assert got["categories"] == ["schema_change"], got
+    item = got["items"][0]
+    assert item["category"] == "schema_change"
+    assert item["source"] == "schema_snapshots"
+    assert "app" in item["title"]
+    for name in ("orders", "legacy", "aud_old"):
+        assert name in item["detail"], item
+    assert got["degraded_sources"] == []
+
+    # The relation the old statement named does not exist on a fully migrated
+    # cache DB: that is why the category could never be populated.
+    assert pg.raw("SELECT to_regclass('schema_changes') IS NULL") == [["t"]]
+
+
+def test_timeline_ignores_baseline_and_out_of_window_snapshots(pg):
+    """Mutation guard: an empty diff (the baseline row) is not a DDL event, and a
+    diff older than the window is not in this window."""
+    cid = "tl-2"
+    _snap(pg, cid, "app", 1, {"users": ["id"]}, {})
+    _snap(pg, cid, "app", 80, {"users": ["id"]}, {"added": ["ancient"]})
+    got = handler._timeline(pg.query, cid, 24, None)
+    assert got["count"] == 0, got
+    assert got["items"] == []
+    assert got["degraded_sources"] == []
+
+
+def test_timeline_names_the_source_it_could_not_read(pg):
+    """A missing relation must be VISIBLE in the payload, not a silent empty
+    category, and still carry no exception text."""
+    def query(sql, params=None):
+        if "schema_snapshots" in sql:
+            raise RuntimeError(
+                'relation "schema_snapshots" does not exist; secret '
+                "arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:dbops-cache-AbCdEf")
+        return pg.query(sql, params)
+
+    got = handler._timeline(query, "tl-1", 24, None)
+    assert got["degraded_sources"] == ["schema_change"], got
+    blob = json.dumps(got, default=str)
+    assert "secretsmanager" not in blob
+    assert "does not exist" not in blob
+    assert "RuntimeError" not in blob
+
+
+# ===========================================================================
+# 8. THE PANEL AND THIS PAYLOAD ARE THE SAME CONTRACT
+# ===========================================================================
+
+_PANEL = _ROOT / "frontend" / "src" / "components" / "dashboard" / "schema-changes-panel.tsx"
+
+# Every field the honesty of this panel depends on. The previous round shipped
+# all of them in the payload and the panel read NONE of them, so a
+# never-collected cluster and an unchanged schema rendered identically.
+_HONESTY_FIELDS = ("status", "note", "ddl_detection", "row_deltas", "collection")
+
+
+def test_panel_renders_the_fields_that_qualify_an_empty_list(pg):
+    src = _PANEL.read_text()
+    got = handler._schema_changes(pg.query, "never-collected-1", 7)
+    for field in _HONESTY_FIELDS:
+        assert field in got, f"{field} missing from the payload"
+        assert field in src, (
+            f"schema-changes-panel.tsx never reads `{field}`, so the API's "
+            "qualification of an empty list cannot reach the operator"
+        )
+    # The empty state must BRANCH on status. The unqualified sentence the two
+    # commits exist to delete was the whole empty state before this.
+    assert "감지된 스키마 변경 없음" not in src, "the unqualified empty state is back"
+    for state in ("no_changes", "not_collected", "insufficient_history"):
+        assert state in src, f"the panel has no empty state for status={state}"
+    for ddl_state in ("baseline_only", "outside_window", "unavailable"):
+        assert ddl_state in src, f"the panel cannot show ddl_detection={ddl_state}"
+
+
+def test_unknown_row_count_is_not_rendered_as_zero(pg):
+    """A created/dropped table outside the top 100 has current_rows/baseline_rows
+    None. The panel coerced null to 0 and printed "0 행"."""
+    cid = "unknown-rows-1"
+    pg.raw("DROP SCHEMA IF EXISTS unk CASCADE; CREATE SCHEMA unk")
+    pg.raw("CREATE TABLE unk.keeper (id int)")
+    api = _DataApi(pg)
+    collect_pg_schema_snapshot(api, _cache_execute(api), "arn:x", "arn:y", cid,
+                              "postgres", snapshot_ts=_ago(10))
+    pg.raw("CREATE TABLE unk.small_new (id int)")   # never in table_stats
+    collect_pg_schema_snapshot(api, _cache_execute(api), "arn:x", "arn:y", cid,
+                              "postgres", snapshot_ts=_ago(1 / 24.0))
+    _stat(pg, cid, "keeper", 100, 0, schema="unk")  # freshness only
+
+    got = handler._schema_changes(pg.query, cid, 7)
+    row = [c for c in got["changes"] if c["table_name"] == "small_new"]
+    assert row and row[0]["current_rows"] is None, got["changes"]
+
+    src = _PANEL.read_text()
+    assert "행 수 미상" in src, "the panel has no rendering for an unknown row count"

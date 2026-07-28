@@ -361,7 +361,67 @@ export async function fetchClusterSettings(clusterId: string) {
   return res.json();
 }
 
-export async function fetchSchemaChanges(clusterId: string, days = 7) {
+export interface SchemaChangeRow {
+  schema_name: string;
+  table_name: string;
+  change_type: "created" | "dropped" | "changed";
+  /** null when the table was never among the 100 largest: UNKNOWN, not zero. */
+  baseline_rows: number | string | null;
+  current_rows: number | string | null;
+  baseline_time: string | null;
+  current_time: string | null;
+  source?: "schema_snapshots" | "table_stats";
+}
+
+/** Every claim in this payload is tied to the producer that can support it, so
+ * an empty `changes` never means "nothing changed" on its own: `status`,
+ * `ddl_detection`, `row_deltas` and `collection` say which of the two sources
+ * was actually able to answer. */
+export interface SchemaChangesResponse {
+  cluster_id: string;
+  days: number;
+  status: "ok" | "no_changes" | "not_collected" | "insufficient_history";
+  changes: SchemaChangeRow[];
+  total_changes: number;
+  truncated: boolean;
+  note: string;
+  ddl_detection: {
+    source: string;
+    status:
+      | "ok"
+      | "not_collected"
+      | "baseline_only"
+      | "outside_window"
+      | "unavailable";
+    schemas_compared: number;
+    snapshots_stored: number;
+    first_snapshot: string | null;
+    last_snapshot: string | null;
+    baseline_only_schemas: string[];
+    partial_window_schemas: string[];
+    /** Schemas whose newest snapshot predates the window: the pair would be a
+     * row against itself, so nothing inside the window was observed. */
+    outside_window_schemas: string[];
+    rename_candidates: { from: string; to: string; schema_name: string }[];
+  };
+  row_deltas: {
+    source: string;
+    status: "ok" | "no_data" | "insufficient_history";
+    tables_compared: number;
+    largest_tables_only: number;
+  };
+  collection: {
+    status: "fresh" | "stale" | "no_data";
+    last_collected: string | null;
+    age_hours: number | null;
+    fresh_within_minutes: number;
+  };
+}
+
+export async function fetchSchemaChanges(
+  clusterId: string,
+  days = 7,
+): Promise<SchemaChangesResponse> {
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/schema-changes?days=${days}`),
   );
