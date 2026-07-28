@@ -294,6 +294,25 @@ def test_the_page_reads_and_renders_the_observation_note():
     assert "schema_change" in banner, banner
 
 
+def test_the_page_renders_the_item_title_and_detail_verbatim():
+    """WHY THIS IS A GUARD AND NOT A TAUTOLOGY. On a refused dialect the server
+    labels each replayed DDL item IN `title` and `detail` (handler
+    `_TL_DDL_UNSOUND_TAG`), precisely because a timeline item is rendered standalone
+    in a category-filtered list where the cluster-level banner is nowhere near it.
+    That only reaches the operator while the page renders those two fields as they
+    arrive; a future edit deriving the title from `category` + a parsed summary would
+    drop the qualification and put `dropped 1` back on the screen unqualified.
+    """
+    flat = _flat(_PAGE)
+    assert "{item.title}" in flat, flat[:200]
+    assert "{item.detail}" in flat
+    # and the label the server sends is a plain string in those fields, so nothing
+    # in the page needs to know the reason to show it.
+    assert "_TL_DDL_UNSOUND" not in flat, (
+        "the page must not reimplement the label; it is server-composed so the five "
+        "consumers cannot describe one state five ways")
+
+
 def test_the_observation_banner_is_outside_the_empty_state_too():
     """Same reason as the degraded banner: a POPULATED timeline is exactly where a
     missing DDL event is invisible."""

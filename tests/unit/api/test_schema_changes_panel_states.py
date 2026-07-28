@@ -1364,9 +1364,17 @@ def test_a_refused_dialect_never_draws_a_created_or_dropped_chip():
     assert got["observation"]["status"] == "unsupported_engine"
     assert got["changes"] == [] and got["ddl_detection"]["rename_candidates"] == []
     assert got["status"] == "partial"
-    # The refusal is stated, and the young-cluster promise is NOT.
-    assert "REVOKE" in got["note"] and "DROP" in got["note"]
+    # The refusal is stated, and the young-cluster promise is NOT. The sentence names
+    # the POSITIVE rule rather than MySQL's mechanism: the same gate refuses four
+    # other families whose reason is not MySQL's (eighth pass, FINDING 4).
+    assert "PostgreSQL" in got["note"] and "pg_namespace" in got["note"], got["note"]
     assert "다음 ETL 주기에 최초 baseline" not in got["note"]
+    # A DocumentDB cluster is refused by the same gate and must not be handed MySQL's
+    # reason for its own cluster.
+    docdb = drive(snaps=[], engine="docdb", stats=[_stat(base=1000, cur=1000)])
+    assert docdb["ddl_detection"]["status"] == "not_supported", docdb["ddl_detection"]
+    for one_familys_reason in ("MySQL", "REVOKE", "information_schema"):
+        assert one_familys_reason not in docdb["note"], one_familys_reason
     assert _NEUTRAL not in panel_verdict(got)
     # Even with stored rows from before the refusal, no pair is selected: the mock
     # returns snapshot rows and the payload still carries no change.

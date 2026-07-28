@@ -641,10 +641,17 @@ def test_a_refused_dialect_is_not_reported_as_a_cluster_with_nothing_yet():
     assert result["status"] == "not_supported", result
     assert result["observation"]["status"] == "unsupported_engine"
     assert result["schemas_compared"] == 0
-    assert "REVOKE" in result["note"] and "DROP" in result["note"]
+    # The POSITIVE rule, not MySQL's mechanism: the same gate refuses documentdb,
+    # dynamodb, elasticache and sqlserver, whose reasons are not MySQL's.
+    assert "PostgreSQL" in result["note"] and "pg_namespace" in result["note"]
     # NOT the young-cluster sentence, and the refusal is stated once, not twice.
     assert "다음 ETL 수집 주기" not in result["note"]
-    assert result["note"].count("스냅샷(테이블 생성·삭제 판정) 대상이 아닙니다") == 1
+    assert result["note"].count("스키마 스냅샷(테이블 생성·삭제 판정)은") == 1
+    dyn = get_schema_diff_impl(_cache(_coverage(0, 0), engine="dynamodb"),
+                               cluster_id="ddb-1")
+    assert dyn["status"] == "not_supported", dyn
+    for one_familys_reason in ("MySQL", "REVOKE", "information_schema"):
+        assert one_familys_reason not in dyn["note"], one_familys_reason
     # Legacy rows from before the refusal cannot be diffed into a claim either: with
     # no scope there is NO PAIR QUERY, which the mock enforces by raising.
     def execute(sql, params=None):

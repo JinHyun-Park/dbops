@@ -42,13 +42,31 @@ from collectors.stats_collector import collect_query_stats
 # schema_snapshots retention. WHAT THIS ACTUALLY GUARANTEES, stated precisely
 # because the previous wording ("90 days") was measurably false for one row shape:
 #   * HISTORY older than 90 days is deleted.
-#   * The CURRENT snapshot of each schema UNDER THE CLUSTER'S ESTABLISHED SCOPE is
-#     exempt FOREVER, however old. That exemption is load-bearing, not tidiness: the
-#     snapshot of a schema that has not changed in 90 days is itself older than the
-#     cutoff, and deleting it would destroy the only row get_schema_diff has to
-#     compare the next change against.
+#   * The TWO NEWEST snapshots of each schema UNDER THE CLUSTER'S ESTABLISHED SCOPE
+#     are exempt FOREVER, however old. That exemption is load-bearing, not tidiness:
+#     a schema that has not changed in 90 days has both of its rows older than the
+#     cutoff, and they are the comparison PAIR.
 #   * Everything else, including the last row of a schema under an ABANDONED scope,
 #     is bounded by 90 days.
+#
+# WHY TWO AND NOT ONE, which is FINDING 3 of the eighth pass. Exempting
+# only the current row is the same argument stopped one row short, and it split the
+# five consumers into two families that answered the same question two ways. The
+# stored diff on the surviving row is REPLAYED by the timeline, get_schema_history
+# and diagnose_root_cause; the pair behind it is RECOMPUTED by get_schema_diff and
+# the dashboard panel. Delete the pre-change baseline and the replay family still
+# reports the event while the recompute family loses its partner and says
+# `baseline_only`, whose sentence ("baseline 스냅샷만 있어 ... 판정에는 스냅샷 2개가
+# 필요합니다") is then a false statement about collection: two were collected and
+# retention ate one. MEASURED on PostgreSQL 14.18, one schema with a baseline at
+# 100 days and its change at 95 days, both aged past the cutoff and this statement
+# run: one row survived, the panel reported ddl_status `baseline_only` with
+# `changes: []` while the timeline over the same window reported
+# `app · created 1 / created: orders`.
+# The exemption's own justification ("the only row the next change has to be diffed
+# against") applies unchanged to the LAST RECORDED change: without its predecessor
+# that change is replayable but no longer recomputable. So the pair is what is
+# exempt, and both families answer from the same rows.
 #
 # The scope predicate is the fix for the third finding of the seventh pass. The old
 # exemption was per (cluster, schema) with no notion of scope, so a schema that
@@ -63,9 +81,15 @@ from collectors.stats_collector import collect_query_stats
 # this statement, `[['stray', 'wrongdb/16687']]` survived and the observation stayed
 # `not_seen` with `['stray']` unconfirmed.
 #
-# IS DISTINCT FROM, not <>: when the schema has no row at all under the established
-# scope (which is exactly the orphan) the subquery is NULL, and `<> NULL` is NULL,
-# i.e. NOT TRUE, i.e. the row is kept. That is the bug in one operator.
+# NOT EXISTS over the exempt SET, and the NULL trap the seventh pass fixed with
+# IS DISTINCT FROM is now structural rather than spelled: for the ORPHAN (a schema
+# with no row at all under the established scope) the inner set is EMPTY, so
+# NOT EXISTS is TRUE and the row is deleted. `snapshot_time NOT IN (<set>)` would
+# have brought the trap straight back, because a NULL anywhere in the set makes the
+# predicate NULL and keeps the row. That property is what let a stray schema pin a
+# cluster to `partial` for its lifetime: MEASURED on PostgreSQL 14.18 against the
+# pre-seventh-pass statement, after aging every row 200 days,
+# `[['stray', 'wrongdb/16687']]` survived and the observation stayed `not_seen`.
 # A cluster whose whole history predates schema_v27 has NO established scope, so
 # nothing of it is exempt: those rows are comparable to nothing by construction and
 # the first scope-known read re-baselines the schema anyway.
@@ -76,13 +100,16 @@ from collectors.stats_collector import collect_query_stats
 SCHEMA_SNAPSHOTS_PURGE_SQL = (
     "DELETE FROM schema_snapshots s "
     "WHERE s.snapshot_time < NOW() - INTERVAL '90 days' "
-    "AND s.snapshot_time IS DISTINCT FROM ("
-    "  SELECT MAX(x.snapshot_time) FROM schema_snapshots x "
-    "  WHERE x.cluster_id = s.cluster_id AND x.schema_name = s.schema_name "
-    "    AND x.read_scope = (SELECT e.read_scope FROM schema_snapshots e "
-    "                        WHERE e.cluster_id = s.cluster_id "
-    "                          AND e.read_scope IS NOT NULL "
-    "                        ORDER BY e.snapshot_time DESC LIMIT 1))"
+    "AND NOT EXISTS ("
+    "  SELECT 1 FROM ("
+    "    SELECT x.snapshot_time FROM schema_snapshots x "
+    "    WHERE x.cluster_id = s.cluster_id AND x.schema_name = s.schema_name "
+    "      AND x.read_scope = (SELECT e.read_scope FROM schema_snapshots e "
+    "                          WHERE e.cluster_id = s.cluster_id "
+    "                            AND e.read_scope IS NOT NULL "
+    "                          ORDER BY e.snapshot_time DESC LIMIT 1) "
+    "    ORDER BY x.snapshot_time DESC LIMIT 2"
+    "  ) keep WHERE keep.snapshot_time = s.snapshot_time)"
 )
 
 

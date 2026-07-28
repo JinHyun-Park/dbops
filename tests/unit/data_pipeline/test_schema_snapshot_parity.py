@@ -133,6 +133,24 @@ def test_reader_and_producer_agree_on_the_same_event():
 # and so was a second interpreter inside a listed one, which is how `_timeline`
 # escaped. `_discover_consumers()` below walks the shipped Python instead, so a new
 # consumer fails this suite the day it appears.
+#
+# ALL THREE RULES RESOLVE NAMES THE SAME WAY, and that is the eighth pass. The
+# seventh discovered consumers by an ImportFrom whose MODULE ends with
+# schema_diff_util, and matched row sources, compute_diff calls and observation calls
+# by ast.Name id. Every one of those signals is blind to reaching the contract
+# through a MODULE OBJECT, which is one keyword away from the idiom the collectors
+# already use, and TWO real files proved it while the full suite stayed at 2530
+# passed:
+#   data-pipeline/etl_collector/collectors/ddl_rollup.py
+#     `import schema_diff_util` then `schema_diff_util.ALL_ROWS`, with ZERO
+#     occurrences of the table name anywhere in the file.
+#   mcp-servers/mcp_servers/incident/tools/ddl_near_incident.py
+#     `from mcp_servers.shared import schema_diff_util`, where node.module is
+#     "mcp_servers.shared" so the endswith check on it never fires.
+# `_reaches_the_contract_module` covers all four import forms and `_referenced`
+# covers attribute access, so the three rules see a module object exactly as they see
+# a bare name. Both files were re-added as mutations after the widening and each one
+# turns this suite red.
 
 # Where shipped Python lives. tests/ is excluded on purpose (a test HAS to be able
 # to write raw SQL to prove what the shipped statement does), as is cdk/ (schemas,
@@ -195,6 +213,65 @@ def _module_string_constants(tree):
             and id(n) not in docstrings]
 
 
+def _referenced(node):
+    """Every name the code under `node` reaches, by BARE NAME or through a MODULE
+    OBJECT.
+
+    `schema_diff_util.ALL_ROWS` is an ast.Attribute, not an ast.Name, so a walk that
+    collects only Name ids cannot see the module-object idiom, and the module-object
+    idiom is what the collectors in data-pipeline/etl_collector/collectors/ already
+    use for their siblings. That single keyword is what let both eighth-pass escape
+    files through three separate rules at once: discovery, the compute_diff rule and
+    the observation rule all resolved names the same way.
+
+    An attribute is matched by its ATTRIBUTE NAME regardless of what it hangs off, so
+    `sdu.ALL_ROWS`, `schema_diff_util.ALL_ROWS` and a re-export all count. That is
+    deliberately loose in the safe direction: an extra match makes a rule fire on a
+    file it did not have to, which is a review-visible failure, while a miss is a
+    consumer nobody is checking.
+    """
+    out = set()
+    for n in ast.walk(node):
+        if isinstance(n, ast.Name):
+            out.add(n.id)
+        elif isinstance(n, ast.Attribute):
+            out.add(n.attr)
+    return out
+
+
+def _reaches_the_contract_module(tree):
+    """True when the file imports schema_diff_util in ANY of the four forms Python
+    offers. The first two were the only ones checked, and they are the two that
+    import names FROM the module; the last two reach the MODULE OBJECT, which is
+    where the eighth-pass escapes lived:
+
+      from schema_diff_util import ALL_ROWS                    module endswith
+      from mcp_servers.shared.schema_diff_util import ALL_ROWS  module endswith
+      import schema_diff_util                                  ast.Import
+      from mcp_servers.shared import schema_diff_util           alias, module is
+                                                               "mcp_servers.shared"
+    Both missed forms were proved with real files that the FULL SUITE then passed:
+    data-pipeline/etl_collector/collectors/ddl_rollup.py building its statement from
+    `schema_diff_util.ALL_ROWS` with ZERO occurrences of the table name, and
+    mcp-servers/mcp_servers/incident/tools/ddl_near_incident.py doing the same
+    through `from mcp_servers.shared import schema_diff_util`.
+
+    `from . import schema_diff_util` (module None) is covered by the alias branch,
+    and a dotted `import a.b.schema_diff_util` by the same endswith on the alias.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            # The module a name is imported FROM (ImportFrom only).
+            if getattr(node, "module", None) and node.module.endswith("schema_diff_util"):
+                return True
+            # The module imported AS A NAME. `import x.y.schema_diff_util` and
+            # `from pkg import schema_diff_util` are both here, and neither is an
+            # ImportFrom whose `module` says anything about the contract.
+            if any(a.name.endswith("schema_diff_util") for a in node.names):
+                return True
+    return False
+
+
 def _discover_consumers():
     """{repo-relative path: Path} for every shipped file that reads schema_snapshots.
 
@@ -202,10 +279,10 @@ def _discover_consumers():
       * a string CONSTANT naming the table (a file writing its own SQL). Comments
         and docstrings do not count: four of these files explain the rule in prose
         and one of them, pg_table_stats.py, only MENTIONS the table.
-      * an import from schema_diff_util (a file building its statement from the
-        contract). A consumer doing this correctly never contains the string
-        "schema_snapshots" at all, which is precisely how a text grep would miss
-        the next one.
+      * an import of schema_diff_util in any form (a file building its statement
+        from the contract). A consumer doing this correctly never contains the
+        string "schema_snapshots" at all, which is precisely how a text grep would
+        miss the next one.
     """
     found = {}
     for root in _SCAN_ROOTS:
@@ -219,10 +296,7 @@ def _discover_consumers():
             if "schema_snapshots" not in text and "schema_diff_util" not in text:
                 continue
             tree = ast.parse(text)
-            names_a_test_cannot_see = any(
-                (node.module or "").endswith("schema_diff_util")
-                for node in ast.walk(tree) if isinstance(node, ast.ImportFrom))
-            if (names_a_test_cannot_see
+            if (_reaches_the_contract_module(tree)
                     or any("schema_snapshots" in lit
                            for lit in _module_string_constants(tree))):
                 found[rel] = path
@@ -281,18 +355,19 @@ def _row_source_readers(path):
     tree = ast.parse(path.read_text())
     derived = set(_ROW_SOURCES)
     # Transitive over module-level assignments. Two passes is one more than this
-    # repo's deepest chain (fragment -> statement -> re-export).
+    # repo's deepest chain (fragment -> statement -> re-export). `_referenced`, not a
+    # Name-only walk: `X = schema_diff_util.ALL_ROWS + "..."` builds a row source
+    # through a module object and a Name walk sees nothing in it.
     for _ in range(3):
         for node in tree.body:
             if isinstance(node, ast.Assign):
-                used = {n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)}
-                if used & derived:
+                if _referenced(node.value) & derived:
                     derived |= {t.id for t in node.targets if isinstance(t, ast.Name)}
     out = {}
     for fn in ast.walk(tree):
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        hit = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)} & derived
+        hit = _referenced(fn) & derived
         if hit:
             out[fn.name] = hit
     return out
@@ -336,8 +411,18 @@ def test_no_consumer_computes_a_diff_without_the_facts_that_qualify_it(name):
     """
     src = _CONSUMERS[name].read_text()
     tree = ast.parse(src)
-    called = {n.func.id for n in ast.walk(tree)
-              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    # Both call shapes. `compute_diff(...)` is a Name and `schema_diff_util
+    # .compute_diff(...)` is an Attribute, and the second escaped this rule
+    # entirely: a file that reached the contract through the module object could
+    # call the unlicensed function and nothing here saw it.
+    called = set()
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.Call):
+            continue
+        if isinstance(n.func, ast.Name):
+            called.add(n.func.id)
+        elif isinstance(n.func, ast.Attribute):
+            called.add(n.func.attr)
     if name in _PRODUCERS:
         assert "compute_diff" in called, (
             "the producer compares this read against the stored blob, so it is the "
@@ -383,8 +468,11 @@ def test_every_function_that_selects_snapshot_rows_carries_the_observation(name)
             continue
         if fn.name not in readers:
             continue
-        names = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
-        if not names & _OBSERVATION_ENTRIES:
+        # `_referenced`, so `schema_diff_util.observed(...)` satisfies the rule the
+        # same way a bare `observed(...)` does. Without it a file reaching the
+        # contract through the module object fails this rule even when it DOES carry
+        # the observation, and a false failure is what gets a rule weakened.
+        if not _referenced(fn) & _OBSERVATION_ENTRIES:
             blind[fn.name] = sorted(readers[fn.name])
     assert not blind, (
         f"{name}: {blind} select snapshot rows without reaching the observation. "
@@ -442,6 +530,11 @@ def test_the_dialect_gate_is_positive_and_fail_closed_in_every_copy():
     POSITIVE and FAIL-CLOSED: only an engine that positively says postgres passes,
     and an engine we could not RESOLVE is `unavailable` (we cannot decide) rather
     than either answer.
+
+    And the SENTENCE is about the rule, not about MySQL. The gate is False for five
+    families (mysql, sqlserver, documentdb, dynamodb, elasticache) and MySQL's
+    measured mechanism is only MySQL's, so the shared note states what IS collected
+    and why; the per-engine grounds live on the predicate's docstring.
     """
     for name, path in _UTIL_COPIES.items():
         mod = _load(path, f"_parity_dialect_{name}")
@@ -467,10 +560,27 @@ def test_the_dialect_gate_is_positive_and_fail_closed_in_every_copy():
         assert mod.observation_is_complete(obs) is False, name
         note = mod.not_seen_note(obs)
         assert note == mod.UNSUPPORTED_DIALECT_NOTE, (name, note)
-        assert "REVOKE" in note and "DROP" in note, (name, note)
+        # It states the POSITIVE rule and names the catalog the rule is about.
+        assert "PostgreSQL" in note and "pg_namespace" in note, (name, note)
         # ...and it is NOT dressed up as a young cluster, which would promise a
         # baseline on the next ETL cycle that is never coming.
         assert obs["status"] != "no_snapshots"
+
+        # FINDING 4 OF THE EIGHTH PASS. The gate above is False for five
+        # engine families and the sentence used to explain MySQL's
+        # privilege-filtered information_schema, so a DocumentDB or DynamoDB
+        # operator was handed a reason that is not their reason. ONE sentence for
+        # all of them means it may not name any single family's mechanism.
+        for other in ("docdb", "documentdb", "dynamodb", "redis", "valkey",
+                      "memcached", "sqlserver-se", "sqlserver-ex", "mysql"):
+            o = mod.observed(lambda s, p=None, e=other: query(s, p, e), "c1")
+            assert o["status"] == mod.UNSUPPORTED_ENGINE, (name, other, o)
+            n = mod.not_seen_note(o)
+            assert n == mod.UNSUPPORTED_DIALECT_NOTE, (name, other)
+            for one_familys_reason in ("MySQL", "REVOKE", "information_schema",
+                                       "DocumentDB", "DynamoDB", "Redis",
+                                       "SQL Server"):
+                assert one_familys_reason not in n, (name, other, one_familys_reason)
 
         # An engine nobody could resolve is a THIRD state: we could not decide.
         unknown = mod.observed(lambda s, p=None: query(s, p, None), "c1")

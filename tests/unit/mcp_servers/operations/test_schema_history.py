@@ -256,8 +256,14 @@ def test_a_refused_dialect_says_so_and_keeps_the_record_it_already_has():
     assert empty["status"] == "not_supported", empty
     assert empty["count"] == 0
     assert empty["observation"]["status"] == "unsupported_engine"
-    assert "REVOKE" in empty["note"]
+    # The POSITIVE rule, not MySQL's mechanism (eighth pass, FINDING 4).
+    assert "PostgreSQL" in empty["note"] and "pg_namespace" in empty["note"]
     assert "최초 baseline 스냅샷이 기록됩니다" not in empty["note"]
+    docdb = get_schema_history_impl(_cache(coverage=_coverage(0, 0), engine="docdb"),
+                                   cluster_id="docdb-1")
+    assert docdb["status"] == "not_supported", docdb
+    for one_familys_reason in ("MySQL", "REVOKE", "information_schema"):
+        assert one_familys_reason not in docdb["note"], one_familys_reason
 
     legacy = get_schema_history_impl(
         _cache(changes=QueryResult(

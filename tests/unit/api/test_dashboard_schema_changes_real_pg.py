@@ -915,21 +915,52 @@ def test_the_timeline_names_a_schema_it_could_not_confirm(pg):
 def test_a_refused_dialect_reaches_the_timeline_and_the_panel_as_a_refusal(pg):
     """FINDING 4 on the real engine, at both dashboard surfaces. A MySQL cluster is
     empty BY DECISION: `not_collected` would promise a first baseline on the next ETL
-    cycle that is never coming."""
+    cycle that is never coming.
+
+    THE ROW IS PRESENT, and that is the whole point of the eighth pass. This test
+    used to `DELETE FROM schema_snapshots` for this cluster before driving the
+    timeline, which deleted the only row that could exercise the REPLAY path and made
+    the cell vacuous: the refusal reached `observation.note` and the replay loop was
+    never entered, so a stored DROP replayed as a positive DDL event went unnoticed
+    for a whole pass. The pre-refusal collector's rows are exactly what a real MySQL
+    cluster has, so they are what this drives.
+    """
     cid = "tl-mysql-1"
+    # _snap writes cluster_meta with the default PostgreSQL engine (that is what
+    # production looks like: the ETL collects meta before the snapshot collector), so
+    # the engine is set AFTER it or the ON CONFLICT UPDATE puts postgres back.
+    _snap(pg, cid, "appdb", 2, {"users": ["id"]},
+          {"added": [], "dropped": ["orders"], "modified": [],
+           "rename_candidates": []})
     _meta(pg, cid, engine="aurora-mysql")
-    pg.raw(f"DELETE FROM schema_snapshots WHERE cluster_id = {_lit(cid)}")
 
     tl = handler._timeline(pg.query, cid, 24, None)
     assert tl["observation"]["status"] == "unsupported_engine", tl["observation"]
-    assert "REVOKE" in tl["observation"]["note"]
     assert tl["degraded_sources"] == [], "a refusal is not a failed read"
 
+    # The item SURVIVES (get_schema_history keeps its rows for the same reason: this
+    # is a record, and deleting history is what the contract forbids) and it is
+    # LABELLED on the item, where it is rendered, not only in a cluster-level note.
+    assert tl["count"] == 1, tl
+    item = tl["items"][0]
+    assert item["category"] == "schema_change"
+    assert handler._TL_DDL_UNSOUND_TAG in item["title"], item["title"]
+    assert "판정" in item["detail"], item["detail"]
+    # and the underlying record is still legible: labelling is not redaction.
+    assert "orders" in item["detail"], item
+
+    # THE PROPERTY THE WHOLE SEQUENCE IS CHASING: the two REPLAY readers agree about
+    # this event. get_schema_history hands back the SAME row under `not_supported`
+    # (asserted on its own harness in
+    # tests/unit/data_pipeline/test_schema_snapshot_real_pg.py, which cannot be
+    # imported here: api/dashboard and mcp_servers each ship a `handler.py` and a
+    # `schema_diff_util.py`), so a timeline that suppressed it would contradict the
+    # tool the agent calls about the same event at the same timestamp.
     panel = handler._schema_changes(pg.query, cid, 7)
     assert panel["ddl_detection"]["status"] == "not_supported", panel["ddl_detection"]
     assert panel["observation"]["status"] == "unsupported_engine"
     assert panel["changes"] == []
-    assert "REVOKE" in panel["note"]
+    assert "PostgreSQL" in panel["note"] and "pg_namespace" in panel["note"]
     assert "다음 ETL 주기에 최초 baseline" not in panel["note"]
     assert _NEUTRAL not in panel_verdict(panel)
 

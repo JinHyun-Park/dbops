@@ -41,7 +41,7 @@ Four MCP servers deployed as Lambda functions behind AgentCore Gateway:
 
 - Performance (11 tools), Incident (9), Operations (34), Simulation (9)
 - Total: 63 gateway tools, managed via Gateway Semantic Search
-- Of those 63, `get_schema_diff` and `get_schema_history` do NOT work: they query `schema_snapshots`, which no collector writes (there is no `data-pipeline/schema_tracker/`). `diagnose_root_cause` also drops its DDL-change signal for the same reason. Treat 63 as the advertised contract, not the working count.
+- `get_schema_diff` and `get_schema_history` work. `schema_snapshots` is written by `data-pipeline/etl_collector/collectors/schema_snapshot.py` (and the `rds_direct_collector` copy), PostgreSQL-only by decision: MySQL's `information_schema` is privilege-filtered so a REVOKE reads exactly like a DROP, and that dialect is refused. Every reader of those rows reports `unsupported_engine` for a refused engine instead of an empty success; the contract is `mcp-servers/mcp_servers/shared/schema_diff_util.py`.
 - Plus 2 agent-local AWS-docs tools (SigV4 proxy to the AWS-managed docs MCP), not a gateway server
 - Tool schemas live in `cdk/tool_definitions.py`. That file is the only tool contract the agent sees; `mcp-servers/schemas/*.json` is stale documentation read by nothing.
 

@@ -82,10 +82,14 @@ Every claim on this surface rests on "absent from the catalog read means absent
 from the database". That holds on PostgreSQL and NOT on MySQL, where
 information_schema is privilege-filtered in all three diff buckets and the scope
 key (CURRENT_USER()) does not move when visibility does: measured numbers are in
-snapshot_dialect_supported(). So MySQL clusters are not collected and every reader
-reports `unsupported_engine` instead of an empty success. The dialect is resolved
-PER CLUSTER from cluster_meta.engine, never from a capability key, because Aurora
-MySQL and Aurora PostgreSQL are the same engine FAMILY.
+snapshot_dialect_supported(). So the gate is POSITIVE: only a PostgreSQL catalog
+read is collected, and every other engine (MySQL, SQL Server, DocumentDB,
+DynamoDB, ElastiCache) is refused by the same rule for reasons listed per engine on
+that predicate. Every reader reports `unsupported_engine` instead of an empty
+success, and the shared sentence states the PostgreSQL rule rather than MySQL's
+reason, because four of the five refused families do not have MySQL's reason. The
+dialect is resolved PER CLUSTER from cluster_meta.engine, never from a capability
+key, because Aurora MySQL and Aurora PostgreSQL are the same engine FAMILY.
 
 COPIES. api/ cannot import mcp_servers and the collector assets cannot either, so
 this file is FOUR verbatim copies (edit them together; the parity test asserts
@@ -173,6 +177,20 @@ def snapshot_dialect_supported(engine: Any) -> bool:
     IDENTICAL PG_SCHEMA_SQL result as the superuser (pg_namespace and pg_class are
     not privilege-filtered) while `SELECT FROM core.users` raises permission denied.
 
+    THE OTHER FAMILIES THIS ALSO REFUSES, and their grounds are not MySQL's:
+      sqlserver-*   no snapshot collector was ever written for it. Its
+                    rds_direct branch does not call one, so nothing is lost by
+                    refusing and nothing about its catalog is claimed here.
+      documentdb    schema-less document model: there is no relational
+                    schema/table/column catalog for a diff to be defined over.
+      dynamodb      a table has no fixed column set beyond its key attributes.
+      redis/valkey/memcached  key-value, no catalog at all.
+    MySQL is the only MEASURED negative on this list of reasons; for the four above
+    the premise was never established rather than disproved.
+    UNSUPPORTED_DIALECT_NOTE therefore states the POSITIVE rule (snapshots are
+    collected off the PostgreSQL catalog) rather than handing every refused engine
+    MySQL's reason for its cluster.
+
     Fail-closed on an unknown engine is the CALLER's job, not this predicate's:
     `observed()` reports an engine it could not resolve as `unavailable`, which is
     "we could not decide", not "this engine is not supported".
@@ -256,12 +274,21 @@ DROPPED_CAVEAT = (
 
 # What every reader says about a refused dialect. One sentence, shared, so the panel
 # and the two MCP tools and the agent narrative cannot describe it three ways.
+#
+# IT STATES THE POSITIVE RULE, not one engine's reason. This note used to explain
+# MySQL's privilege-filtered information_schema, and `snapshot_dialect_supported` is
+# False for documentdb, dynamodb, redis/valkey/memcached and sqlserver-* as well, so
+# a DocumentDB operator was handed MySQL's reason for their cluster. There is one
+# rule and it is a rule about PostgreSQL, so that is what the sentence says; the
+# per-engine grounds (including MySQL's measured numbers) live in
+# snapshot_dialect_supported above, which is where a reader who wants them looks.
 UNSUPPORTED_DIALECT_NOTE = (
-    "이 cluster의 엔진은 스키마 스냅샷(테이블 생성·삭제 판정) 대상이 아닙니다. MySQL 계열은 "
-    "information_schema가 권한 필터링되어, 수집 계정의 권한 회수(REVOKE)와 실제 DROP이 "
-    "완전히 같은 모양으로 보입니다. 잘못된 삭제 보고를 만들지 않기 위해 수집하지 않으며, "
-    "따라서 '변경 없음'도 '변경 있음'도 말할 수 없습니다. PostgreSQL 계열 cluster에서는 "
-    "정상 판정됩니다."
+    "스키마 스냅샷(테이블 생성·삭제 판정)은 PostgreSQL 카탈로그(pg_namespace/pg_class)를 "
+    "읽는 cluster에서만 수집합니다. 이 카탈로그는 권한으로 필터링되지 않아 '읽기 결과에 "
+    "없으면 실제로 없다'가 성립하기 때문입니다. 이 cluster의 엔진은 그 전제가 확인된 "
+    "대상이 아니어서 스냅샷을 수집하지 않으며, 따라서 이 cluster에 대해서는 '변경 없음'도 "
+    "'변경 있음'도 말할 수 없습니다. 엔진별 근거는 snapshot_dialect_supported()에 "
+    "기록되어 있습니다."
 )
 
 

@@ -35,12 +35,20 @@ def test_schema_snapshots_purge_is_its_own_best_effort_block():
     assert "SCHEMA_SNAPSHOTS_PURGE_SQL" in _HANDLER
 
 
-def test_schema_snapshots_purge_never_takes_the_latest_snapshot():
+def test_schema_snapshots_purge_never_takes_the_comparison_pair():
     """String guard on the shape; the RESULT is asserted against a live
     PostgreSQL server in test_schema_snapshot_real_pg.py, which is what actually
     proves the correlated subquery works. Both are needed: under store-on-change
     the CURRENT snapshot of a schema untouched for 90 days is itself past the
-    cutoff, and deleting it destroys the only row the next diff can compare to."""
+    cutoff, and deleting it destroys the only row the next diff can compare to.
+
+    TWO rows, not one, and that is FINDING 3 of the eighth pass. The
+    surviving row's stored diff is REPLAYED by the timeline, get_schema_history and
+    diagnose_root_cause; the PAIR behind it is what get_schema_diff and the dashboard
+    panel RECOMPUTE. Exempting only the newest row left the replay family reporting
+    an event the recompute family called `baseline_only`, a status whose sentence
+    claims only one snapshot was ever collected.
+    """
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(
@@ -52,7 +60,13 @@ def test_schema_snapshots_purge_never_takes_the_latest_snapshot():
     sql = mod.SCHEMA_SNAPSHOTS_PURGE_SQL
     assert "DELETE FROM schema_snapshots s " in sql
     assert "s.snapshot_time < NOW() - INTERVAL '90 days'" in sql
-    assert "MAX(x.snapshot_time)" in sql
+    assert "ORDER BY x.snapshot_time DESC LIMIT 2" in sql, (
+        "the exempt set is the comparison PAIR; LIMIT 1 leaves the last recorded "
+        "change replayable but no longer recomputable"
+    )
+    assert "MAX(x.snapshot_time)" not in sql, (
+        "a MAX is one row by construction, which is the shape this finding replaced"
+    )
     assert "x.cluster_id = s.cluster_id AND x.schema_name = s.schema_name" in sql
 
 
@@ -70,8 +84,11 @@ def test_the_exemption_is_scoped_so_an_orphan_can_age_out():
 
     Two things have to hold and the SECOND one is the whole bug:
       * the exemption is restricted to the ESTABLISHED scope, and
-      * the comparison is IS DISTINCT FROM, because for the orphan the subquery is
-        NULL and `snapshot_time <> NULL` is NULL, i.e. the row is KEPT.
+      * a row whose exempt set is EMPTY (which is exactly the orphan) is DELETED.
+        The seventh pass got that from `IS DISTINCT FROM` because the scalar
+        subquery returned NULL; the exempt set is now a SET, so NOT EXISTS gives it
+        structurally. `snapshot_time NOT IN (<set>)` would bring the trap straight
+        back: one NULL in the set makes the predicate NULL and keeps the row.
     The surviving rows are asserted against a live server in
     test_schema_snapshot_real_pg.py; this is the shape guard beside it.
     """
@@ -84,10 +101,11 @@ def test_the_exemption_is_scoped_so_an_orphan_can_age_out():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     sql = mod.SCHEMA_SNAPSHOTS_PURGE_SQL
-    assert "IS DISTINCT FROM" in sql, (
-        "`<>` keeps every row whose subquery is NULL, which is exactly the orphan"
+    assert "AND NOT EXISTS (" in sql, (
+        "an empty exempt set must DELETE the row, which is what ages the orphan out"
     )
-    assert "s.snapshot_time <> (" not in sql
+    for null_trap in ("s.snapshot_time <> (", "s.snapshot_time NOT IN ("):
+        assert null_trap not in sql, null_trap
     assert "x.read_scope = (SELECT e.read_scope" in sql, (
         "the exemption is not restricted to the cluster's established scope, so the "
         "last row of an abandoned scope is exempt forever again"

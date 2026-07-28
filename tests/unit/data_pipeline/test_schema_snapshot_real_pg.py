@@ -485,9 +485,11 @@ def test_no_changes_in_window_still_reports_coverage(pg):
     assert hist["collection_coverage"]["first_snapshot"]
 
 
-def test_purge_keeps_the_latest_snapshot_per_schema(pg):
+def test_purge_keeps_the_comparison_pair_per_schema(pg):
     """The retention DELETE must never take the current baseline: it is the only
-    thing the next change has to be diffed against."""
+    thing the next change has to be diffed against. Nor its PREDECESSOR, which is
+    FINDING 3 of the eighth pass and is driven end to end in
+    test_retention_does_not_split_the_replay_and_recompute_readers below."""
     # Load by path under a unique module name: several assets in this repo have a
     # top-level handler.py and a bare `import handler` picks whichever one another
     # test put on sys.path first.
@@ -497,6 +499,17 @@ def test_purge_keeps_the_latest_snapshot_per_schema(pg):
     spec.loader.exec_module(mod)
     SCHEMA_SNAPSHOTS_PURGE_SQL = mod.SCHEMA_SNAPSHOTS_PURGE_SQL
 
+    # A schema with THREE rows, seeded here rather than relied on: the exempt set is
+    # the pair, so a module whose leftover schemas all have <= 2 rows would leave the
+    # purge nothing to delete and this test would prove only that it deleted nothing.
+    _meta(pg, "pair-purge-1")
+    for days in (10, 11, 12):
+        pg.raw(
+            "INSERT INTO schema_snapshots (cluster_id, snapshot_time, schema_name, "
+            "tables_json, read_scope, last_seen_at) VALUES "
+            f"('pair-purge-1', NOW() - INTERVAL '{days} days', 'deep', "
+            "'{\"t\": [\"id\"]}'::jsonb, 'db/1', NOW())")
+
     # Age every row past the cutoff, then run the REAL purge statement.
     pg.raw("UPDATE schema_snapshots SET snapshot_time = snapshot_time - INTERVAL '200 days'")
     before = int(pg.execute("SELECT COUNT(*) AS n FROM schema_snapshots", {}).rows[0]["n"])
@@ -504,9 +517,14 @@ def test_purge_keeps_the_latest_snapshot_per_schema(pg):
     rows = pg.execute(
         "SELECT cluster_id, schema_name, COUNT(*) AS n FROM schema_snapshots "
         "GROUP BY cluster_id, schema_name", {}).rows
-    assert before > len(rows), "purge deleted nothing, so it proves nothing"
-    # Exactly one row survives per (cluster, schema): the latest.
-    assert rows and all(int(r["n"]) == 1 for r in rows)
+    # At most the PAIR survives per (cluster, schema): the current row and the one it
+    # was diffed against. A schema with a single row keeps that one.
+    assert rows and all(1 <= int(r["n"]) <= 2 for r in rows), rows
+    assert before > sum(int(r["n"]) for r in rows), (
+        "the pair exemption must still bound history, not keep everything"
+    )
+    deep = [r for r in rows if r["cluster_id"] == "pair-purge-1"]
+    assert deep and int(deep[0]["n"]) == 2, deep
 
 
 def test_purge_ages_out_a_schema_orphaned_under_an_abandoned_scope(pg):
@@ -533,8 +551,11 @@ def test_purge_ages_out_a_schema_orphaned_under_an_abandoned_scope(pg):
     _meta(pg, cid)
     pg.raw(f"DELETE FROM schema_snapshots WHERE cluster_id = '{cid}'")
     # `live` under the scope the collector still reads, `stray` only under the one it
-    # abandoned. Both aged past the cutoff.
-    for schema, scope, days in (("live", "rightdb/1", 300),
+    # abandoned. All aged past the cutoff. THREE `live` rows, because the exemption is
+    # the comparison PAIR: with two the purge would have nothing to delete for this
+    # schema and the surviving-rows assertion below would prove only the orphan half.
+    for schema, scope, days in (("live", "rightdb/1", 400),
+                                ("live", "rightdb/1", 300),
                                 ("live", "rightdb/1", 200),
                                 ("stray", "wrongdb/2", 250)):
         pg.raw(
@@ -548,10 +569,17 @@ def test_purge_ages_out_a_schema_orphaned_under_an_abandoned_scope(pg):
 
     pg.raw(mod.SCHEMA_SNAPSHOTS_PURGE_SQL)
     survived = pg.execute(
-        "SELECT schema_name, read_scope FROM schema_snapshots "
-        "WHERE cluster_id = :c ORDER BY schema_name, read_scope", {"c": cid}).rows
-    # The orphan is gone; the live schema keeps exactly its current row.
-    assert survived == [{"schema_name": "live", "read_scope": "rightdb/1"}], survived
+        "SELECT schema_name, read_scope, "
+        "       EXTRACT(DAY FROM NOW() - snapshot_time)::int AS age_days "
+        "FROM schema_snapshots WHERE cluster_id = :c "
+        "ORDER BY schema_name, snapshot_time DESC", {"c": cid}).rows
+    # The orphan is gone; the live schema keeps exactly its comparison PAIR (the
+    # 200-day row and the 300-day row it was diffed against), and its 400-day
+    # history is bounded.
+    assert survived == [
+        {"schema_name": "live", "read_scope": "rightdb/1", "age_days": 200},
+        {"schema_name": "live", "read_scope": "rightdb/1", "age_days": 300},
+    ], survived
 
     # And the consequence the finding is actually about: the cluster can be
     # `fresh`/complete again once the orphan is gone.
@@ -560,6 +588,64 @@ def test_purge_ages_out_a_schema_orphaned_under_an_abandoned_scope(pg):
     assert obs["status"] == "fresh", obs
     assert obs["unconfirmed_schemas"] == [], obs
     assert sd_util().observation_is_complete(obs) is True
+
+
+def test_retention_does_not_split_the_replay_and_recompute_readers(pg):
+    """FINDING 3 of the eighth pass, driven on the real engine.
+
+    The five consumers are two FAMILIES over the same rows. The timeline,
+    get_schema_history and diagnose_root_cause REPLAY `diff_from_previous_json`; the
+    dashboard panel and get_schema_diff RECOMPUTE a diff from the PAIR of blobs. When
+    the exemption was the newest row alone, a schema whose pre-change baseline aged
+    past 90 days kept its stored diff and lost its comparison partner, so the two
+    families answered the same question two ways over the same window.
+
+    MEASURED before the fix, one schema with its baseline at 100 days and its change
+    at 95 days, both aged past the cutoff and the shipped purge run: ONE row survived,
+    get_schema_history over a 365-day window reported count 1 with
+    `{"added": ["orders"]}` while get_schema_diff reported `baseline_only` and the
+    note "baseline 스냅샷만 있어 비교 대상이 없습니다 (diff에는 최소 2개가 필요합니다)".
+    """
+    _migrate(pg)
+    cid = "retention-split-1"
+    _meta(pg, cid)
+    pg.raw(f"DELETE FROM schema_snapshots WHERE cluster_id = '{cid}'")
+    scope = "rightdb/9"
+    for days, tables, diff in (
+        (100, {"users": ["id"]}, None),
+        (95, {"users": ["id"], "orders": ["id"]}, {"added": ["orders"], "dropped": [],
+                                                   "modified": [],
+                                                   "rename_candidates": []}),
+    ):
+        pg.raw(
+            "INSERT INTO schema_snapshots (cluster_id, snapshot_time, schema_name, "
+            "tables_json, diff_from_previous_json, read_scope, last_seen_at) VALUES "
+            f"('{cid}', NOW() - INTERVAL '{days} days', 'app', "
+            f"'{json.dumps(tables)}'::jsonb, "
+            + ("NULL" if diff is None else f"'{json.dumps(diff)}'::jsonb")
+            + f", '{scope}', NOW())")
+
+    spec = importlib.util.spec_from_file_location(
+        "_e4_etl_handler_pair", _ROOT / "data-pipeline" / "etl_collector" / "handler.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    pg.raw(mod.SCHEMA_SNAPSHOTS_PURGE_SQL)
+
+    # BOTH rows survive: the change and the baseline it was diffed against.
+    assert int(pg.execute(
+        "SELECT COUNT(*) AS n FROM schema_snapshots WHERE cluster_id = :c",
+        {"c": cid}).rows[0]["n"]) == 2
+
+    # REPLAY family: the event is in the record.
+    hist = sh.get_schema_history_impl(pg, cluster_id=cid, days=365)
+    assert hist["status"] == "ok", hist
+    assert hist["count"] == 1, hist
+
+    # RECOMPUTE family: the same event, from the pair, and NOT `baseline_only`.
+    diff = sd.get_schema_diff_impl(pg, cluster_id=cid)
+    assert diff["status"] == "ok", diff
+    assert diff["totals"]["added"] == 1, diff
+    assert diff["diffs"][0]["added"] == ["orders"], diff["diffs"]
 
 
 def sd_util():
@@ -575,22 +661,49 @@ def test_a_mysql_cluster_is_refused_by_every_reader_and_not_reported_as_empty(pg
     A MySQL cluster has no snapshots because the collector refuses to make any, and
     `not_collected` would then promise a baseline on the next ETL cycle that is never
     coming: an empty success. The refusal has to be the ANSWER.
+
+    THE PRE-REFUSAL ROW IS PRESENT. This test used to DELETE this cluster's rows
+    before driving anything, which made the "get_schema_history keeps its rows and
+    labels them" half of the decision untested: nothing was there to keep. A real
+    MySQL cluster collected before the refusal HAS rows, and they are what the two
+    REPLAY readers have to agree about (the other one, api/dashboard `_timeline`, is
+    driven on its own harness in
+    tests/unit/api/test_dashboard_schema_changes_real_pg.py).
     """
     _migrate(pg)
     cid = "mysql-refused-1"
     _meta(pg, cid, engine="aurora-mysql")
     pg.raw(f"DELETE FROM schema_snapshots WHERE cluster_id = '{cid}'")
+    for days, tables, diff_json in (
+        (40, {"users": ["id"], "orders": ["id"]}, None),
+        (39, {"users": ["id"]}, '{"added": [], "dropped": ["orders"], '
+                                '"modified": [], "rename_candidates": []}'),
+    ):
+        pg.raw(
+            "INSERT INTO schema_snapshots (cluster_id, snapshot_time, schema_name, "
+            "tables_json, diff_from_previous_json, read_scope, last_seen_at) VALUES "
+            f"('{cid}', NOW() - INTERVAL '{days} days', 'appdb', "
+            f"'{json.dumps(tables)}'::jsonb, "
+            + ("NULL" if diff_json is None else f"'{diff_json}'::jsonb")
+            + ", 'collector@localhost', NOW())")
 
     diff = sd.get_schema_diff_impl(pg, cluster_id=cid)
     assert diff["status"] == "not_supported", diff
     assert diff["observation"]["status"] == "unsupported_engine", diff["observation"]
-    assert "REVOKE" in diff["note"] and "DROP" in diff["note"], diff["note"]
+    assert "PostgreSQL" in diff["note"], diff["note"]
     assert "다음 ETL" not in diff["note"], "it promises a baseline that is not coming"
+    # The reader that makes a CLAIM selects no pair at all, however many rows exist.
+    assert diff.get("diffs") in ([], None), diff
 
     hist = sh.get_schema_history_impl(pg, cluster_id=cid, days=36500)
     assert hist["status"] == "not_supported", hist
-    assert "REVOKE" in hist["note"]
+    assert "PostgreSQL" in hist["note"]
     assert "최초 baseline 스냅샷이 기록됩니다" not in hist["note"]
+    # THE RECORD IS KEPT AND LABELLED. Deleting real history is what this surface's
+    # contract forbids, so the rows ride along under `not_supported` with a sentence
+    # saying they are history and not a current judgment.
+    assert hist["count"] == 1, hist
+    assert "현재 상태에 대한 판정이 아닙니다" in hist["note"], hist["note"]
 
     examined, skipped = {}, []
     got = drc._collect_schema_changes(pg, cid, "2026-07-29T00:00:00+00:00",

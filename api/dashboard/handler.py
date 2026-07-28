@@ -1681,6 +1681,29 @@ _TL_NO_SNAPSHOTS = (
     "아니었습니다. 이 구간에 DDL이 없었다는 뜻이 아닙니다."
 )
 
+# A STORED DDL DIFF ON A CLUSTER WHOSE DIALECT IS REFUSED, and the two decisions
+# behind these two strings.
+#
+# WHY THE ITEM IS KEPT RATHER THAN SUPPRESSED. The row is a real record of what a
+# read once observed, and get_schema_history keeps its rows on the refusal for
+# exactly that reason: it hands back a RECORD, and deleting history is what this
+# surface's contract forbids (see schema_history.py). This function is the other
+# REPLAY reader of the same rows. Suppressing the item here would make the timeline
+# say "no DDL in this window" about the same event, at the same timestamp, that the
+# tool the agent calls hands over: that is the contradiction between interpreters
+# this whole sequence exists to close, arrived at from the other direction.
+#
+# WHY THE LABEL IS ON THE ITEM. `observation.note` already carries the refusal, and
+# it is a CLUSTER-level sentence rendered in a banner at the top of the page. The
+# item is rendered standalone in a category-filtered list, so the qualification has
+# to travel with the row. It goes in `title` (the field that said `dropped 1`) and
+# in `detail`, both of which every renderer of this payload already shows.
+_TL_DDL_UNSOUND_TAG = "[기록 · 판정 아님]"
+_TL_DDL_UNSOUND = (
+    "이 cluster의 엔진은 스키마 스냅샷 판정 대상이 아닙니다. 이 항목은 과거에 기록된 "
+    "이력이며 현재 상태에 대한 판정이 아닙니다. 위 배너의 설명을 확인하세요."
+)
+
 
 def _ddl_summary(blob) -> tuple[str, str]:
     """Collapse ONE stored schema diff into (title summary, detail).
@@ -1747,10 +1770,28 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
     its SQL to the shared ALL_ROWS fragment without giving it the compensating
     channel: a schema nobody can confirm files no diff row, so an empty
     schema_change category read as "no DDL during the incident" over schemas the
-    read never reached."""
+    read never reached.
+
+    On a REFUSED dialect the stored rows are still replayed and each item is
+    LABELLED (`_TL_DDL_UNSOUND_TAG`), because this is the second of the two REPLAY
+    readers and the first one (get_schema_history) keeps its rows too. The seventh
+    pass added the refusal to the probe and to the four other readers; it never
+    reached this replay, so a MySQL cluster's stored diff rendered as
+    `appdb · dropped 1` at a concrete timestamp while every other reader refused."""
     cats = set(categories or [])
     items: list[dict] = []
     degraded: list[str] = []
+
+    # THE OBSERVATION FIRST, before the DDL rows are read, because it decides
+    # whether they may be replayed as EVENTS at all. It used to run after the loop,
+    # so the dialect refusal reached `observation.note` and never reached the replay:
+    # a MySQL cluster's stored rows rendered as `appdb · dropped 1` at a concrete
+    # timestamp while the other four readers refused. Same shared probe the
+    # schema-changes panel, get_schema_diff, get_schema_history and
+    # diagnose_root_cause use, so one state is described one way everywhere.
+    schema_obs = observed(query, cluster_id)
+    obs_note = not_seen_note(schema_obs)
+    ddl_refused = schema_obs.get("status") == UNSUPPORTED_ENGINE
 
     # event_log already aggregates alerts + RDS events + proactive findings
     # + acks. Pull everything in the window and stamp category from
@@ -1818,8 +1859,14 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
                 "ts": r.get("snapshot_time"),
                 "category": "schema_change",
                 "severity": "info",
-                "title": f"{r.get('schema_name')} · {summary}",
-                "detail": detail[:400],
+                # THE LABEL RIDES ON THE ITEM, not only in the payload note. A
+                # timeline item is rendered standalone in a category-filtered list,
+                # where a cluster-level sentence is nowhere near it, and `title` is
+                # the field that said `dropped 1`: putting the qualification there
+                # means every renderer of this row carries it without knowing why.
+                "title": (f"{_TL_DDL_UNSOUND_TAG} " if ddl_refused else "")
+                         + f"{r.get('schema_name')} · {summary}",
+                "detail": (f"{_TL_DDL_UNSOUND} " if ddl_refused else "") + detail[:400],
                 "source": "schema_snapshots",
                 "source_id": "",
             })
@@ -1829,14 +1876,12 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
         print(f"[timeline] schema_change source degraded: {type(e).__name__}: {e}")
         degraded.append("schema_change")
 
-    # WHAT THE schema_change STREAM CANNOT COVER, from the shared probe. Runs
-    # whether or not the read above succeeded: a successful read of a cluster whose
+    # WHAT THE schema_change STREAM CANNOT COVER, from the probe run above. It is
+    # reported whether or not the read succeeded: a successful read of a cluster whose
     # schemas nobody can currently confirm produces an EMPTY category, and on a
     # timeline an empty category reads as "that did not happen during the incident".
     # Same block and same sentence as the other four consumers, so one state is
     # described one way everywhere.
-    schema_obs = observed(query, cluster_id)
-    obs_note = not_seen_note(schema_obs)
     if not obs_note and schema_obs.get("status") == "no_snapshots":
         # The probe RAN and found no history at all. `not_seen_note` says nothing
         # here on purpose (it names schemas, and there are none), but the operator
