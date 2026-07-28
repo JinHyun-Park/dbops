@@ -6,6 +6,9 @@ from mcp_servers.shared.models import QueryResult
 
 def test_vacuum_stats_detects_bloat():
     mock_cache = MagicMock()
+    # The engine has to be stated: the tool refuses an unresolved engine rather
+    # than defaulting to the PostgreSQL payload.
+    mock_cache.engine_of.return_value = "aurora-postgresql"
     mock_cache.execute.return_value = QueryResult(
         columns=["table_name", "dead_tuples", "live_tuples", "bloat_pct"],
         rows=[
@@ -24,6 +27,7 @@ def test_vacuum_stats_reads_cluster_scoped_cache_not_local_catalog():
     cluster_id — NOT the cache DB's own pg_stat_user_tables (which would report
     DBOps' internal tables for every cluster)."""
     mock_cache = MagicMock()
+    mock_cache.engine_of.return_value = "aurora-postgresql"
     mock_cache.execute.return_value = QueryResult(columns=[], rows=[], row_count=0)
     get_vacuum_stats_impl(mock_cache, cluster_id="prod-pg-1")
     sql, params = mock_cache.execute.call_args.args

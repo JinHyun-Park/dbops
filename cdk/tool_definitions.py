@@ -92,7 +92,9 @@ def performance_schema():
               "information_schema.tables.DATA_FREE (reclaimable free space, in rows not "
               "bytes), no last_vacuum, and the fix is OPTIMIZE TABLE. InnoDB has neither "
               "dead tuples nor VACUUM: read the `engine` and `source` fields before "
-              "quoting any number",
+              "quoting any number. Any other engine returns status=unsupported_engine, "
+              "because nothing collects table stats there and an empty table list would "
+              "read as 'nothing to clean up' when it means 'not measured'",
               {"cluster_id": "string"}, ["cluster_id"]),
         _tool("explain_plan",
               "Run EXPLAIN on a SELECT and return a structured plan analysis. Aurora "
@@ -101,7 +103,9 @@ def performance_schema():
               "EXPLAIN FORMAT=JSON, reporting full table scans (access_type=ALL), filter "
               "selectivity, filesort, internal temporary tables and query_cost, with an "
               "unavailable_analysis field naming what MySQL cannot produce; analyze=true "
-              "is refused there because MySQL EXPLAIN ANALYZE returns no JSON",
+              "is refused there because MySQL EXPLAIN ANALYZE returns no JSON. MySQL "
+              "expensive_nodes rank by node_cost (read_cost + eval_cost, the node's own "
+              "cost), never by the cumulative prefix_cost",
               {"cluster_id": "string", "sql": "string", "analyze": "boolean"},
               ["cluster_id", "sql"]),
     ]

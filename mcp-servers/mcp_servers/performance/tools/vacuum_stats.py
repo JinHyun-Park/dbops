@@ -23,7 +23,41 @@ _MYSQL_SOURCE_NOTE = (
 )
 
 
+# Not in the handler's _ENGINE_GATED_TOOLS, so this tool sees every family. Only
+# two of them have a table_stats producer: PG (pg_table_stats) and MySQL, Aurora
+# or standalone (mysql_table_stats, in both etl_collector and
+# rds_direct_collector). SQL Server, DocumentDB, DynamoDB and ElastiCache have no
+# producer and no table-bloat concept, so the query returns zero rows for them.
+# Before this guard they were handed the PG payload, which asserts
+# engine:"postgresql" and an empty table list with no warnings: a false all-clear
+# under a false engine label, told to a DBA whose cluster is not PostgreSQL.
+# Fail closed, including on an unresolved engine ("" from engine_of), for the same
+# reason the handler's own gate does: refusing beats reporting absent data as fine.
+_UNSUPPORTED_REASON = (
+    "get_vacuum_stats는 table_stats를 수집하는 엔진(PostgreSQL, MySQL) 전용입니다. "
+    "이 클러스터의 엔진은 이 도구가 읽는 테이블 통계를 남기지 않으므로, 빈 결과를 "
+    "'정리할 것이 없다'로 읽으면 안 됩니다. 엔진을 확인할 수 없는 경우(미등록 "
+    "클러스터, 첫 수집 이전, 조회 실패)도 같은 이유로 거부합니다."
+)
+
+
 def get_vacuum_stats_impl(cache: CacheClient, cluster_id: str) -> dict:
+    # Aurora PG and Aurora MySQL are the SAME capability family (relational), so
+    # this cannot be gated by a family flag: it is resolved from the engine
+    # string, the same way operations/tools/prewarm_reader._is_postgres does.
+    # is_mysql_engine also matches standalone RDS MySQL on purpose: its collector
+    # fills n_dead_tup from the identical DATA_FREE expression, so the relabelling
+    # below is correct for both, and SQL Server does not match.
+    engine = cache.engine_of(cluster_id)
+    mysql = is_mysql_engine(engine)
+    if not mysql and "postgres" not in str(engine or "").lower():
+        return {
+            "status": "unsupported_engine",
+            "cluster_id": cluster_id,
+            "engine": engine or None,
+            "reason": _UNSUPPORTED_REASON,
+        }
+
     # Read the pre-collected `table_stats` cache (populated by the ETL collector
     # from each cluster's pg_stat_user_tables), scoped to THIS cluster and the
     # latest snapshot per table. The previous version queried
@@ -56,12 +90,7 @@ def get_vacuum_stats_impl(cache: CacheClient, cluster_id: str) -> dict:
     """
     result = cache.execute(sql, {"cluster_id": cluster_id})
 
-    # Aurora PG and Aurora MySQL are the SAME capability family (relational), so
-    # this cannot be gated by a family flag: it is resolved from the engine
-    # string. is_mysql_engine also matches standalone RDS MySQL on purpose: its
-    # collector fills n_dead_tup from the identical DATA_FREE expression, so the
-    # relabelling is correct for both, and SQL Server does not match.
-    if is_mysql_engine(cache.engine_of(cluster_id)):
+    if mysql:
         return _mysql_payload(cluster_id, result)
 
     warnings = []

@@ -308,7 +308,10 @@ TOOLS = {
             "free_rows_est and fragmentation_pct from information_schema.tables.DATA_FREE "
             "(reclaimable free space expressed in ROWS, not bytes), no last_vacuum, and the "
             "remedy is OPTIMIZE TABLE. InnoDB has neither dead tuples nor VACUUM, so check "
-            "the `engine` and `source` fields before quoting any number."
+            "the `engine` and `source` fields before quoting any number. Any other engine "
+            "(SQL Server, DocumentDB, DynamoDB, ElastiCache) returns "
+            "status=unsupported_engine: nothing collects table stats there, so an empty "
+            "table list would be 'not measured', never 'nothing to clean up'."
         ),
         "input_schema": {
             "type": "object",
@@ -329,7 +332,10 @@ TOOLS = {
             "table scans (access_type=ALL), filter selectivity, filesort, internal temporary "
             "tables and query_cost, plus an unavailable_analysis field naming the analyses "
             "MySQL cannot produce; analyze=true is refused on MySQL because its EXPLAIN "
-            "ANALYZE returns no JSON to parse."
+            "ANALYZE returns no JSON to parse. MySQL expensive_nodes are ranked by "
+            "node_cost (read_cost + eval_cost, this node's OWN cost), not by prefix_cost, "
+            "which is cumulative along the join order and therefore only ever reproduces "
+            "the reversed join order."
         ),
         "input_schema": {
             "type": "object",

@@ -18,6 +18,7 @@ mismatch slips through, so these are not hand-written.
 import json
 from unittest.mock import MagicMock
 
+import pytest
 from mcp_servers.performance.tools.explain_plan import explain_plan_impl
 from mcp_servers.performance.tools.recommend_index import recommend_index_impl
 from mcp_servers.performance.tools.vacuum_stats import get_vacuum_stats_impl
@@ -85,6 +86,46 @@ _LIVE_GROUP_PLAN = {
                 },
             },
         },
+    }
+}
+
+
+# SELECT s.id, p.name FROM sales s LEFT JOIN products p ON p.id = 7
+#   WHERE s.total_price > 999999
+#
+# Captured live for the prefix_cost-vs-node_cost case. The LEFT JOIN pins the
+# const lookup SECOND in the join order, so its prefix_cost (174789.72) exceeds
+# the full scan's (131968.00) while its own read_cost is 1.00.
+_LIVE_CONST_LOOKUP_PLAN = {
+    "query_block": {
+        "select_id": 1,
+        "cost_info": {"query_cost": "174789.72"},
+        "nested_loop": [
+            {"table": {
+                "table_name": "s",
+                "access_type": "ALL",
+                "rows_examined_per_scan": 1284750,
+                "rows_produced_per_join": 428207,
+                "filtered": "33.33",
+                "cost_info": {"read_cost": "89147.28", "eval_cost": "42820.72",
+                              "prefix_cost": "131968.00", "data_read_per_join": "9M"},
+                "attached_condition": "(`sampledb`.`s`.`total_price` > 999999.00)",
+            }},
+            {"table": {
+                "table_name": "p",
+                "access_type": "const",
+                "possible_keys": ["PRIMARY"],
+                "key": "PRIMARY",
+                "used_key_parts": ["id"],
+                "key_length": "4",
+                "ref": ["const"],
+                "rows_examined_per_scan": 1,
+                "rows_produced_per_join": 428207,
+                "filtered": "100.00",
+                "cost_info": {"read_cost": "1.00", "eval_cost": "42820.72",
+                              "prefix_cost": "174789.72", "data_read_per_join": "254M"},
+            }},
+        ],
     }
 }
 
@@ -191,8 +232,19 @@ def test_explain_plan_mysql_finds_full_scan_filesort_and_cost_on_live_plan():
     assert result["summary"]["node_count"] == 2
     assert result["summary"]["total_cost"] == 602995.88
     assert result["summary"]["estimated_rows"] == 428207.0
+    # Ranked by each node's OWN cost (read_cost + eval_cost), which for this plan
+    # is p 428207.17+42820.72 = 471027.89 against s 89147.28+42820.72 = 131968.00.
+    # The eq_ref on p is genuinely the expensive access here: it is re-probed once
+    # per row s produces, which is what its read_cost already prices in.
     assert [n["relation"] for n in result["expensive_nodes"]] == ["p", "s"]
     assert result["expensive_nodes"][0]["key"] == "PRIMARY"
+    assert result["expensive_nodes"][0]["node_cost"] == 471027.89
+    assert result["expensive_nodes"][1]["node_cost"] == 131968.0
+    # The two components stay visible, and the cumulative figure is gone.
+    assert result["expensive_nodes"][0]["read_cost"] == 428207.17
+    assert result["expensive_nodes"][0]["eval_cost"] == 42820.72
+    assert "total_cost" not in result["expensive_nodes"][0]
+    assert "prefix_cost" not in result["expensive_nodes"][0]
 
 
 def test_explain_plan_mysql_finds_temporary_table_nested_two_levels_deep():
@@ -224,6 +276,34 @@ def test_explain_plan_mysql_does_not_call_an_index_scan_a_full_table_scan():
     assert issues == {"High total plan cost"}
     assert result["expensive_nodes"][0]["relation"] == "sales"
     assert result["expensive_nodes"][0]["node_type"] == "index"
+
+
+def test_explain_plan_mysql_ranks_a_full_scan_above_a_one_row_const_lookup():
+    """The prefix_cost defect, on a live plan captured for exactly this shape.
+
+    prefix_cost is the cumulative cost of the join prefix THROUGH this table, so
+    it is non-decreasing along the join order and ranking by it just returns the
+    reversed join order. Here that puts p, a single-row const PRIMARY lookup with
+    read_cost 1.00, above s, a 1,284,750-row full table scan: the DBA is pointed
+    at the cheapest access in the plan. Ranking by the node's own read + eval
+    cost puts the full scan first, where it belongs."""
+    cache = _mysql_cache(_LIVE_CONST_LOOKUP_PLAN)
+    result = explain_plan_impl(cache, cluster_id="mysql-1", sql="SELECT 1 FROM sales")
+
+    nodes = result["expensive_nodes"]
+    assert [n["relation"] for n in nodes] == ["s", "p"]
+    # s: 89147.28 + 42820.72. p: 1.00 + 42820.72.
+    assert nodes[0]["node_cost"] == 131968.0
+    assert nodes[1]["node_cost"] == 42821.72
+    # Reversed join order is what prefix_cost would have produced (131968.00 then
+    # 174789.72), so this ordering is the whole point of the change.
+    assert nodes[0]["node_type"] == "ALL" and nodes[1]["node_type"] == "const"
+    # Both row figures, under MySQL's own names: 1 row per scan of p, yet 428,207
+    # rows evaluated through it, which is why its eval_cost is 42820.72 and its
+    # read_cost is 1.00. A single "plan_rows" next to a cost cannot say that.
+    assert nodes[1]["rows_examined_per_scan"] == 1.0
+    assert nodes[1]["rows_produced_per_join"] == 428207.0
+    assert nodes[1]["read_cost"] == 1.0 and nodes[1]["eval_cost"] == 42820.72
 
 
 def test_explain_plan_mysql_states_what_it_cannot_analyze():
@@ -416,6 +496,44 @@ def test_vacuum_stats_reads_the_same_cluster_scoped_cache_for_both_engines():
         assert "table_stats" in sql, engine
         assert "cluster_id = :cluster_id" in sql, engine
         assert params["cluster_id"] == "c1", engine
+
+
+@pytest.mark.parametrize("engine", [
+    "sqlserver-ex",     # rds_instance, no table_stats producer (MySQL-only there)
+    "docdb",            # documentdb
+    "dynamodb",
+    "redis",            # elasticache
+    "",                 # engine could not be resolved at all
+])
+def test_vacuum_stats_refuses_every_engine_that_has_no_table_stats(engine):
+    """Measured against the live registry: dbops-demo-mssql, dbops-docdb-test,
+    ddb-0d089ec02d21 and dbops-test-valkey were each told engine='postgresql'
+    with tables=[] and warnings=[]. A false all-clear under a false engine label,
+    which is the exact defect class this tier set out to remove. get_vacuum_stats
+    is not in the handler's _ENGINE_GATED_TOOLS, so the refusal lives in the tool."""
+    cache = MagicMock()
+    cache.engine_of.return_value = engine
+
+    result = get_vacuum_stats_impl(cache, cluster_id="c1")
+
+    assert result["status"] == "unsupported_engine"
+    # No engine label may be asserted, least of all the wrong one.
+    assert result.get("engine") != "postgresql"
+    assert "tables" not in result and "warnings" not in result
+    # An empty result must not read as "nothing to clean up".
+    assert "정리할 것이 없다" in result["reason"]
+    # And it must not have queried the cache at all.
+    cache.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("engine", ["aurora-postgresql", "postgres", "aurora-mysql", "mysql"])
+def test_vacuum_stats_still_answers_for_both_supported_engines(engine):
+    cache = MagicMock()
+    cache.engine_of.return_value = engine
+    cache.execute.return_value = QueryResult(columns=[], rows=[], row_count=0)
+    result = get_vacuum_stats_impl(cache, cluster_id="c1")
+    assert result.get("status") != "unsupported_engine", engine
+    assert result["engine"] == ("mysql" if "mysql" in engine else "postgresql")
 
 
 # --- recommend_index ----------------------------------------------------

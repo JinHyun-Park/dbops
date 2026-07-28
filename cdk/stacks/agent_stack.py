@@ -61,10 +61,34 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
                 "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
                 "CACHE_DB_NAME": "dbops",
+                # explain_plan is the only performance tool that runs SQL on the
+                # TARGET cluster (EXPLAIN, both PG and MySQL dialects) instead of
+                # reading the cache. Without this, CacheClient._resolve_target
+                # returns None for every cluster, execute_on_target returns an
+                # empty QueryResult, and the tool answers "cluster not registered
+                # or unreachable" about clusters that are both. Same three grants
+                # as the /api/explain Lambda below, which is why the Query Lab
+                # path worked while the agent path was dark.
+                "CLUSTERS_TABLE": foundation.clusters_table.table_name,
             },
         )
         data.cache_db.secret.grant_read(perf_mcp_lambda)
         data.cache_db.grant_data_api_access(perf_mcp_lambda)
+        foundation.clusters_table.grant_read_data(perf_mcp_lambda)
+        # EXPLAIN on a registry-defined target: the cluster ARN comes from the
+        # registry, so it cannot be resource-scoped here. Read-only by
+        # construction: explain_plan rejects anything that is not SELECT /
+        # WITH...SELECT, and gates analyze=true on is_read_only_safe.
+        perf_mcp_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["rds-data:ExecuteStatement"],
+            resources=["*"],
+        ))
+        # Target DB secrets are registry-defined (arbitrary ARNs) but bounded to
+        # the hub account, matching explain_lambda and operations_mcp_lambda.
+        perf_mcp_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
+        ))
 
         incident_mcp_lambda = lambda_.Function(
             self, "IncidentMCP",

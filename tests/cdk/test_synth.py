@@ -11,6 +11,7 @@ We don't full-diff resources here — that'd flake on every CDK upgrade. The
 goal is "did we keep the load-bearing structure?", not "did anything change?".
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -186,6 +187,61 @@ def test_findings_writer_interval_reaches_both_consumers(cdk_app):
         "handler.lambda_handler",            # api/dashboard
         "mcp_servers.incident.handler.lambda_handler",
     }, f"env var must reach the dashboard + incident MCP Lambdas, got {carriers}"
+
+
+def test_performance_mcp_can_reach_a_target_cluster(cdk_app):
+    """explain_plan is the only performance tool that runs SQL on the TARGET
+    cluster, and it needs all three of these to do it. Without CLUSTERS_TABLE,
+    CacheClient._resolve_target returns None for every cluster, execute_on_target
+    hands back an empty QueryResult, and explain_plan answers
+    status=no_target "cluster not registered or unreachable" about a cluster that
+    is registered AND reachable. Measured on the deployed dev Lambda: three env
+    vars, no registry read, no rds-data on any target, and both Aurora MySQL and
+    Aurora PG came back no_target. /api/explain worked the whole time because
+    explain_lambda has exactly these three grants, which is why the gap survived.
+    """
+    agent = next(s for s in cdk_app.stacks if s.stack_name.endswith("-agent"))
+    resources = (agent.template or {}).get("Resources", {})
+
+    logical_id, fn = next(
+        (k, r) for k, r in resources.items()
+        if r.get("Type") == "AWS::Lambda::Function"
+        and r["Properties"].get("Handler") == "mcp_servers.performance.handler.lambda_handler"
+    )
+    env = fn["Properties"].get("Environment", {}).get("Variables", {})
+    assert "CLUSTERS_TABLE" in env, "explain_plan cannot resolve any target without the registry"
+
+    role_ref = fn["Properties"]["Role"]["Fn::GetAtt"][0]
+    # (action, resource) pairs, not just actions. The deployed role already HAD
+    # rds-data:ExecuteStatement and secretsmanager:GetSecretValue, both scoped to
+    # the DBOps cache cluster and its own secret, and explain_plan was still dark:
+    # a target cluster is neither of those. So the grant has to be checked against
+    # the resource it reaches, or this test passes on the exact broken deployment
+    # it exists to catch (verified: asserting actions alone missed it).
+    grants = []
+    for r in resources.values():
+        if r.get("Type") != "AWS::IAM::Policy":
+            continue
+        if not any(role.get("Ref") == role_ref for role in r["Properties"].get("Roles", [])):
+            continue
+        for st in r["Properties"]["PolicyDocument"]["Statement"]:
+            act = st["Action"]
+            for a in (act if isinstance(act, list) else [act]):
+                grants.append((a, json.dumps(st["Resource"])))
+
+    def reaches(action, predicate):
+        return any(a == action and predicate(res) for a, res in grants)
+
+    # The registry read (scoped to the clusters table, no other Lambda grant
+    # matches it), the EXPLAIN on an arbitrary registered cluster ARN, and that
+    # cluster's own secret. All three, or the tool fails at a different step of
+    # the same journey.
+    assert reaches("dynamodb:GetItem", lambda r: True), \
+        f"{logical_id} cannot read the clusters registry: {grants}"
+    assert reaches("rds-data:ExecuteStatement", lambda r: r == '"*"'), \
+        f"{logical_id} can only run SQL on the cache cluster, not on a target: {grants}"
+    assert reaches("secretsmanager:GetSecretValue", lambda r: ":secret:*" in r), \
+        f"{logical_id} can only read its own secret, not a target's: {grants}"
 
 
 def _data_resources(cdk_app, resource_type):

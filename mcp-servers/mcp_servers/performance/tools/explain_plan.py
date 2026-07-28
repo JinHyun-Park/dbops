@@ -16,7 +16,11 @@ Node Type / Plan Rows), so the two walkers stay separate on purpose: a unified
 plan model would cost more than it saves and would blur which signals are real
 for which engine. What IS shared is the OUTPUT contract: same status/summary/
 findings/expensive_nodes/plan_change keys, plus the plan-history signature
-capture, so the agent reads one shape either way.
+capture, so the agent reads one shape either way. The expensive_nodes ENTRIES
+diverge below node_type/relation, because the two cost models do: PG prices a
+node inclusive of its children (Total Cost), MySQL reports read_cost + eval_cost
+per node plus a cumulative prefix_cost. One "total_cost" key carrying both would
+be the same name for two different quantities, so the MySQL entries name theirs.
 
 Engine resolution: CAPABILITIES is keyed by FAMILY and Aurora PG / Aurora MySQL
 are the same family (relational), so the family flag cannot pick the dialect.
@@ -311,6 +315,34 @@ def _walk_mysql(node, tables: list, flags: dict) -> None:
             _walk_mysql(value, tables, flags)
 
 
+def _node_cost(table: dict):
+    """A MySQL access node's OWN cost: read_cost + eval_cost.
+
+    NOT prefix_cost. prefix_cost is the cumulative cost of the join prefix up to
+    and INCLUDING this table, so it is non-decreasing along the join order:
+    sorting it descending returns exactly the reversed join order and carries no
+    ranking information at all. Measured live on the demo cluster
+    (sales LEFT JOIN products ON p.id = 7 WHERE s.total_price > 999999):
+
+      s  ALL     1,284,750 rows/scan  read 89147.28  eval 42820.72  prefix 131968.00
+      p  const           1 row/scan   read     1.00  eval 42820.72  prefix 174789.72
+
+    Under prefix_cost the single-row const PRIMARY lookup outranks the 1.28M-row
+    full table scan, i.e. the DBA is pointed at the cheapest access in the plan.
+    read_cost + eval_cost gives 131968.00 vs 42821.72 and ranks them the right way
+    round. The sum is also the honest decomposition: prefix_cost(n) ==
+    prefix_cost(n-1) + read_cost(n) + eval_cost(n), so these add up to query_cost
+    within a query block, and unlike prefix_cost they stay comparable ACROSS
+    blocks (a materialized subquery has its own prefix accumulation).
+
+    None only when the node reports neither component."""
+    ci = table.get("cost_info") or {}
+    read, eva = _num(ci.get("read_cost")), _num(ci.get("eval_cost"))
+    if read is None and eva is None:
+        return None
+    return (read or 0.0) + (eva or 0.0)
+
+
 def _mysql_history_nodes(tables: list) -> list:
     """Project MySQL access nodes onto the four slots _plan_signature hashes, so
     plan-flip detection is shared instead of duplicated. The mapping is exact in
@@ -484,15 +516,26 @@ def _explain_mysql(cache: CacheClient, cluster_id: str, inner: str, analyze: boo
     estimated_rows = _num(tables[-1].get("rows_produced_per_join")) if tables else None
 
     expensive_nodes = []
-    for t in sorted(tables, key=lambda t: _num((t.get("cost_info") or {}).get("prefix_cost")) or 0.0,
+    for t in sorted(tables, key=lambda t: _node_cost(t) or 0.0,
                     reverse=True)[:_MAX_EXPENSIVE_NODES]:
+        cost = t.get("cost_info") or {}
         expensive_nodes.append({
             "node_type": t.get("access_type"),
             "relation": t.get("table_name"),
-            "plan_rows": _num(t.get("rows_examined_per_scan")),
-            # prefix_cost is cumulative through this point of the join order,
-            # MySQL's nearest equivalent to a PG node's Total Cost.
-            "total_cost": _num((t.get("cost_info") or {}).get("prefix_cost")),
+            # MySQL's own field names, because both row figures are per-node and
+            # mean different things: examined is PER SCAN of this table, produced
+            # is the row count the join carries forward. A 1-row const lookup
+            # whose eval_cost dominates (the case above) is only legible with
+            # both, and calling either one plan_rows next to a cost invites
+            # reading a per-scan number as the query's row count.
+            "rows_examined_per_scan": _num(t.get("rows_examined_per_scan")),
+            "rows_produced_per_join": _num(t.get("rows_produced_per_join")),
+            # This node's own cost and its two components. prefix_cost is
+            # deliberately NOT emitted: see _node_cost for why it cannot rank and
+            # why a cumulative figure next to per-node rows misleads.
+            "node_cost": _node_cost(t),
+            "read_cost": _num(cost.get("read_cost")),
+            "eval_cost": _num(cost.get("eval_cost")),
             "key": t.get("key"),
             "possible_keys": t.get("possible_keys"),
         })
