@@ -14,13 +14,13 @@ MySQL's `EXPLAIN FORMAT=JSON` document has nothing structurally in common with
 PG's (query_block / table / access_type / rows_examined_per_scan versus Plan /
 Node Type / Plan Rows), so the two walkers stay separate on purpose: a unified
 plan model would cost more than it saves and would blur which signals are real
-for which engine. What IS shared is the OUTPUT contract — same status/summary/
-findings/expensive_nodes/plan_change keys — plus the plan-history signature
+for which engine. What IS shared is the OUTPUT contract: same status/summary/
+findings/expensive_nodes/plan_change keys, plus the plan-history signature
 capture, so the agent reads one shape either way.
 
 Engine resolution: CAPABILITIES is keyed by FAMILY and Aurora PG / Aurora MySQL
 are the same family (relational), so the family flag cannot pick the dialect.
-The engine string is read from cluster_meta via cache.engine_of() — handler-side
+The engine string is read from cluster_meta via cache.engine_of(), which is handler-side
 data, never a caller-supplied parameter, so the agent cannot ask for a PG-shaped
 answer about a MySQL cluster.
 """
@@ -264,7 +264,7 @@ def _analyze_node(node: dict, analyze: bool, findings: list) -> None:
 
 
 # --------------------------------------------------------------------------
-# MySQL (Aurora MySQL) — EXPLAIN FORMAT=JSON
+# MySQL (Aurora MySQL): EXPLAIN FORMAT=JSON
 #
 # Document shape verified live against Aurora MySQL 8.0.39 over the Data API:
 #
@@ -281,7 +281,7 @@ def _analyze_node(node: dict, analyze: bool, findings: list) -> None:
 #
 # So: any dict carrying "table_name" is an access node, the optimizer strategy
 # flags hang off the CONTAINERS (not the tables), and every cost/percentage is a
-# string. Recursion beats enumerating wrapper keys — MySQL has a dozen of them
+# string. Recursion beats enumerating wrapper keys: MySQL has a dozen of them
 # (duplicates_removal, materialized_from_subquery, union_result, windowing, ...)
 # and a missed wrapper would silently drop that whole subtree from the analysis.
 # --------------------------------------------------------------------------
@@ -446,7 +446,7 @@ def _explain_mysql(cache: CacheClient, cluster_id: str, inner: str, analyze: boo
     if not result or not getattr(result, "rows", None):
         return {
             "status": "no_target",
-            "reason": "cluster not registered or unreachable — register via /clusters",
+            "reason": "cluster not registered or unreachable, register via /clusters",
             "cluster_id": cluster_id,
         }
 
@@ -490,7 +490,7 @@ def _explain_mysql(cache: CacheClient, cluster_id: str, inner: str, analyze: boo
             "node_type": t.get("access_type"),
             "relation": t.get("table_name"),
             "plan_rows": _num(t.get("rows_examined_per_scan")),
-            # prefix_cost is cumulative through this point of the join order —
+            # prefix_cost is cumulative through this point of the join order,
             # MySQL's nearest equivalent to a PG node's Total Cost.
             "total_cost": _num((t.get("cost_info") or {}).get("prefix_cost")),
             "key": t.get("key"),
@@ -562,7 +562,7 @@ def explain_plan_impl(cache: CacheClient, cluster_id: str, sql: str, analyze: bo
 
     # Dialect split. The handler's relational gate has already run, but Aurora PG
     # and Aurora MySQL are the SAME family, so the family flag cannot pick the
-    # statement — the engine string decides. Anything not MySQL keeps the PG path
+    # statement: the engine string decides. Anything not MySQL keeps the PG path
     # (engine_of() returns "" on a lookup failure, so a failure degrades to the
     # behaviour this tool has always had rather than to a MySQL statement).
     if is_mysql_engine(cache.engine_of(cluster_id)):
@@ -581,7 +581,7 @@ def explain_plan_impl(cache: CacheClient, cluster_id: str, sql: str, analyze: bo
     if not result or not getattr(result, "rows", None):
         return {
             "status": "no_target",
-            "reason": "cluster not registered or unreachable — register via /clusters",
+            "reason": "cluster not registered or unreachable, register via /clusters",
             "cluster_id": cluster_id,
         }
 

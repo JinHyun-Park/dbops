@@ -57,7 +57,7 @@ def get_vacuum_stats_impl(cache: CacheClient, cluster_id: str) -> dict:
     result = cache.execute(sql, {"cluster_id": cluster_id})
 
     # Aurora PG and Aurora MySQL are the SAME capability family (relational), so
-    # this cannot be gated by a family flag — it is resolved from the engine
+    # this cannot be gated by a family flag: it is resolved from the engine
     # string. is_mysql_engine also matches standalone RDS MySQL on purpose: its
     # collector fills n_dead_tup from the identical DATA_FREE expression, so the
     # relabelling is correct for both, and SQL Server does not match.

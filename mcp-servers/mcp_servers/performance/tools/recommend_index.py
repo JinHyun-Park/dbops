@@ -383,13 +383,13 @@ def recommend_index_impl(cache: CacheClient, cluster_id: str, min_seq_scan_ratio
     scanning are boosted; when it is empty/unavailable the query-derived
     recommendations are returned as-is.
 
-    PostgreSQL only. MySQL is REFUSED rather than answered — see
+    PostgreSQL only. MySQL is REFUSED rather than answered. See
     _MYSQL_REFUSAL for the two measured reasons.
     """
     # Aurora PG and Aurora MySQL are the same capability family (relational), so
     # `index_advice: True` lets Aurora MySQL through the handler gate. Without
     # this branch the tool ran its PG-shaped query and returned count: 0, which a
-    # DBA reads as "no index is needed" — the most expensive kind of wrong answer.
+    # DBA reads as "no index is needed", the most expensive kind of wrong answer.
     if is_mysql_engine(cache.engine_of(cluster_id)):
         return {
             "status": "unsupported_engine",

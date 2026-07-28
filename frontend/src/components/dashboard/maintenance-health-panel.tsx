@@ -49,7 +49,7 @@ const CHECK_LABELS: Record<string, string> = {
   query_regression: "Tuning",
   // MySQL InnoDB 내부 상태 (history list length 등) — rds_instance MySQL 딥리드.
   innodb_history_list_high: "Tuning",
-  // MySQL 테이블스페이스 여유 공간 (DATA_FREE) — mysql_health_checks. InnoDB에는
+  // MySQL 테이블스페이스 여유 공간 (DATA_FREE), mysql_health_checks가 넣는다. InnoDB에는
   // dead tuple이 없으므로 PG의 dead_tuples/table_bloat와 같은 수치를 두 번 내지
   // 않고 이 하나만 쓴다. "Bloat" 탭을 재사용한다(같은 운영 판단: 재구축 필요 여부).
   mysql_fragmentation: "Bloat",

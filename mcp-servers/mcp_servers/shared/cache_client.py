@@ -19,7 +19,7 @@ def is_mysql_engine(engine) -> bool:
 
     Where a caller needs Aurora MySQL specifically (Data API reachability), the
     handler's relational capability gate has already excluded rds_instance
-    before the tool runs — see performance/handler.py _ENGINE_GATED_TOOLS.
+    before the tool runs. See performance/handler.py _ENGINE_GATED_TOOLS.
     """
     return "mysql" in str(engine or "").lower()
 
@@ -40,7 +40,7 @@ class CacheClient:
 
         WHY THIS EXISTS: CAPABILITIES in engine_family.py is keyed by FAMILY, and
         Aurora PG and Aurora MySQL are the SAME family (relational). So a family
-        flag cannot express a PG-vs-MySQL difference — the distinction has to be
+        flag cannot express a PG-vs-MySQL difference: the distinction has to be
         resolved from the engine string at the tool. Same contract as
         operations/tools/prewarm_reader._is_postgres and simulation upgrade_plan,
         hoisted here so the three performance tools that need it share one

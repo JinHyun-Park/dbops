@@ -645,7 +645,7 @@ function HotNodes({
 }
 
 // ---------------------------------------------------------------------------
-// MySQL (Aurora MySQL) — EXPLAIN FORMAT=JSON
+// MySQL (Aurora MySQL): EXPLAIN FORMAT=JSON
 //
 // Mirrors mcp_servers/performance/tools/explain_plan.py._walk_mysql. MySQL's plan
 // is a flat, ordered list of table accesses (the join order), so it is rendered
@@ -734,7 +734,7 @@ export function summarizeMysqlPlanForLLM(plan: MysqlPlanRoot): string {
     else bits.push("no index used");
     if (t.cost_info?.prefix_cost)
       bits.push(`prefix_cost=${t.cost_info.prefix_cost}`);
-    lines.push(`  ${i + 1}. ${t.table_name ?? "?"} — ${bits.join(" · ")}`);
+    lines.push(`  ${i + 1}. ${t.table_name ?? "?"}: ${bits.join(" · ")}`);
     if (t.attached_condition)
       lines.push(`       condition: ${t.attached_condition}`);
   });
@@ -797,7 +797,7 @@ function MysqlIssues({
   if (queryCost != null && queryCost >= 100_000) {
     issues.push({
       severity: "info",
-      text: `query_cost ${fmtCost(queryCost)} — 전체적으로 비싼 플랜입니다.`,
+      text: `query_cost ${fmtCost(queryCost)}, 전체적으로 비싼 플랜입니다.`,
     });
   }
   if (issues.length === 0) return null;

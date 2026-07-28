@@ -304,7 +304,7 @@ TOOLS = {
         "impl": get_vacuum_stats_impl,
         "description": (
             "Per-table maintenance stats. PostgreSQL: dead tuples, bloat ratio, last "
-            "autovacuum/analyze. MySQL: the same cache rows relabelled in InnoDB terms — "
+            "autovacuum/analyze. MySQL: the same cache rows relabelled in InnoDB terms: "
             "free_rows_est and fragmentation_pct from information_schema.tables.DATA_FREE "
             "(reclaimable free space expressed in ROWS, not bytes), no last_vacuum, and the "
             "remedy is OPTIMIZE TABLE. InnoDB has neither dead tuples nor VACUUM, so check "

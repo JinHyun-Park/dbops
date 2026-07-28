@@ -244,7 +244,7 @@ export default function QueryLabPage() {
     if (!explain || !explain.plan) return;
     if (!clusterId) return;
     // Two engines, two summarizers: MySQL's EXPLAIN FORMAT=JSON shares no keys
-    // with the PG shape, so each has its own. The prompt also has to differ —
+    // with the PG shape, so each has its own. The prompt also has to differ:
     // MySQL's plan-only EXPLAIN carries no actual row counts or timings, and
     // asking for an "EXPLAIN ANALYZE" reading of it invites invented numbers.
     const plan = explain.plan;
@@ -267,14 +267,14 @@ export default function QueryLabPage() {
     const message = isPg
       ? `너는 시니어 PostgreSQL 성능 전문가야. 아래는 EXPLAIN ANALYZE 결과를 구조화한 요약이야. ` +
         `**한국어로** 가장 큰 병목 한 가지를 찍고, 구체적인 개선안 2~3가지를 제안해줘 ` +
-        `(인덱스 컬럼 목록, 쿼리 재작성, 스키마 변경, planner 설정 등 — 모호한 일반론 금지). ` +
+        `(인덱스 컬럼 목록, 쿼리 재작성, 스키마 변경, planner 설정 등, 모호한 일반론 금지). ` +
         `답변은 250단어 이하로 간결하게.` +
         sqlBlock +
         `\n\nPlan summary:\n\`\`\`\n${summary}\n\`\`\``
       : `너는 시니어 MySQL(Aurora MySQL) 성능 전문가야. 아래는 EXPLAIN FORMAT=JSON을 구조화한 요약이야. ` +
         `이건 실행하지 않은 플랜이라 모든 행 수가 옵티마이저 추정치이고, 실제 실행시간·실제 행 수·버퍼 통계는 없어. ` +
         `**한국어로** 가장 큰 병목 한 가지를 찍고, 구체적인 개선안 2~3가지를 제안해줘 ` +
-        `(인덱스 컬럼 목록과 순서, 쿼리 재작성, 스키마 변경 — 모호한 일반론 금지). ` +
+        `(인덱스 컬럼 목록과 순서, 쿼리 재작성, 스키마 변경, 모호한 일반론 금지). ` +
         `MySQL 문법·기능만 쓰고, 없는 실측치(실행시간, 실제 행 수, 디스크 스필 여부)는 절대 만들어내지 마. ` +
         `답변은 250단어 이하로 간결하게.` +
         sqlBlock +
@@ -372,7 +372,7 @@ export default function QueryLabPage() {
       setLoadingKind("rewrite");
       setTab("rewrite");
 
-      // Include current plan summary as grounding context when available — for
+      // Include current plan summary as grounding context when available, for
       // MySQL too, which previously fell through to no grounding at all.
       const currentPlan = explain?.plan ?? null;
       const pgArr = currentPlan as PgPlanRoot[];

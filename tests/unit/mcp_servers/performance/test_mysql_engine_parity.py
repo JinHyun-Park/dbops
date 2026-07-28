@@ -118,7 +118,7 @@ _LIVE_INDEX_SCAN_PLAN = {
 
 def _mysql_cache(plan_doc):
     """A cache whose cluster resolves to aurora-mysql and whose target returns
-    `plan_doc`. The plan cell comes back with column name '' — measured: the Data
+    `plan_doc`. The plan cell comes back with column name '': measured, the Data
     API reports aliased/expression columns as name '' with the alias in `label`,
     and MySQL's EXPLAIN column is exactly that."""
     cache = MagicMock()
@@ -423,7 +423,7 @@ def test_vacuum_stats_reads_the_same_cluster_scoped_cache_for_both_engines():
 def test_recommend_index_mysql_refuses_instead_of_reporting_zero():
     """Measured: MySQL query_stats rows have shared_blks_read / shared_blks_hit
     100% NULL (2,889 rows over 24h), so the candidate filter excluded every row
-    and the tool returned count: 0 — a false all-clear. It must refuse, and it
+    and the tool returned count: 0, a false all-clear. It must refuse, and it
     must not carry a zero count anyone can misread as a result."""
     cache = MagicMock()
     cache.engine_of.return_value = "aurora-mysql"

@@ -1,4 +1,4 @@
-"""MySQL Maintenance Health checks — the MySQL counterpart of pg_health_checks.py.
+"""MySQL Maintenance Health checks: the MySQL counterpart of pg_health_checks.py.
 
 pg_health_checks is called ONLY from the "postgresql" in engine branch, so the
 MySQL branch had no health-check collector at all. This closes the part of that
@@ -13,14 +13,14 @@ WHAT THIS EMITS (2 check_types, not the 7 the PG collector has):
 
 WHAT IT DELIBERATELY DOES NOT EMIT, and why:
 
-  - txid_age, vacuum_overdue, extension_missing — inherently non-applicable.
+  - txid_age, vacuum_overdue, extension_missing: inherently non-applicable.
     InnoDB has no visibility-map freeze, no autovacuum, and plugins are not
     CREATE EXTENSION.
-  - dead_tuples — on MySQL this would be THE SAME NUMBER as fragmentation.
+  - dead_tuples: on MySQL this would be THE SAME NUMBER as fragmentation.
     table_stats.n_dead_tup is FLOOR(DATA_FREE / AVG_ROW_LENGTH), and both PG
     checks (dead_tuples and table_bloat) derive from that one quantity. Emitting
     both reports one signal twice, under a PG name InnoDB does not have.
-  - index_unused — the cache has no per-index granularity (mysql_table_stats
+  - index_unused: the cache has no per-index granularity (mysql_table_stats
     GROUP BYs per-index COUNT_FETCH into one table-level idx_scan), and
     performance_schema.table_io_waits_summary_by_index_usage was measured EMPTY
     for the live sampledb schema. A naive check over that source reports every
@@ -29,7 +29,7 @@ WHAT IT DELIBERATELY DOES NOT EMIT, and why:
     queries the target directly at the right granularity.
 
 Reads the CACHE ONLY (table_stats from mysql_table_stats, cluster_settings from
-mysql_locks), never the live cluster — same pattern as mysql_param_fitness.
+mysql_locks), never the live cluster, the same pattern as mysql_param_fitness.
 """
 
 import json
