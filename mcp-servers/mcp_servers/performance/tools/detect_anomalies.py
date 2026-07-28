@@ -7,8 +7,8 @@ median + IQR trained into ``metric_baselines`` by the pg_baseline_trainer
 collector. Robust z = (recent_max - median) / IQR, the IQR doesn't inflate on
 outliers, so the score is stable. To read a robust z as a familiar sigma: on a
 normal distribution the IQR is ≈ 1.349 stddev, NOT the other way round
-(q(0.75) - q(0.25) = 1.348980 to 6 significant figures, analytic and not
-sampled), so a robust z of 2.0 is about 2.7 sigma
+(q(0.75) - q(0.25) = 1.3489795..., analytic and not sampled), so a robust z of
+2.0 is about 2.7 sigma
 and 2.5 is about 3.4.
 
 When no seasonal baseline exists yet for the current hour-of-week bucket

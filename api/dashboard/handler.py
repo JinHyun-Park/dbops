@@ -1926,8 +1926,8 @@ def _anomalies(query, cluster_id, hours, threshold):
     For each metric we have a per-hour-of-week baseline (median + IQR) in
     `metric_baselines`. Robust z-score = (recent_max - median) / IQR
     (on a normal distribution the IQR is ≈ 1.349 stddev, NOT the other way
-    round: q(0.75) - q(0.25) = 1.348980 to 6 significant figures, analytic and
-    not sampled, so a robust z of 2.0 is about
+    round: q(0.75) - q(0.25) = 1.3489795..., analytic and not sampled, so a
+    robust z of 2.0 is about
     2.7 sigma and 2.5 is about 3.4. The IQR doesn't blow up on outliers, so the
     score is stable on a cluster that has a handful of legitimate spikes per
     day).

@@ -182,9 +182,11 @@ def test_the_documented_iqr_to_sigma_ratio_is_not_inverted():
                         ("detect_anomalies.py", _MCP_TOOL.read_text(encoding="utf-8"))):
         flat = " ".join(text.split())
         assert f"IQR is ≈ {round(iqr_in_stddev, 3)} stddev" in flat, where
-        assert (
-            f"q(0.75) - q(0.25) = {iqr_in_stddev:.6f} to 6 significant figures" in flat
-        ), where
+        # Truncation with an ellipsis, not a significant-figure claim. Naming a
+        # figure count is one more thing to get wrong, and it was: "1.348980 to
+        # 6 significant figures" carries SEVEN significant figures (the trailing
+        # zero counts), so the label contradicted the number it labelled.
+        assert f"q(0.75) - q(0.25) = {iqr_in_stddev:.7f}..." in flat, where
         assert "a robust z of 2.0 is about 2.7 sigma and 2.5 is about 3.4" in flat, where
         # The retracted wording, in both the multiplication-sign and the ASCII form.
         for inverted in ("1.349×IQR ≈ 1 stddev", "1.349xIQR ≈ 1 stddev",
@@ -198,6 +200,11 @@ def test_the_documented_iqr_to_sigma_ratio_is_not_inverted():
         # a legitimate use, and a bare-word ban flagged it.
         assert f"= {round(iqr_in_stddev, 5)} exactly" not in flat, (
             f"{where}: an irrational ratio is never 'exactly' a 5-decimal value"
+        )
+        # Both retracted wordings, so neither overclaim can return.
+        assert "significant figures" not in flat, (
+            f"{where}: state the truncation as 1.3489795... rather than counting "
+            "significant figures, which the first correction got wrong"
         )
 
 
