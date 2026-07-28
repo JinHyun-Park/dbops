@@ -49,6 +49,10 @@ const CHECK_LABELS: Record<string, string> = {
   query_regression: "Tuning",
   // MySQL InnoDB 내부 상태 (history list length 등) — rds_instance MySQL 딥리드.
   innodb_history_list_high: "Tuning",
+  // MySQL 테이블스페이스 여유 공간 (DATA_FREE) — mysql_health_checks. InnoDB에는
+  // dead tuple이 없으므로 PG의 dead_tuples/table_bloat와 같은 수치를 두 번 내지
+  // 않고 이 하나만 쓴다. "Bloat" 탭을 재사용한다(같은 운영 판단: 재구축 필요 여부).
+  mysql_fragmentation: "Bloat",
   // DynamoDB findings — ddb_* check_types from dynamodb_findings collector.
   ddb_throttling: "Throttling",
   ddb_capacity_underprovisioned: "Capacity",
@@ -88,10 +92,23 @@ const TABS_PG = [
   "Extensions",
   "Cost",
 ] as const;
-// MySQL now has Parameter Fitness (mysql_param_fitness) and capacity/ACU
-// forecast (capacity_forecast is engine-agnostic) — so Tuning/Capacity apply.
-// VACUUM/Bloat/Indexes/Config/Extensions remain PG-only collectors.
-const TABS_MYSQL = ["All", "Tuning", "Capacity", "Cost"] as const;
+// MySQL has Parameter Fitness (mysql_param_fitness), capacity/ACU forecast
+// (capacity_forecast is engine-agnostic), and now mysql_health_checks, which adds
+// Bloat (mysql_fragmentation: reclaimable DATA_FREE) and Config
+// (setting_misconfigured: slow_query_log / long_query_time /
+// innodb_flush_log_at_trx_commit). Without both tabs listed here those findings
+// render ONLY under "All" and are effectively hidden. VACUUM/Indexes/Extensions
+// stay PG-only: InnoDB has no VACUUM, per-index usage is not in the cache at the
+// needed granularity (the dashboard's redundant-index panel covers it directly),
+// and plugins are not CREATE EXTENSION.
+const TABS_MYSQL = [
+  "All",
+  "Tuning",
+  "Bloat",
+  "Config",
+  "Capacity",
+  "Cost",
+] as const;
 // DynamoDB findings cover throttling, capacity sizing, hot-partition detection,
 // and on-demand cost signals — each gets its own filter tab.
 const TABS_DYNAMODB = [

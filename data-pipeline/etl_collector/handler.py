@@ -16,6 +16,7 @@ from collectors.engine_family import engine_family
 from collectors.incident_embeddings import collect_incident_embeddings
 from collectors.meta_collector import collect_cluster_meta
 from collectors.mysql_activity import collect_mysql_activity
+from collectors.mysql_health_checks import collect_mysql_health_checks
 from collectors.mysql_innodb_status import collect_mysql_innodb_status
 from collectors.mysql_locks import collect_mysql_locks
 from collectors.mysql_param_fitness import collect_mysql_param_fitness
@@ -461,6 +462,21 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         except Exception as e:
             result["param_fitness_error"] = str(e)
             print(f"[{cluster_id}] mysql param fitness error: {e}")
+        # Maintenance Health의 MySQL 대응(pg_health_checks는 postgresql 분기 전용).
+        # param_fitness와 같은 이유로 locks 뒤: cluster_settings를 읽는다. table_stats도
+        # 캐시에서 읽으므로 타깃 접속은 없다. run_ts 공유는 필수 —
+        # 대시보드가 MAX(snapshot_time) 배치로 findings를 읽는다.
+        # ponytail: 이 수집기 자체는 엔진 중립(InnoDB 사실만 쓴다)이라 rds_instance
+        # 분기에도 한 줄로 붙일 수 있다. E-2 범위가 Aurora MySQL이라 지금은 걸지
+        # 않았고, RDS MySQL에서 검증한 뒤 붙일 것.
+        try:
+            result["health"] = collect_mysql_health_checks(
+                cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
+                snapshot_ts=run_ts,
+            )
+        except Exception as e:
+            result["health_error"] = str(e)
+            print(f"[{cluster_id}] mysql health checks error: {e}")
         try:
             result["capacity_forecast"] = collect_capacity_forecast(
                 cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
