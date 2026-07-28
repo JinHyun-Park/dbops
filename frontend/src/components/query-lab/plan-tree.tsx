@@ -1,7 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { PgPlanNode, PgPlanRoot } from "@/lib/api-client";
+import type {
+  MysqlPlanRoot,
+  MysqlTableNode,
+  PgPlanNode,
+  PgPlanRoot,
+} from "@/lib/api-client";
 
 interface Props {
   plan: PgPlanRoot[] | Record<string, unknown> | null;
@@ -639,6 +644,307 @@ function HotNodes({
   );
 }
 
+// ---------------------------------------------------------------------------
+// MySQL (Aurora MySQL) — EXPLAIN FORMAT=JSON
+//
+// Mirrors mcp_servers/performance/tools/explain_plan.py._walk_mysql. MySQL's plan
+// is a flat, ordered list of table accesses (the join order), so it is rendered
+// as a list rather than forced into a tree it does not have. Recursion beats
+// enumerating wrapper keys: ordering_operation / grouping_operation /
+// duplicates_removal / materialized_from_subquery / union_result all nest, and a
+// missed wrapper would silently drop that subtree.
+// ---------------------------------------------------------------------------
+
+export function isMysqlPlan(
+  plan: PgPlanRoot[] | Record<string, unknown> | null,
+): plan is MysqlPlanRoot {
+  return (
+    !!plan &&
+    !Array.isArray(plan) &&
+    typeof (plan as Record<string, unknown>).query_block === "object" &&
+    (plan as Record<string, unknown>).query_block !== null
+  );
+}
+
+type MysqlFlags = { filesort: boolean; temporaryTable: boolean };
+
+function walkMysql(
+  node: unknown,
+  tables: MysqlTableNode[],
+  flags: MysqlFlags,
+): void {
+  if (Array.isArray(node)) {
+    for (const v of node) walkMysql(v, tables, flags);
+    return;
+  }
+  if (typeof node !== "object" || node === null) return;
+  const obj = node as Record<string, unknown>;
+  if ("table_name" in obj) tables.push(obj as MysqlTableNode);
+  if (obj.using_filesort === true) flags.filesort = true;
+  if (obj.using_temporary_table === true) flags.temporaryTable = true;
+  for (const v of Object.values(obj)) walkMysql(v, tables, flags);
+}
+
+function mysqlPlanParts(plan: MysqlPlanRoot) {
+  const tables: MysqlTableNode[] = [];
+  const flags: MysqlFlags = { filesort: false, temporaryTable: false };
+  walkMysql(plan.query_block, tables, flags);
+  const queryCost = Number(plan.query_block.cost_info?.query_cost);
+  return {
+    tables,
+    flags,
+    queryCost: Number.isFinite(queryCost) ? queryCost : null,
+  };
+}
+
+// Same thresholds as the MCP tool, so the panel and the agent agree.
+const MYSQL_BIG_SCAN_ROWS = 10_000;
+const MYSQL_LOW_FILTERED_PCT = 50;
+
+function fmtCost(n: number | null): string {
+  if (n == null) return "—";
+  return n >= 1000 ? Math.round(n).toLocaleString() : n.toFixed(2);
+}
+
+// Compact MySQL plan summary for an LLM prompt. Deliberately states which
+// analyses the plan CANNOT support, so the model does not invent them: every row
+// count here is an estimate, and MySQL's plan-only EXPLAIN has no timings.
+export function summarizeMysqlPlanForLLM(plan: MysqlPlanRoot): string {
+  const { tables, flags, queryCost } = mysqlPlanParts(plan);
+  const lines: string[] = [];
+  lines.push(
+    `Engine: MySQL · EXPLAIN FORMAT=JSON (plan only, NOT executed) · query_cost: ${fmtCost(
+      queryCost,
+    )}`,
+  );
+  lines.push(
+    "All row counts below are OPTIMIZER ESTIMATES. There are no actual row counts, no timings and no buffer stats: MySQL's EXPLAIN ANALYZE does not emit JSON, so estimate-vs-actual and disk-spill analysis are unavailable for this plan. Do not claim either.",
+  );
+  lines.push("\nJoin order (each step reads the row source named):");
+  tables.forEach((t, i) => {
+    const bits = [
+      `access_type=${t.access_type ?? "?"}`,
+      `rows_examined_per_scan=${t.rows_examined_per_scan ?? "?"}`,
+      `rows_produced_per_join=${t.rows_produced_per_join ?? "?"}`,
+      `filtered=${t.filtered ?? "?"}%`,
+    ];
+    if (t.key) bits.push(`key=${t.key}`);
+    else if (t.possible_keys?.length)
+      bits.push(`possible_keys=${t.possible_keys.join(",")} (none chosen)`);
+    else bits.push("no index used");
+    if (t.cost_info?.prefix_cost)
+      bits.push(`prefix_cost=${t.cost_info.prefix_cost}`);
+    lines.push(`  ${i + 1}. ${t.table_name ?? "?"} — ${bits.join(" · ")}`);
+    if (t.attached_condition)
+      lines.push(`       condition: ${t.attached_condition}`);
+  });
+  const strategy: string[] = [];
+  if (flags.filesort)
+    strategy.push("using_filesort=true (sort not served by an index)");
+  if (flags.temporaryTable)
+    strategy.push("using_temporary_table=true (internal temp table)");
+  if (strategy.length)
+    lines.push("\nOptimizer strategy:\n  - " + strategy.join("\n  - "));
+  return lines.join("\n");
+}
+
+function MysqlIssues({
+  tables,
+  flags,
+  queryCost,
+}: {
+  tables: MysqlTableNode[];
+  flags: MysqlFlags;
+  queryCost: number | null;
+}) {
+  const issues: { severity: "high" | "medium" | "info"; text: string }[] = [];
+  for (const t of tables) {
+    const examined = t.rows_examined_per_scan ?? 0;
+    const filtered = Number(t.filtered);
+    if (t.access_type === "ALL" && examined >= MYSQL_BIG_SCAN_ROWS) {
+      issues.push({
+        severity: "high",
+        text: `${t.table_name}: access_type=ALL, ${fmtRows(
+          examined,
+        )} 행을 전부 훑습니다. WHERE·JOIN 컬럼에 인덱스를 검토하세요.`,
+      });
+    }
+    if (
+      Number.isFinite(filtered) &&
+      filtered < MYSQL_LOW_FILTERED_PCT &&
+      examined >= MYSQL_BIG_SCAN_ROWS
+    ) {
+      issues.push({
+        severity: "medium",
+        text: `${t.table_name}: ${fmtRows(examined)} 행을 읽어 약 ${fmtRows(
+          t.rows_produced_per_join,
+        )} 행만 남깁니다 (filtered ${filtered}%). 더 선택적인 인덱스가 읽는 행 수를 줄입니다.`,
+      });
+    }
+  }
+  if (flags.filesort) {
+    issues.push({
+      severity: "medium",
+      text: "using_filesort: 정렬을 인덱스 순서로 처리하지 못해 옵티마이저가 직접 정렬합니다. ORDER BY·GROUP BY 컬럼에 맞는 인덱스로 정렬을 없앨 수 있습니다.",
+    });
+  }
+  if (flags.temporaryTable) {
+    issues.push({
+      severity: "medium",
+      text: "using_temporary_table: 내부 임시 테이블을 만듭니다 (인덱스로 해결되지 않는 GROUP BY·DISTINCT·UNION에서 흔합니다). 커지면 디스크로 스필합니다.",
+    });
+  }
+  if (queryCost != null && queryCost >= 100_000) {
+    issues.push({
+      severity: "info",
+      text: `query_cost ${fmtCost(queryCost)} — 전체적으로 비싼 플랜입니다.`,
+    });
+  }
+  if (issues.length === 0) return null;
+
+  const tone = {
+    high: "text-rose-300",
+    medium: "text-amber-300",
+    info: "text-sky-300",
+  } as const;
+  const dot = {
+    high: "bg-rose-400",
+    medium: "bg-amber-400",
+    info: "bg-sky-400",
+  } as const;
+  return (
+    <div className="border border-zinc-800 bg-zinc-900/40 p-3 mb-3">
+      <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 mb-2">
+        plan signals
+      </div>
+      <ul className="space-y-1.5">
+        {issues.map((iss, i) => (
+          <li key={i} className="flex items-start gap-2 text-xs">
+            <span
+              className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
+                dot[iss.severity]
+              }`}
+            />
+            <span className={tone[iss.severity]}>{iss.text}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function MysqlPlanView({ plan }: { plan: MysqlPlanRoot }) {
+  const { tables, flags, queryCost } = useMemo(
+    () => mysqlPlanParts(plan),
+    [plan],
+  );
+  const strategy =
+    [flags.filesort && "filesort", flags.temporaryTable && "temp table"]
+      .filter(Boolean)
+      .join(" + ") || "none";
+
+  return (
+    <div>
+      <div className="grid grid-cols-3 gap-3 mb-3">
+        <div className="border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+            query cost
+          </div>
+          <div className="text-base text-zinc-100 mt-0.5 tabular-nums">
+            {fmtCost(queryCost)}
+          </div>
+        </div>
+        <div className="border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+            row sources
+          </div>
+          <div className="text-base text-zinc-100 mt-0.5 tabular-nums">
+            {tables.length}
+          </div>
+        </div>
+        <div className="border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+            strategy
+          </div>
+          <div className="text-base text-zinc-100 mt-0.5 truncate">
+            {strategy}
+          </div>
+        </div>
+      </div>
+
+      <MysqlIssues tables={tables} flags={flags} queryCost={queryCost} />
+
+      <div className="border border-zinc-800 bg-zinc-900/40">
+        <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 px-3 py-2 border-b border-zinc-800">
+          join order · 추정값입니다 (실행 통계 아님)
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">
+                <th className="text-left font-normal px-3 py-1.5">#</th>
+                <th className="text-left font-normal px-3 py-1.5">table</th>
+                <th className="text-left font-normal px-3 py-1.5">access</th>
+                <th className="text-left font-normal px-3 py-1.5">key</th>
+                <th className="text-right font-normal px-3 py-1.5">examined</th>
+                <th className="text-right font-normal px-3 py-1.5">produced</th>
+                <th className="text-right font-normal px-3 py-1.5">filtered</th>
+                <th className="text-right font-normal px-3 py-1.5">
+                  prefix cost
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {tables.map((t, i) => {
+                const full = t.access_type === "ALL";
+                return (
+                  <tr
+                    key={i}
+                    className={`border-b border-zinc-800/60 last:border-0 ${
+                      full ? "text-rose-300" : "text-zinc-300"
+                    }`}
+                  >
+                    <td className="px-3 py-1.5 text-zinc-500 tabular-nums">
+                      {i + 1}
+                    </td>
+                    <td className="px-3 py-1.5 font-mono">
+                      {t.table_name ?? "—"}
+                    </td>
+                    <td className="px-3 py-1.5 font-mono">
+                      {t.access_type ?? "—"}
+                    </td>
+                    <td className="px-3 py-1.5 font-mono text-zinc-400">
+                      {t.key ?? "—"}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {fmtRows(t.rows_examined_per_scan)}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                      {fmtRows(t.rows_produced_per_join)}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                      {t.filtered != null ? `${t.filtered}%` : "—"}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                      {fmtCost(Number(t.cost_info?.prefix_cost) || null)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="text-[11px] text-zinc-500 mt-2 leading-relaxed">
+        MySQL의 plan-only EXPLAIN에는 옵티마이저 소요 시간과 실제 행 수가 없어,
+        추정 대비 실제 괴리(통계 부정확)와 디스크 스필 여부는 이 플랜으로 알 수
+        없습니다. EXPLAIN ANALYZE는 JSON을 내주지 않습니다.
+      </div>
+    </div>
+  );
+}
+
 export function PlanTree({ plan }: Props) {
   if (!plan) {
     return (
@@ -657,10 +963,12 @@ export function PlanTree({ plan }: Props) {
     "Plan" in (plan[0] as object);
 
   if (!isPgPlan) {
+    if (isMysqlPlan(plan)) return <MysqlPlanView plan={plan} />;
     return (
       <div className="border border-zinc-800 bg-zinc-900/40 p-4">
         <div className="text-xs text-zinc-500 mb-2">
-          Non-PostgreSQL plan — tree view not yet implemented for this engine.
+          이 엔진의 플랜 형식은 아직 구조화 렌더링을 지원하지 않습니다. 원본
+          응답을 그대로 표시합니다.
         </div>
         <pre className="text-[11px] font-mono text-zinc-400 overflow-auto max-h-96 whitespace-pre-wrap">
           {JSON.stringify(plan, null, 2)}

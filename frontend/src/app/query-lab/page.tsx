@@ -6,6 +6,8 @@ import remarkGfm from "remark-gfm";
 import { QueryEditor } from "@/components/query-lab/query-editor";
 import {
   PlanTree,
+  isMysqlPlan,
+  summarizeMysqlPlanForLLM,
   summarizePlanForLLM,
 } from "@/components/query-lab/plan-tree";
 import { streamChat } from "@/lib/agentcore-sse";
@@ -241,23 +243,42 @@ export default function QueryLabPage() {
   const handleGetInsight = useCallback(() => {
     if (!explain || !explain.plan) return;
     if (!clusterId) return;
-    // PG-only for now — the summarizer assumes the PG shape.
-    const arr = explain.plan as PgPlanRoot[];
-    if (!Array.isArray(arr) || arr.length === 0 || !arr[0]?.Plan) {
-      setInsight("AI 진단은 현재 PostgreSQL 플랜에 대해서만 제공됩니다.");
+    // Two engines, two summarizers: MySQL's EXPLAIN FORMAT=JSON shares no keys
+    // with the PG shape, so each has its own. The prompt also has to differ —
+    // MySQL's plan-only EXPLAIN carries no actual row counts or timings, and
+    // asking for an "EXPLAIN ANALYZE" reading of it invites invented numbers.
+    const plan = explain.plan;
+    const arr = plan as PgPlanRoot[];
+    const isPg = Array.isArray(arr) && arr.length > 0 && !!arr[0]?.Plan;
+    let summary: string;
+    if (isPg) {
+      summary = summarizePlanForLLM(arr[0]);
+    } else if (isMysqlPlan(plan)) {
+      summary = summarizeMysqlPlanForLLM(plan);
+    } else {
+      setInsight(
+        "AI 진단은 PostgreSQL과 MySQL 플랜에 대해 제공됩니다. 이 엔진의 플랜 형식은 아직 지원하지 않습니다.",
+      );
       return;
     }
-    const summary = summarizePlanForLLM(arr[0]);
     const sqlBlock = lastSql
       ? `\n\nSQL:\n\`\`\`sql\n${lastSql.trim()}\n\`\`\``
       : "";
-    const message =
-      `너는 시니어 PostgreSQL 성능 전문가야. 아래는 EXPLAIN ANALYZE 결과를 구조화한 요약이야. ` +
-      `**한국어로** 가장 큰 병목 한 가지를 찍고, 구체적인 개선안 2~3가지를 제안해줘 ` +
-      `(인덱스 컬럼 목록, 쿼리 재작성, 스키마 변경, planner 설정 등 — 모호한 일반론 금지). ` +
-      `답변은 250단어 이하로 간결하게.` +
-      sqlBlock +
-      `\n\nPlan summary:\n\`\`\`\n${summary}\n\`\`\``;
+    const message = isPg
+      ? `너는 시니어 PostgreSQL 성능 전문가야. 아래는 EXPLAIN ANALYZE 결과를 구조화한 요약이야. ` +
+        `**한국어로** 가장 큰 병목 한 가지를 찍고, 구체적인 개선안 2~3가지를 제안해줘 ` +
+        `(인덱스 컬럼 목록, 쿼리 재작성, 스키마 변경, planner 설정 등 — 모호한 일반론 금지). ` +
+        `답변은 250단어 이하로 간결하게.` +
+        sqlBlock +
+        `\n\nPlan summary:\n\`\`\`\n${summary}\n\`\`\``
+      : `너는 시니어 MySQL(Aurora MySQL) 성능 전문가야. 아래는 EXPLAIN FORMAT=JSON을 구조화한 요약이야. ` +
+        `이건 실행하지 않은 플랜이라 모든 행 수가 옵티마이저 추정치이고, 실제 실행시간·실제 행 수·버퍼 통계는 없어. ` +
+        `**한국어로** 가장 큰 병목 한 가지를 찍고, 구체적인 개선안 2~3가지를 제안해줘 ` +
+        `(인덱스 컬럼 목록과 순서, 쿼리 재작성, 스키마 변경 — 모호한 일반론 금지). ` +
+        `MySQL 문법·기능만 쓰고, 없는 실측치(실행시간, 실제 행 수, 디스크 스필 여부)는 절대 만들어내지 마. ` +
+        `답변은 250단어 이하로 간결하게.` +
+        sqlBlock +
+        `\n\nPlan summary:\n\`\`\`\n${summary}\n\`\`\``;
     setInsight("");
     setInsightLoading(true);
     streamChat(
@@ -351,16 +372,19 @@ export default function QueryLabPage() {
       setLoadingKind("rewrite");
       setTab("rewrite");
 
-      // Include current plan summary as grounding context when available.
-      const planSummary =
-        explain?.plan &&
-        Array.isArray(explain.plan) &&
-        explain.plan.length > 0 &&
-        (explain.plan as PgPlanRoot[])[0]?.Plan
-          ? `\n\nCurrent plan summary:\n\`\`\`\n${summarizePlanForLLM(
-              (explain.plan as PgPlanRoot[])[0],
-            )}\n\`\`\``
-          : "";
+      // Include current plan summary as grounding context when available — for
+      // MySQL too, which previously fell through to no grounding at all.
+      const currentPlan = explain?.plan ?? null;
+      const pgArr = currentPlan as PgPlanRoot[];
+      const planSummaryText =
+        Array.isArray(pgArr) && pgArr.length > 0 && pgArr[0]?.Plan
+          ? summarizePlanForLLM(pgArr[0])
+          : isMysqlPlan(currentPlan)
+            ? summarizeMysqlPlanForLLM(currentPlan)
+            : null;
+      const planSummary = planSummaryText
+        ? `\n\nCurrent plan summary:\n\`\`\`\n${planSummaryText}\n\`\`\``
+        : "";
 
       const eng = explain?.engine || "";
       const engineLabel = eng.includes("mysql")

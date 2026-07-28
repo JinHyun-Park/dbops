@@ -1541,6 +1541,34 @@ export type PgPlanRoot = {
   Triggers?: unknown[];
 };
 
+// MySQL `EXPLAIN FORMAT=JSON` returns a single {query_block: ...} object, NOT an
+// array, and shares no keys with the PG shape above. Every cost and percentage
+// arrives as a STRING (verified live on Aurora MySQL 8.0.39: query_cost
+// "602995.88", filtered "33.33"), so read them through Number(), never as
+// numbers. The strategy flags (using_filesort / using_temporary_table) hang off
+// the wrappers (ordering_operation / grouping_operation / ...), not off the table
+// nodes, and the join order arrives as a nested_loop array.
+export type MysqlTableNode = {
+  table_name?: string;
+  access_type?: string;
+  key?: string | null;
+  possible_keys?: string[];
+  rows_examined_per_scan?: number;
+  rows_produced_per_join?: number;
+  filtered?: string;
+  using_index?: boolean;
+  attached_condition?: string;
+  cost_info?: { prefix_cost?: string; read_cost?: string; eval_cost?: string };
+  [k: string]: unknown;
+};
+
+export type MysqlPlanRoot = {
+  query_block: {
+    cost_info?: { query_cost?: string };
+    [k: string]: unknown;
+  };
+};
+
 export interface ExplainResponse {
   engine: string;
   cluster_id: string;
