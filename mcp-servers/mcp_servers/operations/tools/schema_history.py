@@ -6,8 +6,22 @@ change" versus "nothing has ever been collected here, so we do not know". A DBA
 asked "did anyone change the schema before the incident?" acts on those two
 answers in opposite directions, so the empty result is now qualified by a
 COLLECTION-COVERAGE probe and reported as an explicit status.
+
+Coverage is not the whole of it. A schema the collector can no longer SEE files no
+row either, so it used to sit inside the same empty result as a genuinely
+unchanged schema. The collector no longer infers a DROP from that absence (it
+produced a phantom mass drop; see
+data-pipeline/etl_collector/collectors/schema_snapshot.py), so this tool carries
+the unknown instead: `observation` names the schemas the newest catalog read did
+not confirm, and an empty window with one of those is `partial`, not `no_changes`.
 """
 
+from mcp_servers.operations.tools.schema_diff import (
+    DROPPED_CAVEAT,
+    observation_is_complete,
+    observation_note,
+    observation_state,
+)
 from mcp_servers.shared.cache_client import CacheClient
 
 CHANGES_SQL = """
@@ -43,6 +57,8 @@ _BASELINE_ONLY = (
 def get_schema_history_impl(cache: CacheClient, cluster_id: str, days: int = 30) -> dict:
     params = {"cluster_id": cluster_id, "days": days}
     result = cache.execute(CHANGES_SQL, params)
+    observation = observation_state(cache, cluster_id)
+    obs_note = observation_note(observation)
     if result.rows:
         return {
             "status": "ok",
@@ -50,6 +66,11 @@ def get_schema_history_impl(cache: CacheClient, cluster_id: str, days: int = 30)
             "period_days": days,
             "changes": result.rows,
             "count": result.row_count,
+            "observation": observation,
+            # Every row here is a change list that can contain dropped tables, so
+            # the caveat rides along unconditionally rather than being inferred
+            # from parsing each stored diff.
+            "note": (DROPPED_CAVEAT + (" " + obs_note if obs_note else "")),
         }
 
     # Empty window. Before saying anything that sounds like "nothing changed",
@@ -71,11 +92,27 @@ def get_schema_history_impl(cache: CacheClient, cluster_id: str, days: int = 30)
         # each has 3 rows and still nothing to diff. `snapshots > schemas` holds
         # exactly when at least one schema has a second snapshot.
         status, note = "baseline_only", _BASELINE_ONLY
+    elif not observation_is_complete(observation):
+        # An empty window is a real negative only over the schemas that were
+        # actually looked at. One unconfirmed schema (or a cluster nothing has
+        # confirmed lately) makes the cluster-wide sentence unsupportable.
+        status, note = "partial", (
+            f"읽어온 스냅샷 {snapshots}건 범위에서는 최근 {days}일간 변경 기록이 "
+            f"없었습니다 (수집 구간: {coverage['first_snapshot']} ~ "
+            f"{coverage['last_snapshot']}). 다만 클러스터 전체에 대해 '변경 없음'이라고 "
+            "말할 수는 없습니다. "
+        ) + obs_note
     else:
         status, note = "no_changes", (
             f"수집된 스냅샷 {snapshots}건 범위에서 최근 {days}일간 스키마 변경이 없습니다 "
-            f"(수집 구간: {coverage['first_snapshot']} ~ {coverage['last_snapshot']})."
+            f"(수집 구간: {coverage['first_snapshot']} ~ {coverage['last_snapshot']}, "
+            f"모든 스키마가 {observation.get('last_confirmed')}에 확인됨)."
         )
+
+    # EVERY status, not just the negative one: a schema nobody can see any more is
+    # news on the not_collected and baseline_only paths too.
+    if obs_note and obs_note not in note:
+        note += " " + obs_note
 
     return {
         "status": status,
@@ -84,5 +121,6 @@ def get_schema_history_impl(cache: CacheClient, cluster_id: str, days: int = 30)
         "changes": [],
         "count": 0,
         "collection_coverage": coverage,
+        "observation": observation,
         "note": note,
     }

@@ -195,9 +195,32 @@ def _coverage(snapshots, schemas):
     )
 
 
-def _cache(*results):
+_LAST_CONFIRMED = "2026-07-09T00:00:00Z"
+
+
+def _observation(schemas=(("public", "y", "y"),), last=_LAST_CONFIRMED, age=60):
+    """OBSERVATION_SQL's shape: one row per schema (its latest snapshot), plus the
+    cluster-wide newest observation repeated on every row. `schemas` entries are
+    (name, holds_tables, confirmed_by_the_newest_read)."""
+    return QueryResult(
+        columns=["schema_name", "last_seen", "holds_tables", "confirmed_now",
+                 "last_confirmed", "age_sec"],
+        rows=[{"schema_name": n, "last_seen": last if c == "y" else None,
+               "holds_tables": h, "confirmed_now": c,
+               "last_confirmed": last, "age_sec": age}
+              for n, h, c in schemas],
+        row_count=len(schemas),
+    )
+
+
+def _cache(*results, observation=None):
+    """The reader issues the diff query, then the coverage probe, then the
+    observation probe LAST, so the observation default is appended rather than
+    spelled out at every call site. It is a real "everything confirmed" row and
+    not an exhausted mock: observation_state swallows its own failures by design,
+    so a mock that simply ran out would silently test the degraded path."""
     mock = MagicMock()
-    mock.execute.side_effect = list(results)
+    mock.execute.side_effect = list(results) + [observation or _observation()]
     return mock
 
 
@@ -376,3 +399,118 @@ def test_diff_impl_latest_modified_column():
     assert diff["added"] == []
     assert diff["dropped"] == []
     assert diff["modified"][0]["added_columns"] == ["currency"]
+
+
+# ---------------------------------------------------------------------------
+# WHAT WAS NOT LOOKED AT. The producer no longer resolves "absent from my catalog
+# read" to a DROP (it produced a phantom mass drop; see
+# data-pipeline/etl_collector/collectors/schema_snapshot.py), so a schema nobody
+# can see files no row at all. Without the observation probe that schema falls in
+# with the unchanged ones and this tool reports it as an unchanged schema, which
+# is the same false negative pointing the other way.
+# ---------------------------------------------------------------------------
+
+
+def _identical_pair(schema="public"):
+    return QueryResult(
+        columns=["schema_name", "tables_before", "tables_after"],
+        rows=[{"schema_name": schema, "tables_before": '{"users": ["id"]}',
+               "tables_after": '{"users": ["id"]}'}],
+        row_count=1,
+    )
+
+
+def test_a_fully_confirmed_cluster_still_gets_the_clean_negative():
+    result = get_schema_diff_impl(
+        _cache(_EMPTY, _coverage(4, 1)), cluster_id="prod-pg-1")
+    assert result["status"] == "no_changes"
+    assert result["observation"]["status"] == "fresh"
+    assert result["observation"]["unconfirmed_schemas"] == []
+    # The negative names the confirmation that licenses it to cover the cluster.
+    assert _LAST_CONFIRMED in result["note"]
+
+
+def test_an_unconfirmed_schema_downgrades_no_changes_to_partial():
+    """`core` still has stored tables and the newest read did not name it. Neither
+    "dropped" nor "no changes" is supportable, so the answer is `partial` and the
+    schema is NAMED as an unknown."""
+    result = get_schema_diff_impl(
+        _cache(_EMPTY, _coverage(6, 2),
+               observation=_observation((("public", "y", "y"), ("core", "y", "n")))),
+        cluster_id="prod-pg-1")
+    assert result["status"] == "partial"
+    assert result["observation"]["unconfirmed_schemas"] == ["core"]
+    assert "core" in result["note"]
+    assert "확인 불가" in result["note"]
+    assert "삭제로 단정하지 않고" in result["note"]
+
+
+def test_a_stale_cluster_is_partial_even_with_every_schema_confirmed_equally():
+    """A scope-mismatched or stopped collector confirms NOTHING, so every schema's
+    last_seen_at is equally old and no single schema stands out. The cluster-level
+    age is what catches it."""
+    result = get_schema_diff_impl(
+        _cache(_EMPTY, _coverage(6, 2), observation=_observation(age=9 * 3600)),
+        cluster_id="prod-pg-1")
+    assert result["status"] == "partial"
+    assert result["observation"]["status"] == "stale"
+    assert "갱신되지 않았습니다" in result["note"]
+
+
+def test_a_schema_whose_stored_map_is_already_empty_is_not_reported_unconfirmed():
+    """A schema recorded as holding no tables is not serving anything to anybody,
+    so its absence from a read claims nothing and must not raise an unknown on
+    every one of the 288 daily runs forever."""
+    result = get_schema_diff_impl(
+        _cache(_EMPTY, _coverage(6, 2),
+               observation=_observation((("public", "y", "y"), ("emptied", "n", "n")))),
+        cluster_id="prod-pg-1")
+    assert result["status"] == "no_changes"
+    assert result["observation"]["unconfirmed_schemas"] == []
+
+
+def test_an_unconfirmed_schema_is_reported_alongside_real_diffs_too():
+    """An unknown does not disappear because some OTHER schema changed."""
+    result = get_schema_diff_impl(
+        _cache(QueryResult(
+            columns=["schema_name", "tables_before", "tables_after"],
+            rows=[{"schema_name": "public", "tables_before": '{"a": ["id"]}',
+                   "tables_after": '{"a": ["id"], "b": ["id"]}'}],
+            row_count=1),
+            _coverage(6, 2),
+            observation=_observation((("public", "y", "y"), ("core", "y", "n")))),
+        cluster_id="prod-pg-1")
+    assert result["status"] == "ok"
+    assert result["observation"]["unconfirmed_schemas"] == ["core"]
+    assert "core" in result["note"]
+
+
+def test_a_dropped_list_carries_the_catalog_visibility_caveat():
+    result = get_schema_diff_impl(
+        _cache(QueryResult(
+            columns=["schema_name", "tables_before", "tables_after"],
+            rows=[{"schema_name": "public", "tables_before": '{"a": ["id"], "b": ["id"]}',
+                   "tables_after": '{"a": ["id"]}'}],
+            row_count=1), _coverage(6, 1)),
+        cluster_id="prod-pg-1")
+    assert result["totals"]["dropped"] == 1
+    assert "권한 회수(REVOKE)" in result["note"]
+    # And a payload with nothing dropped does not carry it.
+    clean = get_schema_diff_impl(_cache(_identical_pair(), _coverage(4, 1)),
+                                cluster_id="prod-pg-1")
+    assert clean["totals"]["dropped"] == 0
+    assert "권한 회수(REVOKE)" not in clean["note"]
+
+
+def test_a_cache_without_the_migration_says_so_instead_of_claiming_no_changes():
+    """schema_v27 not applied yet: the probe raises, which is not a licence to
+    answer "no changes" for the whole cluster. No exception text may reach the
+    payload (the AST leak guard's allowlist is empty and stays empty)."""
+    mock = MagicMock()
+    mock.execute.side_effect = [_EMPTY, _coverage(6, 2),
+                               RuntimeError("column last_seen_at does not exist")]
+    result = get_schema_diff_impl(mock, cluster_id="prod-pg-1")
+    assert result["status"] == "partial"
+    assert result["observation"] == {"status": "unavailable"}
+    assert "last_seen_at" not in result["note"]
+    assert "schema_v27" in result["note"]

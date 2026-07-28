@@ -19,7 +19,7 @@ tables, ~267 KiB extrapolated at 2,000.
   aggregation is ALL-OR-NOTHING, so there is no partial snapshot to guard
   against: past roughly 7,600 tables in one schema (1 MiB / 137 measured bytes
   per table) the Data API errors, the caller's try/except records it and NOTHING
-  is written. compute_diff infers `dropped` from absence, so a truncating
+  is written. compute_diff derives `dropped` from set difference, so a truncating
   collector would report tables that merely fell out of the list as DROPPED to
   the DBA (that bug is live today in the dashboard's table_stats LIMIT 100
   panel). A missing snapshot is honest; a phantom DROP is not. If a real schema
@@ -36,80 +36,131 @@ and would make get_schema_diff's implicit latest-vs-second-latest comparison
 always diff two identical 5-minutes-apart snapshots and answer "no changes".
 So: compare against the stored blob and INSERT only on a real difference.
 
-A SCHEMA CAN GO TO ZERO, AND THAT IS A CHANGE
-Store-on-change means the last blob written for a schema stands as "latest"
-until something replaces it, so a schema the collector stops SEEING keeps
-serving its dropped tables as existing, forever, on all three readers. Two
-different events do that and both are handled, differently on purpose:
-  * schema still exists, last table dropped -> the catalog read itself returns
-    the schema with '{}' (it is driven off pg_namespace / information_schema.
-    schemata, not off the table list). Directly observed, no inference.
-  * schema itself dropped -> no row exists to return, so it is inferred from
-    absence against TRACKED_SQL.
-Both of those are DESTRUCTIVE conclusions: the readers turn them into "these
-tables are gone" for a DBA. So both hang off CORROBORATION, below.
+=============================================================================
+NOTHING HERE INFERS A DROP FROM ABSENCE. WHY THAT IS THE DESIGN, NOT A GAP.
+=============================================================================
+Four consecutive passes tried to keep the inference "this schema is absent from
+the catalog read, therefore its tables were dropped" and make it safe with one
+more predicate computed from inside that same read:
 
-CORROBORATION, AND EVERY STATE A TRACKED SCHEMA CAN BE REPORTED AS
-A schema is TRACKED when its latest stored blob is non-empty (TRACKED_SQL), i.e.
-the readers are serving tables for it right now. CORROBORATED means at least one
-TRACKED schema came back from THIS read with a table still in it.
-Why that and not "the read returned no rows at all", which is what the previous
-version guarded on: PostgreSQL creates `public` in every database and pg_catalog
-is world-readable, so a successful read is never empty and that guard could not
-fire. MEASURED on PostgreSQL 14.18, a cluster whose history was collected from
-`appdb` read once against `sampledb` (which is the literal db_name fallback in
-etl_collector/handler.py) reported
-  {"schemas_seen": 1, "snapshots_written": 3, "vanished": 2, "vanished_unconfirmed": 0}
-and get_schema_diff, get_schema_history and diagnose_root_cause all reported
-core dropped [orders, users], billing dropped [invoices], public dropped [audit].
-Corroboration is the only evidence available here that the read covered the same
-scope the stored history was recorded from, because schema_snapshots has no
-database column to compare against (adding one is the upgrade path; it needs a
-migration plus all three readers).
+  pass 1  no guard at all
+  pass 2  `if absent and not returned` (the read returned no row at all).
+          UNREACHABLE on PostgreSQL: pg_namespace has `public` in every
+          database, so a successful read is never empty.
+  pass 3  same guard, made reachable and then re-broken in the same commit.
+  pass 4  `corroborated = any(seen.get(s) for s in tracked)`, i.e. at least one
+          tracked schema came back holding a table. Satisfied by `public`, which
+          on PostgreSQL exists in every database and normally HOLDS TABLES, so a
+          read that landed in the WRONG DATABASE corroborated itself.
 
-  the read said                    corroborated  written              counted as
-  ----------------------------------------------------------------------------------
-  1 the same tables                 either       nothing              unchanged
-  2 different tables                either       change row           snapshots_written
-  3 '{}', 2+ tracked schemas        yes          '{}' + dropped diff  snapshots_written
-  4 '{}', 1 tracked schema          no           '{}' + dropped diff  uncorroborated_writes
-  5 '{}', 2+ tracked schemas        no           NOTHING              emptied_unconfirmed
-  6 an empty STRING (NULL agg)      either       nothing              unreadable
-  7 nothing at all (absent)         yes          '{}' + dropped diff  vanished
-  8 nothing at all (absent)         no           NOTHING              vanished_unconfirmed
-  9 the read RAISED                 n/a          NOTHING AT ALL       caller's *_error key
-Row 9 is why there is no tenth row for a PARTIAL read: both transports build the
-whole result before the collector sees any of it (the Data API assembles the
-response server-side; shared/mysql_direct.py builds `records` from a single
-cur.fetchall()), so a session that dies mid-read raises instead of returning a
-short row set. Driven on a real server: a read against a nonexistent database
-raised and the snapshot count was identical before and after.
-Row 4 is the one destructive write made without corroboration, and it is a
-DIRECT OBSERVATION ("this schema exists here and holds no table") on a cluster
-where corroboration is impossible by construction: the only tracked schema is
-the one that emptied. Trusting it keeps the single-schema cluster, which is the
-common shape, from silently serving dropped tables forever. Row 5 is the same
-observation on a cluster that DOES have other tracked schemas and none of them
-corroborate, which is what a scope change looks like, so nothing is written.
-Rows 4/5/8 are all self-healing: no state is kept, and the next run with one
-readable table in any tracked schema records the real thing.
-INDISTINGUISHABLE, on purpose and disclosed:
-  * a cluster with exactly ONE tracked schema, read against a different database
-    that happens to hold a same-named schema. Row 4 writes the drop. `public`
-    makes that a certainty rather than a coincidence on PostgreSQL.
-  * a scope-drifted read still BASELINES any schema it finds that this cluster
-    has never snapshotted. That is not a destructive claim (a baseline carries a
-    NULL diff, and every reader reports it as insufficient history rather than as
-    a change), so it is deliberately not suppressed.
-  * MySQL's information_schema is privilege-filtered, so REVOKE on one database
-    reads exactly like DROP DATABASE. PostgreSQL is NOT exposed to this:
-    measured, an unprivileged role gets the identical PG_SCHEMA_SQL result as
-    the superuser (billing/1, core/2, public/1) while `SELECT FROM core.users`
-    raises permission denied.
-  ponytail: both need the read to name its own scope (current_database() on PG,
-  a SCHEMATA privilege probe on MySQL) AND a database column on schema_snapshots
-  to compare it with. Until then, treat a db_name change on a registered cluster
-  as a re-baseline, not as DDL.
+MEASURED against PostgreSQL 14.18 on the pass-4 code, a cluster collected from
+`rightdb` (core, billing, public) read once against `sampledb` whose `public`
+holds one ordinary table:
+  {"corroborated": true, "schemas_seen": 1, "snapshots_written": 3,
+   "vanished": 2, "vanished_unconfirmed": 0}
+  get_schema_diff      status ok, totals dropped 4
+                       core [orders, users], billing [invoices], public [audit]
+  get_schema_history   count 3
+  diagnose_root_cause  3 DDL signals examined, skipped []
+That read ALSO filed a change row for `public` with dropped [audit] / added
+[app_settings], which is not the absence inference at all: it is the ORDINARY
+diff path comparing two different databases' catalogs. No predicate on absence
+could ever have covered that half.
+
+A read cannot separate "this schema is gone" from "my read could not see it"
+using only what is inside the read. So this collector does two things instead:
+
+ 1. THE READ REPORTS ITS OWN SCOPE and the scope is stored with the snapshot
+    (schema_v27 `read_scope`). Two snapshots are COMPARABLE only under the same
+    scope; a read under any other scope writes NOTHING, so no cross-scope diff
+    and no cross-scope drop can be produced, by either half of the old defect.
+      PostgreSQL  current_database() || '/' || its pg_database.oid. The name
+                  alone would make another cluster's same-named database look
+                  comparable. A physical restore preserves the oid (same data,
+                  legitimately comparable); a separately created database has a
+                  different one.
+      MySQL       CURRENT_USER(). information_schema there is server-wide, so
+                  the connected database is NOT the visibility scope; what the
+                  read can see is decided by the reading identity's grants.
+ 2. ABSENCE IS NEVER A DROP. A tracked schema the read does not name records
+    nothing and is reported as `not_seen`, an UNKNOWN that both readers surface
+    (`observation.unconfirmed_schemas`). The cost is stated plainly: a genuine
+    DROP SCHEMA / DROP DATABASE is no longer reported as a drop. It surfaces as
+    "last confirmed at T, not seen since", which is the strongest claim the data
+    supports, and this product does not state a negative its data cannot support.
+    A drop is only ever recorded from a DIRECT observation: the schema comes back
+    from a scope-matching read carrying an EMPTY table set (row S4).
+
+WHY last_seen_at EXISTS. Under store-on-change, snapshot_time is when a schema
+last CHANGED, which for a stable schema is months ago, so it cannot distinguish
+"unchanged for months" from "not seen for months". That distinction is precisely
+the state the four previous passes each resolved to "dropped". It is now a stored
+fact: every scope-matching read stamps last_seen_at on the schema's latest row
+(an UPDATE, not a row: the blob is TOASTed out of line, so the tuple rewrite is
+~100 bytes and the TOAST chain is reused).
+
+=============================================================================
+EVERY STATE, AND WHAT IT LOOKS LIKE FROM OUTSIDE
+=============================================================================
+READ LEVEL (whole cycle)
+  R1 the read RAISED            nothing written  caller's schema_snapshot_error
+                                                 (no dict is returned at all)
+  R2 the read returned NO ROW   nothing written  scope_status scope_unknown
+  R3 the stored history carries  nothing written  scope_status scope_mismatch
+     ANY other known scope                       (not one baseline either: a
+                                                  cross-scope row would make the
+                                                  dashboard panel's own
+                                                  base-vs-latest blob diff report
+                                                  the mass drop this collector
+                                                  refuses to)
+  R4 scope known, cluster has    per-schema below scope_status adopted
+     no scoped history yet
+  R5 every known stored scope    per-schema below scope_status matched
+     is this one
+
+PER SCHEMA (only under R4/R5)
+  S1 same tables                 nothing + heartbeat        unchanged
+  S2 different tables            change row                 changes
+  S3 latest row is not under      baseline row (NULL diff)   baselines
+     this scope (or there is none)
+  S4 named, ZERO tables, had some change row, dropped=all    emptied (+changes)
+  S5 aggregate came back NULL     nothing + heartbeat        unreadable
+  S6 holds tables, NOT named      nothing, NO heartbeat      not_seen
+Row S4 is the ONLY path from "no tables" to a recorded drop, and it is a direct
+observation under a verified scope: the catalog says this schema exists here and
+holds nothing (the read is driven off pg_namespace / information_schema.schemata,
+not off the table list). S5 is an empty STRING, not '{}': the aggregate returned
+NULL, i.e. we do not know, and "we do not know" may not become a DROP claim.
+R1 is why there is no row for a PARTIAL read: both transports assemble the whole
+result before the collector sees any of it (the Data API builds the response
+server-side; shared/mysql_direct.py builds `records` from one cur.fetchall()), so
+a session that dies mid-read raises instead of returning a short row set. Driven
+on a real server: a read against a nonexistent database raised and the snapshot
+count was identical before and after.
+
+STATES THAT REMAIN GENUINELY INDISTINGUISHABLE. All of them land in S6 or in a
+reader caveat, never in a resolved answer:
+  * DROP SCHEMA (PG) / DROP DATABASE (MySQL) vs a read that could not reach the
+    schema -> S6, reported as unknown, NOT as a drop. This is the deliberate cost.
+  * MySQL only: a REVOKE of every privilege on a database hides it from
+    information_schema.schemata, which is byte-identical to DROP DATABASE -> S6.
+    PostgreSQL is NOT exposed to this: measured, an unprivileged role gets the
+    identical PG_SCHEMA_SQL result as the superuser (billing/1, core/2, public/1)
+    while `SELECT FROM core.users` raises permission denied.
+  * MySQL only: a table-level REVOKE hides individual tables from
+    information_schema.tables, which is byte-identical to DROP TABLE, so it lands
+    in an ordinary S2 diff's `dropped` list. Not closable without a privilege
+    probe; both readers therefore carry a standing caveat on every `dropped`
+    list saying it is relative to what the collecting identity could see.
+  * a schema whose only history predates schema_v27 (read_scope NULL) is not
+    comparable to anything: named -> S3, one re-baseline, once. NOT named -> S6
+    like any other, because the not-seen set is taken from the latest stored row
+    per schema whatever scope it carries; the readers additionally report it off a
+    NULL last_seen_at. Nothing is deleted and nothing is claimed.
+  * a registry edit that repoints a registered cluster_id at a DIFFERENT server
+    whose database has the same name AND the same oid. Not distinguishable here,
+    and not specific to this collector: every producer in the product keys its
+    history on cluster_id.
 """
 
 from datetime import datetime, timezone
@@ -132,8 +183,14 @@ import json
 # the schemas the read returned, so a schema that lost its LAST table used to go
 # invisible: its final blob stayed the newest row forever and all three readers
 # kept serving the dropped tables as existing. Driving off pg_namespace with a
-# LEFT JOIN gives that schema a row carrying '{}', which is a DIRECT OBSERVATION
-# ("this schema exists and has no tables") rather than an inference from absence.
+# LEFT JOIN gives that schema a row carrying '{}', which is the DIRECT
+# OBSERVATION row S4 rests on.
+#
+# THE 4TH COLUMN IS THE READ'S OWN SCOPE. current_database() alone would treat
+# another cluster's same-named database as comparable history; the oid is
+# preserved by a physical restore (same data) and differs for a separately
+# created database. It is a scalar subquery with no outer column reference, so it
+# is legal beside the GROUP BY and PostgreSQL evaluates it once.
 PG_SCHEMA_SQL = """
 WITH cols AS (
   SELECT n.nspname AS schema_name, c.relname AS table_name, a.attname AS column_name
@@ -155,7 +212,9 @@ SELECT ns.nspname AS schema_name,
        COUNT(p.table_name)::bigint AS table_count,
        COALESCE(jsonb_object_agg(p.table_name, p.cols)
                   FILTER (WHERE p.table_name IS NOT NULL),
-                '{}'::jsonb)::text AS tables_json
+                '{}'::jsonb)::text AS tables_json,
+       (SELECT current_database() || '/' || d.oid::text
+          FROM pg_database d WHERE d.datname = current_database()) AS read_scope
 FROM pg_namespace ns
 LEFT JOIN per_table p ON p.schema_name = ns.nspname
 WHERE ns.nspname NOT IN ('pg_catalog', 'information_schema')
@@ -173,10 +232,19 @@ ORDER BY ns.nspname
 # It is a UNION and not a LEFT JOIN because JSON_OBJECTAGG rejects a NULL member
 # name (ER_JSON_DOCUMENT_NULL_KEY), so the outer-joined empty row would abort the
 # whole statement instead of aggregating to an empty object.
+#
+# SCOPE IS CURRENT_USER(), NOT DATABASE(). This catalog is server-wide: the read
+# returns every database the connection can see whatever it is connected to, so
+# the connected database says nothing about what the read covered. What DOES
+# filter it is privileges, and those hang off the reading identity. CURRENT_USER()
+# is also stable across a failover and across a db_name config change, where
+# @@server_uuid and DATABASE() would each churn the scope and abandon comparable
+# history for no reason.
 MYSQL_SCHEMA_SQL = """
 SELECT t.TABLE_SCHEMA AS schema_name,
        COUNT(*) AS table_count,
-       JSON_OBJECTAGG(t.TABLE_NAME, t.cols) AS tables_json
+       JSON_OBJECTAGG(t.TABLE_NAME, t.cols) AS tables_json,
+       CURRENT_USER() AS read_scope
 FROM (
   SELECT c.TABLE_SCHEMA, c.TABLE_NAME, JSON_ARRAYAGG(c.COLUMN_NAME) AS cols
   FROM information_schema.columns c
@@ -188,7 +256,8 @@ FROM (
 ) t
 GROUP BY t.TABLE_SCHEMA
 UNION ALL
-SELECT s.SCHEMA_NAME AS schema_name, 0 AS table_count, JSON_OBJECT() AS tables_json
+SELECT s.SCHEMA_NAME AS schema_name, 0 AS table_count, JSON_OBJECT() AS tables_json,
+       CURRENT_USER() AS read_scope
 FROM information_schema.schemata s
 WHERE s.SCHEMA_NAME NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
   AND NOT EXISTS (
@@ -198,40 +267,74 @@ WHERE s.SCHEMA_NAME NOT IN ('mysql', 'performance_schema', 'information_schema',
 ORDER BY schema_name
 """
 
+# COMPARABILITY, not just recency: a blob captured under another scope is not this
+# read's previous state, so it must not be diffed against. No match -> baseline.
+# `read_scope = :read_scope` also excludes the NULL-scope rows written before
+# schema_v27, which is deliberate: their scope is unknown, so they are not
+# comparable either, and the first scope-known read re-baselines the schema once.
 PREV_SQL = (
     "SELECT tables_json::text FROM schema_snapshots "
     "WHERE cluster_id = :cluster_id AND schema_name = :schema_name "
+    "  AND read_scope = :read_scope "
     "ORDER BY snapshot_time DESC LIMIT 1"
 )
 
-# Schemas this cluster has a NON-EMPTY latest snapshot for. Names only, no blobs:
-# prev blobs stay a per-schema fetch so a cluster with several 2,000-table schemas
-# cannot blow the cache's own 1 MiB Data API response on the prefetch.
-# `tables_json <> '{}'` keeps a long-dropped schema from being re-examined on all
-# 288 runs a day forever: once its emptiness is recorded, it is no longer tracked.
-TRACKED_SQL = (
-    "SELECT schema_name FROM ("
-    "  SELECT DISTINCT ON (schema_name) schema_name, tables_json"
+# The latest row per schema for this cluster: its scope, and whether it is still
+# serving tables to the readers. Two things come out of one statement:
+#   * the cluster's ESTABLISHED scope (the newest known one), which decides
+#     whether this read is comparable at all;
+#   * which schemas would keep serving tables if this read does not name them,
+#     which is what `not_seen` reports as an unknown.
+# Names and flags only, no blobs: prefetching every blob could blow the cache's
+# own 1 MiB Data API response on a cluster with several 2,000-table schemas.
+# 'y'/'n' rather than a boolean column on purpose: the Data API hands a boolean
+# back as booleanValue and a text column as stringValue, and every other field
+# this collector reads goes through _str.
+LATEST_SQL = (
+    "SELECT schema_name, read_scope, "
+    "       CASE WHEN tables_json <> '{}'::jsonb THEN 'y' ELSE 'n' END AS holds_tables "
+    "FROM ("
+    "  SELECT DISTINCT ON (schema_name) schema_name, read_scope, tables_json, snapshot_time"
     "  FROM schema_snapshots WHERE cluster_id = :cluster_id"
     "  ORDER BY schema_name, snapshot_time DESC"
-    ") latest WHERE tables_json <> '{}'::jsonb"
+    ") latest ORDER BY snapshot_time DESC"
 )
 
 # ON CONFLICT DO NOTHING: two runs landing on the same run_ts (a retry) must not
-# raise. diff_from_previous_json stays NULL for the FIRST snapshot of a schema:
-# a baseline is not a change, and inventing a diff against nothing would report
-# every existing table as newly ADDED.
+# raise. diff_from_previous_json stays NULL for the FIRST snapshot of a schema
+# under a scope: a baseline is not a change, and inventing a diff against nothing
+# would report every existing table as newly ADDED.
 #
 # NULLIF(...)::jsonb, NOT `CASE WHEN :diff_json = '' THEN NULL ELSE :diff_json::jsonb END`.
 # PostgreSQL constant-folds the cast in the branch it does NOT take, so the CASE
 # form raises `invalid input syntax for type json` on every baseline insert.
 # Caught by the real-engine test; a mock cache would have passed it forever.
+#
+# last_seen_at is stamped from the same run timestamp: an inserted row was, by
+# construction, observed in this cycle.
 INSERT_SQL = (
     "INSERT INTO schema_snapshots "
-    "(cluster_id, snapshot_time, schema_name, tables_json, diff_from_previous_json) "
+    "(cluster_id, snapshot_time, schema_name, tables_json, diff_from_previous_json, "
+    " read_scope, last_seen_at) "
     "VALUES (:cluster_id, :snapshot_time::timestamptz, :schema_name, :tables_json::jsonb, "
-    " NULLIF(:diff_json, '')::jsonb) "
+    " NULLIF(:diff_json, '')::jsonb, :read_scope, :snapshot_time::timestamptz) "
     "ON CONFLICT (cluster_id, schema_name, snapshot_time) DO NOTHING"
+)
+
+# HEARTBEAT. The schema was named by a scope-matching read and nothing changed, so
+# there is no row to write and there IS a fact to record: it still exists. Without
+# it, "unchanged since March" and "not seen since March" are the same two rows in
+# the table, which is the ambiguity every previous pass resolved to "dropped".
+# Scope-filtered like PREV_SQL: a read under another scope confirms nothing, and
+# matching 0 rows there is exactly the intended outcome.
+SEEN_SQL = (
+    "UPDATE schema_snapshots SET last_seen_at = :snapshot_time::timestamptz "
+    "WHERE cluster_id = :cluster_id AND schema_name = :schema_name "
+    "  AND read_scope = :read_scope "
+    "  AND snapshot_time = (SELECT MAX(x.snapshot_time) FROM schema_snapshots x "
+    "                       WHERE x.cluster_id = :cluster_id "
+    "                         AND x.schema_name = :schema_name "
+    "                         AND x.read_scope = :read_scope)"
 )
 
 
@@ -239,20 +342,33 @@ def _str(field):
     return field.get("stringValue", "") if not field.get("isNull") else ""
 
 
-def _prev_blob(cache_execute, cluster_id, schema_name):
-    """Latest stored blob for this (cluster, schema), or None when the schema has
-    never been snapshotted. None means BASELINE, and it is deliberately distinct
-    from '{}' (a real, empty schema)."""
-    resp = cache_execute(PREV_SQL, {"cluster_id": cluster_id, "schema_name": schema_name})
+def _prev_blob(cache_execute, cluster_id, schema_name, read_scope):
+    """Latest stored blob for this (cluster, schema) UNDER THIS SCOPE, or None when
+    there is none. None means BASELINE, and it is deliberately distinct from '{}'
+    (a real, empty schema)."""
+    resp = cache_execute(PREV_SQL, {"cluster_id": cluster_id, "schema_name": schema_name,
+                                    "read_scope": read_scope})
     records = (resp or {}).get("records") or []
     if not records or not records[0]:
         return None
     return _str(records[0][0])
 
 
-def _tracked_schemas(cache_execute, cluster_id):
-    resp = cache_execute(TRACKED_SQL, {"cluster_id": cluster_id})
-    return [_str(rec[0]) for rec in ((resp or {}).get("records") or []) if rec]
+def _stored_state(cache_execute, cluster_id):
+    """{schema_name: (scope, holds_tables)} from the latest row of each schema.
+
+    The scope is "" for rows written before schema_v27: unknown, therefore not
+    comparable, but also not a reason to freeze the cluster out of collection
+    forever, so the first read under a known scope adopts it.
+    """
+    resp = cache_execute(LATEST_SQL, {"cluster_id": cluster_id})
+    state = {}
+    for rec in ((resp or {}).get("records") or []):
+        if not rec:
+            continue
+        name, scope, holds = _str(rec[0]), _str(rec[1]), _str(rec[2])
+        state[name] = (scope, holds == "y")
+    return state
 
 
 def _collect(rds_data_client, cache_execute, target_cluster_arn, target_secret_arn,
@@ -266,81 +382,129 @@ def _collect(rds_data_client, cache_execute, target_cluster_arn, target_secret_a
     )
 
     when = snapshot_ts or datetime.now(timezone.utc).isoformat()
-    written = 0
-    baselines = 0
-    unchanged = 0
-    unreadable = 0
-    # PASS 1 decides nothing. The destructive branches below need to know what
-    # the WHOLE read said before any of them may write, which is exactly what the
-    # previous version could not do: it wrote each schema as it walked the rows.
-    seen = {}  # schema_name -> parsed table map, readable rows only (row 1/2/3/4/5)
+    # PASS 1 reads the catalog rows and decides nothing. What the WHOLE read said,
+    # including the scope it says it covered, has to be known before anything may
+    # be written.
+    seen = {}  # schema_name -> parsed table map, readable rows only (S1..S4)
     named = set()  # every schema the catalog NAMED, unreadable aggregate included
+    read_scope = ""
+    unreadable = 0
     for rec in resp.get("records", []):
         # rec[1] is table_count. Nothing reads it: the stored blob is the parsed
         # map and its len() is the honest count. It stays in both statements
-        # because rec[2] is positional, so dropping the column moves tables_json.
+        # because rec[2] and rec[3] are positional.
         schema_name = _str(rec[0])
         raw = _str(rec[2])
+        if not read_scope and len(rec) > 3:
+            read_scope = _str(rec[3])
         if schema_name:
             named.add(schema_name)
         if not schema_name or not raw:
-            # Row 6. Empty STRING, not '{}'. '{}' means "read fine, no tables"
-            # and IS stored (that is the dropped-last-table case); "" means the
+            # S5. Empty STRING, not '{}'. '{}' means "read fine, no tables" and IS
+            # stored (that is the emptied-schema observation); "" means the
             # aggregate returned NULL, i.e. we do not know, and inventing a mass
-            # DROP out of "we do not know" is worse than storing nothing. A
-            # schema we could not read is also not a schema that is gone, so it
-            # stays in `named` and out of the vanished pass.
+            # DROP out of "we do not know" is worse than storing nothing. A schema
+            # we could not read is also not a schema that is gone, so it stays in
+            # `named` and out of the not-seen set.
             unreadable += 1
             continue
         seen[schema_name] = parse_tables(raw)
 
-    tracked = set(_tracked_schemas(cache_execute, cluster_id))
-    # THE one signal both destructive branches hang off. See the module
-    # docstring's state table: `not named` (the previous guard) is unreachable on
-    # PostgreSQL because `public` exists in every database, so a successful read
-    # is never empty and a wrong-database read looked exactly like a mass DROP.
-    corroborated = any(seen.get(s) for s in tracked)
-    # Absent = tracked but not even NAMED by the read: DROP SCHEMA (or, on MySQL,
-    # DROP DATABASE). Pass 1 cannot cover it, because a dropped schema produces
-    # no row to iterate.
-    absent = sorted(s for s in tracked if s not in named)
-    # Row 4 vs row 5. With a single tracked schema there is nothing left to
-    # corroborate WITH, so a direct '{}' observation is trusted and logged as
-    # such; with 2+, an emptied schema that nothing corroborates is treated as a
-    # scope change and not written.
-    trust_empty = corroborated or len(tracked) < 2
+    stored = _stored_state(cache_execute, cluster_id)
+    out = {
+        "cluster_id": cluster_id,
+        "read_scope": read_scope,
+        "scope_status": "matched",
+        "schemas_named": len(named),
+        "schemas_seen": len(seen),
+        "snapshots_written": 0,
+        "baselines": 0,
+        "changes": 0,
+        "emptied": 0,
+        "unchanged": 0,
+        "unreadable": unreadable,
+        "heartbeats": 0,
+        "not_seen": 0,
+        "not_seen_schemas": [],
+    }
 
-    vanished = 0
-    vanished_unconfirmed = 0
-    emptied_unconfirmed = 0
-    uncorroborated_writes = 0
+    # R2. No row means no scope, and with no scope nothing in this read can be
+    # compared to anything stored. PostgreSQL only reaches this by having no
+    # non-system schema at all; MySQL reaches it when the identity can see no
+    # database. Either way: write nothing, and let the readers report the cluster
+    # as unconfirmed off the last_seen_at that stops advancing.
+    if not read_scope:
+        out["scope_status"] = "scope_unknown"
+        print(f"[{cluster_id}] schema_snapshot: the catalog read named no schema and "
+              "reported no scope, so nothing was compared or written")
+        return out
 
-    for schema_name, after in seen.items():
-        prev_raw = _prev_blob(cache_execute, cluster_id, schema_name)
+    # R3. THE guard the four previous passes were reaching for, and it is not a
+    # predicate on the read's contents: the read says where it was, and that is
+    # either the ground the stored history was recorded from or it is not.
+    #
+    # NOT ONE BASELINE is written on a mismatch either, and that is measured, not
+    # cautious: the dashboard panel (api/dashboard/handler.py
+    # _SCHEMA_SNAPSHOT_PAIRS_SQL) recomputes its own diff from the OLDEST and
+    # NEWEST blob per schema and has no notion of scope. Driven with this branch
+    # disabled, one baseline row written from the wrong database made that panel
+    # report dropped [(public, audit)] and get_schema_diff totals dropped 1.
+    #
+    # EVERY known scope in the history, not just the newest: with two scopes
+    # present, taking the newest would re-baseline the other one's schemas under
+    # this scope and hand the panel that same cross-scope pair. This collector
+    # never writes a second scope, so the set is normally empty or a single match;
+    # checking all of it keeps that an invariant rather than an assumption.
+    foreign = sorted({sc for sc, _holds in stored.values() if sc and sc != read_scope})
+    if foreign:
+        out["scope_status"] = "scope_mismatch"
+        out["not_seen_schemas"] = sorted(s for s, (sc, holds) in stored.items() if holds)
+        out["not_seen"] = len(out["not_seen_schemas"])
+        print(f"[{cluster_id}] schema_snapshot: this read covered '{read_scope}' but the "
+              f"stored history was recorded from {foreign}, so the two are not "
+              f"comparable and NOTHING was written ({out['not_seen']} schema(s) left "
+              "unconfirmed). Point the collector back at the database the history "
+              "came from, or delete this cluster's schema_snapshots rows to "
+              "re-baseline against the new one")
+        return out
+    if not any(sc for sc, _holds in stored.values()):
+        # R4. First read under a known scope (a new cluster, or a cluster whose
+        # only rows predate schema_v27). Everything baselines under this scope.
+        out["scope_status"] = "adopted"
+
+    for schema_name, after in sorted(seen.items()):
+        # The comparison partner is the schema's LATEST row, and only if that row
+        # was captured under this scope. Asking PREV_SQL for the newest row that
+        # merely HAPPENS to carry this scope would compare against a row that is
+        # not the current state whenever a newer row exists without one, which a
+        # rolling deploy can produce (an old Lambda version writing after a new
+        # one). No comparable partner means baseline, never a diff.
+        prev_scope = stored.get(schema_name, ("", False))[0]
+        prev_raw = (_prev_blob(cache_execute, cluster_id, schema_name, read_scope)
+                    if prev_scope == read_scope else None)
         if prev_raw is None:
-            diff_json = ""  # -> NULL: baseline, not a change
-            baselines += 1
+            diff_json = ""  # -> NULL: baseline, not a change (S3)
+            out["baselines"] += 1
         else:
             # Compare the PARSED maps, never the raw text: MySQL's JSON_ARRAYAGG
             # has no ORDER BY, so the same schema can serialize its column arrays
             # in a different order run to run. parse_tables sorts.
             diff = compute_diff(parse_tables(prev_raw), after)
             if diff_is_empty(diff):
-                unchanged += 1  # row 1
+                out["unchanged"] += 1  # S1
+                _heartbeat(cache_execute, out, cluster_id, schema_name, read_scope, when)
                 continue
-            if not after and not trust_empty:
-                emptied_unconfirmed += 1  # row 5
-                print(f"[{cluster_id}] schema_snapshot: '{schema_name}' came back with "
-                      f"0 tables and no other tracked schema of {len(tracked)} still "
-                      "holds one, so nothing was stored (a read that lost the scope "
-                      "looks exactly like this)")
-                continue
-            if not after and not corroborated:
-                uncorroborated_writes += 1  # row 4
-                print(f"[{cluster_id}] schema_snapshot: '{schema_name}' is the only "
-                      "tracked schema and came back with 0 tables; recorded as "
-                      "dropped on the catalog's word alone (nothing left to "
-                      "corroborate the read's scope with)")
+            out["changes"] += 1  # S2
+            if not after:
+                # S4, the only path from "no tables" to a recorded drop. The
+                # catalog named this schema under a scope that matches the stored
+                # history's, and reported it holds nothing. That is an
+                # observation, not an inference from absence.
+                out["emptied"] += 1
+                print(f"[{cluster_id}] schema_snapshot: '{schema_name}' exists in "
+                      f"'{read_scope}' and holds no table; recording "
+                      f"{len(diff['dropped'])} dropped table(s) from that direct "
+                      "observation")
             diff_json = json.dumps(diff)
 
         cache_execute(INSERT_SQL, {
@@ -351,52 +515,42 @@ def _collect(rds_data_client, cache_execute, target_cluster_arn, target_secret_a
             # canonical and the next run's text comparison is stable.
             "tables_json": json.dumps(after),
             "diff_json": diff_json,
+            "read_scope": read_scope,
         })
-        written += 1
+        out["snapshots_written"] += 1
         print(f"[{cluster_id}] schema_snapshot stored for '{schema_name}' "
-              f"({len(after)} tables, {'baseline' if not diff_json else 'change'})")
+              f"({len(after)} tables, {'baseline' if not diff_json else 'change'}, "
+              f"scope '{read_scope}')")
 
-    # Rows 7 and 8. This is the one INFERENCE on the surface, so unlike row 4 it
-    # never runs uncorroborated: absence is evidence of a drop only if the read
-    # is evidence of anything at all.
-    if absent and not corroborated:
-        vanished_unconfirmed = len(absent)
-        print(f"[{cluster_id}] schema_snapshot: {vanished_unconfirmed} tracked "
-              f"schema(s) {absent} absent from the catalog read, but no tracked "
-              "schema came back holding a table, so they are left as-is rather "
-              "than recorded as dropped (a wrong database, a dead session or a "
-              "privilege-filtered catalog is indistinguishable from a mass drop)")
-        absent = []
-    for schema_name in absent:
-        prev_raw = _prev_blob(cache_execute, cluster_id, schema_name)
-        diff = compute_diff(parse_tables(prev_raw), {})
-        if diff_is_empty(diff):
-            continue
-        cache_execute(INSERT_SQL, {
-            "cluster_id": cluster_id,
-            "snapshot_time": when,
-            "schema_name": schema_name,
-            "tables_json": "{}",
-            "diff_json": json.dumps(diff),
-        })
-        written += 1
-        vanished += 1
-        print(f"[{cluster_id}] schema_snapshot stored for '{schema_name}' "
-              f"(schema absent from the catalog, {len(diff['dropped'])} table(s) dropped)")
+    # S5's heartbeat: named but unusable blob. Existence under this scope IS
+    # confirmed; only the content is not, and snapshot_time already dates that.
+    for schema_name in sorted(named - set(seen)):
+        _heartbeat(cache_execute, out, cluster_id, schema_name, read_scope, when)
 
-    return {
-        "cluster_id": cluster_id,
-        "schemas_seen": len(seen),
-        "snapshots_written": written,
-        "baselines": baselines,
-        "unchanged": unchanged,
-        "unreadable": unreadable,
-        "corroborated": corroborated,
-        "vanished": vanished,
-        "vanished_unconfirmed": vanished_unconfirmed,
-        "emptied_unconfirmed": emptied_unconfirmed,
-        "uncorroborated_writes": uncorroborated_writes,
-    }
+    # S6. The schemas the readers are still serving tables for that this read did
+    # not name. NOTHING is written and nothing is concluded: a DROP SCHEMA and a
+    # read that could not reach the schema produce the identical evidence here, so
+    # this is reported as an unknown and both readers surface it as one.
+    out["not_seen_schemas"] = sorted(s for s, (sc, holds) in stored.items()
+                                     if holds and s not in named)
+    out["not_seen"] = len(out["not_seen_schemas"])
+    if out["not_seen"]:
+        print(f"[{cluster_id}] schema_snapshot: {out['not_seen']} schema(s) "
+              f"{out['not_seen_schemas']} were not named by this read of "
+              f"'{read_scope}' and are left as-is. They are reported as "
+              "unconfirmed, NOT as dropped: absence cannot tell a DROP SCHEMA "
+              "apart from a read that did not reach them")
+    return out
+
+
+def _heartbeat(cache_execute, out, cluster_id, schema_name, read_scope, when):
+    """Record that this schema was still there. The counter is statements ISSUED,
+    not rows matched: a schema the read named for the first time has no row under
+    this scope yet, so its UPDATE matches nothing and its INSERT (which stamps
+    last_seen_at itself) is what records the observation."""
+    cache_execute(SEEN_SQL, {"cluster_id": cluster_id, "schema_name": schema_name,
+                             "read_scope": read_scope, "snapshot_time": when})
+    out["heartbeats"] += 1
 
 
 def collect_pg_schema_snapshot(rds_data_client, cache_execute, target_cluster_arn,

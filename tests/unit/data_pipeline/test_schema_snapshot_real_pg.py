@@ -35,8 +35,21 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[3]
-_MIGRATION = _ROOT / "data-pipeline" / "schema_migrator" / "sql" / "schema_v26.sql"
+_SQL_DIR = _ROOT / "data-pipeline" / "schema_migrator" / "sql"
+_MIGRATION = _SQL_DIR / "schema_v26.sql"
+# v27 adds read_scope + last_seen_at. Applied in the migrator's own order (v26
+# then v27) everywhere v26 is, because the shipped collector reads both columns.
+_MIGRATION_V27 = _SQL_DIR / "schema_v27.sql"
+
+
 _COLLECTORS = _ROOT / "data-pipeline" / "etl_collector" / "collectors"
+
+
+def _migrate(pg):
+    pg.raw(_MIGRATION.read_text())
+    pg.raw(_MIGRATION_V27.read_text())
+
+
 
 sys.path.insert(0, str(_ROOT / "mcp-servers"))
 sys.path.insert(0, str(_COLLECTORS.parent))
@@ -215,7 +228,7 @@ def _cache_execute(api):
 
 
 def test_migration_applies_and_table_matches_reader_contract(pg):
-    pg.raw(_MIGRATION.read_text())
+    _migrate(pg)
     cols = {r[0]: r[1] for r in pg.raw(
         "SELECT column_name, data_type FROM information_schema.columns "
         "WHERE table_name = 'schema_snapshots' ORDER BY column_name")}
@@ -225,6 +238,11 @@ def test_migration_applies_and_table_matches_reader_contract(pg):
         "schema_name": "text",
         "snapshot_time": "timestamp with time zone",
         "tables_json": "jsonb",
+        # v27. read_scope is what makes an ABSENCE interpretable at all;
+        # last_seen_at is what separates "unchanged for months" from "not seen for
+        # months", which is the pair four passes kept resolving to "dropped".
+        "read_scope": "text",
+        "last_seen_at": "timestamp with time zone",
     }
     # The collector's ON CONFLICT target and the readers' lookup key.
     idx = pg.raw("SELECT indexdef FROM pg_indexes WHERE tablename = 'schema_snapshots'")
@@ -232,7 +250,7 @@ def test_migration_applies_and_table_matches_reader_contract(pg):
     assert "UNIQUE" in defs and "cluster_id, schema_name, snapshot_time" in defs
     assert "brin" in defs  # purge support
     # Re-applying must be a no-op: the migrator re-runs every file every deploy.
-    pg.raw(_MIGRATION.read_text())
+    _migrate(pg)
 
 
 # ===========================================================================
@@ -241,7 +259,7 @@ def test_migration_applies_and_table_matches_reader_contract(pg):
 
 
 def test_collector_sql_runs_on_real_catalog_and_stores_baseline(pg):
-    pg.raw(_MIGRATION.read_text())
+    _migrate(pg)
     pg.raw("DELETE FROM schema_snapshots")
     pg.raw("DROP SCHEMA IF EXISTS app CASCADE; CREATE SCHEMA app")
     pg.raw("CREATE TABLE app.users (id int, email text, name text)")
@@ -392,11 +410,31 @@ def test_zero_snapshots_is_not_reported_as_no_changes(pg):
     assert skipped == ["schema_changes"]
 
 
+def _confirmed_just_now(pg, cluster_id):
+    """Stamp this cluster's rows as observed NOW.
+
+    The fixtures write snapshot_ts values in the past, so the collector's own
+    last_seen_at is hours old and the readers correctly call the cluster's
+    observation stale. A test that wants the CONFIRMED path has to say so
+    explicitly rather than have the 15-minute bar decided by the fixture dates.
+    """
+    pg.raw(f"UPDATE schema_snapshots SET last_seen_at = NOW() "
+           f"WHERE cluster_id = '{cluster_id}'")
+
+
 def test_no_changes_in_window_still_reports_coverage(pg):
-    """Two+ snapshots exist but none in the asked-about window: this IS a real
-    negative, and it must be distinguishable from the two states above."""
+    """Two+ snapshots exist but none in the asked-about window. That is a real
+    negative ONLY if every schema was also confirmed to still be there; otherwise
+    it covers just the part of the cluster the collector could see."""
+    stale = sh.get_schema_history_impl(pg, cluster_id="prod-pg-1", days=1)
+    assert stale["status"] == "partial"
+    assert stale["observation"]["status"] == "stale"
+
+    _confirmed_just_now(pg, "prod-pg-1")
     hist = sh.get_schema_history_impl(pg, cluster_id="prod-pg-1", days=1)
     assert hist["status"] == "no_changes"
+    assert hist["observation"]["status"] == "fresh"
+    assert hist["observation"]["unconfirmed_schemas"] == []
     assert hist["collection_coverage"]["snapshots_stored"] >= 2
     assert hist["collection_coverage"]["first_snapshot"]
 
@@ -441,7 +479,8 @@ def _run_collector(pg, cluster_id, ts):
 
 def _latest(pg, cluster_id, schema_name):
     return pg.execute(
-        "SELECT tables_json::text AS t, diff_from_previous_json::text AS d "
+        "SELECT tables_json::text AS t, diff_from_previous_json::text AS d, "
+        "       read_scope, last_seen_at::text AS seen "
         "FROM schema_snapshots WHERE cluster_id = :c AND schema_name = :s "
         "ORDER BY snapshot_time DESC LIMIT 1",
         {"c": cluster_id, "s": schema_name}).rows[0]
@@ -461,7 +500,8 @@ def test_dropping_the_last_table_is_seen_by_all_three_readers(pg):
     pg.raw("DROP TABLE zeroed.only_table")
     out = _run_collector(pg, "zero-1", "2026-07-20T00:05:00+00:00")
     assert out["snapshots_written"] == 1
-    assert out["vanished"] == 0  # the schema still exists; nothing was inferred
+    assert out["emptied"] == 1   # DIRECTLY observed: named here, holds nothing
+    assert out["not_seen"] == 0  # nothing was inferred from an absence
     row = _latest(pg, "zero-1", "zeroed")
     assert json.loads(row["t"]) == {}
     assert json.loads(row["d"])["dropped"] == ["only_table"]
@@ -485,28 +525,63 @@ def test_dropping_the_last_table_is_seen_by_all_three_readers(pg):
     assert _run_collector(pg, "zero-1", "2026-07-20T00:10:00+00:00")["snapshots_written"] == 0
 
 
-def test_a_dropped_schema_is_recorded_as_dropped(pg):
-    """DROP SCHEMA leaves no row to iterate at all, so this one IS inferred from
-    absence against TRACKED_SQL."""
-    pg.raw("DROP SCHEMA IF EXISTS wiped CASCADE; CREATE SCHEMA wiped")
-    pg.raw("CREATE TABLE wiped.t1 (id int); CREATE TABLE wiped.t2 (id int)")
-    assert _run_collector(pg, "wipe-1", "2026-07-21T00:00:00+00:00")["baselines"] >= 1
+def test_a_dropped_schema_is_reported_unknown_and_never_as_a_drop(pg):
+    """DROP SCHEMA leaves no row to iterate at all. So does a read that could not
+    reach the schema, and nothing inside the read separates the two, so the drop
+    is NOT recorded. THIS TEST STATES THE COST: a real DROP SCHEMA stops being
+    reported as a drop and becomes an explicit unknown instead.
 
-    pg.raw("DROP SCHEMA wiped CASCADE")
-    out = _run_collector(pg, "wipe-1", "2026-07-21T00:05:00+00:00")
-    assert out["vanished"] == 1
-    assert out["vanished_unconfirmed"] == 0
-    row = _latest(pg, "wipe-1", "wiped")
-    assert json.loads(row["t"]) == {}
-    assert json.loads(row["d"])["dropped"] == ["t1", "t2"]
-    # And it stays dropped without filing a change row every 5 minutes.
-    assert _run_collector(pg, "wipe-1", "2026-07-21T00:10:00+00:00")["vanished"] == 0
+    Before this pass the same scenario wrote tables_json '{}' with a dropped diff,
+    which is why a read against the wrong database reported a mass DROP."""
+    pg.raw("DROP DATABASE IF EXISTS wipedb", db="postgres")
+    pg.raw("CREATE DATABASE wipedb", db="postgres")
+    pg.raw("CREATE SCHEMA keep; CREATE TABLE keep.t1 (id int)", db="wipedb")
+    pg.raw("CREATE SCHEMA wiped; CREATE TABLE wiped.t1 (id int);"
+           "CREATE TABLE wiped.t2 (id int)", db="wipedb")
+    assert _run_in(pg, "wipedb", "wipe-1", "2026-07-21T00:00:00+00:00")["baselines"] == 3
+    # A real change on ANOTHER schema, so the cluster has comparable history and
+    # the reader statuses below are about the unknown rather than about coverage.
+    pg.raw("CREATE TABLE keep.t2 (id int)", db="wipedb")
+    assert _run_in(pg, "wipedb", "wipe-1", "2026-07-21T00:05:00+00:00")["changes"] == 1
+    stored = _latest(pg, "wipe-1", "wiped")
+
+    pg.raw("DROP SCHEMA wiped CASCADE", db="wipedb")
+    out = _run_in(pg, "wipedb", "wipe-1", "2026-07-21T00:10:00+00:00")
+    assert out["not_seen"] == 1
+    assert out["not_seen_schemas"] == ["wiped"]
+    assert out["snapshots_written"] == 0
+    # Nothing was written, so what is stored is still the last thing observed.
+    assert _latest(pg, "wipe-1", "wiped") == stored
+
+    # The READERS are where the unknown has to show up, or it is not a state, it
+    # is a docstring.
+    diff = sd.get_schema_diff_impl(pg, cluster_id="wipe-1")
+    assert diff["observation"]["unconfirmed_schemas"] == ["wiped"]
+    assert "wiped" in diff["note"] and "확인 불가" in diff["note"]
+    assert diff["totals"]["dropped"] == 0
+    hist = sh.get_schema_history_impl(pg, cluster_id="wipe-1", days=36500)
+    assert hist["status"] == "ok"  # keep's real change is still reported
+    assert "wiped" in hist["note"] and "확인 불가" in hist["note"]
+    # An EMPTY window over the same cluster: never "no_changes" while a schema is
+    # unaccounted for.
+    empty_window = sh.get_schema_history_impl(pg, cluster_id="wipe-1", days=1)
+    assert empty_window["count"] == 0
+    assert empty_window["status"] == "partial"
+    assert "wiped" in empty_window["note"]
+    examined, skipped = {}, []
+    got = drc._collect_schema_changes(pg, "wipe-1", "2026-07-21T00:09:00+00:00",
+                                      "2026-07-21T00:11:00+00:00", None, 60,
+                                      examined, skipped)
+    assert got == []  # and no DDL signal is manufactured for the RCA either
+
+    # Repeating for 288 runs a day changes nothing and files nothing.
+    again = _run_in(pg, "wipedb", "wipe-1", "2026-07-21T00:15:00+00:00")
+    assert again["snapshots_written"] == 0 and again["not_seen"] == 1
 
 
 def test_a_catalog_read_that_returned_nothing_never_invents_a_mass_drop(pg):
-    """Zero schemas returned is what a wrong database, a dead session or a total
-    privilege loss looks like, and it cannot be told apart from "every schema was
-    dropped". Inventing a mass drop out of it would be worse than the bug."""
+    """Zero rows means the read reported no scope either, so nothing in it can be
+    compared with anything stored."""
     pg.raw("DROP SCHEMA IF EXISTS blind CASCADE; CREATE SCHEMA blind")
     pg.raw("CREATE TABLE blind.keeper (id int)")
     _run_collector(pg, "blind-1", "2026-07-22T00:00:00+00:00")
@@ -520,8 +595,8 @@ def test_a_catalog_read_that_returned_nothing_never_invents_a_mass_drop(pg):
     out = collect_pg_schema_snapshot(_NoSchemas(), _cache_execute(api), "arn:x", "arn:y",
                                      "blind-1", "postgres",
                                      snapshot_ts="2026-07-22T00:05:00+00:00")
-    assert out["vanished"] == 0
-    assert out["vanished_unconfirmed"] >= 1
+    assert out["scope_status"] == "scope_unknown"
+    assert out["read_scope"] == ""
     assert out["snapshots_written"] == 0
     assert _latest(pg, "blind-1", "blind")["t"] == before
 
@@ -693,16 +768,22 @@ def test_the_read_returns_the_complete_visible_set_or_raises(pg):
 
 
 def test_a_read_that_landed_in_the_wrong_database_records_no_drop(pg):
-    """THE round-4 CRITICAL, end to end. `target_db = resource.get("db_name",
+    """THE CRITICAL, fifth pass, end to end. `target_db = resource.get("db_name",
     "sampledb")` in etl_collector/handler.py makes this a live production path.
 
-    MEASURED on this same fixture with the guard as shipped in 156dda8: the
-    second run returned
-      {"schemas_seen": 1, "snapshots_written": 3, "vanished": 2,
-       "vanished_unconfirmed": 0}
-    and get_schema_diff, get_schema_history and diagnose_root_cause all reported
-    core dropped [orders, users], billing dropped [invoices], public dropped
-    [audit], status ok, nothing skipped.
+    The wrong database's `public` HOLDS A TABLE here, which is what `public`
+    normally does on PostgreSQL, and that is exactly what the pass-4 corroboration
+    predicate could not survive. MEASURED on this fixture against the pass-4 code:
+      {"corroborated": true, "schemas_seen": 1, "snapshots_written": 3,
+       "vanished": 2, "vanished_unconfirmed": 0}
+      get_schema_diff      status ok, totals dropped 4
+                           core [orders, users], billing [invoices], public [audit]
+      get_schema_history   count 3
+      diagnose_root_cause  3 DDL signals examined, skipped []
+    Note that `public`'s row was an ORDINARY diff (dropped [audit], added
+    [app_settings]), not the absence inference, so no predicate on absence could
+    have covered it. What covers both halves is comparability: the read says which
+    catalog it reached, and that is not the one the history came from.
     """
     pg.raw("DROP DATABASE IF EXISTS rightdb", db="postgres")
     pg.raw("DROP DATABASE IF EXISTS sampledb", db="postgres")
@@ -712,28 +793,40 @@ def test_a_read_that_landed_in_the_wrong_database_records_no_drop(pg):
            "CREATE TABLE core.orders (id int, total numeric)", db="rightdb")
     pg.raw("CREATE SCHEMA billing; CREATE TABLE billing.invoices (id int)", db="rightdb")
     pg.raw("CREATE TABLE public.audit (id int, note text)", db="rightdb")
+    pg.raw("CREATE TABLE public.app_settings (k text, v text)", db="sampledb")
 
     base = _run_in(pg, "rightdb", "wrongdb-1", "2026-07-25T00:00:00+00:00")
     assert base["baselines"] == 3
-    stored = {s: _latest(pg, "wrongdb-1", s)["t"] for s in ("core", "billing", "public")}
+    assert base["scope_status"] == "adopted"
+    assert base["read_scope"].startswith("rightdb/")
+    stored = {s: _latest(pg, "wrongdb-1", s) for s in ("core", "billing", "public")}
+    rows_before = int(pg.execute(
+        "SELECT COUNT(*) AS n FROM schema_snapshots WHERE cluster_id = 'wrongdb-1'",
+        {}).rows[0]["n"])
 
-    # `public` exists in EVERY PostgreSQL database, so the wrong database's read is
-    # NOT empty: this is precisely the shape the old guard could not see.
-    assert [r[0] for r in pg.raw(PG_SCHEMA_SQL, db="sampledb")] == ["public"]
+    # `public` exists in EVERY PostgreSQL database and here it holds a table, so
+    # the wrong database's read is neither empty nor uncorroborated.
+    assert [(r[0], r[1]) for r in pg.raw(PG_SCHEMA_SQL, db="sampledb")] == [("public", "1")]
 
     out = _run_in(pg, "sampledb", "wrongdb-1", "2026-07-25T00:05:00+00:00")
-    assert out["corroborated"] is False
+    assert out["scope_status"] == "scope_mismatch"
+    assert out["read_scope"].startswith("sampledb/")
     assert out["snapshots_written"] == 0
-    assert out["vanished"] == 0
-    assert out["vanished_unconfirmed"] == 2   # core + billing, absent
-    assert out["emptied_unconfirmed"] == 1    # public, observed empty, not trusted
-    assert {s: _latest(pg, "wrongdb-1", s)["t"] for s in stored} == stored
+    assert out["not_seen_schemas"] == ["billing", "core", "public"]
+    # NOT ONE ROW, not even a baseline for the schema it did see: the dashboard
+    # panel recomputes its own diff from the oldest and newest blob per schema and
+    # has no notion of scope.
+    assert int(pg.execute(
+        "SELECT COUNT(*) AS n FROM schema_snapshots WHERE cluster_id = 'wrongdb-1'",
+        {}).rows[0]["n"]) == rows_before
+    assert {s: _latest(pg, "wrongdb-1", s) for s in stored} == stored
 
     # END TO END: what the three readers hand a human is the last GOOD snapshot,
     # and not one word about a drop.
     diff = sd.get_schema_diff_impl(pg, cluster_id="wrongdb-1")
-    assert diff["status"] == "insufficient_snapshots"  # baselines only, still true
+    assert diff["totals"]["dropped"] == 0
     assert all(not d["dropped"] for d in diff.get("diffs", []))
+    assert diff["observation"]["status"] == "stale"  # nothing confirmed this cycle
     hist = sh.get_schema_history_impl(pg, cluster_id="wrongdb-1", days=36500)
     assert hist["count"] == 0
     examined, skipped = {}, []
@@ -747,17 +840,37 @@ def test_a_read_that_landed_in_the_wrong_database_records_no_drop(pg):
     # DDL that happened while the collector was looking at the wrong database.
     pg.raw("DROP TABLE billing.invoices", db="rightdb")
     heal = _run_in(pg, "rightdb", "wrongdb-1", "2026-07-25T00:10:00+00:00")
-    assert heal["corroborated"] is True
+    assert heal["scope_status"] == "matched"
     assert heal["snapshots_written"] == 1
+    assert heal["emptied"] == 1  # billing still exists in rightdb and holds nothing
     assert json.loads(_latest(pg, "wrongdb-1", "billing")["d"])["dropped"] == ["invoices"]
 
 
-def test_the_only_tracked_schema_going_to_zero_is_still_recorded(pg):
-    """Row 4 of the state table, the deliberate exception. With one tracked schema
-    there is nothing left to corroborate the read WITH, and refusing to record it
-    would put the single-schema cluster (the common shape) back to serving dropped
-    tables forever, which is the CRITICAL the previous tier fixed. Recorded, and
-    the payload says it was done without corroboration."""
+def test_a_same_named_database_on_another_server_is_not_comparable_either(pg):
+    """The database NAME alone would have let this through: drop and recreate
+    `rightdb` and it is a different database that happens to share a name, with no
+    relation to the stored history. The oid in the scope catches it."""
+    pg.raw("DROP DATABASE IF EXISTS twin", db="postgres")
+    pg.raw("CREATE DATABASE twin", db="postgres")
+    pg.raw("CREATE SCHEMA core; CREATE TABLE core.users (id int)", db="twin")
+    first = _run_in(pg, "twin", "twin-1", "2026-07-27T00:00:00+00:00")
+    assert first["baselines"] == 2  # core + public
+
+    pg.raw("DROP DATABASE twin", db="postgres")
+    pg.raw("CREATE DATABASE twin", db="postgres")  # same name, new oid, no core
+    out = _run_in(pg, "twin", "twin-1", "2026-07-27T00:05:00+00:00")
+    assert out["scope_status"] == "scope_mismatch"
+    assert out["snapshots_written"] == 0
+    assert json.loads(_latest(pg, "twin-1", "core")["t"]) == {"users": ["id"]}
+
+
+def test_the_only_schema_going_to_zero_is_still_recorded_as_a_drop(pg):
+    """The single-schema cluster is the common shape, and it must not go back to
+    serving dropped tables forever. It does not have to: the catalog NAMED the
+    schema and reported it holds nothing, under a scope that matches the stored
+    history. That is a direct observation and it needs no corroboration from
+    another schema (which is what the pass-4 predicate asked for, and what the
+    wrong database supplied)."""
     pg.raw("DROP DATABASE IF EXISTS solodb", db="postgres")
     pg.raw("CREATE DATABASE solodb", db="postgres")
     pg.raw("CREATE TABLE public.only_table (id int, payload text)", db="solodb")
@@ -765,19 +878,90 @@ def test_the_only_tracked_schema_going_to_zero_is_still_recorded(pg):
 
     pg.raw("DROP TABLE public.only_table", db="solodb")
     out = _run_in(pg, "solodb", "solo-1", "2026-07-26T00:05:00+00:00")
-    assert out["corroborated"] is False
-    assert out["uncorroborated_writes"] == 1
+    assert out["scope_status"] == "matched"
+    assert out["emptied"] == 1
     assert out["snapshots_written"] == 1
-    assert out["emptied_unconfirmed"] == 0
+    assert out["not_seen"] == 0
     assert json.loads(_latest(pg, "solo-1", "public")["t"]) == {}
     assert json.loads(_latest(pg, "solo-1", "public")["d"])["dropped"] == ["only_table"]
 
     hist = sh.get_schema_history_impl(pg, cluster_id="solo-1", days=36500)
     assert any(json.loads(c["changes"]).get("dropped") == ["only_table"]
                for c in hist["changes"])
+    # The same observation from ANOTHER scope records nothing at all.
+    pg.raw("DROP DATABASE IF EXISTS solodb2", db="postgres")
+    pg.raw("CREATE DATABASE solodb2", db="postgres")
+    elsewhere = _run_in(pg, "solodb2", "solo-1", "2026-07-26T00:07:00+00:00")
+    assert elsewhere["scope_status"] == "scope_mismatch"
+    assert elsewhere["snapshots_written"] == 0
     # And it is not re-filed on all 288 runs a day.
     assert _run_in(pg, "solodb", "solo-1", "2026-07-26T00:10:00+00:00")[
         "snapshots_written"] == 0
+
+
+def test_an_unchanged_run_records_that_the_schema_was_still_there(pg):
+    """The heartbeat, on the real engine. Without it snapshot_time is the only
+    date on the row, and for a stable schema that is months old, so "unchanged"
+    and "not seen" are the same two rows in the table."""
+    pg.raw("DROP DATABASE IF EXISTS beatdb", db="postgres")
+    pg.raw("CREATE DATABASE beatdb", db="postgres")
+    pg.raw("CREATE SCHEMA app; CREATE TABLE app.t (id int)", db="beatdb")
+    _run_in(pg, "beatdb", "beat-1", "2026-07-28T00:00:00+00:00")
+    first = _latest(pg, "beat-1", "app")
+    assert first["seen"] is not None
+
+    out = _run_in(pg, "beatdb", "beat-1", "2026-07-28T06:00:00+00:00")
+    assert out["snapshots_written"] == 0 and out["unchanged"] == 2
+    later = _latest(pg, "beat-1", "app")
+    # Same row (snapshot_time unchanged, store-on-change), newer observation.
+    assert later["t"] == first["t"]
+    assert later["seen"] > first["seen"]
+    assert int(pg.execute(
+        "SELECT COUNT(*) AS n FROM schema_snapshots WHERE cluster_id = 'beat-1'",
+        {}).rows[0]["n"]) == 2  # app + public, one row each
+
+    # A read from another scope confirms NOTHING, which is what makes a
+    # scope-frozen cluster visible to the readers at all.
+    pg.raw("DROP DATABASE IF EXISTS beatdb2", db="postgres")
+    pg.raw("CREATE DATABASE beatdb2", db="postgres")
+    _run_in(pg, "beatdb2", "beat-1", "2026-07-28T12:00:00+00:00")
+    assert _latest(pg, "beat-1", "app")["seen"] == later["seen"]
+
+
+def test_rows_written_before_the_migration_are_re_baselined_once(pg):
+    """An existing deployment's rows carry no scope, so they are not comparable to
+    anything. They must not freeze the cluster out of collection forever either:
+    the first read under a known scope adopts it and re-baselines. A baseline
+    carries a NULL diff, so no reader reports it as a DDL change."""
+    pg.raw("DROP DATABASE IF EXISTS legacydb", db="postgres")
+    pg.raw("CREATE DATABASE legacydb", db="postgres")
+    pg.raw("CREATE TABLE public.t1 (id int)", db="legacydb")
+    pg.raw("INSERT INTO schema_snapshots (cluster_id, snapshot_time, schema_name, "
+           "tables_json) VALUES ('legacy-1', '2026-01-01T00:00:00+00', 'public', "
+           """'{"t1": ["id"]}')""")
+
+    out = _run_in(pg, "legacydb", "legacy-1", "2026-07-29T00:00:00+00:00")
+    assert out["scope_status"] == "adopted"
+    assert out["baselines"] == 1 and out["changes"] == 0
+    rows = pg.execute(
+        "SELECT read_scope, diff_from_previous_json IS NULL AS baseline, "
+        "       last_seen_at IS NULL AS unseen FROM schema_snapshots "
+        "WHERE cluster_id = 'legacy-1' ORDER BY snapshot_time", {}).rows
+    assert [r["read_scope"] for r in rows] == [None, out["read_scope"]]
+    assert all(r["baseline"] is True for r in rows)
+    assert [r["unseen"] for r in rows] == [True, False]
+    # The re-baseline is not a change: get_schema_history has nothing to report.
+    assert sh.get_schema_history_impl(pg, cluster_id="legacy-1", days=36500)["count"] == 0
+
+    # A legacy schema the read does not name is reported as an unknown, not as a
+    # drop and not as an unchanged schema.
+    pg.raw("INSERT INTO schema_snapshots (cluster_id, snapshot_time, schema_name, "
+           "tables_json) VALUES ('legacy-1', '2026-01-01T00:00:00+00', 'ghost', "
+           """'{"gone": ["id"]}')""")
+    ghosted = _run_in(pg, "legacydb", "legacy-1", "2026-07-29T00:05:00+00:00")
+    assert ghosted["not_seen_schemas"] == ["ghost"]
+    diff = sd.get_schema_diff_impl(pg, cluster_id="legacy-1")
+    assert "ghost" in diff["observation"]["unconfirmed_schemas"]
 
 
 def test_the_rca_read_failing_is_not_reported_as_a_cluster_with_no_history(pg):
@@ -815,3 +999,35 @@ def test_explicit_miss_names_the_snapshots_that_do_exist(pg):
     # The implicit call on that same cluster still reports the baseline honestly.
     assert sd.get_schema_diff_impl(
         pg, cluster_id="probe-1")["status"] == "insufficient_snapshots"
+
+
+def test_the_comparison_partner_is_the_latest_row_or_nothing(pg):
+    """A NEWER row without a scope can exist: during a rolling deploy an old
+    Lambda version can insert after a new one has. Asking for "the newest row that
+    happens to carry my scope" would then compare against a row that is no longer
+    the current state. The partner is the LATEST row and only if its scope
+    matches, so this re-baselines instead."""
+    _migrate(pg)  # idempotent; this test does not depend on an earlier one running
+    pg.raw("DROP DATABASE IF EXISTS raced", db="postgres")
+    pg.raw("CREATE DATABASE raced", db="postgres")
+    pg.raw("CREATE SCHEMA app; CREATE TABLE app.t1 (id int)", db="raced")
+    scoped = _run_in(pg, "raced", "race-1", "2026-07-30T00:00:00+00:00")
+    assert scoped["baselines"] == 2
+
+    # The old version's write: no scope, and NEWER than the scoped row.
+    pg.raw("INSERT INTO schema_snapshots (cluster_id, snapshot_time, schema_name, "
+           "tables_json, diff_from_previous_json) VALUES ('race-1', "
+           """'2026-07-30T00:02:00+00', 'app', '{"t1": ["id"], "t2": ["id"]}', """
+           """'{"added": ["t2"], "dropped": [], "modified": [], "rename_candidates": []}')""")
+
+    out = _run_in(pg, "raced", "race-1", "2026-07-30T00:05:00+00:00")
+    assert out["scope_status"] == "matched"
+    assert out["baselines"] == 1  # app, re-baselined against nothing comparable
+    assert out["changes"] == 0    # NOT a diff against a row that is not the state
+    row = _latest(pg, "race-1", "app")
+    assert row["d"] is None and json.loads(row["t"]) == {"t1": ["id"]}
+    # And the heartbeat lands on the row the readers now call latest.
+    assert row["seen"] is not None
+    beat = _run_in(pg, "raced", "race-1", "2026-07-30T00:10:00+00:00")
+    assert beat["unchanged"] == 2 and beat["snapshots_written"] == 0
+    assert _latest(pg, "race-1", "app")["seen"] > row["seen"]

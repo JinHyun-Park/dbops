@@ -1,0 +1,52 @@
+-- v27: make a schema's ABSENCE from a catalog read interpretable, by recording
+-- WHAT THE READ WAS SCOPED TO and WHEN each schema was last actually observed.
+--
+-- WHY (five passes over one defect). schema_snapshot.py concluded "these tables
+-- were dropped" from a schema being ABSENT from the catalog read, and guarded
+-- that with four successive predicates computed from inside the read itself:
+-- "the read returned no rows" (unreachable on PostgreSQL: `public` exists in
+-- every database), then "no tracked schema came back holding a table" (satisfied
+-- by `public`, which normally DOES hold tables, so a read that landed in the
+-- WRONG DATABASE corroborated itself and every other tracked schema was filed as
+-- dropped). MEASURED on PostgreSQL 14.18 with the v26 code: a cluster collected
+-- from `rightdb` and read once against `sampledb` (the literal db_name fallback
+-- in etl_collector/handler.py) returned
+--   {"corroborated": true, "schemas_seen": 1, "snapshots_written": 3,
+--    "vanished": 2, "vanished_unconfirmed": 0}
+-- and get_schema_diff reported dropped 4 (core [orders, users], billing
+-- [invoices], public [audit]), get_schema_history count 3, diagnose_root_cause
+-- 3 examined DDL signals, nothing skipped.
+--
+-- A read cannot tell "this schema is gone" from "my read could not see it" using
+-- only what is inside that read. The missing fact is the read's own SCOPE, which
+-- is what these two columns store.
+--
+-- read_scope: the catalog the read actually reached, as reported BY that read.
+--   PostgreSQL  current_database() || '/' || its pg_database.oid. The name alone
+--               would treat another cluster's same-named database as comparable;
+--               the oid is preserved by a physical restore (still the same data,
+--               still comparable) and differs for a separately created database.
+--   MySQL       CURRENT_USER(). information_schema there is server-wide and
+--               PRIVILEGE-FILTERED, so the connected database is not the
+--               visibility scope and the reading identity is.
+--   Two snapshots are comparable ONLY under the same read_scope. NULL = written
+--   before this migration: scope unknown, therefore not comparable, therefore the
+--   next read under a known scope re-baselines that schema (one extra row, once).
+--
+-- last_seen_at: when the schema was last NAMED by a scope-matching read. Under
+--   store-on-change, snapshot_time is when the schema last CHANGED, which for a
+--   stable schema is months ago, so it cannot distinguish "unchanged for months"
+--   from "not seen for months". That distinction IS the state the four previous
+--   passes kept resolving to "dropped". It is now surfaced as an unknown
+--   (get_schema_diff / get_schema_history `observation.unconfirmed_schemas`).
+--   Refreshed by an UPDATE of the latest row per (cluster, schema), not by a new
+--   row: the blob is TOASTed out of line, so the UPDATE rewrites ~100 bytes of
+--   heap tuple and keeps the TOAST chain.
+--
+-- No new index: the freshness probe and the heartbeat both drive off
+-- (cluster_id, snapshot_time DESC), which idx_schema_snapshots_cluster_time
+-- already covers.
+
+ALTER TABLE schema_snapshots ADD COLUMN IF NOT EXISTS read_scope TEXT;
+
+ALTER TABLE schema_snapshots ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
