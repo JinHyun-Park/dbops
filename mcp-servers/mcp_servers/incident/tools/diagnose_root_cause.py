@@ -247,6 +247,15 @@ def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, 
     regression is the single most common cause, so a hit here usually ranks at
     or near the top. The table is optional in some deployments, so a missing
     table is swallowed and the source simply contributes nothing.
+
+    A missing TABLE was always reported as ``skipped_sources``, but an EMPTY
+    table was not: a cluster whose engine family has no snapshot producer
+    contributed 0 candidates and showed up as ``signals_examined: 0``, i.e.
+    "we looked and there was no DDL change". Because schema_change carries the
+    HIGHEST base weight, that does not just lose one signal, it systematically
+    under-ranks the most common real cause. So an empty window is qualified by a
+    producer probe: fewer than two snapshots for this cluster means no change
+    could have been detected at all, and the source is SKIPPED, not examined.
     """
     out = []
     sql = """
@@ -266,6 +275,31 @@ def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, 
         print(f"[diagnose_root_cause] schema_changes source skipped: {e}")
         skipped.append("schema_changes")
         return out
+    if not rows:
+        # Empty window: is that "no DDL happened" or "we have no DDL data"?
+        # A single baseline snapshot cannot yield a diff row either, so anything
+        # under 2 snapshots means this source had no detection capability.
+        # Comparability is PER SCHEMA: `snapshots > schemas` holds exactly when at
+        # least one schema has a second snapshot to have been diffed against.
+        probe = (
+            "SELECT COUNT(*) AS snapshots, COUNT(DISTINCT schema_name) AS schemas "
+            "FROM schema_snapshots WHERE cluster_id = :cluster_id"
+        )
+        try:
+            prows = cache.execute(probe, {"cluster_id": cluster_id}).rows
+        except Exception as e:
+            print(f"[diagnose_root_cause] schema_changes producer probe failed: {e}")
+            skipped.append("schema_changes")
+            return out
+        prow = prows[0] if prows else {}
+        stored = int(prow.get("snapshots") or 0)
+        schemas = int(prow.get("schemas") or 0)
+        if stored <= schemas:
+            print(f"[diagnose_root_cause] schema_changes source skipped: "
+                  f"{stored} snapshot(s) over {schemas} schema(s) for {cluster_id} "
+                  "(no comparable history)")
+            skipped.append("schema_changes")
+            return out
     examined["schema_changes"] = len(rows)
     for row in rows:
         when = row.get("snapshot_time")

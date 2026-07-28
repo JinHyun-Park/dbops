@@ -29,6 +29,7 @@ from mysql_innodb_status import collect_mysql_innodb_status
 from mysql_locks import collect_mysql_locks
 from mysql_query_stats import collect_mysql_query_stats
 from mysql_table_stats import collect_mysql_table_stats
+from schema_snapshot import collect_mysql_schema_snapshot
 
 # TLS CA bundle for RDS, vendored into the asset during CDK bundling (Task 2).
 # Resolved relative to this file so the path is valid in the deployed package.
@@ -126,7 +127,9 @@ def _make_cache_execute(rds_data, cache_cluster_arn, cache_secret_arn, cache_db_
                 sql_params.append({"name": key, "value": {"doubleValue": value}})
             else:
                 sql_params.append({"name": key, "value": {"stringValue": str(value)}})
-        rds_data.execute_statement(
+        # RETURNS the raw Data API response, which the schema_snapshot collector reads
+        # its own previous blob back through this closure (see etl_collector).
+        return rds_data.execute_statement(
             resourceArn=cache_cluster_arn, secretArn=cache_secret_arn, database=cache_db_name,
             sql=f"/* source=dbops-rdsdirect */ {sql}", parameters=sql_params,
         )
@@ -232,6 +235,16 @@ def _process_cluster(row, secrets, cache_execute, run_ts):
         except Exception as e:
             collected["innodb_status_error"] = str(e)
             print(f"[rdsdirect] {cluster_id} mysql innodb status error: {e}")
+        # RDS MySQL gets column-level schema history from the SAME collector file
+        # as Aurora MySQL (byte-identical copy, parity-tested). Without this line
+        # `sql`-gated get_schema_diff/get_schema_history would PASS an
+        # rds_instance cluster (sql: True) into a table with no producer.
+        try:
+            collected["schema_snapshot"] = collect_mysql_schema_snapshot(
+                adapter, cache_execute, "", "", cluster_id, database, snapshot_ts=run_ts)
+        except Exception as e:
+            collected["schema_snapshot_error"] = str(e)
+            print(f"[rdsdirect] {cluster_id} mysql schema snapshot error: {e}")
 
         return {"cluster_id": cluster_id, "collected": collected}
     except Exception as e:

@@ -103,6 +103,19 @@ _ENGINE_GATED_TOOLS = {
     "reboot_rds_instance": "instance_write",
     "create_rds_snapshot": "instance_write",
     "modify_rds_instance_class": "instance_write",
+    # Schema snapshot readers (E-4). READ-ONLY but gated on the EXISTING `sql`
+    # capability, which is already exactly the right predicate: a family with no
+    # SQL surface has no tables and no columns, so tables_json has no honest
+    # shape for it. DocumentDB would have an index change reported as a COLUMN
+    # change and a sampled field list would emit phantom dropped_columns every
+    # run; DynamoDB's AttributeDefinitions lists only KEY attributes, so a table
+    # with 40 item attributes would be described as having 2 columns. Refusing is
+    # the correct answer, and it is fail-closed: an unresolvable cluster gets
+    # unsupported_engine, never a clean zero-diff.
+    # NOTE `sql` is True for rds_instance too, so the gate alone is not enough,
+    # the readers' own producer-existence checks are the other half of the guard.
+    "get_schema_diff": "sql",
+    "get_schema_history": "sql",
 }
 
 _CAP_LABEL = {
@@ -115,6 +128,7 @@ _CAP_LABEL = {
     "live_read": "ElastiCache 클러스터",
     "elasticache_write": "ElastiCache 클러스터",
     "instance_write": "RDS 인스턴스(비-Aurora)",
+    "sql": "SQL 스키마를 가진 엔진(Aurora / RDS 인스턴스)",
 }
 
 TOOLS = {

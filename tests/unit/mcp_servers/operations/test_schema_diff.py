@@ -185,13 +185,83 @@ def test_diff_impl_two_snapshots_drop_surfaced():
     assert result["diffs"][0]["dropped"] == ["deleted_table"]
 
 
-def test_diff_impl_latest_no_changes():
-    """No prior snapshot → empty rows → empty diffs (not error)."""
-    mock_cache = MagicMock()
-    mock_cache.execute.return_value = QueryResult(columns=[], rows=[], row_count=0)
+def _coverage(snapshots, schemas):
+    return QueryResult(
+        columns=["snapshots", "schemas", "first_seen", "last_seen"],
+        rows=[{"snapshots": snapshots, "schemas": schemas,
+               "first_seen": "2026-07-01T00:00:00Z" if snapshots else None,
+               "last_seen": "2026-07-09T00:00:00Z" if snapshots else None}],
+        row_count=1,
+    )
+
+
+def _cache(*results):
+    mock = MagicMock()
+    mock.execute.side_effect = list(results)
+    return mock
+
+
+_EMPTY = QueryResult(columns=[], rows=[], row_count=0)
+
+
+def test_never_collected_is_not_reported_as_no_differences():
+    """This used to return schemas_compared 0 with all totals zero, which reads
+    as "the schema is identical". It has to say we have no snapshot at all."""
+    mock_cache = _cache(_EMPTY, _coverage(0, 0))
     result = get_schema_diff_impl(mock_cache, cluster_id="prod-pg-1")
+    assert result["status"] == "not_collected"
     assert result["schemas_compared"] == 0
     assert result["diffs"] == []
+    assert result["totals"] == {"added": 0, "dropped": 0, "modified": 0, "rename_candidates": 0}
+    assert result["collection_coverage"]["snapshots_stored"] == 0
+    assert "차이가 없다는 뜻이 아닙니다" in result["note"]
+
+
+def test_single_snapshot_is_baseline_not_a_zero_diff():
+    """The implicit query LEFT JOINs, so the baseline row comes back with a NULL
+    tables_before. Diffing it would report every existing table as ADDED."""
+    mock_cache = _cache(
+        QueryResult(
+            columns=["schema_name", "tables_before", "tables_after"],
+            rows=[{"schema_name": "public", "tables_before": None,
+                   "tables_after": '{"users": ["id"]}'}],
+            row_count=1,
+        ),
+        _coverage(1, 1),
+    )
+    result = get_schema_diff_impl(mock_cache, cluster_id="prod-pg-1")
+    assert result["status"] == "insufficient_snapshots"
+    assert result["baseline_only_schemas"] == ["public"]
+    assert result["schemas_compared"] == 0
+    assert result["totals"]["added"] == 0  # NOT "users was added"
+
+
+def test_explicit_timestamps_that_match_nothing_say_so():
+    """Two ISO strings that hit no snapshot pair is a DIFFERENT failure from
+    having no data: the caller guessed the timestamps."""
+    mock_cache = _cache(_EMPTY, _coverage(6, 2))
+    result = get_schema_diff_impl(
+        mock_cache, cluster_id="prod-pg-1",
+        snapshot_a="2026-05-01T00:00:00Z", snapshot_b="2026-05-02T00:00:00Z")
+    assert result["status"] == "snapshots_not_found"
+    assert "get_schema_history" in result["note"]
+
+
+def test_two_snapshots_with_no_change_is_a_supportable_negative():
+    mock_cache = _cache(
+        QueryResult(
+            columns=["schema_name", "tables_before", "tables_after"],
+            rows=[{"schema_name": "public", "tables_before": '{"users": ["id"]}',
+                   "tables_after": '{"users": ["id"]}'}],
+            row_count=1,
+        ),
+        _coverage(4, 1),
+    )
+    result = get_schema_diff_impl(mock_cache, cluster_id="prod-pg-1")
+    # An identical pair still counts as COMPARED, that is the whole difference
+    # between "we looked" and "we could not look".
+    assert result["status"] == "ok"
+    assert result["schemas_compared"] == 1
     assert result["totals"] == {"added": 0, "dropped": 0, "modified": 0, "rename_candidates": 0}
 
 

@@ -32,7 +32,23 @@ from collectors.pg_table_stats import collect_pg_table_stats
 from collectors.pi_collector import PI_METRICS_RDS_INSTANCE, collect_pi_metrics
 from collectors.query_regression import collect_query_regression
 from collectors.rds_instance_cw_collector import collect_rds_instance_metrics
+from collectors.schema_snapshot import (
+    collect_mysql_schema_snapshot,
+    collect_pg_schema_snapshot,
+)
 from collectors.stats_collector import collect_query_stats
+
+# schema_snapshots retention, 90 days. The `<>` MAX(...) guard is load-bearing:
+# the CURRENT snapshot of a schema that has not changed in 90 days is itself older
+# than the cutoff, and deleting it would destroy the only row get_schema_diff has
+# to compare the next change against. Retention prunes HISTORY, never the
+# baseline. Module-level so the unit test can execute it on a real engine.
+SCHEMA_SNAPSHOTS_PURGE_SQL = (
+    "DELETE FROM schema_snapshots s "
+    "WHERE s.snapshot_time < NOW() - INTERVAL '90 days' "
+    "AND s.snapshot_time <> (SELECT MAX(x.snapshot_time) FROM schema_snapshots x "
+    "WHERE x.cluster_id = s.cluster_id AND x.schema_name = s.schema_name)"
+)
 
 
 def _session_for(region, role_arn=""):
@@ -375,6 +391,14 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
             result["capacity_forecast_error"] = str(e)
             print(f"[{cluster_id}] capacity forecast error: {e}")
         try:
+            result["schema_snapshot"] = collect_pg_schema_snapshot(
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn,
+                cluster_id, target_db, snapshot_ts=run_ts,
+            )
+        except Exception as e:
+            result["schema_snapshot_error"] = str(e)
+            print(f"[{cluster_id}] schema snapshot error: {e}")
+        try:
             result["extensions"] = collect_pg_extensions(
                 target_rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
             )
@@ -405,6 +429,14 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         except Exception as e:
             result["table_stats_error"] = str(e)
             print(f"[{cluster_id}] mysql table_stats error: {e}")
+        try:
+            result["schema_snapshot"] = collect_mysql_schema_snapshot(
+                target_rds_data, cache_execute, target_cluster_arn, target_secret_arn,
+                cluster_id, target_db, snapshot_ts=run_ts,
+            )
+        except Exception as e:
+            result["schema_snapshot_error"] = str(e)
+            print(f"[{cluster_id}] mysql schema snapshot error: {e}")
         try:
             result["locks"] = collect_mysql_locks(
                 target_rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
@@ -505,7 +537,11 @@ def lambda_handler(event, context):
                 sql_params.append({"name": key, "value": {"doubleValue": value}})
             else:
                 sql_params.append({"name": key, "value": {"stringValue": str(value)}})
-        cache_rds_data.execute_statement(
+        # RETURNS the raw Data API response. Almost every caller is an INSERT and
+        # ignores it, but the schema_snapshot collector has to READ its own
+        # previous blob back out of the cache to decide whether anything changed,
+        # and this closure is the only cache handle a collector is given.
+        return cache_rds_data.execute_statement(
             resourceArn=cache_cluster_arn, secretArn=cache_secret_arn, database=cache_db_name,
             sql=f"/* source=dbops-etl */ {sql}", parameters=sql_params,
         )
@@ -568,6 +604,28 @@ def lambda_handler(event, context):
         )
     except Exception as e:
         print(f"[etl] query_stats purge failed: {type(e).__name__}: {e}")
+
+    # schema_snapshots: 90 days, same best-effort shape and BRIN-backed cheapness
+    # as the two purges above (brin_schema_snapshots_time, schema_v26). Store-on-
+    # change means this normally matches 0 rows.
+    #
+    # The NOT-the-latest guard is load-bearing, not tidiness: the CURRENT snapshot
+    # of a schema that has not changed in 90 days is older than the cutoff, and
+    # deleting it would destroy the only thing get_schema_diff has to compare the
+    # next change against. Retention prunes HISTORY, never the baseline.
+    # ponytail: correlated subquery over a window function; the table holds a
+    # handful of rows per cluster, so this never needs to be clever.
+    #
+    # Hoisted to SCHEMA_SNAPSHOTS_PURGE_SQL (module level) so the unit test can
+    # EXECUTE it against a real PostgreSQL server and assert the surviving rows,
+    # instead of grepping the handler for a substring.
+    try:
+        cache_rds_data.execute_statement(
+            resourceArn=cache_cluster_arn, secretArn=cache_secret_arn, database=cache_db_name,
+            sql=f"/* source=dbops-etl */ {SCHEMA_SNAPSHOTS_PURGE_SQL}",
+        )
+    except Exception as e:
+        print(f"[etl] schema_snapshots purge failed: {type(e).__name__}: {e}")
 
     # Incident-similarity embeddings: backfill a bounded batch of un-embedded
     # event_log / runbook rows (Titan → pgvector) so find_similar_incidents can do
