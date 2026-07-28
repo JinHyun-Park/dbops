@@ -33,9 +33,14 @@ def _probe(snapshots, schemas):
     )
 
 
-def _run(*results):
+def _cache(*results):
     cache = MagicMock()
     cache.execute.side_effect = list(results)
+    return cache
+
+
+def _run(*results):
+    cache = _cache(*results)
     examined, skipped = {}, []
     out = _collect_schema_changes(cache, "prod-pg-1", ANCHOR_START, ANCHOR_END,
                                   None, 60, examined, skipped)
@@ -102,6 +107,67 @@ def test_probe_failure_is_labelled_apart_from_a_healthy_no_history_skip():
     # And the healthy no-history skip must NOT borrow that label.
     _, _, healthy_skipped, _ = _run(_EMPTY, _probe(3, 3))
     assert healthy_skipped == ["schema_changes"]
+
+
+def test_the_window_read_failing_is_labelled_apart_from_no_history():
+    """The MAIN schema_snapshots read (a cache DB without schema_v26, no
+    permission, cache down) used to append the bare `schema_changes` label, which
+    is byte-identical to the healthy "this cluster has no comparable history"
+    skip. The previous pass fixed exactly this conflation on the PROBE read 12
+    lines below and left it in place here."""
+    cache = MagicMock()
+    cache.execute.side_effect = RuntimeError('relation "schema_snapshots" does not exist')
+    examined, skipped = {}, []
+    out = _collect_schema_changes(cache, "prod-pg-1", ANCHOR_START, ANCHOR_END,
+                                 None, 60, examined, skipped)
+    assert out == []
+    assert skipped == ["schema_changes_read_error"]
+    assert "schema_changes" not in examined
+    # The probe must not have run: there is nothing to qualify.
+    assert cache.execute.call_count == 1
+
+    _, _, no_history, _ = _run(_EMPTY, _probe(3, 3))
+    assert no_history == ["schema_changes"]
+    assert skipped != no_history, (
+        "a cache DB with no schema_snapshots table must not read as a cluster "
+        "with no DDL history"
+    )
+
+
+def test_all_five_states_of_this_source_are_distinguishable():
+    """The enumeration, driven. signals_examined is pre-seeded to 0 for every
+    source, so on the three skipped paths the LABEL is the only difference, and
+    two states sharing one label is the defect this tier keeps relocating."""
+    broken_read = MagicMock()
+    broken_read.execute.side_effect = RuntimeError("no such table")
+    broken_probe = MagicMock()
+    broken_probe.execute.side_effect = [_EMPTY, RuntimeError("cache gone")]
+    rows = QueryResult(
+        columns=["snapshot_time", "schema_name", "changes"],
+        rows=[{"snapshot_time": "2026-07-01T12:00:00+00:00", "schema_name": "app",
+               "changes": '{"dropped": ["orders"]}'}],
+        row_count=1,
+    )
+
+    states = {}
+    for label, cache in (
+        ("window read raised", broken_read),
+        ("probe raised", broken_probe),
+        ("no comparable history", _cache(_EMPTY, _probe(3, 3))),
+        ("comparable history, empty window", _cache(_EMPTY, _probe(5, 2))),
+        ("rows in the window", _cache(rows)),
+    ):
+        examined, skipped = {}, []
+        got = _collect_schema_changes(cache, "prod-pg-1", ANCHOR_START, ANCHOR_END,
+                                     None, 60, examined, skipped)
+        sig = (tuple(skipped), examined.get("schema_changes", "absent"), len(got))
+        assert sig not in states, f"{label} is indistinguishable from {states.get(sig)}"
+        states[sig] = label
+    assert len(states) == 5
+    assert sorted(s[0] for s in states) == [
+        (), (), ("schema_changes",), ("schema_changes_probe_error",),
+        ("schema_changes_read_error",),
+    ]
 
 
 def test_probe_sql_is_a_module_constant_so_a_test_can_execute_it():

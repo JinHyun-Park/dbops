@@ -247,12 +247,20 @@ SCHEMA_PRODUCER_PROBE_SQL = (
     "FROM schema_snapshots WHERE cluster_id = :cluster_id"
 )
 
-# The probe answers "could this source have detected a DDL change at all?", so a
-# probe that FAILED must not be filed under the same label as a probe that ran
-# and said no. Both are "we did not look", which is why both belong in
-# skipped_sources, but only one of them is a normal state of a young cluster; the
-# other is a defect that stays invisible for as long as they share a name.
+# EVERY way this source can decline to answer, each under its OWN label. All of
+# them mean "we did not look", which is why they all belong in skipped_sources,
+# but only ONE of them is a normal state of a young cluster and the rest are
+# defects that stay invisible for as long as they share a name. Sharing one label
+# is what let a column typo inside the probe survive a full green suite.
+#   _SKIP_NO_HISTORY  the reads worked; this cluster has no comparable history
+#   _SKIP_READ_ERROR  the schema_snapshots window read itself raised (no
+#                     schema_v26 in the cache DB, no permission, cache down)
+#   _SKIP_PROBE_ERROR the window read worked and the producer probe raised
+# The label is the whole payload: skipped_sources is a bounded string list that
+# the agent narrates and frontend/src/app/tasks/page.tsx joins into the "건너뜀"
+# line, so the label text IS what a human reads. No exception text goes in it.
 _SKIP_NO_HISTORY = "schema_changes"
+_SKIP_READ_ERROR = "schema_changes_read_error"
 _SKIP_PROBE_ERROR = "schema_changes_probe_error"
 
 
@@ -275,11 +283,18 @@ def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, 
     producer probe: fewer than two snapshots for this cluster means no change
     could have been detected at all, and the source is SKIPPED, not examined.
 
-    A probe that RAISES is reported as ``schema_changes_probe_error``, not as the
-    ordinary ``schema_changes`` skip. Under one shared label a broken probe read
-    exactly like a young cluster with no history, which is how a column typo in
-    the probe survived a full-suite run: every assertion on the negative path
-    passed either way.
+    Each way of declining carries its OWN label (see the constants above), so the
+    five states this source can be in are all distinguishable from the outside:
+      window read raised          -> skipped ``schema_changes_read_error``
+      empty window, probe raised  -> skipped ``schema_changes_probe_error``
+      empty window, no history    -> skipped ``schema_changes``
+      empty window, has history   -> NOT skipped, ``signals_examined`` 0
+      rows in the window          -> NOT skipped, ``signals_examined`` N
+    ``signals_examined`` is pre-seeded to 0 for every source, so on the three
+    skipped paths the label is the only thing that tells them apart. Under one
+    shared name a broken read looked exactly like a young cluster with no
+    history, which is how a column typo in the probe survived a full-suite run:
+    every assertion on the negative path passed either way.
     """
     out = []
     sql = """
@@ -296,8 +311,8 @@ def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, 
     try:
         rows = cache.execute(sql, params).rows
     except Exception as e:
-        print(f"[diagnose_root_cause] schema_changes source skipped: {e}")
-        skipped.append("schema_changes")
+        print(f"[diagnose_root_cause] schema_changes window read failed: {e}")
+        skipped.append(_SKIP_READ_ERROR)
         return out
     if not rows:
         # Empty window: is that "no DDL happened" or "we have no DDL data"?

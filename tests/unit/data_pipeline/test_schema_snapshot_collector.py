@@ -104,7 +104,9 @@ def test_first_snapshot_is_a_baseline_with_no_diff():
     out, cache, _ = _run([("appdb", 2, '{"users": ["id"], "orders": ["id"]}')])
     assert out == {"cluster_id": "rds-mysql-1", "schemas_seen": 1,
                    "snapshots_written": 1, "baselines": 1, "unchanged": 0,
-                   "vanished": 0, "vanished_unconfirmed": 0}
+                   "unreadable": 0, "corroborated": False,
+                   "vanished": 0, "vanished_unconfirmed": 0,
+                   "emptied_unconfirmed": 0, "uncorroborated_writes": 0}
     assert len(cache.writes) == 1
     # Empty string -> NULLIF -> NULL. Never a fabricated "everything was added".
     assert cache.writes[0]["diff_json"] == ""
@@ -222,6 +224,102 @@ def test_a_catalog_read_that_returned_nothing_never_invents_a_mass_drop():
     assert out["vanished"] == 0
     assert out["vanished_unconfirmed"] == 2
     assert cache.writes == []
+
+
+# ===========================================================================
+# THE STATE MATRIX. Every state a TRACKED schema (one the readers are currently
+# serving tables for) can be reported as, driven one row at a time.
+#
+# The point of the table is that no two rows produce the same (write, counter)
+# pair, because the defect this tier keeps relocating is exactly two different
+# states collapsing into one indistinguishable output. Row 9 (the read raised)
+# is not here: the exception leaves _collect entirely and the caller records
+# schema_snapshot_error, which test_a_failed_read_writes_nothing_at_all in
+# test_schema_snapshot_real_pg.py drives against a real server.
+# ===========================================================================
+
+_USERS = '{"users": ["id"]}'
+_OTHER = '{"t": ["id"]}'
+
+# row, catalog rows, previous blobs, expected writes, expected counters
+_MATRIX = [
+    (1, "same tables", [("appdb", 1, _USERS)], {"appdb": _USERS},
+     [], {"unchanged": 1}),
+    (2, "different tables", [("appdb", 2, '{"users": ["id"], "audit": ["id"]}')],
+     {"appdb": _USERS}, [("appdb", '{"users": ["id"], "audit": ["id"]}')],
+     {"snapshots_written": 1}),
+    (3, "'{}' with another tracked schema corroborating",
+     [("appdb", 0, "{}"), ("other", 1, _OTHER)], {"appdb": _USERS, "other": _OTHER},
+     [("appdb", "{}")], {"snapshots_written": 1, "corroborated": True}),
+    (4, "'{}' as the only tracked schema", [("appdb", 0, "{}")], {"appdb": _USERS},
+     [("appdb", "{}")], {"snapshots_written": 1, "uncorroborated_writes": 1,
+                         "corroborated": False}),
+    (5, "'{}' with 2+ tracked and nothing corroborating",
+     [("appdb", 0, "{}"), ("other", 0, "{}")], {"appdb": _USERS, "other": _OTHER},
+     [], {"snapshots_written": 0, "emptied_unconfirmed": 2}),
+    (6, "an empty STRING (NULL aggregate)", [("appdb", 0, ""), ("other", 1, _OTHER)],
+     {"appdb": _USERS, "other": _OTHER}, [], {"unreadable": 1, "vanished": 0}),
+    (7, "absent, with another tracked schema corroborating", [("other", 1, _OTHER)],
+     {"appdb": _USERS, "other": _OTHER}, [("appdb", "{}")],
+     {"vanished": 1, "vanished_unconfirmed": 0}),
+    (8, "absent, with nothing corroborating", [("other", 0, "{}")],
+     {"appdb": _USERS, "other": _OTHER}, [],
+     {"vanished": 0, "vanished_unconfirmed": 1, "emptied_unconfirmed": 1}),
+]
+
+
+def test_state_matrix_every_row_is_driven_and_distinguishable():
+    seen_signatures = {}
+    for row, label, rows, prev, want_writes, want_counters in _MATRIX:
+        out, cache, _ = _run(rows, prev=prev)
+        # (schema, is the stored blob empty) is what the readers turn into
+        # "these tables are gone", so that is what the matrix pins.
+        got = sorted((w["schema_name"], w["tables_json"] == "{}") for w in cache.writes)
+        assert got == sorted((s, b == "{}") for s, b in want_writes), (row, label, got)
+        for key, value in want_counters.items():
+            assert out[key] == value, (row, label, key, out)
+        # No two rows may produce the same observable outcome.
+        sig = (tuple(got),
+               out["snapshots_written"], out["unchanged"], out["unreadable"],
+               out["vanished"], out["vanished_unconfirmed"],
+               out["emptied_unconfirmed"], out["uncorroborated_writes"])
+        assert sig not in seen_signatures, (
+            f"row {row} ({label}) is indistinguishable from row "
+            f"{seen_signatures[sig][0]} ({seen_signatures[sig][1]}): {sig}")
+        seen_signatures[sig] = (row, label)
+
+
+def test_a_read_that_lost_its_scope_writes_no_drop_at_all():
+    """Row 5 + row 8 together, which is the shape a wrong-database read has: one
+    tracked schema comes back empty (PostgreSQL puts `public` in EVERY database)
+    and the rest are absent. MEASURED on real PostgreSQL 14.18 before the fix,
+    a cluster collected from `appdb` and then read once against `sampledb`:
+    snapshots_written 3, vanished 2, vanished_unconfirmed 0, and all three
+    readers reported core dropped [orders, users], billing dropped [invoices],
+    public dropped [audit]."""
+    out, cache, _ = _run(
+        [("public", 0, "{}")],
+        prev={"public": '{"audit": ["id"]}', "core": '{"users": ["id"]}',
+              "billing": '{"invoices": ["id"]}'})
+    assert cache.writes == []
+    assert out["snapshots_written"] == 0
+    assert out["corroborated"] is False
+    assert out["emptied_unconfirmed"] == 1   # public, observed empty, not trusted
+    assert out["vanished_unconfirmed"] == 2  # core + billing, absent, not inferred
+    assert out["vanished"] == 0
+    assert out["uncorroborated_writes"] == 0
+
+
+def test_the_guard_is_not_the_unreachable_one_it_replaced():
+    """`if absent and not returned` could not fire on PostgreSQL: pg_namespace
+    returns `public` for every database, so a successful read is never empty.
+    This drives a NON-empty read that still must not conclude a drop."""
+    out, _, _ = _run([("public", 0, "{}")],
+                     prev={"public": "{}", "core": '{"users": ["id"]}'},
+                     tracked=["core"])
+    assert out["schemas_seen"] == 1          # the read returned a row
+    assert out["vanished"] == 0              # and still concluded nothing
+    assert out["vanished_unconfirmed"] == 1
 
 
 def test_a_schema_whose_aggregate_came_back_null_is_not_treated_as_dropped():

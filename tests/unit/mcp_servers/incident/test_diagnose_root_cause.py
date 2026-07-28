@@ -219,5 +219,9 @@ def test_unavailable_source_is_reported_in_skipped_sources():
     cache.execute.side_effect = _side_effect
     out = diagnose_root_cause_impl(cache, cluster_id="prod-pg-1")
     assert out["status"] == "ok"
-    assert "schema_changes" in out["skipped_sources"]
+    # The label says WHICH failure: a read that raised, not a cluster whose
+    # history simply has nothing comparable in it. `schema_changes` alone means
+    # the latter, and the two were byte-identical until round 4.
+    assert "schema_changes_read_error" in out["skipped_sources"]
+    assert "schema_changes" not in out["skipped_sources"]
     assert out["signals_examined"]["schema_changes"] == 0

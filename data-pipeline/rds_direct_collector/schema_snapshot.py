@@ -45,8 +45,71 @@ different events do that and both are handled, differently on purpose:
     the schema with '{}' (it is driven off pg_namespace / information_schema.
     schemata, not off the table list). Directly observed, no inference.
   * schema itself dropped -> no row exists to return, so it is inferred from
-    absence against TRACKED_SQL, and that inference is guarded. See the comment
-    on the vanished pass in _collect for what "absent" is allowed to mean.
+    absence against TRACKED_SQL.
+Both of those are DESTRUCTIVE conclusions: the readers turn them into "these
+tables are gone" for a DBA. So both hang off CORROBORATION, below.
+
+CORROBORATION, AND EVERY STATE A TRACKED SCHEMA CAN BE REPORTED AS
+A schema is TRACKED when its latest stored blob is non-empty (TRACKED_SQL), i.e.
+the readers are serving tables for it right now. CORROBORATED means at least one
+TRACKED schema came back from THIS read with a table still in it.
+Why that and not "the read returned no rows at all", which is what the previous
+version guarded on: PostgreSQL creates `public` in every database and pg_catalog
+is world-readable, so a successful read is never empty and that guard could not
+fire. MEASURED on PostgreSQL 14.18, a cluster whose history was collected from
+`appdb` read once against `sampledb` (which is the literal db_name fallback in
+etl_collector/handler.py) reported
+  {"schemas_seen": 1, "snapshots_written": 3, "vanished": 2, "vanished_unconfirmed": 0}
+and get_schema_diff, get_schema_history and diagnose_root_cause all reported
+core dropped [orders, users], billing dropped [invoices], public dropped [audit].
+Corroboration is the only evidence available here that the read covered the same
+scope the stored history was recorded from, because schema_snapshots has no
+database column to compare against (adding one is the upgrade path; it needs a
+migration plus all three readers).
+
+  the read said                    corroborated  written              counted as
+  ----------------------------------------------------------------------------------
+  1 the same tables                 either       nothing              unchanged
+  2 different tables                either       change row           snapshots_written
+  3 '{}', 2+ tracked schemas        yes          '{}' + dropped diff  snapshots_written
+  4 '{}', 1 tracked schema          no           '{}' + dropped diff  uncorroborated_writes
+  5 '{}', 2+ tracked schemas        no           NOTHING              emptied_unconfirmed
+  6 an empty STRING (NULL agg)      either       nothing              unreadable
+  7 nothing at all (absent)         yes          '{}' + dropped diff  vanished
+  8 nothing at all (absent)         no           NOTHING              vanished_unconfirmed
+  9 the read RAISED                 n/a          NOTHING AT ALL       caller's *_error key
+Row 9 is why there is no tenth row for a PARTIAL read: both transports build the
+whole result before the collector sees any of it (the Data API assembles the
+response server-side; shared/mysql_direct.py builds `records` from a single
+cur.fetchall()), so a session that dies mid-read raises instead of returning a
+short row set. Driven on a real server: a read against a nonexistent database
+raised and the snapshot count was identical before and after.
+Row 4 is the one destructive write made without corroboration, and it is a
+DIRECT OBSERVATION ("this schema exists here and holds no table") on a cluster
+where corroboration is impossible by construction: the only tracked schema is
+the one that emptied. Trusting it keeps the single-schema cluster, which is the
+common shape, from silently serving dropped tables forever. Row 5 is the same
+observation on a cluster that DOES have other tracked schemas and none of them
+corroborate, which is what a scope change looks like, so nothing is written.
+Rows 4/5/8 are all self-healing: no state is kept, and the next run with one
+readable table in any tracked schema records the real thing.
+INDISTINGUISHABLE, on purpose and disclosed:
+  * a cluster with exactly ONE tracked schema, read against a different database
+    that happens to hold a same-named schema. Row 4 writes the drop. `public`
+    makes that a certainty rather than a coincidence on PostgreSQL.
+  * a scope-drifted read still BASELINES any schema it finds that this cluster
+    has never snapshotted. That is not a destructive claim (a baseline carries a
+    NULL diff, and every reader reports it as insufficient history rather than as
+    a change), so it is deliberately not suppressed.
+  * MySQL's information_schema is privilege-filtered, so REVOKE on one database
+    reads exactly like DROP DATABASE. PostgreSQL is NOT exposed to this:
+    measured, an unprivileged role gets the identical PG_SCHEMA_SQL result as
+    the superuser (billing/1, core/2, public/1) while `SELECT FROM core.users`
+    raises permission denied.
+  ponytail: both need the read to name its own scope (current_database() on PG,
+  a SCHEMATA privilege probe on MySQL) AND a database column on schema_snapshots
+  to compare it with. Until then, treat a db_name change on a registered cluster
+  as a re-baseline, not as DDL.
 """
 
 from datetime import datetime, timezone
@@ -176,19 +239,6 @@ def _str(field):
     return field.get("stringValue", "") if not field.get("isNull") else ""
 
 
-def _long(field):
-    if field.get("isNull"):
-        return 0
-    v = field.get("longValue")
-    if v is not None:
-        return v
-    dv = field.get("doubleValue")
-    if dv is not None:
-        return int(dv)
-    sv = field.get("stringValue")
-    return int(float(sv)) if sv else 0
-
-
 def _prev_blob(cache_execute, cluster_id, schema_name):
     """Latest stored blob for this (cluster, schema), or None when the schema has
     never been snapshotted. None means BASELINE, and it is deliberately distinct
@@ -219,26 +269,53 @@ def _collect(rds_data_client, cache_execute, target_cluster_arn, target_secret_a
     written = 0
     baselines = 0
     unchanged = 0
-    schemas = []
-    # Every schema the catalog NAMED, including one whose aggregate came back
-    # unusable. A schema we could not read is not a schema that is gone, so it
-    # must not fall into the vanished pass below.
-    returned = set()
+    unreadable = 0
+    # PASS 1 decides nothing. The destructive branches below need to know what
+    # the WHOLE read said before any of them may write, which is exactly what the
+    # previous version could not do: it wrote each schema as it walked the rows.
+    seen = {}  # schema_name -> parsed table map, readable rows only (row 1/2/3/4/5)
+    named = set()  # every schema the catalog NAMED, unreadable aggregate included
     for rec in resp.get("records", []):
+        # rec[1] is table_count. Nothing reads it: the stored blob is the parsed
+        # map and its len() is the honest count. It stays in both statements
+        # because rec[2] is positional, so dropping the column moves tables_json.
         schema_name = _str(rec[0])
-        table_count = _long(rec[1])
         raw = _str(rec[2])
         if schema_name:
-            returned.add(schema_name)
+            named.add(schema_name)
         if not schema_name or not raw:
-            # Empty STRING, not '{}'. '{}' means "read fine, no tables" and IS
-            # stored (that is the dropped-last-table case); "" means the
-            # aggregate returned NULL, i.e. we do not know, and inventing a
-            # mass DROP out of "we do not know" is worse than storing nothing.
+            # Row 6. Empty STRING, not '{}'. '{}' means "read fine, no tables"
+            # and IS stored (that is the dropped-last-table case); "" means the
+            # aggregate returned NULL, i.e. we do not know, and inventing a mass
+            # DROP out of "we do not know" is worse than storing nothing. A
+            # schema we could not read is also not a schema that is gone, so it
+            # stays in `named` and out of the vanished pass.
+            unreadable += 1
             continue
-        schemas.append(schema_name)
-        after = parse_tables(raw)
+        seen[schema_name] = parse_tables(raw)
 
+    tracked = set(_tracked_schemas(cache_execute, cluster_id))
+    # THE one signal both destructive branches hang off. See the module
+    # docstring's state table: `not named` (the previous guard) is unreachable on
+    # PostgreSQL because `public` exists in every database, so a successful read
+    # is never empty and a wrong-database read looked exactly like a mass DROP.
+    corroborated = any(seen.get(s) for s in tracked)
+    # Absent = tracked but not even NAMED by the read: DROP SCHEMA (or, on MySQL,
+    # DROP DATABASE). Pass 1 cannot cover it, because a dropped schema produces
+    # no row to iterate.
+    absent = sorted(s for s in tracked if s not in named)
+    # Row 4 vs row 5. With a single tracked schema there is nothing left to
+    # corroborate WITH, so a direct '{}' observation is trusted and logged as
+    # such; with 2+, an emptied schema that nothing corroborates is treated as a
+    # scope change and not written.
+    trust_empty = corroborated or len(tracked) < 2
+
+    vanished = 0
+    vanished_unconfirmed = 0
+    emptied_unconfirmed = 0
+    uncorroborated_writes = 0
+
+    for schema_name, after in seen.items():
         prev_raw = _prev_blob(cache_execute, cluster_id, schema_name)
         if prev_raw is None:
             diff_json = ""  # -> NULL: baseline, not a change
@@ -249,8 +326,21 @@ def _collect(rds_data_client, cache_execute, target_cluster_arn, target_secret_a
             # in a different order run to run. parse_tables sorts.
             diff = compute_diff(parse_tables(prev_raw), after)
             if diff_is_empty(diff):
-                unchanged += 1
+                unchanged += 1  # row 1
                 continue
+            if not after and not trust_empty:
+                emptied_unconfirmed += 1  # row 5
+                print(f"[{cluster_id}] schema_snapshot: '{schema_name}' came back with "
+                      f"0 tables and no other tracked schema of {len(tracked)} still "
+                      "holds one, so nothing was stored (a read that lost the scope "
+                      "looks exactly like this)")
+                continue
+            if not after and not corroborated:
+                uncorroborated_writes += 1  # row 4
+                print(f"[{cluster_id}] schema_snapshot: '{schema_name}' is the only "
+                      "tracked schema and came back with 0 tables; recorded as "
+                      "dropped on the catalog's word alone (nothing left to "
+                      "corroborate the read's scope with)")
             diff_json = json.dumps(diff)
 
         cache_execute(INSERT_SQL, {
@@ -264,36 +354,18 @@ def _collect(rds_data_client, cache_execute, target_cluster_arn, target_secret_a
         })
         written += 1
         print(f"[{cluster_id}] schema_snapshot stored for '{schema_name}' "
-              f"({table_count} tables, {'baseline' if not diff_json else 'change'})")
+              f"({len(after)} tables, {'baseline' if not diff_json else 'change'})")
 
-    # A schema the catalog no longer names at all: DROP SCHEMA (or, on MySQL,
-    # DROP DATABASE). The row above cannot cover it, because a dropped schema
-    # produces no row to iterate.
-    #
-    # WHAT "ABSENT" IS ALLOWED TO MEAN. The catalog read aggregates server-side
-    # and is all-or-nothing: it either errors (the caller's try/except records it
-    # and NOTHING is written) or it returns the complete set of schemas the
-    # session can see. There is no partial row set to mistake for a mass drop.
-    # What remains is a read whose VISIBILITY shrank for a non-DDL reason, and
-    # exactly one shape of that is detectable here: zero schemas returned, which
-    # is what a wrong database, a dead session or a total privilege loss looks
-    # like, and is indistinguishable from "every schema was dropped". So a
-    # vanished schema is only recorded when the read returned at least one other
-    # schema; otherwise it is counted as unconfirmed and left alone.
-    # ponytail: the undetectable residue is per-schema visibility loss (MySQL's
-    # information_schema is privilege-filtered, so REVOKE on one database reads
-    # as DROP DATABASE). Distinguishing that needs a privilege probe per schema,
-    # which is a query per schema per run to defend against an operation nobody
-    # performs on a monitored fleet. If it ever bites, probe SCHEMATA before
-    # concluding, do not go back to ignoring dropped schemas.
-    absent = [s for s in _tracked_schemas(cache_execute, cluster_id) if s not in returned]
-    vanished = 0
-    unconfirmed = 0
-    if absent and not returned:
-        unconfirmed = len(absent)
-        print(f"[{cluster_id}] schema_snapshot: catalog read returned NO schemas; "
-              f"{unconfirmed} tracked schema(s) left as-is rather than recorded as "
-              "dropped (cannot tell a dropped schema from an unreadable catalog)")
+    # Rows 7 and 8. This is the one INFERENCE on the surface, so unlike row 4 it
+    # never runs uncorroborated: absence is evidence of a drop only if the read
+    # is evidence of anything at all.
+    if absent and not corroborated:
+        vanished_unconfirmed = len(absent)
+        print(f"[{cluster_id}] schema_snapshot: {vanished_unconfirmed} tracked "
+              f"schema(s) {absent} absent from the catalog read, but no tracked "
+              "schema came back holding a table, so they are left as-is rather "
+              "than recorded as dropped (a wrong database, a dead session or a "
+              "privilege-filtered catalog is indistinguishable from a mass drop)")
         absent = []
     for schema_name in absent:
         prev_raw = _prev_blob(cache_execute, cluster_id, schema_name)
@@ -314,12 +386,16 @@ def _collect(rds_data_client, cache_execute, target_cluster_arn, target_secret_a
 
     return {
         "cluster_id": cluster_id,
-        "schemas_seen": len(schemas),
+        "schemas_seen": len(seen),
         "snapshots_written": written,
         "baselines": baselines,
         "unchanged": unchanged,
+        "unreadable": unreadable,
+        "corroborated": corroborated,
         "vanished": vanished,
-        "vanished_unconfirmed": unconfirmed,
+        "vanished_unconfirmed": vanished_unconfirmed,
+        "emptied_unconfirmed": emptied_unconfirmed,
+        "uncorroborated_writes": uncorroborated_writes,
     }
 
 

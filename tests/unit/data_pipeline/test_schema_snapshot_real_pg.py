@@ -137,9 +137,9 @@ class _Server:
     """Runs SQL through psql. `execute` mimics CacheClient.execute (named binds,
     dict rows); `raw` is for fixture DDL."""
 
-    def raw(self, sql, db="postgres"):
+    def raw(self, sql, db="postgres", user="dbops"):
         out = subprocess.run(
-            [_PSQL, "-h", "127.0.0.1", "-p", _PORT, "-U", "dbops", "-d", db,
+            [_PSQL, "-h", "127.0.0.1", "-p", _PORT, "-U", user, "-d", db,
              "-v", "ON_ERROR_STOP=1", "-tA", "-F", "\x1f", "-c", sql],
             capture_output=True, text=True)
         if out.returncode != 0:
@@ -613,6 +613,194 @@ def test_successful_diff_is_dated_on_the_real_engine(pg):
     assert dated["previous_snapshot_time"].startswith("2026-07-0")
     assert out["collection_coverage"]["last_snapshot"]
     assert dated["snapshot_time"] in out["note"]
+
+
+# ===========================================================================
+# ROUND 4: what "the read did not see it" is allowed to mean.
+#
+# The previous guard was `if absent and not returned`, and on PostgreSQL it could
+# never fire: pg_namespace returns `public` for EVERY database, so a successful
+# read is never empty. These tests establish what the shipped statement actually
+# guarantees, then drive the replacement guard until it fires.
+# ===========================================================================
+
+
+class _DataApiIn(_DataApi):
+    """Same adapter, but the TARGET read runs in a chosen database while the cache
+    reads and writes stay in `postgres`, which is the real split: the target is a
+    customer cluster, the cache is ours. The collector's target call is the only
+    one that passes `database`."""
+
+    def __init__(self, server, target_db):
+        super().__init__(server)
+        self.target_db = target_db
+
+    def execute_statement(self, resourceArn=None, secretArn=None, database=None,
+                          sql=None, parameters=None, includeResultMetadata=None):
+        if database is None:
+            return super().execute_statement(sql=sql, parameters=parameters)
+        rows = self.s.raw(f"/* target */ {sql}", db=self.target_db)
+        return {"records": [[({"isNull": True} if c == "" else {"stringValue": c})
+                             for c in row] for row in rows]}
+
+
+def _run_in(pg, target_db, cluster_id, ts):
+    api = _DataApiIn(pg, target_db)
+    return collect_pg_schema_snapshot(api, _cache_execute(_DataApi(pg)), "arn:x",
+                                      "arn:y", cluster_id, target_db, snapshot_ts=ts)
+
+
+def test_the_pg_catalog_read_does_not_shrink_when_privileges_are_lost(pg):
+    """One of the three hazards the previous tier named as making absence
+    ambiguous. On PostgreSQL it is NOT one: pg_catalog is world-readable, so an
+    unprivileged role gets the identical result set while being unable to read a
+    single row of the tables it just listed. The MySQL half of this claim is the
+    opposite and stays disclosed, information_schema there IS privilege-filtered.
+    """
+    pg.raw("DROP DATABASE IF EXISTS privdb", db="postgres")
+    pg.raw("CREATE DATABASE privdb", db="postgres")
+    pg.raw("DROP ROLE IF EXISTS lowpriv", db="postgres")
+    pg.raw("CREATE ROLE lowpriv LOGIN", db="postgres")
+    pg.raw("CREATE SCHEMA core; CREATE TABLE core.users (id int, email text);"
+           "CREATE TABLE core.orders (id int)", db="privdb")
+    pg.raw("CREATE TABLE public.audit (id int)", db="privdb")
+    pg.raw("REVOKE ALL ON SCHEMA core FROM PUBLIC;"
+           "REVOKE ALL ON ALL TABLES IN SCHEMA core FROM PUBLIC", db="privdb")
+
+    as_super = pg.raw(PG_SCHEMA_SQL, db="privdb")
+    as_low = pg.raw(PG_SCHEMA_SQL, db="privdb", user="lowpriv")
+    assert [(r[0], r[1]) for r in as_super] == [("core", "2"), ("public", "1")]
+    assert as_low == as_super, "PG catalog visibility must not depend on grants"
+    with pytest.raises(AssertionError, match="permission denied"):
+        pg.raw("SELECT count(*) FROM core.users", db="privdb", user="lowpriv")
+
+
+def test_the_read_returns_the_complete_visible_set_or_raises(pg):
+    """The other half of the claim the guard rests on. Compared against an
+    INDEPENDENT catalog census rather than against itself, and the failure half is
+    driven with a real server FATAL."""
+    census = {r[0] for r in pg.raw(
+        "SELECT nspname FROM pg_namespace WHERE nspname NOT IN "
+        "('pg_catalog', 'information_schema') AND nspname NOT LIKE 'pg\\_%'",
+        db="privdb")}
+    assert {r[0] for r in pg.raw(PG_SCHEMA_SQL, db="privdb")} == census == {"core", "public"}
+
+    before = int(pg.execute("SELECT COUNT(*) AS n FROM schema_snapshots", {}).rows[0]["n"])
+    with pytest.raises(AssertionError, match='database "nosuchdb" does not exist'):
+        _run_in(pg, "nosuchdb", "scope-1", "2026-07-24T00:00:00+00:00")
+    after = int(pg.execute("SELECT COUNT(*) AS n FROM schema_snapshots", {}).rows[0]["n"])
+    assert after == before, "a failed read must write nothing at all"
+
+
+def test_a_read_that_landed_in_the_wrong_database_records_no_drop(pg):
+    """THE round-4 CRITICAL, end to end. `target_db = resource.get("db_name",
+    "sampledb")` in etl_collector/handler.py makes this a live production path.
+
+    MEASURED on this same fixture with the guard as shipped in 156dda8: the
+    second run returned
+      {"schemas_seen": 1, "snapshots_written": 3, "vanished": 2,
+       "vanished_unconfirmed": 0}
+    and get_schema_diff, get_schema_history and diagnose_root_cause all reported
+    core dropped [orders, users], billing dropped [invoices], public dropped
+    [audit], status ok, nothing skipped.
+    """
+    pg.raw("DROP DATABASE IF EXISTS rightdb", db="postgres")
+    pg.raw("DROP DATABASE IF EXISTS sampledb", db="postgres")
+    pg.raw("CREATE DATABASE rightdb", db="postgres")
+    pg.raw("CREATE DATABASE sampledb", db="postgres")  # the db_name fallback
+    pg.raw("CREATE SCHEMA core; CREATE TABLE core.users (id int, email text);"
+           "CREATE TABLE core.orders (id int, total numeric)", db="rightdb")
+    pg.raw("CREATE SCHEMA billing; CREATE TABLE billing.invoices (id int)", db="rightdb")
+    pg.raw("CREATE TABLE public.audit (id int, note text)", db="rightdb")
+
+    base = _run_in(pg, "rightdb", "wrongdb-1", "2026-07-25T00:00:00+00:00")
+    assert base["baselines"] == 3
+    stored = {s: _latest(pg, "wrongdb-1", s)["t"] for s in ("core", "billing", "public")}
+
+    # `public` exists in EVERY PostgreSQL database, so the wrong database's read is
+    # NOT empty: this is precisely the shape the old guard could not see.
+    assert [r[0] for r in pg.raw(PG_SCHEMA_SQL, db="sampledb")] == ["public"]
+
+    out = _run_in(pg, "sampledb", "wrongdb-1", "2026-07-25T00:05:00+00:00")
+    assert out["corroborated"] is False
+    assert out["snapshots_written"] == 0
+    assert out["vanished"] == 0
+    assert out["vanished_unconfirmed"] == 2   # core + billing, absent
+    assert out["emptied_unconfirmed"] == 1    # public, observed empty, not trusted
+    assert {s: _latest(pg, "wrongdb-1", s)["t"] for s in stored} == stored
+
+    # END TO END: what the three readers hand a human is the last GOOD snapshot,
+    # and not one word about a drop.
+    diff = sd.get_schema_diff_impl(pg, cluster_id="wrongdb-1")
+    assert diff["status"] == "insufficient_snapshots"  # baselines only, still true
+    assert all(not d["dropped"] for d in diff.get("diffs", []))
+    hist = sh.get_schema_history_impl(pg, cluster_id="wrongdb-1", days=36500)
+    assert hist["count"] == 0
+    examined, skipped = {}, []
+    got = drc._collect_schema_changes(pg, "wrongdb-1", "2026-07-25T00:04:00+00:00",
+                                      "2026-07-25T00:06:00+00:00", None, 60,
+                                      examined, skipped)
+    assert got == []
+    assert skipped == ["schema_changes"]  # no comparable history, honestly said
+
+    # SELF-HEALING: the next correct read records the truth, including the real
+    # DDL that happened while the collector was looking at the wrong database.
+    pg.raw("DROP TABLE billing.invoices", db="rightdb")
+    heal = _run_in(pg, "rightdb", "wrongdb-1", "2026-07-25T00:10:00+00:00")
+    assert heal["corroborated"] is True
+    assert heal["snapshots_written"] == 1
+    assert json.loads(_latest(pg, "wrongdb-1", "billing")["d"])["dropped"] == ["invoices"]
+
+
+def test_the_only_tracked_schema_going_to_zero_is_still_recorded(pg):
+    """Row 4 of the state table, the deliberate exception. With one tracked schema
+    there is nothing left to corroborate the read WITH, and refusing to record it
+    would put the single-schema cluster (the common shape) back to serving dropped
+    tables forever, which is the CRITICAL the previous tier fixed. Recorded, and
+    the payload says it was done without corroboration."""
+    pg.raw("DROP DATABASE IF EXISTS solodb", db="postgres")
+    pg.raw("CREATE DATABASE solodb", db="postgres")
+    pg.raw("CREATE TABLE public.only_table (id int, payload text)", db="solodb")
+    assert _run_in(pg, "solodb", "solo-1", "2026-07-26T00:00:00+00:00")["baselines"] == 1
+
+    pg.raw("DROP TABLE public.only_table", db="solodb")
+    out = _run_in(pg, "solodb", "solo-1", "2026-07-26T00:05:00+00:00")
+    assert out["corroborated"] is False
+    assert out["uncorroborated_writes"] == 1
+    assert out["snapshots_written"] == 1
+    assert out["emptied_unconfirmed"] == 0
+    assert json.loads(_latest(pg, "solo-1", "public")["t"]) == {}
+    assert json.loads(_latest(pg, "solo-1", "public")["d"])["dropped"] == ["only_table"]
+
+    hist = sh.get_schema_history_impl(pg, cluster_id="solo-1", days=36500)
+    assert any(json.loads(c["changes"]).get("dropped") == ["only_table"]
+               for c in hist["changes"])
+    # And it is not re-filed on all 288 runs a day.
+    assert _run_in(pg, "solodb", "solo-1", "2026-07-26T00:10:00+00:00")[
+        "snapshots_written"] == 0
+
+
+def test_the_rca_read_failing_is_not_reported_as_a_cluster_with_no_history(pg):
+    """FINDING 2 on the real engine: the MAIN schema_snapshots read raising must
+    not borrow the label that means "this cluster has no comparable history"."""
+    class _NoTable:
+        def execute(self, sql, params=None):
+            if "FROM schema_snapshots" in sql:
+                return pg.execute(sql.replace("schema_snapshots", "schema_snapshots_x"),
+                                  params)
+            return pg.execute(sql, params)
+
+    examined, skipped = {}, []
+    drc._collect_schema_changes(_NoTable(), "solo-1", "2026-07-26T00:00:00+00:00",
+                                "2026-07-26T01:00:00+00:00", None, 60, examined, skipped)
+    assert skipped == ["schema_changes_read_error"]
+
+    real_examined, real_skipped = {}, []
+    drc._collect_schema_changes(pg, "never-collected-1", "2026-07-26T00:00:00+00:00",
+                                "2026-07-26T01:00:00+00:00", None, 60,
+                                real_examined, real_skipped)
+    assert real_skipped == ["schema_changes"]
+    assert skipped != real_skipped
 
 
 def test_explicit_miss_names_the_snapshots_that_do_exist(pg):
