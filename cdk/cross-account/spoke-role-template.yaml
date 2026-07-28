@@ -78,8 +78,16 @@ Resources:
               # none of the three actions above cover. Without this, a spoke-account
               # DocumentDB cluster is permanently AND silently blind: rds:Describe*
               # already resolves the profiler state to "on", so only the log read
-              # fails. Both ARN forms are required — the log-group ARN authorizes
-              # the group itself, the `:*` form its log streams. No
+              # fails. The log-group ARN is the form that authorizes: the service
+              # authorization reference lists FilterLogEvents with required
+              # resource type log-group (access level Read, condition key
+              # aws:ResourceTag/${TagKey}), NOT log-stream. The `:*` form below is
+              # not required; it is kept only to mirror the hub grant in
+              # cdk/stacks/data_stack.py byte for byte, so a future reader diffing
+              # the two does not "fix" one of them. Do not drop the log-group form
+              # thinking the `:*` form covers it: AWS own SAM FilterLogEventsPolicy
+              # scopes to `:log-stream:*`, which is broader than the reference
+              # requires and is not evidence about what authorizes. No
               # aws:ResourceTag condition: the profiler log group is created by the
               # service and carries no DBOps tag, so a tag condition here would
               # deny every read (same class of bug as the snapshot-create grants

@@ -84,9 +84,22 @@ def test_spoke_role_grants_every_logs_action_the_collectors_call():
     )
 
 
-def test_spoke_profiler_log_grant_covers_both_arn_forms():
-    """A log-group grant needs the group ARN and its `:*` stream form. Dropping
-    the second is the classic half-grant, and it fails only cross-account."""
+def test_spoke_profiler_log_grant_carries_the_log_group_arn():
+    """FilterLogEvents authorizes on the log-group resource type, per the service
+    authorization reference (list_logs: required resource type log-group, access
+    level Read). The log-group ARN is therefore the load-bearing one; dropping it
+    makes a spoke-account profiler read fail while the hub keeps working, which is
+    the failure mode that only shows up cross-account.
+
+    The `:*` form is asserted too, but only because it mirrors the hub grant in
+    cdk/stacks/data_stack.py. It is NOT required, and an earlier version of this
+    docstring wrongly claimed both forms were, citing log streams."""
     template = TEMPLATE.read_text()
-    assert '"arn:aws:logs:*:*:log-group:/aws/docdb/*"' in template
-    assert '"arn:aws:logs:*:*:log-group:/aws/docdb/*:*"' in template
+    assert '"arn:aws:logs:*:*:log-group:/aws/docdb/*"' in template, (
+        "the required log-group form is missing"
+    )
+    assert '"arn:aws:logs:*:*:log-group:/aws/docdb/*:*"' in template, (
+        "the hub grant carries the :* form; keep the two byte-identical"
+    )
+    # The retracted justification must not come back.
+    assert "the `:*` form its log streams" not in TEMPLATE.read_text()
