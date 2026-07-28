@@ -6,6 +6,24 @@ import boto3
 from mcp_servers.shared.models import QueryResult
 
 
+def is_mysql_engine(engine) -> bool:
+    """True for ANY MySQL engine string: `aurora-mysql` AND standalone `mysql`.
+
+    Matching both is deliberate, not sloppy. The InnoDB facts these callers
+    branch on (no dead tuples, no VACUUM, DATA_FREE instead) are identical for
+    Aurora MySQL and RDS MySQL, and both collectors populate table_stats from
+    the SAME information_schema.tables.DATA_FREE expression
+    (etl_collector/collectors/mysql_table_stats.py and
+    rds_direct_collector/mysql_table_stats.py). `sqlserver` (also rds_instance)
+    does NOT match.
+
+    Where a caller needs Aurora MySQL specifically (Data API reachability), the
+    handler's relational capability gate has already excluded rds_instance
+    before the tool runs — see performance/handler.py _ENGINE_GATED_TOOLS.
+    """
+    return "mysql" in str(engine or "").lower()
+
+
 class CacheClient:
     def __init__(self):
         self.rds_data = boto3.client("rds-data")
@@ -15,6 +33,41 @@ class CacheClient:
         self._clusters_table = os.environ.get("CLUSTERS_TABLE", "")
         self._dynamodb = None
         self._target_cache = {}
+        self._engine_cache = {}
+
+    def engine_of(self, cluster_id: str) -> str:
+        """Raw `cluster_meta.engine` string for a cluster ("" when unknown).
+
+        WHY THIS EXISTS: CAPABILITIES in engine_family.py is keyed by FAMILY, and
+        Aurora PG and Aurora MySQL are the SAME family (relational). So a family
+        flag cannot express a PG-vs-MySQL difference — the distinction has to be
+        resolved from the engine string at the tool. Same contract as
+        operations/tools/prewarm_reader._is_postgres and simulation upgrade_plan,
+        hoisted here so the three performance tools that need it share one
+        memoized lookup instead of three copies.
+
+        Memoized per instance (an engine never changes), mirroring _target_cache,
+        so a warm Lambda pays one cache query per cluster. Returns "" on any
+        failure: callers must treat "" as "not MySQL", i.e. keep the default
+        (PostgreSQL) behaviour rather than guess.
+        """
+        if not cluster_id:
+            return ""
+        if cluster_id in self._engine_cache:
+            return self._engine_cache[cluster_id]
+        try:
+            result = self.execute(
+                "SELECT engine FROM cluster_meta WHERE cluster_id = :cid",
+                {"cid": cluster_id},
+            )
+            rows = getattr(result, "rows", None) or []
+            first = rows[0] if rows else None
+            engine = str(first.get("engine") or "") if isinstance(first, dict) else ""
+        except Exception as e:
+            print(f"[CacheClient] engine lookup failed for {cluster_id}: {e}")
+            return ""
+        self._engine_cache[cluster_id] = engine
+        return engine
 
     def _resolve_target(self, cluster_id: str) -> Optional[dict]:
         """Return {cluster_arn, secret_arn, db_name} for a registered target cluster."""

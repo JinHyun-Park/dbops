@@ -78,16 +78,30 @@ def performance_schema():
         _tool("get_performance_summary", "Get KPI summary for a time period",
               {"cluster_id": "string", "hours": "integer"}, ["cluster_id"]),
         _tool("recommend_index",
-              "Emit CREATE INDEX CONCURRENTLY DDL by parsing heavy queries (table + "
-              "composite columns from WHERE/JOIN/ORDER BY), corroborated by table_stats "
-              "seq scans; read-only advice validated via EXPLAIN and the approval flow",
+              "PostgreSQL only. Emit CREATE INDEX CONCURRENTLY DDL by parsing heavy "
+              "queries (table + composite columns from WHERE/JOIN/ORDER BY), corroborated "
+              "by table_stats seq scans; read-only advice validated via EXPLAIN and the "
+              "approval flow. MySQL returns status=unsupported_engine (the candidate "
+              "filter needs shared_blks_read/hit, which MySQL does not collect) - that is "
+              "'not measured', never 'no index needed'; use explain_plan instead",
               {"cluster_id": "string", "min_seq_scan_ratio": "number"}, ["cluster_id"]),
-        _tool("get_vacuum_stats", "Get autovacuum stats and bloat ratio per table",
+        _tool("get_vacuum_stats",
+              "Per-table maintenance stats. PostgreSQL: dead_tuples, bloat_pct, "
+              "last_vacuum/last_analyze. MySQL: the SAME cache rows relabelled in InnoDB "
+              "terms - free_rows_est and fragmentation_pct derived from "
+              "information_schema.tables.DATA_FREE (reclaimable free space, in rows not "
+              "bytes), no last_vacuum, and the fix is OPTIMIZE TABLE. InnoDB has neither "
+              "dead tuples nor VACUUM: read the `engine` and `source` fields before "
+              "quoting any number",
               {"cluster_id": "string"}, ["cluster_id"]),
         _tool("explain_plan",
-              "Run EXPLAIN on a SELECT and return a structured plan analysis "
-              "(seq scans, bad row estimates, disk spills, expensive nodes); "
-              "analyze=true actually runs the query for real timings",
+              "Run EXPLAIN on a SELECT and return a structured plan analysis. Aurora "
+              "PostgreSQL: seq scans, row-estimate misses, disk spills, expensive nodes; "
+              "analyze=true actually runs the query for real timings. Aurora MySQL: "
+              "EXPLAIN FORMAT=JSON, reporting full table scans (access_type=ALL), filter "
+              "selectivity, filesort, internal temporary tables and query_cost, with an "
+              "unavailable_analysis field naming what MySQL cannot produce; analyze=true "
+              "is refused there because MySQL EXPLAIN ANALYZE returns no JSON",
               {"cluster_id": "string", "sql": "string", "analyze": "boolean"},
               ["cluster_id", "sql"]),
     ]

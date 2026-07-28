@@ -9,16 +9,27 @@ over large inputs) plus a short list of the most expensive nodes, so the agent c
 explain "why is this query slow" without re-deriving plan-reading heuristics from
 the full tree every time.
 
-PostgreSQL is the project's primary engine (Aurora PG). MySQL EXPLAIN FORMAT=JSON
-has a completely different shape; rather than build a second parser we detect it
-and return an explicit "unsupported engine" note instead of crashing.
+Aurora PostgreSQL and Aurora MySQL are BOTH handled, by two separate parsers.
+MySQL's `EXPLAIN FORMAT=JSON` document has nothing structurally in common with
+PG's (query_block / table / access_type / rows_examined_per_scan versus Plan /
+Node Type / Plan Rows), so the two walkers stay separate on purpose: a unified
+plan model would cost more than it saves and would blur which signals are real
+for which engine. What IS shared is the OUTPUT contract — same status/summary/
+findings/expensive_nodes/plan_change keys — plus the plan-history signature
+capture, so the agent reads one shape either way.
+
+Engine resolution: CAPABILITIES is keyed by FAMILY and Aurora PG / Aurora MySQL
+are the same family (relational), so the family flag cannot pick the dialect.
+The engine string is read from cluster_meta via cache.engine_of() — handler-side
+data, never a caller-supplied parameter, so the agent cannot ask for a PG-shaped
+answer about a MySQL cluster.
 """
 
 import hashlib
 import json
 import re
 
-from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.cache_client import CacheClient, is_mysql_engine
 from mcp_servers.shared.sql_safety import is_read_only_safe, strip_sql_literals
 
 # A Seq Scan is normal on a small table; it only becomes a smell once the planner
@@ -34,6 +45,9 @@ _NESTED_LOOP_OUTER_THRESHOLD = 1_000
 _HIGH_COST_THRESHOLD = 100_000
 # How many hot-spot nodes to surface to the agent (avoid dumping the whole tree).
 _MAX_EXPENSIVE_NODES = 10
+# MySQL `filtered` is the % of scanned rows the predicate keeps. Below this, the
+# access reads several times more rows than it returns.
+_MYSQL_FILTERED_PCT_THRESHOLD = 50.0
 
 
 def _strip_explain_prefix(sql: str) -> str:
@@ -145,7 +159,11 @@ def _capture_plan_history(cache: CacheClient, cluster_id: str, inner_sql: str, n
     """Record this plan's structural signature and compare it to the most recent
     prior EXPLAIN of the same (literal-normalized) query on this cluster, so the
     agent can say whether a slowdown is a PLAN FLIP or just DATA GROWTH. Writes to
-    the cache (query_plan_history, schema_v22)."""
+    the cache (query_plan_history, schema_v22).
+
+    Engine-agnostic: the MySQL branch maps its access nodes onto the same four
+    signature slots (see _mysql_history_nodes), so both engines share one hash
+    space per (cluster, query)."""
     plan_hash = hashlib.md5(_plan_signature(nodes).encode()).hexdigest()
     query_sig = hashlib.md5(_normalize_query(inner_sql).encode()).hexdigest()
     summary = " > ".join(str(n.get("Node Type") or "?") for n in nodes[:8])
@@ -245,6 +263,266 @@ def _analyze_node(node: dict, analyze: bool, findings: list) -> None:
         })
 
 
+# --------------------------------------------------------------------------
+# MySQL (Aurora MySQL) — EXPLAIN FORMAT=JSON
+#
+# Document shape verified live against Aurora MySQL 8.0.39 over the Data API:
+#
+#   query_block:
+#     cost_info: {query_cost: "602995.88"}          <- STRINGS, not numbers
+#     ordering_operation:                            <- optional wrapper
+#       using_filesort: true
+#       grouping_operation: {using_temporary_table: true, table: {...}}
+#       nested_loop: [{table: {...}}, {table: {...}}]   <- join order, left-deep
+#     table:                                         <- single-table form
+#       table_name / access_type / rows_examined_per_scan /
+#       rows_produced_per_join / filtered ("33.33") / key / possible_keys /
+#       cost_info / attached_condition
+#
+# So: any dict carrying "table_name" is an access node, the optimizer strategy
+# flags hang off the CONTAINERS (not the tables), and every cost/percentage is a
+# string. Recursion beats enumerating wrapper keys — MySQL has a dozen of them
+# (duplicates_removal, materialized_from_subquery, union_result, windowing, ...)
+# and a missed wrapper would silently drop that whole subtree from the analysis.
+# --------------------------------------------------------------------------
+
+def _num(value):
+    """MySQL reports costs and `filtered` as STRINGS. None when not numeric."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _walk_mysql(node, tables: list, flags: dict) -> None:
+    """Collect every table-access node plus the query-wide optimizer strategy
+    flags. A table node's own values are recursed too, because a derived table
+    nests another query_block inside `materialized_from_subquery`."""
+    if isinstance(node, dict):
+        if "table_name" in node:
+            tables.append(node)
+        for key in ("using_filesort", "using_temporary_table"):
+            if node.get(key) is True:
+                flags[key] = True
+        for value in node.values():
+            _walk_mysql(value, tables, flags)
+    elif isinstance(node, list):
+        for value in node:
+            _walk_mysql(value, tables, flags)
+
+
+def _mysql_history_nodes(tables: list) -> list:
+    """Project MySQL access nodes onto the four slots _plan_signature hashes, so
+    plan-flip detection is shared instead of duplicated. The mapping is exact in
+    meaning, not a fudge: access_type is the node type, table_name is the
+    relation, `key` is the chosen index. Costs and row counts stay excluded, so a
+    cost-only change still reads as data growth rather than a plan flip."""
+    return [
+        {
+            "Node Type": t.get("access_type"),
+            "Relation Name": t.get("table_name"),
+            "Index Name": t.get("key"),
+        }
+        for t in tables
+    ]
+
+
+def _analyze_mysql(tables: list, flags: dict, query_cost, findings: list) -> None:
+    """MySQL plan smells. Deliberately NOT a translation of the PG heuristics:
+    only signals MySQL's plan-only EXPLAIN actually carries are emitted, and the
+    two PG heuristics that need real execution counters are reported as
+    unavailable by the caller instead of being faked from estimates."""
+    for t in tables:
+        relation = t.get("table_name")
+        examined = _num(t.get("rows_examined_per_scan"))
+        produced = _num(t.get("rows_produced_per_join"))
+        access = str(t.get("access_type") or "")
+
+        # access_type ALL = full table scan. MySQL's analogue of a PG Seq Scan,
+        # and the same "index probably missing" candidate.
+        if access == "ALL" and examined is not None and examined >= _SEQ_SCAN_ROW_THRESHOLD:
+            findings.append({
+                "severity": "high",
+                "issue": "Full table scan on large table",
+                "detail": f"access_type=ALL scans {int(examined)} rows on "
+                          f"{relation or 'a table'} (>= {_SEQ_SCAN_ROW_THRESHOLD}); "
+                          f"consider an index on the WHERE/JOIN columns.",
+                "node": access,
+                "relation": relation,
+            })
+
+        # `filtered` is the % of scanned rows the predicate keeps. Low filtered on
+        # a large scan means the access reads far more rows than it returns. This
+        # is a SELECTIVITY signal, not a planner-vs-reality estimate miss: both
+        # numbers here are estimates, so it says nothing about stats accuracy.
+        filtered = _num(t.get("filtered"))
+        if (filtered is not None and filtered < _MYSQL_FILTERED_PCT_THRESHOLD
+                and examined is not None and examined >= _SEQ_SCAN_ROW_THRESHOLD):
+            kept = int(produced) if produced is not None else "?"
+            findings.append({
+                "severity": "medium",
+                "issue": "Low filter selectivity",
+                "detail": f"{relation or 'a table'} reads {int(examined)} rows to keep "
+                          f"an estimated {kept} (filtered={filtered}%); a more selective "
+                          f"index on the filter columns would cut the rows read.",
+                "node": access,
+                "relation": relation,
+            })
+
+    # Strategy flags are query-block level in MySQL, not per-table.
+    if flags.get("using_filesort"):
+        findings.append({
+            "severity": "medium",
+            "issue": "Sort not served by an index (filesort)",
+            "detail": "using_filesort=true: the optimizer sorts rows itself instead of "
+                      "reading them in index order. An index matching the ORDER BY / "
+                      "GROUP BY columns can remove the sort.",
+            "node": "filesort",
+            "relation": None,
+        })
+    if flags.get("using_temporary_table"):
+        findings.append({
+            "severity": "medium",
+            "issue": "Internal temporary table",
+            "detail": "using_temporary_table=true: the query materializes an internal "
+                      "temporary table (typical for GROUP BY / DISTINCT / UNION that no "
+                      "index can satisfy). Large ones spill to disk.",
+            "node": "temporary table",
+            "relation": None,
+        })
+
+    if query_cost is not None and query_cost >= _HIGH_COST_THRESHOLD:
+        findings.append({
+            "severity": "info",
+            "issue": "High total plan cost",
+            "detail": f"query_cost is {query_cost} (>= {_HIGH_COST_THRESHOLD}); "
+                      f"this is an expensive plan overall.",
+            "node": "query_block",
+        })
+
+
+# Analyses the PG path returns that MySQL's plan-only EXPLAIN cannot produce.
+# Stated explicitly rather than defaulted, so the agent never presents a missing
+# analysis as a clean result.
+_MYSQL_UNAVAILABLE = {
+    "planning_time_ms": (
+        "MySQL의 EXPLAIN FORMAT=JSON에는 옵티마이저 소요 시간이 포함되지 않습니다. "
+        "측정값이 없다는 뜻이며 0이라는 뜻이 아닙니다."
+    ),
+    "row_estimate_miss": (
+        "추정 행수와 실제 행수의 괴리(통계 부정확 신호)는 실행 통계가 있어야 계산됩니다. "
+        "MySQL에서 그것을 주는 EXPLAIN ANALYZE는 JSON 출력을 지원하지 않아 이 도구가 "
+        "파싱할 수 없습니다. 이 플랜의 모든 행수는 추정값입니다."
+    ),
+    "disk_spill": (
+        "정렬·해시가 실제로 디스크로 스필했는지는 실행 통계에만 나옵니다. "
+        "using_filesort / using_temporary_table는 '그 연산을 한다'는 뜻이고 "
+        "'디스크를 썼다'는 뜻은 아닙니다."
+    ),
+}
+
+
+def _explain_mysql(cache: CacheClient, cluster_id: str, inner: str, analyze: bool) -> dict:
+    """Aurora MySQL branch. Same output contract as the PG path."""
+    if analyze:
+        # MySQL's EXPLAIN ANALYZE both EXECUTES the statement and returns a
+        # non-JSON tree (api/explain/handler.py:93-94 documents the same limit),
+        # so there is nothing here to parse. Refuse before touching the target.
+        return {
+            "status": "rejected",
+            "cluster_id": cluster_id,
+            "engine": "mysql",
+            "reason": (
+                "MySQL은 EXPLAIN ANALYZE의 결과를 JSON으로 내주지 않아 이 도구가 구조화 "
+                "분석을 만들 수 없습니다. analyze=false로 호출하면 실행 없이 플랜을 "
+                "분석합니다."
+            ),
+        }
+
+    # cache.execute_on_target prepends the required `/* source=dbops-agent */`
+    # audit tag; a leading comment before EXPLAIN is accepted by MySQL (verified
+    # live against the Data API).
+    result = cache.execute_on_target(cluster_id, f"EXPLAIN FORMAT=JSON {inner}")
+    if not result or not getattr(result, "rows", None):
+        return {
+            "status": "no_target",
+            "reason": "cluster not registered or unreachable — register via /clusters",
+            "cluster_id": cluster_id,
+        }
+
+    raw = _extract_plan_cell(result)
+    if raw is None:
+        return {"status": "error", "reason": "EXPLAIN returned no plan cell", "cluster_id": cluster_id}
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return {
+            "status": "error",
+            "reason": "MySQL EXPLAIN did not return parseable FORMAT=JSON output",
+            "cluster_id": cluster_id,
+        }
+
+    block = parsed.get("query_block") if isinstance(parsed, dict) else None
+    if not isinstance(block, dict):
+        return {
+            "status": "error",
+            "reason": "MySQL plan has no top-level query_block",
+            "cluster_id": cluster_id,
+        }
+
+    tables: list = []
+    flags: dict = {}
+    _walk_mysql(block, tables, flags)
+
+    query_cost = _num((block.get("cost_info") or {}).get("query_cost"))
+    findings: list = []
+    _analyze_mysql(tables, flags, query_cost, findings)
+
+    # MySQL has no single "plan output rows" field. The LAST access node in the
+    # join order carries rows_produced_per_join for the whole join, which is the
+    # closest real number; it is pre-LIMIT.
+    estimated_rows = _num(tables[-1].get("rows_produced_per_join")) if tables else None
+
+    expensive_nodes = []
+    for t in sorted(tables, key=lambda t: _num((t.get("cost_info") or {}).get("prefix_cost")) or 0.0,
+                    reverse=True)[:_MAX_EXPENSIVE_NODES]:
+        expensive_nodes.append({
+            "node_type": t.get("access_type"),
+            "relation": t.get("table_name"),
+            "plan_rows": _num(t.get("rows_examined_per_scan")),
+            # prefix_cost is cumulative through this point of the join order —
+            # MySQL's nearest equivalent to a PG node's Total Cost.
+            "total_cost": _num((t.get("cost_info") or {}).get("prefix_cost")),
+            "key": t.get("key"),
+            "possible_keys": t.get("possible_keys"),
+        })
+
+    plan_change = None
+    try:
+        plan_change = _capture_plan_history(
+            cache, cluster_id, inner, _mysql_history_nodes(tables)
+        )
+    except Exception:
+        plan_change = None
+
+    return {
+        "status": "ok",
+        "cluster_id": cluster_id,
+        "analyzed": False,
+        "engine": "mysql",
+        "summary": {
+            "total_cost": query_cost,
+            "planning_time_ms": None,
+            "estimated_rows": estimated_rows,
+            "node_count": len(tables),
+        },
+        "findings": findings,
+        "expensive_nodes": expensive_nodes,
+        "plan_change": plan_change,
+        "unavailable_analysis": _MYSQL_UNAVAILABLE,
+    }
+
+
 def explain_plan_impl(cache: CacheClient, cluster_id: str, sql: str, analyze: bool = False) -> dict:
     """Run EXPLAIN on a target Aurora cluster and parse the plan into structured analysis.
 
@@ -256,6 +534,10 @@ def explain_plan_impl(cache: CacheClient, cluster_id: str, sql: str, analyze: bo
 
     Only SELECT / WITH...SELECT is accepted — EXPLAIN ANALYZE on a write statement
     would mutate the target, so non-SELECT input is rejected outright.
+
+    On Aurora MySQL the statement becomes `EXPLAIN FORMAT=JSON` and the MySQL
+    walker produces the same output contract; analyze=true is refused there
+    because MySQL's EXPLAIN ANALYZE returns no JSON to parse.
     """
     # Peel any leading EXPLAIN the caller wrote, THEN validate the inner
     # statement (so `EXPLAIN SELECT ...` is accepted, not rejected wholesale).
@@ -277,6 +559,14 @@ def explain_plan_impl(cache: CacheClient, cluster_id: str, sql: str, analyze: bo
                 "statement). Use analyze=false for a plan-only estimate."
             ),
         }
+
+    # Dialect split. The handler's relational gate has already run, but Aurora PG
+    # and Aurora MySQL are the SAME family, so the family flag cannot pick the
+    # statement — the engine string decides. Anything not MySQL keeps the PG path
+    # (engine_of() returns "" on a lookup failure, so a failure degrades to the
+    # behaviour this tool has always had rather than to a MySQL statement).
+    if is_mysql_engine(cache.engine_of(cluster_id)):
+        return _explain_mysql(cache, cluster_id, inner, analyze)
 
     if analyze:
         explain_sql = f"EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) {inner}"
@@ -302,9 +592,9 @@ def explain_plan_impl(cache: CacheClient, cluster_id: str, sql: str, analyze: bo
     try:
         parsed = json.loads(raw)
     except (ValueError, TypeError):
-        # Not valid JSON. The likeliest cause on this PG-first platform is a MySQL
-        # target (EXPLAIN FORMAT=JSON there has a different shape) or a client that
-        # didn't return JSON. Be explicit rather than crash.
+        # Not valid JSON. MySQL no longer lands here (it branched above), so this
+        # is a target that answered EXPLAIN with something other than JSON. Be
+        # explicit rather than crash.
         return {
             "status": "error",
             "reason": "unsupported engine for structured analysis (plan was not PG FORMAT JSON)",

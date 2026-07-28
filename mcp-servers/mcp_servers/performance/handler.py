@@ -39,7 +39,10 @@ _ENGINE_GATED_TOOLS = {
     "get_top_queries": "query_stats",
     "get_slow_queries": "query_stats",
     "detect_regressions": "query_stats",
-    # explain / index_advice는 오늘 PG 전용 구현이라 relational만 True다.
+    # explain은 Aurora PG + Aurora MySQL 둘 다 지원하고(툴 안에서 엔진 문자열로
+    # 다이얼렉트를 가른다), index_advice는 아직 PG 전용이라 MySQL은 툴 안에서
+    # unsupported_engine을 돌려준다. 둘 다 relational만 True인 이유는 같다:
+    # rds_instance는 Data API가 없어 EXPLAIN을 보낼 경로 자체가 없다.
     "explain_plan": "explain",
     "recommend_index": "index_advice",
 }
@@ -279,11 +282,14 @@ TOOLS = {
     "recommend_index": {
         "impl": recommend_index_impl,
         "description": (
-            "(PostgreSQL) Emit concrete CREATE INDEX CONCURRENTLY DDL by parsing the heavy "
+            "(PostgreSQL only) Emit concrete CREATE INDEX CONCURRENTLY DDL by parsing the heavy "
             "queries in the cache: derives the driving table and composite column order (WHERE "
             "equality, then JOIN keys, then ORDER BY) from query_text, corroborated by "
             "table_stats seq_scan/idx_scan when available. Read-only advice — never executed; "
-            "validate with EXPLAIN and create via the approval flow."
+            "validate with EXPLAIN and create via the approval flow. MySQL returns "
+            "status=unsupported_engine: the candidate filter needs shared_blks_read/hit, which "
+            "the MySQL collector does not populate, so an empty answer would be 'not measured', "
+            "never 'no index needed'. Use explain_plan on MySQL instead."
         ),
         "input_schema": {
             "type": "object",
@@ -296,7 +302,14 @@ TOOLS = {
     },
     "get_vacuum_stats": {
         "impl": get_vacuum_stats_impl,
-        "description": "(PostgreSQL) Get autovacuum stats, dead tuples, and bloat ratio per table",
+        "description": (
+            "Per-table maintenance stats. PostgreSQL: dead tuples, bloat ratio, last "
+            "autovacuum/analyze. MySQL: the same cache rows relabelled in InnoDB terms — "
+            "free_rows_est and fragmentation_pct from information_schema.tables.DATA_FREE "
+            "(reclaimable free space expressed in ROWS, not bytes), no last_vacuum, and the "
+            "remedy is OPTIMIZE TABLE. InnoDB has neither dead tuples nor VACUUM, so check "
+            "the `engine` and `source` fields before quoting any number."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -308,11 +321,15 @@ TOOLS = {
     "explain_plan": {
         "impl": explain_plan_impl,
         "description": (
-            "(PostgreSQL) Run EXPLAIN on a SELECT against the target cluster and return a "
-            "structured plan analysis: summary, findings (seq scans, bad row estimates, disk "
-            "spills, nested loops), and the most expensive nodes. analyze=false (default) only "
-            "plans the query (safe/instant); analyze=true ACTUALLY RUNS the SELECT to capture "
-            "real timings and row counts."
+            "Run EXPLAIN on a SELECT against the target cluster and return a structured plan "
+            "analysis: summary, findings, and the most expensive nodes. Aurora PostgreSQL: "
+            "seq scans, bad row estimates, disk spills, nested loops; analyze=false (default) "
+            "only plans the query (safe/instant), analyze=true ACTUALLY RUNS the SELECT for "
+            "real timings and row counts. Aurora MySQL: EXPLAIN FORMAT=JSON, reporting full "
+            "table scans (access_type=ALL), filter selectivity, filesort, internal temporary "
+            "tables and query_cost, plus an unavailable_analysis field naming the analyses "
+            "MySQL cannot produce; analyze=true is refused on MySQL because its EXPLAIN "
+            "ANALYZE returns no JSON to parse."
         ),
         "input_schema": {
             "type": "object",

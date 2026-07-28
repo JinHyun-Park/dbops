@@ -25,7 +25,28 @@ is dropped rather than guessed.
 
 import re
 
-from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.cache_client import CacheClient, is_mysql_engine
+
+# Why MySQL gets a refusal instead of an answer. Both blockers were MEASURED on
+# the live Aurora MySQL cluster, they are not caution:
+#   1. The candidate filter is `shared_blks_read > shared_blks_hit * ratio`, and
+#      across 2,889 query_stats rows collected in 24 hours BOTH columns are NULL
+#      for every MySQL row (mysql_query_stats.py does not select an equivalent).
+#      So every row is filtered out before parsing even starts.
+#   2. MySQL digest text quotes every identifier with backticks
+#      (`SELECT `s`.`id` FROM `sales` `s` ...`) and _IDENT accepts only
+#      double-quoted or bare identifiers, so the parser would skip every row even
+#      if the data were there.
+# Emitting an empty recommendation list would report both as "no index needed".
+_MYSQL_REFUSAL = (
+    "이 도구의 인덱스 추천은 아직 PostgreSQL 전용입니다. MySQL에서 추천을 만들지 "
+    "못하는 이유는 두 가지입니다. (1) 후보 선별이 shared_blks_read / shared_blks_hit "
+    "지표에 의존하는데 MySQL 수집기는 이 두 컬럼을 채우지 않습니다. (2) 쿼리 파서가 "
+    "MySQL 다이얼렉트(백틱 식별자)를 인식하지 못합니다. 따라서 '추천이 없다'가 아니라 "
+    "'측정하지 못했다'이며, 인덱스가 필요 없다는 근거로 쓸 수 없습니다. 대신 "
+    "explain_plan으로 해당 쿼리의 full table scan(access_type=ALL)과 filesort를 "
+    "확인하고, 대시보드의 중복·미사용 인덱스 패널로 기존 인덱스 사용 현황을 보세요."
+)
 
 # How many heavy queries to pull from the cache. Generous enough to find a few
 # parseable candidates even when some queries are too complex to parse.
@@ -362,8 +383,21 @@ def recommend_index_impl(cache: CacheClient, cluster_id: str, min_seq_scan_ratio
     scanning are boosted; when it is empty/unavailable the query-derived
     recommendations are returned as-is.
 
-    NOTE: the DDL is read-only advice. This tool never executes it.
+    PostgreSQL only. MySQL is REFUSED rather than answered — see
+    _MYSQL_REFUSAL for the two measured reasons.
     """
+    # Aurora PG and Aurora MySQL are the same capability family (relational), so
+    # `index_advice: True` lets Aurora MySQL through the handler gate. Without
+    # this branch the tool ran its PG-shaped query and returned count: 0, which a
+    # DBA reads as "no index is needed" — the most expensive kind of wrong answer.
+    if is_mysql_engine(cache.engine_of(cluster_id)):
+        return {
+            "status": "unsupported_engine",
+            "cluster_id": cluster_id,
+            "engine": "mysql",
+            "reason": _MYSQL_REFUSAL,
+        }
+
     sql = """
         SELECT query_hash, query_text, total_time_ms, calls,
                COALESCE(shared_blks_read, 0) AS blocks_read,
