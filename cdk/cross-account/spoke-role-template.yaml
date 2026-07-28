@@ -73,6 +73,24 @@ Resources:
                   - "logs:GetQueryResults"
                   - "logs:DescribeLogGroups"
                 Resource: "*"
+              # The DocumentDB profiler collector (data-pipeline/
+              # docdb_mongo_collector) reads slow ops with FilterLogEvents, which
+              # none of the three actions above cover. Without this, a spoke-account
+              # DocumentDB cluster is permanently AND silently blind: rds:Describe*
+              # already resolves the profiler state to "on", so only the log read
+              # fails. Both ARN forms are required — the log-group ARN authorizes
+              # the group itself, the `:*` form its log streams. No
+              # aws:ResourceTag condition: the profiler log group is created by the
+              # service and carries no DBOps tag, so a tag condition here would
+              # deny every read (same class of bug as the snapshot-create grants
+              # below).
+              - Sid: CloudWatchLogsDocDBProfiler
+                Effect: Allow
+                Action:
+                  - "logs:FilterLogEvents"
+                Resource:
+                  - "arn:aws:logs:*:*:log-group:/aws/docdb/*"
+                  - "arn:aws:logs:*:*:log-group:/aws/docdb/*:*"
               - Sid: RDSDataAPI
                 Effect: Allow
                 Action:

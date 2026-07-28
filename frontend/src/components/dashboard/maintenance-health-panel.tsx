@@ -64,12 +64,14 @@ const CHECK_LABELS: Record<string, string> = {
   // DocumentDB Mongo-protocol deep diagnosis — docdb_mongo_* check_types from
   // the in-VPC docdb_mongo_collector (currentOp / serverStatus / profiler).
   docdb_mongo_long_running_ops: "Live Ops",
-  // 프로파일러 CloudWatch 로그(/aws/docdb/{cluster}/profiler) 기반. 두 check_type은
+  // 프로파일러 CloudWatch 로그(/aws/docdb/{cluster}/profiler) 기반. 세 check_type은
   // 서로 배타적이다: 프로파일러가 꺼져 있으면 slow_ops를 측정할 수 없고, 켜져 있는데
-  // 로그가 비어 있으면 finding 자체가 없다(= 느린 op 없음). 라벨이 없으면 "All"
-  // 밖의 어떤 탭에도 걸리지 않아 사실상 숨겨진다.
+  // 로그를 읽지 못하면 read_failed(측정 실패), 켜져 있고 로그가 비어 있으면 finding
+  // 자체가 없다(= 느린 op 없음). 라벨이 없으면 "All" 밖의 어떤 탭에도 걸리지 않아
+  // 사실상 숨겨진다.
   docdb_mongo_slow_ops: "Live Ops",
   docdb_mongo_profiler_off: "Live Ops",
+  docdb_mongo_profiler_read_failed: "Live Ops",
 };
 
 // Full PG tab set. MySQL exposes a trimmed list (VACUUM/Bloat/Extensions are

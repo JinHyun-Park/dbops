@@ -68,11 +68,15 @@ SLOW_OPS_CRITICAL = 5  # ≥5 → critical
 # EventBridge rate, so the window below can never drift from the schedule.
 DEFAULT_INTERVAL_MIN = 5
 
-# CloudWatch Logs delivery is best-effort: AWS documents "typically 1-2 minutes"
-# for a profiled op to appear (profiling.html / the profiler blog post). Every
-# read window is shifted this far into the past so an event that took the
-# documented lag to arrive is still inside the window we read, with 1 minute of
-# headroom over the documented upper bound.
+# CloudWatch Logs delivery is best-effort. The developer guide (profiling.html)
+# gives NO delivery-time number at all: it says only "Amazon DocumentDB logs
+# operations to Amazon CloudWatch Logs on a best-effort basis". The number this
+# lag is sized from is the AWS Database blog post's, not the guide's: "It
+# typically takes 1-2 minutes for your queries to show up in the log events"
+# (Meet Bhagdev, "Profiling slow-running queries in Amazon DocumentDB (with
+# MongoDB compatibility)"). Every read window is shifted this far into the past
+# so an op that took that long to arrive is still inside the window we read,
+# with 1 minute of headroom over the blog's upper bound.
 PROFILER_DELIVERY_LAG_MIN = 3
 
 # Bounded read: page size and the hard cap on parsed events per cluster per run.
@@ -553,12 +557,16 @@ def parse_profiler_entry(message):
 
 
 def fetch_profiler_events(logs_client, cluster_id, start_ms, end_ms):
-    """(records, status) for one window. status is "ok", "no_log_group" or
-    "read_failed": bounded markers, never exception text.
+    """(records, status, error_code) for one window. status is "ok",
+    "no_log_group" or "read_failed"; error_code is the bounded AWS error CODE on
+    a failed read and "" otherwise. Never exception text.
 
-    "no_log_group" is NOT an error: AWS says the group can take up to an hour to
-    appear after the profiler is enabled, and it never appears at all until the
-    first op crosses the threshold. It is reported separately from "ok" so an
+    "no_log_group" is NOT an error: the group never appears until the first op
+    crosses the threshold and is delivered, and the AWS Database blog post says
+    "It can take up to 1 hour for the log group to show up after enabling the
+    profiler and turning on log exports" (Meet Bhagdev, "Profiling slow-running
+    queries in Amazon DocumentDB (with MongoDB compatibility)"; the developer
+    guide states no such interval). It is reported separately from "ok" so an
     empty result can never be presented as a measured "no slow ops".
 
     Paginated on nextToken, which is only followed when it is a real string (a
@@ -578,17 +586,18 @@ def fetch_profiler_events(logs_client, cluster_id, start_ms, end_ms):
         try:
             resp = logs_client.filter_log_events(**kwargs)
         except Exception as e:
-            if _error_code(e) == "ResourceNotFoundException":
-                return [], "no_log_group"
+            code = _error_code(e)
+            if code == "ResourceNotFoundException":
+                return [], "no_log_group", ""
             print(f"[docdb_mongo] {cluster_id} profiler log read failed: {e}")
-            return records, "read_failed"
+            return records, "read_failed", code
         for event in resp.get("events") or []:
             record = parse_profiler_entry(event.get("message"))
             if record is not None:
                 records.append(record)
         token = resp.get("nextToken")
         if len(records) >= PROFILER_EVENT_CAP or not isinstance(token, str) or not token:
-            return records[:PROFILER_EVENT_CAP], "ok"
+            return records[:PROFILER_EVENT_CAP], "ok", ""
 
 
 def aggregate_profiler_records(records):
@@ -736,6 +745,40 @@ def build_profiler_off_finding(state_details):
     }
 
 
+def build_profiler_read_failed_finding(cluster_id, error_code, window_minutes):
+    """docdb_mongo_profiler_read_failed: the profiler is ON but reading its log
+    group FAILED, so this window's slow-op numbers are missing, not zero.
+
+    Without this, a read that fails on every single run is indistinguishable from
+    a healthy cluster: both render as zero query_stats rows and no finding. That
+    is the more likely production blindness, because the control-plane read and
+    the log read need DIFFERENT permissions: rds:Describe* resolves the state to
+    "on" while logs:FilterLogEvents is denied, and only the log read dies.
+
+    Carries the bounded AWS error CODE, never the exception message."""
+    group = profiler_log_group(cluster_id)
+    return {
+        "check_type": "docdb_mongo_profiler_read_failed",
+        "severity": "info",
+        "subject": "DocumentDB Profiler Log Unreadable",
+        "value_str": f"프로파일러 로그 읽기 실패 ({error_code})",
+        "threshold_str": f"FilterLogEvents 성공 (최근 {window_minutes}분)",
+        "recommendation": (
+            f"profiler는 켜져 있지만 {group} 로그를 읽지 못했습니다 (오류 코드 "
+            f"{error_code}). 이 창의 슬로우 op 수치는 '0건'이 아니라 '측정하지 못했다'는 "
+            "뜻이므로, 이 클러스터의 슬로우 쿼리 지표가 비어 있는 것을 정상으로 해석하지 "
+            "마세요. AccessDenied 계열이면 클러스터가 있는 계정의 역할(크로스 계정이면 "
+            "spoke role)에 해당 로그 그룹의 logs:FilterLogEvents 권한이 필요합니다. "
+            "일시적인 Throttling이면 수집기가 다음 주기에 다시 읽습니다."
+        ),
+        "details": {
+            "error_code": error_code,
+            "log_group": group,
+            "window_minutes": window_minutes,
+        },
+    }
+
+
 def collect_profiler(session, cache_execute, cluster_id, run_ts, now_ms=None):
     """Control-plane profiler pass for one cluster: read the state, ingest the
     log window into query_stats, emit findings. NEVER raises."""
@@ -762,13 +805,29 @@ def collect_profiler(session, cache_execute, cluster_id, run_ts, now_ms=None):
     if now_ms is None:
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     start_ms, end_ms = profiler_window_ms(now_ms, interval_min)
-    records, status = fetch_profiler_events(logs_client, cluster_id, start_ms, end_ms)
+    records, status, error_code = fetch_profiler_events(
+        logs_client, cluster_id, start_ms, end_ms)
     result["log_read"] = status
     result["window_minutes"] = interval_min
     result["events"] = len(records)
+    if status == "read_failed":
+        # A finding, because this state is OUR bug to fix and it is otherwise
+        # invisible: the Lambda return value only reaches CloudWatch, so a read
+        # that fails every run looks exactly like a healthy cluster on the
+        # dashboard. Bounded error CODE only, never the exception message.
+        result["log_read_error"] = error_code
+        result["findings_emitted"] = _write_finding(
+            cache_execute, cluster_id, run_ts,
+            build_profiler_read_failed_finding(cluster_id, error_code, interval_min))
+        return result
     if status != "ok":
-        # Missing group / failed read: nothing was MEASURED, so nothing is
-        # claimed. The profiler-on state is already in `result`.
+        # "no_log_group" stays SILENT on purpose. The group does not exist until
+        # the first op crosses the threshold and is delivered, and the AWS
+        # Database blog post says it can take up to 1 hour to appear after the
+        # profiler is enabled, so a finding here would nag every operator who
+        # just turned the profiler on. The dev cluster is in exactly that state
+        # (2026-07-28: profiler=enabled + export on, group ResourceNotFound).
+        # Nothing was MEASURED, so nothing is claimed in either direction.
         return result
 
     shapes = aggregate_profiler_records(records)

@@ -95,6 +95,19 @@ class _ResourceNotFound(Exception):
         self.response = {"Error": {"Code": "ResourceNotFoundException"}}
 
 
+class _AwsError(Exception):
+    """A botocore-shaped ClientError whose MESSAGE is exactly what must never
+    reach a finding payload: it carries the caller's role ARN."""
+
+    def __init__(self, code):
+        super().__init__(
+            "An error occurred (%s) when calling the FilterLogEvents operation: "
+            "User: arn:aws:sts::123456789012:assumed-role/dbops-spoke-role/dbops "
+            "is not authorized to perform: logs:FilterLogEvents" % code
+        )
+        self.response = {"Error": {"Code": code}}
+
+
 class _FakeDocDB:
     """DocumentDB control plane. describe_db_cluster_parameters is deliberately
     PAGINATED (profiler on page 1, the other two on page 2) so the collector's
@@ -696,6 +709,77 @@ def test_missing_log_group_with_profiler_on_is_reported_not_claimed_clean():
     assert row["log_read"] == "no_log_group"
 
 
+def test_failed_log_read_is_a_finding_not_silence():
+    """The one blindness the commit headline MISSED: profiler ON and the log group
+    unreadable (IAM denial, throttle, spoke role). Before this finding existed,
+    that produced 0 findings and 0 query_stats rows, byte-identical to a healthy
+    cluster with a genuinely empty window, and the read_failed marker only reached
+    the Lambda return value, i.e. CloudWatch, where nobody looks."""
+    emitted, _, result = _run_handler(
+        [_docdb_row("docdb-a")],
+        command_results={"serverStatus": {}, "currentOp": {"inprog": []}},
+        docdb=_FakeDocDB(),
+        logs=_FakeLogs(error=_AwsError("AccessDeniedException")),
+    )
+    row = json.loads(result["body"])["results"][0]
+    assert row["profiler"] == "on"
+    assert row["log_read"] == "read_failed"
+    assert row["log_read_error"] == "AccessDeniedException"
+    assert result["_query_stats"] == []
+
+    fin = next(e for e in emitted if e["check_type"] == "docdb_mongo_profiler_read_failed")
+    assert fin["severity"] == "info"
+    assert "AccessDeniedException" in fin["value_str"]
+    assert "logs:FilterLogEvents" in fin["recommendation"]
+    # Bounded CODE only. The exception text carries the assumed-role ARN.
+    blob = json.dumps(fin, ensure_ascii=False)
+    assert "assumed-role" not in blob and "not authorized to perform" not in blob
+
+    # And it must be DISTINGUISHABLE from the healthy case, which is the whole
+    # point: same profiler state, same zero rows, different finding count.
+    healthy, _, _ = _run_handler(
+        [_docdb_row("docdb-a")],
+        command_results={"serverStatus": {}, "currentOp": {"inprog": []}},
+        docdb=_FakeDocDB(),
+        logs=_FakeLogs(pages=[{"events": []}]),
+    )
+    assert healthy == []
+
+    # A check_type with no CHECK_LABELS entry only ever shows under "All", so the
+    # panel label is part of the fix, not decoration.
+    panel = (Path(__file__).resolve().parents[3] / "frontend" / "src" / "components"
+             / "dashboard" / "maintenance-health-panel.tsx").read_text()
+    assert "docdb_mongo_profiler_read_failed:" in panel
+
+
+def test_engine_default_profiler_params_are_not_read_as_blindness():
+    """AWS returns a Parameters entry with NO ParameterValue when the value is the
+    engine default, which is the common case for a group where only `profiler` was
+    modified. Both defaults are read at the source (profiling.html, 2026-07-28):
+    profiler_threshold_ms default 100 (permitted 50-INT_MAX), profiler_sampling_rate
+    default 1.0 (permitted 0.0-1.0). A wrong sampling default is not a cosmetic
+    bug: <= 0.0 makes read_profiler_state call a HEALTHY cluster blind and
+    fabricates docdb_mongo_profiler_off, which is what this collector's own
+    Directive forbids."""
+    assert h.DOC_DEFAULT_THRESHOLD_MS == 100
+    assert h.DOC_DEFAULT_SAMPLING_RATE == 1.0
+
+    state, details = h.read_profiler_state(
+        _FakeDocDB(threshold_ms=None, sampling_rate=None), "docdb-a")
+    assert state == "on", details
+    assert details["threshold_ms"] == 100
+    assert details["sampling_rate"] == 1.0
+
+    # End to end: no fabricated finding on that cluster.
+    emitted, _, _ = _run_handler(
+        [_docdb_row("docdb-a")],
+        command_results={"serverStatus": {}, "currentOp": {"inprog": []}},
+        docdb=_FakeDocDB(threshold_ms=None, sampling_rate=None),
+        logs=_FakeLogs(pages=[{"events": []}]),
+    )
+    assert emitted == []
+
+
 def test_profiler_off_emits_guidance_even_when_log_group_missing():
     """ResourceNotFoundException must NOT become silence: the profiler being off
     is exactly why the log group does not exist, and that is the case the
@@ -815,6 +899,23 @@ def test_windows_are_adjacent_and_lag_shifted():
     start_b, end_b = h.profiler_window_ms(1_000_000_000_000 + 137_000 + step_ms, 5)
     assert end_a - start_a == step_ms
     assert start_b == end_a, "windows must be adjacent (no gap, no overlap)"
+
+    # The pair above is EXACTLY step_ms apart, so it is adjacent even without the
+    # grid snap (`end = now - lag` passes it too). Real EventBridge invocations are
+    # not exactly 300000 ms apart, so the assertion that actually tests grid
+    # alignment is a pair one interval apart PLUS jitter, landing in two different
+    # grid cells: base sits 100000 ms into its cell, so +23000 stays in it and
+    # +step-17000 crosses into the next one.
+    base = 1_000_000_000_000
+    assert base % step_ms == 100_000, "fixture must be mid-cell, not grid-aligned"
+    jittered_a = h.profiler_window_ms(base + 23_000, 5)
+    jittered_b = h.profiler_window_ms(base + step_ms - 17_000, 5)
+    assert jittered_a[1] - jittered_a[0] == step_ms
+    assert jittered_b[1] - jittered_b[0] == step_ms
+    assert jittered_b[0] == jittered_a[1], (
+        "jittered consecutive runs must still read adjacent windows, which only "
+        "the interval-grid snap gives"
+    )
     # ...and the window ends in the past by EXACTLY the delivery lag. Measured
     # from a now that is already on the interval grid, so grid alignment
     # contributes nothing and only the lag shift is under test (an unaligned now
@@ -825,10 +926,19 @@ def test_windows_are_adjacent_and_lag_shifted():
     _, end_aligned = h.profiler_window_ms(aligned_now, 5)
     assert end_aligned == aligned_now - h.PROFILER_DELIVERY_LAG_MIN * 60_000
     # Pins the lag VALUE, not just the relationship, because the constant's
-    # comment makes an arithmetic claim: AWS documents profiler delivery as
-    # "typically 1-2 minutes", and 3 is that upper bound plus one minute of
-    # headroom. Change the number and that sentence stops being true.
+    # comment makes an arithmetic claim: the AWS Database blog post (NOT the
+    # developer guide, which gives no delivery number at all) says "It typically
+    # takes 1-2 minutes for your queries to show up in the log events", and 3 is
+    # that upper bound plus one minute of headroom. Change the number and that
+    # sentence stops being true.
     assert h.PROFILER_DELIVERY_LAG_MIN == 3
+    # The read bound is unreachable in a unit test (5000 parsed events), so pin
+    # the pair instead. Both matter: the cap must stay >= one page or a single
+    # full page would report itself as truncated, and it is what keeps one busy
+    # cluster's run inside the Lambda's memory and timeout.
+    assert h.PROFILER_PAGE_LIMIT == 1000
+    assert h.PROFILER_EVENT_CAP == 5000
+    assert h.PROFILER_EVENT_CAP >= h.PROFILER_PAGE_LIMIT
 
 
 def test_window_falls_back_to_the_shipped_cadence_on_a_garbage_env():
@@ -864,6 +974,6 @@ def test_both_documentdb_findings_writers_stay_disjoint_and_share_one_snapshot()
     other = (Path(__file__).resolve().parents[3] / "data-pipeline" / "etl_collector"
              / "collectors" / "docdb_findings.py").read_text()
     mine = {"docdb_mongo_long_running_ops", "docdb_mongo_slow_ops",
-            "docdb_mongo_profiler_off"}
+            "docdb_mongo_profiler_off", "docdb_mongo_profiler_read_failed"}
     for check_type in mine:
         assert f'"{check_type}"' not in other, f"{check_type} written by both writers"
