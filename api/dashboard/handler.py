@@ -1826,9 +1826,10 @@ def _active_sessions(query, cluster_id, hours):
 # shipped collector tables, the deepest family is about 30 cluster-level
 # metric_types (Aurora PG: 9 cluster CloudWatch + 12 Performance Insights + 5
 # pg_activity connection states + 4 pg_stat_database/bgwriter); the others run 6
-# (DynamoDB on-demand) to 23 (DocumentDB). 81 distinct metric_type literals exist
-# across the whole data-pipeline tree, but a cluster only ever runs ONE family
-# branch, so that number is not a per-cluster ceiling.
+# (DynamoDB on-demand) to 23 (DocumentDB). 81 distinct CLUSTER-LEVEL metric_type
+# literals exist across the whole data-pipeline tree (86 counting the five that
+# are only ever written dimensioned), but a cluster only ever runs ONE family
+# branch, so neither number is a per-cluster ceiling.
 #
 # The LIMIT is gone anyway because `total_checked` and the seasonal/flat
 # classification have to come from the FULL scored set, not from whatever slice
@@ -1925,10 +1926,10 @@ def _anomalies(query, cluster_id, hours, threshold):
     For each metric we have a per-hour-of-week baseline (median + IQR) in
     `metric_baselines`. Robust z-score = (recent_max - median) / IQR
     (on a normal distribution the IQR is ≈ 1.349 stddev, NOT the other way
-    round, so a robust z of 2.0 is about 2.7 sigma and 2.5 is about 3.4;
-    measured, 2M draws gave IQR/stddev = 1.3495. The IQR doesn't blow up on
-    outliers, so the score is stable on a cluster that has a handful of
-    legitimate spikes per day).
+    round: q(0.75) - q(0.25) = 1.34898 exactly, so a robust z of 2.0 is about
+    2.7 sigma and 2.5 is about 3.4. The IQR doesn't blow up on outliers, so the
+    score is stable on a cluster that has a handful of legitimate spikes per
+    day).
 
     Falls back to the legacy flat-mean+stddev baseline when no seasonal
     baseline exists for the current bucket (cold-start: less than ~14 days

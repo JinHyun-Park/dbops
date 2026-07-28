@@ -5,7 +5,10 @@ seasonality and blew up on a cluster with a few legitimate spikes per day) with
 the SAME robust seasonal baseline the dashboard already uses: a per-hour-of-week
 median + IQR trained into ``metric_baselines`` by the pg_baseline_trainer
 collector. Robust z = (recent_max - median) / IQR, the IQR doesn't inflate on
-outliers, so the score is stable.
+outliers, so the score is stable. To read a robust z as a familiar sigma: on a
+normal distribution the IQR is ≈ 1.349 stddev, NOT the other way round
+(q(0.75) - q(0.25) = 1.34898 exactly), so a robust z of 2.0 is about 2.7 sigma
+and 2.5 is about 3.4.
 
 When no seasonal baseline exists yet for the current hour-of-week bucket
 (cold-start: < ~2 weeks of history) we fall back to the legacy flat mean/stddev
@@ -35,9 +38,10 @@ from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 # shipped collector tables, the deepest family is about 30 cluster-level
 # metric_types (Aurora PG: 9 cluster CloudWatch + 12 Performance Insights + 5
 # pg_activity connection states + 4 pg_stat_database/bgwriter); the others run 6
-# (DynamoDB on-demand) to 23 (DocumentDB). 81 distinct metric_type literals exist
-# across the whole data-pipeline tree, but a cluster only ever runs ONE family
-# branch, so that number is not a per-cluster ceiling.
+# (DynamoDB on-demand) to 23 (DocumentDB). 81 distinct CLUSTER-LEVEL metric_type
+# literals exist across the whole data-pipeline tree (86 counting the five that
+# are only ever written dimensioned), but a cluster only ever runs ONE family
+# branch, so neither number is a per-cluster ceiling.
 #
 # The LIMIT is gone anyway because `total_checked` and the seasonal/flat
 # classification have to come from the FULL scored set, not from whatever slice

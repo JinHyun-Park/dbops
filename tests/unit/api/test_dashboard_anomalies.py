@@ -32,6 +32,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from statistics import NormalDist
 
 _ROOT = Path(__file__).resolve().parents[3]
 _DASHBOARD_DIR = _ROOT / "api" / "dashboard"
@@ -158,6 +159,35 @@ def test_the_scoring_sql_is_byte_identical_to_the_mcp_tools():
     anomalous AND about whether the cluster has a trained baseline at all."""
     for name in ("_ANOMALY_SQL", "_RECENT_SAMPLES_SQL"):
         assert _grab_sql(_DASHBOARD_DIR / "handler.py", name) == _grab_sql(_MCP_TOOL, name), name
+
+
+def test_the_documented_iqr_to_sigma_ratio_is_not_inverted():
+    """Both docstrings tell a DBA how to read a robust z as a familiar sigma, and
+    that sentence shipped INVERTED as "1.349xIQR is about 1 stddev", wrong by a
+    factor of 1.82 in the direction that makes a real anomaly sound mild.
+
+    The ratio is DERIVED here from the normal distribution rather than trusted:
+    q(0.75) - q(0.25) = 1.34898, so the IQR is about 1.349 stddev (one stddev is
+    0.741 IQR), and the reported robust z multiplies by that to reach sigma.
+
+    A text guard on purpose. The number never reaches the scored output, so there
+    is no behaviour to assert: it exists only to tell an operator what the score
+    means, which is exactly why nothing caught it being backwards."""
+    iqr_in_stddev = NormalDist().inv_cdf(0.75) - NormalDist().inv_cdf(0.25)
+    assert round(iqr_in_stddev, 5) == 1.34898
+    assert round(1 / iqr_in_stddev, 4) == 0.7413          # the inverse, for reference
+    assert [round(z * iqr_in_stddev, 1) for z in (2.0, 2.5)] == [2.7, 3.4]
+
+    for where, text in (("api/dashboard/handler.py", handler._anomalies.__doc__),
+                        ("detect_anomalies.py", _MCP_TOOL.read_text(encoding="utf-8"))):
+        flat = " ".join(text.split())
+        assert f"IQR is ≈ {round(iqr_in_stddev, 3)} stddev" in flat, where
+        assert f"q(0.75) - q(0.25) = {round(iqr_in_stddev, 5)} exactly" in flat, where
+        assert "a robust z of 2.0 is about 2.7 sigma and 2.5 is about 3.4" in flat, where
+        # The retracted wording, in both the multiplication-sign and the ASCII form.
+        for inverted in ("1.349×IQR ≈ 1 stddev", "1.349xIQR ≈ 1 stddev",
+                         "1.349 x IQR ≈ 1 stddev"):
+            assert inverted not in flat, f"{where}: {inverted}"
 
 
 def test_both_surfaces_execute_the_same_sql_text():
