@@ -8,6 +8,16 @@ The rds_direct copy only ever calls the MySQL entry point (RDS MySQL over direct
 TCP through MySQLDataApiAdapter); the unused PG constant rides along so the two
 files stay diff-clean, exactly like mysql_table_stats.py.
 
+POSTGRESQL ONLY, AND THAT IS A REFUSAL RATHER THAN A GAP
+`collect_mysql_schema_snapshot` reads nothing and writes nothing. MySQL's
+information_schema is privilege-filtered in every bucket this collector derives a
+diff from, and its scope key (CURRENT_USER()) does not move when a grant does, so a
+REVOKE and a DROP are the SAME read: the measured numbers are on that function. Both
+MySQL callers (Aurora MySQL here, RDS MySQL in rds_direct_collector) keep calling
+it, so the refusal lands in the ETL result instead of a source silently going dark,
+and every reader surfaces it through observed() as `unsupported_engine` rather than
+as an empty success.
+
 WHY THE CATALOG READ AGGREGATES SERVER-SIDE
 A one-row-per-column projection is the obvious shape and it is the wrong one:
 the RDS Data API caps a response at 1 MiB, and that projection measures ~688 KiB
@@ -24,9 +34,9 @@ tables, ~267 KiB extrapolated at 2,000.
   the DBA (that bug is live today in the dashboard's table_stats LIMIT 100
   panel). A missing snapshot is honest; a phantom DROP is not. If a real schema
   ever exceeds the cap, page the tables into several blobs, do not add a LIMIT.
-MySQL trap: NOT GROUP_CONCAT. group_concat_max_len defaults to 1024 and
-truncates silently, which is the phantom-DROP bug in a different costume.
-JSON_OBJECTAGG (5.7.22+) has no such cap.
+(The MySQL counterpart of that read is gone, see below. Its own trap, for whoever
+ever revives it: NOT GROUP_CONCAT, whose group_concat_max_len defaults to 1024 and
+truncates silently, which is the phantom-DROP bug in a different costume.)
 
 STORE-ON-CHANGE, not every run
 The ETL runs every STATS_COLLECTION_INTERVAL_MIN (5) minutes = 288 times a day.
@@ -82,9 +92,11 @@ using only what is inside the read. So this collector does two things instead:
                   comparable. A physical restore preserves the oid (same data,
                   legitimately comparable); a separately created database has a
                   different one.
-      MySQL       CURRENT_USER(). information_schema there is server-wide, so
-                  the connected database is NOT the visibility scope; what the
-                  read can see is decided by the reading identity's grants.
+      MySQL       NONE THAT WORKS, which is why MySQL is not collected. The read
+                  is filtered by the reading identity's grants and CURRENT_USER()
+                  does not change when those grants do, so the scope cannot
+                  separate a REVOKE from a DROP. Measured on 9.3.0; see
+                  collect_mysql_schema_snapshot.
  2. ABSENCE IS NEVER A DROP. A tracked schema the read does not name records
     nothing and is reported as `not_seen`, an UNKNOWN that both readers surface
     (`observation.unconfirmed_schemas`). The cost is stated plainly: a genuine
@@ -136,11 +148,24 @@ the collector back and its own scope is established again on the next cycle.
 PER SCHEMA (under R3/R4/R5, i.e. any read that reported a scope)
   S1 same tables                 nothing + heartbeat        unchanged
   S2 different tables            change row                 changes
-  S3 latest row is not under      baseline row (NULL diff)   baselines
-     this scope (or there is none)
+  S3 NO row of this schema under  baseline row (NULL diff)   baselines
+     this scope yet (the comparison
+     partner is the latest SAME-SCOPE
+     row, never the cross-scope one)
   S4 named, ZERO tables, had some change row, dropped=all    emptied (+changes)
   S5 aggregate came back NULL     nothing + heartbeat        unreadable
   S6 holds tables, NOT named      nothing, NO heartbeat      not_seen
+  S7 same tables, but the schema's baseline row (NULL diff)   baselines
+     NEWEST row over all scopes is
+     not under this one
+S1 and S7 are the same OBSERVATION and different WRITES, and the difference is
+which row the readers resolve as current. A heartbeat stamps the latest SAME-SCOPE
+row (SEEN_SQL), so under S7 the foreign row stays newest and OBSERVED_SQL keeps
+resolving the schema to unknown_scope / unmigrated for as long as nothing changes.
+S7 writes one NULL-diff row to re-establish the newest row under this scope. S2
+covers the case where something DID change since the last comparable read, and it
+files a real diff whatever scope the newest row carries: that diff is against the
+same-scope predecessor, so it is a fact about ONE catalog.
 Row S4 is the ONLY path from "no tables" to a recorded drop, and it is a direct
 observation under a verified scope: the catalog says this schema exists here and
 holds nothing (the read is driven off pg_namespace / information_schema.schemata,
@@ -157,16 +182,18 @@ STATES THAT REMAIN GENUINELY INDISTINGUISHABLE. All of them land in S6 or in a
 reader caveat, never in a resolved answer:
   * DROP SCHEMA (PG) / DROP DATABASE (MySQL) vs a read that could not reach the
     schema -> S6, reported as unknown, NOT as a drop. This is the deliberate cost.
-  * MySQL only: a REVOKE of every privilege on a database hides it from
-    information_schema.schemata, which is byte-identical to DROP DATABASE -> S6.
-    PostgreSQL is NOT exposed to this: measured, an unprivileged role gets the
-    identical PG_SCHEMA_SQL result as the superuser (billing/1, core/2, public/1)
-    while `SELECT FROM core.users` raises permission denied.
-  * MySQL only: a table-level REVOKE hides individual tables from
-    information_schema.tables, which is byte-identical to DROP TABLE, so it lands
-    in an ordinary S2 diff's `dropped` list. Not closable without a privilege
-    probe; both readers therefore carry a standing caveat on every `dropped`
-    list saying it is relative to what the collecting identity could see.
+  * MySQL, all of it. A database-level REVOKE hides the database from
+    information_schema.schemata (identical to DROP DATABASE), a table-level REVOKE
+    hides individual tables from information_schema.tables (identical to DROP
+    TABLE, landing in an ordinary S2 `dropped` list) and a column-level GRANT
+    shortens the column list (identical to ALTER TABLE DROP COLUMN, landing in
+    `modified`). CURRENT_USER() is byte-identical across all three, so no scope key
+    separates them. NOT closable with a predicate, so MySQL is REFUSED instead:
+    collect_mysql_schema_snapshot writes nothing and every reader reports
+    `unsupported_engine`. Measured on 9.3.0.
+    PostgreSQL is NOT exposed to this: measured on 14.18, an unprivileged role gets
+    the identical PG_SCHEMA_SQL result as the superuser (billing/1, core/2,
+    public/1) while `SELECT FROM core.users` raises permission denied.
   * a schema whose only history predates schema_v27 (read_scope NULL) is not
     comparable to anything: named -> S3, one re-baseline, once. NOT named -> S6
     like any other, because the not-seen set is taken from the latest stored row
@@ -252,49 +279,13 @@ GROUP BY ns.nspname
 ORDER BY ns.nspname
 """
 
-# information_schema.columns is the same catalog mysql_table_stats already hits.
-# The TABLE_TYPE join excludes views. MySQL has no schema-vs-database split, so
-# TABLE_SCHEMA IS the database and lands in schema_name directly.
-#
-# The UNION ALL half is the MySQL counterpart of the pg_namespace LEFT JOIN
-# above: a database that still exists but holds no BASE TABLE gets its '{}' row.
-# It is a UNION and not a LEFT JOIN because JSON_OBJECTAGG rejects a NULL member
-# name (ER_JSON_DOCUMENT_NULL_KEY), so the outer-joined empty row would abort the
-# whole statement instead of aggregating to an empty object.
-#
-# SCOPE IS CURRENT_USER(), NOT DATABASE(). This catalog is server-wide: the read
-# returns every database the connection can see whatever it is connected to, so
-# the connected database says nothing about what the read covered. What DOES
-# filter it is privileges, and those hang off the reading identity. CURRENT_USER()
-# is also stable across a failover and across a db_name config change, where
-# @@server_uuid and DATABASE() would each churn the scope and abandon comparable
-# history for no reason.
-MYSQL_SCHEMA_SQL = """
-SELECT t.TABLE_SCHEMA AS schema_name,
-       COUNT(*) AS table_count,
-       JSON_OBJECTAGG(t.TABLE_NAME, t.cols) AS tables_json,
-       CURRENT_USER() AS read_scope
-FROM (
-  SELECT c.TABLE_SCHEMA, c.TABLE_NAME, JSON_ARRAYAGG(c.COLUMN_NAME) AS cols
-  FROM information_schema.columns c
-  JOIN information_schema.tables tb
-    ON tb.TABLE_SCHEMA = c.TABLE_SCHEMA AND tb.TABLE_NAME = c.TABLE_NAME
-  WHERE c.TABLE_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
-    AND tb.TABLE_TYPE = 'BASE TABLE'
-  GROUP BY c.TABLE_SCHEMA, c.TABLE_NAME
-) t
-GROUP BY t.TABLE_SCHEMA
-UNION ALL
-SELECT s.SCHEMA_NAME AS schema_name, 0 AS table_count, JSON_OBJECT() AS tables_json,
-       CURRENT_USER() AS read_scope
-FROM information_schema.schemata s
-WHERE s.SCHEMA_NAME NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
-  AND NOT EXISTS (
-    SELECT 1 FROM information_schema.tables tb2
-    WHERE tb2.TABLE_SCHEMA = s.SCHEMA_NAME AND tb2.TABLE_TYPE = 'BASE TABLE'
-  )
-ORDER BY schema_name
-"""
+# THERE IS NO MySQL CATALOG READ HERE ANY MORE, and its absence is the point. It
+# used to select from information_schema.columns / .tables / .schemata with
+# CURRENT_USER() as the scope, and every one of those is privilege-filtered while
+# CURRENT_USER() is not: see collect_mysql_schema_snapshot below for the measured
+# numbers and the refusal. Do not restore a MySQL read without a scope key that
+# provably moves when visibility moves; without one, the stored diff reports a
+# permission change as dropped tables to five readers.
 
 # COMPARABILITY, not just recency: a blob captured under another scope is not this
 # read's previous state, so it must not be diffed against. No match -> baseline.
@@ -496,15 +487,39 @@ def _collect(rds_data_client, cache_execute, target_cluster_arn, target_secret_a
         out["scope_status"] = "adopted"
 
     for schema_name, after in sorted(seen.items()):
-        # The comparison partner is the schema's LATEST row, and only if that row
-        # was captured under this scope. Asking PREV_SQL for the newest row that
-        # merely HAPPENS to carry this scope would compare against a row that is
-        # not the current state whenever a newer row exists without one, which a
-        # rolling deploy can produce (an old Lambda version writing after a new
-        # one). No comparable partner means baseline, never a diff.
-        prev_scope = stored.get(schema_name, ("", False))[0]
-        prev_raw = (_prev_blob(cache_execute, cluster_id, schema_name, read_scope)
-                    if prev_scope == read_scope else None)
+        # THE COMPARISON PARTNER IS THE LATEST SAME-SCOPE ROW, which is what
+        # SCOPED_ROWS exists for. PREV_SQL is built from it and already orders by
+        # snapshot_time DESC, so one query answers "the newest row of this schema
+        # that this read is comparable to".
+        #
+        # It used to be gated on `prev_scope == read_scope`, where prev_scope came
+        # from the CROSS-SCOPE latest row, and the gate lost real DDL: after ONE
+        # cycle read another catalog, the newest row is under that other scope, so a
+        # genuine change landing on the next same-scope cycle was stored as a
+        # BASELINE with a NULL diff even though a same-scope predecessor was sitting
+        # right there. MEASURED on PostgreSQL 14.18, a real CREATE TABLE after one
+        # wrong-database cycle: `{"snapshots_written": 2, "baselines": 2,
+        # "changes": 0}`, and then the product answered the same question two ways,
+        # because the three REPLAY consumers read the stored diff and the two
+        # RECOMPUTE consumers recompute it:
+        #   get_schema_history  count 1  (only the OLDER event; the new one is gone)
+        #   get_schema_diff     added 1  app [invoices]
+        # The gate's stated reason was a newer NULL-scope row from a rolling deploy.
+        # That row is not comparable to anything by construction (`read_scope =
+        # :read_scope` never matches NULL), so it cannot be a partner either way;
+        # skipping the query for it only threw away the partner that WAS comparable.
+        #
+        # TWO DIFFERENT ROWS MATTER HERE and conflating them is what the gate did:
+        #   prev_raw     the latest SAME-SCOPE row: what the diff is computed against.
+        #   newest_scope the scope of the schema's latest row over ALL scopes: what
+        #                every READER resolves as the schema's current state and
+        #                confirmation (OBSERVED_SQL takes the newest row per schema
+        #                whatever scope it carries). If that row is not under this
+        #                scope, this read has to become the newest row or the readers
+        #                keep reporting the schema as unconfirmed off a row nothing
+        #                will ever confirm again.
+        prev_raw = _prev_blob(cache_execute, cluster_id, schema_name, read_scope)
+        newest_scope = stored.get(schema_name, ("", False))[0]
         if prev_raw is None:
             diff_json = ""  # -> NULL: baseline, not a change (S3)
             out["baselines"] += 1
@@ -513,22 +528,35 @@ def _collect(rds_data_client, cache_execute, target_cluster_arn, target_secret_a
             # has no ORDER BY, so the same schema can serialize its column arrays
             # in a different order run to run. parse_tables sorts.
             diff = compute_diff(parse_tables(prev_raw), after)
-            if diff_is_empty(diff):
+            if diff_is_empty(diff) and newest_scope == read_scope:
                 out["unchanged"] += 1  # S1
                 _heartbeat(cache_execute, out, cluster_id, schema_name, read_scope, when)
                 continue
-            out["changes"] += 1  # S2
-            if not after:
-                # S4, the only path from "no tables" to a recorded drop. The
-                # catalog named this schema under a scope that matches the stored
-                # history's, and reported it holds nothing. That is an
-                # observation, not an inference from absence.
-                out["emptied"] += 1
-                print(f"[{cluster_id}] schema_snapshot: '{schema_name}' exists in "
-                      f"'{read_scope}' and holds no table; recording "
-                      f"{len(diff['dropped'])} dropped table(s) from that direct "
-                      "observation")
-            diff_json = json.dumps(diff)
+            if diff_is_empty(diff):
+                # S7. Nothing CHANGED since the last comparable read, and the row the
+                # readers call latest was recorded somewhere else (another scope, or
+                # none at all: a pre-v27 row, or a rolling deploy's old Lambda writing
+                # after a new one). A heartbeat cannot fix that: SEEN_SQL stamps the
+                # latest SAME-SCOPE row, so the foreign row stays newest and
+                # OBSERVED_SQL keeps resolving the schema to unknown_scope /
+                # unmigrated forever. One NULL-diff row re-establishes the newest row
+                # under this scope, and there is genuinely no change to describe, so
+                # NULL is the honest diff.
+                diff_json = ""
+                out["baselines"] += 1
+            else:
+                out["changes"] += 1  # S2
+                if not after:
+                    # S4, the only path from "no tables" to a recorded drop. The
+                    # catalog named this schema under a scope that matches the stored
+                    # history's, and reported it holds nothing. That is an
+                    # observation, not an inference from absence.
+                    out["emptied"] += 1
+                    print(f"[{cluster_id}] schema_snapshot: '{schema_name}' exists in "
+                          f"'{read_scope}' and holds no table; recording "
+                          f"{len(diff['dropped'])} dropped table(s) from that direct "
+                          "observation")
+                diff_json = json.dumps(diff)
 
         cache_execute(INSERT_SQL, {
             "cluster_id": cluster_id,
@@ -584,5 +612,50 @@ def collect_pg_schema_snapshot(rds_data_client, cache_execute, target_cluster_ar
 
 def collect_mysql_schema_snapshot(rds_data_client, cache_execute, target_cluster_arn,
                                   target_secret_arn, cluster_id, database, snapshot_ts=None):
-    return _collect(rds_data_client, cache_execute, target_cluster_arn, target_secret_arn,
-                    cluster_id, database, MYSQL_SCHEMA_SQL, snapshot_ts)
+    """REFUSED, and this is the ONE guard rather than one per caller.
+
+    Both Aurora MySQL (etl_collector) and RDS MySQL (rds_direct_collector) route
+    through here, so the refusal is where every caller already goes. It reads no
+    catalog and writes nothing at all: the return value is what the ETL result
+    reports, so the operator sees a REFUSAL rather than a source that silently went
+    dark.
+
+    WHY, measured on MySQL 9.3.0 with the catalog read this function used to run,
+    executed as the collecting identity (full numbers in the shared contract's
+    snapshot_dialect_supported):
+
+      DROP TABLE dropdb.users     -> dropdb  table_count 0, tables_json {}
+      REVOKE SELECT ON appdb.*    -> appdb   the table VANISHES from the read
+      GRANT SELECT (id) ON t      -> appdb   the COLUMN vanishes from the read
+      REVOKE the whole database   -> appdb   absent from the read entirely
+      read_scope, in every case   -> collector@localhost, IDENTICAL
+
+    So tightening the collector user to least privilege is byte-identical to a DBA
+    dropping every table, in all three diff buckets, and CURRENT_USER() does not
+    move when it happens. There is no scope key here that changes with visibility,
+    and a stored diff is consumed by five readers that would each report it as DDL.
+    A tool that says "not supported for this engine" has never caused a wrong
+    action; a phantom DROP has. PostgreSQL is unaffected: pg_namespace and pg_class
+    are not privilege-filtered (measured on 14.18, an unprivileged role gets the
+    identical read as the superuser).
+    """
+    print(f"[{cluster_id}] schema_snapshot: not collected for MySQL. "
+          "information_schema is privilege-filtered, so a REVOKE and a DROP produce "
+          "the identical read and CURRENT_USER() does not change between them. "
+          "Collecting would let a permission change be reported as dropped tables")
+    return {
+        "cluster_id": cluster_id,
+        "read_scope": "",
+        "scope_status": "unsupported_dialect",
+        "schemas_named": 0,
+        "schemas_seen": 0,
+        "snapshots_written": 0,
+        "baselines": 0,
+        "changes": 0,
+        "emptied": 0,
+        "unchanged": 0,
+        "unreadable": 0,
+        "heartbeats": 0,
+        "not_seen": 0,
+        "not_seen_schemas": [],
+    }

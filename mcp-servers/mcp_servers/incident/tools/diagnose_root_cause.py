@@ -25,6 +25,7 @@ from mcp_servers.shared.incident_signals import metric_in_clause, resolve_family
 from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 from mcp_servers.shared.schema_diff_util import (
     ALL_ROWS,
+    UNSUPPORTED_ENGINE,
     not_seen_note,
     observation_is_complete,
     observed,
@@ -305,6 +306,14 @@ _SKIP_UNCONFIRMED = "schema_changes_unconfirmed_schemas"
 # conflation was caught inside this very commit.
 _SKIP_OBS_ERROR = "schema_changes_observation_error"
 _SKIP_UNMIGRATED = "schema_changes_unmigrated"
+# ...and a SEVENTH, which is a refusal rather than a failure: this cluster's engine
+# has a privilege-filtered catalog, so a REVOKE and a DROP produce the identical
+# read and nothing is collected for it (measured numbers in
+# mcp_servers/shared/schema_diff_util.py snapshot_dialect_supported). This source
+# carries the HIGHEST base weight, so ranking a candidate that might be a permission
+# change is the one wrong action this label exists to prevent: the source
+# contributes nothing and says why.
+_SKIP_UNSUPPORTED = "schema_changes_unsupported_engine"
 
 
 def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, examined,
@@ -369,6 +378,14 @@ def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, 
     if observation is not None:
         observation.update(obs)
     obs_status = obs.get("status")
+    if obs_status == UNSUPPORTED_ENGINE:
+        # REFUSED, and it returns rather than ranking. Any rows in the window predate
+        # the decision to stop collecting this dialect, and a schema_change candidate
+        # is the highest-weight thing this tool can put in front of a DBA at 3am: on
+        # MySQL it could be a permission change wearing a DROP's clothes. The label is
+        # what the agent narrates instead.
+        skipped.append(_SKIP_UNSUPPORTED)
+        return out
     if obs_status == "unavailable":
         skipped.append(_SKIP_OBS_ERROR)
     elif obs_status == "unmigrated":

@@ -45,9 +45,29 @@ _MIGRATION_V27 = _SQL_DIR / "schema_v27.sql"
 _COLLECTORS = _ROOT / "data-pipeline" / "etl_collector" / "collectors"
 
 
+_BASE_SCHEMA = _ROOT / "data-pipeline" / "sql" / "schema.sql"
+
+
 def _migrate(pg):
     pg.raw(_MIGRATION.read_text())
     pg.raw(_MIGRATION_V27.read_text())
+    # cluster_meta, lifted verbatim out of the production base schema. The readers
+    # resolve the DIALECT from `cluster_meta.engine` (schema snapshots are
+    # PostgreSQL-only: MySQL's catalog is privilege-filtered, so a REVOKE and a DROP
+    # are the same read), so without this relation every reader here would report
+    # `unavailable` and every assertion below would be about the wrong state.
+    src = _BASE_SCHEMA.read_text()
+    start = src.index("CREATE TABLE IF NOT EXISTS cluster_meta")
+    pg.raw(src[start:src.index(");", start) + 2])
+
+
+def _meta(pg, cluster_id, engine="aurora-postgresql"):
+    """The cluster_meta row the ETL writes BEFORE the snapshot collector runs
+    (etl_collector/handler.py collects meta first), so having it wherever snapshots
+    exist is what production looks like, not a convenience."""
+    pg.raw("INSERT INTO cluster_meta (cluster_id, account_id, region, engine) "
+           f"VALUES ('{cluster_id}', '123456789012', 'ap-northeast-2', '{engine}') "
+           "ON CONFLICT (cluster_id) DO UPDATE SET engine = EXCLUDED.engine")
 
 
 
@@ -267,6 +287,7 @@ def test_collector_sql_runs_on_real_catalog_and_stores_baseline(pg):
     pg.raw("CREATE VIEW app.v_users AS SELECT id FROM app.users")
 
     api = _DataApi(pg)
+    _meta(pg, "prod-pg-1")
     out = collect_pg_schema_snapshot(
         api, _cache_execute(api), "arn:x", "arn:y", "prod-pg-1", "postgres",
         snapshot_ts="2026-07-01T00:00:00+00:00")
@@ -388,6 +409,7 @@ def test_baseline_only_cluster_is_not_reported_as_no_changes(pg):
     pg.raw("DROP SCHEMA IF EXISTS solo CASCADE; CREATE SCHEMA solo")
     pg.raw("CREATE TABLE solo.t (id int)")
     api = _DataApi(pg)
+    _meta(pg, "baseline-only-1")
     collect_pg_schema_snapshot(api, _cache_execute(api), "arn:x", "arn:y",
                                "baseline-only-1", "postgres",
                                snapshot_ts="2026-07-02T00:00:00+00:00")
@@ -412,6 +434,11 @@ def test_baseline_only_cluster_is_not_reported_as_no_changes(pg):
 def test_zero_snapshots_is_not_reported_as_no_changes(pg):
     """The table EXISTS and is empty for this cluster: the exact state where the
     old readers said 'no schema changes'."""
+    # A registered PG cluster the ETL has met (cluster_meta lands on the first run,
+    # before the snapshot collector) and has no snapshots for yet. Without the meta
+    # row the dialect is UNKNOWN, which is its own cell:
+    # test_a_cluster_whose_engine_is_unknown_is_not_reported_as_empty.
+    _meta(pg, "never-collected-1")
     diff = sd.get_schema_diff_impl(pg, cluster_id="never-collected-1")
     assert diff["status"] == "not_collected"
     assert diff["collection_coverage"]["snapshots_stored"] == 0
@@ -482,6 +509,118 @@ def test_purge_keeps_the_latest_snapshot_per_schema(pg):
     assert rows and all(int(r["n"]) == 1 for r in rows)
 
 
+def test_purge_ages_out_a_schema_orphaned_under_an_abandoned_scope(pg):
+    """FINDING 3 of the seventh pass, on the real engine.
+
+    A schema that exists ONLY under a scope the collector no longer reads has
+    exactly ONE row, so it was always its own MAX(snapshot_time) and the exemption
+    kept it forever. `observed()` reads it as unknown_scope while it still holds
+    tables, so it sat in `unconfirmed_schemas` permanently: observation_is_complete
+    never returned True again and three consumers were pinned to `partial` for the
+    life of the cluster, while the stated 90-day retention bound was false for that
+    row. MEASURED before the fix on this harness: after aging every row 200 days,
+    the orphan survived and the observation stayed not_seen.
+
+    The LIVE schemas' current rows must still be exempt, or the fix would trade a
+    permanent blindness for a destroyed baseline.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "_e4_etl_handler_orphan", _ROOT / "data-pipeline" / "etl_collector" / "handler.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    cid = "orphan-purge-1"
+    _meta(pg, cid)
+    pg.raw(f"DELETE FROM schema_snapshots WHERE cluster_id = '{cid}'")
+    # `live` under the scope the collector still reads, `stray` only under the one it
+    # abandoned. Both aged past the cutoff.
+    for schema, scope, days in (("live", "rightdb/1", 300),
+                                ("live", "rightdb/1", 200),
+                                ("stray", "wrongdb/2", 250)):
+        pg.raw(
+            "INSERT INTO schema_snapshots (cluster_id, snapshot_time, schema_name, "
+            "tables_json, read_scope, last_seen_at) VALUES "
+            f"('{cid}', NOW() - INTERVAL '{days} days', '{schema}', "
+            f"'{{\"t\": [\"id\"]}}'::jsonb, '{scope}', NOW() - INTERVAL '{days} days')")
+    # The established scope is the newest row that HAS one, which is `live`'s.
+    est = pg.execute(sd_util().ESTABLISHED_SCOPE_SQL, {"cluster_id": cid}).rows
+    assert est and est[0]["read_scope"] == "rightdb/1", est
+
+    pg.raw(mod.SCHEMA_SNAPSHOTS_PURGE_SQL)
+    survived = pg.execute(
+        "SELECT schema_name, read_scope FROM schema_snapshots "
+        "WHERE cluster_id = :c ORDER BY schema_name, read_scope", {"c": cid}).rows
+    # The orphan is gone; the live schema keeps exactly its current row.
+    assert survived == [{"schema_name": "live", "read_scope": "rightdb/1"}], survived
+
+    # And the consequence the finding is actually about: the cluster can be
+    # `fresh`/complete again once the orphan is gone.
+    pg.raw(f"UPDATE schema_snapshots SET last_seen_at = NOW() WHERE cluster_id = '{cid}'")
+    obs = sd_util().observed(lambda s, p: pg.execute(s, p).rows, cid)
+    assert obs["status"] == "fresh", obs
+    assert obs["unconfirmed_schemas"] == [], obs
+    assert sd_util().observation_is_complete(obs) is True
+
+
+def sd_util():
+    """The contract module, loaded once by path (api/ and the collectors each ship
+    their own verbatim copy; the canonical one is under mcp_servers.shared)."""
+    from mcp_servers.shared import schema_diff_util
+    return schema_diff_util
+
+
+def test_a_mysql_cluster_is_refused_by_every_reader_and_not_reported_as_empty(pg):
+    """FINDING 4, at the two MCP readers, on the real engine.
+
+    A MySQL cluster has no snapshots because the collector refuses to make any, and
+    `not_collected` would then promise a baseline on the next ETL cycle that is never
+    coming: an empty success. The refusal has to be the ANSWER.
+    """
+    _migrate(pg)
+    cid = "mysql-refused-1"
+    _meta(pg, cid, engine="aurora-mysql")
+    pg.raw(f"DELETE FROM schema_snapshots WHERE cluster_id = '{cid}'")
+
+    diff = sd.get_schema_diff_impl(pg, cluster_id=cid)
+    assert diff["status"] == "not_supported", diff
+    assert diff["observation"]["status"] == "unsupported_engine", diff["observation"]
+    assert "REVOKE" in diff["note"] and "DROP" in diff["note"], diff["note"]
+    assert "다음 ETL" not in diff["note"], "it promises a baseline that is not coming"
+
+    hist = sh.get_schema_history_impl(pg, cluster_id=cid, days=36500)
+    assert hist["status"] == "not_supported", hist
+    assert "REVOKE" in hist["note"]
+    assert "최초 baseline 스냅샷이 기록됩니다" not in hist["note"]
+
+    examined, skipped = {}, []
+    got = drc._collect_schema_changes(pg, cid, "2026-07-29T00:00:00+00:00",
+                                      "2026-07-29T01:00:00+00:00", None, 60,
+                                      examined, skipped)
+    assert got == []
+    assert skipped == ["schema_changes_unsupported_engine"], skipped
+    # and an rds_instance MySQL cluster reaches the same place: the family differs,
+    # the DIALECT is what decides.
+    _meta(pg, cid, engine="mysql")
+    assert sd.get_schema_diff_impl(pg, cluster_id=cid)["status"] == "not_supported"
+
+
+def test_a_cluster_whose_engine_is_unknown_is_not_reported_as_empty_either(pg):
+    """FAIL-CLOSED, and a THIRD state rather than either answer. A cluster with no
+    cluster_meta row yet (registered seconds ago) is not "unsupported": we cannot
+    decide the dialect, so nothing may be claimed and the sentence says which two
+    causes to check."""
+    _migrate(pg)
+    cid = "no-meta-1"
+    pg.raw(f"DELETE FROM cluster_meta WHERE cluster_id = '{cid}'")
+    pg.raw(f"DELETE FROM schema_snapshots WHERE cluster_id = '{cid}'")
+    obs = sd_util().observed(lambda s, p: pg.execute(s, p).rows, cid)
+    assert obs["status"] == "unavailable", obs
+    assert sd_util().observation_is_complete(obs) is False
+    note = sd_util().not_seen_note(obs)
+    assert "cluster_meta" in note and "schema_v27" in note, note
+    assert sd_util().UNSUPPORTED_DIALECT_NOTE not in note
+
+
 # ===========================================================================
 # A schema that goes to ZERO tables, and a schema that disappears entirely.
 # Store-on-change means the last blob written stands as `latest` until something
@@ -492,6 +631,7 @@ def test_purge_keeps_the_latest_snapshot_per_schema(pg):
 
 def _run_collector(pg, cluster_id, ts):
     api = _DataApi(pg)
+    _meta(pg, cluster_id)  # the ETL writes cluster_meta before the snapshot collector
     return collect_pg_schema_snapshot(api, _cache_execute(api), "arn:x", "arn:y",
                                       cluster_id, "postgres", snapshot_ts=ts)
 
@@ -748,6 +888,7 @@ class _DataApiIn(_DataApi):
 
 def _run_in(pg, target_db, cluster_id, ts):
     api = _DataApiIn(pg, target_db)
+    _meta(pg, cluster_id)  # the ETL writes cluster_meta before the snapshot collector
     return collect_pg_schema_snapshot(api, _cache_execute(_DataApi(pg)), "arn:x",
                                       "arn:y", cluster_id, target_db, snapshot_ts=ts)
 
@@ -1102,3 +1243,59 @@ def test_the_comparison_partner_is_the_latest_row_or_nothing(pg):
     beat = _run_in(pg, "raced", "race-1", "2026-07-30T00:10:00+00:00")
     assert beat["unchanged"] == 2 and beat["snapshots_written"] == 0
     assert _latest(pg, "race-1", "app")["seen"] > row["seen"]
+
+
+def test_a_real_change_across_one_foreign_cycle_is_a_change_and_not_a_baseline(pg):
+    """FINDING 1 of the SEVENTH pass, driven end to end.
+
+    ONE cycle reading another catalog leaves the schema's newest row under that
+    other scope. A genuine DDL change landing on the NEXT same-scope cycle then has
+    a same-scope predecessor sitting right there, and the collector used to ignore it
+    (`prev_scope` came from the CROSS-SCOPE latest row) and store a BASELINE with a
+    NULL diff. The event was therefore invisible to the three REPLAY consumers and
+    visible to the two RECOMPUTE ones, so the product answered the same question two
+    ways.
+
+    MEASURED on PostgreSQL 14.18 before the fix, a real CREATE TABLE after one
+    wrong-database cycle:
+      collector           {"snapshots_written": 2, "baselines": 2, "changes": 0}
+      get_schema_history  count 1   (only the older event)
+      get_schema_diff     added 1   app [invoices]
+    """
+    _migrate(pg)
+    for db in ("rgt", "wrg"):
+        pg.raw(f"DROP DATABASE IF EXISTS {db}", db="postgres")
+        pg.raw(f"CREATE DATABASE {db}", db="postgres")
+        pg.raw("CREATE SCHEMA app; CREATE TABLE app.users (id int)", db=db)
+    cid = "flap-1"
+    pg.raw(f"DELETE FROM schema_snapshots WHERE cluster_id = '{cid}'")
+
+    assert _run_in(pg, "rgt", cid, "2026-08-01T00:00:00+00:00")["baselines"] == 2
+    # ONE cycle looks at the wrong database.
+    assert _run_in(pg, "wrg", cid, "2026-08-01T00:05:00+00:00")["scope_status"] == "rescoped"
+    # The config is fixed, and a REAL CREATE TABLE happened in the right one.
+    pg.raw("CREATE TABLE app.invoices (id int, total numeric)", db="rgt")
+    out = _run_in(pg, "rgt", cid, "2026-08-01T00:10:00+00:00")
+    assert out["changes"] == 1, out
+    # `public` had no change and its newest row is the foreign one, so it is
+    # re-baselined (S7) rather than heartbeat-only: the readers resolve the NEWEST
+    # row per schema, so leaving the foreign row newest keeps the schema unconfirmed.
+    assert out["baselines"] == 1, out
+    stored = _latest(pg, cid, "app")
+    assert json.loads(stored["d"])["added"] == ["invoices"], stored
+
+    # BOTH FAMILIES OF CONSUMER NOW AGREE, which is the property that failed.
+    hist = sh.get_schema_history_impl(pg, cluster_id=cid, days=36500)
+    assert any(json.loads(c["changes"]).get("added") == ["invoices"]
+               for c in hist["changes"]), hist["changes"]
+    diff = sd.get_schema_diff_impl(pg, cluster_id=cid)
+    assert [d["added"] for d in diff["diffs"] if d["schema_name"] == "app"] == \
+        [["invoices"]], diff["diffs"]
+    # The fifth consumer, api/dashboard `_timeline`, replays the same stored row. It
+    # is driven on the harness that has event_log and audit_log too:
+    # tests/unit/api/test_dashboard_schema_changes_real_pg.py.
+    examined, skipped = {}, []
+    drc._collect_schema_changes(pg, cid, "2026-08-01T00:09:00+00:00",
+                                "2026-08-01T00:11:00+00:00", None, 60,
+                                examined, skipped)
+    assert examined.get("schema_changes") == 1, (examined, skipped)

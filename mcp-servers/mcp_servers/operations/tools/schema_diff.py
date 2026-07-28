@@ -30,6 +30,8 @@ from mcp_servers.shared.schema_diff_util import (
     COVERAGE_SQL,
     DROPPED_CAVEAT,
     SCOPED_ROWS,
+    UNSUPPORTED_DIALECT_NOTE,
+    UNSUPPORTED_ENGINE,
     compare,
     not_seen_note,
     observation_is_complete,
@@ -237,7 +239,13 @@ def get_schema_diff_impl(
     # whenever the cluster happened to have at most one snapshot per schema,
     # which answers a question they did not ask and drops the coverage range that
     # would have named the snapshots that DO exist.
-    if coverage["snapshots_stored"] == 0:
+    if observation.get("status") == UNSUPPORTED_ENGINE:
+        # THE REFUSAL, and it is tested FIRST because it is the reason the cluster is
+        # empty. `not_collected` here would promise a baseline on the next ETL cycle
+        # that is never coming, which is an empty success dressed as a young cluster.
+        out["status"] = "not_supported"
+        out["note"] = UNSUPPORTED_DIALECT_NOTE
+    elif coverage["snapshots_stored"] == 0:
         out["status"] = "not_collected"
         out["note"] = _NOT_COLLECTED
     elif not scope:

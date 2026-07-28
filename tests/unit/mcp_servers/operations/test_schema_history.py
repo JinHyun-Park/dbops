@@ -57,9 +57,23 @@ def _scope_row(scope=_SCOPE):
         return QueryResult(columns=["read_scope"], rows=[], row_count=0)
     return QueryResult(columns=["read_scope"], rows=[{"read_scope": scope}], row_count=1)
 
+# The DIALECT this cluster is, which decides whether a snapshot claim is possible at
+# all: PostgreSQL's catalog is not privilege-filtered, MySQL's is in every bucket, so
+# on MySQL a REVOKE and a DROP are the same read and nothing is collected.
+_ENGINE = "aurora-postgresql"
+
+
+def _engine_row(engine=_ENGINE):
+    """CLUSTER_ENGINE_SQL's shape. No row = the dialect is UNKNOWN, which is
+    `unavailable` (we cannot decide) and not `unsupported_engine`."""
+    if engine is None:
+        return QueryResult(columns=["engine"], rows=[], row_count=0)
+    return QueryResult(columns=["engine"], rows=[{"engine": engine}], row_count=1)
+
+
 
 def _cache(changes=None, observation=None, coverage=None, raises=None,
-           scope=_SCOPE):
+           scope=_SCOPE, engine=_ENGINE):
     """A cache that DISPATCHES ON SQL, not on call order.
 
     It was a positional side_effect list, and the statement ORDER is exactly what
@@ -71,6 +85,11 @@ def _cache(changes=None, observation=None, coverage=None, raises=None,
     obs = observation if observation is not None else _observation()
 
     def execute(sql, params=None):
+        # THE DIALECT, resolved per cluster from cluster_meta.engine, and asked FIRST:
+        # schema snapshots are PostgreSQL-only (MySQL's information_schema is
+        # privilege-filtered, so a REVOKE and a DROP are the same read).
+        if "FROM cluster_meta" in sql:
+            return _engine_row(engine)
         if "read_scope IS NOT NULL" in sql or "holds_tables" in sql:
             if raises:
                 raise raises
@@ -100,15 +119,18 @@ def test_schema_history_with_changes():
     assert len(result["changes"]) == 2
     # The happy path pays for the observation probes and NOT for the coverage
     # probe: an unconfirmed schema matters even when other schemas did change.
-    # Three statements: the window read, the established scope, the per-schema
-    # observation.
-    assert mock_cache.execute.call_count == 3
+    # FOUR statements: the window read, the DIALECT (cluster_meta.engine, which
+    # decides whether a claim is possible at all), the established scope, and the
+    # per-schema observation.
+    assert mock_cache.execute.call_count == 4
     assert not any("COUNT(*) AS snapshots" in c.args[0]
                    for c in mock_cache.execute.call_args_list)
     assert result["observation"]["status"] == "fresh"
-    # A dropped list is only as good as the catalog the collector could read, and
-    # on MySQL that catalog is privilege-filtered. Disclosed, not resolved.
-    assert "권한 회수(REVOKE)" in result["note"]
+    # A dropped list is only as good as the catalog the collector could read. On
+    # PostgreSQL that catalog is not privilege-filtered, which is WHY the list can be
+    # trusted here and why MySQL is not collected at all.
+    assert "REVOKE와 DROP을 구분할 수 없기" in result["note"]
+    assert "pg_namespace/pg_class" in result["note"]
 
 
 def test_never_collected_is_not_reported_as_no_changes():
@@ -220,3 +242,30 @@ def test_history_with_no_scope_at_all_is_still_replayed_but_never_a_negative():
     assert result["status"] == "partial"
     assert result["observation"]["status"] == "unmigrated"
     assert "schema_v27" in result["note"]
+
+
+def test_a_refused_dialect_says_so_and_keeps_the_record_it_already_has():
+    """FINDING 4 of the seventh pass, at the replay reader. `not_collected` would
+    promise a baseline that is never coming; `no_changes` would be an absence claim
+    over a catalog nobody can read honestly. And the rows that DO exist are kept:
+    this tool hands back a RECORD, and deleting real history is the failure this
+    surface's contract explicitly forbids."""
+    empty = get_schema_history_impl(_cache(coverage=_coverage(0, 0),
+                                          engine="aurora-mysql"),
+                                    cluster_id="mysql-1")
+    assert empty["status"] == "not_supported", empty
+    assert empty["count"] == 0
+    assert empty["observation"]["status"] == "unsupported_engine"
+    assert "REVOKE" in empty["note"]
+    assert "최초 baseline 스냅샷이 기록됩니다" not in empty["note"]
+
+    legacy = get_schema_history_impl(
+        _cache(changes=QueryResult(
+            columns=["snapshot_time", "schema_name", "changes"],
+            rows=[{"snapshot_time": _LAST, "schema_name": "appdb",
+                   "changes": '{"dropped": ["orders"]}'}], row_count=1),
+            engine="mysql"),
+        cluster_id="mysql-1")
+    assert legacy["status"] == "not_supported", legacy
+    assert legacy["count"] == 1, "the stored record is not deleted"
+    assert "현재 상태에 대한 판정이 아닙니다" in legacy["note"]

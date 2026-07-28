@@ -17,6 +17,7 @@ from metric_filters import CLUSTER_LEVEL_ONLY, EXCLUDE_PER_INSTANCE
 from schema_diff_util import (
     ALL_ROWS,
     SCOPED_ROWS,
+    UNSUPPORTED_ENGINE,
     compare,
     not_seen_note,
     observation_is_complete,
@@ -1671,6 +1672,15 @@ _DDL_BUCKETS = (
     ("rename_candidates", "renamed"),
 )
 
+# The one thing `not_seen_note` cannot say, because it names schemas and there are
+# none: the schema_change stream had no detection capability at all here. On a
+# timeline that is the difference between "no DDL during the incident" and "we have
+# no DDL data for this cluster".
+_TL_NO_SNAPSHOTS = (
+    "이 cluster의 schema 스냅샷이 아직 없어 schema_change 신호는 판정 대상이 "
+    "아니었습니다. 이 구간에 DDL이 없었다는 뜻이 아닙니다."
+)
+
 
 def _ddl_summary(blob) -> tuple[str, str]:
     """Collapse ONE stored schema diff into (title summary, detail).
@@ -1726,7 +1736,18 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
 
     A source whose query fails is named in `degraded_sources`. An empty category
     otherwise reads as "that signal did not fire", which is exactly how the DDL
-    category stayed permanently empty against a table no migration creates."""
+    category stayed permanently empty against a table no migration creates.
+
+    And a source whose query SUCCEEDS can still be blind: `observation` carries the
+    per-schema confirmation state behind the schema_change stream, from the same
+    shared probe the schema-changes panel, get_schema_diff, get_schema_history and
+    diagnose_root_cause use. This function is the FIFTH interpreter of
+    schema_snapshots and answers the same question diagnose_root_cause does (did
+    any DDL land near this incident), and the sixth pass over this surface swapped
+    its SQL to the shared ALL_ROWS fragment without giving it the compensating
+    channel: a schema nobody can confirm files no diff row, so an empty
+    schema_change category read as "no DDL during the incident" over schemas the
+    read never reached."""
     cats = set(categories or [])
     items: list[dict] = []
     degraded: list[str] = []
@@ -1808,6 +1829,21 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
         print(f"[timeline] schema_change source degraded: {type(e).__name__}: {e}")
         degraded.append("schema_change")
 
+    # WHAT THE schema_change STREAM CANNOT COVER, from the shared probe. Runs
+    # whether or not the read above succeeded: a successful read of a cluster whose
+    # schemas nobody can currently confirm produces an EMPTY category, and on a
+    # timeline an empty category reads as "that did not happen during the incident".
+    # Same block and same sentence as the other four consumers, so one state is
+    # described one way everywhere.
+    schema_obs = observed(query, cluster_id)
+    obs_note = not_seen_note(schema_obs)
+    if not obs_note and schema_obs.get("status") == "no_snapshots":
+        # The probe RAN and found no history at all. `not_seen_note` says nothing
+        # here on purpose (it names schemas, and there are none), but the operator
+        # still needs to know the stream had no detection capability rather than
+        # nothing to report.
+        obs_note = _TL_NO_SNAPSHOTS
+
     # audit_log — executed write operations (DDL via execute_sql,
     # parameter changes, scaling). Empty in most deployments today;
     # included so it lights up automatically when the agent starts
@@ -1854,6 +1890,17 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
         # Non-empty means a signal stream could not be read, so an absent
         # category here is "unknown", not "did not happen".
         "degraded_sources": degraded,
+        # WHAT THE schema_change STREAM DOES NOT COVER even when it was read fine.
+        # `note` is the operator-facing sentence, composed by the SAME shared
+        # function the other four consumers use; `unconfirmed_schemas` is the list
+        # behind it. Empty note = the stream covered every schema this cluster has.
+        "observation": {
+            "status": schema_obs.get("status"),
+            "read_scope": schema_obs.get("read_scope"),
+            "last_confirmed": schema_obs.get("last_confirmed"),
+            "unconfirmed_schemas": sorted(schema_obs.get("unconfirmed_schemas") or []),
+            "note": obs_note,
+        },
     }
 
 
@@ -2369,9 +2416,14 @@ def _schema_changes(query, cluster_id, days):
     unconfirmed = list(observation.get("unconfirmed_schemas") or [])
 
     # --- DDL from the complete table map ----------------------------------
+    # A REFUSED dialect selects NO PAIR at all: on MySQL the catalog is
+    # privilege-filtered in every bucket a diff is derived from, so a `created` /
+    # `dropped` chip could be a permission change. The panel is the surface that
+    # DRAWS those chips, so it refuses rather than qualifying.
+    ddl_supported = observation.get("status") != UNSUPPORTED_ENGINE
     ddl_available = observation.get("status") != "unavailable"
     snap_rows = []
-    if ddl_available and read_scope:
+    if ddl_supported and ddl_available and read_scope:
         try:
             snap_rows = query(_SCHEMA_SNAPSHOT_PAIRS_SQL,
                               {"cluster_id": cluster_id, "read_scope": read_scope,
@@ -2484,7 +2536,13 @@ def _schema_changes(query, cluster_id, days):
     changes = ordered[:50]
 
     # --- what can each source actually support? ----------------------------
-    if not ddl_available:
+    if not ddl_supported:
+        # FIRST, because it is the REASON this cluster has no snapshots. Under
+        # `not_collected` the note promises a first baseline on the next ETL cycle
+        # that is never coming, which is the empty success this status exists to
+        # replace.
+        ddl_status = "not_supported"
+    elif not ddl_available:
         ddl_status = "unavailable"
     elif observation.get("status") == "no_snapshots":
         # A MEASURED emptiness: the observation probe ran and returned no row. This
@@ -2582,6 +2640,11 @@ def _schema_changes(query, cluster_id, days):
         notes.append(_SC_INSUFFICIENT)
     elif status == "partial":
         notes.append(_SC_PARTIAL)
+    # `not_supported` deliberately adds NOTHING here: its sentence comes from the
+    # SHARED composer below (not_seen_note -> UNSUPPORTED_DIALECT_NOTE), so the panel
+    # and the two MCP tools cannot describe the refusal two ways. What matters is that
+    # it does not fall into _SC_DDL_NOT_COLLECTED, which promises a first baseline on
+    # the next ETL cycle that is never coming.
     if ddl_status == "not_collected":
         notes.append(_SC_DDL_NOT_COLLECTED)
     elif ddl_status == "unavailable":

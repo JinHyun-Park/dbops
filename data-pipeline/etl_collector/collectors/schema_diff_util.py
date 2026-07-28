@@ -76,6 +76,17 @@ reported as a drop anywhere. Absence cannot be told apart from a read that could
 not reach the schema, so it surfaces in every consumer as "last confirmed at T,
 not seen since" and never as "no changes".
 
+DIALECT: POSTGRESQL ONLY, AND THAT IS A REFUSAL RATHER THAN A GAP
+-----------------------------------------------------------------
+Every claim on this surface rests on "absent from the catalog read means absent
+from the database". That holds on PostgreSQL and NOT on MySQL, where
+information_schema is privilege-filtered in all three diff buckets and the scope
+key (CURRENT_USER()) does not move when visibility does: measured numbers are in
+snapshot_dialect_supported(). So MySQL clusters are not collected and every reader
+reports `unsupported_engine` instead of an empty success. The dialect is resolved
+PER CLUSTER from cluster_meta.engine, never from a capability key, because Aurora
+MySQL and Aurora PostgreSQL are the same engine FAMILY.
+
 COPIES. api/ cannot import mcp_servers and the collector assets cannot either, so
 this file is FOUR verbatim copies (edit them together; the parity test asserts
 byte-identity AND identical results):
@@ -128,6 +139,46 @@ LATEST_SCOPED_TIME_SUBQUERY = (
     " WHERE x.cluster_id = :cluster_id AND x.schema_name = :schema_name "
     "   AND x.read_scope = :read_scope)"
 )
+
+# WHICH DIALECT THIS CLUSTER IS, resolved PER CLUSTER and not per engine family.
+# Aurora MySQL and Aurora PostgreSQL are the SAME family (`relational`), so a
+# capability key cannot express this decision; cluster_meta.engine can, and reading
+# it is the prior art of operations/tools/prewarm_reader.py:_is_postgres.
+CLUSTER_ENGINE_SQL = "SELECT engine FROM cluster_meta WHERE cluster_id = :cluster_id"
+
+
+def snapshot_dialect_supported(engine: Any) -> bool:
+    """POSITIVE, FAIL-CLOSED gate: is this engine's catalog free of privilege
+    filtering, so that an absent table means an absent table?
+
+    PostgreSQL only, and this is a REFUSAL rather than another predicate. MEASURED
+    on MySQL 9.3.0 against the shipped catalog read, as the collecting identity:
+
+      full grant on appdb        {"users": ["email","id"], "orders": ["id","total"]}
+      DROP TABLE dropdb.users    dropdb table_count 0, tables_json {}
+      table-level REVOKE         appdb {"users": ["email","id"]}   <- `orders` gone
+      column-level GRANT (id)    appdb {"users": ["id"]}           <- `email` gone
+      whole database REVOKEd     appdb absent from the read entirely
+      read_scope, every time     collector@localhost
+
+    So on MySQL a REVOKE is byte-identical to a DROP in all three diff buckets
+    (dropped, modified, and the schema vanishing), and CURRENT_USER() does not move
+    when it happens: tightening the collector user to least privilege is
+    indistinguishable from a DBA dropping every table. There is no scope key that
+    changes with visibility (the grant set does, but it is not the visibility: role
+    grants, proxy users and column-level grants all move visibility without moving
+    any key this read can select), so the product refuses instead of guessing.
+
+    PostgreSQL is NOT exposed: measured on 14.18, an unprivileged role gets the
+    IDENTICAL PG_SCHEMA_SQL result as the superuser (pg_namespace and pg_class are
+    not privilege-filtered) while `SELECT FROM core.users` raises permission denied.
+
+    Fail-closed on an unknown engine is the CALLER's job, not this predicate's:
+    `observed()` reports an engine it could not resolve as `unavailable`, which is
+    "we could not decide", not "this engine is not supported".
+    """
+    return "postgres" in str(engine or "").lower()
+
 
 # The cluster's ESTABLISHED scope: the scope of the newest row that HAS one. A
 # NULL-scope row can never win it, so a cluster whose whole history predates
@@ -182,17 +233,35 @@ UNMIGRATED = "unmigrated"        # its newest row carries no scope at all (pre-v
 # `stale` from the previous pass is gone on purpose: a cluster nothing has
 # confirmed lately is a cluster where every schema is NOT_SEEN, and that says the
 # same thing while NAMING the schemas, which `stale` could not.
-OBSERVATION_STATUSES = ("fresh", "not_seen", "unmigrated", "no_snapshots", "unavailable")
+OBSERVATION_STATUSES = ("fresh", "not_seen", "unmigrated", "no_snapshots",
+                        "unavailable", "unsupported_engine")
 
-# A `dropped` list is only ever as good as the catalog the collector could read.
-# On MySQL that catalog is privilege-filtered, so a table-level REVOKE is
-# byte-identical to a DROP TABLE and no probe separates them. Disclosed rather
-# than resolved, because resolving it means picking one of two answers the data
-# does not choose between.
+# THE REFUSAL. This cluster's engine has a privilege-filtered catalog, so no read of
+# it can tell a DROP from a REVOKE (see snapshot_dialect_supported for the numbers).
+# It is a first-class observation status because every reader has to say so instead
+# of reporting an empty success: `not_collected` on such a cluster would promise a
+# baseline on the next ETL cycle that is never coming.
+UNSUPPORTED_ENGINE = "unsupported_engine"
+
+# A `dropped` list is only ever as good as the catalog the collector could read, and
+# on MySQL that catalog is privilege-filtered in every bucket, so the product does
+# not collect schema snapshots there at all. The caveat stays on the PostgreSQL path
+# for the honest residue: what the collecting role could see at that moment.
 DROPPED_CAVEAT = (
     "dropped 목록은 수집 계정이 그 시점에 볼 수 있었던 카탈로그를 기준으로 계산됩니다. "
-    "MySQL은 information_schema가 권한 필터링되므로 테이블 권한 회수(REVOKE)가 DROP과 "
-    "같은 모양으로 보입니다."
+    "PostgreSQL 카탈로그(pg_namespace/pg_class)는 권한으로 필터링되지 않으므로 이 목록은 "
+    "실제 DDL을 반영합니다. MySQL 계열은 information_schema가 권한 필터링되어 REVOKE와 "
+    "DROP을 구분할 수 없기 때문에 스키마 스냅샷 수집 대상이 아닙니다."
+)
+
+# What every reader says about a refused dialect. One sentence, shared, so the panel
+# and the two MCP tools and the agent narrative cannot describe it three ways.
+UNSUPPORTED_DIALECT_NOTE = (
+    "이 cluster의 엔진은 스키마 스냅샷(테이블 생성·삭제 판정) 대상이 아닙니다. MySQL 계열은 "
+    "information_schema가 권한 필터링되어, 수집 계정의 권한 회수(REVOKE)와 실제 DROP이 "
+    "완전히 같은 모양으로 보입니다. 잘못된 삭제 보고를 만들지 않기 위해 수집하지 않으며, "
+    "따라서 '변경 없음'도 '변경 있음'도 말할 수 없습니다. PostgreSQL 계열 cluster에서는 "
+    "정상 판정됩니다."
 )
 
 
@@ -322,6 +391,24 @@ def observed(query, cluster_id: str) -> dict:
                            not in here: nobody is being shown stale contents for
                            it, so it is not a blindness.
     """
+    # THE DIALECT FIRST, before anything is counted. It has to come first because
+    # the alternative is `no_snapshots` on a refused engine, and that status'
+    # sentence promises a baseline on the next ETL cycle which is never coming: an
+    # empty success. An engine we could not RESOLVE is `unavailable`, not
+    # `unsupported_engine`: "we cannot decide" is not "this is not supported", and a
+    # cluster registered minutes ago has no cluster_meta row yet.
+    try:
+        erows = query(CLUSTER_ENGINE_SQL, {"cluster_id": cluster_id})
+        engine = (erows[0].get("engine") if erows else None) or ""
+    except Exception as e:
+        print(f"[schema] engine lookup unavailable: {type(e).__name__}: {e}")
+        engine = ""
+    if not engine:
+        return {"status": "unavailable", "read_scope": None, "last_confirmed": None,
+                "schemas": {}, "unconfirmed_schemas": []}
+    if not snapshot_dialect_supported(engine):
+        return {"status": UNSUPPORTED_ENGINE, "read_scope": None,
+                "last_confirmed": None, "schemas": {}, "unconfirmed_schemas": []}
     try:
         rows = query(ESTABLISHED_SCOPE_SQL, {"cluster_id": cluster_id})
         scope = (rows[0].get("read_scope") if rows else None) or None
@@ -442,8 +529,15 @@ def not_seen_note(obs: dict) -> str:
     """
     parts = []
     status = obs.get("status")
+    if status == UNSUPPORTED_ENGINE:
+        # A REFUSAL, not a failure, and it is the whole sentence: there is no
+        # per-schema detail to add because nothing was collected on purpose.
+        return UNSUPPORTED_DIALECT_NOTE
     if status == "unavailable":
-        parts.append("스키마 관측 기록을 조회할 수 없어(schema_v27 미적용 캐시 DB) 각 "
+        # BOTH causes, because they lead to different operator actions: apply the
+        # migration, or wait one collection cycle for cluster_meta to land.
+        parts.append("스키마 관측에 필요한 정보를 조회할 수 없어(캐시 DB에 schema_v27 "
+                     "미적용이거나 이 cluster의 cluster_meta 행이 아직 없음) 각 "
                      "스키마가 현재도 존재하는지는 확인하지 못했습니다.")
     elif status == "unmigrated":
         parts.append("저장된 스냅샷이 모두 schema_v27 이전 기록이라 어떤 카탈로그를 "

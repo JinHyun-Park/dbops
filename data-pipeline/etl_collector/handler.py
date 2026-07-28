@@ -39,16 +39,50 @@ from collectors.schema_snapshot import (
 )
 from collectors.stats_collector import collect_query_stats
 
-# schema_snapshots retention, 90 days. The `<>` MAX(...) guard is load-bearing:
-# the CURRENT snapshot of a schema that has not changed in 90 days is itself older
-# than the cutoff, and deleting it would destroy the only row get_schema_diff has
-# to compare the next change against. Retention prunes HISTORY, never the
-# baseline. Module-level so the unit test can execute it on a real engine.
+# schema_snapshots retention. WHAT THIS ACTUALLY GUARANTEES, stated precisely
+# because the previous wording ("90 days") was measurably false for one row shape:
+#   * HISTORY older than 90 days is deleted.
+#   * The CURRENT snapshot of each schema UNDER THE CLUSTER'S ESTABLISHED SCOPE is
+#     exempt FOREVER, however old. That exemption is load-bearing, not tidiness: the
+#     snapshot of a schema that has not changed in 90 days is itself older than the
+#     cutoff, and deleting it would destroy the only row get_schema_diff has to
+#     compare the next change against.
+#   * Everything else, including the last row of a schema under an ABANDONED scope,
+#     is bounded by 90 days.
+#
+# The scope predicate is the fix for the third finding of the seventh pass. The old
+# exemption was per (cluster, schema) with no notion of scope, so a schema that
+# exists ONLY under a scope the collector no longer reads (a database that was
+# collected once by mistake, a db_name that changed) had exactly ONE row, was
+# therefore always its own MAX, and survived every purge forever. `observed()` reads
+# it as unknown_scope while it still holds tables, so it sat in
+# `unconfirmed_schemas` permanently: observation_is_complete never returned True
+# again, `no_changes` / `fresh` became unreachable in all three status-bearing
+# consumers, and the dashboard panel was pinned to `partial` for the life of the
+# cluster. MEASURED on PostgreSQL 14.18: after aging every row 200 days and running
+# this statement, `[['stray', 'wrongdb/16687']]` survived and the observation stayed
+# `not_seen` with `['stray']` unconfirmed.
+#
+# IS DISTINCT FROM, not <>: when the schema has no row at all under the established
+# scope (which is exactly the orphan) the subquery is NULL, and `<> NULL` is NULL,
+# i.e. NOT TRUE, i.e. the row is kept. That is the bug in one operator.
+# A cluster whose whole history predates schema_v27 has NO established scope, so
+# nothing of it is exempt: those rows are comparable to nothing by construction and
+# the first scope-known read re-baselines the schema anyway.
+#   ponytail: two correlated subqueries per row. Store-on-change means a handful of
+#   rows per cluster, so this never needs to be clever; make it a window function if
+#   a fleet ever makes the purge visible in the ETL's own duration.
+# Module-level so the unit test can execute it on a real engine.
 SCHEMA_SNAPSHOTS_PURGE_SQL = (
     "DELETE FROM schema_snapshots s "
     "WHERE s.snapshot_time < NOW() - INTERVAL '90 days' "
-    "AND s.snapshot_time <> (SELECT MAX(x.snapshot_time) FROM schema_snapshots x "
-    "WHERE x.cluster_id = s.cluster_id AND x.schema_name = s.schema_name)"
+    "AND s.snapshot_time IS DISTINCT FROM ("
+    "  SELECT MAX(x.snapshot_time) FROM schema_snapshots x "
+    "  WHERE x.cluster_id = s.cluster_id AND x.schema_name = s.schema_name "
+    "    AND x.read_scope = (SELECT e.read_scope FROM schema_snapshots e "
+    "                        WHERE e.cluster_id = s.cluster_id "
+    "                          AND e.read_scope IS NOT NULL "
+    "                        ORDER BY e.snapshot_time DESC LIMIT 1))"
 )
 
 
@@ -621,16 +655,13 @@ def lambda_handler(event, context):
     except Exception as e:
         print(f"[etl] query_stats purge failed: {type(e).__name__}: {e}")
 
-    # schema_snapshots: 90 days, same best-effort shape and BRIN-backed cheapness
-    # as the two purges above (brin_schema_snapshots_time, schema_v26). Store-on-
-    # change means this normally matches 0 rows.
-    #
-    # The NOT-the-latest guard is load-bearing, not tidiness: the CURRENT snapshot
-    # of a schema that has not changed in 90 days is older than the cutoff, and
-    # deleting it would destroy the only thing get_schema_diff has to compare the
-    # next change against. Retention prunes HISTORY, never the baseline.
-    # ponytail: correlated subquery over a window function; the table holds a
-    # handful of rows per cluster, so this never needs to be clever.
+    # schema_snapshots: same best-effort shape and BRIN-backed cheapness as the two
+    # purges above (brin_schema_snapshots_time, schema_v26). Store-on-change means
+    # this normally matches 0 rows. What it guarantees, and the one row shape it used
+    # to keep forever, is spelled out at SCHEMA_SNAPSHOTS_PURGE_SQL: the exemption is
+    # the current snapshot of each schema UNDER THE ESTABLISHED SCOPE, so an orphan
+    # under an abandoned scope now ages out instead of pinning the whole cluster to
+    # `unconfirmed` for its lifetime.
     #
     # Hoisted to SCHEMA_SNAPSHOTS_PURGE_SQL (module level) so the unit test can
     # EXECUTE it against a real PostgreSQL server and assert the surviving rows,

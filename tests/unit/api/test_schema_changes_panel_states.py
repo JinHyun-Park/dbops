@@ -365,7 +365,7 @@ def _stat(table="t", base=1000, cur=1000, *, in_window=True, schema="app"):
 
 
 def drive(*, snaps=(), stats=(), age_sec=60, snaps_fail=False, days=7,
-          obs=None, scope=_SCOPE, obs_fail=False):
+          obs=None, scope=_SCOPE, obs_fail=False, engine="aurora-postgresql"):
     """Run the SHIPPED `_schema_changes` over these rows.
 
     The fake dispatches on WHICH statement is being run and returns ROWS. It
@@ -384,6 +384,14 @@ def drive(*, snaps=(), stats=(), age_sec=60, snaps_fail=False, days=7,
     def query(sql, params=None):
         # ORDER MATTERS: both observation statements name schema_snapshots too, so
         # they have to be claimed before the pairs branch.
+        #
+        # The DIALECT, asked FIRST by the shared probe. Schema snapshots are
+        # PostgreSQL-only: MySQL's information_schema is privilege-filtered in every
+        # bucket a diff is derived from, so a REVOKE and a DROP are the same read.
+        # `engine=None` models a cluster with no cluster_meta row yet, which is
+        # `unavailable` (we cannot decide) rather than either answer.
+        if "FROM cluster_meta" in sql:
+            return [] if engine is None else [{"engine": engine}]
         if "read_scope IS NOT NULL" in sql:
             if obs_fail:
                 raise RuntimeError(
@@ -560,6 +568,19 @@ _MATRIX = [
      dict(snaps=[_snap()], obs_fail=True, stats=[_stat(base=1000, cur=1000)]),
      ("partial", "unavailable", "ok", "fresh", "unavailable"),
      "일부 신호만 판정됨", [_NEUTRAL]),
+    # --- the engine's catalog cannot support the claim (FINDING 4) ---------
+    # MySQL: measured on 9.3.0, a table-level REVOKE removes the table from the read
+    # exactly as a DROP does and CURRENT_USER() does not change, so nothing is
+    # collected and the panel must not draw a created/dropped chip for this cluster.
+    ("a_refused_dialect_is_partial_and_never_no_changes",
+     dict(snaps=[], engine="aurora-mysql", stats=[_stat(base=1000, cur=1000)]),
+     ("partial", "not_supported", "ok", "fresh", "unsupported_engine"),
+     "일부 신호만 판정됨", [_NEUTRAL]),
+    # An engine nobody could resolve is a THIRD state: no cluster_meta row yet.
+    ("an_unresolvable_engine_is_not_a_refusal",
+     dict(snaps=[_snap()], engine=None, stats=[_stat(base=1000, cur=1000)]),
+     ("partial", "unavailable", "ok", "fresh", "unavailable"),
+     "일부 신호만 판정됨", [_NEUTRAL]),
 ]
 
 
@@ -606,10 +627,10 @@ def test_a_change_is_never_rendered_by_the_empty_verdict_at_all():
 # blindness test either. So the product is built here mechanically, from one
 # constructor per signal value, and the expectation is a LITERAL table.
 #
-# DDL has EIGHT values, not five: `ddl_detection.status == "ok"` means "at least
-# one schema compared", so it splits by WHICH schemas went unanswered.
+# DDL has NINE structural values, not five: `ddl_detection.status == "ok"` means "at
+# least one schema compared", so it splits by WHICH schemas went unanswered.
 _DDL_CASES = {
-    # complete: every schema, over the whole window, every schema confirmed
+    # complete: every schema, over the whole window
     "ok": dict(snaps=[_snap()]),
     # ok, and blind for one schema, ONE CASE PER BLINDNESS LIST IN THE PAYLOAD
     "ok+baseline_only": dict(snaps=[_snap(schema="ok_s", stored=3),
@@ -618,13 +639,6 @@ _DDL_CASES = {
     "ok+outside_window": dict(snaps=[_snap(schema="ok_s", stored=4),
                                      _snap(schema="ancient_s", is_latest=True,
                                            stored=4)]),
-    # THE SIXTH BLINDNESS LIST, and the whole of FINDING 2. A schema still serving
-    # tables that the newest catalog read did not confirm: a genuine DROP SCHEMA and
-    # a read that could not reach it leave identical evidence, so it is never a drop
-    # and it is never `no_changes` either.
-    "ok+not_seen": dict(snaps=[_snap(schema="live_s", stored=4)],
-                        obs=[_obs_row("live_s"),
-                             _obs_row("gone_s", confirmed=False)]),
     # nothing compared at all, one row per ddl_detection.status
     "not_collected": dict(snaps=[]),
     # history EXISTS and none of it is comparable: every row predates schema_v27, so
@@ -639,27 +653,66 @@ _DDL_CASES = {
     # the guard doing to this pass what it should have done to the previous one.
     "unavailable+pair_read": dict(snaps_fail=True, obs=[_obs_row()]),
     "unavailable+table_unreadable": dict(snaps_fail=True, obs_fail=True),
+    # THE REFUSAL, added by the seventh pass. This cluster's engine has a
+    # privilege-filtered catalog, so a REVOKE and a DROP are the same read (measured
+    # on MySQL 9.3.0) and nothing is collected: no pair is selected AT ALL. Its own
+    # status because `not_collected`'s sentence promises a first baseline on the next
+    # ETL cycle that is never coming, which is an empty success.
+    "not_supported": dict(snaps=[], engine="aurora-mysql"),
 }
 
-# The observation value each DDL case necessarily produces. It is NOT a free axis:
-# `no_snapshots` forces ddl=not_collected, `unmigrated` forces not_comparable and a
-# raising probe forces unavailable, so crossing them would enumerate 40 unreachable
-# cells. It IS a column of the product (see signals()), and
-# test_every_observation_status_appears_in_the_product asserts every value the
-# SHARED probe can return is covered here, which is the guard `not_seen` escaped.
-_DDL_OBSERVATION = {
-    "ok": "fresh",
-    "ok+baseline_only": "fresh",
-    "ok+partial_window": "fresh",
-    "ok+outside_window": "fresh",
-    "ok+not_seen": "not_seen",
-    "not_collected": "no_snapshots",
-    "not_comparable": "unmigrated",
-    "baseline_only": "fresh",
-    "outside_window": "fresh",
-    "unavailable+pair_read": "fresh",
-    "unavailable+table_unreadable": "unavailable",
+
+def _also_not_seen(kw):
+    """The same DDL case with ONE unconfirmed table-holding schema beside it.
+
+    `drive()` defaults the observation to "every schema in `snaps` confirmed", so the
+    transform has to rebuild that default and append, or it would silently drop the
+    case's own schemas out of the observation.
+    """
+    scope = kw.get("scope", _SCOPE)
+    base = list(kw.get("obs") or [_obs_row(r["schema_name"], scope=scope)
+                                  for r in kw.get("snaps", ())])
+    return {**kw, "obs": base + [_obs_row("gone_s", confirmed=False)]}
+
+
+# WHICH (ddl, observation) PAIRS A HUMAN CAN REACH, which is FINDING 6 of the seventh
+# pass. The previous shape was `_DDL_OBSERVATION`, one observation value pinned per
+# ddl case on the claim that the axis was forced. Four of the six values ARE forced,
+# because they are the same condition seen from two sides: `no_snapshots` means the
+# probe returned no row, which is also why nothing compared; `unmigrated` means no row
+# carries a scope, which is why the pair is not comparable; a raising probe forces
+# `unavailable`; and a refused dialect forces `not_supported`. The other two,
+# `fresh` and `not_seen`, are FREE over every scope-bearing ddl case, and the previous
+# shape expressed the one free combination it happened to need ("ok+not_seen") as a
+# ninth ddl case, which left (baseline_only, not_seen), (outside_window, not_seen) and
+# the rest simply absent from the product while the comment claimed they were
+# unreachable. So the two axes are crossed here, and the pairing is the claim:
+#   * anything listed is DRIVEN and its observation value ASSERTED, so a pair that
+#     turns out unreachable fails rather than sitting unnoticed;
+#   * `test_every_observation_status_appears_in_the_product` reads the value set off
+#     the SHARED contract, so a new observation value fails here with no edit.
+_OBS_TRANSFORMS = {"not_seen": _also_not_seen}
+_REACHABLE = {
+    # the seven scope-bearing cases: the observation axis is FREE over them
+    "ok": ("fresh", "not_seen"),
+    "ok+baseline_only": ("fresh", "not_seen"),
+    "ok+partial_window": ("fresh", "not_seen"),
+    "ok+outside_window": ("fresh", "not_seen"),
+    "baseline_only": ("fresh", "not_seen"),
+    "outside_window": ("fresh", "not_seen"),
+    "unavailable+pair_read": ("fresh", "not_seen"),
+    # ...and the four where the observation value and the ddl value are one condition
+    "not_collected": ("no_snapshots",),
+    "not_comparable": ("unmigrated",),
+    "unavailable+table_unreadable": ("unavailable",),
+    "not_supported": ("unsupported_engine",),
 }
+
+
+def _cell_kwargs(ddl, obs):
+    kw = _DDL_CASES[ddl]
+    transform = _OBS_TRANSFORMS.get(obs)
+    return transform(kw) if transform else kw
 
 # rows and collection are NOT independent: `no_data` on either side means
 # table_stats holds no row for this cluster at all, so rows=no_data <->
@@ -675,85 +728,111 @@ _ROW_CASES = {
     ("no_data", "no_data"): dict(stats=[], age_sec=_DEAD),
 }
 
-# THE EXPECTED TOP-LEVEL STATUS FOR ALL 11 x 5 = 55 CELLS, written out rather than
+# THE EXPECTED TOP-LEVEL STATUS FOR ALL 18 x 5 = 90 CELLS, written out rather than
 # recomputed from the handler's rules: a test that re-derives the derivation passes
 # for exactly the reasons the derivation is wrong.
 #   `no_changes` appears TWICE in this whole table, and only on the row where DDL
 #   answered for every schema over the whole window AND every schema was confirmed.
+_PARTIAL_5 = ["partial", "partial", "partial", "partial", "partial"]
+_INSUF_3 = ["partial", "partial", "insufficient_history", "insufficient_history",
+            "insufficient_history"]
 _PRODUCT = {
-    #                        (ok,fresh)    (ok,stale)    (insuf,fresh)          (insuf,stale)          (no_data,no_data)
-    "ok":                ["no_changes", "no_changes", "partial",              "partial",              "partial"],
-    "ok+baseline_only":  ["partial",    "partial",    "partial",              "partial",              "partial"],
-    "ok+partial_window": ["partial",    "partial",    "partial",              "partial",              "partial"],
-    "ok+outside_window": ["partial",    "partial",    "partial",              "partial",              "partial"],
-    "ok+not_seen":       ["partial",    "partial",    "partial",              "partial",              "partial"],
-    "not_collected":     ["partial",    "partial",    "insufficient_history", "insufficient_history", "not_collected"],
-    "not_comparable":    ["partial",    "partial",    "insufficient_history", "insufficient_history", "insufficient_history"],
-    "baseline_only":     ["partial",    "partial",    "insufficient_history", "insufficient_history", "insufficient_history"],
-    "outside_window":    ["partial",    "partial",    "insufficient_history", "insufficient_history", "insufficient_history"],
-    "unavailable+pair_read":       ["partial", "partial", "insufficient_history", "insufficient_history", "insufficient_history"],
-    "unavailable+table_unreadable": ["partial", "partial", "insufficient_history", "insufficient_history", "insufficient_history"],
+    #                          (ok,fresh)    (ok,stale)    (insuf,fresh)          (insuf,stale)          (no_data,no_data)
+    ("ok", "fresh"):        ["no_changes", "no_changes", "partial",              "partial",              "partial"],
+    ("ok", "not_seen"):     _PARTIAL_5,
+    ("ok+baseline_only", "fresh"): _PARTIAL_5,
+    ("ok+baseline_only", "not_seen"): _PARTIAL_5,
+    ("ok+partial_window", "fresh"): _PARTIAL_5,
+    ("ok+partial_window", "not_seen"): _PARTIAL_5,
+    ("ok+outside_window", "fresh"): _PARTIAL_5,
+    ("ok+outside_window", "not_seen"): _PARTIAL_5,
+    ("not_collected", "no_snapshots"):
+        ["partial", "partial", "insufficient_history", "insufficient_history",
+         "not_collected"],
+    ("not_comparable", "unmigrated"): _INSUF_3,
+    ("baseline_only", "fresh"): _INSUF_3,
+    ("baseline_only", "not_seen"): _INSUF_3,
+    ("outside_window", "fresh"): _INSUF_3,
+    ("outside_window", "not_seen"): _INSUF_3,
+    ("unavailable+pair_read", "fresh"): _INSUF_3,
+    ("unavailable+pair_read", "not_seen"): _INSUF_3,
+    ("unavailable+table_unreadable", "unavailable"): _INSUF_3,
+    # THE REFUSAL. Same shape as the other "nothing compared" rows: for the operator
+    # a refusal IS a blindness, and the only thing that must not happen is
+    # `not_collected`, whose sentence promises a baseline that is never coming.
+    ("not_supported", "unsupported_engine"): _INSUF_3,
 }
 
-_PRODUCT_CELLS = [(d, r, i) for d in _DDL_CASES for i, r in enumerate(_ROW_CASES)]
+_PRODUCT_CELLS = [(d, o, r, i) for d, obs in _REACHABLE.items() for o in obs
+                  for i, r in enumerate(_ROW_CASES)]
 
 
-@pytest.mark.parametrize("ddl,rows,i", _PRODUCT_CELLS,
-                         ids=[f"{d}__{r[0]}_{r[1]}" for d, r, _ in _PRODUCT_CELLS])
-def test_the_whole_product_of_the_four_signals(ddl, rows, i):
+def _all_cells():
+    for d, obs in _REACHABLE.items():
+        for o in obs:
+            for r in _ROW_CASES:
+                yield d, o, r, drive(**{**_cell_kwargs(d, o), **_ROW_CASES[r]})
+
+
+@pytest.mark.parametrize("ddl,obs,rows,i", _PRODUCT_CELLS,
+                         ids=[f"{d}__{o}__{r[0]}_{r[1]}" for d, o, r, _ in _PRODUCT_CELLS])
+def test_the_whole_product_of_the_five_signals(ddl, obs, rows, i):
     """Every combination a human can reach, and what the operator reads there."""
-    got = drive(**{**_DDL_CASES[ddl], **_ROW_CASES[rows]})
-    expected_status = _PRODUCT[ddl][i]
+    got = drive(**{**_cell_kwargs(ddl, obs), **_ROW_CASES[rows]})
+    expected_status = _PRODUCT[(ddl, obs)][i]
     assert signals(got) == (expected_status, ddl.split("+")[0], rows[0], rows[1],
-                            _DDL_OBSERVATION[ddl]), got
+                            obs), got
     # The property the whole surface exists for, asserted on every cell rather
     # than on the cells someone remembered to list.
     assert (_NEUTRAL in panel_verdict(got)) == (expected_status == "no_changes"), (
-        ddl, rows, got["status"])
+        ddl, obs, rows, got["status"])
+
+
+def test_the_product_table_covers_exactly_the_reachable_pairs():
+    """The two tables cannot drift apart: a pair added to _REACHABLE with no expected
+    row, or an expected row for a pair nobody drives, both fail here."""
+    assert set(_PRODUCT) == {(d, o) for d, obs in _REACHABLE.items() for o in obs}
 
 
 def test_no_changes_appears_exactly_where_the_product_says_it_does():
-    """Two cells out of forty. If a change to the derivation widens that, this
+    """Two cells out of ninety. If a change to the derivation widens that, this
     fails with the cells it added."""
-    licensed = {(d, r) for d in _DDL_CASES for i, r in enumerate(_ROW_CASES)
-                if _PRODUCT[d][i] == "no_changes"}
-    assert licensed == {("ok", ("ok", "fresh")), ("ok", ("ok", "stale"))}
-    got = {(d, r) for d in _DDL_CASES for r in _ROW_CASES
-           if drive(**{**_DDL_CASES[d], **_ROW_CASES[r]})["status"] == "no_changes"}
+    licensed = {(d, o, r) for (d, o), row in _PRODUCT.items()
+                for i, r in enumerate(_ROW_CASES) if row[i] == "no_changes"}
+    assert licensed == {("ok", "fresh", ("ok", "fresh")),
+                        ("ok", "fresh", ("ok", "stale"))}
+    got = {(d, o, r) for d, o, r, payload in _all_cells()
+           if payload["status"] == "no_changes"}
     assert got == licensed, sorted(got ^ licensed)
 
 
 def test_the_two_no_data_signals_are_the_same_signal():
-    """Why the product is 8 x 5 and not 8 x 9, measured instead of asserted in a
-    comment: rows=no_data and collection=no_data are one condition (table_stats
-    holds no row for this cluster), so neither can occur without the other."""
-    for d in _DDL_CASES:
-        for r in _ROW_CASES:
-            got = drive(**{**_DDL_CASES[d], **_ROW_CASES[r]})
-            assert (got["row_deltas"]["status"] == "no_data") == \
-                   (got["collection"]["status"] == "no_data"), (d, r, got)
+    """Why the row axis is 5 and not 9, measured instead of asserted in a comment:
+    rows=no_data and collection=no_data are one condition (table_stats holds no row
+    for this cluster), so neither can occur without the other."""
+    for d, o, r, got in _all_cells():
+        assert (got["row_deltas"]["status"] == "no_data") == \
+               (got["collection"]["status"] == "no_data"), (d, o, r, got)
 
 
 def test_every_blindness_list_in_the_payload_forbids_no_changes():
     """THE ANTI-RELOCATION GUARD, and the reason this round did not add a fifth
     named condition. Any `*_schemas` key of ddl_detection is a set of schemas the
     DDL source could not answer for, so a non-empty one may never coexist with the
-    status that reads as an absence of change. A SIXTH blindness list added later
+    status that reads as an absence of change. A SEVENTH blindness list added later
     is covered by this the moment it appears in the payload, with no test edit."""
     exercised = set()
-    for d in _DDL_CASES:
-        for r in _ROW_CASES:
-            got = drive(**{**_DDL_CASES[d], **_ROW_CASES[r]})
-            blind = {k: v for k, v in got["ddl_detection"].items()
-                     if k.endswith("_schemas") and v}
-            exercised |= set(blind)
-            if blind:
-                assert got["status"] != "no_changes", (d, r, blind)
-                assert _NEUTRAL not in panel_verdict(got), (d, r, blind)
-                # and the operator is told WHICH schemas, by name
-                for key, names in blind.items():
-                    for n in names:
-                        assert n in got["note"], (d, r, key, got["note"])
+    for d, o, r, got in _all_cells():
+        blind = {k: v for k, v in got["ddl_detection"].items()
+                 if k.endswith("_schemas") and v}
+        exercised |= set(blind)
+        if blind:
+            assert got["status"] != "no_changes", (d, o, r, blind)
+            assert _NEUTRAL not in panel_verdict(got), (d, o, r, blind)
+            # and the operator is told WHICH schemas, by name
+            for key, names in blind.items():
+                for n in names:
+                    assert n in got["note"], (d, o, r, key, got["note"])
     # Not vacuous: every list the payload can carry is actually driven non-empty
     # somewhere in the product.
     assert exercised == {"baseline_only_schemas", "partial_window_schemas",
@@ -1163,12 +1242,17 @@ def _observation_statuses():
 
 def test_every_observation_status_appears_in_the_product():
     """Every value the shared probe can return is a cell of the product. A new one
-    fails HERE, with no test edit, which is the guard `not_seen` walked past."""
-    assert set(_DDL_OBSERVATION.values()) == _observation_statuses(), (
-        "observation values in the product: "
-        f"{sorted(set(_DDL_OBSERVATION.values()))}, values the probe can return: "
-        f"{sorted(_observation_statuses())}"
-    )
+    fails HERE, with no test edit, which is the guard `not_seen` walked past.
+
+    And it is asserted against the DRIVEN payloads, not against the table: a value
+    listed in _REACHABLE that the shipped code cannot actually produce would make the
+    enumeration look complete while covering nothing."""
+    listed = {o for obs in _REACHABLE.values() for o in obs}
+    assert listed == _observation_statuses(), (
+        f"observation values in the product: {sorted(listed)}, values the probe can "
+        f"return: {sorted(_observation_statuses())}")
+    produced = {got["observation"]["status"] for _d, _o, _r, got in _all_cells()}
+    assert produced == _observation_statuses(), sorted(produced)
 
 
 def test_every_observation_status_has_a_chip_and_only_fresh_is_ok():
@@ -1188,12 +1272,10 @@ def test_every_observation_status_has_a_chip_and_only_fresh_is_ok():
 def test_only_a_fully_confirmed_cluster_reaches_the_absence_of_change_sentence():
     """The property in one line, driven across the whole product: `no_changes` and
     an observation that is anything but `fresh` may never coexist."""
-    for d in _DDL_CASES:
-        for r in _ROW_CASES:
-            got = drive(**{**_DDL_CASES[d], **_ROW_CASES[r]})
-            if got["observation"]["status"] != "fresh":
-                assert got["status"] != "no_changes", (d, r, got["observation"])
-                assert _NEUTRAL not in panel_verdict(got), (d, r)
+    for d, o, r, got in _all_cells():
+        if got["observation"]["status"] != "fresh":
+            assert got["status"] != "no_changes", (d, o, r, got["observation"])
+            assert _NEUTRAL not in panel_verdict(got), (d, o, r)
 
 
 def test_a_schema_nobody_can_see_is_named_with_the_time_it_was_last_confirmed():
@@ -1265,3 +1347,45 @@ def test_the_panel_never_calls_a_vanished_schema_dropped():
                 stats=[_stat(base=1000, cur=1000)])
     assert [c for c in got["changes"] if c["schema_name"] == "gone_s"] == []
     assert got["ddl_detection"]["rename_candidates"] == []
+
+
+def test_a_refused_dialect_never_draws_a_created_or_dropped_chip():
+    """FINDING 4 at the surface that DRAWS the claim. A `created` / `dropped` row is
+    what a DBA acts on, and on a privilege-filtered catalog it could be a permission
+    change, so the panel must contribute no row at all and say why.
+
+    MEASURED on a real mysqld 9.3.0 with the read the collector used to run, as the
+    collecting identity: `REVOKE SELECT ON appdb.*` removed `orders` from the read,
+    `GRANT SELECT (id)` removed the COLUMN `email`, revoking the database removed the
+    schema entirely, and read_scope stayed `collector@localhost` through all of it.
+    """
+    got = drive(snaps=[], engine="aurora-mysql", stats=[_stat(base=1000, cur=1000)])
+    assert got["ddl_detection"]["status"] == "not_supported", got["ddl_detection"]
+    assert got["observation"]["status"] == "unsupported_engine"
+    assert got["changes"] == [] and got["ddl_detection"]["rename_candidates"] == []
+    assert got["status"] == "partial"
+    # The refusal is stated, and the young-cluster promise is NOT.
+    assert "REVOKE" in got["note"] and "DROP" in got["note"]
+    assert "다음 ETL 주기에 최초 baseline" not in got["note"]
+    assert _NEUTRAL not in panel_verdict(got)
+    # Even with stored rows from before the refusal, no pair is selected: the mock
+    # returns snapshot rows and the payload still carries no change.
+    with_legacy = drive(snaps=[_snap(before={"users": ["id"], "gone": ["id"]},
+                                     after={"users": ["id"]})],
+                        engine="mysql", stats=[_stat(base=1000, cur=1000)])
+    assert with_legacy["changes"] == [], with_legacy["changes"]
+    assert with_legacy["ddl_detection"]["status"] == "not_supported"
+
+
+def test_the_refusal_and_the_unknown_engine_read_differently():
+    """FAIL-CLOSED without over-claiming: a cluster whose cluster_meta row has not
+    landed yet is `unavailable` (we could not decide), not "this engine is not
+    supported", and the two sentences name different things to check."""
+    refused = drive(snaps=[], engine="aurora-mysql",
+                    stats=[_stat(base=1000, cur=1000)])
+    unknown = drive(snaps=[_snap()], engine=None, stats=[_stat(base=1000, cur=1000)])
+    assert refused["ddl_detection"]["status"] == "not_supported"
+    assert unknown["ddl_detection"]["status"] == "unavailable"
+    assert "cluster_meta" in unknown["note"], unknown["note"]
+    assert "REVOKE" not in unknown["note"]
+    assert refused["note"] != unknown["note"]

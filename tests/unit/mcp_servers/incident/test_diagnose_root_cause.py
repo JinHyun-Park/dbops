@@ -33,6 +33,9 @@ def _dispatching_cache(**by_source):
     SQL. Anything unclaimed comes back empty, which is what a cluster with no rows
     for that signal looks like."""
     def execute(sql, params=None):
+        if "FROM cluster_meta" in sql:
+            # PostgreSQL: schema snapshots are collected for this dialect only.
+            return _qr([{"engine": "aurora-postgresql"}])
         if "read_scope IS NOT NULL" in sql:
             return _qr([{"read_scope": "dbops/16384"}])
         if "holds_tables" in sql:

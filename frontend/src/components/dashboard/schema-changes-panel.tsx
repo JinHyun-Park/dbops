@@ -46,6 +46,10 @@ const DDL_CHIP: Record<string, { label: string; ok: boolean }> = {
   baseline_only: { label: "DDL baseline만", ok: false },
   outside_window: { label: "DDL 구간 밖", ok: false },
   unavailable: { label: "DDL 조회 불가", ok: false },
+  // A REFUSAL, not a failure: this cluster's engine has a privilege-filtered
+  // catalog, so a REVOKE and a DROP are the same read and no snapshot is collected.
+  // It is drawn like every other blindness, because for the operator it IS one.
+  not_supported: { label: "DDL 판정 미지원 엔진", ok: false },
 };
 
 // THE FOURTH SOURCE, and the one this panel did not have at all. "did the schema
@@ -60,6 +64,7 @@ const OBSERVATION_CHIP: Record<string, { label: string; ok: boolean }> = {
   unmigrated: { label: "스키마 관측 기록 없음", ok: false },
   no_snapshots: { label: "스냅샷 없음", ok: false },
   unavailable: { label: "스키마 관측 조회 불가", ok: false },
+  unsupported_engine: { label: "스키마 관측 미지원 엔진", ok: false },
 };
 
 const ROWS_CHIP: Record<string, { label: string; ok: boolean }> = {

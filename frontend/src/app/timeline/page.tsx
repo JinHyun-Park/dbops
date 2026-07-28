@@ -115,6 +115,20 @@ export default function TimelinePage() {
   // it, so the operator saw the original defect either way.
   const degraded = data?.degraded_sources ?? [];
 
+  // A stream that WAS read successfully and still cannot cover the question. The
+  // schema_change stream is a REPLAY of stored DDL diffs, so a schema nobody can
+  // currently confirm files no row: the category is empty, and on a timeline an
+  // empty category reads as "that did not happen during the incident". The sentence
+  // is composed server-side by the same shared function the schema-changes panel,
+  // get_schema_diff, get_schema_history and diagnose_root_cause use, so one state
+  // is described one way wherever the operator meets it.
+  const schemaNote = data?.observation?.note ?? "";
+
+  // EITHER kind of blindness forbids the "nothing happened" sentence below. Two
+  // conditions and one name, because the previous round had the failed-read half
+  // only and the successful-but-blind half reached the operator as an absence.
+  const blind = degraded.length > 0 || schemaNote !== "";
+
   const visibleItems = useMemo(() => {
     if (!data) return [];
     if (filterIn.size === 0) return data.items;
@@ -186,6 +200,26 @@ export default function TimelinePage() {
         </div>
       )}
 
+      {/* The read SUCCEEDED and still could not cover every schema. Rendered
+          whether or not the list is empty, for the same reason as the banner
+          above: a populated timeline is exactly where a missing DDL event is
+          invisible. */}
+      {schemaNote && (
+        <div className="mb-4 px-3 py-2 border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs">
+          <div>
+            schema_change 판정 범위
+            {(data?.observation?.unconfirmed_schemas?.length ?? 0) > 0 && (
+              <span className="font-mono ml-1">
+                ({data?.observation?.unconfirmed_schemas?.join(", ")})
+              </span>
+            )}
+          </div>
+          <div className="text-amber-200/70 mt-1 leading-relaxed">
+            {schemaNote}
+          </div>
+        </div>
+      )}
+
       {/* Category filter chips */}
       {presentCategories.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 mb-5">
@@ -231,18 +265,18 @@ export default function TimelinePage() {
         <EmptyState
           eyebrow="timeline"
           title={
-            degraded.length > 0
+            blind
               ? "확인하지 못한 signal이 있습니다"
               : "이 윈도우에 신호가 없습니다"
           }
           description={
             filterIn.size > 0
               ? "현재 필터에 매칭되는 신호가 없습니다. clear 를 눌러 전체를 보세요."
-              : degraded.length > 0
+              : blind
                 ? // Never state the negative the data cannot support: with a
-                  // stream unread, "아무 일도 없었다" is a claim about signals
-                  // nobody looked at.
-                  "읽을 수 있었던 signal에는 이 윈도우에 아무것도 없습니다. 위에 표시된 signal은 조회에 실패해 확인하지 못했습니다."
+                  // stream unread OR a schema nobody could confirm, "아무 일도
+                  // 없었다" is a claim about signals nobody looked at.
+                  "읽을 수 있었던 signal에는 이 윈도우에 아무것도 없습니다. 위 배너에 표시된 범위는 확인하지 못했습니다."
                 : "이 cluster에서 최근 발생한 알림, RDS 이벤트, 스키마 변경, 승인 실행이 없습니다. 윈도우를 늘려보세요."
           }
           secondary={{

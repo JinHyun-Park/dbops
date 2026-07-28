@@ -54,3 +54,43 @@ def test_schema_snapshots_purge_never_takes_the_latest_snapshot():
     assert "s.snapshot_time < NOW() - INTERVAL '90 days'" in sql
     assert "MAX(x.snapshot_time)" in sql
     assert "x.cluster_id = s.cluster_id AND x.schema_name = s.schema_name" in sql
+
+
+def test_the_exemption_is_scoped_so_an_orphan_can_age_out():
+    """The third finding of the seventh pass, pinned in the SQL.
+
+    The exemption used to be per (cluster, schema) with no notion of scope, so a
+    schema that exists ONLY under a scope the collector no longer reads had exactly
+    one row, was always its own MAX, and survived every purge forever. `observed()`
+    then reported it as unconfirmed for the life of the cluster, which made
+    `observation_is_complete` permanently False and pinned three consumers to
+    `partial`. MEASURED on PostgreSQL 14.18 before this change: after aging every
+    row 200 days and running this statement, `[['stray', 'wrongdb/16687']]`
+    survived.
+
+    Two things have to hold and the SECOND one is the whole bug:
+      * the exemption is restricted to the ESTABLISHED scope, and
+      * the comparison is IS DISTINCT FROM, because for the orphan the subquery is
+        NULL and `snapshot_time <> NULL` is NULL, i.e. the row is KEPT.
+    The surviving rows are asserted against a live server in
+    test_schema_snapshot_real_pg.py; this is the shape guard beside it.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_purge_etl_handler_scoped",
+        Path(__file__).resolve().parents[3] / "data-pipeline" / "etl_collector" / "handler.py",
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    sql = mod.SCHEMA_SNAPSHOTS_PURGE_SQL
+    assert "IS DISTINCT FROM" in sql, (
+        "`<>` keeps every row whose subquery is NULL, which is exactly the orphan"
+    )
+    assert "s.snapshot_time <> (" not in sql
+    assert "x.read_scope = (SELECT e.read_scope" in sql, (
+        "the exemption is not restricted to the cluster's established scope, so the "
+        "last row of an abandoned scope is exempt forever again"
+    )
+    assert "e.read_scope IS NOT NULL" in sql
+    assert "ORDER BY e.snapshot_time DESC LIMIT 1" in sql

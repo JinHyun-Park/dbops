@@ -105,50 +105,82 @@ def test_reader_and_producer_agree_on_the_same_event():
 
 # ===========================================================================
 # THE SELECTION CONTRACT, enforced. This is the section that would have failed
-# every one of the five previous passes.
+# every one of the SIX previous passes.
 # ===========================================================================
 # compute_diff was already shared. The SQL deciding WHICH TWO BLOBS ARE COMPARABLE
 # was not: schema_diff.IMPLICIT_SQL, api/dashboard._SCHEMA_SNAPSHOT_PAIRS_SQL and
 # the collector's PREV_SQL were three independent definitions, so every pass fixed
 # the ones its file ownership happened to include and the defect survived in the
-# rest. Two mechanical rules replace the editorial one:
+# rest. THREE mechanical rules replace the editorial one:
 #
 #   1. NO CONSUMER MAY WRITE `FROM schema_snapshots`. Every read is built from a
 #      fragment in schema_diff_util.py, so a change to the comparability rule
-#      reaches all four consumers at once or reaches none of them.
+#      reaches every consumer at once or reaches none of them.
 #   2. NO CONSUMER MAY CALL compute_diff. `compare()` is the only licensed way to
 #      obtain a diff and it cannot be called without the read_scope and the
 #      per-schema confirmation state, so a consumer that wants a diff is forced to
 #      select them.
+#   3. EVERY FUNCTION THAT SELECTS ROWS CARRIES THE OBSERVATION. Rule 1 is
+#      satisfied by building the statement from ALL_ROWS, and that is exactly what
+#      api/dashboard `_timeline` did while getting no observation channel at all:
+#      a FIFTH interpreter, living inside a file rules 1 and 2 had already cleared,
+#      answering the same question as diagnose_root_cause. So the rule is
+#      STATEMENT-SCOPED, per function, not per file.
+#
+# AND THE SET OF CONSUMERS IS DISCOVERED, NOT WRITTEN DOWN. The sixth pass wrote
+# the two rules against a hand-written `_CONSUMERS` dict, which made them
+# mechanical over exactly the files someone remembered. A new file was invisible,
+# and so was a second interpreter inside a listed one, which is how `_timeline`
+# escaped. `_discover_consumers()` below walks the shipped Python instead, so a new
+# consumer fails this suite the day it appears.
 
-# Every file that reads schema_snapshots to answer a question about it. The purge
-# in data-pipeline/etl_collector/handler.py is deliberately NOT here: it is a
-# retention DELETE, it interprets nothing, and binding it to a comparability
-# fragment would say something false about what it does.
-_CONSUMERS = {
-    "mcp_schema_diff":
-        _ROOT / "mcp-servers/mcp_servers/operations/tools/schema_diff.py",
-    "mcp_schema_history":
-        _ROOT / "mcp-servers/mcp_servers/operations/tools/schema_history.py",
-    "mcp_diagnose_root_cause":
-        _ROOT / "mcp-servers/mcp_servers/incident/tools/diagnose_root_cause.py",
-    "api_dashboard_handler": _ROOT / "api" / "dashboard" / "handler.py",
-    "etl_collector":
-        _ROOT / "data-pipeline/etl_collector/collectors/schema_snapshot.py",
-    "rds_direct_collector":
-        _ROOT / "data-pipeline/rds_direct_collector/schema_snapshot.py",
+# Where shipped Python lives. tests/ is excluded on purpose (a test HAS to be able
+# to write raw SQL to prove what the shipped statement does), as is cdk/ (schemas,
+# no reads).
+_SCAN_ROOTS = ("api", "mcp-servers", "data-pipeline", "agent", "tools")
+_SKIP_DIRS = {"node_modules", "__pycache__", "_deps", ".git", "cdk.out", "build"}
+
+# THE EXPLICIT NON-INTERPRETER ALLOWLIST, and every entry needs a reason, because
+# an allowlist is the one place a seventh pass could still hide.
+_NOT_INTERPRETERS = {
+    # The contract itself. It OWNS the row sources; binding it to its own rule is
+    # circular. Its four copies are byte-identity-checked above instead.
+    "mcp-servers/mcp_servers/shared/schema_diff_util.py": "the contract",
+    "api/dashboard/schema_diff_util.py": "the contract (verbatim copy)",
+    "data-pipeline/etl_collector/collectors/schema_diff_util.py":
+        "the contract (verbatim copy)",
+    "data-pipeline/rds_direct_collector/schema_diff_util.py":
+        "the contract (verbatim copy)",
+    # Retention. A DELETE interprets nothing and answers no question about what
+    # changed, so binding it to a comparability fragment would say something false
+    # about what it does. Its own guard is
+    # tests/unit/data_pipeline/test_etl_purge.py, which EXECUTES it on a real
+    # engine and asserts which rows survive.
+    "data-pipeline/etl_collector/handler.py": "the retention purge, interprets nothing",
+}
+
+# The two row sources a consumer builds a statement from. A function that reaches
+# either of them is SELECTING SNAPSHOT ROWS to answer a question, which is what
+# obliges it to also carry the observation. COVERAGE_SQL / OBSERVED_SQL /
+# ESTABLISHED_SCOPE_SQL are complete statements owned by the contract, not row
+# sources a consumer composes, so they are not in here.
+_ROW_SOURCES = {"SCOPED_ROWS", "ALL_ROWS"}
+
+# The two shared entry points to the confirmation state. `compare()` needs one, and
+# so does every negative any consumer states about a cluster.
+_OBSERVATION_ENTRIES = {"observed", "observation_state"}
+
+# THE PRODUCERS, exempt from rule 3 and the licensed compute_diff callers. They
+# hold the LIVE READ, so they ARE the scope, and there is no stored confirmation
+# state to consult yet: they are what produces it.
+_PRODUCERS = {
+    "data-pipeline/etl_collector/collectors/schema_snapshot.py",
+    "data-pipeline/rds_direct_collector/schema_snapshot.py",
 }
 
 
-def _sql_literals(path):
-    """Every string CONSTANT in the module except docstrings.
-
-    Docstrings and comments are excluded on purpose: this rule is about the SQL a
-    consumer SENDS, and the four files here have to be able to explain the rule in
-    prose without tripping it. A comment is not an ast.Constant at all; a docstring
-    is, so it is subtracted explicitly.
-    """
-    tree = ast.parse(path.read_text())
+def _module_string_constants(tree):
+    """Every string CONSTANT in the tree except docstrings (see _sql_literals)."""
     docstrings = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
@@ -161,6 +193,109 @@ def _sql_literals(path):
     return [n.value for n in ast.walk(tree)
             if isinstance(n, ast.Constant) and isinstance(n.value, str)
             and id(n) not in docstrings]
+
+
+def _discover_consumers():
+    """{repo-relative path: Path} for every shipped file that reads schema_snapshots.
+
+    TWO ways to be one, because either alone misses a real consumer:
+      * a string CONSTANT naming the table (a file writing its own SQL). Comments
+        and docstrings do not count: four of these files explain the rule in prose
+        and one of them, pg_table_stats.py, only MENTIONS the table.
+      * an import from schema_diff_util (a file building its statement from the
+        contract). A consumer doing this correctly never contains the string
+        "schema_snapshots" at all, which is precisely how a text grep would miss
+        the next one.
+    """
+    found = {}
+    for root in _SCAN_ROOTS:
+        for path in sorted((_ROOT / root).rglob("*.py")):
+            if _SKIP_DIRS & set(path.parts):
+                continue
+            rel = path.relative_to(_ROOT).as_posix()
+            if rel in _NOT_INTERPRETERS:
+                continue
+            text = path.read_text()
+            if "schema_snapshots" not in text and "schema_diff_util" not in text:
+                continue
+            tree = ast.parse(text)
+            names_a_test_cannot_see = any(
+                (node.module or "").endswith("schema_diff_util")
+                for node in ast.walk(tree) if isinstance(node, ast.ImportFrom))
+            if (names_a_test_cannot_see
+                    or any("schema_snapshots" in lit
+                           for lit in _module_string_constants(tree))):
+                found[rel] = path
+    return found
+
+
+_CONSUMERS = _discover_consumers()
+
+# The six that exist today. Asserted so a discovery walk that silently finds
+# NOTHING cannot make every rule below vacuously true, which is the failure mode of
+# a mechanical test: it would go green on the exact commit it is meant to fail.
+_KNOWN_CONSUMERS = {
+    "mcp-servers/mcp_servers/operations/tools/schema_diff.py",
+    "mcp-servers/mcp_servers/operations/tools/schema_history.py",
+    "mcp-servers/mcp_servers/incident/tools/diagnose_root_cause.py",
+    "api/dashboard/handler.py",
+    "data-pipeline/etl_collector/collectors/schema_snapshot.py",
+    "data-pipeline/rds_direct_collector/schema_snapshot.py",
+}
+
+
+def test_the_consumer_set_is_discovered_and_finds_the_ones_we_know_about():
+    """A new consumer joins this suite by EXISTING, and the known six prove the
+    walk is not silently empty. A file discovered here that should not be bound by
+    the rules goes in _NOT_INTERPRETERS with a reason, which is a review-visible
+    edit; a file that nobody adds anywhere is now impossible."""
+    missing = _KNOWN_CONSUMERS - set(_CONSUMERS)
+    assert not missing, f"discovery no longer finds {sorted(missing)}"
+    assert set(_NOT_INTERPRETERS) <= {
+        p.relative_to(_ROOT).as_posix()
+        for root in _SCAN_ROOTS for p in (_ROOT / root).rglob("*.py")}, (
+        "an allowlist entry names a file that no longer exists, so it is silently "
+        "excluding nothing and hiding whatever replaced it")
+
+
+def _sql_literals(path):
+    """Every string CONSTANT in the module except docstrings.
+
+    Docstrings and comments are excluded on purpose: this rule is about the SQL a
+    consumer SENDS, and the four files here have to be able to explain the rule in
+    prose without tripping it. A comment is not an ast.Constant at all; a docstring
+    is, so it is subtracted explicitly.
+    """
+    return _module_string_constants(ast.parse(path.read_text()))
+
+
+def _row_source_readers(path):
+    """{function name: the row sources it reaches} for one consumer file.
+
+    STATEMENT-SCOPED, and that is the whole of FINDING 5. A module-level constant
+    built from ALL_ROWS is itself a row source (resolved transitively), so a
+    function using `_SCHEMA_SNAPSHOT_PAIRS_SQL` counts exactly as much as one
+    inlining the fragment, and TWO functions in one file are two separate
+    obligations rather than one satisfied file.
+    """
+    tree = ast.parse(path.read_text())
+    derived = set(_ROW_SOURCES)
+    # Transitive over module-level assignments. Two passes is one more than this
+    # repo's deepest chain (fragment -> statement -> re-export).
+    for _ in range(3):
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                used = {n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)}
+                if used & derived:
+                    derived |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+    out = {}
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        hit = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)} & derived
+        if hit:
+            out[fn.name] = hit
+    return out
 
 
 @pytest.mark.parametrize("name", sorted(_CONSUMERS))
@@ -203,7 +338,7 @@ def test_no_consumer_computes_a_diff_without_the_facts_that_qualify_it(name):
     tree = ast.parse(src)
     called = {n.func.id for n in ast.walk(tree)
               if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-    if name.endswith("collector"):
+    if name in _PRODUCERS:
         assert "compute_diff" in called, (
             "the producer compares this read against the stored blob, so it is the "
             "one legitimate compute_diff caller; if that call is gone, the "
@@ -218,14 +353,59 @@ def test_no_consumer_computes_a_diff_without_the_facts_that_qualify_it(name):
     )
 
 
+@pytest.mark.parametrize("name", sorted(_CONSUMERS))
+def test_every_function_that_selects_snapshot_rows_carries_the_observation(name):
+    """RULE 3, and THE TEST THAT WOULD HAVE CAUGHT THE SIXTH PASS.
+
+    Rules 1 and 2 are satisfied by building the statement from ALL_ROWS and not
+    calling compute_diff, and api/dashboard `_timeline` did both while getting no
+    observation channel at all. It is a FIFTH interpreter of these rows, answering
+    the same question as diagnose_root_cause (did any DDL land near this incident),
+    living inside a file the sixth pass had already cleared at FILE scope. So the
+    obligation is per FUNCTION: whatever selects the rows also has to know whether
+    the schemas behind them could still be seen, or its empty result reads as
+    "no DDL happened" over schemas nobody looked at.
+
+    The producers are exempt: they hold the live read, so they ARE the observation.
+    """
+    readers = _row_source_readers(_CONSUMERS[name])
+    assert readers, (
+        f"{name} was discovered as a consumer but reaches no row source. Either it "
+        "writes its own SQL (rule 1 says where that belongs) or it is not an "
+        "interpreter at all and belongs in _NOT_INTERPRETERS with a reason."
+    )
+    if name in _PRODUCERS:
+        return
+    src = ast.parse(_CONSUMERS[name].read_text())
+    blind = {}
+    for fn in ast.walk(src):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if fn.name not in readers:
+            continue
+        names = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
+        if not names & _OBSERVATION_ENTRIES:
+            blind[fn.name] = sorted(readers[fn.name])
+    assert not blind, (
+        f"{name}: {blind} select snapshot rows without reaching the observation. "
+        f"Call one of {sorted(_OBSERVATION_ENTRIES)} in the same function and put "
+        "the result in the payload, the way _schema_changes and "
+        "_collect_schema_changes do. A statement built from the shared fragment is "
+        "only half the contract: the other half is being able to say which schemas "
+        "the answer does NOT cover."
+    )
+
+
 def test_every_copy_exposes_the_whole_contract():
     """Byte-identity already implies this. It is asserted by NAME anyway, because a
     consumer importing a fragment that a sibling copy does not export fails at
     runtime in one Lambda and nowhere in this suite."""
     contract = ("SCOPED_ROWS", "ALL_ROWS", "LATEST_SCOPED_TIME_SUBQUERY",
                 "ESTABLISHED_SCOPE_SQL", "OBSERVED_SQL", "COVERAGE_SQL",
-                "CONFIRM_WITHIN_SEC", "OBSERVATION_STATUSES", "DROPPED_CAVEAT",
+                "CLUSTER_ENGINE_SQL", "CONFIRM_WITHIN_SEC", "OBSERVATION_STATUSES",
+                "DROPPED_CAVEAT", "UNSUPPORTED_ENGINE", "UNSUPPORTED_DIALECT_NOTE",
                 "compare", "observed", "observation_is_complete", "not_seen_note",
+                "snapshot_dialect_supported",
                 "parse_tables", "compute_diff", "diff_is_empty",
                 "SchemaComparison")
     for name, path in _UTIL_COPIES.items():
@@ -251,6 +431,65 @@ def test_a_null_scope_is_comparable_to_nothing_in_every_copy():
                         observation={})
 
 
+def test_the_dialect_gate_is_positive_and_fail_closed_in_every_copy():
+    """FINDING 4 of the seventh pass. Every claim on this surface rests on "absent
+    from the catalog read means absent from the database", and that is FALSE on
+    MySQL: measured on 9.3.0, a table-level REVOKE removes the table from the read, a
+    column-level GRANT removes a column, a database-level REVOKE removes the schema
+    entirely, and read_scope (CURRENT_USER()) is identical across all of it. So the
+    product refuses rather than adding a predicate.
+
+    POSITIVE and FAIL-CLOSED: only an engine that positively says postgres passes,
+    and an engine we could not RESOLVE is `unavailable` (we cannot decide) rather
+    than either answer.
+    """
+    for name, path in _UTIL_COPIES.items():
+        mod = _load(path, f"_parity_dialect_{name}")
+        for engine in ("aurora-postgresql", "postgres", "PostgreSQL", "aurora-postgresql-15"):
+            assert mod.snapshot_dialect_supported(engine) is True, (name, engine)
+        for engine in ("aurora-mysql", "mysql", "MySQL", "sqlserver-se", "docdb",
+                       "redis", "dynamodb", "", None, "unknown"):
+            assert mod.snapshot_dialect_supported(engine) is False, (name, engine)
+
+        rows = [{"schema_name": "app", "read_scope": "db/1", "last_seen": "2026-07-29",
+                 "holds_tables": "y", "age_sec": 60}]
+
+        def query(sql, params=None, _engine=None, _rows=rows):
+            if "FROM cluster_meta" in sql:
+                return [] if _engine is None else [{"engine": _engine}]
+            if "read_scope IS NOT NULL" in sql:
+                return [{"read_scope": "db/1"}]
+            return _rows
+
+        # A refused dialect: REFUSED, and it never reads as an absence of change.
+        obs = mod.observed(lambda s, p=None: query(s, p, "aurora-mysql"), "c1")
+        assert obs["status"] == mod.UNSUPPORTED_ENGINE, (name, obs)
+        assert mod.observation_is_complete(obs) is False, name
+        note = mod.not_seen_note(obs)
+        assert note == mod.UNSUPPORTED_DIALECT_NOTE, (name, note)
+        assert "REVOKE" in note and "DROP" in note, (name, note)
+        # ...and it is NOT dressed up as a young cluster, which would promise a
+        # baseline on the next ETL cycle that is never coming.
+        assert obs["status"] != "no_snapshots"
+
+        # An engine nobody could resolve is a THIRD state: we could not decide.
+        unknown = mod.observed(lambda s, p=None: query(s, p, None), "c1")
+        assert unknown["status"] == "unavailable", (name, unknown)
+        assert mod.UNSUPPORTED_DIALECT_NOTE not in mod.not_seen_note(unknown), name
+
+        # And the supported dialect still answers.
+        ok = mod.observed(lambda s, p=None: query(s, p, "aurora-postgresql"), "c1")
+        assert ok["status"] == "fresh", (name, ok)
+
+        # The engine lookup is the FIRST thing it does: a refused dialect must not
+        # depend on the snapshot reads working at all.
+        def only_engine(sql, params=None):
+            if "FROM cluster_meta" in sql:
+                return [{"engine": "mysql"}]
+            raise RuntimeError("the snapshot reads must not be reached")
+        assert mod.observed(only_engine, "c1")["status"] == mod.UNSUPPORTED_ENGINE, name
+
+
 def test_confirmation_is_per_schema_and_never_a_cluster_wide_max():
     """FINDING 3, pinned in the SQL. The previous shape asked "is this schema the
     most recently seen one in the cluster", a RELATIVE test: with every schema
@@ -269,6 +508,8 @@ def test_confirmation_is_per_schema_and_never_a_cluster_wide_max():
                  "holds_tables": "y", "age_sec": stale} for n in ("alpha", "beta")]
 
         def query(sql, params=None, _rows=rows):
+            if "FROM cluster_meta" in sql:
+                return [{"engine": "aurora-postgresql"}]
             if "read_scope IS NOT NULL" in sql:
                 return [{"read_scope": "db/1"}]
             return _rows
@@ -291,6 +532,14 @@ def test_observation_statuses_are_exactly_what_observed_can_return():
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             if node.value in mod.OBSERVATION_STATUSES:
                 returned.add(node.value)
+        # ...and by NAME, because a status can be returned through a module constant
+        # (`{"status": UNSUPPORTED_ENGINE}`). Resolving the name is what keeps this
+        # test derived from the function rather than from its spelling: without it,
+        # naming a constant silently removed a value from the enumeration.
+        if isinstance(node, ast.Name):
+            val = getattr(mod, node.id, None)
+            if isinstance(val, str) and val in mod.OBSERVATION_STATUSES:
+                returned.add(val)
         if isinstance(node, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == "status" for t in node.targets):
             if isinstance(node.value, ast.Constant):
@@ -323,6 +572,8 @@ def test_last_confirmed_survives_a_cluster_that_has_gone_entirely_unconfirmed():
                  "age_sec": 90 * 60}]
 
         def query(sql, params=None, _rows=rows):
+            if "FROM cluster_meta" in sql:
+                return [{"engine": "aurora-postgresql"}]
             if "read_scope IS NOT NULL" in sql:
                 return [{"read_scope": "db/1"}]
             return _rows

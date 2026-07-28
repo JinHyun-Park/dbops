@@ -320,7 +320,20 @@ _OLD_SQL = (
 )
 
 
+def _meta(pg, cluster_id, engine="aurora-postgresql"):
+    """The cluster_meta row the ETL writes BEFORE any of these producers run
+    (etl_collector/handler.py collects meta first). The panel resolves the DIALECT
+    from it, because schema snapshots are PostgreSQL-only: MySQL's information_schema
+    is privilege-filtered, so a REVOKE and a DROP are the same read and no
+    created/dropped claim is possible there. Seeding it wherever data is seeded is
+    what production looks like, not a convenience."""
+    pg.raw("INSERT INTO cluster_meta (cluster_id, account_id, region, engine) VALUES ("
+           f"{_lit(cluster_id)}, '123456789012', 'ap-northeast-2', {_lit(engine)}) "
+           "ON CONFLICT (cluster_id) DO UPDATE SET engine = EXCLUDED.engine")
+
+
 def _stat(pg, cluster, table, rows, age_days, schema="app", bytes_=1000):
+    _meta(pg, cluster)
     pg.raw(
         "INSERT INTO table_stats (cluster_id, snapshot_time, schema_name, table_name, "
         " n_live_tup, total_bytes) VALUES ("
@@ -504,6 +517,9 @@ def test_one_table_is_one_line_even_when_both_sources_have_something_to_say(pg):
 
 
 def test_cluster_with_no_history_at_all_says_not_collected(pg):
+    # Registered and meta-collected, nothing produced yet. Without the meta row the
+    # DIALECT is unknown, which is `unavailable` and its own cell below.
+    _meta(pg, "never-collected-1")
     got = handler._schema_changes(pg.query, "never-collected-1", 7)
     assert got["changes"] == []
     assert got["status"] == "not_collected"
@@ -615,6 +631,7 @@ def test_snapshots_without_any_table_stats_cannot_date_their_verdict(pg):
     cluster there is no freshness signal at all, and an undatable verdict has to
     say it is undatable rather than read as "currently no changes"."""
     cid = "no-stats-1"
+    _meta(pg, cid)
     pg.raw("DROP SCHEMA IF EXISTS nostats CASCADE; CREATE SCHEMA nostats")
     pg.raw("CREATE TABLE nostats.t (id int)")
     api = _DataApi(pg)
@@ -829,6 +846,7 @@ def _snap(pg, cid, schema, hours_ago, tables, diff, scope=_SCOPE,
     reader would report `not_comparable` for every cell rather than the cell under
     test. `scope=None` is how a cell asks for the pre-v27 shape on purpose.
     """
+    _meta(pg, cid)
     pg.raw(
         "INSERT INTO schema_snapshots (cluster_id, snapshot_time, schema_name, "
         " tables_json, diff_from_previous_json, read_scope, last_seen_at) VALUES ("
@@ -861,6 +879,59 @@ def test_timeline_ddl_comes_from_schema_snapshots(pg):
     # The relation the old statement named does not exist on a fully migrated
     # cache DB: that is why the category could never be populated.
     assert pg.raw("SELECT to_regclass('schema_changes') IS NULL") == [["t"]]
+
+    # THE OBSERVATION CHANNEL, on the real engine. `_timeline` is the FIFTH
+    # interpreter of these rows and the sixth pass swapped its SQL to the shared
+    # ALL_ROWS fragment without giving it the channel, so an empty schema_change
+    # category read as "no DDL during the incident" over schemas the read never
+    # reached. A fully confirmed cluster gets NO sentence, or the banner fires on
+    # every timeline and is ignored within a week.
+    assert got["observation"]["status"] == "fresh", got["observation"]
+    assert got["observation"]["note"] == "", got["observation"]
+
+
+def test_the_timeline_names_a_schema_it_could_not_confirm(pg):
+    """An empty (or non-empty) schema_change category over a cluster with an
+    unconfirmable schema is not evidence about that schema. Same shared sentence the
+    schema-changes panel and both MCP readers use."""
+    cid = "tl-obs-1"
+    _snap(pg, cid, "live_s", 2, {"users": ["id"]}, {"added": ["users"]})
+    # a schema still serving tables whose stamp is far past the confirmation bar
+    _snap(pg, cid, "gone_s", 400 * 24, {"orders": ["id"]}, {},
+          last_seen="NOW() - INTERVAL '30 days'")
+
+    got = handler._timeline(pg.query, cid, 24, None)
+    obs = got["observation"]
+    assert obs["status"] == "not_seen", obs
+    assert obs["unconfirmed_schemas"] == ["gone_s"], obs
+    assert "gone_s" in obs["note"]
+    assert "삭제로 단정하지 않고" in obs["note"]
+    for drop_word in ("삭제됨", "dropped"):
+        assert drop_word not in obs["note"], drop_word
+    # and it is NOT dressed up as a failed read: nothing failed.
+    assert got["degraded_sources"] == []
+
+
+def test_a_refused_dialect_reaches_the_timeline_and_the_panel_as_a_refusal(pg):
+    """FINDING 4 on the real engine, at both dashboard surfaces. A MySQL cluster is
+    empty BY DECISION: `not_collected` would promise a first baseline on the next ETL
+    cycle that is never coming."""
+    cid = "tl-mysql-1"
+    _meta(pg, cid, engine="aurora-mysql")
+    pg.raw(f"DELETE FROM schema_snapshots WHERE cluster_id = {_lit(cid)}")
+
+    tl = handler._timeline(pg.query, cid, 24, None)
+    assert tl["observation"]["status"] == "unsupported_engine", tl["observation"]
+    assert "REVOKE" in tl["observation"]["note"]
+    assert tl["degraded_sources"] == [], "a refusal is not a failed read"
+
+    panel = handler._schema_changes(pg.query, cid, 7)
+    assert panel["ddl_detection"]["status"] == "not_supported", panel["ddl_detection"]
+    assert panel["observation"]["status"] == "unsupported_engine"
+    assert panel["changes"] == []
+    assert "REVOKE" in panel["note"]
+    assert "다음 ETL 주기에 최초 baseline" not in panel["note"]
+    assert _NEUTRAL not in panel_verdict(panel)
 
 
 def test_timeline_ignores_baseline_and_out_of_window_snapshots(pg):
@@ -975,6 +1046,9 @@ _MX = "mx"  # schema used by the matrix cells
 
 
 def _mx_setup(pg, cid, snaps, stats):
+    # A registered PostgreSQL cluster, whether or not it has produced anything yet:
+    # cluster_meta lands on the ETL's FIRST run, before either producer.
+    _meta(pg, cid)
     pg.raw(f"DROP SCHEMA IF EXISTS {_MX} CASCADE; CREATE SCHEMA {_MX}")
     for hours_ago, tables in snaps:
         _snap(pg, cid, _MX, hours_ago, {t: ["id"] for t in tables}, {})
@@ -1114,6 +1188,8 @@ def test_an_unreadable_snapshot_table_is_not_evidence_of_a_new_cluster(pg):
     of a read, so that sentence would be a negative the data cannot support.
     Measured before the guard: status "not_collected" with _SC_NO_HISTORY and
     _SC_DDL_UNAVAILABLE contradicting each other in one note."""
+    _meta(pg, "mx-unreadable-and-no-stats")
+
     def query(sql, params=None):
         if "schema_snapshots" in sql:
             raise RuntimeError('relation "schema_snapshots" does not exist')

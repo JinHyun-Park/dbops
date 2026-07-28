@@ -51,13 +51,21 @@ def _observation(schemas=(("public", "y", "y"),), scope=_SCOPE,
 
 
 def _cache(window=None, probe=None, observation=None, scope=_SCOPE,
-           window_raises=None, probe_raises=None, obs_raises=None):
+           window_raises=None, probe_raises=None, obs_raises=None,
+           engine="aurora-postgresql"):
     """A cache that DISPATCHES ON SQL rather than on call order: the source now
     issues the shared observation probe as well, and a positional side_effect list
     makes every such change a wall of unrelated red."""
     obs = observation if observation is not None else _observation()
 
     def execute(sql, params=None):
+        # THE DIALECT, resolved per cluster from cluster_meta.engine, and asked FIRST:
+        # schema snapshots are PostgreSQL-only (MySQL's information_schema is
+        # privilege-filtered, so a REVOKE and a DROP are the same read).
+        if "FROM cluster_meta" in sql:
+            return QueryResult(columns=["engine"],
+                               rows=[] if engine is None else [{"engine": engine}],
+                               row_count=0 if engine is None else 1)
         if "read_scope IS NOT NULL" in sql:
             if obs_raises:
                 raise obs_raises
@@ -130,9 +138,9 @@ def test_rows_in_the_window_skip_the_probe_entirely():
     assert examined["schema_changes"] == 1
     assert out[0]["category"] == "schema_change"
     assert out[0]["evidence"]["schema_name"] == "app"
-    # The window read plus the two shared observation statements, and NO producer
-    # probe: there is nothing to qualify when rows came back.
-    assert cache.execute.call_count == 3
+    # The window read, the DIALECT lookup and the two shared observation statements,
+    # and NO producer probe: there is nothing to qualify when rows came back.
+    assert cache.execute.call_count == 4
     assert not any("COUNT(*) AS snapshots" in c.args[0]
                    for c in cache.execute.call_args_list)
 
@@ -175,16 +183,24 @@ def test_the_window_read_failing_is_labelled_apart_from_no_history():
     )
 
 
-def test_all_eight_states_of_this_source_are_distinguishable():
+def test_all_nine_states_of_this_source_are_distinguishable():
     """The enumeration, driven. signals_examined is pre-seeded to 0 for every
     source, so on the skipped paths the LABEL is the only difference, and two states
     sharing one label is the defect this tier keeps relocating.
 
-    A SIXTH state joins them in this pass, and it is the accepted cost of the whole
-    surface: a schema nobody can currently confirm files no diff row, so an empty
-    window is not evidence that no DDL happened. Under the previous pass that state
-    was byte-identical to "comparable history, empty window", i.e. to a real
+    A SIXTH state joined them in the sixth pass, and it is the accepted cost of the
+    whole surface: a schema nobody can currently confirm files no diff row, so an
+    empty window is not evidence that no DDL happened. Under the fifth pass that
+    state was byte-identical to "comparable history, empty window", i.e. to a real
     negative, in the HIGHEST-weighted source.
+
+    A NINTH joins them now, and it is a REFUSAL rather than a failure: this cluster's
+    engine has a privilege-filtered catalog (measured on MySQL 9.3.0: a REVOKE and a
+    DROP produce the identical read, and CURRENT_USER() does not move between them),
+    so nothing is collected for it and this source contributes no candidate at all.
+    Without its own label it would have been byte-identical to "no comparable
+    history", i.e. to a young PostgreSQL cluster, which is the conflation this
+    enumeration exists to prevent.
     """
     rows = QueryResult(
         columns=["snapshot_time", "schema_name", "changes"],
@@ -209,6 +225,12 @@ def test_all_eight_states_of_this_source_are_distinguishable():
         ("comparable history, empty window, a schema unconfirmed",
          _cache(probe=_probe(5, 2), observation=unconfirmed)),
         ("rows in the window", _cache(window=rows)),
+        # THE REFUSAL. Note the rows: even WITH stored history in the window, this
+        # source contributes nothing, because a schema_change candidate is the
+        # highest-weight thing this tool can rank and on this dialect it might be a
+        # permission change.
+        ("engine whose catalog cannot support the claim",
+         _cache(window=rows, engine="aurora-mysql")),
     ):
         examined, skipped = {}, []
         got = _collect_schema_changes(cache, "prod-pg-1", ANCHOR_START, ANCHOR_END,
@@ -216,7 +238,7 @@ def test_all_eight_states_of_this_source_are_distinguishable():
         sig = (tuple(skipped), examined.get("schema_changes", "absent"), len(got))
         assert sig not in states, f"{label} is indistinguishable from {states.get(sig)}"
         states[sig] = label
-    assert len(states) == 8
+    assert len(states) == 9
     # EXACTLY TWO states carry no label: the state with rows (which needs none, the
     # rows are the answer) and the one real negative. Every other state is labelled,
     # so "examined 0 and nothing skipped" means "we looked and there was no DDL

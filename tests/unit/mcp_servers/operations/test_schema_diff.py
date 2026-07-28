@@ -232,8 +232,22 @@ def _scope_row(scope=_SCOPE):
     return QueryResult(columns=["read_scope"], rows=[{"read_scope": scope}],
                        row_count=1)
 
+# The DIALECT this cluster is, which decides whether a snapshot claim is possible at
+# all: PostgreSQL's catalog is not privilege-filtered, MySQL's is in every bucket, so
+# on MySQL a REVOKE and a DROP are the same read and nothing is collected.
+_ENGINE = "aurora-postgresql"
 
-def _cache(*results, observation=None, scope=_SCOPE):
+
+def _engine_row(engine=_ENGINE):
+    """CLUSTER_ENGINE_SQL's shape. No row = the dialect is UNKNOWN, which is
+    `unavailable` (we cannot decide) and not `unsupported_engine`."""
+    if engine is None:
+        return QueryResult(columns=["engine"], rows=[], row_count=0)
+    return QueryResult(columns=["engine"], rows=[{"engine": engine}], row_count=1)
+
+
+
+def _cache(*results, observation=None, scope=_SCOPE, engine=_ENGINE):
     """A cache that DISPATCHES ON SQL, not on call order.
 
     It used to be a positional side_effect list, and the order of statements is
@@ -246,6 +260,11 @@ def _cache(*results, observation=None, scope=_SCOPE):
     obs = observation or _observation()
 
     def execute(sql, params=None):
+        # THE DIALECT, resolved per cluster from cluster_meta.engine, and asked FIRST:
+        # schema snapshots are PostgreSQL-only (MySQL's information_schema is
+        # privilege-filtered, so a REVOKE and a DROP are the same read).
+        if "FROM cluster_meta" in sql:
+            return _engine_row(engine)
         if "read_scope IS NOT NULL" in sql:
             return _scope_row(scope)
         if "holds_tables" in sql:
@@ -544,12 +563,15 @@ def test_a_dropped_list_carries_the_catalog_visibility_caveat():
             row_count=1), _coverage(6, 1)),
         cluster_id="prod-pg-1")
     assert result["totals"]["dropped"] == 1
-    assert "권한 회수(REVOKE)" in result["note"]
+    assert "REVOKE와 DROP을 구분할 수 없기" in result["note"]
+    # ...and it says WHY this PostgreSQL list can be trusted, which is the other half
+    # of the same fact: pg_namespace/pg_class are not privilege-filtered.
+    assert "pg_namespace/pg_class" in result["note"]
     # And a payload with nothing dropped does not carry it.
     clean = get_schema_diff_impl(_cache(_identical_pair(), _coverage(4, 1)),
                                 cluster_id="prod-pg-1")
     assert clean["totals"]["dropped"] == 0
-    assert "권한 회수(REVOKE)" not in clean["note"]
+    assert "REVOKE와 DROP을 구분할 수 없기" not in clean["note"]
 
 
 def test_a_cache_without_the_migration_says_so_instead_of_claiming_no_changes():
@@ -563,6 +585,8 @@ def test_a_cache_without_the_migration_says_so_instead_of_claiming_no_changes():
     reach it.
     """
     def execute(sql, params=None):
+        if "FROM cluster_meta" in sql:
+            return _engine_row(_ENGINE)
         if "read_scope IS NOT NULL" in sql or "holds_tables" in sql:
             raise RuntimeError("column last_seen_at does not exist")
         if "COUNT(*) AS snapshots" in sql:
@@ -588,6 +612,8 @@ def test_history_with_no_scope_at_all_is_not_comparable_and_not_no_changes():
     which is not what it was asked, and its blob-diff readers compared the rows
     anyway. There is now a status for it and no pair is selected."""
     def execute(sql, params=None):
+        if "FROM cluster_meta" in sql:
+            return _engine_row(_ENGINE)
         if "read_scope IS NOT NULL" in sql:
             return _scope_row(None)
         if "holds_tables" in sql:
@@ -602,3 +628,45 @@ def test_history_with_no_scope_at_all_is_not_comparable_and_not_no_changes():
     assert result["observation"]["status"] == "unmigrated"
     assert result["schemas_compared"] == 0
     assert "schema_v27" in result["note"]
+
+
+def test_a_refused_dialect_is_not_reported_as_a_cluster_with_nothing_yet():
+    """FINDING 4 of the seventh pass. A MySQL cluster has no snapshots BY DECISION:
+    its catalog is privilege-filtered in all three diff buckets and CURRENT_USER()
+    does not move when grants do (measured on 9.3.0), so nothing is collected. Under
+    `not_collected` the note promises a baseline on the next ETL cycle that is never
+    coming, which is an empty success dressed as a young cluster."""
+    result = get_schema_diff_impl(_cache(_coverage(0, 0), engine="aurora-mysql"),
+                                 cluster_id="mysql-1")
+    assert result["status"] == "not_supported", result
+    assert result["observation"]["status"] == "unsupported_engine"
+    assert result["schemas_compared"] == 0
+    assert "REVOKE" in result["note"] and "DROP" in result["note"]
+    # NOT the young-cluster sentence, and the refusal is stated once, not twice.
+    assert "다음 ETL 수집 주기" not in result["note"]
+    assert result["note"].count("스냅샷(테이블 생성·삭제 판정) 대상이 아닙니다") == 1
+    # Legacy rows from before the refusal cannot be diffed into a claim either: with
+    # no scope there is NO PAIR QUERY, which the mock enforces by raising.
+    def execute(sql, params=None):
+        if "FROM cluster_meta" in sql:
+            return _engine_row("mysql")
+        if "COUNT(*) AS snapshots" in sql:
+            return _coverage(9, 3)
+        raise AssertionError("a refused dialect must not select a pair: " + sql)
+    mock = MagicMock()
+    mock.execute.side_effect = execute
+    legacy = get_schema_diff_impl(mock, cluster_id="mysql-1")
+    assert legacy["status"] == "not_supported"
+    assert legacy["totals"] == {"added": 0, "dropped": 0, "modified": 0,
+                                "rename_candidates": 0}
+
+
+def test_an_unresolvable_engine_is_neither_supported_nor_unsupported():
+    """FAIL-CLOSED, and a third state. A cluster registered seconds ago has no
+    cluster_meta row yet: claiming "this engine is not supported" would be a negative
+    the data does not support, so it reports `unavailable`."""
+    result = get_schema_diff_impl(_cache(_coverage(0, 0), engine=None),
+                                 cluster_id="brand-new-1")
+    assert result["observation"]["status"] == "unavailable"
+    assert result["status"] != "not_supported"
+    assert "cluster_meta" in result["note"]

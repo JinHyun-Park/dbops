@@ -33,6 +33,8 @@ from mcp_servers.shared.schema_diff_util import (
     ALL_ROWS,
     COVERAGE_SQL,
     DROPPED_CAVEAT,
+    UNSUPPORTED_DIALECT_NOTE,
+    UNSUPPORTED_ENGINE,
     observation_is_complete,
 )
 
@@ -66,6 +68,26 @@ def get_schema_history_impl(cache: CacheClient, cluster_id: str, days: int = 30)
     result = cache.execute(CHANGES_SQL, params)
     observation = observation_state(cache, cluster_id)
     obs_note = observation_note(observation)
+    if observation.get("status") == UNSUPPORTED_ENGINE:
+        # THE REFUSAL, before either branch. This cluster is empty BY DECISION, so
+        # `not_collected` would promise a baseline on the next ETL cycle that is never
+        # coming. Any rows that DO exist were written before the collection stopped
+        # and are kept in the payload: this tool hands back a RECORD, and deleting
+        # history is the failure this surface's contract explicitly forbids. They are
+        # labelled rather than replayed as a current answer, and the tools that make a
+        # CLAIM (get_schema_diff, the dashboard panel, the RCA ranking) contribute
+        # nothing at all for this engine.
+        return {
+            "status": "not_supported",
+            "cluster_id": cluster_id,
+            "period_days": days,
+            "changes": result.rows,
+            "count": result.row_count,
+            "observation": observation,
+            "note": UNSUPPORTED_DIALECT_NOTE + (
+                " 아래 changes는 이 엔진의 스냅샷 수집을 중단하기 전에 기록된 이력이며, "
+                "현재 상태에 대한 판정이 아닙니다." if result.rows else ""),
+        }
     if result.rows:
         return {
             "status": "ok",

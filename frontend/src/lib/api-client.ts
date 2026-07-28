@@ -415,7 +415,14 @@ export interface SchemaChangesResponse {
       | "not_comparable"
       | "baseline_only"
       | "outside_window"
-      | "unavailable";
+      | "unavailable"
+      /** A REFUSAL, not a failure. This cluster's engine has a privilege-filtered
+       * catalog (MySQL: a table-level REVOKE removes the table from
+       * information_schema exactly as a DROP does, and the collector's scope key
+       * does not change with it), so no snapshot is collected and no created /
+       * dropped claim is possible. Distinct from `not_collected`, whose sentence
+       * promises a first baseline on the next ETL cycle. */
+      | "not_supported";
     schemas_compared: number;
     snapshots_stored: number;
     first_snapshot: string | null;
@@ -455,7 +462,10 @@ export interface SchemaChangesResponse {
       /** every stored row predates schema_v27, so nothing is comparable */
       | "unmigrated"
       | "no_snapshots"
-      | "unavailable";
+      | "unavailable"
+      /** the engine's catalog cannot support the claim: see ddl_detection.status
+       * `not_supported` */
+      | "unsupported_engine";
     read_scope: string | null;
     last_confirmed: string | null;
     schemas_known: number;
@@ -2798,6 +2808,20 @@ export interface TimelineResponse {
    * whole difference between "no DDL during the incident" and "we could not
    * look". Absent on a payload from an api Lambda older than this field. */
   degraded_sources?: string[];
+  /** WHAT THE schema_change STREAM DOES NOT COVER even when its read succeeded.
+   * That stream replays stored DDL diffs, so a schema the collector can no longer
+   * confirm files no row and the category goes quiet: `degraded_sources` cannot
+   * express that, because nothing failed. `note` is the operator-facing sentence,
+   * composed server-side by the same shared function the schema-changes panel and
+   * the MCP schema readers use. Empty note = the stream covered every schema this
+   * cluster has. Absent on a payload from an api Lambda older than this field. */
+  observation?: {
+    status?: string;
+    read_scope?: string | null;
+    last_confirmed?: string | null;
+    unconfirmed_schemas?: string[];
+    note?: string;
+  };
 }
 
 export async function fetchTimeline(

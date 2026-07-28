@@ -16,17 +16,17 @@ sys.path.insert(0, str(_ROOT / "data-pipeline" / "etl_collector"))
 from collectors.schema_snapshot import (  # noqa: E402
     INSERT_SQL,
     LATEST_SQL,
-    MYSQL_SCHEMA_SQL,
     PG_SCHEMA_SQL,
     PREV_SQL,
     SEEN_SQL,
     collect_mysql_schema_snapshot,
+    collect_pg_schema_snapshot,
 )
 
-# The scope a read reports. On MySQL this is CURRENT_USER(); the value is opaque
-# to the collector, only its equality with the stored one decides anything.
-_SCOPE = "dbops@%"
-_OTHER_SCOPE = "readonly@10.0.0.1"
+# The scope a read reports: `current_database()/oid` on PostgreSQL. The value is
+# opaque to the collector, only its equality with the stored one decides anything.
+_SCOPE = "appdb/16401"
+_OTHER_SCOPE = "otherdb/16402"
 
 
 class _FakeTarget:
@@ -92,8 +92,8 @@ class _FakeCache:
 
 def _run(rows, prev=None, scope=_SCOPE, stored_scope=_SCOPE):
     target, cache = _FakeTarget(rows, scope), _FakeCache(prev, stored_scope)
-    out = collect_mysql_schema_snapshot(
-        target, cache, "arn:x", "arn:y", "rds-mysql-1", "appdb",
+    out = collect_pg_schema_snapshot(
+        target, cache, "arn:x", "arn:y", "pg-1", "appdb",
         snapshot_ts="2026-07-10T00:00:00+00:00")
     return out, cache, target
 
@@ -103,24 +103,16 @@ def _run(rows, prev=None, scope=_SCOPE, stored_scope=_SCOPE):
 # ===========================================================================
 
 
-def test_mysql_sql_aggregates_and_avoids_the_truncating_functions():
-    # JSON_OBJECTAGG has no length cap. GROUP_CONCAT silently truncates at
-    # group_concat_max_len=1024, which would make compute_diff report tables that
-    # merely fell off the end as DROPPED.
-    assert "JSON_OBJECTAGG" in MYSQL_SCHEMA_SQL
-    assert "JSON_ARRAYAGG" in MYSQL_SCHEMA_SQL
-    assert "GROUP_CONCAT" not in MYSQL_SCHEMA_SQL
+def test_the_pg_read_is_bounded_by_nothing_and_excludes_views():
     # No LIMIT anywhere: server-side aggregation is all-or-nothing, so a schema
     # too big for the 1 MiB Data API response errors out and writes NOTHING
     # rather than writing a partial snapshot that looks like a mass DROP.
-    assert "LIMIT" not in MYSQL_SCHEMA_SQL.upper()
     assert "LIMIT" not in PG_SCHEMA_SQL.upper()
     # Views are not tables.
-    assert "'BASE TABLE'" in MYSQL_SCHEMA_SQL
     assert "relkind IN ('r', 'p')" in PG_SCHEMA_SQL
 
 
-def test_both_dialects_make_the_read_report_its_own_scope():
+def test_the_read_reports_its_own_scope():
     """The whole fix rests on the read naming the catalog it reached, so that a
     later absence is interpreted against it instead of being guessed at from
     inside the read."""
@@ -129,10 +121,78 @@ def test_both_dialects_make_the_read_report_its_own_scope():
     # The oid, not just the name: another cluster's same-named database is not
     # comparable history, and a physical restore keeps the oid so it stays one.
     assert "pg_database" in PG_SCHEMA_SQL and "d.oid" in PG_SCHEMA_SQL
-    # MySQL's information_schema is server-wide, so the connected database is not
-    # the visibility scope; privileges are, and they hang off the identity.
-    assert MYSQL_SCHEMA_SQL.count("CURRENT_USER() AS read_scope") == 2  # both UNION halves
-    assert "DATABASE() AS read_scope" not in MYSQL_SCHEMA_SQL
+
+
+# ===========================================================================
+# MySQL is REFUSED, and the refusal is the one guard both callers route through
+# ===========================================================================
+# FINDING 4 of the seventh pass. Every claim this collector's output supports rests
+# on "absent from the catalog read means absent from the database", and that is
+# FALSE on MySQL. MEASURED on a real mysqld 9.3.0 with the read this function used to
+# run, as the collecting identity:
+#   DROP TABLE dropdb.users     -> dropdb  table_count 0, tables_json {}
+#   REVOKE SELECT ON appdb.*    -> appdb   the table VANISHES from the read
+#   GRANT SELECT (id) ON users  -> appdb   {"users": ["id"]}, the COLUMN vanishes
+#   REVOKE the whole database   -> appdb   absent from the read entirely
+#   read_scope, in every case   -> collector@localhost, byte-identical
+# So a REVOKE is indistinguishable from a DROP in all three diff buckets and the
+# scope key does not move. A predicate cannot close that (four passes over this
+# surface tried predicates), so the product refuses.
+
+
+def test_mysql_is_not_collected_and_says_so_without_reading_anything():
+    class _Explodes:
+        def execute_statement(self, **kw):
+            raise AssertionError("MySQL must not be read at all")
+
+    def _cache(sql, params):
+        raise AssertionError("MySQL must not write or read the cache")
+
+    out = collect_mysql_schema_snapshot(_Explodes(), _cache, "arn:x", "arn:y",
+                                        "mysql-1", "appdb",
+                                        snapshot_ts="2026-07-29T00:00:00+00:00")
+    assert out["scope_status"] == "unsupported_dialect", out
+    assert out["snapshots_written"] == 0 and out["changes"] == 0, out
+    # It is NOT reported as a cluster with nothing yet: that would promise a
+    # baseline on the next cycle which is never coming.
+    assert out["baselines"] == 0 and out["heartbeats"] == 0, out
+    # Same key set as the PG return, so the ETL result shape does not fork.
+    ok, _, _ = _run([("appdb", 1, '{"t": ["id"]}')])
+    assert set(out) == set(ok), set(out) ^ set(ok)
+
+
+def test_no_mysql_catalog_read_survives_anywhere_in_the_collector():
+    """The constant is GONE, not merely unused: a dead-but-correct-looking read is
+    what a future pass would wire back up. Its two privilege-filtered halves are the
+    reason, and they are documented on the refusing function."""
+    import ast
+
+    import collectors.schema_snapshot as mod
+    assert not hasattr(mod, "MYSQL_SCHEMA_SQL")
+    src = (_ROOT / "data-pipeline" / "etl_collector" / "collectors"
+           / "schema_snapshot.py").read_text()
+    tree = ast.parse(src)
+    # AST, not a text grep: the file EXPLAINS the refusal in prose and has to be able
+    # to name the catalog it no longer reads.
+    assigned = {t.id for n in ast.walk(tree) if isinstance(n, ast.Assign)
+                for t in n.targets if isinstance(t, ast.Name)}
+    assert "MYSQL_SCHEMA_SQL" not in assigned
+    # Module-level string CONSTANTS only: every statement this collector sends is
+    # one, and docstrings/comments are where the refusal is explained.
+    statements = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for sub in ast.walk(node.value):
+                if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                    statements.append(sub.value)
+    # The FROM targets of the removed read, not the bare word: PG_SCHEMA_SQL names
+    # `information_schema` in an EXCLUSION list ("NOT IN ('pg_catalog',
+    # 'information_schema')"), which is the opposite of reading it.
+    for stmt in statements:
+        for banned in ("information_schema.columns", "information_schema.tables",
+                       "information_schema.schemata", "JSON_OBJECTAGG",
+                       "CURRENT_USER()"):
+            assert banned not in stmt, (banned, stmt[:120])
 
 
 def test_comparability_is_scope_filtered_in_every_statement_that_decides_it():
@@ -157,7 +217,7 @@ def test_target_read_carries_the_etl_audit_marker():
 
 def test_first_snapshot_is_a_baseline_with_no_diff():
     out, cache, _ = _run([("appdb", 2, '{"users": ["id"], "orders": ["id"]}')])
-    assert out == {"cluster_id": "rds-mysql-1", "read_scope": _SCOPE,
+    assert out == {"cluster_id": "pg-1", "read_scope": _SCOPE,
                    "scope_status": "adopted", "schemas_named": 1, "schemas_seen": 1,
                    "snapshots_written": 1, "baselines": 1, "changes": 0, "emptied": 0,
                    "unchanged": 0, "unreadable": 0, "heartbeats": 0,
@@ -232,28 +292,16 @@ def test_empty_blob_row_is_skipped_not_stored_as_an_empty_schema():
     assert cache.heartbeats == ["appdb"]
 
 
-def test_mysql_sql_also_returns_databases_that_hold_no_table():
-    """Grouping the table list by schema returns NO ROW for a database with zero
+def test_the_read_also_returns_schemas_that_hold_no_table():
+    """Grouping the table list by schema returns NO ROW for a schema with zero
     tables, and the collector can only diff the schemas the read returned, so
-    dropping the LAST table used to make the whole database invisible while its
-    stale blob stood as `latest` forever.
-
-    The statement itself was executed against a real MySQL 9.3.0 rather than only
-    asserted on as text: appdb with 2 tables + 1 view returned
-    {"users": [...], "orders": [...]} with the view excluded, emptydb returned
-    '{}', and after dropping every table in appdb it returned appdb -> '{}',
-    which is the whole point of the UNION ALL half. A MySQL fixture is
-    deliberately NOT added to this suite: it costs a ~40s server start on every
-    run and the structural assertions below fail if the half is removed.
-    """
-    assert "information_schema.schemata" in MYSQL_SCHEMA_SQL
-    assert "UNION ALL" in MYSQL_SCHEMA_SQL
-    assert "JSON_OBJECT() AS tables_json" in MYSQL_SCHEMA_SQL
-    # Not a LEFT JOIN: JSON_OBJECTAGG rejects a NULL member name
-    # (ER_JSON_DOCUMENT_NULL_KEY), so an outer-joined empty row would abort the
-    # whole statement instead of aggregating to an empty object.
-    assert "NOT EXISTS" in MYSQL_SCHEMA_SQL
-    assert "pg_namespace" in PG_SCHEMA_SQL  # the PG counterpart, real-engine tested
+    dropping the LAST table used to make the whole schema invisible while its stale
+    blob stood as `latest` forever. Driving off pg_namespace with a LEFT JOIN is what
+    gives that schema its '{}' row, which is the direct observation row S4 rests on
+    (real-engine tested in test_schema_snapshot_real_pg.py)."""
+    assert "pg_namespace" in PG_SCHEMA_SQL
+    assert "LEFT JOIN per_table" in PG_SCHEMA_SQL
+    assert "'{}'::jsonb" in PG_SCHEMA_SQL
 
 
 def test_zero_table_schema_is_stored_as_an_empty_map_with_the_drop_diff():
