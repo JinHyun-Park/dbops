@@ -57,9 +57,16 @@ MULTIENGINE_CHEATSHEET = """
 - 느린 op: profiler 로그가 `query_stats`에 누적되므로 `get_top_queries` /
   `get_slow_queries` / `detect_regressions` 로 조회합니다. 숫자는 profiler_threshold_ms를
   넘긴 op만의 집계이고 `query_text` 는 op shape(op + namespace + 필터 키)이라 EXPLAIN
-  대상이 아닙니다. 조치는 해당 컬렉션 인덱스와 쿼리 패턴 점검, 필요하면
-  `create_docdb_index`(승인 필요). 기록이 없으면 먼저 profiler 상태를 확인하세요
-  (`set_docdb_profiler`, 승인 필요).
+  대상이 아닙니다. `mean_time_ms` 는 수집 시작 이후 누적된 생애 평균이라 "지금 이만큼
+  느리다"로 인용할 수 없고, 행 하나는 shape 하나가 아니라 수집 창 하나의 스냅샷입니다.
+  `threshold_ms` 는 그 클러스터의 profiler_threshold_ms에 맞춰 지정하세요(기본값 1000ms는
+  profiler 기본 임계값 100ms의 10배라 기록된 op이 대부분 빠집니다).
+  조치는 해당 컬렉션 인덱스와 쿼리 패턴 점검, 필요하면 `create_docdb_index`(승인 필요).
+  기록이 없을 때 profiler 상태는 `get_maintenance_findings` 의
+  `docdb_mongo_profiler_off` · `docdb_mongo_profiler_read_failed` finding으로 확인합니다
+  (읽기 전용. profiler 상태를 읽는 전용 도구는 없습니다). profiler가 실제로 꺼져 있다고
+  확인된 뒤에만 `set_docdb_profiler`(승인 필요)를 제안하세요. 상태 확인 목적으로 승인
+  요청을 만들지 마세요.
 
 ## Non-Relational 엔진 공통 진단 워크플로
 1. `get_health_status(cluster_id)` 호출 → engine + resource_details 확인

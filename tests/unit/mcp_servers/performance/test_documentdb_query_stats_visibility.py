@@ -12,12 +12,24 @@ Flipping the capability is only half the fix. The rows carry the same COLUMNS as
 pg_stat_statements and a different MEANING:
   * calls / total_time_ms / rows_returned cover ONLY the ops that crossed
     profiler_threshold_ms, so they are not the shape's real traffic.
-  * mean_time_ms is that censored subset's mean, always >= the threshold.
+  * mean_time_ms is that censored subset's LIFETIME mean: the accumulator
+    recomputes it from cumulative total_time_ms / cumulative calls every window,
+    so it is never "the mean over this window" and lags a real change badly.
+  * one row is one collection WINDOW, not one op shape, so top-N / slow-N can be
+    the same query_hash N times over.
   * query_text is a Mongo op shape, not SQL, so it is not EXPLAIN input.
   * a window with no slow op writes no row at all, so "no rows" is not "healthy".
 So the handler labels every row it returns for this family, and these tests pin
 the label STRUCTURALLY (which keys exist, for which families) rather than by
 matching prose.
+
+WHAT THESE TESTS CANNOT DO: _FakeCache returns canned rows, so no assertion here
+proves the SQL is valid for PostgreSQL. That gap shipped a detect_regressions
+statement PostgreSQL refuses to parse (`round(double precision, integer)` does
+not exist, SQLSTATE 42883) while this file claimed the rows were "reachable".
+test_query_stats_sql_survives_postgres_type_resolution below now pins the
+type-safety invariants directly on the SQL these tools emit. Executing them for
+real still needs a live engine and is a manual step, not CI coverage.
 """
 
 import json
@@ -124,17 +136,76 @@ def _payload_rows(tool_name, result):
 
 
 def test_all_three_query_tools_return_documentdb_profiler_rows():
-    """The bug: unsupported_engine while the rows existed. Assert real data comes
-    back, not just that the refusal is gone."""
+    """The bug: unsupported_engine while the rows existed. Assert the gate opened
+    and the impl carried the rows through unaltered.
+
+    NOTE the limit of this assertion: the rows come from _FakeCache, so
+    `payload == rows` proves only that nothing between the gate and the payload
+    dropped or rewrote them. It says NOTHING about whether the SQL runs. The
+    engine-level invariants live in
+    test_query_stats_sql_survives_postgres_type_resolution."""
     for tool, event in _QUERY_TOOLS.items():
         rows = _rows_for(tool)
         result, fake = _invoke(tool, event, "documentdb", rows)
         assert result.get("status") != "unsupported_engine", tool
+        assert result.get("status") != "tool_error", tool
         assert _payload_rows(tool, result) == rows, tool
         assert result["count" if tool == "detect_regressions" else "row_count"] == len(rows), tool
-        # The impl was really reached and really queried query_stats.
+        # The impl was really reached and really read query_stats. Matched as a
+        # whole token: a substring check passes for `query_stats_typo` too, which
+        # is how a wrong table name got through this file once already.
         assert fake.executed, tool
-        assert "query_stats" in fake.executed[0][0], tool
+        assert re.search(r"\bFROM\s+query_stats\b", fake.executed[0][0]), tool
+
+
+def _round_call_args(sql):
+    """Yield the argument list of every ROUND(...) in `sql`, split on top-level
+    commas. Paren-balanced, because the interesting argument is itself full of
+    parens: ROUND(((a - b) / NULLIF(b, 0)) * 100, 1)."""
+    for m in re.finditer(r"\bROUND\s*\(", sql, re.I):
+        depth, start, args, arg_start = 1, m.end(), [], m.end()
+        for i in range(start, len(sql)):
+            c = sql[i]
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0:
+                    args.append(sql[arg_start:i])
+                    break
+            elif c == "," and depth == 1:
+                args.append(sql[arg_start:i])
+                arg_start = i + 1
+        yield [a.strip() for a in args]
+
+
+def test_query_stats_sql_survives_postgres_type_resolution():
+    """The invariant no mocked test could see, and the one that shipped broken.
+
+    query_stats.mean_time_ms / total_time_ms are DOUBLE PRECISION, so AVG() of
+    them is double precision. PostgreSQL has round(numeric, integer) and the
+    1-argument round(double precision), but NO round(double precision, integer):
+    a 2-argument ROUND over a double is SQLSTATE 42883 at parse time, which means
+    the whole tool returns tool_error on every call for every engine family, not
+    just a wrong number. Verified against PostgreSQL 14.18 with the production
+    DDL applied.
+
+    Asserted on the SQL the tools actually emit (captured from the fake cache),
+    so it covers all three regardless of which build the string through
+    _build_query and which carry a literal."""
+    for tool, event in _QUERY_TOOLS.items():
+        _, fake = _invoke(tool, event, "documentdb", _rows_for(tool))
+        sql = fake.executed[0][0]
+        for args in _round_call_args(sql):
+            if len(args) < 2:
+                continue  # 1-arg round(double precision) is fine
+            assert "::numeric" in args[0], (
+                f"{tool}: 2-argument ROUND over {args[0]!r} -- PostgreSQL has no "
+                "round(double precision, integer). Cast to ::numeric first."
+            )
+            # ...and cast back out, or the Data API returns numeric as
+            # stringValue and change_pct silently becomes a string.
+            assert "::double precision" in sql, tool
 
 
 def test_dynamodb_is_still_refused_so_the_flip_was_not_a_blanket_widening():
@@ -154,7 +225,7 @@ def test_dynamodb_is_still_refused_so_the_flip_was_not_a_blanket_widening():
 def test_documentdb_rows_carry_a_data_source_label_and_sql_families_do_not():
     """Structural, not prose: which keys exist, for which family. Without the
     label, a censored profiler mean reads as the op's average response time."""
-    expected_keys = {"origin", "query_text", "counters", "mean_time_ms", "coverage"}
+    expected_keys = {"origin", "query_text", "counters", "mean_time_ms", "rows", "coverage"}
     for tool, event in _QUERY_TOOLS.items():
         result, _ = _invoke(tool, event, "documentdb", _rows_for(tool))
         note = result["data_source"]
@@ -163,6 +234,32 @@ def test_documentdb_rows_carry_a_data_source_label_and_sql_families_do_not():
         for tool, event in _QUERY_TOOLS.items():
             result, _ = _invoke(tool, event, fam, _rows_for(tool))
             assert "data_source" not in result, (fam, tool)
+
+
+def test_the_label_discloses_the_two_ways_a_dba_misreads_these_numbers():
+    """Prose-pinned on purpose, one keyword each, because the DEFECT here was
+    understatement: the label was true and incomplete, which is worse than
+    missing, since it reads as "the only caveat is X".
+
+    Both were measured against a real PostgreSQL seeded through the shipped
+    accumulator: a shape whose slow ops run at 620ms was labelled
+    mean_time_ms 400.0 (the lifetime mean), and get_slow_queries at the tool
+    default threshold_ms=1000 returned 20 rows that were all one shape while the
+    620ms shape was absent."""
+    note = handler._DOCDB_QUERY_STATS_NOTE
+    # (1) the mean is cumulative over all windows, not this window's mean.
+    assert "생애" in note["mean_time_ms"], note["mean_time_ms"]
+    # (2) a row is a COLLECTION WINDOW, not an op shape, and query_hash is how you
+    # collapse them. Each token below is separately load-bearing: dropping the
+    # "one row = one window" sentence and keeping only the parenthetical still
+    # leaves "스냅샷"/"query_hash" in the string, which is how a watered-down
+    # version of this note survived the first version of this assertion.
+    rows_note = note["rows"]
+    assert any(w in rows_note for w in ("수집 창", "수집 윈도우", "window")), rows_note
+    assert "스냅샷" in rows_note and "query_hash" in rows_note, rows_note
+    # (3) the tool default hides the profiler's own rows: 1000ms vs 100ms.
+    src = handler._DOCDB_SLOW_QUERIES_SOURCE
+    assert "profiler_threshold_ms" in src and "100ms" in src, src
 
 
 def test_get_slow_queries_source_is_family_correct():
@@ -267,14 +364,23 @@ def test_execute_sql_still_refuses_documentdb(mock_boto3, mock_lookup):
 # ---------------------------------------------------------------------------
 
 
-def test_ts_mirror_has_no_query_stats_capability_to_drift():
-    """frontend/src/lib/engine.ts mirrors engine_family(): the classification and
-    the panel sets, never the capability flags. There is therefore no TS
-    counterpart to this flip, and a partial capability map added later would make
-    the frontend disagree with the backend silently."""
+def test_ts_mirror_did_not_gain_a_query_panel_for_documentdb():
+    """engine.ts DOES carry a capability mirror, contrary to what 69b0156's commit
+    message claimed: FAMILY_PANELS is annotated "Mirrors backend CAPABILITIES --
+    keep in sync". The earlier form of this test asserted `"query_stats" not in
+    src`, which passes no matter what FAMILY_PANELS holds, because the TS side
+    uses panel keys (opcounters / cacheHit), never the backend key names.
+
+    So assert on the panel SET instead. documentdb must not have gained a
+    query/slow-op panel from the backend flip. It has no consumer today either
+    (grep FAMILY_PANELS over frontend/src returns only its own definition, and
+    dashboard/page.tsx gates the perf tab on relational || rds_instance
+    literally), so this pins intent, not a live UI surface."""
     src = (Path(__file__).resolve().parents[4] / "frontend/src/lib/engine.ts").read_text()
-    assert "query_stats" not in src
-    assert "queryStats" not in src
+    panels = re.search(r"documentdb:\s*new Set\(\[(.*?)\]\)", src, re.S)
+    assert panels, "FAMILY_PANELS.documentdb not found -- was engine.ts restructured?"
+    keys = set(re.findall(r'"([^"]+)"', panels.group(1)))
+    assert keys and not {k for k in keys if "quer" in k.lower() or "slow" in k.lower()}, keys
     # Classification still agrees with engine_family() for the flipped family.
     assert re.search(r'includes\("docdb"\).*return "documentdb"', src, re.S)
     assert handler._engine_family("docdb") == "documentdb"

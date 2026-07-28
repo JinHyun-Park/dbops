@@ -66,8 +66,22 @@ _DOCDB_QUERY_STATS_NOTE = {
         "누적한 값입니다. 그 op의 전체 호출 수나 전체 실행시간이 아닙니다."
     ),
     "mean_time_ms": (
-        "느린 op만의 평균이라 항상 profiler_threshold_ms 이상입니다. 그 op의 평균 "
-        "응답시간으로 인용하지 마세요."
+        "느린 op만의 평균이고, 그 위에 수집 시작 이후를 통째로 누적한 생애 평균입니다"
+        "(collector가 창마다 누적 total_time_ms / 누적 calls로 다시 계산합니다). "
+        "항상 profiler_threshold_ms 이상이며, 그 op의 평균 응답시간으로도 '이번 창의 "
+        "평균'으로도 인용하지 마세요. 최근 구간이 실제로 얼마나 느린지는 연속한 두 행의 "
+        "total_time_ms 차이를 calls 차이로 나눈 값, 즉 구간 평균으로만 말할 수 있습니다."
+    ),
+    # 행 하나 = op shape 하나가 아니다. 이걸 밝히지 않으면 top-N / slow-N의 답이
+    # "느린 shape N개"로 읽히는데, 실제로는 같은 shape의 연속 스냅샷일 수 있다.
+    # ponytail: query_hash별 최신 행만 남기는 dedup이 다음 단계다. 오늘 넣지 않는
+    # 이유는 query_stats가 relational에서도 같은 스냅샷 구조라서(pg_stat_statements)
+    # dedup은 이 패밀리만의 수정이 아니라 세 툴 전체의 동작 변경이기 때문이다.
+    "rows": (
+        "행 하나는 op shape 하나가 아니라 수집 창 하나의 스냅샷입니다. 같은 shape이 창마다 "
+        "한 행씩 쌓이므로 top-N / slow-N 결과가 서로 다른 shape N개라는 보장이 없습니다"
+        "(같은 query_hash의 연속 스냅샷일 수 있습니다). shape 단위로 보려면 query_hash로 "
+        "그룹핑해서 shape마다 최신 행만 쓰고, 서로 다른 query_hash가 몇 개인지 세어 보세요."
     ),
     "coverage": (
         "임계값을 넘긴 op이 없던 구간에는 행이 아예 없습니다. 행이 없다는 것은 "
@@ -79,9 +93,16 @@ _DOCDB_QUERY_STATS_NOTE = {
 
 # get_slow_queries가 relational 기준으로 붙이는 source 문구는 이 패밀리에서
 # 사실과 반대다("슬로우 쿼리 로그가 아니다" → documentdb는 정확히 그것이다).
+# threshold_ms 기본값(1000)은 이 패밀리에서 사실상 필터다: DocumentDB profiler의
+# 기본 profiler_threshold_ms는 100ms(DOC_DEFAULT_THRESHOLD_MS)라서 profiler가 기록한
+# 느린 op 대부분이 기본값에 걸려 빠진다. 게다가 비교 대상 mean_time_ms는 생애 평균이라
+# 지금 느려진 shape도 임계값 밑에 남아 있을 수 있다.
 _DOCDB_SLOW_QUERIES_SOURCE = (
     "documentdb profiler log에서 누적한 query_stats.mean_time_ms "
-    "(profiler_threshold_ms를 넘긴 op만의 평균)"
+    "(profiler_threshold_ms를 넘긴 op만의 생애 평균). threshold_ms를 이 클러스터의 "
+    "profiler_threshold_ms에 맞춰 지정하세요. 기본값 1000ms는 DocumentDB profiler 기본 "
+    "임계값(100ms)의 10배라서, 기본값으로 호출하면 profiler가 실제로 기록한 느린 op이 "
+    "대부분 빠지고 그 결과를 '느린 op이 없다'로 읽게 됩니다."
 )
 
 # detect_regressions는 before/after를 query_hash로 INNER JOIN한다. relational에서

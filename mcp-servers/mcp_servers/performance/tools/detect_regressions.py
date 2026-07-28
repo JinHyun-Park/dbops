@@ -18,6 +18,17 @@ def detect_regressions_impl(
     # Server digest collectors, and the DocumentDB profiler accumulator), so
     # MAX(calls) per side is the running total at the END of that side's window
     # and after_calls - before_calls is what actually ran in between.
+    #
+    # BOTH casts around ROUND are load-bearing, do not "simplify" either away:
+    #   * query_stats.mean_time_ms is DOUBLE PRECISION, so AVG() of it is double
+    #     precision, and PostgreSQL has NO round(double precision, integer) -- only
+    #     round(numeric, integer) and the 1-arg round(double precision). Without
+    #     ::numeric the whole statement fails to parse (SQLSTATE 42883) and this
+    #     tool returned tool_error on EVERY call, for every engine family.
+    #   * ::double precision back on the outside keeps change_pct a NUMBER in the
+    #     payload. The RDS Data API sends numeric/decimal as stringValue, so
+    #     stopping at ::numeric would silently turn change_pct into "77.5" while
+    #     every other change_pct in this repo is a float.
     sql = """
         WITH before_period AS (
             SELECT query_hash, query_text, AVG(mean_time_ms) as before_mean_ms,
@@ -39,7 +50,7 @@ def detect_regressions_impl(
         )
         SELECT b.query_hash, b.query_text, b.before_mean_ms, a.after_mean_ms,
                b.before_calls, a.after_calls,
-               ROUND(((a.after_mean_ms - b.before_mean_ms) / NULLIF(b.before_mean_ms, 0)) * 100, 1) as change_pct
+               ROUND((((a.after_mean_ms - b.before_mean_ms) / NULLIF(b.before_mean_ms, 0)) * 100)::numeric, 1)::double precision as change_pct
         FROM before_period b JOIN after_period a ON b.query_hash = a.query_hash
         WHERE a.after_mean_ms > b.before_mean_ms * (1 + :min_change_pct / 100.0)
         ORDER BY change_pct DESC LIMIT 20
