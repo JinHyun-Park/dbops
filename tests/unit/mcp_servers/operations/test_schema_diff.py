@@ -9,11 +9,15 @@ snapshots.
 from unittest.mock import MagicMock
 
 from mcp_servers.operations.tools.schema_diff import (
-    _compute_diff,
     _parse_tables,
     get_schema_diff_impl,
 )
 from mcp_servers.shared.models import QueryResult
+
+# compute_diff is NOT re-exported by the tool any more: no consumer may call it
+# (see mcp_servers/shared/schema_diff_util.py), so a test that wants the raw
+# four-bucket computation takes it from the contract module directly.
+from mcp_servers.shared.schema_diff_util import compute_diff as _compute_diff
 
 # ---------------------------------------------------------------------------
 # _parse_tables — handles dict / JSON string / unsupported shapes
@@ -161,8 +165,7 @@ def test_compute_diff_column_order_irrelevant():
 def test_diff_impl_two_snapshots_drop_surfaced():
     """DROP scenario: pre-incident schema had a table, post-incident
     doesn't. The output's `dropped` list must include it."""
-    mock_cache = MagicMock()
-    mock_cache.execute.return_value = QueryResult(
+    mock_cache = _cache(QueryResult(
         columns=["schema_name", "tables_before", "tables_after"],
         rows=[
             {
@@ -172,7 +175,7 @@ def test_diff_impl_two_snapshots_drop_surfaced():
             }
         ],
         row_count=1,
-    )
+    ), _coverage(4, 1))
     result = get_schema_diff_impl(
         mock_cache,
         cluster_id="prod-pg-1",
@@ -195,32 +198,63 @@ def _coverage(snapshots, schemas):
     )
 
 
+_SCOPE = "dbops/16384"
 _LAST_CONFIRMED = "2026-07-09T00:00:00Z"
 
 
-def _observation(schemas=(("public", "y", "y"),), last=_LAST_CONFIRMED, age=60):
-    """OBSERVATION_SQL's shape: one row per schema (its latest snapshot), plus the
-    cluster-wide newest observation repeated on every row. `schemas` entries are
-    (name, holds_tables, confirmed_by_the_newest_read)."""
+def _observation(schemas=(("public", "y", "y"),), last=_LAST_CONFIRMED, age=60,
+                 scope=_SCOPE):
+    """OBSERVED_SQL's shape: one row per schema (its LATEST snapshot), carrying that
+    schema's OWN read_scope and its OWN last_seen_at age.
+
+    `schemas` entries are (name, holds_tables, confirmed), where confirmed "y"
+    means the row is under the cluster's established scope with a fresh
+    last_seen_at. "n" ages that schema's OWN stamp past the bar, which is the whole
+    of the sixth pass's FINDING 3: the previous shape asked "is this schema the most
+    recently seen one in the cluster", a RELATIVE test that reported zero
+    unconfirmed schemas whenever every schema shared one stamp, however old.
+    """
     return QueryResult(
-        columns=["schema_name", "last_seen", "holds_tables", "confirmed_now",
-                 "last_confirmed", "age_sec"],
-        rows=[{"schema_name": n, "last_seen": last if c == "y" else None,
-               "holds_tables": h, "confirmed_now": c,
-               "last_confirmed": last, "age_sec": age}
+        columns=["schema_name", "read_scope", "last_seen", "holds_tables", "age_sec"],
+        rows=[{"schema_name": n, "read_scope": scope,
+               "last_seen": last, "holds_tables": h,
+               "age_sec": age if c == "y" else 40 * 24 * 3600}
               for n, h, c in schemas],
         row_count=len(schemas),
     )
 
 
-def _cache(*results, observation=None):
-    """The reader issues the diff query, then the coverage probe, then the
-    observation probe LAST, so the observation default is appended rather than
-    spelled out at every call site. It is a real "everything confirmed" row and
-    not an exhausted mock: observation_state swallows its own failures by design,
-    so a mock that simply ran out would silently test the degraded path."""
+def _scope_row(scope=_SCOPE):
+    """ESTABLISHED_SCOPE_SQL's shape: the newest row that carries a scope, or none
+    at all when every stored row predates schema_v27."""
+    if scope is None:
+        return QueryResult(columns=["read_scope"], rows=[], row_count=0)
+    return QueryResult(columns=["read_scope"], rows=[{"read_scope": scope}],
+                       row_count=1)
+
+
+def _cache(*results, observation=None, scope=_SCOPE):
+    """A cache that DISPATCHES ON SQL, not on call order.
+
+    It used to be a positional side_effect list, and the order of statements is
+    exactly what this tier changes: the scope and the per-schema observation have to
+    be selected BEFORE a pair can be, because a pair that is not scope-filtered is
+    the phantom mass DROP. A positional mock turns any such change into dozens of
+    unrelated red tests and, worse, can hand the pair query the observation's rows.
+    """
+    pair, coverage = (list(results) + [_EMPTY, _EMPTY])[:2]
+    obs = observation or _observation()
+
+    def execute(sql, params=None):
+        if "read_scope IS NOT NULL" in sql:
+            return _scope_row(scope)
+        if "holds_tables" in sql:
+            return obs
+        if "COUNT(*) AS snapshots" in sql:
+            return coverage
+        return pair
     mock = MagicMock()
-    mock.execute.side_effect = list(results) + [observation or _observation()]
+    mock.execute.side_effect = execute
     return mock
 
 
@@ -382,8 +416,7 @@ def test_explicit_ok_payload_states_the_normalization():
 def test_diff_impl_latest_modified_column():
     """Latest snapshot path: row carries before/after as JSON. ALTER
     TABLE ADD COLUMN should land in modified, not added/dropped."""
-    mock_cache = MagicMock()
-    mock_cache.execute.return_value = QueryResult(
+    mock_cache = _cache(QueryResult(
         columns=["schema_name", "tables_before", "tables_after"],
         rows=[
             {
@@ -393,7 +426,7 @@ def test_diff_impl_latest_modified_column():
             }
         ],
         row_count=1,
-    )
+    ), _coverage(4, 1))
     result = get_schema_diff_impl(mock_cache, cluster_id="prod-pg-1")
     diff = result["diffs"][0]
     assert diff["added"] == []
@@ -445,16 +478,33 @@ def test_an_unconfirmed_schema_downgrades_no_changes_to_partial():
     assert "삭제로 단정하지 않고" in result["note"]
 
 
-def test_a_stale_cluster_is_partial_even_with_every_schema_confirmed_equally():
-    """A scope-mismatched or stopped collector confirms NOTHING, so every schema's
-    last_seen_at is equally old and no single schema stands out. The cluster-level
-    age is what catches it."""
+def test_a_cycle_that_confirmed_nothing_names_every_schema_it_left_behind():
+    """FINDING 3 of the sixth pass, at the point it is decided.
+
+    A scope change or a stopped collector confirms NOTHING, so every schema's
+    last_seen_at is equally old and no single schema stands out. The previous shape
+    derived `confirmed_now` from the CLUSTER-WIDE MAX(last_seen_at), a RELATIVE
+    test: every schema equalled that max, so `unconfirmed_schemas` came back EMPTY
+    while the collector's own return value for the same cycle said two schemas were
+    unconfirmed. MEASURED on PostgreSQL 14.18 pre-fix, one frozen cycle over a
+    2-schema cluster: collector {"not_seen": 2, "not_seen_schemas":
+    ["alpha", "public"]} against readers {"status": "fresh",
+    "unconfirmed_schemas": []}.
+
+    Each schema's OWN age against an ABSOLUTE bar is the fix, and the point of the
+    fix is that the schemas are NAMED.
+    """
     result = get_schema_diff_impl(
-        _cache(_EMPTY, _coverage(6, 2), observation=_observation(age=9 * 3600)),
+        _cache(_EMPTY, _coverage(6, 2),
+               observation=_observation((("public", "y", "n"), ("core", "y", "n")),
+                                        age=9 * 3600)),
         cluster_id="prod-pg-1")
     assert result["status"] == "partial"
-    assert result["observation"]["status"] == "stale"
-    assert "갱신되지 않았습니다" in result["note"]
+    assert result["observation"]["status"] == "not_seen"
+    assert result["observation"]["unconfirmed_schemas"] == ["core", "public"]
+    for name in ("core", "public"):
+        assert name in result["note"], result["note"]
+    assert "확인되지 않았습니다" in result["note"]
 
 
 def test_a_schema_whose_stored_map_is_already_empty_is_not_reported_unconfirmed():
@@ -505,12 +555,50 @@ def test_a_dropped_list_carries_the_catalog_visibility_caveat():
 def test_a_cache_without_the_migration_says_so_instead_of_claiming_no_changes():
     """schema_v27 not applied yet: the probe raises, which is not a licence to
     answer "no changes" for the whole cluster. No exception text may reach the
-    payload (the AST leak guard's allowlist is empty and stays empty)."""
+    payload (the AST leak guard's allowlist is empty and stays empty).
+
+    And with no scope there is NO PAIR QUERY AT ALL. That is the contract, not an
+    optimisation: comparing two blobs whose catalog is unknown is the phantom mass
+    DROP, so `compare()` raises rather than falling back and the reader does not
+    reach it.
+    """
+    def execute(sql, params=None):
+        if "read_scope IS NOT NULL" in sql or "holds_tables" in sql:
+            raise RuntimeError("column last_seen_at does not exist")
+        if "COUNT(*) AS snapshots" in sql:
+            return _coverage(6, 2)
+        raise AssertionError("a pair must not be selected without a scope: " + sql)
     mock = MagicMock()
-    mock.execute.side_effect = [_EMPTY, _coverage(6, 2),
-                               RuntimeError("column last_seen_at does not exist")]
+    mock.execute.side_effect = execute
     result = get_schema_diff_impl(mock, cluster_id="prod-pg-1")
-    assert result["status"] == "partial"
-    assert result["observation"] == {"status": "unavailable"}
+    # `not_comparable`, NOT `partial`: partial claims some of the question was
+    # answered with a real negative, and here NOTHING was compared, because
+    # comparability could not even be established. WHY it could not is the
+    # observation's own status, which is named and never swallowed.
+    assert result["status"] == "not_comparable"
+    assert result["observation"]["status"] == "unavailable"
+    assert result["schemas_compared"] == 0
     assert "last_seen_at" not in result["note"]
+    assert "schema_v27" in result["note"]
+
+
+def test_history_with_no_scope_at_all_is_not_comparable_and_not_no_changes():
+    """Every stored row predates schema_v27, so no row says which catalog it
+    describes. The previous pass answered this cluster "only a baseline exists",
+    which is not what it was asked, and its blob-diff readers compared the rows
+    anyway. There is now a status for it and no pair is selected."""
+    def execute(sql, params=None):
+        if "read_scope IS NOT NULL" in sql:
+            return _scope_row(None)
+        if "holds_tables" in sql:
+            return _observation((("public", "y", "y"),), scope=None)
+        if "COUNT(*) AS snapshots" in sql:
+            return _coverage(6, 2)
+        raise AssertionError("a pair must not be selected without a scope: " + sql)
+    mock = MagicMock()
+    mock.execute.side_effect = execute
+    result = get_schema_diff_impl(mock, cluster_id="prod-pg-1")
+    assert result["status"] == "not_comparable"
+    assert result["observation"]["status"] == "unmigrated"
+    assert result["schemas_compared"] == 0
     assert "schema_v27" in result["note"]

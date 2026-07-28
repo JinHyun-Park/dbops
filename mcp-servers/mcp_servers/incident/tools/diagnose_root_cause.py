@@ -23,6 +23,12 @@ from datetime import datetime, timedelta, timezone
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.incident_signals import metric_in_clause, resolve_family, signals_for
 from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
+from mcp_servers.shared.schema_diff_util import (
+    ALL_ROWS,
+    not_seen_note,
+    observation_is_complete,
+    observed,
+)
 
 # ---------------------------------------------------------------------------
 # Scoring weights. Kept as module constants so the ranking is transparent and
@@ -196,7 +202,13 @@ def diagnose_root_cause_impl(
         # a guess, so say so instead of reporting a silent zero.
         skipped.append("engine_family")
 
-    candidates.extend(_collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
+    # Filled by the schema source with the shared per-schema confirmation state.
+    # Reported at the top level because it qualifies the HIGHEST-weight signal: an
+    # empty schema_changes result over a cluster with an unconfirmed schema is not
+    # evidence that no DDL happened.
+    schema_observation: dict = {}
+    candidates.extend(_collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor,
+                                              win, examined, skipped, schema_observation))
     candidates.extend(_collect_events(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
     candidates.extend(_collect_blocking(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
     candidates.extend(
@@ -206,6 +218,10 @@ def diagnose_root_cause_impl(
     )
     candidates.extend(_collect_slow_queries(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
     candidates.extend(_collect_elasticache_signals(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
+
+    # The unknown the accepted cost of this surface creates, in the words the other
+    # three consumers use. Composed here so `note` stays a plain expression.
+    schema_obs_note = not_seen_note(schema_observation)
 
     # Rank by score desc, keep the top ~8 and assign 1-based ranks.
     candidates.sort(key=lambda c: c["score"], reverse=True)
@@ -225,6 +241,10 @@ def diagnose_root_cause_impl(
         "candidates": top,
         "signals_examined": examined,
         "skipped_sources": skipped,
+        # The same `observation` block get_schema_diff, get_schema_history and the
+        # dashboard panel carry, from the same shared function, so one state is
+        # described one way in all four consumers.
+        "schema_observation": schema_observation,
         # Surface the priors + per-candidate score_breakdown so the ranking is
         # explainable (score = base_weight × recency × category factor), not an
         # opaque number a DBA has to trust blindly.
@@ -234,7 +254,10 @@ def diagnose_root_cause_impl(
             "카테고리 인자(event=severity, blocking=block 지속, spike=배수). 자세한 분해는 "
             "candidate.score_breakdown 참고. 우선순위(prior)는 휴리스틱입니다."
         ),
-        "note": "ranked by proximity + severity; correlation, not proof — verify before acting",
+        "note": (
+            "ranked by proximity + severity; correlation, not proof, verify before acting"
+            + ((" " + schema_obs_note) if schema_obs_note else "")
+        ),
     }
 
 
@@ -242,9 +265,14 @@ def diagnose_root_cause_impl(
 # engine. It used to be an inline string, and it was the one new statement in
 # this tier that no test ran: a column rename inside it left the whole suite
 # green while the probe raised on every live call.
+#
+# ALL_ROWS from the shared contract, not a `FROM schema_snapshots` of its own.
+# That is the mechanical rule that stops a seventh pass over this surface (see
+# mcp_servers/shared/schema_diff_util.py): the SQL selecting the rows was
+# duplicated per consumer, so every pass fixed the copies it owned and the defect
+# survived in the ones it did not.
 SCHEMA_PRODUCER_PROBE_SQL = (
-    "SELECT COUNT(*) AS snapshots, COUNT(DISTINCT schema_name) AS schemas "
-    "FROM schema_snapshots WHERE cluster_id = :cluster_id"
+    "SELECT COUNT(*) AS snapshots, COUNT(DISTINCT schema_name) AS schemas " + ALL_ROWS
 )
 
 # EVERY way this source can decline to answer, each under its OWN label. All of
@@ -262,9 +290,25 @@ SCHEMA_PRODUCER_PROBE_SQL = (
 _SKIP_NO_HISTORY = "schema_changes"
 _SKIP_READ_ERROR = "schema_changes_read_error"
 _SKIP_PROBE_ERROR = "schema_changes_probe_error"
+# A FOURTH way not to have looked, and the one the accepted cost of this surface
+# creates: a schema nobody can currently confirm files no diff row, so an empty
+# window is not evidence that no DDL happened. Absence is never resolved to a DROP
+# (that produced a phantom mass drop), so the unknown has to appear HERE, in the
+# highest-weight source, or the agent under-ranks the most common real cause.
+_SKIP_UNCONFIRMED = "schema_changes_unconfirmed_schemas"
+# ...and the two OTHER ways the observation can decline, each under its own label
+# for the reason the probe labels were split in the previous pass: they lead to
+# different operator actions (apply schema_v27 / wait one collection cycle / find
+# out why a schema stopped being seen), and a shared label is what let a broken
+# read look exactly like a young cluster. Driven apart by
+# test_all_six_states_of_this_source_are_distinguishable, which is how this
+# conflation was caught inside this very commit.
+_SKIP_OBS_ERROR = "schema_changes_observation_error"
+_SKIP_UNMIGRATED = "schema_changes_unmigrated"
 
 
-def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped):
+def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, examined,
+                            skipped, observation=None):
     """Schema/DDL changes near the window — the highest-weight category.
 
     Reads ``schema_snapshots`` (the same table the operations ``get_schema_history``
@@ -297,16 +341,20 @@ def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, 
     every assertion on the negative path passed either way.
     """
     out = []
-    sql = """
-        SELECT snapshot_time, schema_name, diff_from_previous_json AS changes
-        FROM schema_snapshots
-        WHERE cluster_id = :cluster_id
-          AND snapshot_time >= :start_time::timestamptz
-          AND snapshot_time < :end_time::timestamptz
-          AND diff_from_previous_json IS NOT NULL
-          AND diff_from_previous_json::text NOT IN ('{}', '')
-        ORDER BY snapshot_time DESC
-    """
+    # REPLAY of stored diffs, so ALL_ROWS: each stored diff was computed by the
+    # producer against a same-scope predecessor by construction. Scope-filtering a
+    # replay would erase real DDL history whenever a cluster is re-scoped, which is
+    # the opposite failure from the phantom drop.
+    sql = (
+        "SELECT snapshot_time, schema_name, read_scope, "
+        "       diff_from_previous_json AS changes "
+        + ALL_ROWS +
+        "  AND snapshot_time >= :start_time::timestamptz "
+        "  AND snapshot_time < :end_time::timestamptz "
+        "  AND diff_from_previous_json IS NOT NULL "
+        "  AND diff_from_previous_json::text NOT IN ('{}', '') "
+        "ORDER BY snapshot_time DESC"
+    )
     params = {"cluster_id": cluster_id, "start_time": start_iso, "end_time": end_iso}
     try:
         rows = cache.execute(sql, params).rows
@@ -314,6 +362,21 @@ def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, 
         print(f"[diagnose_root_cause] schema_changes window read failed: {e}")
         skipped.append(_SKIP_READ_ERROR)
         return out
+    # WHAT WAS NOT LOOKED AT, on every path including the one with rows: a schema
+    # the collector can no longer confirm is silent here whether or not another
+    # schema changed, so this cannot live only in the empty branch.
+    obs = observed(lambda s, p: cache.execute(s, p).rows, cluster_id)
+    if observation is not None:
+        observation.update(obs)
+    obs_status = obs.get("status")
+    if obs_status == "unavailable":
+        skipped.append(_SKIP_OBS_ERROR)
+    elif obs_status == "unmigrated":
+        skipped.append(_SKIP_UNMIGRATED)
+    elif not observation_is_complete(obs) and obs_status != "no_snapshots":
+        # `no_snapshots` is the absence of any schema, not an unknown about one, and
+        # it already has its own label below.
+        skipped.append(_SKIP_UNCONFIRMED)
     if not rows:
         # Empty window: is that "no DDL happened" or "we have no DDL data"?
         # A single baseline snapshot cannot yield a diff row either, so anything

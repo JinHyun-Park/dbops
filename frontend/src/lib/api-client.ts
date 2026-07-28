@@ -408,6 +408,11 @@ export interface SchemaChangesResponse {
     status:
       | "ok"
       | "not_collected"
+      /** History exists and NONE of it is comparable: every row predates
+       * schema_v27, so no row says which catalog it describes and diffing them
+       * would report a phantom DROP for every table the other catalog did not
+       * hold. */
+      | "not_comparable"
       | "baseline_only"
       | "outside_window"
       | "unavailable";
@@ -423,6 +428,13 @@ export interface SchemaChangesResponse {
     /** Schemas whose newest snapshot predates the window: the pair would be a
      * row against itself, so nothing inside the window was observed. */
     outside_window_schemas: string[];
+    /** Schemas still SERVING TABLES that the newest catalog read did not confirm.
+     * THE ACCEPTED COST of this surface: a genuine DROP SCHEMA is never reported
+     * as a drop, because absence cannot be told apart from a read that could not
+     * reach the schema. It appears here and in `note` as "last confirmed at T, not
+     * seen since", and like every other `*_schemas` list it forbids
+     * `status: "no_changes"`. */
+    unconfirmed_schemas: string[];
     rename_candidates: { from: string; to: string; schema_name: string }[];
   };
   row_deltas: {
@@ -430,6 +442,24 @@ export interface SchemaChangesResponse {
     status: "ok" | "no_data" | "insufficient_history";
     tables_compared: number;
     largest_tables_only: number;
+  };
+  /** WAS EACH SCHEMA STILL THERE, which is a different question from when it last
+   * CHANGED. The same block get_schema_diff, get_schema_history and
+   * diagnose_root_cause carry, off the same shared probe, so one state is
+   * described one way everywhere. */
+  observation: {
+    status: /** every table-holding schema confirmed under the established scope */
+    | "fresh"
+      /** at least one is not: see ddl_detection.unconfirmed_schemas */
+      | "not_seen"
+      /** every stored row predates schema_v27, so nothing is comparable */
+      | "unmigrated"
+      | "no_snapshots"
+      | "unavailable";
+    read_scope: string | null;
+    last_confirmed: string | null;
+    schemas_known: number;
+    confirm_within_minutes: number;
   };
   collection: {
     status: "fresh" | "stale" | "no_data";

@@ -298,10 +298,10 @@ def test_a_catalog_read_that_returned_nothing_never_invents_a_mass_drop():
 # ===========================================================================
 
 
-def test_a_read_from_another_scope_writes_absolutely_nothing():
-    """MEASURED on real PostgreSQL 14.18 against the previous (pass-4) code: a
-    cluster collected from `rightdb` (core, billing, public) read once against
-    `sampledb` whose `public` holds one ordinary table returned
+def test_a_read_from_another_scope_never_compares_across_it_and_never_freezes():
+    """MEASURED on real PostgreSQL 14.18 against the pass-4 code: a cluster
+    collected from `rightdb` (core, billing, public) read once against `sampledb`
+    whose `public` holds one ordinary table returned
       {"corroborated": true, "schemas_seen": 1, "snapshots_written": 3,
        "vanished": 2, "vanished_unconfirmed": 0}
     and get_schema_diff reported dropped 4: core [orders, users], billing
@@ -309,32 +309,52 @@ def test_a_read_from_another_scope_writes_absolutely_nothing():
     normally HOLDS TABLES, so the pass-4 corroboration predicate was satisfied by
     the wrong database itself.
 
-    Note the shape: `public` came back with DIFFERENT tables, not with none, so
-    that half of the damage was an ORDINARY diff and no predicate on ABSENCE
-    could ever have covered it. What covers both halves is comparability."""
+    Note the shape: `public` came back with DIFFERENT tables, not with none, so that
+    half of the damage was an ORDINARY diff and no predicate on ABSENCE could ever
+    have covered it. What covers both halves is comparability, and comparability is
+    now decided in the READERS' selection (SCOPED_ROWS), not by refusing to write.
+
+    THE PASS-5 FREEZE IS GONE, and that is a fix and not a relaxation. It wrote
+    nothing at all on a mismatch, for one stated reason: the dashboard panel
+    recomputed its own base-vs-latest blob diff with no notion of scope. That
+    reader is now scope-filtered, and the freeze had a cost that was measured:
+    pre-v27 history plus one wrong-database read left the cluster on
+    snapshots_written 0 FOREVER, so the phantom drop the readers were already
+    reporting could not heal even after the operator fixed the config.
+
+    What must hold instead: nothing is DIFFED across the two scopes. Every write
+    here is a baseline with a NULL diff, and the schemas of the other scope are
+    reported unconfirmed.
+    """
     out, cache, _ = _run(
         [("public", 1, '{"app_settings": ["k", "v"]}')],
         prev={"public": '{"audit": ["id"]}', "core": '{"users": ["id"]}',
               "billing": '{"invoices": ["id"]}'},
         scope=_OTHER_SCOPE, stored_scope=_SCOPE)
-    assert out["scope_status"] == "scope_mismatch"
-    assert cache.writes == []      # not one row, not even a baseline
-    assert cache.heartbeats == []  # and nothing was confirmed either
-    assert out["snapshots_written"] == 0
-    assert out["not_seen"] == 3
-    assert out["not_seen_schemas"] == ["billing", "core", "public"]
+    assert out["scope_status"] == "rescoped"
+    # NOT ONE DIFF across the scopes: every write is a baseline, NULL diff.
+    assert out["changes"] == 0
+    assert all(w["diff_json"] == "" for w in cache.writes), cache.writes
+    assert [w["schema_name"] for w in cache.writes] == ["public"]
+    assert all(w["read_scope"] == _OTHER_SCOPE for w in cache.writes)
+    # ...and the schemas this read could not reach are unconfirmed, not dropped.
+    assert out["not_seen"] == 2
+    assert out["not_seen_schemas"] == ["billing", "core"]
 
 
-def test_a_scope_mismatch_does_not_baseline_the_other_scope_into_the_history():
-    """A baseline is not a destructive claim on its own, and writing one here
-    would still be a phantom mass DROP: the dashboard panel
-    (api/dashboard/handler.py _SCHEMA_SNAPSHOT_PAIRS_SQL) recomputes its own diff
-    from the OLDEST and NEWEST blob per schema and knows nothing about scopes."""
-    _, cache, _ = _run(
+def test_a_rescope_writes_only_baselines_so_no_cross_scope_diff_can_exist():
+    """The property that replaces the freeze, stated as the invariant it is: after a
+    rescope every stored row of the NEW scope is a baseline, so the readers'
+    scope-filtered pair has nothing to diff yet and CANNOT produce a drop. A future
+    edit that lets a mismatched read carry a diff over from the old scope fails
+    here."""
+    out, cache, _ = _run(
         [("public", 1, '{"app_settings": ["k"]}'), ("brandnew", 1, '{"t": ["id"]}')],
         prev={"public": '{"audit": ["id"]}'},
         scope=_OTHER_SCOPE, stored_scope=_SCOPE)
-    assert cache.writes == []
+    assert out["scope_status"] == "rescoped"
+    assert out["baselines"] == 2 and out["changes"] == 0
+    assert all(w["diff_json"] == "" for w in cache.writes), cache.writes
 
 
 def test_history_whose_scope_is_unknown_is_re_baselined_not_diffed():
@@ -384,8 +404,17 @@ _OTHER = '{"t": ["id"]}'
 _MATRIX = [
     ("R2", "the read returned no row", [], {"appdb": _USERS}, _SCOPE, _SCOPE,
      [], {"scope_status": "scope_unknown", "read_scope": ""}),
+    # R3 no longer freezes: it baselines under its own scope and reports the other
+    # scope's table-holding schemas as unconfirmed. Nothing is DIFFED across the two
+    # (baselines only), and the readers never select a cross-scope pair.
     ("R3", "the read covered another scope", [("appdb", 1, _OTHER)], {"appdb": _USERS},
-     _OTHER_SCOPE, _SCOPE, [], {"scope_status": "scope_mismatch", "not_seen": 1}),
+     _OTHER_SCOPE, _SCOPE, [("appdb", False)],
+     # not_seen is 0 here BECAUSE the read named appdb: its fresh baseline under the
+     # new scope becomes its latest row, so the readers confirm it and serve nothing
+     # stale. A schema of the old scope that this read does NOT name is the not_seen
+     # case, driven by
+     # test_a_read_from_another_scope_never_compares_across_it_and_never_freezes.
+     {"scope_status": "rescoped", "baselines": 1, "changes": 0, "not_seen": 0}),
     ("R4", "no scoped history yet", [("appdb", 1, _USERS)], {}, _SCOPE, _SCOPE,
      [("appdb", False)], {"scope_status": "adopted", "baselines": 1}),
     ("S1", "same tables", [("appdb", 1, _USERS)], {"appdb": _USERS}, _SCOPE, _SCOPE,

@@ -11,10 +11,18 @@ from engine_family import CAPABILITIES, DOCUMENTDB, RDS_INSTANCE, engine_family
 from metric_filters import CLUSTER_LEVEL_ONLY, EXCLUDE_PER_INSTANCE
 
 # api/ cannot import mcp_servers, so schema_diff_util.py is a VERBATIM copy of
-# mcp-servers/mcp_servers/operations/schema_diff_util.py (the engine_family /
+# mcp-servers/mcp_servers/shared/schema_diff_util.py (the engine_family /
 # metric_filters convention). tests/unit/data_pipeline/test_schema_snapshot_parity.py
 # asserts byte-identity across all four copies AND identical diff results.
-from schema_diff_util import compute_diff, parse_tables
+from schema_diff_util import (
+    ALL_ROWS,
+    SCOPED_ROWS,
+    compare,
+    not_seen_note,
+    observation_is_complete,
+    observed,
+    parse_tables,
+)
 
 
 def _parse_int(value, default, min_v=1, max_v=168):
@@ -1764,15 +1772,22 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
     # silently" comment: the category was permanently empty, which on a timeline
     # reads as "no DDL happened during the incident".
     try:
+        # REPLAY of stored diffs, so ALL_ROWS from the shared contract: each stored
+        # diff was computed by the producer against a same-scope predecessor by
+        # construction, so replaying it is complete without the scope predicate and
+        # filtering it by the CURRENT scope would erase real DDL history from the
+        # timeline whenever a cluster is re-scoped. The rule that keeps this honest
+        # is that the statement comes from schema_diff_util.py either way: see its
+        # docstring for why a per-consumer `FROM schema_snapshots` is the defect.
         schema_rows = query(
-            "SELECT snapshot_time, schema_name, diff_from_previous_json AS diff "
-            "FROM schema_snapshots "
-            "WHERE cluster_id = :cid "
+            "SELECT snapshot_time, schema_name, read_scope, "
+            "       diff_from_previous_json AS diff "
+            + ALL_ROWS +
             "  AND snapshot_time > NOW() - (:hours || ' hours')::interval "
             "  AND diff_from_previous_json IS NOT NULL "
             "  AND diff_from_previous_json::text NOT IN ('{}', '') "
             "ORDER BY snapshot_time DESC LIMIT 100",
-            {"cid": cluster_id, "hours": str(hours)},
+            {"cluster_id": cluster_id, "hours": str(hours)},
         )
         for r in schema_rows:
             summary, detail = _ddl_summary(r.get("diff"))
@@ -2084,10 +2099,19 @@ def _anomalies(query, cluster_id, hours, threshold):
 # agent cannot describe one DDL event two different ways (a rename is a
 # rename_candidate in both, not a DROP + a CREATE).
 
+# SCOPED_ROWS, and that single word is FINDING 1 of the sixth pass. This statement
+# recomputed its own diff from the OLDEST and NEWEST blob per schema with no notion
+# of read_scope, so a pre-v27 history plus one read of the wrong database handed it
+# a cross-catalog pair. MEASURED on PostgreSQL 14.18 before this change:
+# `[('created','public','app_settings'), ('dropped','public','audit')]`, status ok,
+# a table that was never dropped reported as dropped, permanently, and it survived
+# the operator fixing the config because the collector's own guard then froze the
+# cluster. NULL read_scope never matches `= :read_scope`, which is the point: a row
+# whose catalog is unknown is comparable to nothing.
 _SCHEMA_SNAPSHOT_PAIRS_SQL = (
     "WITH snaps AS ("
     "  SELECT schema_name, snapshot_time, tables_json "
-    "  FROM schema_snapshots WHERE cluster_id = :cid"
+    "  " + SCOPED_ROWS +
     "), latest AS ("
     "  SELECT DISTINCT ON (schema_name) schema_name, snapshot_time, tables_json "
     "  FROM snaps ORDER BY schema_name, snapshot_time DESC"
@@ -2200,6 +2224,11 @@ _SC_DDL_OUTSIDE_WINDOW = (
     "이 스키마의 스냅샷이 모두 요청 구간보다 오래되어, 구간 안에서 비교할 스냅샷 쌍이 "
     "없습니다 (가장 최근 스냅샷조차 구간 시작보다 이전). DDL 변경이 없다는 뜻이 "
     "아닙니다. 구간을 늘리면 그 이전 이력끼리 비교할 수 있습니다."
+)
+_SC_DDL_NOT_COMPARABLE = (
+    "저장된 스냅샷이 모두 schema_v27 이전 기록이라 어떤 카탈로그를 읽은 것인지 알 수 없어 "
+    "테이블 생성·삭제(DDL)를 비교하지 못했습니다. DDL 변경이 없다는 뜻이 아닙니다. 다음 "
+    "ETL 주기에 각 스키마가 baseline으로 다시 기록되고, 그 다음 변경 시점부터 비교됩니다."
 )
 _SC_DDL_UNAVAILABLE = (
     "schema_snapshots를 조회할 수 없어 이번 응답에서는 테이블 생성·삭제(DDL)를 "
@@ -2324,16 +2353,36 @@ def _schema_changes(query, cluster_id, days):
     stat_rows = query(_TABLE_STATS_WINDOW_SQL, {"cid": cluster_id, "days": days_s})
     by_key = {(r.get("schema_name"), r.get("table_name")): r for r in stat_rows}
 
+    # --- WAS EACH SCHEMA STILL THERE, and under which catalog? --------------
+    # The SHARED probe, the same one get_schema_diff, get_schema_history and
+    # diagnose_root_cause carry, so one state is described one way in all four. It
+    # yields the cluster's established read_scope, which is the only key under
+    # which two blobs are comparable, and the per-schema confirmation state, which
+    # is the only thing that distinguishes "unchanged" from "nobody can see it any
+    # more". Without it a genuine DROP SCHEMA reached this panel as `no_changes`:
+    # MEASURED on PostgreSQL 14.18, `DROP SCHEMA core CASCADE` gave the collector
+    # `{"not_seen": 1, "not_seen_schemas": ["core"]}` and this function
+    # `status "no_changes"`, with the string "core" appearing nowhere in the
+    # payload.
+    observation = observed(query, cluster_id)
+    read_scope = observation.get("read_scope")
+    unconfirmed = list(observation.get("unconfirmed_schemas") or [])
+
     # --- DDL from the complete table map ----------------------------------
-    ddl_available = True
-    try:
-        snap_rows = query(_SCHEMA_SNAPSHOT_PAIRS_SQL, {"cid": cluster_id, "days": days_s})
-    except Exception as e:
-        # schema_snapshots arrives in schema_v26. A cache DB that has not run the
-        # migrator yet must degrade to "DDL unknown", not 500 the whole panel.
-        # Detail to CloudWatch only: never into the payload.
-        print(f"[schema-changes] schema_snapshots unavailable: {type(e).__name__}: {e}")
-        snap_rows, ddl_available = [], False
+    ddl_available = observation.get("status") != "unavailable"
+    snap_rows = []
+    if ddl_available and read_scope:
+        try:
+            snap_rows = query(_SCHEMA_SNAPSHOT_PAIRS_SQL,
+                              {"cluster_id": cluster_id, "read_scope": read_scope,
+                               "days": days_s})
+        except Exception as e:
+            # schema_snapshots arrives in schema_v26 and read_scope in schema_v27. A
+            # cache DB that has not run the migrator yet must degrade to "DDL
+            # unknown", not 500 the whole panel. Detail to CloudWatch only: never
+            # into the payload.
+            print(f"[schema-changes] schema_snapshots unavailable: {type(e).__name__}: {e}")
+            snap_rows, ddl_available = [], False
 
     created, dropped, renames = [], [], []
     snapshotted_schemas, live_keys = set(), set()
@@ -2364,7 +2413,13 @@ def _schema_changes(query, cluster_id, days):
             continue
         if r.get("baseline_outside_window"):
             partial_window.append(schema)
-        diff = compute_diff(parse_tables(r.get("tables_before")), after)
+        # compare(), never compute_diff: it cannot be called without the read_scope
+        # the pair was recorded under and the confirmation state of the schema, which
+        # is exactly what this reader was missing for five passes. See
+        # schema_diff_util.py.
+        cmp_ = compare(schema, r.get("tables_before"), r.get("tables_after"),
+                       read_scope=read_scope, observation=observation)
+        diff = cmp_.diff
         schemas_compared += 1
         detected = r.get("current_time")
         since = r.get("baseline_time")
@@ -2431,8 +2486,18 @@ def _schema_changes(query, cluster_id, days):
     # --- what can each source actually support? ----------------------------
     if not ddl_available:
         ddl_status = "unavailable"
-    elif snapshots_stored == 0:
+    elif observation.get("status") == "no_snapshots":
+        # A MEASURED emptiness: the observation probe ran and returned no row. This
+        # used to be `snapshots_stored == 0`, which is also what a scope-filtered
+        # read of a cluster whose history is not comparable returns, i.e. "unknown"
+        # dressed as "empty".
         ddl_status = "not_collected"
+    elif not read_scope:
+        # History EXISTS and none of it is comparable: every row predates
+        # schema_v27, so no row says which catalog it describes. Diffing them anyway
+        # is the phantom mass DROP, so there is no diff and this is its own status
+        # rather than a silent `baseline_only`.
+        ddl_status = "not_comparable"
     elif schemas_compared:
         ddl_status = "ok"
     elif outside_window:
@@ -2463,10 +2528,26 @@ def _schema_changes(query, cluster_id, days):
     # non-empty `*_schemas` list can never coexist with `no_changes`, so the next
     # one cannot be forgotten the way this one was.
     ddl_blind = baseline_only + partial_window + outside_window
-    # A source that answered for EVERY schema it holds, for the WHOLE window it
-    # was asked about. `ddl_status == "ok"` only means at least one schema
-    # compared over whatever span happened to exist.
-    ddl_complete = ddl_status == "ok" and not ddl_blind
+    # A source that answered for EVERY schema it holds, for the WHOLE window it was
+    # asked about. `ddl_status == "ok"` only means at least one schema compared over
+    # whatever span happened to exist.
+    #
+    # `unconfirmed` is the SIXTH way a schema goes unanswered and it is the one the
+    # fifth pass left out of this panel entirely (it added the observation channel to
+    # the two MCP readers and not to this one, so a genuine DROP SCHEMA reached the
+    # operator as `no_changes`). It is NOT a fourth entry in ddl_blind, and that is
+    # deliberate: it is carried by `observation_is_complete`, the SAME shared
+    # predicate the two MCP readers use, so the four consumers cannot disagree about
+    # what "complete" means.
+    #
+    # ONE condition, not both. Written both ways first, and MUTATION-CHECKED: with
+    # `unconfirmed` also in ddl_blind, EITHER mechanism could be deleted and the
+    # whole suite stayed green (measured: 661 passed for each of the two deletions
+    # separately), because each alone was sufficient. An unprotected redundancy is
+    # how a guard gets removed in two commits by two authors who each saw a green
+    # suite, which is this surface's entire history.
+    ddl_complete = (ddl_status == "ok" and not ddl_blind
+                    and observation_is_complete(observation))
     rows_ok = rows_status == "ok"
 
     if changes or renames:
@@ -2481,7 +2562,8 @@ def _schema_changes(query, cluster_id, days):
         # real negative and the rest was not answered at all. "no_changes" here
         # is the defect this branch exists to prevent.
         status = "partial"
-    elif ddl_available and snapshots_stored == 0 and collection == "no_data":
+    elif (ddl_available and observation.get("status") == "no_snapshots"
+          and collection == "no_data"):
         # `not_collected` claims BOTH sources hold nothing for this cluster, and
         # _SC_NO_HISTORY says so in those words. When the schema_snapshots read
         # RAISED, `snapshots_stored` is 0 because nothing was read, not because
@@ -2504,6 +2586,15 @@ def _schema_changes(query, cluster_id, days):
         notes.append(_SC_DDL_NOT_COLLECTED)
     elif ddl_status == "unavailable":
         notes.append(_SC_DDL_UNAVAILABLE)
+    elif ddl_status == "not_comparable":
+        notes.append(_SC_DDL_NOT_COMPARABLE)
+    # THE ACCEPTED COST OF THIS SURFACE, in the words the other three consumers use,
+    # from the shared composer so they cannot drift: a genuine DROP SCHEMA is never
+    # reported as a drop, it is reported as "last confirmed at T, not seen since".
+    # This sentence is the whole of FINDING 2, and it was missing here.
+    obs_note = not_seen_note(observation)
+    if obs_note:
+        notes.append(obs_note)
     # Both of these fire off the LIST, never off ddl_status. With two schemas of
     # which one holds a single snapshot, ddl_status is "ok" and a note keyed to
     # the status said nothing at all about the schema that was never compared.
@@ -2552,7 +2643,22 @@ def _schema_changes(query, cluster_id, days):
             "baseline_only_schemas": sorted(baseline_only),
             "partial_window_schemas": sorted(partial_window),
             "outside_window_schemas": sorted(outside_window),
+            # The sixth blindness list. `*_schemas` is the naming convention the
+            # structural test keys off, so it forbids `no_changes` and has to be
+            # named in the note without any test edit.
+            "unconfirmed_schemas": sorted(unconfirmed),
             "rename_candidates": renames,
+        },
+        # The SAME block get_schema_diff, get_schema_history and
+        # diagnose_root_cause return, from the same shared function. `status` is one
+        # of OBSERVATION_STATUSES and `not_seen` is a first-class value of it, which
+        # is what FINDING 2 means by a signal the state matrix could not see.
+        "observation": {
+            "status": observation.get("status"),
+            "read_scope": observation.get("read_scope"),
+            "last_confirmed": observation.get("last_confirmed"),
+            "schemas_known": len(observation.get("schemas") or {}),
+            "confirm_within_minutes": _FRESH_MAX_AGE_SEC // 60,
         },
         "row_deltas": {
             "source": "table_stats",

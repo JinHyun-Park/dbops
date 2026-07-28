@@ -4,44 +4,51 @@ This tool used to answer `count: 0` for an empty result, which conflates two
 opposite facts: "we have been snapshotting this cluster and its schema did not
 change" versus "nothing has ever been collected here, so we do not know". A DBA
 asked "did anyone change the schema before the incident?" acts on those two
-answers in opposite directions, so the empty result is now qualified by a
+answers in opposite directions, so the empty result is qualified by a
 COLLECTION-COVERAGE probe and reported as an explicit status.
 
 Coverage is not the whole of it. A schema the collector can no longer SEE files no
 row either, so it used to sit inside the same empty result as a genuinely
-unchanged schema. The collector no longer infers a DROP from that absence (it
-produced a phantom mass drop; see
-data-pipeline/etl_collector/collectors/schema_snapshot.py), so this tool carries
-the unknown instead: `observation` names the schemas the newest catalog read did
-not confirm, and an empty window with one of those is `partial`, not `no_changes`.
+unchanged schema. Absence is never resolved to a DROP (it produced a phantom mass
+drop; see mcp_servers/shared/schema_diff_util.py), so this tool carries the
+unknown instead: `observation` names the schemas the newest scope-matching read did
+not confirm, and an empty window with one of those is `partial`, never
+`no_changes`.
+
+REPLAY, NOT RECOMPUTE, which is why this file reads ALL_ROWS and not SCOPED_ROWS.
+Each stored diff_from_previous_json was computed by the producer against a
+same-scope predecessor by construction, so replaying it is both safe and complete.
+Filtering the replay by the CURRENT scope would erase real DDL history from the
+record every time a cluster is re-scoped. The contract names the two row sources
+separately (mcp_servers/shared/schema_diff_util.py) so that difference is a
+decision made once rather than a `FROM schema_snapshots` written per consumer.
 """
 
 from mcp_servers.operations.tools.schema_diff import (
-    DROPPED_CAVEAT,
-    observation_is_complete,
     observation_note,
     observation_state,
 )
 from mcp_servers.shared.cache_client import CacheClient
+from mcp_servers.shared.schema_diff_util import (
+    ALL_ROWS,
+    COVERAGE_SQL,
+    DROPPED_CAVEAT,
+    observation_is_complete,
+)
 
-CHANGES_SQL = """
-    SELECT snapshot_time, schema_name, diff_from_previous_json as changes
-    FROM schema_snapshots
-    WHERE cluster_id = :cluster_id AND snapshot_time > NOW() - (:days || ' days')::interval
-      AND diff_from_previous_json IS NOT NULL AND diff_from_previous_json != '{}'
-    ORDER BY snapshot_time DESC
-"""
+CHANGES_SQL = (
+    "SELECT snapshot_time, schema_name, read_scope, "
+    "       diff_from_previous_json as changes "
+    + ALL_ROWS +
+    "  AND snapshot_time > NOW() - (:days || ' days')::interval "
+    "  AND diff_from_previous_json IS NOT NULL "
+    "  AND diff_from_previous_json != '{}' "
+    "ORDER BY snapshot_time DESC"
+)
 
 # Coverage probe: does a PRODUCER exist for this cluster at all? Runs only on the
 # empty path, so the happy path stays a single query.
-COVERAGE_SQL = """
-    SELECT COUNT(*) AS snapshots,
-           COUNT(DISTINCT schema_name) AS schemas,
-           MIN(snapshot_time)::text AS first_seen,
-           MAX(snapshot_time)::text AS last_seen
-    FROM schema_snapshots
-    WHERE cluster_id = :cluster_id
-"""
+_COVERAGE_SQL = COVERAGE_SQL
 
 _NOT_COLLECTED = (
     "이 클러스터의 스키마 스냅샷이 아직 수집되지 않았습니다. "
@@ -75,7 +82,7 @@ def get_schema_history_impl(cache: CacheClient, cluster_id: str, days: int = 30)
 
     # Empty window. Before saying anything that sounds like "nothing changed",
     # find out whether we have any data at all for this cluster.
-    cov_rows = cache.execute(COVERAGE_SQL, {"cluster_id": cluster_id}).rows
+    cov_rows = cache.execute(_COVERAGE_SQL, {"cluster_id": cluster_id}).rows
     cov = cov_rows[0] if cov_rows else {}
     snapshots = int(cov.get("snapshots") or 0)
     coverage = {
@@ -94,10 +101,10 @@ def get_schema_history_impl(cache: CacheClient, cluster_id: str, days: int = 30)
         status, note = "baseline_only", _BASELINE_ONLY
     elif not observation_is_complete(observation):
         # An empty window is a real negative only over the schemas that were
-        # actually looked at. One unconfirmed schema (or a cluster nothing has
-        # confirmed lately) makes the cluster-wide sentence unsupportable.
+        # actually looked at. One unconfirmed schema (or a cluster whose history is
+        # not comparable at all) makes the cluster-wide sentence unsupportable.
         status, note = "partial", (
-            f"읽어온 스냅샷 {snapshots}건 범위에서는 최근 {days}일간 변경 기록이 "
+            f"읽어온 스냅샷 {snapshots}건 범위에서 최근 {days}일간 변경 기록이 "
             f"없었습니다 (수집 구간: {coverage['first_snapshot']} ~ "
             f"{coverage['last_snapshot']}). 다만 클러스터 전체에 대해 '변경 없음'이라고 "
             "말할 수는 없습니다. "

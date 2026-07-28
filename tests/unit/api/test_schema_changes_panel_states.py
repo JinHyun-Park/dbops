@@ -317,6 +317,10 @@ _T0 = "2026-07-20 00:00:00+00"
 _T1 = "2026-07-27 00:00:00+00"
 
 
+_SCOPE = "dbops/16384"
+_CONFIRMED_AT = "2026-07-27 00:00:00+00"
+
+
 def _snap(schema="app", n=2, before=None, after=None, *, outside=False,
           is_latest=False, stored=None):
     """One row of what _SCHEMA_SNAPSHOT_PAIRS_SQL returns. `tables_*` are JSON
@@ -337,6 +341,19 @@ def _snap(schema="app", n=2, before=None, after=None, *, outside=False,
     }
 
 
+def _obs_row(schema="app", *, holds="y", confirmed=True, scope=_SCOPE):
+    """One row of what OBSERVED_SQL returns: the LATEST snapshot of one schema,
+    carrying that schema's OWN read_scope and its OWN last_seen_at age.
+
+    `confirmed=False` ages THAT SCHEMA's stamp past the bar. It is per-schema and
+    absolute on purpose: the previous shape asked "is this schema the most recently
+    seen one in the cluster", so with every schema sharing one stamp (which is what
+    the collector writes, one run timestamp per cycle) none was ever unconfirmed
+    however old the stamp was."""
+    return {"schema_name": schema, "read_scope": scope, "last_seen": _CONFIRMED_AT,
+            "holds_tables": holds, "age_sec": 60 if confirmed else 40 * 24 * 3600}
+
+
 def _stat(table="t", base=1000, cur=1000, *, in_window=True, schema="app"):
     """One row of what _TABLE_STATS_WINDOW_SQL returns."""
     return {
@@ -347,14 +364,36 @@ def _stat(table="t", base=1000, cur=1000, *, in_window=True, schema="app"):
     }
 
 
-def drive(*, snaps=(), stats=(), age_sec=60, snaps_fail=False, days=7):
+def drive(*, snaps=(), stats=(), age_sec=60, snaps_fail=False, days=7,
+          obs=None, scope=_SCOPE, obs_fail=False):
     """Run the SHIPPED `_schema_changes` over these rows.
 
-    The fake dispatches on which of the three statements is being run and returns
-    ROWS. It computes no status: `collection`, `ddl_detection.status`,
-    `row_deltas.status` and the top-level `status` are all derived by the handler
-    under test. `age_sec=None` means table_stats has no row for this cluster."""
+    The fake dispatches on WHICH statement is being run and returns ROWS. It
+    computes no status: `collection`, `ddl_detection.status`, `row_deltas.status`,
+    `observation.status` and the top-level `status` are all derived by the code under
+    test.
+
+    `obs` defaults to "every schema in `snaps` confirmed under `scope`", so a cell
+    that is not about the observation gets a fully confirmed cluster rather than a
+    silently blind one. `age_sec=None` means table_stats has no row for this
+    cluster.
+    """
+    default_obs = [_obs_row(r["schema_name"], scope=scope) for r in snaps]
+    obs_rows = default_obs if obs is None else list(obs)
+
     def query(sql, params=None):
+        # ORDER MATTERS: both observation statements name schema_snapshots too, so
+        # they have to be claimed before the pairs branch.
+        if "read_scope IS NOT NULL" in sql:
+            if obs_fail:
+                raise RuntimeError(
+                    'column "read_scope" does not exist; secret '
+                    "arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:cache-AbCdEf")
+            return [] if scope is None else [{"read_scope": scope}]
+        if "holds_tables" in sql:
+            if obs_fail:
+                raise RuntimeError("column last_seen_at does not exist")
+            return obs_rows
         if "schema_snapshots" in sql:
             if snaps_fail:
                 raise RuntimeError(
@@ -370,8 +409,13 @@ def drive(*, snaps=(), stats=(), age_sec=60, snaps_fail=False, days=7):
 
 
 def signals(p: dict) -> tuple:
+    """FIVE signals now, not four. `observation.status` is the channel the fifth
+    pass added to the two MCP readers and NOT to this panel, which is how a genuine
+    DROP SCHEMA reached the operator as "no changes detected": `not_seen` was a
+    signal value that appeared in no row of this matrix, so the matrix guard was
+    structurally unable to see it."""
     return (p["status"], p["ddl_detection"]["status"], p["row_deltas"]["status"],
-            p["collection"]["status"])
+            p["collection"]["status"], p["observation"]["status"])
 
 
 _FRESH, _STALE_SEC, _DEAD = 60, 48 * 3600, None
@@ -385,24 +429,28 @@ _MATRIX = [
     # --- never collected -------------------------------------------------
     ("never_collected",
      dict(age_sec=_DEAD),
-     ("not_collected", "not_collected", "no_data", "no_data"),
+     ("not_collected", "not_collected", "no_data", "no_data", "no_snapshots"),
      "수집 이력이 없어", [_NEUTRAL]),
 
-    # --- the cache DB has no schema_v26 (the read raises) -----------------
-    ("no_schema_v26_but_rows_compare",
-     dict(snaps_fail=True, stats=[_stat(base=1000, cur=1000)]),
-     ("partial", "unavailable", "ok", "fresh"),
+    # --- the pair read raises (a permission, a missing column) ------------
+    # `obs=` is supplied on all three: a cache DB where schema_snapshots is
+    # READABLE and the pair statement specifically fails. The case where the whole
+    # TABLE is unreadable is its own cell further down (`obs_fail`), because the
+    # observation probe reads the same relation and cannot succeed while this fails.
+    ("pair_read_raises_but_rows_compare",
+     dict(snaps_fail=True, obs=[_obs_row()], stats=[_stat(base=1000, cur=1000)]),
+     ("partial", "unavailable", "ok", "fresh", "fresh"),
      "일부 신호만 판정됨", [_NEUTRAL]),
-    ("no_schema_v26_and_no_rows_either",
-     dict(snaps_fail=True, stats=[_stat(base=None, cur=5)]),
-     ("insufficient_history", "unavailable", "insufficient_history", "fresh"),
+    ("pair_read_raises_and_no_rows_either",
+     dict(snaps_fail=True, obs=[_obs_row()], stats=[_stat(base=None, cur=5)]),
+     ("insufficient_history", "unavailable", "insufficient_history", "fresh", "fresh"),
      "비교 가능한 이력이 부족해", [_NEUTRAL]),
     # A FAILED read leaves snapshots_stored at 0 for want of a read, not because
     # the table is empty, so this may not headline "not_collected": that status
     # and _SC_NO_HISTORY both assert both sources hold nothing for this cluster.
-    ("no_schema_v26_and_nothing_in_table_stats_either",
-     dict(snaps_fail=True, age_sec=_DEAD),
-     ("insufficient_history", "unavailable", "no_data", "no_data"),
+    ("pair_read_raises_and_nothing_in_table_stats_either",
+     dict(snaps_fail=True, obs=[_obs_row()], age_sec=_DEAD),
+     ("insufficient_history", "unavailable", "no_data", "no_data", "fresh"),
      "비교 가능한 이력이 부족해", [_NEUTRAL]),
 
     # --- history STARTS inside the window (FINDING 2's cell) --------------
@@ -412,24 +460,24 @@ _MATRIX = [
     # the blindness test.
     ("partial_window_history_shorter_than_the_window",
      dict(snaps=[_snap(outside=True)], stats=[_stat(base=1000, cur=1000)], days=30),
-     ("partial", "ok", "ok", "fresh"),
+     ("partial", "ok", "ok", "fresh", "fresh"),
      "일부 신호만 판정됨", [_NEUTRAL]),
     ("one_schema_compared_one_partial_window",
      dict(snaps=[_snap(schema="full_s", stored=4),
                  _snap(schema="short_s", outside=True, stored=4)],
           stats=[_stat(base=1000, cur=1000)], days=30),
-     ("partial", "ok", "ok", "fresh"),
+     ("partial", "ok", "ok", "fresh", "fresh"),
      "일부 신호만 판정됨", [_NEUTRAL]),
 
     # --- snapshots entirely outside the window (FINDING 3's cell) --------
     ("outside_window_but_rows_compare",
      dict(snaps=[_snap(is_latest=True)], stats=[_stat(base=1000, cur=1000)]),
-     ("partial", "outside_window", "ok", "fresh"),
+     ("partial", "outside_window", "ok", "fresh", "fresh"),
      "일부 신호만 판정됨", [_NEUTRAL]),
     ("outside_window_and_rows_too_old",
      dict(snaps=[_snap(is_latest=True)], stats=[_stat(in_window=False)],
           age_sec=40 * 24 * 3600),
-     ("insufficient_history", "outside_window", "insufficient_history", "stale"),
+     ("insufficient_history", "outside_window", "insufficient_history", "stale", "fresh"),
      "비교 가능한 이력이 부족해", [_NEUTRAL]),
 
     # --- a blind schema BESIDE a compared one ----------------------------
@@ -437,37 +485,37 @@ _MATRIX = [
      dict(snaps=[_snap(schema="ok_s", after={"users": ["id"]}, stored=4),
                  _snap(schema="blind_s", is_latest=True, stored=4)],
           stats=[_stat(base=1000, cur=1000)]),
-     ("partial", "ok", "ok", "fresh"),
+     ("partial", "ok", "ok", "fresh", "fresh"),
      "일부 신호만 판정됨", [_NEUTRAL]),
     ("one_schema_compared_one_baseline_only",
      dict(snaps=[_snap(schema="ok_s", stored=3),
                  _snap(schema="new_s", n=1, stored=3)],
           stats=[_stat(base=1000, cur=1000)]),
-     ("partial", "ok", "ok", "fresh"),
+     ("partial", "ok", "ok", "fresh", "fresh"),
      "일부 신호만 판정됨", [_NEUTRAL]),
 
     # --- one source silent -----------------------------------------------
     ("ddl_never_collected_rows_ok",
      dict(stats=[_stat(base=1000, cur=1000)]),
-     ("partial", "not_collected", "ok", "fresh"),
+     ("partial", "not_collected", "ok", "fresh", "no_snapshots"),
      "일부 신호만 판정됨", [_NEUTRAL]),
     ("ddl_baseline_only_rows_ok",
      dict(snaps=[_snap(n=1, stored=1)], stats=[_stat(base=1000, cur=1000)]),
-     ("partial", "baseline_only", "ok", "fresh"),
+     ("partial", "baseline_only", "ok", "fresh", "fresh"),
      "일부 신호만 판정됨", [_NEUTRAL]),
     ("ddl_ok_rows_have_one_endpoint",
      dict(snaps=[_snap()], stats=[_stat(base=None, cur=7)]),
-     ("partial", "ok", "insufficient_history", "fresh"),
+     ("partial", "ok", "insufficient_history", "fresh", "fresh"),
      "일부 신호만 판정됨", [_NEUTRAL]),
 
     # --- the only cell that may read as an absence of change -------------
     ("fresh_and_both_sources_compared",
      dict(snaps=[_snap()], stats=[_stat(base=1000, cur=1000)]),
-     ("no_changes", "ok", "ok", "fresh"),
+     ("no_changes", "ok", "ok", "fresh", "fresh"),
      _NEUTRAL, ["일부 신호만 판정됨", "판정할 수 없음"]),
     ("stale_but_still_inside_the_window",
      dict(snaps=[_snap()], stats=[_stat(base=1000, cur=1000)], age_sec=_STALE_SEC),
-     ("no_changes", "ok", "ok", "stale"),
+     ("no_changes", "ok", "ok", "stale", "fresh"),
      _NEUTRAL, ["일부 신호만 판정됨"]),
 
     # --- real changes ----------------------------------------------------
@@ -475,12 +523,43 @@ _MATRIX = [
      dict(snaps=[_snap(before={"users": ["id"]},
                        after={"users": ["id"], "created_tbl": ["id"]})],
           stats=[_stat(base=1000, cur=1000)], age_sec=_STALE_SEC),
-     ("ok", "ok", "ok", "stale"), None, None),
+     ("ok", "ok", "ok", "stale", "fresh"), None, None),
     ("fresh_with_a_real_ddl_change",
      dict(snaps=[_snap(before={"users": ["id"], "gone_tbl": ["id"]},
                        after={"users": ["id"]})],
           stats=[_stat(base=1000, cur=1000)]),
-     ("ok", "ok", "ok", "fresh"), None, None),
+     ("ok", "ok", "ok", "fresh", "fresh"), None, None),
+    # --- THE ACCEPTED COST, at the point the operator reads it ------------
+    # A genuine DROP SCHEMA is never drawn as a drop, because absence cannot be told
+    # apart from a read that could not reach the schema. It surfaces as "last
+    # confirmed at T, not seen since", and it must never be `no_changes`. MEASURED
+    # before this pass on PostgreSQL 14.18: `DROP SCHEMA core CASCADE` gave the
+    # collector {"not_seen": 1, "not_seen_schemas": ["core"]} and this function
+    # status "no_changes", with the string "core" nowhere in the payload.
+    ("a_dropped_schema_is_not_seen_never_no_changes",
+     dict(snaps=[_snap(schema="live_s", stored=4)],
+          obs=[_obs_row("live_s"), _obs_row("gone_s", confirmed=False)],
+          stats=[_stat(base=1000, cur=1000)]),
+     ("partial", "ok", "ok", "fresh", "not_seen"),
+     "일부 신호만 판정됨", [_NEUTRAL]),
+    # An EMPTY schema that stopped being seen is NOT a blindness: nobody is being
+    # shown stale contents for it, so it must not downgrade the negative.
+    ("an_emptied_schema_that_vanished_is_not_a_blindness",
+     dict(snaps=[_snap(schema="live_s")],
+          obs=[_obs_row("live_s"), _obs_row("empty_s", holds="n", confirmed=False)],
+          stats=[_stat(base=1000, cur=1000)]),
+     ("no_changes", "ok", "ok", "fresh", "fresh"),
+     _NEUTRAL, ["일부 신호만 판정됨"]),
+    # --- history exists and NONE of it is comparable ----------------------
+    ("every_row_predates_the_scope_column",
+     dict(snaps=[_snap()], scope=None, obs=[_obs_row("app", scope=None)],
+          stats=[_stat(base=1000, cur=1000)]),
+     ("partial", "not_comparable", "ok", "fresh", "unmigrated"),
+     "일부 신호만 판정됨", [_NEUTRAL]),
+    ("the_observation_probe_itself_is_unreadable",
+     dict(snaps=[_snap()], obs_fail=True, stats=[_stat(base=1000, cur=1000)]),
+     ("partial", "unavailable", "ok", "fresh", "unavailable"),
+     "일부 신호만 판정됨", [_NEUTRAL]),
 ]
 
 
@@ -530,20 +609,56 @@ def test_a_change_is_never_rendered_by_the_empty_verdict_at_all():
 # DDL has EIGHT values, not five: `ddl_detection.status == "ok"` means "at least
 # one schema compared", so it splits by WHICH schemas went unanswered.
 _DDL_CASES = {
-    # complete: every schema, over the whole window
+    # complete: every schema, over the whole window, every schema confirmed
     "ok": dict(snaps=[_snap()]),
-    # ok, and blind for one schema, one way per blindness list in the payload
+    # ok, and blind for one schema, ONE CASE PER BLINDNESS LIST IN THE PAYLOAD
     "ok+baseline_only": dict(snaps=[_snap(schema="ok_s", stored=3),
                                     _snap(schema="one_snap_s", n=1, stored=3)]),
     "ok+partial_window": dict(snaps=[_snap(outside=True)], days=30),
     "ok+outside_window": dict(snaps=[_snap(schema="ok_s", stored=4),
                                      _snap(schema="ancient_s", is_latest=True,
                                            stored=4)]),
+    # THE SIXTH BLINDNESS LIST, and the whole of FINDING 2. A schema still serving
+    # tables that the newest catalog read did not confirm: a genuine DROP SCHEMA and
+    # a read that could not reach it leave identical evidence, so it is never a drop
+    # and it is never `no_changes` either.
+    "ok+not_seen": dict(snaps=[_snap(schema="live_s", stored=4)],
+                        obs=[_obs_row("live_s"),
+                             _obs_row("gone_s", confirmed=False)]),
     # nothing compared at all, one row per ddl_detection.status
     "not_collected": dict(snaps=[]),
+    # history EXISTS and none of it is comparable: every row predates schema_v27, so
+    # no row says which catalog it describes.
+    "not_comparable": dict(snaps=[_snap()], scope=None,
+                           obs=[_obs_row("app", scope=None)]),
     "baseline_only": dict(snaps=[_snap(n=1, stored=1)]),
     "outside_window": dict(snaps=[_snap(is_latest=True)]),
-    "unavailable": dict(snaps_fail=True),
+    # TWO ways to reach ddl=unavailable, and they differ in the OBSERVATION column,
+    # so they are two cells. Splitting them is not bookkeeping: the exhaustiveness
+    # guard below refused the product until `unavailable` appeared in it, which is
+    # the guard doing to this pass what it should have done to the previous one.
+    "unavailable+pair_read": dict(snaps_fail=True, obs=[_obs_row()]),
+    "unavailable+table_unreadable": dict(snaps_fail=True, obs_fail=True),
+}
+
+# The observation value each DDL case necessarily produces. It is NOT a free axis:
+# `no_snapshots` forces ddl=not_collected, `unmigrated` forces not_comparable and a
+# raising probe forces unavailable, so crossing them would enumerate 40 unreachable
+# cells. It IS a column of the product (see signals()), and
+# test_every_observation_status_appears_in_the_product asserts every value the
+# SHARED probe can return is covered here, which is the guard `not_seen` escaped.
+_DDL_OBSERVATION = {
+    "ok": "fresh",
+    "ok+baseline_only": "fresh",
+    "ok+partial_window": "fresh",
+    "ok+outside_window": "fresh",
+    "ok+not_seen": "not_seen",
+    "not_collected": "no_snapshots",
+    "not_comparable": "unmigrated",
+    "baseline_only": "fresh",
+    "outside_window": "fresh",
+    "unavailable+pair_read": "fresh",
+    "unavailable+table_unreadable": "unavailable",
 }
 
 # rows and collection are NOT independent: `no_data` on either side means
@@ -560,21 +675,24 @@ _ROW_CASES = {
     ("no_data", "no_data"): dict(stats=[], age_sec=_DEAD),
 }
 
-# THE EXPECTED TOP-LEVEL STATUS FOR ALL 8 x 5 = 40 CELLS, written out rather than
-# recomputed from the handler's rules: a test that re-derives the derivation
-# passes for exactly the reasons the derivation is wrong.
+# THE EXPECTED TOP-LEVEL STATUS FOR ALL 11 x 5 = 55 CELLS, written out rather than
+# recomputed from the handler's rules: a test that re-derives the derivation passes
+# for exactly the reasons the derivation is wrong.
 #   `no_changes` appears TWICE in this whole table, and only on the row where DDL
-#   answered for every schema over the whole window.
+#   answered for every schema over the whole window AND every schema was confirmed.
 _PRODUCT = {
     #                        (ok,fresh)    (ok,stale)    (insuf,fresh)          (insuf,stale)          (no_data,no_data)
-    "ok":               ["no_changes", "no_changes", "partial",             "partial",             "partial"],
-    "ok+baseline_only": ["partial",    "partial",    "partial",             "partial",             "partial"],
-    "ok+partial_window": ["partial",   "partial",    "partial",             "partial",             "partial"],
-    "ok+outside_window": ["partial",   "partial",    "partial",             "partial",             "partial"],
-    "not_collected":    ["partial",    "partial",    "insufficient_history", "insufficient_history", "not_collected"],
-    "baseline_only":    ["partial",    "partial",    "insufficient_history", "insufficient_history", "insufficient_history"],
-    "outside_window":   ["partial",    "partial",    "insufficient_history", "insufficient_history", "insufficient_history"],
-    "unavailable":      ["partial",    "partial",    "insufficient_history", "insufficient_history", "insufficient_history"],
+    "ok":                ["no_changes", "no_changes", "partial",              "partial",              "partial"],
+    "ok+baseline_only":  ["partial",    "partial",    "partial",              "partial",              "partial"],
+    "ok+partial_window": ["partial",    "partial",    "partial",              "partial",              "partial"],
+    "ok+outside_window": ["partial",    "partial",    "partial",              "partial",              "partial"],
+    "ok+not_seen":       ["partial",    "partial",    "partial",              "partial",              "partial"],
+    "not_collected":     ["partial",    "partial",    "insufficient_history", "insufficient_history", "not_collected"],
+    "not_comparable":    ["partial",    "partial",    "insufficient_history", "insufficient_history", "insufficient_history"],
+    "baseline_only":     ["partial",    "partial",    "insufficient_history", "insufficient_history", "insufficient_history"],
+    "outside_window":    ["partial",    "partial",    "insufficient_history", "insufficient_history", "insufficient_history"],
+    "unavailable+pair_read":       ["partial", "partial", "insufficient_history", "insufficient_history", "insufficient_history"],
+    "unavailable+table_unreadable": ["partial", "partial", "insufficient_history", "insufficient_history", "insufficient_history"],
 }
 
 _PRODUCT_CELLS = [(d, r, i) for d in _DDL_CASES for i, r in enumerate(_ROW_CASES)]
@@ -586,7 +704,8 @@ def test_the_whole_product_of_the_four_signals(ddl, rows, i):
     """Every combination a human can reach, and what the operator reads there."""
     got = drive(**{**_DDL_CASES[ddl], **_ROW_CASES[rows]})
     expected_status = _PRODUCT[ddl][i]
-    assert signals(got) == (expected_status, ddl.split("+")[0], rows[0], rows[1]), got
+    assert signals(got) == (expected_status, ddl.split("+")[0], rows[0], rows[1],
+                            _DDL_OBSERVATION[ddl]), got
     # The property the whole surface exists for, asserted on every cell rather
     # than on the cells someone remembered to list.
     assert (_NEUTRAL in panel_verdict(got)) == (expected_status == "no_changes"), (
@@ -638,7 +757,8 @@ def test_every_blindness_list_in_the_payload_forbids_no_changes():
     # Not vacuous: every list the payload can carry is actually driven non-empty
     # somewhere in the product.
     assert exercised == {"baseline_only_schemas", "partial_window_schemas",
-                         "outside_window_schemas"}, sorted(exercised)
+                         "outside_window_schemas", "unconfirmed_schemas"}, \
+        sorted(exercised)
 
 
 def test_outside_window_does_not_headline_as_no_changes():
@@ -948,10 +1068,15 @@ def test_exactly_one_chip_entry_per_source_is_marked_ok():
         assert oks == ["ok"] if name != "COLLECTION_CHIP" else oks == ["fresh"], (name, oks)
 
 
-def test_the_three_chips_are_rendered_and_fall_back_to_the_unknown_entry():
+def test_the_four_chips_are_rendered_and_fall_back_to_the_unknown_entry():
     block = _PANEL[_PANEL.index("flex flex-wrap items-center gap-1.5"):]
     block = _flat(block[:block.index("</div>")])
-    assert block.count("<Chip") == 3, block
+    # FOUR, not three. "did the schema change" and "is the schema still there" are
+    # different questions and the panel had a chip for only the first, which is why
+    # `not_seen` could reach the operator as "no changes detected".
+    assert block.count("<Chip") == 4, block
+    assert 'OBSERVATION_CHIP[obs?.status ?? "unavailable"] ?? OBSERVATION_CHIP.unavailable' \
+        in block
     # Each chip reads its own field, and a MISSING field falls back to a non-ok
     # entry rather than to the ok one.
     assert 'DDL_CHIP[ddl?.status ?? "unavailable"] ?? DDL_CHIP.unavailable' in block
@@ -981,6 +1106,14 @@ _NOT_SURFACED = {
     "snapshots_stored",
     "last_snapshot",
     "fresh_within_minutes",
+    # Diagnostics for whoever fixes the collector, not for the operator: WHICH
+    # catalog the history describes, HOW MANY schemas are known, and the freshness
+    # bar itself. The operator-facing meaning of all three is already carried by the
+    # observation chip and by the not-seen line, which names the schemas and the
+    # last confirmed time.
+    "read_scope",
+    "schemas_known",
+    "confirm_within_minutes",
 }
 # Not read by the panel, but folded into `note`, which is.
 _VIA_NOTE = {
@@ -1006,3 +1139,129 @@ def test_no_payload_field_reaches_the_operator_by_accident():
     # The _VIA_NOTE half is a claim about the handler, so check it there.
     for name in ("first_snapshot", "baseline_only_schemas", "outside_window_schemas"):
         assert name in _HANDLER_SRC
+
+
+# ===========================================================================
+# THE OBSERVATION AXIS: no signal value outside the matrix
+# ===========================================================================
+# FINDING 2 of the sixth pass was not that a cell was wrong. It was that the
+# producer's `not_seen` state was a FIFTH signal value that appeared in NO row of
+# this matrix, so the matrix guard, written specifically to stop a signal value
+# escaping, was structurally unable to see it. The fix is that the enumeration is
+# derived from the SHARED probe rather than written beside it.
+
+def _observation_statuses():
+    """Read the enumeration off the contract module, not off a list here. api/
+    cannot import mcp_servers, so the panel's copy is the one that ships with it."""
+    import importlib.util as _ilu
+    spec = _ilu.spec_from_file_location(
+        "_panel_states_contract", _DASHBOARD_DIR / "schema_diff_util.py")
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return set(mod.OBSERVATION_STATUSES)
+
+
+def test_every_observation_status_appears_in_the_product():
+    """Every value the shared probe can return is a cell of the product. A new one
+    fails HERE, with no test edit, which is the guard `not_seen` walked past."""
+    assert set(_DDL_OBSERVATION.values()) == _observation_statuses(), (
+        "observation values in the product: "
+        f"{sorted(set(_DDL_OBSERVATION.values()))}, values the probe can return: "
+        f"{sorted(_observation_statuses())}"
+    )
+
+
+def test_every_observation_status_has_a_chip_and_only_fresh_is_ok():
+    """The chip is what tells the operator WHICH signal was blind once the headline
+    says `partial`. A server-side value with no entry falls back to the unknown chip,
+    which is safe but says the wrong thing; a second `ok: true` would draw blindness
+    as normal."""
+    chips = _chip_map("OBSERVATION_CHIP")
+    assert set(chips) == _observation_statuses(), (
+        f"OBSERVATION_CHIP keys {sorted(chips)} vs probe {sorted(_observation_statuses())}")
+    start = _PANEL.index("const OBSERVATION_CHIP: Record<")
+    body = _PANEL[start:_PANEL.index("};", start)]
+    oks = re.findall(r"^\s{2}(\w+): \{ label: \".*?\", ok: true \},", body, re.M)
+    assert oks == ["fresh"], oks
+
+
+def test_only_a_fully_confirmed_cluster_reaches_the_absence_of_change_sentence():
+    """The property in one line, driven across the whole product: `no_changes` and
+    an observation that is anything but `fresh` may never coexist."""
+    for d in _DDL_CASES:
+        for r in _ROW_CASES:
+            got = drive(**{**_DDL_CASES[d], **_ROW_CASES[r]})
+            if got["observation"]["status"] != "fresh":
+                assert got["status"] != "no_changes", (d, r, got["observation"])
+                assert _NEUTRAL not in panel_verdict(got), (d, r)
+
+
+def test_a_schema_nobody_can_see_is_named_with_the_time_it_was_last_confirmed():
+    """THE ACCEPTED COST, at the sentence. A genuine DROP SCHEMA is not reported as
+    a drop anywhere; it has to read as "last confirmed at T, not seen since" and it
+    has to reach the operator, which is what the fifth pass left out of this panel
+    entirely."""
+    got = drive(snaps=[_snap(schema="live_s", stored=4)],
+                obs=[_obs_row("live_s"), _obs_row("gone_s", confirmed=False)],
+                stats=[_stat(base=1000, cur=1000)])
+    assert got["status"] == "partial"
+    assert got["ddl_detection"]["unconfirmed_schemas"] == ["gone_s"]
+    assert got["observation"]["status"] == "not_seen"
+    assert got["observation"]["last_confirmed"] == _CONFIRMED_AT
+    # the note names it, and never as a drop
+    assert "gone_s" in got["note"]
+    assert "확인되지 않았습니다" in got["note"]
+    assert "삭제로 단정하지 않고" in got["note"]
+    for drop_word in ("삭제됨", "dropped"):
+        assert drop_word not in got["note"], drop_word
+    # and the panel renders that, in every branch of the verdict chain.
+    # The BINDING is asserted as well as the interpolation: checking only
+    # `{notSeen}` was MUTATION-CHECKED and survived `const notSeen = null;`, which
+    # deletes the whole operator-facing half while leaving every interpolation in
+    # place (measured: 661 passed).
+    assert "const notSeen = <NotSeen d={d} />;" in _verdict_body(), (
+        "the not-seen line is no longer bound to the NotSeen component, so every "
+        "`{notSeen}` below it renders nothing"
+    )
+    assert "{notSeen}" in panel_verdict(got)
+    for status in ("no_changes", "partial", "not_collected", "insufficient_history",
+                   "some_future_status"):
+        assert "{notSeen}" in panel_verdict({"status": status}), status
+    # the component itself prints the names and the timestamp
+    body = _PANEL[_PANEL.index("function NotSeen("):_PANEL.index("// The verdict an EMPTY")]
+    assert "unconfirmed_schemas" in body
+    assert "last_confirmed" in body
+    assert "확인되지 않았습니다" in body
+    assert "if (names.length === 0) return null;" in body, (
+        "a fully confirmed cluster must gain no chrome at all")
+
+
+def test_the_not_seen_line_also_reaches_a_window_that_has_real_changes():
+    """EmptyVerdict is not reached when there are rows, so a window with one real
+    change plus an unconfirmed schema would hide the unknown behind the change."""
+    got = drive(snaps=[_snap(schema="live_s", stored=4,
+                             before={"users": ["id"]},
+                             after={"users": ["id"], "made": ["a", "b"]})],
+                obs=[_obs_row("live_s"), _obs_row("gone_s", confirmed=False)],
+                stats=[_stat(base=1000, cur=1000)])
+    assert got["status"] == "ok"
+    assert got["changes"], got
+    assert got["ddl_detection"]["unconfirmed_schemas"] == ["gone_s"]
+    branch = _list_branch()
+    tail = _flat(_PANEL[_PANEL.index("{shown === 0 ? ("):])
+    assert "<NotSeen d={data} />" in tail, (
+        "the list branch renders no not-seen line, so a window containing one real "
+        "change hides a schema nobody can see any more"
+    )
+    assert "changes.map" in branch
+
+
+def test_the_panel_never_calls_a_vanished_schema_dropped():
+    """The cost is accepted AND kept visible: `dropped` is a change_type the panel
+    draws in red, and a schema nobody can confirm must never reach it. Driven: the
+    unconfirmed schema contributes no row of any kind."""
+    got = drive(snaps=[_snap(schema="live_s", stored=4)],
+                obs=[_obs_row("live_s"), _obs_row("gone_s", confirmed=False)],
+                stats=[_stat(base=1000, cur=1000)])
+    assert [c for c in got["changes"] if c["schema_name"] == "gone_s"] == []
+    assert got["ddl_detection"]["rename_candidates"] == []

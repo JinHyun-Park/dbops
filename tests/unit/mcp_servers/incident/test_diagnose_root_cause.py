@@ -1,17 +1,10 @@
 """Tests for diagnose_root_cause_impl.
 
-The impl issues several cache.execute calls IN THIS ORDER when ``around_time``
-is supplied (passing around_time skips the NOW() probe, keeping the order
-deterministic):
-
-    1. cluster_meta      (engine family -> which metric_type names to look for)
-    2. schema_snapshots  (schema/DDL changes)
-    3. event_log         (operational events)
-    4. blocking_locks    (lock contention)
-    5. metric_snapshots  (metric spikes, grouped per metric_type)
-    6. query_stats       (top slow queries)
-
-So ``cache.execute.side_effect`` is a 6-element list matching that order.
+The impl issues one cache.execute call per source. The fake DISPATCHES ON SQL
+rather than on call ORDER: a positional side_effect list breaks, silently and
+misleadingly, the moment a source gains a statement (the schema source gained the
+two shared observation statements in the sixth pass over that surface, which
+shifted every later source's rows by two and made a working tool look broken).
 Assertions target the RETURN structure (ranks/categories/scores/
 signals_examined), never the SQL strings, so they survive SQL tweaks.
 
@@ -35,13 +28,31 @@ def _empty():
     return QueryResult(columns=[], rows=[], row_count=0)
 
 
-def test_ranks_schema_change_event_and_metric_spike():
+def _dispatching_cache(**by_source):
+    """Return the rows for whichever source is asking, keyed on a fragment of its
+    SQL. Anything unclaimed comes back empty, which is what a cluster with no rows
+    for that signal looks like."""
+    def execute(sql, params=None):
+        if "read_scope IS NOT NULL" in sql:
+            return _qr([{"read_scope": "dbops/16384"}])
+        if "holds_tables" in sql:
+            return by_source.get("observation", _qr([
+                {"schema_name": "public", "read_scope": "dbops/16384",
+                 "last_seen": ANCHOR, "holds_tables": "y", "age_sec": 60}]))
+        for marker, rows in by_source.items():
+            if marker != "observation" and marker in sql:
+                return rows
+        return _empty()
     cache = MagicMock()
-    # Order: cluster_meta, schema_changes, events, blocking, metric_spikes, slow_queries
-    cache.execute.side_effect = [
-        _qr([{"engine": "aurora-postgresql"}]),
+    cache.execute.side_effect = execute
+    return cache
+
+
+def test_ranks_schema_change_event_and_metric_spike():
+    cache = _dispatching_cache(
+        cluster_meta=_qr([{"engine": "aurora-postgresql"}]),
         # schema change right at the anchor -> should rank at/near the top
-        _qr([
+        diff_from_previous_json=_qr([
             {
                 "snapshot_time": "2024-01-01T11:59:00Z",
                 "schema_name": "public",
@@ -49,7 +60,7 @@ def test_ranks_schema_change_event_and_metric_spike():
             }
         ]),
         # a critical event a couple minutes before the anchor
-        _qr([
+        event_log=_qr([
             {
                 "event_time": "2024-01-01T11:58:00Z",
                 "event_type": "failover",
@@ -58,15 +69,14 @@ def test_ranks_schema_change_event_and_metric_spike():
                 "source": "rds-event",
             }
         ]),
-        # no blocking locks
-        _empty(),
-        # cpu spiked 3x vs baseline
-        _qr([
+        # cpu spiked 3x vs baseline (blocking_locks is left empty). The marker is
+        # `window_avg`, not `metric_snapshots`: the elasticache source reads the same
+        # table, so the table name matches two statements and would feed both.
+        window_avg=_qr([
             {"metric_type": "cpu", "window_avg": 90.0, "baseline_avg": 30.0},
-            {"metric_type": "connections", "window_avg": 50.0, "baseline_avg": 48.0},  # not a spike
+            {"metric_type": "connections", "window_avg": 50.0, "baseline_avg": 48.0},
         ]),
-        # one slow query
-        _qr([
+        query_stats=_qr([
             {
                 "query_hash": "abc123",
                 "query_text": "SELECT * FROM orders WHERE status = $1",
@@ -76,7 +86,7 @@ def test_ranks_schema_change_event_and_metric_spike():
                 "snapshot_time": "2024-01-01T11:57:00Z",
             }
         ]),
-    ]
+    )
 
     result = diagnose_root_cause_impl(cache, cluster_id="prod-pg-1", around_time=ANCHOR, window_minutes=30)
 

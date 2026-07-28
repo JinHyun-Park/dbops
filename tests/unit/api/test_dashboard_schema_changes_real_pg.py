@@ -734,7 +734,20 @@ def test_missing_schema_snapshots_table_degrades_instead_of_500(pg):
 
 
 def _snapshot_pair(pg, cid, days="7"):
-    return pg.query(handler._SCHEMA_SNAPSHOT_PAIRS_SQL, {"cid": cid, "days": days})
+    # The pair statement is built from SCOPED_ROWS now, so it binds :cluster_id and
+    # :read_scope: comparability, not just recency, decides which rows it may see.
+    # The scope is RESOLVED the way the handler resolves it rather than assumed,
+    # because some fixtures in this module drive the real collector, whose scope is
+    # the live database's own oid.
+    return pg.query(handler._SCHEMA_SNAPSHOT_PAIRS_SQL,
+                    {"cluster_id": cid, "read_scope": _established_scope(pg, cid),
+                     "days": days})
+
+
+def _established_scope(pg, cid):
+    from schema_diff_util import ESTABLISHED_SCOPE_SQL
+    rows = pg.query(ESTABLISHED_SCOPE_SQL, {"cluster_id": cid})
+    return rows[0]["read_scope"] if rows else None
 
 
 def test_every_snapshot_older_than_the_window_is_not_a_comparison(pg):
@@ -804,12 +817,24 @@ def test_a_real_in_window_comparison_still_reports_ok(pg):
 # ===========================================================================
 
 
-def _snap(pg, cid, schema, hours_ago, tables, diff):
+_SCOPE = "dbops/16384"
+
+
+def _snap(pg, cid, schema, hours_ago, tables, diff, scope=_SCOPE,
+          last_seen="NOW()"):
+    """One stored snapshot.
+
+    read_scope and last_seen_at are written by DEFAULT, because a row without them
+    is a PRE-v27 row and a pre-v27 row is deliberately comparable to nothing: the
+    reader would report `not_comparable` for every cell rather than the cell under
+    test. `scope=None` is how a cell asks for the pre-v27 shape on purpose.
+    """
     pg.raw(
         "INSERT INTO schema_snapshots (cluster_id, snapshot_time, schema_name, "
-        " tables_json, diff_from_previous_json) VALUES ("
+        " tables_json, diff_from_previous_json, read_scope, last_seen_at) VALUES ("
         f"{_lit(cid)}, NOW() - INTERVAL '1 hour' * {float(hours_ago)}, {_lit(schema)}, "
-        f"{_lit(json.dumps(tables))}::jsonb, {_lit(json.dumps(diff))}::jsonb)"
+        f"{_lit(json.dumps(tables))}::jsonb, {_lit(json.dumps(diff))}::jsonb, "
+        f"{_lit(scope)}, {'NULL' if last_seen is None else last_seen})"
     )
 
 
@@ -1054,7 +1079,9 @@ def test_a_30_day_question_answered_from_7_days_of_snapshots(pg):
                         (0.5, ["users", "orders"])],
               [("t", 1000, 40), ("t", 1000, 0)])
 
-    rows = pg.query(handler._SCHEMA_SNAPSHOT_PAIRS_SQL, {"cid": cid, "days": "30"})
+    rows = pg.query(handler._SCHEMA_SNAPSHOT_PAIRS_SQL,
+                    {"cluster_id": cid, "read_scope": _established_scope(pg, cid),
+                     "days": "30"})
     assert rows and rows[0]["baseline_outside_window"] is True, rows
     assert rows[0]["baseline_is_latest"] is False, rows[0]
     assert int(rows[0]["snapshots_for_schema"]) == 3, rows[0]

@@ -42,9 +42,24 @@ const TYPE_STYLES: Record<string, { color: string; bg: string; icon: string }> =
 const DDL_CHIP: Record<string, { label: string; ok: boolean }> = {
   ok: { label: "DDL 판정됨", ok: true },
   not_collected: { label: "DDL 미수집", ok: false },
+  not_comparable: { label: "DDL 비교 불가", ok: false },
   baseline_only: { label: "DDL baseline만", ok: false },
   outside_window: { label: "DDL 구간 밖", ok: false },
   unavailable: { label: "DDL 조회 불가", ok: false },
+};
+
+// THE FOURTH SOURCE, and the one this panel did not have at all. "did the schema
+// change" and "is the schema still there" are different questions, and conflating
+// them is the defect six passes over this surface kept relocating. `not_seen` is a
+// first-class value here because it is the ACCEPTED COST: a genuine DROP SCHEMA is
+// never drawn as a drop, it is drawn as "not confirmed", and the note carries the
+// last confirmed time. Same values the agent's `observation.status` carries.
+const OBSERVATION_CHIP: Record<string, { label: string; ok: boolean }> = {
+  fresh: { label: "스키마 존재 확인됨", ok: true },
+  not_seen: { label: "확인 안 된 스키마 있음", ok: false },
+  unmigrated: { label: "스키마 관측 기록 없음", ok: false },
+  no_snapshots: { label: "스냅샷 없음", ok: false },
+  unavailable: { label: "스키마 관측 조회 불가", ok: false },
 };
 
 const ROWS_CHIP: Record<string, { label: string; ok: boolean }> = {
@@ -58,6 +73,24 @@ const COLLECTION_CHIP: Record<string, { label: string; ok: boolean }> = {
   stale: { label: "수집 지연", ok: false },
   no_data: { label: "수집 기록 없음", ok: false },
 };
+
+/** "last confirmed at T, not seen since", which is the strongest thing this
+ * surface can say about a schema that stopped appearing in the catalog read.
+ * A DROP SCHEMA and a read that could not reach the schema leave IDENTICAL
+ * evidence, so it is never drawn as a drop. Returns null when the cluster was
+ * fully confirmed, so the ordinary case gains no chrome. */
+function NotSeen({ d }: { d: SchemaChangesResponse }) {
+  const names = d.ddl_detection?.unconfirmed_schemas ?? [];
+  if (names.length === 0) return null;
+  const last = d.observation?.last_confirmed;
+  return (
+    <div className="text-[11px] text-amber-300 mt-1.5 leading-relaxed">
+      {names.join(", ")} 스키마는 최근 카탈로그 읽기에서 확인되지 않았습니다
+      {last ? ` (마지막 확인 ${last})` : ""}. 삭제됐을 수도 있고 읽기가 도달하지
+      못한 것일 수도 있어 삭제로 단정하지 않습니다.
+    </div>
+  );
+}
 
 // The verdict an EMPTY list carries. One branch per top-level `status`, written
 // as an if-chain rather than the lookup table this used to be: a table key is
@@ -75,6 +108,11 @@ function EmptyVerdict({ d }: { d: SchemaChangesResponse }) {
       {d.row_deltas?.tables_compared ?? 0}개 table
     </div>
   );
+  // The compensating channel for the deleted absence inference, rendered in EVERY
+  // branch below and not only the negative one: a schema the collector can no
+  // longer confirm is news whatever the headline says, and putting it in one branch
+  // is how it ended up in no branch at all.
+  const notSeen = <NotSeen d={d} />;
   if (d.status === "no_changes") {
     // The ONLY branch that may read as an absence of change: every source
     // compared, across every schema it holds.
@@ -82,6 +120,7 @@ function EmptyVerdict({ d }: { d: SchemaChangesResponse }) {
       <div className="p-6 text-sm">
         <div className="text-zinc-400">이 구간에서 감지된 변경 없음</div>
         {measured}
+        {notSeen}
       </div>
     );
   }
@@ -92,6 +131,7 @@ function EmptyVerdict({ d }: { d: SchemaChangesResponse }) {
           일부 신호만 판정됨: 변경 없음이라고 볼 수 없음
         </div>
         {measured}
+        {notSeen}
       </div>
     );
   }
@@ -101,6 +141,7 @@ function EmptyVerdict({ d }: { d: SchemaChangesResponse }) {
         <div className="text-amber-300">
           수집 이력이 없어 변경 여부를 판정할 수 없음
         </div>
+        {notSeen}
       </div>
     );
   }
@@ -110,6 +151,7 @@ function EmptyVerdict({ d }: { d: SchemaChangesResponse }) {
         <div className="text-amber-300">
           비교 가능한 이력이 부족해 변경 여부를 판정할 수 없음
         </div>
+        {notSeen}
       </div>
     );
   }
@@ -124,6 +166,7 @@ function EmptyVerdict({ d }: { d: SchemaChangesResponse }) {
         변경 여부를 판정할 수 없음 (알 수 없는 응답 상태)
       </div>
       {measured}
+      {notSeen}
     </div>
   );
 }
@@ -266,6 +309,7 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
   // The frontend is a static export deployed separately from the API Lambda, so
   // it can meet a payload predating these fields. Unknown, never "ok".
   const coll = data?.collection;
+  const obs = data?.observation;
   const rowStatus = data?.row_deltas?.status ?? "no_data";
   const age = coll?.age_hours;
 
@@ -345,6 +389,13 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
             </div>
           )}
 
+          {shown > 0 &&
+            (data.ddl_detection?.unconfirmed_schemas ?? []).length > 0 && (
+              <div className="px-4 py-2.5 border-t border-zinc-800">
+                <NotSeen d={data} />
+              </div>
+            )}
+
           {data.truncated && (
             <div className="px-4 py-2 border-t border-zinc-800 text-[11px] text-zinc-500 tabular-nums">
               전체 {data.total_changes}건 중 {changes.length}건만 표시
@@ -358,6 +409,10 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
                 DDL_CHIP.unavailable)}
             />
             <Chip {...(ROWS_CHIP[rowStatus] ?? ROWS_CHIP.no_data)} />
+            <Chip
+              {...(OBSERVATION_CHIP[obs?.status ?? "unavailable"] ??
+                OBSERVATION_CHIP.unavailable)}
+            />
             <Chip
               {...(COLLECTION_CHIP[coll?.status ?? "no_data"] ??
                 COLLECTION_CHIP.no_data)}

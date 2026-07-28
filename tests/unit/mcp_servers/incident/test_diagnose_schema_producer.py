@@ -33,14 +33,56 @@ def _probe(snapshots, schemas):
     )
 
 
-def _cache(*results):
+_SCOPE = "dbops/16384"
+
+
+def _observation(schemas=(("public", "y", "y"),), scope=_SCOPE,
+                 last="2026-07-01T12:00:00Z"):
+    """OBSERVED_SQL's shape. `schemas` entries are (name, holds_tables, confirmed);
+    "n" ages that schema's OWN last_seen_at past the bar, which is what makes it an
+    unconfirmed schema."""
+    return QueryResult(
+        columns=["schema_name", "read_scope", "last_seen", "holds_tables", "age_sec"],
+        rows=[{"schema_name": n, "read_scope": scope, "last_seen": last,
+               "holds_tables": h, "age_sec": 60 if c == "y" else 40 * 24 * 3600}
+              for n, h, c in schemas],
+        row_count=len(schemas),
+    )
+
+
+def _cache(window=None, probe=None, observation=None, scope=_SCOPE,
+           window_raises=None, probe_raises=None, obs_raises=None):
+    """A cache that DISPATCHES ON SQL rather than on call order: the source now
+    issues the shared observation probe as well, and a positional side_effect list
+    makes every such change a wall of unrelated red."""
+    obs = observation if observation is not None else _observation()
+
+    def execute(sql, params=None):
+        if "read_scope IS NOT NULL" in sql:
+            if obs_raises:
+                raise obs_raises
+            if scope is None:
+                return QueryResult(columns=["read_scope"], rows=[], row_count=0)
+            return QueryResult(columns=["read_scope"], rows=[{"read_scope": scope}],
+                               row_count=1)
+        if "holds_tables" in sql:
+            if obs_raises:
+                raise obs_raises
+            return obs
+        if "COUNT(*) AS snapshots" in sql:
+            if probe_raises:
+                raise probe_raises
+            return probe if probe is not None else _probe(0, 0)
+        if window_raises:
+            raise window_raises
+        return window if window is not None else _EMPTY
     cache = MagicMock()
-    cache.execute.side_effect = list(results)
+    cache.execute.side_effect = execute
     return cache
 
 
-def _run(*results):
-    cache = _cache(*results)
+def _run(**kwargs):
+    cache = _cache(**kwargs)
     examined, skipped = {}, []
     out = _collect_schema_changes(cache, "prod-pg-1", ANCHOR_START, ANCHOR_END,
                                   None, 60, examined, skipped)
@@ -53,7 +95,8 @@ def test_schema_change_is_the_highest_weighted_category():
 
 
 def test_no_snapshots_at_all_is_skipped_not_examined_zero():
-    out, examined, skipped, _ = _run(_EMPTY, _probe(0, 0))
+    out, examined, skipped, _ = _run(probe=_probe(0, 0),
+                                     observation=_EMPTY, scope=None)
     assert out == []
     assert skipped == ["schema_changes"]
     assert "schema_changes" not in examined
@@ -62,7 +105,7 @@ def test_no_snapshots_at_all_is_skipped_not_examined_zero():
 def test_baseline_only_is_skipped_because_no_diff_could_exist():
     """One snapshot per schema cannot produce a diff row, so an empty window
     proves nothing about DDL."""
-    out, examined, skipped, _ = _run(_EMPTY, _probe(3, 3))
+    out, examined, skipped, _ = _run(probe=_probe(3, 3))
     assert out == []
     assert skipped == ["schema_changes"]
 
@@ -70,14 +113,14 @@ def test_baseline_only_is_skipped_because_no_diff_could_exist():
 def test_comparable_history_with_an_empty_window_is_a_real_negative():
     """Snapshots exist and at least one schema has two, so "no DDL change in this
     window" is supportable: examined, NOT skipped."""
-    out, examined, skipped, _ = _run(_EMPTY, _probe(5, 2))
+    out, examined, skipped, _ = _run(probe=_probe(5, 2))
     assert out == []
     assert skipped == []
     assert examined["schema_changes"] == 0
 
 
 def test_rows_in_the_window_skip_the_probe_entirely():
-    out, examined, skipped, cache = _run(QueryResult(
+    out, examined, skipped, cache = _run(window=QueryResult(
         columns=["snapshot_time", "schema_name", "changes"],
         rows=[{"snapshot_time": "2026-07-01T12:00:00+00:00", "schema_name": "app",
                "changes": '{"dropped": ["orders"]}'}],
@@ -87,7 +130,11 @@ def test_rows_in_the_window_skip_the_probe_entirely():
     assert examined["schema_changes"] == 1
     assert out[0]["category"] == "schema_change"
     assert out[0]["evidence"]["schema_name"] == "app"
-    assert cache.execute.call_count == 1  # no probe on the happy path
+    # The window read plus the two shared observation statements, and NO producer
+    # probe: there is nothing to qualify when rows came back.
+    assert cache.execute.call_count == 3
+    assert not any("COUNT(*) AS snapshots" in c.args[0]
+                   for c in cache.execute.call_args_list)
 
 
 def test_probe_failure_is_labelled_apart_from_a_healthy_no_history_skip():
@@ -95,17 +142,13 @@ def test_probe_failure_is_labelled_apart_from_a_healthy_no_history_skip():
     "we did not look", but only one of them is normal. Sharing the single label
     `schema_changes` is what let a column typo inside the probe survive a green
     suite: every assertion on this path passed either way."""
-    cache = MagicMock()
-    cache.execute.side_effect = [_EMPTY, RuntimeError("cache unavailable")]
-    examined, skipped = {}, []
-    out = _collect_schema_changes(cache, "prod-pg-1", ANCHOR_START, ANCHOR_END,
-                                  None, 60, examined, skipped)
+    out, examined, skipped, _ = _run(probe_raises=RuntimeError("cache unavailable"))
     assert out == []
     assert skipped == ["schema_changes_probe_error"]
     assert "schema_changes" not in examined
 
     # And the healthy no-history skip must NOT borrow that label.
-    _, _, healthy_skipped, _ = _run(_EMPTY, _probe(3, 3))
+    _, _, healthy_skipped, _ = _run(probe=_probe(3, 3))
     assert healthy_skipped == ["schema_changes"]
 
 
@@ -115,18 +158,16 @@ def test_the_window_read_failing_is_labelled_apart_from_no_history():
     is byte-identical to the healthy "this cluster has no comparable history"
     skip. The previous pass fixed exactly this conflation on the PROBE read 12
     lines below and left it in place here."""
-    cache = MagicMock()
-    cache.execute.side_effect = RuntimeError('relation "schema_snapshots" does not exist')
-    examined, skipped = {}, []
-    out = _collect_schema_changes(cache, "prod-pg-1", ANCHOR_START, ANCHOR_END,
-                                 None, 60, examined, skipped)
+    out, examined, skipped, cache = _run(
+        window_raises=RuntimeError('relation "schema_snapshots" does not exist'))
     assert out == []
     assert skipped == ["schema_changes_read_error"]
     assert "schema_changes" not in examined
-    # The probe must not have run: there is nothing to qualify.
+    # Neither the probe NOR the observation runs: the source returns immediately,
+    # because there is nothing to qualify.
     assert cache.execute.call_count == 1
 
-    _, _, no_history, _ = _run(_EMPTY, _probe(3, 3))
+    _, _, no_history, _ = _run(probe=_probe(3, 3))
     assert no_history == ["schema_changes"]
     assert skipped != no_history, (
         "a cache DB with no schema_snapshots table must not read as a cluster "
@@ -134,28 +175,40 @@ def test_the_window_read_failing_is_labelled_apart_from_no_history():
     )
 
 
-def test_all_five_states_of_this_source_are_distinguishable():
+def test_all_eight_states_of_this_source_are_distinguishable():
     """The enumeration, driven. signals_examined is pre-seeded to 0 for every
-    source, so on the three skipped paths the LABEL is the only difference, and
-    two states sharing one label is the defect this tier keeps relocating."""
-    broken_read = MagicMock()
-    broken_read.execute.side_effect = RuntimeError("no such table")
-    broken_probe = MagicMock()
-    broken_probe.execute.side_effect = [_EMPTY, RuntimeError("cache gone")]
+    source, so on the skipped paths the LABEL is the only difference, and two states
+    sharing one label is the defect this tier keeps relocating.
+
+    A SIXTH state joins them in this pass, and it is the accepted cost of the whole
+    surface: a schema nobody can currently confirm files no diff row, so an empty
+    window is not evidence that no DDL happened. Under the previous pass that state
+    was byte-identical to "comparable history, empty window", i.e. to a real
+    negative, in the HIGHEST-weighted source.
+    """
     rows = QueryResult(
         columns=["snapshot_time", "schema_name", "changes"],
         rows=[{"snapshot_time": "2026-07-01T12:00:00+00:00", "schema_name": "app",
                "changes": '{"dropped": ["orders"]}'}],
         row_count=1,
     )
+    unconfirmed = _observation((("app", "y", "y"), ("gone", "y", "n")))
 
     states = {}
     for label, cache in (
-        ("window read raised", broken_read),
-        ("probe raised", broken_probe),
-        ("no comparable history", _cache(_EMPTY, _probe(3, 3))),
-        ("comparable history, empty window", _cache(_EMPTY, _probe(5, 2))),
-        ("rows in the window", _cache(rows)),
+        ("window read raised",
+         _cache(window_raises=RuntimeError("no such table"))),
+        ("probe raised", _cache(probe_raises=RuntimeError("cache gone"))),
+        ("observation unavailable",
+         _cache(probe=_probe(5, 2), obs_raises=RuntimeError("no schema_v27"))),
+        ("nothing comparable, every row predates schema_v27",
+         _cache(probe=_probe(5, 2), scope=None,
+                observation=_observation((("app", "y", "y"),), scope=None))),
+        ("no comparable history", _cache(probe=_probe(3, 3))),
+        ("comparable history, empty window", _cache(probe=_probe(5, 2))),
+        ("comparable history, empty window, a schema unconfirmed",
+         _cache(probe=_probe(5, 2), observation=unconfirmed)),
+        ("rows in the window", _cache(window=rows)),
     ):
         examined, skipped = {}, []
         got = _collect_schema_changes(cache, "prod-pg-1", ANCHOR_START, ANCHOR_END,
@@ -163,11 +216,42 @@ def test_all_five_states_of_this_source_are_distinguishable():
         sig = (tuple(skipped), examined.get("schema_changes", "absent"), len(got))
         assert sig not in states, f"{label} is indistinguishable from {states.get(sig)}"
         states[sig] = label
-    assert len(states) == 5
-    assert sorted(s[0] for s in states) == [
-        (), (), ("schema_changes",), ("schema_changes_probe_error",),
-        ("schema_changes_read_error",),
-    ]
+    assert len(states) == 8
+    # EXACTLY TWO states carry no label: the state with rows (which needs none, the
+    # rows are the answer) and the one real negative. Every other state is labelled,
+    # so "examined 0 and nothing skipped" means "we looked and there was no DDL
+    # change" and can mean nothing else.
+    assert sorted(lbl for sig, lbl in states.items() if sig[0] == ()) == [
+        "comparable history, empty window", "rows in the window"]
+    unlabelled_negatives = [lbl for sig, lbl in states.items()
+                            if sig[0] == () and sig[2] == 0]
+    assert unlabelled_negatives == ["comparable history, empty window"]
+
+
+def test_an_unconfirmed_schema_is_reported_even_when_another_schema_changed():
+    """The unknown is not confined to the empty branch: a schema nobody can confirm
+    is silent here whether or not some other schema changed in the window, so the
+    label rides along with the rows."""
+    rows = QueryResult(
+        columns=["snapshot_time", "schema_name", "changes"],
+        rows=[{"snapshot_time": "2026-07-01T12:00:00+00:00", "schema_name": "app",
+               "changes": '{"dropped": ["orders"]}'}],
+        row_count=1,
+    )
+    out, examined, skipped, _ = _run(
+        window=rows,
+        observation=_observation((("app", "y", "y"), ("gone", "y", "n"))))
+    assert examined["schema_changes"] == 1
+    assert len(out) == 1
+    assert skipped == ["schema_changes_unconfirmed_schemas"]
+
+
+def test_a_cluster_with_no_snapshots_at_all_is_not_labelled_unconfirmed():
+    """`no_snapshots` is not an unknown about a schema, it is the absence of any
+    schema, and it already has its own label. Two labels for one state is the
+    conflation in reverse."""
+    _, _, skipped, _ = _run(probe=_probe(0, 0), observation=_EMPTY, scope=None)
+    assert skipped == ["schema_changes"]
 
 
 def test_probe_sql_is_a_module_constant_so_a_test_can_execute_it():

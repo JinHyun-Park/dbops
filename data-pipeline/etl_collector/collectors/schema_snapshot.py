@@ -72,8 +72,11 @@ using only what is inside the read. So this collector does two things instead:
 
  1. THE READ REPORTS ITS OWN SCOPE and the scope is stored with the snapshot
     (schema_v27 `read_scope`). Two snapshots are COMPARABLE only under the same
-    scope; a read under any other scope writes NOTHING, so no cross-scope diff
-    and no cross-scope drop can be produced, by either half of the old defect.
+    scope, and every READER selects its pair through SCOPED_ROWS in
+    schema_diff_util.py, so no cross-scope diff and no cross-scope drop can be
+    produced by anybody, by either half of the old defect. A read under another
+    scope therefore does not have to be refused: it baselines under its own scope
+    (NULL diff, nothing diffed across the two) and says so as `rescoped`.
       PostgreSQL  current_database() || '/' || its pg_database.oid. The name
                   alone would make another cluster's same-named database look
                   comparable. A physical restore preserves the oid (same data,
@@ -106,19 +109,31 @@ READ LEVEL (whole cycle)
   R1 the read RAISED            nothing written  caller's schema_snapshot_error
                                                  (no dict is returned at all)
   R2 the read returned NO ROW   nothing written  scope_status scope_unknown
-  R3 the stored history carries  nothing written  scope_status scope_mismatch
-     ANY other known scope                       (not one baseline either: a
-                                                  cross-scope row would make the
-                                                  dashboard panel's own
-                                                  base-vs-latest blob diff report
-                                                  the mass drop this collector
-                                                  refuses to)
+  R3 the stored history carries  per-schema below scope_status rescoped
+     ANY other known scope                       (this read is authoritative
+                                                  GOING FORWARD; the other scope's
+                                                  rows are never compared against
+                                                  and its table-holding schemas
+                                                  land in not_seen)
   R4 scope known, cluster has    per-schema below scope_status adopted
      no scoped history yet
   R5 every known stored scope    per-schema below scope_status matched
      is this one
 
-PER SCHEMA (only under R4/R5)
+R3 USED TO FREEZE THE CLUSTER and that was a defect, not caution. The freeze
+existed for one stated reason: api/dashboard/handler.py recomputed its own
+base-vs-latest blob diff with NO notion of read_scope, so a single cross-scope row
+in front of it produced the phantom mass drop. Every reader now selects its pair
+through SCOPED_ROWS in schema_diff_util.py, so a second scope in the table cannot
+be compared against the first by anyone, and the freeze bought nothing while
+costing everything: MEASURED on PostgreSQL 14.18, pre-v27 history plus one read of
+the wrong database left the cluster on scope_status scope_mismatch with
+snapshots_written 0 FOREVER, so the phantom drop the readers were already
+reporting could never heal, not even after the operator fixed the config. The
+current read's scope is now authoritative going forward, which self-heals: point
+the collector back and its own scope is established again on the next cycle.
+
+PER SCHEMA (under R3/R4/R5, i.e. any read that reported a scope)
   S1 same tables                 nothing + heartbeat        unchanged
   S2 different tables            change row                 changes
   S3 latest row is not under      baseline row (NULL diff)   baselines
@@ -166,9 +181,23 @@ reader caveat, never in a resolved answer:
 from datetime import datetime, timezone
 
 try:  # etl_collector: package-rooted asset
-    from collectors.schema_diff_util import compute_diff, diff_is_empty, parse_tables
+    from collectors.schema_diff_util import (
+        ALL_ROWS,
+        LATEST_SCOPED_TIME_SUBQUERY,
+        SCOPED_ROWS,
+        compute_diff,
+        diff_is_empty,
+        parse_tables,
+    )
 except ImportError:  # rds_direct_collector: flat asset root
-    from schema_diff_util import compute_diff, diff_is_empty, parse_tables
+    from schema_diff_util import (
+        ALL_ROWS,
+        LATEST_SCOPED_TIME_SUBQUERY,
+        SCOPED_ROWS,
+        compute_diff,
+        diff_is_empty,
+        parse_tables,
+    )
 
 import json
 
@@ -273,9 +302,8 @@ ORDER BY schema_name
 # schema_v27, which is deliberate: their scope is unknown, so they are not
 # comparable either, and the first scope-known read re-baselines the schema once.
 PREV_SQL = (
-    "SELECT tables_json::text FROM schema_snapshots "
-    "WHERE cluster_id = :cluster_id AND schema_name = :schema_name "
-    "  AND read_scope = :read_scope "
+    "SELECT tables_json::text " + SCOPED_ROWS +
+    "  AND schema_name = :schema_name "
     "ORDER BY snapshot_time DESC LIMIT 1"
 )
 
@@ -295,7 +323,7 @@ LATEST_SQL = (
     "       CASE WHEN tables_json <> '{}'::jsonb THEN 'y' ELSE 'n' END AS holds_tables "
     "FROM ("
     "  SELECT DISTINCT ON (schema_name) schema_name, read_scope, tables_json, snapshot_time"
-    "  FROM schema_snapshots WHERE cluster_id = :cluster_id"
+    "  " + ALL_ROWS +
     "  ORDER BY schema_name, snapshot_time DESC"
     ") latest ORDER BY snapshot_time DESC"
 )
@@ -331,10 +359,7 @@ SEEN_SQL = (
     "UPDATE schema_snapshots SET last_seen_at = :snapshot_time::timestamptz "
     "WHERE cluster_id = :cluster_id AND schema_name = :schema_name "
     "  AND read_scope = :read_scope "
-    "  AND snapshot_time = (SELECT MAX(x.snapshot_time) FROM schema_snapshots x "
-    "                       WHERE x.cluster_id = :cluster_id "
-    "                         AND x.schema_name = :schema_name "
-    "                         AND x.read_scope = :read_scope)"
+    "  AND snapshot_time = " + LATEST_SCOPED_TIME_SUBQUERY
 )
 
 
@@ -439,35 +464,33 @@ def _collect(rds_data_client, cache_execute, target_cluster_arn, target_secret_a
               "reported no scope, so nothing was compared or written")
         return out
 
-    # R3. THE guard the four previous passes were reaching for, and it is not a
-    # predicate on the read's contents: the read says where it was, and that is
-    # either the ground the stored history was recorded from or it is not.
+    # R3. The read says where it was, and that is either the ground the stored
+    # history was recorded from or it is not. It is REPORTED and it does NOT stop
+    # the cycle.
     #
-    # NOT ONE BASELINE is written on a mismatch either, and that is measured, not
-    # cautious: the dashboard panel (api/dashboard/handler.py
-    # _SCHEMA_SNAPSHOT_PAIRS_SQL) recomputes its own diff from the OLDEST and
-    # NEWEST blob per schema and has no notion of scope. Driven with this branch
-    # disabled, one baseline row written from the wrong database made that panel
-    # report dropped [(public, audit)] and get_schema_diff totals dropped 1.
+    # The previous pass froze the cluster here, writing nothing at all, and stated
+    # exactly one reason: api/dashboard/handler.py recomputed its own base-vs-latest
+    # blob diff with no notion of read_scope, so one cross-scope row in front of it
+    # produced the phantom mass drop. Every reader now selects its pair through
+    # SCOPED_ROWS, so no two scopes can be compared against each other by anybody,
+    # and the freeze only made the damage permanent: MEASURED, pre-v27 history plus
+    # one read of the wrong database left this cluster on snapshots_written 0
+    # forever, so the drop the readers were already reporting could not heal even
+    # after the operator fixed the config.
     #
-    # EVERY known scope in the history, not just the newest: with two scopes
-    # present, taking the newest would re-baseline the other one's schemas under
-    # this scope and hand the panel that same cross-scope pair. This collector
-    # never writes a second scope, so the set is normally empty or a single match;
-    # checking all of it keeps that an invariant rather than an assumption.
+    # EVERY known scope in the history, not just the newest: what matters is that
+    # some stored row was recorded elsewhere, and the operator needs to be told.
     foreign = sorted({sc for sc, _holds in stored.values() if sc and sc != read_scope})
     if foreign:
-        out["scope_status"] = "scope_mismatch"
-        out["not_seen_schemas"] = sorted(s for s, (sc, holds) in stored.items() if holds)
-        out["not_seen"] = len(out["not_seen_schemas"])
-        print(f"[{cluster_id}] schema_snapshot: this read covered '{read_scope}' but the "
-              f"stored history was recorded from {foreign}, so the two are not "
-              f"comparable and NOTHING was written ({out['not_seen']} schema(s) left "
-              "unconfirmed). Point the collector back at the database the history "
-              "came from, or delete this cluster's schema_snapshots rows to "
-              "re-baseline against the new one")
-        return out
-    if not any(sc for sc, _holds in stored.values()):
+        out["scope_status"] = "rescoped"
+        print(f"[{cluster_id}] schema_snapshot: this read covered '{read_scope}' but part "
+              f"of the stored history was recorded from {foreign}. The two are NOT "
+              "comparable, so nothing is diffed across them: this read baselines under "
+              "its own scope and the other scope's schemas are reported as unconfirmed "
+              "until a read reaches them again. If this is not the database you meant "
+              "to collect, point the collector back and the next cycle picks the "
+              "original history up again")
+    elif not any(sc for sc, _holds in stored.values()):
         # R4. First read under a known scope (a new cluster, or a cluster whose
         # only rows predate schema_v27). Everything baselines under this scope.
         out["scope_status"] = "adopted"
