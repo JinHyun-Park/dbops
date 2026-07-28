@@ -78,13 +78,39 @@ trainer's SQL and the shipped detect_anomalies scoring, median 99.50 -> 95.0:
 The dashboard's default threshold of 2.5 narrows the band further (measured: a
 real IQR of 0.17 is still flagged, 0.19 is not). The reported 0.125 bucket sits
 inside the band, so that case is genuinely fixed, but a healthy cache-hit hour
-with somewhat more real jitter is not. Deliberately NOT widened: raising the cap
-or lowering MIN_IQR_MEDIAN_FRACTION re-opens the median-20.1 false positive the
-floor exists to suppress, and 10x is exactly what holds that bucket at its 1.005
-floor (10 * its real IQR of 0.2 is 2.0, above the relative floor, so the cap is
-not the binding branch there). The properly targeted fix is the same
-per-metric-unit floor the ceiling below needs, and that unit table does not
-exist in this repo.
+with somewhat more real jitter is not.
+
+WHICH DIRECTION IS DANGEROUS (5249541 stated this backwards). RAISING
+MAX_IQR_FLOOR_INFLATION cannot re-open anything: LEAST(0.05*|m|, k*raw) is
+non-decreasing in k, so a larger k can only raise the trained IQR and mute MORE.
+LOWERING it is the dangerous direction. Swept on PostgreSQL 14.18 through this
+trainer's own SQL, on the median-20.1 bucket ([20.0,20.1,20.2]*4, raw IQR 0.2,
+12 samples), scoring the 21.0 reading at the agent's threshold of 2.0:
+
+  k=1     -> trained 0.2000  z=4.5000  flagged  (the false positive is back)
+  k=2     -> trained 0.4000  z=2.2500  flagged
+  k=3     -> trained 0.6000  z=1.5000  silent
+  k=5.025 -> trained 1.0050  z=0.8955  silent
+  k=10    -> trained 1.0050  z=0.8955  silent   (shipped)
+  k=1000  -> trained 1.0050  z=0.8955  silent
+
+10x is not "exactly what holds that bucket at 1.005" either: EVERY k >= 5.025
+lands on 1.005, because 5.025 * its raw IQR of 0.2 already reaches the relative
+floor (0.05 * 20.1), so from there up the RELATIVE floor is the binding branch and
+the cap is not. The knob that DOES re-open the false positive is
+MIN_IQR_MEDIAN_FRACTION: with k left at the shipped 10, lowering 0.05 to 0.005
+trains 0.2 and the same 21.0 reading scores z=4.5 again.
+
+Widening does not cover the silence zone either, it eats the rescue from the
+other end. Band edge for the same 4.5-point collapse from median 99.5, by
+bisection through this trainer's SQL: k=1 ends the band at a real IQR of 2.2500,
+k=2 at 1.1250, k=5 at 0.4500, k=10 (shipped) at 0.2250, k=1000 at 0.0022. So
+raising the cap 10 -> 1000 shrinks the rescued band about 100x, and lowering it
+10 -> 1 widens it about 10x at the price of the median-20.1 false positive. The
+direction is pinned by behaviour, not by this paragraph:
+test_lowering_the_cap_re_opens_the_false_positive_raising_it_cannot. The properly
+targeted fix is still the per-metric-unit floor the ceiling below needs, and that
+unit table does not exist in this repo.
 
 KNOWN CEILING (zero-median counters). Neither guard helps a bucket that is all
 zeros, which is the HEALTHY shape for a counter like deadlocks or

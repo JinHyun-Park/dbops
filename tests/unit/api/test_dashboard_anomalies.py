@@ -122,9 +122,13 @@ def _row(metric, z, mode, **kw):
 def _wide_fixture():
     """The exact shape of defect 2: MORE than 50 scored metrics, ordered |z|
     descending as the SQL orders them, with the ONLY seasonal baseline outside
-    the top 50. A cluster with engine-internals collection reaches this easily
-    (pg_stat_database + bgwriter alone contribute more than a dozen
-    metric_types).
+    the top 50.
+
+    56 is deliberately BEYOND what today's collectors produce, not a state a
+    cluster is in now: counted off the shipped collector tables the deepest family
+    reaches about 30 cluster-level metric_types (Aurora PG), and pg_stat_database
+    + bgwriter contribute 4 of those, not a dozen. This fixture is the future the
+    removed LIMIT protects against, which is why the cap has to be a display cap.
 
     Derived-after-LIMIT reports total_checked 50 and mode 'flat'. The truth is
     56 and 'seasonal'.
@@ -284,9 +288,14 @@ def test_more_than_fifty_scored_metrics_count_and_classify_off_the_full_set():
 
 
 def test_the_reported_list_stays_capped_and_is_the_strongest_anomalies():
-    """The cap applies to what is DISPLAYED, after threshold filtering, on an
-    |z|-descending list, so the operator gets the 50 strongest rather than an
-    arbitrary 50."""
+    """The cap applies to what is DISPLAYED, and the SQL's own ORDER BY ABS(z)
+    DESC is what makes those the 50 STRONGEST: the rows at or above threshold are
+    a prefix of a sorted list, so the cap can only drop the weakest.
+
+    The cap's position relative to the threshold filter is NOT what buys that.
+    On sorted input the two orders are provably identical, and swapping them is
+    an equivalent mutation (checked: 0 failures). So this test pins the ordering
+    and the size, not the placement."""
     out = handler._anomalies(_query(_wide_fixture()), "c1", 4, 2.5)
     zs = [abs(float(a["z_score"])) for a in out["anomalies"]]
     assert len(zs) == 50

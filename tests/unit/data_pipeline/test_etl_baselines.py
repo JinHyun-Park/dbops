@@ -416,6 +416,13 @@ def _uncapped(sql):
     return re.sub(_CAP_RE, ")) * 1000000000 )", " ".join(sql.split()))
 
 
+def _with_cap(sql, k):
+    """The trainer's own SQL with MAX_IQR_FLOOR_INFLATION swapped for `k`, the
+    same substitution _uncapped makes, so a swept cap still runs through the
+    shipped formula instead of a re-derivation of it."""
+    return re.sub(_CAP_RE, f")) * {k} )", " ".join(sql.split()))
+
+
 def test_three_samples_in_one_hour_train_no_baseline():
     """3 samples is 15 minutes of a 5-minute-cadence hour, not an observed
     hour-of-week, so nothing may be learned from it."""
@@ -457,6 +464,48 @@ def test_iqr_floor_is_relative_to_the_median():
 
     was = _model_training(_pre_fix(fake.insert_sql), _rows_for("memory_usage_pct", _THIN * 4))
     assert (_SPIKE - was[0]["median"]) / was[0]["iqr"] == pytest.approx(4.5, abs=0.01)
+
+
+# Swept on real PostgreSQL 14.18 through this trainer's own SQL: the median-20.1
+# bucket with MAX_IQR_FLOOR_INFLATION swept and the 21.0 reading scored.
+# LEAST(0.05*|m|, k*raw) is non-decreasing in k, so RAISING the cap can only mute
+# more; LOWERING it is what brings the false positive back. 5249541's docstring
+# and its commit message both had this direction backwards and no test could tell.
+_CAP_DIRECTION = [
+    (1,     0.2000, 4.5000, True),      # the false positive is fully back
+    (2,     0.4000, 2.2500, True),      # still over the agent's threshold
+    (3,     0.6000, 1.5000, False),
+    (5.025, 1.0050, 0.8955, False),     # from here up the relative floor binds
+    (10,    1.0050, 0.8955, False),     # shipped
+    (1000,  1.0050, 0.8955, False),     # 100x the shipped cap changes nothing
+]
+
+
+@pytest.mark.parametrize("cap,trained_iqr,z,flagged", _CAP_DIRECTION)
+def test_lowering_the_cap_re_opens_the_false_positive_raising_it_cannot(
+        cap, trained_iqr, z, flagged):
+    """The directional guard. A sentence claiming the cap must not be RAISED is
+    what shipped three times; this asserts the behaviour instead, end to end
+    through the shipped detect_anomalies_impl at the agent's default threshold.
+
+    Every k >= 5.025 trains the same 1.0050, so "10x is exactly what holds this
+    bucket at its floor" is false too: the relative floor is the branch that holds
+    it. The knob that really does re-open the false positive is
+    MIN_IQR_MEDIAN_FRACTION, which test_iqr_floor_is_relative_to_the_median covers
+    from the other side (drop it to 0 and the same reading scores 4.5)."""
+    from mcp_servers.performance.tools.detect_anomalies import detect_anomalies_impl
+
+    shipped, _ = _run_trainer("memory_usage_pct", values=_THIN * 4)
+    trained = _model_training(_with_cap(shipped.insert_sql, cap),
+                              _rows_for("memory_usage_pct", _THIN * 4))
+    assert trained[0]["median"] == pytest.approx(20.1)
+    assert trained[0]["iqr"] == pytest.approx(trained_iqr, abs=0.0001)
+
+    scored = _anomaly_row(trained, "memory_usage_pct", recent_max=_SPIKE)
+    assert scored["z_score"] == pytest.approx(z, abs=0.001)
+    out = detect_anomalies_impl(_cache_returning(scored), "c", hours=4,
+                                threshold=_AGENT_THRESHOLD)
+    assert bool(out["anomalies"]) is flagged
 
 
 def test_relative_floor_cannot_inflate_a_real_iqr_without_bound():
@@ -573,6 +622,11 @@ def test_trainer_docstring_states_the_measured_survival_boundary():
     assert "keeps its real IQR exactly when that IQR is >= 5% of |median|" in doc
     assert "keeps its real IQR exactly when that IQR is >= 0.5% of |median|" not in doc
     assert "0.5% is only where the CAP stops binding" in doc
+    # The cap's direction, which 5249541 shipped inverted. The behaviour guard is
+    # test_lowering_the_cap_re_opens_the_false_positive_raising_it_cannot; these
+    # two lines only stop the retracted sentence from being pasted back.
+    assert "raising the cap or lowering MIN_IQR_MEDIAN_FRACTION re-opens" not in doc
+    assert "10x is exactly what holds that bucket" not in doc
 
 
 def test_zero_median_counter_ceiling_is_documented_not_silently_fixed():
@@ -739,8 +793,14 @@ def test_capped_floor_rescue_band_ends_around_two_tenths_of_a_percent(
     is genuinely fixed, but a healthy cache-hit hour with slightly more real
     jitter is still muted by the relative floor: between roughly 0.2% and the 5%
     survival boundary the SAME 4.5-point collapse scores under both thresholds.
-    Disclosed in the trainer docstring rather than fixed, because widening the cap
-    re-opens the median-20.1 false positive."""
+
+    Disclosed in the trainer docstring rather than fixed, and NOT because widening
+    the cap re-opens the median-20.1 false positive: that was backwards. Raising
+    the cap narrows this very band (measured by bisection through the trainer SQL:
+    k=10 ends it at a real IQR of 0.225, k=1000 at 0.0022). Widening the band means
+    LOWERING the cap (k=1 ends it at 2.25), and that is the move that brings the
+    false positive back, which
+    test_lowering_the_cap_re_opens_the_false_positive_raising_it_cannot pins."""
     from mcp_servers.performance.tools.detect_anomalies import detect_anomalies_impl
 
     fake, _ = _run_trainer("buffer_cache_hit", values=_bucket_at(99.5, real_iqr))

@@ -25,13 +25,26 @@ from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 # mean/stddev fallback. Mirrors the dashboard's seasonal anomaly query so the
 # chat agent and the dashboard never disagree on what's anomalous.
 #
-# Deliberately UNLIMITED: `total_checked` and the seasonal/flat classification
-# are derived from every row this returns, so a SQL LIMIT would cap the count
-# and could hide the only seasonal baseline outside the top-N by |z| (a cluster
-# with engine-internals collection has well over 50 cluster-level
-# metric_types). One row per cluster-level metric_type, so the row count is
-# bounded in the tens to low hundreds. The display cap is applied in Python,
-# after threshold filtering, to the ROWS RETURNED to the caller.
+# Deliberately UNLIMITED. One row per cluster-level metric_type, verified on
+# PostgreSQL 14.18: 7 metric_types with 168 trained hour_of_week buckets each, a
+# flat baseline, and 30 dimensioned rows each, returns exactly 7 rows (the
+# seasonal CTE pins hour_of_week to the current bucket, and the strict dimension
+# filter keeps the dimensioned rows out of `recent`).
+#
+# LIMIT 50 was therefore never reachable on today's collectors. Counted off the
+# shipped collector tables, the deepest family is about 30 cluster-level
+# metric_types (Aurora PG: 9 cluster CloudWatch + 12 Performance Insights + 5
+# pg_activity connection states + 4 pg_stat_database/bgwriter); the others run 6
+# (DynamoDB on-demand) to 23 (DocumentDB). 81 distinct metric_type literals exist
+# across the whole data-pipeline tree, but a cluster only ever runs ONE family
+# branch, so that number is not a per-cluster ceiling.
+#
+# The LIMIT is gone anyway because `total_checked` and the seasonal/flat
+# classification have to come from the FULL scored set, not from whatever slice
+# the query happened to keep: one new per-object collector would push a cluster
+# past 50 and the count would silently cap and the only seasonal baseline outside
+# the top-N by |z| would disappear. The display cap is applied in Python, to the
+# ROWS RETURNED to the caller.
 _ANOMALY_SQL = """
 SELECT * FROM (
     WITH current_hour AS (
@@ -102,10 +115,13 @@ WHERE cluster_id = :cluster_id
 LIMIT 1
 """
 
-# How many anomalies to hand back. Applied AFTER threshold filtering to an
-# |z|-descending list, so the caller gets the strongest ones, not an arbitrary
-# slice. Keep in sync with the api/dashboard copy (parity test compares the
-# derived output, not just the SQL).
+# How many anomalies to hand back. What makes these the STRONGEST ones is the
+# ORDERING, not where the cap sits: the scoring SQL already emits |z| descending,
+# so the rows at or above threshold are a prefix of a sorted list and the cap can
+# only ever drop the weakest. Swapping the cap and the threshold filter is an
+# equivalent mutation on that input (checked: 0 tests fail when swapped), so do
+# not read the placement as load-bearing. Keep in sync with the api/dashboard copy
+# (parity test compares the derived output, not just the SQL).
 _MAX_REPORTED = 50
 
 

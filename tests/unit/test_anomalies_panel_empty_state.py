@@ -14,10 +14,18 @@ documentdb / dynamodb / elasticache which only just got the panel at all.
 
 No JS runtime in CI, so instead of asserting strings exist, the EmptyState
 branch chain is PARSED and MODELLED (same idea as `_apply_dim_filter` in
-test_metric_filters.py): the guards are read out of the source in order, each is
+test_metric_filters.py): the guards are read out of the source, each is
 translated into a Python predicate, and every case below asserts which branch a
 given `meta` actually reaches. An unrecognized guard fails loudly, so a fourth
 branch has to be recorded here deliberately.
+
+What this does NOT pin is branch ORDER, and no comment should imply otherwise.
+Mutation-checked both ways: swapping the `no_samples` and `none` guards fails 0
+tests (they are mutually exclusive equality tests on the same field, so the swap
+is a semantic no-op), and moving the `meta.failed` guard below both of them also
+fails 0 tests. The second one is order-sensitive in principle but unreachable in
+practice: the panel's `.catch` does `setMeta({ failed: true })`, replacing the
+whole object, so `failed` never arrives alongside a mode.
 """
 
 import re
@@ -54,8 +62,10 @@ _PREDICATES = {
 
 
 def _branches():
-    """[(guard_source, predicate, branch_jsx)], in source order, plus the
-    fallthrough as the last entry with a guard of None."""
+    """[(guard_source, predicate, branch_jsx)] as they appear in the source, plus
+    the fallthrough as the last entry with a guard of None. Source position is how
+    an if-chain is modelled, not a property under test: see the module docstring
+    for why no ordering here is load-bearing."""
     body = _empty_state_body()
     guards = list(re.finditer(r"^  if \((.*?)\) \{", body, re.M))
     assert guards, "EmptyState has no branches at all"
@@ -126,7 +136,9 @@ def test_no_recent_samples_sends_the_operator_to_collection_not_to_wait():
 def test_a_failed_lookup_is_not_rendered_as_no_anomalies_either():
     jsx = _rendered({"failed": True})
     assert _ALL_CLEAR not in jsx
-    # failure wins even when a stale mode is still in state
+    # A mode alongside `failed` is not a state the panel can actually produce (the
+    # `.catch` replaces meta wholesale), so this pins the guard's independence from
+    # leftover fields, NOT a "failure wins over a stale mode" behaviour.
     assert _rendered({"failed": True, "mode": "seasonal"}) == jsx
 
 
