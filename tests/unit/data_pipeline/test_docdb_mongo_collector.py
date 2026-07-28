@@ -16,7 +16,9 @@ Strategy:
 
 import importlib.util
 import json
+import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -618,7 +620,7 @@ def test_slow_ops_finding_and_query_stats_rows():
     rows = result["_query_stats"]
     assert len(rows) == 2, [r["query_text"] for r in rows]
     # Worst total time first, and every row carries the cluster_id the readers
-    # filter on plus the shared run_ts.
+    # filter on.
     assert rows[0]["query_text"] == "command test.daily_cases {$match}"
     assert rows[0]["calls"] == 1
     assert rows[0]["total_time_ms"] == 900.0
@@ -626,10 +628,20 @@ def test_slow_ops_finding_and_query_stats_rows():
     perf = next(r for r in rows if r["query_text"] == "query test.perf {threadRunCount}")
     assert perf["calls"] == 2
     assert perf["total_time_ms"] == 600.0  # 137 + 463
+    assert len({row["ts"] for row in rows}) == 1, "one window is one snapshot_time"
     for row in rows:
         assert row["cluster_id"] == "docdb-a"
-        assert row["ts"] == fin["ts"]
         assert len(row["query_hash"]) <= 64  # query_stats.query_hash is VARCHAR(64)
+        # Deliberately NOT the finding's run_ts (it was, before the accumulation
+        # was made idempotent). A query_stats row is stamped with the grid-aligned
+        # WINDOW END, because that is the idempotency key a retry has to re-derive,
+        # and run_ts differs between a run and its retry. Asserted without knowing
+        # the test's own clock: a window end is always exactly (interval - lag)
+        # into its 5-minute grid cell, and it is always in the past.
+        assert row["ts"] != fin["ts"]
+        row_ms = int(datetime.fromisoformat(row["ts"]).timestamp() * 1000)
+        assert row_ms % (5 * 60_000) == (5 - h.PROFILER_DELIVERY_LAG_MIN) * 60_000
+        assert row_ms < int(datetime.fromisoformat(fin["ts"]).timestamp() * 1000)
 
 
 def test_query_stats_rows_are_readable_by_the_existing_readers():
@@ -977,3 +989,138 @@ def test_both_documentdb_findings_writers_stay_disjoint_and_share_one_snapshot()
             "docdb_mongo_profiler_off", "docdb_mongo_profiler_read_failed"}
     for check_type in mine:
         assert f'"{check_type}"' not in other, f"{check_type} written by both writers"
+
+
+# ---------------------------------------------------------------------------
+# Idempotency of the query_stats accumulation.
+#
+# These tests EXECUTE the collector's own accumulate statement (stdlib sqlite3,
+# in memory) instead of recording it, because what has to hold is a property of
+# the STATEMENT: re-reading one window must not add its totals twice. A
+# recording fake can only assert the SQL text, which is how the double count got
+# through the first review of ee0a63c.
+# ---------------------------------------------------------------------------
+
+_SQLITE_QUERY_STATS = (
+    "CREATE TABLE query_stats (cluster_id TEXT, snapshot_time TEXT, "
+    "query_hash TEXT, query_text TEXT, calls INTEGER, total_time_ms REAL, "
+    "mean_time_ms REAL, rows_returned INTEGER)"
+)
+
+_MID_CELL_MS = 1_000_000_000_000 + 137_000  # deliberately NOT on the interval grid
+_STEP_MS = 5 * 60_000
+
+
+def _sqlite_cache(conn):
+    """cache_execute backed by sqlite3, running the collector's REAL sql string.
+
+    Only the Postgres-only cast is stripped (`::timestamptz`); the accumulate
+    expression and its guard run verbatim, so weakening either changes what these
+    tests measure. Writes aimed at the other tables are dropped: this fake models
+    query_stats only."""
+
+    def cache_execute(sql, params):
+        if "query_stats" not in sql:
+            return
+        conn.execute(sql.replace("::timestamptz", ""), params)
+
+    return cache_execute
+
+
+def _profiler_pass(cache_execute, run_ts, now_ms, entries, cluster_id="docdb-a"):
+    """One profiler pass exactly as lambda_handler calls it, with the clock pinned
+    so a second pass can be aimed at the same window."""
+    session = _FakeSession(
+        docdb=_FakeDocDB(),
+        logs=_FakeLogs(pages=[{"events": [_event(e) for e in entries]}]),
+    )
+    return h.collect_profiler(session, cache_execute, cluster_id, run_ts, now_ms=now_ms)
+
+
+def _stats_rows(conn):
+    return conn.execute(
+        "SELECT snapshot_time, calls, total_time_ms, mean_time_ms, rows_returned "
+        "FROM query_stats ORDER BY snapshot_time, query_text"
+    ).fetchall()
+
+
+def _window_end_iso(now_ms):
+    """The window end as an ISO timestamp, derived here INDEPENDENTLY of the
+    handler's own conversion so the assertion is on the value, not on a shared
+    helper."""
+    end_ms = h.profiler_window_ms(now_ms, 5)[1]
+    return datetime.fromtimestamp(end_ms / 1000, timezone.utc).isoformat()
+
+
+def _two_events():
+    """Two ops of the SAME shape: calls 2, total 600ms, mean 300ms."""
+    return [dict(_DOC_PROFILER_ENTRY, millis=137), dict(_DOC_PROFILER_ENTRY, millis=463)]
+
+
+def test_the_same_window_read_twice_advances_the_counters_once():
+    """The real failure mode is a SEQUENTIAL retry, not concurrency: EventBridge
+    delivery is at-least-once and an async Lambda invocation retries twice by
+    default, so a second pass lands in the same interval grid cell, derives the
+    SAME window and re-reads the SAME profiler events.
+
+    Unguarded, pass 1 writes prev+W and pass 2 reads prev+W as its own prev and
+    writes prev+2W. The inflation is permanent, and every reader of query_stats is
+    written against monotonic counters (api/dashboard _slow_queries /
+    _query_detail / _workload_diff, api/alerts, report_generator, and the LAG-delta
+    query_regression collector, which would publish a regression that never
+    happened)."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute(_SQLITE_QUERY_STATS)
+    cache = _sqlite_cache(conn)
+
+    # First-ever window for this (cluster_id, query_hash): no previous row, and a
+    # row still has to land, carrying this window's own totals.
+    first = _profiler_pass(cache, "2026-06-12T00:00:07+00:00", _MID_CELL_MS, _two_events())
+    assert first["query_stats_rows"] == 1
+    expected = [(_window_end_iso(_MID_CELL_MS), 2, 600.0, 300.0, 0)]
+    assert _stats_rows(conn) == expected, (
+        "snapshot_time must be the grid-aligned WINDOW END, which is the only value "
+        "a retry re-derives; run_ts differs between a run and its retry"
+    )
+
+    # The retry: 41 s later, still inside the same grid cell, different run_ts.
+    _profiler_pass(cache, "2026-06-12T00:00:48+00:00", _MID_CELL_MS + 41_000, _two_events())
+    assert (_MID_CELL_MS + 41_000) // _STEP_MS == _MID_CELL_MS // _STEP_MS, (
+        "fixture must keep both passes in ONE grid cell, or they read two windows"
+    )
+    assert _stats_rows(conn) == expected, (
+        "a re-read of the same window must not add its totals a second time"
+    )
+
+
+def test_two_different_windows_still_accumulate_both():
+    """The guard must not block legitimate progress. Consecutive runs read ADJACENT
+    windows, so the second window is a different snapshot_time and its totals go on
+    top, and the regression collector's LAG delta still recovers the per-window
+    mean from the cumulative pair."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute(_SQLITE_QUERY_STATS)
+    cache = _sqlite_cache(conn)
+
+    _profiler_pass(cache, "2026-06-12T00:00:07+00:00", _MID_CELL_MS, _two_events())
+    _profiler_pass(cache, "2026-06-12T00:05:07+00:00", _MID_CELL_MS + _STEP_MS, _two_events())
+
+    rows = _stats_rows(conn)
+    assert [r[0] for r in rows] == [
+        _window_end_iso(_MID_CELL_MS), _window_end_iso(_MID_CELL_MS + _STEP_MS)
+    ]
+    assert [r[1] for r in rows] == [2, 4], rows          # calls, cumulative
+    assert [r[2] for r in rows] == [600.0, 1200.0], rows  # total_time_ms, cumulative
+
+    # What the LAG-delta reader gets out of those two rows: 2 calls, 300ms mean.
+    delta = conn.execute(
+        "SELECT (calls - prev_calls) AS d_calls, "
+        "       (total_time_ms - prev_total) / (calls - prev_calls) AS interval_mean "
+        "FROM (SELECT calls, total_time_ms, "
+        "             LAG(calls) OVER w AS prev_calls, "
+        "             LAG(total_time_ms) OVER w AS prev_total "
+        "      FROM query_stats "
+        "      WINDOW w AS (PARTITION BY query_hash ORDER BY snapshot_time)) o "
+        "WHERE prev_calls IS NOT NULL"
+    ).fetchall()
+    assert delta == [(2, 300.0)], delta

@@ -178,6 +178,10 @@ def _insert_metric(cache_execute, cluster_id, ts, metric_type, value):
 # therefore the lifetime mean, exactly like the other three writers.
 # The LEFT JOIN over a one-row source is what makes the first-ever window insert
 # (no previous row) still produce a row instead of selecting nothing.
+#
+# :ts is the grid-aligned WINDOW END, never the run timestamp, and the WHERE NOT
+# EXISTS at the bottom is what makes an accumulating write idempotent. Read the
+# two together: they are one mechanism.
 _QUERY_STATS_ACCUMULATE = (
     "INSERT INTO query_stats "
     "(cluster_id, snapshot_time, query_hash, query_text, calls, total_time_ms, "
@@ -193,11 +197,38 @@ _QUERY_STATS_ACCUMULATE = (
     "  SELECT calls, total_time_ms, rows_returned FROM query_stats "
     "  WHERE cluster_id = :cluster_id AND query_hash = :query_hash "
     "  ORDER BY snapshot_time DESC LIMIT 1"
-    ") p ON TRUE"
+    ") p ON TRUE "
+    # WATERMARK, and the row this window already wrote IS the watermark.
+    # EventBridge delivery is at-least-once and an async Lambda invocation retries
+    # twice by default, so the same grid-aligned window gets read twice in NORMAL
+    # operation: pass 1 writes prev + W, and unguarded pass 2 reads prev + W as its
+    # own prev and writes prev + 2W. The inflation is permanent, because every
+    # reader treats these counters as monotonic, and the LAG-delta query_regression
+    # collector would publish the jump as a regression that never happened.
+    #
+    # Chosen over a UNIQUE (cluster_id, query_hash, snapshot_time) constraint plus
+    # ON CONFLICT DO NOTHING for two measured reasons: (1) the retry is SEQUENTIAL,
+    # so a plain existence check catches it, and (2) that constraint would sit on a
+    # table three other collectors INSERT into with no ON CONFLICT clause
+    # (stats_collector, mysql_query_stats, mssql_query_stats), turning any
+    # collision of theirs into a raised statement. It also needs no migration.
+    #
+    # Per (cluster_id, query_hash, window), not per cluster, so a retry after a
+    # partially-written run still fills in the shapes the first pass never reached.
+    # NOT a lock: two EXACTLY concurrent passes both miss each other's row and both
+    # write prev + W, which is still this window counted once (one duplicate row
+    # whose delta to its twin is 0).
+    "WHERE NOT EXISTS ("
+    "  SELECT 1 FROM query_stats "
+    "  WHERE cluster_id = :cluster_id AND query_hash = :query_hash "
+    "    AND snapshot_time = :ts::timestamptz"
+    ")"
 )
 
 
 def _insert_query_stats(cache_execute, cluster_id, ts, shape):
+    """`ts` MUST be the window end (see collect_profiler), not the run timestamp:
+    it is both the row's snapshot_time and the idempotency key."""
     cache_execute(_QUERY_STATS_ACCUMULATE, {
         "cluster_id": cluster_id,
         "ts": ts,
@@ -831,13 +862,24 @@ def collect_profiler(session, cache_execute, cluster_id, run_ts, now_ms=None):
         return result
 
     shapes = aggregate_profiler_records(records)
+    # query_stats rows are stamped with the WINDOW END, not run_ts, and that is
+    # load bearing: it is the idempotency key the accumulate statement's guard
+    # checks. The window is grid aligned, so a retry re-derives the same value and
+    # sees its own earlier row; run_ts differs between a run and its retry, so a
+    # key built on it would never match and the counters would double. It is also
+    # the more truthful timestamp for these rows: it is when the ops ran, not when
+    # the Lambda got around to reading them. Findings keep run_ts (the freshness
+    # window from 67d1c3e is built on one snapshot_time per cycle).
+    window_ts = datetime.fromtimestamp(end_ms / 1000, timezone.utc).isoformat()
     persisted = 0
     for shape in shapes[:SHAPES_PERSISTED]:
         try:
-            _insert_query_stats(cache_execute, cluster_id, run_ts, shape)
+            _insert_query_stats(cache_execute, cluster_id, window_ts, shape)
             persisted += 1
         except Exception as e:
             print(f"[docdb_mongo] {cluster_id} query_stats write failed: {e}")
+    # Statements issued, not rows landed: a re-read of an already-applied window
+    # inserts nothing, and the Data API response is not read back to tell.
     result["query_stats_rows"] = persisted
 
     finding = build_slow_ops_finding(
