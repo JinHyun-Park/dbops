@@ -107,6 +107,14 @@ export default function TimelinePage() {
   // so empty buckets don't render as dead UI.
   const presentCategories = useMemo(() => data?.categories || [], [data]);
 
+  // A signal stream whose query FAILED. Without this the schema_change category
+  // is simply ABSENT when schema_snapshots cannot be read, and an absent
+  // category on a timeline reads as "that did not happen during the incident",
+  // which is exactly the bug the API's degraded_sources exists to prevent. The
+  // API has emitted it since the schema_v26 tier; nothing in the frontend read
+  // it, so the operator saw the original defect either way.
+  const degraded = data?.degraded_sources ?? [];
+
   const visibleItems = useMemo(() => {
     if (!data) return [];
     if (filterIn.size === 0) return data.items;
@@ -161,6 +169,23 @@ export default function TimelinePage() {
         </div>
       )}
 
+      {/* Rendered whether or not the list is empty: with other signals present
+          the operator has no reason to suspect a stream is missing entirely. */}
+      {degraded.length > 0 && (
+        <div className="mb-4 px-3 py-2 border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs">
+          <div>
+            읽지 못한 signal:{" "}
+            <span className="font-mono">{degraded.join(", ")}</span>
+          </div>
+          <div className="text-amber-200/70 mt-1 leading-relaxed">
+            아래 타임라인에 이 category가 없는 것은 발생하지 않았다는 뜻이
+            아니라, 조회에 실패해 확인하지 못했다는 뜻입니다.
+            {degraded.includes("schema_change") &&
+              " schema_change는 schema_snapshots에서 읽습니다: cache DB에 schema_v26 마이그레이션이 적용됐는지 확인하세요."}
+          </div>
+        </div>
+      )}
+
       {/* Category filter chips */}
       {presentCategories.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 mb-5">
@@ -205,11 +230,20 @@ export default function TimelinePage() {
       ) : !data || visibleItems.length === 0 ? (
         <EmptyState
           eyebrow="timeline"
-          title="이 윈도우에 신호가 없습니다"
+          title={
+            degraded.length > 0
+              ? "확인하지 못한 signal이 있습니다"
+              : "이 윈도우에 신호가 없습니다"
+          }
           description={
             filterIn.size > 0
               ? "현재 필터에 매칭되는 신호가 없습니다. clear 를 눌러 전체를 보세요."
-              : "이 cluster에서 최근 발생한 알림, RDS 이벤트, 스키마 변경, 승인 실행이 없습니다. 윈도우를 늘려보세요."
+              : degraded.length > 0
+                ? // Never state the negative the data cannot support: with a
+                  // stream unread, "아무 일도 없었다" is a claim about signals
+                  // nobody looked at.
+                  "읽을 수 있었던 signal에는 이 윈도우에 아무것도 없습니다. 위에 표시된 signal은 조회에 실패해 확인하지 못했습니다."
+                : "이 cluster에서 최근 발생한 알림, RDS 이벤트, 스키마 변경, 승인 실행이 없습니다. 윈도우를 늘려보세요."
           }
           secondary={{
             href: `/dashboard?cluster=${clusterId}`,

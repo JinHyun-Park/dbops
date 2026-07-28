@@ -49,20 +49,74 @@ const COLLECTION_CHIP: Record<string, { label: string; ok: boolean }> = {
   no_data: { label: "수집 기록 없음", ok: false },
 };
 
-// The empty list means something different in each of these states, and only
-// the first one is an absence of change.
-const EMPTY_STATE: Record<string, { title: string; tone: string }> = {
-  no_changes: { title: "이 구간에서 감지된 변경 없음", tone: "text-zinc-400" },
-  not_collected: {
-    title: "수집 이력이 없어 변경 여부를 판정할 수 없음",
-    tone: "text-amber-300",
-  },
-  insufficient_history: {
-    title: "비교 가능한 이력이 부족해 변경 여부를 판정할 수 없음",
-    tone: "text-amber-300",
-  },
-  ok: { title: "이 구간에서 감지된 변경 없음", tone: "text-zinc-400" },
-};
+// The verdict an EMPTY list carries. One branch per top-level `status`, written
+// as an if-chain rather than the lookup table this used to be: a table key is
+// indistinguishable from a comment or a type to a source-parsing guard, so the
+// whole operator-facing half of this panel could be deleted with the suite
+// green. tests/unit/api/test_schema_changes_panel_states.py parses these guards,
+// asserts which branch each status REACHES, and holds the state matrix that
+// api/dashboard/handler.py documents beside its `status` derivation.
+// Order is not load-bearing: the guards are mutually exclusive equality tests on
+// one field.
+function EmptyVerdict({ d }: { d: SchemaChangesResponse }) {
+  const measured = (
+    <div className="text-[11px] text-zinc-500 mt-1 tabular-nums">
+      DDL 비교 {d.ddl_detection?.schemas_compared ?? 0}개 schema · 행 수 비교{" "}
+      {d.row_deltas?.tables_compared ?? 0}개 table
+    </div>
+  );
+  if (d.status === "no_changes") {
+    // The ONLY branch that may read as an absence of change: every source
+    // compared, across every schema it holds.
+    return (
+      <div className="p-6 text-sm">
+        <div className="text-zinc-400">이 구간에서 감지된 변경 없음</div>
+        {measured}
+      </div>
+    );
+  }
+  if (d.status === "partial") {
+    return (
+      <div className="p-6 text-sm">
+        <div className="text-amber-300">
+          일부 신호만 판정됨: 변경 없음이라고 볼 수 없음
+        </div>
+        {measured}
+      </div>
+    );
+  }
+  if (d.status === "not_collected") {
+    return (
+      <div className="p-6 text-sm">
+        <div className="text-amber-300">
+          수집 이력이 없어 변경 여부를 판정할 수 없음
+        </div>
+      </div>
+    );
+  }
+  if (d.status === "insufficient_history") {
+    return (
+      <div className="p-6 text-sm">
+        <div className="text-amber-300">
+          비교 가능한 이력이 부족해 변경 여부를 판정할 수 없음
+        </div>
+      </div>
+    );
+  }
+  // Deploy skew. This is a static export, so it can meet a payload from an api
+  // Lambda newer than itself. An unrecognised status is UNKNOWN, never a clean
+  // bill of health: that is the difference from the anomalies panel, where the
+  // old API predated the field entirely and degrading to the neutral copy was
+  // the deliberate choice.
+  return (
+    <div className="p-6 text-sm">
+      <div className="text-amber-300">
+        변경 여부를 판정할 수 없음 (알 수 없는 응답 상태)
+      </div>
+      {measured}
+    </div>
+  );
+}
 
 function Chip({ label, ok }: { label: string; ok: boolean }) {
   return (
@@ -191,7 +245,6 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
   const ddl = data?.ddl_detection;
   const renames = ddl?.rename_candidates ?? [];
   const shown = changes.length + renames.length;
-  const empty = EMPTY_STATE[data?.status ?? "no_changes"] ?? EMPTY_STATE.ok;
   // The frontend is a static export deployed separately from the API Lambda, so
   // it can meet a payload predating these fields. Unknown, never "ok".
   const coll = data?.collection;
@@ -237,15 +290,7 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
       ) : (
         <>
           {shown === 0 ? (
-            <div className="p-6 text-sm">
-              <div className={empty.tone}>{empty.title}</div>
-              {data.status === "no_changes" && (
-                <div className="text-[11px] text-zinc-500 mt-1 tabular-nums">
-                  DDL 비교 {ddl?.schemas_compared ?? 0}개 schema · 행 수 비교{" "}
-                  {data.row_deltas?.tables_compared ?? 0}개 table
-                </div>
-              )}
-            </div>
+            <EmptyVerdict d={data} />
           ) : (
             <div className="divide-y divide-zinc-700">
               {changes.map((c, i) => (

@@ -21,9 +21,24 @@ stopped entirely returns ZERO rows, which the panel renders identically to
 "nothing changed" (baseline and latest collapse onto the same row, so the delta
 is 0 and every row is filtered out).
 
+Section 9 adds the STATE MATRIX: the cells a real server can produce, driven by
+the shipped statements and followed through the panel's parsed branch chain to the
+sentence an operator reads. The full cross-product of the four signals lives in
+tests/unit/api/test_schema_changes_panel_states.py, which also holds the panel
+model this file imports.
+
 ENGINE: PostgreSQL from the local install. The production DDL in
 data-pipeline/schema_migrator/sql/ is applied in the migrator's own numeric
 order. Skipped, not faked, when no initdb/pg_ctl/psql is on the machine.
+
+The port comes from the KERNEL. It used to be `56000 + os.getpid() % 3000`, and
+the guess was MEASURED to fail: with that port held by anything else, pg_ctl start
+raises before the fixture yields, so the try/finally never runs and the datadir is
+left behind for the next run to trip over. Observed on this machine, one process
+squatting the computed port: `pg_ctl: could not start server`, datadir still
+present after the raise; the kernel-assigned port started normally under the same
+squatter. Two concurrent runs of this module then pass (32 + 32) and leave no
+datadir and no postmaster behind.
 """
 
 import importlib.util
@@ -31,6 +46,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -60,6 +76,15 @@ _spec.loader.exec_module(handler)
 
 from collectors.schema_snapshot import collect_pg_schema_snapshot  # noqa: E402
 
+# The panel's branch chain, parsed once there and reused here so a real DDL event
+# on a real engine is followed all the way to the sentence an operator reads.
+# Importing rather than re-parsing keeps ONE model of the panel: two copies drift,
+# and a drifted copy is how "the fix stops at the API boundary" survives a suite.
+from tests.unit.api.test_schema_changes_panel_states import (  # noqa: E402
+    _NEUTRAL,
+    panel_verdict,
+)
+
 _SEARCH = [
     "",  # PATH
     "/opt/homebrew/opt/postgresql@14/bin",
@@ -87,15 +112,33 @@ pytestmark = pytest.mark.skipif(
     reason="no local PostgreSQL (initdb/pg_ctl/psql), real-engine test skipped",
 )
 
-# Own port + own data dir, BOTH derived from the PID. A hardcoded port and a
-# fixed datadir meant a second pytest process (or an aborted run whose
-# postmaster was still up) collided on both: the rmtree below deleted the data
-# directory out from under a live postmaster, and every test in the module then
-# ERRORed on fixture setup. Two of these harnesses did exactly that and produced
-# 34 fixture errors that were written off as flake.
-# 56000+ keeps clear of the schema_snapshot harness's fixed 55433.
-_PORT = str(56000 + os.getpid() % 3000)
+def _free_port():
+    """Ask the KERNEL. `56000 + os.getpid() % 3000` was a guess: whatever already
+    holds that port reproduces the exact cascade this harness family was fixed
+    for, and it does not self-heal, because pg_ctl start raises BEFORE the fixture
+    yields, so the try/finally never runs and the datadir is left behind for the
+    next run to trip over. Same as tests/unit/data_pipeline/
+    test_schema_snapshot_real_pg.py, which solved it properly first."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return str(s.getsockname()[1])
+
+
+_PORT = _free_port()
+# PID-scoped: two concurrent runs must not share one datadir, and the teardown of
+# one must not delete the datadir the other is still serving from.
 _PGDATA = os.path.join(tempfile.gettempdir(), f"dbops_schema_changes_pg_{os.getpid()}")
+
+
+def _stop_and_remove():
+    """Stop FIRST, then remove. rmtree under a live postmaster leaves it running
+    on a datadir that no longer exists, and every later fixture in the process
+    then fails to start: 34 fixture ERRORs once got written off as flake. Called
+    on setup as well as teardown, which is the only self-healing there is for a
+    run that died before its finally."""
+    subprocess.run([_PGCTL, "-D", _PGDATA, "-m", "immediate", "stop"],
+                   capture_output=True)
+    shutil.rmtree(_PGDATA, ignore_errors=True)
 
 # `:name` binds, but NOT the `::type` cast that follows one.
 _BIND = re.compile(r"(?<!:):([a-z_][a-z0-9_]*)")
@@ -177,11 +220,7 @@ def _cache_execute(api):
 
 @pytest.fixture(scope="module")
 def pg():
-    # Self-healing: stop whatever a previous aborted run left behind BEFORE
-    # removing its datadir. Deleting the directory under a live postmaster is
-    # how this harness family produced "flaky" fixture errors.
-    subprocess.run([_PGCTL, "-D", _PGDATA, "-m", "immediate", "stop"], capture_output=True)
-    shutil.rmtree(_PGDATA, ignore_errors=True)
+    _stop_and_remove()
     os.makedirs(_PGDATA, exist_ok=True)
     subprocess.run([_INITDB, "-D", _PGDATA, "-U", "dbops", "--auth=trust"],
                    check=True, capture_output=True)
@@ -220,8 +259,7 @@ def pg():
                                                                      "schema_snapshots"]]
         yield srv
     finally:
-        subprocess.run([_PGCTL, "-D", _PGDATA, "-m", "immediate", "stop"], capture_output=True)
-        shutil.rmtree(_PGDATA, ignore_errors=True)
+        _stop_and_remove()
 
 
 # The SHIPPED-BEFORE statement, verbatim. Executed against the same rows as the
@@ -467,9 +505,14 @@ def test_table_stats_only_cluster_cannot_claim_no_ddl(pg):
     assert got["ddl_detection"]["status"] == "not_collected"
     assert got["ddl_detection"]["schemas_compared"] == 0
     assert "DDL 변경이 없다는 뜻이 아닙니다" in got["note"]
-    # A real negative for what IS measurable, so not "not_collected" overall.
-    assert got["status"] == "no_changes"
+    # `partial`, not `no_changes`: row deltas are a real negative, DDL is silence,
+    # and the HEADLINE has to carry that. It used to be "no_changes", so the
+    # sentence an operator read on a cluster whose DDL nobody could judge was
+    # "이 구간에서 감지된 변경 없음". Measured: status was `no_changes` here before
+    # the ddl_complete change and is `partial` after.
+    assert got["status"] == "partial"
     assert got["changes"] == []
+    assert _NEUTRAL not in panel_verdict(got)
     # The row-delta cap is stated, never implied.
     assert "상위 100개" in got["note"]
 
@@ -811,22 +854,18 @@ _PANEL = _ROOT / "frontend" / "src" / "components" / "dashboard" / "schema-chang
 _HONESTY_FIELDS = ("status", "note", "ddl_detection", "row_deltas", "collection")
 
 
-def test_panel_renders_the_fields_that_qualify_an_empty_list(pg):
-    src = _PANEL.read_text()
+def test_the_payload_still_carries_every_field_the_panel_branches_on(pg):
+    """The SERVER half of the contract. The panel half is not a substring search
+    for these names: `assert field in src` passes on a comment, a type or a dead
+    map key, which is how the whole operator-facing half of the previous round
+    could have been deleted with the suite green. It lives in
+    tests/unit/api/test_schema_changes_panel_states.py, where the branch a status
+    REACHES is parsed, and is mutation-checked there."""
     got = handler._schema_changes(pg.query, "never-collected-1", 7)
     for field in _HONESTY_FIELDS:
         assert field in got, f"{field} missing from the payload"
-        assert field in src, (
-            f"schema-changes-panel.tsx never reads `{field}`, so the API's "
-            "qualification of an empty list cannot reach the operator"
-        )
-    # The empty state must BRANCH on status. The unqualified sentence the two
-    # commits exist to delete was the whole empty state before this.
-    assert "감지된 스키마 변경 없음" not in src, "the unqualified empty state is back"
-    for state in ("no_changes", "not_collected", "insufficient_history"):
-        assert state in src, f"the panel has no empty state for status={state}"
-    for ddl_state in ("baseline_only", "outside_window", "unavailable"):
-        assert ddl_state in src, f"the panel cannot show ddl_detection={ddl_state}"
+    assert "감지된 스키마 변경 없음" not in _PANEL.read_text(), (
+        "the unqualified empty state is back")
 
 
 def test_unknown_row_count_is_not_rendered_as_zero(pg):
@@ -847,5 +886,160 @@ def test_unknown_row_count_is_not_rendered_as_zero(pg):
     row = [c for c in got["changes"] if c["table_name"] == "small_new"]
     assert row and row[0]["current_rows"] is None, got["changes"]
 
+    # Not `"행 수 미상" in src`: that passes on the const declaration alone. The
+    # null branch of RowCount is sliced out and asserted to be the thing that
+    # renders it, and the numeric path asserted NOT to.
     src = _PANEL.read_text()
-    assert "행 수 미상" in src, "the panel has no rendering for an unknown row count"
+    body = src[src.index("function RowCount("):src.index("\nfunction ChangeRow(")]
+    null_branch = body[body.index("if (value === null) {"):body.index("\n  }")]
+    assert "{UNKNOWN_ROWS}" in null_branch, null_branch
+    assert "table_stats는 매 주기 상위 100개" in null_branch, "the null branch lost its why"
+    numeric = body[body.index("\n  }"):]
+    assert "{UNKNOWN_ROWS}" not in numeric
+    assert "fmtNumber(value)" in numeric, numeric
+    assert 'const UNKNOWN_ROWS = "행 수 미상";' in src
+
+
+# ===========================================================================
+# 9. THE STATE MATRIX, DRIVEN BY THE SHIPPED SQL ON THIS SERVER
+# ===========================================================================
+# tests/unit/api/test_schema_changes_panel_states.py enumerates the full
+# cross-product of the four signals over a fake `query`, because a real engine
+# cannot be coerced into `ddl=unavailable` or `ok-with-one-blind-schema` without a
+# dozen fixtures. What it CANNOT do is notice that the reader's SQL does not
+# parse, or that PostgreSQL resolves the pair differently from the way the fake
+# hands rows back. So the cells a real server can produce are produced here, by
+# the SHIPPED statements against real rows, and the signal tuple is compared
+# against the SAME expectation the enumeration uses.
+#
+# Rows go in through INSERT rather than through the collector for these cells on
+# purpose: the collector is store-on-change and snapshots EVERY visible schema,
+# so it cannot be steered into "three snapshots of one schema whose endpoints
+# match" without every other schema left behind by an earlier test in this module
+# turning up as baseline_only. The producer has its own end-to-end coverage in
+# sections 1-7 above; what is under test HERE is the reader's pair resolution and
+# the derivation on top of it.
+
+_MX = "mx"  # schema used by the matrix cells
+
+
+def _mx_setup(pg, cid, snaps, stats):
+    pg.raw(f"DROP SCHEMA IF EXISTS {_MX} CASCADE; CREATE SCHEMA {_MX}")
+    for hours_ago, tables in snaps:
+        _snap(pg, cid, _MX, hours_ago, {t: ["id"] for t in tables}, {})
+    for table, rows, age_days in stats:
+        _stat(pg, cid, table, rows, age_days, schema=_MX)
+
+
+def _signals(p):
+    return (p["status"], p["ddl_detection"]["status"], p["row_deltas"]["status"],
+            p["collection"]["status"])
+
+
+# (cell id, snapshots [(hours ago, tables)], table_stats [(table, rows, days ago)],
+#  expected signal tuple, phrase the panel must show, phrases it must not)
+_H = 24.0
+_CELLS = [
+    ("never_collected", [], [],
+     ("not_collected", "not_collected", "no_data", "no_data"),
+     "수집 이력이 없어", [_NEUTRAL]),
+
+    ("snapshots_entirely_outside_the_window",
+     [(60 * _H, ["a"]), (40 * _H, ["a", "b"])], [("t", 10, 60), ("t", 20, 40)],
+     ("insufficient_history", "outside_window", "insufficient_history", "stale"),
+     "비교 가능한 이력이 부족해", [_NEUTRAL]),
+
+    ("snapshots_outside_the_window_but_rows_compare",
+     [(60 * _H, ["a"]), (40 * _H, ["a", "b"])], [("t", 1000, 10), ("t", 1000, 0)],
+     ("partial", "outside_window", "ok", "fresh"),
+     "일부 신호만 판정됨", [_NEUTRAL]),
+
+    ("stale_collection_with_a_real_change",
+     [(10 * _H, ["a"]), (2 * _H, ["a", "b"])], [("t", 1000, 10), ("t", 1000, 2)],
+     ("ok", "ok", "ok", "stale"), None, None),
+
+    ("stale_collection_with_no_changes",
+     [(10 * _H, ["a"]), (5 * _H, ["a", "b"]), (2 * _H, ["a"])],
+     [("t", 1000, 10), ("t", 1000, 2)],
+     ("no_changes", "ok", "ok", "stale"), _NEUTRAL, ["일부 신호만 판정됨"]),
+
+    ("fresh_with_no_changes",
+     [(10 * _H, ["a"]), (5 * _H, ["a", "b"]), (0.2, ["a"])],
+     [("t", 1000, 10), ("t", 1000, 0)],
+     ("no_changes", "ok", "ok", "fresh"), _NEUTRAL, ["일부 신호만 판정됨"]),
+]
+
+
+@pytest.mark.parametrize("cell", _CELLS, ids=[c[0] for c in _CELLS])
+def test_matrix_cell_on_a_real_engine(pg, cell):
+    cid, snaps, stats, expected, phrase, forbidden = cell
+    _mx_setup(pg, f"mx-{cid}", snaps, stats)
+    got = handler._schema_changes(pg.query, f"mx-{cid}", 7)
+    assert _signals(got) == expected, got
+    if phrase:
+        jsx = panel_verdict(got)
+        assert phrase in jsx, (cid, jsx)
+        for bad in forbidden or ():
+            assert bad not in jsx, (cid, bad)
+
+
+def test_the_cache_db_without_schema_v26_is_its_own_cell(pg):
+    """The one cell whose trigger is a FAILING read, so it needs the wrapper
+    rather than rows. Same tuple the enumeration expects."""
+    cid = "mx-no-v26"
+    _mx_setup(pg, cid, [], [("t", 1000, 10), ("t", 1000, 0)])
+
+    def query(sql, params=None):
+        if "schema_snapshots" in sql:
+            raise RuntimeError('relation "schema_snapshots" does not exist')
+        return pg.query(sql, params)
+
+    got = handler._schema_changes(query, cid, 7)
+    assert _signals(got) == ("partial", "unavailable", "ok", "fresh"), got
+    assert "일부 신호만 판정됨" in panel_verdict(got)
+    assert _NEUTRAL not in panel_verdict(got)
+    assert "schema_v26" in got["note"]
+
+
+def test_every_matrix_cell_reads_differently_from_every_other(pg):
+    """The property three passes over this surface kept losing: two cells that
+    render the same thing. Compared as (signal tuple, headline sentence) so a cell
+    cannot be distinguished only in a field nobody renders."""
+    seen = {}
+    cells = list(_CELLS) + [("no_v26", None, None, None, None, None)]
+    for cid, snaps, stats, _e, _p, _f in cells:
+        if cid == "no_v26":
+            _mx_setup(pg, "mx-no-v26", [], [("t", 1000, 10), ("t", 1000, 0)])
+
+            def query(sql, params=None):
+                if "schema_snapshots" in sql:
+                    raise RuntimeError("no relation")
+                return pg.query(sql, params)
+            got = handler._schema_changes(query, "mx-no-v26", 7)
+        else:
+            _mx_setup(pg, f"mx-{cid}", snaps, stats)
+            got = handler._schema_changes(pg.query, f"mx-{cid}", 7)
+        head = None if got["changes"] else re.search(
+            r'<div className="text-(?:zinc-400|amber-300)">(.*?)</div>',
+            panel_verdict(got)).group(1).strip()
+        key = (_signals(got), head)
+        assert key not in seen, f"{cid} is indistinguishable from {seen[key]}: {key}"
+        seen[key] = cid
+    assert len(seen) == 7
+
+
+def test_no_changes_is_reachable_against_a_real_server(pg):
+    """`no_changes` now requires ddl_complete AND rows ok. A guard whose licensing
+    state cannot be reached is the pass-3 defect, so it is DRIVEN here, not read:
+    a window that opens and closes on the same table set, with row deltas under
+    the threshold and collection fresh."""
+    cid = "mx-reachable"
+    _mx_setup(pg, cid, [(10 * _H, ["a"]), (5 * _H, ["a", "b"]), (0.2, ["a"])],
+              [("t", 1000, 10), ("t", 1000, 0)])
+    got = handler._schema_changes(pg.query, cid, 7)
+    assert got["status"] == "no_changes", got
+    assert got["ddl_detection"]["schemas_compared"] == 1
+    assert got["ddl_detection"]["baseline_only_schemas"] == []
+    assert got["ddl_detection"]["outside_window_schemas"] == []
+    assert got["row_deltas"]["tables_compared"] == 1
+    assert _NEUTRAL in panel_verdict(got)

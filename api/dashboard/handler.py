@@ -2214,6 +2214,55 @@ _SC_ROW_DELTA_CAP = (
     "행 수 증감은 table_stats 기준이며, 이 수집기는 매 주기 상위 100개 테이블만 "
     "기록합니다. 상위 100개 밖의 테이블은 증감 판정 대상이 아닙니다."
 )
+_SC_PARTIAL = (
+    "두 신호 중 일부만 판정됐습니다. 아래 칩에서 판정되지 않은 신호를 확인하세요. "
+    "판정되지 않은 쪽은 변경이 없다는 뜻이 아닙니다."
+)
+
+# THE STATE MATRIX. Four INDEPENDENT signals feed this panel, and three passes
+# over this surface each fixed one cell and broke or missed another, so the
+# enumeration lives here rather than in a review comment.
+#
+#   fetch       ok | failed              (failed never reaches this function:
+#                                         the PANEL owns that cell, and
+#                                         schema-changes-panel.tsx renders it as
+#                                         its own error branch)
+#   ddl         ok | ok+blind | not_collected | baseline_only | outside_window
+#               | unavailable            ddl_detection.status; "ok+blind" is
+#                                        status ok with a non-empty
+#                                        baseline_only_schemas /
+#                                        outside_window_schemas, i.e. SOME
+#                                        schema was not compared
+#   rows        ok | insufficient_history | no_data          row_deltas.status
+#   collection  fresh | stale | no_data                      collection.status
+#
+# The top-level `status` is the HEADLINE, and it exists to stop an empty
+# `changes` list reading as "nothing changed". Its whole contract is:
+#
+#   ok                    something changed. The list is the answer.
+#   no_changes            EVERY applicable source compared, across EVERY schema
+#                         it holds, and found nothing. The only cell that
+#                         licenses "no changes".
+#   partial               at least one source compared and at least one could
+#                         not (or could not for every schema). A real negative
+#                         for part of the question and silence for the rest.
+#   insufficient_history  NOTHING compared, but rows exist somewhere.
+#   not_collected         nothing has ever been collected for this cluster.
+#
+# `partial` is what FINDING 3 of the fourth review pass is about: with
+# ddl=outside_window and rows=ok the old derivation hit
+# `elif ddl_status == "ok" or rows_status == "ok"` and headlined "no_changes",
+# so the schema whose entire history predates the window was reported to the
+# operator as an unchanged schema. It is deliberately NOT special-cased to
+# outside_window: ddl=ok-with-blind-schemas, ddl=baseline_only+rows=ok,
+# ddl=unavailable+rows=ok and ddl=ok+rows=insufficient_history are the same
+# defect in a different cell, and special-casing one is how the previous three
+# passes relocated this bug.
+#
+# tests/unit/api/test_schema_changes_panel_states.py holds the machine-readable
+# copy of this matrix and asserts each cell reaches a DISTINCT sentence in the
+# panel; the real-engine cells are driven end to end in
+# tests/unit/api/test_dashboard_schema_changes_real_pg.py.
 
 
 def _schema_changes(query, cluster_id, days):
@@ -2368,13 +2417,25 @@ def _schema_changes(query, cluster_id, days):
     else:
         rows_status = "insufficient_history"
 
+    # A source that answered for EVERY schema it holds. `ddl_status == "ok"` only
+    # means at least one schema compared, so a cluster with 3 schemas of which 1
+    # sits entirely outside the window is "ok" AND blind, and calling that a
+    # negative reports the blind schema as unchanged.
+    ddl_complete = ddl_status == "ok" and not baseline_only and not outside_window
+    rows_ok = rows_status == "ok"
+
     if changes or renames:
         # A rename is a schema change the panel has to show. It is not in
         # `changes` (it is a pair, not a row with counts), so without it here a
         # window containing nothing but a RENAME reported "no_changes".
         status = "ok"
-    elif ddl_status == "ok" or rows_status == "ok":
+    elif ddl_complete and rows_ok:
         status = "no_changes"
+    elif ddl_status == "ok" or rows_ok:
+        # See the state matrix above: SOME of the question was answered with a
+        # real negative and the rest was not answered at all. "no_changes" here
+        # is the defect this branch exists to prevent.
+        status = "partial"
     elif snapshots_stored == 0 and collection == "no_data":
         status = "not_collected"
     else:
@@ -2385,15 +2446,20 @@ def _schema_changes(query, cluster_id, days):
         notes.append(_SC_NO_HISTORY)
     elif status == "insufficient_history":
         notes.append(_SC_INSUFFICIENT)
+    elif status == "partial":
+        notes.append(_SC_PARTIAL)
     if ddl_status == "not_collected":
         notes.append(_SC_DDL_NOT_COLLECTED)
-    elif ddl_status == "baseline_only":
-        notes.append(_SC_DDL_BASELINE_ONLY)
     elif ddl_status == "unavailable":
         notes.append(_SC_DDL_UNAVAILABLE)
+    # Both of these fire off the LIST, never off ddl_status. With two schemas of
+    # which one holds a single snapshot, ddl_status is "ok" and a note keyed to
+    # the status said nothing at all about the schema that was never compared.
+    if baseline_only:
+        notes.append(
+            f"{_SC_DDL_BASELINE_ONLY} 해당 스키마: {', '.join(sorted(baseline_only))}."
+        )
     if outside_window:
-        # Also fires when other schemas DID compare (ddl_status "ok"): the ones
-        # that did not must not disappear behind that.
         notes.append(
             f"{_SC_DDL_OUTSIDE_WINDOW} 해당 스키마: {', '.join(sorted(outside_window))}."
         )

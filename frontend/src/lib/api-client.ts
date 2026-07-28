@@ -380,7 +380,18 @@ export interface SchemaChangeRow {
 export interface SchemaChangesResponse {
   cluster_id: string;
   days: number;
-  status: "ok" | "no_changes" | "not_collected" | "insufficient_history";
+  /** The HEADLINE. `no_changes` is the only value that means an absence of
+   * change, and it requires EVERY source to have compared, across every schema
+   * it holds. `partial` is a real negative from one source and silence from the
+   * other (a schema whose whole history predates the window, a cache DB without
+   * schema_v26, row deltas with only one endpoint). See the state matrix beside
+   * the `status` derivation in api/dashboard/handler.py. */
+  status:
+    | "ok"
+    | "no_changes"
+    | "partial"
+    | "not_collected"
+    | "insufficient_history";
   changes: SchemaChangeRow[];
   total_changes: number;
   truncated: boolean;
@@ -2741,6 +2752,12 @@ export interface TimelineResponse {
   categories: string[];
   count: number;
   items: TimelineItem[];
+  /** Signal streams whose query FAILED (a cache DB without schema_v26, a
+   * missing audit_log). A category absent from `categories` while it is named
+   * here is UNKNOWN, not "that signal did not fire", which on a timeline is the
+   * whole difference between "no DDL during the incident" and "we could not
+   * look". Absent on a payload from an api Lambda older than this field. */
+  degraded_sources?: string[];
 }
 
 export async function fetchTimeline(
