@@ -10,6 +10,12 @@ import tenancy
 from engine_family import CAPABILITIES, DOCUMENTDB, RDS_INSTANCE, engine_family
 from metric_filters import CLUSTER_LEVEL_ONLY, EXCLUDE_PER_INSTANCE
 
+# api/ cannot import mcp_servers, so schema_diff_util.py is a VERBATIM copy of
+# mcp-servers/mcp_servers/operations/schema_diff_util.py (the engine_family /
+# metric_filters convention). tests/unit/data_pipeline/test_schema_snapshot_parity.py
+# asserts byte-identity across all four copies AND identical diff results.
+from schema_diff_util import compute_diff, parse_tables
+
 
 def _parse_int(value, default, min_v=1, max_v=168):
     try:
@@ -1981,47 +1987,368 @@ def _anomalies(query, cluster_id, hours, threshold):
     }
 
 
+# ---------------------------------------------------------------------------
+# GET /api/dashboard/{id}/schema-changes
+# ---------------------------------------------------------------------------
+# TWO producers feed this panel and only ONE of them can answer a DDL question.
+#
+# created / dropped come from schema_snapshots (schema_v26) ONLY. Both
+# table_stats producers cap their catalog read at the 100 largest tables
+# (data-pipeline/etl_collector/collectors/pg_table_stats.py TABLE_STATS_SQL and
+# mysql_table_stats.py TABLE_STATS_SQL), so ABSENCE from table_stats means "not
+# in the top 100 of that run", which is indistinguishable from "does not exist".
+# Deriving DDL from a size-capped producer gave this panel two defects, both
+# reproduced against a real PostgreSQL in
+# tests/unit/api/test_dashboard_schema_changes_real_pg.py:
+#   * `dropped` was UNREACHABLE. `baseline` (newest row older than :days) is a
+#     subset of an UNBOUNDED `latest`, so `l.table_name IS NULL` could never be
+#     true and a genuinely dropped table was reported as nothing at all.
+#   * `created` fired on TOP-100 ENTRANTS. A table that grew into the largest
+#     100 has no row older than :days, and the CASE called that 'created'.
+# schema_snapshots stores the COMPLETE table map per schema with no LIMIT
+# anywhere in its catalog read (deliberately: see schema_snapshot.py), so
+# absence there is a real DROP.
+#
+# Row-count deltas stay on table_stats: n_live_tup exists nowhere else. The cap
+# is harmless for a DELTA because a delta needs BOTH endpoints, so a table
+# crossing the top-100 boundary yields no row instead of a false claim.
+#
+# The diff itself is compute_diff from the verbatim-copied schema_diff_util, the
+# same function get_schema_diff and the collector use, so the panel and the
+# agent cannot describe one DDL event two different ways (a rename is a
+# rename_candidate in both, not a DROP + a CREATE).
+
+_SCHEMA_SNAPSHOT_PAIRS_SQL = (
+    "WITH snaps AS ("
+    "  SELECT schema_name, snapshot_time, tables_json "
+    "  FROM schema_snapshots WHERE cluster_id = :cid"
+    "), latest AS ("
+    "  SELECT DISTINCT ON (schema_name) schema_name, snapshot_time, tables_json "
+    "  FROM snaps ORDER BY schema_name, snapshot_time DESC"
+    "), oldest AS ("
+    "  SELECT DISTINCT ON (schema_name) schema_name, snapshot_time, tables_json "
+    "  FROM snaps ORDER BY schema_name, snapshot_time ASC"
+    "), base AS ("
+    "  SELECT DISTINCT ON (schema_name) schema_name, snapshot_time, tables_json "
+    "  FROM snaps WHERE snapshot_time <= NOW() - (:days || ' days')::interval "
+    "  ORDER BY schema_name, snapshot_time DESC"
+    "), per_schema AS ("
+    "  SELECT schema_name, COUNT(*) AS n FROM snaps GROUP BY schema_name"
+    ") "
+    "SELECT l.schema_name, "
+    "  p.n AS snapshots_for_schema, "
+    # No snapshot at or before the window start means the history STARTS inside
+    # the window: fall back to the oldest snapshot and report the shorter span
+    # instead of silently answering for :days we never observed.
+    "  COALESCE(b.tables_json, o.tables_json) AS tables_before, "
+    "  COALESCE(b.snapshot_time, o.snapshot_time) AS baseline_time, "
+    "  (b.schema_name IS NULL) AS baseline_outside_window, "
+    "  l.tables_json AS tables_after, "
+    "  l.snapshot_time AS current_time, "
+    # Uncorrelated scalar subqueries: PostgreSQL evaluates each once as an
+    # InitPlan, so cluster-wide coverage costs one extra index scan, not one per
+    # schema.
+    "  (SELECT COUNT(*) FROM snaps) AS snapshots_stored, "
+    "  (SELECT MIN(snapshot_time) FROM snaps) AS first_snapshot, "
+    "  (SELECT MAX(snapshot_time) FROM snaps) AS last_snapshot "
+    "FROM latest l "
+    "JOIN per_schema p ON p.schema_name = l.schema_name "
+    "JOIN oldest o ON o.schema_name = l.schema_name "
+    "LEFT JOIN base b ON b.schema_name = l.schema_name "
+    "ORDER BY l.schema_name"
+)
+
+# `latest` is deliberately UNBOUNDED in time: a table the snapshot diff reports
+# as dropped needs its LAST OBSERVED row count, which is older than the window
+# by definition. `current_in_window` is what decides whether that count may be
+# called current, so a stale value can never be presented as a fresh one.
+#   ponytail: LIMIT 500 is a bound, not a cap on truth. The DDL list comes from
+#   schema_snapshots and is unaffected; above 500 distinct (schema, table) keys
+#   the tail loses its row COUNTS only. Raise it or page by schema if a real
+#   fleet exceeds it.
+_TABLE_STATS_WINDOW_SQL = (
+    "WITH latest AS ("
+    "  SELECT DISTINCT ON (schema_name, table_name) "
+    "    schema_name, table_name, n_live_tup, snapshot_time "
+    "  FROM table_stats WHERE cluster_id = :cid "
+    "  ORDER BY schema_name, table_name, snapshot_time DESC"
+    "), baseline AS ("
+    "  SELECT DISTINCT ON (schema_name, table_name) "
+    "    schema_name, table_name, n_live_tup, snapshot_time "
+    "  FROM table_stats WHERE cluster_id = :cid "
+    "    AND snapshot_time <= NOW() - (:days || ' days')::interval "
+    "  ORDER BY schema_name, table_name, snapshot_time DESC"
+    ") "
+    "SELECT l.schema_name, l.table_name, "
+    "  b.n_live_tup AS baseline_rows, l.n_live_tup AS current_rows, "
+    "  b.snapshot_time AS baseline_time, l.snapshot_time AS current_time, "
+    "  (l.snapshot_time > NOW() - (:days || ' days')::interval) AS current_in_window "
+    "FROM latest l "
+    "LEFT JOIN baseline b "
+    "  ON b.schema_name = l.schema_name AND b.table_name = l.table_name "
+    "ORDER BY l.snapshot_time DESC, l.n_live_tup DESC NULLS LAST "
+    "LIMIT 500"
+)
+
+# table_stats is written EVERY ETL run, so its high-water mark is the honest
+# answer to "is collection still running for this cluster". schema_snapshots is
+# store-on-change and normally writes 0 rows/day, so it cannot carry freshness.
+# Age is computed IN SQL: parsing the timestamp back in Python is how this repo
+# has produced naive-datetime bugs four times.
+_TABLE_STATS_FRESHNESS_SQL = (
+    "SELECT MAX(snapshot_time) AS last_collected, "
+    "  ROUND(EXTRACT(EPOCH FROM (NOW() - MAX(snapshot_time))))::bigint AS age_sec "
+    "FROM table_stats WHERE cluster_id = :cid"
+)
+
+# Same threshold api/clusters/handler.py uses for etl_status: 15 minutes is 3
+# missed runs at the default STATS_COLLECTION_INTERVAL_MIN of 5.
+_FRESH_MAX_AGE_SEC = 15 * 60
+
+_SC_NO_HISTORY = (
+    "이 클러스터의 스키마 이력이 아직 없습니다 (schema_snapshots와 table_stats 모두 "
+    "이 클러스터 행이 없음). 변경이 없다는 뜻이 아닙니다."
+)
+_SC_INSUFFICIENT = (
+    "수집된 이력이 요청 구간을 걸치지 않아 비교할 기준점이 없습니다. 변경이 없다는 "
+    "뜻이 아닙니다. 구간을 늘리거나 수집이 쌓일 때까지 기다려야 합니다."
+)
+_SC_DDL_NOT_COLLECTED = (
+    "테이블 생성·삭제(DDL)는 schema_snapshots로만 판정하는데 이 클러스터의 스냅샷이 "
+    "아직 없습니다. DDL 변경이 없다는 뜻이 아닙니다. 다음 ETL 주기에 최초 baseline "
+    "스냅샷이 기록되고, 그 다음 변경 시점부터 생성·삭제가 표시됩니다."
+)
+_SC_DDL_BASELINE_ONLY = (
+    "baseline 스냅샷만 있어 DDL 비교 대상이 없습니다 (판정에는 스냅샷 2개가 "
+    "필요합니다). 다음 스키마 변경이 감지되면 그 시점의 스냅샷과 비교됩니다."
+)
+_SC_DDL_UNAVAILABLE = (
+    "schema_snapshots를 조회할 수 없어 이번 응답에서는 테이블 생성·삭제(DDL)를 "
+    "판정하지 못했습니다 (schema_v26 마이그레이션 적용 여부를 확인하세요). DDL "
+    "변경이 없다는 뜻이 아닙니다."
+)
+_SC_NO_FRESHNESS = (
+    "table_stats에 이 클러스터의 수집 기록이 없어 위 판정이 언제 기준인지 확인할 수 "
+    "없습니다. 표시된 내용은 마지막으로 기록된 스냅샷 기준입니다."
+)
+_SC_ROW_DELTA_CAP = (
+    "행 수 증감은 table_stats 기준이며, 이 수집기는 매 주기 상위 100개 테이블만 "
+    "기록합니다. 상위 100개 밖의 테이블은 증감 판정 대상이 아닙니다."
+)
+
+
 def _schema_changes(query, cluster_id, days):
-    rows = query(
-        "WITH latest AS ("
-        "  SELECT DISTINCT ON (schema_name, table_name) "
-        "    schema_name, table_name, n_live_tup, snapshot_time "
-        "  FROM table_stats "
-        "  WHERE cluster_id = :cid "
-        "  ORDER BY schema_name, table_name, snapshot_time DESC"
-        "), "
-        "baseline AS ("
-        "  SELECT DISTINCT ON (schema_name, table_name) "
-        "    schema_name, table_name, n_live_tup, snapshot_time "
-        "  FROM table_stats "
-        "  WHERE cluster_id = :cid "
-        "  AND snapshot_time < NOW() - (:days || ' days')::interval "
-        "  ORDER BY schema_name, table_name, snapshot_time DESC"
-        ") "
-        "SELECT "
-        "  COALESCE(l.schema_name, b.schema_name) AS schema_name, "
-        "  COALESCE(l.table_name, b.table_name) AS table_name, "
-        "  b.n_live_tup AS baseline_rows, "
-        "  l.n_live_tup AS current_rows, "
-        "  CASE "
-        "    WHEN b.table_name IS NULL THEN 'created' "
-        "    WHEN l.table_name IS NULL THEN 'dropped' "
-        "    ELSE 'changed' "
-        "  END AS change_type, "
-        "  b.snapshot_time AS baseline_time, "
-        "  l.snapshot_time AS current_time "
-        "FROM latest l "
-        "FULL OUTER JOIN baseline b "
-        "  ON l.schema_name = b.schema_name AND l.table_name = b.table_name "
-        "WHERE b.table_name IS NULL "
-        "   OR l.table_name IS NULL "
-        "   OR (b.n_live_tup IS NOT NULL AND l.n_live_tup IS NOT NULL "
-        "       AND ABS(l.n_live_tup - b.n_live_tup) > GREATEST(b.n_live_tup * 0.5, 1000)) "
-        "ORDER BY change_type, schema_name, table_name "
-        "LIMIT 50",
-        {"cid": cluster_id, "days": str(days)},
+    """Schema changes over the last `days`, with each claim tied to the producer
+    that can actually support it.
+
+    `changes` keeps the exact six fields the panel renders, plus `source`.
+    Everything an empty list needs in order NOT to read as "nothing changed"
+    lives beside it: `status`, `note`, `ddl_detection`, `row_deltas`,
+    `collection`.
+    """
+    days_s = str(days)
+
+    # --- is collection even running? ---------------------------------------
+    fresh = (query(_TABLE_STATS_FRESHNESS_SQL, {"cid": cluster_id}) or [{}])[0]
+    last_collected = fresh.get("last_collected")
+    age_sec = fresh.get("age_sec")
+    age_sec = int(age_sec) if age_sec is not None else None
+    if last_collected is None:
+        collection = "no_data"
+    elif age_sec is not None and age_sec > _FRESH_MAX_AGE_SEC:
+        collection = "stale"
+    else:
+        collection = "fresh"
+
+    # --- row counts, one query serving deltas AND the DDL rows' counts -----
+    stat_rows = query(_TABLE_STATS_WINDOW_SQL, {"cid": cluster_id, "days": days_s})
+    by_key = {(r.get("schema_name"), r.get("table_name")): r for r in stat_rows}
+
+    # --- DDL from the complete table map ----------------------------------
+    ddl_available = True
+    try:
+        snap_rows = query(_SCHEMA_SNAPSHOT_PAIRS_SQL, {"cid": cluster_id, "days": days_s})
+    except Exception as e:
+        # schema_snapshots arrives in schema_v26. A cache DB that has not run the
+        # migrator yet must degrade to "DDL unknown", not 500 the whole panel.
+        # Detail to CloudWatch only: never into the payload.
+        print(f"[schema-changes] schema_snapshots unavailable: {type(e).__name__}: {e}")
+        snap_rows, ddl_available = [], False
+
+    created, dropped, renames = [], [], []
+    snapshotted_schemas, live_keys = set(), set()
+    baseline_only, partial_window = [], []
+    schemas_compared = 0
+    snapshots_stored = 0
+    first_snapshot = last_snapshot = None
+
+    for r in snap_rows:
+        schema = r.get("schema_name")
+        snapshots_stored = int(r.get("snapshots_stored") or 0)
+        first_snapshot = r.get("first_snapshot")
+        last_snapshot = r.get("last_snapshot")
+        snapshotted_schemas.add(schema)
+        after = parse_tables(r.get("tables_after"))
+        live_keys |= {(schema, t) for t in after}
+        if int(r.get("snapshots_for_schema") or 0) < 2:
+            # One snapshot is a baseline, not a history. Diffing it against
+            # itself would report zero changes for a schema never compared.
+            baseline_only.append(schema)
+            continue
+        if r.get("baseline_outside_window"):
+            partial_window.append(schema)
+        diff = compute_diff(parse_tables(r.get("tables_before")), after)
+        schemas_compared += 1
+        detected = r.get("current_time")
+        since = r.get("baseline_time")
+        for t in diff["added"]:
+            known = by_key.get((schema, t)) or {}
+            created.append({
+                "schema_name": schema, "table_name": t, "change_type": "created",
+                # Row counts are a table_stats lookup, so they are the LAST
+                # OBSERVED count and are None for anything outside the 100
+                # largest. `collection` below dates them. The DDL claim itself
+                # does not depend on them.
+                "baseline_rows": None, "current_rows": known.get("current_rows"),
+                "baseline_time": since, "current_time": detected,
+                "source": "schema_snapshots",
+            })
+        for t in diff["dropped"]:
+            known = by_key.get((schema, t)) or {}
+            dropped.append({
+                "schema_name": schema, "table_name": t, "change_type": "dropped",
+                # Last count observed before the table disappeared. None when it
+                # was never among the 100 largest, which the panel renders as 0.
+                "baseline_rows": known.get("current_rows"),
+                "current_rows": None,
+                "baseline_time": known.get("current_time") or since,
+                "current_time": detected,
+                "source": "schema_snapshots",
+            })
+        renames += [dict(rc, schema_name=schema) for rc in diff["rename_candidates"]]
+
+    ddl_keys = {(c["schema_name"], c["table_name"]) for c in created + dropped}
+
+    # --- row-count deltas --------------------------------------------------
+    changed = []
+    pairs_compared = 0
+    for r in stat_rows:
+        key = (r.get("schema_name"), r.get("table_name"))
+        base_rows, cur_rows = r.get("baseline_rows"), r.get("current_rows")
+        if base_rows is None or cur_rows is None:
+            continue  # only one endpoint: a top-100 crossing, not a change
+        if not r.get("current_in_window"):
+            continue  # newest row predates the window: nothing to call current
+        pairs_compared += 1
+        if key in ddl_keys:
+            continue  # already reported by the snapshot diff
+        if key[0] in snapshotted_schemas and key not in live_keys:
+            continue  # the complete map says it is gone; this row is a leftover
+        base_rows, cur_rows = int(base_rows), int(cur_rows)
+        if abs(cur_rows - base_rows) <= max(base_rows * 0.5, 1000):
+            continue
+        changed.append({
+            "schema_name": key[0], "table_name": key[1], "change_type": "changed",
+            "baseline_rows": base_rows, "current_rows": cur_rows,
+            "baseline_time": r.get("baseline_time"), "current_time": r.get("current_time"),
+            "source": "table_stats",
+        })
+
+    # Same display order the SQL used to produce: change_type, schema, table.
+    ordered = sorted(
+        changed + created + dropped,
+        key=lambda c: (c["change_type"], c["schema_name"] or "", c["table_name"] or ""),
     )
-    return {"cluster_id": cluster_id, "days": days, "changes": rows}
+    changes = ordered[:50]
+
+    # --- what can each source actually support? ----------------------------
+    if not ddl_available:
+        ddl_status = "unavailable"
+    elif snapshots_stored == 0:
+        ddl_status = "not_collected"
+    elif schemas_compared:
+        ddl_status = "ok"
+    else:
+        ddl_status = "baseline_only"
+
+    if pairs_compared:
+        rows_status = "ok"
+    elif collection == "no_data":
+        rows_status = "no_data"
+    else:
+        rows_status = "insufficient_history"
+
+    if changes:
+        status = "ok"
+    elif ddl_status == "ok" or rows_status == "ok":
+        status = "no_changes"
+    elif snapshots_stored == 0 and collection == "no_data":
+        status = "not_collected"
+    else:
+        status = "insufficient_history"
+
+    notes = []
+    if status == "not_collected":
+        notes.append(_SC_NO_HISTORY)
+    elif status == "insufficient_history":
+        notes.append(_SC_INSUFFICIENT)
+    if ddl_status == "not_collected":
+        notes.append(_SC_DDL_NOT_COLLECTED)
+    elif ddl_status == "baseline_only":
+        notes.append(_SC_DDL_BASELINE_ONLY)
+    elif ddl_status == "unavailable":
+        notes.append(_SC_DDL_UNAVAILABLE)
+    if partial_window and first_snapshot:
+        notes.append(
+            f"요청 구간({days}일)보다 스냅샷 이력이 짧아 {first_snapshot} 이후 구간만 "
+            f"비교했습니다: {', '.join(sorted(partial_window))}."
+        )
+    if collection == "stale" and age_sec is not None:
+        notes.append(
+            f"table_stats 수집이 약 {age_sec // 3600}시간 {(age_sec % 3600) // 60}분 전에 "
+            f"멈췄습니다 (마지막 수집 {last_collected}). 표시된 현재 행 수와 DDL 판정은 "
+            f"모두 그 시점 기준이며 지금 값이 아닙니다."
+        )
+    elif collection == "no_data" and status != "not_collected":
+        # Snapshots exist but the every-run producer has no row for this cluster,
+        # so nothing here can be dated. Store-on-change means an empty DDL diff
+        # is only as current as the last collection, whenever that was.
+        notes.append(_SC_NO_FRESHNESS)
+    if rows_status == "ok":
+        notes.append(_SC_ROW_DELTA_CAP)
+
+    return {
+        "cluster_id": cluster_id,
+        "days": days,
+        "status": status,
+        "changes": changes,
+        "total_changes": len(ordered),
+        "truncated": len(ordered) > len(changes),
+        "note": " ".join(notes),
+        "ddl_detection": {
+            "source": "schema_snapshots",
+            "status": ddl_status,
+            "schemas_compared": schemas_compared,
+            "snapshots_stored": snapshots_stored,
+            "first_snapshot": first_snapshot,
+            "last_snapshot": last_snapshot,
+            "baseline_only_schemas": sorted(baseline_only),
+            "partial_window_schemas": sorted(partial_window),
+            "rename_candidates": renames,
+        },
+        "row_deltas": {
+            "source": "table_stats",
+            "status": rows_status,
+            "tables_compared": pairs_compared,
+            "largest_tables_only": 100,
+        },
+        "collection": {
+            "status": collection,
+            "last_collected": last_collected,
+            "age_hours": round(age_sec / 3600.0, 1) if age_sec is not None else None,
+            "fresh_within_minutes": _FRESH_MAX_AGE_SEC // 60,
+        },
+    }
 
 
 def _blocking_locks(query, cluster_id):

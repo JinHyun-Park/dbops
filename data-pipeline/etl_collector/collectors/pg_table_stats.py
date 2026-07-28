@@ -20,6 +20,15 @@ ORDER BY pg_total_relation_size(c.oid) DESC NULLS LAST
 LIMIT 100
 """
 
+# The LIMIT above is a deliberate size bound, and it means table_stats CANNOT
+# answer "does this table exist": absence is "not in the 100 largest of that
+# run", which is indistinguishable from a DROP, and top-100 membership churns on
+# its own as tables grow. Anything needing table EXISTENCE (created / dropped)
+# must read schema_snapshots, whose catalog read has no LIMIT anywhere. The
+# dashboard schema-changes panel derived DDL from here and shipped two defects:
+# an unreachable `dropped` branch and a `created` that fired on top-100
+# entrants. See api/dashboard/handler.py::_schema_changes.
+
 
 INSERT_SQL = (
     "INSERT INTO table_stats "

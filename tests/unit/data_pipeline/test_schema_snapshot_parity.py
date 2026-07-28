@@ -25,6 +25,15 @@ _UTIL_COPIES = {
     "canonical": _ROOT / "mcp-servers" / "mcp_servers" / "operations" / "schema_diff_util.py",
     "etl": _ROOT / "data-pipeline" / "etl_collector" / "collectors" / "schema_diff_util.py",
     "rds_direct": _ROOT / "data-pipeline" / "rds_direct_collector" / "schema_diff_util.py",
+    # FOURTH copy: the dashboard schema-changes panel derives created/dropped
+    # from schema_snapshots and needs the same compute_diff, so a rename is a
+    # rename_candidate in the panel exactly as it is in get_schema_diff. api/
+    # cannot import mcp_servers, hence a copy.
+    # NOTE: the canonical file's own docstring still says "COPIES (edit all three
+    # together)" and lists three paths. This dict, not that docstring, is the
+    # enforcement point; the wording is worth a one-line fix by whoever owns
+    # mcp-servers/mcp_servers/operations/schema_diff_util.py next.
+    "api_dashboard": _ROOT / "api" / "dashboard" / "schema_diff_util.py",
 }
 
 _SNAPSHOT_COPIES = {
