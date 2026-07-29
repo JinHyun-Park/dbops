@@ -377,6 +377,11 @@ by account/region. Delivered across 5 sequenced specs:
 - Per-org retention policy + archival to S3 Glacier ✅ (archive bucket lifecycle: IA 30d → Glacier Instant Retrieval 90d → Deep Archive 365d, optional `ARCHIVE_RETENTION_DAYS` expiry; verified live 2026-06-16).
 - CDN cache tuning for `/config.json` (currently no-store).
 
+### Real-PG test harness (noted 2026-07-29, out of scope of the schema-honesty pass)
+
+- **The third harness copy still has the masked teardown.** `tests/unit/test_mysql_tier_cache_sql_real_pg.py` runs `pg_ctl -m immediate stop` without checking it and then `shutil.rmtree(..., ignore_errors=True)`, which is the pattern that leaves a live postmaster on a datadir that no longer exists (measured on the other two copies: the helper returned with no exception while the server was still serving and the datadir was gone). It is also the only one of the three that does NOT stop before `initdb`, so it has no setup-time self-heal at all. `tests/unit/data_pipeline/test_schema_snapshot_real_pg.py` and `tests/unit/api/test_dashboard_schema_changes_real_pg.py` were fixed (the stop is verified against the fixture's port, and a server that did not stop raises with its datadir intact); give this one the same treatment when it is next touched.
+- **Kernel-assigned ports are released before they are used.** All three modules call `bind(("127.0.0.1", 0))`, read the port and close the socket at IMPORT time, so between collection and `pg_ctl start` nothing holds the port. Two modules in one process being handed the same port is possible in principle (not observed here); the loser's `pg_ctl start` raises before its fixture yields, so the `finally` never runs and the datadir survives. Cheap fixes if it is ever seen: keep the probe socket open until start, or retry once on a fresh port.
+
 ### Pre-public hardening (gate before flipping the repo public)
 
 Done (2026-06-16):

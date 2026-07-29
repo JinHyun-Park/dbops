@@ -30,6 +30,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -125,13 +126,59 @@ _PORT = _free_port()
 _PGDATA = os.path.join(tempfile.gettempdir(), f"dbops_e4_pg_{os.getpid()}")
 
 
+def _serving(timeout=5.0):
+    """Is ANYTHING still answering on this fixture's port?
+
+    Asked instead of trusting pg_ctl, because pg_ctl finds the server through
+    `postmaster.pid`: once that file is gone the stop reports nothing useful while the
+    postmaster keeps serving. Polled rather than probed once, so a backend that
+    outlives the postmaster by a moment is not reported as a live server (a false
+    alarm here aborts a module, which is the failure mode that gets guards deleted).
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        with socket.socket() as s:
+            s.settimeout(1)
+            if s.connect_ex(("127.0.0.1", int(_PORT))) != 0:
+                return False
+        if time.monotonic() >= deadline:
+            return True
+        time.sleep(0.2)
+
+
 def _stop_and_remove():
-    """Stop FIRST, then remove. rmtree under a live postmaster leaves it running
-    on a datadir that no longer exists, and every later fixture in that process
-    then fails to start: 34 fixture ERRORs once got written off as flake."""
-    subprocess.run([_PGCTL, "-D", _PGDATA, "-m", "immediate", "stop"],
-                   capture_output=True)
-    shutil.rmtree(_PGDATA, ignore_errors=True)
+    """Stop FIRST, then remove, and REFUSE TO REMOVE under a live server.
+
+    rmtree under a live postmaster leaves it running on a datadir that no longer
+    exists, and every later fixture in that process then fails to start: 34 fixture
+    ERRORs once got written off as flake.
+
+    `ignore_errors=True` after an UNCHECKED stop is exactly how that state was
+    reached a second time. MEASURED on the shipped version, driving this function
+    with a live server whose postmaster.pid had been removed (which is what a
+    previous masked rmtree leaves behind): it returned with no exception, the
+    postmaster was still alive, still serving the port, and the datadir was gone.
+    Half-succeeding silently is worse than failing: the failure lands on whoever runs
+    next. So the stop is VERIFIED against the port, and a server that did not stop
+    raises HERE, in the fixture that owns it, with its datadir intact so it can still
+    be stopped by hand or by the next setup call.
+    """
+    existed = os.path.isdir(_PGDATA)
+    if existed:
+        subprocess.run([_PGCTL, "-D", _PGDATA, "-m", "immediate", "stop"],
+                       capture_output=True)
+    if _serving():
+        raise RuntimeError(
+            f"something is still serving 127.0.0.1:{_PORT} after pg_ctl stop on "
+            f"{_PGDATA}. NOT removing the datadir under a live server: that is what "
+            "leaves a postmaster on a datadir that no longer exists and turns every "
+            "later fixture in this process into an unrelated ERROR. Stop it by hand: "
+            f"{_PGCTL} -D {_PGDATA} -m immediate stop"
+        )
+    if existed:
+        # No ignore_errors: a tree this process owns and no longer serves has to
+        # come off cleanly, and a failure here is a fact, not noise to swallow.
+        shutil.rmtree(_PGDATA)
 
 
 @pytest.fixture(scope="module")

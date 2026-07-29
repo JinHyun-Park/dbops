@@ -276,6 +276,23 @@ def _observation_use(fn):
         used inside a larger expression, all count; bound to a name nothing ever
         reads does not, and neither does a bare `observed(...)` statement.
 
+    ASKED OF THE CALL, NOT OF THE WALK ORDER, which is the TENTH pass's finding. The
+    first version of this rule looked for statements carrying an observation call by
+    doing `getattr(stmt, "value", None)` over `ast.walk(fn)`, and that has two defects,
+    both of them FALSE FAILURES on compliant code:
+      * `ast.Constant.value` is a plain `str`, so an ordinary reader that assigns any
+        string constant before the call handed that `str` to `ast.walk` and the rule
+        CRASHED with AttributeError. Measured on `label = 'schema drift'` followed by
+        `obs = sdu.observed(q, cid)` inside an `if`: AttributeError: 'str' object has
+        no attribute '_fields'. Whether it crashed at all depended on which node the
+        breadth-first walk reached first, so it was latent rather than absent.
+      * `ast.If` has no `.value`, so `if observed(q, cid):` was judged "discarded". A
+        call whose value decides a branch is the plainest use there is.
+    So the question is now asked once per CALL, of its PARENT: the value is thrown
+    away only where the language throws it away (an `ast.Expr` statement) or where it
+    is bound to a plain name nothing ever reads. Every other position (a condition, a
+    return, an argument, a dict slot, an operand) is a use.
+
     WHERE IT STOPS, and this is a limit and not an oversight. It does NOT prove the
     observation influences the ANSWER. `observation` reaches the panel's payload
     through `not_seen_note` into a list into a joined string, so following it would
@@ -296,22 +313,20 @@ def _observation_use(fn):
     loaded = {n.id for n in ast.walk(fn)
               if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
               and id(n) not in callees}
-    for stmt in ast.walk(fn):
-        value = getattr(stmt, "value", None)
-        if value is None or isinstance(stmt, ast.Expr):
-            # ast.Expr is `observed(...)` as a statement: the value is thrown away.
-            continue
-        if not _observation_calls(value):
-            continue
-        if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+    parent = {id(child): node for node in ast.walk(fn)
+              for child in ast.iter_child_nodes(node)}
+    for call in calls:
+        up = parent.get(id(call))
+        if isinstance(up, ast.Expr):
+            continue  # `observed(...)` as a statement: the value is thrown away.
+        if (isinstance(up, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+                and up.value is call):
+            targets = up.targets if isinstance(up, ast.Assign) else [up.target]
             names = {t.id for t in targets if isinstance(t, ast.Name)}
             # No plain name target (a dict slot, an attribute, a tuple unpack) means
             # the value landed in a structure, which is a use.
-            if not names or (names & loaded):
-                return "used"
-            continue
-        # Return, an argument, a dict value, a comparison operand: consumed in place.
+            if names and not (names & loaded):
+                continue  # bound to a name nothing ever reads
         return "used"
     return "discarded"
 
@@ -648,6 +663,12 @@ _OBSERVATION_SHAPES = {
                               "    return q(ALL_ROWS)\n", "discarded"),
     "bound_and_never_read": ("    obs = observed(q, cid)\n"
                              "    return q(ALL_ROWS)\n", "discarded"),
+    # Still refused with a string constant in the function, which is where the old
+    # walk-order version CRASHED instead of deciding anything.
+    "discarded_beside_a_string_constant": ("    label = 'schema drift'\n"
+                                           "    observed(q, cid)\n"
+                                           "    return {'l': label, 'r': q(ALL_ROWS)}\n",
+                                           "discarded"),
     # THE REAL SHAPES. Every one of these is a shipped consumer's shape and every one
     # must pass, because a false failure here is what gets the rule weakened.
     "bound_and_read": ("    obs = observed(q, cid)\n"
@@ -662,22 +683,55 @@ _OBSERVATION_SHAPES = {
     "into_a_structure": ("    out = {}\n"
                          "    out['observation'] = observation_state(cache, cid)\n"
                          "    return out\n", "used"),
+    # THE TWO SHAPES THE TENTH-PASS REVIEWER WROTE, both of which the walk-order
+    # version got wrong on COMPLIANT code. A rule that errors or refuses here is the
+    # rule the next agent deletes.
+    # (1) a string constant assigned before the call, module-object form, call nested
+    #     in an `if`: AttributeError: 'str' object has no attribute '_fields'.
+    "module_object_and_a_string_constant": (
+        "    sdu = schema_diff_util\n"
+        "    label = 'schema drift'\n"
+        "    rows = q(ALL_ROWS)\n"
+        "    if rows:\n"
+        "        obs = sdu.observed(q, cid)\n"
+        "        return {'label': label, 'rows': rows, 'observation': obs}\n"
+        "    return {'label': label, 'rows': rows}\n", "used"),
+    # (2) the call's value DECIDES A BRANCH, which the old version called "discarded".
+    "tested_in_a_condition": ("    if observed(q, cid):\n"
+                              "        return q(ALL_ROWS)\n"
+                              "    return []\n", "used"),
+    # ...and the same crash class without the module object, so the cause is pinned on
+    # the string constant and not on the attribute form: the value is consumed as an
+    # ARGUMENT inside a nested block, after a constant the walk reached first.
+    "string_constant_then_a_nested_argument": (
+        "    sql = 'select 1'\n"
+        "    if cid:\n"
+        "        return {'r': q(ALL_ROWS), 'n': not_seen_note(observed(q, cid)),\n"
+        "                's': sql}\n"
+        "    return {}\n", "used"),
 }
 
 
 @pytest.mark.parametrize("shape", sorted(_OBSERVATION_SHAPES))
 def test_the_observation_rule_sees_a_call_and_not_a_mention(shape):
-    """FINDING 2, driven on both sides.
+    """The ninth pass's FINDING 2 and the tenth pass's FINDING 1, driven on BOTH sides.
 
-    The five REFUSED shapes are the escape and its neighbours: the reviewer's
+    The REFUSED shapes are the escape and its neighbours: the reviewer's
     `observed = None`, the same thing through an attribute, a mention in prose, a call
-    whose value is discarded, and a call bound to a name nothing reads. The five
-    ACCEPTED shapes are the ways the shipped consumers actually write it, including
-    the module-object idiom, so this test fails if the rule ever starts firing on a
-    consumer that DOES carry the observation.
+    whose value is discarded, a call bound to a name nothing reads, and a discarded
+    call beside a string constant. The ACCEPTED shapes are the ways the shipped
+    consumers actually write it, including the module-object idiom, so this test fails
+    if the rule ever starts firing on a consumer that DOES carry the observation.
 
-    Both directions matter equally: without the accepted half, tightening the rule
-    until it rejects everything would look like progress.
+    Both directions matter equally, and the accepted half is not decoration: the
+    walk-order version of this rule ERRORED with AttributeError on
+    `module_object_and_a_string_constant` and REFUSED `tested_in_a_condition`, two
+    perfectly ordinary compliant shapes, which is a false failure and therefore the
+    shortest route to this rule being deleted. Tightening a rule until it rejects
+    everything looks like progress and is not.
+
+    The shape is asserted by CALLING the helper, so a shape that raises fails here as
+    a failure and not as an error somewhere downstream.
     """
     body, expected = _OBSERVATION_SHAPES[shape]
     fn = ast.parse(f"def reader(q, cid):\n{body}").body[0]

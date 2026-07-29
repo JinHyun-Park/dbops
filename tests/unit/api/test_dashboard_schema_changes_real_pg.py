@@ -65,6 +65,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -146,15 +147,61 @@ _PORT = _free_port()
 _PGDATA = os.path.join(tempfile.gettempdir(), f"dbops_schema_changes_pg_{os.getpid()}")
 
 
+def _serving(timeout=5.0):
+    """Is ANYTHING still answering on this fixture's port?
+
+    Asked instead of trusting pg_ctl, because pg_ctl finds the server through
+    `postmaster.pid`: once that file is gone the stop reports nothing useful while the
+    postmaster keeps serving. Polled rather than probed once, so a backend that
+    outlives the postmaster by a moment is not reported as a live server (a false
+    alarm here aborts a module, which is the failure mode that gets guards deleted).
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        with socket.socket() as s:
+            s.settimeout(1)
+            if s.connect_ex(("127.0.0.1", int(_PORT))) != 0:
+                return False
+        if time.monotonic() >= deadline:
+            return True
+        time.sleep(0.2)
+
+
 def _stop_and_remove():
-    """Stop FIRST, then remove. rmtree under a live postmaster leaves it running
-    on a datadir that no longer exists, and every later fixture in the process
-    then fails to start: 34 fixture ERRORs once got written off as flake. Called
-    on setup as well as teardown, which is the only self-healing there is for a
-    run that died before its finally."""
-    subprocess.run([_PGCTL, "-D", _PGDATA, "-m", "immediate", "stop"],
-                   capture_output=True)
-    shutil.rmtree(_PGDATA, ignore_errors=True)
+    """Stop FIRST, then remove, and REFUSE TO REMOVE under a live server.
+
+    rmtree under a live postmaster leaves it running on a datadir that no longer
+    exists, and every later fixture in the process then fails to start: 34 fixture
+    ERRORs once got written off as flake. Called on setup as well as teardown, which
+    is the only self-healing there is for a run that died before its finally.
+
+    `ignore_errors=True` after an UNCHECKED stop is exactly how that state was reached
+    a second time. MEASURED on the shipped version of the sibling copy of this
+    function, driven with a live server whose postmaster.pid had been removed (what a
+    previous masked rmtree leaves behind): it returned with no exception, the
+    postmaster was still alive, still serving the port, and the datadir was gone. So
+    the stop is VERIFIED against the port, and a server that did not stop raises HERE,
+    with its datadir intact so it can still be stopped by hand or by the next setup
+    call. Same treatment as tests/unit/data_pipeline/test_schema_snapshot_real_pg.py:
+    these two are copies of one harness and a fix to one that skips the other leaves
+    the leak in the run.
+    """
+    existed = os.path.isdir(_PGDATA)
+    if existed:
+        subprocess.run([_PGCTL, "-D", _PGDATA, "-m", "immediate", "stop"],
+                       capture_output=True)
+    if _serving():
+        raise RuntimeError(
+            f"something is still serving 127.0.0.1:{_PORT} after pg_ctl stop on "
+            f"{_PGDATA}. NOT removing the datadir under a live server: that is what "
+            "leaves a postmaster on a datadir that no longer exists and turns every "
+            "later fixture in this process into an unrelated ERROR. Stop it by hand: "
+            f"{_PGCTL} -D {_PGDATA} -m immediate stop"
+        )
+    if existed:
+        # No ignore_errors: a tree this process owns and no longer serves has to
+        # come off cleanly, and a failure here is a fact, not noise to swallow.
+        shutil.rmtree(_PGDATA)
 
 # `:name` binds, but NOT the `::type` cast that follows one.
 _BIND = re.compile(r"(?<!:):([a-z_][a-z0-9_]*)")
@@ -986,6 +1033,63 @@ def test_a_refused_dialect_reaches_the_timeline_and_the_panel_as_a_refusal(pg):
     bare_panel = handler._schema_changes(pg.query, bare, 7)
     assert bare_panel["status"] == "not_supported", bare_panel
     assert bare_panel["note"] == panel["note"], (bare_panel["note"], panel["note"])
+
+
+def test_a_refused_dialect_dates_the_row_counts_and_claims_no_ddl_verdict(pg):
+    """TENTH PASS, FINDING 2: the last sentence in this payload that asserted a DDL
+    verdict exists on an engine that never produces one.
+
+    The ninth pass took the WAIT/WIDEN headline and the phantom snapshot basis off the
+    refused dialect, and left the STALE-collection sentence alone with a note saying
+    "표시된 현재 행 수와 DDL 판정은 모두 그 시점 기준이며 지금 값이 아닙니다" (it is
+    vacuous rather than a promise). It is not vacuous to an operator: it is a fourth
+    sentence in the same note saying the displayed DDL 판정 is merely OUT OF DATE, two
+    sentences after the refusal said no snapshot is collected for this cluster at all.
+
+    The staleness fact about ROW COUNTS is true and is kept: table_stats IS collected
+    here and IS 48h old. Only the DDL half goes.
+    """
+    cid = "stale-mysql-1"
+    _stat(pg, cid, "t", 5000, 10)
+    _stat(pg, cid, "t", 90000, 2)  # newest row is 48h old: collection is `stale`
+    # AFTER the _stat calls: _stat upserts cluster_meta with the default PostgreSQL
+    # engine, so setting the dialect first would be undone by ON CONFLICT UPDATE.
+    _meta(pg, cid, engine="aurora-mysql")
+
+    got = handler._schema_changes(pg.query, cid, 7)
+    assert got["collection"]["status"] == "stale", got["collection"]
+    assert 47.0 <= got["collection"]["age_hours"] <= 49.0, got["collection"]
+    assert got["ddl_detection"]["status"] == "not_supported", got["ddl_detection"]
+    assert got["observation"]["status"] == "unsupported_engine", got["observation"]
+
+    # THE FACT THAT SURVIVES: the row counts are real, dated, and stale.
+    assert "table_stats 수집이" in got["note"], got["note"]
+    assert "지금 값이 아닙니다" in got["note"], got["note"]
+    # THE FALSEHOOD THAT GOES: no sentence may date a DDL 판정 this engine never made.
+    # Measured pre-fix on this exact cell: "... 멈췄습니다 (마지막 수집 ...). 표시된 현재
+    # 행 수와 DDL 판정은 모두 그 시점 기준이며 지금 값이 아닙니다."
+    assert "DDL 판정" not in got["note"], got["note"]
+    # ...and the refusal itself still says why, in the shared composer's words.
+    assert "PostgreSQL" in got["note"] and "pg_namespace" in got["note"], got["note"]
+    # The other three never-coming sentences the ninth pass removed stay removed here
+    # too, on the stale cell they were never driven on.
+    for never_coming in ("기다려야", "구간을 늘리거나", "마지막으로 기록된 스냅샷 기준"):
+        assert never_coming not in got["note"], (never_coming, got["note"])
+
+
+def test_a_supported_dialect_still_dates_both_halves(pg):
+    """The mutation guard for the sentence above: on PostgreSQL the DDL verdict IS
+    dated by table_stats collection, and dropping that clause everywhere would cost
+    the operator the fact that an empty DDL diff is only as current as the last
+    collection. Same stale cell, supported engine."""
+    cid = "stale-pg-1"
+    _stat(pg, cid, "t", 5000, 10)
+    _stat(pg, cid, "t", 90000, 2)
+
+    got = handler._schema_changes(pg.query, cid, 7)
+    assert got["collection"]["status"] == "stale", got["collection"]
+    assert "DDL 판정" in got["note"], got["note"]
+    assert "지금 값이 아닙니다" in got["note"], got["note"]
 
 
 def test_timeline_ignores_baseline_and_out_of_window_snapshots(pg):

@@ -2748,10 +2748,21 @@ def _schema_changes(query, cluster_id, days):
             f"비교했습니다: {', '.join(sorted(partial_window))}."
         )
     if collection == "stale" and age_sec is not None:
+        # WHAT IS DATED, and only what is dated. On a supported dialect this sentence
+        # dates BOTH halves: an empty DDL diff is only as current as the last
+        # collection, and losing that clause would cost the operator a real fact.
+        # On a REFUSED dialect there is no DDL verdict to be out of date, so the
+        # second half asserted one exists two sentences after the refusal said no
+        # snapshot is collected for this cluster at all. Measured pre-fix on a
+        # refused engine with 48h-old table_stats: "... 멈췄습니다 (마지막 수집 ...).
+        # 표시된 현재 행 수와 DDL 판정은 모두 그 시점 기준이며 지금 값이 아닙니다."
+        # The ROW-COUNT staleness is true in both cases and survives in both.
+        dated = ("표시된 현재 행 수와 DDL 판정은 모두" if ddl_supported
+                 else "표시된 현재 행 수는")
         notes.append(
             f"table_stats 수집이 약 {age_sec // 3600}시간 {(age_sec % 3600) // 60}분 전에 "
-            f"멈췄습니다 (마지막 수집 {last_collected}). 표시된 현재 행 수와 DDL 판정은 "
-            f"모두 그 시점 기준이며 지금 값이 아닙니다."
+            f"멈췄습니다 (마지막 수집 {last_collected}). {dated} 그 시점 기준이며 "
+            f"지금 값이 아닙니다."
         )
     elif collection == "no_data" and status != "not_collected" and ddl_supported:
         # Snapshots exist but the every-run producer has no row for this cluster,
