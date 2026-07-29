@@ -21,11 +21,18 @@ def simulate_ddl_impact_impl(cache: CacheClient, cluster_id: str, ddl_sql: str) 
     # note flag it; a live describe would refine it but adds latency/perms.
     # Queried BEFORE the table_stats lookup so the size query stays the last
     # cache call (it carries the cluster-scoped contract the tests pin).
+    # `engine` rides along in the same query: it decides the online-DDL
+    # semantics (InnoDB builds a secondary index with concurrent DML permitted,
+    # PostgreSQL needs CONCURRENTLY) and which rewrite tooling the
+    # recommendation may name. Without it every MySQL index build was reported
+    # as write-blocking.
     meta = cache.execute(
-        "SELECT instance_class FROM cluster_meta WHERE cluster_id = :cluster_id",
+        "SELECT instance_class, engine FROM cluster_meta WHERE cluster_id = :cluster_id",
         {"cluster_id": cluster_id},
     )
-    instance_class = meta.rows[0].get("instance_class") if meta.rows else None
+    row = meta.rows[0] if meta.rows else {}
+    instance_class = row.get("instance_class")
+    engine = row.get("engine")
 
     row_count = 0
     size_mb = 0.0
@@ -53,5 +60,6 @@ def simulate_ddl_impact_impl(cache: CacheClient, cluster_id: str, ddl_sql: str) 
         size_mb=size_mb,
         instance_class=instance_class,
         io_optimized=False,
+        engine=engine,
     )
     return {"cluster_id": cluster_id, **est}

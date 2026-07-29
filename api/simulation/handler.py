@@ -798,11 +798,15 @@ def _simulate_ddl_impact(cluster_id: str, ddl_sql: str) -> dict:
     size_mb = table_bytes / (1024 * 1024) if table_bytes else 0.0
 
     # Instance class grounds the throughput estimate (vs the old flat 40 MB/s).
+    # `engine` decides the online-DDL semantics and which rewrite tooling the
+    # recommendation may name; the MCP tool reads the same two columns, so the
+    # dashboard and the agent cannot disagree about the same statement.
     meta = _cache_query(
-        "SELECT instance_class FROM cluster_meta WHERE cluster_id = :cluster_id",
+        "SELECT instance_class, engine FROM cluster_meta WHERE cluster_id = :cluster_id",
         {"cluster_id": cluster_id},
     )
-    instance_class = meta[0].get("instance_class") if meta else None
+    row = meta[0] if meta else {}
+    instance_class = row.get("instance_class")
 
     est = estimate_ddl(
         ddl_sql=ddl_sql,
@@ -811,6 +815,7 @@ def _simulate_ddl_impact(cluster_id: str, ddl_sql: str) -> dict:
         size_mb=size_mb,
         instance_class=instance_class,
         io_optimized=False,
+        engine=row.get("engine"),
     )
     return {"cluster_id": cluster_id, **est}
 

@@ -139,3 +139,141 @@ def test_classify_plain_index_blocking():
     c = classify_ddl("CREATE INDEX I ON ORDERS (X)")
     assert c["online"] is False
     assert "blocking" in c["lock"]
+
+
+# --- MySQL online-DDL semantics ----------------------------------------------
+# Every expectation below was ACCEPT/REJECT-measured against a real mysqld
+# (9.3.0, local scratch datadir) by running the statement with the clause and
+# recording whether InnoDB took it. InnoDB REFUSES a clause it cannot honour
+# (errors 1845 / 1846) rather than silently degrading, so an accepted
+# LOCK=NONE is the engine itself saying concurrent DML is permitted.
+#
+# To re-measure: start a scratch mysqld, then for each shape run
+#   ALTER TABLE t <change>, LOCK=NONE;
+# and record ACCEPT vs "ERROR 1846 ... Try LOCK=SHARED".
+
+_MY = "aurora-mysql"
+
+
+def test_mysql_secondary_index_build_is_online():
+    """The defect this suite exists for: MySQL never writes CONCURRENTLY, so the
+    only online signal the classifier had was a PostgreSQL keyword, and every
+    InnoDB index build was reported as "writes blocked during build" with a
+    maintenance-window recommendation. Measured: LOCK=NONE is ACCEPTED for a
+    secondary index, including the UNIQUE form and the CREATE INDEX form."""
+    for ddl in (
+        "ALTER TABLE t ADD INDEX ix(a)",
+        "ALTER TABLE t ADD INDEX ix(a), ALGORITHM=INPLACE, LOCK=NONE",
+        "ALTER TABLE t ADD UNIQUE INDEX uq(a)",
+        "ALTER TABLE t ADD KEY ix(a)",
+        "CREATE INDEX ix ON t(a) LOCK=NONE",
+    ):
+        c = classify_ddl(ddl.upper(), _MY)
+        assert c["operation"] == "create_index", ddl
+        assert c["online"] is True, ddl
+
+
+def test_mysql_index_kinds_that_require_a_lock_are_not_promised_away():
+    """Measured REJECT: "Fulltext index creation requires a lock" and "Do not
+    support online operation on table with GIS index". Treating every MySQL
+    index build as online would promise these two away."""
+    for ddl in (
+        "ALTER TABLE t ADD FULLTEXT INDEX ft(b)",
+        "ALTER TABLE t ADD SPATIAL INDEX sp(pt)",
+    ):
+        c = classify_ddl(ddl.upper(), _MY)
+        assert c["operation"] == "create_index", ddl
+        assert c["online"] is False, ddl
+        assert "blocking" in c["lock"], ddl
+
+
+def test_mysql_declared_clauses_override_the_default():
+    assert classify_ddl("ALTER TABLE T ADD INDEX IX(A), ALGORITHM=COPY", _MY)["online"] is False
+    assert classify_ddl("ALTER TABLE T ADD INDEX IX(A), LOCK=SHARED", _MY)["online"] is False
+    assert classify_ddl("ALTER TABLE T ADD INDEX IX(A), LOCK=EXCLUSIVE", _MY)["online"] is False
+
+
+def test_mysql_column_type_change_is_recognized_and_always_a_rebuild():
+    """MySQL spells this MODIFY/CHANGE COLUMN, which matched no branch and fell
+    to `other` ("exclusive (assumed, unrecognized DDL)") with 0 MB of extra disk
+    reported for what is a full table copy.
+
+    Measured: a type change ALWAYS rebuilds on InnoDB, even a varchar WIDENING;
+    both ALGORITHM=INPLACE and LOCK=NONE are rejected with "Cannot change column
+    type INPLACE. Try LOCK=SHARED"."""
+    for ddl in (
+        "ALTER TABLE t MODIFY COLUMN a BIGINT",
+        "ALTER TABLE t MODIFY COLUMN b VARCHAR(100)",
+        "ALTER TABLE t CHANGE COLUMN a a2 BIGINT",
+    ):
+        c = classify_ddl(ddl.upper(), _MY)
+        assert c["operation"] == "alter_column_type", ddl
+        assert c["online"] is False, ddl
+    e = estimate_ddl(
+        ddl_sql="ALTER TABLE t MODIFY COLUMN a BIGINT", table="t", row_count=1,
+        size_mb=500.0, instance_class="db.r6g.large", engine=_MY,
+    )
+    assert e["disk_space_needed_mb"] == 500.0  # a rebuild holds a second copy
+
+
+def test_mysql_rewrite_advice_does_not_name_a_postgresql_tool():
+    """MySQL only reaches the rewrite branch now that MODIFY COLUMN is
+    classified, and that branch used to recommend pg_repack unconditionally."""
+    my = estimate_ddl(
+        ddl_sql="ALTER TABLE t MODIFY COLUMN a BIGINT", table="t", row_count=1,
+        size_mb=100.0, instance_class="db.r6g.large", engine=_MY,
+    )["recommendation"]
+    assert "gh-ost" in my and "pg_repack" not in my
+    pg = estimate_ddl(
+        ddl_sql="ALTER TABLE t ALTER COLUMN a TYPE bigint", table="t", row_count=1,
+        size_mb=100.0, instance_class="db.r6g.large", engine="aurora-postgresql",
+    )["recommendation"]
+    assert "pg_repack" in pg and "gh-ost" not in pg
+
+
+def test_mysql_add_column_is_instant_except_stored_generated():
+    """Measured ACCEPT for ALGORITHM=INSTANT with a DEFAULT (including NOT NULL
+    and CURRENT_TIMESTAMP) and with GENERATED ... VIRTUAL; measured REJECT (1845)
+    for GENERATED ... STORED, which materializes a value per row. The blanket
+    conservative branch told the DBA to take a window for a catalog change."""
+    for ddl in (
+        "ALTER TABLE t ADD COLUMN e INT DEFAULT 5",
+        "ALTER TABLE t ADD COLUMN e INT NOT NULL DEFAULT 7",
+        "ALTER TABLE t ADD COLUMN ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        "ALTER TABLE t ADD COLUMN g INT GENERATED ALWAYS AS (a+1) VIRTUAL",
+    ):
+        c = classify_ddl(ddl.upper(), _MY)
+        assert c["online"] is True, ddl
+        assert c["scans_table"] is False, ddl
+    stored = classify_ddl(
+        "ALTER TABLE T ADD COLUMN G INT GENERATED ALWAYS AS (A+1) STORED", _MY
+    )
+    assert stored["online"] is False
+    assert stored["scans_table"] is True
+
+
+def test_postgresql_unique_concurrently_is_no_longer_unrecognized():
+    """Pre-existing and on the PRIMARY engine: classify_ddl tested the substrings
+    "CREATE INDEX" / "ADD INDEX", and "CREATE UNIQUE INDEX" contains neither, so
+    a CONCURRENTLY unique build was reported as an assumed exclusive lock."""
+    c = classify_ddl("CREATE UNIQUE INDEX CONCURRENTLY IX ON T(A)", "aurora-postgresql")
+    assert c["operation"] == "create_index"
+    assert c["online"] is True
+    assert resolve_table("CREATE UNIQUE INDEX CONCURRENTLY ix ON orders(a)") == "orders"
+    assert resolve_table("CREATE FULLTEXT INDEX ft ON orders(b)") == "orders"
+
+
+def test_postgresql_classification_is_unmoved_by_the_engine_argument():
+    """The engine argument must not touch PostgreSQL, and omitting it must behave
+    exactly as before it existed."""
+    for engine in (None, "aurora-postgresql"):
+        assert classify_ddl("CREATE INDEX I ON ORDERS (X)", engine)["online"] is False
+        assert classify_ddl("CREATE INDEX CONCURRENTLY I ON ORDERS (X)", engine)["online"] is True
+        assert classify_ddl("ALTER TABLE T ALTER COLUMN A TYPE BIGINT", engine)["online"] is False
+        assert classify_ddl("ALTER TABLE T ADD COLUMN E INT DEFAULT 5", engine)["online"] is False
+        assert classify_ddl("ALTER TABLE T ADD COLUMN E INT", engine)["online"] is True
+    # Same statement, MySQL: the index build is online and ADD COLUMN DEFAULT is
+    # instant. This asserts the two engines actually diverge, so a regression that
+    # drops the engine plumbing cannot pass both halves of this test.
+    assert classify_ddl("CREATE INDEX I ON ORDERS (X)", _MY)["online"] is True
+    assert classify_ddl("ALTER TABLE T ADD COLUMN E INT DEFAULT 5", _MY)["online"] is True

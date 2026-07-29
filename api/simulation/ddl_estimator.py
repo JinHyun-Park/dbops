@@ -70,11 +70,122 @@ _CONCURRENT_SLOWDOWN = 2.0
 # agent simulates. CREATE INDEX names the table after ON (after the optional
 # CONCURRENTLY + index name).
 _TABLE_RX = re.compile(
-    r"\b(?:ALTER\s+TABLE|CREATE\s+(?:UNIQUE\s+)?INDEX(?:\s+CONCURRENTLY)?\s+\S+\s+ON|"
+    r"\b(?:ALTER\s+TABLE"
+    r"|CREATE\s+(?:UNIQUE\s+|FULLTEXT\s+|SPATIAL\s+)?INDEX(?:\s+CONCURRENTLY)?\s+\S+\s+ON|"
     r"DROP\s+TABLE|TRUNCATE(?:\s+TABLE)?|REINDEX\s+(?:TABLE|INDEX)|VACUUM(?:\s+FULL)?|CLUSTER)\s+"
     r"(?:IF\s+EXISTS\s+)?([A-Za-z_\"][\w.\"]*)",
     re.IGNORECASE,
 )
+
+
+# --- MySQL online-DDL clauses -------------------------------------------------
+# InnoDB lets the statement DECLARE how it wants to run, and refuses rather than
+# degrades: an unsupported request raises 1845/1846 ("Try ALGORITHM=COPY",
+# "Try LOCK=SHARED"). So a declared clause is proof of how the statement will
+# run if it runs at all, which is why it overrides the shape-based default here.
+# Every entry in the table below was measured against a real mysqld, not read off
+# a docs page:
+#   ADD/CREATE secondary INDEX (incl. UNIQUE, both statement forms) LOCK=NONE  ACCEPT
+#   ADD FULLTEXT INDEX                                             LOCK=NONE  REJECT
+#   ADD SPATIAL INDEX                                              LOCK=NONE  REJECT
+#   MODIFY/CHANGE COLUMN <type>            INPLACE and LOCK=NONE              REJECT
+#   ADD COLUMN / DROP COLUMN / RENAME COLUMN                  ALGORITHM=INSTANT ACCEPT
+#   DROP INDEX                             ALGORITHM=INSTANT REJECT, INPLACE   ACCEPT
+_ALGORITHM_RX = re.compile(r"\bALGORITHM\s*=\s*(INSTANT|INPLACE|COPY)\b")
+_LOCK_RX = re.compile(r"\bLOCK\s*=\s*(NONE|SHARED|EXCLUSIVE)\b")
+
+# Index kinds InnoDB cannot build with concurrent DML, whatever else is declared:
+# "Fulltext index creation requires a lock" / "Do not support online operation on
+# table with GIS index". Treating all MySQL index builds as online would promise
+# these two away.
+_NO_CONCURRENT_DML_INDEX = ("FULLTEXT", "SPATIAL")
+
+# MySQL's spelling of a column type change. `CHANGE COLUMN` also renames, but it
+# still carries a type, so it rebuilds the same way.
+_MYSQL_TYPE_CHANGE_RX = re.compile(r"\b(?:MODIFY|CHANGE)\s+(?:COLUMN\s+)?\S+\s+\S")
+
+
+def _is_mysql(engine) -> bool:
+    """True for Aurora MySQL and standalone RDS MySQL, false for everything else.
+
+    Both run InnoDB and share these online-DDL rules; PostgreSQL does not, and
+    its ``CONCURRENTLY`` has no MySQL equivalent.
+    """
+    return "mysql" in str(engine or "").strip().lower()
+
+
+def _requested(rx: re.Pattern, ddl_upper: str):
+    """The value of a declared ALGORITHM= / LOCK= clause, or None."""
+    m = rx.search(ddl_upper)
+    return m.group(1) if m else None
+
+
+def _adds_special_index(ddl_upper: str) -> bool:
+    """ADD FULLTEXT/SPATIAL INDEX, which does not contain the substring
+    "ADD INDEX" and so missed the index branch entirely."""
+    return any(f"ADD {kind}" in ddl_upper for kind in _NO_CONCURRENT_DML_INDEX)
+
+
+# Every shape that BUILDS an index. This was two substring tests, "CREATE INDEX"
+# and "ADD INDEX", which silently missed the qualified forms: neither
+# "CREATE UNIQUE INDEX" nor "ADD UNIQUE INDEX" contains either substring, so both
+# fell through to the `other` fallback and were reported as
+# "exclusive (assumed, unrecognized DDL)" with 0 MB of extra disk. That was wrong
+# on PostgreSQL too: `CREATE UNIQUE INDEX CONCURRENTLY` came back as a blocking
+# operation needing a maintenance window. Pre-existing, found by driving the
+# classifier over the shapes a DBA actually writes rather than reading it.
+#
+# `ADD KEY` is MySQL's synonym for `ADD INDEX`. `ADD PRIMARY KEY` is deliberately
+# NOT here: it rebuilds the table rather than adding a secondary index, so it
+# belongs to a different cost class (see BACKLOG.md).
+_INDEX_BUILD_RX = re.compile(
+    r"\b(?:CREATE\s+(?:UNIQUE\s+|FULLTEXT\s+|SPATIAL\s+)?INDEX"
+    r"|ADD\s+(?:UNIQUE\s+|FULLTEXT\s+|SPATIAL\s+)?(?:INDEX|KEY))\b"
+)
+
+
+def _mysql_changes_column_type(ddl_upper: str) -> bool:
+    return bool(_MYSQL_TYPE_CHANGE_RX.search(ddl_upper))
+
+
+def _mysql_operation(ddl_upper: str):
+    """Operation label for a statement whose ALGORITHM=INSTANT already settled
+    the cost. Only the label is in question here, not the lock or the scan."""
+    for needle, op in (
+        ("ADD COLUMN", "add_column"),
+        ("DROP COLUMN", "drop_column"),
+        ("RENAME COLUMN", "rename_column"),
+        ("ADD INDEX", "create_index"),
+        ("DROP INDEX", "drop_index"),
+    ):
+        if needle in ddl_upper:
+            return op
+    return None
+
+
+def _mysql_index_lock(ddl_upper: str, algorithm, lock):
+    """(online, lock_text) for a MySQL index build.
+
+    An explicitly declared LOCK wins, because InnoDB would refuse a request it
+    cannot honour. Otherwise the default is INPLACE with concurrent DML, except
+    for the two index kinds that require a lock.
+    """
+    needs_lock = any(kind in ddl_upper for kind in _NO_CONCURRENT_DML_INDEX)
+    if lock == "NONE" and not needs_lock:
+        return True, "none (LOCK=NONE, concurrent DML permitted)"
+    if lock == "SHARED":
+        return False, "reads allowed, writes blocked (LOCK=SHARED)"
+    if lock == "EXCLUSIVE":
+        return False, "exclusive (LOCK=EXCLUSIVE)"
+    if needs_lock:
+        kind = next(k for k in _NO_CONCURRENT_DML_INDEX if k in ddl_upper)
+        return False, (
+            f"blocking: InnoDB refuses LOCK=NONE for a {kind} index "
+            "(writes blocked during build)"
+        )
+    if algorithm == "COPY":
+        return False, "blocking (ALGORITHM=COPY rebuilds the table)"
+    return True, "none (InnoDB default ALGORITHM=INPLACE permits concurrent DML)"
 
 
 def resolve_table(ddl_sql: str):
@@ -89,20 +200,50 @@ def resolve_table(ddl_sql: str):
     return m.group(1).strip().split(".")[-1].strip('"')
 
 
-def classify_ddl(ddl_upper: str) -> dict:
+def classify_ddl(ddl_upper: str, engine=None) -> dict:
     """Classify DDL into (operation, scans_table, online, lock) by statement
     shape. Falls back to a conservative blocking estimate for anything
-    unrecognized."""
-    has_concurrently = "CONCURRENTLY" in ddl_upper
+    unrecognized.
 
-    if "CREATE INDEX" in ddl_upper or "ADD INDEX" in ddl_upper:
+    ``engine`` (cluster_meta.engine) decides the ONLINE semantics. Without it
+    the only online signal is PostgreSQL's ``CONCURRENTLY``, which MySQL never
+    writes, so every MySQL index build was reported as "writes blocked during
+    build" and the recommendation told the DBA to take a maintenance window for
+    a statement InnoDB runs with concurrent DML permitted. Measured against a
+    real mysqld: ``ALTER TABLE t ADD INDEX ix(a), LOCK=NONE`` is ACCEPTED.
+    """
+    has_concurrently = "CONCURRENTLY" in ddl_upper
+    mysql = _is_mysql(engine)
+    algorithm = _requested(_ALGORITHM_RX, ddl_upper)
+    lock = _requested(_LOCK_RX, ddl_upper)
+
+    # A declared ALGORITHM=INSTANT is metadata-only whatever the operation is,
+    # and it cannot silently degrade: MySQL REFUSES an algorithm it cannot honour
+    # (errors 1845 / 1846, both measured) instead of falling back to a rebuild.
+    # So the declaration is evidence, not a hope.
+    if mysql and algorithm == "INSTANT":
+        return {
+            "operation": _mysql_operation(ddl_upper) or "other",
+            "scans_table": False,
+            "online": True,
+            "lock": "none (ALGORITHM=INSTANT, metadata only)",
+        }
+
+    if _INDEX_BUILD_RX.search(ddl_upper) or _adds_special_index(ddl_upper):
+        if mysql:
+            online, lock_text = _mysql_index_lock(ddl_upper, algorithm, lock)
+        else:
+            online = has_concurrently
+            lock_text = (
+                "none (CONCURRENTLY)"
+                if has_concurrently
+                else "blocking (writes blocked during build)"
+            )
         return {
             "operation": "create_index",
             "scans_table": True,
-            "online": has_concurrently,
-            "lock": "none (CONCURRENTLY)"
-            if has_concurrently
-            else "blocking (writes blocked during build)",
+            "online": online,
+            "lock": lock_text,
         }
     if "REINDEX" in ddl_upper:
         return {
@@ -118,29 +259,71 @@ def classify_ddl(ddl_upper: str) -> dict:
             "online": False,
             "lock": "exclusive (full table rewrite + ~table-size extra disk)",
         }
-    if "ALTER COLUMN" in ddl_upper and "TYPE" in ddl_upper:
+    if ("ALTER COLUMN" in ddl_upper and "TYPE" in ddl_upper) or (
+        mysql and _mysql_changes_column_type(ddl_upper)
+    ):
+        # MySQL writes this as MODIFY COLUMN / CHANGE COLUMN, which matched no
+        # branch and fell through to "other" ("exclusive (assumed)"). It is the
+        # same operation as PostgreSQL's ALTER COLUMN ... TYPE and needs the same
+        # 1.0x extra-disk accounting, which only this branch reports.
+        #
+        # Measured: a column type change is ALWAYS a table rebuild on InnoDB,
+        # even a varchar WIDENING. mysqld rejects both ALGORITHM=INPLACE and
+        # LOCK=NONE with "Cannot change column type INPLACE. Try LOCK=SHARED",
+        # so LOCK=SHARED (reads allowed, writes blocked) is the best case and
+        # honouring a declared LOCK=NONE here would be wrong.
         return {
             "operation": "alter_column_type",
             "scans_table": True,
             "online": False,
-            "lock": "exclusive (table rewrite)",
+            "lock": (
+                "reads allowed, writes blocked (LOCK=SHARED is the best InnoDB "
+                "offers for a type change)"
+                if mysql
+                else "exclusive (table rewrite)"
+            ),
         }
     if "ADD COLUMN" in ddl_upper:
         # PG11+/MySQL8: ADD COLUMN with NO default is metadata-only (instant).
-        # A DEFAULT (possibly volatile) or GENERATED can rewrite the table and
-        # we can't prove constness from text — so be CONSERVATIVE.
+        # A DEFAULT (possibly volatile) or GENERATED can rewrite the table and on
+        # PostgreSQL we can't prove constness from text, so be CONSERVATIVE.
+        #
+        # On InnoDB we CAN, because it answers: ADD COLUMN with a DEFAULT accepts
+        # ALGORITHM=INSTANT (measured, including NOT NULL and CURRENT_TIMESTAMP
+        # defaults), and so does a GENERATED ... VIRTUAL column. Only
+        # GENERATED ... STORED is refused (1845), because it materializes a value
+        # per row. Being conservative there told the DBA to take a maintenance
+        # window for an instant catalog change.
+        if mysql:
+            stored_generated = "GENERATED" in ddl_upper and "STORED" in ddl_upper
+            if stored_generated:
+                return {
+                    "operation": "add_column",
+                    "scans_table": True,
+                    "online": False,
+                    "lock": (
+                        "reads allowed, writes blocked: a STORED generated column "
+                        "is materialized per row (InnoDB refuses LOCK=NONE)"
+                    ),
+                }
+            return {
+                "operation": "add_column",
+                "scans_table": False,
+                "online": True,
+                "lock": "none (ALGORITHM=INSTANT, metadata only)",
+            }
         if "DEFAULT" in ddl_upper or "GENERATED" in ddl_upper:
             return {
                 "operation": "add_column",
                 "scans_table": True,
                 "online": False,
-                "lock": "potentially blocking — DEFAULT/GENERATED may rewrite the table",
+                "lock": "potentially blocking: DEFAULT/GENERATED may rewrite the table",
             }
         return {
             "operation": "add_column",
             "scans_table": False,
             "online": True,
-            "lock": "brief (metadata-only — no default)",
+            "lock": "brief (metadata-only, no default)",
         }
     if "DROP COLUMN" in ddl_upper:
         return {
@@ -209,12 +392,18 @@ def estimate_ddl(
     size_mb: float,
     instance_class=None,
     io_optimized: bool = False,
+    engine=None,
 ) -> dict:
     """Full DDL impact estimate. Returns everything except ``cluster_id`` (the
     caller adds it). Time scales with table size ÷ instance-derived throughput
-    for full-scan ops; metadata-only ops are size-independent."""
+    for full-scan ops; metadata-only ops are size-independent.
+
+    ``engine`` is cluster_meta.engine. It decides the online-DDL semantics and
+    which rewrite tooling the recommendation may name; omitted, the model behaves
+    exactly as it did before the argument existed (PostgreSQL rules).
+    """
     ddl_upper = (ddl_sql or "").strip().upper()
-    cls = classify_ddl(ddl_upper)
+    cls = classify_ddl(ddl_upper, engine)
     try:
         size_mb = float(size_mb or 0)
     except (TypeError, ValueError):
@@ -246,17 +435,34 @@ def estimate_ddl(
     disk_needed_mb = _disk_needed_mb(cls["operation"], size_mb)
 
     if cls["online"]:
-        recommendation = "온라인 DDL 가능 — 서비스 영향 최소"
+        recommendation = "온라인 DDL 가능, 서비스 영향 최소"
     elif cls["operation"] in ("rewrite", "alter_column_type"):
-        recommendation = "테이블 전체 재작성/배타 락 — 점검 윈도우 + pg_repack/BG 마이그레이션 검토"
+        # Name the tooling that exists for THIS engine. pg_repack is a
+        # PostgreSQL extension, and MySQL reaches this branch now that a
+        # MODIFY COLUMN type change is classified instead of falling to "other".
+        tooling = (
+            "gh-ost/pt-online-schema-change"
+            if _is_mysql(engine)
+            else "pg_repack/BG 마이그레이션"
+        )
+        recommendation = f"테이블 전체 재작성/배타 락, 점검 윈도우 + {tooling} 검토"
     else:
-        recommendation = "쓰기 차단/배타적 락 — 점검 윈도우에서 수행 권장"
+        recommendation = "쓰기 차단/배타적 락, 점검 윈도우에서 수행 권장"
 
     if cls["scans_table"] or cls["operation"] == "add_column":
+        # The ADD COLUMN caveat is engine-specific: on InnoDB a DEFAULT is stored
+        # in the catalog (INSTANT), so repeating the PostgreSQL warning there
+        # would contradict what this tool now reports for the same statement.
+        add_column_note = (
+            "InnoDB에서 ADD COLUMN은 DEFAULT가 있어도 ALGORITHM=INSTANT로 처리되며, "
+            "GENERATED ... STORED 만 테이블 재작성을 유발합니다. "
+            if _is_mysql(engine)
+            else "ADD COLUMN은 상수/무default일 때만 메타데이터 변경이며 volatile default는 재작성을 유발합니다. "
+        )
         note = (
             f"런타임은 추정치입니다 (테이블 {size_mb:.0f}MB ÷ {mb_s:.0f}MB/s, 인스턴스 클래스 기반). "
-            "ADD COLUMN은 상수/무default일 때만 메타데이터 변경이며 volatile default는 재작성을 유발합니다. "
-            "실제 시간은 동시 부하·캐시 상태·I/O 경합에 따라 달라집니다."
+            + add_column_note
+            + "실제 시간은 동시 부하·캐시 상태·I/O 경합에 따라 달라집니다."
         )
     else:
         note = "메타데이터 전용 작업으로 테이블 크기와 무관하게 거의 즉시 완료됩니다."
