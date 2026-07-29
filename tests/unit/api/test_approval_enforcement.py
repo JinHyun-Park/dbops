@@ -3,17 +3,28 @@
 import base64
 import importlib.util
 import json
+import os as _os
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-_HANDLER_PATH = Path(__file__).resolve().parents[3] / "api" / "approvals" / "handler.py"
+# api/approvals must be ON sys.path before the handler is executed: it does a
+# bare `import tenancy`, which resolves in Lambda because the handler's own
+# directory is on the path there. Without this line the module raises
+# ModuleNotFoundError at collection, and this file was green ONLY inside a full
+# run, where an earlier test module happened to seed the path first. That made
+# any targeted run of the approval path (a mutation check, for instance) fail
+# for a reason unrelated to the code under test. Same idiom as
+# test_approvals_tenancy.py.
+_APPROVALS_DIR = Path(__file__).resolve().parents[3] / "api" / "approvals"
+sys.path.insert(0, str(_APPROVALS_DIR))
+
+_os.environ.setdefault("APPROVALS_TABLE", "test-approvals")
+
+_HANDLER_PATH = _APPROVALS_DIR / "handler.py"
 _spec = importlib.util.spec_from_file_location("approvals_handler", _HANDLER_PATH)
 handler = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(handler)
-
-import os as _os
-
-_os.environ.setdefault("APPROVALS_TABLE", "test-approvals")
 
 R = handler.resolve_eligible_approvers
 
