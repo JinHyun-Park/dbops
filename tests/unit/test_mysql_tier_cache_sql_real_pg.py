@@ -41,6 +41,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -115,22 +116,85 @@ pytestmark = pytest.mark.skipif(
     reason="no local PostgreSQL (initdb/pg_ctl/psql), real-engine test skipped",
 )
 
-def _free_port():
-    """Ask the OS for an unused port instead of hardcoding one.
+def _reserve_port():
+    """Ask the OS for an unused port instead of hardcoding one, and HOLD it.
 
     Measured: with a hardcoded port and a fixed data dir, a second pytest process
     running this module rmtree's the first one's PGDATA and initdb's over it,
     killing the live server mid-test ("server closed the connection
     unexpectedly", then "connection refused" for every test after it). That is
     not hypothetical, it happened twice while another agent was running the suite
-    in this repo. Port from the OS + PID in the path makes two runs independent."""
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return str(s.getsockname()[1])
+    in this repo. Port from the OS + PID in the path makes two runs independent.
+
+    The socket stays OPEN until just before `pg_ctl start`. Closing it here (the
+    previous `with socket.socket()`) released the port at IMPORT time, so between
+    collection and start nothing held it and two modules in one process could be
+    handed the same number. Bound-but-not-listening refuses connections, so the
+    hold does not make `_serving()` see a live server, and it is closed before
+    PostgreSQL binds.
+    """
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    return str(s.getsockname()[1]), s
 
 
-_PORT = _free_port()
+_PORT, _PORT_HOLD = _reserve_port()
 _PGDATA = os.path.join(tempfile.gettempdir(), f"dbops_mysql_tier_pg_{os.getpid()}")
+
+
+def _release_port():
+    """Drop the reservation so PostgreSQL can bind. Idempotent."""
+    global _PORT_HOLD
+    if _PORT_HOLD is not None:
+        _PORT_HOLD.close()
+        _PORT_HOLD = None
+
+
+def _serving(timeout=5.0):
+    """Is ANYTHING still answering on this fixture's port?
+
+    Asked instead of trusting pg_ctl, because pg_ctl finds the server through
+    `postmaster.pid`: once that file is gone the stop reports nothing useful while
+    the postmaster keeps serving. Polled rather than probed once, so a backend that
+    outlives the postmaster by a moment is not reported as a live server.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        with socket.socket() as s:
+            s.settimeout(1)
+            if s.connect_ex(("127.0.0.1", int(_PORT))) != 0:
+                return False
+        if time.monotonic() >= deadline:
+            return True
+        time.sleep(0.2)
+
+
+def _stop_and_remove():
+    """Stop FIRST, then remove, and REFUSE TO REMOVE under a live server.
+
+    rmtree under a live postmaster leaves it running on a datadir that no longer
+    exists, and every later fixture in that process then fails to start: 34 fixture
+    ERRORs once got written off as flake in this repo. `ignore_errors=True` after an
+    UNCHECKED stop is exactly how that state was reached, and this module was the
+    last copy still doing it. It was also the only one that did not stop before
+    `initdb`, so it had no setup-time self-heal either.
+    """
+    existed = os.path.isdir(_PGDATA)
+    if existed:
+        subprocess.run([_PGCTL, "-D", _PGDATA, "-m", "immediate", "stop"],
+                       capture_output=True)
+    if _serving():
+        raise RuntimeError(
+            f"something is still serving 127.0.0.1:{_PORT} after pg_ctl stop on "
+            f"{_PGDATA}. NOT removing the datadir under a live server: that is what "
+            "leaves a postmaster on a datadir that no longer exists and turns every "
+            "later fixture in this process into an unrelated ERROR. Stop it by hand: "
+            f"{_PGCTL} -D {_PGDATA} -m immediate stop"
+        )
+    if existed:
+        # No ignore_errors: a tree this process owns and no longer serves has to
+        # come off cleanly, and a failure here is a fact, not noise to swallow.
+        shutil.rmtree(_PGDATA)
 
 # `:name` binds, but NOT the `::type` cast that follows one: the lookbehind makes
 # the second colon of `::` non-matching, so `:ts::timestamptz` binds ts and
@@ -210,9 +274,10 @@ def _run(argv):
 
 @pytest.fixture(scope="module")
 def server():
-    shutil.rmtree(_PGDATA, ignore_errors=True)
+    _stop_and_remove()
     os.makedirs(_PGDATA, exist_ok=True)
     _run([_INITDB, "-D", _PGDATA, "-U", "dbops", "--auth=trust"])
+    _release_port()  # hand the port over to PostgreSQL, last possible moment
     _run([_PGCTL, "-D", _PGDATA,
           "-o", f"-p {_PORT} -k {_PGDATA} -c listen_addresses=127.0.0.1",
           "-l", os.path.join(_PGDATA, "log"), "-w", "start"])
@@ -222,8 +287,7 @@ def server():
             s.raw((_SQL_DIR / fname).read_text())
         yield s
     finally:
-        subprocess.run([_PGCTL, "-D", _PGDATA, "-m", "immediate", "stop"], capture_output=True)
-        shutil.rmtree(_PGDATA, ignore_errors=True)
+        _stop_and_remove()
 
 
 @pytest.fixture

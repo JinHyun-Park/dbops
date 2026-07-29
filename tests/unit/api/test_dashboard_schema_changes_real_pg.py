@@ -129,19 +129,36 @@ pytestmark = pytest.mark.skipif(
     reason="no local PostgreSQL (initdb/pg_ctl/psql), real-engine test skipped",
 )
 
-def _free_port():
-    """Ask the KERNEL. `56000 + os.getpid() % 3000` was a guess: whatever already
-    holds that port reproduces the exact cascade this harness family was fixed
-    for, and it does not self-heal, because pg_ctl start raises BEFORE the fixture
-    yields, so the try/finally never runs and the datadir is left behind for the
-    next run to trip over. Same as tests/unit/data_pipeline/
-    test_schema_snapshot_real_pg.py, which solved it properly first."""
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return str(s.getsockname()[1])
+def _reserve_port():
+    """Ask the KERNEL, and HOLD the port until `pg_ctl start`.
+
+    `56000 + os.getpid() % 3000` was a guess: whatever already holds that port
+    reproduces the exact cascade this harness family was fixed for, and it does not
+    self-heal, because pg_ctl start raises BEFORE the fixture yields, so the
+    try/finally never runs and the datadir is left behind for the next run to trip
+    over. Same as tests/unit/data_pipeline/test_schema_snapshot_real_pg.py, which
+    solved it properly first.
+
+    Asking the kernel and then CLOSING the socket at import time only shrinks that
+    window, it does not close it: between collection and start nothing holds the
+    number, so two modules in one process can still be handed the same one. Keeping
+    the socket open until start does close it. Bound-but-not-listening refuses
+    connections, so the hold does not make `_serving()` see a live server.
+    """
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    return str(s.getsockname()[1]), s
 
 
-_PORT = _free_port()
+_PORT, _PORT_HOLD = _reserve_port()
+
+
+def _release_port():
+    """Drop the reservation so PostgreSQL can bind. Idempotent."""
+    global _PORT_HOLD
+    if _PORT_HOLD is not None:
+        _PORT_HOLD.close()
+        _PORT_HOLD = None
 # PID-scoped: two concurrent runs must not share one datadir, and the teardown of
 # one must not delete the datadir the other is still serving from.
 _PGDATA = os.path.join(tempfile.gettempdir(), f"dbops_schema_changes_pg_{os.getpid()}")
@@ -287,6 +304,7 @@ def pg():
     os.makedirs(_PGDATA, exist_ok=True)
     subprocess.run([_INITDB, "-D", _PGDATA, "-U", "dbops", "--auth=trust"],
                    check=True, capture_output=True)
+    _release_port()  # hand the port over to PostgreSQL, last possible moment
     subprocess.run(
         [_PGCTL, "-D", _PGDATA, "-o", f"-p {_PORT} -k {_PGDATA} -c listen_addresses=127.0.0.1",
          "-l", os.path.join(_PGDATA, "log"), "-w", "start"],

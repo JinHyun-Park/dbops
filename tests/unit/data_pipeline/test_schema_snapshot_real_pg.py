@@ -110,15 +110,32 @@ pytestmark = pytest.mark.skipif(
     reason="no local PostgreSQL (initdb/pg_ctl/psql), real-engine E-4 test skipped",
 )
 
-def _free_port():
-    """Ask the kernel. A hardcoded port collides with a sibling real-PG fixture
-    in the same run and with a postmaster an aborted run left behind."""
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return str(s.getsockname()[1])
+def _reserve_port():
+    """Ask the kernel, and HOLD the port until `pg_ctl start`.
+
+    A hardcoded port collides with a sibling real-PG fixture in the same run and
+    with a postmaster an aborted run left behind. Closing the probe socket here
+    (the previous `with socket.socket()`) released the port at IMPORT time, so
+    between collection and start nothing held it and two modules in one process
+    could be handed the same number; the loser's `pg_ctl start` then raises before
+    its fixture yields, so the `finally` never runs and its datadir survives.
+    Bound-but-not-listening refuses connections, so the hold does not make
+    `_serving()` below see a live server.
+    """
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    return str(s.getsockname()[1]), s
 
 
-_PORT = _free_port()
+_PORT, _PORT_HOLD = _reserve_port()
+
+
+def _release_port():
+    """Drop the reservation so PostgreSQL can bind. Idempotent."""
+    global _PORT_HOLD
+    if _PORT_HOLD is not None:
+        _PORT_HOLD.close()
+        _PORT_HOLD = None
 # A unix socket path over ~103 bytes is refused, and the pytest tmp path is much
 # longer than that, so the data dir goes somewhere short and we talk TCP.
 # PID-scoped: two concurrent runs must not share one datadir, and the teardown of
@@ -187,6 +204,7 @@ def pg():
     os.makedirs(_PGDATA, exist_ok=True)
     subprocess.run([_INITDB, "-D", _PGDATA, "-U", "dbops", "--auth=trust"],
                    check=True, capture_output=True)
+    _release_port()  # hand the port over to PostgreSQL, last possible moment
     subprocess.run(
         [_PGCTL, "-D", _PGDATA, "-o", f"-p {_PORT} -k {_PGDATA} -c listen_addresses=127.0.0.1",
          "-l", os.path.join(_PGDATA, "log"), "-w", "start"],
