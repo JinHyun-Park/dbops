@@ -14,21 +14,34 @@ a FRESH describe re-checks state right before the call (TOCTOU), and no str(e)
 internals leak into a return shown to users (errors are logged to CloudWatch).
 """
 
+import logging
+
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import client_for_cluster
 
+logger = logging.getLogger(__name__)
+
+# COULD-NOT-ASK, as distinct from DOES-NOT-EXIST. See _describe.
+_LOOKUP_FAILED = object()
+
 
 def _describe(rds, cluster_id):
-    """Return the instance dict or None. Never raises — a describe failure is
-    treated as "can't confirm state" by the caller."""
+    """Return the instance dict, None when RDS says there is no such instance, or
+    _LOOKUP_FAILED when the describe could not be made at all. Never raises.
+
+    Those last two are DIFFERENT answers, and collapsing them into one None sent
+    the DBA to check the target identifier after a throttle or an AccessDenied,
+    where the identifier is the one thing that is not the problem. Same split
+    modify_rds_instance_params already ships.
+    """
     try:
         instances = rds.describe_db_instances(DBInstanceIdentifier=cluster_id).get(
             "DBInstances"
         ) or []
-    except Exception as e:
-        print(f"[reboot_rds_instance] describe_db_instances failed for {cluster_id}: {e}")
-        return None
+    except Exception:
+        logger.warning("describe_db_instances failed for %s", cluster_id, exc_info=True)
+        return _LOOKUP_FAILED
     return instances[0] if instances else None
 
 
@@ -44,9 +57,15 @@ def reboot_rds_instance_impl(
     # Pre-check BEFORE offering approval: skip the approval round-trip for an
     # instance that can't be rebooted (not available / is an Aurora member).
     inst = _describe(rds, cluster_id)
+    if inst is _LOOKUP_FAILED:
+        return {"status": "lookup_failed", "cluster_id": cluster_id,
+                "reason": ("RDS describe 호출 자체가 실패해 인스턴스 상태를 확인하지 "
+                           "못했습니다 (throttling 또는 권한 문제일 수 있습니다). "
+                           "대상 식별자 문제가 아니므로 잠시 후 다시 시도하고, 반복되면 "
+                           "IAM 권한을 확인하세요. 승인은 아직 요청되지 않았습니다.")}
     if inst is None:
         return {"status": "not_applicable", "cluster_id": cluster_id,
-                "reason": "인스턴스를 조회할 수 없습니다 — 대상 식별자를 확인하세요."}
+                "reason": "해당 식별자의 RDS 인스턴스가 존재하지 않습니다. 대상 식별자를 확인하세요."}
     if inst.get("DBClusterIdentifier"):
         return {"status": "unsupported", "cluster_id": cluster_id,
                 "reason": "Aurora 클러스터 멤버는 이 툴로 재부팅할 수 없습니다 (클러스터 도구를 사용하세요)."}
@@ -76,9 +95,19 @@ def reboot_rds_instance_impl(
     # instance may have left `available` (or become a cluster member) in the
     # window since approval.
     fresh = _describe(rds, cluster_id)
+    if fresh is _LOOKUP_FAILED:
+        # The approval is SINGLE-USE and was consumed by verify_approval above, so
+        # say so: this is the one place the DBA has to re-request, and a message
+        # that only says "aborted" leaves them re-issuing the same call forever.
+        return {"status": "lookup_failed", "cluster_id": cluster_id,
+                "reason": ("재부팅 직전 재확인을 위한 RDS describe 호출이 실패해 안전을 위해 "
+                           "중단했습니다 (throttling 또는 권한 문제일 수 있습니다). "
+                           "이 승인은 이미 소진되었으므로 재부팅이 필요하면 승인을 다시 "
+                           "요청해야 합니다.")}
     if fresh is None:
         return {"status": "not_applicable", "cluster_id": cluster_id,
-                "reason": "재부팅 직전 인스턴스 재확인에 실패했습니다 — 안전을 위해 중단합니다."}
+                "reason": ("승인 이후 해당 인스턴스가 더 이상 존재하지 않습니다. 재부팅하지 "
+                           "않았으며, 이 승인은 이미 소진되었습니다.")}
     if fresh.get("DBClusterIdentifier"):
         return {"status": "unsupported", "cluster_id": cluster_id,
                 "reason": "Aurora 클러스터 멤버는 이 툴로 재부팅할 수 없습니다 (클러스터 도구를 사용하세요)."}
@@ -88,8 +117,8 @@ def reboot_rds_instance_impl(
 
     try:
         rds.reboot_db_instance(DBInstanceIdentifier=cluster_id)
-    except Exception as e:
-        print(f"[reboot_rds_instance] reboot_db_instance failed for {cluster_id}: {e}")
+    except Exception:
+        logger.warning("reboot_db_instance failed for %s", cluster_id, exc_info=True)
         return {"status": "reboot_failed", "cluster_id": cluster_id,
                 "reason": "인스턴스 재부팅에 실패했습니다 (상태·권한 확인)."}
 

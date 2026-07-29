@@ -394,3 +394,96 @@ def test_project_binds_new_action_type_fields():
         "cluster_id": "a", "target_class": "t2", "current_class": "c1"})
     assert mc != canonical_action_hash("modify_rds_instance_class", {
         "cluster_id": "a", "target_class": "t1", "current_class": "c2"})
+
+
+# ===========================================================================
+# COULD-NOT-ASK vs DOES-NOT-EXIST
+# ===========================================================================
+# All three tools returned None from their own _describe helper both when the
+# describe RAISED and when RDS said there was no such instance, and both landed on
+# not_applicable with "인스턴스를 조회할 수 없습니다, 대상 식별자를 확인하세요". After a
+# throttle or an AccessDenied that sends the DBA to fix a name that was never
+# wrong, and the identifier is the one thing that is not the problem. The split
+# modify_rds_instance_params already shipped is applied here.
+#
+# Driven with verify_approval SPIED, so "consumed" means the single-use approval
+# is gone. `describes_when_approved` differs per tool: reboot and snapshot
+# pre-check before the `if not approved` branch, modify-class pre-checks inside it.
+
+_AVAIL = {"DBInstanceStatus": "available", "DBInstanceClass": "db.t4g.micro"}
+
+_TOOLS = (
+    ("reboot", _RB, reboot_rds_instance_impl, {}, 2, "reboot_db_instance"),
+    ("modify_class", _MC, modify_rds_instance_class_impl,
+     {"target_class": "db.t4g.small", "current_class": "db.t4g.micro"}, 1,
+     "modify_db_instance"),
+    ("snapshot", _SN, create_rds_snapshot_impl, {"snapshot_id": "s1"}, 2,
+     "create_db_snapshot"),
+)
+
+
+def _drive(mod_path, impl, kwargs, describe_side, approved):
+    """(response, approvals_consumed, rds_mock)."""
+    rds = MagicMock()
+    rds.describe_db_instances.side_effect = describe_side
+    consumed = []
+    with patch(f"{mod_path}.client_for_cluster", return_value=rds), \
+         patch(f"{mod_path}.verify_approval",
+               side_effect=lambda *a, **k: consumed.append(1) or {"ok": True}):
+        resp = impl(MagicMock(), "inst-1", approved=approved, approval_id="a1", **kwargs)
+    return resp, len(consumed), rds
+
+
+def test_a_failed_describe_does_not_blame_the_target_identifier():
+    for name, mod_path, impl, kwargs, _n, _write in _TOOLS:
+        resp, consumed, _ = _drive(mod_path, impl, kwargs, Exception("Throttling"), False)
+        assert resp["status"] == "lookup_failed", (name, resp)
+        assert consumed == 0, (name, "a pre-approval failure must not consume anything")
+        reason = resp["reason"]
+        assert "throttling" in reason.lower(), (name, reason)
+        assert "문제가 아니므로" in reason, (name, "must say the identifier is NOT the problem")
+        # And no exception text reaches the payload.
+        assert "Throttling(" not in reason and "Traceback" not in reason, (name, reason)
+
+
+def test_a_missing_instance_does_blame_the_target_identifier():
+    for name, mod_path, impl, kwargs, _n, _write in _TOOLS:
+        resp, consumed, _ = _drive(mod_path, impl, kwargs, [{"DBInstances": []}], False)
+        assert resp["status"] == "not_applicable", (name, resp)
+        assert consumed == 0, (name,)
+        assert "존재하지 않습니다" in resp["reason"], (name, resp["reason"])
+
+
+def test_a_failed_recheck_says_the_approval_was_consumed_and_writes_nothing():
+    """This failure IS post-consume and cannot be moved earlier: the re-check
+    exists to look at the state in the window after approval. So the message has
+    to say the approval is gone, or the DBA re-issues the same call forever."""
+    for name, mod_path, impl, kwargs, describes, write in _TOOLS:
+        side = [{"DBInstances": [_AVAIL]}] * (describes - 1) + [Exception("Throttling")]
+        resp, consumed, rds = _drive(mod_path, impl, kwargs, side, True)
+        assert resp["status"] == "lookup_failed", (name, resp)
+        assert consumed == 1, (name, "the re-check runs after the consume by design")
+        assert "소진" in resp["reason"], (name, "must say the approval is spent")
+        assert write not in str(rds.method_calls), (name, "must not write")
+
+
+def test_an_instance_that_vanished_after_approval_writes_nothing():
+    for name, mod_path, impl, kwargs, describes, write in _TOOLS:
+        side = [{"DBInstances": [_AVAIL]}] * (describes - 1) + [{"DBInstances": []}]
+        resp, consumed, rds = _drive(mod_path, impl, kwargs, side, True)
+        assert resp["status"] == "not_applicable", (name, resp)
+        assert consumed == 1, (name,)
+        assert write not in str(rds.method_calls), (name, "must not write")
+
+
+def test_the_happy_path_still_reaches_the_write_on_all_three():
+    """A pre-check that refuses too much silently removes a capability, which is
+    worse than the message it fixed."""
+    for name, mod_path, impl, kwargs, _n, write in _TOOLS:
+        rds = MagicMock()
+        rds.describe_db_instances.return_value = {"DBInstances": [_AVAIL]}
+        with patch(f"{mod_path}.client_for_cluster", return_value=rds), \
+             patch(f"{mod_path}.verify_approval", return_value={"ok": True}):
+            resp = impl(MagicMock(), "inst-1", approved=True, approval_id="a1", **kwargs)
+        assert write in str(rds.method_calls), (name, resp)
+        assert resp["status"] in ("rebooting", "modifying", "snapshot_creating"), (name, resp)
