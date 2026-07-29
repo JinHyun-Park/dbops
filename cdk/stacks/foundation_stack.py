@@ -278,6 +278,24 @@ class FoundationStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
+        # Short-lived single-use handshake tickets (WS-ticket pattern). The
+        # `ttl` attribute only REAPS rows; the authorizer checks `expires_at`
+        # against its own clock, because DynamoDB TTL deletion is best-effort and
+        # can lag by up to 48 hours. Treating TTL as the expiry would turn a
+        # 60-second ticket into a 48-hour one.
+        self.ws_tickets_table = dynamodb.Table(
+            self, "WsTicketsTable",
+            table_name=f"dbops-{Settings.ENV}-ws-tickets",
+            partition_key=dynamodb.Attribute(name="ticket", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            time_to_live_attribute="ttl",
+            # cdk-nag AwsSolutions-DDB3, same as the connections table. Pointless
+            # operationally on rows that live 60 seconds, but the nag gate is the
+            # CI gate and a suppression costs more to justify than the setting
+            # costs on a table this small.
+            point_in_time_recovery=True,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
         _ws_env = {"WS_CONNECTIONS_TABLE": self.ws_connections_table.table_name}
         ws_connect_fn = lambda_.Function(
             self, "WsConnect",
@@ -295,15 +313,22 @@ class FoundationStack(cdk.Stack):
             timeout=cdk.Duration.seconds(10),
             environment=_ws_env,
         )
-        # Authorizer validates the Cognito ACCESS token (passed as ?token=) via
-        # Cognito GetUser — no IAM, no JWKS/crypto bundling.
+        # Authorizer consumes a single-use TICKET (passed as ?ticket=) minted by
+        # POST /api/ws-ticket. It replaced Cognito-GetUser-on-an-access-token so
+        # that no long-lived credential rides the query string; see
+        # api/ws_authorizer/handler.py for why the ticket, not the DynamoDB TTL,
+        # is what enforces expiry.
         ws_authorizer_fn = lambda_.Function(
             self, "WsAuthorizer",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="handler.lambda_handler",
             code=lambda_.Code.from_asset("../api/ws_authorizer"),
             timeout=cdk.Duration.seconds(10),
+            environment={"WS_TICKETS_TABLE": self.ws_tickets_table.table_name},
         )
+        # READ+WRITE, not read: the authorizer CONSUMES the ticket with a
+        # conditional delete, which is what makes it single-use.
+        self.ws_tickets_table.grant_read_write_data(ws_authorizer_fn)
         self.ws_connections_table.grant_read_write_data(ws_connect_fn)
         self.ws_connections_table.grant_read_write_data(ws_disconnect_fn)
 
@@ -316,16 +341,15 @@ class FoundationStack(cdk.Stack):
                 ),
                 authorizer=apigwv2_authorizers.WebSocketLambdaAuthorizer(
                     "WsAuth", ws_authorizer_fn,
-                    # The Cognito access token rides the query string (browsers
-                    # can't set WS headers). Acceptable only because: wss:// is
-                    # TLS so the query string is inside the encrypted GET (proxies
-                    # see only CONNECT host:443), AND this stage has NO access
-                    # logging (see the stage below). HARDENING GUARD: if you ever
-                    # need WS access logs, FIRST switch to the WS-ticket pattern
-                    # (short-lived single-use nonce in the URL instead of the
-                    # token) — see BACKLOG "WS-ticket". Otherwise the token lands
-                    # in CloudWatch in plaintext.
-                    identity_source=["route.request.querystring.token"],
+                    # A single-use TICKET rides the query string, not the Cognito
+                    # access token. Browsers still can't set WS headers, so
+                    # something has to be in the URL; the point is that this value
+                    # is random, lives 60 seconds, is consumed by the first
+                    # handshake that presents it, and authorizes nothing else.
+                    # The real credential stays in the Authorization header of the
+                    # ordinary REST call that mints it (POST /api/ws-ticket, behind
+                    # the API's JWT authorizer).
+                    identity_source=["route.request.querystring.ticket"],
                 ),
             ),
             disconnect_route_options=apigwv2.WebSocketRouteOptions(
@@ -334,11 +358,13 @@ class FoundationStack(cdk.Stack):
                 ),
             ),
         )
-        # HARDENING GUARD: do NOT add access_log_settings here without first
-        # implementing the WS-ticket pattern (BACKLOG "WS-ticket"). The connect
-        # authorizer's identity source is the access token in the query string;
-        # WS access logs would record it in plaintext. No access logging today =
-        # the token-in-URL exposure is mitigated.
+        # Access logging is now SAFE to add here, and that is the whole point of
+        # the WS-ticket work: the identity source in the query string is a
+        # single-use 60-second ticket, so a log line recording it captures
+        # something already spent and worth nothing. It stays off only because
+        # nothing needs it yet, not because enabling it would leak a credential.
+        # (Before the ticket, the access token was in the URL and logs would have
+        # written it to CloudWatch in plaintext.)
         self.ws_stage = apigwv2.WebSocketStage(
             self, "AlertWsStage",
             web_socket_api=self.ws_api,
@@ -372,6 +398,16 @@ class FoundationStack(cdk.Stack):
         list/get API). Includes table + index read/write."""
         fn.add_environment("AGENT_TASKS_TABLE", self.agent_tasks_table.table_name)
         self.agent_tasks_table.grant_read_write_data(fn)
+
+    def grant_ws_ticket_mint(self, fn) -> None:
+        """Wire a Lambda to MINT WebSocket handshake tickets (env + write grant).
+
+        Write-only on purpose: the minting endpoint has no reason to read or delete
+        a ticket, and the authorizer is the only thing that consumes one. Keeping
+        the two grants disjoint means a bug in the API cannot spend a ticket.
+        """
+        fn.add_environment("WS_TICKETS_TABLE", self.ws_tickets_table.table_name)
+        self.ws_tickets_table.grant_write_data(fn)
 
     def grant_app_config_read(self, fn) -> None:
         """Wire a Lambda to READ the app-config table (env + read grant).

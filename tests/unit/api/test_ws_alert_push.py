@@ -24,36 +24,20 @@ def _effect(resp):
     return resp["policyDocument"]["Statement"][0]["Effect"]
 
 
-# --- authorizer (fail-closed Cognito GetUser check) ---
+# --- authorizer (fail-closed) ---
+#
+# The authorizer no longer validates a Cognito ACCESS TOKEN via GetUser: it
+# consumes a single-use handshake TICKET, so no long-lived credential rides the
+# query string. The two tests that asserted the GetUser behaviour were DELETED
+# rather than adapted, because the behaviour they described is gone; the ticket
+# path (single use, expiry checked in code, every unknown a Deny, and a token
+# no longer opening a socket) is covered in tests/unit/api/test_ws_ticket.py.
+#
+# This one stays here because it is about the WS surface itself rather than the
+# credential: a handshake carrying no identity source at all must be denied.
 
-def test_authorizer_no_token_denies():
+def test_authorizer_with_no_identity_source_denies():
     r = authz.lambda_handler({"methodArn": "arn:x", "queryStringParameters": {}}, None)
-    assert _effect(r) == "Deny"
-
-
-def test_authorizer_valid_token_allows(monkeypatch):
-    fake = MagicMock()
-    fake.get_user.return_value = {
-        "Username": "alice",
-        "UserAttributes": [{"Name": "sub", "Value": "s-1"}],
-    }
-    monkeypatch.setattr(authz, "_cognito", fake)
-    r = authz.lambda_handler(
-        {"methodArn": "arn:x", "queryStringParameters": {"token": "good"}}, None
-    )
-    assert _effect(r) == "Allow"
-    assert r["context"]["sub"] == "s-1"
-
-
-def test_authorizer_bad_token_denies(monkeypatch):
-    fake = MagicMock()
-    fake.get_user.side_effect = ClientError(
-        {"Error": {"Code": "NotAuthorizedException"}}, "GetUser"
-    )
-    monkeypatch.setattr(authz, "_cognito", fake)
-    r = authz.lambda_handler(
-        {"methodArn": "arn:x", "queryStringParameters": {"token": "bad"}}, None
-    )
     assert _effect(r) == "Deny"
 
 

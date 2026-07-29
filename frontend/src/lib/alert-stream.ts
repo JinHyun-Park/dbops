@@ -22,7 +22,8 @@
  * `dbops:auth-logout` (so a logged-out user stops receiving pushes instead of
  * riding the socket to its 2h TTL) and re-opens on `dbops:auth-login`.
  */
-import { getValidAccessToken, isLoggedIn } from "@/lib/auth";
+import { isLoggedIn } from "@/lib/auth";
+import { apiUrl, authedFetch } from "@/lib/api-client";
 
 export interface PushedAlert {
   type: "alert" | "incident" | "task";
@@ -69,6 +70,28 @@ let suspended = false;
 // socket — the second would orphan the first without closing it.
 let connectInFlight = false;
 
+/**
+ * Mint a WebSocket handshake ticket. Returns "" on any failure, which the caller
+ * treats as "retry later" — the alert badge keeps polling meanwhile, so a failed
+ * mint degrades the push channel rather than the product.
+ *
+ * Not cached and not retried here: a ticket is single-use and expires in 60s, so
+ * holding one across a reconnect backoff would hand the authorizer an expired
+ * value. Each connect() attempt mints its own.
+ */
+async function mintTicket(): Promise<string> {
+  try {
+    const res = await authedFetch(await apiUrl("/api/ws-ticket"), {
+      method: "POST",
+    });
+    if (!res.ok) return "";
+    const body = (await res.json()) as { ticket?: string };
+    return body.ticket || "";
+  } catch {
+    return "";
+  }
+}
+
 async function connect(): Promise<void> {
   if (typeof window === "undefined" || socket || suspended || connectInFlight)
     return;
@@ -80,18 +103,22 @@ async function connect(): Promise<void> {
       scheduleReconnect(); // not logged in yet — retry later
       return;
     }
-    const token = await getValidAccessToken();
-    if (!token) {
+    // A single-use 60s TICKET, not the access token. The token would be a
+    // long-lived credential sitting in a URL; the ticket authorizes exactly one
+    // handshake and is consumed by it. The real credential travels in the
+    // Authorization header of this ordinary REST call.
+    const ticket = await mintTicket();
+    if (!ticket) {
       scheduleReconnect();
       return;
     }
     // Re-check after the awaits: a logout (suspended) or another connect()
-    // (socket) may have landed while we were awaiting the url/token.
+    // (socket) may have landed while we were awaiting the url/ticket.
     if (suspended || socket) return;
     closedByUs = false;
     let ws: WebSocket;
     try {
-      ws = new WebSocket(`${base}?token=${encodeURIComponent(token)}`);
+      ws = new WebSocket(`${base}?ticket=${encodeURIComponent(ticket)}`);
     } catch {
       scheduleReconnect();
       return;

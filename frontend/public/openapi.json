@@ -101,6 +101,9 @@
     },
     {
       "name": "tasks"
+    },
+    {
+      "name": "ws-ticket"
     }
   ],
   "paths": {
@@ -3066,6 +3069,25 @@
             }
           }
         ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/ws-ticket": {
+      "post": {
+        "tags": ["ws-ticket"],
+        "summary": "POST /api/ws-ticket",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
         "security": [
           {
             "cognitoJwt": []

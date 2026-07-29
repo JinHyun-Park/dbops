@@ -1120,6 +1120,19 @@ class AgentStack(cdk.Stack):
         )
         foundation.grant_app_config_write(config_lambda)  # R/W + APP_CONFIG_TABLE env
 
+        # WS handshake ticket minting. Sits behind the API's default JWT
+        # authorizer like every other route, which is the point: the real
+        # credential stays in the Authorization header here, and only a
+        # single-use 60s ticket ever reaches the WebSocket URL.
+        ws_ticket_lambda = lambda_.Function(
+            self, "WsTicketApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/ws_ticket"),
+            timeout=cdk.Duration.seconds(10),
+        )
+        foundation.grant_ws_ticket_mint(ws_ticket_lambda)
+
         # Runbooks API — CRUD over the `runbooks` cache table. AI-generated
         # diagnoses can be saved as reusable playbooks for pattern recurrence.
         runbooks_lambda = lambda_.Function(
@@ -1395,6 +1408,14 @@ class AgentStack(cdk.Stack):
             version=dashboard_lambda.current_version,
         )
 
+        # Mint a WebSocket handshake ticket. POST because it CREATES a
+        # single-use credential; a GET would be cacheable and replayable by any
+        # intermediary that decided to cache it.
+        self.api.add_routes(
+            path="/api/ws-ticket",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=integrations.HttpLambdaIntegration("WsTicketIntegration", ws_ticket_lambda),
+        )
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}",
             methods=[apigwv2.HttpMethod.GET],
