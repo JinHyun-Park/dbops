@@ -1,4 +1,4 @@
-"""REAL-ENGINE coverage for the cache SQL the Aurora MySQL tier dispatches on.
+"""REAL-ENGINE coverage for the cache SQL the MySQL / rds_instance tiers run.
 
 WHY THIS FILE EXISTS. `CacheClient.engine_of()` is the single dispatch point for
 explain_plan, get_vacuum_stats and recommend_index, and it swallows every
@@ -16,6 +16,18 @@ what the SQL says. So this file runs the REAL statements against a real
 PostgreSQL server, on the REAL cache schema, through a Data-API-shaped adapter,
 and asserts on what comes back out. Mutate any table or column name in the
 statements below and these tests fail.
+
+E-3 EXTENSION (bottom section). The same hole reopened for every statement the
+E-3 tier added: its doubles returned canned rows regardless of the SQL text, so
+MEASURED, all 9 of these identifier mutations left the FULL 2615-test suite green
+at 1c8c3bf: sys.dm_os_performance_counters, cntr_value/cntr_type, object_name,
+CAST(is_dynamic AS INT), the cluster_settings upsert, the metric_snapshots insert,
+cluster_meta, cluster_settings and metric_snapshots in mysql_param_fitness. The
+four statements that target the CACHE (PostgreSQL) are therefore EXECUTED here,
+against the real schema, including the ON CONFLICT targets and the jsonb casts.
+The two T-SQL statements cannot run here (no SQL Server in CI); they are pinned by
+identifier in their own unit tests and were executed read-only against
+dbops-demo-mssql.
 
 ENGINE: PostgreSQL from the local install (verified against 14.18). Skipped, not
 faked, when no initdb/pg_ctl/psql is on the machine.
@@ -37,13 +49,15 @@ _ROOT = Path(__file__).resolve().parents[2]
 _SQL_DIR = _ROOT / "data-pipeline" / "schema_migrator" / "sql"
 _COLLECTORS = _ROOT / "data-pipeline" / "etl_collector" / "collectors"
 
-# The three migration files that create the four tables these statements read
-# and write: cluster_meta (base), table_stats + cluster_settings (v4),
-# cluster_health_findings (v6). Named rather than "apply the whole chain"
-# because v21 needs the pgvector extension, which a stock local PostgreSQL does
-# not have. If a later migration moves one of these tables, this list is the
-# one-line fix and the failure ("relation does not exist") says exactly that.
-_MIGRATIONS = ["schema.sql", "schema_v4.sql", "schema_v6.sql"]
+# The migration files that create the tables these statements read and write:
+# cluster_meta + metric_snapshots (base), table_stats + cluster_settings + the
+# default partitions (v4), cluster_health_findings (v6), and cluster_meta's
+# engine_mode / serverlessv2_max_acu columns (v9, which mysql_param_fitness
+# projects). Named rather than "apply the whole chain" because v21 needs the
+# pgvector extension, which a stock local PostgreSQL does not have. If a later
+# migration moves one of these tables, this list is the one-line fix and the
+# failure ("relation does not exist" / "column does not exist") says exactly that.
+_MIGRATIONS = ["schema.sql", "schema_v4.sql", "schema_v6.sql", "schema_v9.sql"]
 
 sys.path.insert(0, str(_ROOT / "mcp-servers"))
 sys.path.insert(0, str(_COLLECTORS.parent))
@@ -53,8 +67,26 @@ os.environ.setdefault("CACHE_DB_CLUSTER_ARN", "arn:aws:rds:ap-northeast-2:1:clus
 os.environ.setdefault("CACHE_DB_SECRET_ARN", "arn:aws:secretsmanager:ap-northeast-2:1:secret:fake")
 
 from collectors.mysql_health_checks import collect_mysql_health_checks  # noqa: E402
+from collectors.mysql_param_fitness import collect_mysql_param_fitness  # noqa: E402
 from mcp_servers.performance.tools.vacuum_stats import get_vacuum_stats_impl  # noqa: E402
 from mcp_servers.shared.cache_client import CacheClient  # noqa: E402
+
+# The two rds_direct_collector modules are loaded by path, not by sys.path: that
+# directory has its own mysql_innodb_status.py, and putting it on the path would
+# make which copy `collectors.*` resolves to depend on import order.
+_RDS_DIRECT = _ROOT / "data-pipeline" / "rds_direct_collector"
+
+
+def _load_by_path(name, filename):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, _RDS_DIRECT / filename)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_MSSQL_SETTINGS = _load_by_path("e3_mssql_settings", "mssql_settings.py")
+_MSSQL_COUNTERS = _load_by_path("e3_mssql_perf_counters", "mssql_perf_counters.py")
 
 _SEARCH = [
     "",  # PATH
@@ -197,7 +229,8 @@ def server():
 @pytest.fixture
 def fresh(server):
     """A clean slate per test, so one test's rows never make another one pass."""
-    server.raw("TRUNCATE cluster_meta, table_stats, cluster_settings, cluster_health_findings")
+    server.raw("TRUNCATE cluster_meta, table_stats, cluster_settings, "
+               "cluster_health_findings, metric_snapshots")
     return server
 
 
@@ -357,3 +390,248 @@ def test_no_rows_anywhere_emits_nothing_rather_than_a_clean_bill(fresh):
                        "tables_over_min_rows": 0, "settings_read": 0,
                        "findings_emitted": 0}
     assert _findings(fresh, "my-1") == []
+
+
+# ===========================================================================
+# E-3: the four CACHE statements the rds_instance tier added, EXECUTED.
+#
+# All four were mutation-blind at 1c8c3bf: renaming their tables, columns,
+# aliases, ON CONFLICT targets or the ::jsonb cast left the full suite green,
+# because every double answered with canned rows no matter what the SQL said.
+# The T-SQL halves (sys.configurations, sys.dm_os_performance_counters) cannot
+# run against PostgreSQL and are pinned by identifier in their own unit files;
+# both were executed read-only against dbops-demo-mssql.
+# ===========================================================================
+
+
+def _cache_writer(server):
+    """The `cache_execute(sql, params)` closure rds_direct_collector builds.
+
+    Same contract as _make_cache_execute in data-pipeline/rds_direct_collector/
+    handler.py, except the statement goes to a real server instead of the Data API.
+    """
+    def cache_execute(sql, params):
+        return server.raw(_BIND.sub(lambda m: _lit(params[m.group(1)]), sql))
+    return cache_execute
+
+
+class _TsqlRows:
+    """Stands in for the SQL Server side only. The cache side is the real server.
+
+    A SQL Server result set cannot be produced by PostgreSQL, so the T-SQL read is
+    the one thing faked here: the rows below are the MEASURED live result sets.
+    """
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def execute_statement(self, **kw):
+        def field(v):
+            return {"longValue": v} if isinstance(v, int) else {"stringValue": v}
+        return {"records": [[field(c) for c in row] for row in self.rows]}
+
+
+# MEASURED on dbops-demo-mssql: (name, configured, running, is_dynamic).
+_MSSQL_SETTING_ROWS = [
+    ("max server memory (MB)", "1576", "1576", 1),
+    ("min server memory (MB)", "0", "16", 1),     # engine-adjusted, is_dynamic=1
+    ("user connections", "0", "40", 0),           # needs a restart
+]
+# MEASURED live (second probe): (object, counter, cntr_value, cntr_type).
+_MSSQL_COUNTER_ROWS = [
+    ("SQLServer:Buffer Manager", "Buffer cache hit ratio", 104, 537003264),
+    ("SQLServer:Buffer Manager", "Buffer cache hit ratio base", 104, 1073939712),
+    ("SQLServer:Buffer Manager", "Page life expectancy", 10449, 65792),
+    ("SQLServer:General Statistics", "Processes blocked", 0, 65792),
+    ("SQLServer:Memory Manager", "Memory Grants Pending", 0, 65792),
+    ("SQLServer:Memory Manager", "Target Server Memory (KB)", 496752, 65792),
+    ("SQLServer:Memory Manager", "Total Server Memory (KB)", 184488, 65792),
+]
+
+
+def _settings_rows(server, cluster_id):
+    cols, rows = server.raw(
+        "SELECT name, value, unit FROM cluster_settings "
+        f"WHERE cluster_id = {_lit(cluster_id)} ORDER BY name")
+    return [dict(zip(cols, r, strict=False)) for r in rows]
+
+
+def test_mssql_settings_upsert_executes_against_the_real_cluster_settings(fresh):
+    """The UPSERT is run for real, so the ON CONFLICT target must match the
+    table's actual primary key and `unit` must fit its actual width."""
+    collect = _MSSQL_SETTINGS.collect_mssql_settings
+    result = collect(_TsqlRows(_MSSQL_SETTING_ROWS), _cache_writer(fresh),
+                     "", "", "mssql-1", "master")
+    assert result["settings_upserted"] == 3
+    assert result["diverging_from_configured"] == 2
+
+    rows = _settings_rows(fresh, "mssql-1")
+    assert [r["name"] for r in rows] == [
+        "max server memory (MB)", "min server memory (MB)", "user connections"]
+    # RUNNING values, which is what a DBA sees in sp_configure.
+    assert [r["value"] for r in rows] == ["1576", "16", "40"]
+    # cluster_settings.unit is VARCHAR(50): a longer marker would raise here and
+    # nowhere else, because only a real column has a width.
+    assert rows[0]["unit"] == ""
+    assert "재시작" not in rows[1]["unit"]      # is_dynamic=1, engine-adjusted
+    assert "재시작" in rows[2]["unit"]          # is_dynamic=0, restart applies it
+
+
+def test_mssql_settings_upsert_updates_in_place_on_the_real_primary_key(fresh):
+    collect = _MSSQL_SETTINGS.collect_mssql_settings
+    write = _cache_writer(fresh)
+    collect(_TsqlRows(_MSSQL_SETTING_ROWS), write, "", "", "mssql-1", "master")
+    changed = [("max server memory (MB)", "1576", "1200", 1)] + _MSSQL_SETTING_ROWS[1:]
+    collect(_TsqlRows(changed), write, "", "", "mssql-1", "master")
+
+    rows = _settings_rows(fresh, "mssql-1")
+    assert len(rows) == 3, "ON CONFLICT did not update in place"
+    assert rows[0]["value"] == "1200"
+    assert "설정값 1576" in rows[0]["unit"]
+
+
+def test_mssql_perf_counter_insert_executes_against_real_metric_snapshots(fresh):
+    """INSERT_METRIC runs for real: the column list, the `:dimensions::jsonb`
+    cast and ON CONFLICT DO NOTHING all have to be valid against the partitioned
+    metric_snapshots table (which needs its DEFAULT partition to accept a row)."""
+    result = _MSSQL_COUNTERS.collect_mssql_perf_counters(
+        _TsqlRows(_MSSQL_COUNTER_ROWS), _cache_writer(fresh), "", "",
+        "mssql-1", "master")
+    assert result["skipped"] == {}
+
+    # Read back through the STRICT cluster-level filter every aggregate reader
+    # uses. A dimensioned row would not be visible here, so this proves the
+    # dashboard and the anomaly baselines will actually see these series.
+    cols, rows = fresh.raw(
+        "SELECT metric_type, value FROM metric_snapshots "
+        "WHERE cluster_id = 'mssql-1' AND dimensions::text = '{}' "
+        "ORDER BY metric_type")
+    got = {r[0]: float(r[1]) for r in rows}
+    assert got == {
+        # 104 / 104, NOT the raw numerator 104.
+        "mssql_buffer_cache_hit_ratio": 100.0,
+        "mssql_memory_grants_pending": 0.0,
+        "mssql_page_life_expectancy_sec": 10449.0,
+        "mssql_processes_blocked": 0.0,
+        # 184488 / 496752
+        "mssql_server_memory_used_pct": 37.14,
+    }
+
+
+# --- mysql_param_fitness: cluster_meta / cluster_settings / metric_snapshots ---
+
+def _register_instance(server, cluster_id, engine, instance_class="db.r6g.large"):
+    server.raw(
+        "INSERT INTO cluster_meta (cluster_id, account_id, region, engine, "
+        "  instance_class, engine_mode) "
+        f"VALUES ({_lit(cluster_id)}, '000000000000', 'ap-northeast-2', "
+        f"        {_lit(engine)}, {_lit(instance_class)}, 'provisioned')")
+
+
+def _settings(server, cluster_id, **kv):
+    for name, value in kv.items():
+        server.raw(
+            "INSERT INTO cluster_settings (cluster_id, name, value) VALUES "
+            f"({_lit(cluster_id)}, {_lit(name)}, {_lit(str(value))})")
+
+
+def _series(server, cluster_id, metric_type, value, n, dimensions="{}"):
+    server.raw(
+        "INSERT INTO metric_snapshots (cluster_id, ts, metric_type, value, dimensions) "
+        f"SELECT {_lit(cluster_id)}, NOW() - (g || ' minutes')::interval, "
+        f"       {_lit(metric_type)}, {value}, {_lit(dimensions)}::jsonb "
+        f"FROM generate_series(1, {n}) g")
+
+
+def _fitness(server, cluster_id):
+    api = _DataApi(server)
+    result = collect_mysql_param_fitness(
+        api, "arn:cache", "arn:secret", "dbops", cluster_id,
+        snapshot_ts="2026-07-29T00:00:00+00:00")
+    result["_findings"] = _findings(server, cluster_id)
+    return result
+
+
+def _quiet_workload(server, cluster_id):
+    """Enough real rows for M3 to be decidable while M1 and M2 stay silent."""
+    _settings(server, cluster_id, max_connections=200,
+              sort_buffer_size=262144, innodb_buffer_pool_size=134217728)
+    _series(server, cluster_id, "db_connections", 80, 25)
+
+
+def test_param_fitness_reads_the_real_cluster_meta_projection(fresh):
+    """instance_class / engine_mode / serverlessv2_max_acu / engine are read in
+    ONE statement; a renamed column silently makes every rule skip."""
+    _register_instance(fresh, "my-1", "aurora-mysql")
+    _quiet_workload(fresh, "my-1")
+    result = _fitness(fresh, "my-1")
+    assert result["instance_class"] == "db.r6g.large"
+    assert result["instance_memory_gb"] == 16          # mapped, so M2 is live
+    assert result["max_connections"] == 200            # read out of cluster_settings
+    assert result["peak_connections_7d"] == 80         # read out of metric_snapshots
+
+
+def test_param_fitness_m3_uses_the_innodb_metric_for_a_standalone_instance(fresh):
+    """The rds_instance family writes only innodb_buffer_pool_hit_rate. This runs
+    the real 4-column CASE query against real rows of that metric_type."""
+    _register_instance(fresh, "rds-1", "mysql")
+    _quiet_workload(fresh, "rds-1")
+    _series(fresh, "rds-1", "innodb_buffer_pool_hit_rate", 80.0, 25)
+
+    result = _fitness(fresh, "rds-1")
+    (row,) = [r for r in result["_findings"] if r["check_type"] == "param_buffer_cache_hit"]
+    assert "80.0%" in row["value_str"]
+    assert json.loads(row["details"])["metric_type"] == "innodb_buffer_pool_hit_rate"
+    assert json.loads(row["details"])["samples"] == 25
+
+
+def test_param_fitness_m3_prefers_cloudwatch_and_never_averages_the_two(fresh):
+    """Aurora has BOTH metric_types in the same table. The CW value must come
+    back verbatim: 90.0, not the InnoDB 60.0 and not their 75.0 mean."""
+    _register_instance(fresh, "my-1", "aurora-mysql")
+    _quiet_workload(fresh, "my-1")
+    _series(fresh, "my-1", "buffer_cache_hit", 90.0, 25)
+    _series(fresh, "my-1", "innodb_buffer_pool_hit_rate", 60.0, 25)
+
+    result = _fitness(fresh, "my-1")
+    (row,) = [r for r in result["_findings"] if r["check_type"] == "param_buffer_cache_hit"]
+    assert "90.0%" in row["value_str"]
+    assert json.loads(row["details"])["metric_type"] == "buffer_cache_hit"
+
+
+def test_param_fitness_m3_stays_silent_on_aurora_with_only_the_innodb_series(fresh):
+    """The E-3 fallback is gated to rds_instance. Aurora writes
+    innodb_buffer_pool_hit_rate too, so an ungated fallback fires this rule on
+    Aurora clusters where it used to be silent: a widening, not a no-op."""
+    _register_instance(fresh, "my-1", "aurora-mysql")
+    _quiet_workload(fresh, "my-1")
+    _series(fresh, "my-1", "innodb_buffer_pool_hit_rate", 80.0, 25)
+
+    result = _fitness(fresh, "my-1")
+    assert [r for r in result["_findings"]
+            if r["check_type"] == "param_buffer_cache_hit"] == []
+
+
+def test_param_fitness_ignores_per_instance_dimensioned_rows(fresh):
+    """Both metric_snapshots reads carry the strict `dimensions::text = '{}'`
+    filter. Without it a cluster-level average silently mixes in the per-instance
+    rows, which is the recurring defect this repo has paid for repeatedly. A jsonb
+    column is the only place that can be checked."""
+    _register_instance(fresh, "rds-1", "mysql")
+    _settings(fresh, "rds-1", max_connections=200, sort_buffer_size=262144,
+              innodb_buffer_pool_size=134217728)
+    # Cluster-level: a healthy 99%, under-sampled on purpose (5 rows).
+    _series(fresh, "rds-1", "innodb_buffer_pool_hit_rate", 99.0, 5)
+    # Per-instance rows: 40 samples at a terrible 10%. If the filter is dropped,
+    # the average collapses and the sample count clears MIN_SAMPLES, so the rule
+    # fires with a number that describes nothing.
+    _series(fresh, "rds-1", "innodb_buffer_pool_hit_rate", 10.0, 40,
+            dimensions='{"instance": "rds-1-instance-1"}')
+    _series(fresh, "rds-1", "db_connections", 80, 25)
+    _series(fresh, "rds-1", "db_connections", 5000, 40,
+            dimensions='{"instance": "rds-1-instance-1"}')
+
+    result = _fitness(fresh, "rds-1")
+    assert result["peak_connections_7d"] == 80, "dimensioned rows leaked into the peak"
+    assert [r for r in result["_findings"]
+            if r["check_type"] == "param_buffer_cache_hit"] == []

@@ -32,6 +32,17 @@ which the frontend SettingsPanel renders as a suffix after the value.
 # SQL Server 2019 Express (sqlserver-ex 15.00.4470.1.v1). A name that is absent
 # on another edition/version simply yields no row: this collector never invents
 # a setting it did not read.
+#
+# These are sys.configurations names, which are NOT spelled the way the RDS API
+# spells the same options. MEASURED on dbops-demo-mssql: of the 23 names below,
+# 7 differ from describe_db_parameters by case only ('Agent XPs' vs 'agent xps',
+# 'max server memory (MB)' vs 'max server memory (mb)'), 6 are IsModifiable=false
+# in the parameter group, and 2 ('backup checksum default',
+# 'blocked process threshold (s)') have no RDS parameter at all. The write tool
+# (operations/tools/modify_rds_instance_params.py) therefore matches parameter
+# names case-INSENSITIVELY and answers in the API's spelling, so every name shown
+# here is a name a DBA can act on. If a name is added here, that is the contract
+# to keep: displayed implies acceptable.
 _TRACKED = (
     # memory
     "max server memory (MB)",

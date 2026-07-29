@@ -413,7 +413,8 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     ],
     considerations: [
       "parameter / value / parameter group(아래 표시)을 확인, 특히 그룹을 공유하는 인스턴스가 있는지",
-      "메모리 관련 파라미터(innodb_buffer_pool_size, max server memory)는 인스턴스 메모리 대비 합계를 먼저 계산",
+      "메모리 관련 파라미터(innodb_buffer_pool_size, 'max server memory (mb)')는 인스턴스 메모리 대비 합계를 먼저 계산",
+      "SQL Server 파라미터 이름은 RDS API 표기(소문자)로 기록됩니다. Configuration 탭의 sys.configurations 표기('max server memory (MB)')와 대소문자만 다르며 같은 파라미터입니다",
       "static 파라미터면 재시작 윈도우를 함께 계획(reboot_rds_instance)",
     ],
   },

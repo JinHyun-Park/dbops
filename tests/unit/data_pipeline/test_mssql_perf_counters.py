@@ -6,9 +6,22 @@ deployed operations MCP Lambda. Two probes minutes apart returned
 `cntr_value` moves with the counter window and is NOT a percentage, while the
 derived ratio is 100.0% both times. That is the whole reason this collector
 exists, so the first test pins it with both measured pairs.
+
+IDENTIFIER PINNING, and WHICH HALF this file gets. The T-SQL half is pinned by
+identifier only, because CI has no SQL Server: `_Fake` now asserts the DMV, all
+four projected columns and the instance_name filter before answering, so a canned
+row can no longer stand in for a statement that would not parse. MEASURED before
+that: `sys.dm_os_performance_counters`, `cntr_value`/`cntr_type`, `object_name`
+and the whole metric_snapshots insert could each be renamed with this file green,
+and with the FULL 2615-test suite green. The statement itself WAS executed against
+the live engine, read-only, through the deployed operations MCP execute_sql path
+against dbops-demo-mssql (sqlserver-ex 15.00.4470.1.v1). The PostgreSQL half is
+EXECUTED, not pinned: INSERT_METRIC runs against a real server on the real
+metric_snapshots schema in tests/unit/test_mysql_tier_cache_sql_real_pg.py.
 """
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -46,7 +59,40 @@ def _f(v):
     return {"longValue": v} if isinstance(v, int) else {"stringValue": v}
 
 
+# Every identifier the DMV read depends on. Anchored so a renamed view or column
+# cannot be satisfied by a prefix.
+_DMV_REQUIRED = (
+    r"/\* source=dbops-etl \*/",
+    r"\bFROM\s+sys\.dm_os_performance_counters\b",
+    # The projection is pinned WITH its aliases and IN ORDER, because the reader
+    # is positional (rec[0]=obj, rec[1]=cnt, rec[2]=cntr_value, rec[3]=cntr_type).
+    # Pinning the bare column names is not enough: object_name and counter_name
+    # also appear in the WHERE clause, so a mutated SELECT projection still
+    # satisfied a bare `RTRIM(object_name)` pattern (MEASURED).
+    r"SELECT\s+RTRIM\(object_name\)\s+AS\s+obj\s*,\s*"
+    r"RTRIM\(counter_name\)\s+AS\s+cnt\s*,\s*cntr_value\s*,\s*cntr_type\b",
+    r"\bRTRIM\(instance_name\)\s*=\s*''",
+)
+# The cache write, pinned here and EXECUTED for real in the real-PG test.
+_INSERT_REQUIRED = (
+    r"\bINSERT\s+INTO\s+metric_snapshots\s*\(\s*cluster_id,\s*ts,\s*metric_type,\s*"
+    r"value,\s*dimensions\s*\)",
+    r":dimensions::jsonb",
+    r"\bON\s+CONFLICT\s+DO\s+NOTHING\b",
+)
+
+
+def _require(sql, patterns, what):
+    for pat in patterns:
+        assert re.search(pat, sql, re.S | re.I), (
+            f"{what} no longer names {pat!r}. A canned row must not stand in for a "
+            f"statement whose identifiers changed:\n{sql}")
+
+
 class _Fake:
+    """Both legs VALIDATE the statement before answering, so every test in this
+    file fails if an identifier moves, not just the dedicated one."""
+
     def __init__(self, rows):
         self.rows = rows
         self.sql = None
@@ -54,9 +100,12 @@ class _Fake:
 
     def execute_statement(self, **kw):
         self.sql = kw["sql"]
+        _require(self.sql, _DMV_REQUIRED, "the dm_os_performance_counters read")
         return {"records": [[_f(a), _f(b), _f(c), _f(d)] for a, b, c, d in self.rows]}
 
     def cache_execute(self, sql, params):
+        _require(sql, _INSERT_REQUIRED, "the metric_snapshots insert")
+        assert set(params) == {"cluster_id", "metric_type", "value", "dimensions"}, params
         self.writes.append(params)
 
 
@@ -159,10 +208,27 @@ def test_empty_result_set_writes_nothing():
     assert result["counters_read"] == 0
 
 
-def test_marker_and_dimensions_shape():
+def test_statement_and_insert_identifiers_are_pinned():
+    """IDENTIFIER HALF for both statements.
+
+    The DMV read is checked on every call by _Fake; this is the explicit pin, plus
+    the metric_snapshots insert, whose columns and jsonb cast are also EXECUTED
+    against a real PostgreSQL server in the real-PG test."""
     fake, _ = _run(_LIVE)
-    assert "/* source=dbops-etl */" in fake.sql
-    assert "ON CONFLICT DO NOTHING" in pc.INSERT_METRIC
+    _require(fake.sql, _DMV_REQUIRED, "the dm_os_performance_counters read")
+    _require(pc.INSERT_METRIC, _INSERT_REQUIRED, "the metric_snapshots insert")
+    # The three cntr_type semantics this collector branches on, by value.
+    assert (pc.RATIO_NUMERATOR, pc.RATIO_BASE, pc.RAW_VALUE) == (
+        537003264, 1073939712, 65792)
+    # Every counter the statement asks for, by (object, counter) pair.
+    for obj, counter in [
+        (BUF, "Buffer cache hit ratio"), (BUF, "Buffer cache hit ratio base"),
+        (BUF, "Page life expectancy"), (MEM, "Memory Grants Pending"),
+        (MEM, "Total Server Memory (KB)"), (MEM, "Target Server Memory (KB)"),
+        (GEN, "Processes blocked"),
+    ]:
+        assert f"'{obj}'" in fake.sql
+        assert f"'{counter}'" in fake.sql
 
 
 def test_collector_does_not_raise_on_a_bare_mock_adapter():

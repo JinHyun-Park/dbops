@@ -1,13 +1,20 @@
 """modify_rds_instance_params: the INSTANCE parameter-group write (E-3).
 
-Grounding for the fixture values used below, all read live and READ-ONLY:
+Grounding for the fixture values used below, all read live and READ-ONLY
+(`aws rds describe-db-parameters`, ap-northeast-2, 2026-07-29):
   dbops-demo-mysql -> DBParameterGroups [{'DBParameterGroupName':
-      'dbops-demo-mysql84', 'ParameterApplyStatus': 'in-sync'}], and in that
-      group innodb_buffer_pool_size has ApplyType 'dynamic' with NO
-      ParameterValue (engine default), while max_connections holds the FORMULA
-      string '{DBInstanceClassMemory/12582880}'. 6 describe_db_parameters pages.
+      'dbops-demo-mysql84', 'ParameterApplyStatus': 'in-sync'}]. That group has
+      536 parameters, of which 149 have IsModifiable=false. innodb_buffer_pool_size
+      is dynamic/modifiable with NO ParameterValue (engine default),
+      max_connections holds the FORMULA string '{DBInstanceClassMemory/12582880}',
+      explicit_defaults_for_timestamp is static/modifiable with value '1', and
+      log_bin is static with IsModifiable=FALSE. 6 describe_db_parameters pages.
   dbops-demo-mssql -> 'default.sqlserver-ex-15.0', i.e. an AWS-managed default
-      group, which is what makes the default.* refusal live-groundable.
+      group, which is what makes the default.* refusal live-groundable. That
+      group has 117 parameters, 44 of them IsModifiable=false (xp_cmdshell,
+      'agent xps', 'min server memory (mb)', 'recovery interval (min)',
+      'lightweight pooling', 'priority boost' among them), and EVERY name is
+      lower case while sys.configurations spells the same options in mixed case.
 
 The formula string is the reason the approval hash binds `value` as a STRING:
 a parameter value is not necessarily a number.
@@ -27,12 +34,28 @@ from mcp_servers.shared import approval_guard as G  # noqa: E402
 
 ACTION = "modify_rds_instance_params"
 
-# MEASURED shapes from dbops-demo-mysql84.
-P_DYNAMIC = {"ParameterName": "innodb_buffer_pool_size", "ApplyType": "dynamic"}
+# MEASURED shapes from dbops-demo-mysql84. IsModifiable is carried on EVERY one
+# of them because describe_db_parameters carries it on every real parameter: the
+# fixtures used to omit it, which is precisely how the tool came to read the field
+# and drop it with no test noticing.
+P_DYNAMIC = {"ParameterName": "innodb_buffer_pool_size", "ApplyType": "dynamic",
+             "IsModifiable": True}
 P_FORMULA = {"ParameterName": "max_connections", "ApplyType": "dynamic",
+             "IsModifiable": True,
              "ParameterValue": "{DBInstanceClassMemory/12582880}"}
-P_STATIC = {"ParameterName": "log_bin_trust_function_creators",
-            "ParameterValue": "0", "ApplyType": "static"}
+P_STATIC = {"ParameterName": "explicit_defaults_for_timestamp",
+            "ParameterValue": "1", "ApplyType": "static", "IsModifiable": True}
+# The two shapes finding 1 is about, both MEASURED IsModifiable=false.
+P_FIXED_MYSQL = {"ParameterName": "log_bin", "ApplyType": "static",
+                 "IsModifiable": False}
+P_FIXED_MSSQL = {"ParameterName": "xp_cmdshell", "ApplyType": "dynamic",
+                 "IsModifiable": False, "ParameterValue": "0"}
+# SQL Server, where the API's spelling and the product's display differ by case.
+# API name (describe_db_parameters) vs sys.configurations name (Configuration tab).
+P_MSSQL_MEM = {"ParameterName": "max server memory (mb)", "ApplyType": "dynamic",
+               "IsModifiable": True,
+               "ParameterValue": "{DBInstanceClassMemory/1191564}"}
+DISPLAY_MSSQL_MEM = "max server memory (MB)"
 
 
 def _rds(groups, params=None, pages=None):
@@ -184,6 +207,153 @@ def test_unresolvable_instance_refuses():
 
 
 # ---------------------------------------------------------------------------
+# IsModifiable: the precondition that has to be answered BEFORE the guard runs
+#
+# describe_db_parameters carries IsModifiable on every parameter and
+# modify_db_parameter_group refuses the false ones. MEASURED live: 149 of the 536
+# parameters in dbops-demo-mysql84 and 44 of the 117 in default.sqlserver-ex-15.0
+# are IsModifiable=false, and 6 of those are options this product DISPLAYS on the
+# Configuration tab (xp_cmdshell, 'agent xps', 'min server memory (mb)',
+# 'recovery interval (min)', 'lightweight pooling', 'priority boost'). So a DBA
+# reading a value off the dashboard and asking to change it is the ordinary path
+# into this branch, not an exotic one.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("cluster,group,param,name", [
+    ("dbops-demo-mysql", "dbops-demo-mysql84", P_FIXED_MYSQL, "log_bin"),
+    ("dbops-demo-mssql", "custom-mssql-pg", P_FIXED_MSSQL, "xp_cmdshell"),
+])
+def test_non_modifiable_parameter_is_refused_before_the_approval_is_consumed(
+        cluster, group, param, name):
+    """THE BURNT-APPROVAL ORDERING. verify_approval is the only thing that
+    consumes the single-use approval, so "not called" is exactly "not consumed".
+
+    Pre-fix behaviour, MEASURED: status modify_failed, verify_approval called
+    once (approval gone), modify_db_parameter_group called and rejected by AWS,
+    and the reason did not even name the parameter."""
+    guard = MagicMock(return_value={"ok": True})
+    rds = _rds([group, group], [param])
+    with patch.object(M, "client_for_cluster", lambda cid, svc: rds), \
+         patch.object(M, "verify_approval", guard):
+        out = M.modify_rds_instance_params_impl(
+            None, cluster, parameter_name=name, value="1",
+            parameter_group=group, approved=True, approval_id="appr-1")
+    assert out["status"] == "not_modifiable"
+    guard.assert_not_called()
+    rds.modify_db_parameter_group.assert_not_called()
+    # "say which parameter is not modifiable": a DBA must not have to guess.
+    assert name in out["reason"]
+    assert name == out["parameter"]
+    assert "IsModifiable" in out["reason"]
+
+
+def test_non_modifiable_parameter_never_reaches_approval_required():
+    """The preview leg must refuse too. Offering an approval card for a change
+    the API will reject is how the approval gets minted in the first place."""
+    rds = _rds(["dbops-demo-mysql84"], [P_FIXED_MYSQL])
+    out = _call(rds, parameter_name="log_bin", value="ON")
+    assert out["status"] == "not_modifiable"
+    assert out["apply_type"] == "static"
+
+
+def test_a_parameter_without_the_field_is_not_declared_non_modifiable():
+    """Only an explicit False refuses. A response that does not carry
+    IsModifiable has not told us the parameter is fixed, and reporting it as
+    fixed would be a negative the data does not support."""
+    no_field = {"ParameterName": "innodb_buffer_pool_size", "ApplyType": "dynamic"}
+    rds = _rds(["dbops-demo-mysql84"], [no_field])
+    out = _call(rds, parameter_name="innodb_buffer_pool_size", value="1")
+    assert out["status"] == "approval_required"
+
+
+def test_modifiable_true_still_previews():
+    rds = _rds(["dbops-demo-mysql84"], [P_DYNAMIC])
+    assert _call(rds, parameter_name="innodb_buffer_pool_size",
+                 value="1")["status"] == "approval_required"
+
+
+# ---------------------------------------------------------------------------
+# The name the product DISPLAYS has to be a name the tool ACCEPTS
+#
+# MEASURED: describe_db_parameters names every SQL Server parameter in lower
+# case ('max server memory (mb)', 'agent xps'), while sys.configurations, which
+# is what sp_configure and this product's Configuration tab show, uses mixed case
+# ('max server memory (MB)', 'Agent XPs'). 7 of the 23 curated option names in
+# mssql_settings._TRACKED differ from the API only by case, MEASURED by executing
+# the collector's own statement live and diffing against describe_db_parameters. Neither group has any
+# pair of names differing only by case (117 and 536 names checked), so folding
+# case cannot merge two distinct parameters.
+# ---------------------------------------------------------------------------
+
+def test_the_displayed_sys_configurations_name_is_accepted():
+    """Pre-fix, MEASURED: 'max server memory (MB)' -> unknown_parameter while
+    'max server memory (mb)' -> approval_required, i.e. the product rejected the
+    name it puts on the screen."""
+    rds = _rds(["custom-mssql-pg"], [P_MSSQL_MEM])
+    with patch.object(M, "client_for_cluster", lambda cid, svc: rds):
+        out = M.modify_rds_instance_params_impl(
+            None, "dbops-demo-mssql", parameter_name=DISPLAY_MSSQL_MEM, value="1024")
+    assert out["status"] == "approval_required"
+    # ... and it comes back under the API's spelling, because that is what a
+    # modify_db_parameter_group call will carry.
+    assert out["parameter"] == "max server memory (mb)"
+    assert out["current_value"] == "{DBInstanceClassMemory/1191564}"
+
+
+def test_the_api_spelling_is_what_gets_written_not_the_typed_one():
+    rds = _rds(["custom-mssql-pg", "custom-mssql-pg"], [P_MSSQL_MEM])
+    with patch.object(M, "client_for_cluster", lambda cid, svc: rds), \
+         patch.object(M, "verify_approval", lambda *a, **k: {"ok": True}):
+        out = M.modify_rds_instance_params_impl(
+            None, "dbops-demo-mssql", parameter_name=DISPLAY_MSSQL_MEM,
+            value="1024", parameter_group="custom-mssql-pg",
+            approved=True, approval_id="u")
+    assert out["status"] == "modified"
+    assert rds.modify_db_parameter_group.call_args.kwargs["Parameters"][0][
+        "ParameterName"] == "max server memory (mb)"
+    assert out["parameter"] == "max server memory (mb)"
+
+
+def test_a_non_modifiable_parameter_is_matched_case_insensitively_too():
+    """'Agent XPs' on screen, 'agent xps' in the API, IsModifiable=false. The
+    refusal has to fire for the displayed name as well, or the burnt-approval
+    path stays open for exactly the names a DBA reads off the dashboard."""
+    api_row = {"ParameterName": "agent xps", "ApplyType": "dynamic",
+               "IsModifiable": False, "ParameterValue": "1"}
+    guard = MagicMock(return_value={"ok": True})
+    rds = _rds(["custom-mssql-pg", "custom-mssql-pg"], [api_row])
+    with patch.object(M, "client_for_cluster", lambda cid, svc: rds), \
+         patch.object(M, "verify_approval", guard):
+        out = M.modify_rds_instance_params_impl(
+            None, "dbops-demo-mssql", parameter_name="Agent XPs", value="0",
+            parameter_group="custom-mssql-pg", approved=True, approval_id="u")
+    assert out["status"] == "not_modifiable"
+    guard.assert_not_called()
+
+
+def test_a_name_that_is_wrong_beyond_case_is_still_unknown():
+    """Case folding must not turn the honest "no such parameter" answer into a
+    fuzzy match."""
+    rds = _rds(["custom-mssql-pg"], [P_MSSQL_MEM])
+    out = _call(rds, parameter_name="max server memory", value="1024")
+    assert out["status"] == "unknown_parameter"
+
+
+def test_the_approval_hash_ignores_parameter_name_case():
+    """Both legs of the tool now send the API's spelling, but the agent fills
+    action_details itself. If the hash were case-sensitive, an approval
+    registered from the DISPLAYED name could never be executed: the DBA would
+    approve and be told to approve again, forever."""
+    base = {"cluster_id": "i", "parameter_name": "max server memory (mb)",
+            "value": "1024", "parameter_group": "pg-a"}
+    h = lambda d: G.canonical_action_hash(ACTION, d)  # noqa: E731
+    assert h(base) == h({**base, "parameter_name": "max server memory (MB)"})
+    assert h(base) == h({**base, "parameter_name": "MAX SERVER MEMORY (MB)"})
+    # Still a different parameter, not just a different casing.
+    assert h(base) != h({**base, "parameter_name": "min server memory (mb)"})
+
+
+# ---------------------------------------------------------------------------
 # ApplyMethod comes from the parameter's own ApplyType
 # ---------------------------------------------------------------------------
 
@@ -204,7 +374,7 @@ def test_dynamic_parameter_previews_immediate():
 
 def test_static_parameter_previews_pending_reboot():
     rds = _rds(["dbops-demo-mysql84"], [P_STATIC])
-    out = _call(rds, parameter_name="log_bin_trust_function_creators", value="1")
+    out = _call(rds, parameter_name="explicit_defaults_for_timestamp", value="1")
     assert out["apply_method"] == "pending-reboot"
     assert "재시작 후에" in out["cli_preview"]
 
@@ -357,7 +527,7 @@ def test_static_write_reports_not_yet_applied():
     to prevent."""
     rds = _rds(["pg-a", "pg-a"], [P_STATIC])
     out = _call(rds, guard_ok={"ok": True},
-                parameter_name="log_bin_trust_function_creators", value="1",
+                parameter_name="explicit_defaults_for_timestamp", value="1",
                 parameter_group="pg-a", approved=True, approval_id="u")
     assert out["applied"] is False
     assert out["apply_method"] == "pending-reboot"

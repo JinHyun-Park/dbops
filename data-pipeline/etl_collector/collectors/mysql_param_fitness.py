@@ -217,9 +217,10 @@ def collect_mysql_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, c
     # 'buffer_cache_hit'만 읽었는데, 그 metric_type을 쓰는 수집기는 Aurora CW
     # (cw_collector.BufferCacheHitRatio)와 DocumentDB뿐이다. rds_instance
     # 패밀리(RDS MySQL)는 innodb_buffer_pool_hit_rate만 쓰므로 이 규칙은 그
-    # 패밀리에서 영구히 죽어 있었다. Aurora 경로의 값은 바꾸지 않기 위해
-    # 평균을 섞지 않고 CW를 우선하고, 표본이 없을 때만 InnoDB로 폴백한다
-    # (둘은 정의가 다른 측정치라 하나의 AVG로 합치면 안 된다).
+    # 패밀리에서 영구히 죽어 있었다. Aurora 경로의 답은 그대로 두기 위해 평균을
+    # 섞지 않고 CW를 우선하며, InnoDB 폴백은 그것이 필요했던 패밀리
+    # (rds_instance)에만 준다(아래 분기 참조). 둘은 정의가 다른 측정치라 하나의
+    # AVG로 합쳐서도, 아무 클러스터에나 바꿔 써서도 안 된다.
     hit_rows = _execute(
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
         "SELECT "
@@ -241,8 +242,19 @@ def collect_mysql_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, c
 
     cw_hit, cw_samples = _pair("cw_hit", "cw_samples")
     innodb_hit, innodb_samples = _pair("innodb_hit", "innodb_samples")
+    # 폴백은 rds_instance 패밀리에만 준다. Aurora MySQL도 innodb_buffer_pool_hit_rate를
+    # 쓰므로(etl_collector/handler.py의 relational 분기가 collect_mysql_innodb_status를
+    # 돌린다), 무조건 폴백하면 CW 표본이 MIN_SAMPLES 미만인 Aurora 클러스터에서
+    # 이 규칙이 새로 뜬다. 그건 확장이지 no-op이 아니고, E-3의 "Aurora 답은 그대로"
+    # 라는 주장과 어긋난다. 그래서 Aurora는 CW 표본이 부족하면 이전처럼 침묵한다
+    # (두 측정치는 정의가 다르다: CW BufferCacheHitRatio는 CloudWatch 주기 평균,
+    # InnoDB 히트율은 SHOW ENGINE INNODB STATUS의 직전 구간 값이다).
+    # engine을 못 읽은 클러스터는 is_aurora=False로 떨어지며, 이 파일의 다른
+    # 문구 분기와 같은 취급이다.
     if cw_hit is not None and cw_samples >= MIN_SAMPLES:
         avg_hit, hit_samples, hit_source = cw_hit, cw_samples, "buffer_cache_hit"
+    elif is_aurora:
+        avg_hit, hit_samples, hit_source = None, 0, "buffer_cache_hit"
     else:
         avg_hit, hit_samples, hit_source = innodb_hit, innodb_samples, "innodb_buffer_pool_hit_rate"
     if avg_hit is not None and hit_samples >= MIN_SAMPLES and avg_hit < CACHE_HIT_FLOOR:

@@ -3,9 +3,20 @@
 collect_mysql_param_fitness는 RDS Data API에 의존하므로 _execute를 모킹해
 캐시 응답(메타·MySQL global variables·메트릭)을 주입하고 emit된 finding을
 확인한다. 핵심은 per-connection 버퍼 × max_connections OOM 상호작용 규칙.
+
+IDENTIFIER PINNING (아래 _ROUTES). 이 파일의 더블은 예전에 `"FROM cluster_meta"
+in sql` 같은 부분문자열로 분기했다. 그래서 `cluster_meta` → `cluster_metaZZZ`로
+바꿔도 부분문자열이 그대로 남아 캔드 로우가 계속 반환됐고(MEASURED: 이 파일의
+mutation 3건 모두 통과, 전체 2615개 스위트도 통과) 실행되면 반드시 깨지는 SQL이
+초록으로 나갔다. 이제 더블은 각 statement가 명명해야 하는 테이블·컬럼·별칭을
+정규식으로 확인하고, 모르는 SQL은 캔드 로우 대신 AssertionError를 낸다.
+반쪽 정보가 아니라 양쪽 다 확보한 상태다: 여기서 식별자를 고정하고,
+tests/unit/test_mysql_tier_cache_sql_real_pg.py가 같은 statement를 실제
+PostgreSQL에 실행한다.
 """
 
 import importlib.util
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -25,29 +36,59 @@ _load("instance_specs", "collectors/instance_specs.py")
 pf = _load("mysql_param_fitness", "collectors/mysql_param_fitness.py")
 
 
+# 각 statement가 반드시 명명해야 하는 식별자. \b 덕분에 `cluster_metaZZZ`는
+# `cluster_meta` 패턴을 만족하지 못한다. 별칭(AS cw_hit ...)도 고정한다: 리더가
+# hr["cw_hit"]로 읽으므로 별칭이 바뀌면 실제로는 전부 None이 된다.
+# 클러스터 레벨 집계의 strict dimension 필터(dimensions::text = '{}')도 고정한다.
+_ROUTES = (
+    ("meta", r"SELECT\s+instance_class,\s*engine_mode,\s*serverlessv2_max_acu,\s*engine\s+"
+             r"FROM\s+cluster_meta\b\s+WHERE\s+cluster_id\b"),
+    ("settings", r"SELECT\s+name,\s*value\s+FROM\s+cluster_settings\b\s+WHERE\s+cluster_id\b"),
+    ("conn", r"MAX\(value\)\s+AS\s+peak\b.*COUNT\(\*\)\s+AS\s+samples\b.*"
+             r"FROM\s+metric_snapshots\b.*metric_type\s*=\s*'db_connections'.*"
+             r"\bts\s*>\s*NOW\(\).*dimensions::text\s*=\s*'\{\}'"),
+    ("hit", r"AS\s+cw_hit\b.*AS\s+cw_samples\b.*AS\s+innodb_hit\b.*AS\s+innodb_samples\b.*"
+            r"FROM\s+metric_snapshots\b.*"
+            r"metric_type\s+IN\s*\('buffer_cache_hit',\s*'innodb_buffer_pool_hit_rate'\).*"
+            r"\bts\s*>\s*NOW\(\).*dimensions::text\s*=\s*'\{\}'"),
+    ("insert", r"INSERT\s+INTO\s+cluster_health_findings\s*\(\s*cluster_id,\s*snapshot_time,\s*"
+               r"check_type,\s*severity,\s*subject,\s*value_str,\s*threshold_str,\s*"
+               r"recommendation,\s*details\s*\)"),
+)
+
+
+def _route(sql):
+    for name, pat in _ROUTES:
+        if re.search(pat, sql, re.S | re.I):
+            return name
+    raise AssertionError(
+        "the collector issued SQL this double does not recognise, so no canned row "
+        "can stand in for it. If an identifier changed ON PURPOSE, update _ROUTES "
+        "(and the real-PostgreSQL test) instead of loosening the match:\n" + sql)
+
+
 def _mock_execute(meta, settings, metrics):
-    """_execute 호출을 SQL 키워드로 분기. settings는 {name: value} (MySQL은 바이트).
+    """_execute 호출을 식별자로 분기. settings는 {name: value} (MySQL은 바이트).
 
     캐시 히트율 쿼리는 E-3에서 두 metric_type을 한 번에 재는 4-컬럼 shape가 됐다.
     `avg_hit`/`hit_samples`는 Aurora CW 경로(buffer_cache_hit),
     `innodb_hit`/`innodb_samples`는 rds_instance 경로(innodb_buffer_pool_hit_rate).
     """
     def fake(rds, arn, secret, db, sql, params=None):
-        if "FROM cluster_meta" in sql:
+        route = _route(sql)
+        if route == "meta":
             return [meta]
-        if "FROM cluster_settings" in sql:
+        if route == "settings":
             return [{"name": n, "value": v} for n, v in settings.items()]
-        if "metric_type = 'db_connections'" in sql:
+        if route == "conn":
             return [{"peak": metrics.get("peak_conn"), "samples": metrics.get("conn_samples", 0)}]
-        if "'innodb_buffer_pool_hit_rate'" in sql:
+        if route == "hit":
             return [{
                 "cw_hit": metrics.get("avg_hit"),
                 "cw_samples": metrics.get("hit_samples", 0),
                 "innodb_hit": metrics.get("innodb_hit"),
                 "innodb_samples": metrics.get("innodb_samples", 0),
             }]
-        if sql.strip().upper().startswith("INSERT"):
-            return []
         return []
     return fake
 
@@ -205,6 +246,35 @@ def test_cache_hit_rule_still_silent_with_too_few_samples():
                "innodb_hit": 50.0, "innodb_samples": 5}
     emitted, _ = _run(_RDS_META, _SMALL_BUFFERS, metrics)
     assert "param_buffer_cache_hit" not in emitted
+
+
+def test_aurora_does_not_fall_back_to_the_innodb_metric_when_its_window_is_thin():
+    """The fallback is gated to the family that needed it.
+
+    Aurora MySQL writes innodb_buffer_pool_hit_rate too (the relational branch of
+    etl_collector/handler.py runs collect_mysql_innodb_status), so an ungated
+    fallback fires this rule on Aurora clusters whose CloudWatch window is under
+    MIN_SAMPLES, where it was previously silent. MEASURED across three revisions,
+    Aurora with cw_samples=5 and innodb_samples=25 @80%:
+      pre-E3 (1c8c3bf~1) -> silent
+      1c8c3bf            -> fires, "80.0% (7일 평균)" from innodb_buffer_pool_hit_rate
+      now                -> silent again
+    The two are different measurements (CloudWatch period average vs the last
+    SHOW ENGINE INNODB STATUS interval), so substituting one for the other is a
+    change of answer, not a repair."""
+    metrics = {"peak_conn": 80, "conn_samples": 100,
+               "avg_hit": 99.9, "hit_samples": 5,        # CW present but thin
+               "innodb_hit": 80.0, "innodb_samples": 25}  # would breach the floor
+    emitted, _ = _run(_AURORA_META, _SMALL_BUFFERS, metrics)
+    assert "param_buffer_cache_hit" not in emitted
+
+    # No CW rows at all: same answer for Aurora, and the rds_instance family
+    # still gets the rule it was missing.
+    metrics_no_cw = dict(metrics, avg_hit=None, hit_samples=0)
+    assert "param_buffer_cache_hit" not in _run(
+        _AURORA_META, _SMALL_BUFFERS, metrics_no_cw)[0]
+    assert "param_buffer_cache_hit" in _run(
+        _RDS_META, _SMALL_BUFFERS, metrics_no_cw)[0]
 
 
 def test_cache_hit_rule_silent_when_neither_metric_has_data():

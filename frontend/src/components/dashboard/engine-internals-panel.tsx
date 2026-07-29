@@ -58,7 +58,13 @@ const MSSQL_METRICS: MetricDef[] = [
     title: "Page Life Expectancy",
     unit: "s",
   },
-  { key: "mssql_server_memory_used_pct", title: "버퍼 풀 확보율", unit: "%" },
+  // 제목을 "확보율"에서 비율 그대로로 바꿨다: Total이 Target 밑에 머무는 것은
+  // 수요가 없는 서버의 정상 정상상태이므로 건강도 퍼센트로 읽히면 안 된다.
+  {
+    key: "mssql_server_memory_used_pct",
+    title: "Total / Target 메모리",
+    unit: "%",
+  },
   { key: "mssql_processes_blocked", title: "차단된 프로세스", unit: "" },
   {
     key: "mssql_memory_grants_pending",

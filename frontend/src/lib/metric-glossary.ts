@@ -230,9 +230,9 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
     unit: "s",
   },
   mssql_server_memory_used_pct: {
-    label: "Buffer Pool Ramp",
-    what: "SQL Server가 확보하려는 메모리(Target Server Memory) 대비 현재 확보한 메모리(Total Server Memory)의 비율.",
-    why: "재시작 직후에는 낮은 값에서 올라가는 것이 정상이다. 오래 100%에 붙어 있으면 max server memory 상한에 도달한 상태이고, 계속 낮으면 OS 메모리 압박으로 확보를 못 하고 있다는 뜻.",
+    label: "Total / Target Server Memory",
+    what: "SQL Server가 지금 확보한 메모리(Total Server Memory)를 확보 목표(Target Server Memory)로 나눈 비율. 건강도 점수가 아니라 버퍼 풀 확보가 어디까지 진행됐는지를 나타낸다.",
+    why: "낮은 값이 곧 문제는 아니다. 수요가 없으면 SQL Server는 Target까지 올릴 이유가 없어 Total이 Target 밑에 오래 머무는 것이 정상 정상상태다(실측: 유휴 상태의 dbops-demo-mssql에서 37~43%, 같은 시점 Page Life Expectancy 26,429초·Memory Grants Pending 0·Processes Blocked 0). 100%에 붙어 있으면 목표만큼 다 확보한 상태로, 더 필요하면 max server memory 상한을 본다. 이 지표만으로는 유휴와 메모리 압박을 구분할 수 없으므로, 압박 여부는 Page Life Expectancy와 Memory Grants Pending으로 판단한다.",
     unit: "%",
   },
   mssql_processes_blocked: {

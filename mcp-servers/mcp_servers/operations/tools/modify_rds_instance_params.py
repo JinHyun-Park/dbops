@@ -23,6 +23,14 @@ Safety:
   - The parameter must EXIST in the group's family, read from
     describe_db_parameters. Modifying a name the family does not have would be
     accepted by the API into a group nothing reads.
+  - The parameter must be MODIFIABLE (describe_db_parameters IsModifiable).
+    Also refused before verify_approval, for the same reason: AWS pins a large
+    share of every group per engine/version (MEASURED 44 of 117 on
+    default.sqlserver-ex-15.0, 149 of 536 on dbops-demo-mysql84), and
+    modify_db_parameter_group rejects those. Discovering that AFTER the guard
+    consumed the approval burns it on a change that was never possible, which is
+    the same defect the aws:ResourceTag condition caused once already (see the
+    comment in cdk/cross-account/spoke-role-template.yaml).
   - ApplyMethod is derived from the parameter's own ApplyType: dynamic ->
     immediate, static -> pending-reboot. Forcing pending-reboot on a dynamic
     parameter would make the DBA reboot for a change that needed no downtime;
@@ -33,6 +41,15 @@ Safety:
     a group the DBA never saw.
 
 No raw exception text reaches a return value; details go to the module logger.
+
+ponytail: `AllowedValues` is the one precondition still left to the API. An
+out-of-range value is rejected by modify_db_parameter_group AFTER the guard has
+consumed the approval, i.e. the same burnt-approval shape as IsModifiable, but
+the field is free-form ("0-4294967295", "ON,OFF", enumerations with ranges mixed
+in) and a parser that misreads it would refuse writes that are actually legal,
+which is worse than one wasted approval. Upgrade path if it becomes worth it:
+validate only the two unambiguous shapes (a single "lo-hi" integer range and a
+pure comma-separated enumeration) and stay silent on everything else.
 """
 
 import logging
@@ -73,14 +90,32 @@ def _instance_param_group(inst):
     return groups[0].get("DBParameterGroupName") or ""
 
 
+_LOOKUP_FAILED = object()
+
+
 def _find_parameter(rds, group_name, parameter_name):
     """Locate one parameter in a DB parameter group.
 
-    Returns (found, current_value, apply_type) where found is True/False, or
-    (None, None, None) when the group could not be read at all. The caller MUST
-    distinguish "the group says this parameter does not exist" from "we could not
-    ask", because only the first is a safe refusal.
+    Returns the parameter's OWN describe_db_parameters dict, None when the group
+    says it does not have it, or _LOOKUP_FAILED when the group could not be read
+    at all. The caller MUST distinguish "the group says this parameter does not
+    exist" from "we could not ask", because only the first is a safe refusal.
+
+    The whole dict is returned on purpose. This used to project three fields out
+    of it and drop the rest, and the field it dropped was `IsModifiable`, i.e.
+    exactly the precondition that decides whether the write can succeed at all.
+
+    Matching is CASE-INSENSITIVE, and the API's own spelling wins from here on.
+    RDS reports SQL Server parameter names in LOWER case ('max server memory
+    (mb)', 'agent xps'), while sys.configurations, which is what sp_configure and
+    this product's Configuration tab show, spells the same options in mixed case
+    ('max server memory (MB)', 'Agent XPs'). A case-sensitive compare therefore
+    rejected 7 of the 23 option names the dashboard itself displays. MEASURED on
+    the live groups: default.sqlserver-ex-15.0 has 117 parameters and
+    dbops-demo-mysql84 has 536, with ZERO names in either that differ only by
+    case, so folding case cannot merge two distinct parameters.
     """
+    wanted = parameter_name.strip().lower()
     marker = None
     for _ in range(_MAX_PARAM_PAGES):
         kwargs = {"DBParameterGroupName": group_name}
@@ -90,20 +125,18 @@ def _find_parameter(rds, group_name, parameter_name):
             resp = rds.describe_db_parameters(**kwargs)
         except Exception:
             logger.warning("describe_db_parameters failed for %s", group_name, exc_info=True)
-            return None, None, None
+            return _LOOKUP_FAILED
         for p in resp.get("Parameters") or []:
-            if p.get("ParameterName") == parameter_name:
-                # ParameterValue is ABSENT for a parameter left at the engine
-                # default, which is not the same as an empty string.
-                return True, p.get("ParameterValue"), (p.get("ApplyType") or "")
+            if str(p.get("ParameterName") or "").strip().lower() == wanted:
+                return p
         marker = resp.get("Marker")
         # A non-str marker (or a falsy one) ends the scan. Without the isinstance
         # check a test double handing back a truthy mock would loop forever.
         if not isinstance(marker, str) or not marker:
-            return False, None, None
+            return None
     logger.warning("describe_db_parameters exceeded %d pages for %s",
                    _MAX_PARAM_PAGES, group_name)
-    return None, None, None
+    return _LOOKUP_FAILED
 
 
 def modify_rds_instance_params_impl(
@@ -158,17 +191,52 @@ def modify_rds_instance_params_impl(
             ),
         }
 
-    found, current_value, apply_type = _find_parameter(rds, live_group, parameter_name)
-    if found is None:
+    found = _find_parameter(rds, live_group, parameter_name)
+    if found is _LOOKUP_FAILED:
         return {"status": "lookup_failed", "cluster_id": cluster_id,
                 "parameter_group": live_group,
                 "reason": "파라미터 그룹의 파라미터 목록을 조회할 수 없어 변경하지 않았습니다 "
                           "(자세한 원인은 서버 로그를 확인하세요)."}
-    if not found:
+    if found is None:
         return {"status": "unknown_parameter", "cluster_id": cluster_id,
                 "parameter_group": live_group, "parameter": parameter_name,
                 "reason": f"파라미터 그룹 '{live_group}'에 {parameter_name!r} 파라미터가 "
                           "없습니다. 엔진/버전에 맞는 이름인지 확인하세요."}
+
+    # From here on the API's spelling is the parameter's name: it goes into the
+    # responses, into the approval payload and into the write, so the name the
+    # DBA reads back is the name that was actually sent to AWS.
+    parameter_name = str(found.get("ParameterName") or "").strip() or parameter_name
+    # ParameterValue is ABSENT for a parameter left at the engine default, which
+    # is not the same as an empty string.
+    current_value = found.get("ParameterValue")
+    apply_type = found.get("ApplyType") or ""
+
+    # AWS pins part of every group per engine/version. modify_db_parameter_group
+    # REFUSES those, so this has to be answered before verify_approval: the
+    # approval is single-use, and consuming it for a change the API was always
+    # going to reject burns it (the retry then dies with "already consumed").
+    # Only an explicit False refuses: a response that does not carry the field
+    # has not told us the parameter is fixed, and claiming it did would be a
+    # negative the data does not support.
+    if found.get("IsModifiable") is False:
+        return {
+            "status": "not_modifiable",
+            "cluster_id": cluster_id,
+            "parameter_group": live_group,
+            "parameter": parameter_name,
+            "current_value": current_value,
+            "apply_type": apply_type,
+            "reason": (
+                f"'{parameter_name}' 파라미터는 이 파라미터 그룹에서 수정할 수 없습니다"
+                f"(describe_db_parameters의 IsModifiable=false). 엔진/버전 단위로 AWS가 "
+                f"고정한 값이라 변경 요청 자체가 거부되므로, 승인을 소모하지 않고 여기서 "
+                f"중단합니다. 현재 값은 "
+                f"{(current_value if current_value is not None else '엔진 기본값')!r}입니다. "
+                f"수정 가능한 다른 파라미터를 쓰거나, 엔진 버전 업그레이드가 필요한지 "
+                f"확인하세요."
+            ),
+        }
 
     # dynamic -> immediate (no restart), static -> pending-reboot. Anything else
     # (an ApplyType this code has not seen) takes the conservative branch.

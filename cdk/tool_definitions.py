@@ -356,9 +356,15 @@ def operations_schema():
               "Standalone RDS instance only (non-Aurora MySQL / SQL Server): change one "
               "parameter in the instance's DB PARAMETER GROUP (modify_db_parameter_group). "
               "Aurora uses modify_parameter instead, a standalone instance has no cluster "
-              "parameter group. AWS-managed default.* groups are refused; ApplyMethod comes "
-              "from the parameter's ApplyType (dynamic=immediate, static=pending-reboot); the "
-              "parameter group is bound at approval time and drift is refused; requires approval",
+              "parameter group. AWS-managed default.* groups are refused, and so is a "
+              "parameter AWS pins for the engine version (IsModifiable=false), both BEFORE "
+              "any approval is requested or consumed. parameter_name is matched "
+              "case-insensitively and echoed back in the AWS API's own spelling, so the "
+              "mixed-case option names the SQL Server Configuration tab shows "
+              "('max server memory (MB)') are accepted and come back as "
+              "'max server memory (mb)'. ApplyMethod comes from the parameter's ApplyType "
+              "(dynamic=immediate, static=pending-reboot); the parameter group is bound at "
+              "approval time and drift is refused; requires approval",
               {"cluster_id": "string", "parameter_name": "string", "value": "string",
                "parameter_group": "string", "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "parameter_name", "value"]),

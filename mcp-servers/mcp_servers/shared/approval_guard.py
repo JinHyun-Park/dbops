@@ -318,11 +318,21 @@ def _project(action_type: str, details: dict) -> dict:
     # passing "200": that direction fails CLOSED (approval_denied, re-request),
     # which is the correct bias for a write. The tool's schema declares `value` a
     # string for exactly this reason.
+    #
+    # `parameter_name` IS case-folded, and only here. RDS names SQL Server
+    # parameters in lower case ('agent xps') while sys.configurations, i.e. the
+    # dashboard's Configuration tab, spells the same option 'Agent XPs'. Without
+    # folding, an approval registered from the displayed name could never match
+    # the execute leg (which sends the API's spelling), so the DBA would approve
+    # and then be told to approve again. That fails closed, but it is a dead end,
+    # not a safety property. MEASURED: 117 parameters on
+    # default.sqlserver-ex-15.0 and 536 on dbops-demo-mysql84, with ZERO names in
+    # either differing only by case, so folding cannot merge two real operations.
     if action_type == "modify_rds_instance_params":
         return {
             "cluster_id": str(d.get("cluster_id") or "").strip(),
             "parameter_name": str(
-                d.get("parameter_name") or d.get("parameter") or "").strip(),
+                d.get("parameter_name") or d.get("parameter") or "").strip().lower(),
             "value": str(d.get("value") if d.get("value") is not None else "").strip(),
             "parameter_group": str(d.get("parameter_group") or "").strip(),
         }

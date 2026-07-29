@@ -5,9 +5,23 @@ Every row shape below was MEASURED live on dbops-demo-mssql (sqlserver-ex
 case that decides the wording: `min server memory (MB)` is CONFIGURED 0 but
 RUNNING 16 with is_dynamic = 1. Calling that "restart required" would be wrong,
 so the divergence wording branches on is_dynamic and this file pins both sides.
+
+IDENTIFIER PINNING, and WHICH HALF this file gets. The T-SQL half is pinned by
+identifier only: CI has no SQL Server, so `_Fake` asserts the view, the columns
+and the curated option literals the statement depends on (with word boundaries,
+because the earlier `"sys.configurations" in sql` assertion was satisfied by
+`sys.configurationsZZZ`, and MEASURED: `CAST(is_dynamic AS INT)` and the whole
+cluster_settings upsert could be mutated with this file staying green). The
+statement itself WAS executed against the live engine: driven read-only through
+the deployed operations MCP execute_sql path against dbops-demo-mssql
+(sqlserver-ex 15.00.4470.1.v1), 84 sys.configurations rows total and 23 after the
+curated filter. The PostgreSQL half is EXECUTED, not pinned: the same
+UPSERT_SETTING_SQL runs against a real server with the real cache schema in
+tests/unit/test_mysql_tier_cache_sql_real_pg.py.
 """
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -29,8 +43,41 @@ def _f(v):
     return {"longValue": v} if isinstance(v, int) else {"stringValue": v}
 
 
+# Every identifier the T-SQL read depends on, word-boundary anchored so a
+# renamed view or column cannot be satisfied by a prefix.
+_TSQL_REQUIRED = (
+    r"/\* source=dbops-etl \*/",
+    r"\bFROM\s+sys\.configurations\b",
+    # Pinned WITH the aliases and IN ORDER: the reader is positional
+    # (rec[0]=name, rec[1]=configured, rec[2]=running, rec[3]=is_dynamic), and
+    # `name` also appears in the WHERE / ORDER BY, so bare column patterns are
+    # satisfiable by a statement whose projection has already been broken.
+    r"SELECT\s+RTRIM\(name\)\s+AS\s+name\s*,\s*"
+    r"CAST\(value\s+AS\s+VARCHAR\(64\)\)\s+AS\s+configured\s*,\s*"
+    r"CAST\(value_in_use\s+AS\s+VARCHAR\(64\)\)\s+AS\s+running\s*,\s*"
+    r"CAST\(is_dynamic\s+AS\s+INT\)\s+AS\s+is_dynamic\b",
+    r"\bWHERE\s+name\s+IN\s*\(",
+)
+# The cache write, pinned here and EXECUTED for real in the real-PG test.
+_UPSERT_REQUIRED = (
+    r"\bINSERT\s+INTO\s+cluster_settings\s*\(\s*cluster_id,\s*name,\s*value,\s*unit,\s*updated_at\s*\)",
+    r"\bON\s+CONFLICT\s*\(\s*cluster_id,\s*name\s*\)\s+DO\s+UPDATE\b",
+)
+
+
+def _require(sql, patterns, what):
+    for pat in patterns:
+        assert re.search(pat, sql, re.S | re.I), (
+            f"{what} no longer names {pat!r}. A canned row must not stand in for a "
+            f"statement whose identifiers changed:\n{sql}")
+
+
 class _Fake:
-    """Data-API-shaped adapter double + cache_execute capture."""
+    """Data-API-shaped adapter double + cache_execute capture.
+
+    Both legs VALIDATE the statement before answering, so every test in this file
+    (not just the dedicated one) fails if an identifier moves.
+    """
 
     def __init__(self, rows):
         self.rows = rows
@@ -39,9 +86,12 @@ class _Fake:
 
     def execute_statement(self, **kw):
         self.sql = kw["sql"]
+        _require(self.sql, _TSQL_REQUIRED, "the sys.configurations read")
         return {"records": [[_f(a), _f(b), _f(c), _f(d)] for a, b, c, d in self.rows]}
 
     def cache_execute(self, sql, params):
+        _require(sql, _UPSERT_REQUIRED, "the cluster_settings upsert")
+        assert set(params) == {"cluster_id", "name", "value", "unit"}, params
         self.writes.append(params)
 
 
@@ -101,18 +151,19 @@ def test_static_divergence_says_restart():
 
 def test_statement_pins_server_scoped_view_and_the_curated_names():
     """The collector must read sys.configurations (SERVER-scoped, hence correct
-    from the `master` session) and only the curated option list."""
+    from the `master` session) and only the curated option list.
+
+    IDENTIFIER HALF: the view, all four projected columns and the option literals
+    are pinned here (word-boundary anchored: `sys.configurationsZZZ` no longer
+    satisfies `sys.configurations`). The statement was separately EXECUTED against
+    dbops-demo-mssql, read-only, returning 84 rows / 23 after this filter."""
     fake, _ = _run([_IN_SYNC])
-    assert "sys.configurations" in fake.sql
-    assert "/* source=dbops-etl */" in fake.sql
-    # A name with no row is simply absent, never invented.
-    for name in ("max server memory (MB)", "max degree of parallelism",
-                 "cost threshold for parallelism", "blocked process threshold (s)"):
+    _require(fake.sql, _TSQL_REQUIRED, "the sys.configurations read")
+    # Every curated name must reach the statement as an exact quoted literal:
+    # a name with no row is simply absent from the result, never invented.
+    for name in ms._TRACKED:
         assert f"'{name}'" in fake.sql
-    # value/value_in_use are sql_variant; the statement must CAST or the adapter
-    # hands back a type the row reader has no field for.
-    assert "CAST(value AS VARCHAR" in fake.sql
-    assert "CAST(value_in_use AS VARCHAR" in fake.sql
+    assert len(ms._TRACKED) == 23
 
 
 def test_empty_dmv_writes_nothing_and_says_so():
@@ -124,6 +175,11 @@ def test_empty_dmv_writes_nothing_and_says_so():
 
 
 def test_upsert_targets_cluster_settings_on_conflict():
-    """Re-running must update in place, not accumulate duplicate rows."""
-    assert "INSERT INTO cluster_settings" in ms.UPSERT_SETTING_SQL
-    assert "ON CONFLICT (cluster_id, name) DO UPDATE" in ms.UPSERT_SETTING_SQL
+    """Re-running must update in place, not accumulate duplicate rows.
+
+    Anchored, because `INSERT INTO cluster_settingsZZZ` satisfied the old
+    substring assertion (MEASURED: that mutation left this file green). The same
+    statement is EXECUTED against a real PostgreSQL server, on the real cache
+    schema, in tests/unit/test_mysql_tier_cache_sql_real_pg.py, which is what
+    proves the ON CONFLICT target matches the table's actual primary key."""
+    _require(ms.UPSERT_SETTING_SQL, _UPSERT_REQUIRED, "the cluster_settings upsert")
