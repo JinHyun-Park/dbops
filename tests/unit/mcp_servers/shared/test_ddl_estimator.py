@@ -1,6 +1,7 @@
 """Unit tests for the shared DDL estimator model."""
 
 from mcp_servers.shared.ddl_estimator import (
+    _disk_needed_mb,
     classify_ddl,
     estimate_ddl,
     resolve_table,
@@ -277,3 +278,79 @@ def test_postgresql_classification_is_unmoved_by_the_engine_argument():
     # drops the engine plumbing cannot pass both halves of this test.
     assert classify_ddl("CREATE INDEX I ON ORDERS (X)", _MY)["online"] is True
     assert classify_ddl("ALTER TABLE T ADD COLUMN E INT DEFAULT 5", _MY)["online"] is True
+
+
+def test_add_primary_key_is_online_and_expensive_at_the_same_time():
+    """The one shape neither existing class expressed.
+
+    Measured on a real mysqld: `ADD PRIMARY KEY(id), LOCK=NONE` is ACCEPTED, so
+    InnoDB permits concurrent DML, while still rebuilding the table (the clustered
+    index IS the table). It used to fall to the `other` fallback, which reported
+    scans_table=True but 0 MB of extra disk for a full rewrite, and whose
+    recommendation told the DBA to take a maintenance window they do not need.
+    """
+    e = estimate_ddl(
+        ddl_sql="ALTER TABLE t ADD PRIMARY KEY (id)", table="t", row_count=1,
+        size_mb=500.0, instance_class="db.r6g.large", engine=_MY,
+    )
+    assert e["operation"] == "add_primary_key"
+    assert e["online_ddl_possible"] is True
+    # A rebuild holds a second copy of the table, same as VACUUM FULL.
+    assert e["disk_space_needed_mb"] == 500.0
+    # And the recommendation must say BOTH halves: no write block, but a rewrite.
+    assert "쓰기를 막지 않지만" in e["recommendation"]
+    assert "재작성" in e["recommendation"]
+    assert "영향 최소" not in e["recommendation"], (
+        "an online-but-rebuilding operation must not be sold as minimal impact")
+
+
+def test_add_primary_key_honours_a_declared_blocking_clause():
+    for ddl in ("ALTER TABLE t ADD PRIMARY KEY (id), LOCK=SHARED",
+                "ALTER TABLE t ADD PRIMARY KEY (id), LOCK=EXCLUSIVE",
+                "ALTER TABLE t ADD PRIMARY KEY (id), ALGORITHM=COPY"):
+        c = classify_ddl(ddl.upper(), _MY)
+        assert c["operation"] == "add_primary_key", ddl
+        assert c["online"] is False, ddl
+
+
+def test_postgresql_add_primary_key_stays_blocking():
+    """No new claim: PostgreSQL has no CONCURRENTLY form of ADD PRIMARY KEY, so
+    the bare statement follows the same `online = has_concurrently` rule every
+    other PG branch uses, and lands on False."""
+    c = classify_ddl("ALTER TABLE T ADD PRIMARY KEY (ID)", "aurora-postgresql")
+    assert c["operation"] == "add_primary_key"
+    assert c["online"] is False
+    assert "exclusive" in c["lock"]
+    e = estimate_ddl(ddl_sql="ALTER TABLE t ADD PRIMARY KEY (id)", table="t",
+                     row_count=1, size_mb=500.0, engine="aurora-postgresql")
+    assert e["disk_space_needed_mb"] == 500.0
+    assert "pg_repack" in e["recommendation"]
+
+
+def test_add_primary_key_and_the_index_branch_do_not_swallow_each_other():
+    """Two adjacent branches over overlapping-looking text, pinned both ways.
+
+    What actually keeps them apart is the BRANCH ORDER: the ADD PRIMARY KEY test
+    runs before the index branch. Measured: widening `_INDEX_BUILD_RX` to accept
+    `ADD PRIMARY KEY` changes nothing on its own (all tests stay green), because
+    the PK branch has already returned. Removing the PK branch DOES fail this
+    test. So the regex exclusion is belt-and-braces, not the guarantee, and
+    anyone reordering these two branches will fail here.
+    """
+    assert classify_ddl("ALTER TABLE T ADD PRIMARY KEY (ID)", _MY)["operation"] == "add_primary_key"
+    for ddl in ("ALTER TABLE T ADD INDEX IX(A)",
+                "ALTER TABLE T ADD UNIQUE INDEX UQ(A)",
+                "ALTER TABLE T ADD KEY IX(A)",
+                "CREATE INDEX IX ON T(A)"):
+        assert classify_ddl(ddl, _MY)["operation"] == "create_index", ddl
+
+
+def test_the_rebuild_set_is_one_list_not_two_literals():
+    """The disk accounting and the rewrite recommendation must name the SAME set.
+    They were two separate literals, which is how add_primary_key would have been
+    added to one and not the other."""
+    from mcp_servers.shared.ddl_estimator import _REBUILD_OPERATIONS
+    for op in _REBUILD_OPERATIONS:
+        assert _disk_needed_mb(op, 100.0) == 100.0, op
+    assert _disk_needed_mb("create_index", 100.0) == 50.0
+    assert _disk_needed_mb("drop_column", 100.0) == 0.0

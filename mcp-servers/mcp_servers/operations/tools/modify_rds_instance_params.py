@@ -53,20 +53,20 @@ Safety:
     group dbops-demo-mysql84 carries `dbops-demo=true` and `Application=DBOps`
     and NOT ManagedBy, so the day that instance is reached through a spoke role
     the write is denied and the approval is gone.
-    It IS knowable: the group's ARN is derivable from the DBInstanceArn this tool
-    already reads (`...:db:x` -> `...:pg:<group>`, DRIVEN live) and one
-    list_tags_for_resource would answer it. Deliberately NOT done here, for
-    three reasons. (1) The condition gates 15 write actions in that template, so
-    a check bolted onto this one tool leaves 14 siblings burning approvals while
-    looking covered; the fix belongs in one shared pre-consume preflight.
-    (2) Refusing on a missing tag asserts what the SPOKE ROLE's policy says, and
-    this code does not read that policy: the template is a template customers
-    adapt, so an untagged group is not reliably a denial. (3) It must not fire
-    same-account, where the hub role has no tag condition at all, so it would
-    also need the registry's spoke_role_arn as a second gate.
-    The modify_failed reason names the parameter-group tag so a DBA knows where
-    to look, and rds:ListTagsForResource is NOT granted to the operations Lambda
-    today, so implementing it is an IAM change too.
+    It is now REPORTED IN THE PREVIEW, by the shared
+    mcp_servers/shared/managed_tag_preflight.py: the group's ARN comes from
+    describe_db_parameter_groups and its tags from list_tags_for_resource, both
+    already granted to the SPOKE role. No new IAM, because the check only runs when
+    the registry row carries a spoke_role_arn, so the hub role never makes the call.
+    It is a WARNING and NOT a pre-consume refusal, and objection (2) is exactly why:
+    refusing asserts what the SPOKE ROLE's policy says, and this code does not read
+    that policy. The template is one customers adapt, so an untagged group is not
+    reliably a denial, and a refusal would block writes that work for a deployment
+    that dropped the condition. Blocking a working capability is worse than the
+    wasted approval. Reporting it at review time costs nothing to act on: the DBA
+    sees it before approving, so no approval is spent on a card that cannot execute.
+    The modify_failed reason still names the parameter-group tag, for the case where
+    the write is attempted anyway.
 
 No raw exception text reaches a return value; details go to the module logger.
 
@@ -85,6 +85,9 @@ import logging
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import client_for_cluster
+from mcp_servers.shared.managed_tag_preflight import (
+    instance_parameter_group_tag_warning,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +315,10 @@ def modify_rds_instance_params_impl(
     apply_method = "immediate" if is_dynamic else "pending-reboot"
 
     if not approved:
-        return {
+        # The cross-account tag, surfaced where acting on it is free. WARNING and
+        # not a refusal: see the docstring's objection (2). Blocking a write that
+        # works is worse than the wasted approval this prevents.
+        card = {
             "status": "approval_required",
             "cluster_id": cluster_id,
             "parameter": parameter_name,
@@ -337,6 +343,10 @@ def modify_rds_instance_params_impl(
                 + ". 같은 파라미터 그룹을 쓰는 다른 인스턴스에도 함께 적용됩니다."
             ),
         }
+        tag_warning = instance_parameter_group_tag_warning(rds, cluster_id, live_group)
+        if tag_warning:
+            card["warning"] = tag_warning
+        return card
 
     # TOCTOU, answered with what is ALREADY IN HAND. `live_group` is the group
     # the instance points at right now, read a few lines up in THIS invocation,

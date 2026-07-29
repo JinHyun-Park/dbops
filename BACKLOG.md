@@ -421,14 +421,46 @@ that is worth not re-litigating.
   behind full-run ordering. A conftest.py in that directory appends every `api/*`
   dir to sys.path, so new test files get it too. Commit 98a4d08.
 
-### Still open from that surface
+### Resolved 2026-07-30: the last two
 
-- **`ADD PRIMARY KEY` has no cost class in the DDL estimator.** It falls to the
-  `other` fallback, which reports 0 MB of extra disk for what is a table rebuild.
-  Measured on a real mysqld: it ACCEPTS `LOCK=NONE` (so InnoDB permits concurrent
-  DML) while still rebuilding, so it is neither the secondary-index class nor the
-  blocking-rewrite class and needs its own entry with engine-aware lock text.
-- **`AllowedValues` and the cross-account `ManagedBy=dbops` tag still burn an
-  approval** when they fire, on both parameter tools. Recorded rather than fixed
-  because the tag gates 15 write actions in the spoke template and belongs in one
-  shared preflight, not in each tool. Unchanged by this pass.
+- **`ADD PRIMARY KEY` cost class — FIXED.** It fell to the `other` fallback, which
+  reports 0 MB of extra disk for a full table rebuild. It is the one shape that is
+  ONLINE AND EXPENSIVE at once (measured: InnoDB ACCEPTS `LOCK=NONE`, so concurrent
+  DML is permitted, while the clustered index rebuild rewrites the table), and
+  neither existing class could say that: the online branch sold it as "서비스 영향
+  최소" and the rewrite branch would have claimed a write block. It now has its own
+  operation, 1.0x disk, and a recommendation that states both halves. The rebuild
+  set is one tuple shared by the disk accounting and the recommendation, because
+  they were two literals and that is how this operation ended up in neither.
+
+- **Cross-account `ManagedBy=dbops` — REPORTED, deliberately not refused.** The
+  spoke template gates 15 write actions on the tag, and the two parameter-group
+  actions authorize against the GROUP, so an untagged spoke-account group is denied
+  AFTER the approval is consumed. `mcp_servers/shared/managed_tag_preflight.py`
+  reads the group's tags with the spoke role's own rds:Describe\* +
+  rds:ListTagsForResource (no new IAM: the check only runs when the registry row
+  carries a spoke_role_arn, so the hub role never makes the call) and puts a
+  `warning` on the approval_required card.
+
+  It is a WARNING and not a pre-consume refusal, and the earlier objection recorded
+  in modify_rds_instance_params is exactly why: refusing asserts what the SPOKE
+  ROLE's policy says, and this code does not read that policy. That template is one
+  customers adapt, so an untagged group is not reliably a denial, and a refusal
+  would block parameter tuning outright for a deployment that dropped the
+  condition. Blocking a working capability is worse than the wasted approval it
+  would save. Reporting it at review time costs nothing to act on. The tag matching
+  mirrors IAM exactly (key case-insensitive, value case-SENSITIVE) so the
+  predicate's answer equals the one that decides the write.
+
+  Known limit, stated rather than papered over: it reaches the DBA only if the
+  agent relays the preview, and it is not a gate. The IAM condition remains the
+  enforcement point. The other 13 tag-gated actions still discover the denial
+  post-consume; the shared helper is now the place to add them.
+
+- **`AllowedValues` is a DECISION, not an open item.** The field is free-form
+  ("0-4294967295", "ON,OFF", enumerations with ranges mixed in) and a parser that
+  misreads it would refuse writes that are legal, which is worse than one wasted
+  approval on a value the DBA can see in the response. Recorded here so it stops
+  reading like unfinished work. Upgrade path if it ever becomes worth it: validate
+  ONLY the two unambiguous shapes (a single "lo-hi" integer range and a pure
+  comma-separated enumeration) and stay silent on everything else.

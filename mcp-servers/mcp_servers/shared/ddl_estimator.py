@@ -229,6 +229,42 @@ def classify_ddl(ddl_upper: str, engine=None) -> dict:
             "lock": "none (ALGORITHM=INSTANT, metadata only)",
         }
 
+    # ADD PRIMARY KEY is its own cost class, and it does NOT match
+    # _INDEX_BUILD_RX (that regex requires INDEX or KEY immediately after ADD, so
+    # "ADD PRIMARY KEY" falls through it by construction). It used to land on the
+    # `other` fallback, which reports scans_table=True but 0 MB of extra disk, for
+    # an operation that rebuilds the whole table: on InnoDB the clustered index IS
+    # the table, so adding a primary key rewrites it and needs room for a second
+    # copy, exactly like the `rewrite` class.
+    #
+    # It is the one shape that is ONLINE AND EXPENSIVE at the same time. Measured
+    # on a real mysqld: `ALTER TABLE p ADD PRIMARY KEY(id), LOCK=NONE` is ACCEPTED,
+    # so InnoDB permits concurrent DML throughout, while still rebuilding. Neither
+    # existing class expresses that, which is why it gets its own.
+    if "ADD PRIMARY KEY" in ddl_upper:
+        if mysql:
+            if lock in ("SHARED", "EXCLUSIVE") or algorithm == "COPY":
+                online, lock_text = False, (
+                    f"blocking as declared (LOCK={lock})" if lock
+                    else "blocking (ALGORITHM=COPY)")
+            else:
+                online, lock_text = True, (
+                    "none (InnoDB rebuilds the clustered index but permits "
+                    "concurrent DML)")
+        else:
+            # PostgreSQL has no CONCURRENTLY form of ADD PRIMARY KEY, so the bare
+            # statement takes ACCESS EXCLUSIVE. No new claim is made here: this is
+            # the same `online = has_concurrently` rule every other PG branch uses.
+            online = has_concurrently
+            lock_text = ("none (CONCURRENTLY)" if has_concurrently
+                         else "exclusive (table rewrite + unique index build)")
+        return {
+            "operation": "add_primary_key",
+            "scans_table": True,
+            "online": online,
+            "lock": lock_text,
+        }
+
     if _INDEX_BUILD_RX.search(ddl_upper) or _adds_special_index(ddl_upper):
         if mysql:
             online, lock_text = _mysql_index_lock(ddl_upper, algorithm, lock)
@@ -374,11 +410,19 @@ def throughput_mb_s(instance_class, io_optimized: bool):
     return round(mb_s, 1), factors, tier_known
 
 
+# Operations that hold a SECOND COPY of the table until commit, so the extra-disk
+# figure is ~1.0x the table. One tuple rather than a repeated literal, because the
+# disk accounting and the rewrite recommendation have to name the same set: they
+# used to be two separate literals and `add_primary_key` would have had to be added
+# to both, which is how it ended up in neither.
+_REBUILD_OPERATIONS = ("rewrite", "alter_column_type", "add_primary_key")
+
+
 def _disk_needed_mb(operation: str, size_mb: float) -> float:
     if operation == "create_index":
         # New index covers a subset of columns; ~0.5× table size upper bound.
         return round(size_mb * 0.5, 1)
-    if operation in ("rewrite", "alter_column_type"):
+    if operation in _REBUILD_OPERATIONS:
         # A rewrite holds a second copy of the table until commit.
         return round(size_mb * 1.0, 1)
     return 0.0
@@ -434,9 +478,19 @@ def estimate_ddl(
 
     disk_needed_mb = _disk_needed_mb(cls["operation"], size_mb)
 
-    if cls["online"]:
+    rebuilds = cls["operation"] in _REBUILD_OPERATIONS
+    if cls["online"] and rebuilds:
+        # ONLINE AND EXPENSIVE. InnoDB's ADD PRIMARY KEY permits concurrent DML
+        # while rebuilding the whole table, so "서비스 영향 최소" would understate a
+        # long operation that also needs room for a second copy. Neither of the
+        # two branches below said that, which is the gap this class exists for.
+        recommendation = (
+            "쓰기를 막지 않지만 테이블 전체를 재작성합니다. 소요 시간이 길고 테이블 "
+            "크기만큼 추가 디스크가 필요하므로, 여유 공간과 복제 지연을 함께 확인하세요"
+        )
+    elif cls["online"]:
         recommendation = "온라인 DDL 가능, 서비스 영향 최소"
-    elif cls["operation"] in ("rewrite", "alter_column_type"):
+    elif rebuilds:
         # Name the tooling that exists for THIS engine. pg_repack is a
         # PostgreSQL extension, and MySQL reaches this branch now that a
         # MODIFY COLUMN type change is classified instead of falling to "other".

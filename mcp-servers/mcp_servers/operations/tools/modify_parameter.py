@@ -7,10 +7,11 @@ unsupported_engine instead of failing inside `rds.describe_db_clusters`.
 
 THE APPROVAL IS SINGLE-USE. Every precondition this tool can answer from the two
 describes it already makes, plus the shape of its own arguments, is answered
-before `verify_approval`. TWO are deliberately left to the API and both burn the
-approval when they fire (`AllowedValues` and the cross-account tag, see below), so
-"everything knowable" would be an overclaim: what holds is that nothing this code
-can see is discovered after the consume. This tool used to go straight from
+before `verify_approval`. ONE is deliberately left to the API and it burns the
+approval when it fires (`AllowedValues`, see below), so "everything knowable" would
+be an overclaim: what holds is that nothing this code can see is discovered after
+the consume. The cross-account tag is a second post-consume denial, and it is now
+REPORTED in the preview rather than discovered late. This tool used to go straight from
 describe_db_clusters to modify_db_cluster_parameter_group with no
 describe_db_cluster_parameters anywhere, so it could see NEITHER whether the
 parameter is modifiable NOR whether it exists in the group at all, and both
@@ -56,15 +57,24 @@ the new group while the card named none. Same parameter, same value, wrong targe
 and nothing in the audit record said so. A mismatch now returns state_changed
 WITHOUT consuming the approval.
 
-Still left to the API, exactly as in the instance tool, and both burn the approval
-when they fire: `AllowedValues` (the field is free-form, and a parser that
-misreads it would refuse legal writes) and the cross-account
-`aws:ResourceTag/ManagedBy=dbops` condition, which for
-rds:ModifyDBClusterParameterGroup authorizes against the CLUSTER PARAMETER GROUP
-rather than the cluster, so an untagged spoke-account group is denied after the
-consume. See the safety notes in modify_rds_instance_params for why that one is
-recorded rather than checked: it gates 15 write actions in the spoke template and
-belongs in one shared preflight, not in each tool.
+THE CROSS-ACCOUNT TAG IS REPORTED AT REVIEW TIME, not refused at execute time.
+`rds:ModifyDBClusterParameterGroup` authorizes against the CLUSTER PARAMETER GROUP
+rather than the cluster, so an untagged spoke-account group is denied with
+AccessDenied AFTER the consume. The preview now carries a `warning` when the group
+was read and lacks `ManagedBy=dbops` (`managed_tag_preflight`, using the spoke
+role's own rds:Describe* + rds:ListTagsForResource, so no new IAM).
+
+It is a WARNING and NOT a refusal on purpose: this code does not read the spoke
+role's policy, and that template is one customers adapt, so an untagged group is not
+reliably a denial. A refusal would block writes that work for a deployment that
+dropped the condition, and blocking a working capability is worse than the wasted
+approval. Surfacing it in the preview costs the DBA nothing to act on: they see it
+before approving, so the approval is never spent on a card that cannot execute.
+
+STILL LEFT TO THE API, and it does burn the approval when it fires: `AllowedValues`.
+That one is a DECISION rather than a gap. The field is free-form, a parser that
+misreads it would refuse legal writes, and refusing a legal write is worse than the
+occasional burnt approval on an out-of-range value the DBA can see in the response.
 
 Failures return a STATIC Korean reason and log the detail with the module
 logger: raw exception text must never reach a tool response.
@@ -79,6 +89,9 @@ from mcp_servers.operations.tools.modify_rds_instance_params import (
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import rds_client_for_cluster
+from mcp_servers.shared.managed_tag_preflight import (
+    cluster_parameter_group_tag_warning,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -220,13 +233,22 @@ def modify_parameter_impl(
         }
 
     if not approved:
-        return {
+        # The cross-account tag, surfaced where acting on it is free. It is a
+        # WARNING and not a refusal: this code does not read the spoke role's
+        # policy, and the template is one customers adapt, so an untagged group is
+        # not reliably a denial. Blocking a write that would work is worse than the
+        # wasted approval this is trying to prevent.
+        card = {
             "status": "approval_required",
             "cluster_id": cluster_id,
             "parameter": parameter_name,
             "value": value,
             "parameter_group": pg_name,
         }
+        tag_warning = cluster_parameter_group_tag_warning(rds, cluster_id, pg_name)
+        if tag_warning:
+            card["warning"] = tag_warning
+        return card
 
     # TOCTOU, answered with what is ALREADY IN HAND, exactly as the instance tool
     # does it. `pg_name` is the group this cluster points at right now, read a few
