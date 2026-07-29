@@ -90,3 +90,123 @@ def test_ws_notify_copies_are_identical():
     a = (_ROOT / "api/incident_webhook/ws_notify.py").read_bytes()
     b = (_ROOT / "data-pipeline/alert_evaluator/ws_notify.py").read_bytes()
     assert a == b, "ws_notify.py copies drifted — re-sync the two files"
+
+
+# --- broadcast efficiency: one scan per invocation, and bounded waits ---------
+#
+# broadcast() was called inside alert_evaluator's per-rule loop, so N fired rules
+# meant N full scans of the connections table and N fresh boto3 clients. And the
+# management client had no explicit timeouts, so botocore's 60s default read
+# timeout meant ONE unresponsive socket could outlast the evaluator's own Lambda
+# timeout and take the remaining notifications with it: one dead socket, several
+# missed alerts.
+
+
+def _ws_env(monkeypatch):
+    monkeypatch.setenv("WS_CONNECTIONS_TABLE", "conns")
+    monkeypatch.setenv("WS_MGMT_ENDPOINT", "https://ws.example/prod")
+
+
+class _Conns:
+    """A connections table that counts scans, so 'scanned once' is measurable."""
+
+    def __init__(self, ids):
+        self.ids = list(ids)
+        self.scans = 0
+        self.deleted = []
+
+    def scan(self, **kwargs):
+        self.scans += 1
+        return {"Items": [{"connection_id": c} for c in self.ids]}
+
+    def delete_item(self, Key):
+        self.deleted.append(Key["connection_id"])
+
+
+class _Mgmt:
+    class exceptions:
+        class GoneException(Exception):
+            pass
+
+    def __init__(self, gone=()):
+        self.gone = set(gone)
+        self.posted = []
+
+    def post_to_connection(self, ConnectionId, Data):
+        self.posted.append(ConnectionId)
+        if ConnectionId in self.gone:
+            raise _Mgmt.exceptions.GoneException()
+
+
+def _wire(monkeypatch, conns, mgmt):
+    _ws_env(monkeypatch)
+    monkeypatch.setattr(notify, "_table", lambda _n: conns)
+    monkeypatch.setattr(notify, "_mgmt", lambda _e: mgmt)
+
+
+def test_a_prescanned_list_is_not_rescanned_per_broadcast(monkeypatch):
+    conns = _Conns(["a", "b"])
+    mgmt = _Mgmt()
+    _wire(monkeypatch, conns, mgmt)
+
+    ids = notify.load_connections()
+    assert conns.scans == 1
+    for _ in range(5):
+        notify.broadcast({"x": 1}, connections=ids)
+    assert conns.scans == 1, f"rescanned {conns.scans} times for 5 broadcasts"
+    assert len(mgmt.posted) == 10  # 2 connections x 5 broadcasts
+
+
+def test_omitting_the_list_still_scans_for_a_single_shot_caller(monkeypatch):
+    """incident_webhook broadcasts once per request, so it must keep working
+    without the caller having to pre-scan."""
+    conns = _Conns(["a"])
+    mgmt = _Mgmt()
+    _wire(monkeypatch, conns, mgmt)
+    assert notify.broadcast({"x": 1}) == 1
+    assert conns.scans == 1
+
+
+def test_a_gone_connection_is_pruned_from_the_callers_list(monkeypatch):
+    """The point of sharing the list: a socket found dead on rule 1 must not be
+    pushed again on rule 2."""
+    conns = _Conns(["live", "dead"])
+    mgmt = _Mgmt(gone=["dead"])
+    _wire(monkeypatch, conns, mgmt)
+
+    ids = notify.load_connections()
+    assert notify.broadcast({"x": 1}, connections=ids) == 1
+    assert ids == ["live"], f"the dead id was left in the list: {ids}"
+    assert conns.deleted == ["dead"], "the row must also be pruned from the table"
+
+    mgmt.posted.clear()
+    notify.broadcast({"x": 2}, connections=ids)
+    assert mgmt.posted == ["live"], "a known-dead socket was retried"
+
+
+def test_the_management_client_has_explicit_timeouts():
+    """Bounded waits, asserted on the config rather than on behaviour: a hung post
+    is exactly what cannot be reproduced in a unit test, so the value that
+    prevents it is what gets pinned."""
+    cfg = notify._MGMT_CONFIG
+    assert cfg.connect_timeout and cfg.connect_timeout <= 5, cfg.connect_timeout
+    assert cfg.read_timeout and cfg.read_timeout <= 10, cfg.read_timeout
+    # A push to a live socket returns in milliseconds; retrying a timed-out one
+    # mostly means pushing to a connection that has already gone away.
+    assert cfg.retries.get("max_attempts", 99) <= 3, cfg.retries
+
+
+def test_an_unconfigured_channel_is_still_a_no_op(monkeypatch):
+    monkeypatch.delenv("WS_CONNECTIONS_TABLE", raising=False)
+    monkeypatch.delenv("WS_MGMT_ENDPOINT", raising=False)
+    assert notify.broadcast({"x": 1}) == 0
+    assert notify.load_connections() == []
+
+
+def test_a_failed_scan_yields_no_connections_rather_than_raising(monkeypatch):
+    class Boom:
+        def scan(self, **_):
+            raise RuntimeError("throttled")
+    _ws_env(monkeypatch)
+    monkeypatch.setattr(notify, "_table", lambda _n: Boom())
+    assert notify.load_connections() == []

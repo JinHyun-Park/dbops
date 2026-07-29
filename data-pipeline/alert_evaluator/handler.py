@@ -372,6 +372,19 @@ def lambda_handler(event, context):
     triggered = 0
     skipped = 0
 
+    # Scan the WS connections table ONCE for the whole invocation. broadcast()
+    # used to scan it per fired rule, so N rules meant N full scans; it also
+    # prunes Gone ids from this list in place, so a socket found dead while
+    # pushing one rule is not retried for the next. [] when the push channel is
+    # not configured, which makes every broadcast below a cheap no-op.
+    try:
+        from ws_notify import load_connections
+
+        ws_connections = load_connections()
+    except Exception as e:
+        print(f"[alert-evaluator] ws connection load failed: {type(e).__name__}")
+        ws_connections = []
+
     for rule in rules:
         rule_id = int(rule["id"])
         conditions_json = rule.get("conditions_json")
@@ -479,7 +492,7 @@ def lambda_handler(event, context):
                 "cluster_id": rule["cluster_id"],
                 "severity": "warning",
                 "title": message,
-            })
+            }, connections=ws_connections)
         except Exception as e:
             print(f"[alert-evaluator] ws broadcast failed for rule {rule_id}: {type(e).__name__}")
 
