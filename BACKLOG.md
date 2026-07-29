@@ -479,3 +479,36 @@ Remaining (do at actual flip time):
 - AnomaliesPanel 카드 클릭 → 모달 (4 stats + AI diagnose)
 - Wait Events "unknown" 제거 (PI total AAS 행 필터 + name prefix로 type 추론)
 - 친근한 라벨 (`unknown` → "Other (RDS)", snake/CamelCase → Title Case)
+
+### Schema honesty surface, deferred after the tenth pass (noted 2026-07-29)
+
+Both items were raised by cross-model review, both were MEASURED against the
+tree rather than relayed, and both are deferred deliberately: the surface was
+bounded after ten passes and neither of these is a falsehood an operator would
+act on.
+
+1. The panel-guard JSX slicer is not brace-matched.
+   `tests/unit/api/test_schema_changes_panel_states.py::_branches()` slices each
+   branch with `body.index("\n  }", g.end())`, the first two-space closing brace
+   after the guard, not the matching close of the `if`. MEASURED on the current
+   tree with five branches: every branch is truncated by exactly 4 characters,
+   `\n  }`, which is the closing brace itself and not branch content. So the
+   guard covers what it claims TODAY. It becomes wrong the moment a branch body
+   contains a nested block closing at two-space indentation. Fix when that file
+   is next touched: walk from the opening brace at depth 0, and assert each slice
+   ends with its own closing brace so a future truncation fails loudly.
+
+2. OBSERVED_SQL collapses by schema NAME across read_scopes, and it may be
+   correct.
+   `schema_diff_util.OBSERVED_SQL` does `DISTINCT ON (schema_name)` over
+   ALL_ROWS, which is deliberately not scope-filtered, so a cluster with the same
+   schema name under two scopes keeps whichever row is newest. The review called
+   this false completeness. ANALYSIS SUGGESTS IT IS NOT, and the analysis is why
+   this is a note rather than a fix: a schema that exists ONLY under an abandoned
+   scope has its own old row as the newest, so its age is old and it IS reported
+   unconfirmed, which is right. The flagged case needs the same NAME in both
+   scopes, and there the current-scope row is a genuine observation of that name.
+   `public` makes that shape certain on PostgreSQL, so it is worth SETTLING with
+   a driven test rather than reasoning: seed one schema present in both scopes
+   and one present only in the abandoned scope, and assert what each reports.
+   Fix only if the test disagrees with the analysis above.

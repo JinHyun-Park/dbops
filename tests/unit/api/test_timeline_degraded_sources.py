@@ -343,3 +343,69 @@ def test_the_response_type_declares_the_field():
     i = _CLIENT.index("export interface TimelineResponse {")
     body = _CLIENT[i:_CLIENT.index("\n}", i)]
     assert "degraded_sources?: string[]" in body, body
+
+
+# ===========================================================================
+# schema_v26 cache: replay must not depend on a schema_v27 column
+# ===========================================================================
+# A cross-model review found `read_scope` in the REPLAY projection, which the
+# loop never consumes. read_scope arrives in schema_v27, so on a cache that had
+# applied v26 and not yet v27 the SELECT raised, the except named the stream
+# degraded, and every stored diff went unrendered even though all of them were
+# readable. Driven here rather than asserted as text: the fake refuses exactly
+# the statements that name the v27 column, which is what such a cache does.
+
+def _v26_query(diff_rows):
+    """A cache at schema_v26: schema_snapshots and its diffs exist, the v27
+    columns do not, so any statement naming one raises."""
+    def query(sql, params=None):
+        if "read_scope" in sql or "last_seen_at" in sql:
+            raise RuntimeError('column "read_scope" does not exist')
+        if "FROM cluster_meta" in sql:
+            return [{"engine": "aurora-postgresql"}]
+        if "diff_from_previous_json" in sql:
+            return diff_rows
+        if "event_log" in sql:
+            return []
+        return []
+    return query
+
+
+def test_a_v26_cache_still_renders_the_stored_diffs():
+    rows = [{"snapshot_time": "2026-07-29 01:00:00+00", "schema_name": "app",
+             "diff": {"added": ["invoices"], "dropped": [], "modified": [],
+                      "rename_candidates": []}}]
+    got = handler._timeline(_v26_query(rows), "c1", 24, None)
+    assert "schema_change" not in got["degraded_sources"], (
+        "the replay stream degraded on a v26 cache, which means the projection "
+        "names a v27 column the loop does not consume: "
+        f"{got['degraded_sources']}"
+    )
+    assert "schema_change" in got["categories"], got["categories"]
+    titles = [i["title"] for i in got["items"] if i["category"] == "schema_change"]
+    assert titles and "invoices" in " ".join(t for t in titles) + " " + " ".join(
+        i.get("detail", "") for i in got["items"]), got["items"]
+
+
+def test_the_replay_projection_names_no_column_the_loop_ignores():
+    """Companion to the driven test above, so the REASON is pinned and not just
+    the symptom. Anything added to this projection must be consumed by the loop,
+    or a future migration column silently takes the whole category down again."""
+    captured = []
+
+    def query(sql, params=None):
+        captured.append(sql)
+        if "FROM cluster_meta" in sql:
+            return [{"engine": "aurora-postgresql"}]
+        return []
+
+    handler._timeline(query, "c1", 24, None)
+    replay = [s for s in captured if "diff_from_previous_json AS diff" in s]
+    assert replay, "the replay statement was never issued"
+    projection = replay[0].split("FROM")[0]
+    for v27_only in ("read_scope", "last_seen_at"):
+        assert v27_only not in projection, (
+            f"{v27_only} is a schema_v27 column and the replay loop does not read "
+            "it; naming it here degrades the whole schema_change category on a "
+            "cache that has not run v27"
+        )

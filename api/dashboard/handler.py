@@ -1841,8 +1841,17 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
         # timeline whenever a cluster is re-scoped. The rule that keeps this honest
         # is that the statement comes from schema_diff_util.py either way: see its
         # docstring for why a per-consumer `FROM schema_snapshots` is the defect.
+        #
+        # read_scope is NOT projected, and that is deliberate. Replay does not use
+        # it (the loop below reads snapshot_time, schema_name and diff), while
+        # read_scope arrives only in schema_v27. Naming an unused v27 column here
+        # made this whole category degrade on a cache that had applied v26 and not
+        # yet v27: the SELECT raised, the except appended "schema_change" to
+        # degraded, and every stored diff went unrendered even though all of them
+        # were perfectly readable. Do not add a column to this projection unless
+        # the loop consumes it.
         schema_rows = query(
-            "SELECT snapshot_time, schema_name, read_scope, "
+            "SELECT snapshot_time, schema_name, "
             "       diff_from_previous_json AS diff "
             + ALL_ROWS +
             "  AND snapshot_time > NOW() - (:hours || ' hours')::interval "
