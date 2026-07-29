@@ -168,7 +168,15 @@ def request_approval_impl(
     # it is the key the tools' own approval_required response uses. Only
     # surrounding whitespace is stripped ("0" and "off" are legitimate parameter
     # values, and both tools accept them), and the stripped values are written
-    # back so the card reads exactly what the executor will send.
+    # back so the card does not show padding the executor drops.
+    #
+    # It is only the WHITESPACE that is reconciled here, not the case. Registration
+    # cannot know the parameter's canonical spelling: that comes from the group's
+    # own describe, which only the executing tool calls. So a card registered as
+    # "MAX_CONNECTIONS" still displays that, while the write sends the API's
+    # "max_connections". The card remains executable because both projections
+    # case-fold `parameter_name` before hashing (approval_guard._project), which is
+    # the equality the round trip rests on, not the displayed string.
     if action_type in ("modify_parameter", "modify_rds_instance_params"):
         details = dict(action_details or {})
         raw_value = details.get("value")

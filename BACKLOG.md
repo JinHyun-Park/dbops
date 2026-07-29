@@ -512,3 +512,55 @@ act on.
    a driven test rather than reasoning: seed one schema present in both scopes
    and one present only in the abandoned scope, and assert what each reports.
    Fix only if the test disagrees with the analysis above.
+
+### Parameter tools, deferred (noted 2026-07-29)
+
+`modify_parameter` (Aurora CLUSTER form) binds no parameter group into the
+approval payload: its projection is {parameter_name, value} and the tool has no
+`parameter_group` argument to compare against. So if the cluster is re-pointed to
+a different cluster parameter group between the approval and the execute, the
+write lands on the new group while the card named none. The instance tool does
+bind its group and refuses drift pre-consume, which is why only the Aurora side
+is open.
+
+Correctly NOT claimed in the gateway description, and pre-existing rather than
+introduced by the burnt-approval work. Closing it means adding a
+`parameter_group` argument to the tool and its schema, which changes the gateway
+contract and the approval payload shape, so it is its own change.
+
+Also noted while fixing the could-not-ask / does-not-exist split: three sibling
+tools carry their own `_describe` helper with the identical conflation and
+`print()` the exception instead of using the module logger:
+modify_rds_instance_class, create_rds_snapshot, reboot_rds_instance.
+
+### Unexecutable approval cards, deferred (noted 2026-07-29)
+
+`request_approval` is the sole payload_hash minter. The parameter actions now
+refuse an empty name or value at registration, but three sibling shapes still
+mint a card the executor can never run. All three leave the approval INTACT
+(measured: verify_approval consume count 0 or the hash-mismatch branch returning
+before the update_item), so the cost is a wasted DBA review, not a lost approval.
+
+1. An instance card minted with no `parameter_group` in action_details mints, then
+   answers `state_changed`. Knowable at registration with zero AWS calls.
+2. An instance card whose action_details omits `cluster_id` hashes with
+   cluster_id="" and can never verify, answering `approval_denied`. Natural
+   omission, because `request_approval` takes cluster_id as its own top-level
+   argument, so a caller reasonably assumes it does not belong in the details.
+3. `modify_dynamodb_capacity` refuses an out-of-range or non-integer rcu/wcu
+   pre-consume, but registration has no range check, so rcu=0 still mints.
+
+The general fix is an audit rather than three patches: for every action_type in
+the `request_approval` enum whose tool carries a cheap pre-consume refusal,
+mirror it at the registration boundary, or accept that the Approval Center can
+mint cards the executor always refuses and say so in the UI.
+
+### Test isolation, pre-existing (noted 2026-07-29)
+
+`tests/unit/api/test_approval_enforcement.py` cannot be collected on its own:
+`ModuleNotFoundError: No module named 'tenancy'`, from the bare `import tenancy`
+at `api/approvals/handler.py:8`. It is green only in a full run, where an earlier
+module seeds sys.path. Any subset run including it, but not that module, is red
+for a reason unrelated to the code under test, which makes a targeted mutation
+check on the approval path return a false result. Reproduced against the
+pre-change tree, so not caused by the parameter work.
