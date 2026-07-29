@@ -158,6 +158,42 @@ def request_approval_impl(
         details["sampling_rate"] = rate_f
         action_details = details
 
+    # The two argument preconditions BOTH parameter tools answer BEFORE
+    # verify_approval, answered on the path that MINTS the payload_hash too. Each
+    # tool refuses an empty parameter_name and an empty value pre-consume, so a
+    # card carrying either could only ever answer invalid_request: the DBA reviews
+    # and approves a write that cannot run, and the only way out is a new request.
+    #
+    # `parameter` is accepted as the alias `_project` already tolerates, because
+    # it is the key the tools' own approval_required response uses. Only
+    # surrounding whitespace is stripped ("0" and "off" are legitimate parameter
+    # values, and both tools accept them), and the stripped values are written
+    # back so the card reads exactly what the executor will send.
+    if action_type in ("modify_parameter", "modify_rds_instance_params"):
+        details = dict(action_details or {})
+        raw_value = details.get("value")
+        name = str(details.get("parameter_name")
+                   or details.get("parameter") or "").strip()
+        value = str(raw_value if raw_value is not None else "").strip()
+        if not name:
+            return {
+                "status": "error",
+                "message": "parameter_name이 필요합니다. 파라미터 이름이 비어 있는 승인은 "
+                           "실행 시점에 거부되므로 등록하지 않았습니다.",
+            }
+        if not value:
+            return {
+                "status": "error",
+                "message": "value가 필요합니다. 파라미터를 엔진 기본값으로 되돌리는 것은 "
+                           "이 툴들이 지원하지 않는 별개의 작업이고, 값이 비어 있는 승인은 "
+                           "실행 시점에 거부되므로 등록하지 않았습니다.",
+            }
+        for key in ("parameter_name", "parameter"):
+            if key in details:
+                details[key] = name
+        details["value"] = value
+        action_details = details
+
     approval_id = str(uuid.uuid4())
     created_at = str(int(time.time() * 1000))  # ms epoch as string for sort key
 

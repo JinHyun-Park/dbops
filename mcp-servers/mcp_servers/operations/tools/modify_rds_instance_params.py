@@ -162,11 +162,15 @@ def _find_parameter(describe, group_kwarg, group_name, parameter_name):
     (117), dbops-demo-mysql84 (536), pgtsd-demo-cpg (448),
     default.aurora-postgresql15 (416) and default.aurora-mysql8.0 (424).
 
-    Whether the CALLER then adopts the API's spelling is the caller's decision:
-    this instance tool does (its approval projection case-folds parameter_name to
-    match), the Aurora tool does NOT (its projection does not fold, so rewriting
-    the name would break an in-flight approval hash, and MEASURED zero Aurora
-    parameter names are mixed-case, so there is nothing to reconcile).
+    BOTH callers adopt the API's spelling from here on (`found["ParameterName"]`
+    goes into the response, the approval payload and the write), and BOTH
+    actions' approval projections case-fold `parameter_name` to match: this
+    instance tool since 388795b, the Aurora tool since 881181b. That pairing is
+    what makes adopting the spelling safe. Adopt it on the tool leg without
+    folding the projection and a card registered from the DBA's typed spelling
+    can never verify against an execute carrying the API's: fail-closed, but into
+    a loop the DBA cannot exit. A third caller MUST do both, or the card and the
+    write will name different things.
     """
     wanted = parameter_name.strip().lower()
     marker = None

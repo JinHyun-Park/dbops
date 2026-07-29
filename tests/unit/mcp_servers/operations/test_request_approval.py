@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 _BASE = Path(__file__).resolve().parents[4] / "mcp-servers/mcp_servers/operations/tools"
 
 
@@ -327,3 +329,91 @@ def test_registration_accepts_real_booleans():
     )
     assert result["status"] == "pending"
     assert item["action_details"]["enabled"] is False
+
+
+# ===== a parameter card that can never execute is never minted ================
+#
+# Both parameter tools refuse an empty parameter_name and an empty value BEFORE
+# verify_approval (MEASURED: invalid_request, 0 consumes). This file is the only
+# payload_hash minter, and it used to accept both and store them verbatim, so the
+# DBA was handed a card that could only ever answer invalid_request. The refusals
+# now run on the registration boundary too.
+#
+# `parameter` is the alias to care about: it is the key BOTH tools'
+# approval_required response actually uses, and _project already tolerates it.
+
+_AURORA = {"cluster_id": "pgtsd-demo-aurora-pg", "parameter": "work_mem",
+           "value": "8MB", "parameter_group": "pgtsd-demo-cpg"}
+_INSTANCE = {"cluster_id": "dbops-demo-mysql",
+             "parameter_name": "innodb_buffer_pool_size", "value": "536870912",
+             "parameter_group": "dbops-demo-mysql84"}
+_PARAM_ACTIONS = [
+    ("modify_parameter", _AURORA, "parameter"),
+    ("modify_rds_instance_params", _INSTANCE, "parameter_name"),
+]
+
+
+def _register(action_type, details):
+    """Returns (result, table) so "no card minted" can be asserted on put_item."""
+    with patch.dict(os.environ, {"APPROVALS_TABLE": "approvals"}):
+        with patch.object(request_approval, "boto3") as mock_boto3:
+            table = MagicMock()
+            mock_boto3.resource.return_value.Table.return_value = table
+            result = request_approval.request_approval_impl(
+                None, cluster_id=details.get("cluster_id", "c1"),
+                action_type=action_type, action_details=details)
+    return result, table
+
+
+@pytest.mark.parametrize("action_type,base,namekey", _PARAM_ACTIONS)
+@pytest.mark.parametrize("empty", ["", "   ", None])
+def test_registration_refuses_an_empty_parameter_name(action_type, base, namekey,
+                                                      empty):
+    result, table = _register(action_type, {**base, namekey: empty})
+    assert result["status"] == "error"
+    assert "parameter_name" in result["message"]
+    table.put_item.assert_not_called()
+
+
+@pytest.mark.parametrize("action_type,base,namekey", _PARAM_ACTIONS)
+@pytest.mark.parametrize("empty", ["", "   ", None])
+def test_registration_refuses_an_empty_value(action_type, base, namekey, empty):
+    """Clearing a parameter back to the engine default is a different operation
+    (reset_db_*_parameter_group), which is why the tools refuse rather than send
+    ParameterValue "". A card for it is unexecutable by construction."""
+    result, table = _register(action_type, {**base, "value": empty})
+    assert result["status"] == "error"
+    assert "value" in result["message"]
+    table.put_item.assert_not_called()
+
+
+@pytest.mark.parametrize("action_type,base,namekey", _PARAM_ACTIONS)
+@pytest.mark.parametrize("real", ["0", "off", "OFF", 0])
+def test_registration_still_mints_a_falsy_but_real_value(action_type, base,
+                                                         namekey, real):
+    """Control: "0" and "off" are legitimate parameter values, and both tools
+    accept them. Only an actually-empty value is refused, which is why the check
+    runs on the STRINGIFIED value: a JSON 0 is falsy and is not empty."""
+    result, table = _register(action_type, {**base, "value": real})
+    assert result["status"] == "pending"
+    table.put_item.assert_called_once()
+
+
+@pytest.mark.parametrize("action_type,base,namekey", _PARAM_ACTIONS)
+def test_registration_hash_is_unmoved_by_the_normalisation(action_type, base,
+                                                           namekey):
+    """The registration path MINTS the hash the execute leg is verified against,
+    so normalising here must not move it. It does not: _project already strips
+    parameter_name and value, so the padded card and the clean one project to one
+    hash, and that hash is the one the tool computes from the API's spelling."""
+    from mcp_servers.shared.approval_guard import canonical_action_hash
+
+    padded, table = _register(
+        action_type, {**base, namekey: f"  {base[namekey].upper()}  ",
+                      "value": f"  {base['value']}  "})
+    assert padded["status"] == "pending"
+    item = table.put_item.call_args.kwargs["Item"]
+    assert item["payload_hash"] == canonical_action_hash(action_type, base)
+    # ...and the card shows what the executor will send, not the padding.
+    assert item["action_details"][namekey] == base[namekey].upper()
+    assert item["action_details"]["value"] == base["value"]

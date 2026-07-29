@@ -337,7 +337,10 @@ def _project(action_type: str, details: dict) -> dict:
     # which is the correct bias for a write. The tool's schema declares `value` a
     # string for exactly this reason.
     #
-    # `parameter_name` IS case-folded, and only here. RDS names SQL Server
+    # `parameter_name` IS case-folded, here and in the modify_parameter
+    # projection above: both parameter tools adopt the spelling their describe
+    # reported, so both projections have to fold or the adopting leg mints a card
+    # the other leg can never match. RDS names SQL Server
     # parameters in lower case ('agent xps') while sys.configurations, i.e. the
     # dashboard's Configuration tab, spells the same option 'Agent XPs'. Without
     # folding, an approval registered from the displayed name could never match
