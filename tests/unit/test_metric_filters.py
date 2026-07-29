@@ -503,7 +503,11 @@ _EXPECTED_CLUSTER_LEVEL_PREDICATES = {
     "api/simulation/handler.py": 4,
     "data-pipeline/alert_evaluator/handler.py": 2,
     "data-pipeline/etl_collector/collectors/capacity_forecast.py": 3,
-    "data-pipeline/etl_collector/collectors/cost_check.py": 2,
+    # 3 since the storage right-sizing check landed: it aggregates
+    # free_storage_bytes and would otherwise mix the cluster total with
+    # per-instance rows. Mixed-row proof lives in
+    # tests/unit/data_pipeline/test_cost_storage_rightsize.py.
+    "data-pipeline/etl_collector/collectors/cost_check.py": 3,
     "data-pipeline/etl_collector/collectors/docdb_findings.py": 3,
     "data-pipeline/etl_collector/collectors/dynamodb_findings.py": 6,
     "data-pipeline/etl_collector/collectors/elasticache_findings.py": 2,

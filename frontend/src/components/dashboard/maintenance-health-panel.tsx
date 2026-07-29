@@ -36,6 +36,11 @@ const CHECK_LABELS: Record<string, string> = {
   cost_serverless_max_too_high: "Cost",
   cost_serverless_min_too_low: "Cost",
   cost_savings_plan_opportunity: "Cost",
+  // Standalone RDS instances only (Aurora/DocumentDB storage auto-scales, DynamoDB
+  // has no storage sizing). A check_type missing from this map is filtered out of
+  // EVERY tab by the tab filter below, so the finding would be produced and never
+  // shown.
+  cost_storage_oversized: "Cost",
   // Parameter Fitness — 이 클러스터 워크로드 기준 파라미터 적정성 진단.
   param_max_connections: "Tuning",
   param_work_mem_risk: "Tuning", // PG

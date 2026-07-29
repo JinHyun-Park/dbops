@@ -207,49 +207,155 @@ def _check_serverless_v2_acu(rds_data, cache_arn, cache_secret, cache_db, cluste
     return emitted
 
 
+# RDS's floor for gp2/gp3 general-purpose storage. Below this there is nowhere to
+# go, so an over-allocated 20 GB instance gets NO finding: measured on the standing
+# fixtures, dbops-demo-mysql uses 1.8 of 20 GB and dbops-demo-mssql 0.35 of 20 GB,
+# and both are already at the floor. A ratio check alone would have produced two
+# findings nobody can act on, which is the fastest way to teach a DBA to ignore the
+# Cost tab.
+_RDS_MIN_STORAGE_GB = 20
+# Waste has to be BOTH proportionally large and absolutely large. A 30 GB instance
+# using 9 GB is 30% but only 21 GB wasted, which is not worth a migration.
+_STORAGE_WASTE_RATIO = 0.35
+_STORAGE_MIN_WASTED_GB = 50
+
+
+def _storage_usage(rds_data, cache_arn, cache_secret, cache_db, cluster_id, allocated_gb):
+    """(used_gb, free_gb, samples) from the collected FreeStorageSpace series.
+
+    Uses the MAX free over the window, i.e. the LOW-WATER mark of usage, so a brief
+    spike does not make the instance look busy. The cluster-level dimension filter
+    is the strict one every other metric_snapshots aggregate uses: without it this
+    would mix per-instance rows into the total.
+    """
+    rows = _execute(
+        rds_data, cache_arn, cache_secret, cache_db,
+        "SELECT MAX(value) AS max_free, COUNT(*) AS samples "
+        "FROM metric_snapshots "
+        "WHERE cluster_id = :cid AND metric_type = 'free_storage_bytes' "
+        "  AND ts > NOW() - INTERVAL '7 days' "
+        "  AND (dimensions IS NULL OR dimensions::text = '{}')",
+        {"cid": cluster_id},
+    )
+    row = rows[0] if rows else {}
+    try:
+        samples = int(row.get("samples") or 0)
+        free_gb = float(row.get("max_free") or 0) / (1024 ** 3)
+    except (TypeError, ValueError):
+        return None, None, 0
+    if samples < 100 or free_gb <= 0:
+        # Not enough of a series to characterise steady-state usage. Say nothing:
+        # a storage migration is expensive advice to give on thin data.
+        return None, None, samples
+    return max(allocated_gb - free_gb, 0.0), free_gb, samples
+
+
 def _check_storage_rightsize(rds_data, cache_arn, cache_secret, cache_db, cluster_id, meta):
-    """Storage right-sizing — currently a no-op scaffold.
+    """Over-allocated PROVISIONED storage on a standalone RDS instance.
 
-    The DBOps collector today only handles Aurora MySQL/PostgreSQL, where
-    storage auto-scales and bills per-GB-used (not allocated) — there's no
-    "shrink the disk" advice to give. This function is the entry point for
-    when the collector grows to cover other engines:
+    Aurora and DocumentDB are no-ops by design: storage auto-scales and bills per
+    GB USED, so there is no allocation to shrink. DynamoDB has no storage sizing at
+    all (its analogue is provisioned RCU/WCU, which is a different check and a
+    different check_type). So this only ever fires for the rds_instance family,
+    where AllocatedStorage is fixed and billed per allocated GB.
 
-      • RDS non-Aurora (MySQL/PG/MariaDB): `AllocatedStorage` is fixed and
-        billed per allocated GB. Compare with actual used (information_schema
-        / pg_database_size) — if used << allocated and StorageType is gp2/gp3,
-        recommend shrinking via Modify-DBInstance.
-      • DocumentDB: same storage model as Aurora — skip.
-      • DynamoDB: storage itself is per-GB-used, so storage rightsize doesn't
-        apply. The equivalent finding is *provisioned-capacity rightsize* on
-        RCU/WCU (TableDescription.ProvisionedThroughput vs actual ConsumedCapacity).
-        Emit a different check_type — `cost_dynamodb_capacity_oversized` —
-        when the provisioned tier is adopted.
+    THE RECOMMENDATION CANNOT SAY "SHRINK IT", and the scaffold this replaced was
+    wrong about that: RDS allocated storage can only ever be INCREASED. There is no
+    ModifyDBInstance that makes it smaller. The only remedies are a migration to a
+    new, smaller instance (dump/restore or a read replica promoted after a smaller
+    initial allocation) or accepting the cost. Advice a DBA cannot execute is worse
+    than no advice, so the finding names the real remedy.
 
-    Plumbing this in requires:
-      1. meta_collector branching on the service (rds.describe_db_clusters
-         today; add docdb.describe_db_clusters, rds.describe_db_instances,
-         dynamodb.describe_table).
-      2. cluster_meta schema extension for `allocated_storage_gb`,
-         `actual_storage_used_gb`, `storage_type`, `provisioned_rcu`,
-         `provisioned_wcu`.
-      3. New `cost_storage_oversized` / `cost_dynamodb_capacity_oversized`
-         check_types in CHECK_LABELS (frontend) + this collector.
-
-    Tracked in BACKLOG: "Multi-engine support — DocumentDB / RDS non-Aurora /
-    DynamoDB" epic.
+    Storage AUTOSCALING is called out when it is on, because it is how an instance
+    silently gets here: allocation grows under load and never comes back down.
     """
     engine = (meta.get("engine") or "").lower()
-    # All currently-supported engines are Aurora — storage auto-scales.
-    if "aurora" in engine or not engine:
+    if not engine:
         return 0
-    # Future engines hit this branch — for now we just log so it's obvious
-    # the scaffold ran. Real check goes here once the meta is collected.
-    print(
-        f"[cost] storage rightsize scaffold hit for {cluster_id} (engine={engine}) — "
-        "implement when multi-engine collector lands."
+    # Positive gate: only the provisioned-storage family. Everything else is a
+    # deliberate no-op with the reason in the docstring above.
+    if ("aurora" in engine or "docdb" in engine or "dynamodb" in engine
+            or engine in ("redis", "valkey", "memcached")):
+        return 0
+
+    details_json = meta.get("resource_details") or {}
+    if isinstance(details_json, str):
+        try:
+            details_json = json.loads(details_json)
+        except (ValueError, TypeError):
+            details_json = {}
+    try:
+        allocated_gb = float(details_json.get("allocated_storage_gb") or 0)
+    except (TypeError, ValueError):
+        allocated_gb = 0.0
+    if allocated_gb <= _RDS_MIN_STORAGE_GB:
+        # At or below the floor there is no smaller instance to migrate to.
+        return 0
+
+    used_gb, free_gb, samples = _storage_usage(
+        rds_data, cache_arn, cache_secret, cache_db, cluster_id, allocated_gb
     )
-    return 0
+    if used_gb is None:
+        return 0
+
+    ratio = used_gb / allocated_gb if allocated_gb else 1.0
+    wasted_gb = allocated_gb - used_gb
+    if ratio >= _STORAGE_WASTE_RATIO or wasted_gb < _STORAGE_MIN_WASTED_GB:
+        return 0
+
+    # The smallest allocation that still leaves real headroom, floored at the RDS
+    # minimum. Not a promise, a starting point for sizing the migration target.
+    suggested_gb = max(_RDS_MIN_STORAGE_GB, int(used_gb * 2) + 1)
+    storage_type = str(details_json.get("storage_type") or "").lower()
+    autoscale_max = details_json.get("max_allocated_storage_gb")
+
+    notes = [
+        f"프로비저닝된 스토리지 {allocated_gb:.0f}GB 중 약 {used_gb:.1f}GB만 "
+        f"사용 중입니다 (사용률 {ratio * 100:.0f}%, 미사용 {wasted_gb:.0f}GB). "
+        f"RDS는 할당 스토리지를 **줄일 수 없습니다**(증가만 가능). 따라서 "
+        f"ModifyDBInstance로는 해결되지 않고, 더 작게 할당한 새 인스턴스로 "
+        f"마이그레이션(덤프/복원 또는 작은 할당의 read replica 승격)해야 합니다. "
+        f"목표 할당량은 현재 사용량의 2배 + 여유인 약 {suggested_gb}GB부터 "
+        f"검토하세요."
+    ]
+    if autoscale_max:
+        notes.append(
+            f"스토리지 자동 확장이 켜져 있습니다(최대 {autoscale_max}GB). 부하 시 "
+            "할당량이 자동으로 늘어나며 이후 자동으로 줄지는 않으므로, 지금 값이 "
+            "과거 피크의 결과일 수 있습니다."
+        )
+    if storage_type == "gp2":
+        notes.append(
+            "storage_type이 gp2입니다. gp3로 전환하면 마이그레이션 없이 "
+            "ModifyDBInstance로 즉시 적용되고, 동일 용량에서 더 저렴하며 baseline "
+            "3000 IOPS를 확보합니다. 마이그레이션보다 먼저 검토할 항목입니다."
+        )
+
+    _emit_finding(
+        rds_data, cache_arn, cache_secret, cache_db, cluster_id,
+        "cost_storage_oversized", "info",
+        f"스토리지 과다 할당: {allocated_gb:.0f}GB 중 {used_gb:.1f}GB 사용",
+        f"사용 {used_gb:.1f}GB / 할당 {allocated_gb:.0f}GB ({ratio * 100:.0f}%)",
+        f"사용률 {_STORAGE_WASTE_RATIO * 100:.0f}% 미만 그리고 미사용 "
+        f"{_STORAGE_MIN_WASTED_GB}GB 이상",
+        " ".join(notes),
+        {
+            "engine": engine,
+            "allocated_storage_gb": allocated_gb,
+            "used_storage_gb": round(used_gb, 2),
+            "free_storage_gb": round(free_gb, 2),
+            "usage_ratio": round(ratio, 4),
+            "wasted_gb": round(wasted_gb, 2),
+            "suggested_allocation_gb": suggested_gb,
+            "storage_type": storage_type or None,
+            "storage_autoscaling_max_gb": autoscale_max,
+            "samples": samples,
+            # Stated in the payload too: a consumer that renders only the numbers
+            # must not imply a resize is available.
+            "shrink_supported_by_aws": False,
+        },
+    )
+    return 1
 
 
 def _check_savings_plan_opportunity(rds_data, cache_arn, cache_secret, cache_db, cluster_id):
@@ -361,7 +467,12 @@ def collect_cost_findings(rds_data, cache_cluster_arn, cache_secret_arn, cache_d
     _RUN_SNAPSHOT_TS = snapshot_ts
     meta_rows = _execute(
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
-        "SELECT instance_class, engine_mode, serverlessv2_min_acu, serverlessv2_max_acu "
+        # `engine` and `resource_details` are read for the storage check: it gates
+        # on the engine family and takes allocated_storage_gb / storage_type /
+        # max_allocated_storage_gb out of the JSONB. Without them that check saw
+        # None for both and silently returned 0 for every cluster.
+        "SELECT instance_class, engine_mode, serverlessv2_min_acu, serverlessv2_max_acu, "
+        "       engine, resource_details "
         "FROM cluster_meta WHERE cluster_id = :cid",
         {"cid": cluster_id},
     )
