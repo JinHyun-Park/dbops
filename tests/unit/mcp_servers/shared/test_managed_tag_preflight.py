@@ -20,6 +20,7 @@ shape used below.
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from mcp_servers.operations.tools import modify_parameter as mp
 from mcp_servers.operations.tools import modify_rds_instance_params as mip
 from mcp_servers.shared import managed_tag_preflight as mtp
@@ -161,3 +162,114 @@ def test_the_tag_lookup_does_not_run_on_the_execute_path_at_all():
                                  parameter_group=_GRP, approved=True,
                                  approval_id="a1")
     rds.list_tags_for_resource.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# The generic resource form: actions whose target ARN is already in a describe
+# the tool makes anyway, so the tag costs one list-tags call and no extra
+# describe. Wired for the two rds_instance writes; the remaining tag-gated
+# actions use the same helper (see BACKLOG).
+# ---------------------------------------------------------------------------
+
+from mcp_servers.operations.tools import modify_rds_instance_class as mic  # noqa: E402
+from mcp_servers.operations.tools import reboot_rds_instance as reb  # noqa: E402
+
+_INST_ARN = "arn:aws:rds:ap-northeast-2:999999999999:db:inst-1"
+
+
+def _instance_client(tags, cls="db.t4g.micro"):
+    r = MagicMock()
+    r.describe_db_instances.return_value = {"DBInstances": [{
+        "DBInstanceStatus": "available",
+        "DBInstanceClass": cls,
+        "DBInstanceArn": _INST_ARN,
+    }]}
+    r.list_tags_for_resource.return_value = {"TagList": tags}
+    return r
+
+
+_INSTANCE_TOOLS = (
+    ("reboot", reb, reb.reboot_rds_instance_impl, {}, "rds:RebootDBInstance"),
+    ("modify_class", mic, mic.modify_rds_instance_class_impl,
+     {"target_class": "db.t4g.small"}, "rds:ModifyDBInstance"),
+)
+
+
+@pytest.mark.parametrize("name,mod,impl,kwargs,action", _INSTANCE_TOOLS)
+def test_an_untagged_cross_account_instance_warns(name, mod, impl, kwargs, action):
+    client = _instance_client(_UNTAGGED)
+    with patch.object(mtp, "lookup_cluster", return_value=_SPOKE_ROW), \
+         patch.object(mod, "client_for_cluster", return_value=client):
+        card = impl(MagicMock(), "inst-1", **kwargs)
+    assert card["status"] == "approval_required", (name, card)
+    warning = card.get("warning") or ""
+    assert warning, f"{name}: no warning on an untagged cross-account instance"
+    assert action in warning, warning
+    assert "그대로 쓴다면" in warning, "the warning must stay conditional"
+
+
+@pytest.mark.parametrize("name,mod,impl,kwargs,action", _INSTANCE_TOOLS)
+def test_a_tagged_or_same_account_instance_is_silent(name, mod, impl, kwargs, action):
+    for row, tags in ((_SPOKE_ROW, _TAGGED), ({}, _UNTAGGED)):
+        client = _instance_client(tags)
+        with patch.object(mtp, "lookup_cluster", return_value=row), \
+             patch.object(mod, "client_for_cluster", return_value=client):
+            card = impl(MagicMock(), "inst-1", **kwargs)
+        assert not card.get("warning"), (name, row, card)
+
+
+@pytest.mark.parametrize("name,mod,impl,kwargs,action", _INSTANCE_TOOLS)
+def test_the_execute_path_neither_refuses_nor_pays_for_the_tag(name, mod, impl, kwargs, action):
+    """It is a review-time report. Asserted on the CALL, because "it did not
+    refuse" would also hold if it ran and happened to pass."""
+    client = _instance_client(_UNTAGGED)
+    extra = dict(kwargs)
+    if "target_class" in extra:
+        extra["current_class"] = "db.t4g.micro"
+    with patch.object(mtp, "lookup_cluster", return_value=_SPOKE_ROW), \
+         patch.object(mod, "client_for_cluster", return_value=client), \
+         patch.object(mod, "verify_approval", return_value={"ok": True}):
+        resp = impl(MagicMock(), "inst-1", approved=True, approval_id="a1", **extra)
+    assert resp["status"] in ("rebooting", "modifying"), (name, resp)
+    client.list_tags_for_resource.assert_not_called()
+
+
+def test_a_failed_list_tags_on_the_resource_form_claims_nothing():
+    client = _instance_client(_UNTAGGED)
+    client.list_tags_for_resource.side_effect = Exception("Throttling")
+    with patch.object(mtp, "lookup_cluster", return_value=_SPOKE_ROW), \
+         patch.object(reb, "client_for_cluster", return_value=client):
+        card = reb.reboot_rds_instance_impl(MagicMock(), "inst-1")
+    assert not card.get("warning")
+
+
+def test_a_missing_arn_claims_nothing():
+    """Not every describe response carries the ARN in every API version; absence
+    is not evidence the tag is missing."""
+    client = _instance_client(_UNTAGGED)
+    client.describe_db_instances.return_value = {"DBInstances": [
+        {"DBInstanceStatus": "available", "DBInstanceClass": "db.t4g.micro"}]}
+    with patch.object(mtp, "lookup_cluster", return_value=_SPOKE_ROW), \
+         patch.object(reb, "client_for_cluster", return_value=client):
+        card = reb.reboot_rds_instance_impl(MagicMock(), "inst-1")
+    assert not card.get("warning")
+    client.list_tags_for_resource.assert_not_called()
+
+
+def test_the_dynamodb_shape_is_handled_even_though_its_api_differs():
+    """dynamodb uses list_tags_OF_resource(ResourceArn=...) and returns `Tags`,
+    while rds/elasticache use list_tags_FOR_resource(ResourceName=...) returning
+    `TagList`. Pinned so the next wiring cannot assume they are the same."""
+    called = {}
+
+    def ddb_list_tags(ResourceArn=None):
+        called["arn"] = ResourceArn
+        return {"Tags": [{"Key": "Application", "Value": "DBOps"}]}
+
+    with patch.object(mtp, "lookup_cluster", return_value=_SPOKE_ROW):
+        w = mtp.resource_tag_warning(
+            ddb_list_tags, "arn:aws:dynamodb:ap-northeast-2:9:table/t1", "t1",
+            label="DynamoDB 테이블", action="dynamodb:UpdateTable",
+            arn_kwarg="ResourceArn")
+    assert w, "the dynamodb Tags key was not read"
+    assert called["arn"].endswith("table/t1")

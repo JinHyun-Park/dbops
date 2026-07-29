@@ -82,6 +82,51 @@ def instance_parameter_group_tag_warning(rds, cluster_id: str, group_name: str) 
     )
 
 
+def resource_tag_warning(list_tags, arn, cluster_id, *, label, action,
+                         arn_kwarg="ResourceName") -> str:
+    """"" unless `arn` was read and provably lacks ManagedBy=dbops.
+
+    For the write actions whose target ARN is already in a describe response the
+    tool makes anyway, so this costs ONE extra list-tags call and no extra
+    describe. `list_tags` is the bound API, and `arn_kwarg` is its parameter name,
+    which is NOT uniform across services:
+
+      rds          rds.list_tags_for_resource(ResourceName=arn)
+      elasticache  ec.list_tags_for_resource(ResourceName=arn)
+      dynamodb     ddb.list_tags_of_resource(ResourceArn=arn)   <- different verb
+                                                                   AND kwarg
+
+    Same fail-open contract as everything else here: no ARN, a same-account
+    cluster, or a failed call produces NO warning.
+    """
+    if not arn or not is_cross_account(cluster_id):
+        return ""
+    try:
+        resp = list_tags(**{arn_kwarg: arn})
+    except Exception:
+        logger.warning("ManagedBy tag lookup unavailable for %s (%s)",
+                       cluster_id, arn, exc_info=True)
+        return ""
+    # rds/elasticache return TagList; dynamodb returns Tags.
+    tags = resp.get("TagList")
+    if tags is None:
+        tags = resp.get("Tags") or []
+    if tag_is_present(tags):
+        return ""
+    return _warning_text(label, arn.rsplit(":", 1)[-1] or arn, action)
+
+
+def _warning_text(label, name, action) -> str:
+    return (
+        f"주의: 이 클러스터는 다른 AWS 계정(spoke)에 있고, {label} "
+        f"'{name}'에는 {MANAGED_BY_KEY}={MANAGED_BY_VALUE} 태그가 없습니다. "
+        f"spoke role이 기본 템플릿을 그대로 쓴다면 {action} 권한이 이 태그를 요구하므로 "
+        f"변경이 AccessDenied로 거부되고, 그 거부는 승인이 소모된 뒤에 발생합니다. "
+        f"승인하기 전에 대상 리소스에 태그를 붙이거나, spoke role 정책에서 이 조건을 "
+        f"쓰지 않는지 확인하세요."
+    )
+
+
 def _group_tag_warning(rds, cluster_id, group_name, *, describe, list_key,
                        name_kwarg, arn_key, label, action) -> str:
     if not group_name or not is_cross_account(cluster_id):
@@ -102,14 +147,10 @@ def _group_tag_warning(rds, cluster_id, group_name, *, describe, list_key,
         return ""
     if tag_is_present(tags):
         return ""
-    return (
-        f"주의: 이 클러스터는 다른 AWS 계정(spoke)에 있고, {label} "
-        f"'{group_name}'에는 {MANAGED_BY_KEY}={MANAGED_BY_VALUE} 태그가 없습니다. "
-        f"spoke role이 기본 템플릿을 그대로 쓴다면 {action} 권한이 이 태그를 요구하므로 "
-        f"변경이 AccessDenied로 거부되고, 그 거부는 승인이 소모된 뒤에 발생합니다. "
-        f"승인하기 전에 그룹(클러스터가 아니라 그룹 자체)에 태그를 붙이거나, "
-        f"spoke role 정책에서 이 조건을 쓰지 않는지 확인하세요."
-    )
+    # The parameter-group wording says "the GROUP, not the cluster" on purpose:
+    # that is the part operators get wrong, because the action reads as if it
+    # authorizes against the cluster.
+    return _warning_text(label + "(클러스터가 아니라 그룹 자체)", group_name, action)
 
 
 def tag_is_present(tags) -> bool:

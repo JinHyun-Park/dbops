@@ -19,6 +19,7 @@ import logging
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import client_for_cluster
+from mcp_servers.shared.managed_tag_preflight import resource_tag_warning
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ def reboot_rds_instance_impl(
                 "reason": f"인스턴스 상태가 available이 아닙니다 (현재: {inst.get('DBInstanceStatus')})."}
 
     if not approved:
-        return {
+        card = {
             "status": "approval_required",
             "cluster_id": cluster_id,
             "cli_preview": (
@@ -82,6 +83,15 @@ def reboot_rds_instance_impl(
                 "재부팅 동안 짧은 다운타임이 발생하며, Multi-AZ가 아니면 연결이 끊깁니다."
             ),
         }
+        # The instance ARN is already in the describe above, so the cross-account
+        # tag costs one list-tags call and no extra describe. WARNING, never a
+        # refusal: see managed_tag_preflight.
+        tag_warning = resource_tag_warning(
+            rds.list_tags_for_resource, inst.get("DBInstanceArn"), cluster_id,
+            label="DB 인스턴스", action="rds:RebootDBInstance")
+        if tag_warning:
+            card["warning"] = tag_warning
+        return card
 
     guard = verify_approval(
         approval_id, cluster_id, "reboot_rds_instance",

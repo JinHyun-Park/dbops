@@ -19,6 +19,7 @@ import logging
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import client_for_cluster
+from mcp_servers.shared.managed_tag_preflight import resource_tag_warning
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ def modify_rds_instance_class_impl(
                     "reason": f"인스턴스가 이미 {target_class!r} 클래스입니다 (변경 없음)."}
         # Bind the current class NOW so the approval hash pins the baseline
         # state; execute refuses if the live class has drifted from it.
-        return {
+        card = {
             "status": "approval_required",
             "cluster_id": cluster_id,
             "target_class": target_class,
@@ -94,6 +95,15 @@ def modify_rds_instance_class_impl(
                 "인스턴스 재기동으로 짧은 다운타임이 발생하며 시간당 비용이 달라집니다."
             ),
         }
+        # The instance ARN is already in the describe above, so the cross-account
+        # tag costs one list-tags call and no extra describe. WARNING, never a
+        # refusal: see managed_tag_preflight.
+        tag_warning = resource_tag_warning(
+            rds.list_tags_for_resource, inst.get("DBInstanceArn"), cluster_id,
+            label="DB 인스턴스", action="rds:ModifyDBInstance")
+        if tag_warning:
+            card["warning"] = tag_warning
+        return card
 
     guard = verify_approval(
         approval_id, cluster_id, "modify_rds_instance_class",

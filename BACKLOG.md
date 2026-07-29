@@ -463,8 +463,26 @@ that is worth not re-litigating.
 
   Known limit, stated rather than papered over: it reaches the DBA only if the
   agent relays the preview, and it is not a gate. The IAM condition remains the
-  enforcement point. The other 13 tag-gated actions still discover the denial
-  post-consume; the shared helper is now the place to add them.
+  enforcement point.
+
+  **Wired 2026-07-30 (4 of 15):** both parameter-group actions plus
+  `rds:RebootDBInstance` and `rds:ModifyDBInstance`. The generic
+  `resource_tag_warning()` covers the rest and needs no new API calls, because every
+  one of those tools ALREADY reads the target ARN in a describe it makes anyway
+  (`DBInstanceArn`, `DBClusterArn`, elasticache `ARN`, `TableArn`) - only the
+  list-tags call is added.
+
+  **Remaining (6 actions, mechanical):** `modify_scaling` (DBClusterArn), the three
+  ElastiCache writes (ReplicationGroupArn), and the three DynamoDB writes (TableArn).
+  Each is a three-line edit at the preview return, but note the DynamoDB API is NOT
+  the same shape: `list_tags_of_resource(ResourceArn=...)` returning `Tags`, versus
+  rds/elasticache `list_tags_for_resource(ResourceName=...)` returning `TagList`.
+  The helper takes both and there is a test pinning the DynamoDB shape, so the
+  difference cannot be assumed away.
+
+  Stopped at 4 deliberately rather than pushing through all 15 in one pass: two of
+  the mechanical edits in this batch produced dead code that only a follow-up read
+  caught, and this is approval-path code.
 
 - **`AllowedValues` is a DECISION, not an open item.** The field is free-form
   ("0-4294967295", "ON,OFF", enumerations with ranges mixed in) and a parser that
