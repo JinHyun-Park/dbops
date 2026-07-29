@@ -1,0 +1,19 @@
+# gitleaks configuration.
+#
+# Extends the default ruleset rather than replacing it: a hand-written ruleset
+# would silently lose every rule gitleaks adds upstream, which is the opposite of
+# what a secret scanner is for.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Paths that describe findings rather than containing them"
+paths = [
+  # `.gitleaksignore` documents each suppression in a comment that QUOTES the
+  # flagged line, so scanning it re-reports the very string it exists to explain.
+  # Measured: a clean full-history scan still returned `leaks found: 1`, pointing
+  # at .gitleaksignore:4. A scanner whose only finding is its own allowlist file
+  # trains the reader to ignore the exit status, which is how a real leak gets
+  # waved through.
+  '''^\.gitleaksignore$''',
+]

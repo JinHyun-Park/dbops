@@ -1,7 +1,7 @@
 name: CI
 
-# Runs on every push + every PR. Three independent jobs in parallel so a
-# slow one doesn't block the others' feedback.
+# Runs on every push + every PR. Independent jobs in parallel so a slow one
+# doesn't block the others' feedback.
 
 on:
   push:
@@ -15,6 +15,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  secrets:
+    name: secrets (gitleaks, full history)
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 is load-bearing. gitleaks in git mode scans COMMITS, so a
+      # shallow clone would scan only the tip and report clean for a secret still
+      # sitting in history, which is exactly what a public repo exposes. Verified
+      # locally: a planted secret committed and then scanned exits 1; the clean
+      # tree exits 0 over all 900 commits.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: gitleaks (exit code is the gate)
+        # Pinned release, not a moving action tag, so nothing in this gate can
+        # change under us. `detect` walks the whole history and exits non-zero on
+        # any finding. --redact keeps the matched value out of the CI log, which
+        # would otherwise become the leak. Asset name verified against the GitHub
+        # release API (gitleaks_<ver>_linux_x64.tar.gz).
+        run: |
+          set -euo pipefail
+          VER=8.30.1
+          curl -sSfL -o /tmp/gitleaks.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          /tmp/gitleaks version
+          /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner
+
   python:
     name: python (pytest + ruff)
     runs-on: ubuntu-latest
