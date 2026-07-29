@@ -206,6 +206,45 @@ _PREDICATES = {
 }
 
 
+def _matching_close(body: str, open_brace: int) -> int:
+    """Index of the `}` that closes the `{` at ``open_brace``.
+
+    Was `body.index("\\n  }", g.end())`: the first two-space closing brace after
+    the guard, which is the MATCHING one only while no branch body contains a
+    nested block closing at that indentation. Measured on the tree at the time:
+    every branch was truncated by exactly the four characters of "\\n  }", i.e. the
+    closing brace itself and no branch content, so the guard covered what it
+    claimed. It stops being true the first time someone adds a nested block, and
+    the failure would be silent: a truncated branch simply stops containing the
+    sentence a test looks for, and the test that reads it goes quietly weaker.
+
+    Braces inside string and template literals are skipped, since a `{` in Korean
+    copy or a Tailwind class would otherwise unbalance the count. JSX expression
+    braces are balanced, so they need no special handling.
+    """
+    assert body[open_brace] == "{", "not an opening brace"
+    depth = 0
+    i = open_brace
+    n = len(body)
+    while i < n:
+        c = body[i]
+        if c in "\"'`":
+            quote, i = c, i + 1
+            while i < n and body[i] != quote:
+                i += 2 if body[i] == "\\" else 1
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    raise AssertionError(
+        f"unbalanced braces from offset {open_brace}: EmptyVerdict could not be "
+        "parsed, so no branch below is actually being checked"
+    )
+
+
 def _branches():
     """[(guard_source, predicate, branch_jsx)] in source order, with the
     fallthrough last carrying a guard of None. Source position models the
@@ -217,6 +256,7 @@ def _branches():
         "sentence, which is the collapse this whole module exists to prevent"
     )
     out = []
+    last_close = None
     for g in guards:
         cond = g.group(1)
         assert cond in _PREDICATES, (
@@ -224,10 +264,17 @@ def _branches():
             "assert which payload reaches it: an unmodelled branch could be "
             "swallowing a state the panel is supposed to distinguish."
         )
-        close = body.index("\n  }", g.end())
-        out.append((cond, _PREDICATES[cond], body[g.start():close]))
-    tail = body.index("\n  }", guards[-1].end())
-    out.append((None, lambda _p: True, body[tail:]))
+        last_close = _matching_close(body, g.end() - 1)
+        branch = body[g.start():last_close + 1]
+        # A slice that does not end at its own closing brace means the walk went
+        # wrong and the branch is truncated. Fail here rather than let every
+        # assertion over this text quietly weaken.
+        assert branch.rstrip().endswith("}"), (
+            f"branch for {cond!r} does not end at its closing brace; the parse is "
+            "truncating branch content and the tests below would pass vacuously"
+        )
+        out.append((cond, _PREDICATES[cond], branch))
+    out.append((None, lambda _p: True, body[last_close + 1:]))
     return out
 
 
@@ -1469,3 +1516,58 @@ def test_the_refusal_and_the_unknown_engine_read_differently():
     assert "cluster_meta" in unknown["note"], unknown["note"]
     assert "REVOKE" not in unknown["note"]
     assert refused["note"] != unknown["note"]
+
+
+# ===========================================================================
+# The parser itself
+# ===========================================================================
+
+
+def test_branch_slicing_survives_a_nested_block_at_two_space_indentation():
+    """The slicer used to take the first "\\n  }" after the guard, which is the
+    MATCHING brace only while no branch contains a nested block closing at that
+    indentation. Measured with such a block injected into the real panel: the old
+    scan captured 72 characters and LOST the branch's own sentence, so every
+    assertion that reads that text would have passed vacuously. Nothing failed,
+    which is why this is pinned here rather than left to the next reader.
+    """
+    body = (
+        'function EmptyVerdict({ d }) {\n'
+        '  if (d.status === "partial") {\n'
+        '    if (d.ddl_detection) {\n'
+        '      void 0;\n'
+        '  }\n'            # <- closes at two-space indentation, mid-branch
+        '    return <div>SENTINEL</div>;\n'
+        '  }\n'
+        '  return null;\n'
+        '}\n'
+    )
+    guard = re.search(r"^  if \((.*?)\) \{", body, re.M)
+    close = _matching_close(body, guard.end() - 1)
+    branch = body[guard.start():close + 1]
+    assert "SENTINEL" in branch, "the matching close was not found; branch truncated"
+    assert branch.rstrip().endswith("}")
+    # And the substring scan this replaced would have stopped early.
+    assert "SENTINEL" not in body[guard.start():body.index("\n  }", guard.end())]
+
+
+def test_braces_inside_string_literals_do_not_unbalance_the_walk():
+    """A `{` in Korean copy or a class string must not be counted. Without the
+    quote skipping the walk would either stop early or run to the end of file."""
+    body = (
+        'function EmptyVerdict({ d }) {\n'
+        '  if (d.status === "partial") {\n'
+        '    return <div className="w-[{broken}" title=\'a } b\'>SENTINEL</div>;\n'
+        '  }\n'
+        '  return null;\n'
+        '}\n'
+    )
+    guard = re.search(r"^  if \((.*?)\) \{", body, re.M)
+    branch = body[guard.start():_matching_close(body, guard.end() - 1) + 1]
+    assert "SENTINEL" in branch
+    assert branch.rstrip().endswith("}")
+
+
+def test_unbalanced_braces_raise_instead_of_returning_a_wrong_slice():
+    with pytest.raises(AssertionError, match="unbalanced braces"):
+        _matching_close("if (x) {\n  return 1;\n", 7)
