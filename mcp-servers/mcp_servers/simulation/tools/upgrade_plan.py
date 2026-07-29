@@ -48,7 +48,10 @@ def generate_upgrade_plan_impl(cache: CacheClient, cluster_id: str, target_versi
     storage_gb = float(cluster.get("storage_size_gb") or 50)
     engine = cluster.get("engine") or "aurora-postgresql"
 
-    upgrade_type = classify_upgrade(current_version, target_version)
+    # engine is read above and passed in: on standalone RDS MySQL the major
+    # boundary is the second component (8.0 -> 8.4 is a major per AWS), so
+    # classifying without it calls that a minor.
+    upgrade_type = classify_upgrade(current_version, target_version, engine)
     readers, reader_note = _resolve_reader_count(cluster_id)
     table_count = _resolve_table_count(cache, cluster_id)
     is_major = upgrade_type == "major"

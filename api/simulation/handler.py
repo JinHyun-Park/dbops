@@ -287,7 +287,11 @@ def _generate_upgrade_plan(
     readers = _resolve_upgrade_readers(cluster_id)
     table_count = _resolve_table_count(cluster_id)
 
-    upgrade_type = classify_upgrade(current_version, target_version)
+    # engine is read above and passed in: on standalone RDS MySQL the major
+    # boundary is the second component (8.0 -> 8.4 is a major per AWS), so
+    # classifying without it calls that a minor. This route has no
+    # engine-family gate, so a registered rds_instance cluster reaches here.
+    upgrade_type = classify_upgrade(current_version, target_version, engine)
     is_major = upgrade_type == "major"
     # Engine from cluster_meta (authoritative) — a MySQL major must NOT get a
     # PG-only pg_upgrade step.

@@ -51,7 +51,7 @@ def price_per_node_hour(region: str, engine: str, node_type: str):
             ],
             MaxResults=100,
         )
-    except Exception as e:
+    except Exception as e:  # pragma: no cover
         print(f"[elasticache_pricing] lookup failed ({region}/{node_type}): {e}")
         _CACHE[key] = None
         return None

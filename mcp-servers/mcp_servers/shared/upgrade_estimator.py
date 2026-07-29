@@ -1,4 +1,10 @@
-"""upgrade_estimator — calibrated Aurora upgrade time/downtime model.
+"""upgrade_estimator — calibrated engine upgrade time/downtime model.
+
+Calibrated on Aurora, and the REST ``/upgrade-impact`` + ``/upgrade-plan``
+routes carry no engine-family gate, so a registered standalone RDS MySQL
+instance reaches this model too. Version PARSING is therefore engine-aware
+(see ``major_family``); the time model itself is not, so an rds_instance
+estimate is directionally useful rather than calibrated for that form.
 
 This is the single source of truth for "how long will this upgrade take and
 how much downtime will it cost", shared by the Simulation MCP tools
@@ -86,12 +92,50 @@ _METHODOLOGY_NOTE = (
 )
 
 
-def major_family(version: str) -> str:
-    """Best-effort MAJOR engine family token from an Aurora version string.
+# --- Standalone RDS MySQL major ladder --------------------------------------
+# MySQL's major version is the FIRST TWO components, not the leading integer:
+# AWS reports 8.0.42 -> 8.4.6 as ``IsMajorVersionUpgrade: true`` (measured with
+# describe-db-engine-versions), yet the leading integer is 8 on both sides. So
+# the bare-integer rule that is correct for PostgreSQL called that a MINOR with
+# high confidence, and the REST /upgrade-impact route has no engine-family gate,
+# so a registered standalone RDS MySQL cluster reached it (measured live).
+#
+# Aurora MySQL is NOT here: its version string carries "mysql_aurora.<family>",
+# which major_family() reads directly and which is what actually distinguishes
+# an Aurora MySQL major.
+#
+# Ordered oldest-first so "families crossed" is a list distance. Two-component
+# families cannot use the arithmetic distance _family_int gives: it reads "8.0"
+# as 0 and "8.4" as 4, i.e. FOUR majors for one family step. A family missing
+# from the ladder (a future MySQL release) falls back to the same safe "1 if
+# major" the unparseable case uses, so a stale ladder under-counts rather than
+# inventing a distance. Measured available families on RDS today: 5.7, 8.0, 8.4.
+_MYSQL_MAJOR_LADDER = ("5.5", "5.6", "5.7", "8.0", "8.4")
+
+
+def _is_plain_mysql(engine) -> bool:
+    """True for standalone RDS MySQL (``cluster_meta.engine == "mysql"``).
+
+    False for Aurora MySQL (``"aurora-mysql"``), whose version string encodes
+    the major as ``mysql_aurora.<n>`` and is handled by the branch above it.
+    Engine is the authoritative signal here: the version text alone cannot tell
+    a MySQL ``"8.0.42"`` from a hypothetical PostgreSQL ``"8.0"``.
+    """
+    text = str(engine or "").strip().lower()
+    return "mysql" in text and "aurora" not in text
+
+
+def major_family(version: str, engine=None) -> str:
+    """Best-effort MAJOR engine family token from an engine version string.
 
     Aurora PostgreSQL ``"15.4"`` / ``"16.2"`` -> the integer before the first
     dot. Aurora MySQL ``"8.0.mysql_aurora.3.06.0"`` -> the aurora family major
     (``"mysql_aurora.3"``), since that is what distinguishes a MySQL major.
+    Standalone RDS MySQL (``engine="mysql"``) -> the first TWO components
+    (``"8.0.42"`` -> ``"8.0"``, ``"8.4.9"`` -> ``"8.4"``), which is where MySQL
+    puts its major boundary. ``engine`` is optional and defaults to the
+    pre-existing behaviour, so a caller that does not know the engine is
+    unaffected.
 
     Returns a comparison token, or ``""`` when unparseable (callers treat an
     empty token as "cannot prove it's a minor" => major).
@@ -103,6 +147,13 @@ def major_family(version: str) -> str:
         tail = text.split("mysql_aurora.", 1)[1]  # e.g. "3.06.0"
         family = tail.split(".", 1)[0]            # e.g. "3"
         return f"mysql_aurora.{family}" if family else ""
+    if _is_plain_mysql(engine):
+        # "8.4.9" -> "8.4"; "5.7.44-rds.20250213" -> "5.7". A single component
+        # ("8") cannot name a MySQL family, so it stays unparseable => major.
+        parts = text.split(".")
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            return f"{int(parts[0])}.{int(parts[1])}"
+        return ""
     head = text.split(".", 1)[0]
     return head if head.isdigit() else ""
 
@@ -125,27 +176,39 @@ def _family_kind(family: str):
     return "mysql_aurora" if family.startswith("mysql_aurora") else "pg"
 
 
-def classify_upgrade(current_version: str, target_version: str) -> str:
+def classify_upgrade(current_version: str, target_version: str, engine=None) -> str:
     """``"major"`` if the major family changes, else ``"minor"``.
 
     Unparseable inputs are treated as ``"major"`` so guidance stays on the
-    safer, higher-effort path by default.
+    safer, higher-effort path by default. Pass ``engine`` (cluster_meta.engine)
+    whenever the caller has it: it is what makes a standalone RDS MySQL
+    ``8.0 -> 8.4`` read as the major AWS says it is.
     """
-    cur = major_family(current_version)
-    tgt = major_family(target_version)
+    cur = major_family(current_version, engine)
+    tgt = major_family(target_version, engine)
     if not cur or not tgt:
         return "major"
     return "minor" if cur == tgt else "major"
 
 
-def major_jump(current_version: str, target_version: str) -> int:
+def major_jump(current_version: str, target_version: str, engine=None) -> int:
     """Number of major versions crossed (``12 -> 16`` = 4, ``15.4 -> 15.7`` = 0).
 
     Falls back to 1 when the change is a major but the distance can't be
     computed (so the major uplift term is never zeroed out for a real major).
+    A downgrade floors at 0, matching the pre-existing convention.
     """
-    cur_family = major_family(current_version)
-    tgt_family = major_family(target_version)
+    cur_family = major_family(current_version, engine)
+    tgt_family = major_family(target_version, engine)
+    if _is_plain_mysql(engine):
+        # Ladder distance, not arithmetic: see _MYSQL_MAJOR_LADDER.
+        if cur_family in _MYSQL_MAJOR_LADDER and tgt_family in _MYSQL_MAJOR_LADDER:
+            return max(
+                _MYSQL_MAJOR_LADDER.index(tgt_family)
+                - _MYSQL_MAJOR_LADDER.index(cur_family),
+                0,
+            )
+        return 0 if classify_upgrade(current_version, target_version, engine) == "minor" else 1
     cur = _family_int(cur_family)
     tgt = _family_int(tgt_family)
     # Only a NUMERIC distance when both sides are the same engine kind; a
@@ -289,7 +352,8 @@ def estimate_upgrade(
     """Full, calibrated upgrade estimate shared by all four call sites.
 
     Args:
-        engine: cluster_meta.engine (``"aurora-postgresql"`` / ``"aurora-mysql"``).
+        engine: cluster_meta.engine (``"aurora-postgresql"`` / ``"aurora-mysql"``
+            / ``"mysql"``). Also decides where the MySQL major boundary sits.
         current_version / target_version: engine version strings.
         storage_gb: cluster storage (drives only the small snapshot term).
         readers: live reader count.
@@ -301,8 +365,10 @@ def estimate_upgrade(
     ``downtime_text`` / ``downtime_seconds`` + ``risk`` + ``basis``), a
     ``recommendation`` (+ reason), and a ``methodology_note``.
     """
-    upgrade_type = classify_upgrade(current_version, target_version)
-    jumps = major_jump(current_version, target_version)
+    # engine is passed through: standalone RDS MySQL puts its major boundary at
+    # the second component, so without it 8.0 -> 8.4 classifies as a minor.
+    upgrade_type = classify_upgrade(current_version, target_version, engine)
+    jumps = major_jump(current_version, target_version, engine)
     readers = max(int(readers or 0), 0)
     try:
         storage_gb = float(storage_gb)
