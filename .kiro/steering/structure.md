@@ -10,7 +10,7 @@ dbops/
 ├── smoke-test.sh                 # Post-deploy smoke checks
 ├── cdk/                          # IaC (CDK Python)
 │   ├── app.py                    # CDK App entry point (stack names: dbops-{ENV}-*)
-│   ├── tool_definitions.py       # Gateway tool schemas: THE contract the agent sees (63 tools)
+│   ├── tool_definitions.py       # Gateway tool schemas: THE contract the agent sees (64 tools)
 │   ├── bundling.py               # Shared asset bundling (local pip, Docker fallback) for pymongo assets
 │   ├── config/
 │   │   ├── settings.py           # Environment config, gitignored (edit this for deployment)
@@ -36,7 +36,7 @@ dbops/
 │   ├── mcp_servers/              # PYTHON IMPORT ROOT: handlers are mcp_servers.<server>.handler
 │   │   ├── performance/          # 11 tools: query analysis, metrics, forecast
 │   │   ├── incident/             # 9 tools: RCA, signal correlation, logs
-│   │   ├── operations/           # 34 tools: params, schema, backup, SQL review, NoSQL/ElastiCache/RDS-instance writes
+│   │   ├── operations/           # 35 tools: params (Aurora cluster + RDS instance groups), schema, backup, SQL review, NoSQL/ElastiCache/RDS-instance writes
 │   │   ├── simulation/           # 9 tools: upgrade, scaling, DDL impact, NoSQL/cache cost, RDS-instance right-sizing
 │   │   ├── workers/              # task_worker.py (agent-tasks queue), ticketing.py
 │   │   └── shared/               # DB connectors, cache_client, approval_guard, engine_family, metric_filters, pricing

@@ -114,6 +114,10 @@ def request_approval_impl(
         "reboot_rds_instance",
         "create_rds_snapshot",
         "modify_rds_instance_class",
+        # INSTANCE parameter-group change (E-3). Aurora's cluster-group change is
+        # the separate modify_parameter action; the two are gated to disjoint
+        # engine families and must stay separate enum values.
+        "modify_rds_instance_params",
         "other",
     ):
         return {

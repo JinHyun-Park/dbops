@@ -309,6 +309,14 @@ class AgentStack(cdk.Stack):
                 "rds:RebootDBInstance",
                 "rds:CreateDBSnapshot",
                 "rds:ModifyDBInstance",
+                # modify_rds_instance_params (E-3): the INSTANCE parameter group,
+                # which is a different resource type from the Aurora CLUSTER
+                # parameter group above. Describe is needed to confirm the
+                # parameter exists in the group's family (and to read its
+                # ApplyType) before the write; without it the tool would send a
+                # name the engine does not have into a group nothing reads.
+                "rds:DescribeDBParameters",
+                "rds:ModifyDBParameterGroup",
                 # Aurora custom cluster endpoints (P2-⑤). Create/Delete/Modify are
                 # approval-gated in tool code; Describe validates the endpoint is
                 # CUSTOM before delete/modify (never touches writer/reader builtins).

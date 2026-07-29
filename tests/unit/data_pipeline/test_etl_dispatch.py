@@ -343,11 +343,139 @@ def test_rds_instance_sqlserver_does_not_call_param_fitness():
         "metrics_inserted": 4, "errors": [],
         "resource_id": None, "pi_enabled": False})
     mock_pf = MagicMock()
+    mock_health = MagicMock()
 
     with (
         patch.object(handler, "collect_rds_instance_metrics", mock_inst_collector),
         patch.object(handler, "collect_mysql_param_fitness", mock_pf),
+        patch.object(handler, "collect_mysql_health_checks", mock_health),
     ):
         handler._collect_one(resource, **_COMMON_KWARGS)
 
     mock_pf.assert_not_called()
+    # Both MySQL cache-only findings are keyed on InnoDB/MySQL variable names, so
+    # neither may run for SQL Server (its cluster_settings rows carry
+    # sys.configurations option names).
+    mock_health.assert_not_called()
+
+
+def test_rds_instance_mysql_calls_health_checks_with_cache_args():
+    """E-3: mysql_health_checks is engine-neutral (it reads only table_stats +
+    cluster_settings from the CACHE), so the rds_instance MySQL branch runs it
+    exactly like the Aurora MySQL branch does, with the SHARED run_ts.
+
+    A regression dropping run_ts here scatters this cycle's findings across
+    snapshot_times and the dashboard's MAX(snapshot_time) batch shows only one.
+    """
+    handler = _load_handler()
+
+    resource = {
+        "cluster_id": "dbops-demo-mysql",
+        "engine": "mysql",
+        "engine_family": "rds_instance",
+        "region": "ap-northeast-2",
+        "account_id": "111122223333",
+    }
+    mock_inst_collector = MagicMock(return_value={
+        "metrics_inserted": 7, "errors": [],
+        "resource_id": None, "pi_enabled": False})
+    mock_health = MagicMock(return_value={"findings_emitted": 0})
+
+    with (
+        patch.object(handler, "collect_rds_instance_metrics", mock_inst_collector),
+        patch.object(handler, "collect_mysql_health_checks", mock_health),
+    ):
+        result = handler._collect_one(resource, **_COMMON_KWARGS)
+
+    mock_health.assert_called_once()
+    assert mock_health.call_args.args[0] is _COMMON_KWARGS["cache_rds_data"]
+    assert mock_health.call_args.args[1] == _COMMON_KWARGS["cache_cluster_arn"]
+    assert mock_health.call_args.args[2] == _COMMON_KWARGS["cache_secret_arn"]
+    assert mock_health.call_args.args[3] == _COMMON_KWARGS["cache_db_name"]
+    assert mock_health.call_args.args[4] == "dbops-demo-mysql"
+    assert mock_health.call_args.kwargs["snapshot_ts"] == _COMMON_KWARGS["run_ts"]
+    assert "health" in result
+
+
+def test_aurora_mysql_still_runs_health_checks_and_param_fitness():
+    """RELATIONAL REGRESSION PIN for E-3.
+
+    E-3 attached mysql_health_checks to the rds_instance branch. The Aurora MySQL
+    branch called it FIRST and must keep calling it, with the same cache args and
+    the same shared run_ts. This is the pin that stops the rds_instance tier from
+    moving Aurora.
+    """
+    handler = _load_handler()
+
+    resource = {
+        "cluster_id": "prod-aurora-mysql",
+        "engine": "aurora-mysql",
+        "region": "ap-northeast-2",
+        "account_id": "111122223333",
+        "cluster_arn": "arn:aws:rds:ap-northeast-2:123:cluster:prod-aurora-mysql",
+        "secret_arn": "arn:aws:secretsmanager:ap-northeast-2:123:secret:prod-aurora-mysql",
+        "db_name": "sampledb",
+    }
+
+    mock_health = MagicMock(return_value={})
+    mock_pf = MagicMock(return_value={})
+
+    with (
+        patch.object(handler, "collect_cluster_meta", MagicMock(return_value={})),
+        patch.object(handler, "collect_cost_findings", MagicMock(return_value={})),
+        patch.object(handler, "collect_pi_metrics", MagicMock(return_value={})),
+        patch.object(handler, "collect_cw_metrics", MagicMock(return_value={})),
+        patch.object(handler, "collect_pg_baselines", MagicMock(return_value={})),
+        patch.object(handler, "collect_mysql_query_stats", MagicMock(return_value={})),
+        patch.object(handler, "collect_mysql_table_stats", MagicMock(return_value={})),
+        patch.object(handler, "collect_mysql_locks", MagicMock(return_value={})),
+        patch.object(handler, "collect_mysql_activity", MagicMock(return_value={})),
+        patch.object(handler, "collect_mysql_innodb_status", MagicMock(return_value={})),
+        patch.object(handler, "collect_mysql_schema_snapshot", MagicMock(return_value={})),
+        patch.object(handler, "collect_capacity_forecast", MagicMock(return_value={})),
+        patch.object(handler, "collect_query_regression", MagicMock(return_value={})),
+        patch.object(handler, "collect_mysql_health_checks", mock_health),
+        patch.object(handler, "collect_mysql_param_fitness", mock_pf),
+    ):
+        fake_rds_client = MagicMock()
+        fake_rds_client.describe_db_instances.return_value = {"DBInstances": []}
+        kwargs = dict(_COMMON_KWARGS)
+        kwargs["get_client"] = lambda service, region: (
+            fake_rds_client if service == "rds" else MagicMock())
+        result = handler._collect_one(resource, **kwargs)
+
+    mock_health.assert_called_once()
+    mock_pf.assert_called_once()
+    assert mock_health.call_args.args[0] is _COMMON_KWARGS["cache_rds_data"]
+    assert mock_health.call_args.kwargs["snapshot_ts"] == _COMMON_KWARGS["run_ts"]
+    assert result["cluster_id"] == "prod-aurora-mysql"
+
+
+def test_health_checks_failure_does_not_take_the_rds_instance_cycle_down():
+    """Per-collector try/except: a health-check failure must not skip the
+    engine-agnostic advisory collectors that follow it."""
+    handler = _load_handler()
+
+    resource = {
+        "cluster_id": "dbops-demo-mysql",
+        "engine": "mysql",
+        "engine_family": "rds_instance",
+        "region": "ap-northeast-2",
+        "account_id": "111122223333",
+    }
+    mock_cost = MagicMock(return_value={})
+
+    with (
+        patch.object(handler, "collect_rds_instance_metrics", MagicMock(return_value={
+            "metrics_inserted": 7, "errors": [], "resource_id": None, "pi_enabled": False})),
+        patch.object(handler, "collect_mysql_health_checks",
+                     MagicMock(side_effect=RuntimeError("boom"))),
+        patch.object(handler, "collect_cost_findings", mock_cost),
+        patch.object(handler, "collect_capacity_forecast", MagicMock(return_value={})),
+        patch.object(handler, "collect_query_regression", MagicMock(return_value={})),
+        patch.object(handler, "collect_pg_baselines", MagicMock(return_value={})),
+    ):
+        result = handler._collect_one(resource, **_COMMON_KWARGS)
+
+    assert "health_error" in result
+    mock_cost.assert_called_once()

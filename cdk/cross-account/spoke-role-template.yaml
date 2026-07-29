@@ -159,6 +159,13 @@ Resources:
                   # ManagedBy=dbops too or parameter tuning is denied. See
                   # README "Tag clusters for write access".
                   - "rds:ModifyDBClusterParameterGroup"
+                  # Same caveat as ModifyDBClusterParameterGroup above, for the
+                  # INSTANCE parameter group of a standalone (non-Aurora) RDS DB
+                  # instance: this authorizes against the pg resource, NOT the DB
+                  # instance, so the DB PARAMETER GROUP itself must carry
+                  # ManagedBy=dbops or the change is denied AFTER the single-use
+                  # approval was already consumed.
+                  - "rds:ModifyDBParameterGroup"
                   - "rds:ModifyDBInstance"
                   - "rds:RebootDBInstance"
                   - "rds:DeleteDBInstance"

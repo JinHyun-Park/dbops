@@ -84,7 +84,7 @@ Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
               ▼            ▼              ▼               ▼
          Performance   Incident      Operations       Simulation
            MCP          MCP            MCP               MCP
-                       (4 custom MCP servers · 63 tools)
+                       (4 custom MCP servers · 64 tools)
                                     │
                                     ▼
                   Aurora PG Cache ◀── Data Collection Pipeline
@@ -334,7 +334,7 @@ See `cdk/cross-account/README.md` for details.
 dbops/
 ├── cdk/                  # CDK infrastructure (4 stacks)
 ├── agent/                # Strands Agent + Dockerfile
-├── mcp-servers/          # 4 Custom MCP servers (63 tools, incl. snapshot/restore + request_approval + query_activity_audit)
+├── mcp-servers/          # 4 Custom MCP servers (64 tools, incl. snapshot/restore + request_approval + query_activity_audit)
 ├── data-pipeline/        # ETL, Event Processor, Report Generator, Monitor
 ├── api/                  # REST API Lambdas
 ├── frontend/             # Next.js Web UI

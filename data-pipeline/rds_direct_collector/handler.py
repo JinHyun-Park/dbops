@@ -21,7 +21,9 @@ from datetime import datetime, timezone
 import boto3
 from mssql_activity import collect_mssql_activity
 from mssql_adapter import MSSQLDataApiAdapter
+from mssql_perf_counters import collect_mssql_perf_counters
 from mssql_query_stats import collect_mssql_query_stats
+from mssql_settings import collect_mssql_settings
 from mssql_waits import collect_mssql_waits
 from mysql_activity import collect_mysql_activity
 from mysql_adapter import MySQLDataApiAdapter
@@ -180,10 +182,16 @@ def _process_cluster(row, secrets, cache_execute, run_ts):
             collected = {}
             # Per-collector try/except: one DMV read failing must not skip the
             # rest. target arns unused by the adapter → empty strings.
+            # settings + perf_counters (E-3) read SERVER-scoped views
+            # (sys.configurations, sys.dm_os_performance_counters), so they are
+            # correct from this `master` session. A DATABASE-scoped DMV would
+            # describe master's own system tables and must not be added here.
             for name, fn in (
                 ("query_stats", collect_mssql_query_stats),
                 ("activity", collect_mssql_activity),
                 ("waits", collect_mssql_waits),
+                ("settings", collect_mssql_settings),
+                ("perf_counters", collect_mssql_perf_counters),
             ):
                 try:
                     collected[name] = fn(adapter, cache_execute, "", "", cluster_id, database)

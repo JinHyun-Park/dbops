@@ -170,6 +170,7 @@ function PolicyForm({
             <option value="reboot_rds_instance" />
             <option value="create_rds_snapshot" />
             <option value="modify_rds_instance_class" />
+            <option value="modify_rds_instance_params" />
             {/* 유지보수 / 백업·복원 */}
             <option value="manage_maintenance" />
             <option value="create_snapshot" />

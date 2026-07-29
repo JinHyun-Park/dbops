@@ -12,15 +12,15 @@ AI-powered DBOps platform for DBAs managing AWS database fleets. Provides natura
 
 Five engine families, defined in `mcp-servers/mcp_servers/shared/engine_family.py` (the single source of truth for per-family capabilities):
 
-| Family         | Covers                                            | Depth today                                                                      |
-| -------------- | ------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `relational`   | Aurora MySQL, Aurora PostgreSQL                   | Deepest: SQL deep-read, Performance Insights, findings, full simulator, writes   |
-| `rds_instance` | Standalone (non-Aurora) RDS MySQL, RDS SQL Server | SQL deep-read over direct TCP, findings, approval-gated writes, right-sizing sim |
-| `documentdb`   | Amazon DocumentDB                                 | Mongo-protocol deep-read, findings, approval-gated writes                        |
-| `dynamodb`     | Amazon DynamoDB tables                            | CloudWatch metrics, findings, capacity/TTL/PITR writes, capacity cost sim        |
-| `elasticache`  | ElastiCache Redis / Valkey / Memcached            | Live describe, findings, approval-gated writes, node-resize cost sim             |
+| Family         | Covers                                            | Depth today                                                                                                                                         |
+| -------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `relational`   | Aurora MySQL, Aurora PostgreSQL                   | Deepest: SQL deep-read, Performance Insights, findings, full simulator, writes                                                                      |
+| `rds_instance` | Standalone (non-Aurora) RDS MySQL, RDS SQL Server | SQL deep-read over direct TCP, findings, server-config read (both engines), approval-gated writes incl. INSTANCE parameter groups, right-sizing sim |
+| `documentdb`   | Amazon DocumentDB                                 | Mongo-protocol deep-read, findings, approval-gated writes                                                                                           |
+| `dynamodb`     | Amazon DynamoDB tables                            | CloudWatch metrics, findings, capacity/TTL/PITR writes, capacity cost sim                                                                           |
+| `elasticache`  | ElastiCache Redis / Valkey / Memcached            | Live describe, findings, approval-gated writes, node-resize cost sim                                                                                |
 
-Capability gating is data-driven off that `CAPABILITIES` map, and the MCP handlers return `status: "unsupported_engine"` when a tool does not apply. Non-relational families have no SQL surface (`sql: False`). `relational` reaches SQL through the RDS Data API, `rds_instance` through direct TCP (`sql_via`). The Aurora simulator (`simulate_scaling`, upgrade simulation) is relational-only; `rds_instance` uses `simulate_rds_instance_rightsizing` instead.
+Capability gating is data-driven off that `CAPABILITIES` map, and the MCP handlers return `status: "unsupported_engine"` when a tool does not apply. Non-relational families have no SQL surface (`sql: False`). `relational` reaches SQL through the RDS Data API, `rds_instance` through direct TCP (`sql_via`). The Aurora simulator (`simulate_scaling`, upgrade simulation) is relational-only; `rds_instance` uses `simulate_rds_instance_rightsizing` instead. Parameter tuning splits the same way: Aurora changes a CLUSTER parameter group (`modify_parameter`, gated on `cluster_parameter`) and `rds_instance` changes the DB INSTANCE parameter group (`modify_rds_instance_params`, gated on `instance_write`); the two tools refuse each other's engines.
 
 ## Target Users
 

@@ -213,6 +213,38 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
     why: "스캔 범위가 넓거나 필터로 대량 항목을 버리면 상승한다. 키 설계·GSI 재검토 신호.",
     unit: "ms",
   },
+
+  // ── SQL Server 엔진 내부 (sys.dm_os_performance_counters, rds_instance) ──
+  // 전부 파생값 또는 순간값이다. 누적 카운터(cntr_type 272696576)는 수집하지
+  // 않으므로 이 시리즈에는 단조 증가하는 값이 없다.
+  mssql_buffer_cache_hit_ratio: {
+    label: "Buffer Cache Hit Ratio",
+    what: "요청 페이지를 디스크 없이 버퍼 풀에서 처리한 비율. Buffer cache hit ratio를 짝 base 카운터로 나눈 값이다(원시 cntr_value는 비율이 아니다).",
+    why: "정상 워크로드에서는 95% 이상. 낮으면 working set이 버퍼 풀을 넘어 디스크를 읽고 있다는 뜻이라 max server memory 또는 인스턴스 메모리를 함께 본다. 단독으로는 신뢰도가 낮아 Page Life Expectancy와 같이 읽어야 한다.",
+    unit: "%",
+  },
+  mssql_page_life_expectancy_sec: {
+    label: "Page Life Expectancy",
+    what: "데이터 페이지가 버퍼 풀에 머무는 기대 시간(초).",
+    why: "메모리 압박의 가장 직접적인 신호다. 급격히 떨어지면 버퍼 풀이 계속 밀려나며 재읽기가 일어나고 있다는 뜻. 절대 임계치는 메모리 크기에 따라 달라지므로 이 클러스터의 평소 추세와 비교한다.",
+    unit: "s",
+  },
+  mssql_server_memory_used_pct: {
+    label: "Buffer Pool Ramp",
+    what: "SQL Server가 확보하려는 메모리(Target Server Memory) 대비 현재 확보한 메모리(Total Server Memory)의 비율.",
+    why: "재시작 직후에는 낮은 값에서 올라가는 것이 정상이다. 오래 100%에 붙어 있으면 max server memory 상한에 도달한 상태이고, 계속 낮으면 OS 메모리 압박으로 확보를 못 하고 있다는 뜻.",
+    unit: "%",
+  },
+  mssql_processes_blocked: {
+    label: "Processes Blocked",
+    what: "지금 다른 세션의 락을 기다리며 차단된 프로세스 수.",
+    why: "0이 정상. 0이 아닌 값이 지속되면 블로킹 체인이 있다는 뜻으로, blocked process threshold를 설정해 블로킹 리포트를 남기고 원인 트랜잭션을 찾는다.",
+  },
+  mssql_memory_grants_pending: {
+    label: "Memory Grants Pending",
+    what: "쿼리 실행에 필요한 메모리 그랜트를 받지 못해 대기 중인 쿼리 수.",
+    why: "0이 정상. 0보다 크면 정렬·해시 조인이 메모리를 못 받아 대기 중이라는 뜻으로, 메모리 부족이 이미 쿼리 지연으로 나타나고 있는 상태다.",
+  },
 };
 
 /** Lookup with graceful fallback — unknown metric returns null so

@@ -113,10 +113,19 @@ engine_family가 `rds_instance`인 클러스터(Aurora가 아닌 독립형 RDS)�
   `db_name`이 없으면 master DB로의 무자격 쓰기를 막기 위해 요청이 거부됩니다.
 
 ### 쓰기 (승인 게이트, Aurora와 동일한 승인 루프)
-독립형 인스턴스 전용 쓰기 3종 — `reboot_rds_instance`, `create_rds_snapshot`,
-`modify_rds_instance_class` — 은 반드시 위 "핵심 규칙" #3의 승인 플로우를 따라
-`request_approval` 로 승인을 받은 뒤에만 실행하세요. Aurora 클러스터 멤버 인스턴스에는
-`reboot_rds_instance`가 자동으로 거부됩니다.
+독립형 인스턴스 전용 쓰기 4종(`reboot_rds_instance`, `create_rds_snapshot`,
+`modify_rds_instance_class`, `modify_rds_instance_params`)은 반드시 위 "핵심 규칙"
+#3의 승인 플로우를 따라 `request_approval` 로 승인을 받은 뒤에만 실행하세요.
+Aurora 클러스터 멤버 인스턴스에는 `reboot_rds_instance`가 자동으로 거부됩니다.
+
+### 파라미터 변경은 툴이 엔진별로 다릅니다
+`rds_instance` 는 **INSTANCE 파라미터 그룹**을 쓰고 Aurora 는 **CLUSTER 파라미터 그룹**을
+씁니다. 따라서 파라미터 변경 요청에는 `rds_instance` → `modify_rds_instance_params`,
+Aurora → `modify_parameter` 를 쓰세요. 서로 반대 엔진에 호출하면 `unsupported_engine`
+입니다. AWS 기본(`default.*`) 파라미터 그룹은 수정할 수 없어 거부되며, 이때는 커스텀
+그룹을 먼저 만들어 연결해야 한다고 안내하세요. dynamic 파라미터는 즉시 반영되고
+static 파라미터는 재시작 전까지 동작값이 바뀌지 않으므로, 결과의 `apply_method` /
+`applied` 를 그대로 전달하고 "변경 완료"로만 답하지 마세요.
 
 ### Aurora 전용 툴 호출 금지
 커스텀 엔드포인트 관리, 리더 prewarm/scale-out/scale-in, 업그레이드·파라미터·DDL·스케일링

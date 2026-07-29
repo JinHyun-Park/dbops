@@ -1,5 +1,9 @@
-"""MySQL Parameter Fitness — 이 Aurora MySQL 클러스터의 실측 워크로드 기준
+"""MySQL Parameter Fitness: 이 MySQL 클러스터/인스턴스의 실측 워크로드 기준
 파라미터 적정성 진단(pg_param_fitness의 MySQL 대응).
+
+두 패밀리에서 돈다: Aurora MySQL(relational)과 표준 RDS MySQL(rds_instance).
+둘의 메모리 모델이 다르므로 권고 문구는 cluster_meta.engine으로 분기한다
+(E-3에서 정정: 이전에는 Aurora 전용 문구를 두 패밀리에 모두 내보냈다).
 
 PG 모듈과 같은 철학이되 MySQL 고유의 메모리 모델을 따른다:
 
@@ -9,9 +13,10 @@ PG 모듈과 같은 철학이되 MySQL 고유의 메모리 모델을 따른다:
      InnoDB 버퍼 풀을 인스턴스 메모리의 ~75%로 자동 설정하므로, per-thread
      버퍼는 남은 ~25%를 두고 경쟁한다 — 이 합이 메모리의 25%를 넘으면 동시
      부하 시 OOM/스왑 위험.
-  2. Aurora 특수성 — innodb_buffer_pool_size는 Aurora가 인스턴스 메모리
-     공식으로 자동 관리하므로(PG의 shared_buffers와 동일) 직접 권고하지 않는다.
-     vanilla MySQL 베스트프랙티스를 그대로 들이대지 않는다.
+  2. 엔진 분기: innodb_buffer_pool_size는 Aurora에서는 인스턴스 메모리
+     공식으로 자동 관리되므로(PG의 shared_buffers와 동일) 직접 권고하지 않는다.
+     표준 RDS MySQL에서는 그 반대로 **직접 튜닝 대상**이며, 실측 사례로
+     db.t4g.micro(1GB)에서 128MB가 그대로 남아 있었다.
   3. 확실한 것만 — 메모리 매핑이 안 되거나 표본이 부족하면 침묵한다.
 
 입력은 모두 캐시 DB에 이미 있다(cluster_settings는 mysql_locks가 global
@@ -101,11 +106,15 @@ def collect_mysql_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, c
     # --- 1) 메타: 인스턴스 클래스 → 메모리(Sv2는 max ACU로 추정)
     meta_rows = _execute(
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
-        "SELECT instance_class, engine_mode, serverlessv2_max_acu "
+        "SELECT instance_class, engine_mode, serverlessv2_max_acu, engine "
         "FROM cluster_meta WHERE cluster_id = :cid", {"cid": cluster_id},
     )
     meta = meta_rows[0] if meta_rows else {}
     instance_class = meta.get("instance_class") or ""
+    # E-3: this collector also runs for the rds_instance family (standalone RDS
+    # MySQL), where innodb_buffer_pool_size is NOT auto-managed: it is THE
+    # parameter to tune. Aurora-specific advice must not be given to it.
+    is_aurora = "aurora" in str(meta.get("engine") or "").lower()
     mem_gb, _vcpu = instance_memory_gb(instance_class)
     if mem_gb is None and meta.get("serverlessv2_max_acu"):
         try:
@@ -159,7 +168,7 @@ def collect_mysql_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, c
             f"최근 7일 동시 연결 peak가 {int(peak_conn)}인데 max_connections는 "
             f"{max_conn}으로 설정돼 있습니다(사용률 {usage_pct:.1f}%). MySQL은 각 연결마다 "
             f"sort/join/read 버퍼를 예약할 수 있어, 과다 할당은 메모리 상한을 끌어올립니다. "
-            f"Aurora MySQL이 인스턴스 메모리 공식으로 자동 설정한 값이라면 파라미터 조정보다 "
+            f"기본 파라미터 그룹의 인스턴스 메모리 공식이 만든 값이라면 파라미터 조정보다 "
             f"인스턴스 다운사이즈가 더 효과적일 수 있습니다.",
             {"current": max_conn, "peak_7d": int(peak_conn), "usage_pct": round(usage_pct, 1)},
         )
@@ -185,26 +194,57 @@ def collect_mysql_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, c
                 f"연결당 세션 버퍼 합({_fmt_mb(per_conn_bytes)} = "
                 f"sort+join+read+read_rnd+thread_stack) × max_connections {max_conn} = "
                 f"최악의 경우 {_fmt_gb(worst)}(인스턴스 {mem_gb:.0f}GB의 {worst_pct:.0f}%)까지 "
-                f"점유할 수 있습니다. Aurora MySQL은 InnoDB 버퍼 풀을 메모리의 ~75%로 자동 "
-                f"확보하므로 per-thread 버퍼는 남은 여유를 두고 경쟁합니다 — 복잡한 쿼리가 "
-                f"동시에 몰리면 OOM/스왑 위험이 있습니다. 전역 버퍼를 낮추고 메모리 집약 쿼리에만 "
-                f"세션 단위(SET SESSION sort_buffer_size=…)로 올리거나, max_connections를 "
-                f"실측 peak에 맞춰 줄이는 방안을 검토하세요.",
+                f"점유할 수 있습니다. "
+                + (
+                    "Aurora MySQL은 InnoDB 버퍼 풀을 메모리의 ~75%로 자동 확보하므로 "
+                    "per-thread 버퍼는 남은 여유를 두고 경쟁합니다"
+                    if is_aurora else
+                    f"이 인스턴스에서는 innodb_buffer_pool_size"
+                    f"({_fmt_mb(_to_bytes(settings.get('innodb_buffer_pool_size')) or 0)})가 "
+                    f"직접 설정값이므로, 버퍼 풀과 per-connection 버퍼의 합이 인스턴스 메모리를 "
+                    f"넘지 않는지 함께 확인해야 합니다"
+                )
+                + ". 복잡한 쿼리가 동시에 몰리면 OOM/스왑 위험이 있습니다. 전역 버퍼를 낮추고 "
+                "메모리 집약 쿼리에만 세션 단위(SET SESSION sort_buffer_size=…)로 올리거나, "
+                "max_connections를 실측 peak에 맞춰 줄이는 방안을 검토하세요.",
                 {"per_conn_bytes": int(per_conn_bytes), "max_connections": max_conn,
                  "instance_memory_gb": mem_gb, "worst_case_pct": round(worst_pct, 1),
                  "buffers": buffer_detail},
             )
 
     # === 규칙 M3: 버퍼 캐시 히트율 저조 (인스턴스 메모리 신호로) ===
+    # 두 metric_type을 한 쿼리로 재는 이유(E-3에서 실측한 버그): 이 규칙은
+    # 'buffer_cache_hit'만 읽었는데, 그 metric_type을 쓰는 수집기는 Aurora CW
+    # (cw_collector.BufferCacheHitRatio)와 DocumentDB뿐이다. rds_instance
+    # 패밀리(RDS MySQL)는 innodb_buffer_pool_hit_rate만 쓰므로 이 규칙은 그
+    # 패밀리에서 영구히 죽어 있었다. Aurora 경로의 값은 바꾸지 않기 위해
+    # 평균을 섞지 않고 CW를 우선하고, 표본이 없을 때만 InnoDB로 폴백한다
+    # (둘은 정의가 다른 측정치라 하나의 AVG로 합치면 안 된다).
     hit_rows = _execute(
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
-        "SELECT AVG(value) AS avg_hit, COUNT(*) AS samples FROM metric_snapshots "
-        "WHERE cluster_id = :cid AND metric_type = 'buffer_cache_hit' "
+        "SELECT "
+        "  AVG(CASE WHEN metric_type = 'buffer_cache_hit' THEN value END) AS cw_hit, "
+        "  COUNT(CASE WHEN metric_type = 'buffer_cache_hit' THEN 1 END) AS cw_samples, "
+        "  AVG(CASE WHEN metric_type = 'innodb_buffer_pool_hit_rate' THEN value END) AS innodb_hit, "
+        "  COUNT(CASE WHEN metric_type = 'innodb_buffer_pool_hit_rate' THEN 1 END) AS innodb_samples "
+        "FROM metric_snapshots "
+        "WHERE cluster_id = :cid "
+        "  AND metric_type IN ('buffer_cache_hit', 'innodb_buffer_pool_hit_rate') "
         "  AND ts > NOW() - INTERVAL '7 days' "
         "  AND (dimensions IS NULL OR dimensions::text = '{}')", {"cid": cluster_id},
     )
-    avg_hit = float(hit_rows[0]["avg_hit"]) if hit_rows and hit_rows[0]["avg_hit"] is not None else None
-    hit_samples = int(hit_rows[0]["samples"] or 0) if hit_rows else 0
+    hr = hit_rows[0] if hit_rows else {}
+
+    def _pair(avg_key, cnt_key):
+        v = hr.get(avg_key)
+        return (float(v) if v is not None else None), int(hr.get(cnt_key) or 0)
+
+    cw_hit, cw_samples = _pair("cw_hit", "cw_samples")
+    innodb_hit, innodb_samples = _pair("innodb_hit", "innodb_samples")
+    if cw_hit is not None and cw_samples >= MIN_SAMPLES:
+        avg_hit, hit_samples, hit_source = cw_hit, cw_samples, "buffer_cache_hit"
+    else:
+        avg_hit, hit_samples, hit_source = innodb_hit, innodb_samples, "innodb_buffer_pool_hit_rate"
     if avg_hit is not None and hit_samples >= MIN_SAMPLES and avg_hit < CACHE_HIT_FLOOR:
         add(
             "param_buffer_cache_hit", "info", "buffer cache hit ratio",
@@ -212,11 +252,23 @@ def collect_mysql_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, c
             f"{CACHE_HIT_FLOOR:.0f}% 미만",
             f"버퍼 캐시 히트율이 7일 평균 {avg_hit:.1f}%로 {CACHE_HIT_FLOOR:.0f}% 미만입니다 — "
             f"작업셋이 인스턴스 메모리(InnoDB 버퍼 풀)를 초과해 디스크 I/O가 늘고 있을 수 "
-            f"있습니다. Aurora MySQL은 InnoDB 버퍼 풀을 인스턴스 메모리 비율로 크게 자동 "
-            f"설정하므로, 파라미터 조정보다 인스턴스 메모리 상향(또는 Serverless v2 max ACU "
-            f"상향)이 더 효과적인 경우가 많습니다. Cost 탭의 라이트사이징 권고와 함께 검토하세요.",
+            f"있습니다. "
+            + (
+                "Aurora MySQL은 InnoDB 버퍼 풀을 인스턴스 메모리 비율로 크게 자동 설정하므로, "
+                "파라미터 조정보다 인스턴스 메모리 상향(또는 Serverless v2 max ACU 상향)이 "
+                "더 효과적인 경우가 많습니다. Cost 탭의 라이트사이징 권고와 함께 검토하세요."
+                if is_aurora else
+                f"이 인스턴스는 innodb_buffer_pool_size"
+                f"({_fmt_mb(_to_bytes(settings.get('innodb_buffer_pool_size')) or 0)})가 "
+                f"직접 설정값입니다(Aurora처럼 자동으로 크게 잡히지 않습니다). 인스턴스 메모리에 "
+                f"여유가 있으면 파라미터 그룹에서 innodb_buffer_pool_size를 올리는 것이 1차 조치이고, "
+                f"이미 메모리 대비 크게 잡혀 있다면 인스턴스 메모리 상향을 검토하세요. "
+                f"MySQL 8.x에서 이 파라미터는 dynamic이라 재시작 없이 적용되지만, 온라인 리사이즈는 "
+                f"청크 단위로 진행되며 진행 중에는 버퍼 풀 경합이 있습니다."
+            ),
             {"avg_hit_pct": round(avg_hit, 1), "samples": hit_samples,
-             "instance_class": instance_class},
+             "metric_type": hit_source, "instance_class": instance_class,
+             "innodb_buffer_pool_size": settings.get("innodb_buffer_pool_size")},
         )
 
     # --- 단일 snapshot_time으로 일괄 적재

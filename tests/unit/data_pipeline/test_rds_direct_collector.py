@@ -369,4 +369,10 @@ def test_process_cluster_dispatches_sqlserver_to_mssql_collectors():
     assert mysql_calls["n"] == 0                 # mysql collectors NOT called
     assert mssql_calls["n"] == 1                 # pytds factory used exactly once
     assert "error" not in res
-    assert set(res["collected"]) == {"query_stats", "activity", "waits"}
+    # E-3 added the two SERVER-scoped collectors (sys.configurations,
+    # sys.dm_os_performance_counters), which is why they are safe from the
+    # `master` session this test's row resolves to (no db_name).
+    assert set(res["collected"]) == {
+        "query_stats", "activity", "waits", "settings", "perf_counters"}
+    # Every collector ran on empty DMVs without raising: no *_error key.
+    assert not [k for k in res["collected"] if k.endswith("_error")]

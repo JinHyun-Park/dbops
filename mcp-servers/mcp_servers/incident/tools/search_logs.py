@@ -3,6 +3,7 @@ import time
 
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import client_for_cluster
+from mcp_servers.shared.engine_family import RDS_INSTANCE, engine_family
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,15 @@ def search_logs_impl(
     log_group: str = None,
 ) -> dict:
     if not log_group:
-        log_group = f"/aws/rds/cluster/{cluster_id}/error"
+        # A standalone RDS DB instance publishes to /aws/rds/instance/<id>/...;
+        # the Aurora /aws/rds/cluster/ path NEVER exists for it, so the default
+        # used to guarantee a "log group not found" on every default call for
+        # this family. engine_of() returns "" on any lookup failure and
+        # engine_family("") is relational, so an unresolvable cluster keeps the
+        # historical Aurora default rather than guessing the instance path.
+        fam = engine_family(cache.engine_of(cluster_id))
+        prefix = "/aws/rds/instance/" if fam == RDS_INSTANCE else "/aws/rds/cluster/"
+        log_group = f"{prefix}{cluster_id}/error"
     permitted = permitted_log_group_prefixes(cluster_id)
     if not str(log_group).startswith(permitted):
         logger.warning(

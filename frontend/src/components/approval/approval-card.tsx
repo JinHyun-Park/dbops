@@ -85,6 +85,10 @@ const ACTION_RISK: Record<string, string> = {
   reboot_rds_instance: "high",
   create_rds_snapshot: "low",
   modify_rds_instance_class: "high",
+  // INSTANCE 파라미터 그룹 변경(E-3). 그룹은 여러 인스턴스가 공유할 수 있어
+  // blast radius가 이 인스턴스를 넘어가고, dynamic 파라미터는 즉시 반영된다
+  // → set_docdb_profiler와 같은 이유로 high.
+  modify_rds_instance_params: "high",
   // DocumentDB. 프로파일러는 Mongo 명령이 아니라 CUSTOM 클러스터 파라미터
   // 그룹 변경 + CloudWatch Logs export다. 그룹은 여러 클러스터가 공유할 수
   // 있어 blast radius가 이 클러스터를 넘어간다 → high.
@@ -397,6 +401,20 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     considerations: [
       "target class / current class(아래 표시)를 확인 — 의도한 방향(업/다운사이즈)인지",
       "Multi-AZ 여부 확인 — 아니라면 재기동 중 연결 끊김",
+    ],
+  },
+  modify_rds_instance_params: {
+    what: "독립형(비-Aurora) RDS 인스턴스의 DB 파라미터 그룹에서 파라미터 1개를 변경합니다.",
+    risks: [
+      "파라미터 그룹은 여러 인스턴스가 공유할 수 있습니다. 같은 그룹을 쓰는 모든 인스턴스에 적용됩니다.",
+      "dynamic 파라미터는 ApplyMethod=immediate로 즉시 반영됩니다(재시작 없이 동작이 바뀝니다).",
+      "static 파라미터는 pending-reboot로 등록만 되며, 인스턴스 재시작 전까지 동작값은 바뀌지 않습니다.",
+      "승인 이후 인스턴스의 파라미터 그룹이 바뀌면 안전을 위해 변경이 거부됩니다.",
+    ],
+    considerations: [
+      "parameter / value / parameter group(아래 표시)을 확인, 특히 그룹을 공유하는 인스턴스가 있는지",
+      "메모리 관련 파라미터(innodb_buffer_pool_size, max server memory)는 인스턴스 메모리 대비 합계를 먼저 계산",
+      "static 파라미터면 재시작 윈도우를 함께 계획(reboot_rds_instance)",
     ],
   },
 };

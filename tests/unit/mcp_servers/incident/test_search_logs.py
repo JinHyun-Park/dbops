@@ -265,3 +265,74 @@ def test_malformed_query_is_not_echoed_into_the_logs(mock_client_for, caplog):
     # truncated query from a wrong-dialect one
     assert "malformed" in logged.lower()
     assert "prod-pg-1" in logged
+
+
+# ===== family-aware default log group (E-3) =====
+# A standalone RDS DB instance publishes to /aws/rds/instance/<id>/..., so the
+# Aurora /aws/rds/cluster/ default guaranteed a "log group not found" on every
+# default call for that family. MEASURED on the live fixture: both
+# /aws/rds/instance/dbops-demo-mysql/error and .../slowquery EXIST, and no
+# /aws/rds/cluster/dbops-demo-mysql/* group does.
+
+def _logs_double(mock_client_for, mock_time):
+    mock_time.time.return_value = 1704067200.0
+    mock_time.sleep = MagicMock()
+    c = MagicMock()
+    mock_client_for.return_value = c
+    c.start_query.return_value = {"queryId": "q-1"}
+    c.get_query_results.return_value = {"status": "Complete", "results": []}
+    return c
+
+
+def _cache_with_engine(engine):
+    cache = MagicMock()
+    cache.engine_of.return_value = engine
+    return cache
+
+
+@patch("mcp_servers.incident.tools.search_logs.time")
+@patch("mcp_servers.incident.tools.search_logs.client_for_cluster")
+def test_default_log_group_uses_the_instance_path_for_rds_instance(mock_client_for, mock_time):
+    logs = _logs_double(mock_client_for, mock_time)
+    for engine in ("mysql", "sqlserver-ex"):
+        result = search_logs_impl(_cache_with_engine(engine), cluster_id="dbops-demo-mysql")
+        assert result["log_group"] == "/aws/rds/instance/dbops-demo-mysql/error"
+        assert result.get("status") != "log_group_not_allowed"
+    assert logs.start_query.call_args.kwargs["logGroupName"] == \
+        "/aws/rds/instance/dbops-demo-mysql/error"
+
+
+@patch("mcp_servers.incident.tools.search_logs.time")
+@patch("mcp_servers.incident.tools.search_logs.client_for_cluster")
+def test_default_log_group_stays_on_the_cluster_path_for_aurora(mock_client_for, mock_time):
+    """RELATIONAL REGRESSION PIN: Aurora keeps the cluster path."""
+    _logs_double(mock_client_for, mock_time)
+    for engine in ("aurora-postgresql", "aurora-mysql"):
+        result = search_logs_impl(_cache_with_engine(engine), cluster_id="prod-pg-1")
+        assert result["log_group"] == "/aws/rds/cluster/prod-pg-1/error"
+
+
+@patch("mcp_servers.incident.tools.search_logs.time")
+@patch("mcp_servers.incident.tools.search_logs.client_for_cluster")
+def test_unresolvable_engine_keeps_the_historical_aurora_default(mock_client_for, mock_time):
+    """engine_of() returns "" on ANY lookup failure. Guessing the instance path
+    from a failed lookup would break Aurora on a transient cache error, so ""
+    must keep the Aurora default (engine_family("") is relational)."""
+    _logs_double(mock_client_for, mock_time)
+    result = search_logs_impl(_cache_with_engine(""), cluster_id="prod-pg-1")
+    assert result["log_group"] == "/aws/rds/cluster/prod-pg-1/error"
+
+
+@patch("mcp_servers.incident.tools.search_logs.time")
+@patch("mcp_servers.incident.tools.search_logs.client_for_cluster")
+def test_explicit_log_group_still_wins_and_is_still_bound_to_the_cluster(mock_client_for, mock_time):
+    _logs_double(mock_client_for, mock_time)
+    cache = _cache_with_engine("mysql")
+    ok = search_logs_impl(cache, cluster_id="dbops-demo-mysql",
+                          log_group="/aws/rds/instance/dbops-demo-mysql/slowquery")
+    assert ok["log_group"] == "/aws/rds/instance/dbops-demo-mysql/slowquery"
+    assert ok.get("status") != "log_group_not_allowed"
+    # Another cluster's instance log group is still refused.
+    bad = search_logs_impl(cache, cluster_id="dbops-demo-mysql",
+                           log_group="/aws/rds/instance/someone-elses-db/error")
+    assert bad["status"] == "log_group_not_allowed"

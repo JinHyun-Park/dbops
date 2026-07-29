@@ -116,9 +116,14 @@ const MYSQL_RECOMMENDED: Record<string, Rec> = {
   log_bin: {
     value: "ON",
     severity: "info",
-    why: "바이너리 로그(PITR/복제) — Aurora는 클러스터에서 관리.",
+    why: "바이너리 로그(PITR/복제). Aurora는 클러스터 스토리지가 대신 처리하고, 표준 RDS MySQL은 이 설정이 리드 리플리카·PITR의 전제입니다.",
   },
 };
+
+// SQL Server: no static recommendation map. sys.configurations values are almost
+// all instance-memory / core-count dependent (max server memory, MAXDOP, cost
+// threshold for parallelism), so a fixed "recommended" number would be wrong
+// more often than right. The cards render plain, which is the honest state.
 
 function fmtValue(s: Setting): string {
   const v = s.value;
@@ -189,6 +194,11 @@ export function SettingsPanel({
   const [diffOpen, setDiffOpen] = useState(true);
   const [diffLoading, setDiffLoading] = useState(true);
   const [diffAvailable, setDiffAvailable] = useState(false);
+  // The backend distinguishes "could not read the defaults" from "this engine has
+  // no parameter-group default comparison at all" (rds_instance / DocumentDB
+  // return not_applicable). Collapsing both into "미조회" told a SQL Server user
+  // to retry something that can never succeed.
+  const [diffNotApplicable, setDiffNotApplicable] = useState(false);
   const [params, setParams] = useState<ParamRow[]>([]);
   const [diffCount, setDiffCount] = useState(0);
   const [diffQuery, setDiffQuery] = useState("");
@@ -212,6 +222,7 @@ export function SettingsPanel({
         const d: ParamDiffResponse = await res.json();
         if (cancelled) return;
         setDiffAvailable(!!d.available);
+        setDiffNotApplicable(!d.available && !!d.not_applicable);
         // Prefer the full `params` list; fall back to `diffs` for backward-compat
         // with an older backend. `diffs` rows have no `differs` field but are all
         // differing by definition, so normalize to differs:true — otherwise they
@@ -224,6 +235,7 @@ export function SettingsPanel({
       } catch {
         if (!cancelled) {
           setDiffAvailable(false);
+          setDiffNotApplicable(false);
           setParams([]);
           setDiffCount(0);
         }
@@ -259,11 +271,13 @@ export function SettingsPanel({
   const rangeFrom = filteredParams.length === 0 ? 0 : pageStart + 1;
   const rangeTo = Math.min(pageStart + PARAM_PAGE_SIZE, filteredParams.length);
 
-  const engineLabel = (engine || "").includes("mysql")
-    ? "MySQL"
-    : (engine || "").includes("postgresql")
-      ? "PostgreSQL"
-      : "Engine";
+  const engineLabel = (engine || "").includes("sqlserver")
+    ? "SQL Server"
+    : (engine || "").includes("mysql")
+      ? "MySQL"
+      : (engine || "").includes("postgresql")
+        ? "PostgreSQL"
+        : "Engine";
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-5">
@@ -357,6 +371,10 @@ export function SettingsPanel({
           <div className="mt-2">
             {diffLoading ? (
               <div className="text-zinc-500 text-sm">불러오는 중…</div>
+            ) : diffNotApplicable ? (
+              <div className="text-zinc-500 text-sm">
+                이 엔진에는 파라미터 그룹 디폴트 비교가 적용되지 않습니다
+              </div>
             ) : !diffAvailable ? (
               <div className="text-zinc-500 text-sm">디폴트 비교 미조회</div>
             ) : params.length === 0 ? (

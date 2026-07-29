@@ -303,6 +303,29 @@ def _project(action_type: str, details: dict) -> dict:
             "target_class": str(d.get("target_class") or "").strip(),
             "current_class": str(d.get("current_class") or "").strip(),
         }
+    # INSTANCE parameter-group change (E-3). Binds the target instance, the
+    # parameter, the new value AND the parameter GROUP the DBA reviewed: without
+    # the group in the hash, an approval could be consumed after the instance was
+    # pointed at a different group and the write would land somewhere the DBA
+    # never saw.
+    #
+    # `value` is deliberately NOT run through _norm_val (modify_parameter does use
+    # it; this is a considered divergence, not an oversight). _norm_val collapses
+    # any numeric-looking string to float, so "0"/"0.0"/"00" and "1e3"/"1000" all
+    # hash the SAME, and a DB parameter group stores the string verbatim, so
+    # those are different writes. The cost of strict string binding is that an
+    # approval registered with a JSON number 200.0 will not match an execute
+    # passing "200": that direction fails CLOSED (approval_denied, re-request),
+    # which is the correct bias for a write. The tool's schema declares `value` a
+    # string for exactly this reason.
+    if action_type == "modify_rds_instance_params":
+        return {
+            "cluster_id": str(d.get("cluster_id") or "").strip(),
+            "parameter_name": str(
+                d.get("parameter_name") or d.get("parameter") or "").strip(),
+            "value": str(d.get("value") if d.get("value") is not None else "").strip(),
+            "parameter_group": str(d.get("parameter_group") or "").strip(),
+        }
     # other / unknown: bind the FULL detail set VERBATIM (no numeric coercion).
     # This closes the loose "other" bucket — an "other" approval now matches
     # only if the entire registered payload matches. We deliberately do NOT

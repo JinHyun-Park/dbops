@@ -185,7 +185,17 @@ const TABS_BY_FAMILY: Record<EngineFamily, TabKey[]> = {
   dynamodb: ["overview", "advisory", "config", "audit"],
   documentdb: ["overview", "advisory", "config", "audit"],
   elasticache: ["overview", "advisory", "config", "audit"],
-  rds_instance: ["overview", "perf", "advisory", "internals", "audit"],
+  // config for rds_instance renders the SettingsPanel HALF only (E-3): the
+  // collected server settings. No ExtensionsPanel (PG-only), no EndpointsPanel
+  // (Aurora custom endpoints do not exist for a standalone instance).
+  rds_instance: [
+    "overview",
+    "perf",
+    "advisory",
+    "internals",
+    "config",
+    "audit",
+  ],
 };
 
 function readInitialTab(): TabKey {
@@ -1088,6 +1098,18 @@ export default function DashboardPage() {
                 )}
                 {fam === "elasticache" && (
                   <EngineConfigPanel
+                    clusterId={selectedCluster}
+                    engine={activeEngine}
+                  />
+                )}
+                {/* Standalone RDS instance (E-3): the collected server settings
+                    only. /settings is engine-agnostic (a pure cache read), and
+                    both engines of this family now have a producer: RDS MySQL
+                    via mysql_locks.SETTINGS_SQL, SQL Server via mssql_settings.
+                    /param-diff answers not_applicable for this family and the
+                    panel says so instead of offering a retry. */}
+                {fam === "rds_instance" && (
+                  <SettingsPanel
                     clusterId={selectedCluster}
                     engine={activeEngine}
                   />

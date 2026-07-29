@@ -68,13 +68,18 @@ def test_rds_instance_capabilities():
     assert "instance_write" not in ef.CAPABILITIES["relational"]
     assert "instance_write" not in ef.CAPABILITIES["dynamodb"]
     assert caps["cw_namespace"] == "AWS/RDS"
-    # R-2/R-5: cache-only findings run in the ETL collector. health stays OUT
-    # (PG-only); InnoDB-status findings come from the direct-TCP collector.
+    # R-2/R-5: cache-only findings run in the ETL collector. InnoDB-status
+    # findings come from the direct-TCP collector, not tracked here.
+    # E-3 added `health`: mysql_health_checks is engine-neutral (it reads only
+    # table_stats + cluster_settings from the cache, both of which
+    # rds_direct_collector fills for RDS MySQL), so it is NOT PG-only and now
+    # runs for the MySQL half of this family too.
     assert caps["findings"] == {
         "param_fitness",
         "capacity_forecast",
         "query_regression",
         "cost",
+        "health",
     }
 
 def test_task0_capability_matrix():

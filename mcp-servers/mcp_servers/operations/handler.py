@@ -24,6 +24,7 @@ from mcp_servers.operations.tools.modify_dynamodb_ttl import modify_dynamodb_ttl
 from mcp_servers.operations.tools.modify_elasticache_node_type import modify_elasticache_node_type_impl
 from mcp_servers.operations.tools.modify_parameter import modify_parameter_impl
 from mcp_servers.operations.tools.modify_rds_instance_class import modify_rds_instance_class_impl
+from mcp_servers.operations.tools.modify_rds_instance_params import modify_rds_instance_params_impl
 from mcp_servers.operations.tools.modify_scaling import modify_scaling_impl
 from mcp_servers.operations.tools.plan_az_scaleout import plan_az_scaleout_impl
 from mcp_servers.operations.tools.prewarm_reader import prewarm_reader_impl
@@ -103,6 +104,12 @@ _ENGINE_GATED_TOOLS = {
     "reboot_rds_instance": "instance_write",
     "create_rds_snapshot": "instance_write",
     "modify_rds_instance_class": "instance_write",
+    # INSTANCE parameter-group change (E-3). Same gate, and deliberately NOT a
+    # new capability key: `instance_write` already means "a write that applies to
+    # a standalone RDS DB instance", which is exactly this tool's predicate.
+    # Aurora keeps using modify_parameter (cluster_parameter). The two tools are
+    # mutually exclusive by gate, so neither engine can reach the other's API.
+    "modify_rds_instance_params": "instance_write",
     # Schema snapshot readers (E-4). READ-ONLY but gated on the EXISTING `sql`
     # capability, which is already exactly the right predicate: a family with no
     # SQL surface has no tables and no columns, so tables_json has no honest
@@ -679,6 +686,32 @@ TOOLS = {
             "required": ["cluster_id", "target_class"],
         },
     },
+    "modify_rds_instance_params": {
+        "impl": modify_rds_instance_params_impl,
+        "description": (
+            "Standalone RDS instance only (non-Aurora MySQL / SQL Server): change "
+            "one parameter in the instance's DB PARAMETER GROUP "
+            "(modify_db_parameter_group). Aurora uses modify_parameter instead: "
+            "a standalone instance has no cluster parameter group. AWS-managed "
+            "default.* groups are refused. ApplyMethod is derived from the "
+            "parameter's ApplyType (dynamic=immediate, static=pending-reboot), so "
+            "a static change needs a reboot before the running value changes. The "
+            "parameter group is bound at approval time and drift is refused. "
+            "Requires approved=true AND approval_id=<uuid from request_approval>."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string", "description": "Target RDS DB instance id"},
+                "parameter_name": {"type": "string", "description": "Parameter to change (e.g. innodb_buffer_pool_size, max server memory (MB))"},
+                "value": {"type": "string", "description": "New parameter value"},
+                "parameter_group": {"type": "string", "description": "DB parameter group bound at approval time (re-issue with the value from approval_required)"},
+                "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval"},
+            },
+            "required": ["cluster_id", "parameter_name", "value"],
+        },
+    },
     "review_sql": {
         "impl": review_sql_impl,
         "description": "Pre-execution SQL review with risk classification, issue detection, and rollback suggestion",
@@ -794,7 +827,7 @@ TOOLS = {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "action_type": {
                     "type": "string",
-                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "create_custom_endpoint", "delete_custom_endpoint", "modify_custom_endpoint", "prewarm_reader", "add_reader_instance", "remove_reader_instance", "scale_out_with_warmup", "modify_dynamodb_capacity", "modify_dynamodb_ttl", "enable_dynamodb_pitr", "set_docdb_profiler", "create_docdb_index", "modify_elasticache_node_type", "create_elasticache_snapshot", "reboot_elasticache", "test_elasticache_failover", "reboot_rds_instance", "create_rds_snapshot", "modify_rds_instance_class", "other"],
+                    "enum": ["execute_sql", "modify_parameter", "modify_scaling", "manage_maintenance", "create_snapshot", "restore_cluster", "create_custom_endpoint", "delete_custom_endpoint", "modify_custom_endpoint", "prewarm_reader", "add_reader_instance", "remove_reader_instance", "scale_out_with_warmup", "modify_dynamodb_capacity", "modify_dynamodb_ttl", "enable_dynamodb_pitr", "set_docdb_profiler", "create_docdb_index", "modify_elasticache_node_type", "create_elasticache_snapshot", "reboot_elasticache", "test_elasticache_failover", "reboot_rds_instance", "create_rds_snapshot", "modify_rds_instance_class", "modify_rds_instance_params", "other"],
                     "description": "Which write tool needs approval",
                 },
                 "action_details": {

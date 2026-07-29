@@ -186,7 +186,17 @@ def operations_schema():
               {"cluster_id": "string", "action_type": "string",
                "action_details": "object", "requested_by": "string"},
               ["cluster_id", "action_type", "action_details"]),
-        _tool("modify_parameter", "Modify DB parameter (requires approval)",
+        # Aurora ONLY. The description has to say so now that
+        # modify_rds_instance_params exists for the standalone-instance family:
+        # "Modify DB parameter" alone read as engine-neutral and invited the agent
+        # to call the cluster tool on an RDS instance, which the gateway then
+        # refuses with unsupported_engine (a wasted turn, not a wrong write).
+        _tool("modify_parameter",
+              "Aurora clusters only: modify a parameter in the CLUSTER parameter group "
+              "(modify_db_cluster_parameter_group, ApplyMethod=pending-reboot, so a reboot "
+              "is needed before the running value changes). A standalone RDS instance has no "
+              "cluster parameter group, use modify_rds_instance_params for those. "
+              "AWS-managed default.* groups are refused; requires approval",
               {"cluster_id": "string", "parameter_name": "string", "value": "string", "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "parameter_name", "value"]),
         _tool("modify_scaling", "Scale instance (requires approval)",
@@ -342,6 +352,16 @@ def operations_schema():
               {"cluster_id": "string", "target_class": "string", "current_class": "string",
                "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "target_class"]),
+        _tool("modify_rds_instance_params",
+              "Standalone RDS instance only (non-Aurora MySQL / SQL Server): change one "
+              "parameter in the instance's DB PARAMETER GROUP (modify_db_parameter_group). "
+              "Aurora uses modify_parameter instead, a standalone instance has no cluster "
+              "parameter group. AWS-managed default.* groups are refused; ApplyMethod comes "
+              "from the parameter's ApplyType (dynamic=immediate, static=pending-reboot); the "
+              "parameter group is bound at approval time and drift is refused; requires approval",
+              {"cluster_id": "string", "parameter_name": "string", "value": "string",
+               "parameter_group": "string", "approved": "boolean", "approval_id": "string"},
+              ["cluster_id", "parameter_name", "value"]),
         _tool("review_sql", "Pre-execution SQL review with risk assessment",
               {"cluster_id": "string", "sql": "string"}, ["cluster_id", "sql"]),
         _tool("audit_permissions", "Audit DB user permissions",

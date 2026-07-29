@@ -43,9 +43,32 @@ const MYSQL_METRICS: MetricDef[] = [
   { key: "innodb_pending_io", title: "대기 중 I/O", unit: "" },
   { key: "innodb_row_ops_per_sec", title: "Row Ops 처리량", unit: "/s" },
 ];
-// SQL Server has no InnoDB/pg_stat equivalent — sys.dm_os_wait_stats is
-// collected as a single metric_type dimensioned by wait_type (see
-// data-pipeline/rds_direct_collector/mssql_waits.py), not flat MetricDefs.
+// SQL Server gauges derived from sys.dm_os_performance_counters (E-3, see
+// data-pipeline/rds_direct_collector/mssql_perf_counters.py). Every one of these
+// is DERIVED or genuinely instantaneous: the collector deliberately publishes no
+// cumulative counter, so none of these series is a monotonic ramp.
+const MSSQL_METRICS: MetricDef[] = [
+  {
+    key: "mssql_buffer_cache_hit_ratio",
+    title: "버퍼 캐시 히트율",
+    unit: "%",
+  },
+  {
+    key: "mssql_page_life_expectancy_sec",
+    title: "Page Life Expectancy",
+    unit: "s",
+  },
+  { key: "mssql_server_memory_used_pct", title: "버퍼 풀 확보율", unit: "%" },
+  { key: "mssql_processes_blocked", title: "차단된 프로세스", unit: "" },
+  {
+    key: "mssql_memory_grants_pending",
+    title: "대기 중 메모리 그랜트",
+    unit: "",
+  },
+];
+// sys.dm_os_wait_stats is collected as a single metric_type dimensioned by
+// wait_type (see mssql_waits.py), not a flat MetricDef, so it renders as a
+// ranked bar list alongside the grid above.
 const MSSQL_WAIT_METRIC = "mssql_wait_ms";
 
 function fmtTime(iso: string) {
@@ -221,8 +244,10 @@ export function EngineInternalsPanel({
   const kind = engineKind(engine);
   const mysql = kind === "mysql";
   const sqlserver = kind === "sqlserver";
-  const defs = mysql ? MYSQL_METRICS : sqlserver ? [] : PG_METRICS;
-  const metricKeys = sqlserver ? [MSSQL_WAIT_METRIC] : defs.map((d) => d.key);
+  const defs = mysql ? MYSQL_METRICS : sqlserver ? MSSQL_METRICS : PG_METRICS;
+  const metricKeys = sqlserver
+    ? [MSSQL_WAIT_METRIC, ...defs.map((d) => d.key)]
+    : defs.map((d) => d.key);
   const [series, setSeries] = useState<Record<string, Point[]>>({});
   const [loading, setLoading] = useState(true);
 
@@ -253,26 +278,27 @@ export function EngineInternalsPanel({
           {mysql
             ? "InnoDB engine status"
             : sqlserver
-              ? "sys.dm_os_wait_stats"
+              ? "sys.dm_os_performance_counters / dm_os_wait_stats"
               : "pg_stat_database / bgwriter"}
         </span>
       </div>
-      {sqlserver ? (
-        <TopWaitsCard
-          points={series[MSSQL_WAIT_METRIC] || []}
-          loading={loading}
-        />
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {defs.map((def) => (
-            <MiniChart
-              key={def.key}
-              def={def}
-              points={series[def.key] || []}
-              loading={loading}
-              colors={colors}
-            />
-          ))}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        {defs.map((def) => (
+          <MiniChart
+            key={def.key}
+            def={def}
+            points={series[def.key] || []}
+            loading={loading}
+            colors={colors}
+          />
+        ))}
+      </div>
+      {sqlserver && (
+        <div className="mt-3">
+          <TopWaitsCard
+            points={series[MSSQL_WAIT_METRIC] || []}
+            loading={loading}
+          />
         </div>
       )}
     </div>

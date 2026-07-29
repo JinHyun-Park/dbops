@@ -299,7 +299,8 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         # MySQL param_fitness reads ONLY the cache DB (cluster_settings +
         # metric_snapshots), so it runs here with no VPC/target connection.
         # InnoDB-status findings need the target and live in rds_direct_collector.
-        # SQL Server has no cache-only finding.
+        # SQL Server has no cache-only MySQL finding (its cluster_settings rows
+        # come from mssql_settings.py and use SQL Server option names).
         if "mysql" in engine:
             try:
                 result["param_fitness"] = collect_mysql_param_fitness(
@@ -308,6 +309,20 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
             except Exception as e:
                 result["param_fitness_error"] = str(e)
                 print(f"[{cluster_id}] param_fitness error: {e}")
+            # E3-1: the same engine-neutral collector the Aurora MySQL branch
+            # runs. It reads ONLY the cache (table_stats + cluster_settings),
+            # both of which rds_direct_collector fills for RDS MySQL over direct
+            # TCP, so there is no VPC/target connection here either. Emits
+            # mysql_fragmentation + setting_misconfigured, both already in the
+            # frontend CHECK_LABELS map. run_ts is shared so this cycle's
+            # findings land in one MAX(snapshot_time) batch.
+            try:
+                result["health"] = collect_mysql_health_checks(
+                    cache_rds_data, cache_cluster_arn, cache_secret_arn,
+                    cache_db_name, cluster_id, snapshot_ts=run_ts)
+            except Exception as e:
+                result["health_error"] = str(e)
+                print(f"[{cluster_id}] health checks error: {e}")
         # Engine-agnostic cache-only advisory collectors — same set the relational
         # branch runs, all reading ONLY the hub cache DB (no target/VPC connection):
         # cost, capacity/storage forecast, query regression, seasonal baselines.
@@ -527,9 +542,8 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         # param_fitness와 같은 이유로 locks 뒤: cluster_settings를 읽는다. table_stats도
         # 캐시에서 읽으므로 타깃 접속은 없다. run_ts 공유는 필수다:
         # 대시보드가 MAX(snapshot_time) 배치로 findings를 읽는다.
-        # ponytail: 이 수집기 자체는 엔진 중립(InnoDB 사실만 쓴다)이라 rds_instance
-        # 분기에도 한 줄로 붙일 수 있다. E-2 범위가 Aurora MySQL이라 지금은 걸지
-        # 않았고, RDS MySQL에서 검증한 뒤 붙일 것.
+        # 이 수집기는 엔진 중립(InnoDB 사실만 쓴다)이라 E-3에서 rds_instance
+        # 분기에도 붙였다(위 "mysql" in engine 블록). 한쪽만 고치지 말 것.
         try:
             result["health"] = collect_mysql_health_checks(
                 cache_rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id,
