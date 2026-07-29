@@ -113,9 +113,27 @@ def _project(action_type: str, details: dict) -> dict:
     if action_type == "execute_sql":
         return {"sql": str(d.get("sql") or "").strip()}
     if action_type == "modify_parameter":
+        # Folded the same way as modify_rds_instance_params below, and for the
+        # same reason: the tool now adopts the spelling
+        # describe_db_cluster_parameters reported, so an approval registered from
+        # the DBA's typed spelling and an execute carrying the API's have to
+        # project to ONE hash or the card dead-ends (fails closed into a loop the
+        # DBA cannot exit). Folding cannot merge two real Aurora parameters and
+        # cannot move the hash of an approval that named one: MEASURED live
+        # (describe-only, ap-northeast-2, 2026-07-29) zero of the 448 / 416 / 424
+        # parameters in pgtsd-demo-cpg, default.aurora-postgresql15 and
+        # default.aurora-mysql8.0 differ from their own stripped+lowered form,
+        # and zero collide under the fold.
+        v = d.get("value")
         return {
-            "parameter_name": d.get("parameter_name") or d.get("parameter"),
-            "value": _norm_val(d.get("value")),
+            "parameter_name": str(
+                d.get("parameter_name") or d.get("parameter") or "").strip().lower(),
+            # _norm_val STAYS (unlike the instance projection): it collapses
+            # 200 / 200.0 / "200", which the approval card and the tool arg do
+            # disagree on. Strip first, because _norm_val leaves a padded
+            # NON-numeric value alone (MEASURED: " 200 " already hashed the same
+            # as "200", " ON " did not hash the same as "ON").
+            "value": _norm_val(v.strip() if isinstance(v, str) else v),
         }
     if action_type == "modify_scaling":
         return {

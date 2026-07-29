@@ -365,6 +365,24 @@ def test_canonical_hash_request_and_execute_shapes_agree():
     # modify_parameter: response key "parameter" vs tool arg "parameter_name"
     assert canonical_action_hash("modify_parameter", {"parameter": "work_mem", "value": "64MB"}) == \
         canonical_action_hash("modify_parameter", {"parameter_name": "work_mem", "value": "64MB"})
+    # modify_parameter adopts the spelling describe_db_cluster_parameters reports,
+    # so the DBA's typed spelling (which is what a card can be registered from)
+    # and the API's have to project to ONE hash. Normalising on only one leg
+    # leaves a card that fails closed forever, which is a dead-end, not a refusal.
+    for typed in (" work_mem ", "WORK_MEM", "Work_Mem"):
+        assert canonical_action_hash("modify_parameter", {"parameter_name": typed, "value": "64MB"}) == \
+            canonical_action_hash("modify_parameter", {"parameter_name": "work_mem", "value": "64MB"})
+    # ...and the value the same way. _norm_val already folded a padded NUMERIC
+    # value (it parses as float); a padded non-numeric one needs the strip.
+    assert canonical_action_hash("modify_parameter", {"parameter_name": "work_mem", "value": " ON "}) == \
+        canonical_action_hash("modify_parameter", {"parameter_name": "work_mem", "value": "ON"})
+    assert canonical_action_hash("modify_parameter", {"parameter_name": "work_mem", "value": " 200 "}) == \
+        canonical_action_hash("modify_parameter", {"parameter_name": "work_mem", "value": 200})
+    # Folding must not merge two DIFFERENT parameters or two different values.
+    assert canonical_action_hash("modify_parameter", {"parameter_name": "work_mem", "value": "64MB"}) != \
+        canonical_action_hash("modify_parameter", {"parameter_name": "work_memory", "value": "64MB"})
+    assert canonical_action_hash("modify_parameter", {"parameter_name": "work_mem", "value": "ON"}) != \
+        canonical_action_hash("modify_parameter", {"parameter_name": "work_mem", "value": "OFF"})
     # modify_scaling: int vs float, and min_acu alias vs min_capacity
     assert canonical_action_hash("modify_scaling", {"min_acu": 2, "max_acu": 8}) == \
         canonical_action_hash("modify_scaling", {"min_capacity": 2.0, "max_capacity": 8.0})

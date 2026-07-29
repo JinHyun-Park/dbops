@@ -5,8 +5,12 @@ Aurora-relational only. The handler positive-gates this tool on the
 INSTANCE parameter groups), DocumentDB, DynamoDB and ElastiCache refuse with
 unsupported_engine instead of failing inside `rds.describe_db_clusters`.
 
-THE APPROVAL IS SINGLE-USE, so every precondition that is knowable before
-`verify_approval` is answered before it. This tool used to go straight from
+THE APPROVAL IS SINGLE-USE. Every precondition this tool can answer from the two
+describes it already makes, plus the shape of its own arguments, is answered
+before `verify_approval`. TWO are deliberately left to the API and both burn the
+approval when they fire (`AllowedValues` and the cross-account tag, see below), so
+"everything knowable" would be an overclaim: what holds is that nothing this code
+can see is discovered after the consume. This tool used to go straight from
 describe_db_clusters to modify_db_cluster_parameter_group with no
 describe_db_cluster_parameters anywhere, so it could see NEITHER whether the
 parameter is modifiable NOR whether it exists in the group at all, and both
@@ -24,6 +28,24 @@ APIs return the same paginated shape with the same per-parameter fields, so only
 the bound API and its group keyword are passed in. Sibling tools in this package
 already share helpers this way (modify_custom_endpoint imports
 delete_custom_endpoint.find_custom_endpoint).
+
+Because that lookup matches on `.strip().lower()`, the arguments are normalised
+the same way BEFORE anything is bound to the approval, and from the moment the
+parameter is found the API's OWN spelling is the name (response, approval payload
+and write alike). Sharing the case-insensitive lookup without that made the
+preflight pass on a padded or mis-cased name and then hand the CALLER's raw string
+to modify_db_cluster_parameter_group, i.e. it moved the burn from the preflight to
+the write instead of removing it. MEASURED pre-fix with verify_approval spied and
+the write intercepted by a local double: `" max_connections "`, `MAX_CONNECTIONS`
+and an empty value all reached the write with verify_approval called ONCE (the
+approval gone). Post-fix the first two are normalised and the write receives
+`max_connections`; the empty value is refused as invalid_request with 0 consumes,
+because clearing a parameter back to the engine default is
+reset_db_cluster_parameter_group, a different operation this tool does not do.
+`approval_guard._project("modify_parameter")` folds parameter_name and strips
+value for the same reason the instance action does: adopting the API's spelling on
+only one leg would leave a card that can never verify, which fails closed but into
+a loop the DBA cannot exit.
 
 Still left to the API, exactly as in the instance tool, and both burn the approval
 when they fire: `AllowedValues` (the field is free-form, and a parser that
@@ -64,6 +86,24 @@ def modify_parameter_impl(
     # set_docdb_profiler). The approval is SINGLE-USE: consuming it and then
     # refusing on a precondition that was already true at approval time burnt the
     # approval, and the retry died with "already consumed".
+    #
+    # The ARGUMENTS are a precondition too, and the cheapest one. Same
+    # normalisation as modify_rds_instance_params: only surrounding whitespace
+    # goes, because "0" and "off" are legitimate parameter values, and
+    # _project("modify_parameter") folds the name and strips the value identically
+    # so the preview leg and the execute leg hash the same text.
+    parameter_name = (parameter_name or "").strip()
+    value = str(value if value is not None else "").strip()
+
+    if not parameter_name:
+        return {"status": "invalid_request", "cluster_id": cluster_id,
+                "reason": "parameter_name이 필요합니다 (예: work_mem)."}
+    if not value:
+        return {"status": "invalid_request", "cluster_id": cluster_id,
+                "reason": "value가 필요합니다. 파라미터를 엔진 기본값으로 되돌리는 것은 "
+                          "이 툴이 지원하지 않는 별개의 작업입니다"
+                          "(reset_db_cluster_parameter_group)."}
+
     try:
         rds = rds_client_for_cluster(cluster_id)
     except Exception:
@@ -132,6 +172,13 @@ def modify_parameter_impl(
                       "없습니다. 엔진/버전에 맞는 이름인지 확인하세요.",
         }
 
+    # From here on the API's spelling IS the parameter's name: it goes into the
+    # responses, into the approval payload and into the write, so the name the DBA
+    # reads back on the card is the name that was actually sent to AWS. Same as
+    # the instance tool. Without this the case-insensitive lookup accepted
+    # " max_connections " / MAX_CONNECTIONS and then sent that raw string to
+    # modify_db_cluster_parameter_group AFTER the guard had consumed the approval.
+    parameter_name = str(found.get("ParameterName") or "").strip() or parameter_name
     # ParameterValue is ABSENT for a parameter left at the engine default, which
     # is not the same as an empty string (MEASURED: 279 of the 448 parameters in
     # pgtsd-demo-cpg carry no ParameterValue at all).
@@ -172,7 +219,10 @@ def modify_parameter_impl(
 
     # parameter_group is informational here: the approval projection binds
     # {parameter_name, value} only, so echoing the group into action_details
-    # cannot break the hash.
+    # cannot break the hash. `parameter_name` is the API's spelling by now, which
+    # is what the approval_required card above advertised too, and the projection
+    # folds both anyway, so a card registered from the DBA's typed spelling still
+    # verifies.
     guard = verify_approval(
         approval_id,
         cluster_id,

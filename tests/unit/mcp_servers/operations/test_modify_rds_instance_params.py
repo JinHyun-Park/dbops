@@ -199,11 +199,33 @@ def test_instance_with_no_parameter_group_refuses():
     assert out["status"] == "no_parameter_group"
 
 
-def test_unresolvable_instance_refuses():
+def test_a_describe_failure_is_not_reported_as_a_missing_instance():
+    """"we could not ask" and "RDS says there is no such instance" are different
+    answers, and only the second one makes "check the identifier" actionable
+    advice. Both used to return not_applicable with that same reason, which sent
+    a DBA to fix an identifier that a throttle or an AccessDenied had nothing to
+    do with. Same distinction _find_parameter draws for the parameter scan."""
     rds = MagicMock()
-    rds.describe_db_instances.side_effect = Exception("DBInstanceNotFound")
+    rds.describe_db_instances.side_effect = Exception(
+        "ThrottlingException boom: arn:aws:rds:ap-northeast-2:830858425797:db:x")
+    out = _call(rds, parameter_name="innodb_buffer_pool_size", value="1")
+    assert out["status"] == "lookup_failed"
+    assert "식별자" not in out["reason"]
+    # Static reason only: no raw exception text in a response payload, ever.
+    blob = " ".join(str(v) for v in out.values())
+    for leak in ("boom", "Throttling", "arn:aws:rds", "Exception"):
+        assert leak not in blob, f"raw exception text leaked: {out}"
+    rds.modify_db_parameter_group.assert_not_called()
+
+
+def test_unresolvable_instance_refuses():
+    """RDS answered with an empty DBInstances list, i.e. no such instance."""
+    rds = MagicMock()
+    rds.describe_db_instances.return_value = {"DBInstances": []}
     out = _call(rds, parameter_name="innodb_buffer_pool_size", value="1")
     assert out["status"] == "not_applicable"
+    assert "식별자" in out["reason"]
+    rds.modify_db_parameter_group.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

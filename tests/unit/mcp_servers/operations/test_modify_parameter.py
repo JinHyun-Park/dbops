@@ -347,21 +347,129 @@ def test_parameter_found_on_a_later_page(mock_rds_for):
     mock_rds.describe_db_parameters.assert_not_called()
 
 
+# ---------------------------------------------------------------------------
+# The ARGUMENTS are a precondition too, and sharing a case-insensitive lookup
+# without normalising them was a hole the sharing itself opened: a padded or
+# mis-cased name PASSED the new preflight and then the CALLER's raw string was
+# handed to modify_db_cluster_parameter_group, after the guard had consumed the
+# single-use approval.
+#
+# MEASURED with verify_approval spied and the write intercepted by a local double
+# (AWS never called). Pre-fix, execute leg: " max_connections " and
+# MAX_CONNECTIONS both reached the write VERBATIM with verify_approval called
+# ONCE, and an empty value reached it as ParameterValue "". Post-fix: the first
+# two are sent as 'max_connections' (byte-identical to the clean-name happy path)
+# and the empty value is invalid_request with 0 consumes.
+#
+# Live grounding for adopting the API's spelling (describe-only, ap-northeast-2,
+# 2026-07-29): of the 448 / 416 / 424 parameters in pgtsd-demo-cpg,
+# default.aurora-postgresql15 and default.aurora-mysql8.0, ZERO differ from their
+# own stripped+lowered form and zero collide under the fold. So on Aurora the
+# adopted spelling can only ever differ from the caller's when the caller sent
+# padding or the wrong case, and folding parameter_name in
+# approval_guard._project cannot move the hash of an approval that named a real
+# parameter.
+# ---------------------------------------------------------------------------
+
+@patch("mcp_servers.operations.tools.modify_parameter.verify_approval")
 @patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
-def test_a_case_difference_matches_but_the_caller_spelling_is_kept(mock_rds_for):
-    """The lookup folds case (it is shared with the INSTANCE tool, where SQL
-    Server forces it). Aurora does NOT adopt the API's spelling afterwards:
-    approval_guard._project('modify_parameter') does not case-fold
-    parameter_name, so rewriting it here would stop an in-flight approval from
-    ever matching. Nothing is lost by that: MEASURED zero mixed-case names across
-    all three Aurora groups probed (448 + 416 + 424), so there is no display-vs-API
-    spelling to reconcile the way SQL Server has."""
+def test_a_padded_name_is_written_in_the_apis_spelling(mock_rds_for, mock_verify):
+    """The write, the approval payload and the response all carry the name
+    describe_db_cluster_parameters reported, never the caller's raw string."""
+    mock_verify.return_value = {"ok": True}
     mock_rds = _rds(params=[P_WORK_MEM])
     mock_rds_for.return_value = mock_rds
     result = modify_parameter_impl(
-        MagicMock(), cluster_id="prod-pg-1", parameter_name="WORK_MEM", value="8MB")
+        MagicMock(), cluster_id="prod-pg-1", parameter_name="  work_mem  ",
+        value="  8MB  ", approved=True, approval_id="appr-1")
+    assert result["status"] == "modified"
+    assert result["parameter"] == "work_mem"
+    assert result["value"] == "8MB"
+    sent = mock_rds.modify_db_cluster_parameter_group.call_args.kwargs["Parameters"][0]
+    assert sent["ParameterName"] == "work_mem"
+    assert sent["ParameterValue"] == "8MB"
+    # The guard has to be asked about the SAME text that gets written, or the
+    # approval is bound to one operation and the write performs another.
+    assert mock_verify.call_args.kwargs["payload"] == {
+        "parameter_name": "work_mem", "value": "8MB"}
+
+
+@patch("mcp_servers.operations.tools.modify_parameter.verify_approval")
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_a_case_difference_is_written_in_the_apis_spelling(mock_rds_for, mock_verify):
+    """The lookup folds case (it is shared with the INSTANCE tool, where SQL
+    Server forces it), so the caller's spelling must not survive into the write:
+    matching case-insensitively and then sending MAX_CONNECTIONS moved the burnt
+    approval from the preflight to the API instead of removing it."""
+    mock_verify.return_value = {"ok": True}
+    mock_rds = _rds(params=[P_WORK_MEM])
+    mock_rds_for.return_value = mock_rds
+    result = modify_parameter_impl(
+        MagicMock(), cluster_id="prod-pg-1", parameter_name="WORK_MEM", value="8MB",
+        approved=True, approval_id="appr-1")
+    assert result["status"] == "modified"
+    assert result["parameter"] == "work_mem"
+    sent = mock_rds.modify_db_cluster_parameter_group.call_args.kwargs["Parameters"][0]
+    assert sent["ParameterName"] == "work_mem"
+
+
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_the_approval_card_advertises_the_apis_spelling(mock_rds_for):
+    """The preview leg is where the card is minted, so it has to carry the same
+    normalised name the execute leg will hash and write."""
+    mock_rds_for.return_value = _rds(params=[P_WORK_MEM])
+    result = modify_parameter_impl(
+        MagicMock(), cluster_id="prod-pg-1", parameter_name=" WORK_MEM ", value=" 8MB ")
     assert result["status"] == "approval_required"
-    assert result["parameter"] == "WORK_MEM"
+    assert result["parameter"] == "work_mem"
+    assert result["value"] == "8MB"
+
+
+@patch("mcp_servers.operations.tools.modify_parameter.verify_approval")
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_an_empty_value_is_refused_without_consuming_the_approval(
+        mock_rds_for, mock_verify):
+    """An empty value used to be sent as ParameterValue "" after the consume.
+    Clearing a parameter back to the engine default is
+    reset_db_cluster_parameter_group, a different operation, so this refuses
+    instead of guessing, and refuses before the guard."""
+    mock_verify.return_value = {"ok": True}
+    mock_rds = _rds()
+    mock_rds_for.return_value = mock_rds
+    for empty in ("", "   ", None):
+        result = modify_parameter_impl(
+            MagicMock(), cluster_id="prod-pg-1", parameter_name="work_mem",
+            value=empty, approved=True, approval_id="appr-1")
+        assert result["status"] == "invalid_request", empty
+        mock_verify.assert_not_called()
+        mock_rds.modify_db_cluster_parameter_group.assert_not_called()
+
+
+@patch("mcp_servers.operations.tools.modify_parameter.verify_approval")
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_an_empty_parameter_name_is_refused_without_consuming_the_approval(
+        mock_rds_for, mock_verify):
+    mock_verify.return_value = {"ok": True}
+    mock_rds = _rds()
+    mock_rds_for.return_value = mock_rds
+    result = modify_parameter_impl(
+        MagicMock(), cluster_id="prod-pg-1", parameter_name="   ", value="8MB",
+        approved=True, approval_id="appr-1")
+    assert result["status"] == "invalid_request"
+    mock_verify.assert_not_called()
+    mock_rds.modify_db_cluster_parameter_group.assert_not_called()
+
+
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_a_falsy_but_real_value_is_not_treated_as_empty(mock_rds_for):
+    """"0" and "off" are legitimate parameter values. Only whitespace is
+    stripped, and only an actually-empty value is refused."""
+    mock_rds_for.return_value = _rds(params=[P_WORK_MEM])
+    for real in ("0", "off", "OFF"):
+        result = modify_parameter_impl(
+            MagicMock(), cluster_id="prod-pg-1", parameter_name="work_mem", value=real)
+        assert result["status"] == "approval_required", real
+        assert result["value"] == real
 
 
 @patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")

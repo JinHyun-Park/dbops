@@ -191,12 +191,23 @@ def operations_schema():
         # "Modify DB parameter" alone read as engine-neutral and invited the agent
         # to call the cluster tool on an RDS instance, which the gateway then
         # refuses with unsupported_engine (a wasted turn, not a wrong write).
+        # The refusals have to be IN the description: this string is the only
+        # contract the agent sees, so a preflight it does not know about becomes a
+        # promise to the DBA that the tool will not keep. Kept level with the
+        # modify_rds_instance_params description below, which advertises the same
+        # pre-approval refusals.
         _tool("modify_parameter",
               "Aurora clusters only: modify a parameter in the CLUSTER parameter group "
               "(modify_db_cluster_parameter_group, ApplyMethod=pending-reboot, so a reboot "
               "is needed before the running value changes). A standalone RDS instance has no "
               "cluster parameter group, use modify_rds_instance_params for those. "
-              "AWS-managed default.* groups are refused; requires approval",
+              "AWS-managed default.* groups are refused, and so is a parameter that the group "
+              "does not have or that AWS pins for the engine version (IsModifiable=false), "
+              "all BEFORE any approval is requested or consumed. parameter_name is trimmed, "
+              "matched case-insensitively and echoed back in the AWS API's own spelling, so "
+              "the name on the approval card is the name that gets written; an empty value is "
+              "refused, since resetting a parameter to the engine default is a different "
+              "operation; requires approval",
               {"cluster_id": "string", "parameter_name": "string", "value": "string", "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "parameter_name", "value"]),
         _tool("modify_scaling", "Scale instance (requires approval)",

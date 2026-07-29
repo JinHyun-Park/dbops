@@ -96,15 +96,26 @@ logger = logging.getLogger(__name__)
 # any real group while making a bad/never-ending Marker terminate.
 _MAX_PARAM_PAGES = 25
 
+_LOOKUP_FAILED = object()
+
 
 def _describe_instance(rds, cluster_id):
-    """Return the instance dict, or None. Never raises."""
+    """Return the instance dict, None when RDS says there is no such instance, or
+    _LOOKUP_FAILED when the describe could not be made at all. Never raises.
+
+    Those last two are DIFFERENT answers and this used to collapse them into one,
+    which is the same could-not-ask / does-not-exist conflation _find_parameter
+    below is explicitly written to avoid. Both landed on not_applicable with a
+    reason that told the DBA to check the target identifier: after a throttle or
+    an AccessDenied that sends them to fix a name that was never wrong, and the
+    identifier is the one thing that is not the problem.
+    """
     try:
         instances = rds.describe_db_instances(
             DBInstanceIdentifier=cluster_id).get("DBInstances") or []
     except Exception:
         logger.warning("describe_db_instances failed for %s", cluster_id, exc_info=True)
-        return None
+        return _LOOKUP_FAILED
     return instances[0] if instances else None
 
 
@@ -118,9 +129,6 @@ def _instance_param_group(inst):
     if not groups:
         return ""
     return groups[0].get("DBParameterGroupName") or ""
-
-
-_LOOKUP_FAILED = object()
 
 
 def _find_parameter(describe, group_kwarg, group_name, parameter_name):
@@ -214,9 +222,18 @@ def modify_rds_instance_params_impl(
     rds = client_for_cluster(cluster_id, "rds")
 
     inst = _describe_instance(rds, cluster_id)
+    if inst is _LOOKUP_FAILED:
+        # We could not ASK. Reusing lookup_failed, the status the parameter scan
+        # below already returns for the same class of answer.
+        return {"status": "lookup_failed", "cluster_id": cluster_id,
+                "reason": "인스턴스 정보를 조회할 수 없어 변경하지 않았습니다. 잠시 후 다시 "
+                          "시도하세요 (자세한 원인은 서버 로그를 확인하세요)."}
     if inst is None:
+        # RDS answered, and the answer is that this instance does not exist. Only
+        # here is "check the identifier" actionable advice.
         return {"status": "not_applicable", "cluster_id": cluster_id,
-                "reason": "인스턴스를 조회할 수 없습니다. 대상 식별자를 확인하세요."}
+                "reason": "해당 식별자의 RDS 인스턴스를 찾을 수 없습니다. 대상 식별자를 "
+                          "확인하세요."}
 
     live_group = _instance_param_group(inst)
     if not live_group:
