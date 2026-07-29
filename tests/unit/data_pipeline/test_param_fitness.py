@@ -132,3 +132,46 @@ def test_unmapped_instance_skips_memory_rules():
     assert "param_work_mem_risk" not in emitted   # 메모리 미상이라 skip
     assert "param_max_connections" in emitted      # peak 10 / 500 = 2% → 과다
     assert result["memory_mapping"].startswith("unmapped")
+
+
+def test_the_window_wording_is_derived_from_the_window_that_was_measured():
+    """The PostgreSQL twin of the mysql_param_fitness finding: the peak-connection
+    and cache-hit statements said INTERVAL '7 days' while their findings said "7일"
+    as separate hardcoded literals, so widening the window left the finding
+    claiming a 7-day average of a longer measurement with nothing failing. Both
+    halves now come from WINDOW_DAYS; this drives the constant to a different
+    value and requires the SQL and the wording to move together."""
+    settings = {
+        "max_connections": ("500", ""),
+        "work_mem": ("4096", "kB"),
+        "effective_cache_size": ("1572864", "8kB"),
+    }
+    meta = {"instance_class": "db.r6g.large", "engine_mode": "provisioned",
+            "serverlessv2_max_acu": None}
+    # peak 10 / 500 = 2% -> M1 fires; avg_hit 80% < 95% floor -> M5 fires.
+    metrics = {"peak_conn": 10, "conn_samples": 100, "avg_hit": 80.0, "hit_samples": 100}
+    rows, sqls = [], []
+    with patch.object(pf, "WINDOW_DAYS", 30), patch.object(pf, "_execute") as m:
+        def capture(rds, arn, secret, db, sql, params=None):
+            sqls.append(sql)
+            if sql.strip().upper().startswith("INSERT"):
+                rows.append(params)
+            return _mock_execute(meta, settings, metrics, 0)(rds, arn, secret, db, sql, params)
+        m.side_effect = capture
+        pf.collect_param_fitness(MagicMock(), "arn", "secret", "db", "c1",
+                                 snapshot_ts="2026-06-11T00:00:00Z")
+
+    windowed = [s for s in sqls if "metric_snapshots" in s]
+    assert len(windowed) == 2, "peak-connections and cache-hit windows"
+    for sql in windowed:
+        assert "INTERVAL '30 days'" in sql, sql
+        assert "'7 days'" not in sql, sql
+
+    (hit,) = [r for r in rows if r["check_type"] == "param_buffer_cache_hit"]
+    assert hit["value_str"] == "80.0% (30일 평균)"
+    assert "30일 평균" in hit["recommendation"]
+    (conn,) = [r for r in rows if r["check_type"] == "param_max_connections"]
+    assert "30일 peak" in conn["threshold_str"]
+    assert "최근 30일" in conn["recommendation"]
+    for row in (hit, conn):
+        assert "7일" not in row["value_str"] + row["threshold_str"] + row["recommendation"]

@@ -96,8 +96,10 @@ def _mock_execute(meta, settings, metrics):
 def _run(meta, settings, metrics):
     emitted = []
     rows = []
+    sqls = []
     with patch.object(pf, "_execute") as m:
         def capture(rds, arn, secret, db, sql, params=None):
+            sqls.append(sql)
             if sql.strip().upper().startswith("INSERT"):
                 emitted.append(params["check_type"])
                 rows.append(params)
@@ -107,6 +109,7 @@ def _run(meta, settings, metrics):
             MagicMock(), "arn", "secret", "db", "c1", snapshot_ts="2026-06-11T00:00:00Z"
         )
     result["_rows"] = rows
+    result["_sql"] = sqls
     return emitted, result
 
 
@@ -222,6 +225,38 @@ def test_cache_hit_rule_fires_for_rds_instance_from_innodb_metric():
     (row,) = [r for r in result["_rows"] if r["check_type"] == "param_buffer_cache_hit"]
     assert "80.0%" in row["value_str"]
     assert '"metric_type": "innodb_buffer_pool_hit_rate"' in row["details"]
+
+
+def test_the_window_wording_is_derived_from_the_window_that_was_measured():
+    """The M1 and M3 statements said INTERVAL '7 days' while their findings said
+    "7일" as separate hardcoded literals. Widening the window therefore left the
+    finding claiming a 7-day average of a longer measurement, and NOTHING failed:
+    MEASURED pre-fix with the interval edited to 30 days, value_str stayed
+    "80.0% (7일 평균)" and the full 2634-test suite stayed green.
+
+    Both halves now come from WINDOW_DAYS, so this drives the constant to a
+    different value and requires the SQL and the wording to move together. It
+    would also catch the reverse mistake (wording derived, SQL still literal)."""
+    metrics = {"peak_conn": 10, "conn_samples": 100,
+               "avg_hit": None, "hit_samples": 0,
+               "innodb_hit": 80.0, "innodb_samples": 500}
+    with patch.object(pf, "WINDOW_DAYS", 30):
+        emitted, result = _run(_RDS_META, _SMALL_BUFFERS, metrics)
+
+    measured = [s for s in result["_sql"] if "metric_snapshots" in s]
+    assert len(measured) == 2, "M1 peak-connections and M3 cache-hit windows"
+    for sql in measured:
+        assert "INTERVAL '30 days'" in sql, sql
+        assert "'7 days'" not in sql, sql
+
+    (hit,) = [r for r in result["_rows"] if r["check_type"] == "param_buffer_cache_hit"]
+    assert hit["value_str"] == "80.0% (30일 평균)"
+    assert "30일 평균" in hit["recommendation"]
+    (conn,) = [r for r in result["_rows"] if r["check_type"] == "param_max_connections"]
+    assert "30일 peak" in conn["threshold_str"]
+    assert "최근 30일" in conn["recommendation"]
+    for row in (hit, conn):
+        assert "7일" not in row["value_str"] + row["threshold_str"] + row["recommendation"]
 
 
 def test_cache_hit_rule_prefers_the_cloudwatch_metric_for_aurora():

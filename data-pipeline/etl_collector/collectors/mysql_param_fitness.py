@@ -35,6 +35,11 @@ MAXCONN_MIN_TO_FLAG = 100        # 너무 작은 max_connections는 굳이 안 �
 CONN_BUFFER_RISK_PCT = 0.25      # per-thread 버퍼 합×max_conn이 메모리 25% 초과 시 경고
 CACHE_HIT_FLOOR = 95.0           # 버퍼 캐시 히트율(%) 하한
 MIN_SAMPLES = 20                 # 메트릭 표본 최소치
+# 워크로드 메트릭(peak 커넥션·버퍼 캐시 히트)을 재는 윈도. SQL의 INTERVAL과
+# finding 문구가 이 상수 하나에서 나온다. 예전에는 statement가 INTERVAL '7 days'
+# 이고 문구가 "7일 평균"으로 각각 하드코딩돼 있어서, 윈도를 넓히면 finding이
+# 30일치 측정을 "7일 평균"이라고 말하는데도 깨지는 것이 아무것도 없었다.
+WINDOW_DAYS = 7
 
 # MySQL global variables 중 per-connection(세션)마다 할당될 수 있는 버퍼.
 # Aurora MySQL은 모두 바이트 값으로 보고한다.
@@ -146,12 +151,12 @@ def collect_mysql_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, c
     except (TypeError, ValueError):
         max_conn = None
 
-    # --- 3) 워크로드 메트릭(7일): peak 커넥션, 평균 버퍼 캐시 히트
+    # --- 3) 워크로드 메트릭(WINDOW_DAYS일): peak 커넥션, 평균 버퍼 캐시 히트
     conn_rows = _execute(
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
         "SELECT MAX(value) AS peak, COUNT(*) AS samples FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = 'db_connections' "
-        "  AND ts > NOW() - INTERVAL '7 days' "
+        f"  AND ts > NOW() - INTERVAL '{WINDOW_DAYS} days' "
         "  AND (dimensions IS NULL OR dimensions::text = '{}')", {"cid": cluster_id},
     )
     peak_conn = float(conn_rows[0]["peak"]) if conn_rows and conn_rows[0]["peak"] is not None else None
@@ -164,8 +169,8 @@ def collect_mysql_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, c
         add(
             "param_max_connections", "info", "max_connections",
             f"peak {int(peak_conn)} / {max_conn} ({usage_pct:.1f}%)",
-            f"7일 peak가 설정의 {MAXCONN_USAGE_FLOOR*100:.0f}% 미만",
-            f"최근 7일 동시 연결 peak가 {int(peak_conn)}인데 max_connections는 "
+            f"{WINDOW_DAYS}일 peak가 설정의 {MAXCONN_USAGE_FLOOR*100:.0f}% 미만",
+            f"최근 {WINDOW_DAYS}일 동시 연결 peak가 {int(peak_conn)}인데 max_connections는 "
             f"{max_conn}으로 설정돼 있습니다(사용률 {usage_pct:.1f}%). MySQL은 각 연결마다 "
             f"sort/join/read 버퍼를 예약할 수 있어, 과다 할당은 메모리 상한을 끌어올립니다. "
             f"기본 파라미터 그룹의 인스턴스 메모리 공식이 만든 값이라면 파라미터 조정보다 "
@@ -231,7 +236,7 @@ def collect_mysql_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, c
         "FROM metric_snapshots "
         "WHERE cluster_id = :cid "
         "  AND metric_type IN ('buffer_cache_hit', 'innodb_buffer_pool_hit_rate') "
-        "  AND ts > NOW() - INTERVAL '7 days' "
+        f"  AND ts > NOW() - INTERVAL '{WINDOW_DAYS} days' "
         "  AND (dimensions IS NULL OR dimensions::text = '{}')", {"cid": cluster_id},
     )
     hr = hit_rows[0] if hit_rows else {}
@@ -260,9 +265,10 @@ def collect_mysql_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, c
     if avg_hit is not None and hit_samples >= MIN_SAMPLES and avg_hit < CACHE_HIT_FLOOR:
         add(
             "param_buffer_cache_hit", "info", "buffer cache hit ratio",
-            f"{avg_hit:.1f}% (7일 평균)",
+            f"{avg_hit:.1f}% ({WINDOW_DAYS}일 평균)",
             f"{CACHE_HIT_FLOOR:.0f}% 미만",
-            f"버퍼 캐시 히트율이 7일 평균 {avg_hit:.1f}%로 {CACHE_HIT_FLOOR:.0f}% 미만입니다 — "
+            f"버퍼 캐시 히트율이 {WINDOW_DAYS}일 평균 {avg_hit:.1f}%로 "
+            f"{CACHE_HIT_FLOOR:.0f}% 미만입니다 — "
             f"작업셋이 인스턴스 메모리(InnoDB 버퍼 풀)를 초과해 디스크 I/O가 늘고 있을 수 "
             f"있습니다. "
             + (

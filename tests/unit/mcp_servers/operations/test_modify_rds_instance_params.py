@@ -465,38 +465,76 @@ def test_guard_denial_writes_nothing():
     rds.modify_db_parameter_group.assert_not_called()
 
 
-def test_group_drift_after_approval_is_refused():
-    """The approval pinned dbops-demo-mysql84. If the instance now points at
-    another group, writing there would change an instance the DBA never saw."""
-    rds = _rds(["dbops-demo-mysql84", "someone-elses-pg"], [P_DYNAMIC])
-    out = _call(rds, guard_ok={"ok": True},
-                parameter_name="innodb_buffer_pool_size", value="1",
-                parameter_group="dbops-demo-mysql84", approved=True, approval_id="u")
+def test_group_drift_is_refused_BEFORE_the_approval_is_consumed():
+    """The approval is hash-bound to dbops-demo-mysql84. If the instance points
+    somewhere else, writing there would change an instance the DBA never saw.
+
+    THE ORDERING IS THE POINT. `live_group` is read in this same invocation, so
+    the mismatch is known before the guard runs. It used to be found by a SECOND
+    describe_db_instances AFTER the consume: MEASURED pre-fix, status
+    state_changed with verify_approval called ONCE, i.e. the DBA lost the approval
+    AND got no change, on a condition that was already visible. Post-fix:
+    state_changed with verify_approval calls 0."""
+    guard = MagicMock(return_value={"ok": True})
+    rds = _rds(["someone-elses-pg"], [P_DYNAMIC])
+    with patch.object(M, "client_for_cluster", lambda cid, svc: rds), \
+         patch.object(M, "verify_approval", guard):
+        out = M.modify_rds_instance_params_impl(
+            None, "dbops-demo-mysql", parameter_name="innodb_buffer_pool_size",
+            value="1", parameter_group="dbops-demo-mysql84",
+            approved=True, approval_id="u")
     assert out["status"] == "state_changed"
+    guard.assert_not_called()
+    rds.modify_db_parameter_group.assert_not_called()
+    # Both group names, so the DBA can see WHICH way it drifted.
+    assert out["parameter_group"] == "someone-elses-pg"
+    assert out["approved_parameter_group"] == "dbops-demo-mysql84"
+
+
+def test_drift_to_a_default_group_is_refused_before_the_approval():
+    """A drift onto an AWS-default group is caught by the default.* refusal, which
+    also sits before the guard."""
+    guard = MagicMock(return_value={"ok": True})
+    rds = _rds(["default.mysql8.4"], [P_DYNAMIC])
+    with patch.object(M, "client_for_cluster", lambda cid, svc: rds), \
+         patch.object(M, "verify_approval", guard):
+        out = M.modify_rds_instance_params_impl(
+            None, "dbops-demo-mysql", parameter_name="innodb_buffer_pool_size",
+            value="1", parameter_group="dbops-demo-mysql84",
+            approved=True, approval_id="u")
+    assert out["status"] == "default_group_refused"
+    guard.assert_not_called()
     rds.modify_db_parameter_group.assert_not_called()
 
 
-def test_drift_to_a_default_group_after_approval_is_refused():
-    rds = _rds(["dbops-demo-mysql84", "default.mysql8.4"], [P_DYNAMIC])
-    out = _call(rds, guard_ok={"ok": True},
-                parameter_name="innodb_buffer_pool_size", value="1",
-                parameter_group="dbops-demo-mysql84", approved=True, approval_id="u")
-    assert out["status"] in ("state_changed", "default_group_refused")
-    rds.modify_db_parameter_group.assert_not_called()
+def test_an_omitted_parameter_group_does_not_consume_the_approval():
+    """An agent that leaves parameter_group out used to reach verify_approval and
+    fail the payload hash. That was closed but it CONSUMED nothing only by luck of
+    where the guard returns; the comparison answers it here instead, and the
+    reason must not claim the group "changed" when the arg was simply missing."""
+    guard = MagicMock(return_value={"ok": True})
+    rds = _rds(["dbops-demo-mysql84"], [P_DYNAMIC])
+    with patch.object(M, "client_for_cluster", lambda cid, svc: rds), \
+         patch.object(M, "verify_approval", guard):
+        out = M.modify_rds_instance_params_impl(
+            None, "dbops-demo-mysql", parameter_name="innodb_buffer_pool_size",
+            value="1", parameter_group="", approved=True, approval_id="u")
+    assert out["status"] == "state_changed"
+    guard.assert_not_called()
+    assert "다릅니다" in out["reason"]
 
 
-def test_instance_unreadable_after_approval_is_refused():
-    rds = MagicMock()
-    rds.describe_db_instances.side_effect = [
-        {"DBInstances": [{"DBParameterGroups": [{"DBParameterGroupName": "pg-a"}]}]},
-        Exception("throttled"),
-    ]
-    rds.describe_db_parameters.return_value = {"Parameters": [P_DYNAMIC]}
+def test_no_second_describe_runs_after_the_consume():
+    """The post-guard re-read is GONE, not merely reordered. It could not observe
+    anything the pre-guard read did not (both run at execute time), and any
+    refusal it produced arrived with the approval already spent. This pins the
+    absence: one describe_db_instances for the whole write."""
+    rds = _rds(["pg-a"], [P_DYNAMIC])
     out = _call(rds, guard_ok={"ok": True},
                 parameter_name="innodb_buffer_pool_size", value="1",
                 parameter_group="pg-a", approved=True, approval_id="u")
-    assert out["status"] == "not_applicable"
-    rds.modify_db_parameter_group.assert_not_called()
+    assert out["status"] == "modified"
+    assert rds.describe_db_instances.call_count == 1
 
 
 # ---------------------------------------------------------------------------

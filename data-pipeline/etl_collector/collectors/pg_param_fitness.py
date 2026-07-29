@@ -37,6 +37,11 @@ CACHE_HIT_FLOOR = 95.0          # 버퍼 캐시 히트율(%) 하한
 DEAD_RATIO_PCT = 20.0           # dead tuple 비율 임계
 DEAD_TABLES_TO_FLAG = 3         # 이 개수 이상 테이블이 압력이면 worker 진단
 MIN_SAMPLES = 20                # 메트릭 표본 최소치
+# 워크로드 메트릭(peak 커넥션·버퍼 캐시 히트)을 재는 윈도. SQL의 INTERVAL과
+# finding 문구가 이 상수 하나에서 나온다. 예전에는 statement가 INTERVAL '7 days'
+# 이고 문구가 "7일 평균"으로 각각 하드코딩돼 있어서, 윈도를 넓히면 finding이
+# 30일치 측정을 "7일 평균"이라고 말하는데도 깨지는 것이 아무것도 없었다.
+WINDOW_DAYS = 7
 
 
 def _execute(rds_data, cluster_arn, secret_arn, db_name, sql, params=None):
@@ -155,12 +160,12 @@ def collect_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, cache_d
     except (TypeError, ValueError):
         max_conn = None
 
-    # --- 3) 워크로드 메트릭(7일): peak 커넥션, 평균 버퍼 캐시 히트
+    # --- 3) 워크로드 메트릭(WINDOW_DAYS일): peak 커넥션, 평균 버퍼 캐시 히트
     conn_rows = _execute(
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
         "SELECT MAX(value) AS peak, COUNT(*) AS samples FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = 'db_connections' "
-        "  AND ts > NOW() - INTERVAL '7 days' "
+        f"  AND ts > NOW() - INTERVAL '{WINDOW_DAYS} days' "
         "  AND (dimensions IS NULL OR dimensions::text = '{}')", {"cid": cluster_id},
     )
     peak_conn = float(conn_rows[0]["peak"]) if conn_rows and conn_rows[0]["peak"] is not None else None
@@ -173,8 +178,8 @@ def collect_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, cache_d
         add(
             "param_max_connections", "info", "max_connections",
             f"peak {int(peak_conn)} / {max_conn} ({usage_pct:.1f}%)",
-            f"7일 peak가 설정의 {MAXCONN_USAGE_FLOOR*100:.0f}% 미만",
-            f"최근 7일 동시 연결 peak가 {int(peak_conn)}인데 max_connections는 "
+            f"{WINDOW_DAYS}일 peak가 설정의 {MAXCONN_USAGE_FLOOR*100:.0f}% 미만",
+            f"최근 {WINDOW_DAYS}일 동시 연결 peak가 {int(peak_conn)}인데 max_connections는 "
             f"{max_conn}으로 설정돼 있습니다(사용률 {usage_pct:.1f}%). 각 연결 슬롯은 "
             f"work_mem 등 백엔드 메모리를 예약하므로, 과다 할당은 메모리를 선점합니다. "
             f"Aurora가 인스턴스 메모리 공식으로 자동 설정한 값이라면 파라미터 조정보다 "
@@ -254,7 +259,7 @@ def collect_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, cache_d
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
         "SELECT AVG(value) AS avg_hit, COUNT(*) AS samples FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = 'buffer_cache_hit' "
-        "  AND ts > NOW() - INTERVAL '7 days' "
+        f"  AND ts > NOW() - INTERVAL '{WINDOW_DAYS} days' "
         "  AND (dimensions IS NULL OR dimensions::text = '{}')", {"cid": cluster_id},
     )
     avg_hit = float(hit_rows[0]["avg_hit"]) if hit_rows and hit_rows[0]["avg_hit"] is not None else None
@@ -262,9 +267,10 @@ def collect_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, cache_d
     if avg_hit is not None and hit_samples >= MIN_SAMPLES and avg_hit < CACHE_HIT_FLOOR:
         add(
             "param_buffer_cache_hit", "info", "buffer cache hit ratio",
-            f"{avg_hit:.1f}% (7일 평균)",
+            f"{avg_hit:.1f}% ({WINDOW_DAYS}일 평균)",
             f"{CACHE_HIT_FLOOR:.0f}% 미만",
-            f"버퍼 캐시 히트율이 7일 평균 {avg_hit:.1f}%로 {CACHE_HIT_FLOOR:.0f}% 미만입니다 — "
+            f"버퍼 캐시 히트율이 {WINDOW_DAYS}일 평균 {avg_hit:.1f}%로 "
+            f"{CACHE_HIT_FLOOR:.0f}% 미만입니다 — "
             f"작업셋이 인스턴스 메모리를 초과해 디스크 I/O가 늘고 있을 수 있습니다. "
             f"Aurora PG는 shared_buffers를 인스턴스 메모리 비율로 크게 자동 설정하므로, "
             f"파라미터 조정보다 인스턴스 메모리 상향(또는 Serverless v2 max ACU 상향)이 "

@@ -35,10 +35,38 @@ Safety:
     immediate, static -> pending-reboot. Forcing pending-reboot on a dynamic
     parameter would make the DBA reboot for a change that needed no downtime;
     claiming a static change took effect without a reboot would be a lie.
-  - The parameter GROUP NAME is hash-bound into the approval and re-read on a
-    FRESH describe at execute (TOCTOU): if the instance was pointed at a
-    different group after approval, the change is refused rather than written to
-    a group the DBA never saw.
+  - The parameter GROUP NAME is hash-bound into the approval and compared
+    against the group the instance points at RIGHT NOW (TOCTOU): if the instance
+    was re-pointed after approval, the change is refused rather than written to a
+    group the DBA never saw. That comparison happens BEFORE verify_approval,
+    because `live_group` is read in this same invocation and is therefore already
+    known: the mismatch used to be found by a SECOND describe_db_instances after
+    the consume, which returned state_changed with the approval already gone.
+  - CROSS-ACCOUNT AccessDenied is the other precondition still left to the API,
+    and it burns the approval when it fires.
+    cdk/cross-account/spoke-role-template.yaml (Sid RDSModifyExisting) authorizes
+    rds:ModifyDBParameterGroup under `aws:ResourceTag/ManagedBy=dbops`, and that
+    action authorizes against the PARAMETER GROUP, not the DB instance, so a
+    spoke-account group without the tag is denied AFTER the guard has consumed
+    the approval. Same shape as the snapshot-create incident recorded in that
+    same template. Not hypothetical: MEASURED on the standing demo fixture, the
+    group dbops-demo-mysql84 carries `dbops-demo=true` and `Application=DBOps`
+    and NOT ManagedBy, so the day that instance is reached through a spoke role
+    the write is denied and the approval is gone.
+    It IS knowable: the group's ARN is derivable from the DBInstanceArn this tool
+    already reads (`...:db:x` -> `...:pg:<group>`, DRIVEN live) and one
+    list_tags_for_resource would answer it. Deliberately NOT done here, for
+    three reasons. (1) The condition gates 15 write actions in that template, so
+    a check bolted onto this one tool leaves 14 siblings burning approvals while
+    looking covered; the fix belongs in one shared pre-consume preflight.
+    (2) Refusing on a missing tag asserts what the SPOKE ROLE's policy says, and
+    this code does not read that policy: the template is a template customers
+    adapt, so an untagged group is not reliably a denial. (3) It must not fire
+    same-account, where the hub role has no tag condition at all, so it would
+    also need the registry's spoke_role_arn as a second gate.
+    The modify_failed reason names the parameter-group tag so a DBA knows where
+    to look, and rds:ListTagsForResource is NOT granted to the operations Lambda
+    today, so implementing it is an IAM change too.
 
 No raw exception text reaches a return value; details go to the module logger.
 
@@ -60,10 +88,12 @@ from mcp_servers.shared.cluster_targets import client_for_cluster
 
 logger = logging.getLogger(__name__)
 
-# describe_db_parameters is paginated and has no name filter, so the group is
-# scanned for the requested parameter. Bounded on purpose: RDS MySQL 8.x carries
-# roughly 500 parameters (about 5 pages at the default MaxRecords), so 25 pages
-# is far past any real group while making a bad/never-ending Marker terminate.
+# describe_db_parameters / describe_db_cluster_parameters are paginated and have
+# no name filter, so the group is scanned for the requested parameter. Bounded on
+# purpose: MEASURED 536 parameters over 6 pages for dbops-demo-mysql84, and 448 /
+# 416 / 424 over 5 pages each for the Aurora cluster groups pgtsd-demo-cpg,
+# default.aurora-postgresql15 and default.aurora-mysql8.0. 25 pages is far past
+# any real group while making a bad/never-ending Marker terminate.
 _MAX_PARAM_PAGES = 25
 
 
@@ -93,38 +123,54 @@ def _instance_param_group(inst):
 _LOOKUP_FAILED = object()
 
 
-def _find_parameter(rds, group_name, parameter_name):
-    """Locate one parameter in a DB parameter group.
+def _find_parameter(describe, group_kwarg, group_name, parameter_name):
+    """Locate one parameter in an RDS parameter group.
 
-    Returns the parameter's OWN describe_db_parameters dict, None when the group
-    says it does not have it, or _LOOKUP_FAILED when the group could not be read
-    at all. The caller MUST distinguish "the group says this parameter does not
-    exist" from "we could not ask", because only the first is a safe refusal.
+    `describe` is the bound paginated API and `group_kwarg` its group-name
+    keyword, so this serves BOTH forms:
+      instance: rds.describe_db_parameters,         "DBParameterGroupName"
+      Aurora:   rds.describe_db_cluster_parameters, "DBClusterParameterGroupName"
+    The two responses are the same shape (Parameters[] + Marker) and carry the
+    same per-parameter fields, MEASURED on both, so one scan covers both. The
+    Aurora CLUSTER tool used to call NEITHER describe, which is why it could see
+    neither IsModifiable nor whether the parameter existed.
+
+    Returns the parameter's OWN dict, None when the group says it does not have
+    it, or _LOOKUP_FAILED when the group could not be read at all. The caller
+    MUST distinguish "the group says this parameter does not exist" from "we
+    could not ask", because only the first is a safe refusal.
 
     The whole dict is returned on purpose. This used to project three fields out
     of it and drop the rest, and the field it dropped was `IsModifiable`, i.e.
     exactly the precondition that decides whether the write can succeed at all.
 
-    Matching is CASE-INSENSITIVE, and the API's own spelling wins from here on.
-    RDS reports SQL Server parameter names in LOWER case ('max server memory
-    (mb)', 'agent xps'), while sys.configurations, which is what sp_configure and
-    this product's Configuration tab show, spells the same options in mixed case
-    ('max server memory (MB)', 'Agent XPs'). A case-sensitive compare therefore
-    rejected 7 of the 23 option names the dashboard itself displays. MEASURED on
-    the live groups: default.sqlserver-ex-15.0 has 117 parameters and
-    dbops-demo-mysql84 has 536, with ZERO names in either that differ only by
-    case, so folding case cannot merge two distinct parameters.
+    Matching is CASE-INSENSITIVE. RDS reports SQL Server parameter names in LOWER
+    case ('max server memory (mb)', 'agent xps'), while sys.configurations, which
+    is what sp_configure and this product's Configuration tab show, spells the
+    same options in mixed case ('max server memory (MB)', 'Agent XPs'). A
+    case-sensitive compare therefore rejected 7 of the 23 option names the
+    dashboard itself displays. Folding case cannot merge two distinct parameters:
+    MEASURED zero names differing only by case in default.sqlserver-ex-15.0
+    (117), dbops-demo-mysql84 (536), pgtsd-demo-cpg (448),
+    default.aurora-postgresql15 (416) and default.aurora-mysql8.0 (424).
+
+    Whether the CALLER then adopts the API's spelling is the caller's decision:
+    this instance tool does (its approval projection case-folds parameter_name to
+    match), the Aurora tool does NOT (its projection does not fold, so rewriting
+    the name would break an in-flight approval hash, and MEASURED zero Aurora
+    parameter names are mixed-case, so there is nothing to reconcile).
     """
     wanted = parameter_name.strip().lower()
     marker = None
     for _ in range(_MAX_PARAM_PAGES):
-        kwargs = {"DBParameterGroupName": group_name}
+        kwargs = {group_kwarg: group_name}
         if marker:
             kwargs["Marker"] = marker
         try:
-            resp = rds.describe_db_parameters(**kwargs)
+            resp = describe(**kwargs)
         except Exception:
-            logger.warning("describe_db_parameters failed for %s", group_name, exc_info=True)
+            logger.warning("%s failed for %s", getattr(describe, "__name__", "describe"),
+                           group_name, exc_info=True)
             return _LOOKUP_FAILED
         for p in resp.get("Parameters") or []:
             if str(p.get("ParameterName") or "").strip().lower() == wanted:
@@ -134,7 +180,7 @@ def _find_parameter(rds, group_name, parameter_name):
         # check a test double handing back a truthy mock would loop forever.
         if not isinstance(marker, str) or not marker:
             return None
-    logger.warning("describe_db_parameters exceeded %d pages for %s",
+    logger.warning("parameter scan exceeded %d pages for %s",
                    _MAX_PARAM_PAGES, group_name)
     return _LOOKUP_FAILED
 
@@ -191,7 +237,8 @@ def modify_rds_instance_params_impl(
             ),
         }
 
-    found = _find_parameter(rds, live_group, parameter_name)
+    found = _find_parameter(rds.describe_db_parameters, "DBParameterGroupName",
+                            live_group, parameter_name)
     if found is _LOOKUP_FAILED:
         return {"status": "lookup_failed", "cluster_id": cluster_id,
                 "parameter_group": live_group,
@@ -270,6 +317,38 @@ def modify_rds_instance_params_impl(
             ),
         }
 
+    # TOCTOU, answered with what is ALREADY IN HAND. `live_group` is the group
+    # the instance points at right now, read a few lines up in THIS invocation,
+    # and `parameter_group` is the group the DBA's approval is hash-bound to. So
+    # the comparison belongs here, BEFORE the guard consumes the approval.
+    #
+    # This used to run AFTER the consume, off a SECOND describe_db_instances, and
+    # returned state_changed with the approval already gone: a drift that was
+    # visible before the guard cost the DBA the approval AND the change. The
+    # second describe is gone rather than merely reordered, because it could not
+    # observe anything the first one did not: both run at execute time, so the
+    # window it covered is the microseconds between two adjacent calls, not the
+    # minutes between approval and execute (which is what `parameter_group` being
+    # in the hash covers). Should the instance be re-pointed inside that
+    # microsecond window, the write still lands on the group named on the approval
+    # card, i.e. the group the DBA reviewed, which is the correct target.
+    #
+    # An empty/omitted `parameter_group` lands here too, and the reason says
+    # "different from", not "changed": the arg may simply have been left out, and
+    # asserting drift would be a claim the data does not support. Either way the
+    # approval survives (it previously failed the hash instead, which was also
+    # closed but reported as a payload mismatch).
+    if live_group != parameter_group:
+        return {"status": "state_changed", "cluster_id": cluster_id,
+                "parameter_group": live_group,
+                "approved_parameter_group": parameter_group,
+                "reason": (
+                    f"승인에 기록된 DB 파라미터 그룹({parameter_group!r})이 이 인스턴스가 "
+                    f"현재 사용하는 그룹({live_group!r})과 다릅니다. 승인 이후 그룹이 "
+                    f"바뀌었을 수 있습니다. 승인을 소모하지 않았으니, 현재 그룹으로 다시 "
+                    f"승인 요청하세요."
+                )}
+
     guard = verify_approval(
         approval_id, cluster_id, "modify_rds_instance_params",
         payload={"cluster_id": cluster_id, "parameter_name": parameter_name,
@@ -280,28 +359,9 @@ def modify_rds_instance_params_impl(
                 "parameter": parameter_name, "value": value,
                 "reason": guard.get("reason", "approval guard rejected the request")}
 
-    # TOCTOU: the approval pinned a group name; re-read it and refuse if the
-    # instance now points somewhere else. Writing to the approved-but-detached
-    # group would change an instance the DBA never reviewed.
-    fresh = _describe_instance(rds, cluster_id)
-    fresh_group = _instance_param_group(fresh)
-    if not fresh_group:
-        return {"status": "not_applicable", "cluster_id": cluster_id,
-                "reason": "승인 이후 인스턴스의 파라미터 그룹을 확인할 수 없어 변경하지 않았습니다."}
-    if fresh_group != parameter_group:
-        return {"status": "state_changed", "cluster_id": cluster_id,
-                "parameter_group": fresh_group,
-                "reason": "승인 이후 인스턴스의 DB 파라미터 그룹이 바뀌었습니다. 안전을 위해 "
-                          "변경하지 않았습니다. 다시 승인 요청하세요."}
-    if fresh_group.startswith("default."):
-        return {"status": "default_group_refused", "cluster_id": cluster_id,
-                "parameter_group": fresh_group,
-                "reason": "승인 이후 인스턴스가 AWS 기본 파라미터 그룹으로 바뀌었습니다. "
-                          "기본 그룹은 수정할 수 없습니다."}
-
     try:
         rds.modify_db_parameter_group(
-            DBParameterGroupName=fresh_group,
+            DBParameterGroupName=live_group,
             Parameters=[{
                 "ParameterName": parameter_name,
                 "ParameterValue": value,
@@ -311,17 +371,17 @@ def modify_rds_instance_params_impl(
     except Exception:
         logger.warning(
             "modify_db_parameter_group failed for %s (group=%s, param=%s)",
-            cluster_id, fresh_group, parameter_name, exc_info=True,
+            cluster_id, live_group, parameter_name, exc_info=True,
         )
         return {"status": "modify_failed", "cluster_id": cluster_id,
-                "parameter_group": fresh_group, "parameter": parameter_name,
+                "parameter_group": live_group, "parameter": parameter_name,
                 "reason": "DB 파라미터 그룹 수정에 실패했습니다 (값 유효 범위·권한·파라미터 "
                           "그룹 태그를 확인하세요)."}
 
     return {
         "status": "modified",
         "cluster_id": cluster_id,
-        "parameter_group": fresh_group,
+        "parameter_group": live_group,
         "parameter": parameter_name,
         "value": value,
         "previous_value": current_value,
@@ -332,7 +392,7 @@ def modify_rds_instance_params_impl(
         # nothing changed" confusion this field exists to prevent.
         "applied": is_dynamic,
         "note": (
-            f"DB 파라미터 그룹 '{fresh_group}'에 {parameter_name}={value}로 등록했습니다. "
+            f"DB 파라미터 그룹 '{live_group}'에 {parameter_name}={value}로 등록했습니다. "
             + (
                 "ApplyMethod=immediate이라 동작값에 즉시 반영됩니다. "
                 if is_dynamic else
