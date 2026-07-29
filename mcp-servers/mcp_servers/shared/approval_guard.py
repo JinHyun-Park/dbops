@@ -134,6 +134,22 @@ def _project(action_type: str, details: dict) -> dict:
             # NON-numeric value alone (MEASURED: " 200 " already hashed the same
             # as "200", " ON " did not hash the same as "ON").
             "value": _norm_val(v.strip() if isinstance(v, str) else v),
+            # The GROUP the write lands on, bound for the same reason the instance
+            # projection binds it: a cluster re-pointed to a different cluster
+            # parameter group between approval and execute otherwise had the write
+            # land somewhere the card never named. NOT case-folded (AWS parameter
+            # group names are case-sensitive) and NOT run through _norm_val (a
+            # group name is never numeric).
+            #
+            # NOTE: adding this key CHANGED the hash for this action. A pending
+            # modify_parameter card minted before the change answers
+            # approval_denied on a payload mismatch, which is closed and does NOT
+            # consume the approval, and cards expire in 24h anyway. cluster_id is
+            # deliberately NOT here even though the instance projection has it:
+            # verify_approval already matches the row's cluster_id, and putting it
+            # in the projection makes a card that omits it from action_details
+            # permanently unverifiable.
+            "parameter_group": str(d.get("parameter_group") or "").strip(),
         }
     if action_type == "modify_scaling":
         return {

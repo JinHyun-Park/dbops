@@ -75,7 +75,8 @@ def test_modify_parameter_with_approval(mock_rds_for):
     mock_rds_for.return_value = mock_rds
     mock_cache = MagicMock()
     result = modify_parameter_impl(
-        mock_cache, cluster_id="prod-pg-1", parameter_name="max_connections", value="200", approved=True,
+        mock_cache, cluster_id="prod-pg-1", parameter_name="max_connections", value="200",
+        parameter_group=CUSTOM_PG, approved=True,
     )
     assert result["status"] == "modified"
     assert result["parameter"] == "max_connections"
@@ -146,7 +147,7 @@ def test_modify_failure_returns_static_reason_no_exception_text(mock_rds_for):
     )
     result = modify_parameter_impl(
         MagicMock(), cluster_id="prod-pg-1", parameter_name="work_mem", value="64MB",
-        approved=True,
+        parameter_group=CUSTOM_PG, approved=True,
     )
     assert result["status"] == "modify_failed"
     assert "error" not in result
@@ -215,6 +216,7 @@ def test_modify_parameter_approved_without_id_rejected(mock_rds_for):
             cluster_id="prod-pg-1",
             parameter_name="max_connections",
             value="200",
+            parameter_group=CUSTOM_PG,
             approved=True,
         )
         assert result["status"] == "approval_denied"
@@ -381,7 +383,7 @@ def test_a_padded_name_is_written_in_the_apis_spelling(mock_rds_for, mock_verify
     mock_rds_for.return_value = mock_rds
     result = modify_parameter_impl(
         MagicMock(), cluster_id="prod-pg-1", parameter_name="  work_mem  ",
-        value="  8MB  ", approved=True, approval_id="appr-1")
+        value="  8MB  ", parameter_group=CUSTOM_PG, approved=True, approval_id="appr-1")
     assert result["status"] == "modified"
     assert result["parameter"] == "work_mem"
     assert result["value"] == "8MB"
@@ -391,7 +393,8 @@ def test_a_padded_name_is_written_in_the_apis_spelling(mock_rds_for, mock_verify
     # The guard has to be asked about the SAME text that gets written, or the
     # approval is bound to one operation and the write performs another.
     assert mock_verify.call_args.kwargs["payload"] == {
-        "parameter_name": "work_mem", "value": "8MB"}
+        "parameter_name": "work_mem", "value": "8MB",
+        "parameter_group": CUSTOM_PG}
 
 
 @patch("mcp_servers.operations.tools.modify_parameter.verify_approval")
@@ -406,7 +409,7 @@ def test_a_case_difference_is_written_in_the_apis_spelling(mock_rds_for, mock_ve
     mock_rds_for.return_value = mock_rds
     result = modify_parameter_impl(
         MagicMock(), cluster_id="prod-pg-1", parameter_name="WORK_MEM", value="8MB",
-        approved=True, approval_id="appr-1")
+        parameter_group=CUSTOM_PG, approved=True, approval_id="appr-1")
     assert result["status"] == "modified"
     assert result["parameter"] == "work_mem"
     sent = mock_rds.modify_db_cluster_parameter_group.call_args.kwargs["Parameters"][0]
@@ -480,3 +483,177 @@ def test_a_name_that_is_wrong_beyond_case_is_still_unknown(mock_rds_for):
     result = modify_parameter_impl(
         MagicMock(), cluster_id="prod-pg-1", parameter_name="work_memory", value="8MB")
     assert result["status"] == "unknown_parameter"
+
+# ===========================================================================
+# THE GROUP IS PART OF WHAT WAS APPROVED
+# ===========================================================================
+# `parameter_group` used to be informational: the projection bound
+# {parameter_name, value}, so a cluster re-pointed to a DIFFERENT cluster
+# parameter group between approval and execute had the write land on the new group
+# while the card named none. Same parameter, same value, wrong target, and nothing
+# in the audit record said so. It is now hash-bound and compared pre-consume,
+# mirroring modify_rds_instance_params.
+
+
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_group_drift_is_refused_before_the_approval_is_consumed(mock_rds_for):
+    mock_rds_for.return_value = _rds(params=[P_WORK_MEM])
+    consumed = []
+    with patch("mcp_servers.operations.tools.modify_parameter.verify_approval",
+               side_effect=lambda *a, **k: consumed.append(1) or {"ok": True}):
+        result = modify_parameter_impl(
+            MagicMock(), cluster_id="prod-pg-1", parameter_name="work_mem",
+            value="8MB", parameter_group="some-other-group",
+            approved=True, approval_id="appr-1")
+    assert result["status"] == "state_changed", result
+    assert result["parameter_group"] == CUSTOM_PG
+    assert result["approved_parameter_group"] == "some-other-group"
+    assert consumed == [], "a drift visible before the guard must not cost the approval"
+    # And the reason tells the DBA the approval survived, so they re-request rather
+    # than assuming it is spent.
+    assert "소모하지 않았" in result["reason"], result["reason"]
+
+
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_an_omitted_group_does_not_claim_the_group_changed(mock_rds_for):
+    """An omitted arg is not evidence of drift, so the sentence says "different
+    from", not "changed". Same wording rule as the instance tool."""
+    mock_rds_for.return_value = _rds(params=[P_WORK_MEM])
+    consumed = []
+    with patch("mcp_servers.operations.tools.modify_parameter.verify_approval",
+               side_effect=lambda *a, **k: consumed.append(1) or {"ok": True}):
+        result = modify_parameter_impl(
+            MagicMock(), cluster_id="prod-pg-1", parameter_name="work_mem",
+            value="8MB", approved=True, approval_id="appr-1")
+    assert result["status"] == "state_changed", result
+    assert consumed == []
+    assert "다릅니다" in result["reason"], result["reason"]
+
+
+@patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster")
+def test_the_preview_reports_the_group_the_approved_call_must_echo(mock_rds_for):
+    """The round trip has to be closable from the tool's own output: the card the
+    agent registers comes from this response, so the group must be in it."""
+    mock_rds_for.return_value = _rds(params=[P_WORK_MEM])
+    preview = modify_parameter_impl(
+        MagicMock(), cluster_id="prod-pg-1", parameter_name="work_mem", value="8MB")
+    assert preview["status"] == "approval_required"
+    assert preview["parameter_group"] == CUSTOM_PG
+
+    # Echoing it back reaches the write.
+    mock_rds = _rds(params=[P_WORK_MEM])
+    mock_rds_for.return_value = mock_rds
+    with patch("mcp_servers.operations.tools.modify_parameter.verify_approval",
+               return_value={"ok": True}):
+        result = modify_parameter_impl(
+            MagicMock(), cluster_id="prod-pg-1", parameter_name="work_mem",
+            value="8MB", parameter_group=preview["parameter_group"],
+            approved=True, approval_id="appr-1")
+    assert result["status"] == "modified", result
+    kwargs = mock_rds.modify_db_cluster_parameter_group.call_args.kwargs
+    assert kwargs["DBClusterParameterGroupName"] == CUSTOM_PG
+
+
+def test_the_projection_binds_the_group_and_does_not_fold_its_case():
+    """AWS parameter group names are case-sensitive, so folding them would let an
+    approval for one group be consumed for another whose name differs only in
+    case. parameter_name IS folded, for the opposite reason (the tool adopts the
+    API's spelling), and that asymmetry is deliberate."""
+    from mcp_servers.shared.approval_guard import canonical_action_hash as h
+    base = {"parameter_name": "work_mem", "value": "8MB", "parameter_group": "grp-a"}
+    other = dict(base, parameter_group="grp-b")
+    upper = dict(base, parameter_group="GRP-A")
+    assert h("modify_parameter", base) != h("modify_parameter", other)
+    assert h("modify_parameter", base) != h("modify_parameter", upper)
+    # The name still folds, and padding on either still collapses.
+    assert h("modify_parameter", base) == h(
+        "modify_parameter", {"parameter_name": " WORK_MEM ", "value": " 8MB ",
+                             "parameter_group": "grp-a"})
+
+
+def _real_guard_table():
+    """(register, execute) closures over an in-memory approvals table using the
+    REAL _project and canonical_action_hash, so the register leg and the execute
+    leg have to agree for real rather than by mock."""
+    import os
+
+    from mcp_servers.operations.tools.request_approval import request_approval_impl
+    from mcp_servers.shared import approval_guard
+
+    os.environ.setdefault("APPROVALS_TABLE", "t")
+    table = {}
+
+    def register(details):
+        with patch("mcp_servers.operations.tools.request_approval.boto3") as b:
+            tbl = MagicMock()
+            tbl.put_item.side_effect = lambda Item: table.__setitem__(
+                Item["approval_id"], dict(Item))
+            b.resource.return_value.Table.return_value = tbl
+            return request_approval_impl(
+                MagicMock(), "prod-pg-1", "modify_parameter", details)
+
+    def verify(approval_id, cluster_id, action_type, payload=None):
+        row = table.get(approval_id)
+        if not row:
+            return {"ok": False, "reason": "not found"}
+        if row["payload_hash"] != approval_guard.canonical_action_hash(
+                action_type, payload or {}):
+            return {"ok": False, "reason": "payload mismatch"}
+        if row.get("consumed"):
+            return {"ok": False, "reason": "already consumed"}
+        row["consumed"] = True
+        return {"ok": True}
+
+    def execute(approval_id, group_arg, live_group=CUSTOM_PG):
+        with patch("mcp_servers.operations.tools.modify_parameter.rds_client_for_cluster",
+                   return_value=_rds(live_group, params=[P_WORK_MEM])), \
+             patch("mcp_servers.operations.tools.modify_parameter.verify_approval",
+                   side_effect=verify):
+            return modify_parameter_impl(
+                MagicMock(), cluster_id="prod-pg-1", parameter_name="work_mem",
+                value="8MB", parameter_group=group_arg, approved=True,
+                approval_id=approval_id)
+
+    return register, execute, table
+
+
+def test_a_transient_group_drift_leaves_the_card_usable():
+    """The point of refusing BEFORE the guard: the approval has to survive so the
+    same card still works once the cluster is back on the group the DBA reviewed.
+    A post-consume refusal would have destroyed it."""
+    register, execute, table = _real_guard_table()
+    card = register({"parameter_name": "work_mem", "value": "8MB",
+                     "parameter_group": CUSTOM_PG})
+    drift = execute(card["approval_id"], CUSTOM_PG, live_group="some-other-group")
+    assert drift["status"] == "state_changed", drift
+    assert table[card["approval_id"]].get("consumed") is not True
+
+    ok = execute(card["approval_id"], CUSTOM_PG)
+    assert ok["status"] == "modified", ok
+    assert table[card["approval_id"]]["consumed"] is True
+    # ...and only once.
+    assert execute(card["approval_id"], CUSTOM_PG)["status"] == "approval_denied"
+
+
+def test_a_card_minted_without_the_group_fails_closed_without_burning():
+    """Adding parameter_group to the projection changed the hash for this action,
+    so a card minted before the change cannot verify. It must fail CLOSED and
+    leave the approval intact, not consume it: cards live 24h, so this is a
+    bounded one-time cost and the DBA can simply re-request."""
+    register, execute, table = _real_guard_table()
+    legacy = register({"parameter_name": "work_mem", "value": "8MB"})
+    resp = execute(legacy["approval_id"], CUSTOM_PG)
+    assert resp["status"] == "approval_denied", resp
+    assert table[legacy["approval_id"]].get("consumed") is not True
+
+
+def test_a_card_for_one_group_cannot_be_consumed_for_another():
+    """The whole point of binding it. Even when the executing call's arg agrees
+    with the LIVE group (so the pre-consume comparison passes), the hash refuses,
+    because the card named a different group."""
+    register, execute, table = _real_guard_table()
+    card = register({"parameter_name": "work_mem", "value": "8MB",
+                     "parameter_group": "grp-a"})
+    resp = execute(card["approval_id"], "grp-b", live_group="grp-b")
+    assert resp["status"] == "approval_denied", resp
+    assert table[card["approval_id"]].get("consumed") is not True

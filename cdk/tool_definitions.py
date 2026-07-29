@@ -207,8 +207,13 @@ def operations_schema():
               "matched case-insensitively and echoed back in the AWS API's own spelling, so "
               "the name on the approval card is the name that gets written; an empty value is "
               "refused, since resetting a parameter to the engine default is a different "
-              "operation; requires approval",
-              {"cluster_id": "string", "parameter_name": "string", "value": "string", "approved": "boolean", "approval_id": "string"},
+              "operation. The preview reports the cluster parameter group it resolved; pass "
+              "it back as parameter_group on the approved call, because the group is part of "
+              "what the approval is bound to and a cluster re-pointed to another group "
+              "between approval and execute is refused WITHOUT consuming the approval; "
+              "requires approval",
+              {"cluster_id": "string", "parameter_name": "string", "value": "string",
+               "parameter_group": "string", "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "parameter_name", "value"]),
         _tool("modify_scaling", "Scale instance (requires approval)",
               {"cluster_id": "string", "min_capacity": "number", "max_capacity": "number", "approved": "boolean", "approval_id": "string"},

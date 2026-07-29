@@ -47,6 +47,15 @@ value for the same reason the instance action does: adopting the API's spelling 
 only one leg would leave a card that can never verify, which fails closed but into
 a loop the DBA cannot exit.
 
+THE GROUP IS PART OF WHAT WAS APPROVED. `parameter_group` is bound into the
+approval payload and compared against the cluster's live group BEFORE the guard
+runs, mirroring the instance tool. It used to be informational only: the
+projection bound {parameter_name, value}, so a cluster re-pointed to a DIFFERENT
+cluster parameter group between the approval and the execute had the write land on
+the new group while the card named none. Same parameter, same value, wrong target,
+and nothing in the audit record said so. A mismatch now returns state_changed
+WITHOUT consuming the approval.
+
 Still left to the API, exactly as in the instance tool, and both burn the approval
 when they fire: `AllowedValues` (the field is free-form, and a parser that
 misreads it would refuse legal writes) and the cross-account
@@ -79,6 +88,7 @@ def modify_parameter_impl(
     cluster_id: str,
     parameter_name: str,
     value: str,
+    parameter_group: str = "",
     approved: bool = False,
     approval_id: str = "",
 ) -> dict:
@@ -94,6 +104,7 @@ def modify_parameter_impl(
     # so the preview leg and the execute leg hash the same text.
     parameter_name = (parameter_name or "").strip()
     value = str(value if value is not None else "").strip()
+    parameter_group = (parameter_group or "").strip()
 
     if not parameter_name:
         return {"status": "invalid_request", "cluster_id": cluster_id,
@@ -217,17 +228,44 @@ def modify_parameter_impl(
             "parameter_group": pg_name,
         }
 
-    # parameter_group is informational here: the approval projection binds
-    # {parameter_name, value} only, so echoing the group into action_details
-    # cannot break the hash. `parameter_name` is the API's spelling by now, which
-    # is what the approval_required card above advertised too, and the projection
-    # folds both anyway, so a card registered from the DBA's typed spelling still
-    # verifies.
+    # TOCTOU, answered with what is ALREADY IN HAND, exactly as the instance tool
+    # does it. `pg_name` is the group this cluster points at right now, read a few
+    # lines up in THIS invocation, and `parameter_group` is the group the DBA's
+    # approval is hash-bound to.
+    #
+    # Without this, the group was informational only: the projection bound
+    # {parameter_name, value}, so a cluster re-pointed to a DIFFERENT cluster
+    # parameter group between the approval and the execute had the write land on
+    # the new group while the card named none. Same value, same parameter, wrong
+    # group, and nothing in the record said so. Binding the group is what makes the
+    # target part of what the DBA approved.
+    #
+    # An empty/omitted `parameter_group` lands here too, and the reason says
+    # "different from", not "changed": the arg may simply have been left out, and
+    # asserting drift would be a claim the data does not support. Either way the
+    # approval SURVIVES, because this returns before verify_approval.
+    if pg_name != parameter_group:
+        return {
+            "status": "state_changed",
+            "cluster_id": cluster_id,
+            "parameter_group": pg_name,
+            "approved_parameter_group": parameter_group,
+            "reason": (
+                f"승인에 기록된 클러스터 파라미터 그룹({parameter_group!r})이 이 클러스터가 "
+                f"현재 사용하는 그룹({pg_name!r})과 다릅니다. 승인 이후 그룹이 바뀌었을 수 "
+                f"있습니다. 승인을 소모하지 않았으니, 현재 그룹으로 다시 승인 요청하세요."
+            ),
+        }
+
+    # `parameter_name` is the API's spelling by now, which is what the
+    # approval_required card above advertised too, and the projection folds both
+    # anyway, so a card registered from the DBA's typed spelling still verifies.
     guard = verify_approval(
         approval_id,
         cluster_id,
         "modify_parameter",
-        payload={"parameter_name": parameter_name, "value": value},
+        payload={"parameter_name": parameter_name, "value": value,
+                 "parameter_group": parameter_group},
     )
     if not guard.get("ok"):
         return {
