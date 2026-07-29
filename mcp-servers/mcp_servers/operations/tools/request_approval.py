@@ -10,6 +10,25 @@ The handoff is intentionally explicit (two tool calls) so:
   - The agent's transcript shows exactly what it proposed.
   - The DBA sees the same JSON the agent saw.
   - Replay (re-issuing after approval) is auditable.
+
+NO UNEXECUTABLE CARD. This file is the SOLE payload_hash minter, so a shape it
+accepts but the executing tool always refuses costs the DBA a review for nothing.
+Every write tool's pre-consume refusal that is DECIDABLE FROM THE PAYLOAD is
+mirrored here, using the tool's OWN pure helper wherever one exists
+(validate_profiler_params, _validate_capacity, _norm_mode) so the two boundaries
+cannot disagree about what is valid.
+
+The line is drawn at "decidable from the payload", and it is drawn deliberately:
+refusing a card the executor WOULD have run is worse than minting one it refuses.
+So an omitted `billing_mode` on modify_dynamodb_capacity is left alone, because
+the tool resolves the effective mode from live state that this boundary cannot
+see, and only the values actually present are range-checked.
+
+Two of these NORMALISE rather than refuse, because the right value is in hand:
+the profiler's effective defaults, and the `cluster_id` the instance parameter
+projection binds (request_approval takes it as its own top-level argument, so a
+caller reasonably leaves it out of action_details, and left out the card hashed
+with cluster_id="" and could never verify).
 """
 
 import logging
@@ -20,6 +39,10 @@ from decimal import Decimal
 
 import boto3
 
+from mcp_servers.operations.tools.modify_dynamodb_capacity import (
+    _norm_mode,
+    _validate_capacity,
+)
 from mcp_servers.operations.tools.set_docdb_profiler import validate_profiler_params
 from mcp_servers.shared.approval_guard import boolean_flag_error, canonical_action_hash
 
@@ -200,7 +223,77 @@ def request_approval_impl(
             if key in details:
                 details[key] = name
         details["value"] = value
+
+        # THE GROUP the write lands on is part of both projections, so a card that
+        # does not name one can only ever answer state_changed: the executing tool
+        # compares the live group against the card's and they can never match.
+        # Knowable here with ZERO AWS calls, so it is refused here.
+        if not str(details.get("parameter_group") or "").strip():
+            return {
+                "status": "error",
+                "message": "parameter_group가 필요합니다. 파라미터 그룹은 승인에 함께 "
+                           "묶이는 대상이고, 그룹이 비어 있는 승인은 실행 시점에 "
+                           "state_changed로 거부되므로 등록하지 않았습니다. 툴의 "
+                           "approval_required 응답에 들어 있는 parameter_group을 그대로 "
+                           "전달하세요.",
+            }
+        details["parameter_group"] = str(details["parameter_group"]).strip()
+
+        # cluster_id is in the INSTANCE action's projection but not the Aurora
+        # one, and request_approval takes it as its own top-level argument, so a
+        # caller reasonably leaves it out of action_details. Left out, the card
+        # hashed with cluster_id="" and could NEVER verify. Fill it in from the
+        # argument rather than refusing: we know the right value, and the whole
+        # point of the projection carrying it is that the card names the target.
+        if action_type == "modify_rds_instance_params":
+            details["cluster_id"] = str(
+                details.get("cluster_id") or cluster_id or "").strip()
         action_details = details
+
+    # DynamoDB capacity: the tool refuses a non-integer or sub-1 RCU/WCU with the
+    # SAME pure helper, before the consume, so registration mirrors it and no card
+    # is minted for a capacity the executor will always reject. Only the cases
+    # registration can DECIDE are checked: on-demand ignores capacity entirely, and
+    # an empty billing_mode means the tool resolves the effective mode from live
+    # state, which this boundary cannot see.
+    if action_type == "modify_dynamodb_capacity":
+        details = dict(action_details or {})
+        mode = _norm_mode(details.get("billing_mode"))
+        rcu, wcu = details.get("rcu"), details.get("wcu")
+        # _norm_mode returns the raw uppercased token for anything it does not
+        # recognise, and the tool refuses that. Decidable from the payload alone.
+        if mode not in ("", "PROVISIONED", "PAY_PER_REQUEST"):
+            return {
+                "status": "error",
+                "message": (
+                    f"billing_mode {details.get('billing_mode')!r}는 지원하지 않는 값입니다 "
+                    "(PROVISIONED 또는 PAY_PER_REQUEST). 실행 시점에 거부되므로 승인을 "
+                    "등록하지 않았습니다."
+                ),
+            }
+        cap_error = None
+        if mode == "PROVISIONED":
+            # Explicit switch to provisioned: the tool requires BOTH, so the whole
+            # rule applies and registration can run it verbatim.
+            _r, _w, cap_error = _validate_capacity("PROVISIONED", rcu, wcu)
+        elif mode != "PAY_PER_REQUEST":
+            # billing_mode omitted: the tool resolves the effective mode from live
+            # state, which this boundary cannot see, so DO NOT require both. Only
+            # check the values that ARE present, because no effective mode makes a
+            # non-integer or sub-1 capacity executable, while an on-demand target
+            # would legitimately ignore a missing one.
+            for present in (v for v in (rcu, wcu) if v is not None):
+                _r, _w, cap_error = _validate_capacity("PROVISIONED", present, present)
+                if cap_error:
+                    break
+        if cap_error:
+            return {
+                "status": "error",
+                "message": (
+                    f"{cap_error} 이 값으로는 실행 시점에 거부되므로 승인을 "
+                    "등록하지 않았습니다."
+                ),
+            }
 
     approval_id = str(uuid.uuid4())
     created_at = str(int(time.time() * 1000))  # ms epoch as string for sort key

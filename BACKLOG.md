@@ -377,190 +377,58 @@ by account/region. Delivered across 5 sequenced specs:
 - Per-org retention policy + archival to S3 Glacier ✅ (archive bucket lifecycle: IA 30d → Glacier Instant Retrieval 90d → Deep Archive 365d, optional `ARCHIVE_RETENTION_DAYS` expiry; verified live 2026-06-16).
 - CDN cache tuning for `/config.json` (currently no-store).
 
-### Real-PG test harness (noted 2026-07-29, out of scope of the schema-honesty pass)
+### Resolved 2026-07-29: the five deferred items from the schema/parameter passes
 
-- **The third harness copy still has the masked teardown.** `tests/unit/test_mysql_tier_cache_sql_real_pg.py` runs `pg_ctl -m immediate stop` without checking it and then `shutil.rmtree(..., ignore_errors=True)`, which is the pattern that leaves a live postmaster on a datadir that no longer exists (measured on the other two copies: the helper returned with no exception while the server was still serving and the datadir was gone). It is also the only one of the three that does NOT stop before `initdb`, so it has no setup-time self-heal at all. `tests/unit/data_pipeline/test_schema_snapshot_real_pg.py` and `tests/unit/api/test_dashboard_schema_changes_real_pg.py` were fixed (the stop is verified against the fixture's port, and a server that did not stop raises with its datadir intact); give this one the same treatment when it is next touched.
-- **Kernel-assigned ports are released before they are used.** All three modules call `bind(("127.0.0.1", 0))`, read the port and close the socket at IMPORT time, so between collection and `pg_ctl start` nothing holds the port. Two modules in one process being handed the same port is possible in principle (not observed here); the loser's `pg_ctl start` raises before its fixture yields, so the `finally` never runs and the datadir survives. Cheap fixes if it is ever seen: keep the probe socket open until start, or retry once on a fresh port.
+All five sections that stood here were worked through and closed. Kept as a short
+record because two of them ended in a MEASUREMENT rather than a code change, and
+that is worth not re-litigating.
 
-### Pre-public hardening (gate before flipping the repo public)
+- **Real-PG harness (2 items) — FIXED.** `test_mysql_tier_cache_sql_real_pg.py`
+  was the last copy running an unchecked `pg_ctl stop` before
+  `rmtree(ignore_errors=True)`; it now shares the verified stop-then-remove form,
+  driven against the exact masked state (a live server with postmaster.pid
+  deleted): it raised, the datadir stayed, the postmaster stayed alive. All three
+  modules now HOLD the kernel-assigned port until `pg_ctl start` instead of
+  releasing it at import time. Commit 5361350.
+- **Panel-guard JSX slicer — FIXED.** Replaced the `body.index("\n  }")` scan with
+  a brace-matching walk. With a nested block injected into the real panel, the old
+  scan captured 72 characters and lost the branch's own sentence while the new walk
+  captured 280 and kept it. Nothing failed in that state, which is why the parser
+  is now pinned by its own tests. Commit 67dff9a.
+- **`OBSERVED_SQL` scope collapse — NOT A DEFECT, and now driven.** The analysis
+  held: a schema present only under an abandoned scope keeps its own old row, reads
+  as unknown_scope, and stays named in `unconfirmed_schemas`. Applying the proposed
+  scope filter as a mutation CAUSES the defect it was meant to prevent (the schema
+  disappears from `obs["schemas"]` entirely). Two real-PostgreSQL tests now pin
+  both halves. Do not scope-filter `OBSERVED_SQL`: the scope predicate belongs to
+  the comparison path, not the observation path. Commit 5bd90d5.
+- **`modify_parameter` bound no parameter group — FIXED.** The group is now a tool
+  argument, hash-bound, and compared pre-consume, mirroring the instance tool. A
+  transient drift leaves the card usable; a card minted before the change fails
+  closed WITHOUT burning. The three sibling `_describe` helpers
+  (modify_rds_instance_class, create_rds_snapshot, reboot_rds_instance) got the
+  could-not-ask / does-not-exist split and the module logger. Commits ccb9834,
+  58b5112.
+- **Unexecutable approval cards — AUDITED and closed.** `request_approval` now
+  mirrors every write tool's pre-consume refusal that is decidable from the
+  payload, using the tool's own pure helper where one exists. The line is drawn at
+  "decidable from the payload" on purpose: refusing a card the executor would have
+  run is worse than minting one it refuses, so an omitted `billing_mode` is left
+  alone and only the capacity values actually present are range-checked. Both
+  directions are mutation-checked.
+- **Test isolation — FIXED at the choke point.** 8 modules under tests/unit/api
+  could not be collected alone (`ModuleNotFoundError: tenancy`), hiding 68 tests
+  behind full-run ordering. A conftest.py in that directory appends every `api/*`
+  dir to sys.path, so new test files get it too. Commit 98a4d08.
 
-Done (2026-06-16):
+### Still open from that surface
 
-- ✅ Secret scan of full git history (regex sweep over all blobs) — clean; only matches are code assigning from assume-role creds + a test fixture. `e2e/.auth/state.json` confirmed gitignored/untracked (no auth-state leak).
-- ✅ Playwright config no longer ships a baked-in CloudFront URL — `DBOPS_E2E_URL` is now required and throws a clear error if unset (verified both paths).
-- ✅ `npm audit` (frontend): js-cookie (high) → 3.0.8 and js-yaml (moderate) → 4.2.0 fixed via `npm audit fix` (lockfile-only, no `package.json`/Next change); build verified green.
-- ✅ `pip-audit` over CDK + agent + MCP + data-pipeline requirements — no known vulnerabilities.
-- ✅ Dependabot config added (`.github/dependabot.yml`) — weekly grouped minor/patch PRs for npm, pip (all manifests), and GitHub Actions.
-
-Done (2026-06-17):
-
-- ✅ Public `/api/health` no longer leaks raw exceptions (`str(e)` → server-log + error code / generic message; `affd54b`). Dashboard read panels were already hardened; authenticated-admin handlers keep bounded `str(e)[:N]` diagnostics.
-- ✅ `cdk-nag` (AwsSolutions) wired as a synth-time lint, **gated behind `CDK_NAG=1`** so it never blocks deploys/CI (`72277db`). Pinned to cdk-nag 2.x (3.x needs aws-cdk-lib≥2.260, schema 54 > pinned CLI).
-- ✅ **cdk-nag full triage: 162 → 0 errors** (`851d122`). Fixed in-place + deployed + verified live: COG1 (password policy min 8 + symbols), DDB3 (PITR on clusters/sessions/approvals — verified ENABLED), S10 (`enforce_ssl` on archive + frontend buckets — SecureTransport deny verified), SNS3 (topic SSL). Everything else suppressed with per-stack justifications: IAM4/IAM5/L1 (managed exec role / describe-list-AssumeRole wildcards / pinned Python 3.12), APIG4 (HMAC/token public routes), APIG1/CFR3/S1/VPC7 (logging deferred), COG2 (MFA product decision), COG8/CFR2 (paid tiers), CFR1 (no geo req), CFR4 (default cert; min-TLS needs custom domain — CFN rejects otherwise), RDS2 (encryption = cluster replacement, deferred), RDS6 (Data API not IAM auth), RDS10 (disposable cache), SMG4 (rotation deferred), agent COG\* (M2M pool, no humans). cdk diff confirmed 0 replacements.
-
-Remaining (do at actual flip time):
-
-- ~~**Optional: enforce cdk-nag as a CI gate**~~ ✅ done (2026-06-17) — `ci.yml` cdk job now installs `cdk/requirements.txt` (cdk-nag 2.x) + `aws-cdk@2` CLI, stubs `frontend/out`, and runs `CDK_NAG=1 cdk synth` as the gate (synth exits non-zero on any unsuppressed AwsSolutions finding — no AWS creds needed; the CI account's AZ lookup is pre-cached in `cdk.context.json`). New WebSocket resources' findings (APIG1 no-access-logging, APIG4 $disconnect-no-authorizer) are suppressed with justifications in `app.py`. Verified `CDK_NAG=1 cdk synth` → exit 0 locally.
-- **WS-ticket pattern before enabling WS alert-channel access logging / public flip** — the `$connect` authorizer's identity source is the Cognito access token in the query string (mitigated today by TLS + no access logging). Code guards are in `foundation_stack.py` at the authorizer `identity_source` and the WS stage. See BACKLOG P4 "WS-ticket" for the design.
-- `gitleaks` proper history scan (the regex sweep above is a good proxy; run the real tool before the flip for entropy/rule coverage).
-- postcss (moderate) lives under Next's bundled toolchain — `npm audit fix --force` would downgrade Next 16 → 9 (catastrophic). Real fix is a Next minor bump to a patched 16.x; build-time CSS-stringify only, so runtime exposure on a static export is negligible. Defer to a deliberate Next bump.
-- Enable GitHub secret scanning + CodeQL after the repo is public.
-- ~~Steering docs say "Next.js 15" but the lockfile resolves Next 16 — reconcile the docs.~~ ✅ done (2026-06-17) — living docs (`.kiro/steering/tech.md`, `structure.md`, `README.md`) updated to Next.js 16 (lockfile: 16.2.9); dated plan/spec artifacts left as point-in-time records.
-
----
-
-## Done (recent)
-
-- Dashboard expansion: 17 panels, 24 metrics, ETL collectors (pi/cw/locks/activity/table_stats)
-- Application Inference Profile setup + Cost dashboard
-- Chat history (localStorage) + model selector (Bedrock list_inference_profiles)
-- Operations MCP cluster_id resolution fix
-- IA redesign: AppShell sidebar, page primitives, Claude Design language
-- Portability: runtime config.json, Cognito callback auto-registration, schema migrator
-- Cross-account spoke role validation at cluster registration
-
-### Maintenance Health (Phase 1 + 2)
-
-- `cluster_health_findings` 테이블 (schema_v6) — check_type / severity / subject /
-  value / threshold / recommendation / details(JSONB)
-- `pg_health_checks.py` — 7개 check_type (txid_age, dead_tuples, vacuum_overdue,
-  index_unused, extension_missing, setting_misconfigured, table_bloat). 단일
-  snapshot_time으로 모든 finding 동시 emit (NOW() per-row 버그 픽스)
-- `pg_extensions.py` (schema_v7) — `pg_extension` 동기화, UPSERT + drop된 항목 DELETE
-- `/api/dashboard/{id}/health-findings` — 최신 snapshot의 ranked findings (severity 정렬)
-- `/api/dashboard/{id}/extensions` — installed 목록 + 권장 매트릭스 (severity별 ✓/✗)
-- `MaintenanceHealthPanel` — 상단 배치, severity 배지, 7개 필터 탭(All/VACUUM/Bloat/Indexes/Config/Extensions/Cost),
-  finding 행 클릭 → AI explain 모달 (3-section: Why matters / Concrete fix / How to verify)
-- `ExtensionsCard` — 권장 6개 ✓/✗ 그리드 + "Other installed" 토글
-- SettingsPanel — pg_locks.py settings 7개 로깅 파라미터 확장 수집,
-  권장값 매핑으로 셀별 ✓/⚠ 배지 + "recommended: X" 라벨
-
-### Format / UX polish
-
-- `frontend/src/lib/format.ts` — fmtNumber/fmtBytes/fmtDuration/fmtPct/fmtExact 공통
-- 대시보드 패널 (Table Sizes / Index Recommendations / Vacuum & Bloat / Top Queries)
-  human-readable 변환 + `tabular-nums` + tooltip-with-exact
-- % 컬럼 헤더 명확화 (Seq → "Seq / total scans", Bloat → "Dead / total", Index % → "Indexes / total")
-- 테이블 → 인덱스 detail expand: TableSizesPanel 행 클릭 시 lazy fetch + 인덱스 목록
-  (PK/UQ/unused/invalid 배지)
-
-### Query Lab (P2.1) + RBAC (P2.4 + P2.4.2)
-
-- `/api/explain` 엔드포인트 — EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) → 구조화 JSON
-- `<PlanTree>` 재귀 컴포넌트 — self-time 기반 색상, hot nodes, planner misestimate 배지
-- "Get AI insight" 버튼 — plan summary → 2-3개 구체적 권장사항
-- SQL 에러 = 노란 warning (HTTP 400), 인프라 에러 = 빨간 error (502)
-- Plan history (localStorage) + share link
-- Bulk SQL review (세미콜론 구분 다중 SQL → markdown table verdict)
-- Cognito 그룹 (`dbops-admin`/`dbops-viewer`) + 프론트 mutation UI 숨김
-- 서버 측 RBAC — `_decode_jwt_payload` + `_is_admin` + `_forbid_viewer` 헬퍼,
-  mutation 경로(`POST /clusters`, `POST/PATCH/DELETE /alert-rules`, …) 모두 차단
-- 프론트 api-client `authHeaders()` — mutation 호출에 ID token 자동 첨부
-
-### Auth + Theme
-
-- Self-hosted login (`/login`, `/forgot`, `/reset`) — `amazon-cognito-identity-js` SRP
-- Cognito User Pool Client `USER_PASSWORD_AUTH` + Access/ID token **12시간** validity
-- AuthGuard 토큰 자동 refresh (마운트 / 45분 interval / focus / pre-flight)
-- Light/dark 테마 토글 (헤더 우측, 2-state pill), localStorage 영속화, FOUC 방지
-  inline script, Linear/Notion 톤 v4 팔레트 + prose-invert 색 var 재정의
-- 모바일 하단 탭바 (Fleet/Dashboard/Chat/Alerts/Clusters)
-
-### Cluster registration UX (P2.5) + Alerts (P2.3)
-
-- Bulk Discover panel — same-account/cross-account `rds:DescribeDBClusters` 자동 enumerate
-- "Register selected" 확인 모달 + bulk `/api/clusters/bulk-register`
-- Slack Block Kit + PagerDuty Events API v2 (dedup_key=rule_id) — `alert_subscribers_managed` (schema_v5)
-
-### Dashboard events / anomalies (UX)
-
-- `event_processor` 분류 강화 — CloudTrail wrapper 이벤트의 `detail.eventName` 사용 (unknown 99% 해소)
-- EventsPanel 카드 클릭 → 모달 (Key Facts + AI explain + raw JSON 탭)
-- AnomaliesPanel 카드 클릭 → 모달 (4 stats + AI diagnose)
-- Wait Events "unknown" 제거 (PI total AAS 행 필터 + name prefix로 type 추론)
-- 친근한 라벨 (`unknown` → "Other (RDS)", snake/CamelCase → Title Case)
-
-### Schema honesty surface, deferred after the tenth pass (noted 2026-07-29)
-
-Both items were raised by cross-model review, both were MEASURED against the
-tree rather than relayed, and both are deferred deliberately: the surface was
-bounded after ten passes and neither of these is a falsehood an operator would
-act on.
-
-1. The panel-guard JSX slicer is not brace-matched.
-   `tests/unit/api/test_schema_changes_panel_states.py::_branches()` slices each
-   branch with `body.index("\n  }", g.end())`, the first two-space closing brace
-   after the guard, not the matching close of the `if`. MEASURED on the current
-   tree with five branches: every branch is truncated by exactly 4 characters,
-   `\n  }`, which is the closing brace itself and not branch content. So the
-   guard covers what it claims TODAY. It becomes wrong the moment a branch body
-   contains a nested block closing at two-space indentation. Fix when that file
-   is next touched: walk from the opening brace at depth 0, and assert each slice
-   ends with its own closing brace so a future truncation fails loudly.
-
-2. OBSERVED_SQL collapses by schema NAME across read_scopes, and it may be
-   correct.
-   `schema_diff_util.OBSERVED_SQL` does `DISTINCT ON (schema_name)` over
-   ALL_ROWS, which is deliberately not scope-filtered, so a cluster with the same
-   schema name under two scopes keeps whichever row is newest. The review called
-   this false completeness. ANALYSIS SUGGESTS IT IS NOT, and the analysis is why
-   this is a note rather than a fix: a schema that exists ONLY under an abandoned
-   scope has its own old row as the newest, so its age is old and it IS reported
-   unconfirmed, which is right. The flagged case needs the same NAME in both
-   scopes, and there the current-scope row is a genuine observation of that name.
-   `public` makes that shape certain on PostgreSQL, so it is worth SETTLING with
-   a driven test rather than reasoning: seed one schema present in both scopes
-   and one present only in the abandoned scope, and assert what each reports.
-   Fix only if the test disagrees with the analysis above.
-
-### Parameter tools, deferred (noted 2026-07-29)
-
-`modify_parameter` (Aurora CLUSTER form) binds no parameter group into the
-approval payload: its projection is {parameter_name, value} and the tool has no
-`parameter_group` argument to compare against. So if the cluster is re-pointed to
-a different cluster parameter group between the approval and the execute, the
-write lands on the new group while the card named none. The instance tool does
-bind its group and refuses drift pre-consume, which is why only the Aurora side
-is open.
-
-Correctly NOT claimed in the gateway description, and pre-existing rather than
-introduced by the burnt-approval work. Closing it means adding a
-`parameter_group` argument to the tool and its schema, which changes the gateway
-contract and the approval payload shape, so it is its own change.
-
-Also noted while fixing the could-not-ask / does-not-exist split: three sibling
-tools carry their own `_describe` helper with the identical conflation and
-`print()` the exception instead of using the module logger:
-modify_rds_instance_class, create_rds_snapshot, reboot_rds_instance.
-
-### Unexecutable approval cards, deferred (noted 2026-07-29)
-
-`request_approval` is the sole payload_hash minter. The parameter actions now
-refuse an empty name or value at registration, but three sibling shapes still
-mint a card the executor can never run. All three leave the approval INTACT
-(measured: verify_approval consume count 0 or the hash-mismatch branch returning
-before the update_item), so the cost is a wasted DBA review, not a lost approval.
-
-1. An instance card minted with no `parameter_group` in action_details mints, then
-   answers `state_changed`. Knowable at registration with zero AWS calls.
-2. An instance card whose action_details omits `cluster_id` hashes with
-   cluster_id="" and can never verify, answering `approval_denied`. Natural
-   omission, because `request_approval` takes cluster_id as its own top-level
-   argument, so a caller reasonably assumes it does not belong in the details.
-3. `modify_dynamodb_capacity` refuses an out-of-range or non-integer rcu/wcu
-   pre-consume, but registration has no range check, so rcu=0 still mints.
-
-The general fix is an audit rather than three patches: for every action_type in
-the `request_approval` enum whose tool carries a cheap pre-consume refusal,
-mirror it at the registration boundary, or accept that the Approval Center can
-mint cards the executor always refuses and say so in the UI.
-
-### Test isolation, pre-existing (noted 2026-07-29)
-
-`tests/unit/api/test_approval_enforcement.py` cannot be collected on its own:
-`ModuleNotFoundError: No module named 'tenancy'`, from the bare `import tenancy`
-at `api/approvals/handler.py:8`. It is green only in a full run, where an earlier
-module seeds sys.path. Any subset run including it, but not that module, is red
-for a reason unrelated to the code under test, which makes a targeted mutation
-check on the approval path return a false result. Reproduced against the
-pre-change tree, so not caused by the parameter work.
+- **`ADD PRIMARY KEY` has no cost class in the DDL estimator.** It falls to the
+  `other` fallback, which reports 0 MB of extra disk for what is a table rebuild.
+  Measured on a real mysqld: it ACCEPTS `LOCK=NONE` (so InnoDB permits concurrent
+  DML) while still rebuilding, so it is neither the secondary-index class nor the
+  blocking-rewrite class and needs its own entry with engine-aware lock text.
+- **`AllowedValues` and the cross-account `ManagedBy=dbops` tag still burn an
+  approval** when they fire, on both parameter tools. Recorded rather than fixed
+  because the tag gates 15 write actions in the spoke template and belongs in one
+  shared preflight, not in each tool. Unchanged by this pass.

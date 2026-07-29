@@ -417,3 +417,108 @@ def test_registration_hash_is_unmoved_by_the_normalisation(action_type, base,
     # ...and the card shows what the executor will send, not the padding.
     assert item["action_details"][namekey] == base[namekey].upper()
     assert item["action_details"]["value"] == base["value"]
+
+
+# ===========================================================================
+# NO UNEXECUTABLE CARD
+# ===========================================================================
+# request_approval is the sole payload_hash minter, so a shape it accepts but the
+# executor always refuses costs the DBA a review for nothing. Three shapes were
+# recorded in BACKLOG.md and a fourth arrived with the parameter_group binding.
+# Only rules DECIDABLE FROM THE PAYLOAD are mirrored here: refusing a card the
+# executor would have run is worse than minting one it refuses.
+
+
+@pytest.mark.parametrize("action_type,base,namekey", _PARAM_ACTIONS)
+@pytest.mark.parametrize("missing", ["", "   ", None])
+def test_registration_refuses_a_parameter_card_with_no_group(action_type, base,
+                                                             namekey, missing):
+    """Both projections bind the group, and the executing tool compares the live
+    group against the card's, so a card naming no group can only ever answer
+    state_changed. Knowable here with zero AWS calls."""
+    details = {k: v for k, v in base.items() if k != "parameter_group"}
+    if missing is not None:
+        details["parameter_group"] = missing
+    result, table = _register(action_type, details)
+    assert result["status"] == "error", result
+    assert "parameter_group" in result["message"]
+    table.put_item.assert_not_called()
+
+
+def test_registration_fills_in_the_cluster_id_the_instance_projection_needs():
+    """cluster_id is in the INSTANCE projection but request_approval takes it as
+    its own top-level argument, so a caller reasonably leaves it out of
+    action_details. Left out, the card hashed with cluster_id="" and could NEVER
+    verify. It is FILLED IN rather than refused: the right value is in hand."""
+    details = {k: v for k, v in _INSTANCE.items() if k != "cluster_id"}
+    result, table = _register("modify_rds_instance_params",
+                              {**details, "cluster_id": "dbops-demo-mysql"})
+    # _register reads cluster_id off the details to pass as the top-level arg, so
+    # drive the omission through the impl directly.
+    with patch.dict(os.environ, {"APPROVALS_TABLE": "approvals"}):
+        with patch.object(request_approval, "boto3") as mock_boto3:
+            table2 = MagicMock()
+            mock_boto3.resource.return_value.Table.return_value = table2
+            result = request_approval.request_approval_impl(
+                None, cluster_id="dbops-demo-mysql",
+                action_type="modify_rds_instance_params", action_details=details)
+    assert result["status"] == "pending", result
+    assert result["action_details"]["cluster_id"] == "dbops-demo-mysql"
+    stored = table2.put_item.call_args.kwargs["Item"]
+    assert stored["action_details"]["cluster_id"] == "dbops-demo-mysql"
+
+
+_DDB_REFUSED = [
+    ({"billing_mode": "PROVISIONED", "rcu": 0, "wcu": 5}, "최소 1"),
+    ({"billing_mode": "PROVISIONED", "rcu": 5, "wcu": 0}, "최소 1"),
+    ({"billing_mode": "PROVISIONED", "rcu": 1.5, "wcu": 5}, "정수"),
+    ({"billing_mode": "PROVISIONED", "rcu": "x", "wcu": 5}, "정수"),
+    ({"billing_mode": "PROVISIONED", "rcu": 5}, "모두 지정"),
+    ({"billing_mode": "SERVERLESS", "rcu": 5, "wcu": 5}, "billing_mode"),
+    ({"rcu": 0, "wcu": 5}, "최소 1"),
+]
+
+
+@pytest.mark.parametrize("details,fragment", _DDB_REFUSED)
+def test_registration_refuses_a_dynamodb_capacity_the_executor_rejects(details, fragment):
+    """Mirrors modify_dynamodb_capacity._validate_capacity, the same pure helper
+    the tool uses, so the two boundaries cannot disagree about what is valid."""
+    result, table = _register("modify_dynamodb_capacity", {"cluster_id": "t1", **details})
+    assert result["status"] == "error", result
+    assert fragment in result["message"], result["message"]
+    table.put_item.assert_not_called()
+
+
+_DDB_MINTED = [
+    # On-demand ignores capacity entirely, INCLUDING a zero the caller left in.
+    {"billing_mode": "PAY_PER_REQUEST"},
+    {"billing_mode": "On-Demand", "rcu": 0, "wcu": 0},
+    # An in-place change: the tool resolves the effective mode from LIVE state,
+    # which registration cannot see, so a missing counterpart is not refused.
+    {"rcu": 10},
+    {"rcu": 10, "wcu": 10},
+    {"billing_mode": "Provisioned", "rcu": 10, "wcu": 10},
+]
+
+
+@pytest.mark.parametrize("details", _DDB_MINTED)
+def test_registration_still_mints_the_executable_dynamodb_cards(details):
+    """The dangerous failure of this whole audit is refusing a card the executor
+    would have run. These are the shapes registration must NOT decide about."""
+    result, table = _register("modify_dynamodb_capacity", {"cluster_id": "t1", **details})
+    assert result["status"] == "pending", result
+    table.put_item.assert_called_once()
+
+
+def test_the_audit_did_not_touch_the_other_actions():
+    for action_type, details in (
+        ("execute_sql", {"cluster_id": "c1", "sql": "select 1"}),
+        ("modify_dynamodb_ttl", {"cluster_id": "t1", "enabled": True,
+                                 "attribute_name": "ttl"}),
+        ("create_snapshot", {"cluster_id": "c1", "snapshot_id": "s1"}),
+        ("modify_scaling", {"cluster_id": "c1", "min_capacity": 0.5,
+                            "max_capacity": 4}),
+    ):
+        result, table = _register(action_type, details)
+        assert result["status"] == "pending", (action_type, result)
+        table.put_item.assert_called_once()

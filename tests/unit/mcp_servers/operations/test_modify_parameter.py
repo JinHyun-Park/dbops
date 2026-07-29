@@ -639,12 +639,31 @@ def test_a_card_minted_without_the_group_fails_closed_without_burning():
     """Adding parameter_group to the projection changed the hash for this action,
     so a card minted before the change cannot verify. It must fail CLOSED and
     leave the approval intact, not consume it: cards live 24h, so this is a
-    bounded one-time cost and the DBA can simply re-request."""
-    register, execute, table = _real_guard_table()
-    legacy = register({"parameter_name": "work_mem", "value": "8MB"})
-    resp = execute(legacy["approval_id"], CUSTOM_PG)
+    bounded one-time cost and the DBA can simply re-request.
+
+    The row is built BY HAND rather than through request_approval, because
+    registration now refuses a groupless card outright. That is the point: this
+    shape can only come from a card that was already in DynamoDB when the change
+    deployed, so hand-building it is the faithful reproduction.
+    """
+    from mcp_servers.shared.approval_guard import canonical_action_hash
+
+    _register, execute, table = _real_guard_table()
+    legacy_id = "legacy-card-1"
+    table[legacy_id] = {
+        "approval_id": legacy_id,
+        # A hash over details that name NO group. This is not byte-identical to
+        # what the pre-change projection emitted (that one had no
+        # parameter_group key at all, this one has it empty), and it does not
+        # need to be: the property under test is that a stored hash which does
+        # not match the execute leg's fails closed without consuming, and any
+        # non-matching hash stands in for that.
+        "payload_hash": canonical_action_hash(
+            "modify_parameter", {"parameter_name": "work_mem", "value": "8MB"}),
+    }
+    resp = execute(legacy_id, CUSTOM_PG)
     assert resp["status"] == "approval_denied", resp
-    assert table[legacy["approval_id"]].get("consumed") is not True
+    assert table[legacy_id].get("consumed") is not True
 
 
 def test_a_card_for_one_group_cannot_be_consumed_for_another():
