@@ -1477,3 +1477,91 @@ def test_a_real_change_across_one_foreign_cycle_is_a_change_and_not_a_baseline(p
                                 "2026-08-01T00:11:00+00:00", None, 60,
                                 examined, skipped)
     assert examined.get("schema_changes") == 1, (examined, skipped)
+
+
+def test_observed_collapse_by_schema_name_across_scopes_is_not_false_completeness(pg):
+    """The one open question on this surface, settled on the real engine.
+
+    OBSERVED_SQL does `DISTINCT ON (schema_name)` over ALL_ROWS, which is
+    deliberately NOT scope-filtered, so a cluster carrying the same schema NAME
+    under two read_scopes keeps whichever row is newest. Cross-model review called
+    that false completeness: the read would, it argued, report a name as confirmed
+    on the strength of a row from a catalog nobody reads any more.
+
+    Reasoning said otherwise, and reasoning is exactly what four earlier passes on
+    this surface got wrong, so it is DRIVEN here instead of argued in a comment.
+    Both shapes at once, one cluster:
+
+      `shared`   present under BOTH the abandoned scope and the established one
+      `only_old` present ONLY under the abandoned scope, still holding tables
+
+    The property under test: collapsing by name must never turn an abandoned-scope
+    observation into a confirmation. `only_old` keeps its own old row (it is the
+    newest row FOR THAT NAME), whose scope is not the established one, so it lands
+    in unknown_scope and stays in unconfirmed_schemas. `shared` is confirmed on the
+    strength of the CURRENT-scope row, which is a genuine observation of that name.
+    """
+    _migrate(pg)
+    cid = "scope-collapse-1"
+    _meta(pg, cid)
+    pg.raw(f"DELETE FROM schema_snapshots WHERE cluster_id = '{cid}'")
+    # (schema, scope, age in minutes). `shared` under the abandoned scope is OLDER
+    # than its current-scope row, which is the ordering DISTINCT ON resolves.
+    for schema, scope, mins in (
+        ("shared", "olddb/100", 600),
+        ("only_old", "olddb/100", 590),
+        ("shared", "newdb/200", 1),
+    ):
+        pg.raw(
+            "INSERT INTO schema_snapshots (cluster_id, snapshot_time, schema_name, "
+            "tables_json, read_scope, last_seen_at) VALUES "
+            f"('{cid}', NOW() - INTERVAL '{mins} minutes', '{schema}', "
+            f"'{{\"t\": [\"id\"]}}'::jsonb, '{scope}', NOW() - INTERVAL '{mins} minutes')")
+
+    est = pg.execute(sd_util().ESTABLISHED_SCOPE_SQL, {"cluster_id": cid}).rows
+    assert est and est[0]["read_scope"] == "newdb/200", est
+
+    obs = sd_util().observed(lambda s, p: pg.execute(s, p).rows, cid)
+    assert obs["read_scope"] == "newdb/200", obs
+    assert obs["schemas"]["shared"]["confirmation"] == sd_util().CONFIRMED, obs
+    assert obs["schemas"]["only_old"]["confirmation"] == sd_util().UNKNOWN_SCOPE, obs
+    # The verdict: the abandoned-scope schema is NOT reported as confirmed, so the
+    # cluster cannot read as complete and the schema is NAMED.
+    assert obs["unconfirmed_schemas"] == ["only_old"], obs
+    assert obs["status"] == "not_seen", obs
+    assert sd_util().observation_is_complete(obs) is False
+    # And the operator sentence names it rather than describing the cluster.
+    note = sd_util().not_seen_note(obs)
+    assert "only_old" in note, note
+    assert "shared" not in note, note
+
+
+def test_observed_reports_an_abandoned_scope_only_cluster_as_unconfirmed(pg):
+    """The other half of the same question: EVERY schema under an abandoned scope.
+
+    With no current-scope row at all, the established scope is the abandoned one
+    (it is the newest scope that exists), so these schemas are confirmed or
+    not_seen by AGE rather than by scope. That is the honest answer: the rows are
+    the newest evidence the cluster has, and their age is what makes them stale.
+    Asserted so a future change to ESTABLISHED_SCOPE_SQL cannot silently turn an
+    old-but-only reading into a confirmation.
+    """
+    _migrate(pg)
+    cid = "scope-collapse-2"
+    _meta(pg, cid)
+    pg.raw(f"DELETE FROM schema_snapshots WHERE cluster_id = '{cid}'")
+    for schema in ("alpha", "beta"):
+        pg.raw(
+            "INSERT INTO schema_snapshots (cluster_id, snapshot_time, schema_name, "
+            "tables_json, read_scope, last_seen_at) VALUES "
+            f"('{cid}', NOW() - INTERVAL '600 minutes', '{schema}', "
+            f"'{{\"t\": [\"id\"]}}'::jsonb, 'olddb/100', NOW() - INTERVAL '600 minutes')")
+    obs = sd_util().observed(lambda s, p: pg.execute(s, p).rows, cid)
+    assert obs["read_scope"] == "olddb/100", obs
+    assert obs["status"] == "not_seen", obs
+    assert obs["unconfirmed_schemas"] == ["alpha", "beta"], obs
+    for name in ("alpha", "beta"):
+        assert obs["schemas"][name]["confirmation"] == sd_util().NOT_SEEN, obs
+    # last_confirmed must still carry WHEN, or the sentence loses the only number
+    # the operator can act on.
+    assert obs["last_confirmed"], obs
