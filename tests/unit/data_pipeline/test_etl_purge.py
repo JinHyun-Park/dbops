@@ -5,16 +5,56 @@ at the tail of each collection run. There is no isolated function to unit-test
 (the purge is inline in lambda_handler behind boto3/env), so we guard the SQL
 text: the table, column, and 90-day interval must stay correct. Shortening the
 query_stats window would silently break the 90d SLO latency SLI.
+
+RUNNABLE FILE-ALONE, which is FINDING 3 of the ninth pass. The two
+schema_snapshots guards used to `exec_module` the handler by path, and the
+handler's first import is `from collectors.capacity_forecast import ...`, which
+only resolves when data-pipeline/etl_collector is on sys.path. Nothing here put it
+there: a SIBLING module (test_schema_snapshot_real_pg.py) did, at ITS import time,
+so the two guards passed under `pytest tests/unit` and ERRORED under `pytest
+tests/unit/data_pipeline/test_etl_purge.py`. MEASURED before this change: `2
+failed, 3 passed`, ModuleNotFoundError: No module named 'collectors'. A guard that
+cannot be run in isolation makes a mutation check on the retention decision return
+a FALSE result, and the eighth pass's report relied on exactly such a check.
+
+So the constant is read out of the SOURCE (`_purge_sql`) instead of imported. The
+value is identical (verified against the imported constant: implicit string
+concatenation is folded into one ast.Constant by the parser), and nothing here
+needs the handler's boto3 clients or its forty collector imports. The statement is
+EXECUTED against a live PostgreSQL in
+tests/unit/data_pipeline/test_schema_snapshot_real_pg.py, which loads the module
+properly because it puts collectors/ on sys.path itself.
 """
 
+import ast
 from pathlib import Path
 
-_HANDLER = (
+_HANDLER_PATH = (
     Path(__file__).resolve().parents[3]
     / "data-pipeline"
     / "etl_collector"
     / "handler.py"
-).read_text()
+)
+_HANDLER = _HANDLER_PATH.read_text()
+
+
+def _purge_sql(name="SCHEMA_SNAPSHOTS_PURGE_SQL"):
+    """One MODULE-LEVEL string constant of etl_collector/handler.py, from its AST.
+
+    Module-level is part of the contract, not an implementation detail: the
+    real-engine test reads the same constant off the imported module in order to run
+    it, so a statement inlined back into lambda_handler would leave that test with
+    nothing to execute. This raises rather than skipping in that case.
+    """
+    for node in ast.parse(_HANDLER).body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError(
+        f"{name} is no longer a module-level constant of "
+        f"{_HANDLER_PATH.name}, so neither this guard nor the real-engine test "
+        "that EXECUTES it can reach the statement"
+    )
 
 
 def test_metric_snapshots_purge_sql_intact():
@@ -49,15 +89,7 @@ def test_schema_snapshots_purge_never_takes_the_comparison_pair():
     an event the recompute family called `baseline_only`, a status whose sentence
     claims only one snapshot was ever collected.
     """
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(
-        "_purge_etl_handler",
-        Path(__file__).resolve().parents[3] / "data-pipeline" / "etl_collector" / "handler.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    sql = mod.SCHEMA_SNAPSHOTS_PURGE_SQL
+    sql = _purge_sql()
     assert "DELETE FROM schema_snapshots s " in sql
     assert "s.snapshot_time < NOW() - INTERVAL '90 days'" in sql
     assert "ORDER BY x.snapshot_time DESC LIMIT 2" in sql, (
@@ -92,15 +124,7 @@ def test_the_exemption_is_scoped_so_an_orphan_can_age_out():
     The surviving rows are asserted against a live server in
     test_schema_snapshot_real_pg.py; this is the shape guard beside it.
     """
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(
-        "_purge_etl_handler_scoped",
-        Path(__file__).resolve().parents[3] / "data-pipeline" / "etl_collector" / "handler.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    sql = mod.SCHEMA_SNAPSHOTS_PURGE_SQL
+    sql = _purge_sql()
     assert "AND NOT EXISTS (" in sql, (
         "an empty exempt set must DELETE the row, which is what ages the orphan out"
     )

@@ -160,6 +160,21 @@ function EmptyVerdict({ d }: { d: SchemaChangesResponse }) {
       </div>
     );
   }
+  if (d.status === "not_supported") {
+    // A REFUSAL, and it must not read like the branch above it: a short-history
+    // sentence invites the operator to widen the window or wait for collection, and
+    // on this engine neither ever changes the answer. `measured` stays, because the
+    // row-count half may still have compared something and the counts show that.
+    return (
+      <div className="p-6 text-sm">
+        <div className="text-amber-300">
+          이 엔진은 스키마 변경 판정 대상이 아님: 기다려도 판정되지 않음
+        </div>
+        {measured}
+        {notSeen}
+      </div>
+    );
+  }
   // Deploy skew. This is a static export, so it can meet a payload from an api
   // Lambda newer than itself. An unrecognised status is UNKNOWN, never a clean
   // bill of health: that is the difference from the anomalies panel, where the

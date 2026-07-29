@@ -57,7 +57,7 @@ restored from a backup. Counts are what pytest reported:
   1. delete the whole `if (d.status === "partial")` branch
        -> 9 failed, incl. test_each_api_status_reaches_its_own_sentence (partial
           fell through to the deploy-skew branch) and
-          test_the_five_statuses_read_differently_from_each_other.
+          test_every_status_reads_differently_from_every_other.
   2. remove `{measured}` from the no_changes branch
        -> 1 failed: test_the_two_counting_states_show_what_was_compared.
   3. swap `<EmptyVerdict d={data} />` for an inline unqualified <div>
@@ -199,6 +199,10 @@ _PREDICATES = {
     'd.status === "partial"': lambda p: p.get("status") == "partial",
     'd.status === "not_collected"': lambda p: p.get("status") == "not_collected",
     'd.status === "insufficient_history"': lambda p: p.get("status") == "insufficient_history",
+    # THE REFUSAL AS A HEADLINE. Its own branch because the sentence above it
+    # ("이력이 부족") invites the operator to widen the window or wait, and on a
+    # refused engine no amount of waiting produces a snapshot.
+    'd.status === "not_supported"': lambda p: p.get("status") == "not_supported",
 }
 
 
@@ -757,10 +761,16 @@ _PRODUCT = {
     ("unavailable+pair_read", "fresh"): _INSUF_3,
     ("unavailable+pair_read", "not_seen"): _INSUF_3,
     ("unavailable+table_unreadable", "unavailable"): _INSUF_3,
-    # THE REFUSAL. Same shape as the other "nothing compared" rows: for the operator
-    # a refusal IS a blindness, and the only thing that must not happen is
-    # `not_collected`, whose sentence promises a baseline that is never coming.
-    ("not_supported", "unsupported_engine"): _INSUF_3,
+    # THE REFUSAL, and it is NOT _INSUF_3, which is FINDING 1 of the ninth pass. With
+    # row deltas ok the headline is `partial` (one source answered), exactly like every
+    # other DDL blindness beside a working row source. With nothing else answered it is
+    # `not_supported`, NOT `insufficient_history`: that sentence says to widen the
+    # window or wait for collection, and this engine is refused by decision so no
+    # waiting produces a snapshot. MEASURED before the fix on PostgreSQL 14.18, engine
+    # aurora-mysql, with a stored pre-refusal row and with none: status
+    # `insufficient_history` and a note carrying BOTH that sentence and the refusal.
+    ("not_supported", "unsupported_engine"):
+        ["partial", "partial", "not_supported", "not_supported", "not_supported"],
 }
 
 _PRODUCT_CELLS = [(d, o, r, i) for d, obs in _REACHABLE.items() for o in obs
@@ -899,11 +909,12 @@ def test_no_changes_stays_reachable():
     assert _NEUTRAL in panel_verdict(got)
 
 
-def test_the_five_statuses_read_differently_from_each_other():
+def test_every_status_reads_differently_from_every_other():
     """Pairwise distinct sentences. Two states rendering the same text is the
     collapse every pass over this surface has reintroduced somewhere."""
     seen = {}
     for status in ("no_changes", "partial", "not_collected", "insufficient_history",
+                   "not_supported",
                    "some_status_this_panel_has_never_heard_of"):
         jsx = panel_verdict({"status": status})
         head = re.search(r'<div className="text-(?:zinc-400|amber-300)">(.*?)</div>',
@@ -912,11 +923,12 @@ def test_the_five_statuses_read_differently_from_each_other():
         text = head.group(1).strip()
         assert text not in seen, f"{status} renders the same sentence as {seen.get(text)}"
         seen[text] = status
-    assert len(seen) == 5
+    assert len(seen) == 6
 
 
 def test_only_no_changes_reaches_the_absence_of_change_sentence():
-    for status in ("partial", "not_collected", "insufficient_history", "ok", "zzz"):
+    for status in ("partial", "not_collected", "insufficient_history",
+                   "not_supported", "ok", "zzz"):
         assert _NEUTRAL not in panel_verdict({"status": status}), status
     assert _OLD_UNQUALIFIED not in _PANEL, "the unqualified empty state is back"
 
@@ -1383,6 +1395,66 @@ def test_a_refused_dialect_never_draws_a_created_or_dropped_chip():
                         engine="mysql", stats=[_stat(base=1000, cur=1000)])
     assert with_legacy["changes"] == [], with_legacy["changes"]
     assert with_legacy["ddl_detection"]["status"] == "not_supported"
+
+
+def test_a_refused_dialect_is_never_told_to_wait_for_collection():
+    """FINDING 1 OF THE NINTH PASS, at the headline and in the note.
+
+    With nothing else compared, a refused dialect used to headline
+    `insufficient_history`, whose sentence is "구간을 늘리거나 수집이 쌓일 때까지
+    기다려야 합니다". Collection is never coming: the engine is refused by decision.
+    The refusal sentence was then appended to the SAME note, so one payload told the
+    operator to wait AND told them nothing will ever be collected, while
+    get_schema_diff, get_schema_history, diagnose_root_cause and the timeline all
+    said `not_supported` / `unsupported_engine` for the same cluster.
+
+    MEASURED pre-fix on PostgreSQL 14.18 (engine aurora-mysql), with a stored
+    pre-refusal snapshot row and with none: status `insufficient_history`, note =
+    _SC_INSUFFICIENT + the refusal + _SC_NO_FRESHNESS, i.e. three sentences and two
+    of them promising something that never arrives.
+
+    ONE ANSWER is the assertion, not just the new word: the wait sentence, the
+    young-cluster promise and the "as of the last recorded snapshot" clause must all
+    be absent, and the refusal present.
+    """
+    # the SHARED sentence, from the contract the other four consumers read it from
+    from schema_diff_util import UNSUPPORTED_DIALECT_NOTE
+
+    # every (rows, collection) cell where nothing on the row side compared either
+    for rows_kw in (dict(stats=[_stat(base=None, cur=7)], age_sec=_FRESH),
+                    dict(stats=[_stat(in_window=False)], age_sec=_STALE_SEC),
+                    dict(stats=[], age_sec=_DEAD)):
+        got = drive(snaps=[], engine="aurora-mysql", **rows_kw)
+        assert got["status"] == "not_supported", (rows_kw, got["status"])
+        assert got["ddl_detection"]["status"] == "not_supported", got["ddl_detection"]
+        assert got["observation"]["status"] == "unsupported_engine", got["observation"]
+        note = got["note"]
+        # THE REFUSAL FIRST, and the only sentence allowed after it is one about the
+        # OTHER source: "table_stats collection stopped N hours ago" is a fact about
+        # the row half, not a promise about snapshots. Anything else is a second
+        # answer to the same question, which is what this finding is.
+        assert note.startswith(UNSUPPORTED_DIALECT_NOTE), (rows_kw, note)
+        extra = note[len(UNSUPPORTED_DIALECT_NOTE):].strip()
+        assert extra == "" or extra.startswith("table_stats 수집이 약"), (rows_kw, extra)
+        for never_coming in ("기다려야", "구간을 늘리거나", "다음 ETL 주기",
+                             "마지막으로 기록된 스냅샷 기준"):
+            assert never_coming not in note, (rows_kw, never_coming, note)
+        # and the operator reads a sentence of its own, not the "history is short" one
+        jsx = panel_verdict(got)
+        assert _NEUTRAL not in jsx
+        assert "기다려도 판정되지 않음" in jsx, jsx
+        assert "이력이 부족" not in jsx, jsx
+    # The row source having answered is still worth saying: that cell stays `partial`,
+    # which is what every other DDL blindness beside a working row source headlines.
+    with_rows = drive(snaps=[], engine="aurora-mysql",
+                      stats=[_stat(base=1000, cur=1000)], age_sec=_FRESH)
+    assert with_rows["status"] == "partial", with_rows["status"]
+    assert "기다려야" not in with_rows["note"], with_rows["note"]
+    # table_stats holding no row for the cluster is not lost with the sentence: the
+    # payload says so in the field the chip is drawn from.
+    bare = drive(snaps=[], engine="aurora-mysql", stats=[], age_sec=_DEAD)
+    assert bare["collection"]["status"] == "no_data", bare["collection"]
+    assert bare["row_deltas"]["status"] == "no_data", bare["row_deltas"]
 
 
 def test_the_refusal_and_the_unknown_engine_read_differently():

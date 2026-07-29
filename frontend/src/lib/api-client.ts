@@ -398,7 +398,13 @@ export interface SchemaChangesResponse {
     | "no_changes"
     | "partial"
     | "not_collected"
-    | "insufficient_history";
+    | "insufficient_history"
+    /** The engine is refused by decision (schema snapshots are collected off the
+     * PostgreSQL catalog only), so the DDL half is never coming and
+     * `insufficient_history`, whose sentence says to widen the window or wait for
+     * collection, would be a promise this cluster cannot keep. The same word
+     * get_schema_diff and get_schema_history return for it. */
+    | "not_supported";
   changes: SchemaChangeRow[];
   total_changes: number;
   truncated: boolean;

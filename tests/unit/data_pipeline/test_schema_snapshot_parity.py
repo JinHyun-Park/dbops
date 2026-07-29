@@ -14,6 +14,51 @@ Two families of copy exist here and BOTH matter for a different reason:
 
 Byte-identity is asserted, and so is IDENTICAL RESULT on real inputs, because a
 byte check alone would pass on three copies that are all equally wrong.
+
+WHAT THIS GUARD IS, AND WHAT IT IS NOT
+--------------------------------------
+It is a REGRESSION TRIPWIRE FOR ORDINARY CODE. It is NOT a proof that no file can
+read schema_snapshots outside the contract. Anyone reading this file should come
+away with that distinction, because the guard's own claim is the same kind of claim
+the product side of this surface keeps getting wrong: a check whose sentence says
+"every consumer" while its mechanism sees only some of them is an overclaim, and
+that is the defect class the nine passes over this surface have been removing.
+
+`_discover_consumers()` is a STATIC AST walk over the shipped Python. MEASURED, by
+writing each file into the tree and running the walk (every line below was observed,
+not reasoned about):
+
+  CAUGHT, which is every idiom this repo actually uses
+    import schema_diff_util                        + schema_diff_util.ALL_ROWS
+    from schema_diff_util import ALL_ROWS
+    from mcp_servers.shared import schema_diff_util
+    import mcp_servers.shared.schema_diff_util as s
+    a string CONSTANT containing "schema_snapshots" (a file writing its own SQL)
+
+  MISSED, and NOT closeable by a static check
+    importlib: `spec_from_file_location(... "schema_diff_util.py")` inside the
+      function. There is no import statement and no table name in the file, so
+      neither discovery signal exists to fire. A static walk cannot decide what an
+      arbitrary runtime string resolves to.
+    a RE-EXPORT through an unrelated module: module A does
+      `from schema_diff_util import ALL_ROWS as ROWS`, the consumer does
+      `from A import ROWS`. A is caught (it names the contract); the consumer that
+      actually selects the rows is not, because nothing in it mentions either the
+      contract or the table.
+    a table name ASSEMBLED at runtime: `_T = "schema_" + "snapshots"` then an
+      f-string. `_module_string_constants` sees the two halves, never the whole.
+
+Closing those would mean deciding what arbitrary code resolves to at runtime, which
+is unbounded, so they are documented rather than chased. What the tripwire buys is
+real and is what the previous eight passes each needed: a consumer written the
+ordinary way joins this suite the day it appears, and a NEW interpreter inside an
+already-cleared file (which is how api/dashboard `_timeline` escaped) fails it,
+because the rules are per FUNCTION.
+
+Rule 3 has a limit of its own and it is stated on `_observation_use`: it proves the
+observation is OBTAINED (a call) and USED (the value goes somewhere), not that the
+ANSWER depends on it. The second half is covered per consumer by the driven tests
+that assert the observation block in each payload, not by this AST.
 """
 
 import ast
@@ -120,19 +165,26 @@ def test_reader_and_producer_agree_on_the_same_event():
 #      obtain a diff and it cannot be called without the read_scope and the
 #      per-schema confirmation state, so a consumer that wants a diff is forced to
 #      select them.
-#   3. EVERY FUNCTION THAT SELECTS ROWS CARRIES THE OBSERVATION. Rule 1 is
+#   3. EVERY FUNCTION THAT SELECTS ROWS OBTAINS THE OBSERVATION. Rule 1 is
 #      satisfied by building the statement from ALL_ROWS, and that is exactly what
 #      api/dashboard `_timeline` did while getting no observation channel at all:
 #      a FIFTH interpreter, living inside a file rules 1 and 2 had already cleared,
 #      answering the same question as diagnose_root_cause. So the rule is
-#      STATEMENT-SCOPED, per function, not per file.
+#      STATEMENT-SCOPED, per function, not per file. And it is about the VALUE: a
+#      CALL to an entry whose result is then used. It used to be satisfied by the
+#      mere PRESENCE of the identifier `observed` under the function node, which
+#      `observed = None` satisfies (ninth pass, FINDING 2) -- a rule claiming "carries
+#      the observation" while accepting a name that happens to appear is the same
+#      overclaim as a payload claiming "no changes" over schemas nobody confirmed.
 #
 # AND THE SET OF CONSUMERS IS DISCOVERED, NOT WRITTEN DOWN. The sixth pass wrote
 # the two rules against a hand-written `_CONSUMERS` dict, which made them
 # mechanical over exactly the files someone remembered. A new file was invisible,
 # and so was a second interpreter inside a listed one, which is how `_timeline`
-# escaped. `_discover_consumers()` below walks the shipped Python instead, so a new
-# consumer fails this suite the day it appears.
+# escaped. `_discover_consumers()` below walks the shipped Python instead, so a
+# consumer written the ORDINARY way fails this suite the day it appears. Not any
+# conceivable consumer: the routes the walk cannot see are listed in the module
+# docstring, measured, and left open on purpose.
 #
 # ALL THREE RULES RESOLVE NAMES THE SAME WAY, and that is the eighth pass. The
 # seventh discovered consumers by an ImportFrom whose MODULE ends with
@@ -188,6 +240,81 @@ _ROW_SOURCES = {"SCOPED_ROWS", "ALL_ROWS"}
 # so does every negative any consumer states about a cluster.
 _OBSERVATION_ENTRIES = {"observed", "observation_state"}
 
+
+def _observation_calls(node):
+    """Every CALL under `node` whose callee is an observation entry.
+
+    By callee NAME for `observed(...)` and by ATTRIBUTE for
+    `schema_diff_util.observed(...)`, so the module-object idiom the collectors
+    already use satisfies the rule exactly as a bare name does (that equivalence is
+    the eighth pass's finding and it is kept here deliberately).
+    """
+    out = []
+    for n in ast.walk(node):
+        if not isinstance(n, ast.Call):
+            continue
+        f = n.func
+        name = f.id if isinstance(f, ast.Name) else getattr(f, "attr", None)
+        if name in _OBSERVATION_ENTRIES:
+            out.append(n)
+    return out
+
+
+def _observation_use(fn):
+    """How `fn` OBTAINS and USES the observation: "used", "discarded" or None.
+
+    RULE 3 USED TO BE `_referenced(fn) & _OBSERVATION_ENTRIES`, i.e. "does the
+    identifier `observed` appear anywhere under this function", and FINDING 2 of the
+    ninth pass is that `observed = None` satisfies that. A reader obeying all three
+    rules could then state `no_changes` over schemas nobody confirmed, which is the
+    exact overclaim this whole sequence removes: a rule whose sentence says the
+    observation is CARRIED while its check accepts a name that happens to appear.
+
+    So the check is now about the VALUE:
+      * there has to be a CALL to an entry, not a mention of one, and
+      * the value that call produces may not go nowhere. Returned, or passed on, or
+        used inside a larger expression, all count; bound to a name nothing ever
+        reads does not, and neither does a bare `observed(...)` statement.
+
+    WHERE IT STOPS, and this is a limit and not an oversight. It does NOT prove the
+    observation influences the ANSWER. `observation` reaches the panel's payload
+    through `not_seen_note` into a list into a joined string, so following it would
+    take taint through a method call (`notes.append(...)`), and an assignment-only
+    taint chain would FALSE-FAIL on exactly that shipped shape. A false failure is
+    what gets a rule weakened by the next agent, so the AST stops at "obtained and
+    read" and the other half is covered per consumer by the driven tests that assert
+    the observation block in each payload (real_pg for both dashboard surfaces,
+    test_schema_diff / test_schema_history / test_diagnose_root_cause for the three
+    MCP readers). `obs = observed(...)` followed by `if obs: pass` passes this rule.
+    """
+    calls = _observation_calls(fn)
+    if not calls:
+        return None
+    # Reads of a name, EXCLUDING the callee of the observation call itself: without
+    # that exclusion `observed = observed(...)` would count as reading its own result.
+    callees = {id(c.func) for c in calls}
+    loaded = {n.id for n in ast.walk(fn)
+              if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+              and id(n) not in callees}
+    for stmt in ast.walk(fn):
+        value = getattr(stmt, "value", None)
+        if value is None or isinstance(stmt, ast.Expr):
+            # ast.Expr is `observed(...)` as a statement: the value is thrown away.
+            continue
+        if not _observation_calls(value):
+            continue
+        if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+            names = {t.id for t in targets if isinstance(t, ast.Name)}
+            # No plain name target (a dict slot, an attribute, a tuple unpack) means
+            # the value landed in a structure, which is a use.
+            if not names or (names & loaded):
+                return "used"
+            continue
+        # Return, an argument, a dict value, a comparison operand: consumed in place.
+        return "used"
+    return "discarded"
+
 # THE PRODUCERS, exempt from rule 3 and the licensed compute_diff callers. They
 # hold the LIVE READ, so they ARE the scope, and there is no stored confirmation
 # state to consult yet: they are what produces it.
@@ -222,7 +349,11 @@ def _referenced(node):
     idiom is what the collectors in data-pipeline/etl_collector/collectors/ already
     use for their siblings. That single keyword is what let both eighth-pass escape
     files through three separate rules at once: discovery, the compute_diff rule and
-    the observation rule all resolved names the same way.
+    the observation rule all resolved names the same way. (Rule 3 no longer resolves
+    names through this helper at all, it resolves CALLS through
+    `_observation_calls`, which handles the attribute form itself; this one still
+    decides which functions REACH a row source, so the module-object property it
+    exists for is unchanged.)
 
     An attribute is matched by its ATTRIBUTE NAME regardless of what it hangs off, so
     `sdu.ALL_ROWS`, `schema_diff_util.ALL_ROWS` and a re-export all count. That is
@@ -319,10 +450,13 @@ _KNOWN_CONSUMERS = {
 
 
 def test_the_consumer_set_is_discovered_and_finds_the_ones_we_know_about():
-    """A new consumer joins this suite by EXISTING, and the known six prove the
-    walk is not silently empty. A file discovered here that should not be bound by
-    the rules goes in _NOT_INTERPRETERS with a reason, which is a review-visible
-    edit; a file that nobody adds anywhere is now impossible."""
+    """A consumer written the ordinary way joins this suite by EXISTING, and the known
+    six prove the walk is not silently empty. A file discovered here that should not
+    be bound by the rules goes in _NOT_INTERPRETERS with a reason, which is a
+    review-visible edit; a file that nobody adds anywhere no longer goes unbound,
+    UNLESS it reaches the rows by one of the routes a static walk cannot see (measured
+    and listed in the module docstring: importlib, a re-export through an unrelated
+    module, a table name assembled at runtime)."""
     missing = _KNOWN_CONSUMERS - set(_CONSUMERS)
     assert not missing, f"discovery no longer finds {sorted(missing)}"
     assert set(_NOT_INTERPRETERS) <= {
@@ -452,6 +586,14 @@ def test_every_function_that_selects_snapshot_rows_carries_the_observation(name)
     "no DDL happened" over schemas nobody looked at.
 
     The producers are exempt: they hold the live read, so they ARE the observation.
+
+    AND THE OBSERVATION HAS TO BE OBTAINED, NOT MENTIONED, which is FINDING 2 of the
+    ninth pass. This rule used to be satisfied by the identifier `observed` appearing
+    anywhere under the function node, so `observed = None` passed it and a reader
+    could obey all three rules while stating `no_changes` over schemas nobody
+    confirmed. `_observation_use` requires a CALL whose value is then used; its
+    docstring says where an AST has to stop, and this test's failure message names
+    which of the two ways a function fell short.
     """
     readers = _row_source_readers(_CONSUMERS[name])
     assert readers, (
@@ -468,20 +610,78 @@ def test_every_function_that_selects_snapshot_rows_carries_the_observation(name)
             continue
         if fn.name not in readers:
             continue
-        # `_referenced`, so `schema_diff_util.observed(...)` satisfies the rule the
-        # same way a bare `observed(...)` does. Without it a file reaching the
-        # contract through the module object fails this rule even when it DOES carry
-        # the observation, and a false failure is what gets a rule weakened.
-        if not _referenced(fn) & _OBSERVATION_ENTRIES:
-            blind[fn.name] = sorted(readers[fn.name])
+        # A CALL whose value is used, not a name that appears. `observed(...)` and
+        # `schema_diff_util.observed(...)` count the same way: a file reaching the
+        # contract through the module object must not fail this rule when it DOES
+        # carry the observation, because a false failure is what gets a rule weakened.
+        use = _observation_use(fn)
+        if use != "used":
+            blind[fn.name] = {
+                "row_sources": sorted(readers[fn.name]),
+                "observation": use or "never called",
+            }
     assert not blind, (
-        f"{name}: {blind} select snapshot rows without reaching the observation. "
-        f"Call one of {sorted(_OBSERVATION_ENTRIES)} in the same function and put "
-        "the result in the payload, the way _schema_changes and "
-        "_collect_schema_changes do. A statement built from the shared fragment is "
+        f"{name}: {blind} select snapshot rows without OBTAINING the observation. "
+        f"Call one of {sorted(_OBSERVATION_ENTRIES)} in the same function and USE "
+        "what it returns, the way _schema_changes and _collect_schema_changes do: "
+        "`observed = None` is not carrying the observation, and neither is calling "
+        "it and dropping the result. A statement built from the shared fragment is "
         "only half the contract: the other half is being able to say which schemas "
         "the answer does NOT cover."
     )
+
+
+_OBSERVATION_SHAPES = {
+    # THE REVIEWER'S OWN SHAPE. Obeys rules 1 and 2, and satisfied the old rule 3
+    # because the identifier is there.
+    "assigned_none": ("    observed = None\n"
+                      "    rows = q(ALL_ROWS)\n"
+                      "    return {'status': 'no_changes', 'obs': observed}\n", None),
+    # ...and the same trick through the module object.
+    "attribute_of_a_stub": ("    sdu = types.SimpleNamespace(observed=None)\n"
+                            "    rows = q(ALL_ROWS)\n"
+                            "    return {'x': sdu.observed}\n", None),
+    "mentioned_in_a_docstring": ("    '''calls observed() somewhere else'''\n"
+                                 "    return q(ALL_ROWS)\n", None),
+    # CALLED and thrown away: the value reaches nothing.
+    "called_as_a_statement": ("    observed(q, cid)\n"
+                              "    return q(ALL_ROWS)\n", "discarded"),
+    "bound_and_never_read": ("    obs = observed(q, cid)\n"
+                             "    return q(ALL_ROWS)\n", "discarded"),
+    # THE REAL SHAPES. Every one of these is a shipped consumer's shape and every one
+    # must pass, because a false failure here is what gets the rule weakened.
+    "bound_and_read": ("    obs = observed(q, cid)\n"
+                       "    rows = q(ALL_ROWS)\n"
+                       "    return {'rows': rows, 'observation': obs}\n", "used"),
+    "through_a_module_object": ("    obs = schema_diff_util.observed(q, cid)\n"
+                                "    return {'o': obs, 'r': q(ALL_ROWS)}\n", "used"),
+    "returned_directly": ("    return {'r': q(ALL_ROWS), 'o': observed(q, cid)}\n",
+                          "used"),
+    "passed_straight_on": ("    note = not_seen_note(observed(q, cid))\n"
+                           "    return {'note': note, 'r': q(ALL_ROWS)}\n", "used"),
+    "into_a_structure": ("    out = {}\n"
+                         "    out['observation'] = observation_state(cache, cid)\n"
+                         "    return out\n", "used"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_OBSERVATION_SHAPES))
+def test_the_observation_rule_sees_a_call_and_not_a_mention(shape):
+    """FINDING 2, driven on both sides.
+
+    The five REFUSED shapes are the escape and its neighbours: the reviewer's
+    `observed = None`, the same thing through an attribute, a mention in prose, a call
+    whose value is discarded, and a call bound to a name nothing reads. The five
+    ACCEPTED shapes are the ways the shipped consumers actually write it, including
+    the module-object idiom, so this test fails if the rule ever starts firing on a
+    consumer that DOES carry the observation.
+
+    Both directions matter equally: without the accepted half, tightening the rule
+    until it rejects everything would look like progress.
+    """
+    body, expected = _OBSERVATION_SHAPES[shape]
+    fn = ast.parse(f"def reader(q, cid):\n{body}").body[0]
+    assert _observation_use(fn) == expected, (shape, _observation_use(fn))
 
 
 def test_every_copy_exposes_the_whole_contract():

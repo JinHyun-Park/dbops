@@ -2391,6 +2391,16 @@ _SC_PARTIAL = (
 #                         for part of the question and silence for the rest.
 #   insufficient_history  NOTHING compared. Either nothing spans the window, or
 #                         the source that could have answered was unreadable.
+#                         Its sentence says to widen the window or wait, so it may
+#                         only be used where waiting can actually change the
+#                         answer.
+#   not_supported         this cluster's engine is refused by decision, so the DDL
+#                         half is never coming and no waiting changes it. The same
+#                         word get_schema_diff and get_schema_history use, so the
+#                         five interpreters of these rows say one thing. Reached
+#                         only when the row source did not compare either; with row
+#                         deltas ok the headline stays `partial`, exactly as it does
+#                         for every other DDL blindness beside a working row source.
 #   not_collected         nothing has ever been collected for this cluster. It
 #                         requires the snapshot read to have SUCCEEDED and
 #                         returned zero rows: `snapshots_stored == 0` after a
@@ -2665,6 +2675,24 @@ def _schema_changes(query, cluster_id, days):
         # real negative and the rest was not answered at all. "no_changes" here
         # is the defect this branch exists to prevent.
         status = "partial"
+    elif not ddl_supported:
+        # THE REFUSAL, AS THE HEADLINE. Before this branch a refused dialect with no
+        # comparable row deltas fell through to `insufficient_history`, whose sentence
+        # tells the operator to widen the window or wait for collection to accumulate.
+        # Collection is never coming: the engine is refused by decision, and the
+        # refusal sentence was then appended to the SAME note three sentences later, so
+        # one payload carried two answers while get_schema_diff, get_schema_history,
+        # diagnose_root_cause and the timeline all said `not_supported` /
+        # `unsupported_engine` for the same cluster. MEASURED on PostgreSQL 14.18,
+        # engine aurora-mysql, with a pre-refusal snapshot row stored and with none:
+        # status `insufficient_history`, note carrying BOTH "구간을 늘리거나 수집이
+        # 쌓일 때까지 기다려야 합니다" and the refusal.
+        #
+        # It sits BELOW `partial`, so a refused cluster whose row deltas DID compare
+        # still headlines `partial`: that is what every other DDL blindness beside a
+        # working row source headlines, and the refusal is not the only fact then. It
+        # is the same word the other four interpreters use, so the five agree.
+        status = "not_supported"
     elif (ddl_available and observation.get("status") == "no_snapshots"
           and collection == "no_data"):
         # `not_collected` claims BOTH sources hold nothing for this cluster, and
@@ -2725,10 +2753,17 @@ def _schema_changes(query, cluster_id, days):
             f"멈췄습니다 (마지막 수집 {last_collected}). 표시된 현재 행 수와 DDL 판정은 "
             f"모두 그 시점 기준이며 지금 값이 아닙니다."
         )
-    elif collection == "no_data" and status != "not_collected":
+    elif collection == "no_data" and status != "not_collected" and ddl_supported:
         # Snapshots exist but the every-run producer has no row for this cluster,
         # so nothing here can be dated. Store-on-change means an empty DDL diff
         # is only as current as the last collection, whenever that was.
+        #
+        # NOT on a refused dialect, and that is the same contradiction as the headline:
+        # this sentence ends "표시된 내용은 마지막으로 기록된 스냅샷 기준입니다" while
+        # the refusal one sentence earlier says no snapshot is collected for this
+        # cluster at all. The operator still sees that table_stats has no record: the
+        # payload carries collection.status `no_data` and the panel draws it as
+        # "수집 기록 없음", which is the fact without the phantom snapshot basis.
         notes.append(_SC_NO_FRESHNESS)
     if rows_status == "ok":
         notes.append(_SC_ROW_DELTA_CAP)

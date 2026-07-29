@@ -964,6 +964,29 @@ def test_a_refused_dialect_reaches_the_timeline_and_the_panel_as_a_refusal(pg):
     assert "다음 ETL 주기에 최초 baseline" not in panel["note"]
     assert _NEUTRAL not in panel_verdict(panel)
 
+    # FINDING 1 OF THE NINTH PASS, on the engine that produced the report. The
+    # HEADLINE used to be `insufficient_history`, whose sentence tells the operator to
+    # widen the window or wait for collection to accumulate, and collection is never
+    # coming: this engine is refused by decision. The refusal was then appended to the
+    # SAME note three sentences later, so the payload carried two answers while the
+    # other four interpreters of these rows all said `not_supported` /
+    # `unsupported_engine` for this very cluster.
+    #   MEASURED here pre-fix, both with this stored row and on a cluster with none:
+    #   status "insufficient_history", note = "수집된 이력이 요청 구간을 걸치지 않아
+    #   ... 구간을 늘리거나 수집이 쌓일 때까지 기다려야 합니다." + the refusal +
+    #   "표시된 내용은 마지막으로 기록된 스냅샷 기준입니다."
+    assert panel["status"] == "not_supported", panel["status"]
+    for never_coming in ("기다려야", "구간을 늘리거나", "마지막으로 기록된 스냅샷 기준"):
+        assert never_coming not in panel["note"], (never_coming, panel["note"])
+    assert "기다려도 판정되지 않음" in panel_verdict(panel), panel_verdict(panel)
+    # ...and a cluster with NO pre-refusal rows at all reaches the same headline: the
+    # refusal is decided from cluster_meta.engine, never from how much is stored.
+    bare = "tl-mysql-bare"
+    _meta(pg, bare, engine="aurora-mysql")
+    bare_panel = handler._schema_changes(pg.query, bare, 7)
+    assert bare_panel["status"] == "not_supported", bare_panel
+    assert bare_panel["note"] == panel["note"], (bare_panel["note"], panel["note"])
+
 
 def test_timeline_ignores_baseline_and_out_of_window_snapshots(pg):
     """Mutation guard: an empty diff (the baseline row) is not a DDL event, and a
