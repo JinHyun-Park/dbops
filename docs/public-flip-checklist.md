@@ -31,10 +31,15 @@ string it exists to explain. Before that exclusion a clean scan still ended in
 `leaks found: 1` pointing at the allowlist file, which trains a reader to ignore
 the exit status.
 
-`.gitleaksignore` currently holds ONE suppression, re-audited 2026-07-30:
-`const STORAGE_KEY = "dbops_conversations_v1"` in `chat-panel.tsx`, a
-localStorage key name flagged by `generic-api-key`. Not a credential, no
-rotation needed.
+`.gitleaksignore` currently holds ONE suppression, re-audited 2026-07-30: the
+`STORAGE_KEY` constant in `chat-panel.tsx`, which names the browser localStorage
+key the chat history is stored under and is flagged by `generic-api-key` purely on
+entropy. Not a credential, no rotation needed.
+
+The literal is deliberately NOT quoted here. Quoting it made this very document a
+finding on the next run, which is the same self-reference that put
+`.gitleaksignore` in the allowlist. Describe flagged strings; do not reproduce
+them.
 
 Verified the gate still bites, per credential shape:
 

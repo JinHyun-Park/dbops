@@ -60,3 +60,22 @@ repos:
         language: system
         files: ^frontend/.*\.(ts|tsx)$
         pass_filenames: false
+
+      # Secret scan on the STAGED changes, so a flagged string is caught before
+      # it becomes a commit rather than after it becomes a push.
+      #
+      # This exists because of a real miss: the CI `secrets` job was added, the
+      # history verified clean, and then two files were committed that tripped
+      # it — a doc QUOTING the string it was explaining, and a test using a
+      # JWT-shaped literal. Both reached main and failed CI, because nothing
+      # re-ran the gate between "gate is green" and "push".
+      #
+      # `protect --staged` scans the staged diff only (fast, no history walk);
+      # the CI job still owns the full-history scan. Skipped silently when
+      # gitleaks is not installed locally, so a contributor without it is not
+      # blocked — CI remains the authority.
+      - id: gitleaks-staged
+        name: gitleaks (staged changes)
+        entry: bash -c 'command -v gitleaks >/dev/null || { echo "gitleaks not installed - skipping (CI still enforces)"; exit 0; }; gitleaks protect --staged --config .gitleaks.toml --redact --no-banner'
+        language: system
+        pass_filenames: false

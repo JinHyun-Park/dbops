@@ -6,3 +6,19 @@
 # localStorage key name for chat history, NOT a credential. No secret, no
 # rotation needed.
 8d1c95997a4b1f3a87fc5b584acfa36c70a233fb:frontend/src/components/chat/chat-panel.tsx:generic-api-key:41
+
+# Two entropy-only false positives from 2026-07-30, both introduced by the same
+# session that added the CI secret gate and both now permanent in the commit DIFFS.
+# The working-tree text was already fixed (the doc describes the constant instead of
+# quoting it; the test uses a non-JWT-shaped value), but gitleaks git mode scans
+# COMMIT DIFFS, so the strings survive in 8cda6fc / a2d67ba regardless. Rewriting
+# history for two non-secrets would break every clone, so they are suppressed by
+# fingerprint with the reason stated — which is what this file is for.
+#
+# 1. The pre-flip checklist quoted `chat-panel.tsx`'s STORAGE_KEY (a browser
+#    localStorage key name) while explaining why that same string is suppressed
+#    below. Not a credential.
+8cda6fc002beee745e6f6ccc93edde2719b61684:docs/public-flip-checklist.md:generic-api-key:35
+# 2. A deliberately fake, JWT-SHAPED value in the test that asserts `?token=` no
+#    longer authorizes a WebSocket handshake. Never valid anywhere.
+a2d67bad6c24a0542a17f2423d7d8104e2cda5d4:tests/unit/api/test_ws_ticket.py:generic-api-key:280

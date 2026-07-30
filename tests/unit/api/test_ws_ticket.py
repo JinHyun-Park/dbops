@@ -277,7 +277,11 @@ def test_the_access_token_no_longer_opens_a_socket():
         ddb.Table.return_value = table
         resp = authorizer.lambda_handler(
             {"methodArn": "arn:x",
-             "queryStringParameters": {"token": "eyJraWQiOiJyZWFsLWxvb2tpbmcifQ.x.y"}},
+             # Deliberately NOT a JWT-shaped literal: the assertion is that the
+             # `token` PARAM is no longer an identity source, so the value's shape
+             # is irrelevant, and a realistic-looking one trips the secret scanner
+             # on every future run for no test value.
+             "queryStringParameters": {"token": "former-identity-source"}},
             None)
     assert _effect(resp) == "Deny", resp
     assert table.deletes == 0, "a token-bearing handshake must not even touch a ticket"
