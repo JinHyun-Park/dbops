@@ -7,7 +7,7 @@
 # The other MCP servers share the same asset and get these too (harmless, unused).
 # pymongo pin matches docdb_mongo_collector.
 pymongo>=4.17.0
-redis>=5
+redis>=8.0.1
 pymemcache>=4
 # pg8000: pure-Python PG driver (no C build) for prewarm_reader's direct
 # connection to a reader INSTANCE endpoint (RDS Data API can't target one instance).
