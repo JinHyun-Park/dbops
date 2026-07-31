@@ -24,4 +24,4 @@ pyOpenSSL>=25
 # pyOpenSSL imports typing_extensions at runtime; the manylinux/--python-version
 # 3.12 resolve doesn't always pull it (env marker), so pin it explicitly — its
 # absence makes `import OpenSSL` fail and pytds falls back to "no TLS" (fail-closed).
-typing_extensions>=4
+typing_extensions>=4.16.0
