@@ -27,6 +27,7 @@ from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cluster_targets import client_for_cluster, table_name_for_cluster
+from mcp_servers.shared.managed_tag_preflight import dynamodb_table_tag_warning
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +165,7 @@ def modify_dynamodb_capacity_impl(
         )
 
     if not approved:
-        return {
+        card = {
             "status": "approval_required",
             "cluster_id": cluster_id,
             "target": table,
@@ -178,6 +179,14 @@ def modify_dynamodb_capacity_impl(
             },
             "warnings": warnings,
         }
+        # The describe_table above is projected into `state`, which keeps no ARN,
+        # so the helper resolves it rather than widening that contract.
+        # Cross-account only, WARNING never a refusal.
+        tag_warning = dynamodb_table_tag_warning(
+            client, cluster_id, table, action="dynamodb:UpdateTable")
+        if tag_warning:
+            card["warning"] = tag_warning
+        return card
 
     guard = verify_approval(
         approval_id, cluster_id, "modify_dynamodb_capacity", payload=payload

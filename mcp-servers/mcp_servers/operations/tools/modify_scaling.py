@@ -11,6 +11,7 @@ import logging
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import rds_client_for_cluster
+from mcp_servers.shared.managed_tag_preflight import aurora_cluster_tag_warning
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,13 @@ def modify_scaling_impl(
         }
 
     if not approved:
-        return {"status": "approval_required", "cluster_id": cluster_id, "min_capacity": min_capacity, "max_capacity": max_capacity}
+        card = {"status": "approval_required", "cluster_id": cluster_id, "min_capacity": min_capacity, "max_capacity": max_capacity}
+        # Cross-account only, WARNING never a refusal: see managed_tag_preflight.
+        tag_warning = aurora_cluster_tag_warning(
+            rds, cluster_id, action="rds:ModifyDBCluster")
+        if tag_warning:
+            card["warning"] = tag_warning
+        return card
 
     guard = verify_approval(
         approval_id,

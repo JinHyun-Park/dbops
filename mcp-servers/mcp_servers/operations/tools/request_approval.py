@@ -45,6 +45,11 @@ from mcp_servers.operations.tools.modify_dynamodb_capacity import (
 )
 from mcp_servers.operations.tools.set_docdb_profiler import validate_profiler_params
 from mcp_servers.shared.approval_guard import boolean_flag_error, canonical_action_hash
+from mcp_servers.shared.cluster_targets import rds_client_for_cluster
+from mcp_servers.shared.managed_tag_preflight import (
+    aurora_cluster_tag_warning,
+    is_cross_account,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -336,7 +341,7 @@ def request_approval_impl(
     frontend = os.environ.get("FRONTEND_URL", "").rstrip("/")
     deep_link = f"{frontend}/approvals" if frontend else "/approvals"
 
-    return {
+    card = {
         "status": "pending",
         "approval_id": approval_id,
         "created_at": created_at,
@@ -351,3 +356,26 @@ def request_approval_impl(
             "approval_id 가 없거나 승인 후 1시간이 지나면 서버가 거부합니다."
         ),
     }
+
+    # enable_data_api is the one tag-gated action with NO tool-side preview to
+    # warn from: `api/approvals/handler.py` calls rds:EnableHttpEndpoint the
+    # moment the DBA approves (approve-time auto-execute, no replay), so the
+    # registration IS the last point before the write. A missing ManagedBy tag
+    # would otherwise surface as an AccessDenied on an approval that is already
+    # gone. EnableHttpEndpoint authorizes against the CLUSTER (ResourceArn).
+    # Cross-account only, WARNING never a refusal: see managed_tag_preflight.
+    # is_cross_account is checked before the client is resolved so this
+    # registration path, which every write tool funnels through, stays free of
+    # AWS clients for the same-account case.
+    if action_type == "enable_data_api" and is_cross_account(cluster_id):
+        try:
+            tag_warning = aurora_cluster_tag_warning(
+                rds_client_for_cluster(cluster_id), cluster_id,
+                action="rds:EnableHttpEndpoint")
+        except Exception:
+            logger.warning("ManagedBy preflight unavailable for %s", cluster_id,
+                           exc_info=True)
+            tag_warning = ""
+        if tag_warning:
+            card["warning"] = tag_warning
+    return card

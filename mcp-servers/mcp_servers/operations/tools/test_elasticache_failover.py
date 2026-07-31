@@ -15,6 +15,7 @@ from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cluster_targets import client_for_cluster, lookup_cluster
+from mcp_servers.shared.managed_tag_preflight import elasticache_group_tag_warning
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +59,15 @@ def test_elasticache_failover_impl(cache, cluster_id=None, node_group_id=None,
 
     payload = {"target": cluster_id, "node_group_id": ngid}
     if not approved:
-        return {"status": "approval_required", "cluster_id": cluster_id, "target": cluster_id,
-                "node_group_id": ngid, "warnings": [f"failover 테스트는 노드그룹 {ngid}의 프라이머리를 전환합니다."]}
+        card = {"status": "approval_required", "cluster_id": cluster_id, "target": cluster_id,
+                "node_group_id": ngid,
+                "warnings": [f"failover 테스트는 노드그룹 {ngid}의 프라이머리를 전환합니다."]}
+        # Cross-account only, WARNING never a refusal: see managed_tag_preflight.
+        tag_warning = elasticache_group_tag_warning(
+            client, cluster_id, name, action="elasticache:TestFailover")
+        if tag_warning:
+            card["warning"] = tag_warning
+        return card
     guard = verify_approval(approval_id, cluster_id, "test_elasticache_failover", payload=payload)
     if not guard.get("ok"):
         return {"status": "approval_denied", "reason": guard.get("reason", "approval guard rejected"), "cluster_id": cluster_id}

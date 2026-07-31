@@ -82,6 +82,141 @@ def instance_parameter_group_tag_warning(rds, cluster_id: str, group_name: str) 
     )
 
 
+def aurora_cluster_tag_warning(rds, cluster_id, *, action) -> str:
+    """"" unless the Aurora/DocumentDB CLUSTER lacks the tag. Gated actions:
+    rds:ModifyDBCluster (also the DocumentDB write path, which uses the rds
+    namespace)."""
+    return _resolved_tag_warning(
+        rds, "describe_db_clusters", {"DBClusterIdentifier": cluster_id},
+        "DBClusters", "DBClusterArn", "list_tags_for_resource",
+        cluster_id=cluster_id, label="클러스터", action=action, what=cluster_id)
+
+
+def rds_instance_tag_warning(rds, cluster_id, instance_id, *, action) -> str:
+    """"" unless the DB INSTANCE lacks the tag. rds:DeleteDBInstance authorizes
+    against the instance, NOT the cluster it belongs to."""
+    if not instance_id:
+        return ""
+    return _resolved_tag_warning(
+        rds, "describe_db_instances", {"DBInstanceIdentifier": instance_id},
+        "DBInstances", "DBInstanceArn", "list_tags_for_resource",
+        cluster_id=cluster_id, label="DB 인스턴스", action=action, what=instance_id)
+
+
+def cluster_endpoint_tag_warning(rds, cluster_id, endpoint_id, *, action) -> str:
+    """"" unless the CUSTOM ENDPOINT lacks the tag. rds:ModifyDBClusterEndpoint
+    and rds:DeleteDBClusterEndpoint authorize against the endpoint itself."""
+    if not endpoint_id:
+        return ""
+    return _resolved_tag_warning(
+        rds, "describe_db_cluster_endpoints",
+        {"DBClusterEndpointIdentifier": endpoint_id},
+        "DBClusterEndpoints", "DBClusterEndpointArn", "list_tags_for_resource",
+        cluster_id=cluster_id, label="커스텀 엔드포인트", action=action,
+        what=endpoint_id)
+
+
+def elasticache_group_tag_warning(ec, cluster_id, group_id, *, action) -> str:
+    """"" unless the REPLICATION GROUP lacks the tag. Gated actions:
+    elasticache:ModifyReplicationGroup, elasticache:TestFailover."""
+    if not group_id:
+        return ""
+    return _resolved_tag_warning(
+        ec, "describe_replication_groups", {"ReplicationGroupId": group_id},
+        "ReplicationGroups", "ARN", "list_tags_for_resource",
+        cluster_id=cluster_id, label="replication group", action=action,
+        what=group_id)
+
+
+def elasticache_cache_cluster_tag_warning(ec, cluster_id, cache_cluster_id, *,
+                                          action) -> str:
+    """"" unless the CACHE CLUSTER lacks the tag.
+
+    elasticache:RebootCacheCluster authorizes against the individual cache
+    cluster (the node), NOT the replication group that contains it, so reading
+    the group's tags here would answer a different question than the one IAM
+    asks.
+    """
+    if not cache_cluster_id:
+        return ""
+    return _resolved_tag_warning(
+        ec, "describe_cache_clusters", {"CacheClusterId": cache_cluster_id},
+        "CacheClusters", "ARN", "list_tags_for_resource",
+        cluster_id=cluster_id, label="캐시 클러스터", action=action,
+        what=cache_cluster_id)
+
+
+def dynamodb_table_tag_warning(ddb, cluster_id, table, *, action) -> str:
+    """"" unless the TABLE lacks the tag. Gated actions: dynamodb:UpdateTable,
+    dynamodb:UpdateContinuousBackups, dynamodb:UpdateTimeToLive.
+
+    describe_table returns a single `Table` DICT (not a list), and the tag read is
+    list_tags_of_resource(ResourceArn=...) returning `Tags`. Both differ from the
+    rds/elasticache shape, which is why this lives here instead of at each call
+    site.
+    """
+    if not table:
+        return ""
+    return _resolved_tag_warning(
+        ddb, "describe_table", {"TableName": table},
+        "Table", "TableArn", "list_tags_of_resource",
+        cluster_id=cluster_id, label="DynamoDB 테이블", action=action,
+        what=table, arn_kwarg="ResourceArn")
+
+
+def _resolved_tag_warning(client, describe_name, describe_kwargs, container, arn_key,
+                          list_tags_name, *, cluster_id, label, action, what,
+                          arn_kwarg="ResourceName") -> str:
+    """Resolve the GATED resource's ARN with one describe, then read its tags.
+
+    The two API methods arrive as NAMES, not as bound methods, and are resolved
+    with getattr INSIDE the try below. That is deliberate: passing
+    `client.list_tags_for_resource` would evaluate the attribute at the call
+    site, before the cross-account gate, so a client that lacks the method
+    (a wrong-service client, a stub) would raise AttributeError out of a
+    fail-open preflight. Resolving late keeps "every uncertainty produces no
+    warning" true for the client itself, not just for the API responses.
+
+    Why resolve instead of taking an ARN the caller already has: whether a tool
+    holds the right ARN at PREVIEW time depends on its control flow, not on
+    whether the file contains a describe. manage_maintenance is the example that
+    proves it: its describe_db_clusters sits inside the `action == "describe"`
+    branch, which returns before the modify branch is ever reached, so an
+    in-hand ARN there would have been None. Resolving here removes that whole
+    class of mistake, and the cost is one describe on a cold preview path.
+
+    The cross-account gate runs FIRST so a same-account cluster (the common case)
+    makes no extra call at all. Fail-open throughout.
+
+    Three call sites (remove_reader_instance, prewarm_reader, request_approval)
+    check is_cross_account THEMSELVES before this is reached, because their
+    preview is documented and tested to resolve no AWS client, and the client has
+    to be built before a resolver can be called. So on a cross-account preview
+    from those three the registry is read twice: one extra DynamoDB GetItem on a
+    cold, once-per-approval path, in exchange for keeping the gate at the point
+    that actually decides whether to touch AWS. Note for tests: patching only ONE
+    of the two `is_cross_account` references (the tool binds it by name at import;
+    this module reads its own attribute) leaves the other consulting the real
+    registry, which silently produces no warning.
+    """
+    if not is_cross_account(cluster_id):
+        return ""
+    try:
+        item = getattr(client, describe_name)(**describe_kwargs).get(container)
+        # rds/elasticache describes return a LIST; dynamodb's describe_table
+        # returns a single dict under "Table".
+        if isinstance(item, list):
+            item = item[0] if item else None
+        arn = item.get(arn_key) or "" if isinstance(item, dict) else ""
+        list_tags = getattr(client, list_tags_name)
+    except Exception:
+        logger.warning("ManagedBy tag lookup unavailable for %s (%s)",
+                       cluster_id, what, exc_info=True)
+        return ""
+    return _warn_if_untagged(list_tags, arn, cluster_id=cluster_id, label=label,
+                             action=action, arn_kwarg=arn_kwarg)
+
+
 def resource_tag_warning(list_tags, arn, cluster_id, *, label, action,
                          arn_kwarg="ResourceName") -> str:
     """"" unless `arn` was read and provably lacks ManagedBy=dbops.
@@ -99,7 +234,18 @@ def resource_tag_warning(list_tags, arn, cluster_id, *, label, action,
     Same fail-open contract as everything else here: no ARN, a same-account
     cluster, or a failed call produces NO warning.
     """
-    if not arn or not is_cross_account(cluster_id):
+    if not is_cross_account(cluster_id):
+        return ""
+    return _warn_if_untagged(list_tags, arn, cluster_id=cluster_id, label=label,
+                             action=action, arn_kwarg=arn_kwarg)
+
+
+def _warn_if_untagged(list_tags, arn, *, cluster_id, label, action,
+                      arn_kwarg="ResourceName") -> str:
+    """The tag read itself, with NO cross-account gate: every caller has already
+    gated (the resolvers gate before spending a describe). Split out so a
+    resolved-ARN path costs one registry lookup instead of two."""
+    if not arn:
         return ""
     try:
         resp = list_tags(**{arn_kwarg: arn})

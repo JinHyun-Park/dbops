@@ -465,24 +465,51 @@ that is worth not re-litigating.
   agent relays the preview, and it is not a gate. The IAM condition remains the
   enforcement point.
 
-  **Wired 2026-07-30 (4 of 15):** both parameter-group actions plus
-  `rds:RebootDBInstance` and `rds:ModifyDBInstance`. The generic
-  `resource_tag_warning()` covers the rest and needs no new API calls, because every
-  one of those tools ALREADY reads the target ARN in a describe it makes anyway
-  (`DBInstanceArn`, `DBClusterArn`, elasticache `ARN`, `TableArn`) - only the
-  list-tags call is added.
+  **COMPLETE 2026-07-31: all 15 tag-gated actions now warn**, across 18 call sites
+  (4 wired 2026-07-30, 14 added now). `tests/unit/mcp_servers/shared/`
+  `test_managed_tag_preflight_resolvers.py` reads the spoke template and asserts
+  every gated action is named at a preflight site, so the count cannot drift again
+  and this section can no longer be quietly wrong.
 
-  **Remaining (6 actions, mechanical):** `modify_scaling` (DBClusterArn), the three
-  ElastiCache writes (ReplicationGroupArn), and the three DynamoDB writes (TableArn).
-  Each is a three-line edit at the preview return, but note the DynamoDB API is NOT
-  the same shape: `list_tags_of_resource(ResourceArn=...)` returning `Tags`, versus
-  rds/elasticache `list_tags_for_resource(ResourceName=...)` returning `TagList`.
-  The helper takes both and there is a test pinning the DynamoDB shape, so the
-  difference cannot be assumed away.
+  Three things in the earlier note here were WRONG, which is why the guard is a
+  test now and not a number in prose:
 
-  Stopped at 4 deliberately rather than pushing through all 15 in one pass: two of
-  the mechanical edits in this batch produced dead code that only a follow-up read
-  caught, and this is approval-path code.
+  1. **"6 remaining" undercounted.** The template has THREE tag-gated statements,
+     not one: RDSModifyExisting (9 actions), ElastiCacheModifyExisting (3) and
+     DynamoDBModifyExisting (3). The real remainder was 11 actions over 14 sites.
+  2. **"every one of those tools ALREADY reads the target ARN" was false.**
+     `manage_maintenance` is the proof: its `describe_db_clusters` sits inside the
+     `action == "describe"` branch, which RETURNS, so the modify path never has it.
+     Same for `modify_dynamodb_ttl` (describe_time_to_live carries no ARN),
+     `enable_dynamodb_pitr`, `remove_reader_instance`, `modify_custom_endpoint`.
+     Grep shows a file contains a describe; it does not show that the describe is
+     on the same control-flow path as the preview.
+  3. **The gated RESOURCE is not always the obvious one.** `RebootCacheCluster`
+     authorizes against the individual cache cluster, NOT its replication group.
+     `DeleteDBInstance` against the instance, not the cluster. The endpoint actions
+     against the endpoint. Reading the wrong resource's tags produces a confidently
+     wrong warning, which is worse than none, since the whole value here is that
+     the report is a FACT.
+
+  Fixed by resolving the gated resource's ARN INSIDE the helper
+  (`aurora_cluster_tag_warning`, `rds_instance_tag_warning`,
+  `cluster_endpoint_tag_warning`, `elasticache_group_tag_warning`,
+  `elasticache_cache_cluster_tag_warning`, `dynamodb_table_tag_warning`), so no
+  call site depends on its own control flow and every AWS shape quirk lives in one
+  tested place. The cross-account gate runs before the describe, so a same-account
+  cluster still makes zero extra calls.
+
+  Two sites needed more than a preview edit. `set_docdb_profiler` writes TWO gated
+  resources (the cluster parameter group AND the cluster, for the profiler log
+  export) so it reports both. `enable_data_api` has no tool-side preview at all:
+  `api/approvals/handler.py` calls `rds:EnableHttpEndpoint` the moment the DBA
+  approves, so the warning goes on the `request_approval` registration, which is
+  the last point before an unrecoverable auto-execute.
+
+  Not covered, stated rather than papered over: `SnapshotCreate` carries no
+  ResourceTag condition (an `aws:ResourceTag` condition on a Create action denies
+  unconditionally, since the resource does not exist yet), so snapshot tools
+  correctly have no preflight.
 
 - **`AllowedValues` is a DECISION, not an open item.** The field is free-form
   ("0-4294967295", "ON,OFF", enumerations with ranges mixed in) and a parser that

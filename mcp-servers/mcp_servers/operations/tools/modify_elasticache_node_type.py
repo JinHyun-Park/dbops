@@ -16,6 +16,7 @@ from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cluster_targets import client_for_cluster, lookup_cluster
+from mcp_servers.shared.managed_tag_preflight import elasticache_group_tag_warning
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +53,17 @@ def modify_elasticache_node_type_impl(cache, cluster_id=None, node_type=None,
 
     payload = {"target": cluster_id, "node_type": node_type}
     if not approved:
-        return {
+        card = {
             "status": "approval_required", "cluster_id": cluster_id, "target": cluster_id,
             "node_type": node_type, "current_state": {"node_type": current},
             "warnings": [f"노드 타입 변경은 적용 중 일시적 영향이 있을 수 있습니다. 현재={current} → 변경={node_type}"],
         }
+        # Cross-account only, WARNING never a refusal: see managed_tag_preflight.
+        tag_warning = elasticache_group_tag_warning(
+            client, cluster_id, name, action="elasticache:ModifyReplicationGroup")
+        if tag_warning:
+            card["warning"] = tag_warning
+        return card
     guard = verify_approval(approval_id, cluster_id, "modify_elasticache_node_type", payload=payload)
     if not guard.get("ok"):
         return {"status": "approval_denied", "reason": guard.get("reason", "approval guard rejected"), "cluster_id": cluster_id}

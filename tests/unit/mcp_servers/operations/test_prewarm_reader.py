@@ -20,6 +20,7 @@ from mcp_servers.operations.tools.prewarm_reader import prewarm_reader_impl
 from mcp_servers.shared.approval_guard import canonical_action_hash
 
 _PR = "mcp_servers.operations.tools.prewarm_reader"
+_MTP = "mcp_servers.shared.managed_tag_preflight"
 
 
 def _cache(engine="aurora-postgresql"):
@@ -117,6 +118,62 @@ def test_preview_returns_plan_without_connecting():
     assert "리더 인스턴스 reader-1" in out["cli_preview"]
     pg.connect.assert_not_called()
     cfc.assert_not_called()  # no rds resolution before approval
+
+
+def test_cross_account_preview_warns_about_a_missing_ManagedBy_tag():
+    """The other side of the invariant above.
+
+    A SAME-account preview resolves no rds client (asserted above). A
+    spoke-account one deliberately does: the endpoint re-point later in this
+    flow is rds:ModifyDBClusterEndpoint, which the spoke template gates on
+    `ManagedBy=dbops` on the ENDPOINT, and that denial would otherwise arrive
+    only after the single-use approval was consumed.
+    """
+    rds = MagicMock()
+    rds.describe_db_cluster_endpoints.return_value = {
+        "DBClusterEndpoints": [{"DBClusterEndpointArn": "arn:aws:rds:::cluster-endpoint:ep-ro"}]
+    }
+    rds.list_tags_for_resource.return_value = {
+        "TagList": [{"Key": "Application", "Value": "DBOps"}]  # no ManagedBy
+    }
+    # BOTH gates: the tool bound `is_cross_account` by name at import (it decides
+    # whether to build a client at all), and the helper checks its OWN module
+    # attribute inside the resolver. Patching only one leaves the other hitting
+    # the real registry, which silently yields no warning.
+    with patch(f"{_PR}.pg_direct"), \
+         patch(f"{_PR}.client_for_cluster", return_value=rds), \
+         patch(f"{_PR}.is_cross_account", return_value=True), \
+         patch(f"{_MTP}.is_cross_account", return_value=True):
+        out = prewarm_reader_impl(_cache(), cluster_id="prod-pg-1",
+                                  reader_instance_id="reader-1",
+                                  endpoint_identifier="ep-ro", top_n=20)
+    assert out["status"] == "approval_required"
+    assert "rds:ModifyDBClusterEndpoint" in out["warning"]
+    # the ENDPOINT's tags, not the cluster's
+    rds.describe_db_cluster_endpoints.assert_called_once_with(
+        DBClusterEndpointIdentifier="ep-ro")
+
+
+def test_cross_account_preview_is_silent_when_the_endpoint_is_tagged():
+    rds = MagicMock()
+    rds.describe_db_cluster_endpoints.return_value = {
+        "DBClusterEndpoints": [{"DBClusterEndpointArn": "arn:x"}]
+    }
+    rds.list_tags_for_resource.return_value = {
+        "TagList": [{"Key": "ManagedBy", "Value": "dbops"}]
+    }
+    # BOTH gates: the tool bound `is_cross_account` by name at import (it decides
+    # whether to build a client at all), and the helper checks its OWN module
+    # attribute inside the resolver. Patching only one leaves the other hitting
+    # the real registry, which silently yields no warning.
+    with patch(f"{_PR}.pg_direct"), \
+         patch(f"{_PR}.client_for_cluster", return_value=rds), \
+         patch(f"{_PR}.is_cross_account", return_value=True), \
+         patch(f"{_MTP}.is_cross_account", return_value=True):
+        out = prewarm_reader_impl(_cache(), cluster_id="prod-pg-1",
+                                  reader_instance_id="reader-1",
+                                  endpoint_identifier="ep-ro", top_n=20)
+    assert "warning" not in out
 
 
 # ───────────────────────── execute stage ─────────────────────────

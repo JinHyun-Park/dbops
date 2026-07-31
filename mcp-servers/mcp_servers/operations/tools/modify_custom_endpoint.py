@@ -18,6 +18,7 @@ from mcp_servers.operations.tools.delete_custom_endpoint import find_custom_endp
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import rds_client_for_cluster
+from mcp_servers.shared.managed_tag_preflight import cluster_endpoint_tag_warning
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +67,18 @@ def modify_custom_endpoint_impl(
         return {**found, "cli_preview": cli}
 
     if not approved:
-        return {"status": "approval_required", "cluster_id": cluster_id,
+        card = {"status": "approval_required", "cluster_id": cluster_id,
                 "endpoint_identifier": endpoint_identifier,
                 "static_members": static_members, "excluded_members": excluded_members,
                 "cli_preview": cli}
+        # ModifyDBClusterEndpoint is gated on the ENDPOINT, not on the cluster.
+        # Cross-account only, WARNING never a refusal: see managed_tag_preflight.
+        tag_warning = cluster_endpoint_tag_warning(
+            rds, cluster_id, endpoint_identifier,
+            action="rds:ModifyDBClusterEndpoint")
+        if tag_warning:
+            card["warning"] = tag_warning
+        return card
 
     guard = verify_approval(
         approval_id, cluster_id, "modify_custom_endpoint",

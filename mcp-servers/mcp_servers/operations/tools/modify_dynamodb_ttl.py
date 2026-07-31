@@ -16,6 +16,7 @@ from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cluster_targets import client_for_cluster, table_name_for_cluster
+from mcp_servers.shared.managed_tag_preflight import dynamodb_table_tag_warning
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ def modify_dynamodb_ttl_impl(
     warnings = ["TTL 변경은 테이블당 약 1시간에 한 번만 가능합니다 (AWS 제한)."]
 
     if not approved:
-        return {
+        card = {
             "status": "approval_required",
             "cluster_id": cluster_id,
             "target": table,
@@ -105,6 +106,13 @@ def modify_dynamodb_ttl_impl(
             "current_state": state,
             "warnings": warnings,
         }
+        # describe_time_to_live above does NOT carry the table ARN, so the helper
+        # resolves it. Cross-account only, WARNING never a refusal.
+        tag_warning = dynamodb_table_tag_warning(
+            client, cluster_id, table, action="dynamodb:UpdateTimeToLive")
+        if tag_warning:
+            card["warning"] = tag_warning
+        return card
 
     guard = verify_approval(
         approval_id, cluster_id, "modify_dynamodb_ttl", payload=payload

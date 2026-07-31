@@ -18,6 +18,7 @@ from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cluster_targets import client_for_cluster, table_name_for_cluster
+from mcp_servers.shared.managed_tag_preflight import dynamodb_table_tag_warning
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ def enable_dynamodb_pitr_impl(
         )
 
     if not approved:
-        return {
+        card = {
             "status": "approval_required",
             "cluster_id": cluster_id,
             "target": table,
@@ -110,6 +111,13 @@ def enable_dynamodb_pitr_impl(
             "current_state": {"enabled": current},
             "warnings": warnings,
         }
+        # describe_continuous_backups above does NOT carry the table ARN, so the
+        # helper resolves it. Cross-account only, WARNING never a refusal.
+        tag_warning = dynamodb_table_tag_warning(
+            client, cluster_id, table, action="dynamodb:UpdateContinuousBackups")
+        if tag_warning:
+            card["warning"] = tag_warning
+        return card
 
     guard = verify_approval(
         approval_id, cluster_id, "enable_dynamodb_pitr", payload=payload

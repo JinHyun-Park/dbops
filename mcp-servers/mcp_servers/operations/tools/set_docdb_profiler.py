@@ -52,6 +52,10 @@ import logging
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cluster_targets import client_for_cluster
+from mcp_servers.shared.managed_tag_preflight import (
+    aurora_cluster_tag_warning,
+    cluster_parameter_group_tag_warning,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +217,7 @@ def set_docdb_profiler_impl(
     )
 
     if not approved:
-        return {
+        card = {
             "status": "approval_required",
             "cluster_id": cluster_id,
             "parameter_group": pg_name,
@@ -223,6 +227,21 @@ def set_docdb_profiler_impl(
             "current_log_export": log_export_on,
             "warnings": warnings,
         }
+        # This tool writes TWO tag-gated resources: the cluster parameter group
+        # (modify_db_cluster_parameter_group) and the cluster itself (the
+        # profiler log-export via modify_db_cluster). Either one missing the tag
+        # denies its half, so both are reported. Cross-account only, WARNING never
+        # a refusal: see managed_tag_preflight.
+        tag_warnings = [
+            w for w in (
+                cluster_parameter_group_tag_warning(client, cluster_id, pg_name),
+                aurora_cluster_tag_warning(
+                    client, cluster_id, action="rds:ModifyDBCluster"),
+            ) if w
+        ]
+        if tag_warnings:
+            card["warning"] = "\n".join(tag_warnings)
+        return card
 
     # `pg_name` was resolved from the LIVE cluster a few lines above, so passing
     # it here is what makes the group a bound target: if the cluster was

@@ -15,6 +15,7 @@ from botocore.exceptions import ClientError
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cluster_targets import client_for_cluster, lookup_cluster
+from mcp_servers.shared.managed_tag_preflight import elasticache_cache_cluster_tag_warning
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +54,17 @@ def reboot_elasticache_impl(cache, cluster_id=None, approved=False, approval_id=
 
     payload = {"target": cluster_id}
     if not approved:
-        return {"status": "approval_required", "cluster_id": cluster_id, "target": cluster_id,
-                "member": member, "warnings": [f"재부팅은 해당 노드({member})를 잠시 중단시킵니다."]}
+        card = {"status": "approval_required", "cluster_id": cluster_id, "target": cluster_id,
+                "member": member,
+                "warnings": [f"재부팅은 해당 노드({member})를 잠시 중단시킵니다."]}
+        # RebootCacheCluster is gated on the CACHE CLUSTER (the member node), not
+        # on the replication group, so the group's tags would answer a different
+        # question than IAM asks. Cross-account only, WARNING never a refusal.
+        tag_warning = elasticache_cache_cluster_tag_warning(
+            client, cluster_id, member, action="elasticache:RebootCacheCluster")
+        if tag_warning:
+            card["warning"] = tag_warning
+        return card
     guard = verify_approval(approval_id, cluster_id, "reboot_elasticache", payload=payload)
     if not guard.get("ok"):
         return {"status": "approval_denied", "reason": guard.get("reason", "approval guard rejected"), "cluster_id": cluster_id}

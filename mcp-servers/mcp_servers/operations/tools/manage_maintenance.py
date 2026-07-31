@@ -1,6 +1,7 @@
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import rds_client_for_cluster
+from mcp_servers.shared.managed_tag_preflight import aurora_cluster_tag_warning
 
 
 def manage_maintenance_impl(
@@ -24,7 +25,15 @@ def manage_maintenance_impl(
 
     if action == "modify" and window:
         if not approved:
-            return {"status": "approval_required", "action": "modify_maintenance", "window": window}
+            card = {"status": "approval_required", "action": "modify_maintenance", "window": window}
+            # NOTE the describe_db_clusters above is inside the `describe` branch,
+            # which returns, so there is no cluster ARN in hand on THIS path. The
+            # helper resolves it. Cross-account only, WARNING never a refusal.
+            tag_warning = aurora_cluster_tag_warning(
+                rds, cluster_id, action="rds:ModifyDBCluster")
+            if tag_warning:
+                card["warning"] = tag_warning
+            return card
 
         guard = verify_approval(
             approval_id, cluster_id, "manage_maintenance", payload={"window": window}

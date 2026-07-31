@@ -28,12 +28,17 @@ internals leak into a return shown to users (errors are logged to CloudWatch).
 """
 
 import json
+import logging
 import time
 
 from mcp_servers.shared import pg_direct
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import client_for_cluster
+from mcp_servers.shared.managed_tag_preflight import (
+    cluster_endpoint_tag_warning,
+    is_cross_account,
+)
 
 # ponytail: cap relations + wall-clock. Lambda timeout is 120s; stop launching
 # new prewarms past the budget and never warm an unbounded number of relations.
@@ -256,10 +261,34 @@ def prewarm_reader_impl(
     plan = _build_plan(cluster_id, reader_instance_id, endpoint_identifier, top_n)
 
     if not approved:
-        return {"status": "approval_required", "cluster_id": cluster_id,
+        card = {"status": "approval_required", "cluster_id": cluster_id,
                 "reader_instance_id": reader_instance_id,
                 "endpoint_identifier": endpoint_identifier, "top_n": top_n,
                 "cli_preview": plan}
+        # The endpoint re-point later in this flow is
+        # rds:ModifyDBClusterEndpoint, gated on the ENDPOINT itself.
+        #
+        # is_cross_account is checked HERE, before the client is resolved, not
+        # left to the helper: this preview is documented (and tested) to return
+        # without resolving an rds client or connecting, and a same-account
+        # cluster has no ResourceTag condition to warn about. Only a
+        # spoke-account preview spends an assume-role plus two describes.
+        #
+        # WARNING never a refusal: see managed_tag_preflight. Wrapped because a
+        # preflight nicety must never turn a working preview into an error.
+        tag_warning = ""
+        if is_cross_account(cluster_id):
+            try:
+                tag_warning = cluster_endpoint_tag_warning(
+                    client_for_cluster(cluster_id, "rds"), cluster_id,
+                    endpoint_identifier, action="rds:ModifyDBClusterEndpoint")
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "ManagedBy preflight unavailable for %s (%s)",
+                    cluster_id, endpoint_identifier, exc_info=True)
+        if tag_warning:
+            card["warning"] = tag_warning
+        return card
 
     guard = verify_approval(
         approval_id, cluster_id, "prewarm_reader",

@@ -22,6 +22,7 @@ from mcp_servers.shared.approval_guard import canonical_action_hash
 
 _A = "mcp_servers.operations.tools.add_reader_instance"
 _R = "mcp_servers.operations.tools.remove_reader_instance"
+_MTP = "mcp_servers.shared.managed_tag_preflight"
 
 
 def _rds_cluster(members, cluster_id="prod-pg-1", engine="aurora-postgresql", instances=None):
@@ -205,6 +206,68 @@ def test_remove_requires_approval(mock_client):
     assert "cli_preview" in out
     # preview returns before the RDS client is even used
     mock_client.assert_not_called()
+
+
+@patch(f"{_MTP}.is_cross_account", return_value=True)
+@patch(f"{_R}.is_cross_account", return_value=True)
+@patch(f"{_R}.client_for_cluster")
+def test_remove_preview_warns_when_the_INSTANCE_lacks_ManagedBy(mock_client, _xa, _xa2):
+    """The other side of the invariant above.
+
+    A same-account preview resolves no client (asserted above). A spoke-account
+    one does, because rds:DeleteDBInstance is gated on `ManagedBy=dbops` on the
+    INSTANCE and that denial would otherwise land after the single-use approval
+    was already consumed. Note the describe is of the INSTANCE, not the cluster:
+    the cluster's tags answer a different question than IAM asks here.
+    """
+    rds = MagicMock()
+    rds.describe_db_instances.return_value = {
+        "DBInstances": [{"DBInstanceArn": "arn:aws:rds:::db:r1"}]
+    }
+    rds.list_tags_for_resource.return_value = {
+        "TagList": [{"Key": "dbops-demo", "Value": "true"}]  # no ManagedBy
+    }
+    mock_client.return_value = rds
+
+    out = remove_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", instance_id="r1",
+    )
+    assert out["status"] == "approval_required"
+    assert "rds:DeleteDBInstance" in out["warning"]
+    rds.describe_db_instances.assert_called_once_with(DBInstanceIdentifier="r1")
+    rds.describe_db_clusters.assert_not_called()
+
+
+@patch(f"{_MTP}.is_cross_account", return_value=True)
+@patch(f"{_R}.is_cross_account", return_value=True)
+@patch(f"{_R}.client_for_cluster")
+def test_remove_preview_stays_silent_when_the_instance_is_tagged(mock_client, _xa, _xa2):
+    rds = MagicMock()
+    rds.describe_db_instances.return_value = {
+        "DBInstances": [{"DBInstanceArn": "arn:x"}]
+    }
+    rds.list_tags_for_resource.return_value = {
+        "TagList": [{"Key": "ManagedBy", "Value": "dbops"}]
+    }
+    mock_client.return_value = rds
+
+    out = remove_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", instance_id="r1",
+    )
+    assert "warning" not in out
+
+
+@patch(f"{_MTP}.is_cross_account", return_value=True)
+@patch(f"{_R}.is_cross_account", return_value=True)
+@patch(f"{_R}.client_for_cluster", side_effect=RuntimeError("assume-role failed"))
+def test_remove_preview_survives_a_broken_preflight(_client, _xa, _xa2):
+    """Fail-open: the preflight is a nicety and must never turn a working preview
+    into an error, so a client/STS failure yields a card with no warning."""
+    out = remove_reader_instance_impl(
+        MagicMock(), cluster_id="prod-pg-1", instance_id="r1",
+    )
+    assert out["status"] == "approval_required"
+    assert "warning" not in out
 
 
 @patch(f"{_R}.verify_approval")
