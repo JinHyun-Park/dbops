@@ -1,4 +1,4 @@
-aws-cdk-lib>=2.170.0
+aws-cdk-lib>=2.262.1
 constructs>=10.0.0
 aws-cdk.aws-bedrock-agentcore-alpha
 # Synth-time security lint (AWS Solutions ruleset), gated behind CDK_NAG=1 in
