@@ -123,8 +123,8 @@ still in the WebSocket URL, do not enable WS access logging". It is no longer
 conditional. Verified in the code, not recalled:
 
 - `api/ws_authorizer/handler.py` reads `queryStringParameters["ticket"]` and spends
-  it with `delete_item(ConditionExpression="attribute_exists(ticket)",
-ReturnValues="ALL_OLD")`, so two concurrent handshakes on one ticket leave
+  it with a conditional `delete_item` (`attribute_exists(ticket)` plus
+  `ReturnValues="ALL_OLD"`), so two concurrent handshakes on one ticket leave
   exactly one winner. Missing, unknown, spent, expired, or unconfigured all Deny.
   No Cognito call remains in the path.
 - `api/ws_ticket/handler.py` mints the ticket (60-second `expires_at`, checked in
