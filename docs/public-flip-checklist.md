@@ -311,7 +311,70 @@ and that is a product decision, still open, and out of scope for a flip checklis
 
 ---
 
-## 9. Pending deploy: the section 8 fix is committed but NOT live
+## 9. DEPLOYED and verified live 2026-07-31
+
+All four stacks deployed in dependency order, one `cdk deploy` process at a time:
+foundation (38s), data (53s), agent (114s), frontend (139s). Every stack
+UPDATE_COMPLETE.
+
+**The Cognito fix is live, and the regression path is proven closed.** Checked with
+`describe-user-pool-client` twice, before and after the frontend deploy, because
+the frontend custom resource is the thing that could undo it and CloudFormation
+cannot see an SDK-side mutation:
+
+|                              | after foundation | after frontend |
+| ---------------------------- | ---------------- | -------------- |
+| `PreventUserExistenceErrors` | `ENABLED`        | `ENABLED`      |
+| access / id validity         | 720 minutes      | 12 hours       |
+
+The unit flip from `minutes` to `hours` is the evidence, not a cosmetic detail: it
+shows the custom resource DID run and DID apply the re-asserted values. Without
+the section 8 change that same call would have omitted both properties and reset
+them to Cognito's defaults, which is exactly the silent regression this was about.
+
+Also verified live after the frontend deploy: `/config.json` returns HTTP 200 with
+all of `apiUrl`, `cognitoClientId`, `cognitoUserPoolId`, `webSocketUrl`, and the
+site root returns 200. That settles the `prune=False` claim empirically rather than
+by reading the CDK source.
+
+**The tag preflight is live, and it fired for real.** Probed the deployed
+operations Lambda on preview-only paths (`approved=false`, so no write and no
+approval consumed):
+
+- 7 of the wired tools reached their `approval_required` preview with **zero
+  crashes**. That was the actual regression risk: this change added imports to 18
+  tool files, and one bad import would have made that tool dark.
+- On same-account clusters, no `warning` key appears. Correct: the cross-account
+  gate runs first, so the preflight costs nothing and claims nothing.
+- On `dbops-xacct-demo`, the one registered cross-account cluster, the warning
+  FIRED: the tool assumed the spoke role, described the cluster, read its tags, and
+  reported that `ManagedBy=dbops` is absent and that `rds:ModifyDBCluster` would
+  therefore be denied AFTER the single-use approval is consumed.
+
+That last line is also an operational finding worth acting on: **the real spoke
+cluster genuinely lacks the tag today**, so a write against it right now would burn
+an approval and fail. Tag it, or confirm your spoke role does not use the template's
+tag condition.
+
+Scope of that evidence, stated precisely: `manage_maintenance` is the live
+end-to-end proof of the whole chain (gate, ARN resolution, tag read, warning text).
+The other 12 call sites share that same helper and are covered by the unit tests
+and mutation checks plus the live no-crash probe, not by an individual live warning.
+
+### The commands, for the next time
+
+```bash
+cd cdk
+cdk deploy dbops-dev-foundation   # then data, agent, frontend, in that order
+```
+
+Pre-flight checks that mattered: no IAM or security-group changes in any stack;
+`agent/` free of `__pycache__` (its presence fails the AgentCore Runtime image);
+`frontend/out/` freshly built, because CDK ships the prebuilt export and does not
+build for you.
+
+<details>
+<summary>What was pending before this deploy (kept for the diff record)</summary>
 
 Everything above is in the repo. The Cognito change is IaC, so it does nothing
 until deployed. `cdk diff` was run 2026-07-31 against the live dev environment and
@@ -360,6 +423,8 @@ aws cognito-idp describe-user-pool-client \
 Expect `prevent: ENABLED` and 12-hour access/id validity. Run this AFTER the
 frontend deploy, not just after foundation: the frontend stack is the one that
 could undo it, and that is the whole point of section 8.
+
+</details>
 
 ---
 
