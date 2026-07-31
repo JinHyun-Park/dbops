@@ -29,6 +29,27 @@ updates:
     groups:
       pip-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # cdk-nag MUST stay on the 2.x line. Measured 2026-07-31 from PyPI metadata
+      # rather than recited: cdk-nag 3.0.1 requires `aws-cdk-lib<3.0.0,>=2.257.0`,
+      # while this tree resolves aws-cdk-lib 2.243.0 and cdk-nag 2.38.2. (The
+      # ci.yml comment says 2.260; the real floor is 2.257.0.)
+      #
+      # Taking it would drag aws-cdk-lib past that floor, and the breakage is not
+      # in the library: it is that the LIBRARY would then emit a cloud-assembly
+      # schema newer than the pinned `aws-cdk@2` CLI can read, so `cdk synth`
+      # fails. That synth IS the nag gate, so the upgrade breaks the very check
+      # it belongs to.
+      #
+      # This ignore exists because Dependabot opened the same major bump TWICE
+      # (#39 and #43, byte-identical) and closing them by hand only buys a week.
+      # cdk/requirements.txt already pins `<3`, but a version-requirement update
+      # rewrites the constraint itself, so the pin cannot defend against it.
+      #
+      # Lift this when aws-cdk-lib and the aws-cdk CLI are both moved past the
+      # schema-54 boundary together, and not before.
+      - dependency-name: "cdk-nag"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions pinned in the CI / E2E workflows.
   - package-ecosystem: "github-actions"
