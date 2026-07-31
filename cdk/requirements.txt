@@ -7,7 +7,7 @@
 # floor is what a fresh install already resolved: this line documents reality,
 # it does not introduce the requirement.
 aws-cdk-lib>=2.262.1
-constructs>=10.0.0
+constructs>=10.7.1
 aws-cdk.aws-bedrock-agentcore-alpha
 # Synth-time security lint (AWS Solutions ruleset), gated behind CDK_NAG=1 in
 # app.py: opt-in, never blocks a normal deploy.
