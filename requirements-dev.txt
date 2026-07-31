@@ -17,4 +17,4 @@ boto3>=1.43.38
 ruff>=0.16.0,<1
 
 # Pre-commit framework (local + CI)
-pre-commit>=3.7,<5
+pre-commit>=4.6.1,<5
