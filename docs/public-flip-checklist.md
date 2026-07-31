@@ -116,14 +116,27 @@ weekly PRs have covered everything.
 cannot merge. Every suppression carries a reason; read them before publishing,
 because a suppression is an argument you are now making in public.
 
-## 6. WS-ticket, see the trigger
+## 6. WS-ticket, already satisfied (verified 2026-07-31)
 
-The WebSocket `$connect` authorizer's identity source used to be the Cognito
-access token in the query string, which is why this checklist is referenced from
-the WS section of `BACKLOG.md`. Confirm the current state of that item before
-flipping: if the token is still in the URL, **do not enable WS access logging**
-and treat the flip as a trigger to finish the ticket pattern, because a public
-repo advertises exactly where to look.
+This gate said "confirm the current state before flipping: if the access token is
+still in the WebSocket URL, do not enable WS access logging". It is no longer
+conditional. Verified in the code, not recalled:
+
+- `api/ws_authorizer/handler.py` reads `queryStringParameters["ticket"]` and spends
+  it with `delete_item(ConditionExpression="attribute_exists(ticket)",
+ReturnValues="ALL_OLD")`, so two concurrent handshakes on one ticket leave
+  exactly one winner. Missing, unknown, spent, expired, or unconfigured all Deny.
+  No Cognito call remains in the path.
+- `api/ws_ticket/handler.py` mints the ticket (60-second `expires_at`, checked in
+  code because DynamoDB TTL lags up to 48h), wired at `/api/ws-ticket` in
+  `agent_stack.py`.
+- `frontend/src/lib/alert-stream.ts` mints via the normal bearer-authed POST and
+  connects with `?ticket=`.
+
+So no bearer token is in any URL, and WS access logging is no longer dangerous to
+enable. One correction made while verifying: `alert-stream.ts`'s own header comment
+still described the OLD `?token=` design, which would have told a reader the exact
+opposite of the truth. Fixed.
 
 ## 7. Identifiers: RESOLVED 2026-07-31, working tree scrubbed, history kept
 
@@ -211,15 +224,42 @@ measurement, not by argument:
 See section 8. The attacker-lens reviewer ignored the account id entirely and went
 straight for an unauthenticated Cognito call.
 
-### Still outstanding, and it is YOUR call
+### Committer email: forward-fixed, history left alone
 
-The committer email in **867 of 953 commits** is a personal address, and a
-different one from the GitHub account email. Publishing links that mailbox to this
-repo permanently. This is the ONE item a history rewrite would actually fix, and
-it is not scrubbable by editing files. Options: accept it, or
-`git filter-repo --mailmap` before flipping (and publish as a fresh repo, per the
-note in claim 2 above). Left untouched deliberately: rewriting 867 commits'
-metadata is not a change to make on someone's behalf.
+Measured: **868 of 954 commits** carry a personal address, and a different one from
+the GitHub account email (the other 86 are Dependabot's own noreply). Publishing
+would link that mailbox to this repo permanently, and it is the one item editing
+files cannot touch.
+
+Resolved 2026-07-31 in the proportionate direction rather than the maximal one:
+
+- **Future commits: fixed.** This repo's local git identity is now
+  `<id>+<login>@users.noreply.github.com`, GitHub's own linked-noreply form, so
+  contribution attribution and profile links keep working while the private
+  mailbox stops appearing. `--global` was deliberately left alone; this is a
+  repo-scoped change, revert with `git config --unset user.email`.
+- **Existing 868 commits: not rewritten.** The repo is private with 0 forks, so
+  nothing is exposed today, and a rewrite costs every commit SHA: 27 in-repo SHA
+  citations across 21 tracked files rot silently. Worse, per claim 2 above, a
+  force-push to the SAME repo leaves the old objects reachable by SHA through the
+  GitHub UI and API until gc runs, so doing it now would buy the appearance of
+  removal, which is exactly the reasoning this document rejects elsewhere.
+
+**If you do flip public and want the historical addresses gone, that is the moment,
+and it has to be done as a fresh repo.** Runnable procedure:
+
+```bash
+# 1. mailmap: map the old identity to the noreply one
+printf 'JinHyun-Park <NEW@users.noreply.github.com> <OLD@personal.address>\n' > /tmp/mailmap
+# 2. rewrite a CLONE, never the working repo
+git clone --mirror . /tmp/dbops-rewrite && cd /tmp/dbops-rewrite
+git filter-repo --mailmap /tmp/mailmap          # remaps in-message SHAs by default
+# 3. publish as a NEW empty GitHub repo, do NOT force-push over the old one
+# 4. then re-check: the 3 .gitleaksignore fingerprints are commit-scoped and are
+#    now void. They are INERT today (measured: gitleaks with them disabled = 0
+#    findings), so delete them rather than regenerate.
+# 5. and fix the 27 in-repo SHA citations, or accept them as dangling references
+```
 
 ---
 
@@ -268,6 +308,58 @@ and that is a product decision, still open, and out of scope for a flip checklis
 
 **These are CDK changes: inert until `cdk deploy dbops-{env}-foundation` and
 `dbops-{env}-frontend` run.** Deploy foundation first, then frontend.
+
+---
+
+## 9. Pending deploy: the section 8 fix is committed but NOT live
+
+Everything above is in the repo. The Cognito change is IaC, so it does nothing
+until deployed. `cdk diff` was run 2026-07-31 against the live dev environment and
+all four stacks have pending changes:
+
+| Stack                  | Pending change                                                                                                                | Why                                                                                                                 |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `dbops-dev-foundation` | 1 resource: `UserPoolClient` gains `PreventUserExistenceErrors: ENABLED`                                                      | the section 8 fix. This is the whole diff, nothing else                                                             |
+| `dbops-dev-data`       | 6 Lambda code updates (ETLCollector, RdsDirectCollector, EventProcessor, ReportGenerator, ProactiveMonitor, RestoreFinalizer) | asset rebuilds from the dependency floor bumps; resolved versions are unchanged, so no behaviour change is expected |
+| `dbops-dev-agent`      | 5 MCP Lambdas + the AgentCore Runtime                                                                                         | the ManagedBy tag-preflight wiring, plus an image rebuild from the `agent/requirements.txt` floors                  |
+| `dbops-dev-frontend`   | 2 bucket deployments + the `UpdateCognitoCallbacks` custom resource                                                           | the rebuilt static export, and the custom resource now re-asserting every client property                           |
+
+Checked before deploying, so these do not need re-checking:
+
+- **No IAM or security-group changes in any stack**, so `--require-approval never`
+  approves nothing security-relevant.
+- **`agent/` carries no `__pycache__`** (0 files). Its presence makes the AgentCore
+  Runtime image deploy fail, so this is the pre-flight for the agent stack.
+- **`frontend/out/` is freshly built** (`npm run build`, all routes prerendered).
+  The frontend stack ships the prebuilt export; CDK does not build for you.
+- **`config.json` is safe.** All three `BucketDeployment`s set `prune=False`, and
+  `config.json` is its own deployment via `Source.json_data`, so a frontend deploy
+  cannot delete the runtime config out from under the login flow.
+
+Deploy in dependency order, one `cdk deploy` process at a time (two concurrent
+processes race on `cdk.out` and one fails silently):
+
+```bash
+cd cdk
+cdk deploy dbops-dev-foundation --require-approval never   # the security fix
+cdk deploy dbops-dev-data       --require-approval never
+cdk deploy dbops-dev-agent      --require-approval never   # ~10 min for a warm Runtime
+cdk deploy dbops-dev-frontend   --require-approval never
+```
+
+Then verify the fix is actually live, because CloudFormation reporting success and
+the client being correct are different claims (the frontend custom resource mutates
+the client through the SDK, outside CloudFormation's view):
+
+```bash
+aws cognito-idp describe-user-pool-client \
+  --user-pool-id "$POOL_ID" --client-id "$CLIENT_ID" \
+  --query 'UserPoolClient.{prevent:PreventUserExistenceErrors,access:AccessTokenValidity,id:IdTokenValidity,units:TokenValidityUnits}'
+```
+
+Expect `prevent: ENABLED` and 12-hour access/id validity. Run this AFTER the
+frontend deploy, not just after foundation: the frontend stack is the one that
+could undo it, and that is the whole point of section 8.
 
 ---
 

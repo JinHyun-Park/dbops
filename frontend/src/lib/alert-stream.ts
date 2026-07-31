@@ -1,10 +1,20 @@
 /**
  * alert-stream — singleton WebSocket client for the in-app alert push channel.
  *
- * Connects to the API Gateway WebSocket (config.json `webSocketUrl`), passing
- * the Cognito ACCESS token as `?token=` (browsers can't set WS headers; the
- * $connect Lambda authorizer validates it via Cognito GetUser). Pushed alerts /
- * incidents are fanned out to subscribers. Reconnects with exponential backoff.
+ * Connects to the API Gateway WebSocket (config.json `webSocketUrl`). Browsers
+ * cannot set WS headers, so the credential travels in the query string, and that
+ * is why it is a TICKET and not a token: `mintTicket()` below POSTs to
+ * /api/ws-ticket with the normal bearer auth and gets back a random,
+ * 60-second, SINGLE-USE handshake ticket, passed as `?ticket=`. The $connect
+ * authorizer spends it with a conditional DeleteItem and Denies on anything
+ * else. Pushed alerts / incidents are fanned out to subscribers. Reconnects
+ * with exponential backoff.
+ *
+ * This comment used to say the Cognito ACCESS token went in `?token=` and that
+ * the authorizer validated it with Cognito GetUser. Both stopped being true when
+ * the ticket pattern shipped; neither an access token nor a Cognito call is in
+ * this path any more. Corrected because a stale comment claiming a bearer token
+ * sits in a URL is the kind of thing a reader believes.
  *
  * Audience model: the push is FLEET-WIDE — every connected operator receives
  * every fired alert/incident. This is deliberately consistent with the REST
