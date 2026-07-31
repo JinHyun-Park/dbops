@@ -12,6 +12,25 @@ updates:
     groups:
       npm-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # TypeScript must stay on 6.x until Next.js supports the 7.x compiler API.
+      # Measured 2026-07-31 by actually installing 7.0.2 and running both checks,
+      # because they DISAGREE and only one of them is the whole story:
+      #
+      #   npx tsc --noEmit   CLEAN   (the standalone compiler is happy)
+      #   npm run build      FAILS   "TypeScript 7.0.2 does not provide the
+      #                               compiler API required by Next.js. ... or
+      #                               install TypeScript 6 instead."
+      #
+      # Next 16.2.12 drives typechecking through the TS compiler API, which 7.x
+      # changed. Trusting the typecheck alone would have merged a broken build.
+      #
+      # Next offers `experimental.useTypeScriptCli` as a way through, and that is
+      # deliberately NOT taken: opting a production build into an experimental
+      # flag to satisfy a dev-dependency bump is the wrong trade. Lift this when
+      # Next supports the 7.x API on a stable path.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   # Python dependencies across CDK, the agent, every MCP server, and every
   # data-pipeline Lambda. Globs pick up nested per-service requirements files.
