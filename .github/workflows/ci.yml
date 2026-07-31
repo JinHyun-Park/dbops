@@ -89,15 +89,23 @@ jobs:
       # so new IaC misconfigurations can't be merged. cdk-nag only runs when
       # CDK_NAG=1 (app.py gate) — normal deploys are untouched.
       - name: install cdk-nag (pinned 2.x via cdk/requirements.txt)
-        # cdk-nag MUST stay on the 2.x line — 3.x needs aws-cdk-lib>=2.260
-        # (cloud-assembly schema 54), which outruns the pinned CDK CLI (schema
-        # 53) and breaks synth. cdk/requirements.txt pins `cdk-nag>=2.28,<3`;
-        # install it as-is — do NOT add/upgrade cdk-nag here.
+        # cdk-nag MUST stay on the 2.x line: 3.x removed the `NagSuppressions`
+        # API that cdk/app.py imports, so synth dies at import with
+        # "cannot import name 'NagSuppressions' from 'cdk_nag'" (measured
+        # 2026-07-31 against cdk-nag 3.0.1). cdk/requirements.txt pins
+        # `cdk-nag>=2.28,<3`; install it as-is, and do NOT add or upgrade
+        # cdk-nag here. Full reasoning: cdk/requirements.txt.
         run: pip install -r cdk/requirements.txt
-      - name: install CDK CLI (pinned to the 2.x line)
+      - name: install CDK CLI (latest of the 2.x line)
         # The smoke test above uses a Python-level synth; the nag gate needs the
-        # real `cdk synth` exit code. Pin to aws-cdk@2 so the CLI's cloud-assembly
-        # schema stays compatible with the pinned cdk-nag 2.x.
+        # real `cdk synth` exit code.
+        #
+        # `aws-cdk@2` resolves the LATEST 2.x CLI, and that is load-bearing, not
+        # incidental: aws-cdk-lib 2.262.x emits cloud-assembly schema 54, which
+        # needs CLI >= 2.1134.0 to read. Do NOT narrow this to an older 2.x pin.
+        # Measured 2026-07-31: a 2.1111.0 CLI fails this exact synth with
+        # "Maximum schema version supported is 53.x.x, but found 54.0.0".
+        # (The CLI's compatibility is with aws-cdk-lib, not with cdk-nag.)
         run: npm install -g aws-cdk@2
       - name: stub frontend/out for synth (no frontend build in this job)
         # FrontendStack's BucketDeployment needs frontend/out/ (and the hashed

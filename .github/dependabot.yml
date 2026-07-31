@@ -49,24 +49,36 @@ updates:
       pip-minor-patch:
         update-types: ["minor", "patch"]
     ignore:
-      # cdk-nag MUST stay on the 2.x line. Measured 2026-07-31 from PyPI metadata
-      # rather than recited: cdk-nag 3.0.1 requires `aws-cdk-lib<3.0.0,>=2.257.0`,
-      # while this tree resolves aws-cdk-lib 2.243.0 and cdk-nag 2.38.2. (The
-      # ci.yml comment says 2.260; the real floor is 2.257.0.)
+      # cdk-nag MUST stay on the 2.x line: 3.x REMOVED the `NagSuppressions` API
+      # that cdk/app.py imports and uses at 8 call sites.
       #
-      # Taking it would drag aws-cdk-lib past that floor, and the breakage is not
-      # in the library: it is that the LIBRARY would then emit a cloud-assembly
-      # schema newer than the pinned `aws-cdk@2` CLI can read, so `cdk synth`
-      # fails. That synth IS the nag gate, so the upgrade breaks the very check
-      # it belongs to.
+      # Measured 2026-07-31 by installing cdk-nag 3.0.1 in an isolated venv and
+      # running the real nag gate, NOT by reading version metadata:
+      #
+      #   pip install cdk-nag==3.0.1   installs cleanly
+      #   CDK_NAG=1 cdk synth          ImportError: cannot import name
+      #                                'NagSuppressions' from 'cdk_nag'
+      #
+      # 3.x exports only WriteNagSuppressionsToCloudFormationAspect, so taking it
+      # means rewriting all 8 suppression call sites (add_stack_suppressions x6,
+      # add_resource_suppressions_by_path x2) against the new aspect mechanism.
+      #
+      # CORRECTION: an earlier version of this comment claimed the blocker was a
+      # version conflict dragging aws-cdk-lib past a cloud-assembly schema
+      # boundary. That was wrong on both halves. cdk-nag 3.0.1's floor is
+      # aws-cdk-lib>=2.257.0 and a fresh resolve already installs 2.262.2, so the
+      # requirement is SATISFIED, not conflicting. The schema-54 wall is real but
+      # unrelated to cdk-nag: it is aws-cdk-lib 2.262.x versus a CDK CLI older
+      # than 2.1134.0, and CI installs `aws-cdk@2` so CI never hits it. See
+      # cdk/requirements.txt for that one.
       #
       # This ignore exists because Dependabot opened the same major bump TWICE
       # (#39 and #43, byte-identical) and closing them by hand only buys a week.
       # cdk/requirements.txt already pins `<3`, but a version-requirement update
       # rewrites the constraint itself, so the pin cannot defend against it.
       #
-      # Lift this when aws-cdk-lib and the aws-cdk CLI are both moved past the
-      # schema-54 boundary together, and not before.
+      # Lift this once the 8 suppression call sites are migrated to 3.x, and not
+      # before.
       - dependency-name: "cdk-nag"
         update-types: ["version-update:semver-major"]
 

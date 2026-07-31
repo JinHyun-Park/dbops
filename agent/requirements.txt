@@ -10,4 +10,4 @@ boto3>=1.43.38
 # explicitly so a _deps rebuild can never drop it transitively — without it,
 # token verification ImportErrors and silently downgrades every caller to
 # no-team visibility, breaking team/admin-scoped chat.
-PyJWT[crypto]>=2.10.0
+PyJWT[crypto]>=2.13.0

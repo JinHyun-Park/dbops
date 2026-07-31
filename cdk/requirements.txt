@@ -1,8 +1,26 @@
-aws-cdk-lib>=2.170.0
+# aws-cdk-lib 2.262.x emits cloud-assembly schema 54, which needs CDK CLI
+# >= 2.1134.0 to read. CI installs `aws-cdk@2` (npm latest is 2.1134.0), so CI is
+# unaffected. An OLDER LOCAL CLI fails synth with "Cloud assembly schema version
+# mismatch: Maximum schema version supported is 53.x.x, but found 54.0.0"
+# (measured 2026-07-31 against a local CLI 2.1111.0 from brew, whose formula
+# lags). The fix is `npm i -g aws-cdk@2`, NOT downgrading this floor. Note the
+# floor is what a fresh install already resolved: this line documents reality,
+# it does not introduce the requirement.
+aws-cdk-lib>=2.262.1
 constructs>=10.0.0
 aws-cdk.aws-bedrock-agentcore-alpha
 # Synth-time security lint (AWS Solutions ruleset), gated behind CDK_NAG=1 in
-# app.py — opt-in, never blocks a normal deploy. Pinned to the 2.x line: cdk-nag
-# 3.x needs aws-cdk-lib>=2.260 whose cloud-assembly schema (54) outruns the
-# pinned CDK CLI, breaking synth.
+# app.py: opt-in, never blocks a normal deploy.
+#
+# Pinned to the 2.x line because cdk-nag 3.x REMOVED `NagSuppressions`, which
+# app.py imports and uses at 8 call sites (add_stack_suppressions x6,
+# add_resource_suppressions_by_path x2). Measured 2026-07-31 in an isolated venv:
+# `pip install cdk-nag==3.0.1` installs cleanly, then synth dies at import with
+# "cannot import name 'NagSuppressions' from 'cdk_nag'". 3.x exports only
+# WriteNagSuppressionsToCloudFormationAspect, so taking it means rewriting all 8
+# suppression call sites against the new aspect-based mechanism.
+#
+# This supersedes an earlier comment here that blamed a version conflict with
+# aws-cdk-lib. That was wrong: cdk-nag 3.0.1 resolves fine against aws-cdk-lib
+# 2.262.2 (its floor is >=2.257.0). The blocker is the removed API, nothing else.
 cdk-nag>=2.28,<3

@@ -6,7 +6,7 @@ pytest>=9.1.0,<10
 pytest-cov>=7.1.0,<8
 
 # CDK synth tests
-aws-cdk-lib>=2.200,<3
+aws-cdk-lib>=2.262.1,<3
 constructs>=10,<11
 aws-cdk.aws-bedrock-agentcore-alpha
 
@@ -14,7 +14,7 @@ aws-cdk.aws-bedrock-agentcore-alpha
 boto3>=1.43.38
 
 # Linting / formatting
-ruff>=0.15.17,<1
+ruff>=0.16.0,<1
 
 # Pre-commit framework (local + CI)
 pre-commit>=3.7,<5
