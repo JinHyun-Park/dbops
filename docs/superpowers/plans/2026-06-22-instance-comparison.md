@@ -762,7 +762,7 @@ If the prettier hook reformats and aborts: `git add -A` then re-run the same com
 
 - [ ] **Step 1: Deploy frontend**
 
-Run: `aws s3 sync frontend/out/ s3://dbops-dev-frontend-830858425797/ --delete --exclude config.json --region ap-northeast-2` then `aws cloudfront create-invalidation --distribution-id E3AHIXF7WMTX01 --paths "/*"` and wait for `Completed`.
+Run: `aws s3 sync frontend/out/ s3://dbops-dev-frontend-123456789012/ --delete --exclude config.json --region ap-northeast-2` then `aws cloudfront create-invalidation --distribution-id E1234567890ABC --paths "/*"` and wait for `Completed`.
 
 - [ ] **Step 2: Browser E2E**
 

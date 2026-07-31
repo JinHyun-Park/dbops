@@ -136,7 +136,7 @@ In `CAPABILITIES`: add `"sql_via": "data_api",` to the RELATIONAL entry (right a
 - [ ] **Step 4: Sync the 3 other copies verbatim**
 
 ```bash
-cd /Users/jinstar/Desktop/claude-code/projects/dbops
+cd <repo>
 cp mcp-servers/mcp_servers/shared/engine_family.py api/clusters/engine_family.py
 cp mcp-servers/mcp_servers/shared/engine_family.py api/dashboard/engine_family.py
 cp mcp-servers/mcp_servers/shared/engine_family.py data-pipeline/etl_collector/collectors/engine_family.py

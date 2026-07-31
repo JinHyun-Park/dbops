@@ -117,9 +117,22 @@ jobs:
           [ -f frontend/out/_next/static/.synth-stub ] || printf '// synth stub\n' > frontend/out/_next/static/.synth-stub
       - name: cdk-nag synth gate
         # AwsSolutionsChecks fails synth (non-zero exit) on any unsuppressed
-        # finding — the exit code IS the gate, no grep needed. No AWS creds are
-        # required: there are no from_lookup() calls, and the AZ context lookup
-        # for the template account is pre-cached in cdk/cdk.context.json.
+        # finding: the exit code IS the gate, no grep needed. No AWS creds are
+        # required: there are no from_lookup() calls, and the one AZ context
+        # lookup for the settings.example.py account is pre-seeded in the
+        # `context` block of cdk/cdk.json.
+        #
+        # It used to live in cdk/cdk.context.json. That file is now GITIGNORED,
+        # because CDK keys context by AWS account id and a tracked copy publishes
+        # the operator's real account. cdk.json's context bag is read-only to the
+        # CLI (only cdk.context.json is ever rewritten), so the seeded entry
+        # cannot drift. Measured 2026-07-31 on a clean archive of HEAD with
+        # credentials, config and IMDS all unavailable: `cdk synth --no-lookups`
+        # exits 0 and produces all 4 templates, and the CLI does not recreate
+        # cdk.context.json.
+        #
+        # If a new context lookup is ever added, this job fails with a
+        # missing-context error naming the key: add that key to cdk/cdk.json.
         working-directory: cdk
         env:
           CDK_NAG: "1"

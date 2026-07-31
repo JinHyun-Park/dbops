@@ -497,6 +497,6 @@ git commit -m "feat(context-files): admin UI to upload/manage operator context (
 ## Post-implementation (controller, after all tasks reviewed clean)
 
 - Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`.
-- Deploy dev: clean `agent/__pycache__`, then `cdk deploy dbops-dev-foundation dbops-dev-agent` (table + grants + API + Runtime env/grant + agent code). Frontend build → `aws s3 sync frontend/out/ ... --delete --exclude config.json` → CloudFront invalidation `E3AHIXF7WMTX01`.
+- Deploy dev: clean `agent/__pycache__`, then `cdk deploy dbops-dev-foundation dbops-dev-agent` (table + grants + API + Runtime env/grant + agent code). Frontend build → `aws s3 sync frontend/out/ ... --delete --exclude config.json` → CloudFront invalidation `E1234567890ABC`.
 - Live smoke (viewer e2e token): context-files CRUD viewer → 403 (incl no-bearer/garbage); a valid admin POST/GET requires an admin token (cover by unit tests + document). The agent-prompt injection needs the Runtime warm-container refresh (~10 min) + an interactive chat turn — document the live gap honestly.
 - Then `superpowers:finishing-a-development-branch`.

@@ -851,6 +851,6 @@ git commit -m "feat(approval): admin UI for designated-approver policies (hidden
 ## Post-implementation (controller, after all tasks reviewed clean)
 
 - Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`.
-- Deploy dev: `cdk deploy dbops-dev-foundation dbops-dev-agent` (table + grants + both APIs), then frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-830858425797 --delete --exclude config.json` → CloudFront invalidation `E3AHIXF7WMTX01`.
+- Deploy dev: `cdk deploy dbops-dev-foundation dbops-dev-agent` (table + grants + both APIs), then frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-123456789012 --delete --exclude config.json` → CloudFront invalidation `E1234567890ABC`.
 - Live smoke (viewer e2e token): policy CRUD viewer → 403 (incl. no-Bearer / garbage → 403); `GET /api/approval-policies` admin shape. Designated-approver enforcement (approve requiring a designated user) needs an admin token + a seeded policy — cover by unit tests + document the live gap honestly.
 - Then `superpowers:finishing-a-development-branch`.

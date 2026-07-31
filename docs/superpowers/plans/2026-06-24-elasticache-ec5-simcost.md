@@ -428,6 +428,6 @@ git commit -m "feat(elasticache): REST + simulator UI for node-resize cost + sim
 ## Post-implementation (controller, after all tasks reviewed clean)
 
 - Final whole-branch review (most capable model) — focus: NO hardcoded prices (Price List API + soft-fail `partial`, never a fabricated figure); the capability flip (`simulation:False` + `elasticache_cost_simulation:True`) is byte-identical across the 4 copies AND the positive gate refuses non-ElastiCache while the 6 Aurora tools now also refuse ElastiCache (negative gate); right-sizing finding shares `snapshot_ts` + skips burstable; read-only (no write IAM); parity for the new MCP tool; frontend `partial` handling.
-- Deploy dev: `cdk deploy dbops-dev-agent` (simulation MCP + api/simulation + IAM). Frontend build → sync → invalidate `E3AHIXF7WMTX01`.
+- Deploy dev: `cdk deploy dbops-dev-agent` (simulation MCP + api/simulation + IAM). Frontend build → sync → invalidate `E1234567890ABC`.
 - Live smoke: invoke `simulate_elasticache_node_resize` (direct Lambda invoke) against a non-ElastiCache cluster → `unsupported_engine` (positive gate live). The priced happy-path needs a real cluster + Price List access — `partial`/`ok` is unit-covered; a registered ElastiCache cluster (if one exists) would return a real estimate. Right-sizing finding is unit-covered.
 - Then `superpowers:finishing-a-development-branch`.

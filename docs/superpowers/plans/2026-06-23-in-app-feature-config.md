@@ -753,6 +753,6 @@ git commit -m "feat(config): admin settings page — toggle ticketing + report d
 ## Post-implementation (controller, after all tasks reviewed clean)
 
 - Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`.
-- Deploy dev: `cdk deploy dbops-dev-foundation dbops-dev-data dbops-dev-agent` (table + grants + API + consumer env), then frontend: `npm run build` → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-830858425797 --delete --exclude config.json` → CloudFront invalidation `E3AHIXF7WMTX01`.
+- Deploy dev: `cdk deploy dbops-dev-foundation dbops-dev-data dbops-dev-agent` (table + grants + API + consumer env), then frontend: `npm run build` → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-123456789012 --delete --exclude config.json` → CloudFront invalidation `E1234567890ABC`.
 - Live smoke: admin `GET /api/config` returns defaults; `PUT` flips `REPORT_DELIVERY_ENABLED`; `GET` reflects it; viewer gets 403.
 - Then `superpowers:finishing-a-development-branch`.

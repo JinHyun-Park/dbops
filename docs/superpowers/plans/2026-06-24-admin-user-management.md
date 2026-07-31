@@ -868,6 +868,6 @@ git commit -m "feat(admin-console): /admin/users page + nav/⌘K + api-client (a
 ## Post-implementation (controller, after all tasks reviewed clean)
 
 - Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD` — focus: the handler uses the canonical fail-closed `_is_admin`; self-demotion guard is correct (compares to caller `cognito:username`/`sub`); no `str(e)` leakage; IAM scoped to the one pool ARN; role-set is exclusive (add one group + remove the other); frontend gating mirrors `/settings`.
-- Deploy dev: `cdk deploy dbops-dev-agent` (new Lambda + IAM + routes). Frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-830858425797 --delete --exclude config.json --region ap-northeast-2` → CloudFront invalidation `E3AHIXF7WMTX01`.
+- Deploy dev: `cdk deploy dbops-dev-agent` (new Lambda + IAM + routes). Frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-123456789012 --delete --exclude config.json --region ap-northeast-2` → CloudFront invalidation `E1234567890ABC`.
 - Live smoke (viewer e2e token): `GET /api/admin/users` with `Bearer` viewer → **403**; with raw scheme-less token → **403**; (admin happy-path GET/POST not reachable with the viewer-only e2e token — unit-covered). Confirm the new route exists (not 404-route).
 - Then `superpowers:finishing-a-development-branch`.

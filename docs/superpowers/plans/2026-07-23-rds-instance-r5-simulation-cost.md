@@ -148,7 +148,7 @@ def test_storage_month_gp3_plus_iops():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd /Users/jinstar/Desktop/claude-code/projects/dbops && python3 -m pytest tests/unit/shared/test_rds_instance_pricing.py -v`
+Run: `cd <repo> && python3 -m pytest tests/unit/shared/test_rds_instance_pricing.py -v`
 Expected: FAIL — `ModuleNotFoundError` / `AttributeError` (module not written yet).
 
 - [ ] **Step 3: Implement `rds_instance_pricing.py`**
@@ -294,7 +294,7 @@ def price_rds_storage_month(region, storage_type, gb, provisioned_iops=None):
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd /Users/jinstar/Desktop/claude-code/projects/dbops && python3 -m pytest tests/unit/shared/test_rds_instance_pricing.py -v`
+Run: `cd <repo> && python3 -m pytest tests/unit/shared/test_rds_instance_pricing.py -v`
 Expected: PASS (4 tests). If `test_storage_month_gp3_plus_iops` filter fields differ from your implementation, align the test's `products()` stub with the actual filter set you send — do NOT weaken the assertion that storage_usd = unit × gb.
 
 - [ ] **Step 5: Commit**
@@ -419,7 +419,7 @@ def test_insufficient_data_when_no_metrics():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd /Users/jinstar/Desktop/claude-code/projects/dbops && python3 -m pytest tests/unit/simulation/test_rds_rightsizing.py -v`
+Run: `cd <repo> && python3 -m pytest tests/unit/simulation/test_rds_rightsizing.py -v`
 Expected: FAIL — module missing.
 
 - [ ] **Step 3: Implement `rds_rightsizing.py`**
@@ -592,7 +592,7 @@ def simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd /Users/jinstar/Desktop/claude-code/projects/dbops && python3 -m pytest tests/unit/simulation/test_rds_rightsizing.py -v`
+Run: `cd <repo> && python3 -m pytest tests/unit/simulation/test_rds_rightsizing.py -v`
 Expected: PASS (4 tests).
 
 - [ ] **Step 5: Wire into the simulation handler**
@@ -643,7 +643,7 @@ Add the positive-gate branch in `lambda_handler` — insert a new `elif` BEFORE 
 In each of the 4 `engine_family.py` copies, add `"rds_cost_simulation": True,` inside `CAPABILITIES[RDS_INSTANCE]` (next to `"simulation": False,`). The edit MUST be byte-identical across all four. Then verify:
 
 ```bash
-cd /Users/jinstar/Desktop/claude-code/projects/dbops
+cd <repo>
 for f in mcp-servers/mcp_servers/shared api/clusters api/dashboard data-pipeline/etl_collector/collectors; do
   md5 -q "$f/engine_family.py"
 done | sort -u | wc -l   # expect: 1
@@ -654,7 +654,7 @@ Expected: the `md5` count is `1` (all identical) and the parity test passes.
 
 - [ ] **Step 7: Run the simulation handler + capability tests**
 
-Run: `cd /Users/jinstar/Desktop/claude-code/projects/dbops && python3 -m pytest tests/unit/simulation/ tests/ -k "engine_family or simulation_handler or rightsizing" -v`
+Run: `cd <repo> && python3 -m pytest tests/unit/simulation/ tests/ -k "engine_family or simulation_handler or rightsizing" -v`
 Expected: PASS, including any existing handler parity/gate tests.
 
 - [ ] **Step 8: Commit**
@@ -701,7 +701,7 @@ In `cdk/tool_definitions.py`, inside `simulation_schema()`, add after the `simul
 Run:
 
 ```bash
-cd /Users/jinstar/Desktop/claude-code/projects/dbops/cdk
+cd <repo>/cdk
 python3 -c "import tool_definitions as t; names=[x['name'] for x in t.simulation_schema()]; print(names); assert 'simulate_rds_instance_rightsizing' in names"
 ```
 
@@ -720,7 +720,7 @@ In `agent/prompts/cheatsheet.py`, add a one-line entry next to the other simulat
 Run:
 
 ```bash
-cd /Users/jinstar/Desktop/claude-code/projects/dbops
+cd <repo>
 python3 -c "import ast; ast.parse(open('agent/prompts/system_prompt.py').read()); ast.parse(open('agent/prompts/cheatsheet.py').read()); print('ok')"
 ```
 
@@ -780,7 +780,7 @@ Add the component inline in page.tsx (matching the ElastiCache one's structure).
 Run:
 
 ```bash
-cd /Users/jinstar/Desktop/claude-code/projects/dbops/frontend && npm run build
+cd <repo>/frontend && npm run build
 ```
 
 Expected: build succeeds, `out/` regenerated. Confirm the new component compiled (no TS errors). Do NOT deploy from a stale `out/`.
@@ -788,7 +788,7 @@ Expected: build succeeds, `out/` regenerated. Confirm the new component compiled
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/jinstar/Desktop/claude-code/projects/dbops
+cd <repo>
 git add frontend/src/app/simulator/page.tsx
 git commit -m "feat(ui): RDS instance right-sizing/cost simulator panel — R-5"
 ```

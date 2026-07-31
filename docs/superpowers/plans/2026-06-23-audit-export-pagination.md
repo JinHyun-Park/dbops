@@ -317,6 +317,6 @@ git commit -m "feat(audit-export): export loops all pages (unbounded), client so
 ## Post-implementation (controller, after both tasks reviewed clean)
 
 - Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`.
-- Deploy dev: `cdk deploy dbops-dev-agent` (approvals Lambda code), then frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-830858425797 --delete --exclude config.json` → CloudFront invalidation `E3AHIXF7WMTX01`.
+- Deploy dev: `cdk deploy dbops-dev-agent` (approvals Lambda code), then frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-123456789012 --delete --exclude config.json` → CloudFront invalidation `E1234567890ABC`.
 - Live smoke (viewer e2e token): `GET /api/activity?export=true` → 200 with `next_cursor` key present (null or a token); `GET /api/activity?cursor=garbage` → 400; default `GET /api/activity` unchanged shape.
 - Then `superpowers:finishing-a-development-branch`.

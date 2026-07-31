@@ -422,6 +422,6 @@ git commit -m "feat(token-usage): show per-session token total + error badge in 
 ## Post-implementation (controller, after all tasks reviewed clean)
 
 - Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`.
-- Deploy dev: `cdk deploy dbops-dev-agent` (cost Lambda CloudWatch IAM + the AgentCore Runtime if the agent code change is packaged through it — confirm how `agent/` deploys; the agent container/runtime update takes ~10 min to reach a warm container). Then frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-830858425797 --delete --exclude config.json` → CloudFront invalidation `E3AHIXF7WMTX01`.
+- Deploy dev: `cdk deploy dbops-dev-agent` (cost Lambda CloudWatch IAM + the AgentCore Runtime if the agent code change is packaged through it — confirm how `agent/` deploys; the agent container/runtime update takes ~10 min to reach a warm container). Then frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-123456789012 --delete --exclude config.json` → CloudFront invalidation `E1234567890ABC`.
 - Live smoke (viewer e2e token): `GET /api/cost?view=tokens` → 200 with `by_model`/`daily`/`note` keys (possibly empty); default `GET /api/cost` unchanged. Per-session token capture (agent usage event → session field) needs an interactive chat turn after the agent warm-container refresh — verify in the browser or document the live gap honestly.
 - Then `superpowers:finishing-a-development-branch`.

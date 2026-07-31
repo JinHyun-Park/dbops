@@ -590,7 +590,7 @@ class AgentStack(cdk.Stack):
                 # policy depend on the Gateway, while the Gateway also depends on
                 # this policy (the binding-ordering dependency above) — a
                 # circular dependency. The wildcard matches the real gateway id
-                # (e.g. dbops-dev-gateway-jrndurhosm).
+                # (e.g. dbops-dev-gateway-abc123xyz9).
                 f"arn:aws:bedrock-agentcore:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}"
                 f":gateway/dbops-{Settings.ENV}-gateway-*",
             ],

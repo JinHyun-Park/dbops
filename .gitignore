@@ -30,3 +30,16 @@ agent/_deps/
 
 # Subagent-driven-development scratch (briefs, reports, ledger) — local only
 .superpowers/
+
+# One-off audit scratch files belong in the notes vault, not the repo.
+.audit-*
+
+# CDK writes resolved context lookups here, keyed by AWS ACCOUNT ID, so a
+# tracked copy publishes the operator's account. The one entry CI needs (the
+# settings.example.py account's AZ list) lives in cdk/cdk.json's `context`
+# block instead, which the CLI treats as read-only and never rewrites.
+# Measured: credential-free `cdk synth --no-lookups` exits 0 with this file
+# absent, and the CLI does not recreate it.
+# If a NEW context lookup is ever added (from_lookup, SSM, VPC), CI will fail
+# with a missing-context error: add that entry to cdk/cdk.json by hand.
+cdk/cdk.context.json

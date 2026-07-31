@@ -207,7 +207,7 @@ def test_a_describe_failure_is_not_reported_as_a_missing_instance():
     do with. Same distinction _find_parameter draws for the parameter scan."""
     rds = MagicMock()
     rds.describe_db_instances.side_effect = Exception(
-        "ThrottlingException boom: arn:aws:rds:ap-northeast-2:830858425797:db:x")
+        "ThrottlingException boom: arn:aws:rds:ap-northeast-2:123456789012:db:x")
     out = _call(rds, parameter_name="innodb_buffer_pool_size", value="1")
     assert out["status"] == "lookup_failed"
     assert "식별자" not in out["reason"]

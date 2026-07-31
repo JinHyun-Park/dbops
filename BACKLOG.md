@@ -334,7 +334,7 @@ by account/region. Delivered across 5 sequenced specs:
   usual `DBClusterNotFoundFault` (no real resource).
   - ✅ **Spoke-assume path LIVE-VERIFIED end-to-end** (2026-06-17): deployed
     `dbops-spoke-role` (the repo's CFN template) into a real second account
-    (619071337646) trusting the hub (830858425797), and confirmed the full chain
+    (210987654321) trusting the hub (123456789012), and confirmed the full chain
     against that account's Aurora PG: test-connection (assume + describe + secret
     - data_api all ok), cross-account discover (found the cluster via the spoke
       role), register (resolved cluster_arn/secret_arn/db_name cross-account), and

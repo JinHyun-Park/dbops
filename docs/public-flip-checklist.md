@@ -11,7 +11,7 @@ publish. These are the checks that catch what reading misses.
 
 ---
 
-## 1. Secret scan over the FULL history — blocking, and now enforced
+## 1. Secret scan over the FULL history, blocking, and now enforced
 
 A public repo exposes its entire commit history, not its tip. A secret that was
 committed and later deleted is still published.
@@ -65,20 +65,20 @@ Two scan-mode notes that will otherwise waste your time:
 if it finds anything, ROTATE the credential first. Removing it from history does
 not un-leak it.
 
-## 2. Deployment-specific config must not be in the tree — already satisfied
+## 2. Deployment-specific config must not be in the tree, already satisfied
 
 `cdk/config/settings.py` is gitignored and holds the operator's real values;
 `settings.example.py` is the committed template. Confirm `git ls-files` does not
 list `settings.py`, and that `frontend/.env.e2e` (which holds the e2e user's
 password) is likewise untracked.
 
-## 3. No hardcoded deployment URLs in test config — already satisfied
+## 3. No hardcoded deployment URLs in test config, already satisfied
 
 `frontend/playwright.config.ts` reads `process.env.DBOPS_E2E_URL` with **no
 fallback** and throws when it is unset, so no CloudFront domain is baked in.
 (An earlier note claimed a default still needed removing; it does not.)
 
-## 4. Dependency advisories — wired, and cleared 2026-07-30
+## 4. Dependency advisories, wired, and cleared 2026-07-30
 
 `.github/dependabot.yml` covers three ecosystems weekly: `npm` (`/frontend`),
 `pip`, and `github-actions`.
@@ -109,14 +109,14 @@ There is no Python audit tool installed on the dev machine (`pip-audit` is
 absent). Install it for the one-off pre-flip run rather than assuming Dependabot's
 weekly PRs have covered everything.
 
-## 5. IaC security lint — already wired
+## 5. IaC security lint, already wired
 
 `cdk-nag` (AwsSolutions ruleset) runs in the `cdk-synth` CI job behind
 `CDK_NAG=1`, and the synth exit code is the gate, so a new unsuppressed finding
 cannot merge. Every suppression carries a reason; read them before publishing,
 because a suppression is an argument you are now making in public.
 
-## 6. WS-ticket — see the trigger
+## 6. WS-ticket, see the trigger
 
 The WebSocket `$connect` authorizer's identity source used to be the Cognito
 access token in the query string, which is why this checklist is referenced from
@@ -125,52 +125,159 @@ flipping: if the token is still in the URL, **do not enable WS access logging**
 and treat the flip as a trigger to finish the ticket pattern, because a public
 repo advertises exactly where to look.
 
-## 7. Account ids — a real finding, and YOUR decision
+## 7. Identifiers: RESOLVED 2026-07-31, working tree scrubbed, history kept
 
-Measured 2026-07-30: the deployment's REAL AWS account id appears in **11 tracked
-files** — `BACKLOG.md`, `cdk/cdk.context.json`, eight `docs/superpowers/plans/*`
-documents, and one unit test. Everything else is a placeholder
-(`123456789012` ×112, `111122223333` ×35, and so on), and the registry rows with
-real spoke-role ARNs live in DynamoDB rather than the repo, as they should.
+Decision, taken after an 8-agent audit (5 identifier-class sweeps over all 847
+tracked files and all 953 commits on all 193 refs, then 3 adversarial review
+lenses): **scrub the working tree, do NOT rewrite history.**
 
-An account id is not a credential: on its own it grants nothing. It does enable
-targeted enumeration and it is a building block for social engineering and for
-guessing role ARNs, which is why most organisations do not publish theirs.
+### What made the history question answerable
 
-This was NOT scrubbed, because scrubbing it is a decision with a cost and it is
-not one to make on someone's behalf:
+The audit's headline is a definitive negative, verified two independent ways
+(path grep over `git rev-list --all --objects`, and a per-commit tree scan):
 
-- The id is in the COMMIT HISTORY as well as the working tree, so deleting it from
-  the current files publishes it anyway. Actually removing it means rewriting
-  history (`git filter-repo`), which changes every commit hash after the first
-  occurrence.
-- `cdk/cdk.context.json` is functional, not documentation: it caches the AZ lookup
-  keyed by account, and the `cdk-synth` CI job depends on that cache to synth
-  without AWS credentials. Removing the id means either re-caching for a
-  placeholder account or giving CI credentials.
+> `cdk/config/settings.py` was **never** committed, on any of the 193 refs, at any
+> point in 953 commits. `.gitignore` has listed it since the commit that created
+> `.gitignore`.
 
-So pick one before flipping:
+Nor was any `.env*`, `frontend/out/`, `cdk.out/`, or runtime `config.json`. And
+credential-class material is **zero**: no AKIA/ASIA/ABIA/ACCA/AIDA/AROA key ids,
+no `BEGIN * PRIVATE KEY`, no JWTs, no `sk-`/`ghp_`/`xox` tokens, no
+`AWS_BEARER_TOKEN_BEDROCK`, no real Slack webhook, no DB password, no Cognito
+user pool id anywhere. `gitleaks` over all commits, run twice (once with the 3
+`.gitleaksignore` fingerprints DISABLED), returns 0 findings both times, so the
+suppressions are inert rather than load-bearing.
 
-1. **Accept it.** Publish the id. Defensible: it is not a secret, and it is
-   already visible to anyone who has seen a support ticket or an ARN from this
-   deployment.
-2. **Rewrite history.** `git filter-repo` over the 11 paths, re-cache
-   `cdk.context.json` for a placeholder account, force-push. Coordinate: every
-   existing clone breaks.
+So there is nothing in history a rewrite would remove except AWS resource NAMING.
+A rewrite is the wrong instrument for that: it changes every commit hash, and 27
+in-repo SHA citations across 21 tracked files would silently rot (10 in
+`BACKLOG.md`, 6 in `tests/unit/data_pipeline/test_etl_baselines.py`, 5 in
+`.gitleaksignore`, whose fingerprints are `commit:path:rule:line`-scoped and would
+be voided outright).
 
-Whichever you choose, the spoke-role ARNs of any REGISTERED customer account are a
-separate question, and those are in DynamoDB. Confirm nothing has leaked one into
-a committed doc.
+### What was scrubbed from the working tree
+
+| Identifier                                      | Where                              | Action                                   |
+| ----------------------------------------------- | ---------------------------------- | ---------------------------------------- |
+| Hub AWS account id                              | 11 files, 12 occurrences           | → `123456789012`                         |
+| Spoke AWS account id                            | `BACKLOG.md`                       | → `210987654321`                         |
+| CloudFront distribution id                      | 15 plan docs                       | → placeholder                            |
+| S3 frontend bucket name (embeds the account id) | 8 plan docs                        | → placeholder                            |
+| AgentCore Gateway id                            | `agent_stack.py` comment, 1 spec   | → placeholder                            |
+| Live API Gateway URL + Cognito app-client id    | `tools/local-tester/dev-smoke.sh`  | defaults REMOVED, see below              |
+| Live CloudFront domain                          | `.audit-light-mode-and-refresh.md` | file untracked, moved to the notes vault |
+| Local absolute paths (`/Users/<name>/…`)        | 30 occurrences in docs             | → `<repo>`                               |
+
+`cdk/cdk.context.json` is now **gitignored** rather than scrubbed in place. CDK
+keys context by account id, so a tracked copy republishes the account on every
+lookup. The one entry CI needs (the `settings.example.py` account's AZ list) moved
+into `cdk/cdk.json`'s `context` block, which the CLI treats as read-only. This
+also satisfies the CDK guide's instruction that context be committed: the value is
+still committed, in the other committed file.
+
+### Three claims in the first version of this section were WRONG
+
+Recorded because each was stated confidently and each was falsified by
+measurement, not by argument:
+
+1. **"`cdk.context.json` is functional; removing the id means re-caching for a
+   placeholder account or giving CI credentials."** False, and the reason is
+   subtle: whether synth needs the real-account entry or the placeholder one
+   depends on which `settings.py` is present. CI copies `settings.example.py`, so
+   CI only ever needs the `123456789012` entry; the real-account entry is for the
+   owner's local synth and can stay local and untracked. Measured on a clean
+   archive of HEAD with credentials, config and IMDS all unavailable:
+   `cdk synth --no-lookups` exits 0 with the file absent and the entry in
+   `cdk.json`, produces all 4 templates, passes the `CDK_NAG=1` gate, and the CLI
+   does **not** recreate `cdk.context.json`.
+2. **"Deleting it from the current files publishes it anyway, so a rewrite buys
+   the appearance of removal."** A rationalisation. This repo is private, has one
+   human author, no forks, and the 57 `refs/remotes/pr/*` refs are the owner's own
+   fetch config, so there is no third-party clone population. A pre-publication
+   rewrite would in fact be complete. The sound reason to skip it is the first
+   one: an account id is not a credential. (The _real_ version of this concern:
+   force-pushing a rewrite to the same GitHub repo leaves the old objects
+   reachable by SHA through the web UI and API until GitHub runs gc. If a rewrite
+   ever happens, publish as a fresh repo.)
+3. **"The spoke-role trust policy names a specific hub role ARN."** It does not.
+   `cdk/cross-account/spoke-role-template.yaml` uses
+   `Principal.AWS: !Sub arn:aws:iam::${HubAccountId}:root`, i.e. it trusts the
+   whole hub ACCOUNT, and the boundary is that account plus each hub role's
+   identity policy. The conclusion is unchanged (an outsider still needs
+   credentials inside the hub account) but the stated mechanism was wrong.
+
+### The genuinely serious finding was not the account id
+
+See section 8. The attacker-lens reviewer ignored the account id entirely and went
+straight for an unauthenticated Cognito call.
+
+### Still outstanding, and it is YOUR call
+
+The committer email in **867 of 953 commits** is a personal address, and a
+different one from the GitHub account email. Publishing links that mailbox to this
+repo permanently. This is the ONE item a history rewrite would actually fix, and
+it is not scrubbable by editing files. Options: accept it, or
+`git filter-repo --mailmap` before flipping (and publish as a fresh repo, per the
+note in claim 2 above). Left untouched deliberately: rewriting 867 commits'
+metadata is not a change to make on someone's behalf.
+
+---
+
+## 8. Cognito user enumeration: FIXED 2026-07-31, and it was never about going public
+
+The most serious thing the audit found had nothing to do with the account id, and
+was exploitable **before** any flip.
+
+The web app client is secretless (`generate_secret=False`) and its id ships inside
+the publicly served frontend bundle, so it is readable by anyone who loads the
+site. That is fine by design. What was not fine: `prevent_user_existence_errors`
+was never set anywhere in the repo, so Cognito applied its API default (`LEGACY`)
+and returned `UserNotFoundException` for an unknown email versus
+`NotAuthorizedException` for a wrong password. The error **code alone** told an
+anonymous caller whether an email was registered: free user enumeration, no
+credentials, no browser.
+
+Verified at the template level rather than in the source, because "the property is
+missing from the Python" and "the property is missing from the deployed client" are
+different claims: the synthesized `AWS::Cognito::UserPoolClient` carried no
+`PreventUserExistenceErrors` at all.
+
+Fixed in two places, and the second is the interesting one:
+
+- `foundation_stack.py`: `prevent_user_existence_errors=True`.
+- `frontend_stack.py`: the `UpdateCognitoCallbacks` custom resource calls
+  `updateUserPoolClient`, which is a **full replace**: every optional property it
+  omits reverts to the API default. Setting the flag only in `foundation_stack`
+  would have survived exactly until the next `cdk deploy dbops-{env}-frontend`.
+  The same omission was already silently reverting the deliberate 12-hour access
+  and id token validity to Cognito's 60-minute default on every frontend deploy.
+  Both are now re-asserted in that call.
+
+`tests/cdk/test_synth.py` pins all of it (4 tests, mutation-checked): the flag in
+the foundation template, the 720-minute validity, and the custom resource carrying
+every property. Fixing only one half looks correct in isolation and is undone in
+practice, so both halves are asserted.
+
+`USER_PASSWORD_AUTH` was deliberately KEPT despite one reviewer recommending its
+removal. Removing it does not remove the online password-guessing surface, because
+`user_srp=True` is an equally unauthenticated password flow for anyone holding the
+client id, and `smoke-test.sh` authenticates through it to obtain an id_token
+without a browser. Rate limiting and MFA are the controls for guessing; this
+setting is the control for ENUMERATION. **MFA is not configured on this pool**,
+and that is a product decision, still open, and out of scope for a flip checklist.
+
+**These are CDK changes: inert until `cdk deploy dbops-{env}-foundation` and
+`dbops-{env}-frontend` run.** Deploy foundation first, then frontend.
 
 ---
 
 ## After the flip
 
-- **GitHub secret scanning + push protection** — free on public repos. Turn both
+- **GitHub secret scanning + push protection**, free on public repos. Turn both
   on immediately; push protection is the only one of these checks that runs
   before a secret reaches the remote.
-- **CodeQL** — free on public repos. Add the default setup for Python and
+- **CodeQL**, free on public repos. Add the default setup for Python and
   JavaScript/TypeScript.
-- **Branch protection** — the free tier has no branch protection on private
+- **Branch protection**, the free tier has no branch protection on private
   repos, which is why Dependabot PRs are merged by hand today. Public unlocks
   it: require the CI jobs above, including `secrets`, before merge.

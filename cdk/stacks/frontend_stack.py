@@ -184,6 +184,30 @@ function handler(event) {
                         "ALLOW_REFRESH_TOKEN_AUTH",
                         "ALLOW_USER_PASSWORD_AUTH",
                     ],
+                    # UpdateUserPoolClient is a FULL REPLACE, not a patch: every
+                    # optional property omitted here is reset to its API default.
+                    # So this call has to re-assert everything foundation_stack
+                    # chose for this client, or a frontend deploy silently undoes
+                    # it. Two settings were being lost that way:
+                    #
+                    #   PreventUserExistenceErrors -> reverted to LEGACY, which
+                    #     re-opens the user-enumeration hole foundation_stack sets
+                    #     this for. That made the security fix survive only until
+                    #     the next `cdk deploy dbops-{env}-frontend`.
+                    #   Access/Id token validity -> reverted from the deliberate
+                    #     12h to Cognito's 60-minute default, so the "DBA shifts
+                    #     are long" decision in foundation_stack was being quietly
+                    #     reversed on every frontend deploy.
+                    #
+                    # Keep these in sync with foundation_stack's add_client. If you
+                    # add a client property there, add it here too.
+                    "PreventUserExistenceErrors": "ENABLED",
+                    "AccessTokenValidity": 12,
+                    "IdTokenValidity": 12,
+                    "TokenValidityUnits": {
+                        "AccessToken": "hours",
+                        "IdToken": "hours",
+                    },
                 },
                 physical_resource_id=cr.PhysicalResourceId.of(
                     f"cognito-callback-{distribution.distribution_domain_name}"

@@ -163,6 +163,6 @@ git commit -m "feat(elasticache): Cost page ElastiCache spend tab"
 ## Post-implementation (controller, after both tasks reviewed clean)
 
 - Final whole-branch review (standard model — small mirror): the elasticache view envelope matches the rds view exactly (only SERVICE filter + view label differ); no tag filter; no new IAM; the dispatch arm doesn't disturb the existing views; the frontend tab reuses the rds rendering without breaking the other tabs.
-- Deploy dev: `cdk deploy dbops-dev-agent` (api/cost Lambda). Frontend build → sync → invalidate `E3AHIXF7WMTX01`.
+- Deploy dev: `cdk deploy dbops-dev-agent` (api/cost Lambda). Frontend build → sync → invalidate `E1234567890ABC`.
 - Live smoke: `GET /api/cost?view=elasticache&days=30` (viewer token) → 200 with the envelope (`view: "elasticache"`, total/daily/by_usage_type; likely $0 or small in dev — that's fine, the envelope + no_data_reason is the check). Confirm the other views (rds/bedrock/platform/tokens) still return 200 (no regression).
 - Then `superpowers:finishing-a-development-branch`.

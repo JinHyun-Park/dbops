@@ -336,3 +336,92 @@ def test_app_carries_application_tag(cdk_app):
             found_tagged = True
             break
     assert found_tagged, "Application=DBOps tag not detected on any stack"
+
+
+# ---------------------------------------------------------------------------
+# Cognito app-client hardening
+# ---------------------------------------------------------------------------
+#
+# The web app client is SECRETLESS and its id ships inside the publicly served
+# frontend bundle, so nothing about it is private. That makes two client
+# properties load-bearing, and both were silently wrong before 2026-07-31:
+#
+#   PreventUserExistenceErrors  absent -> Cognito's API default (LEGACY) leaks
+#     UserNotFoundException vs NotAuthorizedException, so the error code alone
+#     tells an anonymous caller whether an email is registered.
+#   Access/Id token validity    the deliberate 12h choice in foundation_stack
+#     was being reset to the 60-minute default on every frontend deploy.
+#
+# Both had the same root cause: FrontendStack's UpdateCognitoCallbacks custom
+# resource calls updateUserPoolClient, which is a FULL REPLACE. Any optional
+# property it omits reverts to the API default, so a setting made in
+# foundation_stack survives only until the next `cdk deploy ...-frontend`.
+# These tests pin BOTH halves, because fixing only foundation_stack looks
+# correct in isolation and is undone in practice.
+
+
+def _web_client_properties(cdk_app):
+    """The foundation stack's WEB user-pool client properties.
+
+    Scoped to the foundation stack on purpose: the agent stack also defines a
+    user-pool client (the Gateway's machine-to-machine client_credentials
+    client). That one has no human users, so user-existence errors do not apply
+    to it and it must not be swept into this assertion.
+    """
+    foundation = next(s for s in cdk_app.stacks if s.stack_name.endswith("-foundation"))
+    clients = [
+        r
+        for r in (foundation.template or {}).get("Resources", {}).values()
+        if r.get("Type") == "AWS::Cognito::UserPoolClient"
+    ]
+    assert len(clients) == 1, f"expected exactly one foundation client, got {len(clients)}"
+    return clients[0].get("Properties", {})
+
+
+def test_web_client_prevents_user_existence_errors(cdk_app):
+    props = _web_client_properties(cdk_app)
+    assert props.get("PreventUserExistenceErrors") == "ENABLED", (
+        "the web app client must return a uniform NotAuthorizedException; absent "
+        "means Cognito's LEGACY default and free user enumeration"
+    )
+
+
+def test_web_client_keeps_the_twelve_hour_token_validity(cdk_app):
+    """720 minutes, not 12: CDK renders Duration.hours(12) in minutes here."""
+    props = _web_client_properties(cdk_app)
+    assert props.get("AccessTokenValidity") == 720
+    assert props.get("IdTokenValidity") == 720
+
+
+def test_frontend_callback_update_reasserts_every_client_setting(cdk_app):
+    """The custom resource must carry the properties foundation_stack chose.
+
+    Read as raw TEXT rather than json.loads on the Update property: that
+    property is a CloudFormation Fn::Join structure, not a JSON string, so
+    json.loads silently fails and returns nothing. A first version of this
+    check did exactly that and reported every parameter as ABSENT while they
+    were all present, which is why this asserts on the serialised blob.
+    """
+    frontend = next(s for s in cdk_app.stacks if s.stack_name.endswith("-frontend"))
+    blobs = [
+        json.dumps(r.get("Properties", {}))
+        for r in (frontend.template or {}).get("Resources", {}).values()
+        if r.get("Type") == "Custom::AWS"
+    ]
+    update = next((b for b in blobs if "updateUserPoolClient" in b), None)
+    assert update, "no updateUserPoolClient custom resource found in the frontend stack"
+
+    for prop in (
+        "PreventUserExistenceErrors",
+        "AccessTokenValidity",
+        "IdTokenValidity",
+        "TokenValidityUnits",
+        # already present before this round; asserted so a future edit cannot
+        # drop it while adding something else
+        "ExplicitAuthFlows",
+    ):
+        assert prop in update, (
+            f"{prop} missing from the updateUserPoolClient call. That call is a "
+            "full replace, so an omitted property resets to the API default and "
+            "silently undoes foundation_stack."
+        )

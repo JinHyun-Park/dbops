@@ -239,11 +239,11 @@ def test_a_write_failure_leaks_no_detail_and_mints_nothing():
         rows = {}
 
         def put_item(self, Item):
-            raise RuntimeError("arn:aws:dynamodb:ap-northeast-2:830858425797:table/x")
+            raise RuntimeError("arn:aws:dynamodb:ap-northeast-2:123456789012:table/x")
     resp, _ = _mint({"authorization": _bearer({"sub": "u"})}, table=Boom())
     assert resp["statusCode"] == 500
     blob = json.dumps(resp)
-    for leak in ("arn:aws", "830858425797", "RuntimeError"):
+    for leak in ("arn:aws", "123456789012", "RuntimeError"):
         assert leak not in blob, f"leaked {leak}: {resp}"
 
 

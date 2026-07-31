@@ -318,6 +318,6 @@ git commit -m "feat(onboarding): spoke-account setup wizard UI (hidden from view
 ## Post-implementation (controller, after both tasks reviewed clean)
 
 - Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`.
-- Deploy dev: `cdk deploy dbops-dev-agent` (onboarding Lambda + route). Frontend build → `aws s3 sync frontend/out/ ... --delete --exclude config.json` → CloudFront invalidation `E3AHIXF7WMTX01`.
+- Deploy dev: `cdk deploy dbops-dev-agent` (onboarding Lambda + route). Frontend build → `aws s3 sync frontend/out/ ... --delete --exclude config.json` → CloudFront invalidation `E1234567890ABC`.
 - Live smoke (viewer e2e token): `GET /api/onboarding/template` → 403 (admin-gated); (the admin path returns a valid template — unit-covered since the viewer token can't reach it). Confirm the route exists (not 404).
 - Then `superpowers:finishing-a-development-branch`.

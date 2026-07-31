@@ -65,7 +65,7 @@ binding flip, fully reversible — all probe policies were created with
 `enforcementMode=LOG_ONLY` and deleted). Verified facts:
 
 1. **Engine ACTIVE + bound.** `dbops_dev_policy_engine-6dubd1jle0` is `ACTIVE`,
-   bound to gateway `dbops-dev-gateway-jrndurhosm` (4 targets: performance /
+   bound to gateway `dbops-dev-gateway-abc123xyz9` (4 targets: performance /
    operations / incident / simulation).
 2. **All 4 policies are ACTIVE with `enforcementMode: ACTIVE`** — definition is
    the coarse permit `permit(principal, action in AgentCore::Action::"<target>",

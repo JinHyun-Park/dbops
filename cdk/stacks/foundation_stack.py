@@ -47,6 +47,25 @@ class FoundationStack(cdk.Stack):
         self.user_pool_client = self.user_pool.add_client(
             "WebClient",
             auth_flows=cognito.AuthFlow(user_password=True, user_srp=True),
+            # Return a uniform NotAuthorizedException instead of
+            # UserNotFoundException. Without this, Cognito's API default for a
+            # programmatically created client is LEGACY, so the error CODE alone
+            # tells an anonymous caller whether an email is registered: free user
+            # enumeration against this pool. The app client is secretless
+            # (generate_secret=False) and its id ships inside the public frontend
+            # bundle, so "the client id is not published" was never the control.
+            #
+            # Verified 2026-07-31 that this was missing at the TEMPLATE level, not
+            # just in the source: the synthesized AWS::Cognito::UserPoolClient had
+            # no PreventUserExistenceErrors property at all.
+            #
+            # USER_PASSWORD_AUTH is deliberately KEPT. Removing it does not remove
+            # the online password-guessing surface, because user_srp=True is an
+            # equally unauthenticated password flow for anyone holding the client
+            # id, and smoke-test.sh authenticates through USER_PASSWORD_AUTH to get
+            # an id_token without a browser. Rate limiting and MFA are the controls
+            # for guessing; this setting is the control for ENUMERATION.
+            prevent_user_existence_errors=True,
             o_auth=cognito.OAuthSettings(
                 flows=cognito.OAuthFlows(authorization_code_grant=True),
                 scopes=[cognito.OAuthScope.OPENID, cognito.OAuthScope.PROFILE],

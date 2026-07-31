@@ -398,7 +398,7 @@ git commit -m "fix(etl): run cost/param/capacity findings for relational family 
 ### ▶ CODEX CHECKPOINT 1 (after Phase 1)
 
 ```bash
-codex exec -s read-only -C /Users/jinstar/Desktop/claude-code/projects/dbops \
+codex exec -s read-only -C <repo> \
 "Adversarially review the uncommitted/last-3-commits diff for the ETL engine-family dispatch \
 (handler.py _collect_one, engine_family.py, schema_v16). Verify: (1) no RDS/PI/AWS-RDS-CW call \
 can execute for a dynamodb/documentdb row; (2) the relational path is byte-for-byte behavior- \
@@ -997,7 +997,7 @@ git commit -m "feat(cdk): grant ETL+clusters roles dynamodb/docdb describe permi
 ### ▶ CODEX CHECKPOINT 2 (after Phase 2)
 
 ```bash
-codex exec -s read-only -C /Users/jinstar/Desktop/claude-code/projects/dbops \
+codex exec -s read-only -C <repo> \
 "Adversarially review Phase-2 diff: dynamodb_cw_collector, docdb_cw_collector, api/clusters \
 per-family register/discover, api/dashboard engine gating, mcp engine guard, CDK IAM. Verify: \
 (1) DynamoDB Provisioned* only queried for PROVISIONED tables; latency uses Operation dim; \
@@ -1204,7 +1204,7 @@ git commit -m "feat(fe): register DynamoDB/DocumentDB resources from Clusters pa
 ### ▶ CODEX CHECKPOINT 3 (after Phase 3)
 
 ```bash
-codex exec -s read-only -C /Users/jinstar/Desktop/claude-code/projects/dbops \
+codex exec -s read-only -C <repo> \
 "Adversarially review Phase-3 frontend diff: engine.ts family helpers, group-by-family, dashboard \
 shell gating, dynamodb/docdb panels, clusters form. Verify: (1) NO Aurora/SQL panel can render for \
 a dynamodb/documentdb resource (grep dashboard/page.tsx for the family guard around each panel). \

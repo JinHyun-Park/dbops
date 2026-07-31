@@ -332,6 +332,6 @@ git commit -m "feat(reports): /reports HTML download (presigned) + viewer button
 ## Post-implementation (controller, after all tasks reviewed clean)
 
 - Final whole-branch review (most capable model) — focus: HTML is self-contained (no external refs/scripts); ALL DB/AI text HTML-escaped (no injection); HTML twin is best-effort (JSON/DB/delivery unaffected on failure); the `.html` key derivation matches both sides (generator writes, api derives the same key); download is read-only presigned + 404-on-missing for old reports; no new dep, no schema migration; openapi parity if a route was added.
-- Deploy dev: `cdk deploy dbops-dev-data` (report_generator) + `cdk deploy dbops-dev-agent` (api/reports + route). Frontend build → sync → invalidate `E3AHIXF7WMTX01`.
+- Deploy dev: `cdk deploy dbops-dev-data` (report_generator) + `cdk deploy dbops-dev-agent` (api/reports + route). Frontend build → sync → invalidate `E1234567890ABC`.
 - Live smoke: trigger report_generator (direct Lambda invoke) for a cluster with data → confirm a `.html` lands in S3; `GET /api/reports/{id}/html` → 200 + a presigned url that fetches valid self-contained HTML; an old report → 404 + note. No-regression: the existing JSON report viewer + delivery still work.
 - Then `superpowers:finishing-a-development-branch`.

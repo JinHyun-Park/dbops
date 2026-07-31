@@ -214,6 +214,6 @@ export async function unassignClusterFromTeam(
 ## Post-implementation (controller, after both tasks reviewed clean)
 
 - **Final review (standard model — frontend, mirrors an existing page):** the page mirrors admin/users (consistent product UI, no AI-slop); all mutations confirm destructive actions; 403 → admin-only empty state; the nav item is `adminOnly`; member/cluster pickers reuse `fetchAdminUsers`/`fetchClusters`; no secrets/PII in URLs; Korean copy correct.
-- **Build + deploy:** `cd frontend && npm run build` → `aws s3 sync out/ s3://dbops-dev-frontend-830858425797 --delete --exclude config.json --region ap-northeast-2` → CloudFront invalidate `E3AHIXF7WMTX01`.
+- **Build + deploy:** `cd frontend && npm run build` → `aws s3 sync out/ s3://dbops-dev-frontend-123456789012 --delete --exclude config.json --region ap-northeast-2` → CloudFront invalidate `E1234567890ABC`.
 - **Live smoke:** as the e2e VIEWER (no admin token available), confirm the COSMETIC gate: `/admin/teams` shows the admin-only empty state and the nav "Teams" item is hidden for the viewer. (The admin CRUD happy-path is covered by the `test_admin_teams.py` unit suite + the api-level T-1 work; a full admin browser flow needs an admin credential, which isn't available in this environment — note this in the smoke report rather than faking it.)
 - Then `superpowers:finishing-a-development-branch` (ff-merge to main). T-4 (agent SSE tenancy) is the remaining increment.

@@ -1,6 +1,12 @@
 {
   "app": "python3 app.py",
   "context": {
-    "@aws-cdk/core:stackRelativeExports": true
+    "@aws-cdk/core:stackRelativeExports": true,
+    "availability-zones:account=123456789012:region=ap-northeast-2": [
+      "ap-northeast-2a",
+      "ap-northeast-2b",
+      "ap-northeast-2c",
+      "ap-northeast-2d"
+    ]
   }
 }

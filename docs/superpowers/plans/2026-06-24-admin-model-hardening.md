@@ -113,6 +113,6 @@ git commit -m "fix(admin): frontend isAdmin() matches canonical gate (group set 
 ## Post-implementation (controller, after both tasks reviewed clean)
 
 - Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD` — focus: every handler's `_is_admin` is now identical to the canonical form; no handler accidentally diverges; the single-admin (no-group→admin) fallback is preserved; existing admin/viewer behavior unchanged.
-- Deploy dev: the handlers span the agent stack (most api/) — `cdk deploy dbops-dev-agent` (+ any stack a changed handler lives in; confirm). Frontend build → sync → CloudFront invalidation `E3AHIXF7WMTX01`.
+- Deploy dev: the handlers span the agent stack (most api/) — `cdk deploy dbops-dev-agent` (+ any stack a changed handler lives in; confirm). Frontend build → sync → CloudFront invalidation `E1234567890ABC`.
 - Live smoke (viewer e2e token): a previously-FAIL-OPEN write — `PUT /api/saved-queries/<id>` and a runbooks write — with a RAW (no-Bearer) token → now **403** (was the priv-esc); `Bearer` viewer → 403; confirm a normal admin/GET path still works. (The single-admin no-group case isn't reachable with the viewer token — unit-covered.)
 - Then `superpowers:finishing-a-development-branch`.
