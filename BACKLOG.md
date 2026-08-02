@@ -599,10 +599,16 @@ Ordered by operator impact. Each was confirmed against source, not just observed
   now closes this, but the plan builder is a pure string template driven by
   is_major/is_postgres and trusts that it was only reached for Aurora. Defence in
   depth for a tool that emits runnable CLI.
-- **Valkey is priced at the Redis rate**, ~25% high, because `_ENGINE_LABEL` in
-  `shared/elasticache_pricing.py` aliases it. AWS now publishes separate Valkey
-  SKUs. One map entry, and the module already soft-fails to None where a SKU is
-  missing.
+- **ElastiCache Redis has MULTIPLE Price List SKUs per node type and the helper
+  takes whichever comes back first.** Measured 2026-08-02 in ap-northeast-2:
+  cache.t4g.micro returns 0.019, 0.024 and 0.038; cache.t4g.small returns 0.047,
+  0.075 and 0.038. So a Redis cluster's cost can be off by 2x depending on API
+  ordering. This is what the Valkey alias fix exposed rather than caused: aliasing
+  Valkey to Redis was wrong by +25% on one node type and -1% on another, i.e.
+  arbitrary in size AND direction, not a constant markup. Valkey now queries its own
+  SKU and is exact; Redis still needs the disambiguating attribute (likely
+  cacheEngineVersion or a serverless-vs-node dimension) identified before its own
+  lookup can be called correct.
 - **`aurora_pricing` defaults an unrecognised engine to Aurora PostgreSQL**, so
   DocumentDB was priced at the Aurora rate and stamped `source=aws_price_list`. A
   guess dressed as a measurement. Return None instead; callers already handle a
