@@ -26,9 +26,15 @@ def performance_schema():
         _tool("get_top_queries", "Get top-N queries sorted by total time, calls, or mean time; optional ISO start_time/end_time window",
               {"cluster_id": "string", "sort_by": "string", "limit": "integer",
                "start_time": "string", "end_time": "string"}, ["cluster_id"]),
-        _tool("get_pi_metrics", "Get Performance Insights metrics (AAS, wait events) from cache; optional ISO start_time/end_time window",
+        _tool("get_pi_metrics",
+              "Get Performance Insights metrics (AAS, wait events) from cache. Bounded by "
+              "default: last 6h and 1000 newest samples. Pass hours to widen the relative "
+              "window, or an explicit ISO start_time/end_time to override it, and limit "
+              "(max 5000) for more samples. The response echoes the window/limit applied "
+              "and sets truncated=true when the limit clipped the series",
               {"cluster_id": "string", "metric_type": "string",
-               "start_time": "string", "end_time": "string"}, ["cluster_id"]),
+               "start_time": "string", "end_time": "string",
+               "hours": "integer", "limit": "integer"}, ["cluster_id"]),
         _tool("get_slow_queries", "Get slow queries exceeding threshold from cache; optional ISO start_time/end_time window",
               {"cluster_id": "string", "threshold_ms": "number", "limit": "integer",
                "start_time": "string", "end_time": "string"}, ["cluster_id"]),

@@ -603,6 +603,14 @@ def test_the_census_covers_every_file_that_reads_metric_snapshots():
         "api/clusters/handler.py",
         # 90-day retention purge (DELETE), not a read
         "data-pipeline/etl_collector/handler.py",
+        # get_pi_metrics returns the RAW time series, deliberately WITHOUT the
+        # cluster-level filter: Performance Insights wait-event breakdowns live in
+        # the dimensioned rows, so CLUSTER_LEVEL_ONLY would drop exactly the detail
+        # this tool exists to return. It aggregates no value across dimensions, it
+        # pages rows through. (It surfaced here only because the module docstring
+        # quotes the query it used to emit; the SQL itself is built by
+        # cache._build_query.)
+        "mcp-servers/mcp_servers/performance/tools/pi_metrics.py",
     }
     unrecorded = []
     for sub in ("api", "mcp-servers/mcp_servers", "data-pipeline"):

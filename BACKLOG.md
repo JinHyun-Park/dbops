@@ -518,3 +518,151 @@ that is worth not re-litigating.
   reading like unfinished work. Upgrade path if it ever becomes worth it: validate
   ONLY the two unambiguous shapes (a single "lo-hi" integer range and a pure
   comma-separated enumeration) and stay silent on everything else.
+
+---
+
+## Live tool sweep 2026-08-02: what 567 real invocations found
+
+Every one of the 64 gateway tools was invoked against 9 registered clusters (one
+per engine family plus the cross-account spoke) on the DEPLOYED Lambdas.
+Approval-gated tools ran with `approved=false`, so only preview branches
+executed: no writes, no approvals consumed. Zero Lambda crashes in 567 calls.
+
+Then four analysis lenses (engine gating, false-empty success, argument/error
+quality, simulation depth) read the captured results against the source.
+
+Harness discipline worth repeating: two "universal failures" were the PROBE's
+fault, not the code's. `get_runbook` was sent an undeclared `cluster_id` and
+`search_logs` an undeclared `pattern` instead of `query`. Both tools are correct.
+A self-audit that diffed every argument sent against `tools/list` separated the
+two classes; without it they would have been filed as bugs.
+
+### FIXED in this pass
+
+- **`compare_periods` was dead for every engine family.** `ts >= :start_time` with
+  no `::timestamptz`: the Data API binds every parameter as stringValue, so
+  PostgreSQL got text and there is no `timestamptz >= text` operator (SQLState
+  42883). Its unit test asserted `execute.call_count == 2` against a MagicMock that
+  accepts any SQL, so it was green the whole time. Guarded now by a repo-wide
+  census (`tests/unit/test_sql_timestamp_casts.py`) plus an assertion on the SQL
+  the tool actually builds.
+- **One missing `.rows` unwrap broke all 9 simulation tools, in both directions.**
+  `simulation/handler.py::_resolve_family` did `isinstance(rows, list)` on a
+  QueryResult, so it always returned None. The generic `simulation` gate is
+  DEFAULT-PERMIT on None, so the six Aurora-only tools ran on every engine:
+  `estimate_upgrade_impact` told the operator a Valkey cache would be down
+  "~23분 (pg_upgrade 동안 writer 중단)", and `generate_upgrade_plan` emitted a
+  runnable `aws rds create-blue-green-deployment` for a DynamoDB table. The three
+  POSITIVE gates refuse None, so `simulate_dynamodb_capacity_cost`,
+  `simulate_elasticache_node_resize` and `simulate_rds_instance_rightsizing`
+  returned `unsupported_engine` on 9 of 9 clusters INCLUDING their own family:
+  three shipped capabilities, completely unusable.
+  `rds_rightsizing.py` had the same omission twice more, so the two bugs hid each
+  other, the gate never letting a call through to reveal the impl.
+  The engine-guard test could not catch any of it: its fixture returned a plain
+  `list`, a shape `CacheClient.execute` never produces, so it encoded the bug's
+  premise. Fixed to wrap in a real QueryResult, which makes 6 of its tests fail
+  against the old handler.
+- **`cache_client._build_query` emitted uncast time predicates**, so
+  `start_time`/`end_time` were dead on `get_top_queries`, `get_slow_queries` and
+  `get_pi_metrics`. The column name is interpolated there, which is exactly why the
+  first version of the census walked past the repo's one shared query builder. The
+  census now scans interpolated predicates too.
+- **`get_pi_metrics` had no LIMIT and no default window**, so an unbounded
+  `SELECT *` blew the Data API's 1 MB cap on precisely the three clusters that HAVE
+  Performance Insights, and looked fine on the ones that do not. That reads as "PI
+  is not enabled there", the exact opposite of the truth. Now 6h/1000 by default,
+  newest-first so a clipped read keeps the recent end, and it returns the window,
+  the limit and `truncated`.
+- **`audit_permissions` took its dialect from a DEFAULT**
+  (`engine="postgresql"`), so a real Aurora MySQL cluster got `FROM pg_roles` and
+  answered MySQL error 1146. The MySQL branch existed and was never selected. The
+  engine now comes from `cluster_meta`; an explicit `engine` overrides the DIALECT
+  only, because deriving the FAMILY from it would refuse a caller who passes
+  `engine="mysql"` for an Aurora MySQL cluster (bare "mysql" classifies as
+  rds_instance). It also told the operator to register five clusters that were
+  already registered: "no Data API ARN" was being reported as "not registered".
+  Gated on `sql_via == "data_api"` rather than the `sql` capability, since
+  rds_instance has `sql` but reaches it over direct TCP.
+- **Three missing engine gates**, each of which had been answering a question that
+  could not be asked: `modify_scaling` told a DocumentDB cluster it was "a
+  provisioned Aurora cluster" and recommended an Aurora-only tool;
+  `get_pi_metrics` returned a silent `{"data_points": [], "count": 0}` for three
+  families with no PI series at all; `review_sql` called SQL "safe to execute"
+  against DynamoDB, Valkey and DocumentDB.
+
+### RECORDED, not yet fixed
+
+Ordered by operator impact. Each was confirmed against source, not just observed.
+
+- **`upgrade_plan` should refuse non-relational engines itself.** The handler gate
+  now closes this, but the plan builder is a pure string template driven by
+  is_major/is_postgres and trusts that it was only reached for Aurora. Defence in
+  depth for a tool that emits runnable CLI.
+- **Valkey is priced at the Redis rate**, ~25% high, because `_ENGINE_LABEL` in
+  `shared/elasticache_pricing.py` aliases it. AWS now publishes separate Valkey
+  SKUs. One map entry, and the module already soft-fails to None where a SKU is
+  missing.
+- **`aurora_pricing` defaults an unrecognised engine to Aurora PostgreSQL**, so
+  DocumentDB was priced at the Aurora rate and stamped `source=aws_price_list`. A
+  guess dressed as a measurement. Return None instead; callers already handle a
+  miss.
+- **`get_health_status` reports "healthy" from `cluster_meta.status` alone**, with
+  `current_metrics: []` and nothing saying telemetry is absent. A collection
+  outage is indistinguishable from a healthy cluster, which is the one case this
+  tool exists for.
+- **`get_performance_summary` returns a 4-key KPI shell for every engine**, all
+  null on 6 of 9 clusters, and `slow_count: 0` even where `get_slow_queries`
+  returns rows. Needs per-KPI provenance rather than bare nulls.
+- **`simulate_parameter_change`'s static fallback is engine-blind**: it reported
+  `known: true` and "즉시 적용 가능" for the PostgreSQL `work_mem` on MySQL, SQL
+  Server, DynamoDB and Valkey. Mostly masked now by the gate, but PARAMETER_INFO
+  entries should carry the engines they apply to.
+- **`create_docdb_index` reports `unsupported_engine` on DocumentDB** when the real
+  problem is an unset `mongo_write_secret_arn`. A config gap wearing the status
+  code that means "this engine cannot do this".
+- **Handlers splat the raw event into the impl** (`impl(cache, **event)`), so any
+  argument-name mistake becomes one static message naming neither the argument nor
+  the fix, and the four servers disagree on its shape. This probe's own two
+  harness errors are the evidence that a schema-aware caller still gets argument
+  names wrong. A ~25-line shared `inspect`-based helper returning
+  `invalid_arguments` with the accepted names would make it self-correctable.
+  Related: 22 impls carry `**_ignored`, and they are overwhelmingly the
+  approval-gated writes, so a hallucinated argument silently becomes "proceed with
+  the default" on exactly the tools that change infrastructure.
+- **`query_activity_audit` catches `Exception` on its PostgreSQL half but only
+  `ClientError` on its DynamoDB half**, so one bad approvals item kills the whole
+  compliance answer instead of degrading to a partial one.
+- **The MCP layer never reads the registry's `is_demo` flag**, so the synthetic
+  sample row produces "verify the cluster id" and "register this cluster" messages
+  for nine tools. The flag exists; only the frontend consumes it.
+- **Empty-state disclosure**, four small omissions of the same shape:
+  `get_remediation_history` returns bare empty lists with no cluster_id, window or
+  count; `get_recent_events` reports `count: 0` without naming its 24h window;
+  `get_maintenance_findings` cannot distinguish "checks ran, all clean" from "never
+  collected"; `estimate_upgrade_impact` substitutes `storage_gb: 50.0` silently
+  while the field beside it declares its own fallback honestly.
+- **`estimate_upgrade_impact` names pg_upgrade for MySQL, SQL Server and
+  DocumentDB**, and its reader count is always 0 for rds_instance because it asks
+  `describe_db_clusters`. Both matter only once rds_instance is admitted to the
+  simulator, which `CAPABILITIES.simulation` currently refuses.
+- **`simulate_ddl_impact`** hardcodes a mid-tier Serverless-v2 throughput
+  multiplier instead of reading the cluster's ACU range, and splits dialects only
+  MySQL-vs-everything, so SQL Server gets PostgreSQL rewrite advice.
+- **`check_upgrade_compatibility` returns a bare `is_compatible: false`** with no
+  reason, so a downgrade is indistinguishable from an unavailable target version.
+
+### Confirmed CORRECT, stated so it is not re-litigated
+
+- 208 of 212 `unsupported_engine` responses were right, and operations plus
+  performance gating was exactly on spec.
+- **Zero** exception text, ARNs, tracebacks or driver class names in any of the 567
+  response bodies. The no-`str(e)` rule holds across five engine families and a
+  cross-account spoke.
+- No stale price table anywhere: all four pricing modules query the live Price List
+  API and soft-fail rather than fabricate.
+- The MySQL 5.7/8.0/8.4 major ladder is correct; arithmetic version distance is
+  properly avoided.
+- Most empty results in the probe are properly self-describing. The bucket-3 cases
+  above are the exceptions, which is why each fix is two or three keys rather than
+  new machinery.

@@ -157,11 +157,23 @@ class CacheClient:
         conditions = ["cluster_id = :cluster_id"]
         params = {"cluster_id": cluster_id}
 
+        # ::timestamptz is REQUIRED. `execute` below binds every non-numeric value
+        # as stringValue, so PostgreSQL receives text and there is no
+        # `timestamp with time zone >= text` operator: the statement dies with
+        # SQLState 42883 before reading a row. Every hand-written SQL site in the
+        # repo carries the cast; this shared builder did not, which meant passing
+        # start_time/end_time to get_top_queries, get_slow_queries or
+        # get_pi_metrics turned a working call into a generic tool error.
+        #
+        # Note the column name is INTERPOLATED here, which is why the repo-wide
+        # census in tests/unit/test_sql_timestamp_casts.py could not see this site:
+        # it matches literal column names. That test now also scans interpolated
+        # predicates for exactly this reason.
         if time_column and start_time:
-            conditions.append(f"{time_column} >= :start_time")
+            conditions.append(f"{time_column} >= :start_time::timestamptz")
             params["start_time"] = start_time
         if time_column and end_time:
-            conditions.append(f"{time_column} < :end_time")
+            conditions.append(f"{time_column} < :end_time::timestamptz")
             params["end_time"] = end_time
         if extra_where:
             conditions.append(extra_where)

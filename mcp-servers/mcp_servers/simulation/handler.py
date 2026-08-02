@@ -157,6 +157,23 @@ def _resolve_family(cluster_id):
     except Exception as e:
         print(f"[simulation] family lookup failed for {cluster_id}: {e}")
         return None
+    # cache.execute returns a QueryResult, NOT a list. Without this unwrap the
+    # isinstance(rows, list) below is ALWAYS False, so this function always
+    # returned None and every engine gate in lambda_handler silently degraded:
+    #
+    #   - the `simulation` guard is DEFAULT-PERMIT on a None family, so the six
+    #     Aurora-only tools ran on EVERY engine. Measured 2026-08-02: on a Valkey
+    #     cluster, estimate_upgrade_impact answered "~23분 (pg_upgrade 동안 writer
+    #     중단)" — a PostgreSQL downtime figure for a Redis-protocol cache, which a
+    #     DBA could plan a real maintenance window from.
+    #   - the three POSITIVE gates (ddb_cost_simulation, elasticache_cost_simulation,
+    #     rds_cost_simulation) refuse a None family, so those tools returned
+    #     unsupported_engine on 9 of 9 clusters INCLUDING their own family: three
+    #     shipped capabilities that could not be used at all.
+    #
+    # operations/handler.py's copy of this function has the unwrap, which is why
+    # its gates worked and these did not. The two are otherwise near-identical.
+    rows = getattr(rows, "rows", rows)
     if isinstance(rows, list) and rows and isinstance(rows[0], dict):
         return _engine_family(rows[0].get("engine"))
     return None

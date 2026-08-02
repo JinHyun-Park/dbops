@@ -28,6 +28,12 @@ _GATED = {
     "detect_regressions": {"cluster_id": "x", "change_point": "2026-07-01T00:00:00Z"},
     "explain_plan": {"cluster_id": "x", "sql": "SELECT 1"},
     "recommend_index": {"cluster_id": "x"},
+    # Performance Insights is an RDS/Aurora feature. Gated 2026-08-02 after a live
+    # probe found it returning {"data_points": [], "count": 0} with no status and no
+    # reason for DocumentDB, DynamoDB and ElastiCache, which have no PI series at
+    # all: a silent empty that reads as "nothing happening" rather than "wrong
+    # question for this engine".
+    "get_pi_metrics": {"cluster_id": "x"},
 }
 
 
@@ -118,11 +124,17 @@ def test_relational_passes_every_gated_tool():
 
 
 def test_ungated_tools_stay_ungated():
-    """Engine-agnostic cache reads (metrics/health summaries) are NOT gated, so a
-    DynamoDB cluster still reaches their impls."""
+    """Genuinely engine-agnostic cache reads are NOT gated, so a DynamoDB cluster
+    still reaches their impls.
+
+    The example used to be get_pi_metrics, and that premise was wrong: Performance
+    Insights is an RDS/Aurora feature, so for DynamoDB the tool was not
+    engine-agnostic, it was silently empty. detect_anomalies is the honest example
+    because it reads metric_snapshots, which EVERY family has a collector for.
+    """
     spy = MagicMock(return_value={"status": "ok"})
-    with _patch_family("dynamodb"), patch.dict(handler.TOOLS["get_pi_metrics"], {"impl": spy}):
-        assert _invoke("get_pi_metrics", {"cluster_id": "ddb-1"})["status"] == "ok"
+    with _patch_family("dynamodb"), patch.dict(handler.TOOLS["detect_anomalies"], {"impl": spy}):
+        assert _invoke("detect_anomalies", {"cluster_id": "ddb-1"})["status"] == "ok"
     spy.assert_called_once()
 
 

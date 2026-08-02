@@ -18,6 +18,7 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "ap-northeast-2")
 os.environ.setdefault("CACHE_DB_CLUSTER_ARN", "arn:aws:rds:ap-northeast-2:0:cluster:test")
 os.environ.setdefault("CACHE_DB_SECRET_ARN", "arn:aws:secretsmanager:ap-northeast-2:0:secret:test")
 
+from mcp_servers.shared.models import QueryResult  # noqa: E402
 from mcp_servers.simulation import handler  # noqa: E402
 
 
@@ -32,8 +33,29 @@ def _ctx(tool_name):
 
 def _run(tool_name, event, execute_return=None, execute_side_effect=None):
     """Invoke the handler with a patched module cache + a sentinel tool impl.
-    Returns (parsed_body, sentinel_impl)."""
+    Returns (parsed_body, sentinel_impl).
+
+    `execute_return` is given as a list of row dicts for readability, and wrapped
+    in a real QueryResult here because that is what CacheClient.execute actually
+    returns. This wrapping is the whole point of the helper.
+
+    Until 2026-08-02 the list was passed through raw, and that single detail made
+    this entire test file false-green: the handler's `_resolve_family` did
+    `isinstance(rows, list)` WITHOUT unwrapping `.rows`, so a list-shaped mock
+    resolved the family correctly while production (a QueryResult) always resolved
+    None. Every assertion below passed against a gate that was dead for all 9
+    clusters in the deployed Lambda: three tools refused their own family and six
+    Aurora-only tools answered for DynamoDB and Valkey. A fixture built from the
+    handler's expectations rather than from the collaborator's real return type
+    encodes the bug instead of catching it.
+    """
     sentinel = MagicMock(return_value={"ok": True, "tool": tool_name})
+    if isinstance(execute_return, list):
+        execute_return = QueryResult(
+            columns=["engine"],
+            rows=execute_return,
+            row_count=len(execute_return),
+        )
     with patch.object(handler, "cache") as mock_cache, patch.dict(
         handler.TOOLS[tool_name], {"impl": sentinel}
     ):

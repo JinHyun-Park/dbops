@@ -35,8 +35,21 @@ def _client():
     return boto3.client("pricing", region_name="us-east-1")
 
 
-def _engine_label(engine: str) -> str:
-    return _ENGINE_LABEL.get((engine or "").lower(), "Aurora PostgreSQL")
+def _engine_label(engine: str):
+    """The Price List `databaseEngine` value, or None when this is not an Aurora
+    engine we can price.
+
+    This used to default to "Aurora PostgreSQL" for ANY unrecognised engine, which
+    turns a miss into a confidently-priced wrong product. Measured 2026-08-02: a
+    DocumentDB cluster reached this helper (its family gate was dead) and came back
+    priced at the Aurora PostgreSQL rate with `source: "aws_price_list"` attached,
+    i.e. a guess wearing the label of a measurement.
+
+    Returning None is safe because every caller already handles a pricing miss:
+    they null the cost fields and set source to "fallback". A missing price is
+    honest; a wrong one that claims provenance is not.
+    """
+    return _ENGINE_LABEL.get((engine or "").lower())
 
 
 def _on_demand_usd(product: dict):
@@ -65,6 +78,13 @@ def price_per_acu_hour(region: str, engine: str, io_optimized: bool):
         return _CACHE[key]
 
     label = _engine_label(engine)
+    if label is None:
+        # Not an Aurora engine we can price. Return the miss BEFORE calling the API:
+        # passing None as a TERM_MATCH value would raise inside the try below and
+        # degrade to the same None via an exception, logging a spurious failure for
+        # what is a known, expected non-match.
+        _CACHE[key] = None
+        return None
     suffix = "ServerlessV2IOOptimizedUsage" if io_optimized else "ServerlessV2Usage"
     result = None
     try:
@@ -118,6 +138,13 @@ def price_per_instance_hour(region: str, engine: str, instance_class: str, io_op
         return _CACHE[key]
 
     label = _engine_label(engine)
+    if label is None:
+        # Not an Aurora engine we can price. Return the miss BEFORE calling the API:
+        # passing None as a TERM_MATCH value would raise inside the try below and
+        # degrade to the same None via an exception, logging a spurious failure for
+        # what is a known, expected non-match.
+        _CACHE[key] = None
+        return None
     result = None
     try:
         pricing = _client()

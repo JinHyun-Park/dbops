@@ -123,6 +123,19 @@ _ENGINE_GATED_TOOLS = {
     # the readers' own producer-existence checks are the other half of the guard.
     "get_schema_diff": "sql",
     "get_schema_history": "sql",
+    # Aurora Serverless v2 ACU 범위 변경. 게이트가 없어서 비-Aurora에도 impl이
+    # 돌았고, 2026-08-02 라이브 전수 호출에서 DocumentDB에 "이 클러스터는
+    # 프로비저닝(고정 인스턴스) 모드라 ACU 범위 변경이 적용되지 않습니다"라며
+    # Aurora 전용 툴(simulate_scaling)을 권하는 확신에 찬 오답을 냈다. rds_instance/
+    # dynamodb/elasticache에서는 describe_db_clusters가 실패해 "cluster_id를
+    # 확인하세요"라고 안내했는데, 진짜 이유는 이 엔진에 ACU 개념이 없다는 것이다.
+    # 형제 Aurora 전용 write들과 같은 scale_instance 키를 쓴다(relational만 True).
+    "modify_scaling": "scale_instance",
+    # 정적 SQL 리스크 분류기인데 cluster_id를 받으므로 클러스터별 판정으로 읽힌다.
+    # 게이트가 없던 동안 DynamoDB/Valkey/DocumentDB에 대해 risk_level "safe",
+    # "실행해도 안전"이라고 답했다. SQL 표면이 없는 저장소에 대해 SQL 안전성을
+    # 단정하는 것이라, 물을 수 없는 질문에 확신 있게 답한 셈이다.
+    "review_sql": "sql",
 }
 
 _CAP_LABEL = {

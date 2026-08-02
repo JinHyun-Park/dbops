@@ -45,12 +45,20 @@ _ENGINE_GATED_TOOLS = {
     # rds_instance는 Data API가 없어 EXPLAIN을 보낼 경로 자체가 없다.
     "explain_plan": "explain",
     "recommend_index": "index_advice",
+    # Performance Insights는 RDS/Aurora 기능이다. 게이트가 없던 동안
+    # documentdb/dynamodb/elasticache는 {"data_points": [], "count": 0}을
+    # status도 reason도 없이 돌려줬다(2026-08-02 라이브 전수 호출로 측정).
+    # 그 빈 배열은 "아직 안 수집됨"이 아니라 "이 엔진에는 PI 시계열 자체가
+    # 없음"이라, 조용한 성공이 아니라 unsupported_engine이 정직한 답이다.
+    # get_top_queries/get_slow_queries가 query_stats로 이미 하는 것과 같다.
+    "get_pi_metrics": "perf_insights",
 }
 
 _CAP_LABEL = {
     "query_stats": "쿼리 통계가 수집되는 엔진(Aurora, RDS 인스턴스, DocumentDB)",
     "explain": "EXPLAIN 지원 엔진(Aurora)",
     "index_advice": "인덱스 추천 지원 엔진(Aurora)",
+    "perf_insights": "Performance Insights 지원 엔진(Aurora, RDS 인스턴스)",
 }
 
 # documentdb의 query_stats 행은 엔진 카운터가 아니다: docdb_mongo_collector가

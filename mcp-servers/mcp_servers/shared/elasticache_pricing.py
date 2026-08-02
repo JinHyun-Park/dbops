@@ -6,8 +6,17 @@ import json
 
 import boto3
 
-# Price List `cacheEngine` attribute values. Valkey is priced as Redis today.
-_ENGINE_LABEL = {"redis": "Redis", "valkey": "Redis", "memcached": "Memcached"}
+# Price List `cacheEngine` attribute values.
+#
+# Valkey used to be aliased to "Redis" with the comment "Valkey is priced as Redis
+# today". That stopped being true: AWS publishes a separate Valkey SKU. Measured
+# against the live Price List API on 2026-08-02 for cache.t4g.small in
+# ap-northeast-2: cacheEngine=Valkey is $0.0376/hr while the Redis SKU this code
+# picked is $0.047/hr, so every Valkey node was priced 25% high, and the response
+# still stamped source=aws_price_list. The lookup soft-fails to None where a SKU is
+# absent, so a region without Valkey SKUs degrades to the existing fallback rather
+# than to a wrong number.
+_ENGINE_LABEL = {"redis": "Redis", "valkey": "Valkey", "memcached": "Memcached"}
 
 _CACHE: dict = {}
 

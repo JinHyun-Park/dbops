@@ -17,7 +17,14 @@ def compare_periods_impl(
             "MIN(value) as min_value, COUNT(*) as sample_count "
             "FROM metric_snapshots "
             "WHERE cluster_id = :cluster_id AND metric_type = :metric_type "
-            "AND ts >= :start_time AND ts < :end_time "
+            # ::timestamptz is REQUIRED, not decoration. The RDS Data API sends
+            # every bound parameter as stringValue, so PostgreSQL receives text,
+            # and there is no `timestamp with time zone >= text` operator: the
+            # statement fails with SQLState 42883 before touching a row. This
+            # tool was dead for EVERY engine family until 2026-08-02 for exactly
+            # that reason, and it was the only site in the repo missing the cast
+            # (censused across mcp-servers/, api/ and data-pipeline/).
+            "AND ts >= :start_time::timestamptz AND ts < :end_time::timestamptz "
             f"{CLUSTER_LEVEL_ONLY}"
         )
         params = {

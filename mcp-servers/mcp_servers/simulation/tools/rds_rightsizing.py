@@ -81,9 +81,16 @@ def simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=
     except (TypeError, ValueError):
         headroom = 0.5
 
+    # `.rows` unwrap is REQUIRED: cache.execute returns a QueryResult, so the
+    # isinstance(..., list) below is always False without it and this tool would
+    # always report "cluster_meta를 찾지 못했습니다" even for a perfectly collected
+    # instance. The same omission in simulation/handler.py's _resolve_family kept
+    # this tool's engine gate refusing on 9 of 9 clusters, so the two bugs hid
+    # each other: the gate never let the call through to reveal this one.
     meta_rows = cache.execute(
         "SELECT engine, instance_class, region, resource_details "
         "FROM cluster_meta WHERE cluster_id = :cid", {"cid": cluster_id})
+    meta_rows = getattr(meta_rows, "rows", meta_rows)
     if not (isinstance(meta_rows, list) and meta_rows and isinstance(meta_rows[0], dict)):
         return {"status": "error", "reason": "cluster_meta를 찾지 못했습니다", "cluster_id": cluster_id}
     meta = meta_rows[0]
@@ -124,6 +131,10 @@ def simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=
         # writer) would otherwise mix a total with its fractions in the p95.
         f"  {CLUSTER_LEVEL_ONLY}",
         {"cid": cluster_id, "h": window_hours})
+    # Same required unwrap as the meta query above: without it `row` is always {},
+    # so cpu_p95 is None and the tool reports "not enough samples" no matter how
+    # much the collector actually gathered.
+    agg = getattr(agg, "rows", agg)
     row = agg[0] if isinstance(agg, list) and agg and isinstance(agg[0], dict) else {}
     cpu_p95 = row.get("cpu_p95")
     samples = row.get("samples") or 0
