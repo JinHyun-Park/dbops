@@ -591,6 +591,14 @@ two classes; without it they would have been filed as bugs.
   families with no PI series at all; `review_sql` called SQL "safe to execute"
   against DynamoDB, Valkey and DocumentDB.
 
+- **Two pricing helpers reported a guess as a measurement.** `aurora_pricing`
+  defaulted ANY unrecognised engine to "Aurora PostgreSQL", so DocumentDB was priced
+  at the Aurora rate and stamped `source=aws_price_list`; it returns None now (every
+  caller already nulls costs and sets source=fallback) and short-circuits before the
+  API call so a known non-match logs nothing. `elasticache_pricing` aliased Valkey to
+  the Redis SKU; Valkey has its own SKU and the tool now returns it exactly, verified
+  live after deploy at $0.0192/hr for cache.t4g.micro.
+
 ### RECORDED, not yet fixed
 
 Ordered by operator impact. Each was confirmed against source, not just observed.
@@ -609,10 +617,6 @@ Ordered by operator impact. Each was confirmed against source, not just observed
   SKU and is exact; Redis still needs the disambiguating attribute (likely
   cacheEngineVersion or a serverless-vs-node dimension) identified before its own
   lookup can be called correct.
-- **`aurora_pricing` defaults an unrecognised engine to Aurora PostgreSQL**, so
-  DocumentDB was priced at the Aurora rate and stamped `source=aws_price_list`. A
-  guess dressed as a measurement. Return None instead; callers already handle a
-  miss.
 - **`get_health_status` reports "healthy" from `cluster_meta.status` alone**, with
   `current_metrics: []` and nothing saying telemetry is absent. A collection
   outage is indistinguishable from a healthy cluster, which is the one case this
@@ -642,21 +646,50 @@ Ordered by operator impact. Each was confirmed against source, not just observed
 - **The MCP layer never reads the registry's `is_demo` flag**, so the synthetic
   sample row produces "verify the cluster id" and "register this cluster" messages
   for nine tools. The flag exists; only the frontend consumes it.
-- **Empty-state disclosure**, four small omissions of the same shape:
-  `get_remediation_history` returns bare empty lists with no cluster_id, window or
-  count; `get_recent_events` reports `count: 0` without naming its 24h window;
-  `get_maintenance_findings` cannot distinguish "checks ran, all clean" from "never
-  collected"; `estimate_upgrade_impact` substitutes `storage_gb: 50.0` silently
-  while the field beside it declares its own fallback honestly.
-- **`estimate_upgrade_impact` names pg_upgrade for MySQL, SQL Server and
-  DocumentDB**, and its reader count is always 0 for rds_instance because it asks
-  `describe_db_clusters`. Both matter only once rds_instance is admitted to the
-  simulator, which `CAPABILITIES.simulation` currently refuses.
-- **`simulate_ddl_impact`** hardcodes a mid-tier Serverless-v2 throughput
-  multiplier instead of reading the cluster's ACU range, and splits dialects only
-  MySQL-vs-everything, so SQL Server gets PostgreSQL rewrite advice.
-- **`check_upgrade_compatibility` returns a bare `is_compatible: false`** with no
-  reason, so a downgrade is indistinguishable from an unavailable target version.
+
+- **`get_recent_events` reports `count: 0` without naming its 24h window**, so the
+  agent renders "no recent events" for a cluster whose last anomaly was 26 hours
+  ago. One line: echo `hours` (and `event_type` when filtered).
+- **`simulate_ddl_impact` hardcodes a mid-tier Serverless-v2 throughput multiplier**
+  instead of reading the cluster's ACU range, overstating throughput on small
+  clusters. The sibling scaling tool already resolves live ACU.
+
+### Investigated and NOT defects, recorded so they are not re-filed
+
+Adversarial verification refuted six candidates from this sweep. Five share one
+cause worth stating on its own: **the `_resolve_family` bug generated a cloud of
+apparent secondary defects, and once the gate works those code paths are
+unreachable for the families that produced the evidence.** Re-measured after
+deploy: `estimate_upgrade_impact`, `generate_upgrade_plan`, `simulate_ddl_impact`
+and `check_upgrade_compatibility` all return `unsupported_engine` for
+rds_instance/documentdb/dynamodb/elasticache now.
+
+- `estimate_upgrade_impact`'s unlabelled `storage_gb: 50.0` fallback, its
+  pg_upgrade wording on MySQL/SQL Server/DocumentDB, and its always-0 reader count
+  for rds_instance: all five probe records came from families the tool refuses.
+  `CAPABILITIES.simulation` is True only for relational, and on relational the
+  fallback never fired.
+- `simulate_ddl_impact` giving SQL Server PostgreSQL rewrite advice: SQL Server is
+  not admitted to the tool at all, so `unsupported_engine` is the correct answer and
+  a three-way dialect dispatch would be building for a surface that is gated off.
+- `check_upgrade_compatibility`'s bare `is_compatible: false`: 3 of the 5 cited
+  records were artifacts of the gate bug. The one genuinely opaque case is
+  `sample-cluster`, the synthetic demo row.
+- `get_remediation_history`'s bare `{"actions": [], "recent": []}`: that is an
+  ASSERTED contract, not an oversight. `tests/unit/mcp_servers/incident/`
+  `test_remediation_history.py:43` checks it by exact equality, so the proposed
+  extra keys would fail it. The emptiness is also causally explained: the
+  outcome_evaluator opens cases only from findings/anomaly rows, and the same
+  probe shows those clusters have neither. The identical SQL returns 6 action
+  classes for `dbops-demo-mysql`.
+- `get_maintenance_findings` not distinguishing "checks ran, all clean" from "never
+  collected": `cluster_health_findings` writes one row per finding and nothing on a
+  clean cycle, so there is no heartbeat and the two states are not separable in the
+  data as it is modelled today. Separating them means changing the producer, not
+  the reader.
+
+The lesson is the reusable part: after fixing a gate, RE-DERIVE the downstream
+findings instead of working the list. Most of that list was the gate.
 
 ### Confirmed CORRECT, stated so it is not re-litigated
 
