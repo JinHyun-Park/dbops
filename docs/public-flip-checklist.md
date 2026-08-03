@@ -366,10 +366,13 @@ printf 'JinHyun-Park <NEW@users.noreply.github.com> <OLD@personal.address>\n' > 
 git clone --mirror . /tmp/dbops-rewrite && cd /tmp/dbops-rewrite
 git filter-repo --mailmap /tmp/mailmap          # remaps in-message SHAs by default
 # 3. publish as a NEW empty GitHub repo, do NOT force-push over the old one
-# 4. then re-check: the 3 .gitleaksignore fingerprints are commit-scoped and are
-#    now void. They are INERT today (measured: gitleaks with them disabled = 0
-#    findings), so delete them rather than regenerate.
-# 5. and fix the 27 in-repo SHA citations, or accept them as dangling references
+# 4. then REGENERATE the 3 .gitleaksignore fingerprints. They are commit-scoped
+#    (commit:path:rule:line), so a rewrite voids all three. An earlier version of
+#    this step said to DELETE them because they were "inert": that was measured
+#    wrong. With the file removed, gitleaks reports exactly 3 findings (all
+#    verified false positives, see section 1), so deleting them fails the gate.
+# 5. and fix the remaining in-repo SHA citations (17 across 20 files after BACKLOG
+#    was cleared), or accept them as dangling references
 ```
 
 ---
