@@ -120,6 +120,11 @@ test("learning page renders", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Learning" })).toBeVisible();
 });
 
+// UI-ONLY. This asserts the drawer opens in place; it does NOT invoke the agent.
+// Measured 2026-08-03: a full smoke run produces ZERO AgentCore runtime log
+// events, so a green suite is not evidence that the agent booted. After a
+// dependency re-vendor or a runtime change, verify the agent separately (send a
+// real /chat message and read the runtime log group).
 test("RCA 드로어: 페이지를 떠나지 않고 인플레이스로 열린다", async ({
   page,
 }) => {

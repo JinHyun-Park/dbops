@@ -23,6 +23,8 @@ secret still in history) and `--redact` (so the CI log does not itself become th
 leak). The exit code is the gate.
 
 Measured 2026-07-30 on 900 commits / 11.25 MB: **no leaks found**.
+Re-measured 2026-08-03 at the publish candidate `988fc8f`, 961 commits /
+11.68 MB: **no leaks found**.
 
 `.gitleaks.toml` extends the default ruleset rather than replacing it, and
 allowlists exactly one path: `.gitleaksignore`, which documents each suppression
@@ -31,10 +33,36 @@ string it exists to explain. Before that exclusion a clean scan still ended in
 `leaks found: 1` pointing at the allowlist file, which trains a reader to ignore
 the exit status.
 
-`.gitleaksignore` currently holds ONE suppression, re-audited 2026-07-30: the
-`STORAGE_KEY` constant in `chat-panel.tsx`, which names the browser localStorage
-key the chat history is stored under and is flagged by `generic-api-key` purely on
-entropy. Not a credential, no rotation needed.
+`.gitleaksignore` holds THREE suppressions, each re-audited at the publish
+candidate on 2026-08-03 by deleting the file and reading what came back. All three
+are `generic-api-key` hits on entropy alone. None is a credential and none needs
+rotation:
+
+| suppressed hit                                             | what it actually is                                                                                 |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `STORAGE_KEY` in `chat-panel.tsx`                          | the browser localStorage key the chat history is stored under                                       |
+| the same constant quoted in THIS file                      | the self-reference described below                                                                  |
+| a JWT-shaped literal in `tests/unit/api/test_ws_ticket.py` | synthetic. Its payload segment decodes to `{"kid":"real-looking"}` and the rest is a literal `.x.y` |
+
+The JWT one is only in HISTORY: the working tree replaced that literal with a
+non-JWT-shaped string, because the assertion is that the `token` param is no longer
+an identity source, so the value's shape carries no test value and a realistic one
+trips the scanner forever.
+
+An earlier version of this section claimed the scan "returns 0 findings both times,
+so the suppressions are inert rather than load-bearing." That was wrong, and it is
+worth stating plainly because it is the kind of claim a reader of a public repo will
+check. Deleting `.gitleaksignore` produces `leaks found: 3`, matching the three
+recorded fingerprints exactly. The suppressions ARE load-bearing; what makes them
+safe is that each suppressed finding was individually opened and verified, not that
+they suppress nothing.
+
+Two traps that produced that wrong claim, worth avoiding on the next audit:
+
+- `gitleaks ... | tail` reports `tail`'s exit status, so a piped run prints
+  `exit=0` while gitleaks is failing. Read the `leaks found:` line, not `$?`.
+- A JSON report (`--report-format json --report-path ...`) is the only way to see
+  WHICH findings were suppressed. The console summary gives a count.
 
 The literal is deliberately NOT quoted here. Quoting it made this very document a
 finding on the next run, which is the same self-reference that put
@@ -105,9 +133,65 @@ facts that could change:
   and re-check compatibility first.
 - `brace-expansion ^5.0.8` comes solely from eslint tooling, so it is dev-only.
 
-There is no Python audit tool installed on the dev machine (`pip-audit` is
-absent). Install it for the one-off pre-flip run rather than assuming Dependabot's
-weekly PRs have covered everything.
+### The Python audit, RUN 2026-08-03, and it found the one real thing
+
+This was the last genuinely open gate. `pip-audit 2.10.1`, in a throwaway venv so
+the brew Python is untouched.
+
+All 13 `requirements*.txt` files: **no known vulnerabilities**. That result is also
+the trap, because it is nearly meaningless on its own: those files carry unbounded
+`>=` floors, so pip-audit resolves them to whatever is current at audit time, which
+is not what ships.
+
+What ships for the agent is `agent/_deps/`, a vendored tree frozen at whatever
+`build-deps.sh` last produced. Auditing the ACTUAL pinned versions there (reconstruct
+them from the `*.dist-info` directory names) returned **8 vulnerable packages, 20
+distinct advisories**:
+
+| package           | shipped | fixed in |
+| ----------------- | ------- | -------- |
+| pyjwt             | 2.12.1  | 2.13.0   |
+| starlette         | 1.0.0   | 1.3.1    |
+| mcp               | 1.27.1  | 1.28.1   |
+| python-multipart  | 0.0.28  | 0.0.31   |
+| bedrock-agentcore | 1.9.0   | 1.18.1   |
+| cryptography      | 48.0.0  | 48.0.1   |
+| idna              | 3.14    | 3.15     |
+| pydantic-settings | 2.14.1  | 2.14.2   |
+
+`pyjwt` is the one that matters most: `agent/tenancy.py` uses it to verify the
+caller's Cognito id_token against the pool JWKS, which is the tenancy isolation
+boundary.
+
+The cause was not a missed advisory, it was a stale artifact. `agent/requirements.txt`
+ALREADY declared `PyJWT[crypto]>=2.13.0` and `mcp>=1.28.1`, both ABOVE what was
+vendored: the floors were raised and `_deps` was never rebuilt, so the shipped image
+contradicted its own requirements file. `_deps/` is gitignored, so nothing in CI or
+in a diff could see it.
+
+Fixed by re-running `agent/build-deps.sh`, which cleared all 20. Verified at three
+levels rather than assumed:
+
+1. Re-audit of the rebuilt tree: no known vulnerabilities.
+2. The DEPLOYED artifact: downloaded the runtime's own S3 code zip and read the
+   `dist-info` names inside it. All 8 patched versions are in the artifact the
+   runtime actually runs (version 57).
+3. The runtime BOOTS on them: a real `/chat` message produced
+   `Gateway token issued`, `Loaded 65 tools from Gateway` (so mcp 1.29.0 speaks to
+   the Gateway) and `AgentCore Memory wired (actor=...)`, where the actor id is
+   derived from the verified id_token, so pyjwt 2.13.0's JWKS path ran.
+
+Two traps this exposed, both worth carrying forward:
+
+- **Newer pip byte-compiles into `--target`.** The rebuild produced 295
+  `__pycache__` directories and +23MB where the previous tree had zero, and a
+  `__pycache__` under `agent/` is the known cause of an AgentCore image rejection.
+  `build-deps.sh` now passes `--no-compile` and sweeps afterwards.
+- **A green e2e suite is not agent verification.** The smoke suite's RCA test
+  asserts the drawer's UI and produces ZERO runtime log events, so it passes with a
+  dead agent. Verifying the agent needs a real message plus the runtime log group.
+
+Re-run both halves before publishing, not just the requirements half.
 
 ## 5. IaC security lint, already wired
 
@@ -115,6 +199,25 @@ weekly PRs have covered everything.
 `CDK_NAG=1`, and the synth exit code is the gate, so a new unsuppressed finding
 cannot merge. Every suppression carries a reason; read them before publishing,
 because a suppression is an argument you are now making in public.
+
+**Read 2026-08-03, and three of them were arguing for a design that no longer
+ships.** Both WebSocket suppressions said the `$connect` authorizer reads the
+Cognito access token from the query string, and one cited a `HARDENING GUARD`
+comment in `foundation_stack.py`. The WS-ticket pattern replaced the token on
+2026-07-30 and that comment is gone: the identity source is now
+`route.request.querystring.ticket`, a random 60-second single-use ticket that
+`$connect` spends before any log line is written. So the honest reason for APIG1 is
+"nothing consumes the logs", not "logging would leak a credential", and enabling
+access logging is now safe rather than forbidden. APIG4 likewise described a
+"Cognito Lambda authorizer" where the authorizer validates a ticket.
+
+Corrected in `cdk/app.py`. The lesson generalizes past this repo: a suppression
+reason is a claim about code, and code moves. Re-read every reason against the
+current source before publishing, do not re-read the reasons against each other.
+
+The remaining reasons were checked and hold. The one open product decision is
+Cognito MFA (`AwsSolutions-COG2`), deliberately out of scope: it is a policy call
+for whoever deploys this.
 
 ## 6. WS-ticket, already satisfied (verified 2026-07-31)
 
@@ -155,11 +258,15 @@ The audit's headline is a definitive negative, verified two independent ways
 
 Nor was any `.env*`, `frontend/out/`, `cdk.out/`, or runtime `config.json`. And
 credential-class material is **zero**: no AKIA/ASIA/ABIA/ACCA/AIDA/AROA key ids,
-no `BEGIN * PRIVATE KEY`, no JWTs, no `sk-`/`ghp_`/`xox` tokens, no
+no `BEGIN * PRIVATE KEY`, no real JWT, no `sk-`/`ghp_`/`xox` tokens, no
 `AWS_BEARER_TOKEN_BEDROCK`, no real Slack webhook, no DB password, no Cognito
-user pool id anywhere. `gitleaks` over all commits, run twice (once with the 3
-`.gitleaksignore` fingerprints DISABLED), returns 0 findings both times, so the
-suppressions are inert rather than load-bearing.
+user pool id anywhere.
+
+"No real JWT" is the precise claim. History does hold ONE JWT-shaped literal, in
+`tests/unit/api/test_ws_ticket.py`, and it is synthetic: its payload segment
+decodes to `{"kid":"real-looking"}` and the remainder is a literal `.x.y`. It
+carries no pool id, no client id and no subject. See section 1 for why the
+suppression count claim here was previously wrong.
 
 So there is nothing in history a rewrite would remove except AWS resource NAMING.
 A rewrite is the wrong instrument for that: it changes every commit hash, and 27
