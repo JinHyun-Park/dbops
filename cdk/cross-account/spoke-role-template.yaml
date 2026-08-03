@@ -245,6 +245,22 @@ Resources:
               # keys that tool sends, so it cannot be used to relabel arbitrary
               # resources. If create_snapshot.py's tag keys change, add them here
               # or snapshots start failing.
+              #
+              # DO NOT ADD ManagedBy TO aws:TagKeys, AND DO NOT REMOVE THE CONDITION.
+              # The key restriction is a privilege-escalation guard, not tidiness.
+              # RDSModifyExisting above gates 9 write actions on
+              # aws:ResourceTag/ManagedBy=dbops. If this role could write that tag,
+              # it could stamp it on ANY RDS resource in the account and thereby
+              # grant itself those 9 writes on anything, which is the whole boundary
+              # this template exists to draw.
+              #
+              # This is a real trap, not a hypothetical: the tag preflight in
+              # mcp_servers/shared/managed_tag_preflight.py correctly warns that a
+              # cluster is missing ManagedBy, and the obvious next move is to add
+              # the tag through DBOps. Attempted 2026-08-03 with the live spoke
+              # role: AccessDenied on rds:AddTagsToResource, exactly as intended.
+              # The tag must be applied from the TARGET account by a principal that
+              # already has tagging rights there. The warning text now says so.
               - Sid: RDSTagOnCreate
                 Effect: Allow
                 Action:

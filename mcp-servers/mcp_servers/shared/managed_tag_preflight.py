@@ -268,7 +268,16 @@ def _warning_text(label, name, action) -> str:
         f"'{name}'에는 {MANAGED_BY_KEY}={MANAGED_BY_VALUE} 태그가 없습니다. "
         f"spoke role이 기본 템플릿을 그대로 쓴다면 {action} 권한이 이 태그를 요구하므로 "
         f"변경이 AccessDenied로 거부되고, 그 거부는 승인이 소모된 뒤에 발생합니다. "
-        f"승인하기 전에 대상 리소스에 태그를 붙이거나, spoke role 정책에서 이 조건을 "
+        # The old wording said only "태그를 붙이거나", which reads as something the
+        # operator can do through DBOps. They cannot: the spoke role's single
+        # tag-write statement (RDSTagOnCreate) is key-restricted to dbops:created-by
+        # and dbops:type, so ManagedBy is unreachable from this side BY DESIGN.
+        # Measured 2026-08-03 by assuming the real spoke role and trying:
+        # AccessDenied on rds:AddTagsToResource. Naming where the tag has to be
+        # applied is the difference between an actionable warning and a dead end.
+        f"태그는 DBOps에서 붙일 수 없습니다(spoke role의 태그 권한은 dbops: 접두 키로 "
+        f"제한되어 있고, 이는 역할이 스스로 write 권한을 열지 못하게 하는 의도된 "
+        f"제약입니다). 대상 계정에서 직접 태그를 붙이거나, spoke role 정책이 이 조건을 "
         f"쓰지 않는지 확인하세요."
     )
 

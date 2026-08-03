@@ -119,7 +119,14 @@ def performance_schema():
 
 def incident_schema():
     return [
-        _tool("get_health_status", "Get cluster health status overview",
+        _tool("get_health_status",
+              "Cluster health overview: control-plane status plus whether telemetry is "
+              "actually arriving. `health` is healthy/warning/critical/unknown, and it "
+              "is UNKNOWN rather than healthy when no cluster-level metric samples "
+              "landed in the last 10 minutes, so a collection outage cannot look like "
+              "a healthy cluster. An unrecognised status word is also unknown, never "
+              "critical. `telemetry` carries the window, the sample count and the raw "
+              "control-plane status; `reason` explains any unknown verdict",
               {"cluster_id": "string"}, ["cluster_id"]),
         _tool("get_recent_events", "Get recent RDS events and alarms; optional event_type filter",
               {"cluster_id": "string", "hours": "integer", "event_type": "string"}, ["cluster_id"]),
