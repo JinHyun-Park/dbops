@@ -71,11 +71,42 @@ def price_per_node_hour(region: str, engine: str, node_type: str):
         print(f"[elasticache_pricing] lookup failed ({region}/{node_type}): {e}")
         _CACHE[key] = None
         return None
+    # PICK THE NODE SKU, do not take whichever came back first.
+    #
+    # A node type returns SEVERAL SKUs and they are not variants of one price, they
+    # are different CHARGES. Measured 2026-08-03 for cache.t4g.micro / Redis /
+    # ap-northeast-2:
+    #
+    #   $0.024  usagetype APN2-NodeUsage:cache.t4g.micro          <- the node price
+    #   $0.019  usagetype APN2-ExtendedSupportYr1_Yr2-NodeUsage:  <- EOL surcharge
+    #   $0.038  usagetype APN2-ExtendedSupportYr3-NodeUsage:      <- EOL surcharge
+    #
+    # Extended Support is an ADD-ON for running an engine version past end of
+    # standard support, not an alternative node rate. The old `first price wins`
+    # loop could therefore report a surcharge AS the node cost: $0.019 where the
+    # node actually costs $0.024, and for cache.t4g.small the spread was 0.038 to
+    # 0.075. Valkey looks correct today only because it is new enough to have no
+    # extended-support SKUs yet, so this would have started lying about Valkey too.
+    #
+    # The real node SKU is the one whose usagetype has no ExtendedSupport segment.
+    # `surcharges` is returned to the caller rather than discarded, because a
+    # cluster on an EOL version really does pay them and silently dropping them
+    # would understate its bill.
+    surcharges = []
     for raw in resp.get("PriceList", []):
         product = json.loads(raw)
         price = _on_demand_usd(product)
-        if price is not None:
+        if price is None:
+            continue
+        usagetype = product.get("product", {}).get("attributes", {}).get("usagetype", "")
+        if "ExtendedSupport" in usagetype:
+            surcharges.append((usagetype, price))
+            continue
+        if result is None:
             result = price
-            break
+    if result is None and surcharges:
+        # Every SKU was a surcharge, so there is no node price to report. Returning
+        # a surcharge here is exactly the bug above; report the miss instead.
+        print(f"[elasticache_pricing] only ExtendedSupport SKUs for {region}/{node_type}/{label}")
     _CACHE[key] = result
     return result

@@ -607,16 +607,20 @@ Ordered by operator impact. Each was confirmed against source, not just observed
   now closes this, but the plan builder is a pure string template driven by
   is_major/is_postgres and trusts that it was only reached for Aurora. Defence in
   depth for a tool that emits runnable CLI.
-- **ElastiCache Redis has MULTIPLE Price List SKUs per node type and the helper
-  takes whichever comes back first.** Measured 2026-08-02 in ap-northeast-2:
-  cache.t4g.micro returns 0.019, 0.024 and 0.038; cache.t4g.small returns 0.047,
-  0.075 and 0.038. So a Redis cluster's cost can be off by 2x depending on API
-  ordering. This is what the Valkey alias fix exposed rather than caused: aliasing
-  Valkey to Redis was wrong by +25% on one node type and -1% on another, i.e.
-  arbitrary in size AND direction, not a constant markup. Valkey now queries its own
-  SKU and is exact; Redis still needs the disambiguating attribute (likely
-  cacheEngineVersion or a serverless-vs-node dimension) identified before its own
-  lookup can be called correct.
+- **FIXED: ElastiCache node pricing was picking an Extended Support SURCHARGE as
+  the node price.** Recorded here earlier as "multiple SKUs, ambiguous ordering,
+  needs a disambiguating attribute". Measured 2026-08-03 and it is not ambiguity,
+  the SKUs are different CHARGES: for cache.t4g.micro / Redis / ap-northeast-2,
+  `APN2-NodeUsage:` is $0.024 (the node) while
+  `APN2-ExtendedSupportYr1_Yr2-NodeUsage:` is $0.019 and
+  `APN2-ExtendedSupportYr3-NodeUsage:` is $0.038, both add-ons for running an engine
+  version past end of standard support. The old first-price-wins loop could report a
+  surcharge as the node cost. Fixed by selecting the SKU with no ExtendedSupport
+  segment; only-surcharge returns a miss rather than a surcharge. Valkey looked
+  correct only because it is new enough to have no extended-support SKUs yet, so
+  this would have started lying about Valkey too. Remaining: a cluster on an EOL
+  version genuinely owes the surcharge, and surfacing it as a separate line is a
+  feature, not a correction.
 - **`get_health_status` reports "healthy" from `cluster_meta.status` alone**, with
   `current_metrics: []` and nothing saying telemetry is absent. A collection
   outage is indistinguishable from a healthy cluster, which is the one case this
