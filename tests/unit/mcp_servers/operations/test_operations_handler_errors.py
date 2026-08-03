@@ -37,7 +37,11 @@ def test_tool_exception_is_masked_in_the_response(caplog):
     with caplog.at_level(logging.ERROR, logger=handler.logger.name), patch.dict(
         handler.TOOLS["get_runbook"], {"impl": boom}
     ):
-        result = _invoke("get_runbook", {"cluster_id": "c1"})
+        # get_runbook does NOT take cluster_id. This payload was the same mistake I
+        # made when probing the live tools, sitting in the repo's own suite: the
+        # argument guard now refuses it before the impl runs, so the exception-masking
+        # path under test would never have been reached.
+        result = _invoke("get_runbook", {})
 
     blob = " ".join(str(v) for v in result.values())
     for leak in (_SECRET, "AccessDeniedException", "RuntimeError", "Traceback", "123456789012"):

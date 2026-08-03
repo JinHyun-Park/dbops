@@ -20,14 +20,23 @@ undeclared `cluster_id` and `search_logs` an undeclared `pattern` instead of
 defects until a self-audit diffed the arguments against the schema. A careful caller
 holding the schema got it wrong twice.
 
-WHY REFUSE RATHER THAN DROP
---------------------------
+WHY REFUSE RATHER THAN DROP, AND WHY A CATCH-ALL IS NOT AN EXEMPTION
+-------------------------------------------------------------------
 Silently dropping an unknown key turns "you named an argument wrong" into "proceed
-with the default", and 22 of the 64 impls already do that via `**_ignored` --
-overwhelmingly the approval-gated WRITE tools. On a tool that changes
-infrastructure, substituting a default for a misnamed argument is the worst of the
-three options. Refusing is fail-closed and, because the response names the accepted
-parameters, self-correctable in one turn.
+with the default", and 22 of the 64 impls do exactly that via `**_ignored`.
+
+The first version of this module treated those 22 as having opted into tolerating
+extras and permitted any call to them. That lasted about an hour: calling
+simulate_elasticache_node_resize with `node_type` (the real parameter is
+`new_node_type`) returned status "ok" with proposed == current, a confident "no cost
+change" answer to a resize question that was never asked. A catch-all does not make
+an out-of-schema key harmless, it makes it INVISIBLE, and it is arguably worse on a
+READ tool than on a write one, because no approval card and no downstream check ever
+looks at it again.
+
+So the allow-list is the declared schema UNION the impl signature, and it applies
+regardless of a catch-all. Refusing is fail-closed and, because the response names
+the accepted parameters, self-correctable in one turn.
 
 Naming the parameters is not a leak: they are already published in
 `cdk/tool_definitions.py` and returned by `tools/list`. That is categorically
@@ -47,6 +56,12 @@ _TRANSPORT_KEYS = frozenset({"method"})
 def accepted_params(impl) -> tuple[frozenset, bool]:
     """(parameter names the impl accepts, whether it has a **kwargs catch-all).
 
+    `names` is None when the callable cannot be introspected at all, which is
+    DISTINCT from "introspected and found a catch-all". Conflating the two is a real
+    bug: after the catch-all exemption was removed, an uninspectable impl reported an
+    EMPTY name set and the check then refused every argument. None means "no
+    signature information", and the caller must fall back rather than refuse.
+
     The leading `cache` parameter is excluded: handlers pass it positionally, so a
     caller naming it would be an error too, and it is not part of the tool's
     published schema.
@@ -54,7 +69,7 @@ def accepted_params(impl) -> tuple[frozenset, bool]:
     try:
         sig = inspect.signature(impl)
     except (TypeError, ValueError):  # builtins / C callables: cannot introspect
-        return frozenset(), True
+        return None, True
     names, has_var_kw = [], False
     for i, (name, p) in enumerate(sig.parameters.items()):
         if p.kind is inspect.Parameter.VAR_KEYWORD:
@@ -68,19 +83,38 @@ def accepted_params(impl) -> tuple[frozenset, bool]:
     return frozenset(names), has_var_kw
 
 
-def invalid_argument_error(tool_name: str, impl, event) -> dict | None:
+def invalid_argument_error(tool_name: str, impl, event, schema_props=None) -> dict | None:
     """The `invalid_arguments` payload, or None when the call is well-formed.
 
-    Returns None (i.e. permits the call) when the impl declares `**kwargs`, because
-    such an impl has deliberately opted into tolerating extras. Tightening those is
-    a separate change: removing 22 catch-alls at once is a different blast radius
-    from adding this check.
+    The allow-list is the DECLARED SCHEMA properties UNION the impl signature, and
+    it applies even to an impl with a `**kwargs` catch-all.
+
+    An earlier version of this function permitted any call to a catch-all impl, on
+    the theory that those 22 impls had opted into tolerating extras. That was wrong,
+    and the counter-example arrived within the hour: calling
+    simulate_elasticache_node_resize with `node_type` (the real parameter is
+    `new_node_type`) returned status "ok" with proposed == current, i.e. a confident
+    "no cost change" answer to a resize question that was never actually asked. A
+    catch-all does not make an out-of-schema key harmless, it makes it INVISIBLE,
+    and a silently substituted default is worse on a read tool than on a write tool
+    because nothing downstream flags it.
+
+    Both sources are needed, and the union is never more restrictive than either:
+      * schema properties are the contract the agent sees (tools/list,
+        cdk/tool_definitions.py), so they are what an out-of-schema key violates;
+      * the impl signature covers params in `_INTENTIONALLY_HIDDEN`, which exist on
+        purpose and are absent from the schema. Judging on the schema alone would
+        refuse those.
     """
     if not isinstance(event, dict):
         return None
-    names, has_var_kw = accepted_params(impl)
-    if has_var_kw:
+    sig_names, _has_var_kw = accepted_params(impl)
+    if sig_names is None and not schema_props:
+        # No signature information and no schema: nothing to judge against, so fail
+        # OPEN. Refusing every call to such a tool would be worse than passing
+        # through.
         return None
+    names = (sig_names or frozenset()) | frozenset(schema_props or ())
     unknown = sorted(set(event) - names - _TRANSPORT_KEYS)
     if not unknown:
         return None

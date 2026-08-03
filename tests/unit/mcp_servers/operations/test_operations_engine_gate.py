@@ -195,7 +195,10 @@ def test_gate_docdb_family_passes_to_impl():
     with _patch_family("documentdb"), patch.dict(
         handler.TOOLS["set_docdb_profiler"], {"impl": spy}
     ):
-        result = _invoke("set_docdb_profiler", {"cluster_id": "docdb-1", "level": 1})
+        # `enabled`, not `level`. The argument guard rejects out-of-schema keys, and
+        # this payload carried an invented one, so the test was asserting the gate
+        # while actually exercising nothing.
+        result = _invoke("set_docdb_profiler", {"cluster_id": "docdb-1", "enabled": True})
     assert result["status"] == "approval_required"
     spy.assert_called_once()
 

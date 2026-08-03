@@ -435,7 +435,11 @@ def lambda_handler(event, context):
             # complaint. Without this, one misnamed key raises TypeError and the
             # except below (correctly) strips the exception text, leaving the caller
             # a generic failure it cannot correct. See shared/tool_args.py.
-            _bad_args = invalid_argument_error(tool_name, TOOLS[tool_name]["impl"], event)
+            _schema_props = (
+                (TOOLS[tool_name].get("input_schema") or {}).get("properties") or {}
+            )
+            _bad_args = invalid_argument_error(
+                tool_name, TOOLS[tool_name]["impl"], event, _schema_props)
             if _bad_args:
                 return {"content": [{"type": "text", "text": json.dumps(_bad_args)}]}
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))

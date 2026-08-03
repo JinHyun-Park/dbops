@@ -60,9 +60,15 @@ def test_uninspectable_callable_is_permitted_not_refused(monkeypatch):
 
     monkeypatch.setattr(ta.inspect, "signature", _boom)
     names, has_var_kw = ta.accepted_params(_impl)
-    assert names == frozenset()
+    # None, NOT an empty set: "no signature information" must be distinguishable from
+    # "introspected and found nothing", or the check refuses everything.
+    assert names is None
     assert has_var_kw is True
     assert ta.invalid_argument_error("t", _impl, {"anything": 1}) is None
+    # With a schema available it is still judged, on the schema alone.
+    err = ta.invalid_argument_error("t", _impl, {"bogus": 1},
+                                    schema_props={"cluster_id": {}})
+    assert err["status"] == "invalid_arguments"
 
 
 # --------------------------------------------------------------------------
@@ -90,11 +96,32 @@ def test_the_transport_method_key_is_not_an_argument():
     assert invalid_argument_error("t", _impl, {"cluster_id": "c1", "method": "tools/call"}) is None
 
 
-def test_a_catchall_impl_is_passed_through_unchanged():
-    """22 of the 64 impls declare **_ignored and have deliberately opted into
-    tolerating extras. Tightening those is a separate change with a different blast
-    radius, so this check must not silently start refusing them."""
-    assert invalid_argument_error("t", _impl_with_catchall, {"cluster_id": "c1", "bogus": 1}) is None
+def test_a_catchall_impl_does_not_exempt_an_out_of_schema_key():
+    """A **kwargs catch-all is not permission to accept anything.
+
+    The counter-example that forced this: simulate_elasticache_node_resize takes
+    `new_node_type` and its impl ends in `**_`. Called with `node_type`, the key was
+    swallowed and the tool answered status "ok" with proposed == current, a confident
+    "no cost change" for a resize that never happened.
+    """
+    err = invalid_argument_error("t", _impl_with_catchall,
+                                 {"cluster_id": "c1", "bogus": 1},
+                                 schema_props={"cluster_id": {}})
+    assert err["status"] == "invalid_arguments"
+    assert err["unknown_arguments"] == ["bogus"]
+
+
+def test_a_catchall_impl_still_accepts_its_declared_arguments():
+    assert invalid_argument_error("t", _impl_with_catchall, {"cluster_id": "c1"},
+                                  schema_props={"cluster_id": {}}) is None
+
+
+def test_a_hidden_impl_param_absent_from_the_schema_is_permitted():
+    """Some impl params are in _INTENTIONALLY_HIDDEN and deliberately absent from the
+    gateway schema. Judging on the schema ALONE would refuse them, which is why the
+    allow-list is a union."""
+    assert invalid_argument_error("t", _impl, {"cluster_id": "c1", "limit": 5},
+                                  schema_props={"cluster_id": {}}) is None
 
 
 def test_multiple_unknowns_are_all_reported():
