@@ -255,3 +255,87 @@ def test_query_result_model_importable():
     a trivial smoke check keeps the import wired per the test brief."""
     qr = QueryResult(columns=["p"], rows=[{"p": "work_mem"}], row_count=1)
     assert qr.row_count == 1
+
+
+def _cache_with_engine(engine: str) -> MagicMock:
+    cache = MagicMock()
+    cache.execute.return_value = QueryResult(
+        columns=["engine"], rows=[{"engine": engine}], row_count=1
+    )
+    return cache
+
+
+def test_static_fallback_refuses_a_postgres_parameter_on_a_mysql_cluster():
+    """A PG-only parameter on Aurora MySQL must not come back `known` and safe.
+
+    The catalog holds BOTH dialects' parameters, so catalog membership alone said
+    work_mem was known, dynamic and "즉시 적용 가능" on an Aurora MySQL cluster:
+    a confident answer about a parameter that does not exist there.
+    """
+    cache = _cache_with_engine("aurora-mysql")
+    rds = MagicMock()
+    # Force the fallback path: no readable parameter group.
+    rds.describe_db_clusters.return_value = {"DBClusters": [{"DBClusterParameterGroup": ""}]}
+
+    with patch(f"{MODULE}.rds_client_for_cluster", return_value=rds):
+        result = simulate_parameter_change_impl(
+            cache, cluster_id="prod-mysql-1", parameter_name="work_mem", new_value="256MB"
+        )
+
+    assert "static fallback" in result["data_source"]
+    assert result["known"] is False
+    assert result["engine_mismatch"] is True
+    assert result["catalog_engines"] == ["postgres"]
+    assert "즉시 적용 가능" not in result["recommendation"]
+
+
+def test_static_fallback_keeps_a_matching_parameter_known():
+    """Negative control: the same fallback path on the RIGHT engine still answers.
+
+    Without this, refusing everything would pass the test above.
+    """
+    cache = _cache_with_engine("aurora-postgresql")
+    rds = MagicMock()
+    rds.describe_db_clusters.return_value = {"DBClusters": [{"DBClusterParameterGroup": ""}]}
+
+    with patch(f"{MODULE}.rds_client_for_cluster", return_value=rds):
+        result = simulate_parameter_change_impl(
+            cache, cluster_id="prod-pg-1", parameter_name="work_mem", new_value="256MB"
+        )
+
+    assert result["known"] is True
+    assert "engine_mismatch" not in result
+    assert result["is_dynamic"] is True
+
+
+def test_static_fallback_with_an_unresolvable_engine_degrades_not_refuses():
+    """An unreadable engine must fall back to catalog membership, not refuse.
+
+    The engine is read from the cache, which can be empty for a just-registered
+    cluster; that is a data gap, not evidence the parameter is wrong.
+    """
+    cache = MagicMock()
+    cache.execute.return_value = QueryResult(columns=["engine"], rows=[], row_count=0)
+    rds = MagicMock()
+    rds.describe_db_clusters.return_value = {"DBClusters": [{"DBClusterParameterGroup": ""}]}
+
+    with patch(f"{MODULE}.rds_client_for_cluster", return_value=rds):
+        result = simulate_parameter_change_impl(
+            cache, cluster_id="new-cluster", parameter_name="innodb_buffer_pool_size",
+            new_value="8G",
+        )
+
+    assert result["known"] is True
+    assert "engine_mismatch" not in result
+    assert result["engine"] is None
+
+
+def test_max_connections_is_attested_for_both_dialects():
+    """The one genuinely-both parameter must not be refused on either engine."""
+    from mcp_servers.shared.parameter_estimator import static_fallback
+
+    for engine in ("aurora-postgresql", "aurora-mysql", "mysql", "sqlserver-ex"):
+        out = static_fallback("c", "max_connections", "500", "test", engine)
+        # sqlserver has no catalog dialect, so it degrades rather than refusing.
+        assert out["known"] is True, engine
+        assert "engine_mismatch" not in out, engine

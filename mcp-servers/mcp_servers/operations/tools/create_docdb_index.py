@@ -73,10 +73,24 @@ def _write_creds(cluster_id: str):
     row = lookup_cluster(cluster_id)
     secret_arn = row.get("mongo_write_secret_arn")
     if not secret_arn:
+        # NOT `unsupported_engine`. That status means "this engine family cannot do
+        # this", and a DocumentDB cluster reading it concludes index creation is
+        # unavailable for DocumentDB, which is false: it is a per-cluster
+        # CONFIGURATION gap. Measured 2026-08-02 on the real docdb cluster, where
+        # the tool reported unsupported_engine on the one family it exists for.
+        # The reason names the field and the fix, because "no write credentials
+        # configured" did not say WHICH credential or WHERE to set it.
         return None, {
-            "status": "unsupported_engine",
-            "reason": "no write credentials configured",
+            "status": "write_not_configured",
             "cluster_id": cluster_id,
+            "reason": (
+                "이 클러스터 레지스트리 행에 mongo_write_secret_arn이 설정되지 "
+                "않았습니다. DocumentDB 인덱스 생성은 쓰기 전용 Mongo 자격증명을 "
+                "요구하며, 수집기가 쓰는 읽기 전용 mongo_secret_arn과 의도적으로 "
+                "분리되어 있습니다. /clusters에서 이 클러스터의 "
+                "mongo_write_secret_arn을 등록하세요. (엔진이 지원하지 않는 것이 "
+                "아니라 설정이 비어 있는 것입니다.)"
+            ),
         }
     try:
         raw = boto3.client("secretsmanager").get_secret_value(SecretId=secret_arn).get(

@@ -26,13 +26,21 @@ def simulate_ddl_impact_impl(cache: CacheClient, cluster_id: str, ddl_sql: str) 
     # PostgreSQL needs CONCURRENTLY) and which rewrite tooling the
     # recommendation may name. Without it every MySQL index build was reported
     # as write-blocking.
+    # serverlessv2_max_acu rides along in the SAME query (no extra round trip): on
+    # Serverless v2 `instance_class` is the literal "db.serverless" and carries no
+    # size, so the estimator was falling back to a mid-tier assumption. On a 2-4 ACU
+    # dev cluster that overstated throughput ~3-4x, i.e. it understated the
+    # maintenance window by the same factor, which is the wrong direction to be
+    # wrong in. Written by meta_collector since schema_v9.
     meta = cache.execute(
-        "SELECT instance_class, engine FROM cluster_meta WHERE cluster_id = :cluster_id",
+        "SELECT instance_class, engine, serverlessv2_max_acu "
+        "FROM cluster_meta WHERE cluster_id = :cluster_id",
         {"cluster_id": cluster_id},
     )
     row = meta.rows[0] if meta.rows else {}
     instance_class = row.get("instance_class")
     engine = row.get("engine")
+    serverless_max_acu = row.get("serverlessv2_max_acu")
 
     row_count = 0
     size_mb = 0.0
@@ -61,5 +69,6 @@ def simulate_ddl_impact_impl(cache: CacheClient, cluster_id: str, ddl_sql: str) 
         instance_class=instance_class,
         io_optimized=False,
         engine=engine,
+        serverless_max_acu=serverless_max_acu,
     )
     return {"cluster_id": cluster_id, **est}

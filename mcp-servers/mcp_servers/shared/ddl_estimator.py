@@ -53,9 +53,31 @@ _SIZE_TIER = {
     "24xlarge": 20.0,
     "32xlarge": 24.0,
 }
-# Serverless v2 has no fixed class; assume a mid tier (real throughput tracks
-# the live ACU range, which we don't read here).
+# Serverless v2 has no fixed class. The tier is derived from the cluster's MAX ACU
+# (`cluster_meta.serverlessv2_max_acu`, written by meta_collector since schema_v9):
+# 1 ACU is 2 GiB of memory, so max ACU maps onto the memory-equivalent instance size
+# and reuses _SIZE_TIER above rather than inventing a second curve.
+#
+# Max, not min: a full-table DDL scan is a sustained load and Aurora scales the
+# writer toward the ceiling within seconds, so the ceiling is what the scan gets.
+#
+# _SERVERLESS_TIER remains the fallback for a cluster whose ACU range has not been
+# collected yet. It is ~xlarge, i.e. ~16 ACU: on a 2-4 ACU dev cluster that
+# overstated throughput by 3-4x and understated the DDL window by the same factor.
 _SERVERLESS_TIER = 2.0
+# (max ACU ceiling, _SIZE_TIER key). Memory-equivalent r6g sizes: large is 16 GiB
+# = 8 ACU, and each step doubles. Bucketed rather than interpolated because
+# _SIZE_TIER itself is a coarse curve.
+_ACU_TIERS = (
+    (4, "medium"),
+    (8, "large"),
+    (16, "xlarge"),
+    (32, "2xlarge"),
+    (64, "4xlarge"),
+    (128, "8xlarge"),
+    (192, "12xlarge"),
+    (256, "16xlarge"),
+)
 # I/O-Optimized storage sustains higher scan/write throughput.
 _IO_OPT_MULTIPLIER = 1.4
 
@@ -380,15 +402,50 @@ def classify_ddl(ddl_upper: str, engine=None) -> dict:
     return {"operation": "other", "scans_table": True, "online": False, "lock": "exclusive (assumed — unrecognized DDL)"}
 
 
-def throughput_mb_s(instance_class, io_optimized: bool):
+def _acu_tier(max_acu):
+    """(tier, size_token) for a Serverless v2 max-ACU value, or (None, "").
+
+    Above the largest bucket the biggest tier is used rather than extrapolating:
+    beyond ~256 ACU the bottleneck is no longer compute.
+    """
+    try:
+        acu = float(max_acu)
+    except (TypeError, ValueError):
+        return None, ""
+    if acu <= 0:
+        return None, ""
+    for ceiling, token in _ACU_TIERS:
+        if acu <= ceiling:
+            return _SIZE_TIER[token], token
+    token = _ACU_TIERS[-1][1]
+    return _SIZE_TIER[token], token
+
+
+def throughput_mb_s(instance_class, io_optimized: bool, serverless_max_acu=None):
     """Derive full-scan throughput (MB/s) from the cluster's instance class +
-    storage edition. Returns (mb_s, factors, tier_known)."""
+    storage edition. Returns (mb_s, factors, tier_known).
+
+    For Serverless v2, `serverless_max_acu` (cluster_meta.serverlessv2_max_acu)
+    replaces the coarse mid-tier assumption. Omitted or unparseable, the assumption
+    still applies, so an uncollected cluster degrades instead of failing."""
     factors: list[str] = []
     ic = (instance_class or "").lower()
     if "serverless" in ic:
-        tier = _SERVERLESS_TIER
-        tier_known = True
-        factors.append("Serverless v2 — 중간 처리량 가정(실제는 ACU에 비례)")
+        acu_tier, acu_token = _acu_tier(serverless_max_acu)
+        if acu_tier is not None:
+            tier = acu_tier
+            tier_known = True
+            factors.append(
+                f"Serverless v2 최대 {float(serverless_max_acu):g} ACU "
+                f"(메모리 환산 {acu_token} 상당, 크기 tier x{tier:g})"
+            )
+        else:
+            tier = _SERVERLESS_TIER
+            tier_known = True
+            factors.append(
+                "Serverless v2 — ACU 범위가 아직 수집되지 않아 중간 처리량을 가정했습니다"
+                "(실제 처리량은 ACU에 비례)"
+            )
     elif ic:
         token = ic.rsplit(".", 1)[-1]
         tier = _SIZE_TIER.get(token)
@@ -437,6 +494,7 @@ def estimate_ddl(
     instance_class=None,
     io_optimized: bool = False,
     engine=None,
+    serverless_max_acu=None,
 ) -> dict:
     """Full DDL impact estimate. Returns everything except ``cluster_id`` (the
     caller adds it). Time scales with table size ÷ instance-derived throughput
@@ -453,7 +511,8 @@ def estimate_ddl(
     except (TypeError, ValueError):
         size_mb = 0.0
 
-    mb_s, tput_factors, tier_known = throughput_mb_s(instance_class, io_optimized)
+    mb_s, tput_factors, tier_known = throughput_mb_s(
+        instance_class, io_optimized, serverless_max_acu)
     basis: list[str] = [
         f"연산 분류: {cls['operation']} ({'테이블 풀스캔' if cls['scans_table'] else '메타데이터 전용'})"
     ]

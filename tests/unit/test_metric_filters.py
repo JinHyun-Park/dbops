@@ -364,18 +364,32 @@ def test_agent_performance_summary_kpis_are_cluster_level():
 
     class _Cache:
         def execute(self, sql, params=None):
-            # One statement, three metric_snapshots subselects: each must carry
-            # the filter, so model them by counting occurrences.
-            assert sql.count(STRICT) == 3, sql
+            # One statement, FIVE metric_snapshots subselects: three aggregates plus
+            # the two sample counts, and every one must carry the filter. A sample
+            # count computed over a wider row set than its aggregate would report a
+            # KPI as well-backed while the aggregate saw something else.
+            assert sql.count(STRICT) == 5, sql
             a = _agg(sql)
-            return QueryResult(columns=["avg_aas", "max_aas", "slow_count", "peak_connections"],
-                               rows=[{"avg_aas": a["avg"], "max_aas": a["max"],
-                                      "slow_count": 0, "peak_connections": a["max"]}],
-                               row_count=1)
+            return QueryResult(
+                columns=["avg_aas", "max_aas", "slow_count", "peak_connections",
+                         "aas_samples", "connection_samples", "query_stats_rows"],
+                rows=[{"avg_aas": a["avg"], "max_aas": a["max"],
+                       "slow_count": 0, "peak_connections": a["max"],
+                       "aas_samples": a["count"], "connection_samples": a["count"],
+                       "query_stats_rows": 0}],
+                row_count=1)
 
-    kpis = get_performance_summary_impl(_Cache(), "c")["kpis"]
+    out = get_performance_summary_impl(_Cache(), "c")
+    kpis = out["kpis"]
     assert kpis["avg_aas"] == pytest.approx(_CLUSTER_AVG)
     assert kpis["avg_aas"] != pytest.approx(_WEAK_AVG)
+    # The sample count comes from the cluster-level rows too, so it agrees with the
+    # aggregate rather than counting the per-instance rows the filter excluded.
+    assert out["samples"]["aas"] == len(_CLUSTER_AAS)
+    # query_stats had no rows, so slow_count is flagged as unbacked instead of being
+    # read as "no slow queries".
+    assert "slow_count" in out["unbacked_kpis"]
+    assert "note" in out
 
 
 def test_agent_compare_periods_averages_cluster_level_rows():
@@ -527,7 +541,11 @@ _EXPECTED_CLUSTER_LEVEL_PREDICATES = {
     # db_connections_limit ceiling lookup + E1-5's 2 new per-family lookups
     # (DynamoDB provisioned_* ceiling, ElastiCache eviction probe).
     "mcp-servers/mcp_servers/performance/tools/forecast_capacity.py": 5,
-    "mcp-servers/mcp_servers/performance/tools/performance_summary.py": 3,
+    # 5, not 3: the two per-KPI sample-count subselects added 2026-08-03 carry the
+    # filter for the same reason the aggregates do. An unfiltered COUNT would report
+    # per-instance and per-wait-event rows as cluster-level samples, so a KPI would
+    # look well-backed while its aggregate saw a different row set.
+    "mcp-servers/mcp_servers/performance/tools/performance_summary.py": 5,
     "mcp-servers/mcp_servers/simulation/tools/capacity_cost.py": 3,
     "mcp-servers/mcp_servers/simulation/tools/rds_rightsizing.py": 1,
 }

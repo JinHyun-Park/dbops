@@ -23,7 +23,6 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import boto3
-from botocore.exceptions import ClientError
 
 from mcp_servers.shared.cache_client import CacheClient
 
@@ -109,7 +108,13 @@ def query_activity_audit_impl(
                     "details_excerpt": details_str[:500],
                 })
             sources_used.append("approvals")
-        except ClientError as e:
+        # `Exception`, not `ClientError`. This tool answers from TWO sources and
+        # reports which ones responded in `sources_used`, so a half-failure is
+        # already representable. The PG half below catches Exception; this half
+        # caught only ClientError, so anything else (a malformed approvals item, a
+        # JSON decode error, a None where a dict was expected) escaped and killed the
+        # whole compliance answer instead of degrading to "audit_log only".
+        except Exception as e:
             print(f"[query_activity_audit] approvals scan failed: {e}")
 
     # --- PG audit_log ----------------------------------------------------

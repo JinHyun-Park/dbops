@@ -25,7 +25,31 @@ from mcp_servers.shared.parameter_estimator import (
 logger = logging.getLogger(__name__)
 
 
+def _cluster_engine(cache: CacheClient, cluster_id: str) -> str:
+    """The engine string from cluster_meta, or "" when unreadable.
+
+    Read from the CACHE rather than from the live describe below, because the
+    fallback is reached precisely when that describe failed, and the engine is what
+    decides whether a catalog entry applies at all.
+    """
+    try:
+        res = cache.execute(
+            "SELECT engine FROM cluster_meta WHERE cluster_id = :cid",
+            {"cid": cluster_id},
+        )
+    except Exception:
+        return ""
+    rows = getattr(res, "rows", res)
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+        return str(rows[0].get("engine") or "")
+    return ""
+
+
 def simulate_parameter_change_impl(cache: CacheClient, cluster_id: str, parameter_name: str, new_value: str) -> dict:
+    # The engine decides whether a fallback catalog entry applies: the catalog holds
+    # both PG and MySQL parameters, and `work_mem` on Aurora MySQL was being reported
+    # as known and safe to apply immediately.
+    engine = _cluster_engine(cache, cluster_id)
     # Resolve the cluster's parameter group via the cross-account-aware client.
     # Any failure (assume-role denied, unregistered, RDS unreachable) degrades to
     # the static fallback rather than surfacing an exception to the agent.
@@ -35,15 +59,15 @@ def simulate_parameter_change_impl(cache: CacheClient, cluster_id: str, paramete
         cluster = (resp.get("DBClusters") or [{}])[0]
     except Exception:
         logger.warning("describe_db_clusters failed for %s", cluster_id, exc_info=True)
-        return static_fallback(cluster_id, parameter_name, new_value, "live describe unavailable")
+        return static_fallback(cluster_id, parameter_name, new_value, "live describe unavailable", engine)
 
     pg_name = cluster.get("DBClusterParameterGroup") or ""
     if not pg_name:
-        return static_fallback(cluster_id, parameter_name, new_value, "no parameter group on cluster")
+        return static_fallback(cluster_id, parameter_name, new_value, "no parameter group on cluster", engine)
     # AWS-managed default.* groups can't be modified and their values aren't ours
     # to read meaningfully — treat like the live path is unavailable.
     if pg_name.startswith("default."):
-        return static_fallback(cluster_id, parameter_name, new_value, "AWS-default parameter group")
+        return static_fallback(cluster_id, parameter_name, new_value, "AWS-default parameter group", engine)
 
     try:
         params = describe_all_parameters(rds, pg_name)
@@ -52,10 +76,10 @@ def simulate_parameter_change_impl(cache: CacheClient, cluster_id: str, paramete
             "describe_all_parameters failed for %s (group=%s)",
             cluster_id, pg_name, exc_info=True,
         )
-        return static_fallback(cluster_id, parameter_name, new_value, "live describe unavailable")
+        return static_fallback(cluster_id, parameter_name, new_value, "live describe unavailable", engine)
 
     row = next((p for p in params if p.get("ParameterName") == parameter_name), None)
     if row is None:
-        return static_fallback(cluster_id, parameter_name, new_value, "parameter not found in group")
+        return static_fallback(cluster_id, parameter_name, new_value, "parameter not found in group", engine)
 
     return build_live_result(cluster_id, parameter_name, new_value, row, pg_name)

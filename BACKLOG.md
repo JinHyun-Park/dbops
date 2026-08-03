@@ -1,711 +1,98 @@
 # DBOps Backlog
 
-Priorities are rough — `P1` is "first-impression breakers", `P4` is polish.
-Items are scoped concretely so any of them can be picked up without re-design.
-
----
-
-## P1 — First-impression breakers
-
-### P1.1 Self-hosted login UX ✅ (shipped — in-app `/login` page, SRP auth via `auth.ts signIn()` + amazon-cognito-identity-js; auth-guard redirects to `/login` not Hosted UI; User Pool Client `user_srp=True`; config.json exposes `cognitoUserPoolId`; verified deployed 2026-06-17. Also handles FORCE_CHANGE_PASSWORD first-login for admin-invited users — `signIn` returns a `new_password_required` continuation and `/login` shows a set-new-password step, `55fc8b8`)
-
-**Why:** Cognito Hosted UI is the default AWS-branded ugly login form. First
-impression decides whether someone sticks with the product.
-**What:**
-
-- Replace `getLoginUrl()` redirect with an in-app login page (`/login`).
-- Use `amazon-cognito-identity-js` (or `@aws-sdk/client-cognito-identity-provider`)
-  to call `InitiateAuth` (USER_SRP_AUTH) directly from the browser.
-- Cognito User Pool Client must enable `ALLOW_USER_SRP_AUTH` + `ALLOW_REFRESH_TOKEN_AUTH`.
-- Keep Hosted UI as a fallback for social SSO later.
-  **Out of scope:** SAML/OIDC federation.
-
-### P1.2 Forgot password flow ✅ (shipped — `/forgot` → `requestPasswordReset()` (ForgotPassword) → `/reset` → `confirmPasswordReset()` (ConfirmForgotPassword) + auto sign-in; full validation, wired to auth.ts)
-
-**Why:** Users locked out can't self-recover today.
-**What:**
-
-- `/login` → "Forgot password?" link → `/forgot` page.
-- Call `ForgotPassword` API → email/SMS code → `/reset` page.
-- Call `ConfirmForgotPassword` with code + new password.
-- Cognito User Pool already has email verification configured.
-
-### P1.3 Onboarding tour ✅ (shipped — `onboarding-modal.tsx`, 4-step, first-login localStorage gate, verified rendering 2026-06-16)
-
-**Why:** A first-time visitor lands on an empty dashboard and bounces.
-**What:**
-
-- One-time modal on first login (`localStorage` flag) walks through:
-  1. Register your first cluster
-  2. Wait for ETL (5 min) or click "Generate sample data"
-  3. Open chat and try "analyze recent slow queries"
-- Skippable via "Already familiar" link.
-- Use `<EmptyState>` primitive on every page when `clusters.length === 0`.
-
-### P1.4 Sample data / demo mode ✅ (shipped — `generateSampleCluster` + seeder + DEMO badge + one-click delete on `/clusters`)
-
-**Why:** People want to evaluate the product before connecting their cluster.
-**What:**
-
-- "Generate sample cluster" button on `/clusters` that:
-  1. Creates a fake `cluster_id = "sample-cluster"` row in DynamoDB
-  2. Calls a SampleDataSeeder Lambda that populates 24h of synthetic
-     metric_snapshots / query_stats / blocking_locks
-  3. Marks the cluster `is_demo: true` so it can be deleted in one click
-- Demo cluster shows a yellow "DEMO" badge across all pages.
-
----
-
-## P2 — Core differentiation
-
-### P2.1 Query plan visualizer ✅ (1·2·3단계 완료)
-
-**Why:** pganalyze's strongest feature.
-**What (DONE):**
-
-- POST `/api/explain` → EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) → 구조화 JSON
-- `<PlanTree>` 재귀 컴포넌트, self-time 기반 색상, hot nodes, planner misestimate 배지
-- "Get AI insight" 버튼 → plan summary를 LLM에 보내 2–3개 구체적 권장사항
-- SQL 에러 = 노란 warning (HTTP 400), 인프라 에러 = 빨간 error (502)
-  **5단계 ✅ shipped** (verified 2026-06-16):
-- ✅ localStorage plan history (`PLAN_HISTORY_KEY`, 최근 10개) + 다시 열기
-- ✅ "copy json" / "copy link" 액션 + 공유 링크 복원 (`/query-lab#sql=<base64>&cluster=`)
-
-### P2.2 Mobile responsive ✅ (mobile tab bar)
-
-**Why:** DBAs on-call use phones.
-**What (DONE):**
-
-- 사이드바가 < 768px에서 숨겨지고 하단 탭바(`md:hidden fixed bottom-0`)가 노출
-- 5개 핵심 라우트만 (Fleet / Dashboard / Chat / Alerts / Clusters)
-- main 영역 하단 패딩 추가로 콘텐츠 가림 방지
-  **Remaining (refinement):**
-- 테이블 → 카드뷰 변환 (현재는 가로 스크롤로 fallback)
-- 대시보드 그리드 1열로 collapse + 메트릭 스트립 가로 스크롤
-
-### P2.3 Slack / PagerDuty alert templates ✅
-
-**What (DONE):**
-
-- 새 RDS 테이블 `alert_subscribers_managed` (schema_v5)
-- `/api/alert-subscriptions` POST/GET/DELETE이 `slack-webhook` / `pagerduty-events-v2` 프로토콜 지원
-- Alert evaluator가 Slack Block Kit (header + fields + context block) 페이로드 빌드
-- PagerDuty Events API v2 payload (`dedup_key=dbops-rule-<id>`로 반복 트리거 그룹화)
-- 호출 결과를 `last_used_at` / `last_error`에 기록
-  **Remaining:**
-- ✅ 알림 트리거 시 dashboard URL 자동 첨부 — `_dashboard_url()` 딥링크 + Slack Block Kit
-  dashboard/alerts/timeline 버튼 (verified 2026-06-16)
-- ✅ 토픽 dedup 윈도우 조정: shipped. `_build_pagerduty_payload`의 dedup_key가
-  TTL 버킷을 포함한다 (`dbops-rule-<id>-w<bucket>`, bucket = now // window), window는
-  `ALERT_DEDUP_WINDOW_MINUTES` (기본 30분, 최소 60초). 플래핑 룰이 영구 침묵되지 않고
-  윈도우마다 인시던트를 다시 연다 (`data-pipeline/alert_evaluator/handler.py`).
-
-### P2.4 RBAC (admin / viewer) ✅ (frontend gate)
-
-**What (DONE):**
-
-- Cognito 그룹 `dbops-admin`, `dbops-viewer` 생성 (foundation_stack)
-- `auth.ts`에 `isAdmin()` / `isViewer()` (id token `cognito:groups` 디코드)
-- Default model: 모든 사용자는 admin (`dbops-viewer` 명시 가입 시에만 viewer로 강등)
-- `/clusters`, `/alerts` 페이지에서 mutation 버튼/폼이 viewer 사용자에겐 숨김
-- "read-only · viewer" 뱃지로 모드 표시
-  **P2.4.2 server-side RBAC ✅ shipped** (2026-06-13):
-- API Gateway에 Cognito JWT authorizer가 default로 전 라우트 적용(public 3개 제외:
-  slack webhook ×2 + /health) — 인증은 게이트웨이가 Lambda 진입 전 강제.
-- 모든 mutating 핸들러가 `_is_admin(event)`로 `cognito:groups` 검증 후 viewer면 403:
-  clusters(POST/DELETE), approvals(POST 생성 + PUT 승인/거부 — human-in-the-loop의 핵심),
-  alerts(POST/PATCH/DELETE), backups(POST), saved_queries·runbooks·chat_sessions, explain.
-  `_is_admin` semantics: bearer 없음=NOT admin(fail-closed), `dbops-viewer`만 있으면 거부,
-  그 외(또는 group claim 없음)=admin(one-admin 배포 기본). frontend isAdmin()과 일치.
-- mutation 없는 핸들러(reports/models)·read-only 계산(simulation POST)·per-user ownership
-  (memory DELETE, sub-scoped)은 admin gate 비대상.
-- viewer→403 강제 보증 유닛 테스트(approvals 승인·생성, saved_queries 삭제).
-  DevTools 직접 호출도 서버에서 차단 — frontend gate만 있던 갭 해소.
-
-### P2.5 Bulk cluster discovery + register ✅ shipped
-
-`POST /api/clusters/discover` (assume-role → enumerate) + `/bulk-register`; the
-`/clusters` page has the Discover panel (discoverForm/discoverOpen, checkbox table,
-bulk register). Multi-engine: Aurora (DescribeDBClusters), DocumentDB (docdb client),
-DynamoDB (ListTables → `ddb-*` slug). Discovery + registration compute the same
-cluster_id (account+region+name) so re-discovery flags already-registered rows.
-Tests: `test_clusters_multiengine.py`.
-
-**Why:** Manually entering cluster_id / account_id / region / spoke role per
-cluster is fine for 1-2 clusters; a fleet of 50+ makes onboarding painful.
-**What:**
-
-- `/clusters` page gets a "Discover" panel:
-  - Same-account: enumerate via `rds:DescribeDBClusters` in selected region(s)
-  - Cross-account: input role ARN → assume → enumerate
-- Show a table of discovered clusters with checkboxes (cluster_id, engine,
-  endpoint, status, already-registered flag)
-- "Register selected" button → confirmation modal that warns:
-  - "DBOps will run read-only inspection queries against the data plane"
-  - "Bedrock costs accrue for any chat or AI insight you trigger"
-  - "Cancel anytime by deleting the cluster row"
-- On confirm: bulk POST to `/api/clusters` (one row per checked cluster).
-- DDB record auto-populates cluster_arn + secret_arn (from RDS describe + the
-  cluster's master secret) so EXPLAIN works without manual backfill.
-
----
-
-## P3 — Depth
-
-### P3.1 ML anomaly detection ✅ (seasonal baseline, robust z-score)
-
-**What (DONE):**
-
-- `metric_baselines` 테이블 (cluster × metric × hour_of_week PK, median + IQR + sample_count)
-- `pg_baseline_trainer.py` — 14일 history → `PERCENTILE_CONT`로 robust 통계,
-  1시간 간격 time-gate, dimensions 빈 row만 학습 (per-wait-event 폭주 방지)
-- `_anomalies` 엔드포인트 재작성 — 현재 hour-of-week 버킷의 robust z-score
-  `(max - median) / IQR`, 버킷 미존재 시 flat fallback
-- AnomaliesPanel에 `seasonal` / `flat` 모드 배지 + tooltip
-- statsmodels / numpy 추가 없음 (Lambda zip 가벼움)
-
-### P3.2 MySQL parity ✅
-
-**What (DONE):**
-
-- `mysql_query_stats` — `performance_schema.events_statements_summary_by_digest`
-- `mysql_table_stats` — `information_schema.tables` + `table_io_waits_summary_by_index_usage`
-- `mysql_locks` — `sys.innodb_lock_waits` + `global_variables`
-- `mysql_activity` — `performance_schema.threads`
-- ETL handler에 engine 분기 (`"mysql" in engine`)
-- `/api/dashboard/{id}/table-indexes` MySQL용 분기 (`information_schema.statistics`)
-- Wait events SQL의 wait_type CASE에 MySQL `wait/io/*` / `wait/lock/*` / `wait/synch/*` 매핑
-- 프론트 dashboard 페이지 — MySQL일 때 VacuumPanel 숨김 (InnoDB equivalent 없음)
-- WaitEventsPanel color map에 Sync / Idle 추가
-- SettingsPanel 헤더 `engine` prop으로 PostgreSQL/MySQL 자동 라벨링
-- Dashboard `_make_query` helper — MySQL aggregate alias의 `name` 빈 columnMetadata 시 `label` 폴백
-
-### P3.3 Cost optimization recommendations ✅ (MVP)
-
-**What (DONE):**
-
-- `cost_check.py` 컬렉터 (engine-agnostic) — 7일 CPU `AVG/P95` 계산
-- 임계 (avg<30% AND p95<60% AND not burstable/serverless) 시 `cost_oversized`
-  finding을 기존 `cluster_health_findings`에 INSERT
-- MaintenanceHealthPanel에 **Cost** 탭 추가
-  **P3.3.2 ✅ shipped** (verified 2026-06-16 — implemented, wired, IAM'd, schema present):
-- ✅ Aurora Serverless v2 min/max ACU 권장 — `cost_check.py::_check_serverless_v2_acu`
-  emits `cost_serverless_max_too_high` (p95 CPU < 40% → max ACU overprovisioned) +
-  `cost_serverless_min_too_low` (min < max×0.5 AND p95 > 70% → cold-start risk).
-  `meta_collector.py` collects `serverlessv2_min_acu`/`max_acu` from ScalingConfiguration.
-- ✅ Reserved Instance / Savings Plan 매칭 — `_check_savings_plan_opportunity` calls Cost
-  Explorer `get_savings_plans_purchase_recommendation` (IAM `ce:GetSavingsPlansPurchaseRecommendation`
-  - `GetReservationPurchaseRecommendation` in data_stack.py), cached daily in
-    `cost_recommendations_cache` (schema_v9), emits `cost_savings_plan_opportunity` (>$10/mo).
-- Storage rightsizing — intentional no-op for Aurora (auto-scaled storage, per-GB billing).
-  `_check_storage_rightsize` scaffolded for RDS-non-Aurora / DocDB / DynamoDB (see "Still future").
-
-### P3.4 Lock dependency graph ✅
-
-**What (DONE):**
-
-- LocksPanel에 list / chain 토글
-- 클라이언트에서 edges → DAG 빌드, root holders 식별, BFS로 트리 트래버스
-- 인덴트 트리 렌더링 (depth별 색상, lock mode + duration, cycle 감지, 쿼리 미리보기)
-- 별도 백엔드 변경 없이 기존 blocking_locks 데이터 재사용
-
-### P3.5 Comparative views ✅
-
-- Multi-cluster diff page (pick A and B, see metric-by-metric side-by-side).
-- Time-period diff (e.g., this week vs last week) overlay.
-
-### P3.6 Multi-engine support — DocumentDB / DynamoDB ✅ (program #1–#5 shipped 2026-06)
-
-**Shipped** (engine-family approach, not the old `service`-enum plan): a thin
-`engine_family()` + `CAPABILITIES` layer (4 byte-identical copies + `lib/engine.ts`)
-keyed off `cluster_id`. DynamoDB = Table-as-resource (slug `ddb-<12hex>`), grouped
-by account/region. Delivered across 5 sequenced specs:
-
-- **#1 Foundation** — engine-family model, ETL dispatch (`_collect_one` branches
-  before any RDS/PI/CW call), per-family registration/discovery, `resource_details`
-  JSONB on `cluster_meta`, capability-gated dashboard shell + Fleet grouping.
-- **#2 DocumentDB diagnosis** — `docdb_findings.py` (connection saturation,
-  replica lag, cursor timeout, low cache hit), AWS/DocDB metrics + connections-limit.
-- **#3 DynamoDB diagnosis** — `dynamodb_findings.py` (throttling, capacity
-  under/over-provisioned, hot partition, on-demand high throughput, per-GSI
-  throttle), PK/SK/GSI/LSI structural surfacing.
-- **#4 MCP tools + AI** — `get_maintenance_findings` (engine-agnostic) + engine-aware
-  `get_health_status`; agent prompt is engine-family-aware; chat diagnoses NoSQL.
-- **#5 Simulation gating** — simulation tools/page are Aurora-only and cleanly
-  refuse NoSQL (`unsupported_engine`); `simulation_policy.cedar`; Cedar parity test.
-- **Dashboard parity (audit follow-up)** — ⛶ Expandable metric-expand + time-range
-  selector wiring + previously-uncollected-but-now-charted metrics on the
-  NoSQL overview panels (Codex parity audit TOP 3).
-
-**Remaining follow-ups (concretely scoped, pick up independently):**
-
-- ~~**DocDB cost rightsizing**~~ ✅ **shipped** (2026-06-12): docdb_cw_collector
-  captures the writer instance class into resource_details; `docdb_cost_oversized`
-  rule in `docdb_findings.py` (7d cpu_utilization avg<30/p95<60 on a sized
-  instance, skips burstable t-family). Isolated in try/except so it can't
-  suppress the operational findings.
-- ~~**Dashboard parity — backend panels for new engines**~~ ✅ **shipped**
-  (2026-06-12, all live-verified on DocDB + DynamoDB, Codex SHIP):
-  - ✅ Health score (engine-aware signals + `invert` for cache-hit; no-data→ok).
-  - ✅ Backup/snapshot panel (read-only) — see backup-visibility spec.
-  - ✅ Events panel (un-gate — event_log is keyed by cluster_id).
-  - ✅ Capacity forecast (DocDB connections→db_connections_limit; DynamoDB
-    consumed→provisioned×60; not_applicable on on-demand).
-  - ✅ Replication/topology (DocDB cluster members via docdb describe).
-  - ✅ Engine configuration panel (`/engine-config`: DocDB maintenance/deletion-
-    protection/param-group/retention; DynamoDB table-class/SSE/stream/TTL).
-  - ✅ Per-GSI metric lines on the DynamoDB panel (+ fixed a latent table-level
-    dimension-mixing bug — table charts now filter to `dimensions='{}'`).
-  - (Connection pressure/headroom for DocDB: covered by the db_connections chart
-    - docdb_connection_saturation finding — no separate panel needed.)
-- ~~**NoSQL write / remediation tools** + Cedar policies + approval binding~~ ✅
-  **shipped** (2026-06-13, Codex adversarial safety review → 7 holes fixed; 5 safety
-  gates live-verified; consume→write unit-verified; DocDB Mongo write deferred-live).
-  Five approval-gated write tools on the operations server, mirroring the modify_scaling
-  3-state model (Cedar `approved==true` at the Gateway + approval_guard payload-hash/
-  atomic-consume at the tool): **DynamoDB** `modify_dynamodb_capacity` (update_table
-  RCU/WCU + billing-mode switch), `modify_dynamodb_ttl`, `enable_dynamodb_pitr`;
-  **DocumentDB** (Mongo wire protocol, in-VPC pymongo, hardcoded 2-command write
-  allowlist) `set_docdb_profiler`, `create_docdb_index`. Safety: FAIL-CLOSED engine
-  gate (None family refused — opposite of the read tools); RCU/WCU `<1` rejected (not
-  floored); GSI tables blocked on capacity change; TOCTOU execute-time re-read; PITR
-  disable needs `force` (hashed + Cedar forbid-unless-force); compound-index key ORDER
-  preserved + hashed; DynamoDB table name resolved from the registry `resource_name`
-  (NOT cluster_meta — caught live); separate RW Mongo secret (`mongo_write_secret_arn`).
-  operations Lambda now bundles pymongo + CA (shared `cdk/bundling.py`). **Deployer
-  setup to activate DocDB writes**: provision a read-write Mongo user + secret, put its
-  ARN on the registry row as `mongo_write_secret_arn`. ~~re-run `agentcore policy create`
-  (Cedar is manually applied)~~ **stale, corrected 2026-07-27:** Cedar is no longer
-  manually applied. `cdk/stacks/agent_stack.py` deploys one PolicyEngine plus one Policy
-  per statement from `cdk/policies/cedar/*.cedar` on every `cdk deploy`, so there is no
-  manual step. Note also that Cedar is bound **LOG_ONLY** (`cedar_mode = "LOG_ONLY"`):
-  the "Cedar `approved==true` at the Gateway" and "Cedar forbid-unless-force" halves
-  described in this entry are **not live** (they exist only as commented STEP-2 sketches
-  in `operations_policy.cedar`). The approval enforcement that IS live is entirely the
-  tool-level `approval_guard`: fail-closed, payload-hash-bound, atomic single-use
-  consume. See `cdk/policies/README.md`. This completes P3.6 Group C, the multi-engine program.
-- ~~**Mongo-protocol deep diagnosis** for DocumentDB~~ ✅ **shipped** (2026-06-12,
-  unit + cdk-synth/bundling verified; **live deferred** — no RO Mongo user/secret/
-  network on the demo cluster). Connectivity = **Option A** (ADR 2026-06-12 update):
-  a new in-VPC, pymongo-bundled, scheduled Lambda `data-pipeline/docdb_mongo_collector/`
-  (NOT the AWS DocDB MCP). Read-only command allowlist only (`serverStatus`,
-  `currentOp(active)` — no generic runCommand/eval). Emits `mongo_*` metric_snapshots
-  - `docdb_mongo_long_running_ops` findings (shared `run_ts`),
-    surfaced on the DocDB Maintenance Health panel's new **"Live Ops"** tab. Multi-layer
-    read-only: deployer-provisioned RO Mongo user + scoped per-cluster `mongo_secret_arn`
-    secret + in-VPC SG + command allowlist + `retryWrites=False`/`secondaryPreferred`.
-    Absent `mongo_secret_arn` the cluster no-ops (CW-based DocDB diagnosis unaffected).
-    `_PipLocalBundling` builds the asset Docker-free (manylinux py3.12 wheels) with a
-    Docker fallback. **Deployer setup to activate**: create RO Mongo user → store creds
-    in a secret → put ARN on the registry row → ensure SG reaches the cluster on 27017.
-- ~~**DynamoDB capacity-mode cost simulator** (Provisioned↔On-Demand $ what-if)~~
-  ✅ **shipped** (2026-06-12, live pricing confirmed for ap-northeast-2, Codex
-  adversarial cost-math review → 3 findings all fixed). New `simulate_dynamodb_capacity_cost`
-  simulation tool (positive `ddb_cost_simulation` capability gate — Aurora tools
-  still cleanly refuse DynamoDB via the untouched `simulation: False`). Reads the
-  table's actual consumed_rcu/wcu series + billing_mode/region from the cache,
-  prices BOTH modes with the real AWS Price List API (`dynamodb_pricing.py`,
-  2 byte-identical copies, mirrors `aurora_pricing.py`: regionCode filter, process
-  cache, soft-fail→None), and computes the monthly $ comparison + recommendation
-  in a shared pure module (`dynamodb_cost.py`, 2 byte-identical copies). Surfaced
-  on the `/simulator` page for DynamoDB (new `DynamoDbCapacitySimulator` panel;
-  DocumentDB → "지원 예정") + a REST route `/api/simulation/dynamodb-capacity-cost`.
-  **Honesty contract**: a price that won't resolve → `partial`/`fallback`, never a
-  fabricated $; <20 datapoints → `no_data`; non-STANDARD table class or global
-  tables → `unsupported` (different capacity SKUs — refuses rather than mis-prices,
-  using new collector fields `table_class`/`global_table_replicas`). Provisioned
-  sizing = ceil(p99(consumed/min ÷ 60) ÷ headroom), disclosed as a 1-min-CloudWatch
-  smoothed lower-bound (sub-minute bursts invisible). Capacity (RCU/WCU) only —
-  storage/backup/stream/replication excluded. Cedar + parity updated.
-
-- ~~**Cross-account ETL collection**~~ ✅ **shipped** (2026-06-16, commits
-  `fbac4d2` + `5c62f8a`): the ETL collector now assumes each registry row's
-  `spoke_role_arn` per-cluster (`_session_for`, mirrors dashboard/MCP) so RDS /
-  PI / CloudWatch / RDS-Data TARGET reads run in the cluster's OWN account,
-  cache writes stay in the hub; clusters with no spoke role keep byte-identical
-  local behaviour. Covers ALL engines (relational + DynamoDB + DocumentDB),
-  not just new ones. Also resolved the platform-wide trust mismatch: the spoke
-  template now trusts the hub **account** (each role still gated by its own
-  `sts:AssumeRole` identity policy) so direct-assume works for every path
-  (dashboard/MCP/api/ETL). Unit + CDK-synth + adversarial-review verified;
-  **deployed to dev (`dbops-dev-data`) + live non-regression confirmed** — an
-  ETL Lambda invoke collected all 6 real clusters (Aurora MySQL/PG, DynamoDB×2,
-  DocumentDB) error-free; only the demo placeholder `sample-cluster` shows its
-  usual `DBClusterNotFoundFault` (no real resource).
-  - ✅ **Spoke-assume path LIVE-VERIFIED end-to-end** (2026-06-17): deployed
-    `dbops-spoke-role` (the repo's CFN template) into a real second account
-    (210987654321) trusting the hub (123456789012), and confirmed the full chain
-    against that account's Aurora PG: test-connection (assume + describe + secret
-    - data_api all ok), cross-account discover (found the cluster via the spoke
-      role), register (resolved cluster_arn/secret_arn/db_name cross-account), and
-      ETL collection (CloudWatch 60 metrics, pg_stat_activity, pg_locks, health 13
-      findings — all cross-account). Hub roles' `sts:AssumeRole` is scoped
-      `arn:aws:iam::*:role/dbops-spoke-role`, so no hub redeploy was needed.
-      **Torn down afterward** (spoke role CFN stack + hub registry row deleted):
-      the test account's corporate policy disallows external cross-account trust,
-      so it can't host the spoke role long-term. The verification result and the
-      bug fix below stand regardless — the spoke-assume path is proven to work
-      end-to-end against a real second account.
-  - 🐞→✅ **Spoke template bug found + fixed via this live test**: the
-    `SecretsManager` statement gated `GetSecretValue` on `ResourceTag/ManagedBy=rds`,
-    which **never matches** real RDS-managed secrets (they carry
-    `aws:secretsmanager:owningService=rds`, not `ManagedBy`). Cross-account RDS
-    Data API SQL collection (slow queries, table/lock/activity/extension stats —
-    the core telemetry) failed `AccessDenied "Failed to fetch secret"`; same-account
-    worked because the hub Lambda role reads the secret directly. Fixed to scope by
-    the RDS-managed secret ARN pattern `arn:aws:secretsmanager:*:*:secret:rds!*`;
-    re-verified — SQL collection now succeeds cross-account. (Remaining `stats`
-    error is just the target DB lacking `pg_stat_statements`; PI `NotAuthorized` =
-    PI not enabled on that cluster — both target-config, not DBOps bugs.)
-
-**Still future (separate):** RDS non-Aurora (MySQL/PG/MariaDB) storage rightsize
-(`AllocatedStorage` vs used; `_check_storage_rightsize` is a no-op scaffold today).
-**Out of scope:** Redshift / OpenSearch / RDS Custom — different operational shapes.
-
----
-
-## P4 — Operational polish
-
-- ~~OpenAPI / Swagger docs for `/api/*` endpoints.~~ ✅ shipped (2026-06-17) — `tools/openapi_gen.py` generates `frontend/public/openapi.json` from the CDK route table (63 paths; parity-tested), rendered on-brand at `/api-docs`.
-- SSE/WebSocket push for real-time alerts (replace 5-min polling). **Scoped slice ✅ shipped** (2026-06-17, `9b55e6b`): API GW WebSocket (`foundation`) pushes fired alerts (alert_evaluator) + external incidents (incident_webhook) INSTANTLY to connected operators — `$connect` authorizer validates the Cognito access token via GetUser (fail-closed, no JWKS bundling); `ws_notify.broadcast` prunes Gone(410); frontend `alert-stream.ts` (reconnect backoff) feeds the existing `useAlertBadge` toast. Deployed + boundary-verified (`$connect` 401 without token; `config.json` `webSocketUrl` live). **Still future**: full polling→push replacement of the ~20 dashboard/fleet panels — lower value since that data is ETL-bounded (1–5 min) regardless of transport.
-  - **Adversarial review (critic) + live test follow-up (2026-06-17):** live-verified the broadcast path end-to-end (authorizer fail-closed via real Cognito GetUser; IAM `ManageConnections` on both broadcasting roles; `alert_evaluator` fired → broadcast scanned the connections table → real `post_to_connection` against the live management endpoint; non-Gone errors caught without crashing the caller). Fixed cheap/correct findings: **P1-2** WS now tears down on logout (`auth.ts` `dbops:auth-login/logout` events → `alert-stream.ts`, with a `suspended` flag killing the post-logout reconnect spin) — previously a logged-out user rode the socket to its 2h TTL; **P1-3** drift-guard unit test pins the two `ws_notify.py` copies byte-equal; documented the **fleet-wide audience model** (consistent with the REST layer — `cognito:groups` gate writes, not cluster visibility — so the WS exposes nothing beyond the existing 45s poll; "scoped" = scoped _slice_ of this item, not per-user). Deferred (see below): **WS-ticket** (token-in-URL, well-mitigated) and broadcast efficiency.
-  - **WS-ticket** (deferred — token-in-URL hardening). The `$connect` authorizer's identity source is the Cognito access token in the query string. Mitigated today: `wss://` is TLS (query string is inside the encrypted GET — proxies see only `CONNECT host:443`), the WS stage has NO access logging, and the token is already in `localStorage`. Proper fix when needed: a JWT-authed `/api/ws-ticket` endpoint mints a 60s single-use nonce (DDB), the authorizer validates+consumes the nonce instead of the token, frontend fetches a ticket before connecting. **Trigger** (see code guards in `foundation_stack.py` + `docs/public-flip-checklist.md`): implement this BEFORE enabling WS access logging or the public flip.
-  - **Broadcast efficiency** (deferred — premature at current scale). `broadcast()` posts sequentially and `alert_evaluator` re-scans the connections table per fired rule. Only matters at hundreds of connections (current deployments are UI-driven, small). When it matters: scan connections once per evaluator run + reuse, and set an explicit short `connect_timeout`/`read_timeout` (botocore `Config`) on the management client.
-- ~~Audit log visual timeline (current is text table).~~ ✅ shipped (2026-06-17) — `audit-log-panel` is now a vertical timeline (status rail dots, cards, day separators); fixed a naive-UTC +9h skew.
-- ~~PDF / markdown runbook export for resolved incidents.~~ ✅ shipped (2026-06-17) — markdown export (pre-existing) + PDF via an isolated print window in `/runbooks`.
-- ~~Inbound webhook from Datadog / PagerDuty incidents to auto-start a chat session.~~ ✅ shipped (2026-06-17) — `POST /api/incident-webhook` (shared-secret, fail-closed) writes an `external_incident` event_log row; Events panel shows a one-click chat deep-link (deep-link inbox, no autonomous agent). Set `INCIDENT_WEBHOOK_SECRET` to enable.
-- Per-org retention policy + archival to S3 Glacier ✅ (archive bucket lifecycle: IA 30d → Glacier Instant Retrieval 90d → Deep Archive 365d, optional `ARCHIVE_RETENTION_DAYS` expiry; verified live 2026-06-16).
-- ~~CDN cache tuning for `/config.json` (currently no-store).~~ **Closed as a
-  decision, not work (2026-07-30).** `no-store` is correct here and tuning it is a
-  net loss. The file is ~300 bytes of runtime config (apiUrl, Cognito ids, runtime
-  ARN) fetched once per page load, so caching saves nothing measurable; but it is
-  what gates login, and it changes on deploy. A CloudFront invalidation does not
-  reach a BROWSER cache, so any max-age > 0 means some users get a stale apiUrl or
-  clientId for that window and see auth failures. There is prior art for exactly
-  that failure mode in this repo (a deploy that removed config.json produced 401s).
-  The HTML is `no-cache` and the hashed `/_next` tree is `immutable` — the two
-  places where caching is both safe and worth it.
-
-### Resolved 2026-07-29: the five deferred items from the schema/parameter passes
-
-All five sections that stood here were worked through and closed. Kept as a short
-record because two of them ended in a MEASUREMENT rather than a code change, and
-that is worth not re-litigating.
-
-- **Real-PG harness (2 items) — FIXED.** `test_mysql_tier_cache_sql_real_pg.py`
-  was the last copy running an unchecked `pg_ctl stop` before
-  `rmtree(ignore_errors=True)`; it now shares the verified stop-then-remove form,
-  driven against the exact masked state (a live server with postmaster.pid
-  deleted): it raised, the datadir stayed, the postmaster stayed alive. All three
-  modules now HOLD the kernel-assigned port until `pg_ctl start` instead of
-  releasing it at import time. Commit 5361350.
-- **Panel-guard JSX slicer — FIXED.** Replaced the `body.index("\n  }")` scan with
-  a brace-matching walk. With a nested block injected into the real panel, the old
-  scan captured 72 characters and lost the branch's own sentence while the new walk
-  captured 280 and kept it. Nothing failed in that state, which is why the parser
-  is now pinned by its own tests. Commit 67dff9a.
-- **`OBSERVED_SQL` scope collapse — NOT A DEFECT, and now driven.** The analysis
-  held: a schema present only under an abandoned scope keeps its own old row, reads
-  as unknown_scope, and stays named in `unconfirmed_schemas`. Applying the proposed
-  scope filter as a mutation CAUSES the defect it was meant to prevent (the schema
-  disappears from `obs["schemas"]` entirely). Two real-PostgreSQL tests now pin
-  both halves. Do not scope-filter `OBSERVED_SQL`: the scope predicate belongs to
-  the comparison path, not the observation path. Commit 5bd90d5.
-- **`modify_parameter` bound no parameter group — FIXED.** The group is now a tool
-  argument, hash-bound, and compared pre-consume, mirroring the instance tool. A
-  transient drift leaves the card usable; a card minted before the change fails
-  closed WITHOUT burning. The three sibling `_describe` helpers
-  (modify_rds_instance_class, create_rds_snapshot, reboot_rds_instance) got the
-  could-not-ask / does-not-exist split and the module logger. Commits ccb9834,
-  58b5112.
-- **Unexecutable approval cards — AUDITED and closed.** `request_approval` now
-  mirrors every write tool's pre-consume refusal that is decidable from the
-  payload, using the tool's own pure helper where one exists. The line is drawn at
-  "decidable from the payload" on purpose: refusing a card the executor would have
-  run is worse than minting one it refuses, so an omitted `billing_mode` is left
-  alone and only the capacity values actually present are range-checked. Both
-  directions are mutation-checked.
-- **Test isolation — FIXED at the choke point.** 8 modules under tests/unit/api
-  could not be collected alone (`ModuleNotFoundError: tenancy`), hiding 68 tests
-  behind full-run ordering. A conftest.py in that directory appends every `api/*`
-  dir to sys.path, so new test files get it too. Commit 98a4d08.
-
-### Resolved 2026-07-30: the last two
-
-- **`ADD PRIMARY KEY` cost class — FIXED.** It fell to the `other` fallback, which
-  reports 0 MB of extra disk for a full table rebuild. It is the one shape that is
-  ONLINE AND EXPENSIVE at once (measured: InnoDB ACCEPTS `LOCK=NONE`, so concurrent
-  DML is permitted, while the clustered index rebuild rewrites the table), and
-  neither existing class could say that: the online branch sold it as "서비스 영향
-  최소" and the rewrite branch would have claimed a write block. It now has its own
-  operation, 1.0x disk, and a recommendation that states both halves. The rebuild
-  set is one tuple shared by the disk accounting and the recommendation, because
-  they were two literals and that is how this operation ended up in neither.
-
-- **Cross-account `ManagedBy=dbops` — REPORTED, deliberately not refused.** The
-  spoke template gates 15 write actions on the tag, and the two parameter-group
-  actions authorize against the GROUP, so an untagged spoke-account group is denied
-  AFTER the approval is consumed. `mcp_servers/shared/managed_tag_preflight.py`
-  reads the group's tags with the spoke role's own rds:Describe\* +
-  rds:ListTagsForResource (no new IAM: the check only runs when the registry row
-  carries a spoke_role_arn, so the hub role never makes the call) and puts a
-  `warning` on the approval_required card.
-
-  It is a WARNING and not a pre-consume refusal, and the earlier objection recorded
-  in modify_rds_instance_params is exactly why: refusing asserts what the SPOKE
-  ROLE's policy says, and this code does not read that policy. That template is one
-  customers adapt, so an untagged group is not reliably a denial, and a refusal
-  would block parameter tuning outright for a deployment that dropped the
-  condition. Blocking a working capability is worse than the wasted approval it
-  would save. Reporting it at review time costs nothing to act on. The tag matching
-  mirrors IAM exactly (key case-insensitive, value case-SENSITIVE) so the
-  predicate's answer equals the one that decides the write.
-
-  Known limit, stated rather than papered over: it reaches the DBA only if the
-  agent relays the preview, and it is not a gate. The IAM condition remains the
-  enforcement point.
-
-  **COMPLETE 2026-07-31: all 15 tag-gated actions now warn**, across 18 call sites
-  (4 wired 2026-07-30, 14 added now). `tests/unit/mcp_servers/shared/`
-  `test_managed_tag_preflight_resolvers.py` reads the spoke template and asserts
-  every gated action is named at a preflight site, so the count cannot drift again
-  and this section can no longer be quietly wrong.
-
-  Three things in the earlier note here were WRONG, which is why the guard is a
-  test now and not a number in prose:
-
-  1. **"6 remaining" undercounted.** The template has THREE tag-gated statements,
-     not one: RDSModifyExisting (9 actions), ElastiCacheModifyExisting (3) and
-     DynamoDBModifyExisting (3). The real remainder was 11 actions over 14 sites.
-  2. **"every one of those tools ALREADY reads the target ARN" was false.**
-     `manage_maintenance` is the proof: its `describe_db_clusters` sits inside the
-     `action == "describe"` branch, which RETURNS, so the modify path never has it.
-     Same for `modify_dynamodb_ttl` (describe_time_to_live carries no ARN),
-     `enable_dynamodb_pitr`, `remove_reader_instance`, `modify_custom_endpoint`.
-     Grep shows a file contains a describe; it does not show that the describe is
-     on the same control-flow path as the preview.
-  3. **The gated RESOURCE is not always the obvious one.** `RebootCacheCluster`
-     authorizes against the individual cache cluster, NOT its replication group.
-     `DeleteDBInstance` against the instance, not the cluster. The endpoint actions
-     against the endpoint. Reading the wrong resource's tags produces a confidently
-     wrong warning, which is worse than none, since the whole value here is that
-     the report is a FACT.
-
-  Fixed by resolving the gated resource's ARN INSIDE the helper
-  (`aurora_cluster_tag_warning`, `rds_instance_tag_warning`,
-  `cluster_endpoint_tag_warning`, `elasticache_group_tag_warning`,
-  `elasticache_cache_cluster_tag_warning`, `dynamodb_table_tag_warning`), so no
-  call site depends on its own control flow and every AWS shape quirk lives in one
-  tested place. The cross-account gate runs before the describe, so a same-account
-  cluster still makes zero extra calls.
-
-  Two sites needed more than a preview edit. `set_docdb_profiler` writes TWO gated
-  resources (the cluster parameter group AND the cluster, for the profiler log
-  export) so it reports both. `enable_data_api` has no tool-side preview at all:
-  `api/approvals/handler.py` calls `rds:EnableHttpEndpoint` the moment the DBA
-  approves, so the warning goes on the `request_approval` registration, which is
-  the last point before an unrecoverable auto-execute.
-
-  Not covered, stated rather than papered over: `SnapshotCreate` carries no
-  ResourceTag condition (an `aws:ResourceTag` condition on a Create action denies
-  unconditionally, since the resource does not exist yet), so snapshot tools
-  correctly have no preflight.
-
-- **`AllowedValues` is a DECISION, not an open item.** The field is free-form
-  ("0-4294967295", "ON,OFF", enumerations with ranges mixed in) and a parser that
-  misreads it would refuse writes that are legal, which is worse than one wasted
-  approval on a value the DBA can see in the response. Recorded here so it stops
-  reading like unfinished work. Upgrade path if it ever becomes worth it: validate
-  ONLY the two unambiguous shapes (a single "lo-hi" integer range and a pure
-  comma-separated enumeration) and stay silent on everything else.
-
----
-
-## Live tool sweep 2026-08-02: what 567 real invocations found
-
-Every one of the 64 gateway tools was invoked against 9 registered clusters (one
-per engine family plus the cross-account spoke) on the DEPLOYED Lambdas.
-Approval-gated tools ran with `approved=false`, so only preview branches
-executed: no writes, no approvals consumed. Zero Lambda crashes in 567 calls.
-
-Then four analysis lenses (engine gating, false-empty success, argument/error
-quality, simulation depth) read the captured results against the source.
-
-Harness discipline worth repeating: two "universal failures" were the PROBE's
-fault, not the code's. `get_runbook` was sent an undeclared `cluster_id` and
-`search_logs` an undeclared `pattern` instead of `query`. Both tools are correct.
-A self-audit that diffed every argument sent against `tools/list` separated the
-two classes; without it they would have been filed as bugs.
-
-### FIXED in this pass
-
-- **`compare_periods` was dead for every engine family.** `ts >= :start_time` with
-  no `::timestamptz`: the Data API binds every parameter as stringValue, so
-  PostgreSQL got text and there is no `timestamptz >= text` operator (SQLState
-  42883). Its unit test asserted `execute.call_count == 2` against a MagicMock that
-  accepts any SQL, so it was green the whole time. Guarded now by a repo-wide
-  census (`tests/unit/test_sql_timestamp_casts.py`) plus an assertion on the SQL
-  the tool actually builds.
-- **One missing `.rows` unwrap broke all 9 simulation tools, in both directions.**
-  `simulation/handler.py::_resolve_family` did `isinstance(rows, list)` on a
-  QueryResult, so it always returned None. The generic `simulation` gate is
-  DEFAULT-PERMIT on None, so the six Aurora-only tools ran on every engine:
-  `estimate_upgrade_impact` told the operator a Valkey cache would be down
-  "~23분 (pg_upgrade 동안 writer 중단)", and `generate_upgrade_plan` emitted a
-  runnable `aws rds create-blue-green-deployment` for a DynamoDB table. The three
-  POSITIVE gates refuse None, so `simulate_dynamodb_capacity_cost`,
-  `simulate_elasticache_node_resize` and `simulate_rds_instance_rightsizing`
-  returned `unsupported_engine` on 9 of 9 clusters INCLUDING their own family:
-  three shipped capabilities, completely unusable.
-  `rds_rightsizing.py` had the same omission twice more, so the two bugs hid each
-  other, the gate never letting a call through to reveal the impl.
-  The engine-guard test could not catch any of it: its fixture returned a plain
-  `list`, a shape `CacheClient.execute` never produces, so it encoded the bug's
-  premise. Fixed to wrap in a real QueryResult, which makes 6 of its tests fail
-  against the old handler.
-- **`cache_client._build_query` emitted uncast time predicates**, so
-  `start_time`/`end_time` were dead on `get_top_queries`, `get_slow_queries` and
-  `get_pi_metrics`. The column name is interpolated there, which is exactly why the
-  first version of the census walked past the repo's one shared query builder. The
-  census now scans interpolated predicates too.
-- **`get_pi_metrics` had no LIMIT and no default window**, so an unbounded
-  `SELECT *` blew the Data API's 1 MB cap on precisely the three clusters that HAVE
-  Performance Insights, and looked fine on the ones that do not. That reads as "PI
-  is not enabled there", the exact opposite of the truth. Now 6h/1000 by default,
-  newest-first so a clipped read keeps the recent end, and it returns the window,
-  the limit and `truncated`.
-- **`audit_permissions` took its dialect from a DEFAULT**
-  (`engine="postgresql"`), so a real Aurora MySQL cluster got `FROM pg_roles` and
-  answered MySQL error 1146. The MySQL branch existed and was never selected. The
-  engine now comes from `cluster_meta`; an explicit `engine` overrides the DIALECT
-  only, because deriving the FAMILY from it would refuse a caller who passes
-  `engine="mysql"` for an Aurora MySQL cluster (bare "mysql" classifies as
-  rds_instance). It also told the operator to register five clusters that were
-  already registered: "no Data API ARN" was being reported as "not registered".
-  Gated on `sql_via == "data_api"` rather than the `sql` capability, since
-  rds_instance has `sql` but reaches it over direct TCP.
-- **Three missing engine gates**, each of which had been answering a question that
-  could not be asked: `modify_scaling` told a DocumentDB cluster it was "a
-  provisioned Aurora cluster" and recommended an Aurora-only tool;
-  `get_pi_metrics` returned a silent `{"data_points": [], "count": 0}` for three
-  families with no PI series at all; `review_sql` called SQL "safe to execute"
-  against DynamoDB, Valkey and DocumentDB.
-
-- **Two pricing helpers reported a guess as a measurement.** `aurora_pricing`
-  defaulted ANY unrecognised engine to "Aurora PostgreSQL", so DocumentDB was priced
-  at the Aurora rate and stamped `source=aws_price_list`; it returns None now (every
-  caller already nulls costs and sets source=fallback) and short-circuits before the
-  API call so a known non-match logs nothing. `elasticache_pricing` aliased Valkey to
-  the Redis SKU; Valkey has its own SKU and the tool now returns it exactly, verified
-  live after deploy at $0.0192/hr for cache.t4g.micro.
-
-- **`get_health_status` reported a monitoring outage as healthy AND a healthy
-  DynamoDB table as critical**, both from one hardcoded status lookup with a
-  `critical` catch-all. The vocabulary is now explicit per engine (real RDS /
-  DynamoDB TableStatus / ElastiCache words), an unrecognised word is `unknown`
-  rather than critical, and zero cluster-level samples in the 10-minute window
-  downgrades healthy to `unknown` with a reason. Only the healthy verdict is
-  withheld: a critical control-plane status stands on its own. Live after deploy:
-  DynamoDB `ACTIVE` -> healthy, zero-telemetry -> unknown, the other four families
-  unchanged.
-- **Handlers splatted the raw event into the impl**, so one misnamed argument became
-  a generic internal error naming neither the argument nor the fix.
-  `shared/tool_args.py` now returns `invalid_arguments` with the unknown keys AND the
-  accepted ones, validated against the declared schema UNION the impl signature so a
-  `**kwargs` catch-all cannot hide an out-of-schema key. That mattered immediately:
-  `simulate_elasticache_node_resize` called with `node_type` (the real parameter is
-  `new_node_type`) had been swallowing the key and answering "no cost change" for a
-  resize it never simulated. The check also found the same mistake twice in this
-  repo own test suite.
-- **ElastiCache node pricing was picking an Extended Support SURCHARGE as the node
-  price.** Recorded first as "multiple SKUs, ambiguous ordering". It is not
-  ambiguity: for cache.t4g.micro / Redis / ap-northeast-2, `APN2-NodeUsage:` is
-  $0.024 (the node) while `ExtendedSupportYr1_Yr2` is $0.019 and
-  `ExtendedSupportYr3` is $0.038, both add-ons for running past end of standard
-  support. Now selects the SKU with no ExtendedSupport segment; only-surcharge
-  reports a miss rather than a surcharge. This also retires the earlier "Valkey is
-  correct now" claim as luck: Valkey has one SKU only because it is new enough to
-  have none of these yet.
-
-### RECORDED, not yet fixed
-
-Ordered by operator impact. Each was confirmed against source, not just observed.
-
-- **`upgrade_plan` should refuse non-relational engines itself.** The handler gate
-  now closes this, but the plan builder is a pure string template driven by
-  is_major/is_postgres and trusts that it was only reached for Aurora. Defence in
-  depth for a tool that emits runnable CLI.
-- **`get_performance_summary` returns a 4-key KPI shell for every engine**, all
-  null on 6 of 9 clusters, and `slow_count: 0` even where `get_slow_queries`
-  returns rows. Needs per-KPI provenance rather than bare nulls.
-- **`simulate_parameter_change`'s static fallback is engine-blind**: it reported
-  `known: true` and "즉시 적용 가능" for the PostgreSQL `work_mem` on MySQL, SQL
-  Server, DynamoDB and Valkey. Mostly masked now by the gate, but PARAMETER_INFO
-  entries should carry the engines they apply to.
-- **`create_docdb_index` reports `unsupported_engine` on DocumentDB** when the real
-  problem is an unset `mongo_write_secret_arn`. A config gap wearing the status
-  code that means "this engine cannot do this".
-- **`query_activity_audit` catches `Exception` on its PostgreSQL half but only
-  `ClientError` on its DynamoDB half**, so one bad approvals item kills the whole
-  compliance answer instead of degrading to a partial one.
-- **The MCP layer never reads the registry's `is_demo` flag**, so the synthetic
-  sample row produces "verify the cluster id" and "register this cluster" messages
-  for nine tools. The flag exists; only the frontend consumes it.
-- **`get_recent_events` reports `count: 0` without naming its 24h window**, so the
-  agent renders "no recent events" for a cluster whose last anomaly was 26 hours
-  ago. One line: echo `hours` (and `event_type` when filtered).
-- **`simulate_ddl_impact` hardcodes a mid-tier Serverless-v2 throughput multiplier**
-  instead of reading the cluster's ACU range, overstating throughput on small
-  clusters. The sibling scaling tool already resolves live ACU.
-
-### Investigated and NOT defects, recorded so they are not re-filed
-
-Adversarial verification refuted six candidates from this sweep. Five share one
-cause worth stating on its own: **the `_resolve_family` bug generated a cloud of
-apparent secondary defects, and once the gate works those code paths are
-unreachable for the families that produced the evidence.** Re-measured after
-deploy: `estimate_upgrade_impact`, `generate_upgrade_plan`, `simulate_ddl_impact`
-and `check_upgrade_compatibility` all return `unsupported_engine` for
-rds_instance/documentdb/dynamodb/elasticache now.
-
-- `estimate_upgrade_impact`'s unlabelled `storage_gb: 50.0` fallback, its
-  pg_upgrade wording on MySQL/SQL Server/DocumentDB, and its always-0 reader count
-  for rds_instance: all five probe records came from families the tool refuses.
-  `CAPABILITIES.simulation` is True only for relational, and on relational the
-  fallback never fired.
-- `simulate_ddl_impact` giving SQL Server PostgreSQL rewrite advice: SQL Server is
-  not admitted to the tool at all, so `unsupported_engine` is the correct answer and
-  a three-way dialect dispatch would be building for a surface that is gated off.
-- `check_upgrade_compatibility`'s bare `is_compatible: false`: 3 of the 5 cited
-  records were artifacts of the gate bug. The one genuinely opaque case is
-  `sample-cluster`, the synthetic demo row.
-- `get_remediation_history`'s bare `{"actions": [], "recent": []}`: that is an
-  ASSERTED contract, not an oversight. `tests/unit/mcp_servers/incident/`
-  `test_remediation_history.py:43` checks it by exact equality, so the proposed
-  extra keys would fail it. The emptiness is also causally explained: the
-  outcome_evaluator opens cases only from findings/anomaly rows, and the same
-  probe shows those clusters have neither. The identical SQL returns 6 action
-  classes for `dbops-demo-mysql`.
-- `get_maintenance_findings` not distinguishing "checks ran, all clean" from "never
-  collected": `cluster_health_findings` writes one row per finding and nothing on a
-  clean cycle, so there is no heartbeat and the two states are not separable in the
-  data as it is modelled today. Separating them means changing the producer, not
-  the reader.
-
-The lesson is the reusable part: after fixing a gate, RE-DERIVE the downstream
-findings instead of working the list. Most of that list was the gate.
-
-### Confirmed CORRECT, stated so it is not re-litigated
-
-- 208 of 212 `unsupported_engine` responses were right, and operations plus
-  performance gating was exactly on spec.
-- **Zero** exception text, ARNs, tracebacks or driver class names in any of the 567
-  response bodies. The no-`str(e)` rule holds across five engine families and a
-  cross-account spoke.
-- No stale price table anywhere: all four pricing modules query the live Price List
-  API and soft-fail rather than fabricate.
-- The MySQL 5.7/8.0/8.4 major ladder is correct; arithmetic version distance is
-  properly avoided.
-- Most empty results in the probe are properly self-describing. The bucket-3 cases
-  above are the exceptions, which is why each fix is two or three keys rather than
-  new machinery.
+**Status: empty. No open items.**
+
+Every P1-P4 item and every defect from the 2026-08-02 live tool sweep (567 real
+invocations across all five engine families) is shipped, deployed and verified.
+The full record lives in git history; this file was cleared on 2026-08-03 rather
+than deleted because shipped code, tests and CI comments point at it by name and
+those pointers must keep resolving to something true.
+
+## Decisions that are NOT open items
+
+Recorded here so they stop reading like unfinished work, and because the code
+comments below cite this file.
+
+### cdk-nag suppressions (`cdk/app.py`)
+
+`cdk-nag` (AwsSolutions ruleset) runs in the `cdk-synth` CI job behind
+`CDK_NAG=1` and the synth exit code is the gate, so a new unsuppressed finding
+cannot merge. Stack-level suppressions cover choices that are deliberate for a
+single-tenant, self-hosted DBA tool; the specific findings (S3 SSL, DDB PITR,
+Cognito MFA, RDS, CloudFront, APIG, VPC flow logs, Secrets rotation) are triaged
+individually, each as a fix or a per-resource suppression carrying its reason.
+Every suppression is an argument made in public. Cognito MFA is the one open
+product decision, deliberately out of scope: it is a policy call for whoever
+deploys this, not a code gap.
+
+WS access logging stays disabled because the `$connect` authorizer reads the
+Cognito access token from the query string, so access logs would record it in
+plaintext. The WS-ticket pattern (single-use ticket in the URL instead of the
+token, enforced by an `ALL_OLD` + empty-old-image Deny) shipped 2026-07-30, so
+this is now a mitigation that holds rather than a conditional one.
+
+### ElastiCache Redis multi-SKU price ambiguity (unfixed, bounded)
+
+`elasticache_pricing.py` selects the Price List SKU with no `ExtendedSupport`
+usagetype segment, because AWS returns several SKUs per node type that are
+different CHARGES, not competing prices: `APN2-NodeUsage:` is the node
+($0.024 for cache.t4g.micro) while `ExtendedSupportYr1_Yr2` ($0.019) and `Yr3`
+are EOL surcharges. Picking by API ordering mixed them. Valkey has exactly one
+SKU today only because it is new enough to carry no surcharges. Where every SKU
+for a node type is a surcharge the lookup reports a MISS rather than a
+surcharge, and soft-fails to `None` so a region with no matching SKU degrades to
+the existing fallback instead of to a wrong number.
+
+Residual: for a genuine Redis cluster whose region has several non-surcharge
+node SKUs, the selection is still first-match. Bounded and reported, not silent.
+
+### `ADD PRIMARY KEY` is not an index build (`ddl_estimator.py`)
+
+`_INDEX_BUILD_RX` deliberately excludes `ADD PRIMARY KEY`: it rebuilds the table
+rather than adding a secondary index, so it belongs to the rewrite cost class
+(`_REBUILD_OPERATIONS`), which holds a second copy of the table until commit.
+Putting it in both lists is how it previously ended up in neither.
+
+### `ManagedBy=dbops` tag preflight is a WARNING, not a gate (complete)
+
+The spoke template gates 15 write actions on `aws:ResourceTag/ManagedBy=dbops`,
+and an untagged spoke-account resource is denied AFTER the approval is consumed.
+`shared/managed_tag_preflight.py` reads the gated resource's own tags and puts a
+`warning` on the `approval_required` card. All 15 actions are wired, across 18
+call sites; `tests/unit/mcp_servers/shared/test_managed_tag_preflight_resolvers.py`
+reads the spoke template and asserts every gated action is named at a preflight
+site, so the coverage count cannot drift into prose again.
+
+It stays a warning rather than a pre-consume refusal: refusing would assert what
+the SPOKE role's policy says, and this code does not read that policy. Customers
+adapt that template, so an untagged resource is not reliably a denial, and a
+refusal would block parameter tuning outright for a deployment that dropped the
+condition. The IAM condition remains the enforcement point.
+
+`SnapshotCreate` correctly has no preflight: an `aws:ResourceTag` condition on a
+Create action denies unconditionally, since the resource does not exist yet.
+
+### `AllowedValues` is not parsed
+
+The RDS field is free-form ("0-4294967295", "ON,OFF", enumerations with ranges
+mixed in) and a parser that misread it would refuse writes that are legal, which
+is worse than one wasted approval on a value the DBA can see in the response.
+Upgrade path if it ever becomes worth it: validate ONLY the two unambiguous
+shapes (a single `lo-hi` integer range and a pure comma-separated enumeration)
+and stay silent on everything else.
+
+### `schema_snapshots` is PostgreSQL-only by decision
+
+Not a gap. On MySQL `information_schema` is privilege-filtered, so a REVOKE is
+byte-identical to a DROP in every diff bucket. All five readers report
+`unsupported_engine` rather than an empty success. Contract:
+`shared/schema_diff_util.py`. Do not reconnect a MySQL read without a scope key
+that provably moves when visibility moves.
+
+### Broadcast efficiency (premature at current scale)
+
+`broadcast()` posts sequentially and `alert_evaluator` re-scans the connections
+table per fired rule. This only matters at hundreds of concurrent connections;
+current deployments are UI-driven and small. When it matters: scan connections
+once per evaluator run and reuse, and set explicit short `connect_timeout` /
+`read_timeout` on the management client.

@@ -8,7 +8,7 @@ import boto3
 from mcp_servers.shared import mssql_direct, mysql_direct
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
-from mcp_servers.shared.cluster_targets import client_for_cluster
+from mcp_servers.shared.cluster_targets import DEMO_CLUSTER_NOTE, client_for_cluster
 from mcp_servers.shared.engine_family import CAPABILITIES
 from mcp_servers.shared.engine_family import engine_family as _engine_family
 
@@ -450,9 +450,27 @@ def execute_sql_impl(
         target_db = cluster.get("db_name") or os.environ.get("TARGET_DB_NAME", "")
 
         if not target_arn or not target_secret:
+            # THREE distinct conditions used to share one message. "not found in
+            # registry, register it via /clusters first" was returned for a row that
+            # IS in the registry (measured 2026-08-02 on the built-in sample row),
+            # which sends the operator to re-do the one thing already done.
+            if not cluster:
+                reason = (
+                    f"cluster_id={cluster_id!r} not found in registry — "
+                    "register it via /clusters first"
+                )
+            elif cluster.get("is_demo"):
+                reason = DEMO_CLUSTER_NOTE
+            else:
+                reason = (
+                    f"cluster_id={cluster_id!r}는 레지스트리에 등록되어 있지만 SQL 접속 "
+                    "정보(cluster_arn / secret_arn)가 비어 있습니다. /clusters에서 이 "
+                    "클러스터의 접속 정보를 채우세요 (등록 자체는 되어 있습니다)."
+                )
             return {
                 "status": "no_target",
-                "reason": f"cluster_id={cluster_id!r} not found in registry — register it via /clusters first",
+                "reason": reason,
+                "registered": bool(cluster),
                 "registry_table": _CLUSTERS_TABLE_NAME,
             }
 

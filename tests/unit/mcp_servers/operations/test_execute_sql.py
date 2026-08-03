@@ -968,3 +968,50 @@ def test_aurora_data_api_approved_write_consumes_before_execute(
     assert result["rows_affected"] == 5
     mock_verify.assert_called_once()
     rds.execute_statement.assert_called_once()
+
+
+# ===== no_target must not tell a registered cluster to register itself =====
+
+_NO_ENV_TARGET = {"TARGET_CLUSTER_ARN": "", "TARGET_SECRET_ARN": "", "TARGET_DB_NAME": ""}
+
+
+@patch.dict("os.environ", _NO_ENV_TARGET)
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+def test_no_target_on_the_demo_row_does_not_say_register_it(mock_boto3, mock_lookup):
+    """The built-in sample row is registered on purpose and has no live DB.
+
+    It was answered with "not found in registry — register it via /clusters first",
+    so a first-run user re-seeds the sample and gets the same message again.
+    """
+    mock_lookup.return_value = {"engine": "aurora-postgresql", "is_demo": True}
+    result = execute_sql_impl(MagicMock(), cluster_id="sample-cluster", sql="SELECT 1")
+    assert result["status"] == "no_target"
+    assert result["registered"] is True
+    assert "not found in registry" not in result["reason"]
+    assert "데모" in result["reason"]
+
+
+@patch.dict("os.environ", _NO_ENV_TARGET)
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+def test_no_target_on_a_registered_row_missing_arns_says_so(mock_boto3, mock_lookup):
+    """Registered but no cluster_arn/secret_arn is a CONFIG gap, not a missing row."""
+    mock_lookup.return_value = {"engine": "aurora-postgresql"}
+    result = execute_sql_impl(MagicMock(), cluster_id="half-registered", sql="SELECT 1")
+    assert result["status"] == "no_target"
+    assert result["registered"] is True
+    assert "not found in registry" not in result["reason"]
+    assert "cluster_arn" in result["reason"]
+
+
+@patch.dict("os.environ", _NO_ENV_TARGET)
+@patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
+@patch("mcp_servers.operations.tools.execute_sql.boto3")
+def test_no_target_on_a_genuinely_absent_row_still_says_register_it(mock_boto3, mock_lookup):
+    """Negative control: the original message is still correct for an absent row."""
+    mock_lookup.return_value = {}
+    result = execute_sql_impl(MagicMock(), cluster_id="never-registered", sql="SELECT 1")
+    assert result["status"] == "no_target"
+    assert result["registered"] is False
+    assert "not found in registry" in result["reason"]

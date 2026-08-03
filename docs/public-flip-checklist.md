@@ -168,6 +168,10 @@ in-repo SHA citations across 21 tracked files would silently rot (10 in
 `.gitleaksignore`, whose fingerprints are `commit:path:rule:line`-scoped and would
 be voided outright).
 
+Counted before `BACKLOG.md` was cleared to a closed-out record on 2026-08-03,
+which removed its 10 citations. That lowers the count to 17 across 20 files; it
+does not change the conclusion, and `.gitleaksignore` alone still voids.
+
 ### What was scrubbed from the working tree
 
 | Identifier                                      | Where                              | Action                                   |

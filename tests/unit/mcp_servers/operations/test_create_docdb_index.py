@@ -96,17 +96,29 @@ def _args(**over):
     return base
 
 
-# ===== no write secret → unsupported_engine no-op =====
+# ===== no write secret → write_not_configured no-op =====
 
 
-def test_no_write_secret_unsupported_no_op():
+def test_no_write_secret_is_a_config_gap_not_an_unsupported_engine():
+    """The status must not be `unsupported_engine`.
+
+    That code means "this engine family cannot do this", and a DocumentDB cluster
+    reading it concludes DocumentDB index creation is unavailable. It is a
+    per-cluster CONFIGURATION gap: mongo_write_secret_arn is unset. Measured
+    2026-08-02 on the real docdb cluster, where the tool reported unsupported_engine
+    on the one family it exists for.
+    """
     factory = MagicMock(side_effect=AssertionError("must not connect"))
     with patch.object(mod, "lookup_cluster", lambda cid: {}), patch.object(
         mod, "_CLIENT_FACTORY", factory
     ):
         result = create_docdb_index_impl(MagicMock(), **_args())
-    assert result["status"] == "unsupported_engine"
-    assert result["reason"] == "no write credentials configured"
+    assert result["status"] == "write_not_configured"
+    assert result["status"] != "unsupported_engine"
+    # The reason has to name the field and where to set it; "no write credentials
+    # configured" said neither.
+    assert "mongo_write_secret_arn" in result["reason"]
+    assert "/clusters" in result["reason"]
     factory.assert_not_called()
 
 

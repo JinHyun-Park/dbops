@@ -21,7 +21,7 @@ import re
 
 from mcp_servers.shared.approval_guard import verify_approval
 from mcp_servers.shared.cache_client import CacheClient
-from mcp_servers.shared.cluster_targets import rds_client_for_cluster
+from mcp_servers.shared.cluster_targets import demo_cluster_note, rds_client_for_cluster
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +81,13 @@ def create_custom_endpoint_impl(
         cl = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)["DBClusters"][0]
     except Exception:
         logger.warning("describe_db_clusters failed for %s", cluster_id, exc_info=True)
+        # "cluster_id를 확인하세요" is wrong for the built-in sample row: the id is
+        # correct and the row is registered, it simply has no live AWS cluster to
+        # describe. Only looked up on this failure path, so the happy path is unchanged.
+        demo = demo_cluster_note(cluster_id)
         return {"status": "error", "cluster_id": cluster_id,
-                "reason": "클러스터 조회에 실패해 멤버를 확인할 수 없어 중단했습니다. "
-                          "cluster_id를 확인하세요 (자세한 원인은 서버 로그를 확인하세요).",
+                "reason": demo or ("클러스터 조회에 실패해 멤버를 확인할 수 없어 중단했습니다. "
+                                   "cluster_id를 확인하세요 (자세한 원인은 서버 로그를 확인하세요)."),
                 "cli_preview": cli}
     members = {m.get("DBInstanceIdentifier") for m in cl.get("DBClusterMembers", [])}
     bad = [m for m in (static_members + excluded_members) if m not in members]

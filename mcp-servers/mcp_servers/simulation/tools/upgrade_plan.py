@@ -2,6 +2,7 @@ import logging
 
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.cluster_targets import rds_client_for_cluster
+from mcp_servers.shared.engine_family import CAPABILITIES, engine_family
 from mcp_servers.shared.upgrade_estimator import classify_upgrade, estimate_upgrade
 from mcp_servers.simulation.tools.upgrade_impact import _resolve_table_count
 
@@ -47,6 +48,30 @@ def generate_upgrade_plan_impl(cache: CacheClient, cluster_id: str, target_versi
     current_version = cluster.get("engine_version", "unknown")
     storage_gb = float(cluster.get("storage_size_gb") or 50)
     engine = cluster.get("engine") or "aurora-postgresql"
+
+    # DEFENCE IN DEPTH, deliberately duplicating the handler gate. The steps below
+    # are a pure string template driven by is_major/is_postgres, so it trusts that
+    # it was only ever reached for Aurora. When the handler's family resolver was
+    # silently returning None (fixed 2026-08-02), that trust produced a runnable
+    # `aws rds create-blue-green-deployment` command for a DynamoDB TABLE.
+    #
+    # A tool that emits copy-pasteable infrastructure commands should not depend on
+    # a caller one layer up getting the gate right, so it refuses on its own too.
+    # Note the fallback above defaults an unreadable engine to aurora-postgresql,
+    # which is exactly the kind of default that made this reachable.
+    if not CAPABILITIES.get(engine_family(engine), {}).get("simulation", False):
+        return {
+            "status": "unsupported_engine",
+            "cluster_id": cluster_id,
+            "engine": engine,
+            "engine_family": engine_family(engine),
+            "reason": (
+                "업그레이드 계획은 Aurora(PostgreSQL/MySQL) 전용입니다. 이 툴은 실행 "
+                "가능한 aws rds 명령을 생성하므로, 적용되지 않는 엔진에 대해서는 "
+                "계획을 만들지 않습니다."
+            ),
+            "steps": [],
+        }
 
     # engine is read above and passed in: on standalone RDS MySQL the major
     # boundary is the second component (8.0 -> 8.4 is a major per AWS), so

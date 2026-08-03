@@ -16,6 +16,8 @@ from mcp_servers.operations.tools.delete_custom_endpoint import delete_custom_en
 from mcp_servers.operations.tools.modify_custom_endpoint import modify_custom_endpoint_impl
 from mcp_servers.shared.approval_guard import canonical_action_hash
 
+MODULE = "mcp_servers.operations.tools.create_custom_endpoint"
+
 _CE = "mcp_servers.operations.tools.create_custom_endpoint"
 _DE = "mcp_servers.operations.tools.delete_custom_endpoint"
 _ME = "mcp_servers.operations.tools.modify_custom_endpoint"
@@ -353,3 +355,37 @@ def test_lookup_notfound_classification_survives(mock_rds_for):
     assert out["status"] == "not_found"
     _assert_no_leak(out)
     assert "ghost" in out["reason"]  # caller-supplied identifier, safe to echo
+
+
+def test_describe_failure_on_the_demo_row_does_not_blame_the_cluster_id():
+    """"cluster_id를 확인하세요" is wrong for the sample row: the id is correct.
+
+    The row is registered and deliberately has no live AWS cluster, so the describe
+    always fails and the operator was told to check an id that is right.
+    """
+    with patch(f"{MODULE}.rds_client_for_cluster") as mock_client, \
+         patch(f"{MODULE}.demo_cluster_note", return_value="이 클러스터는 데모 행입니다."):
+        mock_client.return_value.describe_db_clusters.side_effect = Exception("not found")
+        result = create_custom_endpoint_impl(
+            MagicMock(), cluster_id="sample-cluster", endpoint_identifier="analytics",
+            static_members=["i-1"],
+        )
+
+    assert result["status"] == "error"
+    assert "cluster_id를 확인하세요" not in result["reason"]
+    assert "데모" in result["reason"]
+
+
+def test_describe_failure_on_a_real_cluster_keeps_the_original_reason():
+    """Negative control: a real cluster whose describe fails still gets the
+    check-the-id advice, which is the right advice there."""
+    with patch(f"{MODULE}.rds_client_for_cluster") as mock_client, \
+         patch(f"{MODULE}.demo_cluster_note", return_value=""):
+        mock_client.return_value.describe_db_clusters.side_effect = Exception("boom")
+        result = create_custom_endpoint_impl(
+            MagicMock(), cluster_id="prod-pg-1", endpoint_identifier="analytics",
+            static_members=["i-1"],
+        )
+
+    assert result["status"] == "error"
+    assert "cluster_id를 확인하세요" in result["reason"]

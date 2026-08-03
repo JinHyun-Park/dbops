@@ -81,3 +81,30 @@ def rds_client_for_cluster(cluster_id: str):
     cluster isn't registered (or the table is unset), falls back to a local
     client so legacy single-account deploys keep working."""
     return client_for_cluster(cluster_id, "rds")
+
+
+# The note appended when a control-plane call fails against the built-in demo row.
+# Kept here rather than duplicated per tool so the wording stays consistent.
+DEMO_CLUSTER_NOTE = (
+    "이 클러스터는 DBOps 내장 샘플(데모) 행입니다. 캐시에 미리 채워진 데이터로 "
+    "대시보드와 분석 기능을 체험하기 위한 것이며, 실제 AWS 리소스가 없습니다. "
+    "따라서 실 리소스를 조회·변경하는 작업은 이 클러스터에서 동작하지 않습니다. "
+    "등록이 잘못된 것이 아니므로 다시 등록할 필요는 없습니다. 실제 동작을 보려면 "
+    "/clusters에서 운영 클러스터를 등록하세요."
+)
+
+
+def demo_cluster_note(cluster_id: str) -> str:
+    """``DEMO_CLUSTER_NOTE`` when `cluster_id` is the built-in sample row, else "".
+
+    The registry has carried `is_demo` since the sample-seeding path was added, but
+    only the frontend read it. Control-plane failures against the demo row therefore
+    surfaced as "cluster_id를 확인하세요" and "register it via /clusters first"
+    (measured 2026-08-02), which is the opposite of the truth: the row IS registered,
+    and it deliberately has no live AWS resources. A first-run user following that
+    advice re-seeds the sample and gets the same message again.
+    """
+    try:
+        return DEMO_CLUSTER_NOTE if lookup_cluster(cluster_id).get("is_demo") else ""
+    except Exception:  # pragma: no cover - lookup_cluster already swallows its own
+        return ""

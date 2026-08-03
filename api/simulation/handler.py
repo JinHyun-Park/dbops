@@ -407,29 +407,44 @@ def _simulate_parameter_change(
     The fallback `reason` becomes the response's ``data_source`` label, so it
     stays a STATIC string: an RDS describe error carries the hub account id, the
     platform role name and the parameter-group ARN, and goes to CloudWatch only."""
+    # The engine decides whether a fallback catalog entry applies at all: the catalog
+    # holds both PG and MySQL parameters, and `work_mem` on an Aurora MySQL cluster
+    # was being reported as known and safe to apply immediately. Read from the CACHE,
+    # not from the describe below, because the fallback is reached exactly when that
+    # describe failed. Mirrors the MCP tool.
+    engine = ""
+    try:
+        _rows = _cache_query(
+            "SELECT engine FROM cluster_meta WHERE cluster_id = :cid",
+            {"cid": cluster_id})
+        if _rows:
+            engine = str(_rows[0].get("engine") or "")
+    except Exception as e:
+        print(f"[simulation] engine lookup failed for {cluster_id}: {e}")
+
     try:
         rds = boto3.client("rds")
         resp = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
         cluster = (resp.get("DBClusters") or [{}])[0]
     except Exception as e:
         print(f"[simulation] describe_db_clusters failed for {cluster_id}: {e}")
-        return static_fallback(cluster_id, parameter_name, new_value, "live describe unavailable")
+        return static_fallback(cluster_id, parameter_name, new_value, "live describe unavailable", engine)
 
     pg_name = cluster.get("DBClusterParameterGroup") or ""
     if not pg_name:
-        return static_fallback(cluster_id, parameter_name, new_value, "no parameter group on cluster")
+        return static_fallback(cluster_id, parameter_name, new_value, "no parameter group on cluster", engine)
     if pg_name.startswith("default."):
-        return static_fallback(cluster_id, parameter_name, new_value, "AWS-default parameter group")
+        return static_fallback(cluster_id, parameter_name, new_value, "AWS-default parameter group", engine)
 
     try:
         params = describe_all_parameters(rds, pg_name)
     except Exception as e:
         print(f"[simulation] describe_all_parameters failed for {cluster_id} (group={pg_name}): {e}")
-        return static_fallback(cluster_id, parameter_name, new_value, "live describe unavailable")
+        return static_fallback(cluster_id, parameter_name, new_value, "live describe unavailable", engine)
 
     row = next((p for p in params if p.get("ParameterName") == parameter_name), None)
     if row is None:
-        return static_fallback(cluster_id, parameter_name, new_value, "parameter not found in group")
+        return static_fallback(cluster_id, parameter_name, new_value, "parameter not found in group", engine)
 
     return build_live_result(cluster_id, parameter_name, new_value, row, pg_name)
 
@@ -801,8 +816,11 @@ def _simulate_ddl_impact(cluster_id: str, ddl_sql: str) -> dict:
     # `engine` decides the online-DDL semantics and which rewrite tooling the
     # recommendation may name; the MCP tool reads the same two columns, so the
     # dashboard and the agent cannot disagree about the same statement.
+    # serverlessv2_max_acu rides along: on Serverless v2 there is no instance class
+    # to derive throughput from, and the estimator was assuming a mid tier.
     meta = _cache_query(
-        "SELECT instance_class, engine FROM cluster_meta WHERE cluster_id = :cluster_id",
+        "SELECT instance_class, engine, serverlessv2_max_acu "
+        "FROM cluster_meta WHERE cluster_id = :cluster_id",
         {"cluster_id": cluster_id},
     )
     row = meta[0] if meta else {}
@@ -816,6 +834,7 @@ def _simulate_ddl_impact(cluster_id: str, ddl_sql: str) -> dict:
         instance_class=instance_class,
         io_optimized=False,
         engine=row.get("engine"),
+        serverless_max_acu=row.get("serverlessv2_max_acu"),
     )
     return {"cluster_id": cluster_id, **est}
 

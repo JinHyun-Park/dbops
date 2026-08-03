@@ -16,22 +16,40 @@ cross-account denied, parameter absent) and as the autocomplete catalog source.
 # Coarse static fallback / autocomplete catalog. NOT the source of truth for a
 # real simulation — the same parameter can be static on one engine version and
 # dynamic on another, which is exactly why the live describe path is preferred.
+# Every entry declares the ENGINES it applies to. Without that, the fallback said
+# `known: true` and "즉시 적용 가능" for the PostgreSQL `work_mem` on an Aurora MySQL
+# cluster (measured 2026-08-02), i.e. it answered a question about a parameter that
+# does not exist on that engine. `known` has to mean "attested for THIS engine", not
+# "present in the table".
+#
+# `max_connections` is the one entry that is genuinely both, so the field is a set
+# rather than a single value.
 PARAMETER_INFO = {
-    "shared_buffers": {"type": "static", "impact": "memory", "restart": True},
-    "work_mem": {"type": "dynamic", "impact": "memory", "restart": False},
-    "maintenance_work_mem": {"type": "dynamic", "impact": "memory", "restart": False},
-    "max_connections": {"type": "static", "impact": "connections", "restart": True},
-    "effective_cache_size": {"type": "dynamic", "impact": "planner", "restart": False},
-    "random_page_cost": {"type": "dynamic", "impact": "planner", "restart": False},
-    "checkpoint_timeout": {"type": "dynamic", "impact": "wal", "restart": False},
-    "max_wal_size": {"type": "dynamic", "impact": "wal", "restart": False},
-    "autovacuum_vacuum_scale_factor": {"type": "dynamic", "impact": "autovacuum", "restart": False},
-    "innodb_buffer_pool_size": {"type": "static", "impact": "memory", "restart": True},
-    "innodb_lock_wait_timeout": {"type": "dynamic", "impact": "locking", "restart": False},
-    "long_query_time": {"type": "dynamic", "impact": "logging", "restart": False},
-    "max_user_connections": {"type": "dynamic", "impact": "connections", "restart": False},
-    "tmp_table_size": {"type": "dynamic", "impact": "memory", "restart": False},
+    "shared_buffers": {"type": "static", "impact": "memory", "restart": True, "engines": {"postgres"}},
+    "work_mem": {"type": "dynamic", "impact": "memory", "restart": False, "engines": {"postgres"}},
+    "maintenance_work_mem": {"type": "dynamic", "impact": "memory", "restart": False, "engines": {"postgres"}},
+    "max_connections": {"type": "static", "impact": "connections", "restart": True, "engines": {"postgres", "mysql"}},
+    "effective_cache_size": {"type": "dynamic", "impact": "planner", "restart": False, "engines": {"postgres"}},
+    "random_page_cost": {"type": "dynamic", "impact": "planner", "restart": False, "engines": {"postgres"}},
+    "checkpoint_timeout": {"type": "dynamic", "impact": "wal", "restart": False, "engines": {"postgres"}},
+    "max_wal_size": {"type": "dynamic", "impact": "wal", "restart": False, "engines": {"postgres"}},
+    "autovacuum_vacuum_scale_factor": {"type": "dynamic", "impact": "autovacuum", "restart": False, "engines": {"postgres"}},
+    "innodb_buffer_pool_size": {"type": "static", "impact": "memory", "restart": True, "engines": {"mysql"}},
+    "innodb_lock_wait_timeout": {"type": "dynamic", "impact": "locking", "restart": False, "engines": {"mysql"}},
+    "long_query_time": {"type": "dynamic", "impact": "logging", "restart": False, "engines": {"mysql"}},
+    "max_user_connections": {"type": "dynamic", "impact": "connections", "restart": False, "engines": {"mysql"}},
+    "tmp_table_size": {"type": "dynamic", "impact": "memory", "restart": False, "engines": {"mysql"}},
 }
+
+
+def _dialect(engine: str) -> str:
+    """"postgres" / "mysql" / "" from a cluster_meta engine string."""
+    e = (engine or "").lower()
+    if "postgres" in e:
+        return "postgres"
+    if "mysql" in e:
+        return "mysql"
+    return ""
 
 
 def _impact_area(parameter_name: str) -> str:
@@ -98,17 +116,39 @@ def describe_all_parameters(rds, pg_name: str) -> list:
     return params
 
 
-def static_fallback(cluster_id: str, parameter_name: str, new_value: str, reason: str) -> dict:
+def static_fallback(cluster_id: str, parameter_name: str, new_value: str, reason: str,
+                    engine: str = "") -> dict:
     """Coarse heuristic result when the live parameter group can't be read.
 
     ``data_source`` is surfaced so the DBA knows this is a best-guess, not the
-    cluster's actual metadata. ``known`` reflects whether the parameter is in the
-    fallback catalog at all (drives the UI's "catalog 미등록" warning).
+    cluster's actual metadata. ``known`` means "attested for THIS cluster's engine",
+    which is stricter than "present in the catalog": the table holds both PostgreSQL
+    and MySQL parameters, and answering about a PG parameter on a MySQL cluster is a
+    confident answer to an impossible question.
+
+    `engine` is optional so an unresolvable engine degrades to the old
+    catalog-membership behaviour rather than refusing everything. When it IS known
+    and the parameter is not attested for it, `known` is False and the
+    recommendation says why instead of asserting the change is safe.
     """
     info = PARAMETER_INFO.get(parameter_name)
-    known = info is not None
+    dialect = _dialect(engine)
+    wrong_engine = bool(info and dialect and dialect not in info.get("engines", set()))
+    known = info is not None and not wrong_engine
     info = info or {"type": "unknown", "impact": "unknown", "restart": False}
-    return {
+
+    if wrong_engine:
+        recommendation = (
+            f"이 파라미터는 카탈로그상 {'/'.join(sorted(PARAMETER_INFO[parameter_name]['engines']))} "
+            f"전용인데 이 클러스터 엔진은 {dialect}입니다. 적용 가능성을 단정할 수 없으므로 "
+            "실제 파라미터 그룹을 조회해 확인하세요."
+        )
+    elif info["restart"]:
+        recommendation = "재시작 필요 — 점검 윈도우에서 수행 권장"
+    else:
+        recommendation = "즉시 적용 가능"
+
+    out = {
         "cluster_id": cluster_id,
         "parameter": parameter_name,
         "new_value": new_value,
@@ -116,9 +156,16 @@ def static_fallback(cluster_id: str, parameter_name: str, new_value: str, reason
         "is_dynamic": info["type"] == "dynamic",
         "requires_restart": bool(info["restart"]),
         "impact_area": info["impact"],
-        "recommendation": "즉시 적용 가능" if not info["restart"] else "재시작 필요 — 점검 윈도우에서 수행 권장",
+        "recommendation": recommendation,
         "data_source": f"static fallback ({reason})",
+        "engine": engine or None,
     }
+    if wrong_engine:
+        # The type/restart/impact values below belong to the OTHER engine's
+        # parameter, so say so rather than let them be read as this cluster's.
+        out["catalog_engines"] = sorted(PARAMETER_INFO[parameter_name]["engines"])
+        out["engine_mismatch"] = True
+    return out
 
 
 def build_live_result(cluster_id: str, parameter_name: str, new_value: str, row: dict, pg_name: str) -> dict:
