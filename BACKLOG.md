@@ -599,6 +599,34 @@ two classes; without it they would have been filed as bugs.
   the Redis SKU; Valkey has its own SKU and the tool now returns it exactly, verified
   live after deploy at $0.0192/hr for cache.t4g.micro.
 
+- **`get_health_status` reported a monitoring outage as healthy AND a healthy
+  DynamoDB table as critical**, both from one hardcoded status lookup with a
+  `critical` catch-all. The vocabulary is now explicit per engine (real RDS /
+  DynamoDB TableStatus / ElastiCache words), an unrecognised word is `unknown`
+  rather than critical, and zero cluster-level samples in the 10-minute window
+  downgrades healthy to `unknown` with a reason. Only the healthy verdict is
+  withheld: a critical control-plane status stands on its own. Live after deploy:
+  DynamoDB `ACTIVE` -> healthy, zero-telemetry -> unknown, the other four families
+  unchanged.
+- **Handlers splatted the raw event into the impl**, so one misnamed argument became
+  a generic internal error naming neither the argument nor the fix.
+  `shared/tool_args.py` now returns `invalid_arguments` with the unknown keys AND the
+  accepted ones, validated against the declared schema UNION the impl signature so a
+  `**kwargs` catch-all cannot hide an out-of-schema key. That mattered immediately:
+  `simulate_elasticache_node_resize` called with `node_type` (the real parameter is
+  `new_node_type`) had been swallowing the key and answering "no cost change" for a
+  resize it never simulated. The check also found the same mistake twice in this
+  repo own test suite.
+- **ElastiCache node pricing was picking an Extended Support SURCHARGE as the node
+  price.** Recorded first as "multiple SKUs, ambiguous ordering". It is not
+  ambiguity: for cache.t4g.micro / Redis / ap-northeast-2, `APN2-NodeUsage:` is
+  $0.024 (the node) while `ExtendedSupportYr1_Yr2` is $0.019 and
+  `ExtendedSupportYr3` is $0.038, both add-ons for running past end of standard
+  support. Now selects the SKU with no ExtendedSupport segment; only-surcharge
+  reports a miss rather than a surcharge. This also retires the earlier "Valkey is
+  correct now" claim as luck: Valkey has one SKU only because it is new enough to
+  have none of these yet.
+
 ### RECORDED, not yet fixed
 
 Ordered by operator impact. Each was confirmed against source, not just observed.
@@ -607,24 +635,6 @@ Ordered by operator impact. Each was confirmed against source, not just observed
   now closes this, but the plan builder is a pure string template driven by
   is_major/is_postgres and trusts that it was only reached for Aurora. Defence in
   depth for a tool that emits runnable CLI.
-- **FIXED: ElastiCache node pricing was picking an Extended Support SURCHARGE as
-  the node price.** Recorded here earlier as "multiple SKUs, ambiguous ordering,
-  needs a disambiguating attribute". Measured 2026-08-03 and it is not ambiguity,
-  the SKUs are different CHARGES: for cache.t4g.micro / Redis / ap-northeast-2,
-  `APN2-NodeUsage:` is $0.024 (the node) while
-  `APN2-ExtendedSupportYr1_Yr2-NodeUsage:` is $0.019 and
-  `APN2-ExtendedSupportYr3-NodeUsage:` is $0.038, both add-ons for running an engine
-  version past end of standard support. The old first-price-wins loop could report a
-  surcharge as the node cost. Fixed by selecting the SKU with no ExtendedSupport
-  segment; only-surcharge returns a miss rather than a surcharge. Valkey looked
-  correct only because it is new enough to have no extended-support SKUs yet, so
-  this would have started lying about Valkey too. Remaining: a cluster on an EOL
-  version genuinely owes the surcharge, and surfacing it as a separate line is a
-  feature, not a correction.
-- **`get_health_status` reports "healthy" from `cluster_meta.status` alone**, with
-  `current_metrics: []` and nothing saying telemetry is absent. A collection
-  outage is indistinguishable from a healthy cluster, which is the one case this
-  tool exists for.
 - **`get_performance_summary` returns a 4-key KPI shell for every engine**, all
   null on 6 of 9 clusters, and `slow_count: 0` even where `get_slow_queries`
   returns rows. Needs per-KPI provenance rather than bare nulls.
@@ -635,22 +645,12 @@ Ordered by operator impact. Each was confirmed against source, not just observed
 - **`create_docdb_index` reports `unsupported_engine` on DocumentDB** when the real
   problem is an unset `mongo_write_secret_arn`. A config gap wearing the status
   code that means "this engine cannot do this".
-- **Handlers splat the raw event into the impl** (`impl(cache, **event)`), so any
-  argument-name mistake becomes one static message naming neither the argument nor
-  the fix, and the four servers disagree on its shape. This probe's own two
-  harness errors are the evidence that a schema-aware caller still gets argument
-  names wrong. A ~25-line shared `inspect`-based helper returning
-  `invalid_arguments` with the accepted names would make it self-correctable.
-  Related: 22 impls carry `**_ignored`, and they are overwhelmingly the
-  approval-gated writes, so a hallucinated argument silently becomes "proceed with
-  the default" on exactly the tools that change infrastructure.
 - **`query_activity_audit` catches `Exception` on its PostgreSQL half but only
   `ClientError` on its DynamoDB half**, so one bad approvals item kills the whole
   compliance answer instead of degrading to a partial one.
 - **The MCP layer never reads the registry's `is_demo` flag**, so the synthetic
   sample row produces "verify the cluster id" and "register this cluster" messages
   for nine tools. The flag exists; only the frontend consumes it.
-
 - **`get_recent_events` reports `count: 0` without naming its 24h window**, so the
   agent renders "no recent events" for a cluster whose last anomaly was 26 hours
   ago. One line: echo `hours` (and `event_type` when filtered).
