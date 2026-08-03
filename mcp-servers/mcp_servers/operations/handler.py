@@ -43,6 +43,7 @@ from mcp_servers.operations.tools.test_elasticache_failover import test_elastica
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.engine_family import CAPABILITIES
 from mcp_servers.shared.engine_family import engine_family as _engine_family
+from mcp_servers.shared.tool_args import invalid_argument_error
 
 logger = logging.getLogger(__name__)
 
@@ -919,6 +920,14 @@ def lambda_handler(event, context):
                     ),
                 })}]}
         try:
+            # Argument check BEFORE the call, and AFTER the engine gate above: a
+            # wrong-engine call deserves the engine answer, not an argument
+            # complaint. Without this, one misnamed key raises TypeError and the
+            # except below (correctly) strips the exception text, leaving the caller
+            # a generic failure it cannot correct. See shared/tool_args.py.
+            _bad_args = invalid_argument_error(tool_name, TOOLS[tool_name]["impl"], event)
+            if _bad_args:
+                return {"content": [{"type": "text", "text": json.dumps(_bad_args)}]}
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
         except Exception:

@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.engine_family import CAPABILITIES
 from mcp_servers.shared.engine_family import engine_family as _engine_family
+from mcp_servers.shared.tool_args import invalid_argument_error
 from mcp_servers.simulation.tools.capacity_cost import simulate_dynamodb_capacity_cost_impl
 from mcp_servers.simulation.tools.ddl_impact import simulate_ddl_impact_impl
 from mcp_servers.simulation.tools.elasticache_scaling_simulation import simulate_elasticache_node_resize_impl
@@ -258,6 +259,14 @@ def lambda_handler(event, context):
                     ),
                 })}]}
         try:
+            # Argument check BEFORE the call, and AFTER the engine gate above: a
+            # wrong-engine call deserves the engine answer, not an argument
+            # complaint. Without this, one misnamed key raises TypeError and the
+            # except below (correctly) strips the exception text, leaving the caller
+            # a generic failure it cannot correct. See shared/tool_args.py.
+            _bad_args = invalid_argument_error(tool_name, TOOLS[tool_name]["impl"], event)
+            if _bad_args:
+                return {"content": [{"type": "text", "text": json.dumps(_bad_args)}]}
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
         except Exception:
