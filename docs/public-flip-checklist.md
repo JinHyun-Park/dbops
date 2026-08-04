@@ -131,7 +131,38 @@ facts that could change:
   `next.config` sets `output: "export"` and `images: { unoptimized: true }`, so
   sharp is never invoked. If image optimization is ever enabled, drop the override
   and re-check compatibility first.
-- `brace-expansion ^5.0.8` comes solely from eslint tooling, so it is dev-only.
+- `brace-expansion ^5.0.8` was REMOVED on 2026-08-04, and it is the clearest example
+  in this file of an override doing harm. A new advisory (GHSA-rgw5-rvv9-x895, high,
+  range `4.0.0 - 5.0.8`) landed on the exact pinned version, so the override was
+  inside the vulnerable range it existed to escape. Bumping it to `^5.0.9` cleared
+  audit but broke lint: v5 changed its export shape, and the v3-era `minimatch`
+  bundled under `@eslint/config-array` calls it as a function (`TypeError: expand is
+not a function`). Removing the override entirely is correct: npm then installs
+  1.1.18 for the old consumer and 5.0.9 for the new one side by side, `npm audit`
+  reports 0, and lint runs. A forced major across the tree is not a safe default.
+
+### `npm run lint` could not run at all, found 2026-08-04
+
+Not a security gate, but a fresh clone running `npm run lint` got a stack trace
+rather than findings, and for a project distributed as "deploy this to your own AWS
+account" that is a first-impression breaker.
+
+Cause: `eslint` was on `^10` while `eslint-config-next@16.2.12` bundles
+`eslint-plugin-react ^7.37.0`, whose newest release (7.37.5) declares
+`eslint: ^3 || ... || ^9.7`. No published version supports ESLint 10. It went
+unnoticed because `eslint-config-next` declares `eslint: >=9.0.0` with no upper
+bound, so npm never warned, and NOTHING gates lint: CI runs build and typecheck
+only, and pre-commit runs prettier, ruff, tsc and gitleaks.
+
+Pinned to `eslint ^9` (9.39.5), which is what the toolchain actually supports. Lint
+now runs. It reports 113 problems (97 errors, 16 warnings), almost all
+`Calling setState synchronously within an effect`, a rule that arrived with Next 16
+and accumulated unseen for as long as eslint was crashing. Those are recorded in
+BACKLOG as an open item; they are code quality, not a publish blocker, and fixing 97
+effect call sites is not a checklist step.
+
+Deliberately NOT added to CI yet: a lint gate that is red on the first run trains
+people to ignore it. Add it after the findings are addressed.
 
 ### The Python audit, RUN 2026-08-03, and it found the one real thing
 

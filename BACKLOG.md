@@ -1,6 +1,6 @@
 # DBOps Backlog
 
-**Status: one open item (a ceiling, not a defect). Everything else is closed.**
+**Status: two open items, neither a defect. Everything else is closed.**
 
 Every P1-P4 item and every defect from the 2026-08-02 live tool sweep (567 real
 invocations across all five engine families) is shipped, deployed and verified.
@@ -9,6 +9,28 @@ than deleted because shipped code, tests and CI comments point at it by name and
 those pointers must keep resolving to something true.
 
 ## Open
+
+### `npm run lint` reports 113 problems (97 errors, 16 warnings)
+
+Surfaced 2026-08-04. These are not new code: `eslint` was pinned to `^10` while
+`eslint-config-next` bundles an `eslint-plugin-react` that supports at most ESLint
+9.7, so lint CRASHED instead of reporting, and nothing gated it (CI runs build plus
+typecheck; pre-commit runs prettier, ruff, tsc, gitleaks). Pinning `eslint ^9` made
+it runnable and the backlog became visible all at once.
+
+Dominant finding by far: `Calling setState synchronously within an effect can
+trigger cascading renders`, a rule that arrived with Next 16. Worth triaging rather
+than bulk-suppressing, because this codebase has already shipped one real bug of
+exactly that family (a mount-once effect whose async `.then` closed over empty
+state and clobbered a later value). Some of the 97 are probably that bug again;
+most are probably benign. Reading them is the work.
+
+Do NOT add lint to CI before they are addressed: a gate that is red on its first run
+teaches people to ignore gates.
+
+```bash
+cd frontend && npx eslint .
+```
 
 ### The agent stack is at 478 of 500 CloudFormation resources
 
@@ -47,11 +69,17 @@ Every suppression is an argument made in public. Cognito MFA is the one open
 product decision, deliberately out of scope: it is a policy call for whoever
 deploys this, not a code gap.
 
-WS access logging stays disabled because the `$connect` authorizer reads the
-Cognito access token from the query string, so access logs would record it in
-plaintext. The WS-ticket pattern (single-use ticket in the URL instead of the
-token, enforced by an `ALL_OLD` + empty-old-image Deny) shipped 2026-07-30, so
-this is now a mitigation that holds rather than a conditional one.
+WS access logging stays disabled because nothing consumes it, NOT because enabling
+it would leak a credential. The `$connect` identity source is
+`route.request.querystring.ticket`, a random 60-second single-use ticket (enforced by
+an `ALL_OLD` + empty-old-image Deny) that `$connect` spends before any log line is
+written, so a recorded ticket is worth nothing.
+
+The first version of this paragraph said the Cognito access token was in the query
+string. That described the pre-2026-07-30 design, and the same stale claim was sitting
+in two `cdk/app.py` suppression reasons, which is worse: a suppression is an argument
+made in public. Both are corrected. Enabling WS access logging is now safe and
+unblocked; it just needs a retention decision.
 
 ### ElastiCache Redis multi-SKU price ambiguity (unfixed, bounded)
 
