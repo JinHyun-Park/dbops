@@ -1,12 +1,34 @@
 # DBOps Backlog
 
-**Status: empty. No open items.**
+**Status: one open item (a ceiling, not a defect). Everything else is closed.**
 
 Every P1-P4 item and every defect from the 2026-08-02 live tool sweep (567 real
 invocations across all five engine families) is shipped, deployed and verified.
 The full record lives in git history; this file was cleared on 2026-08-03 rather
 than deleted because shipped code, tests and CI comments point at it by name and
 those pointers must keep resolving to something true.
+
+## Open
+
+### The agent stack is at 478 of 500 CloudFormation resources
+
+Measured 2026-08-04 from `cdk.out/dbops-dev-agent.template.json`. 500 is a hard
+CloudFormation limit, so the headroom is 22 resources. `cdk synth` already prints
+`Number of resources: 478 is approaching allowed maximum of 500` on every run.
+
+Nothing is broken today. What makes this worth recording is the failure mode: the
+stack grows by roughly 3 to 6 resources per new REST route and per new MCP tool, so
+a normal-sized feature can cross the line, and the error surfaces at deploy time as
+a limit rejection rather than as anything pointing at the change that caused it.
+
+The fix is a structural decision, not a patch: split the stack (nested stacks for
+the REST API surface, or move the four MCP Lambdas out). That is an owner's call
+about deployment topology, so it is recorded rather than pre-empted. Anyone about to
+add a route or a tool should check the count first:
+
+```bash
+python3 -c "import json;print(len(json.load(open('cdk/cdk.out/dbops-dev-agent.template.json'))['Resources']))"
+```
 
 ## Decisions that are NOT open items
 
