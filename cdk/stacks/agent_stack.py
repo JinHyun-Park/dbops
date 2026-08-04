@@ -26,6 +26,7 @@ from bundling import _PipLocalBundling
 from config.settings import Settings
 from constructs import Construct
 from tool_definitions import incident_schema, operations_schema, performance_schema, simulation_schema
+from vendored_deps import assert_vendored_deps_fresh
 
 # Findings-writer cadence, handed to the two consumers of the multi-writer
 # findings freshness window (api/dashboard/handler.py and the incident MCP
@@ -631,6 +632,15 @@ class AgentStack(cdk.Stack):
         # ===== AgentCore Runtime =====
 
         gateway_mcp_url = f"https://{self.gateway.gateway_id}.gateway.bedrock-agentcore.{Settings.REGION}.amazonaws.com/mcp"
+
+        # The artifact below ships agent/_deps verbatim, and that tree is gitignored:
+        # CI cannot see it and it never shows up in a diff. Dependabot raises the
+        # floors in agent/requirements.txt without rebuilding it, so the shipped image
+        # can silently fall behind its own requirements file (measured 2026-08-03: 20
+        # known advisories, including pyjwt on the tenancy-verification path).
+        # deploy.sh rebuilds first; a bare `cdk deploy dbops-<env>-agent` does not.
+        # Synth is where both paths meet, so the check goes here.
+        assert_vendored_deps_fresh("../agent/requirements.txt", "../agent/_deps")
 
         self.runtime = agentcore.Runtime(
             self, "Runtime",
