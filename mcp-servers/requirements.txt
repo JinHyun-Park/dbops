@@ -19,7 +19,7 @@ pymysql>=1.1
 # against RDS SQL Server (no Data API). See mssql_direct.py. pyOpenSSL is
 # needed for pytds's TLS handshake (cafile/validate_host); wheels resolve
 # manylinux2014_x86_64 for the Lambda bundling target.
-python-tds>=1.17
+python-tds>=1.17.1
 pyOpenSSL>=26.3.0
 # pyOpenSSL imports typing_extensions at runtime; the manylinux/--python-version
 # 3.12 resolve doesn't always pull it (env marker), so pin it explicitly — its
