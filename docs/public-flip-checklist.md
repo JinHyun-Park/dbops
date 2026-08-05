@@ -366,45 +366,37 @@ measurement, not by argument:
 See section 8. The attacker-lens reviewer ignored the account id entirely and went
 straight for an unauthenticated Cognito call.
 
-### Committer email: forward-fixed, history left alone
+### Committer email: CLOSED 2026-08-04, accepted as published
 
-Measured: **868 of 954 commits** carry a personal address, and a different one from
-the GitHub account email (the other 86 are Dependabot's own noreply). Publishing
-would link that mailbox to this repo permanently, and it is the one item editing
-files cannot touch.
+Not a gate and not an open item. The owner reviewed the exposure and accepted it.
+Recorded so it stops being re-raised, and so the reasoning is available if it is
+ever revisited.
 
-Resolved 2026-07-31 in the proportionate direction rather than the maximal one:
+**Forward fix, already in place.** This repo's local git identity is
+`<id>+<login>@users.noreply.github.com`, GitHub's own linked-noreply form, so new
+commits keep contribution attribution and profile links while the private mailbox
+stops appearing. `--global` was deliberately left alone; revert the repo-scoped
+change with `git config --unset user.email`.
 
-- **Future commits: fixed.** This repo's local git identity is now
-  `<id>+<login>@users.noreply.github.com`, GitHub's own linked-noreply form, so
-  contribution attribution and profile links keep working while the private
-  mailbox stops appearing. `--global` was deliberately left alone; this is a
-  repo-scoped change, revert with `git config --unset user.email`.
-- **Existing 868 commits: not rewritten.** The repo is private with 0 forks, so
-  nothing is exposed today, and a rewrite costs every commit SHA: 27 in-repo SHA
-  citations across 21 tracked files rot silently. Worse, per claim 2 above, a
-  force-push to the SAME repo leaves the old objects reachable by SHA through the
-  GitHub UI and API until gc runs, so doing it now would buy the appearance of
-  removal, which is exactly the reasoning this document rejects elsewhere.
+**History: published as is.** Measured 2026-08-04: 862 commits carry a personal
+address as author and 866 as committer, against 39 on the noreply form (25
+Dependabot, 14 post-fix). Accepted because the exposure is a low-severity privacy
+item (bulk harvesting and cross-linking of one mailbox), not a credential and not a
+product vulnerability, and it adds no contact path a public repo does not already
+provide.
 
-**If you do flip public and want the historical addresses gone, that is the moment,
-and it has to be done as a fresh repo.** Runnable procedure:
-
-```bash
-# 1. mailmap: map the old identity to the noreply one
-printf 'JinHyun-Park <NEW@users.noreply.github.com> <OLD@personal.address>\n' > /tmp/mailmap
-# 2. rewrite a CLONE, never the working repo
-git clone --mirror . /tmp/dbops-rewrite && cd /tmp/dbops-rewrite
-git filter-repo --mailmap /tmp/mailmap          # remaps in-message SHAs by default
-# 3. publish as a NEW empty GitHub repo, do NOT force-push over the old one
-# 4. then REGENERATE the 3 .gitleaksignore fingerprints. They are commit-scoped
-#    (commit:path:rule:line), so a rewrite voids all three. An earlier version of
-#    this step said to DELETE them because they were "inert": that was measured
-#    wrong. With the file removed, gitleaks reports exactly 3 findings (all
-#    verified false positives, see section 1), so deleting them fails the gate.
-# 5. and fix the remaining in-repo SHA citations (17 across 20 files after BACKLOG
-#    was cleared), or accept them as dangling references
-```
+**In-place removal was never available, which is why there is no runbook here.**
+Rewriting `main` and force-pushing does NOT remove the addresses from this
+repository. GitHub retains `refs/pull/*` permanently and a branch force-push does
+not touch them: measured 79 pull refs on the remote, and the ancestor chain of
+`refs/pull/40/head` alone keeps 681 of the personal-address commits reachable, so
+`GET /repos/.../commits/<old-sha>` keeps answering. The only route that worked was
+publishing a mailmap-rewritten mirror as a NEW repository and deleting this one,
+which also costs every commit SHA (the remaining in-repo SHA citations rot, and the
+three commit-scoped `.gitleaksignore` fingerprints would need regenerating, not
+deleting, per section 1). That was declined as disproportionate to a low-severity
+item. `git log --format=%ae` reconstructs the mailmap if the decision is ever
+reversed.
 
 ---
 
