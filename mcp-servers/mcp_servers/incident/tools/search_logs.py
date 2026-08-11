@@ -87,8 +87,8 @@ def search_logs_impl(
     try:
         start_response = client.start_query(
             logGroupName=log_group,
-            startTime=int((time.time() - hours * 3600) * 1000),
-            endTime=int(time.time() * 1000),
+            startTime=int(time.time() - hours * 3600),
+            endTime=int(time.time()),
             # NO `/* source=dbops-agent */` prefix here. That marker is the audit
             # convention for SQL sent to a TARGET DATABASE; CloudWatch Logs
             # Insights is not SQL and rejects the comment outright with

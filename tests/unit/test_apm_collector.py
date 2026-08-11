@@ -54,3 +54,53 @@ def test_collect_apm_records_errors_but_does_not_raise():
     result = apm.collect_apm(BoomCW(), FakeLogs(), lambda s, p: None, target)
     assert result["errors"]  # non-empty
     assert result["target_id"] == "svc-b"
+
+
+class CapturingLogs(FakeLogs):
+    def __init__(self):
+        self.start_kwargs = None
+
+    def start_query(self, **kw):
+        self.start_kwargs = kw
+        return {"queryId": "q1"}
+
+
+def test_start_query_uses_epoch_seconds_not_millis():
+    logs = CapturingLogs()
+    target = {"target_id": "svc-c", "instance_id": "i-3", "region": "ap-northeast-2",
+              "service_name": "orders", "log_groups": ["/app/orders"], "team": ""}
+    apm.collect_apm(FakeCW(), logs, lambda s, p: None, target)
+    # Epoch SECONDS are ~1.7e9 today; MILLISECONDS would be ~1.7e12 (year ~53000).
+    assert logs.start_kwargs["startTime"] < 10_000_000_000
+    assert logs.start_kwargs["endTime"] < 10_000_000_000
+    assert logs.start_kwargs["startTime"] < logs.start_kwargs["endTime"]
+
+
+def test_query_timeout_records_error():
+    class NeverCompleteLogs:
+        def start_query(self, **kw):
+            return {"queryId": "q1"}
+
+        def get_query_results(self, **kw):
+            return {"status": "Running", "results": []}
+    target = {"target_id": "svc-d", "instance_id": "i-4", "region": "ap-northeast-2",
+              "service_name": "orders", "log_groups": ["/app/orders"], "team": ""}
+    # Avoid 25s of real sleeping: neutralize the poll delay.
+    orig_sleep = apm.time.sleep
+    apm.time.sleep = lambda *_a, **_k: None
+    try:
+        result = apm.collect_apm(FakeCW(), NeverCompleteLogs(), lambda s, p: None, target)
+    finally:
+        apm.time.sleep = orig_sleep
+    assert any("timed out" in e for e in result["errors"])
+    assert result["log_buckets_inserted"] == 0
+
+
+def test_cache_execute_failure_does_not_raise():
+    def boom_execute(sql, params):
+        raise RuntimeError("db down")
+    target = {"target_id": "svc-e", "instance_id": "i-5", "region": "ap-northeast-2",
+              "service_name": "orders", "log_groups": ["/app/orders"], "team": ""}
+    result = apm.collect_apm(FakeCW(), FakeLogs(), boom_execute, target)
+    assert result["errors"]  # errors captured, no exception propagated
+    assert result["target_id"] == "svc-e"

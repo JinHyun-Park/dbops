@@ -48,20 +48,20 @@ def collect_apm(cw, logs_client, cache_execute, target):
                 Dimensions=[{"Name": dim_name, "Value": dim_value}],
                 StartTime=start, EndTime=end, Period=60, Statistics=[stat],
             ).get("Datapoints", [])
+            for dp in dps:
+                value = dp.get(stat)
+                if value is None:
+                    continue
+                cache_execute(
+                    "INSERT INTO apm_metric_snapshots (target_id, ts, metric_type, value, dimensions) "
+                    "VALUES (:target_id, :ts::timestamptz, :metric_type, :value, '{}'::jsonb) "
+                    "ON CONFLICT DO NOTHING",
+                    {"target_id": target_id, "ts": dp["Timestamp"].isoformat(),
+                     "metric_type": mtype, "value": float(value)})
+                inserted += 1
         except Exception as e:
             errors.append(f"{mtype}: {e}")
             continue
-        for dp in dps:
-            value = dp.get(stat)
-            if value is None:
-                continue
-            cache_execute(
-                "INSERT INTO apm_metric_snapshots (target_id, ts, metric_type, value, dimensions) "
-                "VALUES (:target_id, :ts::timestamptz, :metric_type, :value, '{}'::jsonb) "
-                "ON CONFLICT DO NOTHING",
-                {"target_id": target_id, "ts": dp["Timestamp"].isoformat(),
-                 "metric_type": mtype, "value": float(value)})
-            inserted += 1
 
     # 2) per-level log COUNTS (no raw lines)
     bucket_ts = end.replace(second=0, microsecond=0).isoformat()
@@ -69,8 +69,8 @@ def collect_apm(cw, logs_client, cache_execute, target):
         try:
             qid = logs_client.start_query(
                 logGroupName=log_group,
-                startTime=int((end - timedelta(minutes=5)).timestamp() * 1000),
-                endTime=int(end.timestamp() * 1000),
+                startTime=int((end - timedelta(minutes=5)).timestamp()),
+                endTime=int(end.timestamp()),
                 queryString=f"fields @message | {_LEVEL_QUERY}",
             )["queryId"]
             rows = None
@@ -83,6 +83,8 @@ def collect_apm(cw, logs_client, cache_execute, target):
                     errors.append(f"{log_group}: query {r.get('status')}")
                     break
                 time.sleep(1)
+            if rows is None:
+                errors.append(f"{log_group}: query timed out")
             for row in rows or []:
                 fields = {f["field"]: f["value"] for f in row}
                 level = (fields.get("level") or "").upper()[:16]

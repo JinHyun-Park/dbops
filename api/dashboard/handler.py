@@ -3844,8 +3844,8 @@ def _log_insights(cluster_id, hours, category, keywords: str = ""):
     try:
         resp = client.start_query(
             logGroupName=log_group,
-            startTime=int((time.time() - hours * 3600) * 1000),
-            endTime=int(time.time() * 1000),
+            startTime=int(time.time() - hours * 3600),
+            endTime=int(time.time()),
             # CloudWatch Logs Insights does not accept SQL-style comments;
             # the source-tagging convention applies only to SQL queries.
             queryString=query_string,
