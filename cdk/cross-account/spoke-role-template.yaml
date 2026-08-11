@@ -63,15 +63,22 @@ Resources:
                 Effect: Allow
                 Action:
                   - "cloudwatch:GetMetricData"
-                  - "cloudwatch:DescribeAlarms"
                   - "cloudwatch:GetMetricStatistics"
+                  - "cloudwatch:ListMetrics"
+                  - "cloudwatch:DescribeAlarms"
                 Resource: "*"
               - Sid: CloudWatchLogs
                 Effect: Allow
                 Action:
                   - "logs:StartQuery"
                   - "logs:GetQueryResults"
+                  - "logs:FilterLogEvents"
                   - "logs:DescribeLogGroups"
+                Resource: "*"
+              - Sid: ApmEc2Describe
+                Effect: Allow
+                Action:
+                  - "ec2:DescribeInstances"
                 Resource: "*"
               # The DocumentDB profiler collector (data-pipeline/
               # docdb_mongo_collector) reads slow ops with FilterLogEvents, which

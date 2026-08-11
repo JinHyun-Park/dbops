@@ -186,12 +186,14 @@ class DataStack(cdk.Stack):
                 "CACHE_DB_NAME": "dbops",
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
                 "HUB_ROLE_ARN": foundation.hub_role.role_arn,
+                "APM_TARGETS_TABLE": foundation.apm_targets_table.table_name,
             },
         )
 
         self.cache_db.secret.grant_read(self.etl_lambda)
         self.cache_db.grant_data_api_access(self.etl_lambda)
         foundation.clusters_table.grant_read_data(self.etl_lambda)
+        foundation.apm_targets_table.grant_read_data(self.etl_lambda)
         foundation.hub_role.grant(self.etl_lambda.role, "sts:AssumeRole")
         # Cross-account metric collection: assume each registered cluster's spoke
         # role DIRECTLY (same pattern as the dashboard/MCP _session_for) so RDS /

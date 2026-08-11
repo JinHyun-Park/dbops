@@ -2222,6 +2222,60 @@ class AgentStack(cdk.Stack):
             integration=saved_queries_integration,
         )
 
+        # APM API — EC2 Java/Spring Boot log + metric monitoring
+        apm_lambda = lambda_.Function(
+            self, "ApmApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/apm"),
+            timeout=cdk.Duration.seconds(30),  # on-demand Logs Insights budget
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "APM_TARGETS_TABLE": foundation.apm_targets_table.table_name,
+                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
+                "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
+            },
+        )
+        data.cache_db.secret.grant_read(apm_lambda)
+        data.cache_db.grant_data_api_access(apm_lambda)
+        foundation.apm_targets_table.grant_read_write_data(apm_lambda)
+        foundation.team_members_table.grant_read_data(apm_lambda)
+        apm_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["rds-data:ExecuteStatement"], resources=["*"]))
+        apm_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"]))
+        # On-demand log search assumes the target's spoke role (scoped).
+        apm_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["sts:AssumeRole"],
+            resources=["arn:aws:iam::*:role/dbops-spoke-role"]))
+        # Local-account fallback (no spoke role): read-only CW Logs.
+        apm_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["logs:StartQuery", "logs:GetQueryResults",
+                     "logs:FilterLogEvents", "logs:DescribeLogGroups"],
+            resources=["*"]))
+
+        apm_integration = integrations.HttpLambdaIntegration("ApmIntegration", apm_lambda)
+        self.api.add_routes(
+            path="/api/apm/targets",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
+            integration=apm_integration)
+        self.api.add_routes(
+            path="/api/apm/targets/{id}",
+            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PUT, apigwv2.HttpMethod.DELETE],
+            integration=apm_integration)
+        self.api.add_routes(
+            path="/api/apm/targets/{id}/overview",
+            methods=[apigwv2.HttpMethod.GET], integration=apm_integration)
+        self.api.add_routes(
+            path="/api/apm/targets/{id}/metrics",
+            methods=[apigwv2.HttpMethod.GET], integration=apm_integration)
+        self.api.add_routes(
+            path="/api/apm/targets/{id}/logs/search",
+            methods=[apigwv2.HttpMethod.POST], integration=apm_integration)
+
         # ===== Outputs =====
 
         cdk.CfnOutput(self, "ApiUrl", value=self.api.url or "")
