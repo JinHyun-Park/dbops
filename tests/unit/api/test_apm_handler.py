@@ -1,7 +1,6 @@
 import importlib.util
 import json
 from pathlib import Path
-from unittest import mock
 
 _SPEC = importlib.util.spec_from_file_location(
     "apm_handler", Path(__file__).resolve().parents[3] / "api/apm/handler.py")
