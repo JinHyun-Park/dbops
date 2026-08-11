@@ -181,10 +181,43 @@ def lambda_handler(event, context):
 
 
 def _overview(event, target_id):
-    return _resp(501, {"error": "not implemented"})
+    item = _get_target(target_id)
+    if not item:
+        return _resp(404, {"error": "not found"})
+    if not _target_visible(event, item):
+        return _resp(403, {"error": "forbidden"})
+    rows = _execute(
+        "SELECT DISTINCT ON (metric_type) metric_type, value "
+        "FROM apm_metric_snapshots WHERE target_id = :tid "
+        "ORDER BY metric_type, ts DESC",
+        {"tid": target_id})
+    metrics = {r["metric_type"]: r["value"] for r in rows}
+    log_rows = _execute(
+        "SELECT level, COALESCE(SUM(count),0) AS total FROM apm_log_level_counts "
+        "WHERE target_id = :tid AND ts > NOW() - INTERVAL '1 hour' GROUP BY level",
+        {"tid": target_id})
+    log_counts = {r["level"]: int(r["total"]) for r in log_rows}
+    return _resp(200, {"target_id": target_id, "metrics": metrics, "log_counts": log_counts})
+
 
 def _metrics(event, target_id):
-    return _resp(501, {"error": "not implemented"})
+    item = _get_target(target_id)
+    if not item:
+        return _resp(404, {"error": "not found"})
+    if not _target_visible(event, item):
+        return _resp(403, {"error": "forbidden"})
+    qs = event.get("queryStringParameters") or {}
+    metric_type = qs.get("metric_type", "cpu")
+    try:
+        hours = max(1, min(168, int(qs.get("hours", "6"))))
+    except ValueError:
+        hours = 6
+    rows = _execute(
+        f"SELECT ts, value FROM apm_metric_snapshots "
+        f"WHERE target_id = :tid AND metric_type = :mt "
+        f"AND ts > NOW() - INTERVAL '{hours} hours' ORDER BY ts",
+        {"tid": target_id, "mt": metric_type})
+    return _resp(200, {"target_id": target_id, "metric_type": metric_type, "series": rows})
 
 def _logs_search(event, target_id):
     return _resp(501, {"error": "not implemented"})
