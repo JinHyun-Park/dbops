@@ -1,7 +1,8 @@
 # Making this repository public: pre-flip checklist
 
-The repository is **private** today (`gh repo view` → `PRIVATE`, verified
-2026-07-30). This is the gate list for flipping it public. Every line below was
+**The repository is PUBLIC as of 2026-08-11, published at commit `de4d164`.** This was
+the gate list for flipping it, kept as the record of what was checked and what was
+found. The post-flip settings are applied; see the final section. Every line below was
 checked against the tree rather than recalled, and the ones already satisfied say
 so, because a checklist whose items are mostly already done is only useful if you
 can tell which ones those are.
@@ -610,13 +611,36 @@ could undo it, and that is the whole point of section 8.
 
 ---
 
-## After the flip
+## After the flip: DONE 2026-08-11
 
-- **GitHub secret scanning + push protection**, free on public repos. Turn both
-  on immediately; push protection is the only one of these checks that runs
-  before a secret reaches the remote.
-- **CodeQL**, free on public repos. Add the default setup for Python and
-  JavaScript/TypeScript.
-- **Branch protection**, the free tier has no branch protection on private
-  repos, which is why Dependabot PRs are merged by hand today. Public unlocks
-  it: require the CI jobs above, including `secrets`, before merge.
+All applied and verified through the API immediately after the flip.
+
+| setting                     | state                                                                                               |
+| --------------------------- | --------------------------------------------------------------------------------------------------- |
+| Secret scanning             | `enabled`                                                                                           |
+| Push protection             | `enabled` (the only check that runs BEFORE a secret reaches the remote)                             |
+| Dependabot security updates | `enabled` (needed `vulnerability-alerts` enabled first; the bare call 422s)                         |
+| CodeQL default setup        | `configured`, both `Analyze (python)` and `Analyze (javascript-typescript)` running                 |
+| Branch protection on `main` | 4 required checks, `strict=true`, force-push and deletion blocked, conversation resolution required |
+
+Two deliberate choices in the branch protection, both to avoid changing a solo
+maintainer's workflow without being asked:
+
+- `enforce_admins: false`, so the owner can still push to `main` directly. Verified by
+  an actual push after applying it. Turning this on would require a PR for every
+  change.
+- `required_pull_request_reviews: null`, because a review requirement nobody can
+  satisfy would block every merge on a single-maintainer repo.
+
+Did NOT take effect and is worth knowing: `secret_scanning_non_provider_patterns` and
+`secret_scanning_validity_checks` both accepted the PATCH but read back `disabled`.
+They appear to need GitHub Advanced Security rather than the free public tier.
+
+First results: GitHub's own secret scanning found **0** alerts, independent
+confirmation of the gitleaks result on the same tree. CodeQL opened **3**, all
+preliminarily false positives, recorded in BACKLOG for proper triage. Code scanning
+alerts are visible only to collaborators, so nothing there is publicly exposed.
+
+One avoidable artifact: verifying that owner pushes still work was done with an empty
+commit (`92c78ff`) instead of `git push --dry-run`, and force-push is now blocked, so
+it is permanent. Harmless, but use `--dry-run` next time.

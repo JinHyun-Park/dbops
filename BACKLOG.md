@@ -1,6 +1,6 @@
 # DBOps Backlog
 
-**Status: two open items, neither a defect. Everything else is closed.**
+**Status: three open items, none a defect. Everything else is closed.**
 
 Every P1-P4 item and every defect from the 2026-08-02 live tool sweep (567 real
 invocations across all five engine families) is shipped, deployed and verified.
@@ -9,6 +9,30 @@ than deleted because shipped code, tests and CI comments point at it by name and
 those pointers must keep resolving to something true.
 
 ## Open
+
+### Triage the 3 CodeQL alerts that arrived with the public flip
+
+CodeQL default setup was enabled 2026-08-11 (it cannot run on a private free-tier
+repo, so this is the first time this scanner has ever seen the code). It opened 3
+alerts. Alerts are visible only to collaborators, so nothing is publicly exposed.
+
+My preliminary read is that all three are false positives, but a security alert should
+be dismissed with a recorded reason by someone who looked, not by whoever happened to
+enable the scanner:
+
+| rule                                              | location                                                                   | preliminary read                                                                                                                                                                                                                      |
+| ------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `js/insecure-randomness` (high)                   | `frontend/src/lib/agentcore-sse.ts:142` (sink; sources elsewhere)          | The 3 `Math.random()` uses in the frontend are local list keys: `SavedPlan.id`, `SavedView.id`, toast id. The real session id uses `crypto.randomUUID()` at `agentcore-sse.ts:49` and is length-checked. No traced path reaches auth. |
+| `py/clear-text-logging-sensitive-data` (high)     | `mcp-servers/mcp_servers/operations/tools/modify_dynamodb_capacity.py:270` | The `logger.warning` logs `cluster_id`, `table`, `target_mode`, `eff_rcu`, `eff_wcu` plus `exc_info`. None is a credential. Worth confirming what CodeQL traced as the sensitive source before dismissing.                            |
+| `py/incomplete-url-substring-sanitization` (high) | `tests/unit/api/test_incident_webhook.py:58`                               | Test-only assertion, not shipped code.                                                                                                                                                                                                |
+
+GitHub's own secret scanning found **0** on the same tree, which is independent
+confirmation of the gitleaks result.
+
+```bash
+gh api 'repos/JinHyun-Park/dbops/code-scanning/alerts?state=open' \
+  --jq '.[] | .number, .rule.id, .most_recent_instance.location.path'
+```
 
 ### `npm run lint` reports 113 problems (97 errors, 16 warnings)
 
