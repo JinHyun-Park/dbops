@@ -160,11 +160,15 @@ $EDITOR cdk/config/settings.py
 #             prefix unique to your account (the Hosted UI prefix is globally
 #             unique per region, so a shared literal collides).
 
-# 2. Bootstrap CDK once per account/region.
-#    Pass the target EXPLICITLY. A bare `cdk bootstrap` synthesizes the app to discover
-#    environments, and synth needs frontend/out, which step 3 is what builds, so the
-#    bare form fails here with "Cannot find asset at .../frontend/out/_next".
-cd cdk && cdk bootstrap aws://<ACCOUNT_ID>/<REGION> && cd ..
+# 2. Bootstrap CDK once per account/region, FROM OUTSIDE THE REPO.
+#    `cdk bootstrap` synthesizes the app whenever it is run in a directory that has a
+#    cdk.json, and synth needs build artifacts that step 3 is what produces. Running it
+#    from a directory with no CDK app skips synthesis entirely. Verified 2026-08-12 in a
+#    clean account: from the repo it fails on the missing artifacts, from an empty
+#    directory it bootstraps in about 40 seconds.
+#    Passing the target explicitly is NOT enough on its own: `aws://ACCOUNT/REGION` still
+#    synthesizes when a cdk.json is present.
+(cd /tmp && cdk bootstrap aws://<ACCOUNT_ID>/<REGION>)
 
 # 3. Run the all-in-one deployer
 ./deploy.sh
