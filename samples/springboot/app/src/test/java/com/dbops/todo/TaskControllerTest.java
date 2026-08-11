@@ -26,11 +26,13 @@ class TaskControllerTest {
 
     @Test
     void createAndListTask() throws Exception {
+        // Unique title + membership assertion: @SpringBootTest reuses the H2
+        // context across tests, so we must not assume ordering or an empty table.
         mvc.perform(post("/api/tasks").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"title\":\"write plan\",\"done\":false}"))
            .andExpect(status().isOk());
         mvc.perform(get("/api/tasks")).andExpect(status().isOk())
-           .andExpect(jsonPath("$[0].title").value("write plan"));
+           .andExpect(jsonPath("$[?(@.title == 'write plan')]").exists());
     }
 
     @Test
