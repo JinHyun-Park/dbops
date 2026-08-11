@@ -219,5 +219,83 @@ def _metrics(event, target_id):
         {"tid": target_id, "mt": metric_type})
     return _resp(200, {"target_id": target_id, "metric_type": metric_type, "series": rows})
 
+_DEFAULT_LEVELS = ["ERROR", "WARN"]
+
+
+def _levels_filter(levels):
+    """Server-side level gate. Default ERROR+WARN to avoid unbounded scans."""
+    import re
+    lv = [re.sub(r"[^A-Z]", "", (x or "").upper()) for x in (levels or _DEFAULT_LEVELS)]
+    lv = [x for x in lv if x] or _DEFAULT_LEVELS
+    ors = " or ".join(f"@message like /{x}/" for x in lv)
+    return f"filter ({ors})"
+
+
+def _session_for(region="", role_arn=""):
+    region = region or os.environ.get("AWS_REGION", "")
+    if not role_arn:
+        return boto3.session.Session(region_name=region or None)
+    creds = boto3.client("sts").assume_role(
+        RoleArn=role_arn, RoleSessionName="dbops-apm", DurationSeconds=900,
+    )["Credentials"]
+    return boto3.session.Session(
+        region_name=region or None,
+        aws_access_key_id=creds["AccessKeyId"],
+        aws_secret_access_key=creds["SecretAccessKey"],
+        aws_session_token=creds["SessionToken"])
+
+
+def _logs_client_for(item):
+    return _session_for(item.get("region", ""), item.get("spoke_role_arn", "")).client("logs")
+
+
 def _logs_search(event, target_id):
-    return _resp(501, {"error": "not implemented"})
+    import re
+    item = _get_target(target_id)
+    if not item:
+        return _resp(404, {"error": "not found"})
+    if not _target_visible(event, item):
+        return _resp(403, {"error": "forbidden"})
+    body = json.loads(event.get("body") or "{}")
+    log_group = body.get("log_group") or (item.get("log_groups") or [""])[0]
+    if not log_group:
+        return _resp(400, {"error": "no log_group for target"})
+    try:
+        hours = max(1, min(48, int(body.get("hours", 1))))
+    except (ValueError, TypeError):
+        hours = 1
+    limit = min(int(body.get("limit", 100) or 100), 500)
+
+    parts = [_levels_filter(body.get("levels"))]
+    for raw in (body.get("query") or "").split():
+        cleaned = re.sub(r"[^A-Za-z0-9_./:\-]", "", raw)
+        if cleaned:
+            parts.append(f"filter @message like /{cleaned}/")
+    query_string = ("fields @timestamp, @message | " + " | ".join(parts)
+                    + f" | sort @timestamp desc | limit {limit}")
+
+    client = _logs_client_for(item)
+    base = {"target_id": target_id, "log_group": log_group,
+            "compiled_query": query_string, "entries": [], "count": 0}
+    try:
+        qid = client.start_query(
+            logGroupName=log_group,
+            startTime=int(time.time() - hours * 3600),
+            endTime=int(time.time()),
+            queryString=query_string)["queryId"]
+    except Exception as e:
+        return _resp(200, {**base, "error": f"start_query failed: {e}"})
+    for _ in range(25):
+        r = client.get_query_results(queryId=qid)
+        status = r.get("status")
+        if status == "Complete":
+            entries = []
+            for row in r.get("results", []) or []:
+                fields = {f["field"]: f["value"] for f in row}
+                entries.append({"ts": fields.get("@timestamp"),
+                                "message": fields.get("@message", "")})
+            return _resp(200, {**base, "entries": entries, "count": len(entries)})
+        if status in ("Failed", "Cancelled"):
+            return _resp(200, {**base, "error": f"query {status.lower()}"})
+        time.sleep(1)
+    return _resp(200, {**base, "error": "query timed out"})
