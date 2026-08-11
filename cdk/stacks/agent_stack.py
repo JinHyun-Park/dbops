@@ -438,6 +438,13 @@ class AgentStack(cdk.Stack):
             "simulation": (simulation_mcp_lambda, simulation_schema()),
         }
 
+        # Keep each target so the Cedar policy loop below can declare an
+        # explicit dependency on the target it names. Without it CloudFormation
+        # may create a CedarPolicy before its gateway target has stabilized, and
+        # CreatePolicy then fails with "Target 'dbops-{ENV}-{server}-target'
+        # does not exist in gateway" (observed: only the first target had
+        # stabilized, the rest failed and rolled back the whole agent stack).
+        self._gateway_targets = {}
         for name, (fn, schema) in mcp_lambdas.items():
             fn.grant_invoke(self.gateway.role)
             fn.add_permission(
@@ -470,6 +477,7 @@ class AgentStack(cdk.Stack):
             target.add_dependency(self.gateway.role.node.default_child)
             if self.gateway.role.node.try_find_child("DefaultPolicy"):
                 target.add_dependency(self.gateway.role.node.find_child("DefaultPolicy").node.default_child)
+            self._gateway_targets[name] = target
 
         # ===== Cedar Authorization Policies (Gateway-level) =====
         # The Gateway evaluates these Cedar policies on every tool call: reads
@@ -537,7 +545,7 @@ class AgentStack(cdk.Stack):
                     "resource is AgentCore::Gateway",
                     f'resource == AgentCore::Gateway::"{self.gateway.gateway_arn}"',
                 )
-                agentcore_cfn.CfnPolicy(
+                _policy = agentcore_cfn.CfnPolicy(
                     self, f"CedarPolicy{_key.title()}{_i}",
                     policy_engine_id=self.policy_engine.attr_policy_engine_id,
                     # Name must match ^[A-Za-z][A-Za-z0-9_]*$ — underscores only,
@@ -557,6 +565,13 @@ class AgentStack(cdk.Stack):
                     # to ENFORCE (after the logs confirm they match).
                     validation_mode="IGNORE_ALL_FINDINGS",
                 )
+                # The policy names this target (__TARGET__ substitution above),
+                # so it must not be created until the target exists in the
+                # gateway. CfnPolicy carries no reference to the target, so the
+                # dependency is otherwise invisible to CloudFormation.
+                _target = self._gateway_targets.get(_key)
+                if _target is not None:
+                    _policy.add_dependency(_target)
 
         # Bind the engine to the Gateway. The installed CfnGateway L1 predates
         # the PolicyEngineConfiguration property (the service added it 2026-03),
