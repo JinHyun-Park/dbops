@@ -264,7 +264,10 @@ def _logs_search(event, target_id):
         hours = max(1, min(48, int(body.get("hours", 1))))
     except (ValueError, TypeError):
         hours = 1
-    limit = min(int(body.get("limit", 100) or 100), 500)
+    try:
+        limit = min(max(1, int(body.get("limit", 100) or 100)), 500)
+    except (ValueError, TypeError):
+        limit = 100
 
     parts = [_levels_filter(body.get("levels"))]
     for raw in (body.get("query") or "").split():

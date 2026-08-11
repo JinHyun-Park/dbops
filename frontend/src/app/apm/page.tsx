@@ -100,7 +100,7 @@ export default function ApmPage() {
       ) : (
         <>
           <StatRow>
-            <Stat label="Latency p99" value={metrics.latency_p99 ?? "—"} />
+            <Stat label="Latency avg" value={metrics.latency_avg ?? "—"} />
             <Stat label="Error rate" value={metrics.error_rate ?? "—"} />
             <Stat label="CPU %" value={metrics.cpu ?? "—"} />
             <Stat label="Mem %" value={metrics.mem ?? "—"} />

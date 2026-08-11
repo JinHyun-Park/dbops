@@ -15,7 +15,7 @@ _METRICS = [
     ("CPUUtilization", "AWS/EC2", "InstanceId", "cpu", "Average"),
     ("mem_used_percent", "CWAgent", "InstanceId", "mem", "Average"),
     ("disk_used_percent", "CWAgent", "InstanceId", "disk", "Average"),
-    ("Latency", "ApplicationSignals", "Service", "latency_p99", "Average"),
+    ("Latency", "ApplicationSignals", "Service", "latency_avg", "Average"),
     ("Error", "ApplicationSignals", "Service", "error_rate", "Average"),
     ("Fault", "ApplicationSignals", "Service", "fault_rate", "Average"),
 ]

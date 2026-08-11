@@ -745,6 +745,27 @@ def lambda_handler(event, context):
     except Exception as e:
         print(f"[etl] schema_snapshots purge failed: {type(e).__name__}: {e}")
 
+    # apm_metric_snapshots / apm_log_level_counts: same unbounded-growth shape as
+    # metric_snapshots. Keep ~90 days, best-effort so a purge failure never breaks
+    # collection.
+    try:
+        cache_rds_data.execute_statement(
+            resourceArn=cache_cluster_arn, secretArn=cache_secret_arn, database=cache_db_name,
+            sql="/* source=dbops-etl */ DELETE FROM apm_metric_snapshots "
+                "WHERE ts < NOW() - INTERVAL '90 days'",
+        )
+    except Exception as e:
+        print(f"[etl] apm_metric_snapshots purge failed: {type(e).__name__}: {e}")
+
+    try:
+        cache_rds_data.execute_statement(
+            resourceArn=cache_cluster_arn, secretArn=cache_secret_arn, database=cache_db_name,
+            sql="/* source=dbops-etl */ DELETE FROM apm_log_level_counts "
+                "WHERE ts < NOW() - INTERVAL '90 days'",
+        )
+    except Exception as e:
+        print(f"[etl] apm_log_level_counts purge failed: {type(e).__name__}: {e}")
+
     # Incident-similarity embeddings: backfill a bounded batch of un-embedded
     # event_log / runbook rows (Titan → pgvector) so find_similar_incidents can do
     # semantic cosine search. Best-effort; the tool keyword-falls-back meanwhile.

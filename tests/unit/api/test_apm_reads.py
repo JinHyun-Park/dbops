@@ -21,7 +21,7 @@ def test_overview_shapes_latest_metrics(monkeypatch):
     mod = _load()
     monkeypatch.setattr(mod, "_get_target", lambda t: {"target_id": t, "team": ""})
     monkeypatch.setattr(mod, "_execute", lambda sql, params=None: (
-        [{"metric_type": "cpu", "value": 55.0}, {"metric_type": "latency_p99", "value": 120.0}]
+        [{"metric_type": "cpu", "value": 55.0}, {"metric_type": "latency_avg", "value": 120.0}]
         if "apm_metric_snapshots" in sql else [{"level": "ERROR", "total": 7}]))
     resp = mod._overview(_event(), "svc-a")
     assert resp["statusCode"] == 200

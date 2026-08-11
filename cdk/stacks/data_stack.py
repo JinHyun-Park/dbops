@@ -218,6 +218,13 @@ class DataStack(cdk.Stack):
                      "ce:GetReservationPurchaseRecommendation"],
             resources=["*"],
         ))
+        # APM collector: same-account targets (no spoke_role_arn) read CloudWatch
+        # Logs under this role. Read-only; cross-account targets use the spoke role.
+        self.etl_lambda.add_to_role_policy(iam.PolicyStatement(
+            actions=["logs:StartQuery", "logs:GetQueryResults",
+                     "logs:FilterLogEvents", "logs:DescribeLogGroups"],
+            resources=["*"],
+        ))
         # Target DB secrets are registry-defined (arbitrary ARNs, incl. RDS-managed),
         # so this can't be ARN-scoped, but it is bounded to the hub account: cross-
         # account targets read their secret via the assumed spoke role, not this one.
