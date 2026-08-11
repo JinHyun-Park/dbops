@@ -1,7 +1,10 @@
 import aws_cdk as cdk
 from aws_cdk import (
     aws_ec2 as ec2,
+    aws_events as events,
+    aws_events_targets as targets,
     aws_iam as iam,
+    aws_lambda as lambda_,
     aws_logs as logs,
     aws_s3_assets as s3_assets,
 )
@@ -114,3 +117,87 @@ class SpringbootApmStack(cdk.Stack):
         cdk.CfnOutput(self, "LogGroup", value=LOG_GROUP)
         cdk.CfnOutput(self, "Region", value=self.region)
         cdk.CfnOutput(self, "VpcId", value=vpc.vpc_id)
+
+        # Load generator: drives mostly-healthy traffic plus a trickle of the
+        # three bug triggers so the APM dashboard has a steady signal. Runs in
+        # the private subnets, reaches the app over the shared SG on 8080.
+        sg.add_ingress_rule(
+            peer=ec2.Peer.security_group_id(sg.security_group_id),
+            connection=ec2.Port.tcp(8080),
+            description="load-gen -> app (same SG)",
+        )
+
+        load_gen = lambda_.Function(
+            self, "LoadGen",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="index.handler",
+            code=lambda_.Code.from_inline(LOAD_GEN_CODE),
+            timeout=cdk.Duration.minutes(2),
+            memory_size=256,
+            vpc=vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            security_groups=[sg],
+            environment={"APP_TAG": "dbops-apm-todoapp", "APP_PORT": "8080"},
+        )
+        load_gen.add_to_role_policy(iam.PolicyStatement(
+            actions=["ec2:DescribeInstances"], resources=["*"],
+        ))
+        events.Rule(
+            self, "LoadSchedule",
+            schedule=events.Schedule.rate(cdk.Duration.minutes(2)),
+            targets=[targets.LambdaFunction(load_gen)],
+        )
+
+
+LOAD_GEN_CODE = r'''
+import json, os, urllib.request, urllib.error
+import boto3
+
+def _app_ip():
+    ec2 = boto3.client("ec2")
+    r = ec2.describe_instances(Filters=[
+        {"Name": "tag:Name", "Values": [os.environ["APP_TAG"]]},
+        {"Name": "instance-state-name", "Values": ["running"]},
+    ])
+    for res in r["Reservations"]:
+        for inst in res["Instances"]:
+            ip = inst.get("PrivateIpAddress")
+            if ip:
+                return ip
+    return None
+
+def _call(method, url, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method,
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except Exception:
+        return -1
+
+def handler(event, context):
+    ip = _app_ip()
+    if not ip:
+        return {"error": "app instance not found"}
+    base = f"http://{ip}:{os.environ.get('APP_PORT','8080')}/api"
+    counts = {}
+    def bump(k):
+        counts[k] = counts.get(k, 0) + 1
+    # healthy traffic
+    for i in range(20):
+        bump(f"health_{_call('GET', base + '/health')}")
+    for i in range(10):
+        bump(f"create_{_call('POST', base + '/tasks', {'title': f'task-{context.aws_request_id}-{i}'})}")
+        bump(f"list_{_call('GET', base + '/tasks')}")
+    # bug 1: NPE (note, no title)
+    bump(f"npe_{_call('POST', base + '/tasks', {'note': 'orphan'})}")
+    # bug 2: duplicate title -> constraint violation
+    _call('POST', base + '/tasks', {'title': 'dup-fixed'})
+    bump(f"dup_{_call('POST', base + '/tasks', {'title': 'dup-fixed'})}")
+    # bug 3: resource leak
+    bump(f"leak_{_call('GET', base + '/leak')}")
+    return counts
+'''
