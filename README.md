@@ -118,6 +118,14 @@ Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
 - **Bedrock model access** enabled for BOTH of:
   - a Claude text model, via the cross-region inference profile for your region
     (`apac.` / `us.` / `eu.` / `global.` prefix). This is `AGENT_MODEL_ID`.
+  - **the Anthropic "use case details" form, submitted once per account.** This is a
+    SEPARATE step from enabling model access and it is easy to miss: the agent fails
+    every turn with `ResourceNotFoundException: Model use case details have not been
+submitted for this account`, which reads like a missing model rather than a missing
+    form. Submit it in the Bedrock console and allow ~15 minutes. Measured 2026-08-12:
+    a fresh account returned that error from both `Converse` and `InvokeModel` on
+    `apac.anthropic.claude-sonnet-4-20250514-v1:0` while an account that had submitted
+    the form answered normally with the identical call.
   - **Amazon Titan Text Embeddings V2** (`amazon.titan-embed-text-v2:0`). Semantic
     incident search embeds into pgvector with it (`incident_embeddings` collector and
     the `find_similar_incidents` tool), so without access those fall back to keyword
