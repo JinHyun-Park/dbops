@@ -49,10 +49,34 @@ if os.environ.get("CDK_NAG") == "1":
                 {
                     "id": "AwsSolutions-IAM5",
                     "reason": (
-                        "Wildcard resources are confined to inherently "
-                        "account/region-wide control-plane calls (rds:Describe*, "
-                        "pi/cloudwatch GetMetric*, sts:AssumeRole on dbops-spoke-role, "
-                        "dynamodb:ListTables): documented inline in each stack."
+                        # An earlier version of this reason said wildcards were "confined
+                        # to inherently account/region-wide control-plane calls
+                        # (rds:Describe*, GetMetric*, ListTables)". That read as
+                        # read-only-only and was materially incomplete: 32 wildcard
+                        # statements across agent_stack and data_stack include ~25
+                        # MUTATING actions. A suppression is an argument made in public,
+                        # so it has to state the grant at its real size.
+                        "Resource='*' covers THREE groups, not one. (1) Reads that AWS "
+                        "cannot resource-scope: rds:Describe*, pi/cloudwatch GetMetric*, "
+                        "dynamodb:ListTables. (2) WRITES: rds cluster/instance/snapshot/"
+                        "parameter-group/custom-endpoint modify+create+delete+reboot+"
+                        "restore, dynamodb UpdateTable/UpdateTimeToLive/"
+                        "UpdateContinuousBackups, elasticache Modify/CreateSnapshot/"
+                        "Reboot/TestFailover, bedrock Create+DeleteInferenceProfile, ssm "
+                        "Put+DeleteParameter, and rds-data:ExecuteStatement. (3) "
+                        "sts:AssumeRole, which IS scoped, to "
+                        "arn:aws:iam::*:role/dbops-spoke-role. "
+                        "The writes are not resource-scoped because the targets are "
+                        "operator-registered databases in arbitrary accounts, resolved "
+                        "from the DynamoDB registry at request time and therefore not "
+                        "enumerable at synth time. They are NOT ungated: every one is "
+                        "fail-closed behind the tool-level approval_guard "
+                        "(payload-hash-bound, single-use) in "
+                        "mcp_servers/shared/approval_guard.py, and cross-account reach is "
+                        "bounded by the spoke role's own trust policy plus its "
+                        "aws:ResourceTag/ManagedBy=dbops condition "
+                        "(cdk/cross-account/spoke-role-template.yaml). Each wildcard "
+                        "block carries an inline comment naming its writes."
                     ),
                 },
                 {

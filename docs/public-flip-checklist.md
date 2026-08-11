@@ -140,6 +140,18 @@ production-tree advisory is visible to everyone the moment the repo is public.
 That is twice now that this gate moved between one run and the next. Treat a passing
 `npm audit` as valid for hours, not days: re-run it in the same sitting as the flip.
 
+**Third recurrence of the stale-floor pattern, found 2026-08-11 by re-reading the
+overrides rather than trusting the 0 result.** `postcss: ^8.5.18` had drifted INSIDE
+GHSA-fxqj-rqcc-2cmp (range `<=8.5.22`). Audit reported 0 only because the lockfile
+happened to resolve 8.5.25; the declared floor no longer excluded a vulnerable version,
+so any fresh resolve could have picked one. Raised to `^8.5.23`, the first version
+outside the range. `sharp: ^0.35.3` is outside its advisory (`<0.35.0`) but its floor
+equals the installed version, so it has zero headroom and will need the same check.
+
+The lesson generalizes: **a passing `npm audit` does not validate the overrides.** Audit
+judges what resolved; an override is a claim about what is ALLOWED to resolve. Read every
+floor against the advisory it was added for, every time.
+
 Two overrides are deliberately outside the declared range, and both depend on
 facts that could change:
 
@@ -257,6 +269,23 @@ comment in `foundation_stack.py`. The WS-ticket pattern replaced the token on
 "nothing consumes the logs", not "logging would leak a credential", and enabling
 access logging is now safe rather than forbidden. APIG4 likewise described a
 "Cognito Lambda authorizer" where the authorizer validates a ticket.
+
+**A third stale reason, found 2026-08-11: `AwsSolutions-IAM5`.** It said wildcards were
+"confined to inherently account/region-wide control-plane calls (rds:Describe*,
+GetMetric*, ListTables)", which reads as read-only-only. Measured: 32 `resources=["*"]`
+statements across agent_stack (26) and data_stack (6), containing ~25 MUTATING actions
+(rds cluster/instance/snapshot/parameter-group/custom-endpoint writes, dynamodb capacity
+and TTL and PITR, elasticache modify/reboot/failover, bedrock inference profiles, ssm
+parameters, and `rds-data:ExecuteStatement`). This was the most security-sensitive claim
+in the repo and it understated the grant.
+
+Rewritten to state all three groups at real size, why the writes cannot be
+resource-scoped (targets are operator-registered databases in arbitrary accounts,
+resolved from the registry at request time and not enumerable at synth), and what does
+bound them (the fail-closed `approval_guard`, plus the spoke role's trust policy and its
+`ManagedBy=dbops` tag condition). One part of the finding was wrong and is worth noting:
+`sts:AssumeRole` IS scoped, to `arn:aws:iam::*:role/dbops-spoke-role`, in both
+foundation_stack.py:282 and data_stack.py:203.
 
 Corrected in `cdk/app.py`. The lesson generalizes past this repo: a suppression
 reason is a claim about code, and code moves. Re-read every reason against the
