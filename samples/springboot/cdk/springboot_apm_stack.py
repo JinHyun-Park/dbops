@@ -60,7 +60,9 @@ class SpringbootApmStack(cdk.Stack):
         user_data = ec2.UserData.for_linux()
         user_data.add_commands(
             "set -euxo pipefail",
-            "dnf install -y java-17-amazon-corretto amazon-cloudwatch-agent",
+            # awscli is not guaranteed on a minimal AL2023 image; install it so
+            # the `aws s3 cp` below cannot abort user-data under `set -e`.
+            "dnf install -y java-17-amazon-corretto amazon-cloudwatch-agent awscli",
             "mkdir -p /var/log/todoapp /opt/todoapp",
             f"aws s3 cp s3://{jar_asset.s3_bucket_name}/{jar_asset.s3_object_key} /opt/todoapp/todoapp.jar",
             "cat >/etc/systemd/system/todoapp.service <<'EOF'\n"
@@ -86,6 +88,11 @@ class SpringbootApmStack(cdk.Stack):
             f'    {{"file_path": "/var/log/todoapp/app.log", "log_group_name": "{LOG_GROUP}", "log_stream_name": "{{instance_id}}"}}\n'
             "  ]}}},\n"
             '  "metrics": {"append_dimensions": {"InstanceId": "${aws:InstanceId}"},\n'
+            # aggregation_dimensions rolls the disk metric up to an InstanceId-only
+            # series. Without it the agent only publishes disk_used_percent under the
+            # full [InstanceId, device, fstype, path] set, and the DBOps collector
+            # (which queries InstanceId alone) gets zero datapoints -> empty card.
+            '    "aggregation_dimensions": [["InstanceId"]],\n'
             '    "metrics_collected": {\n'
             '      "mem": {"measurement": ["mem_used_percent"]},\n'
             '      "disk": {"measurement": ["disk_used_percent"], "resources": ["/"]}\n'
@@ -186,12 +193,14 @@ def handler(event, context):
     counts = {}
     def bump(k):
         counts[k] = counts.get(k, 0) + 1
-    # healthy traffic
+    # healthy traffic: mostly reads. A couple of unique creates per run keep
+    # INSERT traffic alive without growing the H2 table unboundedly (that growth
+    # would compete with / mask the intended bug-3 leak on a t3.small).
     for i in range(20):
         bump(f"health_{_call('GET', base + '/health')}")
-    for i in range(10):
-        bump(f"create_{_call('POST', base + '/tasks', {'title': f'task-{context.aws_request_id}-{i}'})}")
         bump(f"list_{_call('GET', base + '/tasks')}")
+    for i in range(2):
+        bump(f"create_{_call('POST', base + '/tasks', {'title': f'task-{context.aws_request_id}-{i}'})}")
     # bug 1: NPE (note, no title)
     bump(f"npe_{_call('POST', base + '/tasks', {'note': 'orphan'})}")
     # bug 2: duplicate title -> constraint violation

@@ -24,7 +24,12 @@ To-Do/Task CRUD 앱을 **Private Subnet EC2**에 배포하고, CloudWatch Agent�
 
 - 빌드 호스트에 **Java 17 + Maven**.
 - **CDK CLI ≥ 2.1134.0** (`npm i -g aws-cdk@2`), Python 3.9+.
-- 배포 대상은 **DBOps와 동일 계정 `571850511781` / 리전 `us-east-1`** (`cdk/config/settings.py` 기준).
+- 배포 대상은 **DBOps와 동일 계정/리전**이어야 해요. `app.py`가 `cdk/config/settings.py`의
+  `Settings.ACCOUNT_ID`/`REGION`을 그대로 읽어 배포하거든요. 그러니 별도로 계정·리전을
+  지정할 필요는 없고, **`settings.py`가 DBOps 배포에 쓰는 그 계정·리전인지**만 확인하면 돼요
+  (fresh clone이라면 `settings.example.py`를 복사해 실제 값으로 채워두어야 해요 — 예시 파일의
+  `123456789012`/`ap-northeast-2`는 placeholder예요). 이 문서 예시의 `us-east-1`은 현재
+  이 저장소 `settings.py` 기준 값이에요.
 
 ## 배포
 
@@ -108,3 +113,9 @@ APM Lambda 역할에 `logs:StartQuery`/`logs:GetQueryResults`/`logs:FilterLogEve
 cd samples/springboot/cdk
 cdk destroy dbops-dev-springboot-apm
 ```
+
+> **재배포 시 로그 그룹 충돌.** 로그 그룹 이름을 `/dbops/apm/todoapp`으로 고정해 뒀어요
+> (APM 타깃 등록을 예측 가능하게 하려고요). destroy가 중간에 실패했거나 로그 그룹만 수동으로
+> 남겨둔 상태에서 다시 `cdk deploy`하면 `ResourceAlreadyExistsException`이 날 수 있어요. 그럴
+> 땐 배포 전에 남은 로그 그룹을 먼저 지워주세요:
+> `aws logs delete-log-group --log-group-name /dbops/apm/todoapp --region us-east-1`
