@@ -47,9 +47,21 @@ class SpringbootApmStack(cdk.Stack):
 
         sg = ec2.SecurityGroup(
             self, "AppSg", vpc=vpc, allow_all_outbound=True,
-            description="todoapp - egress only, no inbound",
+            description="todoapp app instance - egress only, load-gen ingress on 8080",
         )
-        # No inbound rules. Load generator ingress is added below.
+        # Separate SG for the load generator Lambda. Two SGs (rather than one
+        # shared SG with a self-reference ingress) avoids a CloudFormation
+        # circular dependency between the instance, the Lambda, and the shared
+        # SG's ingress rule. The app SG accepts 8080 only from this SG.
+        load_gen_sg = ec2.SecurityGroup(
+            self, "LoadGenSg", vpc=vpc, allow_all_outbound=True,
+            description="todoapp load generator lambda",
+        )
+        sg.add_ingress_rule(
+            peer=load_gen_sg,
+            connection=ec2.Port.tcp(8080),
+            description="load-gen lambda to app 8080",
+        )
 
         jar_asset = s3_assets.Asset(
             self, "TodoJar",
@@ -127,13 +139,7 @@ class SpringbootApmStack(cdk.Stack):
 
         # Load generator: drives mostly-healthy traffic plus a trickle of the
         # three bug triggers so the APM dashboard has a steady signal. Runs in
-        # the private subnets, reaches the app over the shared SG on 8080.
-        sg.add_ingress_rule(
-            peer=ec2.Peer.security_group_id(sg.security_group_id),
-            connection=ec2.Port.tcp(8080),
-            description="load-gen -> app (same SG)",
-        )
-
+        # the private subnets, reaches the app on 8080 via its own SG.
         load_gen = lambda_.Function(
             self, "LoadGen",
             runtime=lambda_.Runtime.PYTHON_3_12,
@@ -143,7 +149,7 @@ class SpringbootApmStack(cdk.Stack):
             memory_size=256,
             vpc=vpc,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
-            security_groups=[sg],
+            security_groups=[load_gen_sg],
             environment={"APP_TAG": "dbops-apm-todoapp", "APP_PORT": "8080"},
         )
         load_gen.add_to_role_policy(iam.PolicyStatement(
