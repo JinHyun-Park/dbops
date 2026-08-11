@@ -575,6 +575,8 @@ export interface LogInsightsResponse {
   category: LogCategory;
   hours: number;
   log_group: string;
+  /** The cluster's own region, for the CloudWatch console deep link. */
+  region?: string;
   compiled_query?: string;
   keywords?: string;
   count: number;

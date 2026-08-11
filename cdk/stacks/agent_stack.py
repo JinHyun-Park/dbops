@@ -1783,6 +1783,12 @@ class AgentStack(cdk.Stack):
             memory_size=512,
             environment={
                 "DEFAULT_MODEL_ID": Settings.AGENT_MODEL_ID,
+                # handler.py otherwise falls back to a hardcoded four-region list
+                # (ap-northeast-2,us-east-1,us-west-2,eu-central-1), which is this
+                # project author's set, not the deployer's: the model picker would scan
+                # regions they do not use and miss the one they do. Default to the
+                # deploy region; MODEL_SCAN_REGIONS in settings.py widens it.
+                "MODEL_SCAN_REGIONS": getattr(Settings, "MODEL_SCAN_REGIONS", "") or Settings.REGION,
             },
         )
         models_lambda.add_to_role_policy(iam.PolicyStatement(

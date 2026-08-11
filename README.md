@@ -115,7 +115,34 @@ Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
 - AWS Account with AdministratorAccess
 - Node.js 20+, Python 3.10+
 - AWS CDK CLI (`npm install -g aws-cdk`)
-- Bedrock model access enabled (Claude Sonnet)
+- **Bedrock model access** enabled for BOTH of:
+  - a Claude text model, via the cross-region inference profile for your region
+    (`apac.` / `us.` / `eu.` / `global.` prefix). This is `AGENT_MODEL_ID`.
+  - **Amazon Titan Text Embeddings V2** (`amazon.titan-embed-text-v2:0`). Semantic
+    incident search embeds into pgvector with it (`incident_embeddings` collector and
+    the `find_similar_incidents` tool), so without access those fall back to keyword
+    matching while everything else looks healthy.
+- A region where **Bedrock AgentCore** (Runtime, Gateway, Memory) is available. The
+  agent stack cannot deploy without it, and it is not in every region.
+
+### Running cost
+
+This is not free tier. Two components bill whether or not anyone logs in:
+
+| always-on                               | measured                     |
+| --------------------------------------- | ---------------------------- |
+| Aurora Serverless v2 cache, min 0.5 ACU | about $70/month              |
+| one NAT Gateway (private Lambda egress) | about $37/month (hours only) |
+
+So roughly **$110/month before any traffic**, plus usage: Lambda (scales with
+registered-cluster count times the 5-minute ETL), Bedrock tokens, CloudFront, DynamoDB
+and S3.
+
+For scale: this project's own dev account, measured over the 30 days to 2026-08-11 with
+`Application=DBOps` cost allocation, came to $485. Do not read that as your bill: most of
+it is the demo TARGET databases being monitored, and one provisioned `db.r6g.large`
+Aurora among them is about $180/month on its own. The platform's own share was closer to
+$200/month with 11 registered clusters.
 
 ### Deployment (Quickstart)
 
@@ -133,8 +160,11 @@ $EDITOR cdk/config/settings.py
 #             prefix unique to your account (the Hosted UI prefix is globally
 #             unique per region, so a shared literal collides).
 
-# 2. Bootstrap CDK once per account/region
-cd cdk && cdk bootstrap && cd ..
+# 2. Bootstrap CDK once per account/region.
+#    Pass the target EXPLICITLY. A bare `cdk bootstrap` synthesizes the app to discover
+#    environments, and synth needs frontend/out, which step 3 is what builds, so the
+#    bare form fails here with "Cannot find asset at .../frontend/out/_next".
+cd cdk && cdk bootstrap aws://<ACCOUNT_ID>/<REGION> && cd ..
 
 # 3. Run the all-in-one deployer
 ./deploy.sh

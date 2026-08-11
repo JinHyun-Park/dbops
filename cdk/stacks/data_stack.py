@@ -590,6 +590,13 @@ class DataStack(cdk.Stack):
                 "ARCHIVE_BUCKET": self.archive_bucket.bucket_name,
                 "ALERT_TOPIC_ARN": self.alert_topic.topic_arn,
                 "REPORT_DELIVERY_ENABLED": "true" if getattr(Settings, "REPORT_DELIVERY_ENABLED", False) else "false",
+                # handler.py defaults this to an `apac.`-prefixed inference profile.
+                # Cross-region inference profiles are REGIONAL: an apac. profile does not
+                # resolve for a deployer in us-east-1 or eu-central-1, so every daily
+                # report summary would fail for them while the rest of the platform
+                # looked healthy. Pass the operator's own choice, the same value the
+                # agent and the RCA narrative already get.
+                "REPORT_SUMMARY_MODEL_ID": Settings.AGENT_MODEL_ID,
             },
         )
         self.cache_db.secret.grant_read(self.report_generator)

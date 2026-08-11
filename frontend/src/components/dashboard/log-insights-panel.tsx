@@ -107,11 +107,16 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
     setRefreshedAt(null);
   }, [clusterId]);
 
-  const cwConsoleUrl = data?.log_group
-    ? `https://console.aws.amazon.com/cloudwatch/home?region=ap-northeast-2#logsV2:log-groups/log-group/${encodeURIComponent(
-        data.log_group,
-      )}`
-    : null;
+  // The region comes from the response, not a literal: this was hardcoded to
+  // ap-northeast-2, so every other deployer got a console link that opened the right
+  // page in the wrong region and reported the log group as missing. Omitted entirely
+  // when unknown, because a link to the wrong region is worse than a plain label.
+  const cwConsoleUrl =
+    data?.log_group && data?.region
+      ? `https://console.aws.amazon.com/cloudwatch/home?region=${encodeURIComponent(
+          data.region,
+        )}#logsV2:log-groups/log-group/${encodeURIComponent(data.log_group)}`
+      : null;
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 overflow-hidden">

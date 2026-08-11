@@ -3824,6 +3824,13 @@ def _log_insights(cluster_id, hours, category, keywords: str = ""):
         "category": category,
         "hours": hours,
         "log_group": log_group,
+        # The cluster's OWN region, so the UI can build a CloudWatch console deep link
+        # that actually resolves. The panel used to hardcode ap-northeast-2, which for
+        # any other deployer silently produced a "log group not found" console page with
+        # no hint that the region was wrong. Taken from the registry row already fetched
+        # above, which is also correct for a cross-account cluster whose logs live in
+        # another account's region entirely.
+        "region": (cluster.get("region") or "") if cluster else "",
         # Expose the compiled query + sanitized keywords so the UI can
         # show "we ran this exact CW Insights query for you" — gives
         # DBAs a copy/paste-ready string to refine in the Console.

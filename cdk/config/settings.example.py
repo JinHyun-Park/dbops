@@ -20,6 +20,12 @@ class Settings:
     #   eu.     eu-* regions
     #   global. any region, routed globally
     AGENT_MODEL_ID = "apac.anthropic.claude-sonnet-4-20250514-v1:0"
+
+    # Extra regions the in-app model picker scans for available inference profiles,
+    # comma-separated. EMPTY means "just REGION", which is the right answer for almost
+    # everyone. Only set this if you deliberately want to select a model hosted in a
+    # different region than the one you deploy to.
+    MODEL_SCAN_REGIONS = ""
     GATEWAY_SEMANTIC_SEARCH = True
 
     # AWS MCP Server (AWS-managed, SigV4) — official AWS/Aurora docs. The agent
