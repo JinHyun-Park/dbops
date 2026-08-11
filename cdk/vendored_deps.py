@@ -22,11 +22,28 @@ WHY AT SYNTH AND NOT IN CI
 hole is `cdk deploy dbops-<env>-agent` on its own, which is the normal way to iterate on
 one stack and skips the rebuild entirely. Synth is the one point both paths cross.
 
-A missing `_deps` is NOT an error here: that is the CI/fresh-clone state, and failing on
-it would break `tests/cdk`. The condition being guarded is a tree that EXISTS and is
-stale, which is the only way a bad artifact reaches AgentCore.
+TWO FAILURE MODES, BOTH GUARDED
+-------------------------------
+1. STALE: `_deps` exists but sits below a floor declared in agent/requirements.txt.
+2. ABSENT: no `_deps` at all. This is the state of every FRESH CLONE, because the tree is
+   gitignored, and it is the worse of the two. Measured 2026-08-11 in a clean clone of the
+   public repo: with `frontend/out` stubbed, `cdk synth` exited 0 with no `_deps`
+   whatsoever. A deploy from that synth ships an AgentCore Runtime containing ZERO vendored
+   dependencies, so the container cannot import strands / bedrock_agentcore / mcp / pyjwt
+   and every chat turn dies at import. Nothing downstream catches it: the e2e suite asserts
+   UI only and produces no runtime log events at all.
+
+   An earlier version of this file treated ABSENT as "not a violation" so `tests/cdk` would
+   pass in CI. That optimised for the CI path and silently broke the newcomer path, which is
+   backwards for a repo published as self-service deployable. The default is now to REFUSE;
+   the two CI synth paths opt out explicitly with DBOPS_SYNTH_WITHOUT_AGENT_DEPS=1, exactly
+   as they already stub `frontend/out`.
+
+`frontend/out` needs no guard here: its absence already fails synth loudly and by name
+(`Cannot find asset at .../frontend/out/_next`, measured in the same clean clone).
 """
 
+import os
 import pathlib
 import re
 
@@ -69,15 +86,23 @@ def vendored_versions(deps_dir) -> dict:
 
 
 def stale_vendored_deps(requirements_path, deps_dir) -> list:
-    """Human-readable violations, empty when the tree is consistent or absent.
+    """Human-readable violations, empty only when the tree is present and consistent.
 
     Returns a list rather than raising so the caller decides the severity, and so the
     whole thing is unit-testable without a real 68MB `_deps` on disk.
     """
     deps_dir = pathlib.Path(deps_dir)
     if not deps_dir.is_dir():
-        # CI / fresh clone. Not a violation: see the module docstring.
-        return []
+        # A fresh clone, or anyone who skipped build-deps.sh. Refuse by default: see
+        # "TWO FAILURE MODES" in the module docstring for why absence is worse than stale.
+        # The opt-out exists for the two CI synth paths, which are structural checks that
+        # never deploy. The name is deliberately long so it cannot be set by accident.
+        if os.environ.get("DBOPS_SYNTH_WITHOUT_AGENT_DEPS") == "1":
+            return []
+        return [
+            f"{deps_dir} DOES NOT EXIST: the agent would ship with zero vendored "
+            "dependencies and every chat turn would fail at import"
+        ]
 
     try:
         from packaging.version import InvalidVersion, Version
@@ -109,10 +134,13 @@ def assert_vendored_deps_fresh(requirements_path, deps_dir) -> None:
     if not problems:
         return
     raise RuntimeError(
-        "agent/_deps is STALE relative to agent/requirements.txt, so this deploy would "
-        "ship an image that contradicts its own declared dependencies:\n"
+        "agent/_deps is MISSING or STALE relative to agent/requirements.txt, so this "
+        "deploy would ship an agent image that cannot run:\n"
         + "\n".join(f"  - {p}" for p in problems)
-        + "\n\nFix: bash agent/build-deps.sh\n"
-        "(deploy.sh does this automatically; a bare `cdk deploy` does not, which is how "
-        "the tree went stale with 20 known advisories in it, pyjwt among them.)"
+        + "\n\nFix: bash agent/build-deps.sh   (or just run ./deploy.sh, which does it)\n"
+        "A bare `cdk deploy` does NOT build the vendored tree. That is how it once went "
+        "stale with 20 known advisories in it, pyjwt among them, and it is why a FRESH "
+        "CLONE (where the gitignored tree does not exist at all) is refused here rather "
+        "than allowed to deploy an agent with no dependencies.\n"
+        "CI-only escape hatch, never for a deploy: DBOPS_SYNTH_WITHOUT_AGENT_DEPS=1"
     )

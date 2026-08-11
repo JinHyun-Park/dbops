@@ -136,6 +136,13 @@ jobs:
         working-directory: cdk
         env:
           CDK_NAG: "1"
+          # agent/_deps is gitignored, so it is absent in CI exactly as in a fresh
+          # clone, and cdk/vendored_deps.py REFUSES that by default: a deploy from such
+          # a synth would ship an agent with zero vendored dependencies and every chat
+          # turn would fail at import. This job is a structural gate that never
+          # deploys, so it opts out, the same way the step above stubs frontend/out.
+          # Never set this anywhere that can reach `cdk deploy`.
+          DBOPS_SYNTH_WITHOUT_AGENT_DEPS: "1"
         run: cdk synth >/dev/null
 
   frontend:

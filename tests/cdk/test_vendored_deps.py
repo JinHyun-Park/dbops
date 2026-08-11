@@ -26,6 +26,13 @@ from vendored_deps import (  # noqa: E402
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_opt_out(monkeypatch):
+    """The opt-out is process-global, so clear it for every test in this module: a value
+    leaking in from the environment would silently turn the absence tests green."""
+    monkeypatch.delenv("DBOPS_SYNTH_WITHOUT_AGENT_DEPS", raising=False)
+
+
 def _tree(tmp_path, requirements: str, installed: dict | None):
     """Write a requirements file, and a `_deps` dir of `*.dist-info` names.
     `installed=None` means the dir does not exist at all (the CI state)."""
@@ -67,11 +74,51 @@ def test_a_consistent_tree_reports_nothing(tmp_path):
     assert stale_vendored_deps(req, deps) == []
 
 
-def test_an_absent_tree_is_not_a_violation(tmp_path):
-    """CI and a fresh clone have no `_deps`. Failing there would break tests/cdk."""
+def test_an_absent_tree_IS_a_violation_by_default(tmp_path, monkeypatch):
+    """The state of every FRESH CLONE, and the worse of the two failure modes.
+
+    Measured 2026-08-11 on a clean clone of the public repo: with frontend/out stubbed,
+    `cdk synth` exited 0 with no `_deps` at all, so a deploy from it would ship an
+    AgentCore Runtime with zero vendored dependencies and every chat turn would die at
+    import. An earlier version of this gate returned [] here to keep CI green, which
+    optimised for CI and silently broke the newcomer path.
+    """
+    monkeypatch.delenv("DBOPS_SYNTH_WITHOUT_AGENT_DEPS", raising=False)
     req, deps = _tree(tmp_path, "PyJWT[crypto]>=2.13.0\n", None)
     assert not deps.exists()
+
+    problems = stale_vendored_deps(req, deps)
+    assert len(problems) == 1, problems
+    assert "DOES NOT EXIST" in problems[0]
+
+
+def test_the_absent_tree_opt_out_is_explicit_and_exact(tmp_path, monkeypatch):
+    """CI's two synth paths opt out; nothing else should be able to, by accident.
+
+    Only the exact string "1" opts out, so a stray empty/0/true value still refuses.
+    """
+    req, deps = _tree(tmp_path, "PyJWT[crypto]>=2.13.0\n", None)
+
+    monkeypatch.setenv("DBOPS_SYNTH_WITHOUT_AGENT_DEPS", "1")
     assert stale_vendored_deps(req, deps) == []
+
+    for sloppy in ("", "0", "true", "yes", "TRUE"):
+        monkeypatch.setenv("DBOPS_SYNTH_WITHOUT_AGENT_DEPS", sloppy)
+        assert len(stale_vendored_deps(req, deps)) == 1, f"{sloppy!r} must not opt out"
+
+
+def test_the_raising_wrapper_names_build_deps_for_an_absent_tree(tmp_path, monkeypatch):
+    """A fresh-clone user must be told the command, not just that something is wrong."""
+    monkeypatch.delenv("DBOPS_SYNTH_WITHOUT_AGENT_DEPS", raising=False)
+    req, deps = _tree(tmp_path, "PyJWT[crypto]>=2.13.0\n", None)
+
+    with pytest.raises(RuntimeError) as e:
+        assert_vendored_deps_fresh(req, deps)
+
+    msg = str(e.value)
+    assert "build-deps.sh" in msg
+    assert "deploy.sh" in msg
+    assert "DOES NOT EXIST" in msg
 
 
 def test_a_declared_package_missing_from_the_tree_is_reported(tmp_path):

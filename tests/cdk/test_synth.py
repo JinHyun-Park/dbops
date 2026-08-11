@@ -47,6 +47,13 @@ def cdk_app():
     # the hashed-assets one sources `frontend/out/_next` as a SEPARATE asset —
     # so that subtree must exist at synth time too, or synth fails with
     # CannotFindAsset on CI (where there's no real build). Stub both.
+    # agent/_deps is gitignored, so it is absent here exactly as in a fresh clone, and
+    # cdk/vendored_deps.py now REFUSES that by default: a deploy from such a synth would
+    # ship an agent with zero vendored dependencies. This fixture is a structural check
+    # that never deploys, so it opts out explicitly, the same way it stubs frontend/out
+    # below. Do NOT set this in anything that can reach `cdk deploy`.
+    os.environ["DBOPS_SYNTH_WITHOUT_AGENT_DEPS"] = "1"
+
     frontend_out = ROOT / "frontend" / "out"
     frontend_out.mkdir(parents=True, exist_ok=True)
     if not (frontend_out / "index.html").exists():
