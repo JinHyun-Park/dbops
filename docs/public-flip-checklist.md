@@ -124,6 +124,22 @@ can go stale in a way that reads as handled: `postcss: ^8.5.10` was still inside
 the range of the sourceMappingURL path-traversal advisory (<=8.5.17), so when you
 see an override, check it still covers the advisory it was added for.
 
+**Re-run 2026-08-11, at the flip itself: 0 became 1 high again.** A new advisory
+(GHSA-2v37-7h3g-55p8, `nanoid <3.3.17`, "custom generators can loop indefinitely when
+size is zero") landed in the week since the last run. It reached the PRODUCTION tree,
+not just dev tooling: the path is `next@16.2.12` to `postcss@8.5.25` to `nanoid`, and
+Next declares postcss itself, so `--omit=dev` flagged it too.
+
+Cleared with an `overrides` entry at `nanoid: ^3.3.18`, deliberately inside the 3.x
+line. postcss declares `nanoid ^3.3.16`, so the bump is in range; nanoid 5.x and 6.x
+are ESM-only and would break postcss's CommonJS require, which is the same mistake the
+removed brace-expansion override made. Real runtime exposure was nil either way
+(postcss runs at build time and `nanoid` appears nowhere in `out/`), but a live
+production-tree advisory is visible to everyone the moment the repo is public.
+
+That is twice now that this gate moved between one run and the next. Treat a passing
+`npm audit` as valid for hours, not days: re-run it in the same sitting as the flip.
+
 Two overrides are deliberately outside the declared range, and both depend on
 facts that could change:
 
