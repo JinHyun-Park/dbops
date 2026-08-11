@@ -37,6 +37,7 @@ from collectors.schema_snapshot import (
     collect_mysql_schema_snapshot,
     collect_pg_schema_snapshot,
 )
+from collectors.apm_collector import collect_apm
 from collectors.stats_collector import collect_query_stats
 
 # schema_snapshots retention. WHAT THIS ACTUALLY GUARANTEES, stated precisely
@@ -149,6 +150,29 @@ def _scan_all(table):
         if "LastEvaluatedKey" not in resp:
             return items
         kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+
+
+def _collect_apm_targets(apm_table, make_get_client, cache_execute):
+    """Separate registry pass: APM targets are EC2 apps, not clusters."""
+    results = []
+    for t in _scan_all(apm_table):
+        region = t.get("region", "")
+        get_client = make_get_client(t.get("spoke_role_arn", ""))
+        try:
+            cw = get_client("cloudwatch", region)
+            logs_client = get_client("logs", region)
+            results.append(collect_apm(cw, logs_client, cache_execute, {
+                "target_id": t.get("target_id", ""),
+                "instance_id": t.get("instance_id", ""),
+                "region": region,
+                "service_name": t.get("service_name", ""),
+                "log_groups": t.get("log_groups") or [],
+                "team": t.get("team", ""),
+            }))
+        except Exception as e:
+            results.append({"target_id": t.get("target_id", ""), "errors": [str(e)]})
+            print(f"[apm] {t.get('target_id')} error: {e}")
+    return results
 
 
 def _train_baselines(result, cache_rds_data, cache_cluster_arn, cache_secret_arn,
@@ -667,6 +691,12 @@ def lambda_handler(event, context):
             datetime.now(timezone.utc).isoformat(),
         ))
 
+    apm_table_name = os.environ.get("APM_TARGETS_TABLE", "")
+    apm_results = []
+    if apm_table_name:
+        apm_table = dynamodb.Table(apm_table_name)
+        apm_results = _collect_apm_targets(apm_table, make_get_client, cache_execute)
+
     # Retention: metric_snapshots has no purge and grows unbounded (PARTITION BY
     # RANGE (ts) but only the DEFAULT partition exists). Keep ~90 days. The BRIN
     # index on ts (schema_v20) makes this an instant block-range check, so running
@@ -723,4 +753,4 @@ def lambda_handler(event, context):
     except Exception as e:
         print(f"[etl] incident embeddings failed: {type(e).__name__}: {e}")
 
-    return {"statusCode": 200, "body": json.dumps({"collected": len(results), "results": results}, default=str)}
+    return {"statusCode": 200, "body": json.dumps({"collected": len(results), "results": results, "apm": apm_results}, default=str)}
