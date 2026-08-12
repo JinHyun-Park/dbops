@@ -30,6 +30,11 @@ export default function ApmPage() {
   const [overview, setOverview] = useState<Record<string, unknown> | null>(null);
   const [levels, setLevels] = useState<string[]>(["ERROR", "WARN"]);
   const [query, setQuery] = useState("");
+  const [allLevels, setAllLevels] = useState(false);
+  // Relative preset in minutes; 0 means "custom range" (use start/end below).
+  const [rangeMin, setRangeMin] = useState<number>(60);
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,11 +60,24 @@ export default function ApmPage() {
     if (!selected) return;
     setSearching(true);
     setError(null);
-    searchApmLogs(selected, { levels, query, hours: 1, limit: 100 })
+    const opts: {
+      levels?: string[]; all?: boolean; query: string; limit: number;
+      minutes?: number; start?: number; end?: number;
+    } = { query, limit: 2000 };
+    if (allLevels) opts.all = true;
+    else opts.levels = levels;
+    if (rangeMin === 0) {
+      // Custom range: convert local datetime-local values to epoch seconds.
+      if (customStart) opts.start = Math.floor(new Date(customStart).getTime() / 1000);
+      if (customEnd) opts.end = Math.floor(new Date(customEnd).getTime() / 1000);
+    } else {
+      opts.minutes = rangeMin;
+    }
+    searchApmLogs(selected, opts)
       .then((r) => setLogs(r.entries || []))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setSearching(false));
-  }, [selected, levels, query]);
+  }, [selected, levels, allLevels, query, rangeMin, customStart, customEnd]);
 
   const toggleLevel = (lv: string) =>
     setLevels((cur) => (cur.includes(lv) ? cur.filter((x) => x !== lv) : [...cur, lv]));
@@ -112,12 +130,64 @@ export default function ApmPage() {
 
           <Section title="로그 검색">
             <div className="flex flex-wrap items-center gap-2 mb-3">
+              {/* Time range presets + custom */}
+              {[
+                { label: "5분", m: 5 },
+                { label: "10분", m: 10 },
+                { label: "30분", m: 30 },
+                { label: "1시간", m: 60 },
+                { label: "6시간", m: 360 },
+                { label: "사용자 지정", m: 0 },
+              ].map((r) => (
+                <button
+                  key={r.label}
+                  onClick={() => setRangeMin(r.m)}
+                  className={`text-xs px-2 py-1 rounded border ${
+                    rangeMin === r.m
+                      ? "bg-emerald-900/40 border-emerald-500 text-emerald-300"
+                      : "bg-zinc-900 border-zinc-700 text-zinc-500"
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+              {rangeMin === 0 && (
+                <>
+                  <input
+                    type="datetime-local"
+                    value={customStart}
+                    onChange={(e) => setCustomStart(e.target.value)}
+                    className="text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                  />
+                  <span className="text-xs text-zinc-500">~</span>
+                  <input
+                    type="datetime-local"
+                    value={customEnd}
+                    onChange={(e) => setCustomEnd(e.target.value)}
+                    className="text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                  />
+                </>
+              )}
+              {/* All-levels toggle */}
+              <button
+                onClick={() => setAllLevels((v) => !v)}
+                className={`text-xs px-2 py-1 rounded border ${
+                  allLevels
+                    ? "bg-emerald-900/40 border-emerald-500 text-emerald-300"
+                    : "bg-zinc-900 border-zinc-700 text-zinc-500"
+                }`}
+              >
+                전체 레벨
+              </button>
               {LEVELS.map((lv) => (
                 <button
                   key={lv}
                   onClick={() => toggleLevel(lv)}
+                  disabled={allLevels}
                   className={`text-xs px-2 py-1 rounded border ${
-                    levels.includes(lv)
+                    allLevels
+                      ? "bg-zinc-900 border-zinc-800 text-zinc-600 cursor-not-allowed"
+                      : levels.includes(lv)
                       ? "bg-zinc-700 border-zinc-500"
                       : "bg-zinc-900 border-zinc-700 text-zinc-500"
                   }`}
