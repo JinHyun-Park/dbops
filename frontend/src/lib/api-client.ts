@@ -3384,7 +3384,17 @@ export async function fetchApmMetrics(id: string, metricType: string, hours = 6)
 
 export async function searchApmLogs(
   id: string,
-  opts: { levels?: string[]; query?: string; hours?: number; limit?: number; log_group?: string },
+  opts: {
+    levels?: string[];
+    all?: boolean;
+    query?: string;
+    minutes?: number;
+    hours?: number;
+    start?: number;
+    end?: number;
+    limit?: number;
+    log_group?: string;
+  },
 ) {
   const res = await authedFetch(await api(`/api/apm/targets/${enc(id)}/logs/search`), {
     method: "POST",
