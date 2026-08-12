@@ -741,6 +741,39 @@ class AgentStack(cdk.Stack):
             resources=[self.memory.memory_arn],
         ))
 
+        # Bedrock model invocation for the agent itself. WITHOUT THIS THE AGENT CANNOT
+        # ANSWER AT ALL: every chat turn fails with
+        #   AccessDeniedException ... not authorized to perform:
+        #   bedrock:InvokeModelWithResponseStream on resource: ...inference-profile/...
+        #
+        # This was MISSING from the code entirely until 2026-08-12, and it was invisible
+        # here because the dev deployment's runtime role carries a hand-added inline policy
+        # named `BedrockInvokePolicy` that appears nowhere in this repo. So dev worked, the
+        # code was broken, and a deploy into a clean account produced 4 green stacks, 64
+        # registered gateway tools, a 9/9 smoke test, and an agent that could not answer a
+        # single question. Found by actually deploying to a fresh account, which is the only
+        # thing that finds this class of drift.
+        #
+        # BOTH actions are needed: the runtime STREAMS its responses, so
+        # InvokeModelWithResponseStream is the one that actually fires, and plain
+        # InvokeModel covers the non-streaming paths.
+        #
+        # BOTH resource shapes are needed, for the same reason the task_worker grant above
+        # says: AGENT_MODEL_ID is a cross-region inference profile, and invoking a profile
+        # authorizes against the profile ARN *and* the underlying foundation-model ARNs in
+        # whichever region it fans out to. The model is also user-switchable at runtime via
+        # the in-app picker, so the grant cannot be pinned to one model id.
+        self.runtime.role.add_to_principal_policy(iam.PolicyStatement(
+            actions=[
+                "bedrock:InvokeModel",
+                "bedrock:InvokeModelWithResponseStream",
+            ],
+            resources=[
+                "arn:aws:bedrock:*::foundation-model/*",
+                f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
+            ],
+        ))
+
         # ===== REST API =====
 
         # Cognito JWT authorizer for the REST API. API Gateway verifies the
