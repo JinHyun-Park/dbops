@@ -1,5 +1,5 @@
 pymysql>=1.1
-python-tds>=1.17
+python-tds>=1.17.1
 pyOpenSSL>=26.3.0
 # pyOpenSSL imports typing_extensions at runtime; the manylinux/--python-version
 # 3.12 resolve doesn't always pull it (env marker), so pin it explicitly — its
