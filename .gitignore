@@ -51,5 +51,7 @@ cdk/cdk.context.json
 # locally) are throwaway. deploy.sh regenerates what it needs.
 cdk-outputs.json
 deploy*.log
+*-deploy.log
+*-redeploy.log
 /package.json
 /package-lock.json
