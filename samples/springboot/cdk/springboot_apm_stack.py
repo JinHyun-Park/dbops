@@ -128,6 +128,14 @@ class SpringbootApmStack(cdk.Stack):
             role=role,
             security_group=sg,
             user_data=user_data,
+            # user-data only runs on first boot and embeds the jar asset's S3 key,
+            # which changes whenever the jar changes. Without this flag a rebuilt
+            # jar updates user-data IN PLACE on the running instance (no reboot),
+            # so the box keeps serving the OLD jar until it happens to restart.
+            # Force a replacement: a new jar -> a fresh instance that downloads
+            # and runs it on boot. (Measured: adding the static frontend and
+            # re-deploying left the old jar running until this was set.)
+            user_data_causes_replacement=True,
         )
         cdk.Tags.of(instance).add("Name", "dbops-apm-todoapp")
         log_group.grant_write(role)
