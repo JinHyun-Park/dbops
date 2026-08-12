@@ -58,3 +58,19 @@ def test_logs_search_runs_query(monkeypatch):
     body = json.loads(resp["body"])
     assert body["count"] == 1
     assert body["entries"][0]["message"] == "ERROR boom"
+
+
+def test_levels_filter_all_via_flag_returns_empty():
+    mod = _load()
+    assert mod._levels_filter(None, all_levels=True) == ""
+
+
+def test_levels_filter_explicit_empty_list_returns_empty():
+    mod = _load()
+    assert mod._levels_filter([], all_levels=False) == ""
+
+
+def test_levels_filter_absent_still_defaults_error_warn():
+    mod = _load()
+    clause = mod._levels_filter(None)
+    assert "ERROR" in clause and "WARN" in clause and "INFO" not in clause

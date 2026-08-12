@@ -222,9 +222,14 @@ def _metrics(event, target_id):
 _DEFAULT_LEVELS = ["ERROR", "WARN"]
 
 
-def _levels_filter(levels):
-    """Server-side level gate. Default ERROR+WARN to avoid unbounded scans."""
+def _levels_filter(levels, all_levels=False):
+    """Server-side level gate. Default ERROR+WARN. Opt in to ALL levels with
+    all_levels=True or an explicit empty list []; then no filter is applied.
+    `levels` absent/None keeps the ERROR+WARN default (never scans everything
+    by accident)."""
     import re
+    if all_levels or (isinstance(levels, list) and not levels):
+        return ""
     lv = [re.sub(r"[^A-Z]", "", (x or "").upper()) for x in (levels or _DEFAULT_LEVELS)]
     lv = [x for x in lv if x] or _DEFAULT_LEVELS
     ors = " or ".join(f"@message like /{x}/" for x in lv)
