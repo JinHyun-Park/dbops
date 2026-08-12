@@ -254,6 +254,41 @@ def _logs_client_for(item):
     return _session_for(item.get("region", ""), item.get("spoke_role_arn", "")).client("logs")
 
 
+_MAX_SPAN = 48 * 3600
+
+
+def _resolve_window(body, now=None):
+    """Return (start_epoch, end_epoch, clamped). Priority: absolute start+end
+    (start<end) > relative minutes > relative hours (1..48) > default 1h.
+    Any invalid value falls through to the next rule. Span capped at 48h."""
+    import time as _time
+    now = int(_time.time()) if now is None else int(now)
+
+    def _int(v):
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return None
+
+    start, end = _int(body.get("start")), _int(body.get("end"))
+    if start is not None and end is not None and start < end:
+        if end - start > _MAX_SPAN:
+            return end - _MAX_SPAN, end, True
+        return start, end, False
+
+    minutes = _int(body.get("minutes"))
+    if minutes is not None and minutes > 0:
+        minutes = min(minutes, _MAX_SPAN // 60)
+        return now - minutes * 60, now, False
+
+    hours = _int(body.get("hours"))
+    if hours is not None:
+        hours = max(1, min(48, hours))
+        return now - hours * 3600, now, False
+
+    return now - 3600, now, False
+
+
 def _logs_search(event, target_id):
     import re
     item = _get_target(target_id)

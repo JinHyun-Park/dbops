@@ -74,3 +74,41 @@ def test_levels_filter_absent_still_defaults_error_warn():
     mod = _load()
     clause = mod._levels_filter(None)
     assert "ERROR" in clause and "WARN" in clause and "INFO" not in clause
+
+
+def test_resolve_window_minutes():
+    mod = _load()
+    s, e, clamped = mod._resolve_window({"minutes": 5}, now=1_000_000)
+    assert e == 1_000_000 and s == 1_000_000 - 300 and clamped is False
+
+
+def test_resolve_window_absolute():
+    mod = _load()
+    s, e, clamped = mod._resolve_window({"start": 100, "end": 700}, now=1_000_000)
+    assert s == 100 and e == 700 and clamped is False
+
+
+def test_resolve_window_absolute_over_48h_clamps():
+    mod = _load()
+    span = 60 * 3600  # 60h
+    s, e, clamped = mod._resolve_window({"start": 0, "end": span}, now=1_000_000)
+    assert e == span and s == span - 48 * 3600 and clamped is True
+
+
+def test_resolve_window_bad_absolute_falls_back_to_hours():
+    mod = _load()
+    # start >= end is invalid -> fall through to hours
+    s, e, clamped = mod._resolve_window({"start": 900, "end": 100, "hours": 2}, now=1_000_000)
+    assert e == 1_000_000 and s == 1_000_000 - 2 * 3600 and clamped is False
+
+
+def test_resolve_window_default_one_hour():
+    mod = _load()
+    s, e, clamped = mod._resolve_window({}, now=1_000_000)
+    assert e == 1_000_000 and s == 1_000_000 - 3600 and clamped is False
+
+
+def test_resolve_window_hours_clamped_1_to_48():
+    mod = _load()
+    s, _, _ = mod._resolve_window({"hours": 999}, now=1_000_000)
+    assert s == 1_000_000 - 48 * 3600
