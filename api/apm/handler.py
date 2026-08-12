@@ -5,12 +5,14 @@ on-demand path: it assumes the target's spoke role and queries CloudWatch Logs
 at request time (mirrors api/dashboard _log_insights). Read-only against AWS.
 """
 import json
+import logging
 import os
 import time
 
 import boto3
-
 import tenancy
+
+logger = logging.getLogger(__name__)
 
 _TABLE = os.environ.get("APM_TARGETS_TABLE", "")
 
@@ -297,7 +299,29 @@ def _logs_search(event, target_id):
     if not _target_visible(event, item):
         return _resp(403, {"error": "forbidden"})
     body = json.loads(event.get("body") or "{}")
-    log_group = body.get("log_group") or (item.get("log_groups") or [""])[0]
+    # The caller MAY pick which of the target's registered log groups to search,
+    # which is why this parameter exists: `log_groups` is a list set by an admin at
+    # registration. But it must be one of THOSE, checked here.
+    #
+    # Before this check the body value was used as-is and passed straight to
+    # start_query, so any authenticated user (including a dbops-viewer) could read
+    # ANY log group in the account by naming it: /aws/lambda/dbops-* carries the
+    # account ids, role names, ARNs and SQL fragments this project deliberately keeps
+    # out of API responses. `_target_visible` gates the TARGET, not the log group, so
+    # team scoping did not cover log CONTENT either. The IAM grant cannot express
+    # "only this target's groups" because they are arbitrary operator-registered
+    # names, so this is the enforcement point.
+    registered = [g for g in (item.get("log_groups") or []) if g]
+    requested = body.get("log_group")
+    if requested:
+        if requested not in registered:
+            return _resp(403, {
+                "error": "log_group not registered for this target",
+                "registered_log_groups": registered,
+            })
+        log_group = requested
+    else:
+        log_group = registered[0] if registered else ""
     if not log_group:
         return _resp(400, {"error": "no log_group for target"})
 
@@ -331,8 +355,16 @@ def _logs_search(event, target_id):
             startTime=start_epoch,
             endTime=end_epoch,
             queryString=query_string)["queryId"]
-    except Exception as e:
-        return _resp(200, {**base, "error": f"start_query failed: {e}"})
+    except Exception:
+        # NOT str(e), and NOT 200. A CloudWatch/STS error carries the hub account id,
+        # the Lambda role name and the target ARN, and this project's tree-wide guard
+        # (tests/unit/mcp_servers/test_handler_error_leaks.py) fails on raw exception
+        # text in a response. Returning 200 also made a failure look like a successful
+        # empty search.
+        logger.warning("apm start_query failed for target %s", target_id, exc_info=True)
+        return _resp(502, {**base,
+                           "error": "로그 검색을 시작할 수 없습니다 "
+                                    "(자세한 원인은 서버 로그를 확인하세요)."})
     for _ in range(25):
         r = client.get_query_results(queryId=qid)
         status = r.get("status")

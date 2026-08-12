@@ -3,6 +3,7 @@ import os
 from datetime import datetime, timezone
 
 import boto3
+from collectors.apm_collector import collect_apm
 from collectors.capacity_forecast import collect_capacity_forecast
 from collectors.cost_check import collect_cost_findings
 from collectors.cw_collector import collect_cw_instance_metrics, collect_cw_metrics
@@ -37,7 +38,6 @@ from collectors.schema_snapshot import (
     collect_mysql_schema_snapshot,
     collect_pg_schema_snapshot,
 )
-from collectors.apm_collector import collect_apm
 from collectors.stats_collector import collect_query_stats
 
 # schema_snapshots retention. WHAT THIS ACTUALLY GUARANTEES, stated precisely

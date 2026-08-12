@@ -2301,8 +2301,21 @@ class AgentStack(cdk.Stack):
             resources=["arn:aws:iam::*:role/dbops-spoke-role"]))
         # Local-account fallback (no spoke role): read-only CW Logs.
         apm_lambda.add_to_role_policy(iam.PolicyStatement(
-            actions=["logs:StartQuery", "logs:GetQueryResults",
-                     "logs:FilterLogEvents", "logs:DescribeLogGroups"],
+            # StartQuery + GetQueryResults ONLY. FilterLogEvents and DescribeLogGroups
+            # were granted here but never called (the code path is Insights:
+            # start_query + get_query_results), and FilterLogEvents on "*" re-committed
+            # the exact over-grant that tests/cdk/test_synth.py
+            # ::test_docdb_collector_log_read_is_prefix_scoped exists to prevent. That
+            # test's own docstring records that this over-grant already shipped once in
+            # this repo for these same actions.
+            #
+            # StartQuery stays on "*" because a target's log groups are arbitrary
+            # operator-registered names, so they cannot be enumerated at synth time.
+            # GetQueryResults does not support resource-level permissions at all. The
+            # enforcement point is therefore api/apm/handler.py, which rejects any
+            # log_group that is not in the target's registered list, the same shape as
+            # this repo's wildcard writes gated by approval_guard.
+            actions=["logs:StartQuery", "logs:GetQueryResults"],
             resources=["*"]))
 
         apm_integration = integrations.HttpLambdaIntegration("ApmIntegration", apm_lambda)

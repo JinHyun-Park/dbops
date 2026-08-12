@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **No public inbound, ever.** App EC2 has no public IP; its security group has **no inbound rules** (egress only). Access via SSM Session Manager only.
-- **Same account/region as DBOps:** account `571850511781`, region `us-east-1`. APM target registered later with `spoke_role_arn` blank (local session, no cross-account).
+- **Same account/region as DBOps:** account `123456789012`, region `us-east-1`. APM target registered later with `spoke_role_arn` blank (local session, no cross-account).
 - **JSON logging** to `/var/log/todoapp/app.log`. Each line is a JSON object with at least a `level` field (UPPERCASE: `ERROR`/`WARN`/`INFO`) and a `message` field. This satisfies both the APM log **search** (`@message like /ERROR/`) and the collector's level-**count** (`stats count(*) by level`, needs a `level` field).
 - **Log Group name:** `/dbops/apm/todoapp` (created by CDK, retention 7 days).
 - **Not wired into the platform test suite** (`tests/unit`, `tests/cdk`, parity). `samples/` is managed separately.
@@ -24,6 +24,7 @@
 ### Task 1: Spring Boot project skeleton + Task entity/repository
 
 **Files:**
+
 - Create: `samples/springboot/app/pom.xml`
 - Create: `samples/springboot/app/src/main/java/com/dbops/todo/TodoApplication.java`
 - Create: `samples/springboot/app/src/main/java/com/dbops/todo/Task.java`
@@ -32,6 +33,7 @@
 - Test: `samples/springboot/app/src/test/java/com/dbops/todo/TaskRepositoryTest.java`
 
 **Interfaces:**
+
 - Produces: `Task` entity (fields `Long id`, `String title` UNIQUE NOT NULL, `boolean done`, `String note` nullable); `TaskRepository extends JpaRepository<Task, Long>` with `Optional<Task> findByTitle(String title)`.
 
 - [ ] **Step 1: Write `pom.xml`**
@@ -221,10 +223,12 @@ git commit -m "feat(samples): Spring Boot todo skeleton (entity + repo)"
 ### Task 2: JSON logging config + global exception handler
 
 **Files:**
+
 - Create: `samples/springboot/app/src/main/resources/logback-spring.xml`
 - Create: `samples/springboot/app/src/main/java/com/dbops/todo/GlobalExceptionHandler.java`
 
 **Interfaces:**
+
 - Produces: JSON log lines with `level`/`message` fields to `${LOG_DIR:-/var/log/todoapp}/app.log`; `GlobalExceptionHandler` `@RestControllerAdvice` mapping uncaught exceptions to HTTP 500 and logging an ERROR with stack trace.
 - Consumes: nothing new.
 
@@ -314,11 +318,13 @@ git commit -m "feat(samples): JSON file logging + global 500 handler"
 ### Task 3: TaskController — CRUD + health + NPE bug + constraint bug
 
 **Files:**
+
 - Create: `samples/springboot/app/src/main/java/com/dbops/todo/TaskController.java`
 - Create: `samples/springboot/app/src/main/java/com/dbops/todo/TaskRequest.java`
 - Test: `samples/springboot/app/src/test/java/com/dbops/todo/TaskControllerTest.java`
 
 **Interfaces:**
+
 - Consumes: `Task`, `TaskRepository`, `GlobalExceptionHandler`.
 - Produces: REST routes `GET /api/health`, `GET /api/tasks`, `GET /api/tasks/{id}`, `POST /api/tasks`, `PUT /api/tasks/{id}`, `DELETE /api/tasks/{id}`. **Bug 1 (NPE):** POST body with `note` set and `title` null reaches `title.trim()` → NPE → 500. **Bug 2 (constraint):** POST with a duplicate `title` → `DataIntegrityViolationException` → 500 (no pre-check by design).
 
@@ -479,10 +485,12 @@ git commit -m "feat(samples): task CRUD + health, NPE and constraint bugs"
 ### Task 4: LeakController — resource-leak bug (bug 3)
 
 **Files:**
+
 - Create: `samples/springboot/app/src/main/java/com/dbops/todo/LeakController.java`
 - Test: `samples/springboot/app/src/test/java/com/dbops/todo/LeakControllerTest.java`
 
 **Interfaces:**
+
 - Produces: `GET /api/leak` — each call appends a retained 1 MB buffer to a `static` list (never released) and increments a counter. Logs `WARN` every call ("leaked resource, open handles=N"), escalates to `ERROR` once N crosses a threshold (10). Static accessor `LeakController.openHandles()` for the test.
 
 - [ ] **Step 1: Write the failing test**
@@ -590,12 +598,14 @@ git commit -m "feat(samples): resource-leak endpoint (bug 3)"
 ### Task 5: CDK stack — VPC, NAT, EC2, CloudWatch Agent, Log Group
 
 **Files:**
+
 - Create: `samples/springboot/cdk/cdk.json`
 - Create: `samples/springboot/cdk/requirements.txt`
 - Create: `samples/springboot/cdk/app.py`
 - Create: `samples/springboot/cdk/springboot_apm_stack.py`
 
 **Interfaces:**
+
 - Consumes: the built fat jar at `samples/springboot/app/target/todoapp.jar` (packaged as an S3 asset via `aws_s3_assets.Asset`).
 - Produces: stack `dbops-dev-springboot-apm` with CfnOutputs `InstanceId`, `LogGroup`, `Region`, `VpcId`. EC2 tagged `Name=dbops-apm-todoapp` (used by the load generator to resolve the private IP in Task 6).
 
@@ -750,10 +760,12 @@ class SpringbootApmStack(cdk.Stack):
 - [ ] **Step 5: Synth to verify (jar must exist first)**
 
 Run:
+
 ```bash
 cd samples/springboot/app && mvn -q package -DskipTests && cd ../cdk && \
 pip install -r requirements.txt -q && cdk synth dbops-dev-springboot-apm >/dev/null && echo SYNTH_OK
 ```
+
 Expected: `SYNTH_OK`. (If Maven/CDK CLI unavailable here, note it; the templates are still committed for the deploy host.)
 
 - [ ] **Step 6: Commit**
@@ -768,9 +780,11 @@ git commit -m "feat(samples): CDK stack — private EC2 + CW Agent + log group"
 ### Task 6: Load-generator Lambda + schedule + ingress grant
 
 **Files:**
+
 - Modify: `samples/springboot/cdk/springboot_apm_stack.py` (append load generator)
 
 **Interfaces:**
+
 - Consumes: `self.vpc`, `self.app_sg` from Task 5; EC2 tag `Name=dbops-apm-todoapp`.
 - Produces: a Python Lambda in the private subnets, EventBridge `rate(2 minutes)`, allowed inbound to the app SG on 8080. Resolves the app private IP via `ec2:DescribeInstances` (tag filter), sends ~mostly-200 traffic plus a low rate of the three bug triggers.
 
@@ -892,13 +906,15 @@ git commit -m "feat(samples): VPC-internal load generator + 2-min schedule"
 ### Task 7: README — deploy + APM target registration walkthrough
 
 **Files:**
+
 - Create: `samples/springboot/README.md`
 
 **Interfaces:** none (docs).
 
 - [ ] **Step 1: Write `README.md`** (Korean, 해요체) covering:
+
   - What this is (APM test target), cost warning (1 NAT ~$32/mo + t3.small).
-  - Prereqs: Java 17 + Maven on the build host; CDK CLI ≥ 2.1134.0; deploying to account `571850511781` / `us-east-1`.
+  - Prereqs: Java 17 + Maven on the build host; CDK CLI ≥ 2.1134.0; deploying to account `123456789012` / `us-east-1`.
   - Deploy: `cd samples/springboot/app && mvn -q package -DskipTests` then `cd ../cdk && pip install -r requirements.txt && cdk deploy dbops-dev-springboot-apm`.
   - Verify the app: `aws ssm start-session --target <InstanceId>` → `systemctl status todoapp`, `journalctl -u todoapp -n 50`, `tail /var/log/todoapp/app.log`.
   - Register the APM target in DBOps `/apm`: paste `InstanceId`, `LogGroup=/dbops/apm/todoapp`, `region=us-east-1`, **leave `spoke_role_arn` blank** (same account). Explain why (local session, `_session_for` with empty role).
@@ -919,6 +935,7 @@ git commit -m "docs(samples): Spring Boot APM target deploy + registration guide
 ## Self-Review
 
 **Spec coverage:**
+
 - §3 layout → Tasks 1–7 create exactly the listed files. ✓
 - §4 domain/routes/logging/bugs → Tasks 1–4 (JSON logging swap from plain-text is documented in Global Constraints with rationale: collector `stats count() by level` needs a `level` field). ✓
 - §5 VPC/NAT/EC2/CW Agent/load-gen/outputs → Tasks 5–6. ✓

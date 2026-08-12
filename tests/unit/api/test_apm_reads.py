@@ -1,4 +1,6 @@
-import importlib.util, json, base64
+import base64
+import importlib.util
+import json
 from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -6,7 +8,9 @@ _SPEC = importlib.util.spec_from_file_location(
 
 
 def _load():
-    m = importlib.util.module_from_spec(_SPEC); _SPEC.loader.exec_module(m); return m
+    m = importlib.util.module_from_spec(_SPEC)
+    _SPEC.loader.exec_module(m)
+    return m
 
 
 def _event(qs=None):

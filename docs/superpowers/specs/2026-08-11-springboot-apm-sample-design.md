@@ -19,7 +19,7 @@ has pre-installed instrumentation on EC2. This sample IS that pre-installed targ
   CloudWatch Log Group and publishing EC2 host metrics (CPU/mem/disk via `CWAgent`).
 - **Three intentional backend bugs** that surface as `ERROR`/`WARN` log lines (and a
   memory trend on host metrics), so we can prove the `/apm` dashboard tracks them.
-- Deploys to **the same AWS account + region as DBOps** (571850511781 / us-east-1), so
+- Deploys to **the same AWS account + region as DBOps** (123456789012 / us-east-1), so
   no cross-account spoke role is needed — the APM Lambda reads CloudWatch locally.
 
 ### Non-Goals (YAGNI)
@@ -36,16 +36,16 @@ has pre-installed instrumentation on EC2. This sample IS that pre-installed targ
 
 ## 2. Key Decisions (from brainstorming)
 
-| Decision | Choice |
-| --- | --- |
-| Instrumentation scope | CloudWatch Agent only → **app logs + EC2 host metrics** (no ADOT) |
-| Network | **Own VPC**, private subnet for the app EC2 (no public IP, egress only) |
-| Outbound path | **NAT Gateway** in a public subnet (so yum/Maven Central/CloudWatch reachable) |
-| CRUD domain | **To-Do/Task API**, H2 in-memory DB with a UNIQUE constraint |
-| Intentional bugs | NPE (500), unvalidated input → DB constraint violation, resource leak |
-| Build/deploy | **Fat jar as CDK S3 asset** (build `mvn package` before `cdk deploy`) |
-| Traffic generation | VPC-internal load-generator Lambda (private), 2-min EventBridge schedule |
-| Same-account | Yes → APM target registered with `spoke_role_arn` blank; no cross-account |
+| Decision              | Choice                                                                         |
+| --------------------- | ------------------------------------------------------------------------------ |
+| Instrumentation scope | CloudWatch Agent only → **app logs + EC2 host metrics** (no ADOT)              |
+| Network               | **Own VPC**, private subnet for the app EC2 (no public IP, egress only)        |
+| Outbound path         | **NAT Gateway** in a public subnet (so yum/Maven Central/CloudWatch reachable) |
+| CRUD domain           | **To-Do/Task API**, H2 in-memory DB with a UNIQUE constraint                   |
+| Intentional bugs      | NPE (500), unvalidated input → DB constraint violation, resource leak          |
+| Build/deploy          | **Fat jar as CDK S3 asset** (build `mvn package` before `cdk deploy`)          |
+| Traffic generation    | VPC-internal load-generator Lambda (private), 2-min EventBridge schedule       |
+| Same-account          | Yes → APM target registered with `spoke_role_arn` blank; no cross-account      |
 
 ### Why same-account works without a spoke role
 
@@ -91,15 +91,15 @@ its own, sidestepping the known `samples/cdk` "no cdk.json / needs a VPC" limita
 `note` (nullable). Repository is Spring Data JPA over H2 in-memory (resets on restart —
 fine for a demo target).
 
-| Route | Method | Behavior |
-| --- | --- | --- |
-| `/api/health` | GET | 200 `{status:"UP"}` |
-| `/api/tasks` | GET | list all |
-| `/api/tasks/{id}` | GET | one, 404 if missing |
-| `/api/tasks` | POST | create |
-| `/api/tasks/{id}` | PUT | update |
-| `/api/tasks/{id}` | DELETE | delete |
-| `/api/leak` | GET | resource-leak trigger (see bugs) |
+| Route             | Method | Behavior                         |
+| ----------------- | ------ | -------------------------------- |
+| `/api/health`     | GET    | 200 `{status:"UP"}`              |
+| `/api/tasks`      | GET    | list all                         |
+| `/api/tasks/{id}` | GET    | one, 404 if missing              |
+| `/api/tasks`      | POST   | create                           |
+| `/api/tasks/{id}` | PUT    | update                           |
+| `/api/tasks/{id}` | DELETE | delete                           |
+| `/api/leak`       | GET    | resource-leak trigger (see bugs) |
 
 ### Logging — the axis the dashboard tracks
 

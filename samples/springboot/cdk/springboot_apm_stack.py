@@ -1,15 +1,35 @@
 import aws_cdk as cdk
 from aws_cdk import (
     aws_cloudfront as cloudfront,
+)
+from aws_cdk import (
     aws_cloudfront_origins as origins,
+)
+from aws_cdk import (
     aws_ec2 as ec2,
+)
+from aws_cdk import (
     aws_elasticloadbalancingv2 as elbv2,
+)
+from aws_cdk import (
     aws_elasticloadbalancingv2_targets as elbv2_targets,
+)
+from aws_cdk import (
     aws_events as events,
+)
+from aws_cdk import (
     aws_events_targets as targets,
+)
+from aws_cdk import (
     aws_iam as iam,
+)
+from aws_cdk import (
     aws_lambda as lambda_,
+)
+from aws_cdk import (
     aws_logs as logs,
+)
+from aws_cdk import (
     aws_s3_assets as s3_assets,
 )
 from constructs import Construct
@@ -165,9 +185,31 @@ class SpringbootApmStack(cdk.Stack):
         # with CDK's default "disallow all" egress, so health checks time out and
         # every target is unhealthy. allow_to wires both sides.
         alb.connections.allow_to(sg, ec2.Port.tcp(8080), "ALB to app 8080")
-        listener = alb.add_listener("Http", port=80, open=True)
+        # The ALB has to be internet-facing for CloudFront to reach it, but that left
+        # the deliberately-buggy app answering ANY caller on plaintext HTTP, bypassing
+        # CloudFront and its REDIRECT_TO_HTTPS entirely. So the listener now DEFAULTS to
+        # 403 and only forwards requests carrying a header that CloudFront adds and a
+        # direct caller cannot guess.
+        #
+        # A CloudFront managed-prefix-list SG rule would be the other way to do this,
+        # but its id differs per region and resolving it needs a synth-time lookup with
+        # credentials, which this sample must not require.
+        #
+        # The value is derived from the stack's own construct path, so it is
+        # deterministic per deployment and is NOT a literal committed to this repo.
+        origin_secret = cdk.Names.unique_id(self)[:40]
+
+        listener = alb.add_listener(
+            "Http", port=80, open=True,
+            default_action=elbv2.ListenerAction.fixed_response(
+                403, content_type="text/plain",
+                message_body="direct origin access is blocked; use the CloudFront URL"),
+        )
         listener.add_targets(
             "AppTarget",
+            priority=10,
+            conditions=[elbv2.ListenerCondition.http_header(
+                "X-Origin-Verify", [origin_secret])],
             port=8080,
             protocol=elbv2.ApplicationProtocol.HTTP,
             targets=[elbv2_targets.InstanceTarget(instance, port=8080)],
@@ -185,6 +227,9 @@ class SpringbootApmStack(cdk.Stack):
                     alb,
                     protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY,
                     http_port=80,
+                    # Paired with the listener rule above: without this header the ALB
+                    # answers 403, so the app is reachable only through CloudFront.
+                    custom_headers={"X-Origin-Verify": origin_secret},
                 ),
                 # Sample app is a JSON API with POST/PUT/DELETE; allow all methods
                 # and disable caching so bug-triggering requests always hit origin.

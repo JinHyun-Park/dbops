@@ -26,7 +26,9 @@ interface LogEntry {
 export default function ApmPage() {
   const [targets, setTargets] = useState<ApmTarget[]>([]);
   const [selected, setSelected] = useState<string>("");
-  const [overview, setOverview] = useState<Record<string, unknown> | null>(null);
+  const [overview, setOverview] = useState<Record<string, unknown> | null>(
+    null,
+  );
   const [levels, setLevels] = useState<string[]>(["ERROR", "WARN"]);
   const [query, setQuery] = useState("");
   const [allLevels, setAllLevels] = useState(false);
@@ -60,15 +62,32 @@ export default function ApmPage() {
     setSearching(true);
     setError(null);
     const opts: {
-      levels?: string[]; all?: boolean; query: string; limit: number;
-      minutes?: number; start?: number; end?: number;
+      levels?: string[];
+      all?: boolean;
+      query: string;
+      limit: number;
+      minutes?: number;
+      start?: number;
+      end?: number;
     } = { query, limit: 2000 };
     if (allLevels) opts.all = true;
     else opts.levels = levels;
+    // The backend documents `levels: []` as "no filter, ALL levels" (see
+    // _levels_filter in api/apm/handler.py), which is deliberate there. But in the UI
+    // an empty list means the user unchecked every level, so sending it straight
+    // through showed EVERYTHING when they asked for nothing. Block it here rather
+    // than change the backend contract, which is documented and tested.
+    if (!allLevels && levels.length === 0) {
+      setSearching(false);
+      setError("레벨을 최소 하나 선택하거나 '전체 레벨'을 켜세요.");
+      return;
+    }
     if (rangeMin === 0) {
       // Custom range: convert local datetime-local values to epoch seconds.
-      if (customStart) opts.start = Math.floor(new Date(customStart).getTime() / 1000);
-      if (customEnd) opts.end = Math.floor(new Date(customEnd).getTime() / 1000);
+      if (customStart)
+        opts.start = Math.floor(new Date(customStart).getTime() / 1000);
+      if (customEnd)
+        opts.end = Math.floor(new Date(customEnd).getTime() / 1000);
     } else {
       opts.minutes = rangeMin;
     }
@@ -79,7 +98,9 @@ export default function ApmPage() {
   }, [selected, levels, allLevels, query, rangeMin, customStart, customEnd]);
 
   const toggleLevel = (lv: string) =>
-    setLevels((cur) => (cur.includes(lv) ? cur.filter((x) => x !== lv) : [...cur, lv]));
+    setLevels((cur) =>
+      cur.includes(lv) ? cur.filter((x) => x !== lv) : [...cur, lv],
+    );
 
   const metrics = (overview?.metrics as Record<string, number>) || {};
   const logCounts = (overview?.log_counts as Record<string, number>) || {};
@@ -113,7 +134,8 @@ export default function ApmPage() {
       {!selected ? (
         <Section title="APM 타겟 없음">
           <p className="text-sm text-zinc-400">
-            먼저 APM 타겟(EC2 instance-id, region, spoke role, 로그 그룹)을 등록하세요.
+            먼저 APM 타겟(EC2 instance-id, region, spoke role, 로그 그룹)을
+            등록하세요.
           </p>
         </Section>
       ) : (
@@ -134,10 +156,20 @@ export default function ApmPage() {
               </div>
             )}
             <div className="flex-1 min-w-40 border border-zinc-800 rounded-lg overflow-hidden">
-              <Stat label="CPU %" value={typeof metrics.cpu === "number" ? fmt2(metrics.cpu) : "—"} />
+              <Stat
+                label="CPU %"
+                value={
+                  typeof metrics.cpu === "number" ? fmt2(metrics.cpu) : "—"
+                }
+              />
             </div>
             <div className="flex-1 min-w-40 border border-zinc-800 rounded-lg overflow-hidden">
-              <Stat label="Mem %" value={typeof metrics.mem === "number" ? fmt2(metrics.mem) : "—"} />
+              <Stat
+                label="Mem %"
+                value={
+                  typeof metrics.mem === "number" ? fmt2(metrics.mem) : "—"
+                }
+              />
             </div>
             <div className="flex-1 min-w-40 border border-zinc-800 rounded-lg overflow-hidden">
               <Stat label="ERROR (1h)" value={logCounts.ERROR ?? 0} />
@@ -207,8 +239,8 @@ export default function ApmPage() {
                     allLevels
                       ? "bg-zinc-900 border-zinc-800 text-zinc-600 cursor-not-allowed"
                       : levels.includes(lv)
-                      ? "bg-zinc-700 border-zinc-500"
-                      : "bg-zinc-900 border-zinc-700 text-zinc-500"
+                        ? "bg-zinc-700 border-zinc-500"
+                        : "bg-zinc-900 border-zinc-700 text-zinc-500"
                   }`}
                 >
                   {lv}
@@ -230,12 +262,16 @@ export default function ApmPage() {
             </div>
             <div className="font-mono text-xs space-y-1 min-h-[55vh] max-h-[72vh] overflow-auto">
               {logs.length === 0 ? (
-                <p className="text-zinc-500">결과 없음. 레벨·검색어·타겟을 확인하세요.</p>
+                <p className="text-zinc-500">
+                  결과 없음. 레벨·검색어·타겟을 확인하세요.
+                </p>
               ) : (
                 logs.map((e, i) => (
                   <div key={i} className="border-b border-zinc-800 py-1">
                     <span className="text-zinc-500 mr-2">{e.ts}</span>
-                    <span className="text-zinc-200 whitespace-pre-wrap">{e.message}</span>
+                    <span className="text-zinc-200 whitespace-pre-wrap">
+                      {e.message}
+                    </span>
                   </div>
                 ))
               )}
