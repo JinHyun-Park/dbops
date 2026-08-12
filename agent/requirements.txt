@@ -4,7 +4,7 @@ mcp>=1.28.1
 # server.py SigV4-signs requests to the AWS MCP Server (doc tools) with
 # botocore directly — declare boto3 explicitly so the runtime never relies on
 # it only being pulled transitively via strands-agents.
-boto3>=1.43.38
+boto3>=1.43.62
 # tenancy.py verifies the caller's Cognito ID token against the pool JWKS
 # (PyJWKClient needs the [crypto] extra → cryptography for RS256). Declared
 # explicitly so a _deps rebuild can never drop it transitively — without it,
