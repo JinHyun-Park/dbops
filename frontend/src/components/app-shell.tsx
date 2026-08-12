@@ -272,6 +272,12 @@ const NAV: NavGroup[] = [
         icon: HeartPulse,
         hint: "DBOps 자체 모니터링 — Lambda·Aurora·DDB 상태",
       },
+      {
+        href: "/apm",
+        label: "APM",
+        icon: Activity,
+        hint: "EC2 앱 로그·성능 모니터링 (Java/Spring Boot)",
+      },
     ],
   },
 ];
@@ -302,6 +308,7 @@ function humanize(segment: string): string {
     "context-files": "Context files",
     onboarding: "Onboarding",
     health: "Health",
+    apm: "APM",
     callback: "Login",
   };
   return map[segment] || segment;

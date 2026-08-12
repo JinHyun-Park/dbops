@@ -28,6 +28,9 @@
       "name": "alert-subscriptions"
     },
     {
+      "name": "apm"
+    },
+    {
       "name": "approval-policies"
     },
     {
@@ -109,7 +112,9 @@
   "paths": {
     "/api/activity": {
       "get": {
-        "tags": ["activity"],
+        "tags": [
+          "activity"
+        ],
         "summary": "GET /api/activity",
         "responses": {
           "200": {
@@ -128,7 +133,9 @@
     },
     "/api/admin/teams": {
       "get": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "GET /api/admin/teams",
         "responses": {
           "200": {
@@ -145,7 +152,9 @@
         ]
       },
       "post": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "POST /api/admin/teams",
         "responses": {
           "200": {
@@ -162,7 +171,9 @@
         ]
       },
       "delete": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "DELETE /api/admin/teams",
         "responses": {
           "200": {
@@ -181,7 +192,9 @@
     },
     "/api/admin/teams/{team_id}": {
       "get": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "GET /api/admin/teams/{team_id}",
         "responses": {
           "200": {
@@ -208,7 +221,9 @@
         ]
       },
       "post": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "POST /api/admin/teams/{team_id}",
         "responses": {
           "200": {
@@ -235,7 +250,9 @@
         ]
       },
       "delete": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "DELETE /api/admin/teams/{team_id}",
         "responses": {
           "200": {
@@ -264,7 +281,9 @@
     },
     "/api/admin/teams/{team_id}/clusters/{cluster_id}": {
       "get": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "GET /api/admin/teams/{team_id}/clusters/{cluster_id}",
         "responses": {
           "200": {
@@ -299,7 +318,9 @@
         ]
       },
       "post": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "POST /api/admin/teams/{team_id}/clusters/{cluster_id}",
         "responses": {
           "200": {
@@ -334,7 +355,9 @@
         ]
       },
       "delete": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "DELETE /api/admin/teams/{team_id}/clusters/{cluster_id}",
         "responses": {
           "200": {
@@ -371,7 +394,9 @@
     },
     "/api/admin/teams/{team_id}/members/{username}": {
       "get": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "GET /api/admin/teams/{team_id}/members/{username}",
         "responses": {
           "200": {
@@ -406,7 +431,9 @@
         ]
       },
       "post": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "POST /api/admin/teams/{team_id}/members/{username}",
         "responses": {
           "200": {
@@ -441,7 +468,9 @@
         ]
       },
       "delete": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "DELETE /api/admin/teams/{team_id}/members/{username}",
         "responses": {
           "200": {
@@ -478,7 +507,9 @@
     },
     "/api/admin/users": {
       "get": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "GET /api/admin/users",
         "responses": {
           "200": {
@@ -497,7 +528,9 @@
     },
     "/api/admin/users/{username}/role": {
       "post": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "POST /api/admin/users/{username}/role",
         "responses": {
           "200": {
@@ -526,7 +559,9 @@
     },
     "/api/alert-rules": {
       "get": {
-        "tags": ["alert-rules"],
+        "tags": [
+          "alert-rules"
+        ],
         "summary": "GET /api/alert-rules",
         "responses": {
           "200": {
@@ -543,7 +578,9 @@
         ]
       },
       "post": {
-        "tags": ["alert-rules"],
+        "tags": [
+          "alert-rules"
+        ],
         "summary": "POST /api/alert-rules",
         "responses": {
           "200": {
@@ -562,7 +599,9 @@
     },
     "/api/alert-rules/snooze-bulk": {
       "post": {
-        "tags": ["alert-rules"],
+        "tags": [
+          "alert-rules"
+        ],
         "summary": "POST /api/alert-rules/snooze-bulk",
         "responses": {
           "200": {
@@ -581,7 +620,9 @@
     },
     "/api/alert-rules/{id}": {
       "patch": {
-        "tags": ["alert-rules"],
+        "tags": [
+          "alert-rules"
+        ],
         "summary": "PATCH /api/alert-rules/{id}",
         "responses": {
           "200": {
@@ -608,7 +649,9 @@
         ]
       },
       "delete": {
-        "tags": ["alert-rules"],
+        "tags": [
+          "alert-rules"
+        ],
         "summary": "DELETE /api/alert-rules/{id}",
         "responses": {
           "200": {
@@ -637,7 +680,9 @@
     },
     "/api/alert-rules/{id}/impact": {
       "get": {
-        "tags": ["alert-rules"],
+        "tags": [
+          "alert-rules"
+        ],
         "summary": "GET /api/alert-rules/{id}/impact",
         "responses": {
           "200": {
@@ -666,7 +711,9 @@
     },
     "/api/alert-rules/{id}/snooze": {
       "post": {
-        "tags": ["alert-rules"],
+        "tags": [
+          "alert-rules"
+        ],
         "summary": "POST /api/alert-rules/{id}/snooze",
         "responses": {
           "200": {
@@ -695,7 +742,9 @@
     },
     "/api/alert-subscriptions": {
       "get": {
-        "tags": ["alert-subscriptions"],
+        "tags": [
+          "alert-subscriptions"
+        ],
         "summary": "GET /api/alert-subscriptions",
         "responses": {
           "200": {
@@ -712,7 +761,9 @@
         ]
       },
       "post": {
-        "tags": ["alert-subscriptions"],
+        "tags": [
+          "alert-subscriptions"
+        ],
         "summary": "POST /api/alert-subscriptions",
         "responses": {
           "200": {
@@ -729,7 +780,9 @@
         ]
       },
       "delete": {
-        "tags": ["alert-subscriptions"],
+        "tags": [
+          "alert-subscriptions"
+        ],
         "summary": "DELETE /api/alert-subscriptions",
         "responses": {
           "200": {
@@ -746,9 +799,233 @@
         ]
       }
     },
+    "/api/apm/targets": {
+      "get": {
+        "tags": [
+          "apm"
+        ],
+        "summary": "GET /api/apm/targets",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "apm"
+        ],
+        "summary": "POST /api/apm/targets",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/apm/targets/{id}": {
+      "get": {
+        "tags": [
+          "apm"
+        ],
+        "summary": "GET /api/apm/targets/{id}",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "apm"
+        ],
+        "summary": "PUT /api/apm/targets/{id}",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "apm"
+        ],
+        "summary": "DELETE /api/apm/targets/{id}",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/apm/targets/{id}/logs/search": {
+      "post": {
+        "tags": [
+          "apm"
+        ],
+        "summary": "POST /api/apm/targets/{id}/logs/search",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/apm/targets/{id}/metrics": {
+      "get": {
+        "tags": [
+          "apm"
+        ],
+        "summary": "GET /api/apm/targets/{id}/metrics",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/apm/targets/{id}/overview": {
+      "get": {
+        "tags": [
+          "apm"
+        ],
+        "summary": "GET /api/apm/targets/{id}/overview",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
     "/api/approval-policies": {
       "get": {
-        "tags": ["approval-policies"],
+        "tags": [
+          "approval-policies"
+        ],
         "summary": "GET /api/approval-policies",
         "responses": {
           "200": {
@@ -765,7 +1042,9 @@
         ]
       },
       "post": {
-        "tags": ["approval-policies"],
+        "tags": [
+          "approval-policies"
+        ],
         "summary": "POST /api/approval-policies",
         "responses": {
           "200": {
@@ -784,7 +1063,9 @@
     },
     "/api/approval-policies/{id}": {
       "put": {
-        "tags": ["approval-policies"],
+        "tags": [
+          "approval-policies"
+        ],
         "summary": "PUT /api/approval-policies/{id}",
         "responses": {
           "200": {
@@ -811,7 +1092,9 @@
         ]
       },
       "delete": {
-        "tags": ["approval-policies"],
+        "tags": [
+          "approval-policies"
+        ],
         "summary": "DELETE /api/approval-policies/{id}",
         "responses": {
           "200": {
@@ -840,7 +1123,9 @@
     },
     "/api/approvals": {
       "get": {
-        "tags": ["approvals"],
+        "tags": [
+          "approvals"
+        ],
         "summary": "GET /api/approvals",
         "responses": {
           "200": {
@@ -857,7 +1142,9 @@
         ]
       },
       "post": {
-        "tags": ["approvals"],
+        "tags": [
+          "approvals"
+        ],
         "summary": "POST /api/approvals",
         "responses": {
           "200": {
@@ -876,7 +1163,9 @@
     },
     "/api/approvals/{id}": {
       "get": {
-        "tags": ["approvals"],
+        "tags": [
+          "approvals"
+        ],
         "summary": "GET /api/approvals/{id}",
         "responses": {
           "200": {
@@ -903,7 +1192,9 @@
         ]
       },
       "put": {
-        "tags": ["approvals"],
+        "tags": [
+          "approvals"
+        ],
         "summary": "PUT /api/approvals/{id}",
         "responses": {
           "200": {
@@ -932,7 +1223,9 @@
     },
     "/api/chat/sessions": {
       "get": {
-        "tags": ["chat"],
+        "tags": [
+          "chat"
+        ],
         "summary": "GET /api/chat/sessions",
         "responses": {
           "200": {
@@ -951,7 +1244,9 @@
     },
     "/api/chat/sessions/{id}": {
       "get": {
-        "tags": ["chat"],
+        "tags": [
+          "chat"
+        ],
         "summary": "GET /api/chat/sessions/{id}",
         "responses": {
           "200": {
@@ -978,7 +1273,9 @@
         ]
       },
       "put": {
-        "tags": ["chat"],
+        "tags": [
+          "chat"
+        ],
         "summary": "PUT /api/chat/sessions/{id}",
         "responses": {
           "200": {
@@ -1005,7 +1302,9 @@
         ]
       },
       "delete": {
-        "tags": ["chat"],
+        "tags": [
+          "chat"
+        ],
         "summary": "DELETE /api/chat/sessions/{id}",
         "responses": {
           "200": {
@@ -1034,7 +1333,9 @@
     },
     "/api/clusters": {
       "get": {
-        "tags": ["clusters"],
+        "tags": [
+          "clusters"
+        ],
         "summary": "GET /api/clusters",
         "responses": {
           "200": {
@@ -1051,7 +1352,9 @@
         ]
       },
       "post": {
-        "tags": ["clusters"],
+        "tags": [
+          "clusters"
+        ],
         "summary": "POST /api/clusters",
         "responses": {
           "200": {
@@ -1070,7 +1373,9 @@
     },
     "/api/clusters/bulk-register": {
       "post": {
-        "tags": ["clusters"],
+        "tags": [
+          "clusters"
+        ],
         "summary": "POST /api/clusters/bulk-register",
         "responses": {
           "200": {
@@ -1089,7 +1394,9 @@
     },
     "/api/clusters/discover": {
       "post": {
-        "tags": ["clusters"],
+        "tags": [
+          "clusters"
+        ],
         "summary": "POST /api/clusters/discover",
         "responses": {
           "200": {
@@ -1108,7 +1415,9 @@
     },
     "/api/clusters/sample": {
       "post": {
-        "tags": ["clusters"],
+        "tags": [
+          "clusters"
+        ],
         "summary": "POST /api/clusters/sample",
         "responses": {
           "200": {
@@ -1127,7 +1436,9 @@
     },
     "/api/clusters/test-connection": {
       "post": {
-        "tags": ["clusters"],
+        "tags": [
+          "clusters"
+        ],
         "summary": "POST /api/clusters/test-connection",
         "responses": {
           "200": {
@@ -1146,7 +1457,9 @@
     },
     "/api/clusters/{id}": {
       "delete": {
-        "tags": ["clusters"],
+        "tags": [
+          "clusters"
+        ],
         "summary": "DELETE /api/clusters/{id}",
         "responses": {
           "200": {
@@ -1175,7 +1488,9 @@
     },
     "/api/clusters/{id}/meta": {
       "patch": {
-        "tags": ["clusters"],
+        "tags": [
+          "clusters"
+        ],
         "summary": "PATCH /api/clusters/{id}/meta",
         "responses": {
           "200": {
@@ -1204,7 +1519,9 @@
     },
     "/api/config": {
       "get": {
-        "tags": ["config"],
+        "tags": [
+          "config"
+        ],
         "summary": "GET /api/config",
         "responses": {
           "200": {
@@ -1221,7 +1538,9 @@
         ]
       },
       "put": {
-        "tags": ["config"],
+        "tags": [
+          "config"
+        ],
         "summary": "PUT /api/config",
         "responses": {
           "200": {
@@ -1240,7 +1559,9 @@
     },
     "/api/context-files": {
       "get": {
-        "tags": ["context-files"],
+        "tags": [
+          "context-files"
+        ],
         "summary": "GET /api/context-files",
         "responses": {
           "200": {
@@ -1257,7 +1578,9 @@
         ]
       },
       "post": {
-        "tags": ["context-files"],
+        "tags": [
+          "context-files"
+        ],
         "summary": "POST /api/context-files",
         "responses": {
           "200": {
@@ -1276,7 +1599,9 @@
     },
     "/api/context-files/{id}": {
       "delete": {
-        "tags": ["context-files"],
+        "tags": [
+          "context-files"
+        ],
         "summary": "DELETE /api/context-files/{id}",
         "responses": {
           "200": {
@@ -1305,7 +1630,9 @@
     },
     "/api/cost": {
       "get": {
-        "tags": ["cost"],
+        "tags": [
+          "cost"
+        ],
         "summary": "GET /api/cost",
         "responses": {
           "200": {
@@ -1324,7 +1651,9 @@
     },
     "/api/dashboard/{cluster_id}": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}",
         "responses": {
           "200": {
@@ -1353,7 +1682,9 @@
     },
     "/api/dashboard/{cluster_id}/active-sessions": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/active-sessions",
         "responses": {
           "200": {
@@ -1382,7 +1713,9 @@
     },
     "/api/dashboard/{cluster_id}/anomalies": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/anomalies",
         "responses": {
           "200": {
@@ -1411,7 +1744,9 @@
     },
     "/api/dashboard/{cluster_id}/audit-log": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/audit-log",
         "responses": {
           "200": {
@@ -1440,7 +1775,9 @@
     },
     "/api/dashboard/{cluster_id}/backups": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/backups",
         "responses": {
           "200": {
@@ -1469,7 +1806,9 @@
     },
     "/api/dashboard/{cluster_id}/batch-timeseries": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/batch-timeseries",
         "responses": {
           "200": {
@@ -1498,7 +1837,9 @@
     },
     "/api/dashboard/{cluster_id}/blocking-locks": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/blocking-locks",
         "responses": {
           "200": {
@@ -1527,7 +1868,9 @@
     },
     "/api/dashboard/{cluster_id}/capacity-forecast": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/capacity-forecast",
         "responses": {
           "200": {
@@ -1556,7 +1899,9 @@
     },
     "/api/dashboard/{cluster_id}/change-impact": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/change-impact",
         "responses": {
           "200": {
@@ -1585,7 +1930,9 @@
     },
     "/api/dashboard/{cluster_id}/engine-config": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/engine-config",
         "responses": {
           "200": {
@@ -1614,7 +1961,9 @@
     },
     "/api/dashboard/{cluster_id}/extensions": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/extensions",
         "responses": {
           "200": {
@@ -1643,7 +1992,9 @@
     },
     "/api/dashboard/{cluster_id}/health-findings": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/health-findings",
         "responses": {
           "200": {
@@ -1672,7 +2023,9 @@
     },
     "/api/dashboard/{cluster_id}/index-recommendations": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/index-recommendations",
         "responses": {
           "200": {
@@ -1701,7 +2054,9 @@
     },
     "/api/dashboard/{cluster_id}/instances": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/instances",
         "responses": {
           "200": {
@@ -1730,7 +2085,9 @@
     },
     "/api/dashboard/{cluster_id}/live-activity": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/live-activity",
         "responses": {
           "200": {
@@ -1759,7 +2116,9 @@
     },
     "/api/dashboard/{cluster_id}/log-insights": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/log-insights",
         "responses": {
           "200": {
@@ -1788,7 +2147,9 @@
     },
     "/api/dashboard/{cluster_id}/long-running": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/long-running",
         "responses": {
           "200": {
@@ -1817,7 +2178,9 @@
     },
     "/api/dashboard/{cluster_id}/param-diff": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/param-diff",
         "responses": {
           "200": {
@@ -1846,7 +2209,9 @@
     },
     "/api/dashboard/{cluster_id}/query-detail": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/query-detail",
         "responses": {
           "200": {
@@ -1875,7 +2240,9 @@
     },
     "/api/dashboard/{cluster_id}/redundant-indexes": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/redundant-indexes",
         "responses": {
           "200": {
@@ -1904,7 +2271,9 @@
     },
     "/api/dashboard/{cluster_id}/resource-details": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/resource-details",
         "responses": {
           "200": {
@@ -1933,7 +2302,9 @@
     },
     "/api/dashboard/{cluster_id}/restore": {
       "post": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "POST /api/dashboard/{cluster_id}/restore",
         "responses": {
           "200": {
@@ -1962,7 +2333,9 @@
     },
     "/api/dashboard/{cluster_id}/schema-changes": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/schema-changes",
         "responses": {
           "200": {
@@ -1991,7 +2364,9 @@
     },
     "/api/dashboard/{cluster_id}/schema-graph": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/schema-graph",
         "responses": {
           "200": {
@@ -2020,7 +2395,9 @@
     },
     "/api/dashboard/{cluster_id}/settings": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/settings",
         "responses": {
           "200": {
@@ -2049,7 +2426,9 @@
     },
     "/api/dashboard/{cluster_id}/slo": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/slo",
         "responses": {
           "200": {
@@ -2078,7 +2457,9 @@
     },
     "/api/dashboard/{cluster_id}/slow-queries": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/slow-queries",
         "responses": {
           "200": {
@@ -2107,7 +2488,9 @@
     },
     "/api/dashboard/{cluster_id}/snapshot": {
       "post": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "POST /api/dashboard/{cluster_id}/snapshot",
         "responses": {
           "200": {
@@ -2136,7 +2519,9 @@
     },
     "/api/dashboard/{cluster_id}/table-indexes": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/table-indexes",
         "responses": {
           "200": {
@@ -2165,7 +2550,9 @@
     },
     "/api/dashboard/{cluster_id}/table-sizes": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/table-sizes",
         "responses": {
           "200": {
@@ -2194,7 +2581,9 @@
     },
     "/api/dashboard/{cluster_id}/timeline": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/timeline",
         "responses": {
           "200": {
@@ -2223,7 +2612,9 @@
     },
     "/api/dashboard/{cluster_id}/timeseries": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/timeseries",
         "responses": {
           "200": {
@@ -2252,7 +2643,9 @@
     },
     "/api/dashboard/{cluster_id}/topology": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/topology",
         "responses": {
           "200": {
@@ -2281,7 +2674,9 @@
     },
     "/api/dashboard/{cluster_id}/vacuum-stats": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/vacuum-stats",
         "responses": {
           "200": {
@@ -2310,7 +2705,9 @@
     },
     "/api/dashboard/{cluster_id}/wait-events": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/wait-events",
         "responses": {
           "200": {
@@ -2339,7 +2736,9 @@
     },
     "/api/dashboard/{cluster_id}/workload-diff": {
       "get": {
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "summary": "GET /api/dashboard/{cluster_id}/workload-diff",
         "responses": {
           "200": {
@@ -2368,7 +2767,9 @@
     },
     "/api/endpoint-requests": {
       "post": {
-        "tags": ["endpoint-requests"],
+        "tags": [
+          "endpoint-requests"
+        ],
         "summary": "POST /api/endpoint-requests",
         "responses": {
           "200": {
@@ -2387,7 +2788,9 @@
     },
     "/api/explain": {
       "post": {
-        "tags": ["explain"],
+        "tags": [
+          "explain"
+        ],
         "summary": "POST /api/explain",
         "responses": {
           "200": {
@@ -2406,7 +2809,9 @@
     },
     "/api/health": {
       "get": {
-        "tags": ["health"],
+        "tags": [
+          "health"
+        ],
         "summary": "GET /api/health",
         "responses": {
           "200": {
@@ -2417,7 +2822,9 @@
     },
     "/api/incident-webhook": {
       "post": {
-        "tags": ["incident-webhook"],
+        "tags": [
+          "incident-webhook"
+        ],
         "summary": "POST /api/incident-webhook",
         "responses": {
           "200": {
@@ -2428,7 +2835,9 @@
     },
     "/api/learning": {
       "get": {
-        "tags": ["learning"],
+        "tags": [
+          "learning"
+        ],
         "summary": "GET /api/learning",
         "responses": {
           "200": {
@@ -2447,7 +2856,9 @@
     },
     "/api/memory": {
       "get": {
-        "tags": ["memory"],
+        "tags": [
+          "memory"
+        ],
         "summary": "GET /api/memory",
         "responses": {
           "200": {
@@ -2466,7 +2877,9 @@
     },
     "/api/memory/{id}": {
       "delete": {
-        "tags": ["memory"],
+        "tags": [
+          "memory"
+        ],
         "summary": "DELETE /api/memory/{id}",
         "responses": {
           "200": {
@@ -2495,7 +2908,9 @@
     },
     "/api/models": {
       "get": {
-        "tags": ["models"],
+        "tags": [
+          "models"
+        ],
         "summary": "GET /api/models",
         "responses": {
           "200": {
@@ -2514,7 +2929,9 @@
     },
     "/api/multi-cluster/overview": {
       "get": {
-        "tags": ["multi-cluster"],
+        "tags": [
+          "multi-cluster"
+        ],
         "summary": "GET /api/multi-cluster/overview",
         "responses": {
           "200": {
@@ -2533,7 +2950,9 @@
     },
     "/api/onboarding/template": {
       "get": {
-        "tags": ["onboarding"],
+        "tags": [
+          "onboarding"
+        ],
         "summary": "GET /api/onboarding/template",
         "responses": {
           "200": {
@@ -2552,7 +2971,9 @@
     },
     "/api/reports": {
       "get": {
-        "tags": ["reports"],
+        "tags": [
+          "reports"
+        ],
         "summary": "GET /api/reports",
         "responses": {
           "200": {
@@ -2571,7 +2992,9 @@
     },
     "/api/reports/{id}": {
       "get": {
-        "tags": ["reports"],
+        "tags": [
+          "reports"
+        ],
         "summary": "GET /api/reports/{id}",
         "responses": {
           "200": {
@@ -2600,7 +3023,9 @@
     },
     "/api/reports/{id}/html": {
       "get": {
-        "tags": ["reports"],
+        "tags": [
+          "reports"
+        ],
         "summary": "GET /api/reports/{id}/html",
         "responses": {
           "200": {
@@ -2629,7 +3054,9 @@
     },
     "/api/runbooks": {
       "get": {
-        "tags": ["runbooks"],
+        "tags": [
+          "runbooks"
+        ],
         "summary": "GET /api/runbooks",
         "responses": {
           "200": {
@@ -2646,7 +3073,9 @@
         ]
       },
       "post": {
-        "tags": ["runbooks"],
+        "tags": [
+          "runbooks"
+        ],
         "summary": "POST /api/runbooks",
         "responses": {
           "200": {
@@ -2665,7 +3094,9 @@
     },
     "/api/runbooks/{id}": {
       "get": {
-        "tags": ["runbooks"],
+        "tags": [
+          "runbooks"
+        ],
         "summary": "GET /api/runbooks/{id}",
         "responses": {
           "200": {
@@ -2692,7 +3123,9 @@
         ]
       },
       "delete": {
-        "tags": ["runbooks"],
+        "tags": [
+          "runbooks"
+        ],
         "summary": "DELETE /api/runbooks/{id}",
         "responses": {
           "200": {
@@ -2721,7 +3154,9 @@
     },
     "/api/saved-queries": {
       "get": {
-        "tags": ["saved-queries"],
+        "tags": [
+          "saved-queries"
+        ],
         "summary": "GET /api/saved-queries",
         "responses": {
           "200": {
@@ -2738,7 +3173,9 @@
         ]
       },
       "post": {
-        "tags": ["saved-queries"],
+        "tags": [
+          "saved-queries"
+        ],
         "summary": "POST /api/saved-queries",
         "responses": {
           "200": {
@@ -2757,7 +3194,9 @@
     },
     "/api/saved-queries/{id}": {
       "get": {
-        "tags": ["saved-queries"],
+        "tags": [
+          "saved-queries"
+        ],
         "summary": "GET /api/saved-queries/{id}",
         "responses": {
           "200": {
@@ -2784,7 +3223,9 @@
         ]
       },
       "put": {
-        "tags": ["saved-queries"],
+        "tags": [
+          "saved-queries"
+        ],
         "summary": "PUT /api/saved-queries/{id}",
         "responses": {
           "200": {
@@ -2811,7 +3252,9 @@
         ]
       },
       "delete": {
-        "tags": ["saved-queries"],
+        "tags": [
+          "saved-queries"
+        ],
         "summary": "DELETE /api/saved-queries/{id}",
         "responses": {
           "200": {
@@ -2840,7 +3283,9 @@
     },
     "/api/scaleout-az": {
       "post": {
-        "tags": ["scaleout-az"],
+        "tags": [
+          "scaleout-az"
+        ],
         "summary": "POST /api/scaleout-az",
         "responses": {
           "200": {
@@ -2859,7 +3304,9 @@
     },
     "/api/scaleout-ops": {
       "get": {
-        "tags": ["scaleout-ops"],
+        "tags": [
+          "scaleout-ops"
+        ],
         "summary": "GET /api/scaleout-ops",
         "responses": {
           "200": {
@@ -2878,7 +3325,9 @@
     },
     "/api/scaleout-ops/{id}/cancel": {
       "post": {
-        "tags": ["scaleout-ops"],
+        "tags": [
+          "scaleout-ops"
+        ],
         "summary": "POST /api/scaleout-ops/{id}/cancel",
         "responses": {
           "200": {
@@ -2907,7 +3356,9 @@
     },
     "/api/scheduled-tasks": {
       "get": {
-        "tags": ["scheduled-tasks"],
+        "tags": [
+          "scheduled-tasks"
+        ],
         "summary": "GET /api/scheduled-tasks",
         "responses": {
           "200": {
@@ -2924,7 +3375,9 @@
         ]
       },
       "post": {
-        "tags": ["scheduled-tasks"],
+        "tags": [
+          "scheduled-tasks"
+        ],
         "summary": "POST /api/scheduled-tasks",
         "responses": {
           "200": {
@@ -2943,7 +3396,9 @@
     },
     "/api/scheduled-tasks/{id}": {
       "delete": {
-        "tags": ["scheduled-tasks"],
+        "tags": [
+          "scheduled-tasks"
+        ],
         "summary": "DELETE /api/scheduled-tasks/{id}",
         "responses": {
           "200": {
@@ -2972,7 +3427,9 @@
     },
     "/api/slack/command": {
       "post": {
-        "tags": ["slack"],
+        "tags": [
+          "slack"
+        ],
         "summary": "POST /api/slack/command",
         "responses": {
           "200": {
@@ -2983,7 +3440,9 @@
     },
     "/api/slack/interactive": {
       "post": {
-        "tags": ["slack"],
+        "tags": [
+          "slack"
+        ],
         "summary": "POST /api/slack/interactive",
         "responses": {
           "200": {
@@ -2994,7 +3453,9 @@
     },
     "/api/tasks": {
       "get": {
-        "tags": ["tasks"],
+        "tags": [
+          "tasks"
+        ],
         "summary": "GET /api/tasks",
         "responses": {
           "200": {
@@ -3011,7 +3472,9 @@
         ]
       },
       "post": {
-        "tags": ["tasks"],
+        "tags": [
+          "tasks"
+        ],
         "summary": "POST /api/tasks",
         "responses": {
           "200": {
@@ -3030,7 +3493,9 @@
     },
     "/api/tasks/stats": {
       "get": {
-        "tags": ["tasks"],
+        "tags": [
+          "tasks"
+        ],
         "summary": "GET /api/tasks/stats",
         "responses": {
           "200": {
@@ -3049,7 +3514,9 @@
     },
     "/api/tasks/{id}": {
       "get": {
-        "tags": ["tasks"],
+        "tags": [
+          "tasks"
+        ],
         "summary": "GET /api/tasks/{id}",
         "responses": {
           "200": {
@@ -3078,7 +3545,9 @@
     },
     "/api/ws-ticket": {
       "post": {
-        "tags": ["ws-ticket"],
+        "tags": [
+          "ws-ticket"
+        ],
         "summary": "POST /api/ws-ticket",
         "responses": {
           "200": {

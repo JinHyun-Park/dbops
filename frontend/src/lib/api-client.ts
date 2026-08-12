@@ -3331,3 +3331,76 @@ export async function fetchOnboardingTemplate(opts?: {
     throw new Error(`onboarding template fetch failed: ${res.status}`);
   return res.json();
 }
+
+// ---- APM (EC2 Java/Spring Boot monitoring) ----
+export interface ApmTarget {
+  target_id: string;
+  instance_id?: string;
+  region?: string;
+  account_id?: string;
+  spoke_role_arn?: string;
+  log_groups?: string[];
+  service_name?: string;
+  team?: string;
+}
+
+export async function fetchApmTargets(): Promise<{ targets: ApmTarget[] }> {
+  const res = await authedFetch(await api(`/api/apm/targets`));
+  if (!res.ok) throw new Error(`APM 타겟 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function createApmTarget(t: ApmTarget) {
+  const res = await authedFetch(await api(`/api/apm/targets`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(t),
+  });
+  if (!res.ok) throw new Error(`APM 타겟 등록 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function deleteApmTarget(id: string) {
+  const res = await authedFetch(await api(`/api/apm/targets/${enc(id)}`), {
+    method: "DELETE",
+    headers: { ...(await authHeaders()) },
+  });
+  if (!res.ok) throw new Error(`APM 타겟 삭제 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function fetchApmOverview(id: string) {
+  const res = await authedFetch(await api(`/api/apm/targets/${enc(id)}/overview`));
+  if (!res.ok) throw new Error(`APM 요약 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function fetchApmMetrics(id: string, metricType: string, hours = 6) {
+  const res = await authedFetch(
+    await api(`/api/apm/targets/${enc(id)}/metrics?metric_type=${enc(metricType)}&hours=${hours}`));
+  if (!res.ok) throw new Error(`APM 지표 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function searchApmLogs(
+  id: string,
+  opts: {
+    levels?: string[];
+    all?: boolean;
+    query?: string;
+    minutes?: number;
+    hours?: number;
+    start?: number;
+    end?: number;
+    limit?: number;
+    log_group?: string;
+  },
+) {
+  const res = await authedFetch(await api(`/api/apm/targets/${enc(id)}/logs/search`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(opts),
+  });
+  if (!res.ok) throw new Error(`APM 로그 검색 실패 (상태 ${res.status})`);
+  return res.json();
+}

@@ -186,12 +186,14 @@ class DataStack(cdk.Stack):
                 "CACHE_DB_NAME": "dbops",
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
                 "HUB_ROLE_ARN": foundation.hub_role.role_arn,
+                "APM_TARGETS_TABLE": foundation.apm_targets_table.table_name,
             },
         )
 
         self.cache_db.secret.grant_read(self.etl_lambda)
         self.cache_db.grant_data_api_access(self.etl_lambda)
         foundation.clusters_table.grant_read_data(self.etl_lambda)
+        foundation.apm_targets_table.grant_read_data(self.etl_lambda)
         foundation.hub_role.grant(self.etl_lambda.role, "sts:AssumeRole")
         # Cross-account metric collection: assume each registered cluster's spoke
         # role DIRECTLY (same pattern as the dashboard/MCP _session_for) so RDS /
@@ -214,6 +216,26 @@ class DataStack(cdk.Stack):
                      # cache DB so the per-call $0.01 fee fires once per day at most.
                      "ce:GetSavingsPlansPurchaseRecommendation",
                      "ce:GetReservationPurchaseRecommendation"],
+            resources=["*"],
+        ))
+        # APM collector: same-account targets (no spoke_role_arn) read CloudWatch
+        # Logs under this role. Read-only; cross-account targets use the spoke role.
+        self.etl_lambda.add_to_role_policy(iam.PolicyStatement(
+            # StartQuery + GetQueryResults ONLY. FilterLogEvents and DescribeLogGroups
+            # were granted here but never called (the code path is Insights:
+            # start_query + get_query_results), and FilterLogEvents on "*" re-committed
+            # the exact over-grant that tests/cdk/test_synth.py
+            # ::test_docdb_collector_log_read_is_prefix_scoped exists to prevent. That
+            # test's own docstring records that this over-grant already shipped once in
+            # this repo for these same actions.
+            #
+            # StartQuery stays on "*" because a target's log groups are arbitrary
+            # operator-registered names, so they cannot be enumerated at synth time.
+            # GetQueryResults does not support resource-level permissions at all. The
+            # enforcement point is therefore api/apm/handler.py, which rejects any
+            # log_group that is not in the target's registered list, the same shape as
+            # this repo's wildcard writes gated by approval_guard.
+            actions=["logs:StartQuery", "logs:GetQueryResults"],
             resources=["*"],
         ))
         # Target DB secrets are registry-defined (arbitrary ARNs, incl. RDS-managed),
