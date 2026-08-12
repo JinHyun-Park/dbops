@@ -14,7 +14,6 @@ import {
   PageHeader,
   Section,
   Stat,
-  StatRow,
 } from "@/components/design-system/page-shell";
 
 const LEVELS = ["ERROR", "WARN", "INFO", "DEBUG"] as const;
@@ -119,21 +118,34 @@ export default function ApmPage() {
         </Section>
       ) : (
         <>
-          <StatRow>
+          {/* Inline cards: individual bordered boxes, gap between them, no
+              shared gray background (the design-system StatRow uses a zinc-800
+              backing that shows through 1px gaps — we opt out of it here). */}
+          <div className="flex flex-wrap gap-3">
             {/* latency/error come from Application Signals; show only when collected. */}
             {typeof metrics.latency_avg === "number" && (
-              <Stat label="Latency avg" value={fmt2(metrics.latency_avg)} />
+              <div className="flex-1 min-w-40 border border-zinc-800 rounded-lg overflow-hidden">
+                <Stat label="Latency avg" value={fmt2(metrics.latency_avg)} />
+              </div>
             )}
             {typeof metrics.error_rate === "number" && (
-              <Stat label="Error rate" value={fmt2(metrics.error_rate)} />
+              <div className="flex-1 min-w-40 border border-zinc-800 rounded-lg overflow-hidden">
+                <Stat label="Error rate" value={fmt2(metrics.error_rate)} />
+              </div>
             )}
-            <Stat label="CPU %" value={typeof metrics.cpu === "number" ? fmt2(metrics.cpu) : "—"} />
-            <Stat label="Mem %" value={typeof metrics.mem === "number" ? fmt2(metrics.mem) : "—"} />
-          </StatRow>
-          <StatRow>
-            <Stat label="ERROR (1h)" value={logCounts.ERROR ?? 0} />
-            <Stat label="WARN (1h)" value={logCounts.WARN ?? 0} />
-          </StatRow>
+            <div className="flex-1 min-w-40 border border-zinc-800 rounded-lg overflow-hidden">
+              <Stat label="CPU %" value={typeof metrics.cpu === "number" ? fmt2(metrics.cpu) : "—"} />
+            </div>
+            <div className="flex-1 min-w-40 border border-zinc-800 rounded-lg overflow-hidden">
+              <Stat label="Mem %" value={typeof metrics.mem === "number" ? fmt2(metrics.mem) : "—"} />
+            </div>
+            <div className="flex-1 min-w-40 border border-zinc-800 rounded-lg overflow-hidden">
+              <Stat label="ERROR (1h)" value={logCounts.ERROR ?? 0} />
+            </div>
+            <div className="flex-1 min-w-40 border border-zinc-800 rounded-lg overflow-hidden">
+              <Stat label="WARN (1h)" value={logCounts.WARN ?? 0} />
+            </div>
+          </div>
 
           <Section title="로그 검색">
             <div className="flex flex-wrap items-center gap-2 mb-3">
