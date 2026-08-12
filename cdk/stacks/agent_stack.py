@@ -188,14 +188,21 @@ class AgentStack(cdk.Stack):
         foundation.grant_task_manage(task_worker)      # agent-tasks R/W + env
         foundation.grant_app_config_read(task_worker)  # DB-backed TICKETING_PROVIDER
         foundation.grant_alert_broadcast(task_worker)   # WS push on completion
-        # Bedrock for the hybrid narrative. The model id is an APAC inference
-        # profile, which fans out to foundation models across regions — so the
-        # grant must cover both the profile ARNs and the underlying FM ARNs.
+        # Bedrock for the hybrid narrative. RCA_NARRATIVE_MODEL_ID is AGENT_MODEL_ID,
+        # an APAC cross-region inference profile, which fans out to foundation models
+        # across regions, so the grant must cover both the profile ARNs and the
+        # underlying FM ARNs. `application-inference-profile/*` is a THIRD, distinct
+        # resource type that `inference-profile/*` does not match: it is included
+        # because AGENT_MODEL_ID comes from operator-edited settings.py and can legally
+        # be pointed at one of the Application Inference Profiles that
+        # data-pipeline/inference_profile_setup/ creates. Without it that config choice
+        # degrades silently (the worker drops to no narrative rather than erroring).
         task_worker.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
             resources=[
                 "arn:aws:bedrock:*::foundation-model/*",
                 f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
+                f"arn:aws:bedrock:*:{self.account}:application-inference-profile/*",
             ],
         ))
         # The table stream is the single trigger. Filter to INSERTs so the
@@ -758,11 +765,37 @@ class AgentStack(cdk.Stack):
         # InvokeModelWithResponseStream is the one that actually fires, and plain
         # InvokeModel covers the non-streaming paths.
         #
-        # BOTH resource shapes are needed, for the same reason the task_worker grant above
-        # says: AGENT_MODEL_ID is a cross-region inference profile, and invoking a profile
-        # authorizes against the profile ARN *and* the underlying foundation-model ARNs in
-        # whichever region it fans out to. The model is also user-switchable at runtime via
-        # the in-app picker, so the grant cannot be pinned to one model id.
+        # ALL THREE resource shapes are needed. Bedrock treats system-defined inference
+        # profiles and APPLICATION inference profiles as DISTINCT resource types, and
+        # `inference-profile/*` does not match `application-inference-profile/*`:
+        #
+        #   1. foundation-model/*             the underlying model. Invoking ANY profile
+        #                                     authorizes against the profile ARN *and* the
+        #                                     regional foundation-model ARN, so removing this
+        #                                     breaks both profile paths. Measured: with only
+        #                                     application-inference-profile/* the call fails
+        #                                     on `...:ap-northeast-2::foundation-model/...`.
+        #   2. inference-profile/*            AGENT_MODEL_ID (`apac.anthropic...`), a
+        #                                     cross-region system profile. Used by the
+        #                                     task worker and by any payload with no `model`.
+        #   3. application-inference-profile/*  what the in-app picker actually serves.
+        #                                     data-pipeline/inference_profile_setup/ creates
+        #                                     tagged Application Inference Profiles, and
+        #                                     api/models/handler.py returns THOSE ARNs once
+        #                                     any exist, so agent/server.py:_resolve_model_id
+        #                                     passes an application-inference-profile ARN
+        #                                     verbatim to Bedrock.
+        #
+        # Entry 3 was missing until 2026-08-12. The 2026-08-12 fix above added 1 and 2 only,
+        # so the code was STILL broken for the default picker selection, and dev still only
+        # worked because of the hand-added `BedrockInvokePolicy` (Resource "*"). Measured on
+        # the live dev role: 153 of 229 model-resolution log lines over 90 days name an
+        # application-inference-profile ARN, and with the CDK grant alone Bedrock returns
+        # AccessDeniedException on exactly those. Verified by minting an sts federation token
+        # carrying only this statement as a session policy and calling Bedrock for real.
+        #
+        # There is no fallback: agent/server.py wraps `stream_async` in no except, so an
+        # AccessDeniedException at stream time kills the turn.
         self.runtime.role.add_to_principal_policy(iam.PolicyStatement(
             actions=[
                 "bedrock:InvokeModel",
@@ -771,6 +804,7 @@ class AgentStack(cdk.Stack):
             resources=[
                 "arn:aws:bedrock:*::foundation-model/*",
                 f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
+                f"arn:aws:bedrock:*:{self.account}:application-inference-profile/*",
             ],
         ))
 

@@ -432,3 +432,101 @@ def test_frontend_callback_update_reasserts_every_client_setting(cdk_app):
             "full replace, so an omitted property resets to the API default and "
             "silently undoes foundation_stack."
         )
+
+
+def test_every_bedrock_invoke_grant_covers_all_three_profile_resource_types(cdk_app):
+    """Bedrock treats system-defined and APPLICATION inference profiles as DISTINCT
+    resource types, and `inference-profile/*` does NOT match
+    `application-inference-profile/*`.
+
+    Measured on the live dev deployment 2026-08-12: api/models/handler.py returns
+    Application Inference Profile ARNs whenever any tagged profile exists (it did:
+    six), the chat picker's default was one, agent/server.py:_resolve_model_id passes
+    that ARN verbatim to Bedrock, and 153 of 229 model-resolution log lines over 90
+    days used that shape. With only the two shapes the CDK granted, Bedrock's own
+    authorization decision on the picker default was AccessDeniedException, verified
+    by minting an sts federation token carrying just that statement as a session
+    policy. The deployment only worked because of a hand-added inline policy
+    (Resource "*") that existed in no committed code, so a fresh clone had a chat
+    that could not answer while every deploy signal was green.
+
+    foundation-model/* is asserted too, and is not redundant: invoking ANY profile
+    authorizes against the profile ARN AND the regional foundation-model ARN, so
+    dropping it re-breaks both profile paths. Measured: a session policy with only
+    application-inference-profile/* fails on
+    `arn:aws:bedrock:ap-northeast-2::foundation-model/...`.
+
+    Resource "*" is rejected on purpose. It would pass a naive "does it work" check
+    while undoing the scoping the cdk-nag IAM5 suppression in cdk/app.py claims.
+
+    SCOPE: this applies only to grants that accept an OPEN set of models, detected as
+    a `foundation-model/*` wildcard. A grant PINNED to one model id is exempt and must
+    stay that way. The first version of this test had no such carve-out and flagged
+    data_stack's ETL collector, which grants InvokeModel on exactly
+    `foundation-model/amazon.titan-embed-text-v2:0` for pgvector embeddings. That is
+    the tightest correct grant for a fixed internal dependency, and widening it to
+    satisfy this test would have been a real regression. Do not "fix" a pinned grant
+    to make this pass.
+    """
+    required = ("foundation-model/", "inference-profile/", "application-inference-profile/")
+    found = []
+    pinned = []
+
+    for stack in cdk_app.stacks:
+        for logical_id, res in (stack.template or {}).get("Resources", {}).items():
+            if res.get("Type") not in ("AWS::IAM::Policy", "AWS::IAM::Role"):
+                continue
+            props = res.get("Properties", {})
+            docs = []
+            if "PolicyDocument" in props:
+                docs.append(props["PolicyDocument"])
+            for p in props.get("Policies", []) or []:
+                if isinstance(p, dict) and "PolicyDocument" in p:
+                    docs.append(p["PolicyDocument"])
+            for doc in docs:
+                for stmt in doc.get("Statement", []) or []:
+                    actions = stmt.get("Action")
+                    actions = [actions] if isinstance(actions, str) else (actions or [])
+                    if not any(
+                        isinstance(a, str) and a.startswith("bedrock:InvokeModel")
+                        for a in actions
+                    ):
+                        continue
+                    resources = stmt.get("Resource")
+                    resources = [resources] if not isinstance(resources, list) else resources
+                    literals = [r for r in resources if isinstance(r, str)]
+                    where = f"{stack.stack_name}/{logical_id}"
+
+                    # A grant pinned to specific model ids serves a fixed internal
+                    # dependency, not a user-selectable model, and is correctly narrow.
+                    if not any(r.endswith("foundation-model/*") for r in literals):
+                        pinned.append(where)
+                        assert not any("inference-profile/" in r for r in literals), (
+                            f"{where} pins its foundation models but also grants a "
+                            f"profile shape: {literals}. A profile can resolve to any "
+                            "model, which defeats the pin."
+                        )
+                        continue
+
+                    found.append(where)
+
+                    assert "*" not in literals, (
+                        f"{where} grants bedrock:InvokeModel* on Resource '*'. Scope it to "
+                        "the three profile resource shapes instead; '*' is what the "
+                        "uncommitted hand-added policy did and it hid this gap for months."
+                    )
+                    for shape in required:
+                        assert any(shape in r for r in literals), (
+                            f"{where} grants {actions} but no resource contains "
+                            f"'{shape}'. Got {literals}. "
+                            "application-inference-profile/ is a THIRD resource type "
+                            "that inference-profile/* does not match; the in-app model "
+                            "picker serves exactly that shape."
+                        )
+
+    # Negative control: if the sweep matched nothing, every assert above was skipped
+    # and this test would pass while granting nothing at all.
+    assert len(found) >= 3, (
+        f"expected at least 3 bedrock:InvokeModel* statements (AgentCore runtime role, "
+        f"agent-tasks worker, report generator), found {len(found)}: {found}"
+    )

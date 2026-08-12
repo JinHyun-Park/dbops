@@ -3,9 +3,19 @@ Claude generations (Sonnet 4.5+, Opus 4.5+, Haiku 4.5+) — older profiles are
 intentionally hidden so the chat dropdown never surfaces deprecated picks.
 
 Cross-region scan is required because AWS rolls new Claude generations out to
-us-east-1/eu-central-1 first; ap-northeast-2 lags by 1-2 release cycles. Since
-the AgentCore Runtime role grants bedrock:InvokeModel Resource:"*", invoking a
-us.* or eu.* profile from an APAC runtime works as long as the profile exists.
+us-east-1/eu-central-1 first; ap-northeast-2 lags by 1-2 release cycles. Invoking
+a us.* or eu.* profile from an APAC runtime works as long as the profile exists,
+because the runtime role's bedrock grant uses a wildcard REGION on each resource
+shape (cdk/stacks/agent_stack.py).
+
+An earlier version of this docstring credited that to the role granting
+`Resource:"*"`. It does not: that was a hand-added inline policy present on one
+deployment and in no committed code. The distinction matters here because THIS
+handler decides which ARN shape the agent is asked to invoke. When any tagged
+Application Inference Profile exists, the tagged branch below returns
+`application-inference-profile/...` ARNs, which are a resource TYPE that
+`inference-profile/*` does not match. Adding a branch that returns a new ARN
+shape means extending the grant in agent_stack.py, not just this file.
 """
 
 import json

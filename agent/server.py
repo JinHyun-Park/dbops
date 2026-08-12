@@ -265,9 +265,17 @@ def _resolve_model_id(payload) -> str:
           arn:aws:bedrock:<region>:<account>:application-inference-profile/<id>
       - Plain foundation model ID: anthropic.claude-...
 
-    Anything else falls back to MODEL_ID. The runtime IAM role grants
-    bedrock:InvokeModel Resource:* so we don't need to extend permissions
-    for newly-listed models.
+    Anything else falls back to MODEL_ID.
+
+    IAM: this function is the reason the runtime role's bedrock grant needs all
+    THREE resource shapes (foundation-model/*, inference-profile/*,
+    application-inference-profile/*). An earlier version of this docstring said the
+    role grants `Resource:*` so permissions never need extending. That was true only
+    of a hand-added inline policy that existed on one deployment and in no committed
+    code, and relying on it is what left the CDK grant missing
+    application-inference-profile/* while this function returns exactly that ARN
+    shape (see cdk/stacks/agent_stack.py). A NEW resource TYPE accepted here still
+    needs the grant extended; a new model id of an already-granted type does not.
     """
     if not isinstance(payload, dict):
         return MODEL_ID

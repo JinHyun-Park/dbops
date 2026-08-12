@@ -629,11 +629,18 @@ class DataStack(cdk.Stack):
         # NL summary path invokes a Bedrock Claude model. Failure to invoke
         # falls back to a template, so this permission is best-effort —
         # but without it every report is template-summary which is dull.
+        # `application-inference-profile/*` is a THIRD, distinct resource type that
+        # `inference-profile/*` does NOT match. REPORT_SUMMARY_MODEL_ID is
+        # AGENT_MODEL_ID, which comes from operator-edited settings.py and can legally
+        # be an Application Inference Profile created by
+        # data-pipeline/inference_profile_setup/. Because this path falls back to a
+        # template on failure, omitting it would degrade every report silently.
         self.report_generator.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
             resources=[
                 "arn:aws:bedrock:*::foundation-model/*",
                 "arn:aws:bedrock:*:*:inference-profile/*",
+                "arn:aws:bedrock:*:*:application-inference-profile/*",
             ],
         ))
 
