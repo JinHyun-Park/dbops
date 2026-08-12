@@ -11,14 +11,17 @@ To-Do/Task CRUD 앱을 **Private Subnet EC2**에 배포하고, CloudWatch Agent�
 
 ## 구성 요약
 
-- **네트워크**: 자체 VPC. 앱 EC2는 **Private Subnet**에 있고 **Public IP 없음, 인바운드 SG
-  규칙 없음**(egress only). 아웃바운드는 **NAT Gateway**로만 나가요. 접속은 **SSM Session
-  Manager**로 해요.
+- **네트워크**: 자체 VPC. 앱 EC2는 **Private Subnet**에 있고 **Public IP 없음, 앱 SG는
+  ALB에서 오는 8080만 허용**. 아웃바운드는 **NAT Gateway**로만 나가요. 인스턴스 접속은 **SSM
+  Session Manager**로 해요.
+- **브라우저 접속**: 인터넷 대면 **ALB**(public subnet)가 private EC2(:8080)를 앞단에서
+  받고, 그 앞에 **CloudFront**를 둬서 안정적인 https URL로 열려요. 배포 후 `CloudFrontUrl`
+  CfnOutput으로 나와요 — 브라우저나 `curl`로 버그를 직접 유발해 APM 로그 추적을 시연할 때 써요.
 - **앱**: Spring Boot 3(Java 17), H2 인메모리 DB, `:8080`. `systemd` 서비스(`todoapp`)로 상시 기동.
 - **로그**: Logback → `/var/log/todoapp/app.log`에 **JSON**(각 줄에 `level` 필드 포함).
   CloudWatch Agent가 이 파일을 tail → Log Group **`/dbops/apm/todoapp`**.
-- **트래픽**: VPC 내부 Lambda(2분 주기)가 정상 요청 다수 + 버그 유발 요청 소수를 섞어 호출해요.
-  Private-only라 브라우저 직접 접속 대신 이 방식으로 로그·메트릭이 계속 흐르게 했어요.
+- **트래픽**: VPC 내부 Lambda(2분 주기)가 정상 요청 다수 + 버그 유발 요청 소수를 섞어 호출해서
+  로그·메트릭이 상시 흐르게 해요. 여기에 더해 위 CloudFront URL로 직접 버그를 유발할 수도 있어요.
 
 ## 사전 준비
 
@@ -97,6 +100,23 @@ CloudWatch를 바로 읽어요. `api/apm/handler.py`의 `_session_for()`가 `rol
 정상 트래픽(대부분의 `POST/GET /api/tasks`, `GET /api/health`)은 200이에요. 버그는 특정
 입력/엔드포인트에서만 소량 발동해서, 대시보드엔 건강한 200 사이에 ERROR/WARN이 꾸준히
 조금씩 섞여 보여요.
+
+### 브라우저/`curl`로 직접 유발 (APM 추적 시연)
+
+`CloudFrontUrl`(배포 CfnOutput)로 직접 버그를 일으켜 `/apm` 로그 검색에서 추적되는지
+시연할 수 있어요. `CF`를 그 URL로 바꿔서:
+
+```bash
+CF=https://<distribution>.cloudfront.net
+curl -s $CF/api/health                                          # 정상 200
+curl -s -X POST $CF/api/tasks -H 'Content-Type: application/json' -d '{"note":"no title"}'   # BUG1 NPE → 500
+curl -s -X POST $CF/api/tasks -H 'Content-Type: application/json' -d '{"title":"dup"}'       # 1회차 200
+curl -s -X POST $CF/api/tasks -H 'Content-Type: application/json' -d '{"title":"dup"}'       # BUG2 제약위반 → 500
+curl -s $CF/api/leak                                            # BUG3 리소스 누수 → WARN/ERROR
+```
+
+그 뒤 `/apm` 페이지(또는 `POST /api/apm/targets/<id>/logs/search`)에서 기본 ERROR+WARN
+필터로 조회하면 방금 발생한 NPE 스택트레이스·제약위반·리소스 누수 로그가 잡혀요.
 
 ## 로그 검색이 AccessDenied가 나면
 

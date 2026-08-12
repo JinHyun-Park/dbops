@@ -1,6 +1,10 @@
 import aws_cdk as cdk
 from aws_cdk import (
+    aws_cloudfront as cloudfront,
+    aws_cloudfront_origins as origins,
     aws_ec2 as ec2,
+    aws_elasticloadbalancingv2 as elbv2,
+    aws_elasticloadbalancingv2_targets as elbv2_targets,
     aws_events as events,
     aws_events_targets as targets,
     aws_iam as iam,
@@ -136,6 +140,58 @@ class SpringbootApmStack(cdk.Stack):
         cdk.CfnOutput(self, "LogGroup", value=LOG_GROUP)
         cdk.CfnOutput(self, "Region", value=self.region)
         cdk.CfnOutput(self, "VpcId", value=vpc.vpc_id)
+
+        # --- Browser access: CloudFront -> internet-facing ALB -> private EC2 ---
+        # The EC2 instance stays private (no public IP). An internet-facing ALB in
+        # the public subnets fronts it, and CloudFront sits in front of the ALB so
+        # the app is reachable at a stable https URL for browser testing. The app
+        # SG accepts 8080 only from the ALB SG.
+        alb = elbv2.ApplicationLoadBalancer(
+            self, "AppAlb",
+            vpc=vpc,
+            internet_facing=True,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+        )
+        # Open BOTH directions: the ALB's SG egress to the app AND the app SG's
+        # ingress from the ALB. A one-sided add_ingress_rule leaves the ALB SG
+        # with CDK's default "disallow all" egress, so health checks time out and
+        # every target is unhealthy. allow_to wires both sides.
+        alb.connections.allow_to(sg, ec2.Port.tcp(8080), "ALB to app 8080")
+        listener = alb.add_listener("Http", port=80, open=True)
+        listener.add_targets(
+            "AppTarget",
+            port=8080,
+            protocol=elbv2.ApplicationProtocol.HTTP,
+            targets=[elbv2_targets.InstanceTarget(instance, port=8080)],
+            health_check=elbv2.HealthCheck(
+                path="/api/health",
+                healthy_http_codes="200",
+                interval=cdk.Duration.seconds(30),
+            ),
+        )
+
+        distribution = cloudfront.Distribution(
+            self, "AppCdn",
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=origins.LoadBalancerV2Origin(
+                    alb,
+                    protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+                    http_port=80,
+                ),
+                # Sample app is a JSON API with POST/PUT/DELETE; allow all methods
+                # and disable caching so bug-triggering requests always hit origin.
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER,
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+            ),
+            comment="dbops sample springboot app",
+        )
+
+        self.alb = alb
+        self.distribution = distribution
+        cdk.CfnOutput(self, "AlbDnsName", value=alb.load_balancer_dns_name)
+        cdk.CfnOutput(self, "CloudFrontUrl", value=f"https://{distribution.distribution_domain_name}")
 
         # Load generator: drives mostly-healthy traffic plus a trickle of the
         # three bug triggers so the APM dashboard has a steady signal. Runs in
