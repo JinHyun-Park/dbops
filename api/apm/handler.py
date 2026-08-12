@@ -300,31 +300,36 @@ def _logs_search(event, target_id):
     log_group = body.get("log_group") or (item.get("log_groups") or [""])[0]
     if not log_group:
         return _resp(400, {"error": "no log_group for target"})
+
+    start_epoch, end_epoch, clamped = _resolve_window(body)
     try:
-        hours = max(1, min(48, int(body.get("hours", 1))))
-    except (ValueError, TypeError):
-        hours = 1
-    try:
-        limit = min(max(1, int(body.get("limit", 100) or 100)), 500)
+        limit = min(max(1, int(body.get("limit", 100) or 100)), 2000)
     except (ValueError, TypeError):
         limit = 100
 
-    parts = [_levels_filter(body.get("levels"))]
+    parts = []
+    lf = _levels_filter(body.get("levels"), all_levels=bool(body.get("all")))
+    if lf:
+        parts.append(lf)
     for raw in (body.get("query") or "").split():
         cleaned = re.sub(r"[^A-Za-z0-9_./:\-]", "", raw)
         if cleaned:
             parts.append(f"filter @message like /{cleaned}/")
-    query_string = ("fields @timestamp, @message | " + " | ".join(parts)
+    query_string = ("fields @timestamp, @message"
+                    + ("".join(" | " + p for p in parts))
                     + f" | sort @timestamp desc | limit {limit}")
 
     client = _logs_client_for(item)
     base = {"target_id": target_id, "log_group": log_group,
-            "compiled_query": query_string, "entries": [], "count": 0}
+            "compiled_query": query_string, "start": start_epoch, "end": end_epoch,
+            "entries": [], "count": 0}
+    if clamped:
+        base["window_clamped"] = True
     try:
         qid = client.start_query(
             logGroupName=log_group,
-            startTime=int(time.time() - hours * 3600),
-            endTime=int(time.time()),
+            startTime=start_epoch,
+            endTime=end_epoch,
             queryString=query_string)["queryId"]
     except Exception as e:
         return _resp(200, {**base, "error": f"start_query failed: {e}"})

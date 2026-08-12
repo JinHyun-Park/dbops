@@ -112,3 +112,77 @@ def test_resolve_window_hours_clamped_1_to_48():
     mod = _load()
     s, _, _ = mod._resolve_window({"hours": 999}, now=1_000_000)
     assert s == 1_000_000 - 48 * 3600
+
+
+def _fake_target_monkeypatch(mod, monkeypatch):
+    monkeypatch.setattr(mod, "_get_target", lambda t: {
+        "target_id": t, "team": "", "region": "ap-northeast-2",
+        "spoke_role_arn": "", "log_groups": ["/app/orders"]})
+
+
+def test_logs_search_all_levels_has_no_level_filter(monkeypatch):
+    mod = _load()
+    _fake_target_monkeypatch(mod, monkeypatch)
+    captured = {}
+
+    class FakeLogs:
+        def start_query(self, **kw):
+            captured.update(kw)
+            return {"queryId": "q1"}
+        def get_query_results(self, **kw):
+            return {"status": "Complete", "results": []}
+
+    monkeypatch.setattr(mod, "_logs_client_for", lambda item: FakeLogs())
+    resp = mod._logs_search(_event({"log_group": "/app/orders", "all": True}), "svc-a")
+    assert resp["statusCode"] == 200
+    qs = captured["queryString"]
+    assert "@message like /ERROR/" not in qs
+    assert "fields @timestamp, @message" in qs and "sort @timestamp desc" in qs
+
+
+def test_logs_search_limit_capped_at_2000(monkeypatch):
+    mod = _load()
+    _fake_target_monkeypatch(mod, monkeypatch)
+    captured = {}
+
+    class FakeLogs:
+        def start_query(self, **kw):
+            captured.update(kw); return {"queryId": "q1"}
+        def get_query_results(self, **kw):
+            return {"status": "Complete", "results": []}
+
+    monkeypatch.setattr(mod, "_logs_client_for", lambda item: FakeLogs())
+    mod._logs_search(_event({"log_group": "/app/orders", "limit": 999999}), "svc-a")
+    assert "limit 2000" in captured["queryString"]
+
+
+def test_logs_search_minutes_window(monkeypatch):
+    mod = _load()
+    _fake_target_monkeypatch(mod, monkeypatch)
+    captured = {}
+
+    class FakeLogs:
+        def start_query(self, **kw):
+            captured.update(kw); return {"queryId": "q1"}
+        def get_query_results(self, **kw):
+            return {"status": "Complete", "results": []}
+
+    monkeypatch.setattr(mod, "_logs_client_for", lambda item: FakeLogs())
+    mod._logs_search(_event({"log_group": "/app/orders", "minutes": 5}), "svc-a")
+    span = captured["endTime"] - captured["startTime"]
+    assert span == 300
+    assert captured["startTime"] < 10_000_000_000  # epoch seconds
+
+
+def test_logs_search_reports_clamp(monkeypatch):
+    mod = _load()
+    _fake_target_monkeypatch(mod, monkeypatch)
+
+    class FakeLogs:
+        def start_query(self, **kw): return {"queryId": "q1"}
+        def get_query_results(self, **kw): return {"status": "Complete", "results": []}
+
+    monkeypatch.setattr(mod, "_logs_client_for", lambda item: FakeLogs())
+    resp = mod._logs_search(_event({"log_group": "/app/orders", "start": 0, "end": 60 * 3600}), "svc-a")
+    body = json.loads(resp["body"])
+    assert body.get("window_clamped") is True
