@@ -84,6 +84,8 @@ export default function ApmPage() {
 
   const metrics = (overview?.metrics as Record<string, number>) || {};
   const logCounts = (overview?.log_counts as Record<string, number>) || {};
+  // Two-decimal display for percent/latency gauges.
+  const fmt2 = (v: number) => v.toFixed(2);
 
   return (
     <PageBody>
@@ -118,10 +120,15 @@ export default function ApmPage() {
       ) : (
         <>
           <StatRow>
-            <Stat label="Latency avg" value={metrics.latency_avg ?? "—"} />
-            <Stat label="Error rate" value={metrics.error_rate ?? "—"} />
-            <Stat label="CPU %" value={metrics.cpu ?? "—"} />
-            <Stat label="Mem %" value={metrics.mem ?? "—"} />
+            {/* latency/error come from Application Signals; show only when collected. */}
+            {typeof metrics.latency_avg === "number" && (
+              <Stat label="Latency avg" value={fmt2(metrics.latency_avg)} />
+            )}
+            {typeof metrics.error_rate === "number" && (
+              <Stat label="Error rate" value={fmt2(metrics.error_rate)} />
+            )}
+            <Stat label="CPU %" value={typeof metrics.cpu === "number" ? fmt2(metrics.cpu) : "—"} />
+            <Stat label="Mem %" value={typeof metrics.mem === "number" ? fmt2(metrics.mem) : "—"} />
           </StatRow>
           <StatRow>
             <Stat label="ERROR (1h)" value={logCounts.ERROR ?? 0} />
@@ -209,7 +216,7 @@ export default function ApmPage() {
                 {searching ? "검색 중…" : "검색"}
               </button>
             </div>
-            <div className="font-mono text-xs space-y-1 max-h-96 overflow-auto">
+            <div className="font-mono text-xs space-y-1 min-h-[55vh] max-h-[72vh] overflow-auto">
               {logs.length === 0 ? (
                 <p className="text-zinc-500">결과 없음. 레벨·검색어·타겟을 확인하세요.</p>
               ) : (
