@@ -48,6 +48,18 @@ To-Do/Task CRUD 앱을 **Private Subnet EC2**에 배포하고, CloudWatch Agent�
 ## 사전 준비
 
 - 빌드 호스트에 **Java 17 + Maven**.
+
+  > **`java -version`이 17이어도 부족합니다.** Maven은 `JAVA_HOME`을 보고, 그게 더 낮은 JDK를
+  > 가리키고 있으면 `<java.version>17</java.version>` 빌드가 깨집니다. 실제로 겪은 상태:
+  > `java -version`은 17.0.15인데 `JAVA_HOME`은 zulu-11이라 `mvn -version`이 Java 11로
+  > 나왔습니다. 빌드 전에 확인하고, 필요하면 이 빌드에만 지정하세요.
+  >
+  > ```bash
+  > mvn -version | grep 'Java version'          # Maven 이 실제로 쓰는 JDK
+  > /usr/libexec/java_home -V                   # macOS: 설치된 JDK 목록
+  > export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+  > ```
+
 - **CDK CLI ≥ 2.1134.0** (`npm i -g aws-cdk@2`), Python 3.9+.
 - 배포 대상은 **DBOps와 동일 계정/리전**이어야 해요. `app.py`가 `cdk/config/settings.py`의
   `Settings.ACCOUNT_ID`/`REGION`을 그대로 읽어 배포하거든요. 그러니 별도로 계정·리전을
