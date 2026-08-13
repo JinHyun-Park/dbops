@@ -6,17 +6,39 @@ To-Do/Task CRUD 앱을 **Private Subnet EC2**에 배포하고, CloudWatch Agent�
 백엔드 버그 3종이 `ERROR`/`WARN` 로그로 남아서, 대시보드에서 로그 추적이 되는지 확인할 수
 있어요.
 
-> **비용 주의.** 상시 과금이 있어요 — **NAT Gateway 1개(~월 $32 + 데이터)** + `t3.small`
-> 1대. 테스트가 끝나면 아래 *정리* 섹션대로 꼭 destroy 해주세요.
+> **비용 주의: 트래픽이 0이어도 월 $78 정도가 계속 나갑니다.**
+>
+> | 리소스                    | 시간당  | 월(730h) |
+> | ------------------------- | ------- | -------- |
+> | NAT Gateway 1개           | $0.059  | ~$43     |
+> | Application Load Balancer | $0.0225 | ~$16     |
+> | EC2 `t3.small` 1대        | $0.026  | ~$19     |
+> | **고정 합계**             |         | **~$78** |
+>
+> 여기에 사용량 과금이 더 붙습니다: NAT 데이터 처리(GB당), ALB LCU, CloudFront 요청/전송,
+> EBS 루트 볼륨. 이 표는 2026-08-13에 AWS Price List API로 조회한 **ap-northeast-2** 요율이고,
+> 요율은 리전마다 다릅니다. 이 스택은 `cdk/config/settings.py`의 `REGION`에 배포되니 다른
+> 리전이면 숫자가 달라집니다.
+>
+> 이 표는 정정된 값입니다. 이전에는 "NAT Gateway 1개(~월 $32) + t3.small"로만 적혀 있었는데,
+> $32는 us-east-1 NAT 요율이었고 ALB와 CloudFront가 아예 빠져 있어서 실제의 절반 수준으로
+> 읽혔습니다.
+>
+> **이건 DBOps 플랫폼의 일부가 아니라 APM 기능을 시연할 테스트 대상입니다.** 메인
+> `cdk deploy`로는 절대 생성되지 않고(별도 CDK 앱이라 이 디렉터리에서 직접 배포해야 합니다),
+> 시연이 끝나면 아래 _정리_ 섹션대로 destroy 해주세요.
 
 ## 구성 요약
 
 - **네트워크**: 자체 VPC. 앱 EC2는 **Private Subnet**에 있고 **Public IP 없음, 앱 SG는
   ALB에서 오는 8080만 허용**. 아웃바운드는 **NAT Gateway**로만 나가요. 인스턴스 접속은 **SSM
   Session Manager**로 해요.
-- **브라우저 접속**: 인터넷 대면 **ALB**(public subnet)가 private EC2(:8080)를 앞단에서
-  받고, 그 앞에 **CloudFront**를 둬서 안정적인 https URL로 열려요. 배포 후 `CloudFrontUrl`
-  CfnOutput으로 나와요 — 브라우저나 `curl`로 버그를 직접 유발해 APM 로그 추적을 시연할 때 써요.
+- **브라우저 접속**: **ALB**(public subnet)가 private EC2(:8080)를 앞단에서 받고, 그 앞에
+  **CloudFront**를 둬서 안정적인 https URL로 열려요. 배포 후 `CloudFrontUrl` CfnOutput으로
+  나와요. 브라우저나 `curl`로 버그를 직접 유발해 APM 로그 추적을 시연할 때 씁니다.
+  ALB는 인터넷에 노출되어 있지만 **기본 응답이 403**이고, CloudFront가 붙이는
+  `X-Origin-Verify` 헤더가 있는 요청만 EC2로 전달합니다. ALB DNS로 직접 오는 요청은 거부되니
+  반드시 `CloudFrontUrl`을 쓰세요.
 - **앱**: Spring Boot 3(Java 17), H2 인메모리 DB, `:8080`. `systemd` 서비스(`todoapp`)로 상시 기동.
 - **로그**: Logback → `/var/log/todoapp/app.log`에 **JSON**(각 줄에 `level` 필드 포함).
   CloudWatch Agent가 이 파일을 tail → Log Group **`/dbops/apm/todoapp`**.
@@ -30,9 +52,10 @@ To-Do/Task CRUD 앱을 **Private Subnet EC2**에 배포하고, CloudWatch Agent�
 - 배포 대상은 **DBOps와 동일 계정/리전**이어야 해요. `app.py`가 `cdk/config/settings.py`의
   `Settings.ACCOUNT_ID`/`REGION`을 그대로 읽어 배포하거든요. 그러니 별도로 계정·리전을
   지정할 필요는 없고, **`settings.py`가 DBOps 배포에 쓰는 그 계정·리전인지**만 확인하면 돼요
-  (fresh clone이라면 `settings.example.py`를 복사해 실제 값으로 채워두어야 해요 — 예시 파일의
-  `123456789012`/`ap-northeast-2`는 placeholder예요). 이 문서 예시의 `us-east-1`은 현재
-  이 저장소 `settings.py` 기준 값이에요.
+  (fresh clone이라면 `settings.example.py`를 복사해 실제 값으로 채워두어야 해요. 예시 파일의
+  `123456789012`/`ap-northeast-2`는 placeholder예요). 아래 명령 예시에 나오는 `us-east-1`은
+  **작성 당시 환경의 값일 뿐 이 저장소의 현재 값이 아닙니다.** `settings.py`의 `REGION`으로
+  바꿔서 실행하세요.
 
 ## 배포
 
@@ -69,12 +92,12 @@ tail -n 20 /var/log/todoapp/app.log      # JSON 로그가 쌓이는지 확인
 
 `/apm` 페이지에서 타깃을 등록해요:
 
-| 필드 | 값 |
-| --- | --- |
-| `instance_id` | CfnOutput `InstanceId` |
-| `log_group` | `/dbops/apm/todoapp` |
-| `region` | `us-east-1` |
-| `spoke_role_arn` | **비워둠** |
+| 필드             | 값                     |
+| ---------------- | ---------------------- |
+| `instance_id`    | CfnOutput `InstanceId` |
+| `log_group`      | `/dbops/apm/todoapp`   |
+| `region`         | `us-east-1`            |
+| `spoke_role_arn` | **비워둠**             |
 
 `spoke_role_arn`을 비워두는 이유: DBOps와 **동일 계정**이라서 APM Lambda가 자기 실행 역할로
 CloudWatch를 바로 읽어요. `api/apm/handler.py`의 `_session_for()`가 `role_arn`이 없으면
@@ -91,11 +114,11 @@ CloudWatch를 바로 읽어요. `api/apm/handler.py`의 `_session_for()`가 `rol
 
 ## 의도적으로 심은 버그 3종
 
-| 버그 | 트리거 | 결과 |
-| --- | --- | --- |
-| **NPE (500)** | `POST /api/tasks`에 `note`만 있고 `title` 없음 | `title.trim()`에서 NPE → `ERROR` 스택트레이스 + 500 |
-| **미검증 입력 → DB 제약 위반** | 이미 있는 `title`로 `POST /api/tasks` | UNIQUE 제약 위반 `DataIntegrityViolationException` → `ERROR` + 500 |
-| **리소스 누수** | `GET /api/leak` | 호출마다 1MB 버퍼를 static 리스트에 쌓고 안 놓음 → `WARN`, 임계치(10) 초과 시 `ERROR`. 시간이 지나며 힙/메모리 상승 |
+| 버그                           | 트리거                                         | 결과                                                                                                                |
+| ------------------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **NPE (500)**                  | `POST /api/tasks`에 `note`만 있고 `title` 없음 | `title.trim()`에서 NPE → `ERROR` 스택트레이스 + 500                                                                 |
+| **미검증 입력 → DB 제약 위반** | 이미 있는 `title`로 `POST /api/tasks`          | UNIQUE 제약 위반 `DataIntegrityViolationException` → `ERROR` + 500                                                  |
+| **리소스 누수**                | `GET /api/leak`                                | 호출마다 1MB 버퍼를 static 리스트에 쌓고 안 놓음 → `WARN`, 임계치(10) 초과 시 `ERROR`. 시간이 지나며 힙/메모리 상승 |
 
 정상 트래픽(대부분의 `POST/GET /api/tasks`, `GET /api/health`)은 200이에요. 버그는 특정
 입력/엔드포인트에서만 소량 발동해서, 대시보드엔 건강한 200 사이에 ERROR/WARN이 꾸준히
@@ -120,10 +143,21 @@ curl -s $CF/api/leak                                            # BUG3 리소스
 
 ## 로그 검색이 AccessDenied가 나면
 
-동일 계정이면 대개 바로 되지만, 만약 `/apm` 로그 검색에서 `AccessDenied`가 나면 APM Lambda
-실행 역할에 same-account CloudWatch 읽기 권한이 빠진 거예요. `cdk/stacks/agent_stack.py`의
-APM Lambda 역할에 `logs:StartQuery`/`logs:GetQueryResults`/`logs:FilterLogEvents`,
-`cloudwatch:GetMetricData`를 추가하면 돼요. (이 샘플 범위 밖의 후속 작업이에요.)
+동일 계정이면 바로 됩니다. `cdk/stacks/agent_stack.py`의 APM Lambda 역할은 로그 검색이 실제로
+쓰는 `logs:StartQuery`와 `logs:GetQueryResults`를 이미 갖고 있어요.
+
+> **`logs:FilterLogEvents`를 추가하지 마세요.** 이 문단은 원래 그걸 추가하라고 안내했는데,
+> 로그 검색 경로는 그 API를 호출하지 않습니다(`api/apm/handler.py`는 `start_query` +
+> `get_query_results`만 씁니다). 게다가 그 액션을 `Resource: "*"`로 주면
+> `cdk/cross-account/spoke-role-template.yaml`이 DocumentDB 프로파일러 로그 읽기를
+> `/aws/docdb/*`로 좁혀둔 것을 무력화해서, 전용 회귀 테스트
+> (`test_docdb_collector_log_read_is_prefix_scoped`)가 깨집니다.
+
+그래도 `AccessDenied`가 나면 권한이 아니라 다른 원인일 가능성이 높아요. 먼저 확인할 것:
+등록한 `log_group` 이름이 정확한지(오타가 있으면 CloudWatch가 권한 오류처럼 보이는 응답을
+줄 수 있어요), 그리고 타깃에 등록된 `log_groups` 목록에 실제로 그 이름이 들어 있는지.
+핸들러는 등록되지 않은 로그 그룹 요청을 **403으로 거부**하고 응답에 등록된 목록을 함께
+돌려주니, 그 목록을 보고 맞추면 됩니다.
 
 ## 정리
 
