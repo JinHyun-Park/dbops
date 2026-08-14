@@ -56,20 +56,22 @@ teaches people to ignore gates.
 cd frontend && npx eslint .
 ```
 
-### The agent stack is at 498 of 500 CloudFormation resources
+### The agent stack is at 478 of 500 CloudFormation resources
 
-Measured 2026-08-12 from `cdk.out/dbops-dev-agent.template.json`. 500 is a hard
-CloudFormation limit, so the headroom is **2 resources**.
+Measured 2026-08-14 from `cdk.out/dbops-dev-agent.template.json`. 500 is a hard
+CloudFormation limit, so the headroom is 22 resources. `cdk synth` already prints
+`Number of resources: 478 is approaching allowed maximum of 500` on every run.
 
-This entry said 478 (measured 2026-08-04) until the APM feature landed. That one
-feature, 8 REST routes and a Lambda and a DynamoDB table, consumed 20 of the 22
-remaining slots. The estimate below was right and the margin is now effectively
-gone: the next new route or MCP tool is expected to cross the line.
+**This is now a measured number, not an estimate.** The count went 478 to 498 when
+the APM feature landed and back to 478 when it was reverted. One feature, 8 REST
+routes plus a Lambda plus a DynamoDB table, consumed **20 of the 22** free slots.
+So the per-feature figure below is not theoretical: a single normal-sized feature
+can exhaust the entire remaining margin.
 
 What makes this worth recording is the failure mode: the stack grows by roughly
-3 to 6 resources per new REST route and per new MCP tool, so a normal-sized feature
-can cross the line, and the error surfaces at deploy time as a limit rejection
-rather than as anything pointing at the change that caused it.
+3 to 6 resources per new REST route and per new MCP tool, and the error surfaces at
+deploy time as a limit rejection rather than as anything pointing at the change
+that caused it.
 
 The fix is a structural decision, not a patch: split the stack (nested stacks for
 the REST API surface, or move the four MCP Lambdas out). That is an owner's call
