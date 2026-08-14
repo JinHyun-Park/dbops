@@ -63,34 +63,15 @@ Resources:
                 Effect: Allow
                 Action:
                   - "cloudwatch:GetMetricData"
-                  - "cloudwatch:GetMetricStatistics"
-                  - "cloudwatch:ListMetrics"
                   - "cloudwatch:DescribeAlarms"
+                  - "cloudwatch:GetMetricStatistics"
                 Resource: "*"
-              # StartQuery + GetQueryResults ONLY, deliberately.
-              # FilterLogEvents and DescribeLogGroups were listed here but no code
-              # calls them (the APM path is Insights: start_query then
-              # get_query_results). Worse, granting FilterLogEvents on "*" here
-              # SUPERSEDED the CloudWatchLogsDocDBProfiler statement below, which
-              # scopes that same action to /aws/docdb/* on purpose. That is why
-              # tests/cdk/test_synth.py::test_docdb_collector_log_read_is_prefix_scoped
-              # fires: its docstring records that this exact over-grant already
-              # shipped once in this repo.
-              #
-              # StartQuery cannot be resource-scoped here because a target's log
-              # groups are arbitrary operator-registered names. The enforcement point
-              # is api/apm/handler.py, which refuses any log_group that is not in the
-              # target's registered list.
               - Sid: CloudWatchLogs
                 Effect: Allow
                 Action:
                   - "logs:StartQuery"
                   - "logs:GetQueryResults"
-                Resource: "*"
-              - Sid: ApmEc2Describe
-                Effect: Allow
-                Action:
-                  - "ec2:DescribeInstances"
+                  - "logs:DescribeLogGroups"
                 Resource: "*"
               # The DocumentDB profiler collector (data-pipeline/
               # docdb_mongo_collector) reads slow ops with FilterLogEvents, which

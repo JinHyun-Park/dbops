@@ -4,7 +4,6 @@ __pycache__/
 dist/
 .venv/
 venv/
-.venv-cdk/
 node_modules/
 .next/
 out/
@@ -44,14 +43,3 @@ agent/_deps/
 # If a NEW context lookup is ever added (from_lookup, SSM, VPC), CI will fail
 # with a missing-context error: add that entry to cdk/cdk.json by hand.
 cdk/cdk.context.json
-
-# Local deploy artifacts (from `cdk deploy` / a locally-installed cdk CLI).
-# cdk-outputs.json embeds the operator's account-specific ARNs and URLs; the
-# deploy logs and the root package*.json (created by `npm install aws-cdk`
-# locally) are throwaway. deploy.sh regenerates what it needs.
-cdk-outputs.json
-deploy*.log
-*-deploy.log
-*-redeploy.log
-/package.json
-/package-lock.json

@@ -130,17 +130,6 @@ class FoundationStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
-        # APM targets — EC2 Java/Spring Boot apps monitored via CloudWatch.
-        # Separate from the clusters registry so engine_family stays untouched.
-        self.apm_targets_table = dynamodb.Table(
-            self, "ApmTargetsTable",
-            table_name=f"dbops-{Settings.ENV}-apm-targets",
-            partition_key=dynamodb.Attribute(name="target_id", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            point_in_time_recovery=True,  # cdk-nag AwsSolutions-DDB3
-            removal_policy=cdk.RemovalPolicy.DESTROY,
-        )
-
         # ===== Multi-team tenancy =====
         # teams: one row per team. team_members: one row per (team, member);
         # the by-user GSI answers "which teams is this user in?" in O(1) for the

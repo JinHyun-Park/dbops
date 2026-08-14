@@ -445,13 +445,6 @@ class AgentStack(cdk.Stack):
             "simulation": (simulation_mcp_lambda, simulation_schema()),
         }
 
-        # Keep each target so the Cedar policy loop below can declare an
-        # explicit dependency on the target it names. Without it CloudFormation
-        # may create a CedarPolicy before its gateway target has stabilized, and
-        # CreatePolicy then fails with "Target 'dbops-{ENV}-{server}-target'
-        # does not exist in gateway" (observed: only the first target had
-        # stabilized, the rest failed and rolled back the whole agent stack).
-        self._gateway_targets = {}
         for name, (fn, schema) in mcp_lambdas.items():
             fn.grant_invoke(self.gateway.role)
             fn.add_permission(
@@ -484,7 +477,6 @@ class AgentStack(cdk.Stack):
             target.add_dependency(self.gateway.role.node.default_child)
             if self.gateway.role.node.try_find_child("DefaultPolicy"):
                 target.add_dependency(self.gateway.role.node.find_child("DefaultPolicy").node.default_child)
-            self._gateway_targets[name] = target
 
         # ===== Cedar Authorization Policies (Gateway-level) =====
         # The Gateway evaluates these Cedar policies on every tool call: reads
@@ -552,7 +544,7 @@ class AgentStack(cdk.Stack):
                     "resource is AgentCore::Gateway",
                     f'resource == AgentCore::Gateway::"{self.gateway.gateway_arn}"',
                 )
-                _policy = agentcore_cfn.CfnPolicy(
+                agentcore_cfn.CfnPolicy(
                     self, f"CedarPolicy{_key.title()}{_i}",
                     policy_engine_id=self.policy_engine.attr_policy_engine_id,
                     # Name must match ^[A-Za-z][A-Za-z0-9_]*$ — underscores only,
@@ -572,13 +564,6 @@ class AgentStack(cdk.Stack):
                     # to ENFORCE (after the logs confirm they match).
                     validation_mode="IGNORE_ALL_FINDINGS",
                 )
-                # The policy names this target (__TARGET__ substitution above),
-                # so it must not be created until the target exists in the
-                # gateway. CfnPolicy carries no reference to the target, so the
-                # dependency is otherwise invisible to CloudFormation.
-                _target = self._gateway_targets.get(_key)
-                if _target is not None:
-                    _policy.add_dependency(_target)
 
         # Bind the engine to the Gateway. The installed CfnGateway L1 predates
         # the PolicyEngineConfiguration property (the service added it 2026-03),
@@ -2303,73 +2288,6 @@ class AgentStack(cdk.Stack):
             ],
             integration=saved_queries_integration,
         )
-
-        # APM API — EC2 Java/Spring Boot log + metric monitoring
-        apm_lambda = lambda_.Function(
-            self, "ApmApi",
-            runtime=lambda_.Runtime.PYTHON_3_12,
-            handler="handler.lambda_handler",
-            code=lambda_.Code.from_asset("../api/apm"),
-            timeout=cdk.Duration.seconds(30),  # on-demand Logs Insights budget
-            environment={
-                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
-                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
-                "CACHE_DB_NAME": "dbops",
-                "APM_TARGETS_TABLE": foundation.apm_targets_table.table_name,
-                "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
-                "TEAM_MEMBERS_BY_USER_INDEX": "by-user",
-            },
-        )
-        data.cache_db.secret.grant_read(apm_lambda)
-        data.cache_db.grant_data_api_access(apm_lambda)
-        foundation.apm_targets_table.grant_read_write_data(apm_lambda)
-        foundation.team_members_table.grant_read_data(apm_lambda)
-        apm_lambda.add_to_role_policy(iam.PolicyStatement(
-            actions=["rds-data:ExecuteStatement"], resources=["*"]))
-        apm_lambda.add_to_role_policy(iam.PolicyStatement(
-            actions=["secretsmanager:GetSecretValue"],
-            resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"]))
-        # On-demand log search assumes the target's spoke role (scoped).
-        apm_lambda.add_to_role_policy(iam.PolicyStatement(
-            actions=["sts:AssumeRole"],
-            resources=["arn:aws:iam::*:role/dbops-spoke-role"]))
-        # Local-account fallback (no spoke role): read-only CW Logs.
-        apm_lambda.add_to_role_policy(iam.PolicyStatement(
-            # StartQuery + GetQueryResults ONLY. FilterLogEvents and DescribeLogGroups
-            # were granted here but never called (the code path is Insights:
-            # start_query + get_query_results), and FilterLogEvents on "*" re-committed
-            # the exact over-grant that tests/cdk/test_synth.py
-            # ::test_docdb_collector_log_read_is_prefix_scoped exists to prevent. That
-            # test's own docstring records that this over-grant already shipped once in
-            # this repo for these same actions.
-            #
-            # StartQuery stays on "*" because a target's log groups are arbitrary
-            # operator-registered names, so they cannot be enumerated at synth time.
-            # GetQueryResults does not support resource-level permissions at all. The
-            # enforcement point is therefore api/apm/handler.py, which rejects any
-            # log_group that is not in the target's registered list, the same shape as
-            # this repo's wildcard writes gated by approval_guard.
-            actions=["logs:StartQuery", "logs:GetQueryResults"],
-            resources=["*"]))
-
-        apm_integration = integrations.HttpLambdaIntegration("ApmIntegration", apm_lambda)
-        self.api.add_routes(
-            path="/api/apm/targets",
-            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
-            integration=apm_integration)
-        self.api.add_routes(
-            path="/api/apm/targets/{id}",
-            methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PUT, apigwv2.HttpMethod.DELETE],
-            integration=apm_integration)
-        self.api.add_routes(
-            path="/api/apm/targets/{id}/overview",
-            methods=[apigwv2.HttpMethod.GET], integration=apm_integration)
-        self.api.add_routes(
-            path="/api/apm/targets/{id}/metrics",
-            methods=[apigwv2.HttpMethod.GET], integration=apm_integration)
-        self.api.add_routes(
-            path="/api/apm/targets/{id}/logs/search",
-            methods=[apigwv2.HttpMethod.POST], integration=apm_integration)
 
         # ===== Outputs =====
 
