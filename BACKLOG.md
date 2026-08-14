@@ -82,6 +82,69 @@ add a route or a tool should check the count first:
 python3 -c "import json;print(len(json.load(open('cdk/cdk.out/dbops-dev-agent.template.json'))['Resources']))"
 ```
 
+### Removing something is not the reverse of adding it: two traps, both measured
+
+Both hit on 2026-08-14 while reverting the APM feature. Neither is APM-specific and
+neither was written down anywhere, because until then nothing had ever been removed
+from a deployed environment. Every deploy in this project's history had been additive.
+
+**1. `cdk deploy --all` cannot drop a cross-stack export in one pass.**
+
+`foundation` exported the APM DynamoDB table ARN and both `data` and `agent`
+imported it (confirmed with `aws cloudformation list-imports`). `--all` always runs
+in dependency order, foundation first, so foundation tried to delete an export that
+two live stacks still consumed and rolled back:
+
+```
+Cannot delete export dbops-dev-foundation:ExportsOutputFnGetAtt...ApmTargetsTable...
+as it is in use by ...
+```
+
+Removal needs the REVERSE order: every consumer must stop importing before the
+producer can drop the export. And `--exclusively` is mandatory, without it CDK pulls
+the producer back in as a dependency and the same failure repeats.
+
+```bash
+# consumers first, one at a time, then the producer
+for S in dbops-dev-data dbops-dev-agent dbops-dev-foundation dbops-dev-frontend; do
+  npx cdk deploy "$S" --exclusively --require-approval never
+done
+```
+
+The rollback is safe (foundation reached `UPDATE_ROLLBACK_COMPLETE` with nothing
+lost), but the error message does not suggest the fix, so budget a failed deploy the
+first time anyone removes an exported resource.
+
+**2. A deleted frontend page stays live, because `frontend_stack` sets `prune=False`.**
+
+After the code was reverted, rebuilt and redeployed, `/apm` still served the old page
+with HTTP 200. The stale objects were still in S3: `apm.html`, `apm.txt` and six
+`apm/__next.*` files. `prune=False` is deliberate and correct (three
+`BucketDeployment`s share one bucket and would otherwise delete each other's files,
+including the separately-deployed `config.json`), so nothing removes an obsolete
+page. Removing a page therefore needs a manual step:
+
+```bash
+aws s3 rm s3://dbops-dev-frontend-<ACCOUNT>/<page>.html
+aws s3 rm s3://dbops-dev-frontend-<ACCOUNT>/<page>.txt
+aws s3 rm s3://dbops-dev-frontend-<ACCOUNT>/<page>/ --recursive
+aws cloudfront create-invalidation --distribution-id <ID> --paths '/<page>' '/<page>/*'
+```
+
+Never `aws s3 rm --recursive` at the bucket root and never `sync --delete`: that
+deletes `/config.json`, which CDK deploys separately, and the console then fails
+login with 401.
+
+**Verifying that a page is gone needs a negative control.** This is a static export
+behind CloudFront, so an unknown path also answers 200 with the fallback document.
+`curl -o /dev/null -w '%{http_code}'` proves nothing on its own. Compare the body
+against a path that cannot exist:
+
+```bash
+curl -s "$CF/apm" -o /tmp/a; curl -s "$CF/zzz-not-a-page" -o /tmp/b
+cmp -s /tmp/a /tmp/b && echo "gone (fallback)" || echo "still served"
+```
+
 ## Decisions that are NOT open items
 
 Recorded here so they stop reading like unfinished work, and because the code
