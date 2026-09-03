@@ -46,20 +46,22 @@ interface ModelOption {
 // Hardcoded fallback only used if /api/models can't be reached (cold start, IAM, etc.).
 // Live models are pulled from Bedrock ListInferenceProfiles via /api/models so the
 // dropdown always reflects what Bedrock will actually accept.
+// Keep in sync with _BASE_MODELS in data-pipeline/inference_profile_setup/handler.py,
+// which is what /api/models actually serves. Every id below was verified callable in
+// ap-northeast-2 on 2026-09-03, both for streaming text and for emitting a valid
+// toolUse block.
 const FALLBACK_MODELS: ModelOption[] = [
-  { id: "global.anthropic.claude-opus-4-7", label: "Opus 4.7" },
-  { id: "global.anthropic.claude-opus-4-6-v1", label: "Opus 4.6" },
-  { id: "global.anthropic.claude-opus-4-5-20251101-v1:0", label: "Opus 4.5" },
+  { id: "global.anthropic.claude-opus-5", label: "Opus 5" },
+  { id: "global.anthropic.claude-sonnet-5", label: "Sonnet 5" },
+  { id: "global.anthropic.claude-opus-4-8", label: "Opus 4.8" },
   { id: "global.anthropic.claude-sonnet-4-6", label: "Sonnet 4.6" },
-  {
-    id: "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
-    label: "Sonnet 4.5",
-  },
+  { id: "global.anthropic.claude-fable-5-1", label: "Fable 5.1" },
   { id: "global.anthropic.claude-haiku-4-5-20251001-v1:0", label: "Haiku 4.5" },
 ];
 
-// Default to Sonnet 4.6 — fastest verified valid generation.
-const DEFAULT_MODEL = "global.anthropic.claude-sonnet-4-6";
+// Sonnet 5: the balanced default for an agent that makes many tool calls per turn.
+// Opus 5 is more capable and is one click away in the picker.
+const DEFAULT_MODEL = "global.anthropic.claude-sonnet-5";
 const MODEL_STORAGE_KEY = "dbops_chat_model";
 const STORAGE_KEY = "dbops_conversations_v1";
 

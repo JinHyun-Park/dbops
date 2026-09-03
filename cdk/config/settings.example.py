@@ -19,7 +19,7 @@ class Settings:
     #   us.     us-* regions
     #   eu.     eu-* regions
     #   global. any region, routed globally
-    AGENT_MODEL_ID = "apac.anthropic.claude-sonnet-4-20250514-v1:0"
+    AGENT_MODEL_ID = "global.anthropic.claude-sonnet-5"
 
     # Extra regions the in-app model picker scans for available inference profiles,
     # comma-separated. EMPTY means "just REGION", which is the right answer for almost

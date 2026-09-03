@@ -13,12 +13,23 @@ import boto3
 
 _ENV = os.environ.get("ENV", "dev")
 _SSM_PARAM = os.environ.get("AIP_SSM_PARAM", f"/dbops/{_ENV}/inference-profile-map")
+# The in-app model picker is built from these and nothing else: api/models/handler.py
+# lists every `dbops-` Application Inference Profile, so this list IS the menu the
+# operator sees. Keep it curated (newest of each family plus one step back), not
+# exhaustive: every entry is one more row in the dropdown.
+#
+# Each base id was verified callable in this account before being listed here
+# (2026-09-03, ap-northeast-2): `converse_stream` returned text AND `converse` with a
+# toolConfig returned a well-formed toolUse block with correct arguments. That second
+# check is the one that matters, because a model can pick the right tool and still fail
+# to GENERATE a valid tool-use sequence (measured previously with Nova Pro against this
+# project's 65-tool surface), and the agent is useless without tool calls.
 _BASE_MODELS = [
-    ("opus-4-7", "global.anthropic.claude-opus-4-7", "Opus 4.7"),
-    ("opus-4-6", "global.anthropic.claude-opus-4-6-v1", "Opus 4.6"),
-    ("opus-4-5", "global.anthropic.claude-opus-4-5-20251101-v1:0", "Opus 4.5"),
+    ("opus-5", "global.anthropic.claude-opus-5", "Opus 5"),
+    ("sonnet-5", "global.anthropic.claude-sonnet-5", "Sonnet 5"),
+    ("opus-4-8", "global.anthropic.claude-opus-4-8", "Opus 4.8"),
     ("sonnet-4-6", "global.anthropic.claude-sonnet-4-6", "Sonnet 4.6"),
-    ("sonnet-4-5", "global.anthropic.claude-sonnet-4-5-20250929-v1:0", "Sonnet 4.5"),
+    ("fable-5-1", "global.anthropic.claude-fable-5-1", "Fable 5.1"),
     ("haiku-4-5", "global.anthropic.claude-haiku-4-5-20251001-v1:0", "Haiku 4.5"),
 ]
 _TAGS = [
@@ -50,6 +61,28 @@ def _find_existing(bedrock, name: str):
             return None
 
 
+def _list_managed(bedrock):
+    """Every Application Inference Profile this stack owns, by name prefix.
+
+    Scoped to `dbops-{ENV}-` on purpose: the account can hold AIPs created by other
+    stacks or by hand, and the prune below must never be able to reach them.
+    """
+    prefix = f"dbops-{_ENV}-"
+    found, next_token = [], None
+    while True:
+        kwargs = {"typeEquals": "APPLICATION", "maxResults": 100}
+        if next_token:
+            kwargs["nextToken"] = next_token
+        resp = bedrock.list_inference_profiles(**kwargs)
+        for prof in resp.get("inferenceProfileSummaries", []):
+            name = prof.get("inferenceProfileName") or ""
+            if name.startswith(prefix):
+                found.append(prof)
+        next_token = resp.get("nextToken")
+        if not next_token:
+            return found
+
+
 def lambda_handler(event, context):
     region = os.environ.get("AWS_REGION", "ap-northeast-2")
     account = os.environ["ACCOUNT_ID"]
@@ -61,18 +94,20 @@ def lambda_handler(event, context):
 
     if request_type == "Delete":
         # Best-effort cleanup. CFN Custom Resource still expects success on delete.
+        # Enumerate by NAME PREFIX, not by _BASE_MODELS. Iterating the list would
+        # leak every profile created under an older version of it: teardown would
+        # leave AIPs behind that nothing tracks and that keep the DBOps cost tag.
         try:
-            for short, _base, _label in _BASE_MODELS:
-                name = f"dbops-{_ENV}-{short}"
-                existing = _find_existing(bedrock, name)
-                if existing:
-                    arn = existing.get("inferenceProfileArn")
-                    if arn:
-                        try:
-                            bedrock.delete_inference_profile(inferenceProfileIdentifier=arn)
-                            print(f"deleted {name}")
-                        except Exception as e:
-                            print(f"delete {name} failed: {e}")
+            for prof in _list_managed(bedrock):
+                name = prof.get("inferenceProfileName") or ""
+                arn = prof.get("inferenceProfileArn")
+                if not arn:
+                    continue
+                try:
+                    bedrock.delete_inference_profile(inferenceProfileIdentifier=arn)
+                    print(f"deleted {name}")
+                except Exception as e:
+                    print(f"delete {name} failed: {e}")
             ssm.delete_parameter(Name=_SSM_PARAM)
         except Exception as e:
             print(f"delete cleanup error: {e}")
@@ -108,7 +143,33 @@ def lambda_handler(event, context):
             print(f"tag {name} failed: {e}")
         arn_map[short] = {"arn": arn, "label": label, "base": base_model}
 
-    # Publish ARN map to SSM so the agent runtime can resolve "Opus 4.7" → AIP ARN.
+    # Prune AIPs this stack created for a model that is no longer in _BASE_MODELS.
+    #
+    # Without this, editing _BASE_MODELS could only ever ADD to the picker. The Update
+    # path created what was listed and left everything else alone, while
+    # api/models/handler.py lists EVERY `dbops-` AIP, so a model removed from the list
+    # above stayed in the dropdown forever. Worse, the Delete path also iterates
+    # _BASE_MODELS, so a removed entry could never be cleaned up on stack teardown
+    # either: it became a permanent orphan billing under the DBOps cost tag.
+    #
+    # Best-effort by design: a delete failure logs and continues, because a stale
+    # dropdown row is a far smaller problem than a failed CloudFormation custom
+    # resource taking the whole agent stack down with it.
+    wanted = {f"dbops-{_ENV}-{short}" for short, _b, _l in _BASE_MODELS}
+    for prof in _list_managed(bedrock):
+        name = prof.get("inferenceProfileName") or ""
+        if name in wanted:
+            continue
+        arn = prof.get("inferenceProfileArn")
+        if not arn:
+            continue
+        try:
+            bedrock.delete_inference_profile(inferenceProfileIdentifier=arn)
+            print(f"pruned {name} (no longer in _BASE_MODELS)")
+        except Exception as e:
+            print(f"prune {name} failed: {e}")
+
+    # Publish ARN map to SSM so the agent runtime can resolve "Opus 5" → AIP ARN.
     try:
         ssm.put_parameter(
             Name=_SSM_PARAM,

@@ -1,6 +1,10 @@
-"""List Bedrock inference profiles across regions and return only the latest
-Claude generations (Sonnet 4.5+, Opus 4.5+, Haiku 4.5+) — older profiles are
-intentionally hidden so the chat dropdown never surfaces deprecated picks.
+"""List Bedrock inference profiles across regions and return only current Claude
+generations, so the chat dropdown never surfaces a deprecated pick.
+
+"Current" is a NUMERIC floor (_VERSION_FLOOR, currently 4.5) applied to a family and
+version parsed out of the profile id, covering opus / sonnet / haiku / fable. It is
+deliberately not a list of known-good version strings: that is what this file used to
+do, and it silently hid every model released after the list was last edited.
 
 Cross-region scan is required because AWS rolls new Claude generations out to
 us-east-1/eu-central-1 first; ap-northeast-2 lags by 1-2 release cycles. Invoking
@@ -20,13 +24,16 @@ shape means extending the grant in agent_stack.py, not just this file.
 
 import json
 import os
+import re
 
 import boto3
 
 _REGION = os.environ.get("AWS_REGION", "ap-northeast-2")
+# Fallback only: CDK passes DEFAULT_MODEL_ID from Settings.AGENT_MODEL_ID. The literal
+# matters for a local run or a mis-wired deploy, so keep it on a current model.
 _DEFAULT_PROFILE = os.environ.get(
     "DEFAULT_MODEL_ID",
-    "apac.anthropic.claude-sonnet-4-20250514-v1:0",
+    "global.anthropic.claude-sonnet-5",
 )
 _SCAN_REGIONS = [
     r.strip()
@@ -37,33 +44,46 @@ _SCAN_REGIONS = [
     if r.strip()
 ]
 
-# Match the model family + minimum version we consider "latest". Substrings
-# matched against the profile ID (case-insensitive). Anything not in this
-# allowlist is filtered out, no matter what region it lives in.
-_LATEST_MARKERS = (
-    # Sonnet 4.5 and forward
-    "sonnet-4-5", "sonnet-4-6", "sonnet-4-7",
-    # Opus 4.5 and forward
-    "opus-4-5", "opus-4-6", "opus-4-7",
-    # Haiku 4.5 and forward
-    "haiku-4-5", "haiku-4-6", "haiku-4-7",
-)
+# A model is "latest" if its family+version parses at or above this floor. Version is
+# compared NUMERICALLY, not matched against a list of strings.
+#
+# It used to be a hardcoded allowlist of substrings (`sonnet-4-5`, `sonnet-4-6`,
+# `sonnet-4-7`, and the same for opus/haiku) duplicated across three places: the
+# filter, the label table, and the sort key. Measured 2026-09-03: the account had
+# claude-opus-5, claude-sonnet-5, claude-opus-4-8 and claude-fable-5-1 all ACTIVE and
+# callable, and every one of them was invisible in the picker because the allowlist
+# stopped at 4-7. The failure is silent, which is what makes it bad: a new model just
+# never appears, and nothing logs a reason.
+_FAMILY_RANK = {"opus": 0, "sonnet": 1, "haiku": 2, "fable": 3}
+_VERSION_FLOOR = (4, 5)
 
-# Friendly label patterns — first match wins.
-_LABEL_RULES = [
-    ("opus-4-7", "Opus 4.7"),
-    ("opus-4-6", "Opus 4.6"),
-    ("opus-4-5", "Opus 4.5"),
-    ("sonnet-4-7", "Sonnet 4.7"),
-    ("sonnet-4-6", "Sonnet 4.6"),
-    ("sonnet-4-5", "Sonnet 4.5"),
-    ("haiku-4-7", "Haiku 4.7"),
-    ("haiku-4-6", "Haiku 4.6"),
-    ("haiku-4-5", "Haiku 4.5"),
-]
+# Current id form:  claude-<family>-<major>[-<minor>]
+#   claude-sonnet-5, claude-opus-4-8, claude-haiku-4-5-20251001-v1:0
+# The minor group is capped at two digits AND must not be followed by another digit,
+# so a trailing release date is not read as a minor version. Without the guard,
+# `claude-sonnet-4-20250514` parses as 4.20250514, which sorts ABOVE 4.5 and would let
+# an old model through the floor.
+_NEW_FORM = re.compile(r"claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d{1,2})(?!\d))?")
+# Legacy id form (family AFTER the version): claude-3-5-sonnet, claude-3-haiku.
+# Parsed only so the floor can exclude it; these never rank.
+_OLD_FORM = re.compile(r"claude-(\d+)(?:-(\d{1,2})(?!\d))?-(opus|sonnet|haiku|fable)")
+# Friendly label from an Application Inference Profile name: "Opus 5", "Sonnet 4.6".
+_LABEL_FORM = re.compile(r"(opus|sonnet|haiku|fable)\s*([0-9]+)(?:\.([0-9]+))?", re.I)
 
-# Stable sort: Opus → Sonnet → Haiku, newer → older, default region first.
-_FAMILY_RANK = {"opus": 0, "sonnet": 1, "haiku": 2}
+
+def _parse_model(text: str):
+    """(family, (major, minor)) from a profile id or a friendly label, else None."""
+    low = (text or "").lower()
+    m = _NEW_FORM.search(low)
+    if m:
+        return m.group(1), (int(m.group(2)), int(m.group(3) or 0))
+    m = _OLD_FORM.search(low)
+    if m:
+        return m.group(3), (int(m.group(1)), int(m.group(2) or 0))
+    m = _LABEL_FORM.search(low)
+    if m:
+        return m.group(1).lower(), (int(m.group(2)), int(m.group(3) or 0))
+    return None
 
 
 def _cors():
@@ -75,28 +95,30 @@ def _response(status, body):
 
 
 def _is_latest(profile_id: str) -> bool:
-    lower = profile_id.lower()
-    return any(m in lower for m in _LATEST_MARKERS)
+    parsed = _parse_model(profile_id)
+    if not parsed:
+        return False
+    family, version = parsed
+    return family in _FAMILY_RANK and version >= _VERSION_FLOOR
 
 
 def _label(profile_id: str) -> str:
-    lower = profile_id.lower()
-    for needle, name in _LABEL_RULES:
-        if needle in lower:
-            return name
-    return profile_id
+    parsed = _parse_model(profile_id)
+    if not parsed:
+        return profile_id
+    family, (major, minor) = parsed
+    version = f"{major}.{minor}" if minor else str(major)
+    return f"{family.capitalize()} {version}"
 
 
 def _rank_by_label(label: str) -> tuple:
-    lower = label.lower()
-    family = "haiku" if "haiku" in lower else "opus" if "opus" in lower else "sonnet"
-    # version score: extract "4.7" -> 47, "4.6" -> 46, etc., negate so higher first
-    version = 0
-    for token in ("4.7", "4.6", "4.5"):
-        if token in lower:
-            version = -int(token.replace(".", ""))
-            break
-    return (_FAMILY_RANK[family], version, label)
+    """Opus before Sonnet before Haiku before Fable; newer version first."""
+    parsed = _parse_model(label)
+    if not parsed:
+        return (len(_FAMILY_RANK), 0, label)
+    family, (major, minor) = parsed
+    # Negated so a higher version sorts first under an ascending sort.
+    return (_FAMILY_RANK.get(family, len(_FAMILY_RANK)), -(major * 100 + minor), label)
 
 
 def _rank(profile_id_or_summary) -> tuple:
@@ -190,7 +212,7 @@ def lambda_handler(event, context):
     if method != "GET":
         return _response(405, {"error": f"method {method} not allowed"})
 
-    # Tagged Application Inference Profiles take precedence — invocations
+    # Tagged Application Inference Profiles take precedence: invocations
     # through them are automatically attributed in Cost Explorer. We only
     # scan the home region; AIPs are created there by CDK.
     tagged = _scan_application_profiles(_REGION)
@@ -222,7 +244,7 @@ def lambda_handler(event, context):
                 return pfx
         return "zzz."
 
-    # Group by friendly label (Opus 4.7, Sonnet 4.6, etc.) — same generation,
+    # Group by friendly label (Opus 5, Sonnet 4.6, etc.): same generation,
     # pick the best prefix. This hides "Opus 4.7 (us)" + "Opus 4.7 (eu)" duplicates.
     grouped: dict[str, dict] = {}
     for p in all_profiles:

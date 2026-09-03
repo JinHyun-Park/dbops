@@ -80,7 +80,7 @@ GATEWAY_TOKEN_URL = os.environ.get("GATEWAY_TOKEN_URL", "")
 GATEWAY_CLIENT_ID = os.environ.get("GATEWAY_CLIENT_ID", "")
 GATEWAY_CLIENT_SECRET = os.environ.get("GATEWAY_CLIENT_SECRET", "")
 GATEWAY_SCOPE = os.environ.get("GATEWAY_SCOPE", "")
-MODEL_ID = os.environ.get("AGENT_MODEL_ID", "apac.anthropic.claude-sonnet-4-20250514-v1:0")
+MODEL_ID = os.environ.get("AGENT_MODEL_ID", "global.anthropic.claude-sonnet-5")
 REGION = os.environ.get("AWS_REGION_OVERRIDE", os.environ.get("AWS_REGION", "ap-northeast-2"))
 # AgentCore Memory: when set, the agent persists turns + retrieves the caller's
 # long-term memory (facts/preferences/summaries). Empty disables it (fail-open).
