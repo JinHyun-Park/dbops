@@ -1,74 +1,76 @@
-# DBOps — AI-Powered Database Operations Platform
+# DBOps: AI-Powered Database Operations Platform
 
-AI 기반 종합 데이터베이스 운영 플랫폼. 자연어 대화로 Amazon Aurora(PostgreSQL·MySQL), RDS for MySQL·SQL Server(비-Aurora 독립형 인스턴스), DocumentDB, DynamoDB, ElastiCache(Redis/Valkey/Memcached)의 성능 분석, 장애 진단, 운영 자동화, 시뮬레이션을 수행합니다.
+**English** | [한국어](README.ko.md)
+
+An AI-powered platform for end-to-end database operations. Run performance analysis, incident diagnosis, operational automation, and simulation across Amazon Aurora (PostgreSQL and MySQL), RDS for MySQL and SQL Server (standalone, non-Aurora instances), DocumentDB, DynamoDB, and ElastiCache (Redis/Valkey/Memcached), all through natural-language conversation.
 
 ## Features
 
-DBA를 위한 풀스택 운영 플랫폼 — **대화로 진단하고, 안전하게 실행하고, fleet 전체를 모니터링**합니다.
-아래는 영역별 핵심 기능이며, 각 항목의 `/path`는 해당 Web UI 페이지입니다.
+A full-stack operations platform for DBAs: **diagnose by talking to it, execute safely, monitor the whole fleet**.
+The sections below group the core capabilities by area, and the `/path` on each item is the Web UI page it lives on.
 
 <details open>
-<summary><b>🤖 AI & 대화</b></summary>
+<summary><b>🤖 AI & Conversation</b></summary>
 
-- **AI Chat** (`/chat`) — 자연어로 성능 분석·장애 진단·운영 작업 요청. AWS MCP Server(SigV4)로 **공식 AWS/Aurora 문서를 근거로 인용**해 답변
-- **Ask the Fleet** (`/ask`) — "CPU 80% 넘은 클러스터 보여줘" 같은 자연어 fleet 조회. NL→filter compiler + saved views
-- **AI Runbooks** (`/runbooks`) — 채팅 진단/처방을 마크다운 playbook으로 저장·검색·재사용
-- **Cross-Device Chat Sessions** — 대화가 DynamoDB에 영속화돼 다른 기기/브라우저에서 이어쓰기 (1.5s debounced sync + offline 캐시 + 90-day TTL)
-- **Agent Memory Inspector** (`/preferences`) — AgentCore Memory의 preferences/facts 조회·삭제. Cognito sub 기반 namespace로 cross-user read 차단
-
-</details>
-
-<details>
-<summary><b>📊 성능 & 분석</b></summary>
-
-- **Performance Analysis** — Slow query 분석, EXPLAIN plan tree + anti-pattern 자동 검출, 인덱스 추천, 이상 탐지
-- **Schema Lineage** (`/schema`) — `pg_constraint` 라이브 introspection으로 FK 관계 그래프 시각화
-- **Replication Topology** (Dashboard) — Writer/Readers + 인스턴스별 AuroraReplicaLag, promotion tier, multi-AZ
-- **Redundant Indexes** (Dashboard) — prefix-covered / 완전 중복 / unused 인덱스 자동 검출
-- **Capacity Forecasting** — Storage/Connections/AAS 30·60·90일 선형 회귀 예측 + 임계 도달 시점
-- **PG Log Insights** + **Keyword Search** (`/dashboard`) — CloudWatch Logs Insights를 카테고리별로 묶어 조회, 검색어 AND 조인 + regex 살균
-- **Saved Query Library** (Query Lab) — 자주 쓰는 SQL 저장·태깅·cross-device 로드
-- **MySQL Dashboard Parity** — Schema/Indexes/Log Insights 모두 Aurora MySQL 지원
+- **AI Chat** (`/chat`): ask for performance analysis, incident diagnosis, and operational work in plain language. Answers **cite the official AWS/Aurora documentation as their evidence** via the AWS MCP Server (SigV4)
+- **Ask the Fleet** (`/ask`): natural-language fleet queries such as "show me the clusters above 80% CPU". NL→filter compiler + saved views
+- **AI Runbooks** (`/runbooks`): save, search, and reuse a chat diagnosis or prescription as a markdown playbook
+- **Cross-Device Chat Sessions**: conversations persist in DynamoDB, so you can pick one up on another device or browser (1.5s debounced sync + offline cache + 90-day TTL)
+- **Agent Memory Inspector** (`/preferences`): read and delete the preferences/facts held in AgentCore Memory. Namespaces are keyed on the Cognito sub, which blocks cross-user reads
 
 </details>
 
 <details>
-<summary><b>📈 모니터링 & 알림</b></summary>
+<summary><b>📊 Performance & Analysis</b></summary>
 
-- **Monitoring Dashboard** (`/dashboard`) — 실시간 클러스터 상태, 메트릭 시각화, Health Score
-- **Fleet Overview** (`/fleet`) — 전체 클러스터 한눈에. ETL 신선도 배지(fresh/stale/no_data) 포함
-- **SLO Tracker** (`/slo`) — 가용성 + p-mean 쿼리 지연 SLO 실측 + 에러 버짓 burn-down
-- **Compound Alert Rules** (`/alerts`) — 단일 threshold + AND/OR DSL(per-operand window/agg). DBA 프리셋 6종 + Slack 양방향 Ack
-- **Alert Impact** — 알람 ±5min의 슬로우 쿼리·동시 이벤트·동시 알람을 인라인 패널로 (사고 triage)
-- **Cost Anomaly Detection** (`/cost`) — Bedrock 일별 사용액 spike를 z-score + 절대차 + 상대비 triple gate로 감지
-
-</details>
-
-<details>
-<summary><b>🔧 운영 & 안전장치</b></summary>
-
-- **Operations Automation** — 파라미터 변경, DDL 실행, 스케일링, **스냅샷·복원** (전부 Human-in-the-loop 승인)
-- **Approval Guard** — 모든 write tool이 서버측에서 DDB approval row를 검증. agent가 `approved=true`를 임의로 못 켜고, `approval_id`(DBA가 `/approvals`에서 승인 시 발급) + cluster/action_type/30분 윈도우/atomic consume까지 강제
-- **Simulation UI** (`/simulator`) — 업그레이드(호환성+method matrix+ordered plan)·파라미터·ACU 비용·DDL 영향을 채팅 없이 즉시 추정
+- **Performance Analysis**: slow query analysis, EXPLAIN plan tree with automatic anti-pattern detection, index recommendations, anomaly detection
+- **Schema Lineage** (`/schema`): FK relationship graph visualized from live `pg_constraint` introspection
+- **Replication Topology** (Dashboard): writer/readers plus per-instance AuroraReplicaLag, promotion tier, multi-AZ
+- **Redundant Indexes** (Dashboard): automatic detection of prefix-covered, fully duplicate, and unused indexes
+- **Capacity Forecasting**: 30/60/90-day linear-regression forecasts for storage, connections, and AAS, plus the point each one crosses its threshold
+- **PG Log Insights** + **Keyword Search** (`/dashboard`): CloudWatch Logs Insights grouped by category, with search terms AND-joined and regex sanitized
+- **Saved Query Library** (Query Lab): store, tag, and cross-device load the SQL you run often
+- **MySQL Dashboard Parity**: Schema, Indexes, and Log Insights all support Aurora MySQL
 
 </details>
 
 <details>
-<summary><b>🚨 인시던트 & 감사</b></summary>
+<summary><b>📈 Monitoring & Alerting</b></summary>
 
-- **Incident Diagnosis** — RCA, 시그널 상관 분석, 타임라인 재구성
-- **Incident Timeline** (`/timeline`) — 한 cluster의 모든 신호(알람/RDS 이벤트/스키마 변경/proactive/Slack ack/실행된 쓰기)를 시간축 한 줄에, 카테고리 칩 필터
-- **DBOps Activity Log** (`/activity`) — 누가 무엇을 요청/승인/실행했는지 시간순 기록 (컴플라이언스 감사 + 사후 회고). `query_activity_audit` MCP 도구로 채팅에서도 질의 가능
-- **Daily Operations Report** (`/reports`) — `report_generator` Lambda가 매일 자정 24h 메트릭을 집계 + Bedrock Claude로 한국어 요약 (실패 시 템플릿 fallback)
+- **Monitoring Dashboard** (`/dashboard`): live cluster status, metric visualization, Health Score
+- **Fleet Overview** (`/fleet`): every cluster at a glance, with ETL freshness badges (fresh/stale/no_data)
+- **SLO Tracker** (`/slo`): measured availability and p-mean query-latency SLOs with error-budget burn-down
+- **Compound Alert Rules** (`/alerts`): a single threshold or an AND/OR DSL (per-operand window/agg). Six DBA presets + two-way Slack Ack
+- **Alert Impact**: the slow queries, concurrent events, and concurrent alarms within ±5min of an alarm, in an inline panel (incident triage)
+- **Cost Anomaly Detection** (`/cost`): catches spikes in daily Bedrock spend through a triple gate of z-score, absolute delta, and relative ratio
 
 </details>
 
 <details>
-<summary><b>🏢 플랫폼 & 멀티계정</b></summary>
+<summary><b>🔧 Operations & Safety</b></summary>
 
-- **Cross-Account** — Hub-Spoke IAM 패턴으로 여러 AWS 계정의 Aurora 통합 관리
-- **Cluster Registration Wizard** (`/clusters`) — same/cross-account 모드 토글, "연결만 테스트" 3-step pre-flight (STS AssumeRole + DescribeDBClusters + master secret)
-- **Schema Migration Auto-Trigger** — `cdk deploy` 시 SQL 디렉터리 SHA-256 해시를 schema_version에 주입해 변경 시 자동 마이그레이션
+- **Operations Automation**: parameter changes, DDL execution, scaling, **snapshot and restore** (all human-in-the-loop approved)
+- **Approval Guard**: every write tool validates a DDB approval row server-side. The agent cannot flip `approved=true` by itself: it must also pass an `approval_id` (issued when a DBA approves in `/approvals`), and the cluster, the action_type, a 30-minute window, and an atomic consume are all enforced
+- **Simulation UI** (`/simulator`): estimate upgrades (compatibility + method matrix + ordered plan), parameter changes, ACU cost, and DDL impact directly, without going through chat
+
+</details>
+
+<details>
+<summary><b>🚨 Incidents & Audit</b></summary>
+
+- **Incident Diagnosis**: RCA, signal correlation, timeline reconstruction
+- **Incident Timeline** (`/timeline`): every signal for one cluster (alarms, RDS events, schema changes, proactive findings, Slack acks, executed writes) on a single time axis, with category chip filters
+- **DBOps Activity Log** (`/activity`): a chronological record of who requested, approved, and executed what (compliance audit + post-incident review). Also queryable from chat through the `query_activity_audit` MCP tool
+- **Daily Operations Report** (`/reports`): the `report_generator` Lambda aggregates 24h of metrics at midnight and summarizes them in Korean with Bedrock Claude (template fallback on failure)
+
+</details>
+
+<details>
+<summary><b>🏢 Platform & Multi-Account</b></summary>
+
+- **Cross-Account**: manage Aurora across several AWS accounts from one place with a hub-spoke IAM pattern
+- **Cluster Registration Wizard** (`/clusters`): same/cross-account mode toggle, plus a connection-test-only 3-step pre-flight (STS AssumeRole + DescribeDBClusters + master secret)
+- **Schema Migration Auto-Trigger**: `cdk deploy` injects a SHA-256 hash of the SQL directory into schema_version, so a change migrates automatically
 
 </details>
 
@@ -78,7 +80,7 @@ DBA를 위한 풀스택 운영 플랫폼 — **대화로 진단하고, 안전하
 Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
                                     │                        │
                           AgentCore Gateway          AWS MCP Server
-                          (Cedar Policy)             (SigV4 · 공식 AWS 문서)
+                          (Cedar Policy)             (SigV4 · official AWS docs)
                                     │
               ┌─────────────────────┼─────────────────────┐
               ▼            ▼              ▼               ▼
@@ -91,12 +93,12 @@ Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
                   (hot cache)         (ETL · Event Processor · Report · Monitor)
 ```
 
-- **Custom 도구는 Gateway 경유** (write 승인은 tool-level `approval_guard`가 강제 — Cedar Policy Engine은 게이트웨이에 LOG_ONLY로 바인딩된 방어심층), **공식 AWS 문서는 AWS MCP Server에 SigV4로 직접** — 읽기 전용 문서 도구만 노출
-- **Dashboard 데이터는 사전 수집 캐시에서** — 실시간 렌더링 중 AWS API를 직접 호출하지 않음 (라이브 패널만 예외: topology/backup)
+- **Custom tools go through the Gateway** (write approval is enforced by the tool-level `approval_guard`; the Cedar Policy Engine is bound at the Gateway in LOG_ONLY as defense in depth), **official AWS docs go straight to the AWS MCP Server over SigV4**, which exposes read-only documentation tools and nothing else
+- **Dashboard data comes from the pre-collected cache**: no AWS API is called directly during rendering (the live panels are the only exception: topology and backup)
 
-- **Single Agent + Gateway**: 단일 AgentCore Runtime + Gateway MCP로 지연/토큰 최적화
-- **CDK-First**: 모든 인프라는 CDK로만 관리. `cdk deploy --all`로 전체 배포
-- **Human-in-the-loop**: 조회는 자동, 변경은 DBA 승인 필수 (tool-level `approval_guard` 강제 — fail-closed·payload-hash 바인딩·single-use)
+- **Single Agent + Gateway**: one AgentCore Runtime plus one Gateway MCP, tuned for latency and token count
+- **CDK-First**: all infrastructure is managed through CDK only. `cdk deploy --all` deploys the whole thing
+- **Human-in-the-loop**: reads are automatic, changes require DBA approval (enforced by the tool-level `approval_guard`: fail-closed, payload-hash bound, single-use)
 
 ## Tech Stack
 
@@ -233,23 +235,23 @@ cost-allocation tag to your Aurora clusters (e.g. `dbops:cluster=<id>`) and
 activate that tag key in the same console. Until then the per-cluster panel
 shows a "not available" notice instead of fabricated numbers.
 
-#### Optional post-deploy: Slack 양방향 Ack
+#### Optional post-deploy: Slack two-way Ack
 
-Outbound Slack 알림 메시지의 "✓ Ack" 버튼이 동작하려면 Slack 앱 측 설정이 한 번 필요합니다. **Alerts 페이지의 "Slack 양방향 Ack 설정" 섹션에서 4단계 가이드 + endpoint URL을 자동으로 받을 수 있습니다.** (PageHeader 아래의 "셋업 가이드 열기" 버튼).
+The "✓ Ack" button on outbound Slack alert messages needs one setup pass on the Slack app side. **The Alerts page has a Slack two-way Ack setup section that hands you the 4-step guide plus your endpoint URL automatically** (the setup-guide button under the PageHeader).
 
-요약:
+In short:
 
-1. [api.slack.com/apps](https://api.slack.com/apps?new_app=1)에서 새 Slack 앱 생성
-2. **Basic Information → Signing Secret** 복사 → `cdk/config/settings.py`의 `SLACK_SIGNING_SECRET`에 붙여넣기
-3. **Interactivity & Shortcuts** 활성화 → Request URL에 `{API_GATEWAY_URL}/api/slack/interactive` 입력
-4. **Incoming Webhooks** 활성화 → 채널 webhook URL을 Alerts 페이지 Subscribers에 `slack-webhook` 프로토콜로 등록 → `cdk deploy dbops-dev-agent` 한번 더
+1. Create a new Slack app at [api.slack.com/apps](https://api.slack.com/apps?new_app=1)
+2. Copy **Basic Information → Signing Secret** and paste it into `SLACK_SIGNING_SECRET` in `cdk/config/settings.py`
+3. Enable **Interactivity & Shortcuts** and set the Request URL to `{API_GATEWAY_URL}/api/slack/interactive`
+4. Enable **Incoming Webhooks**, register the channel webhook URL under Subscribers on the Alerts page with the `slack-webhook` protocol, then run `cdk deploy dbops-dev-agent` once more
 
-Signing Secret이 비어 있어도 outbound Slack 메시지(읽기) + 모든 다른 기능은 정상 작동합니다. 양방향 ack만 비활성화됩니다.
+Outbound Slack messages (the read direction) and every other feature work normally with an empty Signing Secret. Only two-way ack is disabled.
 
 #### Optional post-deploy hardening
 
 ```bash
-# Tighten CORS — by default Lambdas echo request Origin (dev-safe).
+# Tighten CORS: by default Lambdas echo request Origin (dev-safe).
 # Set ALLOWED_ORIGINS on dashboard/alerts Lambdas to your CloudFront domain
 # in production. (Auto-injection would create a cyclic CFN dependency.)
 
@@ -274,7 +276,7 @@ Signing Secret이 비어 있어도 outbound Slack 메시지(읽기) + 모든 다
 #### Optional post-deploy: Ticketing (Jira / ServiceNow / …)
 
 DBOps can file a ticket when an agent task completes. It ships as an inert
-integration seam — off by default, toggled per-deployment in the web UI under
+integration seam: off by default, toggled per-deployment in the web UI under
 **Configure → Settings** (`TICKETING_PROVIDER`). Wiring your team's provider is
 a few lines: see [docs/ticketing-integration.md](docs/ticketing-integration.md).
 
@@ -286,7 +288,7 @@ out-of-the-box but grants DBOps the same blast radius as the admin user.
 
 For production, create a dedicated `dbops_readonly` role on each cluster and
 register its credentials in Secrets Manager using the **DBOps naming
-convention** — bulk Discover finds and attaches it automatically, no manual
+convention**: bulk Discover finds and attaches it automatically, no manual
 ARN entry needed:
 
 ```
@@ -325,9 +327,9 @@ aws secretsmanager create-secret \
 
 After this, the Discover table shows one of three badges per cluster:
 
-- `✓ convention` — dedicated user found and auto-attached (recommended)
-- `⚠ master fallback` — using master secret; works but should be tightened
-- `✗ missing` — no usable secret; needs setup before activation
+- `✓ convention`: dedicated user found and auto-attached (recommended)
+- `⚠ master fallback`: using master secret; works but should be tightened
+- `✗ missing`: no usable secret; needs setup before activation
 
 ### Cross-Account Setup
 
@@ -401,7 +403,7 @@ cd cdk && cdk synth --quiet
 
 ### One-time automation setup
 
-Install once per clone — afterwards every commit / push is auto-checked:
+Install once per clone, and every commit / push is auto-checked from then on:
 
 ```bash
 # Dev deps (pytest, ruff, pre-commit, CDK synth deps)
@@ -412,55 +414,55 @@ pre-commit install
 ```
 
 GitHub Actions (`.github/workflows/ci.yml`) re-runs the same checks on
-every push/PR — three parallel jobs:
+every push/PR, in three parallel jobs:
 
-- **python** — `ruff check .` + `pytest tests/unit`
-- **cdk** — `cdk synth` smoke + 4-stack snapshot test
-- **frontend** — `tsc --noEmit` + `next build`
+- **python**: `ruff check .` + `pytest tests/unit`
+- **cdk**: `cdk synth` smoke + 4-stack snapshot test
+- **frontend**: `tsc --noEmit` + `next build`
 
 Claude Code hooks (`.claude/hooks/`) add two structural gates while
 working with the assistant:
 
-- **`pre-commit-review.sh`** — blocks `git commit` until the code-reviewer
+- **`pre-commit-review.sh`**: blocks `git commit` until the code-reviewer
   subagent runs. Bypass for trivial diffs by adding `[skip-review]` to the
   commit message.
-- **`stop-session-memory.sh`** — at session end, surfaces commits since
+- **`stop-session-memory.sh`**: at session end, surfaces commits since
   the last checkpoint and reminds the assistant to persist a project
   memory note so the next session resumes cleanly.
 
 ## Troubleshooting
 
-### Fleet page에 등록한 적 없는 클러스터가 보임
+### The Fleet page shows a cluster I never registered
 
-PG 캐시(`cluster_meta`)에 과거 ETL이 남긴 행이 있고 DDB 레지스트리에는 없는 경우. 현재 build는 `_multi_cluster_overview`가 DDB와 자동 교차 검증하므로 신규 deploy 이후엔 안 보입니다. 기존 캐시 청소가 필요하면 `cluster_meta` + per-cluster 테이블에서 해당 `cluster_id` DELETE.
+The PG cache (`cluster_meta`) still holds rows left behind by an earlier ETL run while the DDB registry has none. In the current build `_multi_cluster_overview` cross-checks against DDB automatically, so this stops happening after a new deploy. To clean up an existing cache, DELETE that `cluster_id` from `cluster_meta` and the per-cluster tables.
 
-### Cost 페이지에 $0만 표시
+### The Cost page shows only $0
 
-`Application` cost allocation 태그가 billing console에서 활성화되지 않은 경우. Quick Start의 "post-deploy: activate Bedrock cost-allocation tags" 단계 확인. 활성화 후에도 과거 비용은 backfill되지 않고 그 시점 이후 호출분만 집계됩니다.
+The `Application` cost allocation tag has not been activated in the billing console. Check the "post-deploy: activate Bedrock cost-allocation tags" step in Quick Start. Even after activation, past cost is not backfilled: only invocations from that point forward are aggregated.
 
-### Slack "✓ Ack" 버튼 클릭 시 "SLACK_SIGNING_SECRET not configured" 메시지
+### Clicking the Slack "✓ Ack" button returns "SLACK_SIGNING_SECRET not configured"
 
-`cdk/config/settings.py`의 `SLACK_SIGNING_SECRET`이 비어 있음. 위 "Slack 양방향 Ack" 가이드의 4단계 수행 + agent 스택 재배포 필요.
+`SLACK_SIGNING_SECRET` in `cdk/config/settings.py` is empty. Run step 4 of the "Slack two-way Ack" guide above and redeploy the agent stack.
 
-### Schema lineage / Replication topology 패널이 "MySQL은 v1에서 지원하지 않습니다"
+### The Schema lineage / Replication topology panels say MySQL is not supported in v1
 
-PostgreSQL 전용 기능들입니다. MySQL 클러스터에서는 friendly 안내가 표시되며 다른 패널은 정상 동작합니다.
+Both are PostgreSQL-only features. On a MySQL cluster you get a friendly notice there, and every other panel works normally.
 
-### Bedrock 응답이 비정상적으로 느림
+### Bedrock responses are unusually slow
 
-Cold start 또는 region capacity 이슈. CloudWatch에서 AgentCore Runtime 로그 확인. AGENT_MODEL_ID를 가벼운 모델로 임시 전환해서 비교: `settings.py`의 `AGENT_MODEL_ID`를 Haiku로.
+Cold start, or region capacity. Check the AgentCore Runtime logs in CloudWatch. To compare, temporarily point `AGENT_MODEL_ID` in `settings.py` at a lighter model such as Haiku.
 
-### 라이트 모드에서 일부 텍스트가 안 보임
+### Some text is invisible in light mode
 
-Recharts series/grid/axis/tooltip 색상은 inline SVG attr로 주입되어 CSS override가 닿지 않습니다. 모든 chart 컴포넌트는 `frontend/src/lib/use-chart-colors.ts` 의 `useChartColors()` 훅에서 amber/sky/emerald/rose **+ grid/axis/tooltipBg/tooltipBorder/tooltipText** 토큰을 가져와야 합니다. WCAG AA(4.5:1) 목표.
+Recharts injects series/grid/axis/tooltip colors as inline SVG attributes, so a CSS override never reaches them. Every chart component must take amber/sky/emerald/rose **plus the grid/axis/tooltipBg/tooltipBorder/tooltipText tokens** from the `useChartColors()` hook in `frontend/src/lib/use-chart-colors.ts`. The target is WCAG AA (4.5:1).
 
-### 채팅에서 "승인됐어"라고 말했는데도 agent가 `approval_denied` 를 반환
+### The agent returns `approval_denied` even though I said "approved" in chat
 
-서버측 approval guard가 켜진 이후로는 `approved=true`만으로는 부족하고, `approval_id` (request_approval 이 돌려준 UUID) 까지 같은 도구 호출에 함께 넘겨야 합니다. agent의 system prompt가 이 흐름을 알지만, 너무 오래된 모델/낮은 reasoning depth에서는 빠뜨릴 수 있으니 그럴 때는 `agent/prompts/system_prompt.py` 가이드라인 강화 + agent 스택 재배포. 또한 승인은 발급 후 30분 안에 사용해야 합니다 — 지났으면 `request_approval`을 다시 호출.
+Since the server-side approval guard shipped, `approved=true` on its own is not enough: the same tool call must also carry the `approval_id` (the UUID `request_approval` returned). The agent's system prompt knows this flow, but a model that is too old, or one running at low reasoning depth, can drop it. When that happens, strengthen the guidelines in `agent/prompts/system_prompt.py` and redeploy the agent stack. An approval also has to be used within 30 minutes of being issued: once that window passes, call `request_approval` again.
 
-### `/reports` 에서 NL summary 대신 단순 템플릿 문장이 표시됨
+### `/reports` shows plain template sentences instead of the NL summary
 
-`ReportGenerator` Lambda가 Bedrock invoke에 실패해서 결정적 fallback이 발동된 경우입니다. CloudWatch Logs에서 `[report_generator] Bedrock summary failed` 메시지 확인. 흔한 원인은 (1) `bedrock:InvokeModel` IAM 권한 누락 — 이 버전부터는 `data_stack`에 자동 부여, (2) `REPORT_SUMMARY_MODEL_ID` env가 가리키는 inference profile 미존재 — settings.py에서 모델 ID 확인. 데이터 자체(JSONB `data` 컬럼)는 정상 저장되니 UI의 카드/슬로우 쿼리 패널은 그대로 표시됩니다.
+The `ReportGenerator` Lambda failed its Bedrock invoke and the deterministic fallback took over. Look for `[report_generator] Bedrock summary failed` in CloudWatch Logs. The common causes are (1) a missing `bedrock:InvokeModel` IAM permission, which `data_stack` grants automatically as of this version, and (2) the inference profile that the `REPORT_SUMMARY_MODEL_ID` env var points at does not exist, so check the model ID in settings.py. The data itself (the JSONB `data` column) is stored correctly, so the cards and slow-query panels in the UI still render.
 
 ## Documentation
 
@@ -472,4 +474,4 @@ Recharts series/grid/axis/tooltip 색상은 inline SVG attr로 주입되어 CSS 
 
 ## License
 
-Private — All rights reserved
+Private. All rights reserved
