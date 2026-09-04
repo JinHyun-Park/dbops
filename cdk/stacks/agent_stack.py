@@ -1794,10 +1794,31 @@ class AgentStack(cdk.Stack):
         ))
         from aws_cdk import custom_resources as cr
         aip_provider = cr.Provider(self, "InferenceProfileProvider", on_event_handler=aip_setup_lambda)
+        # The property MUST be derived from the handler source, not a literal.
+        #
+        # CloudFormation only invokes a custom resource on Update when its PROPERTIES
+        # change. This used to pass {"version": "v1"}, a hand-bumped constant, while
+        # the model roster lives in the handler's own _BASE_MODELS. Measured 2026-09-03:
+        # editing _BASE_MODELS to the current Claude generations and deploying updated
+        # the Lambda code (new CodeSha256, new LastModified) and then did nothing at all,
+        # because the properties were byte-identical. The AIPs and the SSM ARN map stayed
+        # on the old six models, and the deploy reported success.
+        #
+        # Hashing the whole file rather than just the _BASE_MODELS literal is deliberate:
+        # ANY behaviour change in the handler should re-run it, the run is idempotent
+        # (existing profiles are reused and re-tagged), and it takes seconds. The
+        # over-eager direction is the safe one here.
+        import hashlib
+        import pathlib
+        _aip_handler_src = pathlib.Path(
+            "../data-pipeline/inference_profile_setup/handler.py"
+        ).read_text()
         cdk.CustomResource(
             self, "InferenceProfileSetupRun",
             service_token=aip_provider.service_token,
-            properties={"version": "v1"},
+            properties={
+                "sourceHash": hashlib.sha256(_aip_handler_src.encode()).hexdigest()[:16],
+            },
         )
 
         # ===== Cost API =====
