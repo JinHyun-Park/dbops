@@ -387,6 +387,10 @@ def lambda_handler(event, context):
 
     for rule in rules:
         rule_id = int(rule["id"])
+        # When the breach was OBSERVED. Only the legacy single-threshold path can
+        # know it (the compound-conditions DSL evaluates several metrics, so there is
+        # no single moment to name); empty means the RCA anchors on now, as before.
+        observed_ts = ""
         conditions_json = rule.get("conditions_json")
         compound = None
         if conditions_json:
@@ -416,19 +420,29 @@ def lambda_handler(event, context):
             message = f"{rule['name']}: {joiner.join(summaries)}"
         else:
             # Legacy single-threshold path — unchanged.
+            # Carries the TIMESTAMP of the peak, not just its value. MAX(value)
+            # alone discarded when the breach happened, which is what made every
+            # auto-RCA anchor on task-execution time and diagnose the recovery
+            # instead of the incident: this poll is rate(5 minutes) over a 10-minute
+            # lookback, so the peak is routinely 10-15 minutes old by the time the
+            # RCA runs. DISTINCT ON + ORDER BY value DESC gives the single row that
+            # produced the maximum, which is cheaper than a self-join and keeps the
+            # strict dimension filter in one place.
             metric_rows = q(
-                "SELECT MAX(value) AS latest_value "
+                "SELECT DISTINCT ON (cluster_id) value AS latest_value, ts AS observed_ts "
                 "FROM metric_snapshots "
                 "WHERE cluster_id = :cid "
                 "AND metric_type = :mt "
                 "AND ts > NOW() - INTERVAL '10 minutes' "
-                "AND (dimensions IS NULL OR dimensions::text = '{}')",
+                "AND (dimensions IS NULL OR dimensions::text = '{}') "
+                "ORDER BY cluster_id, value DESC",
                 {"cid": rule["cluster_id"], "mt": rule["metric_type"]},
             )
             if not metric_rows or metric_rows[0].get("latest_value") is None:
                 skipped += 1
                 continue
             latest = float(metric_rows[0]["latest_value"])
+            observed_ts = metric_rows[0].get("observed_ts") or ""
             threshold = float(rule["threshold"])
             comp_fn = COMP_FN.get(rule["comparison"])
             if not comp_fn or not comp_fn(latest, threshold):
@@ -503,7 +517,15 @@ def lambda_handler(event, context):
         try:
             from task_enqueue import enqueue_auto_rca
 
-            enqueue_auto_rca(rule["cluster_id"], rule_id, title=f"경보 RCA · {message}")
+            enqueue_auto_rca(
+                rule["cluster_id"],
+                rule_id,
+                title=f"경보 RCA · {message}",
+                trigger=f"alert:{rule_id}",
+                # The moment the breach was OBSERVED, so the RCA anchors on the
+                # incident rather than on its own execution time.
+                observed_at=str(observed_ts or ""),
+            )
         except Exception as e:
             print(f"[alert-evaluator] auto-RCA enqueue error for rule {rule_id}: {type(e).__name__}")
 

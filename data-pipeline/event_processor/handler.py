@@ -124,6 +124,35 @@ def lambda_handler(event, context):
                 Message=message,
             )
 
+    # Auto-RCA on an engine event that actually means something. This handler used to
+    # end at event_log + SNS, so a real Aurora failover produced an email and nothing
+    # else. Measured over 30 days of event_log BEFORE this change: 155 critical
+    # aws.cloudwatch alarm rows and 94 warning aws.rds rows, including 5 genuine
+    # `failover` events (last 2026-09-10 01:59:49Z), produced ZERO RCAs.
+    #
+    # Scoped to event TYPES that describe a fault, not to severity. Severity alone is
+    # the wrong key here: _classify_rds marks every failover/failure/low-storage as
+    # `warning` (handler.py:65) while routine `backup` and `creation` rows are the
+    # bulk of the table (598 + 140 of the last 30 days), and an alarm_ok transition is
+    # a recovery, not an incident. Enqueuing on severity would diagnose backups.
+    #
+    # Best-effort: an enqueue failure must not break event ingestion, which has
+    # already written the row and sent the notification above.
+    _RCA_WORTHY = ("failover", "failure", "low storage", "alarm_alarm")
+    if (event_type or "").lower() in _RCA_WORTHY:
+        try:
+            from task_enqueue import enqueue_auto_rca
+
+            enqueue_auto_rca(
+                cluster_id,
+                f"event:{event_type}",
+                title=f"엔진 이벤트 자동 RCA · {cluster_id} · {event_type}",
+                trigger=f"event:{event_type}",
+            )
+        except Exception as e:
+            print(f"[event-processor] auto-RCA enqueue error for "
+                  f"{cluster_id}/{event_type}: {type(e).__name__}")
+
     return {"statusCode": 200, "body": json.dumps({"processed": True, "cluster_id": cluster_id, "event_type": event_type})}
 
 

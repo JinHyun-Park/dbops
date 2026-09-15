@@ -355,3 +355,75 @@ def test_narrative_sends_no_sampling_params_the_claude_5_family_rejects(monkeypa
         "RCA_NARRATIVE_MODEL_ID can name."
     )
     assert "maxTokens" in cfg, "maxTokens must stay: an unbounded narrative is a cost risk"
+
+
+def test_the_rca_anchors_on_the_observed_incident_not_on_its_own_execution():
+    """The task row's observed_at must reach diagnose_root_cause as around_time.
+
+    Without it the RCA anchors on task-execution time, which is a different moment
+    from the incident. alert_evaluator reads MAX(value) over a 10-minute lookback on a
+    rate(5 minutes) poll, so the breach is routinely 10-15 minutes older than the
+    anchor. Measured on the 2026-08-30 auto-RCA: the CPU breach was at 19:54:00 and
+    19:56:00, the anchor landed at 19:59:30, and CPU was already back to 49.6 by
+    19:59:00. The analysis described the recovery rather than the incident.
+    """
+    table = MagicMock()
+    table.get_item.return_value = {"Item": {"task_id": "t1", "status": "pending"}}
+    seen = {}
+
+    def fake_diagnose(cache, cluster_id, **kwargs):
+        seen.update(kwargs)
+        return {"status": "ok", "candidates": [], "signals_examined": {}}
+
+    with patch.object(tw, "_table", return_value=table), \
+         patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw, "diagnose_root_cause_impl", side_effect=fake_diagnose), \
+         patch.object(tw, "_claim", return_value=True), \
+         patch.object(tw, "_broadcast", return_value=0), \
+         patch.object(tw, "_narrative", return_value=None):
+        tw.lambda_handler({"Records": [{
+            "eventName": "INSERT",
+            "dynamodb": {"NewImage": {
+                "task_id": {"S": "t1"},
+                "kind": {"S": "auto_rca"},
+                "cluster_id": {"S": "c1"},
+                "status": {"S": "pending"},
+                "observed_at": {"S": "2026-08-30T19:54:00+00:00"},
+            }},
+        }]}, None)
+
+    assert seen.get("around_time") == "2026-08-30T19:54:00+00:00", (
+        f"observed_at must become around_time; got {seen!r}"
+    )
+
+
+def test_a_task_with_no_observed_at_still_anchors_on_now():
+    """Negative control. A manual RCA carries no observed_at because the DBA is
+    looking at the present, and an empty string is what diagnose_root_cause reads as
+    'anchor on now'. Without this test a change that required observed_at would pass
+    the test above and break every manual RCA."""
+    table = MagicMock()
+    table.get_item.return_value = {"Item": {"task_id": "t2", "status": "pending"}}
+    seen = {}
+
+    def fake_diagnose(cache, cluster_id, **kwargs):
+        seen.update(kwargs)
+        return {"status": "ok", "candidates": [], "signals_examined": {}}
+
+    with patch.object(tw, "_table", return_value=table), \
+         patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw, "diagnose_root_cause_impl", side_effect=fake_diagnose), \
+         patch.object(tw, "_claim", return_value=True), \
+         patch.object(tw, "_broadcast", return_value=0), \
+         patch.object(tw, "_narrative", return_value=None):
+        tw.lambda_handler({"Records": [{
+            "eventName": "INSERT",
+            "dynamodb": {"NewImage": {
+                "task_id": {"S": "t2"},
+                "kind": {"S": "manual_rca"},
+                "cluster_id": {"S": "c1"},
+                "status": {"S": "pending"},
+            }},
+        }]}, None)
+
+    assert seen.get("around_time") == "", f"missing observed_at must mean now; got {seen!r}"

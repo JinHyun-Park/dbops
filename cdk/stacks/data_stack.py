@@ -593,6 +593,8 @@ class DataStack(cdk.Stack):
                 "ALERT_TOPIC_ARN": self.alert_topic.topic_arn,
             },
         )
+        # Auto-RCA on a fault event (failover, failure, low storage, alarm_alarm).
+        foundation.grant_task_enqueue(self.event_processor)
         self.cache_db.secret.grant_read(self.event_processor)
         self.cache_db.grant_data_api_access(self.event_processor)
         self.alert_topic.grant_publish(self.event_processor)
@@ -673,6 +675,8 @@ class DataStack(cdk.Stack):
                 "ALERT_TOPIC_ARN": self.alert_topic.topic_arn,
             },
         )
+        # Auto-RCA on a critical anomaly. Without this the handler's enqueue is a no-op:
+        foundation.grant_task_enqueue(self.proactive_monitor)
         self.cache_db.secret.grant_read(self.proactive_monitor)
         self.cache_db.grant_data_api_access(self.proactive_monitor)
         self.alert_topic.grant_publish(self.proactive_monitor)

@@ -300,9 +300,18 @@ def _narrative(cluster_id: str, rca: dict):
         return None
 
 
-def _run_rca(cluster_id: str):
+def _run_rca(cluster_id: str, observed_at: str = ""):
     """Deterministic RCA via the incident diagnose_root_cause tool, with a
     hybrid Korean narrative + recommendations layered on (best-effort LLM).
+
+    `observed_at` is when the incident was OBSERVED, carried on the task row by the
+    producer that enqueued it. It matters because it is not this moment: the RCA used
+    to anchor on task-execution time, and alert_evaluator reads a 10-minute lookback
+    on a 5-minute poll, so the breach is routinely 10-15 minutes older. Measured on
+    the 2026-08-30 auto-RCA: the CPU breach was at 19:54:00 and 19:56:00, the anchor
+    landed at 19:59:30, and CPU was already back to 49.6 by 19:59:00. The analysis
+    described the recovery. Empty falls back to now, which is right for a manual RCA
+    where the DBA is looking at the present.
 
     Returns (result_dict, one_line_summary, steps). The summary is the
     top-ranked candidate's own summary line, so the toast / list reads
@@ -310,13 +319,15 @@ def _run_rca(cluster_id: str):
     trace dicts recording each tool invocation with timing."""
     steps = []
     t = time.time()
-    res = diagnose_root_cause_impl(_get_cache(), cluster_id)
+    res = diagnose_root_cause_impl(_get_cache(), cluster_id, around_time=observed_at or "")
     cands = res.get("candidates", []) if isinstance(res, dict) else []
     examined = res.get("signals_examined", {}) if isinstance(res, dict) else {}
     nsrc = len([k for k, v in examined.items() if v]) if isinstance(examined, dict) else 0
     steps.append({"step": "진단", "tool": "diagnose_root_cause",
                   "ms": int((time.time() - t) * 1000),
-                  "detail": f"{nsrc}개 소스 검사 · 후보 {len(cands)}"})
+                  "detail": (f"{nsrc}개 소스 검사, 후보 {len(cands)}"
+                             + (f", 앵커 {observed_at}" if observed_at
+                                else ", 앵커 현재시각"))})
     if isinstance(res, dict):
         t = time.time()
         narr = _narrative(cluster_id, res)
@@ -390,7 +401,9 @@ def lambda_handler(event, context):
         t0 = time.time()
         try:
             if kind in ("auto_rca", "manual_rca"):
-                result, summary, steps = _run_rca(cluster_id)
+                result, summary, steps = _run_rca(
+                    cluster_id, observed_at=str(img.get("observed_at") or "")
+                )
             elif kind == "scheduled_report":
                 result, summary, steps = _run_report(cluster_id)
             else:

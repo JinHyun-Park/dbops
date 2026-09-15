@@ -109,4 +109,33 @@ def lambda_handler(event, context):
             except Exception as e:
                 print(f"[proactive-monitor] SNS publish failed for {cluster_id}/{metric}: {type(e).__name__}: {e}")
 
+            # Auto-RCA on a CRITICAL anomaly, and the reason this exists at all: until
+            # now this handler ended at SNS, so a 3-sigma move produced an email and
+            # nothing else. Measured over 30 days of event_log BEFORE this change: 258
+            # critical + 439 warning dbops-monitor anomaly rows produced ZERO RCAs,
+            # because the only production caller of enqueue_auto_rca was
+            # alert_evaluator, itself gated on an alert_rules table holding 2 rows for
+            # 1 of 11 registered clusters.
+            #
+            # CRITICAL only, deliberately. Warnings are the larger population (439 vs
+            # 258) and are frequently transient, so enqueuing on them would turn a
+            # quiet feature into a noisy one. The 15-minute per-cluster dedupe inside
+            # task_enqueue bounds it further.
+            #
+            # Best-effort by design: an enqueue failure must never break the alerting
+            # path that already succeeded above.
+            if sev == "critical":
+                try:
+                    from task_enqueue import enqueue_auto_rca
+
+                    enqueue_auto_rca(
+                        cluster_id,
+                        f"anomaly:{metric}",
+                        title=f"이상 징후 자동 RCA · {cluster_id} · {metric}",
+                        trigger=f"anomaly:{metric}",
+                    )
+                except Exception as e:
+                    print(f"[proactive-monitor] auto-RCA enqueue error for "
+                          f"{cluster_id}/{metric}: {type(e).__name__}")
+
     return {"statusCode": 200, "body": json.dumps({"anomalies_found": len(anomalies), "alerts_sent": alerts_sent})}

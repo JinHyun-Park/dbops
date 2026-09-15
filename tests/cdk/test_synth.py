@@ -530,3 +530,62 @@ def test_every_bedrock_invoke_grant_covers_all_three_profile_resource_types(cdk_
         f"expected at least 3 bedrock:InvokeModel* statements (AgentCore runtime role, "
         f"agent-tasks worker, report generator), found {len(found)}: {found}"
     )
+
+
+def test_every_lambda_that_enqueues_an_auto_rca_gets_the_table_env(cdk_app):
+    """A handler that imports task_enqueue is useless without AGENT_TASKS_TABLE.
+
+    enqueue_auto_rca returns None immediately when the env var is unset (written that
+    way so a caller can enqueue unconditionally), so a missing grant is a SILENT no-op:
+    the code looks wired, the deploy succeeds, and no RCA is ever created.
+
+    That is exactly the state this deployment was in. Measured 2026-09-15 before the
+    fix: proactive_monitor and event_processor both returned None for
+    `aws lambda get-function-configuration --query Environment.Variables.AGENT_TASKS_TABLE`,
+    and over 30 days of event_log their 258 critical anomalies, 155 critical CloudWatch
+    alarms and 5 genuine Aurora failovers produced ZERO RCAs.
+
+    The expected set is derived from the SOURCE (which handlers import the module), so
+    adding a fourth producer fails here until its grant exists rather than shipping
+    another silent no-op. Each importer is then matched to its OWN Lambda by logical
+    id: an earlier version of this test compared COUNTS, and removing both new grants
+    still passed it because alert_evaluator and task_scheduler already had the env.
+    A test that cannot fail is worse than no test, because it reads as coverage.
+    """
+    import pathlib as _pl
+    import re as _re
+
+    root = _pl.Path(__file__).resolve().parents[2]
+    pipeline = root / "data-pipeline"
+    importers = sorted(
+        d.name for d in pipeline.iterdir()
+        if d.is_dir() and (d / "handler.py").is_file()
+        and "task_enqueue" in (d / "handler.py").read_text()
+    )
+    assert importers, "no handler imports task_enqueue; did the module move?"
+
+    data = next(s for s in cdk_app.stacks if s.stack_name.endswith("-data"))
+    resources = (data.template or {}).get("Resources", {})
+
+    def _camel(snake: str) -> str:
+        return "".join(part.title() for part in snake.split("_"))
+
+    missing = []
+    for owner in importers:
+        want = _camel(owner)  # proactive_monitor -> ProactiveMonitor
+        logical = [
+            k for k, r in resources.items()
+            if r.get("Type") == "AWS::Lambda::Function"
+            and _re.fullmatch(rf"{want}[0-9A-F]*", k)
+        ]
+        assert logical, f"no Lambda matches importer {owner!r} (expected logical id {want}...)"
+        for lid in logical:
+            env = (resources[lid]["Properties"].get("Environment") or {}).get("Variables") or {}
+            if "AGENT_TASKS_TABLE" not in env:
+                missing.append(f"{owner} -> {lid}")
+
+    assert missing == [], (
+        "these handlers import task_enqueue but their Lambda has no AGENT_TASKS_TABLE, "
+        "so every enqueue is a silent no-op: " + ", ".join(missing)
+        + ". Add foundation.grant_task_enqueue(...) in cdk/stacks/data_stack.py."
+    )
