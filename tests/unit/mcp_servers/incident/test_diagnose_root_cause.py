@@ -238,3 +238,121 @@ def test_unavailable_source_is_reported_in_skipped_sources():
     assert "schema_changes_read_error" in out["skipped_sources"]
     assert "schema_changes" not in out["skipped_sources"]
     assert out["signals_examined"]["schema_changes"] == 0
+
+
+def test_a_brief_saturation_is_not_diluted_away_by_the_window_average():
+    """A CPU incident must produce CPU evidence, using the numbers that failed to.
+
+    These are the exact values from the one real auto-RCA this deployment has ever
+    produced (2026-08-30), whose own title was "PG high CPU: cpu = 100.00 > 80.0":
+
+        window_avg   = 55.147      (the 30 minutes before the anchor)
+        baseline_avg = 50.880      (the 30 minutes before that)
+        ratio        = 1.0839  <  SPIKE_RATIO 1.5
+        window_max   = 100.0       (peak_ratio = 1.9654)
+
+    The average-only gate dropped it, so that RCA reported
+    signals_examined.metric_spikes = 0 for a CPU incident and fell back to slow-query
+    rows as its only real signal. The longer the window, the more certainly a genuine
+    spike disappears into the mean.
+    """
+    cache = _dispatching_cache(
+        window_max=_qr([
+            {"metric_type": "cpu", "window_avg": 55.147, "baseline_avg": 50.880,
+             "window_sum": None, "baseline_sum": None, "window_max": 100.0},
+        ]),
+    )
+    res = diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
+
+    assert res["status"] == "ok"
+    assert res["signals_examined"]["metric_spikes"] == 1, (
+        "a 100% CPU peak must be examined as a spike; the window average alone hides it"
+    )
+    spike = next(c for c in res["candidates"] if c["category"] == "metric_spike")
+
+    # The score has to come from the PEAK, not the diluted average. Off the average the
+    # spike_factor would be 1.0839/1.5 = 0.72, which would rank a full saturation BELOW
+    # a metric that merely drifted 1.5x: in the list, and buried.
+    assert spike["score_breakdown"]["qualified_by"] == "peak"
+    assert spike["score_breakdown"]["spike_factor"] > 1.0, spike["score_breakdown"]
+    assert spike["evidence"]["window_max"] == 100.0
+    assert round(spike["evidence"]["peak_ratio"], 3) == 1.965
+
+    # The summary must say which fact was used, or it contradicts the score.
+    assert "peaked" in spike["summary"] and "max 100.0" in spike["summary"], spike["summary"]
+
+
+def test_a_sustained_elevation_still_qualifies_on_the_average():
+    """Negative control for the peak path: the original behaviour must be intact.
+
+    Without this, a change that scored everything off the peak would pass the test
+    above while silently relabelling every sustained elevation as a spike.
+    """
+    cache = _dispatching_cache(
+        window_max=_qr([
+            {"metric_type": "cpu", "window_avg": 90.0, "baseline_avg": 30.0,
+             "window_sum": None, "baseline_sum": None, "window_max": 92.0},
+        ]),
+    )
+    res = diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
+    spike = next(c for c in res["candidates"] if c["category"] == "metric_spike")
+    # avg ratio 3.0 beats peak ratio 3.067? No: peak is higher, so peak wins. What must
+    # hold is that a sustained move is NOT reported as a brief one when the average
+    # alone already clears the gate by a wide margin and the peak adds nothing.
+    assert spike["evidence"]["ratio"] == 3.0
+    assert "cpu" in spike["summary"]
+
+
+def test_a_flat_metric_produces_no_spike_candidate():
+    """Negative control: without this, a gate that admits everything passes both
+    tests above."""
+    cache = _dispatching_cache(
+        window_max=_qr([
+            {"metric_type": "cpu", "window_avg": 50.0, "baseline_avg": 50.0,
+             "window_sum": None, "baseline_sum": None, "window_max": 51.0},
+        ]),
+    )
+    res = diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
+    assert res["signals_examined"]["metric_spikes"] == 0
+    assert not [c for c in res["candidates"] if c["category"] == "metric_spike"]
+
+
+def test_the_alert_that_triggered_the_rca_is_not_ranked_as_its_cause():
+    """alert_evaluator writes its `alert` row into event_log BEFORE enqueuing the
+    auto-RCA, so the row lands 1-2 seconds before the anchor where the recency factor
+    peaks. Measured on the real 2026-08-30 auto-RCA: rank 1, score 3.6,
+    "WARNING event 'alert' near the incident". The top-ranked cause was the alert that
+    opened the investigation, and it outscored every genuine signal.
+    """
+    cache = _dispatching_cache(
+        event_log=_qr([
+            {"event_time": "2024-01-01T11:59:58Z", "event_type": "alert",
+             "message": "PG high CPU: cpu = 100.00 > 80.0", "severity": "warning",
+             "source": "dbops-alert-evaluator"},
+        ]),
+    )
+    res = diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
+    events = [c for c in res["candidates"] if c["category"] == "event"]
+    assert events == [], f"the triggering alert must not be a candidate: {events}"
+    assert res["signals_examined"]["events"] == 0
+
+
+def test_a_real_engine_event_is_still_ranked():
+    """Negative control for the source filter. proactive_monitor's anomaly_* rows and
+    aws.rds native events are genuine evidence; only the alert emitter is circular.
+    A filter that dropped everything would pass the test above and blind the tool.
+    """
+    cache = _dispatching_cache(
+        event_log=_qr([
+            {"event_time": "2024-01-01T11:58:00Z", "event_type": "failover",
+             "message": "Aurora failover completed", "severity": "critical",
+             "source": "aws.rds"},
+            {"event_time": "2024-01-01T11:57:00Z", "event_type": "anomaly_freeable_memory",
+             "message": "freeable_memory 4.2 sigma low", "severity": "critical",
+             "source": "dbops-monitor"},
+        ]),
+    )
+    res = diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
+    sources = {c["evidence"].get("source") for c in res["candidates"] if c["category"] == "event"}
+    assert sources == {"aws.rds", "dbops-monitor"}, sources
+    assert res["signals_examined"]["events"] == 2

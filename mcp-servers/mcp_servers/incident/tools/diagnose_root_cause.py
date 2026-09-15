@@ -62,6 +62,16 @@ EVENT_SEVERITY_FACTOR = {
     "info": 0.5,
 }
 
+# event_log sources that are DBOps telling itself something, not the database telling
+# us something. Excluded from event candidates.
+#
+# Only the alert emitter qualifies. `dbops-monitor` (proactive_monitor) writes anomaly_*
+# rows that ARE real measurements: a 3-sigma move in freeable_memory is evidence, and
+# there are 697 such rows in the last 30 days, so dropping them would make the diagnosis
+# worse rather than more honest. "An alert fired" carries no information about the
+# database; "freeable_memory is 4 sigma low" carries all of it.
+SELF_EVENT_SOURCES = frozenset({"dbops-alert-evaluator"})
+
 # Lookahead after the anchor: a cause can show up a few minutes before the
 # symptom is noticed, but the symptom can also slightly precede the log entry.
 LOOKAHEAD_MINUTES = 5
@@ -458,6 +468,23 @@ def _collect_events(cache, cluster_id, start_iso, end_iso, anchor, win, examined
         WHERE cluster_id = :cluster_id
           AND event_time >= :start_time::timestamptz
           AND event_time < :end_time::timestamptz
+          -- DBOps' own instrumentation is not a root cause, and without this it
+          -- reliably ranks #1. alert_evaluator INSERTs its `alert` row into event_log
+          -- BEFORE it enqueues the auto-RCA, so the row lands 1-2 seconds before the
+          -- anchor, where the recency factor is at its maximum. Measured on the one
+          -- real auto-RCA in this deployment (2026-08-30): rank 1, score 3.6,
+          -- "WARNING event 'alert' near the incident", event_time 19:59:28.573 against
+          -- anchor 19:59:30.584. The top-ranked cause was the alert that opened the
+          -- investigation, and it outscored every genuine signal.
+          --
+          -- ONLY the alert emitter is excluded, and the distinction matters.
+          -- `dbops-monitor` (proactive_monitor) writes anomaly_* rows that ARE real
+          -- measurements of the cluster: a 3-sigma move in freeable_memory or
+          -- db_connections is evidence, and there are 697 such rows in the last 30
+          -- days. Dropping them to "exclude our own instrumentation" would make the
+          -- diagnosis worse, not more honest. "An alert fired" carries no information
+          -- about the database; "freeable_memory is 4 sigma low" carries all of it.
+          AND COALESCE(source, '') <> 'dbops-alert-evaluator'
         ORDER BY event_time DESC
     """
     params = {"cluster_id": cluster_id, "start_time": start_iso, "end_time": end_iso}
@@ -467,6 +494,12 @@ def _collect_events(cache, cluster_id, start_iso, end_iso, anchor, win, examined
         print(f"[diagnose_root_cause] events source skipped: {e}")
         skipped.append("events")
         return out
+    # Filtered in BOTH places on purpose. The SQL predicate keeps the rows off the
+    # wire, and this keeps the guarantee testable: the unit tests use a fake cache that
+    # returns rows without executing SQL, so a SQL-only filter is unverifiable by
+    # construction and would silently stop working if the predicate were ever edited
+    # away. A defence no test can reach is not a defence.
+    rows = [r for r in rows if (r.get("source") or "") not in SELF_EVENT_SOURCES]
     examined["events"] = len(rows)
     for row in rows:
         when = row.get("event_time")
@@ -600,7 +633,12 @@ def _collect_metric_spikes(
                ) AS window_sum,
                SUM(value) FILTER (
                    WHERE ts >= :baseline_start::timestamptz AND ts < :start_time::timestamptz
-               ) AS baseline_sum
+               ) AS baseline_sum,
+               -- The PEAK, because the average hides a short spike and a short spike
+               -- is exactly what an incident looks like. See the peak path below.
+               MAX(value) FILTER (
+                   WHERE ts >= :start_time::timestamptz AND ts < :end_time::timestamptz
+               ) AS window_max
         FROM metric_snapshots
         WHERE cluster_id = :cluster_id
           AND ts >= :baseline_start::timestamptz
@@ -642,10 +680,39 @@ def _collect_metric_spikes(
         if window_avg is None or baseline_avg is None or baseline_avg <= 0:
             continue
         ratio = window_avg / baseline_avg
-        if ratio < SPIKE_RATIO:
+        window_max = _to_float(row.get("window_max"))
+        peak_ratio = (window_max / baseline_avg) if window_max is not None else None
+
+        # Two ways in, because the AVERAGE alone provably misses real incidents.
+        #
+        # Measured on the one real auto-RCA this deployment has ever produced
+        # (2026-08-30), whose own title was "PG high CPU: cpu = 100.00 > 80.0":
+        #     window_avg   (19:29:30-19:59:30) = 55.147
+        #     baseline_avg (18:59:30-19:29:30) = 50.880
+        #     ratio = 1.0839  <  SPIKE_RATIO 1.5   -> dropped
+        #     window_max = 100.0
+        # That RCA reported signals_examined.metric_spikes = 0 for a CPU incident and
+        # fell back to slow-query rows as its only real signal. A 30-minute window
+        # dilutes a two-sample saturation below the gate, and the longer the window the
+        # more certainly a genuine spike disappears.
+        #
+        # So a metric also qualifies when its PEAK clears the gate. The peak path is
+        # scored off peak_ratio and labelled distinctly, so a DBA can tell "elevated for
+        # the whole window" from "briefly saturated": those lead to different actions.
+        by_avg = ratio >= SPIKE_RATIO
+        by_peak = peak_ratio is not None and peak_ratio >= SPIKE_RATIO
+        if not (by_avg or by_peak):
             continue
         spikes += 1
-        spike_factor = min(ratio / SPIKE_RATIO, 2.0)
+        # Score off whichever ratio actually qualified, and the STRONGER one when both
+        # do. Scoring a peak-qualified candidate off the diluted average would let it
+        # into the list and then bury it: in the measured case spike_factor would be
+        # 1.0839/1.5 = 0.72, so a full CPU saturation would score BELOW a metric that
+        # merely drifted 1.5x. The label follows the same choice so the summary text and
+        # the score never disagree about which fact was used.
+        used_peak = by_peak and (not by_avg or (peak_ratio or 0) > ratio)
+        effective_ratio = peak_ratio if used_peak else ratio
+        spike_factor = min(effective_ratio / SPIKE_RATIO, 2.0)
         score = BASE_WEIGHTS["metric_spike"] * rf * spike_factor
         out.append(
             {
@@ -655,14 +722,27 @@ def _collect_metric_spikes(
                     "base_weight": BASE_WEIGHTS["metric_spike"],
                     "recency_factor": round(rf, 3),
                     "spike_factor": round(spike_factor, 3),
+                    # Which fact the score was computed from. Without this a DBA cannot
+                    # tell a sustained elevation from a brief saturation, and the two
+                    # call for different actions.
+                    "qualified_by": "peak" if used_peak else "average",
                     "formula": "base × recency × spike_magnitude",
                 },
-                "summary": f"{metric_type} spiked {round(ratio, 2)}x vs prior baseline ({round(baseline_avg, 2)} -> {round(window_avg, 2)})",
+                "summary": (
+                    f"{metric_type} peaked {round(peak_ratio, 2)}x vs prior baseline "
+                    f"({round(baseline_avg, 2)} -> max {round(window_max, 2)}, "
+                    f"window avg {round(window_avg, 2)})"
+                    if used_peak else
+                    f"{metric_type} spiked {round(ratio, 2)}x vs prior baseline "
+                    f"({round(baseline_avg, 2)} -> {round(window_avg, 2)})"
+                ),
                 "evidence": {
                     "metric_type": metric_type,
                     "window_avg": round(window_avg, 3),
                     "baseline_avg": round(baseline_avg, 3),
                     "ratio": round(ratio, 3),
+                    "window_max": round(window_max, 3) if window_max is not None else None,
+                    "peak_ratio": round(peak_ratio, 3) if peak_ratio is not None else None,
                 },
                 "when": start_iso,
                 "suggested_action": f"Investigate what drove {metric_type} up around this window (load change, plan regression, runaway query).",

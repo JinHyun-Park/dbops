@@ -307,3 +307,51 @@ def test_ticket_provider_failure_does_not_break_completion():
     finish = table.update_item.call_args_list[-1].kwargs
     assert finish["ExpressionAttributeValues"][":s"] == "done"
     assert ":turl" not in finish["ExpressionAttributeValues"]
+
+
+def test_narrative_sends_no_sampling_params_the_claude_5_family_rejects(monkeypatch):
+    """The RCA narrative must not pin `temperature` or `topP`.
+
+    MEASURED 2026-09-15 in ap-northeast-2, per model, via bedrock-runtime converse:
+
+        global.anthropic.claude-sonnet-5   maxTokens OK | temperature REJECT | topP REJECT
+        global.anthropic.claude-opus-5     maxTokens OK | temperature REJECT | topP REJECT
+        global.anthropic.claude-haiku-4-5  maxTokens OK | temperature OK     | topP OK
+
+    The Claude 5 family answers ValidationException "`temperature` is deprecated for
+    this model" (and the same for `top_p`), while 4.5 still accepts both. So the
+    parameter is not universally safe and not universally broken: it depends on which
+    model RCA_NARRATIVE_MODEL_ID happens to point at.
+
+    WHY THIS TEST EXISTS RATHER THAN A COMMENT. This regression shipped and ran
+    unnoticed for 12 days. RCA_NARRATIVE_MODEL_ID moved to claude-sonnet-5 on
+    2026-09-03 while _narrative still sent temperature=0.2, so the call raised on every
+    RCA, _narrative returned None, and the task still completed `done` with the trace
+    line "모델 미설정/실패 - 스킵". Every RCA shipped ranked candidates with no narrative
+    and no recommendations, and nothing reported a failure.
+
+    test_rca_hybrid_narrative above could not catch it: it mocks the bedrock client, and
+    a MagicMock accepts any kwargs, including ones the real service rejects. A mock can
+    never observe a server-side parameter rejection. So this test asserts on the kwargs
+    the code actually PASSES, which is the part a mock does expose.
+    """
+    monkeypatch.setenv("RCA_NARRATIVE_MODEL_ID", "global.anthropic.claude-sonnet-5")
+    bedrock = MagicMock()
+    bedrock.converse.return_value = {
+        "output": {"message": {"content": [{"text": '{"narrative": "n", "recommendations": ["r"]}'}]}}
+    }
+    monkeypatch.setattr(tw.boto3, "client", lambda *a, **k: bedrock)
+
+    out = tw._narrative("c1", {"candidates": [{"category": "event", "score": 1.0}],
+                                  "signals_examined": {"events": 1}})
+    assert out and out.get("narrative"), "narrative should be produced for a healthy call"
+
+    assert bedrock.converse.called, "converse was never called; the assertions below prove nothing"
+    cfg = bedrock.converse.call_args.kwargs["inferenceConfig"]
+    banned = sorted(k for k in ("temperature", "topP", "top_p") if k in cfg)
+    assert banned == [], (
+        f"inferenceConfig pins {banned}, which the Claude 5 family rejects with "
+        "ValidationException. Only maxTokens is safe across every model "
+        "RCA_NARRATIVE_MODEL_ID can name."
+    )
+    assert "maxTokens" in cfg, "maxTokens must stay: an unbounded narrative is a cost risk"

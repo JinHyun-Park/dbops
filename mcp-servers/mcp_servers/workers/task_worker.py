@@ -267,7 +267,21 @@ def _narrative(cluster_id: str, rca: dict):
                 "당신은 Aurora/RDS 데이터베이스 운영(DBA) 전문가입니다. 제공된 신호만으로 "
                 "간결하고 실무적으로 진단하며, 항상 한국어로 답합니다."
             )}],
-            inferenceConfig={"maxTokens": 900, "temperature": 0.2},
+            # NO `temperature`. Claude Sonnet 5 and the rest of the Claude 5 family
+            # REJECT it: converse returns ValidationException "`temperature` is
+            # deprecated for this model". Reproduced 2026-09-15 against
+            # global.anthropic.claude-sonnet-5 in ap-northeast-2, and the identical call
+            # with the key removed returns 200 on the same model, account and region, so
+            # it is not IAM, not the VPC, not model access.
+            #
+            # This broke silently for 12 days. RCA_NARRATIVE_MODEL_ID moved to
+            # claude-sonnet-5 on 2026-09-03 (4326c0f) while this line still sent
+            # temperature, so _narrative raised on EVERY call and returned None. The task
+            # still finished `done` with the trace line "모델 미설정/실패 - 스킵", so the
+            # RCA shipped its ranked candidates with no narrative and no recommendations
+            # and nothing reported a failure. Pinning an inference parameter that a model
+            # family can retire is what made a model swap a silent feature outage.
+            inferenceConfig={"maxTokens": 900},
         )
         text = resp["output"]["message"]["content"][0]["text"].strip()
         # Models sometimes wrap JSON in prose / fences — extract the object.
