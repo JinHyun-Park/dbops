@@ -377,7 +377,10 @@ def test_the_purge_deletes_only_the_rows_the_manifest_names():
     metric_delete = db.deleted("metric_snapshots")
     assert len(metric_delete) == 1
     sql, params = metric_delete[0]
-    assert "ts IN (:t0)" in sql and "metric_type = :mt" in sql
+    # The cast is part of the contract, not incidental: the Data API binds these as
+    # typed text and PostgreSQL refuses `timestamptz = text` (SQLState 42883), which
+    # made every live POST a 500 until the cast was added.
+    assert "ts IN (:t0::timestamptz)" in sql and "metric_type = :mt" in sql
     assert params["t0"] == "2026-09-15T00:00:17Z" and params["mt"] == "cpu"
     assert len(db.deleted("event_log")) == 1
     assert any("SET status = 'resolved'" in s for s, p in db.calls)

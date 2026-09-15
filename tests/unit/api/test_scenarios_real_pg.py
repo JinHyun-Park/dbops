@@ -311,11 +311,29 @@ def _as_data_api(row: dict) -> dict:
             for k, v in row.items()}
 
 
+def _lit_typed(v):
+    """Like _lit, but a string binds as TEXT, which is what the Data API sends.
+
+    THE HARNESS WAS KINDER THAN PRODUCTION AND HID A 500. The purge deleted rows
+    with `WHERE ts IN (:t0)` and no cast. Inlined by _lit that is `IN ('2026-...')`,
+    an UNTYPED literal, and PostgreSQL coerces those to timestamptz without
+    complaint, so the real-engine test passed. The Data API binds a typed text
+    parameter instead, PostgreSQL refuses `timestamp with time zone = text`
+    (SQLState 42883), and every scenario POST against the live cache returned 500.
+
+    So string binds carry an explicit ::text here. A statement that needs a
+    timestamp now has to say so, exactly as it must in production.
+    """
+    if isinstance(v, str):
+        return "'" + v.replace("'", "''") + "'::text"
+    return _lit(v)
+
+
 def _query(pg):
     """The handler's `query` contract over the real server: name-keyed dict rows
     for SELECT/RETURNING, [] for everything else."""
     def query(sql, params=None):
-        bound = _BIND.sub(lambda m: _lit((params or {})[m.group(1)]), sql)
+        bound = _BIND.sub(lambda m: _lit_typed((params or {})[m.group(1)]), sql)
         stripped = bound.strip()
         if stripped.startswith("/*"):
             stripped = stripped.split("*/", 1)[1].strip()

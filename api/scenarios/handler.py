@@ -486,7 +486,15 @@ def _purge_old_runs(query, cluster_id):
             ts_col = _PURGEABLE.get(table)
             if not ts_col or not times or not _IDENT.match(table):
                 continue
-            placeholders = ", ".join(f":t{i}" for i in range(len(times)))
+            # ::timestamptz ON EVERY ELEMENT. The Data API binds these as typed TEXT
+            # parameters, and PostgreSQL refuses `timestamp with time zone = text`
+            # outright: "operator does not exist ... You might need to add explicit
+            # type casts" (SQLState 42883), which made the purge, and therefore the
+            # whole POST, a 500 against the live cache. The real-engine test did not
+            # catch it because its harness inlines values as UNTYPED literals, which
+            # PostgreSQL happily coerces; a typed text parameter is not coerced.
+            # Every other statement in this module already casts.
+            placeholders = ", ".join(f":t{i}::timestamptz" for i in range(len(times)))
             params = {"cid": cluster_id}
             params.update({f"t{i}": t for i, t in enumerate(times)})
             extra = ""
