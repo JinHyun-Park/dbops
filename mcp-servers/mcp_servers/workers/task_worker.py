@@ -1,17 +1,17 @@
-"""task_worker — executes agent-tasks rows as they are inserted.
+"""task_worker: executes agent-tasks rows as they are inserted.
 
 Triggered by the ``agent-tasks`` DynamoDB stream. For each INSERTed row with
 ``status=pending`` it atomically claims the row (pending -> running), runs the
 generator for the row's ``kind``, and writes the result back (done / failed)
 plus a best-effort in-app WebSocket push.
 
-This is the SINGLE processing path for all task sources — alert auto-RCA,
+This is the SINGLE processing path for all task sources: alert auto-RCA,
 scheduled reports, and manual runs each just write a pending row; this worker is
 the only thing that executes them. See
 docs/superpowers/specs/2026-06-18-agent-tasks-design.md.
 
 RCA is deterministic: it reuses the incident server's ``diagnose_root_cause``
-tool (the same one the agent calls), so no LLM / model invocation happens here —
+tool (the same one the agent calls), so no LLM / model invocation happens here,
 fast, cheap, and safe to run unattended in a Lambda.
 """
 
@@ -74,7 +74,7 @@ def _deser_image(image: dict) -> dict:
 def _broadcast(payload: dict) -> int:
     """Push `payload` to all connected WS clients. Best-effort, never raises.
 
-    Copied from data-pipeline/.../ws_notify.broadcast (kept in sync) — the
+    Copied from data-pipeline/.../ws_notify.broadcast (kept in sync): the
     broadcasting Lambdas each carry their own copy rather than share a layer.
     """
     table_name = os.environ.get("WS_CONNECTIONS_TABLE")
@@ -120,7 +120,7 @@ def _claim(task_id: str) -> bool:
     """Atomically move pending -> running. Returns True iff we won the claim.
 
     A stream record can be redelivered (shard retry, at-least-once) and the same
-    INSERT can surface on a re-drive — the conditional write makes execution
+    INSERT can surface on a re-drive. The conditional write makes execution
     idempotent: only the first claimer runs the work."""
     try:
         _table().update_item(
@@ -224,7 +224,7 @@ def _narrative(cluster_id: str, rca: dict):
     """Hybrid layer: turn the deterministic candidate signals into a Korean
     root-cause narrative + concrete recommendations via ONE Bedrock call.
 
-    Best-effort — returns None (and the task still completes with the raw
+    Best-effort: returns None (and the task still completes with the raw
     ranked signals) if the model isn't configured or the call/parse fails. The
     prompt is constrained to the supplied signals so the model can't invent
     causes the data doesn't support."""
@@ -284,7 +284,7 @@ def _narrative(cluster_id: str, rca: dict):
             inferenceConfig={"maxTokens": 900},
         )
         text = resp["output"]["message"]["content"][0]["text"].strip()
-        # Models sometimes wrap JSON in prose / fences — extract the object.
+        # Models sometimes wrap JSON in prose / fences, so extract the object.
         start, end = text.find("{"), text.rfind("}")
         if start == -1 or end == -1:
             return None
@@ -338,9 +338,9 @@ def _run_rca(cluster_id: str, observed_at: str = ""):
                           "detail": "한국어 narrative+권장조치"})
         else:
             steps.append({"step": "서술 생성", "tool": "bedrock", "ms": 0,
-                          "detail": "모델 미설정/실패 — 스킵"})
+                          "detail": "모델 미설정/실패, 스킵"})
     summary = (cands[0].get("summary") or cands[0].get("category") or "신호 감지") if cands \
-        else "자동 수집 신호에서 뚜렷한 원인 미발견 — 수동 점검 권장"
+        else "자동 수집 신호에서 뚜렷한 원인 미발견, 수동 점검 권장"
     return res, summary, steps
 
 
@@ -351,7 +351,7 @@ def _run_report(cluster_id: str):
 
     health_status returns `health` as an overall string (healthy/warning/
     critical), cluster meta, and `current_metrics` (per-metric avg/max over the
-    last 10 min) — the digest surfaces all three.
+    last 10 min). The digest surfaces all three.
 
     Returns (report_dict, one_line_summary, steps)."""
     steps = []
@@ -372,11 +372,11 @@ def _run_report(cluster_id: str):
                 "label": str(m["metric_type"]),
                 "value": f"avg {m.get('avg_val')} / max {m.get('max_val')}",
             })
-    summary = f"헬스 다이제스트 · {health}" if health else "헬스 다이제스트"
+    summary = f"헬스 다이제스트: {health}" if health else "헬스 다이제스트"
     report = {"report_kind": "health_digest", "lines": lines, "raw": res}
     steps.append({"step": "헬스 다이제스트", "tool": "health_status",
                   "ms": int((time.time() - t) * 1000),
-                  "detail": f"헬스: {health} · 메트릭 {len(lines)}개"})
+                  "detail": f"헬스 {health}, 메트릭 {len(lines)}개"})
     return report, summary, steps
 
 
@@ -407,7 +407,7 @@ def lambda_handler(event, context):
             elif kind == "scheduled_report":
                 result, summary, steps = _run_report(cluster_id)
             else:
-                # Any future kind lands here until its generator ships — fail
+                # Any future kind lands here until its generator ships. Fail
                 # loudly so it shows in the task list instead of hanging at
                 # "running" forever.
                 raise NotImplementedError(f"task kind {kind!r} not yet supported by the worker")
@@ -426,7 +426,7 @@ def lambda_handler(event, context):
                 "task_id": task_id,
                 "cluster_id": cluster_id,
                 "severity": "warning",
-                "title": f"{'리포트' if is_report else 'RCA'} 준비됨 · {cluster_id}: {summary}",
+                "title": f"{'리포트' if is_report else 'RCA'} 준비됨: {cluster_id}, {summary}",
             }
             if ticket_url:
                 payload["ticket_url"] = ticket_url

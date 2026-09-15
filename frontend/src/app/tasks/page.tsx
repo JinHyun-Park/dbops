@@ -23,6 +23,11 @@ import { EngineBadge } from "@/components/design-system/engine-badge";
 import { SearchableClusterSelect } from "@/components/design-system/searchable-cluster-select";
 import { getSelectedCluster } from "@/lib/selected-cluster";
 import { fmtExact, fmtRelative } from "@/lib/format";
+import {
+  RcaCandidateDetail,
+  RcaScoringPolicy,
+  categoryLabel,
+} from "@/components/rca/rca-candidate-detail";
 
 const KIND_LABEL: Record<string, string> = {
   auto_rca: "자동 RCA",
@@ -403,8 +408,13 @@ function TaskRow({
     if (open && rowRef.current) {
       rowRef.current.scrollIntoView({ block: "center" });
     }
-    // eslint-disable-line react-hooks/exhaustive-deps
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // Mount-only ON PURPOSE, so the dependency array stays empty: this scrolls
+    // the row named by ?focus= into view once. Adding `open` would re-scroll on
+    // every expand, which yanks the viewport whenever a user opens any row.
+    // The two eslint-disable-line directives that used to sit here did nothing
+    // (one was on its own line, where the rule has nothing to suppress) and the
+    // linter reported both as unused.
+  }, []);
 
   const candidates = task.result?.candidates ?? [];
   // scheduled_report results carry normalized display lines instead of RCA
@@ -530,17 +540,29 @@ function TaskRow({
                         <span className="flex-shrink-0 w-5 text-zinc-500 font-mono">
                           #{c.rank ?? i + 1}
                         </span>
-                        <span className="flex-shrink-0 text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 border border-zinc-700 text-zinc-400 mt-0.5">
-                          {String(c.category ?? "—")}
+                        <span
+                          className="flex-shrink-0 text-[10px] tracking-wider px-1.5 py-0.5 border border-zinc-700 text-zinc-400 mt-0.5"
+                          title={String(c.category ?? "")}
+                        >
+                          {categoryLabel(c.category as string | undefined)}
                         </span>
                         <span className="flex-1 min-w-0">
                           <span className="text-zinc-200">
                             {String(c.summary ?? "")}
                           </span>
                           <span className="block text-[11px] text-zinc-500 font-mono mt-0.5">
-                            score {String(c.score ?? "—")}
-                            {c.when ? ` · ${String(c.when)}` : ""}
+                            score {String(c.score ?? "-")}
+                            {c.when ? `, ${String(c.when)}` : ""}
                           </span>
+                          {/* The derivation of that score, the measurements
+                              behind the summary, and the per-signal action.
+                              All three come back from diagnose_root_cause and
+                              none of them used to reach the screen. */}
+                          <RcaCandidateDetail
+                            breakdown={c.score_breakdown}
+                            evidence={c.evidence}
+                            suggestedAction={c.suggested_action}
+                          />
                         </span>
                       </li>
                     ))}
@@ -582,6 +604,15 @@ function TaskRow({
               </div>
             </div>
           )}
+
+          {/* The weight table and the sentence explaining it, plus what the
+              schema read could not confirm. Without this the ordering of the
+              candidates above is an assertion; with it, it is a policy. */}
+          <RcaScoringPolicy
+            weights={task.result?.scoring_weights}
+            note={task.result?.scoring_note}
+            schemaObservation={task.result?.schema_observation}
+          />
 
           {task.trace && task.trace.length > 0 && (
             <div className="mt-3 border-t border-zinc-800/60 pt-3">
