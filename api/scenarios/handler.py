@@ -63,6 +63,14 @@ INJECT_SECOND = 17
 # Two minutes, not six: the worker's RCA takes seconds, and every extra minute here is
 # a presenter standing in front of an audience waiting for a button to re-arm.
 LOCK_MINUTES = 2
+# How long after its newest injected sample a run's DERIVED rows may still appear.
+# proactive_monitor reads recent metric_snapshots on a 5-minute schedule and writes an
+# `anomaly_<metric>` row into event_log when it sees a z-score breach, so a scenario's
+# fabricated samples produce a REAL detector event a few minutes later. Measured live
+# on 2026-09-15: cpu samples injected at 12:28-12:30 produced
+# `anomaly_cpu critical, Current: 19.00 (baseline: 5.19, z-score: 9.6)` at 12:34:36.
+# One cadence plus the detector's own lookback, rounded up.
+DERIVED_LAG_MINUTES = 20
 
 # Tables this runner is allowed to write to and purge from. Table and column names are
 # interpolated into SQL (the Data API binds values, never identifiers), so the set is
@@ -135,6 +143,16 @@ def _make_query(rds_data, cluster_arn, secret_arn, database):
 
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_iso(text):
+    """Read back a timestamp this module wrote. None on anything else, because the
+    manifest is data read out of the database and a bad value must not raise inside
+    the purge (which would 500 the POST that called it)."""
+    try:
+        return datetime.strptime(str(text), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
 
 
 def _sample_times(anchor: datetime, count: int, *, offset_minutes: int):
@@ -447,6 +465,55 @@ def _manifest_of(run) -> list:
     return parsed if isinstance(parsed, list) else []
 
 
+def _purge_derived_anomaly(query, cluster_id, entry) -> None:
+    """Remove the anomaly row the real detector derived from rows we just deleted.
+
+    A scenario's fabricated metric samples are read by proactive_monitor exactly as
+    collected ones are, so it detects a genuine z-score breach and writes an
+    `anomaly_<metric>` row into event_log. That row is NOT in any manifest, because a
+    different Lambda wrote it, so it used to survive every purge.
+
+    MEASURED LIVE on 2026-09-15, running the six scenarios in sequence. The cpu
+    scenario's samples produced `anomaly_cpu` at critical severity, and that single
+    row then appeared in FIVE consecutive reports over twenty minutes and took first
+    place in two of them: `event` carries base weight 4.0 against metric_spike's 2.0
+    and slow_query's 2.0, and `critical` multiplies by 1.5 again. Pressing the
+    slow-query button and being told the root cause is a CPU anomaly from a scenario
+    that finished fifteen minutes ago is not a demo of anything.
+
+    THE ARGUMENT FOR DELETING ANOTHER COMPONENT'S ROW is consistency, not tidiness. The
+    anomaly is a conclusion ABOUT the samples in the manifest. Those samples are gone;
+    a report citing the conclusion would be citing evidence whose source no longer
+    exists. Deleting it is what keeps the two consistent.
+
+    Scoped as narrowly as that argument allows: this cluster, this run's own time
+    span plus the detector's lag, source `dbops-monitor`, and only the anomaly for the
+    METRIC the run actually fabricated (proactive_monitor writes
+    `'anomaly_' || metric_type`, an identity mapping). A real anomaly about any other
+    metric, or outside the span, is untouched.
+    """
+    metric = entry.get("metric_type")
+    times = sorted(entry.get("times") or [])
+    if not metric or not times or entry.get("table") != "metric_snapshots":
+        return
+    newest = _parse_iso(times[-1])
+    if newest is None:
+        return
+    query(
+        "DELETE FROM event_log WHERE cluster_id = :cid "
+        "  AND source = 'dbops-monitor' "
+        "  AND event_type = :etype "
+        "  AND event_time >= :from_ts::timestamptz "
+        "  AND event_time < :to_ts::timestamptz",
+        {
+            "cid": cluster_id,
+            "etype": f"anomaly_{metric}",
+            "from_ts": times[0],
+            "to_ts": _iso(newest + timedelta(minutes=DERIVED_LAG_MINUTES)),
+        },
+    )
+
+
 def _purge_old_runs(query, cluster_id):
     """Delete the injected rows of every previous run that no longer holds the lock.
 
@@ -509,6 +576,7 @@ def _purge_old_runs(query, cluster_id):
                 f"  AND {ts_col} IN ({placeholders}){extra}",
                 params,
             )
+            _purge_derived_anomaly(query, cluster_id, entry)
         query(
             "UPDATE scenario_runs SET status = 'resolved', resolved_at = NOW() WHERE id = :id",
             {"id": int(run["id"])},

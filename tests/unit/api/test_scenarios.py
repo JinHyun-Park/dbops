@@ -382,7 +382,11 @@ def test_the_purge_deletes_only_the_rows_the_manifest_names():
     # made every live POST a 500 until the cast was added.
     assert "ts IN (:t0::timestamptz)" in sql and "metric_type = :mt" in sql
     assert params["t0"] == "2026-09-15T00:00:17Z" and params["mt"] == "cpu"
-    assert len(db.deleted("event_log")) == 1
+    # Two event_log deletes: the manifest's own bookkeeping row, and the anomaly row
+    # the real detector derived from the cpu samples above (see
+    # test_the_anomaly_the_detector_derived_is_purged_with_its_samples).
+    event_deletes = db.deleted("event_log")
+    assert len(event_deletes) == 2, [s for s, _ in event_deletes]
     assert any("SET status = 'resolved'" in s for s, p in db.calls)
 
 
@@ -505,3 +509,102 @@ def test_an_unreadable_manifest_reads_as_empty_and_says_so(capsys):
 
     # A JSON scalar parses but is not a manifest, and iterating it would raise.
     assert handler._manifest_of({"id": 8, "injected_json": "42"}) == []
+
+
+# ---------------------------------------------------------------------------
+# Derived rows: what the real detector concluded from fabricated samples
+# ---------------------------------------------------------------------------
+
+def test_the_anomaly_the_detector_derived_is_purged_with_its_samples():
+    """proactive_monitor reads fabricated samples exactly as collected ones.
+
+    MEASURED LIVE on 2026-09-15 running the six scenarios in sequence: the cpu
+    scenario's injected samples produced a REAL `anomaly_cpu` row at critical
+    severity (`Current: 19.00, baseline: 5.19, z-score: 9.6`), written by a different
+    Lambda and therefore in no manifest. It survived every purge, appeared in five
+    consecutive reports over twenty minutes, and took FIRST PLACE in two of them:
+    `event` is base weight 4.0 against metric_spike's and slow_query's 2.0, and
+    critical multiplies by 1.5 again.
+
+    It is deleted because it is a conclusion ABOUT rows that no longer exist, not
+    because it is inconvenient. Scoped to this cluster, this metric, and this run's
+    span plus the detector's lag.
+    """
+    stale = [{
+        "id": 9,
+        "injected_json": json.dumps([
+            {"table": "metric_snapshots",
+             "times": ["2026-09-15T00:00:17Z", "2026-09-15T00:05:17Z"],
+             "metric_type": "cpu"},
+        ]),
+    }]
+    db = FakeDB(stale_runs=stale)
+    handler._purge_old_runs(db, CID)
+    derived = [(s, p) for s, p in db.deleted("event_log") if "dbops-monitor" in s]
+    assert len(derived) == 1, db.deleted("event_log")
+    sql, params = derived[0]
+    assert params["etype"] == "anomaly_cpu", params
+    assert params["from_ts"] == "2026-09-15T00:00:17Z"
+    # Newest sample plus the detector lag, which is when a derived row can still land.
+    assert params["to_ts"] == "2026-09-15T00:25:17Z", params
+    assert "event_type = :etype" in sql and "source = 'dbops-monitor'" in sql
+    # Bounded on BOTH sides: an unbounded delete would take real anomalies from
+    # before the scenario ever ran.
+    assert "event_time >= :from_ts::timestamptz" in sql
+    assert "event_time < :to_ts::timestamptz" in sql
+
+
+def test_a_non_metric_manifest_entry_derives_no_anomaly_delete():
+    """Only metric_snapshots entries feed the anomaly detector, so only they may
+    trigger this delete. Without the guard, a lock or schema scenario would issue an
+    `anomaly_None` delete against real rows."""
+    stale = [{
+        "id": 10,
+        "injected_json": json.dumps([
+            {"table": "blocking_locks", "times": ["2026-09-15T00:03:00Z"]},
+            {"table": "schema_snapshots", "times": ["2026-09-15T00:02:00Z"],
+             "schema_name": "public"},
+        ]),
+    }]
+    db = FakeDB(stale_runs=stale)
+    handler._purge_old_runs(db, CID)
+    assert not [s for s, _ in db.deleted("event_log") if "dbops-monitor" in s], (
+        "a non-metric scenario issued an anomaly delete"
+    )
+
+
+def test_only_a_metric_snapshots_entry_derives_an_anomaly_delete():
+    """The table check is separate from the metric_type check on purpose.
+
+    No manifest entry today carries a metric_type for anything but
+    metric_snapshots, so `not metric` alone happens to be sufficient and a mutation
+    removing the table check passed. Manifests are data read back out of the
+    database, and the entry that eventually carries a metric_type for a different
+    table would issue this DELETE against event_log rows it has no claim on. Only
+    metric_snapshots feeds the anomaly detector.
+    """
+    stale = [{
+        "id": 12,
+        "injected_json": json.dumps([
+            {"table": "query_stats", "times": ["2026-09-15T00:03:00Z"], "metric_type": "cpu"},
+        ]),
+    }]
+    db = FakeDB(stale_runs=stale)
+    handler._purge_old_runs(db, CID)
+    assert not [s for s, _ in db.deleted("event_log") if "dbops-monitor" in s], (
+        "a non-metric_snapshots entry issued an anomaly delete"
+    )
+
+
+def test_a_malformed_manifest_timestamp_does_not_break_the_purge():
+    """The manifest is read back out of the database, so a value this module did not
+    write must not raise inside the purge: that would 500 the POST that called it."""
+    stale = [{
+        "id": 11,
+        "injected_json": json.dumps([
+            {"table": "metric_snapshots", "times": ["not-a-timestamp"], "metric_type": "cpu"},
+        ]),
+    }]
+    db = FakeDB(stale_runs=stale)
+    assert handler._purge_old_runs(db, CID) == 1
+    assert not [s for s, _ in db.deleted("event_log") if "dbops-monitor" in s]
