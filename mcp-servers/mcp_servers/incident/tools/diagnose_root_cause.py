@@ -983,10 +983,23 @@ def _collect_slow_queries(cache, cluster_id, start_iso, end_iso, baseline_start_
         ) q
         GROUP BY query_hash
         HAVING COUNT(*) FILTER (WHERE in_window) > 0
-        ORDER BY GREATEST(
-            COALESCE(MAX(total_time_ms) FILTER (WHERE in_window), 0)
-            - COALESCE(MAX(total_time_ms) FILTER (WHERE NOT in_window),
-                       MIN(total_time_ms) FILTER (WHERE in_window), 0), 0) DESC
+        -- MUST MIRROR THE PYTHON BELOW, and the first version did not. It
+        -- COALESCEd a missing pre-window reading to MIN(in-window), so a query with
+        -- ONE in-window snapshot sorted as `win_max - win_min` = 0 while Python
+        -- costed the same row at its full win_max. Measured live on 2026-09-15: the
+        -- slow-query scenario injected three queries at 214000ms, 86400ms and
+        -- 41000ms, all sorted as 0, and the LIMIT 3 went to real queries worth 120ms.
+        -- The "query first appeared during the incident" branch was unreachable in
+        -- production while reading as implemented and tested.
+        ORDER BY CASE
+            WHEN MAX(total_time_ms) FILTER (WHERE NOT in_window) IS NULL
+                -- No earlier reading: the query did not exist before the window, so
+                -- its cumulative value IS what it spent inside it.
+                THEN COALESCE(MAX(total_time_ms) FILTER (WHERE in_window), 0)
+            ELSE GREATEST(
+                COALESCE(MAX(total_time_ms) FILTER (WHERE in_window), 0)
+                - MAX(total_time_ms) FILTER (WHERE NOT in_window), 0)
+        END DESC
         LIMIT 3
     """
     params = {

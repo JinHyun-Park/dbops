@@ -594,3 +594,59 @@ def test_the_lock_refuses_a_second_scenario_inside_the_window(db):
         f"SELECT COUNT(*) FROM metric_snapshots WHERE cluster_id = '{CID}' "
         "AND metric_type = 'cpu'")[0][0]) == 0
     _clear_run(db, first["run_id"])
+
+
+def test_a_query_first_seen_in_the_window_outranks_established_ones(db):
+    """The ORDER BY must agree with the Python that costs the rows.
+
+    THE TEST THIS FILE WAS MISSING. test_the_real_rca_ranks_the_scenarios_own_signal
+    _first drives the slow-query scenario against an otherwise EMPTY query_stats, so
+    its three injected rows are the only candidates and `LIMIT 3` returns them
+    whatever the ORDER BY computes. A fixture with no competitors cannot discriminate
+    an ordering.
+
+    MEASURED LIVE on 2026-09-15, which is where the defect surfaced: the scenario's
+    three queries (214000ms, 86400ms, 41000ms) all sorted as ZERO because the SQL
+    COALESCEd a missing pre-window reading to MIN(in-window), making the delta
+    `win_max - win_min` = 0 for a single-snapshot row, while Python costed the same
+    row at its full win_max. The LIMIT 3 went to real queries worth ~120ms and the
+    injected ones never appeared.
+
+    FOUR competitors, not one. The first attempt at this test seeded a single
+    established query and still passed against the broken ordering, because with only
+    four candidates in total the `LIMIT 3` had room for two injected rows regardless.
+    Filling every slot with established queries is what makes the ordering decide the
+    outcome, which is the situation on a live cluster.
+    """
+    anchor = datetime.now(timezone.utc).replace(microsecond=0)
+    # Each is present BEFORE the window (so it has a pre-window reading) and barely
+    # moves inside it. Small but NONZERO deltas, which beat zero under the broken
+    # ordering and lose to the injected queries under the correct one.
+    competitors = {"steady_a": 900.0, "steady_b": 800.0, "steady_c": 700.0, "steady_d": 600.0}
+    for qhash, delta in competitors.items():
+        for offset, total in ((45, 500000.0), (3, 500000.0 + delta)):
+            ts = (anchor - timedelta(minutes=offset)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            db.raw(
+                "INSERT INTO query_stats (cluster_id, snapshot_time, query_hash, query_text, "
+                " calls, total_time_ms, mean_time_ms, rows_returned, shared_blks_hit, shared_blks_read) "
+                f"VALUES ('{CID}', '{ts}'::timestamptz, '{qhash}', 'SELECT 1 FROM steady', "
+                f" 90000, {total}, 5.6, 1, 1, 1)"
+            )
+
+    _, body, _ = _run(db, "slow_query_surge")
+    res = diagnose_root_cause_impl(
+        _cache(db), CID, around_time=body["anchor_at"], window_minutes=WINDOW
+    )
+    slow = [c for c in res["candidates"] if c["category"] == "slow_query"]
+    shown = [(c["evidence"]["query_hash"], c["evidence"]["window_time_ms"]) for c in slow]
+    assert slow, f"no slow_query candidate at all: {res.get('signals_examined')}"
+    assert not (set(competitors) & {h for h, _ in shown}), (
+        "an established query with a 900ms delta displaced the queries that appeared "
+        f"DURING the incident, which is the broken ordering: {shown}"
+    )
+    assert all(c["evidence"]["first_seen_in_window"] for c in slow), shown
+    assert max(v for _, v in shown) >= 41000.0, shown
+
+    for qhash in competitors:
+        db.raw(f"DELETE FROM query_stats WHERE cluster_id = '{CID}' AND query_hash = '{qhash}'")
+    _clear_run(db, body["run_id"])
