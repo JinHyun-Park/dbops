@@ -184,6 +184,20 @@ export function RcaCandidateDetail({
                     </div>
                   ))}
               </div>
+              {/* NOT NORMALIZED ON EVERY ENGINE, which is worth knowing before
+                  adding another reader of this field. Measured across the three
+                  relational collectors: PostgreSQL stores
+                  `pg_stat_statements.query` and MySQL stores
+                  `performance_schema.DIGEST_TEXT`, both of which replace
+                  constants with placeholders, so no literal reaches here. SQL
+                  Server stores `sys.dm_exec_sql_text().text`, which is the RAW
+                  statement and CAN carry literals.
+                  This panel is the fifth reader of the same column, not a new
+                  exposure: the dashboard queries panel, the query detail modal
+                  and the long-running panel already render it verbatim to the
+                  same authenticated, tenant-scoped audience. Redaction, if it
+                  is wanted, belongs in the SQL Server collector so all five
+                  readers get it at once, not in one of them. */}
               {typeof evidence!.query_text === "string" && (
                 <pre className="mt-1.5 text-[11px] font-mono text-zinc-400 bg-zinc-900 border border-zinc-800 p-2 overflow-x-auto whitespace-pre-wrap">
                   {evidence!.query_text as string}

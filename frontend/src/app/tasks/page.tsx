@@ -411,9 +411,13 @@ function TaskRow({
     // Mount-only ON PURPOSE, so the dependency array stays empty: this scrolls
     // the row named by ?focus= into view once. Adding `open` would re-scroll on
     // every expand, which yanks the viewport whenever a user opens any row.
-    // The two eslint-disable-line directives that used to sit here did nothing
-    // (one was on its own line, where the rule has nothing to suppress) and the
-    // linter reported both as unused.
+    //
+    // Only ONE of the two directives that used to sit here was dead: the
+    // standalone comment above this line, which the rule has nothing to attach
+    // to, and which the linter did report as unused. The trailing one below is
+    // load-bearing and stays. Removing both left a real
+    // `missing dependency: 'open'` warning behind.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const candidates = task.result?.candidates ?? [];
