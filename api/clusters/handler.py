@@ -24,8 +24,8 @@ _TZ_SUFFIX_RE = re.compile(r"(Z|[+-]\d{2}(:?\d{2})?)$")
 
 def _scan_all(table, **kwargs) -> list:
     """LastEvaluatedKey를 끝까지 따라가는 scan. 단일 scan은 1MB에서 조용히
-    잘려, fleet이 커지면 등록 목록·디스커버리 중복판별이 일부 클러스터만
-    보게 된다(approvals _scan_all·approval_guard Limit=1과 같은 잘림 패밀리,
+    잘려, fleet이 커지면 등록 목록과 디스커버리 중복판별이 일부 클러스터만
+    보게 된다(approvals _scan_all, approval_guard Limit=1과 같은 잘림 패밀리,
     Codex 감사 적발)."""
     items = []
     while True:
@@ -825,7 +825,91 @@ def _register_rds_instance(table, body):
                        "connection_status": "ok"})
 
 
+# Default alert rule seeded on registration: the family's CPU-like gauge > 80.
+#
+# metric_type has to be the name the COLLECTOR writes and the readers query, or
+# the rule is a row that can never fire. The names below are the CPU entries of
+# SIGNAL_SETS[family]["gauges"] in
+# mcp-servers/mcp_servers/shared/incident_signals.py, which is the source of
+# truth. api/ cannot import mcp_servers (no shared layer), so the map is inlined
+# here and tests/unit/api/test_clusters_default_alert_rule.py asserts it still
+# agrees with that module.
+#
+# dynamodb is absent DELIBERATELY: the family has no CPU gauge at all (its
+# series are consumed_rcu/wcu, item counts and throttle counters), so a cpu rule
+# on a table would never fire while reading like coverage. No rule is the honest
+# state. elasticache picks cache_cpu (node level) over engine_cpu to match what
+# the dashboard and the RCA reader treat as the cluster CPU series.
+_DEFAULT_ALERT_CPU_METRIC = {
+    "relational": "cpu",
+    "rds_instance": "cpu",
+    "documentdb": "cpu_utilization",
+    "elasticache": "cache_cpu",
+}
+_DEFAULT_ALERT_THRESHOLD = 80.0
+
+
+def _seed_default_alert_rule(family: str, cluster_id: str) -> None:
+    """Insert one enabled `<cpu metric> > 80` alert rule for a new cluster.
+
+    NEVER raises. Registration is the operator's action and the rule is a
+    convenience on top of it, so a cache DB that is unreachable, unmigrated or
+    otherwise unhappy must not turn a successful registration into an error.
+    Failures are logged and dropped.
+
+    The insert is guarded by NOT EXISTS so re-registering an existing cluster
+    (POST /api/clusters merges instead of rejecting) does not stack duplicate
+    rules. Same uniqueness key as api/alerts/handler.py: (cluster_id,
+    metric_type, comparison, threshold) among rules that have no compound
+    `conditions`.
+    """
+    metric = _DEFAULT_ALERT_CPU_METRIC.get(family)
+    if not metric or not cluster_id:
+        return
+    cluster_arn, secret_arn, db_name = _cache_db_env()
+    if not (cluster_arn and secret_arn):
+        print(f"[register] cache DB not configured; no default alert rule for {cluster_id}")
+        return
+    try:
+        boto3.client("rds-data").execute_statement(
+            resourceArn=cluster_arn,
+            secretArn=secret_arn,
+            database=db_name,
+            # Explicit casts: the Data API sends untyped parameters, and in an
+            # INSERT ... SELECT Postgres has no target column to infer them from.
+            sql="/* source=dbops-clusters-api */ "
+                "INSERT INTO alert_rules (cluster_id, name, metric_type, comparison, threshold, enabled) "
+                "SELECT :cid::varchar, :name::varchar, :metric::varchar, '>', "
+                "       :threshold::double precision, TRUE "
+                "WHERE NOT EXISTS ("
+                "  SELECT 1 FROM alert_rules WHERE cluster_id = :cid::varchar "
+                "    AND metric_type = :metric::varchar AND comparison = '>' "
+                "    AND threshold = :threshold::double precision AND conditions IS NULL)",
+            parameters=[
+                {"name": "cid", "value": {"stringValue": cluster_id}},
+                {"name": "name", "value": {"stringValue": f"{metric} > {int(_DEFAULT_ALERT_THRESHOLD)}"}},
+                {"name": "metric", "value": {"stringValue": metric}},
+                {"name": "threshold", "value": {"doubleValue": _DEFAULT_ALERT_THRESHOLD}},
+            ],
+        )
+    except Exception as e:
+        print(f"[register] default alert rule insert failed for {cluster_id}: {e}")
+
+
 def _handle_register(table, body: dict):
+    resp = _register_dispatch(table, body)
+    # Seed only behind a registration that actually stored a row (201 registered,
+    # 207 registered_with_warning). A 400 wrote nothing.
+    if resp.get("statusCode") in (201, 207):
+        try:
+            cid = json.loads(resp["body"]).get("cluster_id", "")
+        except (KeyError, ValueError):
+            cid = ""
+        _seed_default_alert_rule(engine_family(body.get("engine", "")), cid)
+    return resp
+
+
+def _register_dispatch(table, body: dict):
     fam = engine_family(body.get("engine", ""))
     if fam == "dynamodb":
         return _register_dynamodb(table, body)
@@ -1253,10 +1337,10 @@ def _test_connection(body: dict) -> dict:
         })
 
     # Step 4: Data API(HttpEndpoint). 컨트롤 플레인 점검만으로는 잡히지 않는
-    # 가장 흔한 함정 — 꺼져 있으면 라이브 SQL 수집·에이전트 SQL이 전부 막히는데
+    # 가장 흔한 함정 — 꺼져 있으면 라이브 SQL 수집과 에이전트 SQL이 전부 막히는데
     # 등록 자체는 성공하므로, 여기서 미리 경고해야 DBA가 영문 모를 빈 패널을
     # 보며 기다리는 사태를 막는다. 실패가 아닌 warning: CloudWatch 기반
-    # 지표·이벤트 수집은 Data API 없이도 정상 동작한다.
+    # 지표와 이벤트 수집은 Data API 없이도 정상 동작한다.
     if cluster.get("HttpEndpointEnabled"):
         steps.append({"name": "data_api", "status": "ok"})
     else:
@@ -1265,8 +1349,8 @@ def _test_connection(body: dict) -> dict:
             "status": "warning",
             "note": (
                 "RDS Data API(HttpEndpoint)가 비활성입니다 — CloudWatch 지표는 수집되지만 "
-                "라이브 SQL 기반 기능(테이블 통계·커넥션·Top Queries·에이전트 SQL)은 동작하지 않습니다. "
-                # Sv2·프로비저닝은 EnableHttpEndpoint(resource-arn) API다.
+                "라이브 SQL 기반 기능(테이블 통계, 커넥션, Top Queries, 에이전트 SQL)은 동작하지 않습니다. "
+                # Sv2/프로비저닝은 EnableHttpEndpoint(resource-arn) API다.
                 # modify-db-cluster --enable-http-endpoint는 legacy Serverless
                 # v1 전용으로, 그 외에선 조용히 무시된다(실측).
                 f"활성화: aws rds enable-http-endpoint --resource-arn "

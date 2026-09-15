@@ -292,9 +292,28 @@ def _create_rule(query, body):
     except (TypeError, ValueError):
         return _response(400, {"error": "threshold must be numeric"})
 
+    # Uniqueness guard on (cluster_id, metric_type, comparison, threshold).
+    # Measured before this existed: one cluster carried `cpu > 80` twice, so the
+    # evaluator raised, notified and rate-limited two identical alarms.
+    #
+    # Application check rather than a UNIQUE index on purpose. A unique index
+    # cannot be created without first DELETING the duplicate rules that already
+    # exist (CREATE UNIQUE INDEX fails outright on them), and silently deleting
+    # an operator's alert rules inside a migration is worse than the duplicate.
+    # NOT EXISTS tolerates them instead: they block a third copy and crash
+    # nothing. Scoped to `conditions IS NULL` because a compound rule keeps a
+    # denormalised copy of its FIRST operand in these same columns, so two
+    # genuinely different compound rules legitimately share the tuple.
     rows = query(
         "INSERT INTO alert_rules (cluster_id, name, metric_type, comparison, threshold, enabled) "
-        "VALUES (:cid, :name, :metric, :comp, :threshold, :enabled) "
+        # Explicit casts: an INSERT ... SELECT gives Postgres no target column to
+        # infer an untyped Data API parameter from.
+        "SELECT :cid::varchar, :name::varchar, :metric::varchar, :comp::varchar, "
+        "       :threshold::double precision, :enabled::boolean "
+        "WHERE NOT EXISTS ("
+        "  SELECT 1 FROM alert_rules WHERE cluster_id = :cid::varchar "
+        "    AND metric_type = :metric::varchar AND comparison = :comp::varchar "
+        "    AND threshold = :threshold::double precision AND conditions IS NULL) "
         "RETURNING id, cluster_id, name, metric_type, comparison, threshold, enabled, created_at",
         {
             "cid": cluster_id,
@@ -305,7 +324,10 @@ def _create_rule(query, body):
             "enabled": enabled,
         },
     )
-    return _response(201, {"rule": rows[0] if rows else None})
+    if not rows:
+        return _response(409, {"error": "duplicate_rule",
+                               "reason": "an identical rule already exists for this cluster"})
+    return _response(201, {"rule": rows[0]})
 
 
 def _update_rule(query, rule_id, body):
