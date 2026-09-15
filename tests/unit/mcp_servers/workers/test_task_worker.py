@@ -427,3 +427,95 @@ def test_a_task_with_no_observed_at_still_anchors_on_now():
         }]}, None)
 
     assert seen.get("around_time") == "", f"missing observed_at must mean now; got {seen!r}"
+
+
+# ---------------------------------------------------------------------------
+# _narrative response-shape robustness
+# ---------------------------------------------------------------------------
+
+def _rca():
+    return {"status": "ok", "signals_examined": {},
+            "candidates": [{"summary": "CPU spike", "category": "metric_spike",
+                            "score": 3.0, "when": "t"}]}
+
+
+def _bedrock(blocks, stop_reason="end_turn"):
+    b = MagicMock()
+    b.converse.return_value = {
+        "output": {"message": {"content": blocks}},
+        "stopReason": stop_reason,
+    }
+    return b
+
+
+def test_the_narrative_is_read_from_a_text_block_at_any_position(monkeypatch):
+    """content[0] is not reliably the text block.
+
+    MEASURED LIVE on 2026-09-15 against global.anthropic.claude-opus-5: one RCA
+    produced a narrative and the next died on `KeyError: 'text'` with the same code,
+    the same model and the same prompt shape. A response that leads with a reasoning
+    block (or anything else) used to cost the entire narrative and the
+    recommendations, which are the half of an RCA a DBA acts on.
+
+    This file already carries a 12-day outage caused by assuming something about a
+    model family: a pinned `temperature` the Claude 5 generation retired.
+    """
+    monkeypatch.setenv("RCA_NARRATIVE_MODEL_ID", "model-x")
+    bedrock = _bedrock([
+        {"reasoningContent": {"reasoningText": {"text": "thinking out loud"}}},
+        {"text": '{"narrative":"스키마 변경이 원인입니다","recommendations":["롤백 검토"]}'},
+    ])
+    with patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw.boto3, "client", return_value=bedrock):
+        out = tw._narrative("c1", _rca())
+    assert out is not None, "a leading non-text block still loses the whole narrative"
+    assert out["narrative"] == "스키마 변경이 원인입니다"
+    assert out["recommendations"] == ["롤백 검토"]
+
+
+def test_a_response_with_no_text_block_logs_what_did_come_back(capsys, monkeypatch):
+    """`KeyError: 'text'` said nothing about what the response actually contained and
+    cost a live debugging round. The block keys and the stop reason are the two facts
+    that make the next occurrence diagnosable from the log alone."""
+    monkeypatch.setenv("RCA_NARRATIVE_MODEL_ID", "model-x")
+    bedrock = _bedrock([{"reasoningContent": {}}], stop_reason="max_tokens")
+    with patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw.boto3, "client", return_value=bedrock):
+        out = tw._narrative("c1", _rca())
+    assert out is None
+    log = capsys.readouterr().out
+    assert "no text block" in log and "reasoningContent" in log, log
+    assert "max_tokens" in log, log
+
+
+def test_truncation_at_max_tokens_is_logged_as_the_cause(capsys, monkeypatch):
+    """A response cut at the cap leaves the JSON incomplete, so json.loads fails and
+    the narrative disappears with no stated reason. Saying so turns a silent
+    degradation into a log line that names the fix."""
+    monkeypatch.setenv("RCA_NARRATIVE_MODEL_ID", "model-x")
+    bedrock = _bedrock([{"text": '{"narrative":"원인은 스키마 변'}], stop_reason="max_tokens")
+    with patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw.boto3, "client", return_value=bedrock):
+        out = tw._narrative("c1", _rca())
+    assert out is None
+    log = capsys.readouterr().out
+    assert "truncated at maxTokens" in log, log
+
+
+def test_the_token_budget_has_headroom_over_the_measured_need(monkeypatch):
+    """900 was ON the limit, not under it.
+
+    Two identical opus-5 calls with this worker's own prompt spent 861 and 900 output
+    tokens, the second stopping at `max_tokens`. A budget that a normal response
+    reaches produces a truncated JSON and therefore no narrative, so the guard is on
+    the number itself: a mocked client cannot observe a cap being hit.
+    """
+    monkeypatch.setenv("RCA_NARRATIVE_MODEL_ID", "model-x")
+    bedrock = _bedrock([{"text": '{"narrative":"n","recommendations":[]}'}])
+    with patch.object(tw, "_get_cache", return_value=MagicMock()), \
+         patch.object(tw.boto3, "client", return_value=bedrock):
+        tw._narrative("c1", _rca())
+    cfg = bedrock.converse.call_args.kwargs["inferenceConfig"]
+    assert cfg["maxTokens"] >= 1500, (
+        f"maxTokens={cfg['maxTokens']} leaves no room over the measured 861-900"
+    )

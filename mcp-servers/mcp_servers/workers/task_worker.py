@@ -281,9 +281,37 @@ def _narrative(cluster_id: str, rca: dict):
             # RCA shipped its ranked candidates with no narrative and no recommendations
             # and nothing reported a failure. Pinning an inference parameter that a model
             # family can retire is what made a model swap a silent feature outage.
-            inferenceConfig={"maxTokens": 900},
+            # 900 was measured sitting exactly ON the limit, not under it: two
+            # identical opus-5 calls with the worker's own prompt spent 861 and 900
+            # output tokens, the second stopping at `max_tokens`. A truncated
+            # response cuts the JSON mid-object, so json.loads fails and the RCA
+            # ships with no narrative and no recommendations, which is the same
+            # silent outcome as the model being misconfigured. Headroom is cheap
+            # here: this runs once per incident, not once per chat turn.
+            inferenceConfig={"maxTokens": 2000},
         )
-        text = resp["output"]["message"]["content"][0]["text"].strip()
+        # EVERY text block, not content[0]. Indexing the first block assumes a
+        # response shape, and this file already has a 12-day outage on record from
+        # assuming something about a model family (a pinned `temperature` that
+        # Claude 5 retired). Measured live on 2026-09-15 with opus-5: one RCA
+        # produced a narrative and the next died on `KeyError: 'text'`, same code,
+        # same model, same prompt shape, so content[0] is not reliably a text block.
+        # A response that carries reasoning or any other block type first now costs
+        # nothing instead of the whole narrative.
+        blocks = resp.get("output", {}).get("message", {}).get("content") or []
+        text = "".join(b["text"] for b in blocks if isinstance(b, dict) and "text" in b).strip()
+        stop = resp.get("stopReason")
+        if not text:
+            # The block keys and the stop reason, because `KeyError: 'text'` told us
+            # nothing about what DID come back and cost a live debugging round.
+            print(f"[task-worker] narrative had no text block for {cluster_id}: "
+                  f"stopReason={stop} blocks={[sorted(b) for b in blocks if isinstance(b, dict)]}")
+            return None
+        if stop == "max_tokens":
+            # Truncation cuts the JSON mid-object, so json.loads below fails and the
+            # narrative vanishes with no stated reason. Logged as the cause it is.
+            print(f"[task-worker] narrative truncated at maxTokens for {cluster_id}; "
+                  "the JSON is incomplete and will not parse")
         # Models sometimes wrap JSON in prose / fences, so extract the object.
         start, end = text.find("{"), text.rfind("}")
         if start == -1 or end == -1:
