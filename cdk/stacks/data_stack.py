@@ -76,6 +76,37 @@ class DataStack(cdk.Stack):
             nat_gateways=1,
         )
 
+        # Recovery from an out-of-band deletion, and the reason these two carry
+        # overridden logical IDs instead of CDK's generated ones.
+        #
+        # On 2026-09-15 the NAT gateway and its EIP were gone from the account while
+        # CloudFormation still believed both existed: drift status DELETED for
+        # VpcPublicSubnet1NATGateway4D7517AA and VpcPublicSubnet1EIPD7E02669, and no
+        # delete event anywhere in the stack history. Something outside CFN removed
+        # them (the pattern matches a cost sweep that deletes NATs plus unassociated
+        # EIPs). Both private subnets were left with 0.0.0.0/0 pointing at the dead
+        # NAT in `blackhole`, so every in-VPC Lambda hung until its timeout on any
+        # call to a public AWS endpoint. That is 9 Lambdas, including all four MCP
+        # servers, so the entire 64-tool gateway surface was dark while the dashboard
+        # kept looking healthy (ETLCollector is NOT in the VPC and kept collecting).
+        #
+        # A plain redeploy does NOT fix this. `cdk diff` rendered the NAT as `replace`,
+        # but the changeset CloudFormation actually executed contained only the
+        # ReportGenerator env change: CFN compares template to template, the NAT's
+        # template text was unchanged, so it was never in the changeset. The deploy
+        # reported UPDATE_COMPLETE and recreated nothing.
+        #
+        # Renaming the logical IDs is what forces the fix. The new IDs are resources
+        # CFN has never seen, so it CREATEs them; the old IDs vanish from the template,
+        # so CFN DELETEs them, and deleting an already-absent NAT/EIP is a no-op. The
+        # two private-subnet default routes reference the NAT by `Ref`, which CDK
+        # regenerates against the new ID, so they repoint automatically. Nothing else
+        # moves: the subnets keep their IDs, so the Aurora cache living in them is
+        # untouched.
+        _pub1 = self.vpc.public_subnets[0]
+        _pub1.node.find_child("EIP").override_logical_id("VpcPublicSubnet1EIPv2")
+        _pub1.node.find_child("NATGateway").override_logical_id("VpcPublicSubnet1NATGatewayv2")
+
         self.cache_db = rds.DatabaseCluster(
             self, "CacheDB",
             engine=rds.DatabaseClusterEngine.aurora_postgres(
