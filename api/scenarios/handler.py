@@ -493,11 +493,23 @@ def _purge_derived_anomaly(query, cluster_id, entry) -> None:
     metric, or outside the span, is untouched.
     """
     metric = entry.get("metric_type")
-    times = sorted(entry.get("times") or [])
-    if not metric or not times or entry.get("table") != "metric_snapshots":
+    if not metric or entry.get("table") != "metric_snapshots":
         return
-    newest = _parse_iso(times[-1])
-    if newest is None:
+    # EVERY element is parsed and RE-SERIALISED, so only a value this module can
+    # read reaches the statement. The first version validated `times[-1]` after a
+    # LEXICOGRAPHIC sort and then passed `times[0]` through untouched, which is not
+    # the same element: a malformed value sorting LOW ('!bad', or an empty string)
+    # skipped the check entirely, went into `:from_ts::timestamptz`, and the cast
+    # raised inside the purge, 500ing the POST that called it. The test that was
+    # supposed to cover this used ['not-a-timestamp'], which sorts LAST and so hit
+    # the guard: it never reached the hole.
+    #
+    # Ordering is now by datetime rather than by string, which is also the ordering
+    # actually wanted here.
+    stamps = sorted(
+        t for t in (_parse_iso(x) for x in (entry.get("times") or [])) if t is not None
+    )
+    if not stamps:
         return
     query(
         "DELETE FROM event_log WHERE cluster_id = :cid "
@@ -508,8 +520,8 @@ def _purge_derived_anomaly(query, cluster_id, entry) -> None:
         {
             "cid": cluster_id,
             "etype": f"anomaly_{metric}",
-            "from_ts": times[0],
-            "to_ts": _iso(newest + timedelta(minutes=DERIVED_LAG_MINUTES)),
+            "from_ts": _iso(stamps[0]),
+            "to_ts": _iso(stamps[-1] + timedelta(minutes=DERIVED_LAG_MINUTES)),
         },
     )
 

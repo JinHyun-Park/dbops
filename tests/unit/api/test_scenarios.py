@@ -21,6 +21,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 _DIR = ROOT / "api" / "scenarios"
 sys.path.insert(0, str(_DIR))
@@ -596,15 +598,40 @@ def test_only_a_metric_snapshots_entry_derives_an_anomaly_delete():
     )
 
 
-def test_a_malformed_manifest_timestamp_does_not_break_the_purge():
+@pytest.mark.parametrize("times", [
+    # Sorts LAST, so the original `times[-1]` guard caught it. The only case the
+    # first version of this test covered, which is why it passed over the hole.
+    ["not-a-timestamp"],
+    ["2026-09-15T00:05:17Z", "garbage"],
+    # Sorts FIRST. `!` is 0x21 and `2` is 0x32, so a lexicographic sort puts this
+    # ahead of every real timestamp: the guard checked the LAST element and this
+    # one went straight into `:from_ts::timestamptz`, where the cast raised inside
+    # the purge and 500ed the POST.
+    ["!bad", "2026-09-15T00:05:17Z"],
+    ["", "2026-09-15T00:05:17Z"],
+    [None, "2026-09-15T00:05:17Z"],
+    ["2026-09-15T00:05:17", "2026-09-15T00:05:17Z"],  # no Z, not this module's format
+])
+def test_no_unparsed_manifest_timestamp_reaches_the_statement(times):
     """The manifest is read back out of the database, so a value this module did not
-    write must not raise inside the purge: that would 500 the POST that called it."""
+    write must never reach SQL: the cast would raise inside the purge and 500 the
+    POST that called it.
+
+    Parametrised over BOTH sort positions on purpose. Validating one end of a sorted
+    list leaves the other end unchecked, and which end a bad value lands on is decided
+    by string ordering, not by the code.
+    """
     stale = [{
         "id": 11,
         "injected_json": json.dumps([
-            {"table": "metric_snapshots", "times": ["not-a-timestamp"], "metric_type": "cpu"},
+            {"table": "metric_snapshots", "times": times, "metric_type": "cpu"},
         ]),
     }]
     db = FakeDB(stale_runs=stale)
     assert handler._purge_old_runs(db, CID) == 1
-    assert not [s for s, _ in db.deleted("event_log") if "dbops-monitor" in s]
+    for _sql, params in db.calls:
+        for key in ("from_ts", "to_ts"):
+            if key in params:
+                assert handler._parse_iso(params[key]) is not None, (
+                    f"{key}={params[key]!r} was passed through unparsed from {times!r}"
+                )
