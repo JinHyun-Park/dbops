@@ -42,6 +42,8 @@ import {
 import { AuthGuard } from "@/components/auth-guard";
 import { AuthButton } from "@/components/auth-button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LocaleToggle } from "@/components/locale-toggle";
+import { useT } from "@/lib/i18n";
 import { RcaProvider } from "@/components/rca/rca-drawer";
 import { useAlertBadge, type AlertToast } from "@/lib/use-alert-badge";
 
@@ -100,19 +102,19 @@ const NAV: NavGroup[] = [
         href: "/compare",
         label: "Compare",
         icon: GitCompare,
-        hint: "클러스터 간 · 기간 간 비교",
+        hint: "클러스터 간, 기간 간 비교",
       },
       {
         href: "/slo",
         label: "SLO",
         icon: Target,
-        hint: "가용성·지연 SLO · 에러 버짓",
+        hint: "가용성과 지연 SLO, 에러 버짓",
       },
       {
         href: "/schema",
         label: "Schema",
         icon: Network,
-        hint: "FK 계보 · 테이블 의존성",
+        hint: "FK 계보, 테이블 의존성",
       },
     ],
   },
@@ -141,7 +143,7 @@ const NAV: NavGroup[] = [
         href: "/scaleout",
         label: "Scale-out",
         icon: Layers,
-        hint: "리더 추가·자동 예열 작업 상태 · 예열 전 취소",
+        hint: "리더 추가와 자동 예열 작업 상태, 예열 전 취소",
       },
       {
         href: "/ask",
@@ -159,7 +161,7 @@ const NAV: NavGroup[] = [
         href: "/simulator",
         label: "Simulator",
         icon: Wand2,
-        hint: "업그레이드·파라미터·스케일링·DDL what-if",
+        hint: "업그레이드, 파라미터, 스케일링, DDL what-if",
       },
     ],
   },
@@ -182,13 +184,13 @@ const NAV: NavGroup[] = [
         href: "/timeline",
         label: "Timeline",
         icon: Clock,
-        hint: "알림·이벤트·쓰기 통합 인시던트 피드",
+        hint: "알림, 이벤트, 쓰기 통합 인시던트 피드",
       },
       {
         href: "/activity",
         label: "Activity",
         icon: Activity,
-        hint: "누가 무엇을 승인·실행했는지 — 감사·회고용",
+        hint: "누가 무엇을 승인하고 실행했는지 — 감사와 회고용",
       },
       {
         href: "/workload-diff",
@@ -235,7 +237,7 @@ const NAV: NavGroup[] = [
         href: "/settings",
         label: "Settings",
         icon: SlidersHorizontal,
-        hint: "기능 토글 — 티켓팅·리포트 전달 (관리자)",
+        hint: "기능 토글 — 티켓팅과 리포트 전달 (관리자)",
         adminOnly: true,
       },
       {
@@ -243,21 +245,21 @@ const NAV: NavGroup[] = [
         label: "Approval policies",
         icon: UserCheck,
         adminOnly: true,
-        hint: "지정 승인자 라우팅 — 클러스터·액션별 승인자 (관리자)",
+        hint: "지정 승인자 라우팅 — 클러스터와 액션별 승인자 (관리자)",
       },
       {
         href: "/admin/users",
         label: "Users",
         icon: UserCheck,
         adminOnly: true,
-        hint: "사용자 역할 관리 — admin · viewer (관리자)",
+        hint: "사용자 역할 관리 — admin/viewer (관리자)",
       },
       {
         href: "/admin/teams",
         label: "Teams",
         icon: Users,
         adminOnly: true,
-        hint: "팀 관리 — 멤버·클러스터 가시성 (관리자)",
+        hint: "팀 관리 — 멤버와 클러스터 가시성 (관리자)",
       },
       {
         href: "/context-files",
@@ -277,7 +279,7 @@ const NAV: NavGroup[] = [
         href: "/health",
         label: "Health",
         icon: HeartPulse,
-        hint: "DBOps 자체 모니터링 — Lambda·Aurora·DDB 상태",
+        hint: "DBOps 자체 모니터링 — Lambda, Aurora, DDB 상태",
       },
     ],
   },
@@ -354,10 +356,11 @@ function Breadcrumbs({ pathname }: { pathname: string }) {
 
 function SidebarItem({ item, active }: { item: NavItem; active: boolean }) {
   const Icon = item.icon;
+  const t = useT();
   return (
     <Link
       href={item.href}
-      title={item.hint}
+      title={item.hint ? t(item.hint) : undefined}
       aria-current={active ? "page" : undefined}
       className={`group relative flex items-center gap-2.5 pl-3 pr-2.5 py-1.5 rounded-md text-[13px] transition-all duration-200 ${
         active
@@ -381,7 +384,7 @@ function SidebarItem({ item, active }: { item: NavItem; active: boolean }) {
             : "text-zinc-500 group-hover:text-emerald-300"
         }`}
       />
-      <span className="truncate">{item.label}</span>
+      <span className="truncate">{t(item.label)}</span>
     </Link>
   );
 }
@@ -545,6 +548,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { criticalCount, warningCount, toasts, dismissToast, markSeen } =
     useAlertBadge();
 
+  const t = useT();
+
   const [admin, setAdmin] = useState(false);
   useEffect(() => {
     setAdmin(isAdmin());
@@ -614,7 +619,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 return (
                   <div key={group.label}>
                     <div className="px-3 mb-1 text-[10px] tracking-[0.16em] text-zinc-600 font-semibold uppercase">
-                      {group.label}
+                      {t(group.label)}
                     </div>
                     <div className="space-y-0.5">
                       {visibleItems.map((item) => {
@@ -668,6 +673,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {!pathname.startsWith("/chat") && (
                   <ClusterDropdown align="right" />
                 )}
+                <LocaleToggle />
                 <ThemeToggle />
                 <div className="md:hidden">
                   <AuthButton />

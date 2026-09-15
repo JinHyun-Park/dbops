@@ -88,7 +88,7 @@ export function EventsPanel({
                   )}&prompt=${encodeURIComponent(
                     `${clusterId}에서 외부 모니터링 인시던트가 발생했습니다: ${
                       e.message || label
-                    }. 최근 메트릭·로그·이벤트를 종합해 근본 원인을 진단하고 권장 조치를 알려줘.`,
+                    }. 최근 메트릭, 로그, 이벤트를 종합해 근본 원인을 진단하고 권장 조치를 알려줘.`,
                   )}`
                 : null;
             return (

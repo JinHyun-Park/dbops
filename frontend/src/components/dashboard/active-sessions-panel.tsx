@@ -67,7 +67,7 @@ export function ActiveSessionsPanel({ clusterId }: { clusterId: string }) {
             활성 세션 (고해상 ~5초)
           </h2>
           <div className="text-[10px] text-zinc-500 mt-0.5">
-            최근 1시간 · pg_stat_activity / processlist 5초 샘플 — 5분 ETL이
+            최근 1시간, pg_stat_activity / processlist 5초 샘플 — 5분 ETL이
             놓치는 순간 스파이크 포착
           </div>
         </div>
@@ -76,8 +76,8 @@ export function ActiveSessionsPanel({ clusterId }: { clusterId: string }) {
             {latest ? latest.active : "—"}
           </div>
           <div className="text-[10px] text-zinc-500">
-            현재 · peak {peak}
-            {latest?.top_wait ? ` · ${latest.top_wait}` : ""}
+            현재, peak {peak}
+            {latest?.top_wait ? `, ${latest.top_wait}` : ""}
           </div>
         </div>
       </div>

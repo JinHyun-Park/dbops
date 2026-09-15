@@ -62,7 +62,7 @@ from collectors.stats_collector import collect_query_stats
 # 100 days and its change at 95 days, both aged past the cutoff and this statement
 # run: one row survived, the panel reported ddl_status `baseline_only` with
 # `changes: []` while the timeline over the same window reported
-# `app · created 1 / created: orders`.
+# `app, created 1 / created: orders`.
 # The exemption's own justification ("the only row the next change has to be diffed
 # against") applies unchanged to the LAST RECORDED change: without its predecessor
 # that change is replayable but no longer recomputable. So the pair is what is

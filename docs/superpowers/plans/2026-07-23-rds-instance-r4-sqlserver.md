@@ -87,7 +87,7 @@
 
 ### Task 6: prompts + execute_sql message + write-tool verification
 
-**Files:** Modify `agent/prompts/system_prompt.py`, `cheatsheet.py` (SQL Server SQL now supported — update the "SQL Server는 이후 릴리스" wording to "MySQL·SQL Server 모두 직접 실행 가능"); `mcp-servers/mcp_servers/operations/tools/execute_sql.py` if it carries a now-stale "R-4" message string (Task 3 already routes sqlserver, so remove/adjust the leftover message).
+**Files:** Modify `agent/prompts/system_prompt.py`, `cheatsheet.py` (SQL Server SQL now supported — update the "SQL Server는 이후 릴리스" wording to "MySQL과 SQL Server 모두 직접 실행 가능"); `mcp-servers/mcp_servers/operations/tools/execute_sql.py` if it carries a now-stale "R-4" message string (Task 3 already routes sqlserver, so remove/adjust the leftover message).
 
 - [ ] **Step 1:** prompt updates (ast.parse check, no **pycache**). **Step 2:** confirm no execute_sql code path still returns the "SQL Server 이후 릴리스(R-4)" message for a supported sqlserver row (Task 3 handles it; this is a consistency sweep). **Step 3:** `npx tsc`/ast checks. **Step 4:** commit `feat(agent): SQL Server SQL now supported in prompts (R-4)`.
 

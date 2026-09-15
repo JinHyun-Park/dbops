@@ -150,7 +150,6 @@ function ChainNode({
             )}
             {edge && (
               <>
-                <span className="text-[10px] text-zinc-600">·</span>
                 <span className="text-[10px] text-zinc-400">
                   waiting <span className="font-mono">{edge.blocked_mode}</span>{" "}
                   on <span className="font-mono">{edge.relation || "?"}</span>
@@ -288,8 +287,8 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
             ))
           )}
           <div className="px-4 py-2 mt-1 text-[10px] text-zinc-600 border-t border-zinc-800">
-            🟠 amber dot = root holder · 🔴 rose dot = blocked transaction
-            (longer = worse) · indent = depth in the chain
+            🟠 amber dot = root holder, 🔴 rose dot = blocked transaction
+            (longer = worse), indent = depth in the chain
           </div>
         </div>
       ) : (
@@ -330,7 +329,7 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
                   <div className="grid grid-cols-2 gap-2 text-[11px]">
                     <div>
                       <div className="text-zinc-500 mb-0.5">
-                        BLOCKED ({l.blocked_user}) · {l.blocked_mode}
+                        BLOCKED ({l.blocked_user}), {l.blocked_mode}
                       </div>
                       <pre className="bg-zinc-950 border border-zinc-800 rounded p-2 font-mono text-xs text-zinc-200 truncate whitespace-pre-wrap">
                         {l.blocked_query || "(unknown)"}
@@ -338,7 +337,7 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
                     </div>
                     <div>
                       <div className="text-zinc-500 mb-0.5">
-                        HOLDING ({l.blocking_user}) · {l.blocking_mode}
+                        HOLDING ({l.blocking_user}), {l.blocking_mode}
                       </div>
                       <pre className="bg-zinc-950 border border-zinc-800 rounded p-2 font-mono text-xs text-zinc-200 truncate whitespace-pre-wrap">
                         {l.blocking_query || "(unknown)"}

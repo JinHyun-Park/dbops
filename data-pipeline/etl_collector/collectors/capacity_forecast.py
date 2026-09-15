@@ -6,8 +6,8 @@
 들여다보지 않아도 "현 추세로 N일 후 connection 한도" 경고가 Maintenance
 Health에 능동적으로 올라온다.
 
-엔진 무관(engine-agnostic): storage/connection은 PostgreSQL·MySQL 양쪽 모두
-같은 metric_snapshots(VolumeBytesUsed·DatabaseConnections)에서 나오고, ACU는
+엔진 무관(engine-agnostic): storage/connection은 PostgreSQL/MySQL 양쪽 모두
+같은 metric_snapshots(VolumeBytesUsed, DatabaseConnections)에서 나오고, ACU는
 Serverless v2 클러스터(엔진 불문)면 ServerlessDatabaseCapacity가 잡힌다.
 그래서 PG/MySQL 핸들러 양쪽에서 동일하게 호출한다.
 
@@ -23,7 +23,7 @@ ACU는 특수 취급한다. Serverless v2의 ACU는 부하에 따라 하루에�
 "스케일 헤드룸 없음"(이미 천장), (2) peak가 상승 추세면 max ACU 도달 ETA를
 예측. 한계 = cluster_meta.serverlessv2_max_acu.
 
-캐시 전용(metric_snapshots·cluster_meta·cluster_settings) — cost_check /
+캐시 전용(metric_snapshots, cluster_meta, cluster_settings) — cost_check /
 param_fitness와 동일 패턴. run_ts를 공유해 같은 사이클 finding과 한 배치로
 대시보드에 잡힌다.
 """
@@ -39,7 +39,7 @@ MIN_SAMPLES = 20         # 추세 신뢰를 위한 최소 표본
 SEV_CRIT_DAYS = 3
 SEV_WARN_DAYS = 7
 
-# 스토리지 소진(standalone RDS instance, FreeStorageSpace)은 커넥션·ACU보다
+# 스토리지 소진(standalone RDS instance, FreeStorageSpace)은 커넥션이나 ACU보다
 # 느리게 차지만 디스크 full은 곧 인스턴스 다운이라 파급이 크다 — 더 긴 지평선
 # (30일)에서 경고하고, 임박(14일 이내)하면 critical로 올린다.
 STORAGE_ALERT_DAYS = 30
@@ -185,7 +185,7 @@ def collect_capacity_forecast(rds_data, cache_cluster_arn, cache_secret_arn, cac
                     )
                     if key == "connections" else
                     "Aurora 스토리지는 자동 확장되지만 128 TiB가 하드 상한입니다 — "
-                    "데이터 증가 원인(미사용 테이블·로그 누적)을 점검하세요. "
+                    "데이터 증가 원인(미사용 테이블, 로그 누적)을 점검하세요. "
                 )
                 + f"추세는 최근 {days_lookback}일 선형 회귀 기반이라 워크로드 변화 시 달라질 수 있습니다."
             ),
@@ -238,7 +238,7 @@ def collect_capacity_forecast(rds_data, cache_cluster_arn, cache_secret_arn, cac
                         f"최근 {acu_days}일 중 {sat_days}일의 일별 peak ACU가 설정된 max "
                         f"{max_acu:.1f} ACU의 {ACU_SAT_FRAC*100:.0f}% 이상에 도달했습니다 — "
                         f"Serverless v2가 더 이상 위로 스케일할 헤드룸이 거의 없어, 수요가 더 "
-                        f"몰리면 성능 저하(쿼리 지연·연결 대기)로 이어집니다. "
+                        f"몰리면 성능 저하(쿼리 지연, 연결 대기)로 이어집니다. "
                         f"serverlessv2_max_acu 상향을 검토하세요. ACU 상한은 비용 상한이기도 "
                         f"하므로 Cost 탭의 ACU 사용 추이와 함께 판단하세요."
                     ),
@@ -335,7 +335,7 @@ def collect_capacity_forecast(rds_data, cache_cluster_arn, cache_secret_arn, cac
                     f"여유 스토리지가 하락 추세(약 {-fs_slope / 1024 ** 3:.2f}GB/일)로, 현 추세면 약 "
                     f"{days_until}일 후 디스크가 가득 찰 것으로 예측됩니다. 디스크가 소진되면 쓰기가 "
                     f"멈추고 인스턴스가 STORAGE_FULL 상태로 중단됩니다. AllocatedStorage 상향 또는 "
-                    f"Storage Autoscaling(최대 임계) 설정을 검토하고, 증가 원인(로그·임시파일·미사용 "
+                    f"Storage Autoscaling(최대 임계) 설정을 검토하고, 증가 원인(로그, 임시파일, 미사용 "
                     f"데이터 누적)을 점검하세요. "
                     f"추세는 최근 {days_lookback}일 선형 회귀 기반이라 워크로드 변화 시 달라질 수 있습니다."
                 ),

@@ -184,7 +184,7 @@ export function ClusterOverview({
                           onMouseEnter={() => prefetchDashboard(c.cluster_id)}
                           title={
                             d.reasons.length
-                              ? `${c.cluster_id} — ${d.reasons.join(" · ")}`
+                              ? `${c.cluster_id} — ${d.reasons.join(", ")}`
                               : c.cluster_id
                           }
                           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[12px] font-mono transition-colors max-w-[260px] ${

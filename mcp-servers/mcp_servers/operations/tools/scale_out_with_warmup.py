@@ -136,7 +136,7 @@ def scale_out_with_warmup_impl(
     except Exception as e:
         print(f"[scale_out_with_warmup] create_db_instance failed for {new_instance_id}: {e}")
         return {"status": "add_failed", "cluster_id": cluster_id,
-                "reason": "인스턴스 추가에 실패했습니다 (식별자 중복·용량·권한 확인)."}
+                "reason": "인스턴스 추가에 실패했습니다 (식별자 중복, 용량, 권한 확인)."}
 
     # --- b. pre-create the WARM approval row (status awaiting_instance) --------
     warm_details = {

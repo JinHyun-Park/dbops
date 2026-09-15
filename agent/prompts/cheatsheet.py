@@ -42,7 +42,7 @@ MULTIENGINE_CHEATSHEET = """
   진단: `get_maintenance_findings`의 recommendation에서 partition-key 분포 힌트 확인.
   대응: partition key 설계 변경(write sharding, composite key) — 현재 플랫폼에서 직접 변경 불가; 권고안 제시.
 - GSI throttling: GSI는 기본 테이블과 별도 throughput 할당. GSI RCU/WCU도 독립 모니터링 필요.
-- Billing mode: PROVISIONED (예측 가능한 트래픽) vs PAY_PER_REQUEST (버스트·불규칙 트래픽).
+- Billing mode: PROVISIONED (예측 가능한 트래픽) vs PAY_PER_REQUEST (버스트/불규칙 트래픽).
   전환 자체는 쓰기 작업 → 현재 플랫폼에서 approve 필요.
 
 ### Amazon DocumentDB
@@ -63,7 +63,7 @@ MULTIENGINE_CHEATSHEET = """
   profiler 기본 임계값 100ms의 10배라 기록된 op이 대부분 빠집니다).
   조치는 해당 컬렉션 인덱스와 쿼리 패턴 점검, 필요하면 `create_docdb_index`(승인 필요).
   기록이 없을 때 profiler 상태는 `get_maintenance_findings` 의
-  `docdb_mongo_profiler_off` · `docdb_mongo_profiler_read_failed` finding으로 확인합니다
+  `docdb_mongo_profiler_off`, `docdb_mongo_profiler_read_failed` finding으로 확인합니다
   (읽기 전용. profiler 상태를 읽는 전용 도구는 없습니다). profiler가 실제로 꺼져 있다고
   확인된 뒤에만 `set_docdb_profiler`(승인 필요)를 제안하세요. 상태 확인 목적으로 승인
   요청을 만들지 마세요.
@@ -78,7 +78,7 @@ MULTIENGINE_CHEATSHEET = """
 
 ## 독립형 RDS 인스턴스 (비-Aurora MySQL/SQL Server) 참고
 쿼리 통계는 캐시 기반 `get_top_queries` 등이 엔진 무관하게 그대로 동작 — Aurora MySQL과
-동일한 진단 흐름(위 Aurora 섹션)을 그대로 사용하면 됩니다. SQL 직접 실행은 MySQL·SQL
+동일한 진단 흐름(위 Aurora 섹션)을 그대로 사용하면 됩니다. SQL 직접 실행은 MySQL/SQL
 Server 모두 가능. SQL Server 진단은 DMV 기반(`sys.dm_exec_query_stats` 등)으로 쿼리/
 세션/대기 통계가 캐시에 수집됩니다.
 - 인스턴스가 과대/과소 프로비저닝됐는지, 비용 절감(right-sizing) 질문 → `simulate_rds_instance_rightsizing`

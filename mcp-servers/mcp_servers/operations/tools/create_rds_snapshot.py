@@ -128,7 +128,7 @@ def create_rds_snapshot_impl(
     except Exception:
         logger.warning("create_db_snapshot failed for %s", cluster_id, exc_info=True)
         return {"status": "snapshot_failed", "cluster_id": cluster_id,
-                "reason": "스냅샷 생성에 실패했습니다 (식별자 중복·상태·권한 확인)."}
+                "reason": "스냅샷 생성에 실패했습니다 (식별자 중복, 상태, 권한 확인)."}
 
     return {"status": "snapshot_creating", "cluster_id": cluster_id,
             "snapshot_id": snapshot_id, "db_status": "creating"}

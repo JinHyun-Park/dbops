@@ -83,14 +83,14 @@
 ### 3.3 Frontend
 
 - `app/reports/page.tsx`: 선택 리포트(이미 fetch된 summary+data)에 "다운로드" 버튼 → 마크다운
-  문자열 조립(제목·요약·핵심 data 키/값) → `Blob` + 임시 `<a download="report-{cid}-{date}.md">`
+  문자열 조립(제목, 요약, 핵심 data 키/값) → `Blob` + 임시 `<a download="report-{cid}-{date}.md">`
   클릭 → revokeObjectURL. data 없으면 버튼 비활성/숨김. (필요 시 작은 헬퍼 `lib/`에 분리.)
 
 ## 4. Safety / Cost
 
 - 전달은 **opt-in**(`REPORT_DELIVERY_ENABLED` 기본 false) → 배포해도 동작 무변화(inert).
 - 전 경로 읽기 전용(리포트 산출물 전달/다운로드만). 다운로드 URL은 5분 만료 presigned.
-- presigned URL에 자격증명 없음; SNS/Slack 페이로드에 시크릿·쿼리 본문 없음(요약 텍스트만).
+- presigned URL에 자격증명 없음; SNS/Slack 페이로드에 시크릿과 쿼리 본문 없음(요약 텍스트만).
 - 비용: SNS publish + Slack POST(구독자 수 비례, 일 1회) — 미미. presigned 생성 무료.
 
 ## 5. Increments (구현 순서)
@@ -105,10 +105,10 @@
 ## 6. Test Strategy
 
 - report_generator 유닛: `REPORT_DELIVERY_ENABLED` off → SNS/POST 미호출; on + 구독자 0 →
-  SNS publish는 호출(이메일)·Slack POST 미호출; on + Slack 구독자 → POST 호출; 전달 예외가
+  SNS publish는 호출(이메일), Slack POST 미호출; on + Slack 구독자 → POST 호출; 전달 예외가
   lambda_handler 완료를 안 막음. (boto3 sns/\_post_json mock.)
 - 다운로드: 프런트 전용 — 유닛 테스트 없음(빌드 + 종단). 마크다운 조립 헬퍼를 분리하면
   순수함수 단위 테스트 가능(선택).
-- 회귀: 기존 report 생성/저장·`/api/reports` list/get 불변.
+- 회귀: 기존 report 생성/저장, `/api/reports` list/get 불변.
 - 종단: dev에서 플래그 on + 테스트 Slack 구독자로 수동 리포트 트리거 시 전달 확인(또는 SNS
   publish 로그) + /reports 다운로드 버튼으로 파일 저장 확인.

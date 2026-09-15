@@ -2,14 +2,14 @@
 
 기존 setting_misconfigured 점검(pg_health_checks)은 "log_connections는 on이
 좋다" 같은 워크로드-무관 정적 베스트프랙티스다. 이 모듈은 정반대로,
-**이 인스턴스의 실측 데이터**(peak 커넥션·버퍼 캐시 히트·dead tuple 압력·
+**이 인스턴스의 실측 데이터**(peak 커넥션, 버퍼 캐시 히트, dead tuple 압력,
 인스턴스 메모리)에 비춰 현재 설정값이 과/소한지를 근거와 함께 판단한다.
 
 핵심 차별점:
   1. 상호작용 위험 — 단일 파라미터가 아니라 work_mem × max_connections가
      인스턴스 메모리를 초과할 수 있는 조합을 잡는다(실제 OOM의 흔한 원인,
      상용 도구도 잘 못 짚는 부분).
-  2. Aurora 특수성 — Aurora PG는 shared_buffers·max_connections를 인스턴스
+  2. Aurora 특수성 — Aurora PG는 shared_buffers, max_connections를 인스턴스
      메모리 공식으로 자동 설정하고 일부는 변경이 무의미하다. vanilla PG
      베스트프랙티스를 그대로 들이대지 않는다.
   3. 확실한 것만 — 메모리 매핑이 안 되거나 표본이 부족하면 침묵한다. 틀린
@@ -37,7 +37,7 @@ CACHE_HIT_FLOOR = 95.0          # 버퍼 캐시 히트율(%) 하한
 DEAD_RATIO_PCT = 20.0           # dead tuple 비율 임계
 DEAD_TABLES_TO_FLAG = 3         # 이 개수 이상 테이블이 압력이면 worker 진단
 MIN_SAMPLES = 20                # 메트릭 표본 최소치
-# 워크로드 메트릭(peak 커넥션·버퍼 캐시 히트)을 재는 윈도. SQL의 INTERVAL과
+# 워크로드 메트릭(peak 커넥션, 버퍼 캐시 히트)을 재는 윈도. SQL의 INTERVAL과
 # finding 문구가 이 상수 하나에서 나온다. 예전에는 statement가 INTERVAL '7 days'
 # 이고 문구가 "7일 평균"으로 각각 하드코딩돼 있어서, 윈도를 넓히면 finding이
 # 30일치 측정을 "7일 평균"이라고 말하는데도 깨지는 것이 아무것도 없었다.

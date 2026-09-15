@@ -112,11 +112,11 @@ import os
 
 def _build_report_slack_blocks(cluster_id, report_date, report_type, summary):
     return {
-        "text": f"DBOps 리포트 · {cluster_id}",
+        "text": f"DBOps 리포트: {cluster_id}",
         "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": f"📋 DBOps 리포트 · {report_date}"}},
+            {"type": "header", "text": {"type": "plain_text", "text": f"📋 DBOps 리포트: {report_date}"}},
             {"type": "section", "text": {"type": "mrkdwn",
-                "text": f"*클러스터* `{cluster_id}` · *유형* {report_type}\n\n{summary[:2800]}"}},
+                "text": f"*클러스터* `{cluster_id}`, *유형* {report_type}\n\n{summary[:2800]}"}},
         ],
     }
 
@@ -130,7 +130,7 @@ def _deliver_report(cache_query, cluster_id, report_date, report_type, summary):
         if topic:
             boto3.client("sns").publish(
                 TopicArn=topic,
-                Subject=f"DBOps 리포트 · {cluster_id} · {report_date}"[:100],
+                Subject=f"DBOps 리포트: {cluster_id}, {report_date}"[:100],
                 Message=summary,
             )
         subs = cache_query(

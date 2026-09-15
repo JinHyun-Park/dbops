@@ -222,7 +222,7 @@ def lambda_handler(event, context):
             "trigger": f"manual:{_caller_name(event)}",
             "status": "pending",
             "created_at": str(now_ms),
-            "title": f"수동 RCA · {cluster_id}",
+            "title": f"수동 RCA ({cluster_id})",
             "ttl": int(time.time()) + TTL_DAYS * 24 * 60 * 60,
         }
         try:

@@ -108,7 +108,7 @@ export function ReplicationTopologyPanel({ clusterId }: { clusterId: string }) {
             )}
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            Writer + readers · 인스턴스별 Replica Lag (CloudWatch 15분 윈도우
+            Writer + readers: 인스턴스별 Replica Lag (CloudWatch 15분 윈도우
             최신 datapoint)
           </div>
         </div>

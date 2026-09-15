@@ -232,7 +232,7 @@ def operations_schema():
               {"cluster_id": "string", "min_capacity": "number", "max_capacity": "number", "approved": "boolean", "approval_id": "string"},
               ["cluster_id"]),
         # 쓰기 툴 3종 모두 approved/approval_id를 스키마에 노출해야 한다 —
-        # 핸들러·가드가 완비여도 스키마에 없으면 에이전트가 승인 후 재실행을
+        # 핸들러와 가드가 완비여도 스키마에 없으면 에이전트가 승인 후 재실행을
         # 못 해 승인 루프가 dead-end가 된다 (request_approval 누락 P0와 동일
         # 패밀리, 시나리오 테스트로 적발).
         _tool("manage_maintenance", "View or modify maintenance window (modify requires approval)",

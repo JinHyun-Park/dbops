@@ -4,7 +4,7 @@
   1. request_approval이 스키마에서 통째로 누락 → 승인 루프 dead-end (P0)
   2. manage_maintenance/create_snapshot/restore_cluster에 approved/approval_id
      누락 → 승인 후 재실행 불가
-  3. get_slow_queries 등 12개 툴의 시간창·튜닝 파라미터 누락 → 에이전트
+  3. get_slow_queries 등 12개 툴의 시간창/튜닝 파라미터 누락 → 에이전트
      능력이 기본값으로 조용히 제한
 
 핸들러에 파라미터를 추가하면 이 테스트가 스키마 추가를 강제한다. 반대

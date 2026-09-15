@@ -283,7 +283,7 @@ DROPPED_CAVEAT = (
 # per-engine grounds (including MySQL's measured numbers) live in
 # snapshot_dialect_supported above, which is where a reader who wants them looks.
 UNSUPPORTED_DIALECT_NOTE = (
-    "스키마 스냅샷(테이블 생성·삭제 판정)은 PostgreSQL 카탈로그(pg_namespace/pg_class)를 "
+    "스키마 스냅샷(테이블 생성/삭제 판정)은 PostgreSQL 카탈로그(pg_namespace/pg_class)를 "
     "읽는 cluster에서만 수집합니다. 이 카탈로그는 권한으로 필터링되지 않아 '읽기 결과에 "
     "없으면 실제로 없다'가 성립하기 때문입니다. 이 cluster의 엔진은 그 전제가 확인된 "
     "대상이 아니어서 스냅샷을 수집하지 않으며, 따라서 이 cluster에 대해서는 '변경 없음'도 "

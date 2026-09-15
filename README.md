@@ -80,17 +80,17 @@ The sections below group the core capabilities by area, and the `/path` on each 
 Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
                                     │                        │
                           AgentCore Gateway          AWS MCP Server
-                          (Cedar Policy)             (SigV4 · official AWS docs)
+                          (Cedar Policy)             (SigV4, official AWS docs)
                                     │
               ┌─────────────────────┼─────────────────────┐
               ▼            ▼              ▼               ▼
          Performance   Incident      Operations       Simulation
            MCP          MCP            MCP               MCP
-                       (4 custom MCP servers · 64 tools)
+                       (4 custom MCP servers, 64 tools)
                                     │
                                     ▼
                   Aurora PG Cache ◀── Data Collection Pipeline
-                  (hot cache)         (ETL · Event Processor · Report · Monitor)
+                  (hot cache)         (ETL, Event Processor, Report, Monitor)
 ```
 
 - **Custom tools go through the Gateway** (write approval is enforced by the tool-level `approval_guard`; the Cedar Policy Engine is bound at the Gateway in LOG_ONLY as defense in depth), **official AWS docs go straight to the AWS MCP Server over SigV4**, which exposes read-only documentation tools and nothing else

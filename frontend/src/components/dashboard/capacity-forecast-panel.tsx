@@ -281,11 +281,11 @@ export function CapacityForecastPanel({
                             lim.suffix ? ` ${lim.suffix}` : ""
                           } 중 `
                         : ""}
-                    {usagePct.toFixed(1)}% 사용 ·{" "}
+                    {usagePct.toFixed(1)}% 사용,{" "}
                   </>
                 )}
                 {usagePct == null && data.grounded === false && (
-                  <>한도 미확인 · </>
+                  <>한도 미확인, </>
                 )}
                 <span className={trend.cls}>{trend.text}</span>
               </div>
@@ -323,7 +323,7 @@ export function CapacityForecastPanel({
                           : "예측 한도 안전"}
               </div>
               <div className="text-[10px] text-zinc-500 mt-0.5">
-                {urgency.label} · 추세 {data.slope_per_day >= 0 ? "+" : "-"}
+                {urgency.label}, 추세 {data.slope_per_day >= 0 ? "+" : "-"}
                 {metricSpec.format(Math.abs(data.slope_per_day)).value}
                 {metricSpec.format(Math.abs(data.slope_per_day)).suffix && (
                   <> {metricSpec.format(Math.abs(data.slope_per_day)).suffix}</>
@@ -395,9 +395,9 @@ export function CapacityForecastPanel({
           )}
 
           <div className="text-[10px] text-zinc-600 font-mono">
-            기준: 최근 {data.days_lookback ?? 30}일 · {data.samples}개 샘플
-            {data.metric_type && ` · ${data.metric_type}`}
-            {data.limit_basis && ` · ${data.limit_basis}`} · 단순 선형 회귀
+            기준: 최근 {data.days_lookback ?? 30}일, {data.samples}개 샘플
+            {data.metric_type && `, ${data.metric_type}`}
+            {data.limit_basis && `, ${data.limit_basis}`}, 단순 선형 회귀
             (시즌성/스파이크 미반영)
           </div>
         </div>

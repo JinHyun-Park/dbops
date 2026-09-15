@@ -174,7 +174,7 @@ def _build_slack_payload(rule: dict, latest: float) -> dict:
     blocks.append({
         "type": "context",
         "elements": [
-            {"type": "mrkdwn", "text": f"rule_id `{rule['id']}` · evaluated by dbops-alert-evaluator"},
+            {"type": "mrkdwn", "text": f"rule_id `{rule['id']}`, evaluated by dbops-alert-evaluator"},
         ],
     })
     return {
@@ -200,7 +200,7 @@ def _build_teams_payload(rule: dict, latest: float) -> dict:
         "@context": "http://schema.org/extensions",
         "summary": f"DBOps alert: {rule.get('cluster_id', '')}",
         "themeColor": theme,
-        "title": f"\U0001f6a8 DBOps alert · {rule.get('cluster_id', '')}",
+        "title": f"\U0001f6a8 DBOps alert: {rule.get('cluster_id', '')}",
         "sections": [{"facts": facts, "markdown": True}],
     }
     # Deep-link buttons only when FRONTEND_URL is set (same condition as Slack).
@@ -520,7 +520,7 @@ def lambda_handler(event, context):
             enqueue_auto_rca(
                 rule["cluster_id"],
                 rule_id,
-                title=f"경보 RCA · {message}",
+                title=f"경보 RCA: {message}",
                 trigger=f"alert:{rule_id}",
                 # The moment the breach was OBSERVED, so the RCA anchors on the
                 # incident rather than on its own execution time.

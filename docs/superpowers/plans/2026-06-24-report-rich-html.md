@@ -230,7 +230,7 @@ h1{{font-size:20px;margin:0 0 4px}} .meta{{color:#71717a;font-size:13px;margin-b
 table{{width:100%;border-collapse:collapse;font-size:13px}} td,th{{text-align:left;padding:6px 8px;border-bottom:1px solid #f4f4f5}}
 </style></head><body>
 <h1>DBOps 운영 리포트</h1>
-<div class="meta">{escape(str(cluster_id))} · {escape(str(report_date))} · {escape(str(report_type))}</div>
+<div class="meta">{escape(str(cluster_id))}, {escape(str(report_date))}, {escape(str(report_type))}</div>
 <div class="cards">{cards or ''}</div>
 <div class="summary">{escape(str(summary or ''))}</div>
 <div class="section"><h2>활동 추이 (AAS)</h2>{line_chart(aas_series, "AAS")}</div>

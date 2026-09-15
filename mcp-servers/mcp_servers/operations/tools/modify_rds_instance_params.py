@@ -406,7 +406,7 @@ def modify_rds_instance_params_impl(
         )
         return {"status": "modify_failed", "cluster_id": cluster_id,
                 "parameter_group": live_group, "parameter": parameter_name,
-                "reason": "DB 파라미터 그룹 수정에 실패했습니다 (값 유효 범위·권한·파라미터 "
+                "reason": "DB 파라미터 그룹 수정에 실패했습니다 (값 유효 범위, 권한, 파라미터 "
                           "그룹 태그를 확인하세요)."}
 
     return {

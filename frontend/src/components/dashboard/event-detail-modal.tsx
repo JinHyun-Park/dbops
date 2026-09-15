@@ -148,7 +148,6 @@ export function EventDetailModal({
               <span className="text-[10px] text-zinc-500 font-mono">
                 {event.source || "—"}
               </span>
-              <span className="text-[10px] text-zinc-600">·</span>
               <span className="text-[10px] text-zinc-500">{event.ts}</span>
             </div>
             <h2 className="text-lg font-semibold text-zinc-100 truncate">

@@ -198,7 +198,7 @@ def lambda_handler(event, context):
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
         except Exception:
-            # 예외 텍스트는 응답에 절대 넣지 않는다(SQL·ARN·내부 경로 누출).
+            # 예외 텍스트는 응답에 절대 넣지 않는다(SQL, ARN, 내부 경로 누출).
             # 진단 정보는 CloudWatch 로그로만 보낸다.
             logger.exception("TOOL ERROR (%s)", tool_name)
             return {"content": [{"type": "text", "text": json.dumps({

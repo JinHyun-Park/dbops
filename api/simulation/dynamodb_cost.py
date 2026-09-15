@@ -23,13 +23,13 @@ INPUTS the caller must gather from the cache (this module does NO I/O):
 
 THE MATH (every assumption is echoed into response["assumptions"]):
   - Scale the observed window to a 730h month: month_factor = 730/window_hours.
-  - On-Demand monthly = (Σrcu/1e6)·$/Mrru·month_factor + (Σwcu/1e6)·$/Mwru·month_factor.
+  - On-Demand monthly = (Σrcu/1e6) × $/Mrru × month_factor + (Σwcu/1e6) × $/Mwru × month_factor.
     1 consumed RCU ≈ 1 RRU (≤4KB strongly-consistent read) — stated approximation.
   - Provisioned sizing: capacity is per-second, so convert the per-MINUTE p99 Sum
     to per-second (÷60), divide by headroom (target utilization), ceil:
       rcu_sized = ceil( (p99_rcu_per_min/60) / headroom ).
     p99 (not max) avoids pricing a one-off spike; headroom models auto-scaling.
-  - Provisioned monthly = rcu_sized·$/RCU-hr·730 + wcu_sized·$/WCU-hr·730.
+  - Provisioned monthly = rcu_sized × $/RCU-hr × 730 + wcu_sized × $/WCU-hr × 730.
   - current_monthly = the table's ACTUAL mode cost (PROVISIONED: from the real
     provisioned units; on-demand: = the On-Demand figure).
   - recommendation: cheaper mode + $ delta + % — ONLY when both prices resolved.
@@ -198,7 +198,7 @@ def compute_capacity_cost(
         f"(RCU {rcu_sized} / WCU {wcu_sized}), 프로비저닝 최소치인 면당 1 RCU/1 WCU로 하한 적용. "
         "1분 CloudWatch 집계 기준의 평활화된 추정으로, 1분 미만 burst는 관측되지 않으므로 실제 필요 "
         "Provisioned 용량(과 비용)은 이 추정보다 높을 수 있습니다.",
-        "RCU/WCU(capacity)만 비교합니다 — storage·backup·stream·global-table replication·free-tier는 제외합니다.",
+        "RCU/WCU(capacity)만 비교합니다 — storage, backup, stream, global-table replication, free-tier는 제외합니다.",
     ]
     if not pricing_resolved:
         assumptions.append(

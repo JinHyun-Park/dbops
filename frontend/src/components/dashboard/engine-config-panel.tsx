@@ -133,7 +133,7 @@ export function EngineConfigPanel({
                 label="암호화 (SSE)"
                 value={
                   data?.sse_status
-                    ? `${data.sse_type || "AWS owned"} · ${data.sse_status}`
+                    ? `${data.sse_type || "AWS owned"} (${data.sse_status})`
                     : "AWS 소유 키 (기본)"
                 }
                 tone={data?.sse_status ? "good" : "neutral"}
@@ -142,7 +142,7 @@ export function EngineConfigPanel({
                 label="DynamoDB Streams"
                 value={
                   stream.text === "활성" && data?.stream_view_type
-                    ? `활성 · ${data.stream_view_type}`
+                    ? `활성 (${data.stream_view_type})`
                     : stream.text
                 }
                 tone={stream.tone}
@@ -151,7 +151,7 @@ export function EngineConfigPanel({
                 label="TTL"
                 value={
                   ttlOn && data?.ttl_attribute_name
-                    ? `활성 · ${data.ttl_attribute_name}`
+                    ? `활성 (${data.ttl_attribute_name})`
                     : data?.ttl_status === "ENABLED"
                       ? "활성"
                       : "비활성"
@@ -181,7 +181,7 @@ export function EngineConfigPanel({
     const atRest = posture(data?.at_rest_encryption_enabled);
     const atRestText =
       atRest.tone === "good" && data?.storage_encryption_type
-        ? `활성 · ${data.storage_encryption_type}`
+        ? `활성 (${data.storage_encryption_type})`
         : atRest.text;
     // AUTH: a legacy auth token OR RBAC user groups both mean "authenticated";
     // both absent → unknown.

@@ -38,7 +38,7 @@ const VERDICT_STYLE: Record<string, string> = {
 
 function DeltaChip({ d }: { d: ChangeImpactDelta }) {
   const v = verdict(d);
-  const arrow = d.delta > 0 ? "▲" : d.delta < 0 ? "▼" : "·";
+  const arrow = d.delta > 0 ? "▲" : d.delta < 0 ? "▼" : "=";
   const pct =
     d.delta_pct !== null
       ? `${d.delta_pct > 0 ? "+" : ""}${fmtDecimal(d.delta_pct, 1)}%`
@@ -106,7 +106,7 @@ export function ChangeImpactPanel({ clusterId }: { clusterId: string }) {
         </div>
       </div>
       <div className="text-[11px] text-zinc-500 mb-3">
-        최근 7일 RDS 변경 이벤트(파라미터·스케일링·재시작 등)를 앵커로 전후 ±
+        최근 7일 RDS 변경 이벤트(파라미터, 스케일링, 재시작 등)를 앵커로 전후 ±
         {windowHours}시간 워크로드를 자동 비교합니다. 콘솔/CLI 직접 변경도
         포착합니다.
       </div>

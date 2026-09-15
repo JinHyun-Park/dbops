@@ -321,7 +321,7 @@ def modify_parameter_impl(
             "cluster_id": cluster_id,
             "parameter_group": pg_name,
             "parameter": parameter_name,
-            "reason": "클러스터 파라미터 그룹 수정에 실패했습니다 (값 유효 범위·권한·클러스터 "
+            "reason": "클러스터 파라미터 그룹 수정에 실패했습니다 (값 유효 범위, 권한, 클러스터 "
                       "파라미터 그룹 태그를 확인하세요).",
         }
 

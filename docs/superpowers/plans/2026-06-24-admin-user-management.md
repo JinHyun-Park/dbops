@@ -708,7 +708,7 @@ export default function AdminUsersPage() {
       <PageHeader
         eyebrow="Admin"
         title="Users"
-        description="사용자 목록과 역할(admin · viewer)을 관리합니다. 변경 사항은 즉시 적용됩니다."
+        description="사용자 목록과 역할(admin/viewer)을 관리합니다. 변경 사항은 즉시 적용됩니다."
       />
 
       {error && (
@@ -762,7 +762,7 @@ export default function AdminUsersPage() {
                       <td className="px-4 py-3 text-zinc-400">
                         {u.status}
                         {!u.enabled && (
-                          <span className="ml-1 text-rose-400">· 비활성</span>
+                          <span className="ml-1 text-rose-400">(비활성)</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -833,7 +833,7 @@ export default function AdminUsersPage() {
         label: "Users",
         icon: UserCheck,
         adminOnly: true,
-        hint: "사용자 역할 관리 — admin · viewer (관리자)",
+        hint: "사용자 역할 관리 — admin/viewer (관리자)",
       },
 ```
 

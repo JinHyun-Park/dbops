@@ -19,8 +19,8 @@ const STEPS: Step[] = [
     body: (
       <>
         DBOps는 Amazon Aurora MySQL / PostgreSQL을 플릿 단위로 운영하는 DBA를
-        위해 만든 콘솔입니다. 모든 패널이 에이전트와 연결돼 있어, 이상
-        징후·이벤트·발견 항목을 클릭하면{" "}
+        위해 만든 콘솔입니다. 모든 패널이 에이전트와 연결돼 있어, 이상 징후,
+        이벤트, 발견 항목을 클릭하면{" "}
         <span className="text-sky-300">한 번에 원인 분석과 조치 제안</span>을
         받을 수 있습니다.
       </>

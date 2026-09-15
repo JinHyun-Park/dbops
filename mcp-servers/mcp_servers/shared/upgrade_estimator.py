@@ -85,7 +85,7 @@ _LARGE_STORAGE_GB = 500
 _MANY_READERS = 2
 
 _METHODOLOGY_NOTE = (
-    "추정치는 객체(테이블) 수·메이저 버전 점프·리더 수 기반 휴리스틱입니다. "
+    "추정치는 객체(테이블) 수, 메이저 버전 점프, 리더 수 기반 휴리스틱입니다. "
     "실제 시간은 워크로드(MySQL undo/history list length, blue/green 복제 catch-up 시 "
     "쓰기량)에 따라 달라집니다. 정확한 수치가 필요하면 fast clone으로 동일 클러스터를 "
     "복제해 시험 업그레이드를 1회 측정하는 것이 AWS 권장 방식입니다."
@@ -241,7 +241,7 @@ def _core_minutes(upgrade_type, object_count, major_jumps, readers, storage_gb):
         core = _MINOR_WRITER_MIN + readers * _MINOR_PER_READER_MIN + storage_term
         basis = [
             f"마이너 업그레이드(바이너리 교체, 데이터 파일 미변경) — writer 재시작 "
-            f"{_MINOR_WRITER_MIN}분 기준, 데이터 크기·객체 수와 거의 무관",
+            f"{_MINOR_WRITER_MIN}분 기준, 데이터 크기나 객체 수와 거의 무관",
         ]
         if readers:
             basis.append(f"리더 {readers}개 패치 (+{readers * _MINOR_PER_READER_MIN}분)")
@@ -257,7 +257,7 @@ def _core_minutes(upgrade_type, object_count, major_jumps, readers, storage_gb):
         f"메이저 버전 {major_jumps}단계 점프 (+{round(jump_term)}분)",
     ]
     if readers:
-        basis.append(f"리더 {readers}개 재업그레이드·검증 (+{reader_term}분)")
+        basis.append(f"리더 {readers}개 재업그레이드 및 검증 (+{reader_term}분)")
     return core, basis
 
 
@@ -335,7 +335,7 @@ def recommend_method(upgrade_type: str, storage_gb: float, readers: int) -> tupl
             "영향 범위가 커 blue/green을 권장합니다."
         )
     return "in_place", (
-        f"마이너 업그레이드이고 스토리지 {int(storage_gb)}GB·리더 {readers}개로 규모가 "
+        f"마이너 업그레이드이고 스토리지 {int(storage_gb)}GB, 리더 {readers}개로 규모가 "
         "작아 빠르고 단순한 in-place가 적절합니다."
     )
 

@@ -45,7 +45,7 @@ _MYSQL_REFUSAL = (
     "MySQL 다이얼렉트(백틱 식별자)를 인식하지 못합니다. 따라서 '추천이 없다'가 아니라 "
     "'측정하지 못했다'이며, 인덱스가 필요 없다는 근거로 쓸 수 없습니다. 대신 "
     "explain_plan으로 해당 쿼리의 full table scan(access_type=ALL)과 filesort를 "
-    "확인하고, 대시보드의 중복·미사용 인덱스 패널로 기존 인덱스 사용 현황을 보세요."
+    "확인하고, 대시보드의 중복/미사용 인덱스 패널로 기존 인덱스 사용 현황을 보세요."
 )
 
 # How many heavy queries to pull from the cache. Generous enough to find a few

@@ -83,9 +83,9 @@ def get_performance_summary_impl(
     if unbacked:
         out["note"] = (
             f"표본이 없는 KPI: {', '.join(unbacked)}. 이 값들은 측정치가 아니라 "
-            "데이터 부재입니다(수집 미시작·수집 중단, 또는 이 엔진에 해당 생산자가 "
+            "데이터 부재입니다(수집 미시작이나 수집 중단, 또는 이 엔진에 해당 생산자가 "
             "아예 없음). slow_count는 query_stats 행이 0일 때 '느린 쿼리 없음'이 "
-            "아니라 '물을 수 없음'을 뜻합니다(DynamoDB·ElastiCache에는 query_stats "
+            "아니라 '물을 수 없음'을 뜻합니다(DynamoDB와 ElastiCache에는 query_stats "
             "생산자가 없습니다)."
         )
     return out

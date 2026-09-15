@@ -180,7 +180,7 @@ def _unsupported_other_engine(fam, cluster_id: str) -> dict:
         "cluster_id": cluster_id,
         "message": (
             "이 rds_instance 엔진은 직접 SQL 실행을 지원하지 않습니다 "
-            "(MySQL·SQL Server만 지원)."
+            "(MySQL/SQL Server만 지원)."
         ),
     }
 
@@ -497,7 +497,7 @@ def execute_sql_impl(
             # 프로비저닝 클러스터가 가장 흔하게 밟는 케이스: Data API(HttpEndpoint)
             # 미활성. raw boto 에러만으로는 DBA가 다음 행동을 알 수 없으므로
             # 활성화 명령까지 안내한다 (Aurora PG 14.9+/15.4+/16+, MySQL 3.07+ 지원).
-            # Sv2·프로비저닝은 EnableHttpEndpoint(resource-arn) API로 켠다.
+            # Sv2/프로비저닝은 EnableHttpEndpoint(resource-arn) API로 켠다.
             # modify-db-cluster --enable-http-endpoint는 legacy Serverless v1
             # 전용이며 그 외 클러스터에선 조용히 무시된다(실측으로 확인).
             if "HttpEndpoint" in err or "Http endpoint" in err.lower():
@@ -506,7 +506,7 @@ def execute_sql_impl(
                     f"request_approval(action_type='enable_data_api')로 활성화 승인 요청을 등록하면 "
                     f"DBA 승인 즉시 서버가 활성화합니다(다운타임 없음, 전파 1~2분). "
                     f"CLI 직접 실행도 가능: aws rds enable-http-endpoint --resource-arn {target_arn} (CLI v2). "
-                    f"활성화 전까지는 라이브 SQL 기반 수집(테이블 통계·커넥션·Top Queries)도 동작하지 않습니다."
+                    f"활성화 전까지는 라이브 SQL 기반 수집(테이블 통계, 커넥션, Top Queries)도 동작하지 않습니다."
                 )
             return result
 

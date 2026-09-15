@@ -35,7 +35,7 @@ def _consumed(datapoints=120, sum_rcu=720000.0, sum_wcu=360000.0,
 
 
 def test_on_demand_math_scales_window_to_month():
-    """On-Demand monthly = (Σrcu/1e6·$/Mrru + Σwcu/1e6·$/Mwru)·(730/window)."""
+    """On-Demand monthly = (Σrcu/1e6 * $/Mrru + Σwcu/1e6 * $/Mwru) * (730/window)."""
     window = 2.0
     consumed = _consumed(sum_rcu=2_000_000.0, sum_wcu=1_000_000.0)
     r = compute_capacity_cost(

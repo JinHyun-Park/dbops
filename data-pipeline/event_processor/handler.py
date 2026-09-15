@@ -146,7 +146,7 @@ def lambda_handler(event, context):
             enqueue_auto_rca(
                 cluster_id,
                 f"event:{event_type}",
-                title=f"엔진 이벤트 자동 RCA · {cluster_id} · {event_type}",
+                title=f"엔진 이벤트 자동 RCA ({cluster_id}, {event_type})",
                 trigger=f"event:{event_type}",
             )
         except Exception as e:

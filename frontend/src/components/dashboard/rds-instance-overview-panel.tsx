@@ -301,7 +301,7 @@ export function RdsInstanceOverviewPanel({
 
   const storageLabel =
     details?.storage_type && details?.allocated_storage_gb != null
-      ? `${details.storage_type} · ${fmtDecimal(
+      ? `${details.storage_type}, ${fmtDecimal(
           details.allocated_storage_gb,
           0,
         )} GiB`

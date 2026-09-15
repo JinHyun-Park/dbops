@@ -164,7 +164,7 @@ def simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=
     elif cpu_p95 <= min(40 * headroom / 0.5, 75) and conn_peak < 50:
         down = _next_class_down(cur_class)
         target, action = (down, "downsize") if down else (cur_class, "hold")
-        reason = (f"CPU p95 {util['cpu_p95']}% · 커넥션 최대 {util['conn_peak']} — 한 단계 축소 여력"
+        reason = (f"CPU p95 {util['cpu_p95']}%, 커넥션 최대 {util['conn_peak']} — 한 단계 축소 여력"
                   if down else "이미 최소 클래스 — 축소 불가")
     else:
         target, action, reason = cur_class, "hold", f"CPU p95 {util['cpu_p95']}% — 현행 유지 적정"

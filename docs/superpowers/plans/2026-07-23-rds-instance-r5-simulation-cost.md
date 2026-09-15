@@ -336,7 +336,7 @@ The tool: read CW utilization from `metric_snapshots`, recommend a class (down i
                   "write_iops_p95": 1.0, "window_hours": 168, "samples": 2016},
   "recommendation": {"action": "downsize|upsize|hold",
                      "instance_class": "db.t3.micro",
-                     "reason": "CPU p95 6% · 커넥션 최대 2 — 한 단계 축소 여력"},
+                     "reason": "CPU p95 6%, 커넥션 최대 2 — 한 단계 축소 여력"},
   "cost_impact": {
      "current_monthly_usd": 42.10, "proposed_monthly_usd": 24.30,
      "delta_monthly_usd": -17.80, "change_pct": -42.3,
@@ -551,7 +551,7 @@ def simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=
     elif cpu_p95 <= 40 * headroom / 0.5 and conn_peak < 50:
         down = _next_class_down(cur_class)
         target, action = (down, "downsize") if down else (cur_class, "hold")
-        reason = (f"CPU p95 {util['cpu_p95']}% · 커넥션 최대 {util['conn_peak']} — 한 단계 축소 여력"
+        reason = (f"CPU p95 {util['cpu_p95']}%, 커넥션 최대 {util['conn_peak']} — 한 단계 축소 여력"
                   if down else "이미 최소 클래스 — 축소 불가")
     else:
         target, action, reason = cur_class, "hold", f"CPU p95 {util['cpu_p95']}% — 현행 유지 적정"
@@ -634,7 +634,7 @@ Add the positive-gate branch in `lambda_handler` — insert a new `elif` BEFORE 
                     "status": "unsupported_engine",
                     "engine_family": fam,
                     "cluster_id": cluster_id,
-                    "message": "인스턴스 우측 사이징/비용 시뮬레이션은 RDS MySQL·SQL Server 전용입니다.",
+                    "message": "인스턴스 우측 사이징/비용 시뮬레이션은 RDS MySQL/SQL Server 전용입니다.",
                 })}]}
 ```
 
@@ -711,7 +711,7 @@ Expected: prints the list including `simulate_rds_instance_rightsizing`; no Asse
 
 In `agent/prompts/system_prompt.py`, find the simulation-tools guidance section and add a line for rds_instance (Korean, matching surrounding style), e.g.:
 
-> RDS MySQL·SQL Server 인스턴스의 비용 최적화·우측 사이징 질문에는 `simulate_rds_instance_rightsizing`를 사용한다(읽기 전용, 승인 불필요). Aurora 전용 `simulate_scaling`은 rds_instance에 쓰지 않는다.
+> RDS MySQL/SQL Server 인스턴스의 비용 최적화와 우측 사이징 질문에는 `simulate_rds_instance_rightsizing`를 사용한다(읽기 전용, 승인 불필요). Aurora 전용 `simulate_scaling`은 rds_instance에 쓰지 않는다.
 
 In `agent/prompts/cheatsheet.py`, add a one-line entry next to the other simulation tools mapping the intent ("인스턴스가 너무 크다/작다, 비용 절감") to `simulate_rds_instance_rightsizing`.
 

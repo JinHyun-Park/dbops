@@ -172,7 +172,7 @@ export function EndpointsPanel({ clusterId }: { clusterId: string }) {
 
       {admin ? (
         <div className="text-[11px] text-zinc-500 mb-3">
-          커스텀 엔드포인트 생성·수정·삭제는 DBA 승인이 필요합니다. 요청하면
+          커스텀 엔드포인트 생성, 수정, 삭제는 DBA 승인이 필요합니다. 요청하면
           승인 센터에 등록되고, 승인 즉시 실행됩니다.
         </div>
       ) : (
@@ -206,7 +206,7 @@ export function EndpointsPanel({ clusterId }: { clusterId: string }) {
       {admin && createOpen && (
         <div className="mb-4 border border-zinc-800 bg-zinc-950 p-3 space-y-2">
           <div className="text-[11px] text-zinc-400">
-            READER 는 읽기 전용 리더만, ANY 는 writer·reader 모두 라우팅
+            READER 는 읽기 전용 리더만, ANY 는 writer와 reader 모두 라우팅
             대상입니다. 멤버를 지정하지 않으면 모든 리더가 포함됩니다.
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -406,7 +406,7 @@ function EndpointRow({
             className={`text-[10px] font-mono px-1 py-0.5 border ${pill.cls}`}
           >
             {pill.label}
-            {isCustom && ep.custom_type ? ` · ${ep.custom_type}` : ""}
+            {isCustom && ep.custom_type ? `, ${ep.custom_type}` : ""}
           </span>
           <span className="text-xs text-zinc-200 font-mono truncate">
             {ep.identifier}

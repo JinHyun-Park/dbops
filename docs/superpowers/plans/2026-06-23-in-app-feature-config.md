@@ -729,7 +729,7 @@ export async function updateAppConfig(
     - **Report delivery** (`REPORT_DELIVERY_ENABLED`): a toggle (on/off) bound to `value === "true"`.
     - **Ticketing provider** (`TICKETING_PROVIDER`): a text input (or select) for the provider name; default `none`. Include helper copy (Korean) noting that a provider must be wired in code before a non-`none` value does anything.
   - A "저장" (save) button calls `updateAppConfig({ REPORT_DELIVERY_ENABLED: <bool>, TICKETING_PROVIDER: <string> })`, shows success/error, and updates local state from the response.
-  - Show `updated_at` / `updated_by` per setting when present ("마지막 변경: {updated_by} · {updated_at}").
+  - Show `updated_at` / `updated_by` per setting when present ("마지막 변경: {updated_by}, {updated_at}").
   - Match the project design quality bar — no placeholder/AI-generated feel; consistent with existing pages.
 
 Use the `/preferences` page (`frontend/src/app/preferences/page.tsx`) as the structural template for state/loading/error handling.

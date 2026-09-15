@@ -36,13 +36,13 @@ const commands: Command[] = [
   },
   {
     id: "slo",
-    label: "SLO — 가용성·지연 예산",
+    label: "SLO — 가용성과 지연 예산",
     path: "/slo",
     group: "Monitor",
   },
   {
     id: "schema",
-    label: "Schema — FK 계보·의존성",
+    label: "Schema — FK 계보와 의존성",
     path: "/schema",
     group: "Monitor",
   },
@@ -68,7 +68,7 @@ const commands: Command[] = [
   },
   {
     id: "runbooks",
-    label: "Runbooks — 진단·처방",
+    label: "Runbooks — 진단과 처방",
     path: "/runbooks",
     group: "Automate",
   },
@@ -87,7 +87,7 @@ const commands: Command[] = [
   },
   {
     id: "activity",
-    label: "Activity — 감사·회고 로그",
+    label: "Activity — 감사와 회고 로그",
     path: "/activity",
     group: "Incident",
   },
@@ -100,7 +100,7 @@ const commands: Command[] = [
 
   {
     id: "alerts",
-    label: "Alerts — 규칙·구독자",
+    label: "Alerts — 규칙과 구독자",
     path: "/alerts",
     group: "Configure",
   },
@@ -130,7 +130,7 @@ const commands: Command[] = [
   },
   {
     id: "settings",
-    label: "Settings — 기능 토글·티켓팅·리포트 전달",
+    label: "Settings — 기능 토글, 티켓팅, 리포트 전달",
     path: "/settings",
     group: "Configure",
     adminOnly: true,
@@ -268,7 +268,7 @@ export function CommandPalette() {
           )}
         </div>
         <div className="px-4 py-2 border-t border-zinc-700 text-xs text-zinc-500">
-          ⌘K로 열기 · Enter로 이동 · Esc로 닫기
+          ⌘K로 열기, Enter로 이동, Esc로 닫기
         </div>
       </div>
     </div>

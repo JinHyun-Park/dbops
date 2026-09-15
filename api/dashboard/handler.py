@@ -1233,7 +1233,7 @@ METRIC_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,49}$")
 
 # 변경 영향 회고에서 전후 델타가 의미 있는 핵심 메트릭. direction은 UI가
 # 개선/악화 색을 칠하는 기준 — 대부분 lower=좋음, 캐시 히트는 higher=좋음,
-# 커넥션·IOPS는 워크로드 자체라 중립(증감을 가치판단하지 않음).
+# 커넥션과 IOPS는 워크로드 자체라 중립(증감을 가치판단하지 않음).
 _IMPACT_METRICS = [
     ("cpu", "CPU", "lower"),
     ("aas", "Active Sessions (AAS)", "lower"),
@@ -1253,7 +1253,7 @@ def _change_impact(query, cluster_id, window_hours, days):
 
     앵커는 RDS 컨트롤플레인 이벤트(source=aws.rds, configuration change /
     maintenance / parameter / reboot / scaling / upgrade 류)다 — DBOps 경유
-    여부와 무관하게 콘솔·CLI 직접 변경까지 포착한다. dbops-monitor가 만든
+    여부와 무관하게 콘솔/CLI 직접 변경까지 포착한다. dbops-monitor가 만든
     anomaly_* 이벤트는 변경이 아니므로 source 필터로 제외한다."""
     events = query(
         "SELECT id, event_time, event_type, message FROM event_log "
@@ -1698,7 +1698,7 @@ _TL_NO_SNAPSHOTS = (
 # item is rendered standalone in a category-filtered list, so the qualification has
 # to travel with the row. It goes in `title` (the field that said `dropped 1`) and
 # in `detail`, both of which every renderer of this payload already shows.
-_TL_DDL_UNSOUND_TAG = "[기록 · 판정 아님]"
+_TL_DDL_UNSOUND_TAG = "[기록, 판정 아님]"
 _TL_DDL_UNSOUND = (
     "이 cluster의 엔진은 스키마 스냅샷 판정 대상이 아닙니다. 이 항목은 과거에 기록된 "
     "이력이며 현재 상태에 대한 판정이 아닙니다. 위 배너의 설명을 확인하세요."
@@ -1777,7 +1777,7 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
     readers and the first one (get_schema_history) keeps its rows too. The seventh
     pass added the refusal to the probe and to the four other readers; it never
     reached this replay, so a MySQL cluster's stored diff rendered as
-    `appdb · dropped 1` at a concrete timestamp while every other reader refused."""
+    `appdb, dropped 1` at a concrete timestamp while every other reader refused."""
     cats = set(categories or [])
     items: list[dict] = []
     degraded: list[str] = []
@@ -1785,7 +1785,7 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
     # THE OBSERVATION FIRST, before the DDL rows are read, because it decides
     # whether they may be replayed as EVENTS at all. It used to run after the loop,
     # so the dialect refusal reached `observation.note` and never reached the replay:
-    # a MySQL cluster's stored rows rendered as `appdb · dropped 1` at a concrete
+    # a MySQL cluster's stored rows rendered as `appdb, dropped 1` at a concrete
     # timestamp while the other four readers refused. Same shared probe the
     # schema-changes panel, get_schema_diff, get_schema_history and
     # diagnose_root_cause use, so one state is described one way everywhere.
@@ -1874,7 +1874,7 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
                 # the field that said `dropped 1`: putting the qualification there
                 # means every renderer of this row carries it without knowing why.
                 "title": (f"{_TL_DDL_UNSOUND_TAG} " if ddl_refused else "")
-                         + f"{r.get('schema_name')} · {summary}",
+                         + f"{r.get('schema_name')}, {summary}",
                 "detail": (f"{_TL_DDL_UNSOUND} " if ddl_refused else "") + detail[:400],
                 "source": "schema_snapshots",
                 "source_id": "",
@@ -1917,7 +1917,7 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
                 "ts": r.get("created_at"),
                 "category": "audit",
                 "severity": "warning" if r.get("status") == "failed" else "info",
-                "title": f"{r.get('tool_name') or r.get('action_type')} · {r.get('status')}",
+                "title": f"{r.get('tool_name') or r.get('action_type')}, {r.get('status')}",
                 "detail": (r.get("sql_text") or "")[:240],
                 "source": (
                     f"{r.get('requested_by') or 'agent'} → {r.get('approved_by') or '—'}"
@@ -2313,9 +2313,9 @@ _SC_INSUFFICIENT = (
     "뜻이 아닙니다. 구간을 늘리거나 수집이 쌓일 때까지 기다려야 합니다."
 )
 _SC_DDL_NOT_COLLECTED = (
-    "테이블 생성·삭제(DDL)는 schema_snapshots로만 판정하는데 이 클러스터의 스냅샷이 "
+    "테이블 생성/삭제(DDL)는 schema_snapshots로만 판정하는데 이 클러스터의 스냅샷이 "
     "아직 없습니다. DDL 변경이 없다는 뜻이 아닙니다. 다음 ETL 주기에 최초 baseline "
-    "스냅샷이 기록되고, 그 다음 변경 시점부터 생성·삭제가 표시됩니다."
+    "스냅샷이 기록되고, 그 다음 변경 시점부터 생성/삭제가 표시됩니다."
 )
 _SC_DDL_BASELINE_ONLY = (
     "baseline 스냅샷만 있어 DDL 비교 대상이 없습니다 (판정에는 스냅샷 2개가 "
@@ -2328,11 +2328,11 @@ _SC_DDL_OUTSIDE_WINDOW = (
 )
 _SC_DDL_NOT_COMPARABLE = (
     "저장된 스냅샷이 모두 schema_v27 이전 기록이라 어떤 카탈로그를 읽은 것인지 알 수 없어 "
-    "테이블 생성·삭제(DDL)를 비교하지 못했습니다. DDL 변경이 없다는 뜻이 아닙니다. 다음 "
+    "테이블 생성/삭제(DDL)를 비교하지 못했습니다. DDL 변경이 없다는 뜻이 아닙니다. 다음 "
     "ETL 주기에 각 스키마가 baseline으로 다시 기록되고, 그 다음 변경 시점부터 비교됩니다."
 )
 _SC_DDL_UNAVAILABLE = (
-    "schema_snapshots를 조회할 수 없어 이번 응답에서는 테이블 생성·삭제(DDL)를 "
+    "schema_snapshots를 조회할 수 없어 이번 응답에서는 테이블 생성/삭제(DDL)를 "
     "판정하지 못했습니다 (schema_v26 마이그레이션 적용 여부를 확인하세요). DDL "
     "변경이 없다는 뜻이 아닙니다."
 )
@@ -3618,7 +3618,7 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
         reason = ("eviction이 발생 중입니다. eviction 정책(LRU/TTL)이 걸린 캐시는 설계상 "
                   "메모리 상한 근처에서 동작하므로 '100% 도달까지 며칠'은 의미가 없습니다. "
                   "정확한 신호는 eviction 양과 hit rate이며 Maintenance Health의 "
-                  "elasticache_evictions_spike · elasticache_memory_pressure finding이 "
+                  "elasticache_evictions_spike, elasticache_memory_pressure finding이 "
                   "이를 임계로 관리합니다.")
     elif not grounded:
         reason = (f"한계값을 클러스터 실제 설정에서 확인할 수 없어({limit_basis}) 도달 시점을 "
@@ -4363,7 +4363,7 @@ def _backups(cluster_id: str) -> dict:
         "error": (
             "이 클러스터의 실시간 백업 정보를 조회할 수 없습니다 — 데모(합성) "
             "클러스터이거나 실제 Aurora로 등록되지 않았습니다. 등록된 클러스터를 "
-            "선택하면 스냅샷·PITR 윈도우가 표시됩니다."
+            "선택하면 스냅샷과 PITR 윈도우가 표시됩니다."
         ),
         # info (not error): demo/unregistered cluster — render as a neutral notice.
         "info": True,

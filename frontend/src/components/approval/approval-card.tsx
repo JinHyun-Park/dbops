@@ -59,7 +59,7 @@ const ACTION_RISK: Record<string, string> = {
   // Data API 활성화: 데이터 변경은 없지만 SQL 실행 경로가 IAM 경계로
   // 열리는 설정 변경 — 중간 위험으로 표시해 DBA가 의미를 인지하고 승인.
   enable_data_api: "medium",
-  // DynamoDB write/remediation. Capacity/billing-mode 전환은 throttle·비용
+  // DynamoDB write/remediation. Capacity/billing-mode 전환은 throttle과 비용
   // 영향(medium); TTL 토글은 만료 정책 변경(medium); PITR 활성화는 보호
   // 강화(low)지만 비활성화는 보호 저하(high) — 카드 단계에선 medium 고정.
   modify_dynamodb_capacity: "medium",
@@ -94,9 +94,9 @@ const ACTION_RISK: Record<string, string> = {
   // 있어 blast radius가 이 클러스터를 넘어간다 → high.
   set_docdb_profiler: "high",
   // 인덱스 생성은 background=true라 primary를 막지 않지만, 대형 컬렉션에서는
-  // I/O·스토리지 부담이 있고 삭제는 별도 작업 → medium.
+  // I/O와 스토리지 부담이 있고 삭제는 별도 작업 → medium.
   create_docdb_index: "medium",
-  // ElastiCache. 노드 타입 변경·재부팅·failover 테스트는 모두 중단 또는
+  // ElastiCache. 노드 타입 변경, 재부팅, failover 테스트는 모두 중단 또는
   // 페일오버를 유발(high); 스냅샷은 비파괴적(low).
   modify_elasticache_node_type: "high",
   create_elasticache_snapshot: "low",
@@ -106,7 +106,7 @@ const ACTION_RISK: Record<string, string> = {
 };
 
 // action_type별 "이 작업이 무엇이고, 무슨 리스크가 있고, 승인 전 무엇을
-// 점검해야 하는지" 가이드. 승인 카드만 보고는 요청의 의미·위험을 알기
+// 점검해야 하는지" 가이드. 승인 카드만 보고는 요청의 의미와 위험을 알기
 // 어려워(파라미터 값만 보임) DBA가 매번 따로 판단해야 했다 — 결정에 필요한
 // 컨텍스트를 카드 안에서 바로 제공한다.
 interface ActionGuide {
@@ -150,7 +150,7 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     ],
     considerations: [
       "관측된 평균/피크 ACU 대비 적정 범위인지 확인",
-      "비용 영향은 Cost 탭·Simulator로 추정",
+      "비용 영향은 Cost 탭과 Simulator로 추정",
     ],
   },
   manage_maintenance: {
@@ -172,7 +172,7 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     ],
     considerations: [
       "복원 대상 시점/스냅샷이 정확한지 확인",
-      "새 클러스터 ID·엔드포인트 전환 계획",
+      "새 클러스터 ID와 엔드포인트 전환 계획",
     ],
   },
   enable_data_api: {
@@ -183,7 +183,7 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     ],
     considerations: [
       "다운타임 없음 — 설정 변경만",
-      "활성화 후 라이브 SQL 수집·에이전트 SQL이 동작",
+      "활성화 후 라이브 SQL 수집과 에이전트 SQL이 동작",
     ],
   },
   modify_dynamodb_capacity: {
@@ -268,10 +268,10 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     what: "리더 인스턴스를 추가해 읽기 용량을 확장합니다 (scale-out).",
     risks: [
       "신규 인스턴스는 과금 대상이며 생성에 수 분이 걸립니다.",
-      "생성될 인스턴스 클래스가 아래에 명시되어 있습니다 — 이 클래스로 승인·생성됩니다.",
+      "생성될 인스턴스 클래스가 아래에 명시되어 있습니다 — 이 클래스로 승인되고 생성됩니다.",
     ],
     considerations: [
-      "명시된 인스턴스 클래스가 필요한 읽기 용량·비용에 적정한지 확인",
+      "명시된 인스턴스 클래스가 필요한 읽기 용량과 비용에 적정한지 확인",
     ],
   },
   remove_reader_instance: {
@@ -290,11 +290,11 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     risks: [
       "신규 인스턴스는 과금 대상이며 생성에 수 분이 걸립니다.",
       "이 승인은 리더 생성만 합니다 — 예열은 별도 2차 승인이 필요합니다.",
-      "생성될 인스턴스 클래스가 아래에 명시되어 있습니다 — 이 클래스로 승인·생성됩니다.",
+      "생성될 인스턴스 클래스가 아래에 명시되어 있습니다 — 이 클래스로 승인되고 생성됩니다.",
     ],
     considerations: [
       "리더가 available되면 예열 승인이 자동으로 승인 대기열에 나타납니다",
-      "명시된 인스턴스 클래스가 필요한 읽기 용량·비용에 적정한지 확인",
+      "명시된 인스턴스 클래스가 필요한 읽기 용량과 비용에 적정한지 확인",
     ],
   },
   reboot_rds_instance: {
@@ -322,7 +322,7 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     risks: [
       "클러스터 파라미터 그룹은 공유 자원입니다. 같은 그룹을 쓰는 다른 모든 클러스터에 같은 변경이 적용됩니다(아래 parameter_group 확인 필수).",
       "threshold_ms를 100ms 미만으로 낮추면 처리량이 높은 클러스터에서 성능 문제가 발생할 수 있습니다(AWS 권장: 500ms에서 시작).",
-      "프로파일러 로그는 CloudWatch Logs 수집·보관 비용이 발생합니다.",
+      "프로파일러 로그는 CloudWatch Logs 수집과 보관 비용이 발생합니다.",
       "AWS 기본(default.*) 파라미터 그룹은 수정할 수 없어 거부됩니다. 커스텀 그룹을 먼저 연결해야 합니다.",
     ],
     considerations: [
@@ -340,7 +340,7 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     ],
     considerations: [
       "같은 이름의 인덱스가 이미 있으면 변경 없이 종료됩니다(멱등)",
-      "키 순서·방향이 실제 쿼리 패턴과 맞는지 확인",
+      "키 순서와 방향이 실제 쿼리 패턴과 맞는지 확인",
     ],
   },
   modify_elasticache_node_type: {
@@ -348,10 +348,10 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     risks: [
       "스케일 업/다운 중 페일오버가 발생해 짧은 연결 끊김이 생길 수 있습니다.",
       "노드 타입에 따라 시간당 비용이 달라집니다.",
-      "다운사이즈는 메모리가 줄어 eviction·OOM 위험이 커집니다.",
+      "다운사이즈는 메모리가 줄어 eviction과 OOM 위험이 커집니다.",
     ],
     considerations: [
-      "현재 사용 메모리·evictions 대비 목표 노드의 메모리가 충분한지 확인",
+      "현재 사용 메모리와 evictions 대비 목표 노드의 메모리가 충분한지 확인",
       "저트래픽 시간대 권장 (Multi-AZ면 페일오버로 흡수)",
     ],
   },
@@ -359,7 +359,7 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     what: "ElastiCache(Redis/Valkey) 수동 스냅샷을 생성합니다.",
     risks: [
       "비파괴적입니다(데이터 변경 없음). 스냅샷 스토리지 비용만 발생합니다.",
-      "단일 노드 클러스터에서는 스냅샷 중 메모리·성능에 일시적 영향이 있을 수 있습니다.",
+      "단일 노드 클러스터에서는 스냅샷 중 메모리와 성능에 일시적 영향이 있을 수 있습니다.",
       "Memcached는 스냅샷을 지원하지 않습니다.",
     ],
     considerations: [
@@ -387,7 +387,7 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
       "Memcached는 페일오버를 지원하지 않습니다.",
     ],
     considerations: [
-      "애플리케이션의 재연결·재시도 로직이 준비됐는지 확인",
+      "애플리케이션의 재연결과 재시도 로직이 준비됐는지 확인",
       "DR 훈련 목적이면 저트래픽 시간대 권장",
     ],
   },
@@ -477,7 +477,7 @@ export function ApprovalCard({
         return cli ? <CliPreview cli={cli} /> : null;
       })()}
 
-      {/* 리스크·고려사항 — 승인 결정에 필요한 컨텍스트를 카드 안에서 바로
+      {/* 리스크와 고려사항 — 승인 결정에 필요한 컨텍스트를 카드 안에서 바로
           제공한다. 기본 접힘(공간 절약), 클릭 시 펼침. */}
       {guide && (guide.risks.length > 0 || guide.considerations.length > 0) && (
         <div className="mt-2">
@@ -485,7 +485,7 @@ export function ApprovalCard({
             onClick={() => setShowGuide((v) => !v)}
             className="text-[11px] text-sky-400 hover:text-sky-300"
           >
-            {showGuide ? "▾" : "▸"} 리스크·고려사항
+            {showGuide ? "▾" : "▸"} 리스크와 고려사항
           </button>
           {showGuide && (
             <div className="mt-2 space-y-2 border-l-2 border-zinc-700 pl-3">

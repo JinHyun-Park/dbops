@@ -9,14 +9,14 @@
 
 ### 1.1 Purpose
 
-Compare 페이지는 현재 **클러스터 vs 클러스터**(`cluster`)와 **한 클러스터의 두 시점**(`period`)을 비교한다. 운영 환경에서는 한 클러스터에 Read Replica가 여러 대인 경우가 많아, **인스턴스 vs 인스턴스**(writer vs reader, reader vs reader) 비교가 필요하다. 어느 리플리카가 더 핫한지, 특정 리더의 Replica Lag·부하·메모리·IO가 다른 인스턴스 대비 어떤지를 한눈에 본다.
+Compare 페이지는 현재 **클러스터 vs 클러스터**(`cluster`)와 **한 클러스터의 두 시점**(`period`)을 비교한다. 운영 환경에서는 한 클러스터에 Read Replica가 여러 대인 경우가 많아, **인스턴스 vs 인스턴스**(writer vs reader, reader vs reader) 비교가 필요하다. 어느 리플리카가 더 핫한지, 특정 리더의 Replica Lag, 부하, 메모리, IO가 다른 인스턴스 대비 어떤지를 한눈에 본다.
 
 ### 1.2 Goals
 
-- Compare에 세 번째 모드 **`instance`** 추가 (`cluster`·`period`는 그대로 유지).
+- Compare에 세 번째 모드 **`instance`** 추가 (`cluster`, `period`는 그대로 유지).
 - 한 클러스터의 인스턴스 A vs B를 **풀 메트릭 세트**로 비교 (역할 배지 writer/reader).
 - "거의 실시간(≈1분) + 히스토리"를 **단일 경로**로 충족 — DBOps의 캐시-우선 원칙(대시보드는 실시간 AWS 호출 안 함) 준수.
-- 기존 cluster-level 데이터 경로·대시보드·알림에 **비파괴**.
+- 기존 cluster-level 데이터 경로, 대시보드, 알림에 **비파괴**.
 
 ### 1.3 Non-Goals (이번 범위 밖)
 
@@ -45,7 +45,7 @@ CloudWatch `AWS/RDS` 의 인스턴스 차원(`DBInstanceIdentifier`) 메트릭:
 `FreeLocalStorage`, `ReadIOPS`, `WriteIOPS`, `ReadLatency`, `WriteLatency`,
 `NetworkReceiveThroughput`, `NetworkTransmitThroughput`, `BufferCacheHitRatio`.
 
-(참고: 현재 cluster-level `cw_collector`는 CPU를 수집하지 않는다 — CPU는 인스턴스 차원에서만 의미 있어 per-instance 세트에 새로 포함. `VolumeBytesUsed`·`Deadlocks`·`EngineUptime`·`ServerlessDatabaseCapacity` 는 클러스터 단위라 per-instance 미수집.)
+(참고: 현재 cluster-level `cw_collector`는 CPU를 수집하지 않는다 — CPU는 인스턴스 차원에서만 의미 있어 per-instance 세트에 새로 포함. `VolumeBytesUsed`, `Deadlocks`, `EngineUptime`, `ServerlessDatabaseCapacity` 는 클러스터 단위라 per-instance 미수집.)
 
 ### 2.3 인스턴스 목록(레지스트리)
 
@@ -54,7 +54,7 @@ ETL meta 수집기가 이미 `describe_db_instances`를 호출하므로, 멤버 
 - `cluster_meta` 에 **`instances JSONB` 컬럼 추가**(schema_v18): `[{"id":"...","role":"writer|reader","class":"db.r6g.large"}]`.
 - meta 수집기가 매 사이클 멤버를 갱신.
 
-Compare가 클러스터 선택 시 이 목록으로 인스턴스 A/B 드롭다운을 채운다(역할 배지·클래스 표시).
+Compare가 클러스터 선택 시 이 목록으로 인스턴스 A/B 드롭다운을 채운다(역할 배지와 클래스 표시).
 
 ### 2.4 데이터 흐름
 
@@ -88,24 +88,24 @@ Compare가 클러스터 선택 시 이 목록으로 인스턴스 A/B 드롭다�
 ### 3.3 Frontend
 
 - `lib/api-client.ts` — `fetchClusterInstances(clusterId)`; `fetchBatchTimeseries` 에 `instance?` 옵션 추가.
-- `app/compare/page.tsx` — `Mode` 에 `"instance"` 추가. instance 모드 UI: 클러스터 1개 picker → 그 클러스터 인스턴스 A/B picker(역할 배지·클래스) → 기존 차트 그리드를 per-instance 풀세트로 렌더(기존 시리즈/색상/Expandable 재사용). cluster·period 모드 분기는 불변.
+- `app/compare/page.tsx` — `Mode` 에 `"instance"` 추가. instance 모드 UI: 클러스터 1개 picker → 그 클러스터 인스턴스 A/B picker(역할 배지와 클래스) → 기존 차트 그리드를 per-instance 풀세트로 렌더(기존 시리즈/색상/Expandable 재사용). cluster/period 모드 분기는 불변.
 
 ## 4. Safety / Cost
 
 - 모든 경로 **읽기 전용**(write 없음).
 - 저장량은 클러스터당 인스턴스 수에 비례 증가 — 기존 `metric_snapshots` 시간 파티션 + 보존정책으로 상한. per-instance 모니터링 도구가 으레 저장하는 수준.
-- 기존 cluster-level 쿼리·대시보드·알림 **비파괴**(dimensions 필터로 분리).
+- 기존 cluster-level 쿼리, 대시보드, 알림 **비파괴**(dimensions 필터로 분리).
 - `instance` 파라미터/`cluster_id` 는 인증 authorizer 하위 라우트.
 
 ## 5. Increments (구현 순서)
 
 1. **수집**: schema_v18(`instances` 컬럼) + meta 수집기 멤버 저장 + cw_collector per-instance. → data 배포, dev에서 metric_snapshots에 per-instance 행 + cluster_meta.instances 확인.
 2. **API**: `/instances` 엔드포인트 + batch-timeseries `instance` 필터. → 유닛 + 라이브 조회 검증.
-3. **프런트**: Compare `instance` 모드(클러스터→인스턴스 A/B→차트). → 빌드·배포·종단 검증(W/R 클러스터에서 두 인스턴스 비교).
+3. **프런트**: Compare `instance` 모드(클러스터→인스턴스 A/B→차트). → 빌드, 배포, 종단 검증(W/R 클러스터에서 두 인스턴스 비교).
 
 ## 6. Test Strategy
 
-- cw_collector per-instance 유닛: 멤버 순회·`DBInstanceIdentifier` 차원·`dimensions={instance,role}` INSERT, cluster-level 경로 불변.
+- cw_collector per-instance 유닛: 멤버 순회, `DBInstanceIdentifier` 차원, `dimensions={instance,role}` INSERT, cluster-level 경로 불변.
 - meta 수집기 유닛: `instances` 페이로드(id/role/class).
 - API 유닛: `/instances` 응답, batch-timeseries `instance` 필터(미지정 시 기존 동작 유지) — 핸들러↔스키마 parity.
 - 기존 dashboard/Compare 회귀: per-instance 행 추가 후에도 cluster-level 시리즈 불변.

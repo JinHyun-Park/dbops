@@ -400,7 +400,7 @@ git commit -m "feat(outcome-loop): pull-based case opener (findings + anomalies)
 
 Verdict rules:
 
-- **Metric case** (`watch_metric` set): recent avg of the metric vs its `metric_baselines` bucket (`median ± K·IQR`, K=3). In band ⇒ `resolved`; out ⇒ `persisted`; no recent data or no baseline bucket ⇒ `inconclusive`.
+- **Metric case** (`watch_metric` set): recent avg of the metric vs its `metric_baselines` bucket (`median ± K * IQR`, K=3). In band ⇒ `resolved`; out ⇒ `persisted`; no recent data or no baseline bucket ⇒ `inconclusive`.
 - **Finding case** (`watch_metric` NULL): did the same `(check_type, subject)` recur since `opened_at`? Recurred ⇒ `persisted`. Not recurred — but ONLY trust that if the collector actually ran in the window (**false-resolved guard**: the cluster produced _some_ finding row since `opened_at`); else ⇒ `inconclusive`. Cleared + collector ran ⇒ `resolved`.
 
 - [ ] **Step 1: Write the failing test**
@@ -1077,10 +1077,10 @@ export default function LearningPage() {
                 className="flex justify-between rounded-lg border border-slate-800 bg-slate-900/40 p-3 text-sm"
               >
                 <span className="text-slate-300">
-                  {r.symptom_class} · {r.action_class}
+                  {r.symptom_class}, {r.action_class}
                 </span>
                 <span className="text-slate-400">
-                  {trackRecordLabel(r.successes, r.attempts)} · 신뢰도{" "}
+                  {trackRecordLabel(r.successes, r.attempts)}, 신뢰도{" "}
                   {(confidence(r.successes, r.attempts) * 100).toFixed(0)}%
                 </span>
               </div>

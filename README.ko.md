@@ -2,7 +2,7 @@
 
 [English](README.md) | **한국어**
 
-AI 기반 종합 데이터베이스 운영 플랫폼. 자연어 대화로 Amazon Aurora(PostgreSQL·MySQL), RDS for MySQL·SQL Server(비-Aurora 독립형 인스턴스), DocumentDB, DynamoDB, ElastiCache(Redis/Valkey/Memcached)의 성능 분석, 장애 진단, 운영 자동화, 시뮬레이션을 수행합니다.
+AI 기반 종합 데이터베이스 운영 플랫폼. 자연어 대화로 Amazon Aurora(PostgreSQL/MySQL), RDS for MySQL/SQL Server(비-Aurora 독립형 인스턴스), DocumentDB, DynamoDB, ElastiCache(Redis/Valkey/Memcached)의 성능 분석, 장애 진단, 운영 자동화, 시뮬레이션을 수행합니다.
 
 ## Features
 
@@ -12,11 +12,11 @@ DBA를 위한 풀스택 운영 플랫폼입니다. **대화로 진단하고, 안
 <details open>
 <summary><b>🤖 AI & 대화</b></summary>
 
-- **AI Chat** (`/chat`): 자연어로 성능 분석·장애 진단·운영 작업 요청. AWS MCP Server(SigV4)로 **공식 AWS/Aurora 문서를 근거로 인용**해 답변
+- **AI Chat** (`/chat`): 자연어로 성능 분석, 장애 진단, 운영 작업 요청. AWS MCP Server(SigV4)로 **공식 AWS/Aurora 문서를 근거로 인용**해 답변
 - **Ask the Fleet** (`/ask`): "CPU 80% 넘은 클러스터 보여줘" 같은 자연어 fleet 조회. NL→filter compiler + saved views
-- **AI Runbooks** (`/runbooks`): 채팅 진단/처방을 마크다운 playbook으로 저장·검색·재사용
+- **AI Runbooks** (`/runbooks`): 채팅 진단/처방을 마크다운 playbook으로 저장, 검색, 재사용
 - **Cross-Device Chat Sessions**: 대화가 DynamoDB에 영속화돼 다른 기기/브라우저에서 이어쓰기 (1.5s debounced sync + offline 캐시 + 90-day TTL)
-- **Agent Memory Inspector** (`/preferences`): AgentCore Memory의 preferences/facts 조회·삭제. Cognito sub 기반 namespace로 cross-user read 차단
+- **Agent Memory Inspector** (`/preferences`): AgentCore Memory의 preferences/facts 조회와 삭제. Cognito sub 기반 namespace로 cross-user read 차단
 
 </details>
 
@@ -27,9 +27,9 @@ DBA를 위한 풀스택 운영 플랫폼입니다. **대화로 진단하고, 안
 - **Schema Lineage** (`/schema`): `pg_constraint` 라이브 introspection으로 FK 관계 그래프 시각화
 - **Replication Topology** (Dashboard): Writer/Readers + 인스턴스별 AuroraReplicaLag, promotion tier, multi-AZ
 - **Redundant Indexes** (Dashboard): prefix-covered / 완전 중복 / unused 인덱스 자동 검출
-- **Capacity Forecasting**: Storage/Connections/AAS 30·60·90일 선형 회귀 예측 + 임계 도달 시점
+- **Capacity Forecasting**: Storage/Connections/AAS 30/60/90일 선형 회귀 예측 + 임계 도달 시점
 - **PG Log Insights** + **Keyword Search** (`/dashboard`): CloudWatch Logs Insights를 카테고리별로 묶어 조회, 검색어 AND 조인 + regex 살균
-- **Saved Query Library** (Query Lab): 자주 쓰는 SQL 저장·태깅·cross-device 로드
+- **Saved Query Library** (Query Lab): 자주 쓰는 SQL 저장, 태깅, cross-device 로드
 - **MySQL Dashboard Parity**: Schema/Indexes/Log Insights 모두 Aurora MySQL 지원
 
 </details>
@@ -41,7 +41,7 @@ DBA를 위한 풀스택 운영 플랫폼입니다. **대화로 진단하고, 안
 - **Fleet Overview** (`/fleet`): 전체 클러스터 한눈에. ETL 신선도 배지(fresh/stale/no_data) 포함
 - **SLO Tracker** (`/slo`): 가용성 + p-mean 쿼리 지연 SLO 실측 + 에러 버짓 burn-down
 - **Compound Alert Rules** (`/alerts`): 단일 threshold + AND/OR DSL(per-operand window/agg). DBA 프리셋 6종 + Slack 양방향 Ack
-- **Alert Impact**: 알람 ±5min의 슬로우 쿼리·동시 이벤트·동시 알람을 인라인 패널로 (사고 triage)
+- **Alert Impact**: 알람 ±5min의 슬로우 쿼리, 동시 이벤트, 동시 알람을 인라인 패널로 (사고 triage)
 - **Cost Anomaly Detection** (`/cost`): Bedrock 일별 사용액 spike를 z-score + 절대차 + 상대비 triple gate로 감지
 
 </details>
@@ -49,9 +49,9 @@ DBA를 위한 풀스택 운영 플랫폼입니다. **대화로 진단하고, 안
 <details>
 <summary><b>🔧 운영 & 안전장치</b></summary>
 
-- **Operations Automation**: 파라미터 변경, DDL 실행, 스케일링, **스냅샷·복원** (전부 Human-in-the-loop 승인)
+- **Operations Automation**: 파라미터 변경, DDL 실행, 스케일링, **스냅샷과 복원** (전부 Human-in-the-loop 승인)
 - **Approval Guard**: 모든 write tool이 서버측에서 DDB approval row를 검증. agent가 `approved=true`를 임의로 못 켜고, `approval_id`(DBA가 `/approvals`에서 승인 시 발급) + cluster/action_type/30분 윈도우/atomic consume까지 강제
-- **Simulation UI** (`/simulator`): 업그레이드(호환성+method matrix+ordered plan)·파라미터·ACU 비용·DDL 영향을 채팅 없이 즉시 추정
+- **Simulation UI** (`/simulator`): 업그레이드(호환성+method matrix+ordered plan), 파라미터, ACU 비용, DDL 영향을 채팅 없이 즉시 추정
 
 </details>
 
@@ -80,17 +80,17 @@ DBA를 위한 풀스택 운영 플랫폼입니다. **대화로 진단하고, 안
 Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
                                     │                        │
                           AgentCore Gateway          AWS MCP Server
-                          (Cedar Policy)             (SigV4 · 공식 AWS 문서)
+                          (Cedar Policy)             (SigV4, 공식 AWS 문서)
                                     │
               ┌─────────────────────┼─────────────────────┐
               ▼            ▼              ▼               ▼
          Performance   Incident      Operations       Simulation
            MCP          MCP            MCP               MCP
-                       (4 custom MCP servers · 64 tools)
+                       (4 custom MCP servers, 64 tools)
                                     │
                                     ▼
                   Aurora PG Cache ◀── Data Collection Pipeline
-                  (hot cache)         (ETL · Event Processor · Report · Monitor)
+                  (hot cache)         (ETL, Event Processor, Report, Monitor)
 ```
 
 - **Custom 도구는 Gateway 경유**(write 승인은 tool-level `approval_guard`가 강제하며, Cedar Policy Engine은 게이트웨이에 LOG_ONLY로 바인딩된 방어 심층입니다), **공식 AWS 문서는 AWS MCP Server에 SigV4로 직접** 호출: 읽기 전용 문서 도구만 노출합니다
@@ -98,7 +98,7 @@ Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
 
 - **Single Agent + Gateway**: 단일 AgentCore Runtime + Gateway MCP로 지연/토큰 최적화
 - **CDK-First**: 모든 인프라는 CDK로만 관리. `cdk deploy --all`로 전체 배포
-- **Human-in-the-loop**: 조회는 자동, 변경은 DBA 승인 필수 (tool-level `approval_guard` 강제: fail-closed·payload-hash 바인딩·single-use)
+- **Human-in-the-loop**: 조회는 자동, 변경은 DBA 승인 필수 (tool-level `approval_guard` 강제: fail-closed, payload-hash 바인딩, single-use)
 
 ## Tech Stack
 

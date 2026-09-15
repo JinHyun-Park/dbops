@@ -134,7 +134,7 @@ point changes its own behavior; the case write is best-effort and never blocks i
 
 **`action_class` inference** is a small deterministic classifier mapping
 recommendation text / RCA category to a normalized action: keywords like
-인덱스→`index_add`, work_mem·max_connections·파라미터→`param_change`, 스케일·ACU→
+인덱스→`index_add`, work_mem/max_connections/파라미터→`param_change`, 스케일/ACU→
 `scale_up`, VACUUM→`vacuum`, ANALYZE→`analyze`; default `manual`. One pure function,
 unit-tested against the actual recommendation strings the collectors emit.
 
@@ -168,7 +168,7 @@ Reuse the seasonal baseline already trained by `pg_baseline_trainer`:
 
 - Pull the case's `watch_metric` from `metric_snapshots` over the post-open window.
 - Compare against `metric_baselines` for the current `(metric_type, hour_of_week)`
-  bucket: in-band = `median ± k·IQR` (k default 3, same robust z-score the detector uses).
+  bucket: in-band = `median ± k * IQR` (k default 3, same robust z-score the detector uses).
 - **resolved** = back in band and held for the trailing eval window.
 - **persisted** = still out of band.
 - **inconclusive** = no recent snapshots / no baseline bucket yet.

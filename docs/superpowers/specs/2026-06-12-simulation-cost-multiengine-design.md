@@ -58,7 +58,7 @@ version-upgrade sim are all explicitly deferred (see Part 2 + Out of scope) with
   `simulation_policy.cedar`. (Fills a pre-existing gap: simulation had no Cedar policy at all.)
 - **Frontend Simulator page** (`frontend/src/app/simulator/page.tsx`): gate the four panels by
   engine family. For a non-relational selected cluster, render an `EmptyState`:
-  "시뮬레이션은 Aurora(PostgreSQL/MySQL) 전용입니다 — 업그레이드·파라미터·DDL·스케일링은
+  "시뮬레이션은 Aurora(PostgreSQL/MySQL) 전용입니다 — 업그레이드, 파라미터, DDL, 스케일링은
   관계형 엔진에만 적용됩니다." Use `engineFamily(current?.engine)` + a `FAMILY_PANELS`/capability
   check from `lib/engine.ts`. Do not render Upgrade/Parameter/Scaling/DDL for documentdb/dynamodb.
 - **Agent prompt** (`agent/prompts/system_prompt.py` + `cheatsheet.py`): one line — the simulation

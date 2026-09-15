@@ -1,4 +1,5 @@
 import { getValidAccessToken, getToken } from "./auth";
+import { detectLocale } from "./i18n";
 
 const QUALIFIER = "DEFAULT";
 
@@ -184,7 +185,13 @@ export function streamChat(
       // reaches the agent; the agent re-verifies it against Cognito's JWKS
       // before trusting it.
       const idToken = getToken();
-      const body: Record<string, unknown> = { prompt: promptText };
+      // Answer in whatever language the UI is in. Read here rather than
+      // taken as a parameter so every caller of streamChat (chat page, RCA
+      // drawer, query-lab analysis) gets it without threading it through.
+      const body: Record<string, unknown> = {
+        prompt: promptText,
+        locale: detectLocale(),
+      };
       if (modelId) body.model = modelId;
       if (idToken) body.id_token = idToken;
       return fetch(url, {

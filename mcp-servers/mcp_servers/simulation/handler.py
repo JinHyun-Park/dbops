@@ -239,7 +239,7 @@ def lambda_handler(event, context):
                     "status": "unsupported_engine",
                     "engine_family": fam,
                     "cluster_id": cluster_id,
-                    "message": "인스턴스 우측 사이징/비용 시뮬레이션은 RDS MySQL·SQL Server 전용입니다.",
+                    "message": "인스턴스 우측 사이징/비용 시뮬레이션은 RDS MySQL/SQL Server 전용입니다.",
                 })}]}
         else:
             # Engine-family guard: the OTHER simulation tools (upgrade/parameter/
@@ -253,7 +253,7 @@ def lambda_handler(event, context):
                     "engine_family": fam,
                     "cluster_id": cluster_id,
                     "message": (
-                        "시뮬레이션(업그레이드·파라미터·DDL·스케일링)은 Aurora(PostgreSQL/MySQL) "
+                        "시뮬레이션(업그레이드, 파라미터, DDL, 스케일링)은 Aurora(PostgreSQL/MySQL) "
                         "전용입니다. DynamoDB 용량/비용이나 DocumentDB 스케일링은 "
                         "get_maintenance_findings로 진단하고, 변경은 AWS Console/CDK로 적용하세요."
                     ),
@@ -274,7 +274,7 @@ def lambda_handler(event, context):
             result = TOOLS[tool_name]["impl"](cache, **(event or {}))
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
         except Exception:
-            # 예외 텍스트는 응답에 절대 넣지 않는다(SQL·ARN·내부 경로 누출).
+            # 예외 텍스트는 응답에 절대 넣지 않는다(SQL, ARN, 내부 경로 누출).
             # 진단 정보는 CloudWatch 로그로만 보낸다.
             logger.exception("TOOL ERROR (%s)", tool_name)
             return {"content": [{"type": "text", "text": json.dumps({

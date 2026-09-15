@@ -531,7 +531,7 @@ def estimate_ddl(
         low, high = est * 0.5, est * 2.5
     else:
         est = float(_METADATA_ONLY_SECONDS)
-        basis.append("메타데이터 전용 — 테이블 크기·인스턴스와 무관, 거의 즉시 완료")
+        basis.append("메타데이터 전용 — 테이블 크기나 인스턴스와 무관, 거의 즉시 완료")
         confidence = "high"
         low, high = est, float(_METADATA_ONLY_SECONDS * 3)
 
@@ -575,7 +575,7 @@ def estimate_ddl(
         note = (
             f"런타임은 추정치입니다 (테이블 {size_mb:.0f}MB ÷ {mb_s:.0f}MB/s, 인스턴스 클래스 기반). "
             + add_column_note
-            + "실제 시간은 동시 부하·캐시 상태·I/O 경합에 따라 달라집니다."
+            + "실제 시간은 동시 부하, 캐시 상태, I/O 경합에 따라 달라집니다."
         )
     else:
         note = "메타데이터 전용 작업으로 테이블 크기와 무관하게 거의 즉시 완료됩니다."

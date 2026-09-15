@@ -303,7 +303,7 @@ def _generate_upgrade_plan(
         steps.append({"step": len(steps) + 1, "action": action, "details": details})
 
     # --- Common pre-flight ---
-    add("사전 체크", "클러스터 상태 확인 · 진행 중인 유지보수 / 백업 윈도우 충돌 여부 확인")
+    add("사전 체크", "클러스터 상태 확인, 진행 중인 유지보수 / 백업 윈도우 충돌 여부 확인")
     add("백업 확인", "최신 자동 백업 존재 확인, 필요시 수동 스냅샷 생성")
     add("파라미터 호환성", f"현재 파라미터 그룹이 {target_version}에 호환되는지 확인")
 
@@ -315,7 +315,7 @@ def _generate_upgrade_plan(
         )
         add(
             "확장(extension)/비호환 기능 호환성 점검",
-            "설치된 extension·deprecated 기능·예약어/타입 변경 등 메이저 비호환 항목 점검",
+            "설치된 extension, deprecated 기능, 예약어/타입 변경 등 메이저 비호환 항목 점검",
         )
         if is_postgres:
             add("pg_upgrade 사전 점검", "pg_upgrade --check로 사전 호환성 검증, 비호환 객체 식별")
@@ -328,24 +328,24 @@ def _generate_upgrade_plan(
             "Blue/Green 배포 생성",
             f"aws rds create-blue-green-deployment --source {cluster_id} --target-engine-version {target_version}",
         )
-        add("Green 환경 검증", "Green 환경에서 핵심 read/write 쿼리 실행 · 응답 시간 비교")
+        add("Green 환경 검증", "Green 환경에서 핵심 read/write 쿼리 실행, 응답 시간 비교")
         if readers > 0:
             add(
                 "리더 복제 검증",
-                f"Green의 리더 {readers}개가 재생성/업그레이드된 뒤 replica lag·복제 상태 점검",
+                f"Green의 리더 {readers}개가 재생성/업그레이드된 뒤 replica lag, 복제 상태 점검",
             )
         add("전환 (Switchover)", "트래픽을 Green으로 전환 (~30초 다운타임)")
-        add("검증", "애플리케이션 정상 동작 확인 · 메트릭 모니터링")
+        add("검증", "애플리케이션 정상 동작 확인, 메트릭 모니터링")
         add("정리", "롤백 불필요 시 Blue 환경 삭제")
         rollback = "Blue 환경이 유지되므로 전환 취소(switchover-rollback)로 즉시 복귀 가능"
     elif method == "clone":
         add("클러스터 클론 생성", f"{cluster_id}의 fast clone 생성 (원본 데이터/트래픽에 영향 없음)")
         add("클론 업그레이드", f"클론 클러스터를 {target_version}으로 업그레이드 (원본 무영향)")
-        add("클론 검증", "클론에서 핵심 쿼리·성능 검증, 비호환 여부 확인")
+        add("클론 검증", "클론에서 핵심 쿼리/성능 검증, 비호환 여부 확인")
         if readers > 0:
-            add("리더 검증", f"클론의 리더 {readers}개 replica lag·복제 상태 점검")
+            add("리더 검증", f"클론의 리더 {readers}개 replica lag, 복제 상태 점검")
         add("엔드포인트 전환", "애플리케이션을 클론 클러스터 엔드포인트로 전환 (DNS/설정)")
-        add("검증", "애플리케이션 정상 동작 확인 · 메트릭 모니터링")
+        add("검증", "애플리케이션 정상 동작 확인, 메트릭 모니터링")
         rollback = "원본 클러스터가 유지되므로 DNS 전환으로 롤백"
     else:  # in_place
         add(
@@ -356,7 +356,7 @@ def _generate_upgrade_plan(
         if readers > 0:
             add(
                 "리더 업그레이드 검증",
-                f"리더 {readers}개가 함께 업그레이드된 뒤 replica lag·복제 상태 점검",
+                f"리더 {readers}개가 함께 업그레이드된 뒤 replica lag, 복제 상태 점검",
             )
         add("검증", "버전 확인, 애플리케이션 정상 동작 확인")
         rollback = "스냅샷 복원으로만 롤백 가능 — 시간 소요. 적용 전 스냅샷 필수."
@@ -1111,7 +1111,7 @@ def _simulate_elasticache_node_resize(
         if status == "partial"
         else (
             "노드-시간 비용만 계산했습니다"
-            f"(데이터 전송·스냅샷 스토리지·예약 노드 제외, {_EC_HOURS_PER_MONTH}h/월)."
+            f"(데이터 전송/스냅샷 스토리지/예약 노드 제외, {_EC_HOURS_PER_MONTH}h/월)."
         )
     )
 
@@ -1264,7 +1264,7 @@ def _simulate_rds_instance_rightsizing(
             "status": "unsupported_engine",
             "cluster_id": cluster_id,
             "engine": engine,
-            "message": "인스턴스 라이트사이징은 RDS MySQL·SQL Server 인스턴스에서만 지원됩니다.",
+            "message": "인스턴스 라이트사이징은 RDS MySQL/SQL Server 인스턴스에서만 지원됩니다.",
         }
 
     rd = meta.get("resource_details") or {}
@@ -1327,7 +1327,7 @@ def _simulate_rds_instance_rightsizing(
     elif cpu_p95 <= min(40 * headroom / 0.5, 75) and conn_peak < 50:
         down = _next_class_down(cur_class)
         target, action = (down, "downsize") if down else (cur_class, "hold")
-        reason = (f"CPU p95 {util['cpu_p95']}% · 커넥션 최대 {util['conn_peak']} — 한 단계 축소 여력"
+        reason = (f"CPU p95 {util['cpu_p95']}%, 커넥션 최대 {util['conn_peak']} — 한 단계 축소 여력"
                   if down else "이미 최소 클래스 — 축소 불가")
     else:
         target, action, reason = cur_class, "hold", f"CPU p95 {util['cpu_p95']}% — 현행 유지 적정"

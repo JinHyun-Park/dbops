@@ -254,8 +254,8 @@ function buildConversationHtml(conv: Conversation): string {
   <h1>${escapeHtml(conv.title)}</h1>
   <div class="meta">
     Cluster: <strong>${escapeHtml(conv.cluster_id || "n/a")}</strong>
-    &nbsp;·&nbsp; Exported: ${new Date().toLocaleString()}
-    &nbsp;·&nbsp; ${conv.messages.length} messages
+    ,&nbsp; Exported: ${new Date().toLocaleString()}
+    ,&nbsp; ${conv.messages.length} messages
   </div>
   ${msgs}
 </body>
@@ -429,7 +429,7 @@ export function ChatPanel() {
       deepLinkClusterRef.current = handoff.cluster_id;
       const conv: Conversation = {
         id: `dbops-session-${crypto.randomUUID()}`,
-        title: `RCA · ${handoff.cluster_id}`.slice(0, 50),
+        title: `RCA: ${handoff.cluster_id}`.slice(0, 50),
         cluster_id: handoff.cluster_id,
         updated_at: Date.now(),
         messages: [
@@ -768,7 +768,7 @@ export function ChatPanel() {
       if (assistantText.trim().length < 40) return;
       titleAbortRef.current?.abort();
       const prompt =
-        `이 질문/답변을 6단어 이내의 간결한 한국어 제목으로 요약해줘. 제목 텍스트만 출력 — 따옴표·마크다운·코드펜스·접두어 금지.\n\n` +
+        `이 질문/답변을 6단어 이내의 간결한 한국어 제목으로 요약해줘. 제목 텍스트만 출력 — 따옴표, 마크다운, 코드펜스, 접두어 금지.\n\n` +
         `Q: ${userText}\n\nA: ${assistantText.slice(0, 2000)}`;
       let buffer = "";
       titleAbortRef.current = streamChat(
@@ -788,7 +788,7 @@ export function ChatPanel() {
             .slice(0, 50);
           if (!raw) return;
           // Only overwrite when the title is still the auto first-message-slice
-          // (guard against overwriting a user-set or handoff title like "RCA · …").
+          // (guard against overwriting a user-set or handoff title like "RCA: …").
           const firstMsgSlice = userText.slice(0, 50);
           persist((prev) =>
             prev.map((c) => {
@@ -1180,8 +1180,7 @@ export function ChatPanel() {
         <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800 gap-4 flex-wrap chat-header">
           <div className="min-w-0">
             <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
-              chat
-              <span className="ml-2 text-zinc-700">·</span>
+              chat,
               <span className="ml-2 normal-case tracking-normal">
                 Claude{" "}
                 {availableModels.find((m) => m.id === modelId)?.label ||

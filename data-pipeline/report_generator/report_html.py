@@ -154,7 +154,7 @@ h1{{font-size:20px;margin:0 0 4px}} .meta{{color:#71717a;font-size:13px;margin-b
 table{{width:100%;border-collapse:collapse;font-size:13px}} td,th{{text-align:left;padding:6px 8px;border-bottom:1px solid #f4f4f5}}
 </style></head><body>
 <h1>DBOps 운영 리포트</h1>
-<div class="meta">{escape(str(cluster_id))} · {escape(str(report_date))} · {escape(str(report_type))}</div>
+<div class="meta">{escape(str(cluster_id))}, {escape(str(report_date))}, {escape(str(report_type))}</div>
 <div class="cards">{cards or ''}</div>
 <div class="summary">{escape(str(summary or ''))}</div>
 <div class="section"><h2>활동 추이 (AAS)</h2>{line_chart(aas_series, "AAS")}</div>
@@ -212,7 +212,7 @@ def build_fleet_report_html(report_date, report_type, summary, fleet_data):
 
     engine_badges = "".join(
         f'<span style="background:#27272a;color:#e4e4e7;border-radius:9px;'
-        f'padding:2px 10px;font-size:12px;margin-right:6px">{escape(str(k))} · {_fmt(v)}</span>'
+        f'padding:2px 10px;font-size:12px;margin-right:6px">{escape(str(k))}: {_fmt(v)}</span>'
         for k, v in engine_counts.items()
     ) or '<span style="color:#71717a;font-size:12px">엔진 정보 없음</span>'
 
@@ -244,7 +244,7 @@ h1{{font-size:20px;margin:0 0 4px}} .meta{{color:#71717a;font-size:13px;margin-b
 table{{width:100%;border-collapse:collapse;font-size:13px}} td,th{{text-align:left;padding:6px 8px;border-bottom:1px solid #f4f4f5;white-space:nowrap}}
 </style></head><body>
 <h1>DBOps Fleet 운영 리포트</h1>
-<div class="meta">Fleet 전체 · {escape(str(report_date))} · {escape(str(report_type))}</div>
+<div class="meta">Fleet 전체, {escape(str(report_date))}, {escape(str(report_type))}</div>
 <div class="cards">{cards}</div>
 <div class="summary">{escape(str(summary or ''))}</div>
 <div class="section"><h2>엔진 분포</h2>{engine_badges}</div>

@@ -188,7 +188,7 @@ export async function unassignClusterFromTeam(
         label: "Teams",
         icon: Users,
         adminOnly: true,
-        hint: "팀 관리 — 멤버·클러스터 가시성 (관리자)",
+        hint: "팀 관리 — 멤버/클러스터 가시성 (관리자)",
       },
 ```
 
@@ -197,7 +197,7 @@ export async function unassignClusterFromTeam(
 - [ ] **Step 2: Create `src/app/admin/teams/page.tsx`** — mirror `src/app/admin/users/page.tsx`'s structure (`"use client"`, `PageBody/PageHeader/Section/EmptyState`, the `adminOnly` 403 empty state, loading/error states, zinc table styling, Korean copy). The page:
 
   - Loads `fetchAdminTeams()` on mount; 403 → admin-only `EmptyState` (eyebrow "접근 제한", title "관리자 전용 페이지").
-  - **Team list** (Section eyebrow "Teams"): a table — name · member_count · (load-detail-on-click). A "팀 만들기" inline input + button calling `createTeam(name)` then reloading.
+  - **Team list** (Section eyebrow "Teams"): a table — name, member_count, (load-detail-on-click). A "팀 만들기" inline input + button calling `createTeam(name)` then reloading.
   - **Selected-team detail** (Section, shown when a team is clicked → `fetchTeamDetail`):
     - **Members:** the team's `members` (usernames; show the email if resolvable from a `fetchAdminUsers` map) each with a "제거" button (`removeTeamMember` + `window.confirm`); an "추가" control = a `<select>` of users NOT already members (from `fetchAdminUsers`) → `addTeamMember`.
     - **Clusters:** the team's `clusters` (cluster_ids) each with a "할당 해제" button (`unassignClusterFromTeam` + confirm); an "할당" control = a `<select>` of clusters not already on THIS team (from `fetchClusters`; a cluster already on another team can be reassigned — assigning overwrites its `team_id`, so show its current team if any) → `assignClusterToTeam`.

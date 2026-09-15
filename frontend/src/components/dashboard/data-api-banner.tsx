@@ -106,7 +106,7 @@ export function DataApiBanner({ clusterId }: { clusterId: string }) {
         )}
       </div>
 
-      {/* CLI 직접 실행 경로(보조). Serverless v2·프로비저닝의 Data API는
+      {/* CLI 직접 실행 경로(보조). Serverless v2와 프로비저닝의 Data API는
           EnableHttpEndpoint(resource-arn 기반, CLI v2 전용)다 —
           modify-db-cluster의 --enable-http-endpoint는 legacy Serverless v1
           전용이며 그 외 클러스터에선 조용히 무시된다(실측 확인). */}

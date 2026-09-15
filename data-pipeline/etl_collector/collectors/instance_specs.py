@@ -1,4 +1,4 @@
-"""Aurora 인스턴스 클래스 → 메모리(GB)·vCPU 매핑.
+"""Aurora 인스턴스 클래스 → 메모리(GB)/vCPU 매핑.
 
 Parameter Fitness 진단의 전제: work_mem/shared_buffers/effective_cache_size
 적정성은 "인스턴스 메모리 대비"로만 판단할 수 있는데, RDS describe는 메모리
@@ -12,7 +12,7 @@ Serverless v2(db.serverless)는 메모리가 ACU에 비례(1 ACU ≈ 2 GB)해 �
 없다 — cluster_meta.serverlessv2_max_acu로 별도 계산하므로 여기선 None.
 """
 
-# 크기 토큰 → (메모리 GB, vCPU). r/m/x 계열(메모리·범용 최적화)의 표준 비율.
+# 크기 토큰 → (메모리 GB, vCPU). r/m/x 계열(메모리/범용 최적화)의 표준 비율.
 # Aurora 권장은 r-family(메모리 최적화)라 이 비율이 대부분의 운영 클러스터를
 # 커버한다. t-family(버스터블)는 메모리 비율이 달라 별도 표로 잡는다.
 _SIZE_RX = {

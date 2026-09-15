@@ -32,7 +32,7 @@ the subscriber allowlist + validated, and a Teams option in the alerts UI.
 
    - `_build_teams_payload(rule, latest) -> dict` — a Teams **MessageCard**:
      `{"@type":"MessageCard","@context":"http://schema.org/extensions","summary",
-"themeColor": <severity hex>, "title": "🚨 DBOps alert · {cluster_id}",
+"themeColor": <severity hex>, "title": "🚨 DBOps alert: {cluster_id}",
 "sections":[{"facts":[Rule/Metric/Threshold/Observed], "markdown": true}],
 "potentialAction":[OpenUri buttons (timeline/dashboard/alerts) when
 FRONTEND_URL is set]}`. Mirrors `_build_slack_payload`'s content +

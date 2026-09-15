@@ -209,15 +209,14 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
 
             {/* Load-safety notice */}
             <div className="px-5 py-2 border-b border-zinc-800/60 text-[11px] text-zinc-500">
-              라이브 (이 창이 열려 있는 동안에만 대상 DB를 폴링합니다 · ~2초)
+              라이브 (이 창이 열려 있는 동안에만 대상 DB를 폴링합니다, ~2초)
               {hidden && (
                 <span className="text-amber-400/80">
-                  {" "}
-                  · 탭 비활성 — 일시중단됨
+                  , 탭 비활성 — 일시중단됨
                 </span>
               )}
               {paused && (
-                <span className="text-amber-400/80"> · 일시정지됨</span>
+                <span className="text-amber-400/80">, 일시정지됨</span>
               )}
             </div>
 
@@ -276,7 +275,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
                   <div>
                     <div className="text-xs text-zinc-500 mb-1.5">
                       활성 세션{" "}
-                      {data?.sessions ? `(${data.sessions.length})` : ""} · age
+                      {data?.sessions ? `(${data.sessions.length})` : ""}, age
                       내림차순
                     </div>
                     <div className="overflow-x-auto border border-zinc-800">

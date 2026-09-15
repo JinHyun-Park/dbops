@@ -1,7 +1,7 @@
 """Parameter Fitness 진단 단위 테스트.
 
 collect_param_fitness는 RDS Data API에 의존하므로, 여기서는 순수 헬퍼
-(설정 단위 변환·인스턴스 메모리 매핑)와 진단 규칙의 경계 조건을 검증한다.
+(설정 단위 변환, 인스턴스 메모리 매핑)와 진단 규칙의 경계 조건을 검증한다.
 규칙 자체는 _execute를 모킹해 캐시 응답을 주입하고 emit된 finding을 확인한다.
 """
 
@@ -35,7 +35,7 @@ def test_instance_memory_mapping():
 
 
 def test_instance_memory_unmapped_returns_none():
-    # 미지원 클래스·serverless·빈 값 → (None, None)로 메모리 의존 규칙 skip
+    # 미지원 클래스, serverless, 빈 값 → (None, None)로 메모리 의존 규칙 skip
     assert specs.instance_memory_gb("db.serverless") == (None, None)
     assert specs.instance_memory_gb("db.future.99xlarge") == (None, None)
     assert specs.instance_memory_gb("") == (None, None)

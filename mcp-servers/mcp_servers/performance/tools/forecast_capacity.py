@@ -117,7 +117,7 @@ _STORAGE_SERIES = {
 }
 
 # db_connections(CloudWatch DatabaseConnections)를 쓰는 수집기는 cw_collector
-# (relational) · docdb_cw_collector · rds_instance_cw_collector 셋뿐이다.
+# (relational), docdb_cw_collector, rds_instance_cw_collector 셋뿐이다.
 # DynamoDB에는 커넥션 개념이 없고(용량은 consumed_rcu/wcu), ElastiCache는
 # curr_connections를 쓰지만 maxclients 천장을 수집하지 않아 한계를 근거 있게
 # 잡을 수 없다. 매핑 없는 패밀리는 거부한다: 매핑이 없는 채로 진행하면 표본
@@ -159,8 +159,8 @@ _VALID_METRICS = (
     "storage", "connections", "aas", "read_capacity", "write_capacity", "memory",
 )
 
-# metric_snapshots는 같은 metric_type을 여러 차원으로 저장한다(인스턴스별·PI
-# 대기이벤트별·GSI별). 클러스터 단위 회귀는 반드시 strict 필터를 써야 한다.
+# metric_snapshots는 같은 metric_type을 여러 차원으로 저장한다(인스턴스별, PI
+# 대기이벤트별, GSI별). 클러스터 단위 회귀는 반드시 strict 필터를 써야 한다.
 # 이유와 반례는 shared/metric_filters.py 주석 참고.
 _CLUSTER_LEVEL_ONLY = CLUSTER_LEVEL_ONLY
 
@@ -206,7 +206,7 @@ def _connections_limit(cache, cluster_id: str, fam: str, cluster: dict):
          힌트일 뿐 단독 근거가 될 수 없다.
       2. cluster_settings.max_connections 최신 행
          (data-pipeline/etl_collector/collectors/capacity_forecast.py와 동일
-         쿼리). pg_locks / mysql_locks 수집기가 pg_settings ·
+         쿼리). pg_locks / mysql_locks 수집기가 pg_settings,
          performance_schema.global_variables에서 실제 값을 채운다.
       3. DocumentDB는 max_connections 설정이 없어 cluster_settings에 행이 없다.
          대신 DatabaseConnectionsLimit(db_connections_limit) 최신 관측값을
@@ -287,7 +287,7 @@ def _throughput_limit(cache, cluster_id: str, provisioned_metric: str):
 def _evictions_in_window(cache, cluster_id: str, days_lookback: int) -> float:
     """조회 창 안의 eviction 총합. >0이면 캐시가 이미 메모리를 회수하며 돌고
     있다는 뜻이고, 그 상태의 "100% 도달까지 며칠"은 의미가 없다.
-    evictions는 Redis/Valkey · Memcached 양쪽 목록에 다 있다
+    evictions는 Redis/Valkey, Memcached 양쪽 목록에 다 있다
     (elasticache_cw_collector.py:18,33)."""
     return _latest_value(
         cache,
@@ -574,7 +574,7 @@ def forecast_capacity_impl(
             f"걸린 캐시는 설계상 메모리 상한 근처에서 동작하므로 '100% 도달까지 며칠'은 "
             f"의미가 없습니다(현재 {round(current, 1)}%, 기울기 {round(slope, 4)}/일, "
             f"표본 {n}개). 정확한 신호는 eviction 양과 hit rate이며 "
-            f"elasticache_evictions_spike · elasticache_memory_pressure finding이 이를 "
+            f"elasticache_evictions_spike, elasticache_memory_pressure finding이 이를 "
             f"임계로 관리합니다. days_until_limit=null, approaching_limit=false는 "
             f"'문제 없음'이 아니라 '이 지표로는 소진 시점을 말할 수 없음'입니다."
         )
@@ -616,8 +616,8 @@ def forecast_capacity_impl(
         "metric": metric,
         "metric_type": metric_type,
         "engine_family": fam,
-        # 성공 경로도 거부 경로와 같은 status 키를 갖는다: no_data(표본 0개) ·
-        # evicting(캐시가 상한 근처에서 eviction 중) · limit_reached(이미 도달) · ok.
+        # 성공 경로도 거부 경로와 같은 status 키를 갖는다: no_data(표본 0개) /
+        # evicting(캐시가 상한 근처에서 eviction 중) / limit_reached(이미 도달) / ok.
         "status": (
             "no_data" if n == 0
             else "evicting" if evicting
@@ -636,8 +636,8 @@ def forecast_capacity_impl(
         "slope_per_day": round(slope, 4),
         "r2": round(r2, 3),
         "samples": n,
-        # days_until_limit: 0(status=limit_reached, 이미 도달) · 양의 정수(추세가
-        # 한계로 향함) · null. null의 이유(추세가 한계로 향하지 않음 / 한계 근거
+        # days_until_limit: 0(status=limit_reached, 이미 도달) / 양의 정수(추세가
+        # 한계로 향함) / null. null의 이유(추세가 한계로 향하지 않음 / 한계 근거
         # 없음 / eviction 중)는 note에 문장으로 남긴다. 양의 정수여도 실행 가능
         # 기간을 넘으면 approaching_limit는 false다.
         "days_until_limit": days_until,

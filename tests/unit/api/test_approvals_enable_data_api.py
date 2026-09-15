@@ -139,7 +139,7 @@ def test_reject_does_not_execute():
 @patch.dict("os.environ", {"APPROVALS_TABLE": "approvals", "CLUSTERS_TABLE": "clusters"})
 def test_post_dedupes_pending_request():
     """같은 클러스터의 pending enable_data_api가 있으면 새 행을 만들지 않고
-    기존 행을 200으로 돌려준다 (버튼 더블클릭·재방문 멱등성)."""
+    기존 행을 200으로 돌려준다 (버튼 더블클릭과 재방문 멱등성)."""
     mock_boto3, approvals_table, _ = _boto3_with([dict(_ROW)])
     with patch.object(handler, "boto3", mock_boto3):
         resp = handler.lambda_handler(

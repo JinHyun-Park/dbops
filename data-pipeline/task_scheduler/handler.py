@@ -86,7 +86,7 @@ def _enqueue(table, cluster_id, kind, schedule_id):
             "trigger": f"schedule:{schedule_id}",
             "status": "pending",
             "created_at": str(now_ms),
-            "title": f"예약 작업 · {cluster_id}",
+            "title": f"예약 작업 ({cluster_id})",
             "ttl": int(time.time()) + TTL_DAYS * 24 * 60 * 60,
         }
     )

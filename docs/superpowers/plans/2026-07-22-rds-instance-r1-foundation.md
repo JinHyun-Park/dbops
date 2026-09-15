@@ -810,7 +810,7 @@ const METRICS = [
 ];
 ```
 
-Panel body: (a) a resource card grid showing instance_class / engine_version(from the outer detail response) / Multi-AZ / storage (`{storage_type} · {allocated_storage_gb} GiB`) / license_model / PI enabled — dashes for missing values (honest empty states, no fabrication); (b) four chart cards (CPU %, Connections, Freeable Memory via fmtBytes, Free Storage via fmtBytes) using the template's Area/Line chart card markup with `useChartColors`.
+Panel body: (a) a resource card grid showing instance_class / engine_version(from the outer detail response) / Multi-AZ / storage (`{storage_type}, {allocated_storage_gb} GiB`) / license_model / PI enabled — dashes for missing values (honest empty states, no fabrication); (b) four chart cards (CPU %, Connections, Freeable Memory via fmtBytes, Free Storage via fmtBytes) using the template's Area/Line chart card markup with `useChartColors`.
 
 - [ ] **Step 3: Render it in the dashboard.** In `dashboard/page.tsx`: add the import next to the sibling panels (~L60), then in the overview tab where `DynamodbOverviewPanel`/`DocdbOverviewPanel` render (~L904-947), add an adjacent block with IDENTICAL props to the siblings:
 
@@ -954,7 +954,7 @@ Expected: cpu/db_connections/freeable_memory/free_storage_bytes (+iops/latency) 
 - [ ] **Step 5: Browser verification (Chrome MCP — never AppleScript)**
 
   - Fleet/⌘K/ClusterDropdown: both demo instances appear under new groups "RDS MySQL" / "RDS SQL Server" with correct badges.
-  - Dashboard for each: overview tab shows the resource card (instance class, storage, license) + 4 charts with real datapoints; audit tab shows events (or an honest empty state); NO relational-only tabs (성능·쿼리 etc.) visible.
+  - Dashboard for each: overview tab shows the resource card (instance class, storage, license) + 4 charts with real datapoints; audit tab shows events (or an honest empty state); NO relational-only tabs (성능, 쿼리 etc.) visible.
   - Registration form: the two new options render, cluster_id field shows, cross-account toggle absent for them.
 
 - [ ] **Step 6: Update memory/backlog + report** — record R-1 completion (and any deviations) in the session report to the user. Commit any leftover fixes.

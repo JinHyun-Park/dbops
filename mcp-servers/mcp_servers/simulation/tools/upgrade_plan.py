@@ -106,7 +106,7 @@ def generate_upgrade_plan_impl(cache: CacheClient, cluster_id: str, target_versi
         )
         add(
             "확장(extension)/비호환 기능 호환성 점검",
-            "설치된 extension·deprecated 기능·예약어/타입 변경 등 메이저 비호환 항목 점검",
+            "설치된 extension, deprecated 기능, 예약어/타입 변경 등 메이저 비호환 항목 점검",
         )
         if is_postgres:
             add("pg_upgrade 사전 점검", "pg_upgrade --check로 사전 호환성 검증, 비호환 객체 식별")
@@ -123,7 +123,7 @@ def generate_upgrade_plan_impl(cache: CacheClient, cluster_id: str, target_versi
         if readers > 0:
             add(
                 "리더 복제 검증",
-                f"Green의 리더 {readers}개가 재생성/업그레이드된 뒤 replica lag·복제 상태 점검",
+                f"Green의 리더 {readers}개가 재생성/업그레이드된 뒤 replica lag, 복제 상태 점검",
             )
         add("전환 (Switchover)", "트래픽을 Green으로 전환 (~30초 다운타임)")
         add("검증", "애플리케이션 정상 동작 확인, 메트릭 모니터링")
@@ -134,9 +134,9 @@ def generate_upgrade_plan_impl(cache: CacheClient, cluster_id: str, target_versi
             f"{cluster_id}의 fast clone 생성 (원본 데이터/트래픽에 영향 없음)",
         )
         add("클론 업그레이드", f"클론 클러스터를 {target_version}으로 업그레이드 (원본 무영향)")
-        add("클론 검증", "클론에서 핵심 쿼리·성능 검증, 비호환 여부 확인")
+        add("클론 검증", "클론에서 핵심 쿼리/성능 검증, 비호환 여부 확인")
         if readers > 0:
-            add("리더 검증", f"클론의 리더 {readers}개 replica lag·복제 상태 점검")
+            add("리더 검증", f"클론의 리더 {readers}개 replica lag, 복제 상태 점검")
         add("엔드포인트 전환", "애플리케이션을 클론 클러스터 엔드포인트로 전환 (DNS/설정)")
         add("검증", "애플리케이션 정상 동작 확인, 메트릭 모니터링")
     else:  # in_place
@@ -148,7 +148,7 @@ def generate_upgrade_plan_impl(cache: CacheClient, cluster_id: str, target_versi
         if readers > 0:
             add(
                 "리더 업그레이드 검증",
-                f"리더 {readers}개가 함께 업그레이드된 뒤 replica lag·복제 상태 점검",
+                f"리더 {readers}개가 함께 업그레이드된 뒤 replica lag, 복제 상태 점검",
             )
         add("검증", "애플리케이션 정상 동작 확인")
 

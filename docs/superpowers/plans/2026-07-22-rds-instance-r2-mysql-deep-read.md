@@ -307,12 +307,12 @@ const visibleTabs: TabKey[] = selectedCluster
 - [ ] **Step 2:** `cd frontend && npm run build`, then single `cdk deploy dbops-dev-data dbops-dev-agent dbops-dev-frontend --require-approval never` (agent stack carries api/clusters change). Verify 3× UPDATE_COMPLETE via CloudFormation.
 - [ ] **Step 3:** Re-register `dbops-demo-mysql` via live API (idempotent put) → response 201; registry row now has `db_secret_arn` (master_fallback) + `db_secret_source`.
 - [ ] **Step 4:** Invoke `rds_direct_collector` Lambda directly → result shows collected sections, no error. Invoke a second time (first run's own digest queries land in performance_schema with SCHEMA_NAME='mysql').
-- [ ] **Step 5:** Cache checks via dashboard API (browser authed fetch): `/slow-queries`(or `/overview` top_queries) rows exist for dbops-demo-mysql; `/settings` shows max_connections etc.; `/timeseries?metric=innodb_history_list_length` (+checkpoint_age — RDS MySQL HAS a local redo log so this metric appears, unlike Aurora); `/blocking-locks`·`/long-running` respond 200 (empty OK).
-- [ ] **Step 6:** Browser: dashboard perf탭(쿼리 통계 rows)·internals탭(InnoDB 차트 4종) 렌더; mssql은 perf/internals 탭 자체가 안 보임; chat: "dbops-demo-mysql 최근 쿼리 통계 보여줘" → get_top_queries가 실데이터 반환.
+- [ ] **Step 5:** Cache checks via dashboard API (browser authed fetch): `/slow-queries`(or `/overview` top_queries) rows exist for dbops-demo-mysql; `/settings` shows max_connections etc.; `/timeseries?metric=innodb_history_list_length` (+checkpoint_age — RDS MySQL HAS a local redo log so this metric appears, unlike Aurora); `/blocking-locks`, `/long-running` respond 200 (empty OK).
+- [ ] **Step 6:** Browser: dashboard perf탭(쿼리 통계 rows), internals탭(InnoDB 차트 4종) 렌더; mssql은 perf/internals 탭 자체가 안 보임; chat: "dbops-demo-mysql 최근 쿼리 통계 보여줘" → get_top_queries가 실데이터 반환.
 - [ ] **Step 7:** Ledger + memory update, report.
 
 ## Execution notes (orchestrator)
 
-- Routing: T1·T3 Opus, T2 Opus(소형이지만 CDK 정합), T4 Sonnet, T5 orchestrator. 순차 실행(공유 체크아웃).
+- Routing: T1/T3 Opus, T2 Opus(소형이지만 CDK 정합), T4 Sonnet, T5 orchestrator. 순차 실행(공유 체크아웃).
 - 데모 인스턴스 SG는 이미 VPC CIDR에서 3306 허용(R-1) — Lambda가 같은 VPC라 추가 SG 작업 불필요.
 - Post-commit Codex 테스터 findings는 각 태스크 리뷰와 병합 처리.

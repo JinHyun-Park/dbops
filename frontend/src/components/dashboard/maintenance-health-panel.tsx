@@ -235,7 +235,7 @@ export function MaintenanceHealthPanel({
               조치를 제안합니다.
               {snapshotTime && (
                 <span className="ml-2 text-zinc-600">
-                  · {fmtRelative(snapshotTime)} 갱신
+                  {fmtRelative(snapshotTime)} 갱신
                 </span>
               )}
             </div>
@@ -319,7 +319,7 @@ export function MaintenanceHealthPanel({
                   </div>
                   <div className="text-xs text-zinc-400 mt-1">
                     <span className="text-zinc-200">{f.value_str}</span>
-                    <span className="text-zinc-600"> · target </span>
+                    <span className="text-zinc-600">, target </span>
                     <span className="font-mono">{f.threshold_str}</span>
                   </div>
                   <div className="text-xs text-zinc-300 mt-1 leading-snug">
@@ -332,7 +332,7 @@ export function MaintenanceHealthPanel({
                           f.outcome.successes,
                           f.outcome.attempts,
                         )}
-                        {" · "}신뢰도{" "}
+                        {", "}신뢰도{" "}
                         {Math.round(
                           confidence(f.outcome.successes, f.outcome.attempts) *
                             100,
@@ -409,7 +409,7 @@ function FindingDetailModal({
       // 에이전트가 request_approval을 자동 실행해 승인 센터에 항목이
       // 쌓인다(사용자는 확인만 하려던 것). 실제 승인 요청은 사용자가
       // 아래 'Chat에서 조치 진행' 버튼으로 명시적으로 시작한다.
-      `**중요: 절대 어떤 도구도 호출하지 마. request_approval·execute_sql 등 쓰기/승인 도구를 호출하지 말고, 위 3개 섹션 설명만 텍스트로 제공해. 실제 실행은 사용자가 별도로 진행한다.**\n\n` +
+      `**중요: 절대 어떤 도구도 호출하지 마. request_approval, execute_sql 등 쓰기/승인 도구를 호출하지 말고, 위 3개 섹션 설명만 텍스트로 제공해. 실제 실행은 사용자가 별도로 진행한다.**\n\n` +
       `Cluster: ${clusterId}\n` +
       `Check: ${finding.check_type} (${finding.severity})\n` +
       `Subject: ${finding.subject}\n` +
@@ -458,7 +458,7 @@ function FindingDetailModal({
             </h2>
             <div className="text-xs text-zinc-400 mt-1">
               <span className="text-zinc-200">{finding.value_str}</span>
-              <span className="text-zinc-600"> · target </span>
+              <span className="text-zinc-600">, target </span>
               <span className="font-mono">{finding.threshold_str}</span>
             </div>
           </div>

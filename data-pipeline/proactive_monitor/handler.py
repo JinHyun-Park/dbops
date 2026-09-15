@@ -131,7 +131,7 @@ def lambda_handler(event, context):
                     enqueue_auto_rca(
                         cluster_id,
                         f"anomaly:{metric}",
-                        title=f"이상 징후 자동 RCA · {cluster_id} · {metric}",
+                        title=f"이상 징후 자동 RCA ({cluster_id}, {metric})",
                         trigger=f"anomaly:{metric}",
                     )
                 except Exception as e:

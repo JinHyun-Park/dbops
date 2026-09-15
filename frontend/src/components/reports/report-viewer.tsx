@@ -136,7 +136,7 @@ export function ReportViewer({
                 }`}
               >
                 <div className="text-sm text-zinc-100">
-                  {r.report_date} <span className="text-zinc-500">·</span>{" "}
+                  {r.report_date},{" "}
                   <span className="text-zinc-500">{r.report_type}</span>
                 </div>
                 <div className="text-xs text-zinc-500 mt-1 truncate">
@@ -238,7 +238,7 @@ function ReportDetailPanel({
               {row.report_type} report
             </div>
             <h2 className="text-2xl font-semibold tracking-tight text-zinc-50">
-              {row.report_date} · {clusterLabel(row.cluster_id)}
+              {row.report_date}, {clusterLabel(row.cluster_id)}
             </h2>
           </div>
           {detail && (
@@ -318,10 +318,8 @@ function FleetDetailPanel({ payload }: { payload: FleetPayload }) {
               key={`e-${engine}`}
               className="border border-zinc-800 px-3 py-1.5 text-xs text-zinc-300"
             >
-              {engine}{" "}
-              <span className="text-zinc-500 tabular-nums">
-                · {fmtNumber(n)}
-              </span>
+              {engine},{" "}
+              <span className="text-zinc-500 tabular-nums">{fmtNumber(n)}</span>
             </span>
           ))}
           {healthDist.map(([bucket, n]) => (
@@ -329,10 +327,8 @@ function FleetDetailPanel({ payload }: { payload: FleetPayload }) {
               key={`h-${bucket}`}
               className="border border-zinc-800 px-3 py-1.5 text-xs text-zinc-300"
             >
-              {bucket}{" "}
-              <span className="text-zinc-500 tabular-nums">
-                · {fmtNumber(n)}
-              </span>
+              {bucket},{" "}
+              <span className="text-zinc-500 tabular-nums">{fmtNumber(n)}</span>
             </span>
           ))}
         </section>
@@ -424,7 +420,7 @@ function StatBlock({ payload }: { payload: ReportPayload }) {
         <Cell
           label="AAS avg"
           value={fmtDecimal(aas.avg_aas, 2)}
-          hint={`max ${fmtDecimal(aas.max_aas, 2)} · p95 ${fmtDecimal(
+          hint={`max ${fmtDecimal(aas.max_aas, 2)}, p95 ${fmtDecimal(
             aas.p95_aas,
             2,
           )}`}
@@ -506,8 +502,8 @@ function SlowQueriesBlock({ rows }: { rows: SlowRow[] }) {
                 {(q.query_hash || "").slice(0, 12)}…
               </div>
               <div className="text-xs text-zinc-400 tabular-nums">
-                {fmtDuration(q.total_ms)} 누적 · {fmtNumber(q.calls)} calls ·
-                mean {fmtDuration(q.mean_ms)}
+                {fmtDuration(q.total_ms)} 누적, {fmtNumber(q.calls)} calls, mean{" "}
+                {fmtDuration(q.mean_ms)}
               </div>
             </div>
             <pre className="text-xs text-zinc-300 font-mono whitespace-pre-wrap break-all">
@@ -535,7 +531,7 @@ function AlertsBlock({ rows }: { rows: AlertRow[] }) {
           >
             <div className="text-sm text-zinc-200 font-mono">{a.rule_id}</div>
             <div className="text-xs text-zinc-500 tabular-nums">
-              {fmtNumber(a.fired_count)}회 ·{" "}
+              {fmtNumber(a.fired_count)}회,{" "}
               {a.last_fired ? new Date(a.last_fired).toLocaleString() : ""}
             </div>
           </div>
@@ -558,9 +554,9 @@ function EventsBlock({ rows }: { rows: EventRow[] }) {
             key={(e.event_type || "") + i}
             className="border border-zinc-800 px-3 py-1.5 text-xs"
           >
-            <span className="text-zinc-300">{e.event_type}</span>{" "}
+            <span className="text-zinc-300">{e.event_type}</span>,{" "}
             <span className="text-zinc-500 tabular-nums">
-              · {fmtNumber(e.cnt)}
+              {fmtNumber(e.cnt)}
             </span>
           </div>
         ))}

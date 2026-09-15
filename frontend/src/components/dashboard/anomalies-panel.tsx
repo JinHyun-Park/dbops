@@ -142,7 +142,7 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
                     {a.mode === "seasonal" ? (
                       <span
                         className="text-[9px] uppercase tracking-wider px-1 py-0.5 border border-emerald-500/40 text-emerald-300 rounded-sm"
-                        title="요일·시간대별 과거 분포(중앙값 + IQR)와 비교"
+                        title="요일/시간대별 과거 분포(중앙값 + IQR)와 비교"
                       >
                         seasonal
                       </span>
@@ -156,7 +156,7 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
                     ) : null}
                   </div>
                   <div className="text-[11px] text-zinc-500">
-                    베이스라인 {fmtDecimal(n(a.baseline_mean), 2)} · 최근 최댓값{" "}
+                    베이스라인 {fmtDecimal(n(a.baseline_mean), 2)}, 최근 최댓값{" "}
                     <span className="text-zinc-300">
                       {fmtDecimal(n(a.recent_max), 2)}
                     </span>
@@ -223,7 +223,7 @@ function EmptyState({ meta }: { meta: Meta }) {
         </div>
         <div className="text-[11px] text-zinc-500 mt-1">
           지표는 수집되고 있지만 비교 기준이 되는 baseline이 아직
-          없습니다(요일·시간대별 seasonal, 7일 flat 모두). seasonal baseline은
+          없습니다(요일/시간대별 seasonal, 7일 flat 모두). seasonal baseline은
           이 시간대 지표가 약 2주치 쌓이면 자동으로 학습되니 그때까지 기다려
           주세요.
         </div>
@@ -287,7 +287,7 @@ function AnomalyDetailModal({
       // storms to a Redis operator biases the diagnosis. The agent resolves the
       // engine family from cluster_id and picks the mechanisms itself.
       `1. **추정 원인** — 메트릭 종류와 패턴을 보고 가장 그럴듯한 설명 ` +
-      `(워크로드 급증, 비효율 접근 패턴, 배포·설정 변경, 용량 한계·스로틀, 경합 등). ` +
+      `(워크로드 급증, 비효율 접근 패턴, 배포/설정 변경, 용량 한계/스로틀, 경합 등). ` +
       `이 엔진에 실제로 해당하는 원인만 제시해줘.\n` +
       `2. **운영 영향** — 지금 사용자나 애플리케이션이 어떤 경험을 하고 있을지.\n` +
       `3. **다음 점검 단계** — 원인을 확정하기 위해 실행할 구체적인 쿼리 1건 또는 MCP 도구 1개. ` +
@@ -336,7 +336,7 @@ function AnomalyDetailModal({
               <span
                 className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${sevBadge}`}
               >
-                이상 징후 · σ{z.toFixed(1)}
+                이상 징후, σ{z.toFixed(1)}
               </span>
               <span className="text-[10px] text-zinc-500 font-mono">
                 {anomaly.metric_type}
@@ -346,7 +346,7 @@ function AnomalyDetailModal({
               {prettyLabel}
             </h2>
             <div className="text-xs text-zinc-400 mt-1">
-              베이스라인 {fmtDecimal(baseline, 2)} ± {fmtDecimal(stddev, 2)} ·
+              베이스라인 {fmtDecimal(baseline, 2)} ± {fmtDecimal(stddev, 2)},
               최근 최댓값{" "}
               <span className="text-zinc-200">{fmtDecimal(recentMax, 2)}</span>
             </div>

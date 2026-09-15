@@ -20,7 +20,7 @@ EXCLUDE_PER_INSTANCE is ONLY for readers that deliberately return the
 dimensioned detail rows (wait-event stacked chart, per-GSI panel) and merely
 need the per-instance duplicates dropped.
 
-No shared Lambda layer spans api/ · data-pipeline/ · mcp-servers/, so the
+No shared Lambda layer spans api/, data-pipeline/, mcp-servers/, so the
 constants are duplicated VERBATIM in:
   - api/dashboard/metric_filters.py
 Other packages (api/simulation, data-pipeline/*) inline the same literal text,

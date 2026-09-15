@@ -29,7 +29,7 @@ cache = CacheClient()
 # operations/handler.py와 같은 POSITIVE + FAIL-CLOSED 게이트다. 게이트가 없던
 # 동안 DynamoDB/ElastiCache에 get_top_queries를 물으면 unsupported_engine이
 # 아니라 빈 배열이 돌아왔다. DBA에게는 "무거운 쿼리 없음"으로 읽히는 거짓
-# 빈 상태. 해석 불가 클러스터(미등록·조회 실패)도 거부한다: 없는 데이터를
+# 빈 상태. 해석 불가 클러스터(미등록, 조회 실패)도 거부한다: 없는 데이터를
 # "정상"으로 보고하는 것보다 거부가 안전하다.
 _ENGINE_GATED_TOOLS = {
     # query_stats 행을 쓰는 수집기가 있는 패밀리: relational(pg_stat_statements /
@@ -423,7 +423,7 @@ def lambda_handler(event, context):
                     "cluster_id": cluster_id,
                     "reason": (
                         "클러스터 엔진을 확인할 수 없습니다. 등록되지 않은 클러스터이거나 "
-                        "첫 메트릭 수집 전일 수 있습니다. 클러스터 등록·수집 상태를 확인한 뒤 "
+                        "첫 메트릭 수집 전일 수 있습니다. 클러스터 등록과 수집 상태를 확인한 뒤 "
                         "다시 시도하세요."
                         if fam is None
                         else f"{tool_name}는 {engine_label} 전용입니다 (현재 엔진: {fam})."
@@ -446,7 +446,7 @@ def lambda_handler(event, context):
             result = _annotate_documentdb(tool_name, fam, result)
             return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
         except Exception:
-            # 예외 텍스트는 응답에 절대 넣지 않는다(SQL·ARN·내부 경로 누출).
+            # 예외 텍스트는 응답에 절대 넣지 않는다(SQL, ARN, 내부 경로 누출).
             # 진단 정보는 CloudWatch 로그로만 보낸다.
             logger.exception("TOOL ERROR (%s)", tool_name)
             return {"content": [{"type": "text", "text": json.dumps({

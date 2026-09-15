@@ -35,7 +35,7 @@ MAXCONN_MIN_TO_FLAG = 100        # 너무 작은 max_connections는 굳이 안 �
 CONN_BUFFER_RISK_PCT = 0.25      # per-thread 버퍼 합×max_conn이 메모리 25% 초과 시 경고
 CACHE_HIT_FLOOR = 95.0           # 버퍼 캐시 히트율(%) 하한
 MIN_SAMPLES = 20                 # 메트릭 표본 최소치
-# 워크로드 메트릭(peak 커넥션·버퍼 캐시 히트)을 재는 윈도. SQL의 INTERVAL과
+# 워크로드 메트릭(peak 커넥션, 버퍼 캐시 히트)을 재는 윈도. SQL의 INTERVAL과
 # finding 문구가 이 상수 하나에서 나온다. 예전에는 statement가 INTERVAL '7 days'
 # 이고 문구가 "7일 평균"으로 각각 하드코딩돼 있어서, 윈도를 넓히면 finding이
 # 30일치 측정을 "7일 평균"이라고 말하는데도 깨지는 것이 아무것도 없었다.

@@ -146,7 +146,7 @@ def modify_rds_instance_class_impl(
     except Exception:
         logger.warning("modify_db_instance failed for %s", cluster_id, exc_info=True)
         return {"status": "modify_failed", "cluster_id": cluster_id,
-                "reason": "인스턴스 클래스 변경에 실패했습니다 (클래스 유효성·상태·권한 확인)."}
+                "reason": "인스턴스 클래스 변경에 실패했습니다 (클래스 유효성, 상태, 권한 확인)."}
 
     return {"status": "modifying", "cluster_id": cluster_id,
             "target_class": target_class, "db_status": "modifying"}

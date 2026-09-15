@@ -297,7 +297,7 @@ def collect_elasticache_findings(
             add("elasticache_low_hit_rate", sev, "ElastiCache Low Hit Rate",
                 f"hit rate {pct}%",
                 f"hit rate < {int(HIT_RATE_CRITICAL*100)}%" if sev == "critical" else f"hit rate < {int(HIT_RATE_WARNING*100)}%",
-                f"최근 {window_hours}시간 cache hit rate가 {pct}%입니다. 캐시 키 설계·TTL·워킹셋 크기 또는 메모리 증설을 점검하세요.",
+                f"최근 {window_hours}시간 cache hit rate가 {pct}%입니다. 캐시 키 설계, TTL, 워킹셋 크기 또는 메모리 증설을 점검하세요.",
                 {"hit_rate": round(hr, 4), "hits": hits, "misses": misses, "window_hours": window_hours})
 
     # Rule 3: memory pressure (Redis/Valkey only)
@@ -332,7 +332,7 @@ def collect_elasticache_findings(
         add("elasticache_high_cpu", sev, "ElastiCache High CPU",
             f"{cpu_label} {cpu:.1f}%",
             f"{cpu_label} ≥ {int(CPU_CRITICAL_PCT)}%" if sev == "critical" else f"{cpu_label} ≥ {int(CPU_WARNING_PCT)}%",
-            f"최근 {window_hours}시간 {cpu_label} peak이 {cpu:.1f}%입니다. 핫 키·비싼 명령(KEYS/SORT) 점검 또는 노드 타입 상향을 권장합니다.",
+            f"최근 {window_hours}시간 {cpu_label} peak이 {cpu:.1f}%입니다. 핫 키와 비싼 명령(KEYS/SORT) 점검 또는 노드 타입 상향을 권장합니다.",
             {"max_cpu_pct": cpu, "cpu_metric": cpu_label, "window_hours": window_hours})
 
     # Rule 6: connection surge
@@ -341,7 +341,7 @@ def collect_elasticache_findings(
         add("elasticache_connection_surge", "warning", "ElastiCache Connection Surge",
             f"peak {int(conn)} connections",
             f"connections > {int(CONN_SURGE_WARNING)}",
-            f"최근 {window_hours}시간 연결 수 peak이 {int(conn)}개입니다(Redis 한도 65000). connection pooling·클라이언트 누수 점검을 권장합니다.",
+            f"최근 {window_hours}시간 연결 수 peak이 {int(conn)}개입니다(Redis 한도 65000). connection pooling과 클라이언트 누수 점검을 권장합니다.",
             {"max_curr_connections": conn, "window_hours": window_hours})
 
     for f in findings:

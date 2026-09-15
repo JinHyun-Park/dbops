@@ -189,7 +189,7 @@ def lambda_handler(event, context):
             return _resp(400, {
                 "error": "sql_error",
                 "message": (
-                    "데이터베이스가 이 문장을 거부했습니다. SQL 구문과 참조한 테이블·"
+                    "데이터베이스가 이 문장을 거부했습니다. SQL 구문과 참조한 테이블/"
                     "컬럼 이름을 확인하세요 (자세한 오류는 서버 로그에 기록됩니다)."
                 ),
                 "engine": engine,
@@ -198,7 +198,7 @@ def lambda_handler(event, context):
         return _resp(502, {
             "error": "execution_failed",
             "message": (
-                "EXPLAIN 실행에 실패했습니다. 클러스터 연결·권한 문제일 수 있으니 "
+                "EXPLAIN 실행에 실패했습니다. 클러스터 연결/권한 문제일 수 있으니 "
                 "잠시 후 다시 시도하고, 계속되면 서버 로그를 확인하세요."
             ),
             "engine": engine,

@@ -116,7 +116,7 @@ const MYSQL_RECOMMENDED: Record<string, Rec> = {
   log_bin: {
     value: "ON",
     severity: "info",
-    why: "바이너리 로그(PITR/복제). Aurora는 클러스터 스토리지가 대신 처리하고, 표준 RDS MySQL은 이 설정이 리드 리플리카·PITR의 전제입니다.",
+    why: "바이너리 로그(PITR/복제). Aurora는 클러스터 스토리지가 대신 처리하고, 표준 RDS MySQL은 이 설정이 리드 리플리카와 PITR의 전제입니다.",
   },
 };
 

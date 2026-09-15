@@ -106,7 +106,7 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
         <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
       ) : tables.length === 0 ? (
         <div className="p-6 text-zinc-500 text-sm">
-          테이블 통계 없음 (PG 전용 · 5분 주기 수집)
+          테이블 통계 없음 (PG 전용, 5분 주기 수집)
         </div>
       ) : (
         <div className="max-h-96 overflow-y-auto">

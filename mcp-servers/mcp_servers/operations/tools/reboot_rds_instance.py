@@ -130,6 +130,6 @@ def reboot_rds_instance_impl(
     except Exception:
         logger.warning("reboot_db_instance failed for %s", cluster_id, exc_info=True)
         return {"status": "reboot_failed", "cluster_id": cluster_id,
-                "reason": "인스턴스 재부팅에 실패했습니다 (상태·권한 확인)."}
+                "reason": "인스턴스 재부팅에 실패했습니다 (상태, 권한 확인)."}
 
     return {"status": "rebooting", "cluster_id": cluster_id, "db_status": "rebooting"}

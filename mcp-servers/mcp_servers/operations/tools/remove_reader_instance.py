@@ -43,7 +43,7 @@ def remove_reader_instance_impl(
             "instance_id": instance_id,
             "cli_preview": (
                 f"리더 인스턴스 삭제 (scale-in): 클러스터 {cluster_id}에서 "
-                f"{instance_id!r} 리더를 삭제합니다. 삭제는 비가역이며 writer·"
+                f"{instance_id!r} 리더를 삭제합니다. 삭제는 비가역이며 writer와 "
                 "마지막 인스턴스는 보호됩니다. 삭제 전 이 리더로 가는 커스텀 "
                 "엔드포인트/커넥션을 확인하세요."
             ),
@@ -131,7 +131,7 @@ def remove_reader_instance_impl(
     except Exception as e:
         print(f"[remove_reader_instance] delete_db_instance failed for {instance_id}: {e}")
         return {"status": "remove_failed", "cluster_id": cluster_id,
-                "reason": "인스턴스 삭제에 실패했습니다 (상태·권한 확인)."}
+                "reason": "인스턴스 삭제에 실패했습니다 (상태, 권한 확인)."}
 
     return {
         "status": "instance_removing",

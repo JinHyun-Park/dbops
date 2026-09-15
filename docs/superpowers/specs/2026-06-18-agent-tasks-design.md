@@ -17,14 +17,14 @@ DBOps는 현재 **동기식**이다 — DBA가 채팅으로 묻거나 대시보�
 2. **예약 작업** — "매주 월요일 top slow query 리포트" 같은 반복 작업.
 3. **수동 작업** — 대시보드/Fleet에서 임의 클러스터에 대해 작업을 즉시 실행.
 
-DBOps의 기존 alert_evaluator + WebSocket 푸시 + RCA 드로어와 직결되어, 운영자가 개입하지 않아도 분석·리포트가 준비되도록 한다.
+DBOps의 기존 alert_evaluator + WebSocket 푸시 + RCA 드로어와 직결되어, 운영자가 개입하지 않아도 분석과 리포트가 준비되도록 한다.
 
 ### 1.2 Goals
 
 - 경보→자동 RCA→토스트 연결 (2026-06-18 토스트 딥링크의 논리적 다음 단계).
 - 세 가지 트리거(alert / schedule / manual)를 **단일 처리 경로**로 수용.
 - RCA는 **결정론적** 엔진(`diagnose_root_cause`)으로 — Lambda에서 LLM 없이
-  수초 내 랭킹된 후보 생성. 저비용·안정·재시도 가능.
+  수초 내 랭킹된 후보 생성. 저비용, 안정, 재시도 가능.
 - CDK-only. 스택 의존성(foundation→data→agent) 위배 없음.
 
 ### 1.3 Non-Goals (이번 범위 밖)
@@ -72,7 +72,7 @@ worker(agent 스택)가 스트림으로 트리거된다 — 역방향 의존성 
 | `status`                     | `pending` \| `running` \| `done` \| `failed`                     |
 | `created_at`                 | ms epoch 문자열 (정렬 키)                                        |
 | `started_at`, `completed_at` | ms epoch                                                         |
-| `title` / `summary`          | 토스트·목록용 짧은 텍스트                                        |
+| `title` / `summary`          | 토스트/목록용 짧은 텍스트                                        |
 | `result`                     | JSON (RCA 후보 / 리포트 페이로드)                                |
 | `error`                      | 실패 시 사유                                                     |
 | `ttl`                        | created_at + 30d (자동 만료)                                     |
@@ -92,7 +92,7 @@ enabled bool, last_run_at, created_at)`. task_scheduler가 due 판정 후 enqueu
 ### 3.1 CDK
 
 - **foundation_stack**: `agent_tasks_table`(+Streams +2 GSI), `grant_task_enqueue()`
-  (put 권한) / `grant_task_manage()`(읽기·쓰기) 헬퍼.
+  (put 권한) / `grant_task_manage()`(읽기/쓰기) 헬퍼.
 - **data_stack**:
   - alert_evaluator에 agent_tasks put 권한 부여.
   - `task_scheduler` Lambda(EventBridge rate; 캐시 read + agent_tasks put).
@@ -118,7 +118,7 @@ enabled bool, last_run_at, created_at)`. task_scheduler가 due 판정 후 enqueu
 - `lib/alert-stream.ts` PushedAlert에 `type:"task"` 수용 → `use-alert-badge`가
   "RCA 준비됨: <cluster> →" 토스트(저장 RCA 딥링크).
 - 저장 RCA 뷰: `rca-drawer`를 저장 결과로 렌더(에이전트 SSE 대신 task.result).
-- `/tasks` 목록(또는 Activity 확장): status·kind·클러스터(엔진 배지)·결과 링크.
+- `/tasks` 목록(또는 Activity 확장): status, kind, 클러스터(엔진 배지), 결과 링크.
 - 수동 실행 버튼: 대시보드/Fleet → `POST /api/tasks`.
 - 예약 작업 설정 UI: Alerts 페이지 인접 섹션 — create/list/delete.
 
@@ -127,12 +127,12 @@ enabled bool, last_run_at, created_at)`. task_scheduler가 due 판정 후 enqueu
 - 모든 작업은 **읽기 전용**(캐시 분석). write 액션은 기존 Approval 게이트를 거치므로
   Task가 자동으로 변경을 실행하지 않는다.
 - 수동 `POST /api/tasks`는 인증 필요(authorizer). cluster_id는 레지스트리 검증.
-- 디듀프 + TTL로 작업 폭주·잔존 방지.
+- 디듀프 + TTL로 작업 폭주와 잔존 방지.
 
 ## 5. Increments (구현 순서)
 
 1. **백엔드 코어**: agent_tasks 테이블+스트림(foundation), task_worker(RCA),
-   alert_evaluator 훅+디듀프, `GET /api/tasks`·`/api/tasks/{id}`. → 배포·종단검증
+   alert_evaluator 훅+디듀프, `GET /api/tasks`, `/api/tasks/{id}`. → 배포와 종단검증
    (경보→task→worker→result→WS).
 2. **프런트 자동 RCA**: 토스트 task 처리 + 저장 RCA 뷰 + `/tasks` 목록. → 검증.
 3. **수동 실행**: `POST /api/tasks` + 수동 버튼. → 검증.

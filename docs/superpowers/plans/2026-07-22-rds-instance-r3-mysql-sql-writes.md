@@ -133,7 +133,7 @@ Decision points (recon-verified lines):
 
 ### Task 6: frontend approval-card + agent prompts
 
-**Files:** Modify `frontend/src/components/approval/approval-card.tsx` (ACTION_RISK/ACTION_GUIDE maps — read the existing prewarm/add_reader entries and mirror; reboot+class=high, snapshot=low) ; `agent/prompts/system_prompt.py` + `agent/prompts/cheatsheet.py` (new rds_instance section: SQL 실행은 MySQL만(직접 연결)·SQL Server는 R-4, write 3종은 승인 필수, Aurora 전용 툴 호출 금지 목록 재확인; mirror the DocDB/DynamoDB section style).
+**Files:** Modify `frontend/src/components/approval/approval-card.tsx` (ACTION_RISK/ACTION_GUIDE maps — read the existing prewarm/add_reader entries and mirror; reboot+class=high, snapshot=low) ; `agent/prompts/system_prompt.py` + `agent/prompts/cheatsheet.py` (new rds_instance section: SQL 실행은 MySQL만(직접 연결), SQL Server는 R-4, write 3종은 승인 필수, Aurora 전용 툴 호출 금지 목록 재확인; mirror the DocDB/DynamoDB section style).
 
 - [ ] **Step 1:** approval-card entries (Korean guides, risk levels). **Step 2:** prompt sections. **Step 3:** `npx tsc --noEmit && npm run build` + `python3 -m ast agent/prompts/system_prompt.py`-style syntax check (NO py_compile in agent/ — **pycache** ban; use `python3 -c "import ast; ast.parse(open('agent/prompts/system_prompt.py').read())"`). **Step 4: Commit** `feat(ui)+feat(agent): rds_instance write approval cards + prompts (R-3)`.
 
@@ -149,5 +149,5 @@ Decision points (recon-verified lines):
 
 ## Execution notes (orchestrator)
 
-- Routing: T1·T2 Sonnet(정밀 사양·소형), T3·T5 Opus(핵심 통합), T4 Sonnet, T6 Sonnet, T7 orchestrator. 순차.
+- Routing: T1/T2 Sonnet(정밀 사양, 소형), T3/T5 Opus(핵심 통합), T4 Sonnet, T6 Sonnet, T7 orchestrator. 순차.
 - 승인 UI 정지점은 T7 한 곳으로 몰아 사용자 방문 1회로 처리.

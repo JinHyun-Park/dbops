@@ -30,7 +30,7 @@ def compute_node_resize_cost(engine, region, current_node_type, current_node_cou
         delta = proposed_monthly - current_monthly
     note = ("일부 노드 단가를 AWS Price List API에서 확인하지 못해 부분 추정입니다."
             if status == "partial" else
-            "노드-시간 비용만 계산했습니다(데이터 전송·스냅샷 스토리지·예약 노드 제외, 730h/월).")
+            "노드-시간 비용만 계산했습니다(데이터 전송/스냅샷 스토리지/예약 노드 제외, 730h/월).")
     return {
         "status": status, "engine": engine, "region": region,
         "current": {"node_type": current_node_type, "node_count": current_node_count, "price_per_hour": cur_price},

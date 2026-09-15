@@ -82,7 +82,7 @@ _(deferred — see note above)_
 
 (DocDB cost labels dropped — Part 2 deferred, no new DocDB finding is emitted.)
 
-- [ ] **Step 1:** In `simulator/page.tsx`, compute `const fam = engineFamily(current?.engine)`. When a cluster is selected but `fam !== "relational"` (i.e. documentdb/dynamodb), render an `EmptyState` titled "시뮬레이션은 Aurora 전용" with description "업그레이드·파라미터·DDL·스케일링 시뮬레이션은 Aurora PostgreSQL/MySQL 클러스터에만 적용됩니다. DynamoDB 용량/비용 권장은 대시보드의 Maintenance Health 패널과 Chat 진단을 참고하세요." Keep the existing four-panel block for relational.
+- [ ] **Step 1:** In `simulator/page.tsx`, compute `const fam = engineFamily(current?.engine)`. When a cluster is selected but `fam !== "relational"` (i.e. documentdb/dynamodb), render an `EmptyState` titled "시뮬레이션은 Aurora 전용" with description "업그레이드, 파라미터, DDL, 스케일링 시뮬레이션은 Aurora PostgreSQL/MySQL 클러스터에만 적용됩니다. DynamoDB 용량/비용 권장은 대시보드의 Maintenance Health 패널과 Chat 진단을 참고하세요." Keep the existing four-panel block for relational.
 - [ ] **Step 2:** `cd frontend && npx tsc --noEmit && npx eslint src/app/simulator/page.tsx` → clean.
 - [ ] **Step 3:** Commit (two-step if prettier reformats: `git add -A` then re-commit).
 

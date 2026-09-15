@@ -169,7 +169,7 @@ def _created_ms(item: dict) -> float:
 
 def _scan_all(table, **kwargs) -> list:
     """LastEvaluatedKey를 끝까지 따라가는 scan. 단일 호출 scan은 1MB 페이지에서
-    조용히 잘린다 — 승인 이력이 쌓이면 활동 피드·목록·approval_id 조회가
+    조용히 잘린다 — 승인 이력이 쌓이면 활동 피드, 목록, approval_id 조회가
     임의로 누락되는, approval_guard의 Limit=1 버그와 같은 잘림 패밀리."""
     items = []
     while True:
@@ -315,7 +315,7 @@ def _handle_scaleout(event, table, method, path, path_params, headers) -> dict:
                         "body": json.dumps({
                             "error": "cannot_cancel",
                             "detail": f"현재 상태({_scaleout_state(item)})에서는 취소할 수 없습니다 — "
-                                      "이미 승인·예열·완료된 작업입니다.",
+                                      "이미 승인/예열/완료된 작업입니다.",
                         })}
             raise
         return {"statusCode": 200, "headers": headers,
@@ -373,10 +373,10 @@ def _execute_enable_data_api(item: dict) -> dict:
     재호출(replay) 단계가 없어, 실행이 DBA의 인증된 승인 클릭 아래에서 일어난다.
 
     권한은 rds:EnableHttpEndpoint 단일 액션으로 스코프한다. ModifyDBCluster를
-    쓰면 마스터 패스워드 변경·삭제 보호 해제까지 가능한 광범위 권한을 플랫폼에
+    쓰면 마스터 패스워드 변경과 삭제 보호 해제까지 가능한 광범위 권한을 플랫폼에
     줘야 하므로, 설정 1비트짜리 전용 API를 쓰는 것이 이 기능의 보안 전제다.
     (참고: modify-db-cluster --enable-http-endpoint는 legacy Serverless v1
-    전용으로 Sv2·프로비저닝에선 조용히 무시된다 — 실측 확인.)"""
+    전용으로 Sv2/프로비저닝에선 조용히 무시된다 — 실측 확인.)"""
     cluster_id = item.get("cluster_id", "")
     table_name = os.environ.get("CLUSTERS_TABLE", "")
     if not table_name:
@@ -564,7 +564,7 @@ def _handle_endpoint_requests(event, method, headers) -> dict:
                 "approval_id": minted["approval_id"],
                 "cluster_id": cluster_id,
                 "action": action,
-                "message": "승인 요청이 생성되었습니다 — 승인 센터에서 검토·승인하면 실행됩니다.",
+                "message": "승인 요청이 생성되었습니다 — 승인 센터에서 검토하고 승인하면 실행됩니다.",
             })}
 
 
@@ -652,7 +652,7 @@ def _handle_scaleout_az(event, method, headers) -> dict:
                 "created": created,
                 "failed": failed,
                 "message": (f"{len(created)}개 리더 추가 승인 요청이 생성되었습니다 — "
-                            "승인 센터에서 각각 검토·승인하면 실행됩니다."),
+                            "승인 센터에서 각각 검토하고 승인하면 실행됩니다."),
             }, default=str)}
 
 
@@ -890,7 +890,7 @@ def lambda_handler(event, context):
             }
 
         # UI발 enable_data_api 요청은 멱등 — 같은 클러스터의 pending 요청이
-        # 이미 있으면 새로 만들지 않고 그 행을 돌려준다 (버튼 더블클릭·
+        # 이미 있으면 새로 만들지 않고 그 행을 돌려준다 (버튼 더블클릭이나
         # 페이지 재방문으로 승인 대기열이 중복으로 쌓이는 것 방지).
         if action_type == "enable_data_api":
             existing = _scan_all(

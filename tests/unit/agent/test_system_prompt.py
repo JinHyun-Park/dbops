@@ -61,3 +61,45 @@ def test_existing_extra_context_preserved_with_visible_clusters():
     assert "ORGCHART: alice owns prod-1" in out
     assert "접근 제한" in out
     assert "c-open" in out
+
+
+# ---------------------------------------------------------------------------
+# Response language follows the caller's locale (UI Korean/English toggle).
+# ---------------------------------------------------------------------------
+
+def test_answer_language_fails_safe_to_korean():
+    sp = _load()
+    # Everything unrecognised resolves to Korean, which is what every caller
+    # got before a locale existed. Only an explicit English tag flips it.
+    for value in (None, "", "ko", "ko-KR", "KO", "ja", "zh-CN", 5, ["en"], {}):
+        assert sp.answer_language(value) == "ko", value
+    for value in ("en", "en-US", "EN", "en-GB", " en "):
+        assert sp.answer_language(value) == "en", value
+
+
+def test_korean_locale_keeps_the_korean_answer_rule():
+    sp = _load()
+    out = sp.build_system_prompt("", locale="ko")
+    assert "5. 한국어로 답변하세요." in out
+    # No locale at all must be byte-identical to the Korean answer.
+    assert sp.build_system_prompt("") == out
+
+
+def test_english_locale_swaps_the_answer_rule_only():
+    sp = _load()
+    out = sp.build_system_prompt("", locale="en-US")
+    assert "5. Answer in English." in out
+    assert "한국어로 답변하세요" not in out
+    # The instructions themselves stay Korean; only the output language moves.
+    assert "당신은 DBA를 위한 AI 데이터베이스 운영 전문가입니다." in out
+    # DBA terms of art stay English on both sides.
+    assert "Replica Lag" in out
+
+
+def test_tenancy_refusal_follows_the_locale():
+    sp = _load()
+    ko = sp.build_system_prompt("", visible_clusters={"c-1"})
+    en = sp.build_system_prompt("", visible_clusters={"c-1"}, locale="en")
+    assert "한국어로 안내하세요" in ko
+    assert "한국어로 안내하세요" not in en
+    assert "say in English that you do not have access to that cluster" in en

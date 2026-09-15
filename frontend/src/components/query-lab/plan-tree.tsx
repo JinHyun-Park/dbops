@@ -33,7 +33,7 @@ export function summarizePlanForLLM(root: PgPlanRoot): string {
   const total = totalSelfTime(root.Plan);
   const lines: string[] = [];
   lines.push(
-    `Execution: ${root["Execution Time"]?.toFixed(2) ?? "?"}ms · Planning: ${
+    `Execution: ${root["Execution Time"]?.toFixed(2) ?? "?"}ms, Planning: ${
       root["Planning Time"]?.toFixed(2) ?? "?"
     }ms`,
   );
@@ -360,7 +360,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
       issues.push({
         severity: pct > 40 ? "critical" : "warning",
         title: "대형 테이블 Seq Scan",
-        detail: `${label} read ${fmtRows(actualRows)} rows · ${pct.toFixed(
+        detail: `${label} read ${fmtRows(actualRows)} rows, ${pct.toFixed(
           1,
         )}% of execution time`,
         node: label,
@@ -379,11 +379,11 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
       issues.push({
         severity: "warning",
         title: "정렬이 디스크로 스필됨",
-        detail: `${label} · method "${sortMethod}"${
-          spaceKb ? ` · ${fmtRows(spaceKb)} kB used` : ""
+        detail: `${label}, method "${sortMethod}"${
+          spaceKb ? `, ${fmtRows(spaceKb)} kB used` : ""
         }`,
         node: label,
-        fix: "work_mem를 늘려 in-memory 정렬 유도 (세션 내 SET work_mem) · 또는 LIMIT을 더 빠른 단계로 push down",
+        fix: "work_mem를 늘려 in-memory 정렬 유도 (세션 내 SET work_mem), 또는 LIMIT을 더 빠른 단계로 push down",
       });
     }
 
@@ -393,7 +393,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
       issues.push({
         severity: "warning",
         title: "Hash 멀티배치 (디스크 스필)",
-        detail: `${label} · ${hashBatches} batches`,
+        detail: `${label}, ${hashBatches} batches`,
         node: label,
         fix: "work_mem 부족 — 빌드측 테이블이 hash table에 안 맞음. work_mem 증가 또는 join order 변경 검토",
       });
@@ -405,7 +405,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
       issues.push({
         severity: "info",
         title: "Bitmap recheck에서 다량 행 폐기",
-        detail: `${label} · ${fmtRows(rechecked)} rows discarded after bitmap`,
+        detail: `${label}, ${fmtRows(rechecked)} rows discarded after bitmap`,
         node: label,
         fix: "work_mem 부족으로 lossy bitmap이 됨 — 해당 인덱스 selectivity 재확인 또는 work_mem 상향",
       });
@@ -426,7 +426,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
           issues.push({
             severity: ratio > 1000 || ratio < 0.001 ? "warning" : "info",
             title: "행 수 추정 오차",
-            detail: `${label} · planner expected ${fmtRows(
+            detail: `${label}, planner expected ${fmtRows(
               planRows,
             )}, got ${fmtRows(actualRows)} (${
               ratio > 1
@@ -434,7 +434,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
                 : `${(1 / ratio).toFixed(0)}x↓`
             })`,
             node: label,
-            fix: "ANALYZE 실행으로 통계 갱신 · default_statistics_target 상향 · CREATE STATISTICS로 다중 컬럼 의존성 통계 추가",
+            fix: "ANALYZE 실행으로 통계 갱신, default_statistics_target 상향, CREATE STATISTICS로 다중 컬럼 의존성 통계 추가",
           });
         }
       }
@@ -450,11 +450,11 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
         issues.push({
           severity: "info",
           title: "콜드 버퍼 읽기 (캐시 미스 높음)",
-          detail: `${label} · ${sharedRead} disk reads vs ${
+          detail: `${label}, ${sharedRead} disk reads vs ${
             sharedHit ?? 0
           } cache hits (${(ratio * 100).toFixed(0)}% miss)`,
           node: label,
-          fix: "shared_buffers 또는 메모리 부족 · 쿼리가 처음 실행이면 두번째부터 캐시됨. 반복 실행에도 cold면 working set이 buffer를 초과",
+          fix: "shared_buffers 또는 메모리 부족. 쿼리가 처음 실행이면 두번째부터 캐시됨. 반복 실행에도 cold면 working set이 buffer를 초과",
         });
       }
     }
@@ -467,9 +467,9 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
         issues.push({
           severity: pct > 30 ? "critical" : "warning",
           title: "Nested Loop 내부 반복 과다",
-          detail: `${label} · inner side ran ${fmtRows(innerLoops)} times`,
+          detail: `${label}, inner side ran ${fmtRows(innerLoops)} times`,
           node: label,
-          fix: "Hash Join 또는 Merge Join을 유도 (조인 컬럼에 인덱스 + ANALYZE) · 또는 SET enable_nestloop=off로 검증",
+          fix: "Hash Join 또는 Merge Join을 유도 (조인 컬럼에 인덱스 + ANALYZE), 또는 SET enable_nestloop=off로 검증",
         });
       }
     }
@@ -713,7 +713,7 @@ export function summarizeMysqlPlanForLLM(plan: MysqlPlanRoot): string {
   const { tables, flags, queryCost } = mysqlPlanParts(plan);
   const lines: string[] = [];
   lines.push(
-    `Engine: MySQL · EXPLAIN FORMAT=JSON (plan only, NOT executed) · query_cost: ${fmtCost(
+    `Engine: MySQL, EXPLAIN FORMAT=JSON (plan only, NOT executed), query_cost: ${fmtCost(
       queryCost,
     )}`,
   );
@@ -734,7 +734,7 @@ export function summarizeMysqlPlanForLLM(plan: MysqlPlanRoot): string {
     else bits.push("no index used");
     if (t.cost_info?.prefix_cost)
       bits.push(`prefix_cost=${t.cost_info.prefix_cost}`);
-    lines.push(`  ${i + 1}. ${t.table_name ?? "?"}: ${bits.join(" · ")}`);
+    lines.push(`  ${i + 1}. ${t.table_name ?? "?"}: ${bits.join(", ")}`);
     if (t.attached_condition)
       lines.push(`       condition: ${t.attached_condition}`);
   });
@@ -766,7 +766,7 @@ function MysqlIssues({
         severity: "high",
         text: `${t.table_name}: access_type=ALL, ${fmtRows(
           examined,
-        )} 행을 전부 훑습니다. WHERE·JOIN 컬럼에 인덱스를 검토하세요.`,
+        )} 행을 전부 훑습니다. WHERE와 JOIN 컬럼에 인덱스를 검토하세요.`,
       });
     }
     if (
@@ -785,13 +785,13 @@ function MysqlIssues({
   if (flags.filesort) {
     issues.push({
       severity: "medium",
-      text: "using_filesort: 정렬을 인덱스 순서로 처리하지 못해 옵티마이저가 직접 정렬합니다. ORDER BY·GROUP BY 컬럼에 맞는 인덱스로 정렬을 없앨 수 있습니다.",
+      text: "using_filesort: 정렬을 인덱스 순서로 처리하지 못해 옵티마이저가 직접 정렬합니다. ORDER BY와 GROUP BY 컬럼에 맞는 인덱스로 정렬을 없앨 수 있습니다.",
     });
   }
   if (flags.temporaryTable) {
     issues.push({
       severity: "medium",
-      text: "using_temporary_table: 내부 임시 테이블을 만듭니다 (인덱스로 해결되지 않는 GROUP BY·DISTINCT·UNION에서 흔합니다). 커지면 디스크로 스필합니다.",
+      text: "using_temporary_table: 내부 임시 테이블을 만듭니다 (인덱스로 해결되지 않는 GROUP BY, DISTINCT, UNION에서 흔합니다). 커지면 디스크로 스필합니다.",
     });
   }
   if (queryCost != null && queryCost >= 100_000) {
@@ -876,7 +876,7 @@ function MysqlPlanView({ plan }: { plan: MysqlPlanRoot }) {
 
       <div className="border border-zinc-800 bg-zinc-900/40">
         <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 px-3 py-2 border-b border-zinc-800">
-          join order · 추정값입니다 (실행 통계 아님)
+          join order: 추정값입니다 (실행 통계 아님)
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -1017,7 +1017,7 @@ export function PlanTree({ plan }: Props) {
 
       <div className="border border-zinc-800 bg-zinc-900/40">
         <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 px-3 py-2 border-b border-zinc-800">
-          plan tree · click a row for detail
+          plan tree: click a row for detail
         </div>
         <div className="overflow-y-auto max-h-[60vh]">
           <NodeRow node={root.Plan} depth={0} totalTime={totalTime} />

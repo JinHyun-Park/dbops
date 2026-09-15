@@ -113,7 +113,7 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
   read_latency: {
     label: "Read Latency",
     what: "읽기 I/O 1건당 평균 소요 시간 (CloudWatch ReadLatency, 수집은 초 단위).",
-    why: "스토리지 포화·IOPS 한계 신호. 20ms를 넘어 지속되면 쿼리 응답 시간이 그대로 늘어난다.",
+    why: "스토리지 포화와 IOPS 한계 신호. 20ms를 넘어 지속되면 쿼리 응답 시간이 그대로 늘어난다.",
     unit: "ms",
   },
   write_latency: {
@@ -133,7 +133,7 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
   cache_cpu: {
     label: "CPU",
     what: "캐시 노드 전체 CPU 사용률 (CPUUtilization).",
-    why: "멀티스레드인 Memcached에서는 이 값이 주 포화 지표. Redis에서는 복제·스냅샷 같은 백그라운드 작업까지 포함한다.",
+    why: "멀티스레드인 Memcached에서는 이 값이 주 포화 지표. Redis에서는 복제와 스냅샷 같은 백그라운드 작업까지 포함한다.",
     unit: "%",
   },
   memory_usage_pct: {
@@ -145,7 +145,7 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
   evictions: {
     label: "Evictions/min",
     what: "메모리 확보를 위해 삭제된 키 수.",
-    why: "0이 정상. 계속 발생하면 working set이 노드 메모리를 초과한 상태다. 스케일업 또는 TTL·키 정리가 필요하다.",
+    why: "0이 정상. 계속 발생하면 working set이 노드 메모리를 초과한 상태다. 스케일업 또는 TTL과 키 정리가 필요하다.",
     unit: "/min",
   },
   curr_connections: {
@@ -156,7 +156,7 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
   replication_lag: {
     label: "Replication Lag",
     what: "replica가 primary를 따라잡지 못한 지연.",
-    why: "replica 읽기에서 stale 값을 반환할 수 있는 시간. 쓰기 폭주·네트워크 지연·대형 키 복제 시 증가.",
+    why: "replica 읽기에서 stale 값을 반환할 수 있는 시간. 쓰기 폭주, 네트워크 지연, 대형 키 복제 시 증가.",
     unit: "s",
   },
   swap_usage: {
@@ -189,7 +189,7 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
   read_throttle_events: {
     label: "Read Throttles",
     what: "프로비저닝된 읽기 용량을 초과해 스로틀된 이벤트 수.",
-    why: "0이 정상. 발생하면 읽기가 지연·거부된다. 파티션 편중(hot key)이거나 RCU가 부족한 상태.",
+    why: "0이 정상. 발생하면 읽기가 지연되거나 거부된다. 파티션 편중(hot key)이거나 RCU가 부족한 상태.",
   },
   write_throttle_events: {
     label: "Write Throttles",
@@ -199,7 +199,7 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
   throttled_requests: {
     label: "Throttled Requests",
     what: "용량 초과로 거부된 요청 수 (ProvisionedThroughputExceeded).",
-    why: "테이블·인덱스 단위 스로틀의 총량. 지속되면 애플리케이션에 그대로 에러로 노출된다.",
+    why: "테이블과 인덱스 단위 스로틀의 총량. 지속되면 애플리케이션에 그대로 에러로 노출된다.",
   },
   latency_ms_getitem: {
     label: "GetItem Latency",
@@ -210,7 +210,7 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
   latency_ms_query: {
     label: "Query Latency",
     what: "Query 요청의 평균 응답 시간 (SuccessfulRequestLatency).",
-    why: "스캔 범위가 넓거나 필터로 대량 항목을 버리면 상승한다. 키 설계·GSI 재검토 신호.",
+    why: "스캔 범위가 넓거나 필터로 대량 항목을 버리면 상승한다. 키 설계와 GSI 재검토 신호.",
     unit: "ms",
   },
 
@@ -232,7 +232,7 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
   mssql_server_memory_used_pct: {
     label: "Total / Target Server Memory",
     what: "SQL Server가 지금 확보한 메모리(Total Server Memory)를 확보 목표(Target Server Memory)로 나눈 비율. 건강도 점수가 아니라 버퍼 풀 확보가 어디까지 진행됐는지를 나타낸다.",
-    why: "낮은 값이 곧 문제는 아니다. 수요가 없으면 SQL Server는 Target까지 올릴 이유가 없어 Total이 Target 밑에 오래 머무는 것이 정상 정상상태다(실측: 유휴 상태의 dbops-demo-mssql에서 37~43%, 같은 시점 Page Life Expectancy 26,429초·Memory Grants Pending 0·Processes Blocked 0). 100%에 붙어 있으면 목표만큼 다 확보한 상태로, 더 필요하면 max server memory 상한을 본다. 이 지표만으로는 유휴와 메모리 압박을 구분할 수 없으므로, 압박 여부는 Page Life Expectancy와 Memory Grants Pending으로 판단한다.",
+    why: "낮은 값이 곧 문제는 아니다. 수요가 없으면 SQL Server는 Target까지 올릴 이유가 없어 Total이 Target 밑에 오래 머무는 것이 정상 정상상태다(실측: 유휴 상태의 dbops-demo-mssql에서 37~43%, 같은 시점 Page Life Expectancy 26,429초, Memory Grants Pending 0, Processes Blocked 0). 100%에 붙어 있으면 목표만큼 다 확보한 상태로, 더 필요하면 max server memory 상한을 본다. 이 지표만으로는 유휴와 메모리 압박을 구분할 수 없으므로, 압박 여부는 Page Life Expectancy와 Memory Grants Pending으로 판단한다.",
     unit: "%",
   },
   mssql_processes_blocked: {
@@ -243,7 +243,7 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
   mssql_memory_grants_pending: {
     label: "Memory Grants Pending",
     what: "쿼리 실행에 필요한 메모리 그랜트를 받지 못해 대기 중인 쿼리 수.",
-    why: "0이 정상. 0보다 크면 정렬·해시 조인이 메모리를 못 받아 대기 중이라는 뜻으로, 메모리 부족이 이미 쿼리 지연으로 나타나고 있는 상태다.",
+    why: "0이 정상. 0보다 크면 정렬과 해시 조인이 메모리를 못 받아 대기 중이라는 뜻으로, 메모리 부족이 이미 쿼리 지연으로 나타나고 있는 상태다.",
   },
 };
 

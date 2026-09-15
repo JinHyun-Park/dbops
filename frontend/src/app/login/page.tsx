@@ -159,7 +159,7 @@ function LoginForm() {
         <Link href="/forgot" className="hover:text-amber-300 transition-colors">
           비밀번호 찾기
         </Link>
-        <span className="text-zinc-700">공개 가입 없음 · admin 전용</span>
+        <span className="text-zinc-700">공개 가입 없음, admin 전용</span>
       </div>
     </AuthLayout>
   );

@@ -129,7 +129,7 @@ If the repo has a frontend unit harness, add tests (extract handles no-block/mul
   - In the `onDone` callback: `extractSqlBlock(analysisText)` → `proposedSql`. If present, call the explain fetch with `analyze:false` for BOTH the original SQL and `proposedSql`; store `{beforePlan, afterPlan}` + their `planTotalCost`. Wrap each EXPLAIN in try/catch — a failed/invalid proposed EXPLAIN (or 403 for non-admin) shows a graceful note, never throws; the suggestion text still renders.
   - Add a "리라이팅 제안" button next to the existing analyze/EXPLAIN actions (same styling); cluster-not-selected guard like analyze.
 
-- [ ] **Step 4: before/after panel + banner** — when `beforePlan`/`afterPlan` exist, render a compact compare: 추정 total cost 원본 vs 제안 (+ 개선/악화 % via the two `planTotalCost`s; guard null), and both plans via the existing `PlanTree` component. Above the rewrite output, an advisory banner: "AI 제안 — 실행 전 동등성·성능을 직접 검증하세요 (아래 비교는 실행 없이 planner 추정 cost)". Reuse existing styling; don't alter the existing EXPLAIN/analysis rendering.
+- [ ] **Step 4: before/after panel + banner** — when `beforePlan`/`afterPlan` exist, render a compact compare: 추정 total cost 원본 vs 제안 (+ 개선/악화 % via the two `planTotalCost`s; guard null), and both plans via the existing `PlanTree` component. Above the rewrite output, an advisory banner: "AI 제안 — 실행 전 동등성과 성능을 직접 검증하세요 (아래 비교는 실행 없이 planner 추정 cost)". Reuse existing styling; don't alter the existing EXPLAIN/analysis rendering.
 
 - [ ] **Step 5: Build** — `cd frontend && npm run build` → exit 0, `/query-lab` in route list.
 

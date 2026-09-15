@@ -416,7 +416,7 @@ export function HealthScore({ clusterId, engine }: Props) {
             {grade.label}
           </div>
           <div className="text-xs text-zinc-500 mt-1">
-            {signals.length} signals · weighted
+            {signals.length} signals, weighted
           </div>
         </div>
       </div>

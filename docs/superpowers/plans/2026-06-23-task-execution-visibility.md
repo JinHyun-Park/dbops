@@ -126,7 +126,7 @@ def _run_rca(cluster_id: str):
     nsrc = len([k for k, v in examined.items() if v]) if isinstance(examined, dict) else 0
     steps.append({"step": "진단", "tool": "diagnose_root_cause",
                   "ms": int((time.time() - t) * 1000),
-                  "detail": f"{nsrc}개 소스 검사 · 후보 {len(cands)}"})
+                  "detail": f"{nsrc}개 소스 검사, 후보 {len(cands)}"})
     if isinstance(res, dict):
         t = time.time()
         narr = _narrative(cluster_id, res)
@@ -365,7 +365,7 @@ export async function fetchTaskStats(): Promise<TaskStats> {
 
 - [ ] **Step 2: Trace + signals in `TaskRow` detail** — inside the `open && (done||failed)` block, after the existing narrative/candidates/lines, add:
 
-  - **실행 추적**: if `task.trace?.length`, an ordered list of `step` — `tool` · `detail` · `{ms}ms` (monospace, muted). Show total: `task.duration_ms` as `${(duration_ms/1000).toFixed(1)}s` when present.
+  - **실행 추적**: if `task.trace?.length`, an ordered list of `step` — `tool`, `detail`, `{ms}ms` (monospace, muted). Show total: `task.duration_ms` as `${(duration_ms/1000).toFixed(1)}s` when present.
   - **검사한 신호** (RCA only): if `task.result?.signals_examined`, a small key→count table (source → count); list `skipped` sources muted if present.
     Reuse the existing detail container styling (border-zinc / text-xs / font-mono). Korean labels.
 

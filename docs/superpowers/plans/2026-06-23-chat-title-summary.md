@@ -10,7 +10,7 @@
 
 - Frontend-only — no backend/CDK/openapi. Reuse `streamChat` + the existing `persist`/`putChatSession` flow.
 - **Throwaway session id** (`title-...`) so title-gen never pollutes the conversation's agent memory (exactly like `generateFollowups`).
-- Trigger ONCE, on the FIRST exchange only (when the title is still the auto first-message-slice). Do not regenerate on every turn or overwrite a user-set/handoff title (e.g. the `RCA · {cluster}` handoff title at chat-panel.tsx:405).
+- Trigger ONCE, on the FIRST exchange only (when the title is still the auto first-message-slice). Do not regenerate on every turn or overwrite a user-set/handoff title (e.g. the `RCA: {cluster}` handoff title at chat-panel.tsx:405).
 - Korean title, ≤ ~6 words / ≤ 50 chars; strip surrounding quotes/markdown/code-fences; if generation fails or is empty, keep the existing first-message title (no regression).
 - Best-effort + silent (no error surfaced); abortable like followups (a `titleAbortRef`), cancelled on a new send.
 - Commit: conventional subject; NO `Co-Authored-By: Claude` trailer; no internal-roadmap refs. Frontend prettier hook → `git add -A` + re-commit.
@@ -23,7 +23,7 @@
 
   - Skip if `assistantText.trim().length < 40` (too short to title meaningfully).
   - Add a `titleAbortRef = useRef<AbortController|null>(null)`; abort prior before starting.
-  - Prompt (Korean): `이 질문/답변을 6단어 이내의 간결한 한국어 제목으로 요약해줘. 제목 텍스트만 출력 — 따옴표·마크다운·코드펜스·접두어 금지.\n\nQ: ${userText}\n\nA: ${assistantText.slice(0,2000)}`
+  - Prompt (Korean): `이 질문/답변을 6단어 이내의 간결한 한국어 제목으로 요약해줘. 제목 텍스트만 출력 — 따옴표, 마크다운, 코드펜스, 접두어 금지.\n\nQ: ${userText}\n\nA: ${assistantText.slice(0,2000)}`
   - throwaway session id `title-${convId}-${Date.now()}`, `modelId`.
   - On done: take the buffer, trim, strip wrapping quotes/backticks, collapse newlines, cap to 50 chars; if non-empty, `persist` the conversation's `title` (only if that conv's current title still equals the first-message-slice — guard against overwriting a user/handoff title). The existing persist→putChatSession path saves it.
   - deps: `[modelId, persist]`.

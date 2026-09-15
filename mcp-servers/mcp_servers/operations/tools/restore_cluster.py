@@ -197,7 +197,7 @@ def restore_cluster_impl(
         # what the DBA needs to retry. The RDS error itself only goes to CloudWatch.
         return {"status": "restore_failed", "cluster_id": cluster_id,
                 "new_cluster_id": nid, "mode": mode,
-                "reason": "복원 시작에 실패했습니다. 스냅샷 식별자·복원 시점이 유효한지, "
+                "reason": "복원 시작에 실패했습니다. 스냅샷 식별자와 복원 시점이 유효한지, "
                           "복원 대상 이름이 이미 사용 중이 아닌지 확인하세요 "
                           "(자세한 원인은 서버 로그를 확인하세요)."}
 

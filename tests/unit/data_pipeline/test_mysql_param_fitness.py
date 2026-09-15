@@ -1,14 +1,14 @@
 """MySQL Parameter Fitness 진단 단위 테스트.
 
 collect_mysql_param_fitness는 RDS Data API에 의존하므로 _execute를 모킹해
-캐시 응답(메타·MySQL global variables·메트릭)을 주입하고 emit된 finding을
+캐시 응답(메타, MySQL global variables, 메트릭)을 주입하고 emit된 finding을
 확인한다. 핵심은 per-connection 버퍼 × max_connections OOM 상호작용 규칙.
 
 IDENTIFIER PINNING (아래 _ROUTES). 이 파일의 더블은 예전에 `"FROM cluster_meta"
 in sql` 같은 부분문자열로 분기했다. 그래서 `cluster_meta` → `cluster_metaZZZ`로
 바꿔도 부분문자열이 그대로 남아 캔드 로우가 계속 반환됐고(MEASURED: 이 파일의
 mutation 3건 모두 통과, 전체 2615개 스위트도 통과) 실행되면 반드시 깨지는 SQL이
-초록으로 나갔다. 이제 더블은 각 statement가 명명해야 하는 테이블·컬럼·별칭을
+초록으로 나갔다. 이제 더블은 각 statement가 명명해야 하는 테이블, 컬럼, 별칭을
 정규식으로 확인하고, 모르는 SQL은 캔드 로우 대신 AssertionError를 낸다.
 반쪽 정보가 아니라 양쪽 다 확보한 상태다: 여기서 식별자를 고정하고,
 tests/unit/test_mysql_tier_cache_sql_real_pg.py가 같은 statement를 실제

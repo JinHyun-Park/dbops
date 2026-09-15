@@ -222,8 +222,8 @@ def _cmd_timeline(args: list[str]) -> dict:
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    f"*Timeline for `{cluster_id}`* — 알람·RDS 이벤트·스키마 "
-                    "변경·실행된 쓰기가 시간순으로:"
+                    f"*Timeline for `{cluster_id}`* — 알람, RDS 이벤트, 스키마 "
+                    "변경, 실행된 쓰기가 시간순으로:"
                 ),
             },
         },
@@ -262,7 +262,7 @@ def _cmd_clusters() -> dict:
         conn = it.get("connection_status") or "untested"
         emoji = {"ok": "🟢", "failed": "🔴", "untested": "⚪"}.get(conn, "⚪")
         lines.append(
-            f"{emoji} `{it.get('cluster_id')}` · {it.get('engine', '—')}"
+            f"{emoji} `{it.get('cluster_id')}`, {it.get('engine', '—')}"
         )
     return _slack_blocks([
         {

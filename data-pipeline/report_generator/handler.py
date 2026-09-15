@@ -424,7 +424,7 @@ def _fleet_summary(report_date: str, fleet_data: dict) -> str:
     ]
     pieces = [
         f"Fleet 전체 요약 ({report_date})",
-        f"클러스터 {n}대 · 경보 {alerts}건 · 슬로우쿼리 {slow}건.",
+        f"클러스터 {n}대, 경보 {alerts}건, 슬로우쿼리 {slow}건.",
     ]
     if worst:
         pieces.append(f"주의가 필요한 클러스터: {', '.join(worst[:5])}.")
@@ -495,11 +495,11 @@ def _post_json(url: str, payload: dict, timeout: int = 5) -> tuple[int, str]:
 
 def _build_report_slack_blocks(cluster_id, report_date, report_type, summary):
     return {
-        "text": f"DBOps 리포트 · {cluster_id}",
+        "text": f"DBOps 리포트: {cluster_id}",
         "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": f"📋 DBOps 리포트 · {report_date}"}},
+            {"type": "header", "text": {"type": "plain_text", "text": f"📋 DBOps 리포트: {report_date}"}},
             {"type": "section", "text": {"type": "mrkdwn",
-                "text": f"*클러스터* `{cluster_id}` · *유형* {report_type}\n\n{summary[:2800]}"}},
+                "text": f"*클러스터* `{cluster_id}`, *유형* {report_type}\n\n{summary[:2800]}"}},
         ],
     }
 
@@ -508,9 +508,9 @@ def _build_report_teams_card(cluster_id, report_date, report_type, summary) -> d
     return {
         "@type": "MessageCard",
         "@context": "http://schema.org/extensions",
-        "summary": f"DBOps 리포트 · {cluster_id}",
+        "summary": f"DBOps 리포트: {cluster_id}",
         "themeColor": "2563EB",
-        "title": f"\U0001f4cb DBOps 리포트 · {report_date}",
+        "title": f"\U0001f4cb DBOps 리포트: {report_date}",
         "sections": [{
             "facts": [
                 {"name": "클러스터", "value": f"`{cluster_id}`"},
@@ -537,7 +537,7 @@ def _deliver_report(cache_query, cluster_id, report_date, report_type, summary):
         if topic:
             boto3.client("sns").publish(
                 TopicArn=topic,
-                Subject=f"DBOps 리포트 · {display_cid} · {report_date}"[:100],
+                Subject=f"DBOps 리포트: {display_cid} ({report_date})"[:100],
                 Message=summary,
             )
         subs = cache_query(

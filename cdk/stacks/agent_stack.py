@@ -1141,7 +1141,7 @@ class AgentStack(cdk.Stack):
         # flow (request_approval + create/modify/delete_custom_endpoint).
         operations_mcp_lambda.grant_invoke(approvals_lambda)
         # 의도적으로 rds:EnableHttpEndpoint 단일 액션만 — ModifyDBCluster를
-        # 주면 마스터 패스워드 변경·삭제 보호 해제까지 가능한 광범위 권한이
+        # 주면 마스터 패스워드 변경과 삭제 보호 해제까지 가능한 광범위 권한이
         # 플랫폼에 생긴다. 전용 API(설정 1비트)로 블래스트 반경을 좁히는 것이
         # 이 기능의 보안 전제. Disable은 의도적으로 제외 — 켜는 것만 자동화하고
         # 끄는 것은 사람이 콘솔/CLI에서 하도록 남겨둔다.

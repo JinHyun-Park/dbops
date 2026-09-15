@@ -100,9 +100,9 @@ def audit_permissions_impl(cache: CacheClient, cluster_id: str, engine: str = ""
             "engine": resolved or "unknown",
             "engine_family": fam,
             "reason": (
-                "사용자·권한 감사는 RDS Data API로 조회하므로 Aurora(PostgreSQL/MySQL) "
+                "사용자와 권한 감사는 RDS Data API로 조회하므로 Aurora(PostgreSQL/MySQL) "
                 "전용입니다. 표준 RDS 인스턴스는 Data API가 없어 이 경로로 조회할 수 없고"
-                "(execute_sql로 직접 조회하세요), DocumentDB·DynamoDB·ElastiCache는 "
+                "(execute_sql로 직접 조회하세요), DocumentDB, DynamoDB, ElastiCache는 "
                 "SQL 사용자 카탈로그 자체가 없습니다."
             ),
             "users": [],

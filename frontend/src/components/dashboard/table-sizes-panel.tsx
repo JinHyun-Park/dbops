@@ -87,7 +87,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
         <div>
           <div className="text-sm text-zinc-200 font-medium">Table Sizes</div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            전체 {fmtBytes(totalBytes)} · {tables.length}개 테이블 (상위 30)
+            전체 {fmtBytes(totalBytes)}, {tables.length}개 테이블 (상위 30)
           </div>
         </div>
       </div>
@@ -95,7 +95,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
         <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
       ) : tables.length === 0 ? (
         <div className="p-6 text-zinc-500 text-sm">
-          아직 테이블 크기 데이터 없음 (PG 전용 · 다음 ETL 사이클에서 수집)
+          아직 테이블 크기 데이터 없음 (PG 전용, 다음 ETL 사이클에서 수집)
         </div>
       ) : (
         <div className="max-h-96 overflow-y-auto">

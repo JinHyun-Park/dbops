@@ -109,7 +109,7 @@ function NotSeen({ d }: { d: SchemaChangesResponse }) {
 function EmptyVerdict({ d }: { d: SchemaChangesResponse }) {
   const measured = (
     <div className="text-[11px] text-zinc-500 mt-1 tabular-nums">
-      DDL 비교 {d.ddl_detection?.schemas_compared ?? 0}개 schema · 행 수 비교{" "}
+      DDL 비교 {d.ddl_detection?.schemas_compared ?? 0}개 schema, 행 수 비교{" "}
       {d.row_deltas?.tables_compared ?? 0}개 table
     </div>
   );
@@ -346,7 +346,7 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
             )}
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            테이블 생성·삭제·이름변경 또는 행 수가 크게 변한 항목
+            테이블 생성, 삭제, 이름변경 또는 행 수가 크게 변한 항목
           </div>
         </div>
         <select

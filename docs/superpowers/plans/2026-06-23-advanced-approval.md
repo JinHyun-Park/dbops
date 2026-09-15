@@ -816,7 +816,7 @@ export async function deleteApprovalPolicy(id: string): Promise<void> {
         label: "Approval policies",
         icon: UserCheck,
         adminOnly: true,
-        hint: "지정 승인자 라우팅 — 클러스터·액션별 승인자 (관리자)",
+        hint: "지정 승인자 라우팅 — 클러스터/액션별 승인자 (관리자)",
       },
 ```
 

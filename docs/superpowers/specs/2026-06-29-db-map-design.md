@@ -54,8 +54,8 @@ schemaless, so no migration; absent ⇒ no note / Unassigned):
   DBs with no `service_tags`.
 - **Card** (reuses design-system primitives + `engine.ts` badge +
   `lib/cluster-triage.ts` severity so status agrees with Fleet/dashboard):
-  engine badge · cluster name · env chip · status dot (triage severity) ·
-  region/team · `purpose` note (one line, muted). Whole card is the click target.
+  engine badge, cluster name, env chip, status dot (triage severity),
+  region/team, `purpose` note (one line, muted). Whole card is the click target.
 - **Click → global select + navigate:** `setSelectedCluster(cluster_id)` (shared
   store) then `router.push('/dashboard?cluster=' + encodeURIComponent(id))`.
 - **Admin edit (inline):** admins (`isAdmin()`) get an edit affordance on each

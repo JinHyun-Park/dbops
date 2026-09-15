@@ -187,7 +187,7 @@ def _acked_blocks(
                     {
                         "type": "mrkdwn",
                         "text": (
-                            f"rule_id `{rule_id}` · further triggers will "
+                            f"rule_id `{rule_id}`. Further triggers will "
                             "reset the ack state."
                         ),
                     }

@@ -142,8 +142,8 @@ export function RedundantIndexesPanel({ clusterId }: { clusterId: string }) {
               회수 가능 디스크 ≈{" "}
               <span className="text-zinc-200 font-mono">
                 {fmtBytes(reclaimable)}
-              </span>{" "}
-              · 드롭 전에 항상 <code className="text-amber-300">EXPLAIN</code>
+              </span>
+              , 드롭 전에 항상 <code className="text-amber-300">EXPLAIN</code>
               으로 실제 쿼리 영향 검증 권장
             </div>
             <table className="w-full text-sm">

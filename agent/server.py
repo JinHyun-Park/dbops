@@ -303,6 +303,12 @@ async def invoke(payload, context):
     # data plane does not forward the Authorization/custom headers to the
     # container). tenancy verifies it against the pool JWKS before trusting it.
     id_token = payload.get("id_token") if isinstance(payload, dict) else None
+
+    # Answer in the language the caller's console is set to. Unset or
+    # unrecognised resolves to Korean inside answer_language(), so an older
+    # frontend and every non-chat invoker keep today's behaviour.
+    locale = payload.get("locale") if isinstance(payload, dict) else None
+
     try:
         visible = tenancy.visible_cluster_ids_for(id_token)
     except Exception as e:
@@ -396,7 +402,9 @@ async def invoke(payload, context):
 
         agent_kwargs = dict(
             model=model,
-            system_prompt=build_system_prompt(_load_context_files(), visible_clusters=visible),
+            system_prompt=build_system_prompt(
+                _load_context_files(), visible_clusters=visible, locale=locale
+            ),
             tools=tools,
             hooks=[ClusterVisibilityGate(visible)],
         )
