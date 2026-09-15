@@ -14,6 +14,7 @@ import {
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
 import { RcaButton } from "@/components/design-system/rca-button";
+import { useT } from "@/lib/i18n";
 
 const WINDOWS: { label: string; hours: number }[] = [
   { label: "1h", hours: 1 },
@@ -80,6 +81,7 @@ function relTime(iso: string): string {
 }
 
 export default function TimelinePage() {
+  const t = useT();
   // Global cluster selection (shared store) — stays in sync with ⌘K / header.
   const { selected: clusterId } = useSelectedCluster();
   const [hours, setHours] = useState<number>(24);
@@ -138,9 +140,11 @@ export default function TimelinePage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="incident"
-        title="Timeline"
-        description="단일 cluster의 모든 운영 신호를 시간축 한 줄에. 알림 발화, RDS 이벤트, 스키마 변경, 실행된 쓰기 작업이 모두 같은 흐름에 보입니다. 사고 시점 컨텍스트를 한 화면에 잡아두는 용도."
+        eyebrow={t("incident")}
+        title={t("Timeline")}
+        description={t(
+          "단일 cluster의 모든 운영 신호를 시간축 한 줄에. 알림 발화, RDS 이벤트, 스키마 변경, 실행된 쓰기 작업이 모두 같은 흐름에 보입니다. 사고 시점 컨텍스트를 한 화면에 잡아두는 용도.",
+        )}
         actions={
           <div className="flex items-center gap-2">
             <ClusterPicker selected={clusterId} />
@@ -263,13 +267,13 @@ export default function TimelinePage() {
         <div className="text-sm text-zinc-500">불러오는 중…</div>
       ) : !data || visibleItems.length === 0 ? (
         <EmptyState
-          eyebrow="timeline"
-          title={
+          eyebrow={t("timeline")}
+          title={t(
             blind
               ? "확인하지 못한 signal이 있습니다"
-              : "이 윈도우에 신호가 없습니다"
-          }
-          description={
+              : "이 윈도우에 신호가 없습니다",
+          )}
+          description={t(
             filterIn.size > 0
               ? "현재 필터에 매칭되는 신호가 없습니다. clear 를 눌러 전체를 보세요."
               : blind
@@ -277,11 +281,11 @@ export default function TimelinePage() {
                   // stream unread OR a schema nobody could confirm, "아무 일도
                   // 없었다" is a claim about signals nobody looked at.
                   "읽을 수 있었던 signal에는 이 윈도우에 아무것도 없습니다. 위 배너에 표시된 범위는 확인하지 못했습니다."
-                : "이 cluster에서 최근 발생한 알림, RDS 이벤트, 스키마 변경, 승인 실행이 없습니다. 윈도우를 늘려보세요."
-          }
+                : "이 cluster에서 최근 발생한 알림, RDS 이벤트, 스키마 변경, 승인 실행이 없습니다. 윈도우를 늘려보세요.",
+          )}
           secondary={{
             href: `/dashboard?cluster=${clusterId}`,
-            label: "Dashboard로",
+            label: t("Dashboard로"),
           }}
         />
       ) : (
@@ -322,7 +326,7 @@ function TimelineList({ items }: { items: TimelineItem[] }) {
                   </span>
                 </div>
                 <div className="text-[11px] text-zinc-500 tabular-nums flex-shrink-0">
-                  {ts.toLocaleString()} · {relTime(item.ts)}
+                  {ts.toLocaleString()}, {relTime(item.ts)}
                 </div>
               </div>
               {item.detail && (

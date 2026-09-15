@@ -29,6 +29,7 @@ import {
   ENGINE_GROUP_ORDER,
 } from "@/lib/engine";
 import { groupByEngineGroup, displayName } from "@/lib/group-by-family";
+import { useT } from "@/lib/i18n";
 
 interface ClusterRow {
   cluster_id: string;
@@ -137,6 +138,7 @@ function formatTs(iso: string): string {
 }
 
 export default function ComparePage() {
+  const t = useT();
   const [clusters, setClusters] = useState<ClusterRow[]>([]);
   const [mode, setMode] = useState<Mode>("cluster");
   const [hours, setHours] = useState(24);
@@ -352,7 +354,7 @@ export default function ComparePage() {
       ? clusterB || "B"
       : mode === "instance"
         ? instanceB || "B"
-        : PERIOD_SHIFT_LABEL[hours] || `−${hours}h`;
+        : t(PERIOD_SHIFT_LABEL[hours] || `−${hours}h`);
 
   // Recharts injects series colors as inline svg attrs, so light-mode
   // contrast comes from swapping the hex itself rather than CSS overrides.
@@ -363,9 +365,11 @@ export default function ComparePage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="모니터"
-        title="Compare"
-        description="멀티 클러스터 비교 또는 같은 클러스터의 시간대별 변화를 사이드바이사이드로 확인."
+        eyebrow={t("모니터")}
+        title={t("Compare")}
+        description={t(
+          "멀티 클러스터 비교 또는 같은 클러스터의 시간대별 변화를 사이드바이사이드로 확인.",
+        )}
         actions={
           <div className="flex items-center gap-1">
             {RANGE_OPTIONS.map((r) => (
@@ -484,9 +488,9 @@ export default function ComparePage() {
             onChange={setPeriodCluster}
           />
           <div className="text-xs text-zinc-500 leading-tight">
-            <span className="text-amber-300">current</span> = last {hours}h ·{" "}
+            <span className="text-amber-300">current</span> = last {hours}h,{" "}
             <span className="text-sky-300">
-              {PERIOD_SHIFT_LABEL[hours] || `previous ${hours}h`}
+              {t(PERIOD_SHIFT_LABEL[hours] || `previous ${hours}h`)}
             </span>{" "}
             = same length, shifted back
           </div>

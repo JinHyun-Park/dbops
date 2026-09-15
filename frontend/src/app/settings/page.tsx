@@ -12,6 +12,7 @@ import {
   Section,
   EmptyState,
 } from "@/components/design-system/page-shell";
+import { useT } from "@/lib/i18n";
 
 // ── Inline toggle — no design-system toggle exists yet ─────────────────────
 
@@ -65,7 +66,7 @@ function Provenance({ item }: { item: AppConfigItem }) {
       {item.updated_by && (
         <span className="text-zinc-500">{item.updated_by}</span>
       )}
-      {item.updated_by && ts && <span className="text-zinc-700"> · </span>}
+      {item.updated_by && ts && <span className="text-zinc-700">, </span>}
       {ts && <span className="text-zinc-500">{ts}</span>}
     </div>
   );
@@ -74,6 +75,7 @@ function Provenance({ item }: { item: AppConfigItem }) {
 // ── Page ────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
+  const t = useT();
   const [items, setItems] = useState<AppConfigItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [adminOnly, setAdminOnly] = useState(false);
@@ -153,15 +155,17 @@ export default function SettingsPage() {
     return (
       <PageBody>
         <PageHeader
-          eyebrow="Configure"
-          title="Settings"
-          description="기능 토글 — 티켓팅 연동·리포트 전달 제어 (관리자 전용)"
+          eyebrow={t("Configure")}
+          title={t("Settings")}
+          description={t(
+            "기능 토글 — 티켓팅 연동과 리포트 전달 제어 (관리자 전용)",
+          )}
         />
         <Section>
           <EmptyState
-            eyebrow="접근 제한"
-            title="관리자 전용 페이지"
-            description="이 설정은 관리자만 변경할 수 있습니다."
+            eyebrow={t("접근 제한")}
+            title={t("관리자 전용 페이지")}
+            description={t("이 설정은 관리자만 변경할 수 있습니다.")}
           />
         </Section>
       </PageBody>
@@ -171,9 +175,11 @@ export default function SettingsPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="Configure"
-        title="Settings"
-        description="기능 토글 — 티켓팅 연동·리포트 전달 제어. 변경 사항은 즉시 적용됩니다."
+        eyebrow={t("Configure")}
+        title={t("Settings")}
+        description={t(
+          "기능 토글 — 티켓팅 연동과 리포트 전달 제어. 변경 사항은 즉시 적용됩니다.",
+        )}
       />
 
       {/* Load error */}
@@ -191,7 +197,7 @@ export default function SettingsPage() {
           <Section
             eyebrow="Notifications"
             title="Report delivery"
-            description="정기 운영 요약 리포트를 SNS · Slack 구독자에게 자동 발송합니다."
+            description="정기 운영 요약 리포트를 SNS/Slack 구독자에게 자동 발송합니다."
           >
             <div className="border border-zinc-800 bg-zinc-900/30">
               <div className="px-5 py-4 flex items-center justify-between gap-6">
@@ -201,7 +207,7 @@ export default function SettingsPage() {
                   </div>
                   <div className="mt-0.5 text-xs text-zinc-500 leading-relaxed max-w-lg">
                     활성화하면 Tasks 페이지의 scheduled_report 결과가 SNS 토픽에
-                    등록된 이메일·Slack 구독자에게 자동 발송됩니다. 구독자는
+                    등록된 이메일과 Slack 구독자에게 자동 발송됩니다. 구독자는
                     Alerts 페이지에서 추가하세요.
                   </div>
                   {reportItem && <Provenance item={reportItem} />}
@@ -219,7 +225,7 @@ export default function SettingsPage() {
           <Section
             eyebrow="Integrations"
             title="Ticketing provider"
-            description="이상 감지·RCA 결과를 외부 티켓 시스템에 자동 등록할 제공자를 지정합니다."
+            description="이상 감지와 RCA 결과를 외부 티켓 시스템에 자동 등록할 제공자를 지정합니다."
           >
             <div className="border border-zinc-800 bg-zinc-900/30">
               <div className="px-5 py-4">

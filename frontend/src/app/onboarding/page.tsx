@@ -14,6 +14,7 @@ import {
   Section,
   EmptyState,
 } from "@/components/design-system/page-shell";
+import { useT } from "@/lib/i18n";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -101,7 +102,7 @@ function TemplateStep({
             원격 조치(Remediation) 포함
           </div>
           <div className="text-xs text-zinc-500 mt-0.5">
-            에이전트가 파라미터 수정·재시작 등 쓰기 작업을 수행할 수 있게
+            에이전트가 파라미터 수정, 재시작 등 쓰기 작업을 수행할 수 있게
             합니다. 읽기 전용 모니터링만 필요하면 비활성으로 두세요.
           </div>
         </div>
@@ -394,6 +395,7 @@ function RegisterStep() {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function OnboardingPage() {
+  const t = useT();
   const [loading, setLoading] = useState(true);
   const [adminOnly, setAdminOnly] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -478,15 +480,15 @@ export default function OnboardingPage() {
     return (
       <PageBody>
         <PageHeader
-          eyebrow="Configure"
-          title="Onboarding"
-          description="멤버 계정 연결 위저드 (관리자 전용)"
+          eyebrow={t("Configure")}
+          title={t("Onboarding")}
+          description={t("멤버 계정 연결 위저드 (관리자 전용)")}
         />
         <Section>
           <EmptyState
-            eyebrow="접근 제한"
-            title="관리자 전용 페이지"
-            description="이 설정은 관리자만 변경할 수 있습니다."
+            eyebrow={t("접근 제한")}
+            title={t("관리자 전용 페이지")}
+            description={t("이 설정은 관리자만 변경할 수 있습니다.")}
           />
         </Section>
       </PageBody>
@@ -496,9 +498,11 @@ export default function OnboardingPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="Configure"
-        title="Onboarding"
-        description="멤버 AWS 계정에 스포크 역할을 배포하고 DBOps Hub에 연결합니다."
+        eyebrow={t("Configure")}
+        title={t("Onboarding")}
+        description={t(
+          "멤버 AWS 계정에 스포크 역할을 배포하고 DBOps Hub에 연결합니다.",
+        )}
       />
 
       {loadError && (

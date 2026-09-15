@@ -9,6 +9,7 @@ import {
   Section,
 } from "@/components/design-system/page-shell";
 import { fmtBytes, fmtNumber } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 // Health dot — visual punchline per panel. Green if everything came
 // back ok, amber if a section errored (degraded but the page still
@@ -31,6 +32,7 @@ function relTime(ms: number): string {
 }
 
 export default function HealthPage() {
+  const t = useT();
   const [data, setData] = useState<HealthResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,9 +53,11 @@ export default function HealthPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="self"
-        title="DBOps health"
-        description="DBOps 자체의 운영 상태 — Lambda 함수, Aurora cache, DynamoDB 테이블의 상태를 한 화면에. 30초마다 자동 새로고침."
+        eyebrow={t("self")}
+        title={t("DBOps health")}
+        description={t(
+          "DBOps 자체의 운영 상태 — Lambda 함수, Aurora cache, DynamoDB 테이블의 상태를 한 화면에. 30초마다 자동 새로고침.",
+        )}
         actions={
           <button
             onClick={load}
@@ -73,7 +77,7 @@ export default function HealthPage() {
 
       {data && (
         <div className="text-[11px] text-zinc-500 mb-6 font-mono">
-          last check {relTime(data.checked_at)} · {data.elapsed_ms}ms aggregate
+          last check {relTime(data.checked_at)}, {data.elapsed_ms}ms aggregate
         </div>
       )}
 
@@ -96,7 +100,7 @@ export default function HealthPage() {
                   {data.aurora.cluster_id}
                 </span>
                 <span className="text-[11px] text-zinc-500">
-                  · {data.aurora.status}
+                  {data.aurora.status}
                 </span>
               </div>
               <span className="text-[11px] text-zinc-500 font-mono">
@@ -147,13 +151,13 @@ export default function HealthPage() {
                     {t.label}
                   </span>
                   <span className="text-[11px] text-zinc-500 truncate">
-                    · {t.name}
+                    {t.name}
                   </span>
                 </div>
                 <div className="text-[11px] text-zinc-500 font-mono tabular-nums flex-shrink-0">
                   {t.error
                     ? t.error
-                    : `${fmtNumber(t.item_count ?? 0)} rows · ${fmtBytes(
+                    : `${fmtNumber(t.item_count ?? 0)} rows, ${fmtBytes(
                         t.size_bytes ?? 0,
                       )}`}
                 </div>
@@ -193,7 +197,7 @@ export default function HealthPage() {
                   </span>
                 </div>
                 <div className="text-[10px] text-zinc-500 font-mono tabular-nums flex-shrink-0">
-                  {fn.runtime} · {fn.memory_mb}MB · {fn.timeout_s}s
+                  {fn.runtime}, {fn.memory_mb}MB, {fn.timeout_s}s
                 </div>
               </div>
             ))}

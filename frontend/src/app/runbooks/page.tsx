@@ -20,6 +20,7 @@ import {
 } from "@/components/design-system/page-shell";
 import { getSelectedCluster } from "@/lib/selected-cluster";
 import { SearchableClusterSelect } from "@/components/design-system/searchable-cluster-select";
+import { useT } from "@/lib/i18n";
 
 interface ClusterLite {
   cluster_id: string;
@@ -46,6 +47,7 @@ const DEFAULT_DRAFT: RunbookDraft = {
 };
 
 export default function RunbooksPage() {
+  const t = useT();
   const router = useRouter();
   const [clusters, setClusters] = useState<ClusterLite[]>([]);
   // Seed from the global cluster selection so runbooks open scoped to the
@@ -111,9 +113,11 @@ export default function RunbooksPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="자동화"
-        title="Runbooks"
-        description="AI 진단 + 권장 조치를 재사용 가능한 playbook으로 저장. 동일 패턴 재발 시 같은 처방을 곧바로 참조합니다."
+        eyebrow={t("자동화")}
+        title={t("Runbooks")}
+        description={t(
+          "AI 진단 + 권장 조치를 재사용 가능한 playbook으로 저장. 동일 패턴 재발 시 같은 처방을 곧바로 참조합니다.",
+        )}
         actions={
           <button
             type="button"
@@ -170,11 +174,13 @@ export default function RunbooksPage() {
           <div className="text-zinc-500 text-sm">불러오는 중…</div>
         ) : items.length === 0 ? (
           <EmptyState
-            title="저장된 Runbook 없음"
+            title={t("저장된 Runbook 없음")}
             description={
               filterCluster || filterTag
-                ? "필터를 비우거나 다른 클러스터를 선택해보세요."
-                : "Chat에서 AI 진단을 받은 뒤 '✓ Runbook 저장' 버튼으로 저장하거나, 위의 '+ 새 Runbook'으로 수동 작성하세요."
+                ? t("필터를 비우거나 다른 클러스터를 선택해보세요.")
+                : t(
+                    "Chat에서 AI 진단을 받은 뒤 '✓ Runbook 저장' 버튼으로 저장하거나, 위의 '+ 새 Runbook'으로 수동 작성하세요.",
+                  )
             }
           />
         ) : (
@@ -201,7 +207,7 @@ export default function RunbooksPage() {
                       {rb.title}
                     </span>
                     <span className="text-[10px] text-zinc-500 font-mono">
-                      {new Date(rb.created_at).toLocaleString()} ·{" "}
+                      {new Date(rb.created_at).toLocaleString()},{" "}
                       {rb.created_by ?? "anonymous"}
                     </span>
                   </div>
@@ -235,7 +241,7 @@ export default function RunbooksPage() {
                   <button
                     type="button"
                     onClick={() => runWithAgent(rb)}
-                    title="이 Runbook을 채팅으로 가져가 에이전트가 단계별로 검토·실행 (쓰기는 승인 필요)"
+                    title="이 Runbook을 채팅으로 가져가 에이전트가 단계별로 검토와 실행 (쓰기는 승인 필요)"
                     className="text-[11px] px-2.5 py-1.5 border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 font-mono whitespace-nowrap transition-colors"
                   >
                     ▶ 에이전트로 실행
@@ -485,7 +491,7 @@ function exportRunbookPdf(rb: RunbookDetail) {
     rb.tags.length ? `태그: ${rb.tags.map((t) => "#" + t).join(" ")}` : null,
   ]
     .filter(Boolean)
-    .join(" · ");
+    .join(", ");
   const w = window.open("", "_blank", "width=820,height=1000");
   if (!w) return;
   w.document.write(
@@ -556,10 +562,10 @@ function RunbookModal({
               {runbook.title}
             </div>
             <div className="text-[11px] text-zinc-500 mt-0.5 font-mono">
-              {runbook.cluster_id ? `${runbook.cluster_id} · ` : ""}
-              {new Date(runbook.created_at).toLocaleString()} ·{" "}
+              {runbook.cluster_id ? `${runbook.cluster_id}, ` : ""}
+              {new Date(runbook.created_at).toLocaleString()},{" "}
               {runbook.created_by ?? "anonymous"}
-              {runbook.source ? ` · ${runbook.source}` : ""}
+              {runbook.source ? `, ${runbook.source}` : ""}
             </div>
             {runbook.tags.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-1.5">
@@ -601,7 +607,6 @@ function RunbookModal({
             >
               ⬇ Markdown 내보내기
             </button>
-            <span className="text-zinc-700">·</span>
             <button
               type="button"
               onClick={() => exportRunbookPdf(runbook)}
@@ -610,7 +615,6 @@ function RunbookModal({
             >
               ⬇ PDF 내보내기
             </button>
-            <span className="text-zinc-700">·</span>
             {confirmDelete ? (
               <>
                 <button

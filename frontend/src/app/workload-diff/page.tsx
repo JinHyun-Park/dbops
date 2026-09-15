@@ -9,6 +9,7 @@ import {
 } from "@/components/design-system/page-shell";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
+import { useT } from "@/lib/i18n";
 
 // Default to "24h ago → now" — the most common "what changed since
 // yesterday's deploy" framing. datetime-local needs no timezone suffix.
@@ -20,6 +21,7 @@ function isoLocal(d: Date): string {
 }
 
 export default function WorkloadDiffPage() {
+  const t = useT();
   // Global cluster selection (shared store) — stays in sync with ⌘K / header.
   const { selected: clusterId } = useSelectedCluster();
   const now = new Date();
@@ -58,9 +60,11 @@ export default function WorkloadDiffPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="incident"
-        title="Workload diff"
-        description="두 시점의 쿼리 워크로드(pg_stat_statements)를 비교 — 배포 이후 새로 등장한 쿼리, 갑자기 느려진 쿼리, 사라진 쿼리를 자동 검출. '배포하고 느려졌다'는 신고에 30초 안에 용의자를 좁힙니다."
+        eyebrow={t("incident")}
+        title={t("Workload diff")}
+        description={t(
+          "두 시점의 쿼리 워크로드(pg_stat_statements)를 비교 — 배포 이후 새로 등장한 쿼리, 갑자기 느려진 쿼리, 사라진 쿼리를 자동 검출. '배포하고 느려졌다'는 신고에 30초 안에 용의자를 좁힙니다.",
+        )}
         actions={<ClusterPicker selected={clusterId} />}
       />
 
@@ -159,9 +163,11 @@ export default function WorkloadDiffPage() {
 
       {!data && !loading && (
         <EmptyState
-          eyebrow="workload diff"
-          title="두 시점을 골라 비교를 실행하세요"
-          description="기본값은 '24시간 전 → 지금'. 배포 직전 시각을 Before에 넣으면 그 배포가 워크로드에 무엇을 했는지 바로 보입니다."
+          eyebrow={t("workload diff")}
+          title={t("두 시점을 골라 비교를 실행하세요")}
+          description={t(
+            "기본값은 '24시간 전 → 지금'. 배포 직전 시각을 Before에 넣으면 그 배포가 워크로드에 무엇을 했는지 바로 보입니다.",
+          )}
         />
       )}
     </PageBody>
@@ -218,7 +224,7 @@ function NewBlock({ rows }: { rows: WorkloadDiffResponse["new"] }) {
                 {r.query_hash.slice(0, 12)}…
               </span>
               <span className="text-[11px] text-zinc-400 tabular-nums">
-                mean {Math.round(r.mean_time_ms)}ms · {r.calls} calls
+                mean {Math.round(r.mean_time_ms)}ms, {r.calls} calls
               </span>
             </div>
             <QueryExcerpt text={r.query_excerpt} />

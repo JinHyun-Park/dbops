@@ -35,14 +35,16 @@ import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
 import { engineFamily } from "@/lib/engine";
 import { DynamoDbCapacitySimulator } from "@/components/dashboard/dynamodb-capacity-simulator";
+import { useT } from "@/lib/i18n";
 
 export default function SimulatorPage() {
+  const t = useT();
   // Global selection (shared store) — switching via ⌘K/header persists here.
   const { clusters, selected: selectedCluster } = useSelectedCluster();
 
   const current = clusters.find((c) => c.cluster_id === selectedCluster);
-  // 시뮬레이션(업그레이드/파라미터/DDL/스케일링)은 Aurora 전용 — 버전 업그레이드·
-  // SQL DDL·DB 파라미터그룹·ACU/인스턴스 리사이즈는 NoSQL 등가물이 없다. DynamoDB는
+  // 시뮬레이션(업그레이드/파라미터/DDL/스케일링)은 Aurora 전용 — 버전 업그레이드,
+  // SQL DDL, DB 파라미터그룹, ACU/인스턴스 리사이즈는 NoSQL 등가물이 없다. DynamoDB는
   // 용량 모드 비용 what-if 전용 패널을 보여주고, DocumentDB는 안내 문구를 보여준다
   // (백엔드 핸들러 가드와 일관: dynamodb는 ddb_cost_simulation 능력만 양성 게이트).
   const fam = engineFamily(current?.engine);
@@ -50,9 +52,11 @@ export default function SimulatorPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="자동화"
-        title="Simulator"
-        description="업그레이드 · 파라미터 · 스케일링 · DDL 영향을 실제 실행 전에 추정합니다. 모든 결과는 추정치이며 프로덕션 적용 전 별도 검증 필수."
+        eyebrow={t("자동화")}
+        title={t("Simulator")}
+        description={t(
+          "업그레이드, 파라미터, 스케일링, DDL 영향을 실제 실행 전에 추정합니다. 모든 결과는 추정치이며 프로덕션 적용 전 별도 검증 필수.",
+        )}
         actions={
           <div className="flex items-center gap-2">
             <label className="text-[10px] uppercase tracking-wider text-zinc-500">
@@ -65,8 +69,10 @@ export default function SimulatorPage() {
 
       {!selectedCluster ? (
         <EmptyState
-          title="클러스터가 없습니다"
-          description="시뮬레이션을 실행하려면 Clusters 페이지에서 먼저 등록하세요."
+          title={t("클러스터가 없습니다")}
+          description={t(
+            "시뮬레이션을 실행하려면 Clusters 페이지에서 먼저 등록하세요.",
+          )}
         />
       ) : fam === "dynamodb" ? (
         <DynamoDbCapacitySimulator clusterId={selectedCluster} />
@@ -79,8 +85,10 @@ export default function SimulatorPage() {
         />
       ) : fam !== "relational" ? (
         <EmptyState
-          title="DocumentDB 시뮬레이션은 지원 예정"
-          description="업그레이드 · 파라미터 · DDL · 스케일링 시뮬레이션은 Aurora PostgreSQL/MySQL 전용입니다. DocumentDB의 용량/비용 권장은 대시보드의 Maintenance Health 패널과 Chat 진단을 참고하세요."
+          title={t("DocumentDB 시뮬레이션은 지원 예정")}
+          description={t(
+            "업그레이드, 파라미터, DDL, 스케일링 시뮬레이션은 Aurora PostgreSQL/MySQL 전용입니다. DocumentDB의 용량/비용 권장은 대시보드의 Maintenance Health 패널과 Chat 진단을 참고하세요.",
+          )}
         />
       ) : (
         <div className="space-y-8">
@@ -155,7 +163,7 @@ function UpgradePanel({
       title="버전 업그레이드 시뮬레이션"
       description={`현재 ${
         engine ?? "engine"
-      } 클러스터에서 target 버전으로 업그레이드할 때의 호환성 · 메서드별 시간/다운타임/리스크 · 단계별 실행 계획을 한 번에 추정합니다.`}
+      } 클러스터에서 target 버전으로 업그레이드할 때의 호환성, 메서드별 시간/다운타임/리스크, 단계별 실행 계획을 한 번에 추정합니다.`}
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
@@ -255,7 +263,7 @@ function UpgradePanel({
                   {impact.upgrade_type === "major" ? "메이저" : "마이너"}
                   {typeof impact.major_jump === "number" &&
                     impact.major_jump > 1 &&
-                    ` ·${impact.major_jump}단계`}
+                    ` ${impact.major_jump}단계`}
                 </span>
               )}
               {impact.confidence && (
@@ -264,9 +272,9 @@ function UpgradePanel({
               <span className="text-[10px] text-zinc-600 font-mono ml-auto">
                 storage {fmtDecimal(impact.storage_gb, 0)} GB
                 {typeof impact.table_count === "number" &&
-                  ` · ${fmtDecimal(impact.table_count, 0)} tables`}
+                  `, ${fmtDecimal(impact.table_count, 0)} tables`}
                 {typeof impact.readers === "number" &&
-                  ` · readers ${impact.readers}`}
+                  `, readers ${impact.readers}`}
               </span>
             </div>
             <div className="overflow-x-auto">
@@ -345,7 +353,7 @@ function UpgradePanel({
                                       className="text-[11px] text-zinc-400 leading-relaxed flex gap-1.5"
                                     >
                                       <span className="text-emerald-500/60 select-none">
-                                        ·
+                                        -
                                       </span>
                                       <span>{b}</span>
                                     </li>
@@ -357,7 +365,7 @@ function UpgradePanel({
                                       추정 범위 {m.range_low_minutes}–
                                       {m.range_high_minutes}분
                                       {impact.confidence &&
-                                        ` · 신뢰도 ${
+                                        `, 신뢰도 ${
                                           CONFIDENCE_KO[impact.confidence]
                                         }`}
                                     </div>
@@ -398,7 +406,7 @@ function UpgradePanel({
             <div className="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
               <div className="flex items-center gap-2">
                 <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-                  Plan · {plan.method}
+                  Plan: {plan.method}
                 </span>
                 {plan.confidence && (
                   <ConfidenceBadge confidence={plan.confidence} />
@@ -503,7 +511,7 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
     <Section
       eyebrow="Parameter"
       title="파라미터 변경 시뮬레이션"
-      description="동적/정적 여부 · 재시작 필요 여부 · 영향 영역을 즉시 추정합니다."
+      description="동적/정적 여부, 재시작 필요 여부, 영향 영역을 즉시 추정합니다."
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
@@ -642,7 +650,7 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
   // ACU 입력이 먼저 보였다(모드는 백엔드가 describe로 라이브 판별 — AWS는
   // Sv2도 EngineMode "provisioned"로 보고하므로 프런트 단독 판별 불가).
   // 베이스라인 결과로 입력 컨트롤이 처음부터 실제 모드를 따르고, 현재
-  // 구성·월 비용도 입력 전에 보인다.
+  // 구성과 월 비용도 입력 전에 보인다.
   useEffect(() => {
     setResult(null);
     setErr(null);
@@ -702,7 +710,7 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
     <Section
       eyebrow="Scaling"
       title="스케일링 비용 시뮬레이션"
-      description="Aurora Serverless v2(ACU min/max) 또는 프로비저닝 인스턴스 클래스를 조정했을 때의 월 비용 변화를, 클러스터 리전·에디션(I/O-Optimized) 기준 실시간 Pricing 단가로 추정합니다."
+      description="Aurora Serverless v2(ACU min/max) 또는 프로비저닝 인스턴스 클래스를 조정했을 때의 월 비용 변화를, 클러스터 리전과 에디션(I/O-Optimized) 기준 실시간 Pricing 단가로 추정합니다."
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
@@ -816,7 +824,7 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
                 </span>
               </div>
               <div className="text-[10px] text-zinc-500 font-mono">
-                writers {result.writers} · readers {result.readers}
+                writers {result.writers}, readers {result.readers}
               </div>
             </div>
             {result.mode === "serverless" && result.acu_basis && (
@@ -903,7 +911,7 @@ function DdlPanel({
     <Section
       eyebrow="DDL"
       title="DDL 영향 시뮬레이션"
-      description="ALTER / CREATE INDEX 등 DDL을 실행했을 때의 락 타입 · 예상 소요 시간 · 디스크 추가 사용량을 추정합니다."
+      description="ALTER / CREATE INDEX 등 DDL을 실행했을 때의 락 타입, 예상 소요 시간, 디스크 추가 사용량을 추정합니다."
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
@@ -1023,7 +1031,7 @@ function DdlPanel({
                       key={i}
                       className="text-[11px] text-zinc-400 leading-relaxed flex gap-1.5"
                     >
-                      <span className="text-emerald-500/60 select-none">·</span>
+                      <span className="text-emerald-500/60 select-none">-</span>
                       <span>{b}</span>
                     </li>
                   ))}
@@ -1102,7 +1110,7 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
     <Section
       eyebrow="ElastiCache Cost"
       title="노드 리사이즈 비용 시뮬레이션"
-      description="ElastiCache 노드 타입 · 노드 수를 변경했을 때의 월 비용 변화를 리전별 실시간 AWS Pricing 단가로 추정합니다. 노드-시간 비용만 대상이며 데이터 전송·스냅샷·예약 노드는 제외합니다."
+      description="ElastiCache 노드 타입과 노드 수를 변경했을 때의 월 비용 변화를 리전별 실시간 AWS Pricing 단가로 추정합니다. 노드-시간 비용만 대상이며 데이터 전송, 스냅샷, 예약 노드는 제외합니다."
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
@@ -1240,14 +1248,14 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
               </span>
               {result.current.price_per_hour != null && (
                 <span>
-                  현재 ${fmtDecimal(result.current.price_per_hour, 4)}/hr·node
+                  현재 ${fmtDecimal(result.current.price_per_hour, 4)}/hr/node
                 </span>
               )}
               {result.proposed.price_per_hour != null &&
                 result.proposed.node_type !== result.current.node_type && (
                   <span>
                     제안 ${fmtDecimal(result.proposed.price_per_hour, 4)}
-                    /hr·node
+                    /hr/node
                   </span>
                 )}
             </div>
@@ -1307,6 +1315,7 @@ function RdsRightsizingSimulator({
   clusterId: string;
   engine?: string;
 }) {
+  const t = useT();
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<RdsRightsizingResponse | null>(null);
@@ -1351,8 +1360,8 @@ function RdsRightsizingSimulator({
   return (
     <Section
       eyebrow="RDS Instance Cost"
-      title="인스턴스 라이트사이징 · 비용 시뮬레이션"
-      description="최근 CloudWatch 사용률(CPU · 연결 · IOPS)을 기준으로 인스턴스 클래스 적정성을 진단하고, AWS Price List 실시간 단가로 현재 대비 제안 인스턴스의 월 비용을 추정합니다."
+      title="인스턴스 라이트사이징과 비용 시뮬레이션"
+      description="최근 CloudWatch 사용률(CPU, 연결, IOPS)을 기준으로 인스턴스 클래스 적정성을 진단하고, AWS Price List 실시간 단가로 현재 대비 제안 인스턴스의 월 비용을 추정합니다."
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
@@ -1386,11 +1395,13 @@ function RdsRightsizingSimulator({
         {!loading && result && result.status === "insufficient_data" && (
           <div className="p-4">
             <EmptyState
-              eyebrow="데이터 부족"
-              title="사용률 데이터가 충분하지 않습니다"
+              eyebrow={t("데이터 부족")}
+              title={t("사용률 데이터가 충분하지 않습니다")}
               description={
                 result.message ??
-                "right-sizing 권장을 산출하려면 CloudWatch 사용률 데이터가 더 필요합니다."
+                t(
+                  "right-sizing 권장을 산출하려면 CloudWatch 사용률 데이터가 더 필요합니다.",
+                )
               }
             />
           </div>
@@ -1745,7 +1756,7 @@ function PricingContext({
       <span>
         {pricing.price_per_hour == null
           ? "no unit price"
-          : `$${fmtDecimal(pricing.price_per_hour, 4)}/hr · ${pricing.kind}`}
+          : `$${fmtDecimal(pricing.price_per_hour, 4)}/hr, ${pricing.kind}`}
       </span>
       <span>{pricing.region}</span>
       {pricing.io_optimized && <span>I/O-Optimized</span>}

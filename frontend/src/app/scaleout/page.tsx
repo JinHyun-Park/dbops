@@ -19,6 +19,7 @@ import {
 import { fmtRelative } from "@/lib/format";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { engineFamily } from "@/lib/engine";
+import { useT } from "@/lib/i18n";
 
 // State strings come straight from the API's derived lifecycle; the badge
 // palette matches the operational severity (provisioning=neutral, awaiting
@@ -53,6 +54,7 @@ function isoFromMs(ms: string | undefined): string | undefined {
 }
 
 export default function ScaleoutPage() {
+  const t = useT();
   const [ops, setOps] = useState<ScaleoutOp[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -118,9 +120,11 @@ export default function ScaleoutPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="자동화"
-        title="스케일 관리"
-        description="리더 추가(scale-out)와 자동 버퍼풀 예열 작업의 진행 상태입니다. 예열이 시작되기 전(리더 생성 중·승인 대기)인 작업은 취소할 수 있습니다."
+        eyebrow={t("자동화")}
+        title={t("스케일 관리")}
+        description={t(
+          "리더 추가(scale-out)와 자동 버퍼풀 예열 작업의 진행 상태입니다. 예열이 시작되기 전(리더 생성 중, 승인 대기)인 작업은 취소할 수 있습니다.",
+        )}
         actions={
           <button
             onClick={load}
@@ -135,8 +139,8 @@ export default function ScaleoutPage() {
 
       <Section>
         <p className="text-xs text-zinc-500 mb-4 leading-relaxed">
-          다른 예열 설정(top_n·엔드포인트)을 원하면 이 작업을 취소한 뒤 채팅에서
-          prewarm_reader로 재요청하세요 — 리더는 유지됩니다.
+          다른 예열 설정(top_n, 엔드포인트)을 원하면 이 작업을 취소한 뒤
+          채팅에서 prewarm_reader로 재요청하세요 — 리더는 유지됩니다.
         </p>
 
         {actionMsg && (
@@ -165,10 +169,12 @@ export default function ScaleoutPage() {
           <div className="text-zinc-500 text-sm py-8">불러오는 중…</div>
         ) : ops.length === 0 ? (
           <EmptyState
-            eyebrow="스케일 관리"
-            title="진행 중인 스케일 작업이 없습니다"
-            description="채팅에서 scale_out_with_warmup로 리더를 추가하면 여기에 진행 상태가 표시됩니다."
-            secondary={{ href: "/chat", label: "Agent에게 물어보기" }}
+            eyebrow={t("스케일 관리")}
+            title={t("진행 중인 스케일 작업이 없습니다")}
+            description={t(
+              "채팅에서 scale_out_with_warmup로 리더를 추가하면 여기에 진행 상태가 표시됩니다.",
+            )}
+            secondary={{ href: "/chat", label: t("Agent에게 물어보기") }}
           />
         ) : (
           <div className="overflow-x-auto">
@@ -205,7 +211,7 @@ export default function ScaleoutPage() {
                             STATE_STYLE.reader_provisioning
                           }`}
                         >
-                          {STATE_LABEL[op.state] || op.state}
+                          {t(STATE_LABEL[op.state] || op.state)}
                         </span>
                       </td>
                       <td className="py-2.5 pr-4 font-mono text-zinc-500 text-xs">
@@ -267,6 +273,7 @@ export default function ScaleoutPage() {
 // cluster's healthy AZs, EXCLUDING one chosen AZ, as individually-approved
 // add_reader_instance requests. Preemptive spread away from an at-risk AZ.
 function AzScaleoutRunbook() {
+  const t = useT();
   const { clusters } = useSelectedCluster();
   const relational = useMemo(
     () => clusters.filter((c) => engineFamily(c.engine) === "relational"),
@@ -343,16 +350,18 @@ function AzScaleoutRunbook() {
         <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
           정상 AZ에 리더를 미리 분산 배치합니다 — 위험이 예상되는 AZ 하나를
           제외하고, 나머지 AZ에 리더 {count}대를 라운드로빈으로 계획합니다. 각
-          리더는 과금 대상인 개별 인스턴스이며, 승인 센터에서 하나씩
-          검토·승인해야 실제로 생성됩니다.
+          리더는 과금 대상인 개별 인스턴스이며, 승인 센터에서 하나씩 검토하고
+          승인해야 실제로 생성됩니다.
         </p>
       </div>
 
       {relational.length === 0 ? (
         <EmptyState
-          eyebrow="AZ 스케일아웃"
-          title="Aurora 클러스터가 없습니다"
-          description="AZ 스케일아웃은 Aurora PostgreSQL/MySQL 클러스터 전용입니다."
+          eyebrow={t("AZ 스케일아웃")}
+          title={t("Aurora 클러스터가 없습니다")}
+          description={t(
+            "AZ 스케일아웃은 Aurora PostgreSQL/MySQL 클러스터 전용입니다.",
+          )}
         />
       ) : (
         <>
@@ -435,7 +444,7 @@ function AzScaleoutRunbook() {
                 <div className="text-xs text-zinc-500 mb-2 font-mono">
                   클래스 {result.instance_class}
                   {result.healthy_azs?.length
-                    ? ` · 대상 AZ ${result.healthy_azs.join(", ")}`
+                    ? `, 대상 AZ ${result.healthy_azs.join(", ")}`
                     : ""}
                 </div>
               )}
@@ -465,7 +474,7 @@ function AzScaleoutRunbook() {
                 href="/approvals"
                 className="text-xs text-amber-300 hover:underline"
               >
-                승인 센터에서 검토·승인 →
+                승인 센터에서 검토/승인 →
               </a>
             </div>
           )}

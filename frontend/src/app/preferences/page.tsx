@@ -13,6 +13,7 @@ import {
   Section,
   EmptyState,
 } from "@/components/design-system/page-shell";
+import { useT } from "@/lib/i18n";
 
 const KIND_OPTIONS: { value: MemoryKind; label: string; hint: string }[] = [
   {
@@ -28,6 +29,7 @@ const KIND_OPTIONS: { value: MemoryKind; label: string; hint: string }[] = [
 ];
 
 export default function PreferencesPage() {
+  const t = useT();
   const [kind, setKind] = useState<MemoryKind>("preferences");
   const [records, setRecords] = useState<MemoryRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -67,9 +69,11 @@ export default function PreferencesPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="설정"
-        title="Agent가 기억하는 것"
-        description="AgentCore Memory에 저장된 당신의 선호와 사실. 잘못된 정보가 박혀 있으면 여기서 삭제하세요 — 이후 대화부터 다시 학습됩니다."
+        eyebrow={t("설정")}
+        title={t("Agent가 기억하는 것")}
+        description={t(
+          "AgentCore Memory에 저장된 당신의 선호와 사실. 잘못된 정보가 박혀 있으면 여기서 삭제하세요 — 이후 대화부터 다시 학습됩니다.",
+        )}
         actions={
           <div className="flex border border-zinc-800">
             {KIND_OPTIONS.map((o) => {
@@ -107,13 +111,17 @@ export default function PreferencesPage() {
         ) : records.length === 0 ? (
           <EmptyState
             eyebrow={active.label}
-            title="저장된 기록이 없습니다"
+            title={t("저장된 기록이 없습니다")}
             description={
               kind === "preferences"
-                ? "채팅을 진행하면 Agent가 당신의 선호 (응답 길이, 분석 스타일, 선호 명령)를 자동으로 추출해 여기에 누적합니다."
-                : "Agent는 대화에서 사실을 추출해 여기에 누적합니다. 아직 학습이 충분치 않을 수 있어요."
+                ? t(
+                    "채팅을 진행하면 Agent가 당신의 선호 (응답 길이, 분석 스타일, 선호 명령)를 자동으로 추출해 여기에 누적합니다.",
+                  )
+                : t(
+                    "Agent는 대화에서 사실을 추출해 여기에 누적합니다. 아직 학습이 충분치 않을 수 있어요.",
+                  )
             }
-            secondary={{ href: "/chat", label: "Chat으로 이동" }}
+            secondary={{ href: "/chat", label: t("Chat으로 이동") }}
           />
         ) : (
           <div className="border border-zinc-800 divide-y divide-zinc-800">
@@ -129,7 +137,7 @@ export default function PreferencesPage() {
                   <div className="flex items-center gap-3 mt-1 text-[10px] text-zinc-600 font-mono">
                     <span>{r.id.slice(0, 20)}…</span>
                     {r.updated_at && (
-                      <span>· {new Date(r.updated_at).toLocaleString()}</span>
+                      <span>{new Date(r.updated_at).toLocaleString()}</span>
                     )}
                   </div>
                 </div>

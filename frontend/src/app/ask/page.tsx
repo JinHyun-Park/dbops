@@ -10,6 +10,7 @@ import {
   EmptyState,
 } from "@/components/design-system/page-shell";
 import { fmtBytes, fmtDecimal, fmtExact } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 // AI-first fleet query: a single natural-language sentence + a structured
 // editor that stays in sync. The NL→filter compiler is deliberately a
@@ -113,6 +114,7 @@ function compile(raw: string): FilterSpec | null {
 // ---------------------------------------------------------------------------
 
 export default function AskPage() {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [spec, setSpec] = useState<FilterSpec | null>(null);
   const [allClusters, setAllClusters] = useState<ClusterRow[]>([]);
@@ -200,9 +202,11 @@ export default function AskPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="자동화"
-        title="Ask the fleet"
-        description="자연어로 '최근 24h CPU 80% 넘은 클러스터' 처럼 물어보면 즉시 필터 결과를 카드로 보여줍니다. 필터는 편집 + 저장 가능."
+        eyebrow={t("자동화")}
+        title={t("Ask the fleet")}
+        description={t(
+          "자연어로 '최근 24h CPU 80% 넘은 클러스터' 처럼 물어보면 즉시 필터 결과를 카드로 보여줍니다. 필터는 편집 + 저장 가능.",
+        )}
       />
 
       <form
@@ -278,8 +282,8 @@ export default function AskPage() {
             <div className="text-zinc-500 text-sm">불러오는 중…</div>
           ) : matched.length === 0 ? (
             <EmptyState
-              title="조건을 만족하는 클러스터 없음"
-              description="필터의 metric/threshold를 조정해보세요."
+              title={t("조건을 만족하는 클러스터 없음")}
+              description={t("필터의 metric/threshold를 조정해보세요.")}
             />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -432,7 +436,7 @@ function ResultCard({
         {cluster.cluster_id}
       </div>
       <div className="text-[10px] text-zinc-500 mt-0.5">
-        {cluster.engine} · {cluster.status}
+        {cluster.engine}, {cluster.status}
       </div>
       <div className="mt-3 flex items-baseline gap-2">
         <span className="text-2xl font-semibold text-amber-300 tabular-nums">
@@ -539,5 +543,5 @@ function describeSpec(spec: FilterSpec): string {
     spec.metric === "cpu" ? "%" : spec.metric === "storage_bytes" ? " GB" : "";
   return `${metricLabel(spec.metric)} ${spec.comparison} ${
     spec.threshold
-  }${unit} · 최근 ${spec.hours}h`;
+  }${unit}, 최근 ${spec.hours}h`;
 }

@@ -15,8 +15,10 @@ import { fmtBytes, fmtExact } from "@/lib/format";
 import { isMysql } from "@/lib/engine";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
+import { useT } from "@/lib/i18n";
 
 export default function SchemaPage() {
+  const t = useT();
   const { clusters, selected: selectedCluster } = useSelectedCluster();
   // FK lineage reads pg_constraint — PG only. Guard MySQL selections up front
   // instead of letting the run fail server-side with a cryptic error.
@@ -53,9 +55,11 @@ export default function SchemaPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="모니터"
-        title="Schema Lineage"
-        description="현재 클러스터의 외래키(FK) 관계를 라이브로 추출해 표 의존성을 시각화합니다. PostgreSQL 전용."
+        eyebrow={t("모니터")}
+        title={t("Schema Lineage")}
+        description={t(
+          "현재 클러스터의 외래키(FK) 관계를 라이브로 추출해 표 의존성을 시각화합니다. PostgreSQL 전용.",
+        )}
         actions={
           <div className="flex items-center gap-2">
             <label className="text-[10px] uppercase tracking-wider text-zinc-500">
@@ -68,8 +72,10 @@ export default function SchemaPage() {
 
       {!selectedCluster ? (
         <EmptyState
-          title="클러스터가 없습니다"
-          description="Clusters 페이지에서 먼저 PostgreSQL 클러스터를 등록하세요."
+          title={t("클러스터가 없습니다")}
+          description={t(
+            "Clusters 페이지에서 먼저 PostgreSQL 클러스터를 등록하세요.",
+          )}
         />
       ) : (
         <>
@@ -291,7 +297,7 @@ function GraphCanvas({
   return (
     <div className="bg-zinc-900/40 border border-zinc-800 overflow-auto">
       <div className="px-3 py-2 border-b border-zinc-800 text-[10px] uppercase tracking-wider text-zinc-500">
-        graph · 테이블을 클릭하면 해당 FK가 하이라이트됩니다
+        graph: 테이블을 클릭하면 해당 FK가 하이라이트됩니다
       </div>
       <svg
         width={svgWidth}
@@ -405,7 +411,7 @@ function GraphCanvas({
                 fontSize="9"
                 fontFamily="ui-monospace, monospace"
               >
-                {fmtExact(t.row_count)} rows · {fmtBytes(t.size_bytes)}
+                {fmtExact(t.row_count)} rows, {fmtBytes(t.size_bytes)}
               </text>
               <text
                 x={p.x + BOX_W - 8}
@@ -474,7 +480,7 @@ function SelectedTableDetail({
         </div>
         {table && (
           <div className="text-[10px] text-zinc-500 mt-0.5 font-mono">
-            {fmtExact(table.row_count)} rows · {fmtBytes(table.size_bytes)}
+            {fmtExact(table.row_count)} rows, {fmtBytes(table.size_bytes)}
           </div>
         )}
       </div>
@@ -567,7 +573,7 @@ function TableList({
   return (
     <div className="bg-zinc-900/40 border border-zinc-800 max-h-[680px] overflow-y-auto">
       <div className="px-3 py-2 border-b border-zinc-800 sticky top-0 bg-zinc-900/95 backdrop-blur text-[10px] uppercase tracking-wider text-zinc-500">
-        tables · 클릭하면 FK 상세
+        tables: 클릭하면 FK 상세
       </div>
       <ul className="divide-y divide-zinc-800/60">
         {sorted.map((t) => (

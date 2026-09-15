@@ -61,6 +61,7 @@ import { DynamodbOverviewPanel } from "@/components/dashboard/dynamodb-overview-
 import { DocdbOverviewPanel } from "@/components/dashboard/docdb-overview-panel";
 import { ElasticacheOverviewPanel } from "@/components/dashboard/elasticache-overview-panel";
 import { RdsInstanceOverviewPanel } from "@/components/dashboard/rds-instance-overview-panel";
+import { useT } from "@/lib/i18n";
 
 type TsPoint = { ts: string; value: number | string; dimensions?: string };
 
@@ -169,11 +170,11 @@ type TabKey =
 
 const TAB_DEFS: { key: TabKey; label: string }[] = [
   { key: "overview", label: "개요" },
-  { key: "perf", label: "성능·쿼리" },
+  { key: "perf", label: "성능/쿼리" },
   { key: "advisory", label: "AI 자문" },
   { key: "internals", label: "엔진 내부" },
-  { key: "config", label: "구성·백업" },
-  { key: "audit", label: "변경·감사" },
+  { key: "config", label: "구성/백업" },
+  { key: "audit", label: "변경/감사" },
 ];
 
 // Which tabs each engine family renders — derived from the per-family panel
@@ -288,6 +289,7 @@ function persistViews(next: SavedView[]): void {
 }
 
 export default function DashboardPage() {
+  const t = useT();
   const [clusters, setClusters] = useState<
     {
       cluster_id: string;
@@ -496,9 +498,11 @@ export default function DashboardPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="모니터"
-        title="Dashboard"
-        description="단일 클러스터 deep dive — 시계열, wait events, locks, vacuum, schema changes 등 17개 패널."
+        eyebrow={t("모니터")}
+        title={t("Dashboard")}
+        description={t(
+          "단일 클러스터 deep dive — 시계열, wait events, locks, vacuum, schema changes 등 17개 패널.",
+        )}
         actions={
           <div className="flex items-center gap-1 relative">
             <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
@@ -572,7 +576,7 @@ export default function DashboardPage() {
                 canSave={!!selectedCluster}
                 currentSummary={
                   selectedCluster
-                    ? `${selectedCluster} · ${rangeLabel(range)}`
+                    ? `${selectedCluster}, ${rangeLabel(range)}`
                     : ""
                 }
                 onSave={saveCurrentView}
@@ -620,7 +624,7 @@ export default function DashboardPage() {
       )}
 
       {/* Data API disabled banner — global (above tabs) because it explains why
-          the live-SQL panels across 성능·쿼리 / 구성·백업 / 변경·감사 sit on
+          the live-SQL panels across 성능/쿼리, 구성/백업, 변경/감사 sit on
           "수집 대기". false only — NULL(uncollected)/true stay hidden. */}
       {selectedCluster &&
         fam === "relational" &&
@@ -738,10 +742,10 @@ export default function DashboardPage() {
                                     title={eolHint(eol)}
                                   >
                                     {eol.status === "expired"
-                                      ? `EOL · ${Math.abs(
+                                      ? `EOL, ${Math.abs(
                                           eol.days_remaining,
                                         )}d past`
-                                      : `EOL ${eol.eol} · ${eol.days_remaining}d`}
+                                      : `EOL ${eol.eol}, ${eol.days_remaining}d`}
                                   </span>
                                 )}
                               </div>
@@ -978,7 +982,7 @@ export default function DashboardPage() {
               </>
             )}
 
-            {/* ═══════════════ 성능·쿼리 (perf) — relational + rds_instance ═══════════════ */}
+            {/* ═══════════════ 성능/쿼리 (perf) — relational + rds_instance ═══════════════ */}
             {activeTab === "perf" &&
               (fam === "relational" || fam === "rds_instance") && (
                 <>
@@ -1065,7 +1069,7 @@ export default function DashboardPage() {
                 </>
               )}
 
-            {/* ═══════════════ 구성·백업 (config) ═══════════════ */}
+            {/* ═══════════════ 구성/백업 (config) ═══════════════ */}
             {activeTab === "config" && (
               <>
                 {fam === "relational" && (
@@ -1117,7 +1121,7 @@ export default function DashboardPage() {
               </>
             )}
 
-            {/* ═══════════════ 변경·감사 (audit) ═══════════════ */}
+            {/* ═══════════════ 변경/감사 (audit) ═══════════════ */}
             {activeTab === "audit" && (
               <>
                 {fam === "relational" && (
@@ -1216,7 +1220,7 @@ function SavedViewsPopover({
       <div className="max-h-72 overflow-y-auto">
         {views.length === 0 ? (
           <div className="px-4 py-6 text-center text-zinc-500">
-            아직 저장된 view 없음 · 위 입력란에 이름을 적고 [핀]을 누르세요
+            아직 저장된 view 없음, 위 입력란에 이름을 적고 [핀]을 누르세요
           </div>
         ) : (
           <ul className="divide-y divide-zinc-800">
@@ -1231,7 +1235,7 @@ function SavedViewsPopover({
                 >
                   <div className="text-zinc-200 truncate">{v.name}</div>
                   <div className="text-[10px] text-zinc-500 font-mono truncate">
-                    {v.cluster_id} ·{" "}
+                    {v.cluster_id},{" "}
                     {v.range.kind === "preset"
                       ? `${v.range.hours}h`
                       : `${new Date(v.range.from).toLocaleDateString()} 범위`}

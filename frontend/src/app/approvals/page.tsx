@@ -8,8 +8,10 @@ import {
   PageBody,
   EmptyState,
 } from "@/components/design-system/page-shell";
+import { useT } from "@/lib/i18n";
 
 export default function ApprovalsPage() {
+  const t = useT();
   const [approvals, setApprovals] = useState<any[]>([]);
   const [filter, setFilter] = useState<"pending" | "approved" | "rejected">(
     "pending",
@@ -50,9 +52,11 @@ export default function ApprovalsPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="자동화"
-        title="승인 센터"
-        description="Agent 또는 대시보드가 제안한 변경 작업(DDL, parameter, scaling, maintenance, snapshot/restore, Data API 활성화)을 DBA가 검토하고 승인하는 게이트입니다. 승인됨 탭에는 실행 완료(consumed)된 건도 함께 표시됩니다."
+        eyebrow={t("자동화")}
+        title={t("승인 센터")}
+        description={t(
+          "Agent 또는 대시보드가 제안한 변경 작업(DDL, parameter, scaling, maintenance, snapshot/restore, Data API 활성화)을 DBA가 검토하고 승인하는 게이트입니다. 승인됨 탭에는 실행 완료(consumed)된 건도 함께 표시됩니다.",
+        )}
         actions={
           <div className="flex gap-1">
             {(["pending", "approved", "rejected"] as const).map((s) => (
@@ -94,26 +98,28 @@ export default function ApprovalsPage() {
         </div>
       ) : approvals.length === 0 ? (
         <EmptyState
-          eyebrow={
+          eyebrow={t(
             filter === "pending"
               ? "승인 대기"
               : filter === "approved"
                 ? "승인됨"
-                : "거부됨"
-          }
-          title={
+                : "거부됨",
+          )}
+          title={t(
             filter === "pending"
               ? "대기 중인 승인 요청이 없습니다"
               : filter === "approved"
                 ? "아직 승인된 작업이 없습니다"
-                : "거부된 작업이 없습니다"
-          }
+                : "거부된 작업이 없습니다",
+          )}
           description={
             filter === "pending"
-              ? "Agent가 쓰기 작업을 제안하면 이 페이지에 검토 항목으로 올라옵니다."
+              ? t(
+                  "Agent가 쓰기 작업을 제안하면 이 페이지에 검토 항목으로 올라옵니다.",
+                )
               : undefined
           }
-          secondary={{ href: "/chat", label: "Agent에게 물어보기" }}
+          secondary={{ href: "/chat", label: t("Agent에게 물어보기") }}
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

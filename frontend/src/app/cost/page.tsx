@@ -28,6 +28,7 @@ import {
   StatRow,
   Section,
 } from "@/components/design-system/page-shell";
+import { useT } from "@/lib/i18n";
 
 interface CostAnomaly {
   date: string;
@@ -157,7 +158,7 @@ interface PlatformCostData {
 // "Amazon Relational Database Service" → "RDS (Aurora 캐시)" 같은 축약 라벨.
 function platformServiceLabel(svc: string): string {
   const MAP: Record<string, string> = {
-    "Amazon Relational Database Service": "Aurora (캐시 DB·샘플)",
+    "Amazon Relational Database Service": "Aurora (캐시 DB와 샘플)",
     "AWS Lambda": "Lambda",
     "Amazon DynamoDB": "DynamoDB",
     "Amazon CloudFront": "CloudFront",
@@ -182,7 +183,7 @@ function rdsUsageLabel(ut: string): string {
   const parts = ut.split(":");
   const head = (parts[0] || ut).replace(/^[A-Z0-9]+-/, "");
   const tail = parts.slice(1).join(":");
-  return tail ? `${head} · ${tail}` : head;
+  return tail ? `${head}, ${tail}` : head;
 }
 
 // ElastiCache usage-type labels are like "APN1-NodeUsage:cache.r6g.large" or
@@ -191,7 +192,7 @@ function elasticacheUsageLabel(ut: string): string {
   const parts = ut.split(":");
   const head = (parts[0] || ut).replace(/^[A-Z0-9]+-/, "");
   const tail = parts.slice(1).join(":");
-  return tail ? `${head} · ${tail}` : head;
+  return tail ? `${head}, ${tail}` : head;
 }
 
 function shortLabel(ut: string): string {
@@ -211,6 +212,7 @@ function shortLabel(ut: string): string {
 }
 
 export default function CostPage() {
+  const t = useT();
   const [tab, setTab] = useState<CostTab>("bedrock");
   const [days, setDays] = useState(30);
   const [data, setData] = useState<CostData | null>(null);
@@ -237,8 +239,8 @@ export default function CostPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="재무"
-        title={
+        eyebrow={t("재무")}
+        title={t(
           tab === "rds"
             ? "Aurora / RDS 비용"
             : tab === "platform"
@@ -249,21 +251,21 @@ export default function CostPage() {
                   ? "ElastiCache 비용"
                   : tab === "commitments"
                     ? "커밋 할인 (RI / Savings Plan)"
-                    : "Bedrock 비용"
-        }
-        description={
+                    : "Bedrock 비용",
+        )}
+        description={t(
           tab === "rds"
-            ? "계정의 Aurora/RDS 비용 — Cost Explorer로 사용 유형(Aurora I/O·스토리지·인스턴스 시간·백업)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다."
+            ? "계정의 Aurora/RDS 비용 — Cost Explorer로 사용 유형(Aurora I/O, 스토리지, 인스턴스 시간, 백업)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다."
             : tab === "platform"
-              ? "DBOps 자체를 운영하는 데 드는 전체 비용 — Application=DBOps 태그가 붙은 모든 리소스(Lambda·캐시 Aurora·DynamoDB·CloudFront·AgentCore 등)를 서비스별로 분해합니다. 모니터링 대상 고객 DB 클러스터는 포함되지 않습니다."
+              ? "DBOps 자체를 운영하는 데 드는 전체 비용 — Application=DBOps 태그가 붙은 모든 리소스(Lambda, 캐시 Aurora, DynamoDB, CloudFront, AgentCore 등)를 서비스별로 분해합니다. 모니터링 대상 고객 DB 클러스터는 포함되지 않습니다."
               : tab === "tokens"
                 ? "계정 전체 Bedrock 토큰 사용량(모델별) — CloudWatch AWS/Bedrock 메트릭 기반. 태그 필터 불가로 계정 전체 집계입니다."
                 : tab === "elasticache"
-                  ? "계정의 ElastiCache 비용 — Cost Explorer로 사용 유형(노드 시간·데이터 스토리지·I/O)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다."
+                  ? "계정의 ElastiCache 비용 — Cost Explorer로 사용 유형(노드 시간, 데이터 스토리지, I/O)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다."
                   : tab === "commitments"
-                    ? "등록된 Aurora 계정의 Reserved Instance / Savings Plan 현황 — 스케일링 권장이 RI 커버리지를 깨뜨려 오히려 비용이 늘지 않는지 확인합니다. 만료 임박·미사용 RI를 함께 표시합니다."
-                    : "DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다."
-        }
+                    ? "등록된 Aurora 계정의 Reserved Instance / Savings Plan 현황 — 스케일링 권장이 RI 커버리지를 깨뜨려 오히려 비용이 늘지 않는지 확인합니다. 만료 임박, 미사용 RI를 함께 표시합니다."
+                    : "DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다.",
+        )}
         actions={
           <div className="flex items-center gap-1">
             <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
@@ -353,6 +355,7 @@ function BedrockCostView({
   monthlyProjection: number;
   colors: ReturnType<typeof useChartColors>;
 }) {
+  const t = useT();
   return (
     <>
       {err && (
@@ -365,8 +368,8 @@ function BedrockCostView({
 
       {data?.no_data_reason && !data?.tag_warning ? (
         <EmptyState
-          eyebrow="추적 미시작"
-          title="Cost allocation 태그가 활성화되어 있지 않습니다"
+          eyebrow={t("추적 미시작")}
+          title={t("Cost allocation 태그가 활성화되어 있지 않습니다")}
           description={
             <>
               {data.no_data_reason}.
@@ -388,7 +391,7 @@ function BedrockCostView({
             <Stat
               label={`Total ${days}d`}
               value={loading ? "···" : `$${data?.total.toFixed(2) ?? "0.00"}`}
-              hint={`USD · ${data?.range_days || days} day window`}
+              hint={`USD, ${data?.range_days || days} day window`}
               loading={loading}
               accent="amber"
             />
@@ -486,7 +489,7 @@ function BedrockCostView({
                   <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
                     <tr>
                       <th className="text-left px-4 py-2.5 font-medium">
-                        model · direction
+                        model / direction
                       </th>
                       <th className="text-right px-4 py-2.5 font-medium">
                         tokens
@@ -565,6 +568,7 @@ function PlatformCostView({
   days: number;
   colors: ReturnType<typeof useChartColors>;
 }) {
+  const t = useT();
   const [data, setData] = useState<PlatformCostData | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -605,8 +609,8 @@ function PlatformCostView({
 
       {data?.no_data_reason && data.daily.length === 0 ? (
         <EmptyState
-          eyebrow="데이터 없음"
-          title="플랫폼 비용 데이터가 없습니다"
+          eyebrow={t("데이터 없음")}
+          title={t("플랫폼 비용 데이터가 없습니다")}
           description={data.no_data_reason}
           primary={{
             href: "https://console.aws.amazon.com/cost-management/home",
@@ -619,7 +623,7 @@ function PlatformCostView({
             <Stat
               label={`Total ${days}d`}
               value={loading ? "···" : `$${fmtDecimal(data?.total ?? 0, 2)}`}
-              hint={`USD · ${data?.range_days || days}일 윈도우`}
+              hint={`USD, ${data?.range_days || days}일 윈도우`}
               loading={loading}
               accent="amber"
             />
@@ -751,6 +755,7 @@ function RdsCostView({
   days: number;
   colors: ReturnType<typeof useChartColors>;
 }) {
+  const t = useT();
   const [data, setData] = useState<RdsCostData | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -791,8 +796,8 @@ function RdsCostView({
 
       {data?.no_data_reason && (!data || data.daily.length === 0) ? (
         <EmptyState
-          eyebrow="데이터 없음"
-          title="Aurora / RDS 비용 데이터가 없습니다"
+          eyebrow={t("데이터 없음")}
+          title={t("Aurora / RDS 비용 데이터가 없습니다")}
           description={
             <>
               {data.no_data_reason}
@@ -814,7 +819,7 @@ function RdsCostView({
             <Stat
               label={`Total ${days}d`}
               value={loading ? "···" : `$${fmtDecimal(data?.total ?? 0, 2)}`}
-              hint={`USD · ${data?.range_days || days} day window`}
+              hint={`USD, ${data?.range_days || days} day window`}
               loading={loading}
               accent="amber"
             />
@@ -1068,6 +1073,7 @@ function ElastiCacheCostView({
   days: number;
   colors: ReturnType<typeof useChartColors>;
 }) {
+  const t = useT();
   const [data, setData] = useState<ElastiCacheCostData | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -1109,8 +1115,8 @@ function ElastiCacheCostView({
 
       {data?.no_data_reason && (!data || data.daily.length === 0) ? (
         <EmptyState
-          eyebrow="데이터 없음"
-          title="ElastiCache 비용 데이터가 없습니다"
+          eyebrow={t("데이터 없음")}
+          title={t("ElastiCache 비용 데이터가 없습니다")}
           description={
             <>
               {data.no_data_reason}
@@ -1132,7 +1138,7 @@ function ElastiCacheCostView({
             <Stat
               label={`Total ${days}d`}
               value={loading ? "···" : `$${fmtDecimal(data?.total ?? 0, 2)}`}
-              hint={`USD · ${data?.range_days || days} day window`}
+              hint={`USD, ${data?.range_days || days} day window`}
               loading={loading}
               accent="amber"
             />
@@ -1386,6 +1392,7 @@ function TokensCostView({
   days: number;
   colors: ReturnType<typeof useChartColors>;
 }) {
+  const t = useT();
   const [data, setData] = useState<TokensCost | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -1419,15 +1426,15 @@ function TokensCostView({
 
       {!loading && data && data.by_model.length === 0 ? (
         <EmptyState
-          eyebrow="데이터 없음"
-          title="Bedrock 토큰 메트릭이 없습니다"
+          eyebrow={t("데이터 없음")}
+          title={t("Bedrock 토큰 메트릭이 없습니다")}
           description={
             data.note ||
             "아직 모델 호출 기록이 없거나 CloudWatch 메트릭 전파 전입니다."
           }
           primary={{
             href: "https://console.aws.amazon.com/cloudwatch/home#metricsV2?graph=~()&namespace=AWS%2FBedrock",
-            label: "CloudWatch 메트릭 확인",
+            label: t("CloudWatch 메트릭 확인"),
           }}
         />
       ) : (
@@ -1589,6 +1596,7 @@ function DDayBadge({ days }: { days: number | null }) {
 }
 
 function CommitmentsCostView({ days }: { days: number }) {
+  const t = useT();
   const [data, setData] = useState<CommitmentsCostData | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -1699,8 +1707,8 @@ function CommitmentsCostView({ days }: { days: number }) {
           <div className="text-zinc-500 text-sm">loading…</div>
         ) : ris.length === 0 ? (
           <EmptyState
-            eyebrow="RI 없음"
-            title="활성 Reserved Instance가 없습니다"
+            eyebrow={t("RI 없음")}
+            title={t("활성 Reserved Instance가 없습니다")}
             description={
               data?.note ||
               "등록된 Aurora 계정에서 활성 RI를 찾지 못했습니다. 모두 온디맨드 과금 중이거나, RI가 다른 계정/리전에 있습니다."

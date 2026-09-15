@@ -23,6 +23,7 @@ import {
 import { SetupGuideModal } from "@/components/clusters/setup-guide-modal";
 import { ENGINE_GROUP_META, ENGINE_GROUP_ORDER } from "@/lib/engine";
 import { groupByEngineGroup, displayName } from "@/lib/group-by-family";
+import { useT } from "@/lib/i18n";
 
 interface Cluster {
   cluster_id: string;
@@ -95,7 +96,7 @@ function EtlBadge({
       classes: "bg-emerald-500/10 text-emerald-300 border-emerald-500/40",
       title: (ts, n) =>
         ts
-          ? `latest snapshot ${new Date(ts).toLocaleString()} · ${
+          ? `latest snapshot ${new Date(ts).toLocaleString()}, ${
               n ?? 0
             } rows in 24h`
           : "metrics current",
@@ -148,6 +149,7 @@ function relTime(iso?: string): string {
 }
 
 export default function ClustersPage() {
+  const t = useT();
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [showForm, setShowForm] = useState(false);
   // Two registration paths: same-account (DBOps control plane and the
@@ -397,7 +399,7 @@ export default function ClustersPage() {
       if (status === "ok") {
         setFeedback({
           kind: "ok",
-          msg: `등록됨: ${displayId} · 연결 검증 통과`,
+          msg: `등록됨: ${displayId}, 연결 검증 통과`,
         });
       } else if (status === "failed") {
         setFeedback({
@@ -484,9 +486,11 @@ export default function ClustersPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="설정"
-        title="클러스터 레지스트리"
-        description="Aurora 클러스터 등록과 cross-account 연결 관리. 메트릭/실시간 상태는 Fleet 또는 Dashboard에서 확인하세요."
+        eyebrow={t("설정")}
+        title={t("클러스터 레지스트리")}
+        description={t(
+          "Aurora 클러스터 등록과 cross-account 연결 관리. 메트릭/실시간 상태는 Fleet 또는 Dashboard에서 확인하세요.",
+        )}
         actions={
           <>
             <Link
@@ -536,7 +540,7 @@ export default function ClustersPage() {
             )}
             {!admin && (
               <span className="text-[10px] uppercase tracking-wider text-zinc-500 px-2 py-1 border border-zinc-800">
-                viewer · 읽기 전용
+                viewer, 읽기 전용
               </span>
             )}
           </>
@@ -803,7 +807,7 @@ export default function ClustersPage() {
                 저장합니다.
               </p>
               <p>
-                채팅·AI insight를 사용할 때마다{" "}
+                채팅과 AI insight를 사용할 때마다{" "}
                 <span className="text-zinc-200">Bedrock 토큰 비용</span>이
                 발생합니다. Cost 탭에서 모니터링 가능합니다.
               </p>
@@ -814,9 +818,7 @@ export default function ClustersPage() {
                 <div key={c.cluster_id} className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 bg-amber-400 rounded-full" />
                   <span className="text-zinc-300">{c.cluster_id}</span>
-                  <span className="text-zinc-600">·</span>
                   <span>{c.region}</span>
-                  <span className="text-zinc-600">·</span>
                   <span>{c.engine}</span>
                 </div>
               ))}
@@ -882,7 +884,7 @@ export default function ClustersPage() {
               {form.engine === "docdb" && (
                 <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">
                   기본은 CloudWatch 메트릭 수집입니다. Mongo 읽기 시크릿을
-                  넣으면 서버 상태·장기 실행 op 딥 리드까지 수집합니다. 선택
+                  넣으면 서버 상태와 장기 실행 op 딥 리드까지 수집합니다. 선택
                   항목이며, 이후 PATCH /api/clusters/{"{id}"}/meta 로도 채울 수
                   있습니다.
                 </p>
@@ -1138,7 +1140,7 @@ export default function ClustersPage() {
             {testResult && (
               <div className="border border-zinc-800 bg-zinc-950 p-4 mt-3">
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
-                  Pre-flight 결과 ·{" "}
+                  Pre-flight 결과:{" "}
                   <span
                     className={
                       testResult.ok ? "text-emerald-400" : "text-rose-400"
@@ -1177,7 +1179,7 @@ export default function ClustersPage() {
                           s.note ||
                           [s.engine, s.version, s.endpoint, s.secret_arn]
                             .filter(Boolean)
-                            .join(" · ")}
+                            .join(", ")}
                       </span>
                     </div>
                   ))}
@@ -1211,14 +1213,19 @@ export default function ClustersPage() {
           </div>
         ) : clusters.length === 0 ? (
           <EmptyState
-            eyebrow="클러스터 없음"
-            title="첫 Aurora 클러스터를 등록해보세요"
-            description="Cluster ID, account, region을 입력하면 RDS Data API 기반 메트릭 수집이 시작됩니다."
+            eyebrow={t("클러스터 없음")}
+            title={t("첫 Aurora 클러스터를 등록해보세요")}
+            description={t(
+              "Cluster ID, account, region을 입력하면 RDS Data API 기반 메트릭 수집이 시작됩니다.",
+            )}
             primary={{
               onClick: () => setShowForm(true),
-              label: "+ 클러스터 등록",
+              label: t("+ 클러스터 등록"),
             }}
-            secondary={{ href: "/chat", label: "먼저 에이전트에게 물어보기" }}
+            secondary={{
+              href: "/chat",
+              label: t("먼저 에이전트에게 물어보기"),
+            }}
           />
         ) : (
           <>
@@ -1348,7 +1355,7 @@ export default function ClustersPage() {
                             engine
                           </th>
                           <th className="text-left px-4 py-2.5 font-medium">
-                            account · region
+                            account / region
                           </th>
                           <th className="text-left px-4 py-2.5 font-medium">
                             status

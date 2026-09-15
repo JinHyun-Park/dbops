@@ -14,6 +14,7 @@ import {
   PageBody,
   EmptyState,
 } from "@/components/design-system/page-shell";
+import { useT } from "@/lib/i18n";
 
 function ConfidenceBar({ value }: { value: number }) {
   const pct = Math.round(value * 100);
@@ -97,6 +98,7 @@ const STATUS_LABEL: Record<RecentStatus, string> = {
 };
 
 export default function LearningPage() {
+  const t = useT();
   const [data, setData] = useState<Awaited<
     ReturnType<typeof fetchLearning>
   > | null>(null);
@@ -118,21 +120,25 @@ export default function LearningPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Monitor"
-        title="Learning"
-        description="권장 조치가 실제로 증상을 해소했는지 자동 측정해 누적한 효과 이력 — 입증된 조치를 우선합니다."
+        eyebrow={t("Monitor")}
+        title={t("Learning")}
+        description={t(
+          "권장 조치가 실제로 증상을 해소했는지 자동 측정해 누적한 효과 이력 — 입증된 조치를 우선합니다.",
+        )}
       />
       <PageBody>
         {err ? (
-          <EmptyState title="불러오지 못했습니다" description={err} />
+          <EmptyState title={t("불러오지 못했습니다")} description={err} />
         ) : !data ? (
           <div className="py-16 text-center text-sm text-slate-500">
             불러오는 중…
           </div>
         ) : isEmpty ? (
           <EmptyState
-            title="아직 학습된 결과가 없습니다"
-            description="권장 조치가 적용되고 평가 윈도우가 지나면 효과 이력이 쌓입니다."
+            title={t("아직 학습된 결과가 없습니다")}
+            description={t(
+              "권장 조치가 적용되고 평가 윈도우가 지나면 효과 이력이 쌓입니다.",
+            )}
           />
         ) : (
           <div className="space-y-8">
@@ -182,7 +188,7 @@ export default function LearningPage() {
                           STATUS_CHIP[c.status]
                         }`}
                       >
-                        {STATUS_LABEL[c.status]}
+                        {t(STATUS_LABEL[c.status])}
                       </span>
                       <span className="font-mono text-slate-300">
                         {c.cluster_id}

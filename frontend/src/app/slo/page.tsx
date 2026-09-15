@@ -15,6 +15,7 @@ import { fmtDecimal, fmtExact } from "@/lib/format";
 import { isMysql } from "@/lib/engine";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
+import { useT } from "@/lib/i18n";
 
 // Per-cluster target config persisted to localStorage. We keep this client-
 // side for v1 — there is no team-level "official" SLO yet, just a personal
@@ -62,6 +63,7 @@ function saveConfig(clusterId: string, cfg: SloConfig) {
 }
 
 export default function SloPage() {
+  const t = useT();
   const { clusters, selected: selectedCluster } = useSelectedCluster();
   const engine = clusters.find((c) => c.cluster_id === selectedCluster)?.engine;
   const [config, setConfig] = useState<SloConfig>(DEFAULT_CONFIG);
@@ -112,9 +114,11 @@ export default function SloPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="모니터"
-        title="SLO Tracker"
-        description="가용성 + 쿼리 지연 SLO 목표 대비 실측 + 에러 버짓 burn-down. 목표값은 클러스터별 브라우저에 저장됩니다."
+        eyebrow={t("모니터")}
+        title={t("SLO Tracker")}
+        description={t(
+          "가용성 + 쿼리 지연 SLO 목표 대비 실측 + 에러 버짓 burn-down. 목표값은 클러스터별 브라우저에 저장됩니다.",
+        )}
         actions={
           <div className="flex items-center gap-2">
             <label className="text-[10px] uppercase tracking-wider text-zinc-500">
@@ -127,8 +131,10 @@ export default function SloPage() {
 
       {!selectedCluster ? (
         <EmptyState
-          title="클러스터가 없습니다"
-          description="SLO 계산을 위해 Clusters 페이지에서 먼저 등록하세요."
+          title={t("클러스터가 없습니다")}
+          description={t(
+            "SLO 계산을 위해 Clusters 페이지에서 먼저 등록하세요.",
+          )}
         />
       ) : (
         <>
@@ -259,7 +265,7 @@ function AvailabilityCard({ data }: { data: SloResponse }) {
             ? "amber"
             : "rose"
       }
-      subtitle={`target ${fmtDecimal(a.target_pct, 2)}% · 윈도우 ${
+      subtitle={`target ${fmtDecimal(a.target_pct, 2)}%, 윈도우 ${
         data.window_days
       }d`}
       budgetConsumedPct={budget}
@@ -308,7 +314,7 @@ function LatencyCard({ data, engine }: { data: SloResponse; engine?: string }) {
               ? "amber"
               : "rose"
       }
-      subtitle={`avg(mean_time_ms) ≤ ${fmtExact(l.target_ms)}ms · 윈도우 ${
+      subtitle={`avg(mean_time_ms) ≤ ${fmtExact(l.target_ms)}ms, 윈도우 ${
         data.window_days
       }d`}
       budgetConsumedPct={l.budget_consumed_pct}
@@ -562,12 +568,12 @@ function Strip({
               : "bg-rose-500/60 border-rose-500/40";
         const titleMain =
           kind === "availability"
-            ? `${b.day} · ${fmtDecimal(b.availability_pct, 2)}% up`
-            : `${b.day} · avg ${fmtDecimal(b.avg_latency_ms, 1)}ms`;
+            ? `${b.day}, ${fmtDecimal(b.availability_pct, 2)}% up`
+            : `${b.day}, avg ${fmtDecimal(b.avg_latency_ms, 1)}ms`;
         return (
           <div
             key={b.day}
-            title={noData ? `${b.day} · 데이터 없음` : titleMain}
+            title={noData ? `${b.day}, 데이터 없음` : titleMain}
             className={`w-4 h-6 border ${tone}`}
           />
         );

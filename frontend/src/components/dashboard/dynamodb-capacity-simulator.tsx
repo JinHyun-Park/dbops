@@ -12,6 +12,7 @@ import {
   StatRow,
 } from "@/components/design-system/page-shell";
 import { fmtDecimal } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 // DynamoDB Provisioned↔On-Demand 월 비용 what-if. RCU/WCU/On-Demand/Provisioned/
 // p99 등 DBA jargon은 영어 유지, 설명/empty-state는 한글. 가격 미해결 시
@@ -31,6 +32,7 @@ export function DynamoDbCapacitySimulator({
 }: {
   clusterId: string;
 }) {
+  const t = useT();
   const [data, setData] = useState<DdbCapacityCostResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -59,7 +61,7 @@ export function DynamoDbCapacitySimulator({
     <Section
       eyebrow="DynamoDB Cost"
       title="용량 모드 비용 시뮬레이션"
-      description="테이블의 실제 소비 용량(consumed RCU/WCU)을 기준으로 Provisioned ↔ On-Demand 월 비용을 실시간 AWS Pricing 단가로 비교합니다. 용량(capacity) 비용만 대상이며 storage·backup·replication은 제외합니다."
+      description="테이블의 실제 소비 용량(consumed RCU/WCU)을 기준으로 Provisioned ↔ On-Demand 월 비용을 실시간 AWS Pricing 단가로 비교합니다. 용량(capacity) 비용만 대상이며 storage, backup, replication은 제외합니다."
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         {loading && (
@@ -75,11 +77,11 @@ export function DynamoDbCapacitySimulator({
         {!loading && !err && data && data.status === "no_data" && (
           <div className="p-4">
             <EmptyState
-              eyebrow="데이터 부족"
-              title="비용 비교를 위한 데이터가 부족합니다"
+              eyebrow={t("데이터 부족")}
+              title={t("비용 비교를 위한 데이터가 부족합니다")}
               description={
                 data.no_data_reason ??
-                "소비 용량 데이터포인트가 충분히 수집되지 않았습니다."
+                t("소비 용량 데이터포인트가 충분히 수집되지 않았습니다.")
               }
             />
           </div>
@@ -88,11 +90,11 @@ export function DynamoDbCapacitySimulator({
         {!loading && !err && data && data.status === "unsupported" && (
           <div className="p-4">
             <EmptyState
-              eyebrow="미지원"
-              title="이 테이블은 비용 비교를 지원하지 않습니다"
+              eyebrow={t("미지원")}
+              title={t("이 테이블은 비용 비교를 지원하지 않습니다")}
               description={
                 data.unsupported_reason ??
-                "이 테이블 유형은 비용 시뮬레이션을 지원하지 않습니다."
+                t("이 테이블 유형은 비용 시뮬레이션을 지원하지 않습니다.")
               }
             />
           </div>
@@ -113,7 +115,7 @@ export function DynamoDbCapacitySimulator({
                   {data.billing_mode ? MODE_KO[data.billing_mode] : "unknown"}
                 </span>
                 <span className="text-[10px] text-zinc-600 font-mono ml-auto">
-                  {data.region} · {fmtDecimal(data.window_hours, 0)}h 윈도우 ·{" "}
+                  {data.region}, {fmtDecimal(data.window_hours, 0)}h 윈도우,{" "}
                   {fmtDecimal(data.datapoints, 0)} datapoints
                 </span>
               </div>
@@ -132,7 +134,7 @@ export function DynamoDbCapacitySimulator({
                 <Stat
                   label="On-Demand 월 비용 (추정)"
                   value={usd(data.on_demand_monthly_usd)}
-                  hint="consumed × $/RRU·WRU"
+                  hint="consumed × $/RRU, $/WRU"
                   accent={
                     data.recommended_mode === "PAY_PER_REQUEST"
                       ? "emerald"
@@ -205,7 +207,7 @@ export function DynamoDbCapacitySimulator({
                 <span>{data.region}</span>
                 {data.sizing && (
                   <span>
-                    sizing basis {data.sizing.basis} · headroom{" "}
+                    sizing basis {data.sizing.basis}, headroom{" "}
                     {fmtDecimal(data.sizing.headroom * 100, 0)}%
                   </span>
                 )}
@@ -220,7 +222,7 @@ export function DynamoDbCapacitySimulator({
                   <ul className="mt-2 space-y-1">
                     {data.assumptions.map((a, i) => (
                       <li key={i} className="flex gap-1.5 leading-relaxed">
-                        <span className="text-zinc-600 select-none">·</span>
+                        <span className="text-zinc-600 select-none">-</span>
                         <span>{a}</span>
                       </li>
                     ))}

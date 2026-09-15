@@ -13,8 +13,10 @@ import {
   Section,
   EmptyState,
 } from "@/components/design-system/page-shell";
+import { useT } from "@/lib/i18n";
 
 export default function AdminUsersPage() {
+  const t = useT();
   const [items, setItems] = useState<AdminUser[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -77,15 +79,15 @@ export default function AdminUsersPage() {
     return (
       <PageBody>
         <PageHeader
-          eyebrow="Admin"
-          title="Users"
-          description="사용자 역할 관리 (관리자 전용)"
+          eyebrow={t("Admin")}
+          title={t("Users")}
+          description={t("사용자 역할 관리 (관리자 전용)")}
         />
         <Section>
           <EmptyState
-            eyebrow="접근 제한"
-            title="관리자 전용 페이지"
-            description="이 페이지는 관리자만 볼 수 있습니다."
+            eyebrow={t("접근 제한")}
+            title={t("관리자 전용 페이지")}
+            description={t("이 페이지는 관리자만 볼 수 있습니다.")}
           />
         </Section>
       </PageBody>
@@ -95,9 +97,11 @@ export default function AdminUsersPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="Admin"
-        title="Users"
-        description="사용자 목록과 역할(admin · viewer)을 관리합니다. 변경 사항은 즉시 적용됩니다."
+        eyebrow={t("Admin")}
+        title={t("Users")}
+        description={t(
+          "사용자 목록과 역할(admin/viewer)을 관리합니다. 변경 사항은 즉시 적용됩니다.",
+        )}
       />
 
       {error && (
@@ -111,9 +115,9 @@ export default function AdminUsersPage() {
       ) : items.length === 0 ? (
         <Section>
           <EmptyState
-            eyebrow="비어 있음"
-            title="사용자가 없습니다"
-            description="이 사용자 풀에 등록된 사용자가 없습니다."
+            eyebrow={t("비어 있음")}
+            title={t("사용자가 없습니다")}
+            description={t("이 사용자 풀에 등록된 사용자가 없습니다.")}
           />
         </Section>
       ) : (
@@ -151,7 +155,7 @@ export default function AdminUsersPage() {
                       <td className="px-4 py-3 text-zinc-400">
                         {u.status}
                         {!u.enabled && (
-                          <span className="ml-1 text-rose-400">· 비활성</span>
+                          <span className="ml-1 text-rose-400">(비활성)</span>
                         )}
                       </td>
                       <td className="px-4 py-3">

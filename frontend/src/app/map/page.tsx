@@ -22,6 +22,7 @@ import {
   type MapCluster,
   type StatusLevel,
 } from "@/lib/db-map";
+import { useT } from "@/lib/i18n";
 
 const STATUS_DOT: Record<StatusLevel, string> = {
   ok: "bg-emerald-400",
@@ -213,6 +214,7 @@ function DbCard({
 }
 
 export default function MapPage() {
+  const t = useT();
   const router = useRouter();
   const [clusters, setClusters] = useState<MapCluster[]>([]);
   const [loading, setLoading] = useState(true);
@@ -248,9 +250,11 @@ export default function MapPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Monitor"
-        title="Map"
-        description="계정의 DB를 Region → VPC로 묶어 본 아키텍처 청사진 — 노드를 클릭하면 해당 대시보드로 이동하고 전역 선택이 바뀝니다."
+        eyebrow={t("Monitor")}
+        title={t("Map")}
+        description={t(
+          "계정의 DB를 Region → VPC로 묶어 본 아키텍처 청사진 — 노드를 클릭하면 해당 대시보드로 이동하고 전역 선택이 바뀝니다.",
+        )}
       />
       <PageBody>
         {loading ? (
@@ -259,13 +263,13 @@ export default function MapPage() {
           </div>
         ) : err ? (
           <EmptyState
-            title="클러스터를 불러오지 못했습니다"
+            title={t("클러스터를 불러오지 못했습니다")}
             description={err}
           />
         ) : groups.length === 0 ? (
           <EmptyState
-            title="등록된 DB가 없습니다"
-            description="Clusters 페이지에서 클러스터를 먼저 등록하세요."
+            title={t("등록된 DB가 없습니다")}
+            description={t("Clusters 페이지에서 클러스터를 먼저 등록하세요.")}
           />
         ) : (
           <div className="space-y-6">
@@ -308,7 +312,7 @@ export default function MapPage() {
                       </h3>
                       {!serverless && g.azs.length > 0 && (
                         <span className="text-[10px] text-slate-500">
-                          {g.azs.length} AZ · {g.azs.join(", ")}
+                          {g.azs.length} AZ: {g.azs.join(", ")}
                         </span>
                       )}
                       <span className="ml-auto rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">

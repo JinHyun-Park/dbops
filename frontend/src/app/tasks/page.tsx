@@ -28,6 +28,7 @@ import {
   RcaScoringPolicy,
   categoryLabel,
 } from "@/components/rca/rca-candidate-detail";
+import { useT } from "@/lib/i18n";
 
 const KIND_LABEL: Record<string, string> = {
   auto_rca: "자동 RCA",
@@ -60,6 +61,7 @@ function isoFromMs(ms: string | undefined): string | undefined {
 }
 
 export default function TasksPage() {
+  const t = useT();
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [stats, setStats] = useState<TaskStats | null>(null);
   const [engineByCluster, setEngineByCluster] = useState<
@@ -146,9 +148,11 @@ export default function TasksPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="automate"
-        title="에이전트 작업"
-        description="경보 자동 RCA · 예약 · 수동 실행 작업의 기록과 결과. 모든 작업은 읽기 전용 분석입니다 — 변경은 승인 센터를 거칩니다."
+        eyebrow={t("automate")}
+        title={t("에이전트 작업")}
+        description={t(
+          "경보 자동 RCA, 예약, 수동 실행 작업의 기록과 결과. 모든 작업은 읽기 전용 분석입니다 — 변경은 승인 센터를 거칩니다.",
+        )}
       />
       <Section>
         {stats && (
@@ -173,7 +177,7 @@ export default function TasksPage() {
             )}
             {Object.entries(stats.by_kind).map(([kind, count]) => (
               <span key={kind} className="text-zinc-500">
-                {KIND_LABEL[kind] || kind}{" "}
+                {t(KIND_LABEL[kind] || kind)}{" "}
                 <span className="text-zinc-300">{fmtExact(count)}</span>
               </span>
             ))}
@@ -230,8 +234,10 @@ export default function TasksPage() {
           <div className="text-zinc-500 text-sm py-8">불러오는 중…</div>
         ) : tasks.length === 0 ? (
           <EmptyState
-            title="작업 없음"
-            description="경보가 발생하면 자동 RCA가 여기에 쌓입니다. 위에서 클러스터를 선택해 RCA를 직접 실행할 수도 있습니다."
+            title={t("작업 없음")}
+            description={t(
+              "경보가 발생하면 자동 RCA가 여기에 쌓입니다. 위에서 클러스터를 선택해 RCA를 직접 실행할 수도 있습니다.",
+            )}
           />
         ) : (
           <div className="flex flex-col gap-2">
@@ -270,6 +276,7 @@ function SchedulesSection({
   filterCluster: string;
   clusterOptions: { cluster_id: string; engine?: string }[];
 }) {
+  const t = useT();
   const [schedules, setSchedules] = useState<AgentSchedule[]>([]);
   const [intervalKind, setIntervalKind] = useState("daily");
   const [busy, setBusy] = useState(false);
@@ -359,7 +366,7 @@ function SchedulesSection({
               className="flex items-center gap-3 border border-zinc-800 bg-zinc-900/40 px-4 py-2.5 text-sm"
             >
               <span className="flex-shrink-0 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider border border-sky-500/40 bg-sky-500/10 text-sky-300">
-                {INTERVAL_LABEL[s.interval_kind] || s.interval_kind}
+                {t(INTERVAL_LABEL[s.interval_kind] || s.interval_kind)}
               </span>
               {engineOf[s.cluster_id] && (
                 <EngineBadge
@@ -402,6 +409,7 @@ function TaskRow({
   open: boolean;
   onToggle: () => void;
 }) {
+  const t = useT();
   const rowRef = useRef<HTMLDivElement>(null);
   // Deep-linked task (toast ?focus=) scrolls into view once on mount.
   useEffect(() => {
@@ -451,10 +459,10 @@ function TaskRow({
             STATUS_STYLE[task.status] || STATUS_STYLE.pending
           }`}
         >
-          {STATUS_LABEL[task.status] || task.status}
+          {t(STATUS_LABEL[task.status] || task.status)}
         </span>
         <span className="flex-shrink-0 text-[11px] font-mono text-zinc-400 w-20">
-          {KIND_LABEL[task.kind] || task.kind}
+          {t(KIND_LABEL[task.kind] || task.kind)}
         </span>
         {engine && (
           <EngineBadge
@@ -639,7 +647,6 @@ function TaskRow({
                     <span className="flex-shrink-0 font-mono text-zinc-300">
                       {s.step}
                     </span>
-                    <span className="flex-shrink-0 text-zinc-600">·</span>
                     <span className="flex-shrink-0 font-mono text-zinc-500">
                       {s.tool}
                     </span>

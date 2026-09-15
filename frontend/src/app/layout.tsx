@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { CommandPalette } from "@/components/design-system/command-palette";
 import { AppShell } from "@/components/app-shell";
+import { LocaleProvider } from "@/lib/i18n";
 import "./globals.css";
 
 // Geist is the Vercel/Linear-adjacent default. Replaces IBM Plex which
@@ -21,7 +22,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DBOps · Aurora operations console",
+  title: "DBOps: Aurora operations console",
   description:
     "AI-powered DBA workflows for Aurora MySQL and PostgreSQL at fleet scale.",
 };
@@ -33,7 +34,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
@@ -47,8 +48,14 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-full">
-        <CommandPalette />
-        <AppShell>{children}</AppShell>
+        {/* One provider above both, so the palette and the shell agree on the
+            locale. LocaleProvider resolves it in an effect and sets
+            document.documentElement.lang, which is why <html lang> below is
+            only the pre-hydration default. */}
+        <LocaleProvider>
+          <CommandPalette />
+          <AppShell>{children}</AppShell>
+        </LocaleProvider>
       </body>
     </html>
   );

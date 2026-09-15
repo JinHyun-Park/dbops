@@ -14,6 +14,7 @@ import {
   EmptyState,
 } from "@/components/design-system/page-shell";
 import { fmtBytes } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -114,9 +115,7 @@ function FileRow({
             {file.updated_by && (
               <span className="text-zinc-500">{file.updated_by}</span>
             )}
-            {file.updated_by && ts && (
-              <span className="text-zinc-700"> · </span>
-            )}
+            {file.updated_by && ts && <span className="text-zinc-700">, </span>}
             {ts && <span>{ts}</span>}
           </div>
         )}
@@ -160,8 +159,8 @@ function UploadZone({
         <p className="text-xs text-zinc-400 mb-3">
           <code className="text-zinc-300">.md</code>,{" "}
           <code className="text-zinc-300">.txt</code>,{" "}
-          <code className="text-zinc-300">.csv</code> 형식만 허용 · 파일당 최대{" "}
-          {fmtBytes(PER_FILE_MAX_BYTES)} · 전체 예산{" "}
+          <code className="text-zinc-300">.csv</code> 형식만 허용, 파일당 최대{" "}
+          {fmtBytes(PER_FILE_MAX_BYTES)}, 전체 예산{" "}
           {fmtBytes(TOTAL_BUDGET_BYTES)}
         </p>
         <input
@@ -199,6 +198,7 @@ function UploadZone({
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ContextFilesPage() {
+  const t = useT();
   const [files, setFiles] = useState<ContextFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [adminOnly, setAdminOnly] = useState(false);
@@ -306,15 +306,15 @@ export default function ContextFilesPage() {
     return (
       <PageBody>
         <PageHeader
-          eyebrow="Configure"
-          title="Context files"
-          description="에이전트 참조 컨텍스트 파일 관리 (관리자 전용)"
+          eyebrow={t("Configure")}
+          title={t("Context files")}
+          description={t("에이전트 참조 컨텍스트 파일 관리 (관리자 전용)")}
         />
         <Section>
           <EmptyState
-            eyebrow="접근 제한"
-            title="관리자 전용 페이지"
-            description="이 설정은 관리자만 변경할 수 있습니다."
+            eyebrow={t("접근 제한")}
+            title={t("관리자 전용 페이지")}
+            description={t("이 설정은 관리자만 변경할 수 있습니다.")}
           />
         </Section>
       </PageBody>
@@ -324,9 +324,11 @@ export default function ContextFilesPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="Configure"
-        title="Context files"
-        description="에이전트가 작업할 때 참조하는 운영 컨텍스트 파일을 관리합니다. 업로드한 내용은 매 호출마다 에이전트에 참조 데이터로 주입되며, 명령(command)으로 해석되지 않습니다."
+        eyebrow={t("Configure")}
+        title={t("Context files")}
+        description={t(
+          "에이전트가 작업할 때 참조하는 운영 컨텍스트 파일을 관리합니다. 업로드한 내용은 매 호출마다 에이전트에 참조 데이터로 주입되며, 명령(command)으로 해석되지 않습니다.",
+        )}
       />
 
       {/* ── How it works ── */}
@@ -342,7 +344,7 @@ export default function ContextFilesPage() {
           <p>
             예: 클러스터별 담당자 매핑, 점검 체크리스트, 내부 SLA 기준, 팀
             컨벤션 등을 <code className="text-zinc-400">.md</code> 파일로
-            업로드하면 에이전트가 진단·권고 시 이를 참조합니다.
+            업로드하면 에이전트가 진단과 권고 시 이를 참조합니다.
           </p>
           <p>
             파일당 최대{" "}
@@ -389,8 +391,10 @@ export default function ContextFilesPage() {
           >
             {files.length === 0 ? (
               <EmptyState
-                title="등록된 파일 없음"
-                description="아래에서 첫 번째 컨텍스트 파일을 업로드하세요. 파일이 없으면 에이전트는 기본 참조 정보만 사용합니다."
+                title={t("등록된 파일 없음")}
+                description={t(
+                  "아래에서 첫 번째 컨텍스트 파일을 업로드하세요. 파일이 없으면 에이전트는 기본 참조 정보만 사용합니다.",
+                )}
               />
             ) : (
               <div className="border border-zinc-800 bg-zinc-900/30">
@@ -410,7 +414,7 @@ export default function ContextFilesPage() {
           <Section
             eyebrow="Upload"
             title="파일 업로드"
-            description={`.md · .txt · .csv — 파일당 최대 ${fmtBytes(
+            description={`.md, .txt, .csv — 파일당 최대 ${fmtBytes(
               PER_FILE_MAX_BYTES,
             )}`}
           >

@@ -7,6 +7,7 @@ import {
   Section,
   EmptyState,
 } from "@/components/design-system/page-shell";
+import { useT } from "@/lib/i18n";
 
 interface Operation {
   tags?: string[];
@@ -30,6 +31,7 @@ const METHOD_STYLES: Record<string, string> = {
 };
 
 export default function ApiDocsPage() {
+  const t = useT();
   const [spec, setSpec] = useState<Spec | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -73,11 +75,13 @@ export default function ApiDocsPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="개발자"
-        title="API 문서"
+        eyebrow={t("개발자")}
+        title={t("API 문서")}
         description={
           spec?.info?.description ||
-          "DBOps REST API. 모든 경로는 Cognito JWT(Authorization: Bearer)가 필요합니다 — Slack 웹훅(HMAC)과 /health 제외."
+          t(
+            "DBOps REST API. 모든 경로는 Cognito JWT(Authorization: Bearer)가 필요합니다 — Slack 웹훅(HMAC)과 /health 제외.",
+          )
         }
       />
       {err && (
@@ -90,13 +94,13 @@ export default function ApiDocsPage() {
       )}
       {spec && tags.length === 0 && (
         <EmptyState
-          title="엔드포인트 없음"
-          description="openapi.json에 경로가 없습니다."
+          title={t("엔드포인트 없음")}
+          description={t("openapi.json에 경로가 없습니다.")}
         />
       )}
       {spec && tags.length > 0 && (
         <div className="text-[11px] text-zinc-500 font-mono">
-          {tags.length} groups · {totalOps} endpoints · v{spec.info?.version}
+          {tags.length} groups, {totalOps} endpoints, v{spec.info?.version}
         </div>
       )}
       {tags.map((tag) => (

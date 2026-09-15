@@ -22,6 +22,7 @@ import {
   Section,
   EmptyState,
 } from "@/components/design-system/page-shell";
+import { useT } from "@/lib/i18n";
 
 interface ClusterItem {
   cluster_id: string;
@@ -30,6 +31,7 @@ interface ClusterItem {
 }
 
 export default function AdminTeamsPage() {
+  const t = useT();
   const [teams, setTeams] = useState<AdminTeam[]>([]);
   const [loading, setLoading] = useState(true);
   const [adminOnly, setAdminOnly] = useState(false);
@@ -240,15 +242,15 @@ export default function AdminTeamsPage() {
     return (
       <PageBody>
         <PageHeader
-          eyebrow="Admin"
-          title="Teams"
-          description="팀 관리 — 멤버·클러스터 가시성 (관리자 전용)"
+          eyebrow={t("Admin")}
+          title={t("Teams")}
+          description={t("팀 관리 — 멤버와 클러스터 가시성 (관리자 전용)")}
         />
         <Section>
           <EmptyState
-            eyebrow="접근 제한"
-            title="관리자 전용 페이지"
-            description="이 페이지는 관리자만 볼 수 있습니다."
+            eyebrow={t("접근 제한")}
+            title={t("관리자 전용 페이지")}
+            description={t("이 페이지는 관리자만 볼 수 있습니다.")}
           />
         </Section>
       </PageBody>
@@ -258,9 +260,9 @@ export default function AdminTeamsPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="Admin"
-        title="Teams"
-        description="팀을 만들고 멤버와 클러스터 가시성을 관리합니다."
+        eyebrow={t("Admin")}
+        title={t("Teams")}
+        description={t("팀을 만들고 멤버와 클러스터 가시성을 관리합니다.")}
       />
 
       {error && (
@@ -275,9 +277,9 @@ export default function AdminTeamsPage() {
         <Section eyebrow="Teams" title="팀 목록">
           {teams.length === 0 ? (
             <EmptyState
-              eyebrow="비어 있음"
-              title="팀이 없습니다"
-              description="아래에서 첫 번째 팀을 만들어 보세요."
+              eyebrow={t("비어 있음")}
+              title={t("팀이 없습니다")}
+              description={t("아래에서 첫 번째 팀을 만들어 보세요.")}
             />
           ) : (
             <div className="border border-zinc-800 bg-zinc-900/30">

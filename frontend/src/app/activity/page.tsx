@@ -23,6 +23,7 @@ import {
   Download,
 } from "lucide-react";
 import { buildAuditCsv } from "@/lib/audit-export";
+import { useT } from "@/lib/i18n";
 
 // ---------------------------------------------------------------------------
 // Status config: color tokens drawn from the existing dark-zinc palette
@@ -186,6 +187,7 @@ function fmtDayLabel(dateKey: string): string {
 // Page
 // ---------------------------------------------------------------------------
 export default function ActivityPage() {
+  const t = useT();
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [clusters, setClusters] = useState<ClusterRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -235,9 +237,11 @@ export default function ActivityPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="audit"
-        title="Activity log"
-        description="DBOps에서 일어난 모든 쓰기 의사결정의 시간순 기록 — 누가 요청했고 누가 승인했고 언제 실행됐는지. 컴플라이언스 감사와 사후 회고 (post-incident retro) 용도."
+        eyebrow={t("audit")}
+        title={t("Activity log")}
+        description={t(
+          "DBOps에서 일어난 모든 쓰기 의사결정의 시간순 기록 — 누가 요청했고 누가 승인했고 언제 실행됐는지. 컴플라이언스 감사와 사후 회고 (post-incident retro) 용도.",
+        )}
         actions={
           <div className="flex items-center gap-2 flex-wrap">
             {items.length > 0 && (
@@ -298,7 +302,7 @@ export default function ActivityPage() {
             >
               {ACTION_OPTIONS.map((a) => (
                 <option key={a} value={a}>
-                  {a ? actionLabel(a) : "all actions"}
+                  {a ? t(actionLabel(a)) : "all actions"}
                 </option>
               ))}
             </select>
@@ -323,10 +327,12 @@ export default function ActivityPage() {
         <div className="text-sm text-zinc-500 py-8">불러오는 중…</div>
       ) : items.length === 0 ? (
         <EmptyState
-          eyebrow="activity"
-          title="기록된 활동이 없습니다"
-          description="아직 DBOps를 통해 실행된 쓰기 작업이 없거나, 현재 필터에 매칭되는 기록이 없습니다."
-          secondary={{ href: "/approvals", label: "대기 중인 승인 보기" }}
+          eyebrow={t("activity")}
+          title={t("기록된 활동이 없습니다")}
+          description={t(
+            "아직 DBOps를 통해 실행된 쓰기 작업이 없거나, 현재 필터에 매칭되는 기록이 없습니다.",
+          )}
+          secondary={{ href: "/approvals", label: t("대기 중인 승인 보기") }}
         />
       ) : (
         <div className="space-y-10">
@@ -402,6 +408,7 @@ function TimelineEvent({
   item: ActivityItem;
   isLast: boolean;
 }) {
+  const t = useT();
   const cfg = STATUS_CONFIG[item.approval_status] ?? STATUS_CONFIG_FALLBACK;
   const Icon = cfg.icon;
 
@@ -469,7 +476,7 @@ function TimelineEvent({
 
               {/* Action title */}
               <span className="text-[13px] font-medium text-zinc-100 tracking-tight truncate">
-                {actionLabel(item.action_type)}
+                {t(actionLabel(item.action_type))}
               </span>
 
               {/* action_type identifier — monospace, for DBA scanning */}
@@ -480,7 +487,7 @@ function TimelineEvent({
               {/* Cluster */}
               {item.cluster_id && (
                 <span className="text-[10px] font-mono text-zinc-500 truncate">
-                  · {item.cluster_id}
+                  {item.cluster_id}
                 </span>
               )}
             </div>
@@ -505,12 +512,9 @@ function TimelineEvent({
               요청
             </span>
             {item.approved_by && (
-              <>
-                <span className="text-zinc-700">·</span>
-                <span>
-                  <span className="text-zinc-500">{item.approved_by}</span> 승인
-                </span>
-              </>
+              <span>
+                <span className="text-zinc-500">{item.approved_by}</span> 승인
+              </span>
             )}
             <span className="text-zinc-700 ml-auto select-all">
               {item.approval_id.slice(0, 8)}

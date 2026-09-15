@@ -18,6 +18,7 @@ import {
 } from "@/components/design-system/page-shell";
 import { categoryLabel } from "@/components/rca/rca-candidate-detail";
 import { fmtRelative } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 // Demo page: press a button, a realistic incident appears in the signal tables,
 // and the SAME automatic RCA that runs for a real alert explains it. The point
@@ -40,6 +41,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export default function ScenariosPage() {
+  const t = useT();
   const [catalog, setCatalog] = useState<ScenarioCatalog | null>(null);
   const [runs, setRuns] = useState<ScenarioRun[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -120,9 +122,11 @@ export default function ScenariosPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="demo"
-        title="장애 시나리오"
-        description="버튼을 누르면 실제와 같은 장애 신호가 주입되고, 실제 자동 RCA가 원인과 조치를 분석합니다."
+        eyebrow={t("demo")}
+        title={t("장애 시나리오")}
+        description={t(
+          "버튼을 누르면 실제와 같은 장애 신호가 주입되고, 실제 자동 RCA가 원인과 조치를 분석합니다.",
+        )}
       />
       {loadError && (
         <div className="px-3 py-2 border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs">
@@ -251,8 +255,10 @@ export default function ScenariosPage() {
       <Section title="실행 이력">
         {runs.length === 0 ? (
           <EmptyState
-            title="실행 이력 없음"
-            description="위에서 시나리오를 실행하면 여기에 기록되고, 각 실행에서 생성된 RCA 리포트로 바로 이동할 수 있습니다."
+            title={t("실행 이력 없음")}
+            description={t(
+              "위에서 시나리오를 실행하면 여기에 기록되고, 각 실행에서 생성된 RCA 리포트로 바로 이동할 수 있습니다.",
+            )}
           />
         ) : (
           <div className="flex flex-col divide-y divide-zinc-800/60">
@@ -263,7 +269,7 @@ export default function ScenariosPage() {
                     STATUS_STYLE[r.status] ?? "border-zinc-700 text-zinc-400"
                   }`}
                 >
-                  {STATUS_LABEL[r.status] ?? r.status}
+                  {t(STATUS_LABEL[r.status] ?? r.status)}
                 </span>
                 <span className="text-zinc-200 flex-1 min-w-0 truncate">
                   {r.title ?? r.scenario_id}

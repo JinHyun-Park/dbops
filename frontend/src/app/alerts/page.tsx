@@ -25,6 +25,7 @@ import {
 import { isAdmin } from "@/lib/auth";
 import { getSelectedCluster } from "@/lib/selected-cluster";
 import { SearchableClusterSelect } from "@/components/design-system/searchable-cluster-select";
+import { useT } from "@/lib/i18n";
 
 interface Rule {
   id: number;
@@ -256,6 +257,7 @@ const RULE_TEMPLATES: {
 ];
 
 export default function AlertsPage() {
+  const t = useT();
   const [rules, setRules] = useState<Rule[]>([]);
   // Impact panel: which rule's "what was going on?" context is expanded
   // right now, plus its fetched data. Keyed by rule id so toggling the
@@ -504,9 +506,11 @@ export default function AlertsPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="설정"
-        title="알림 규칙"
-        description={`총 ${rules.length}개 · 5분마다 metric_snapshots를 평가해서 조건 충족 시 발화합니다.`}
+        eyebrow={t("설정")}
+        title={t("알림 규칙")}
+        description={t(
+          "총 {n}개, 5분마다 metric_snapshots를 평가해서 조건 충족 시 발화합니다.",
+        ).replace("{n}", String(rules.length))}
       />
 
       {err && (
@@ -517,7 +521,7 @@ export default function AlertsPage() {
 
       {!admin && (
         <div className="mb-6 px-3 py-2 border border-zinc-800 text-[11px] uppercase tracking-wider text-zinc-500">
-          읽기 전용 · viewer 권한 — 쓰기 액션은 숨겨집니다
+          읽기 전용, viewer 권한 — 쓰기 액션은 숨겨집니다
         </div>
       )}
 
@@ -712,7 +716,7 @@ export default function AlertsPage() {
 
               <div className="space-y-2">
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-                  Operands · 모두{" "}
+                  Operands: 모두{" "}
                   <span className="text-amber-300 font-mono">
                     {compound.logic.toUpperCase()}
                   </span>{" "}
@@ -1085,9 +1089,11 @@ export default function AlertsPage() {
           <div className="text-zinc-500 text-sm">불러오는 중...</div>
         ) : rules.length === 0 ? (
           <EmptyState
-            eyebrow="규칙 없음"
-            title="첫 알림 규칙을 등록해보세요"
-            description="위 폼에서 cluster + metric + threshold를 고르면 됩니다. evaluator가 5분마다 실행되고 SNS / Slack / PagerDuty 구독자에게 fan-out 됩니다."
+            eyebrow={t("규칙 없음")}
+            title={t("첫 알림 규칙을 등록해보세요")}
+            description={t(
+              "위 폼에서 cluster + metric + threshold를 고르면 됩니다. evaluator가 5분마다 실행되고 SNS / Slack / PagerDuty 구독자에게 fan-out 됩니다.",
+            )}
           />
         ) : (
           <div className="border border-zinc-800 overflow-x-auto">
@@ -1209,7 +1215,7 @@ export default function AlertsPage() {
                                 .join(join)}
                             >
                               <span className="px-1 py-0.5 mr-1.5 bg-amber-500/15 text-amber-300 border border-amber-500/40 text-[10px] uppercase tracking-wider">
-                                {comp.logic} · {comp.operands.length}
+                                {comp.logic} × {comp.operands.length}
                               </span>
                               <span className="text-zinc-400">
                                 {comp.operands
@@ -1279,7 +1285,7 @@ export default function AlertsPage() {
                             <button
                               onClick={() => openImpact(r.id)}
                               className="text-amber-300 hover:text-amber-200 text-xs underline underline-offset-2"
-                              title="이 룰이 발화한 시점의 슬로우 쿼리·이벤트·동시 알림"
+                              title="이 룰이 발화한 시점의 슬로우 쿼리, 이벤트, 동시 알림"
                             >
                               {impactOpenId === r.id ? "닫기" : "영향도"}
                             </button>
@@ -1393,7 +1399,7 @@ function SlackAckSetupGuide() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // 클립보드 API가 차단된 환경(비-HTTPS·권한 거부) — 조용히 실패하지
+      // 클립보드 API가 차단된 환경(비-HTTPS, 권한 거부) — 조용히 실패하지
       // 않고 직접 선택해 복사하라고 안내한다. 주소는 위 code 블록에서
       // 선택 가능하다.
       setCopyFailed(true);
@@ -1608,8 +1614,8 @@ function ImpactPanel({
         기준 시각{" "}
         <span className="font-mono text-zinc-300">
           {fmt(data.window.center)}
-        </span>{" "}
-        · ±{data.window.minutes}분 윈도우
+        </span>
+        , ±{data.window.minutes}분 윈도우
       </div>
 
       <div>
@@ -1632,8 +1638,8 @@ function ImpactPanel({
                     total{" "}
                     <span className="text-zinc-200">
                       {Math.round(Number(q.total_ms) || 0)}ms
-                    </span>{" "}
-                    · {Number(q.calls) || 0} calls · mean{" "}
+                    </span>
+                    , {Number(q.calls) || 0} calls, mean{" "}
                     {Math.round(Number(q.mean_ms) || 0)}ms
                   </div>
                 </div>

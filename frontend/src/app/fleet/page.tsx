@@ -24,6 +24,7 @@ import {
 } from "@/lib/engine";
 import { triage, n, LEVEL_RANK, type Level } from "@/lib/cluster-triage";
 import { groupByEngineGroup, displayName } from "@/lib/group-by-family";
+import { useT } from "@/lib/i18n";
 
 interface ClusterRow {
   cluster_id: string;
@@ -121,6 +122,7 @@ interface FleetGroup {
 }
 
 export default function FleetPage() {
+  const t = useT();
   const [rows, setRows] = useState<ClusterRow[]>([]);
   const [demoIds, setDemoIds] = useState<Set<string>>(new Set());
   // Registry account/region keyed by cluster_id — only used for Group by.
@@ -406,9 +408,11 @@ export default function FleetPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="모니터"
-        title="Fleet 개요"
-        description={`총 ${counts.total}개 클러스터 · 위험도 순 정렬 · 30초마다 자동 새로고침`}
+        eyebrow={t("모니터")}
+        title={t("Fleet 개요")}
+        description={t(
+          "총 {n}개 클러스터, 위험도 순 정렬, 30초마다 자동 새로고침",
+        ).replace("{n}", String(counts.total))}
       />
 
       {err && (
@@ -555,10 +559,12 @@ export default function FleetPage() {
         <div className="text-zinc-500 text-sm">불러오는 중…</div>
       ) : counts.total === 0 ? (
         <EmptyState
-          eyebrow="클러스터 없음"
-          title="아직 등록된 클러스터가 없습니다"
-          description="Aurora 클러스터를 등록하면 CPU, AAS, connection, lock 등 메트릭이 30초 주기로 이 페이지에 스트리밍됩니다."
-          primary={{ href: "/clusters", label: "+ 클러스터 등록" }}
+          eyebrow={t("클러스터 없음")}
+          title={t("아직 등록된 클러스터가 없습니다")}
+          description={t(
+            "Aurora 클러스터를 등록하면 CPU, AAS, connection, lock 등 메트릭이 30초 주기로 이 페이지에 스트리밍됩니다.",
+          )}
+          primary={{ href: "/clusters", label: t("+ 클러스터 등록") }}
         />
       ) : view.length === 0 ? (
         <div className="bg-zinc-800/40 border border-zinc-700 rounded-lg px-4 py-8 text-center text-zinc-500 text-sm">
@@ -780,8 +786,8 @@ function FleetRow({ d, demoIds }: { d: Decorated; demoIds: Set<string> }) {
                   title={eolHint(d.eol)}
                 >
                   {d.eol.status === "expired"
-                    ? `EOL · ${Math.abs(d.eol.days_remaining)}d past`
-                    : `EOL ${d.eol.eol} · ${d.eol.days_remaining}d`}
+                    ? `EOL, ${Math.abs(d.eol.days_remaining)}d past`
+                    : `EOL ${d.eol.eol}, ${d.eol.days_remaining}d`}
                 </span>
               )}
             </div>
@@ -892,8 +898,8 @@ function FleetCard({ d, demoIds }: { d: Decorated; demoIds: Set<string> }) {
               }`}
             >
               {d.eol.status === "expired"
-                ? `EOL · ${Math.abs(d.eol.days_remaining)}d past`
-                : `EOL ${d.eol.eol} · ${d.eol.days_remaining}d`}
+                ? `EOL, ${Math.abs(d.eol.days_remaining)}d past`
+                : `EOL ${d.eol.eol}, ${d.eol.days_remaining}d`}
             </div>
           )}
         </div>
@@ -936,7 +942,7 @@ function FleetCard({ d, demoIds }: { d: Decorated; demoIds: Set<string> }) {
   );
 }
 
-// "🔴 2 · 🟡 1" style rollup — only non-zero buckets, worst-first.
+// "🔴 2, 🟡 1" style rollup — only non-zero buckets, worst-first.
 function groupRollup(rows: Decorated[]): string {
   let critical = 0,
     warning = 0,
@@ -950,7 +956,7 @@ function groupRollup(rows: Decorated[]): string {
   if (critical) parts.push(`🔴 ${critical}`);
   if (warning) parts.push(`🟡 ${warning}`);
   if (ok) parts.push(`🟢 ${ok}`);
-  return parts.join(" · ");
+  return parts.join(", ");
 }
 
 // Desktop group block: a styled colSpan header row + (when expanded) the

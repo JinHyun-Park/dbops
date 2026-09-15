@@ -14,6 +14,7 @@ import {
   Section,
   EmptyState,
 } from "@/components/design-system/page-shell";
+import { useT } from "@/lib/i18n";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -49,7 +50,7 @@ function Provenance({ policy }: { policy: ApprovalPolicy }) {
       {policy.updated_by && (
         <span className="text-zinc-500">{policy.updated_by}</span>
       )}
-      {policy.updated_by && ts && <span className="text-zinc-700"> · </span>}
+      {policy.updated_by && ts && <span className="text-zinc-700">, </span>}
       {ts && <span className="text-zinc-500">{ts}</span>}
     </div>
   );
@@ -171,7 +172,7 @@ function PolicyForm({
             <option value="create_rds_snapshot" />
             <option value="modify_rds_instance_class" />
             <option value="modify_rds_instance_params" />
-            {/* 유지보수 / 백업·복원 */}
+            {/* 유지보수 / 백업과 복원 */}
             <option value="manage_maintenance" />
             <option value="create_snapshot" />
             <option value="restore_cluster" />
@@ -189,8 +190,8 @@ function PolicyForm({
             <option value="other" />
           </datalist>
           <p className="mt-1 text-[11px] text-zinc-600">
-            승인 요청의 action_type / tool_name과 매칭 — SQL·파라미터뿐 아니라
-            엔드포인트·스케일 변경(create_custom_endpoint, add_reader_instance
+            승인 요청의 action_type / tool_name과 매칭 — SQL과 파라미터뿐 아니라
+            엔드포인트와 스케일 변경(create_custom_endpoint, add_reader_instance
             등)도 지정 가능. 값이 요청의 action_type과{" "}
             <strong className="text-zinc-400">정확히 일치</strong>해야
             적용됩니다 (오타 시 정책이 매칭되지 않아 미승인 상태로 남음).
@@ -371,6 +372,7 @@ function PolicyRow({
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ApprovalPoliciesPage() {
+  const t = useT();
   const [policies, setPolicies] = useState<ApprovalPolicy[]>([]);
   const [loading, setLoading] = useState(true);
   const [adminOnly, setAdminOnly] = useState(false);
@@ -468,15 +470,15 @@ export default function ApprovalPoliciesPage() {
     return (
       <PageBody>
         <PageHeader
-          eyebrow="Configure"
-          title="Approval policies"
-          description="클러스터·액션별 지정 승인자 라우팅 (관리자 전용)"
+          eyebrow={t("Configure")}
+          title={t("Approval policies")}
+          description={t("클러스터와 액션별 지정 승인자 라우팅 (관리자 전용)")}
         />
         <Section>
           <EmptyState
-            eyebrow="접근 제한"
-            title="관리자 전용 페이지"
-            description="이 설정은 관리자만 변경할 수 있습니다."
+            eyebrow={t("접근 제한")}
+            title={t("관리자 전용 페이지")}
+            description={t("이 설정은 관리자만 변경할 수 있습니다.")}
           />
         </Section>
       </PageBody>
@@ -486,9 +488,11 @@ export default function ApprovalPoliciesPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="Configure"
-        title="Approval policies"
-        description="클러스터·액션 타입별로 지정 승인자를 라우팅합니다. 매칭된 정책이 있으면 목록에 없는 관리자는 승인 불가 — 미매칭 요청은 모든 관리자에게 fallback."
+        eyebrow={t("Configure")}
+        title={t("Approval policies")}
+        description={t(
+          "클러스터와 액션 타입별로 지정 승인자를 라우팅합니다. 매칭된 정책이 있으면 목록에 없는 관리자는 승인 불가 — 미매칭 요청은 모든 관리자에게 fallback.",
+        )}
       />
 
       {/* ── How it works ── */}
@@ -544,8 +548,10 @@ export default function ApprovalPoliciesPage() {
           >
             {policies.length === 0 ? (
               <EmptyState
-                title="등록된 정책 없음"
-                description="아래 폼에서 첫 번째 정책을 추가하세요. 정책이 없으면 모든 관리자가 모든 승인 요청을 처리할 수 있습니다."
+                title={t("등록된 정책 없음")}
+                description={t(
+                  "아래 폼에서 첫 번째 정책을 추가하세요. 정책이 없으면 모든 관리자가 모든 승인 요청을 처리할 수 있습니다.",
+                )}
               />
             ) : (
               <div className="border border-zinc-800 bg-zinc-900/30">

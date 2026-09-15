@@ -26,6 +26,7 @@ import { extractSqlBlock, planTotalCost } from "@/lib/query-rewrite";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
+import { useT } from "@/lib/i18n";
 
 const PRESETS = [
   {
@@ -50,7 +51,7 @@ const PRESETS = [
     label: "성능 개선 리라이트",
     template: "-- original SQL",
     prompt:
-      "**한국어로** 답변해줘. 이 SQL을 대상 클러스터의 DB 엔진에서(해당 엔진 문법·기능만 사용) 더 빠르게 돌도록 재작성하고, 각 변경이 왜 도움이 되는지 설명해줘. 정확한 시맨틱은 보존.",
+      "**한국어로** 답변해줘. 이 SQL을 대상 클러스터의 DB 엔진에서(해당 엔진 문법과 기능만 사용) 더 빠르게 돌도록 재작성하고, 각 변경이 왜 도움이 되는지 설명해줘. 정확한 시맨틱은 보존.",
   },
 ];
 
@@ -116,6 +117,7 @@ function relTime(ms: number): string {
 }
 
 export default function QueryLabPage() {
+  const t = useT();
   const { selected: clusterId, setSelected: setClusterId } =
     useSelectedCluster();
   const [analysis, setAnalysis] = useState("");
@@ -272,10 +274,10 @@ export default function QueryLabPage() {
         sqlBlock +
         `\n\nPlan summary:\n\`\`\`\n${summary}\n\`\`\``
       : `너는 시니어 MySQL(Aurora MySQL) 성능 전문가야. 아래는 EXPLAIN FORMAT=JSON을 구조화한 요약이야. ` +
-        `이건 실행하지 않은 플랜이라 모든 행 수가 옵티마이저 추정치이고, 실제 실행시간·실제 행 수·버퍼 통계는 없어. ` +
+        `이건 실행하지 않은 플랜이라 모든 행 수가 옵티마이저 추정치이고, 실제 실행시간, 실제 행 수, 버퍼 통계는 없어. ` +
         `**한국어로** 가장 큰 병목 한 가지를 찍고, 구체적인 개선안 2~3가지를 제안해줘 ` +
         `(인덱스 컬럼 목록과 순서, 쿼리 재작성, 스키마 변경, 모호한 일반론 금지). ` +
-        `MySQL 문법·기능만 쓰고, 없는 실측치(실행시간, 실제 행 수, 디스크 스필 여부)는 절대 만들어내지 마. ` +
+        `MySQL 문법과 기능만 쓰고, 없는 실측치(실행시간, 실제 행 수, 디스크 스필 여부)는 절대 만들어내지 마. ` +
         `답변은 250단어 이하로 간결하게.` +
         sqlBlock +
         `\n\nPlan summary:\n\`\`\`\n${summary}\n\`\`\``;
@@ -393,7 +395,7 @@ export default function QueryLabPage() {
           ? "Aurora PostgreSQL"
           : "대상 클러스터의 DB 엔진";
       const message =
-        `너는 ${engineLabel} 성능 전문가야. 아래 SQL을 **${engineLabel}의 문법·기능만 사용해**(다른 엔진 전용 구문 금지) **시맨틱을 완전히 보존**하면서 성능을 개선하는 재작성안을 제안해줘.\n\n` +
+        `너는 ${engineLabel} 성능 전문가야. 아래 SQL을 **${engineLabel}의 문법과 기능만 사용해**(다른 엔진 전용 구문 금지) **시맨틱을 완전히 보존**하면서 성능을 개선하는 재작성안을 제안해줘.\n\n` +
         `반드시 아래 형식으로 **한국어**로 답변해줘:\n` +
         `1. 재작성된 SQL을 \`\`\`sql 블록으로 먼저 출력\n` +
         `2. 변경 근거 (왜 이 방식이 더 빠른지 구체적으로)\n` +
@@ -486,9 +488,11 @@ export default function QueryLabPage() {
   return (
     <PageBody>
       <PageHeader
-        eyebrow="자동화"
-        title="Query Lab"
-        description="EXPLAIN 버튼은 plan tree를 바로 렌더링하고, AI 분석은 SQL을 agent에 보내 자연어 해석을 받아옵니다."
+        eyebrow={t("자동화")}
+        title={t("Query Lab")}
+        description={t(
+          "EXPLAIN 버튼은 plan tree를 바로 렌더링하고, AI 분석은 SQL을 agent에 보내 자연어 해석을 받아옵니다.",
+        )}
         actions={
           <div className="flex items-center gap-2">
             <label className="text-[10px] uppercase tracking-wider text-zinc-500">
@@ -548,7 +552,7 @@ export default function QueryLabPage() {
           <div className="border border-zinc-800 bg-zinc-900/40">
             <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
               <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
-                saved queries · {savedQueries.length}
+                saved queries: {savedQueries.length}
               </div>
               <button
                 onClick={() =>
@@ -651,7 +655,7 @@ export default function QueryLabPage() {
             <div className="border border-zinc-800 bg-zinc-900/40">
               <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
                 <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
-                  recent plans · {history.length}
+                  recent plans: {history.length}
                 </div>
                 <button
                   onClick={() => {
@@ -673,11 +677,8 @@ export default function QueryLabPage() {
                       <span className="font-mono">
                         {h.engine.replace("aurora-", "")}
                       </span>
-                      <span>·</span>
                       <span className="tabular-nums">{h.elapsed_ms}ms</span>
-                      <span>·</span>
                       <span>{relTime(h.saved_at)}</span>
-                      <span className="text-zinc-700">·</span>
                       <span className="truncate font-mono opacity-70">
                         {h.cluster_id}
                       </span>
@@ -789,16 +790,13 @@ export default function QueryLabPage() {
               rewrite
             </button>
             {clusterId && (
-              <>
-                <span className="text-zinc-700">·</span>
-                <span className="text-[10px] text-zinc-500 font-mono truncate">
-                  {clusterId}
-                </span>
-              </>
+              <span className="text-[10px] text-zinc-500 font-mono truncate">
+                {clusterId}
+              </span>
             )}
             {tab === "plan" && explain && (
               <span className="ml-auto text-[10px] text-zinc-500 font-mono">
-                {explain.engine.replace("aurora-", "")} · {explain.elapsed_ms}ms
+                {explain.engine.replace("aurora-", "")}, {explain.elapsed_ms}ms
               </span>
             )}
           </div>
@@ -909,8 +907,8 @@ export default function QueryLabPage() {
                 <div className="space-y-4">
                   {/* Advisory banner */}
                   <div className="text-xs px-3 py-2 border border-amber-500/30 bg-amber-500/5 text-amber-200">
-                    AI 제안 — 실행 전 동등성·성능을 직접 검증하세요 (아래 비교는
-                    실행 없이 planner 추정 cost)
+                    AI 제안 — 실행 전 동등성과 성능을 직접 검증하세요 (아래
+                    비교는 실행 없이 planner 추정 cost)
                   </div>
 
                   {/* Rewrite narrative */}
