@@ -79,6 +79,25 @@ LOOKAHEAD_MINUTES = 5
 # A metric is a "spike" if its in-window average is at least this multiple of
 # the immediately-prior baseline window.
 SPIKE_RATIO = 1.5
+# A metric can enter the ranking on its window AVERAGE or on its window PEAK (see
+# _collect_metric_spikes). These two constants decide which of those facts the score and
+# the label are taken from, and how much a peak is worth.
+#
+# PEAK_DOMINANCE: the peak only takes over when the maximum is materially above the
+# window's own sustained level. `MAX >= AVG` holds by definition, so `peak_ratio >=
+# ratio` is unconditionally true and a bare `>` comparison hands every candidate to the
+# peak path: a flatly elevated metric (avg 3.0x, peak 3.067x) was being labelled and
+# scored as a brief saturation. Requiring the same 1.5x margin the gate itself uses
+# keeps "elevated all window" and "briefly saturated" on separate paths.
+PEAK_DOMINANCE = 1.5
+# LONE_PEAK_CONFIDENCE: a peak whose single highest sample accounts for the window's
+# ENTIRE excess over baseline is one datapoint's worth of evidence, and one datapoint is
+# also what normal burstiness and a corrupt reading look like. At metric_snapshots
+# cadence (~5 min) nothing in-window can tell those apart from a real 5-minute
+# saturation, so such a candidate is admitted, discounted, and labelled rather than
+# silently trusted or silently dropped. A peak corroborated by more than one sample
+# keeps full weight.
+LONE_PEAK_CONFIDENCE = 0.75
 
 # Recency decay: 1.0 at the anchor, floored at this value at the window edge.
 RECENCY_FLOOR = 0.3
@@ -166,14 +185,14 @@ def diagnose_root_cause_impl(
     Returns a dict with the anchor, a ranked ``candidates`` list (top ~8 by
     score desc), a ``signals_examined`` count per source, and a ``note``.
     """
-    # A non-empty but unparseable around_time must NOT silently become NOW() —
+    # A non-empty but unparseable around_time must NOT silently become NOW():
     # that would diagnose the wrong window and quietly mislead the DBA.
     if around_time and _parse_ts(around_time) is None:
         return {
             "status": "error",
             "cluster_id": cluster_id,
             "reason": (
-                f"could not parse around_time {around_time!r} — pass ISO 8601 "
+                f"could not parse around_time {around_time!r}: pass ISO 8601 "
                 "(e.g. 2026-06-08T14:30:00Z) or leave it empty to anchor on now"
             ),
         }
@@ -328,7 +347,7 @@ _SKIP_UNSUPPORTED = "schema_changes_unsupported_engine"
 
 def _collect_schema_changes(cache, cluster_id, start_iso, end_iso, anchor, win, examined,
                             skipped, observation=None):
-    """Schema/DDL changes near the window — the highest-weight category.
+    """Schema/DDL changes near the window, the highest-weight category.
 
     Reads ``schema_snapshots`` (the same table the operations ``get_schema_history``
     tool reads): each row carries a ``diff_from_previous_json`` describing what
@@ -638,7 +657,12 @@ def _collect_metric_spikes(
                -- is exactly what an incident looks like. See the peak path below.
                MAX(value) FILTER (
                    WHERE ts >= :start_time::timestamptz AND ts < :end_time::timestamptz
-               ) AS window_max
+               ) AS window_max,
+               -- Sample count, so the peak path can tell whether the maximum is
+               -- corroborated by the rest of the window or is one datapoint.
+               COUNT(value) FILTER (
+                   WHERE ts >= :start_time::timestamptz AND ts < :end_time::timestamptz
+               ) AS window_samples
         FROM metric_snapshots
         WHERE cluster_id = :cluster_id
           AND ts >= :baseline_start::timestamptz
@@ -677,6 +701,7 @@ def _collect_metric_spikes(
             continue
         window_avg = _to_float(row.get("window_avg"))
         baseline_avg = _to_float(row.get("baseline_avg"))
+        window_sum = _to_float(row.get("window_sum"))
         if window_avg is None or baseline_avg is None or baseline_avg <= 0:
             continue
         ratio = window_avg / baseline_avg
@@ -704,16 +729,50 @@ def _collect_metric_spikes(
         if not (by_avg or by_peak):
             continue
         spikes += 1
-        # Score off whichever ratio actually qualified, and the STRONGER one when both
-        # do. Scoring a peak-qualified candidate off the diluted average would let it
-        # into the list and then bury it: in the measured case spike_factor would be
-        # 1.0839/1.5 = 0.72, so a full CPU saturation would score BELOW a metric that
-        # merely drifted 1.5x. The label follows the same choice so the summary text and
-        # the score never disagree about which fact was used.
-        used_peak = by_peak and (not by_avg or (peak_ratio or 0) > ratio)
+        # Score off whichever ratio actually qualified, and off the peak when both do
+        # AND the peak is materially higher (PEAK_DOMINANCE). Scoring a peak-qualified
+        # candidate off the diluted average would let it into the list and then bury it:
+        # in the measured case spike_factor would be 1.0839/1.5 = 0.72, so a full CPU
+        # saturation would score BELOW a metric that merely drifted 1.5x. Handing the
+        # peak every candidate is the opposite error, and is what a bare `>` did.
+        # The label follows the same choice so the summary text and the score never
+        # disagree about which fact was used.
+        used_peak = by_peak and (
+            not by_avg or (peak_ratio or 0) >= ratio * PEAK_DOMINANCE
+        )
         effective_ratio = peak_ratio if used_peak else ratio
         spike_factor = min(effective_ratio / SPIKE_RATIO, 2.0)
+        # How much of the window's excess over baseline the single highest sample
+        # carries. `window_sum - n*baseline_avg` is the window's total excess; the top
+        # sample's share of it is >= 1.0 exactly when that one reading accounts for all
+        # of it (>1 when the other samples sat BELOW baseline). That is the signature of
+        # one datapoint, whether it came from a genuine 5-minute saturation, a burst, or
+        # a bad reading. A missing count or sum means the corroboration cannot be
+        # established, which is treated the same as absent corroboration.
+        samples = int(_to_float(row.get("window_samples")) or 0)
+        excess = (window_sum - samples * baseline_avg) if (window_sum is not None and samples) else None
+        lone_peak = used_peak and (
+            excess is None or excess <= 0 or (window_max - baseline_avg) / excess >= 1.0
+        )
+        if lone_peak:
+            spike_factor *= LONE_PEAK_CONFIDENCE
         score = BASE_WEIGHTS["metric_spike"] * rf * spike_factor
+        if used_peak:
+            support = (
+                f", carried by a single sample of {samples}" if lone_peak and samples
+                else ", on one uncorroborated sample" if lone_peak
+                else ""
+            )
+            summary = (
+                f"{metric_type} peaked {round(peak_ratio, 2)}x vs prior baseline "
+                f"({round(baseline_avg, 2)} -> max {round(window_max, 2)}, "
+                f"window avg {round(window_avg, 2)}){support}"
+            )
+        else:
+            summary = (
+                f"{metric_type} spiked {round(ratio, 2)}x vs prior baseline "
+                f"({round(baseline_avg, 2)} -> {round(window_avg, 2)})"
+            )
         out.append(
             {
                 "category": "metric_spike",
@@ -726,16 +785,15 @@ def _collect_metric_spikes(
                     # tell a sustained elevation from a brief saturation, and the two
                     # call for different actions.
                     "qualified_by": "peak" if used_peak else "average",
-                    "formula": "base × recency × spike_magnitude",
+                    # Set only on the peak path: the maximum stands on one sample, so
+                    # the score carries LONE_PEAK_CONFIDENCE and the reader is told why.
+                    "lone_sample": lone_peak,
+                    "formula": (
+                        "base × recency × spike_magnitude × lone_sample_confidence"
+                        if lone_peak else "base × recency × spike_magnitude"
+                    ),
                 },
-                "summary": (
-                    f"{metric_type} peaked {round(peak_ratio, 2)}x vs prior baseline "
-                    f"({round(baseline_avg, 2)} -> max {round(window_max, 2)}, "
-                    f"window avg {round(window_avg, 2)})"
-                    if used_peak else
-                    f"{metric_type} spiked {round(ratio, 2)}x vs prior baseline "
-                    f"({round(baseline_avg, 2)} -> {round(window_avg, 2)})"
-                ),
+                "summary": summary,
                 "evidence": {
                     "metric_type": metric_type,
                     "window_avg": round(window_avg, 3),
@@ -743,6 +801,7 @@ def _collect_metric_spikes(
                     "ratio": round(ratio, 3),
                     "window_max": round(window_max, 3) if window_max is not None else None,
                     "peak_ratio": round(peak_ratio, 3) if peak_ratio is not None else None,
+                    "window_samples": samples or None,
                 },
                 "when": start_iso,
                 "suggested_action": f"Investigate what drove {metric_type} up around this window (load change, plan regression, runaway query).",
@@ -899,7 +958,7 @@ def _collect_slow_queries(cache, cluster_id, start_iso, end_iso, anchor, win, ex
 
 def _collect_elasticache_signals(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped):
     """ElastiCache cache-specific signals from metric_snapshots: eviction spikes
-    and replication-lag spikes near the incident. Engine-safe — non-ElastiCache
+    and replication-lag spikes near the incident. Engine-safe: non-ElastiCache
     clusters have no such rows, so this yields nothing."""
     out = []
     sql = """
@@ -936,7 +995,7 @@ def _collect_elasticache_signals(cache, cluster_id, start_iso, end_iso, anchor, 
             action = "Check write load / failover; replication lag often coincides with a primary failover or load surge."
         else:
             title = "ElastiCache Eviction Spike"
-            action = "Memory pressure — evictions spiking suggests the working set exceeds capacity; check maxmemory-policy and node size."
+            action = "Memory pressure: evictions spiking suggests the working set exceeds capacity; check maxmemory-policy and node size."
         out.append({
             "category": "elasticache_spike",
             "score": score,

@@ -6,7 +6,11 @@ misleadingly, the moment a source gains a statement (the schema source gained th
 two shared observation statements in the sixth pass over that surface, which
 shifted every later source's rows by two and made a working tool look broken).
 Assertions target the RETURN structure (ranks/categories/scores/
-signals_examined), never the SQL strings, so they survive SQL tweaks.
+signals_examined), never the SQL strings, so they survive SQL tweaks. The one
+documented exception is test_the_metric_spike_query_selects_what_the_scorer_reads:
+the fake never executes SQL, so a column the Python scorer reads BY NAME is
+otherwise unverifiable here, and dropping it degrades every peak candidate
+identically, which no return-value assertion can distinguish.
 
 Per-family metric sets and the zero-baseline counter path have their own file:
 test_diagnose_family_signals.py.
@@ -256,10 +260,14 @@ def test_a_brief_saturation_is_not_diluted_away_by_the_window_average():
     rows as its only real signal. The longer the window, the more certainly a genuine
     spike disappears into the mean.
     """
+    # Six samples: five around 46 and one at 100, which is what an average of 55.147
+    # with a maximum of 100 reconstructs to. The real incident WAS one CloudWatch
+    # 5-minute sample at full saturation, so this case also pins the lone-sample path.
     cache = _dispatching_cache(
         window_max=_qr([
             {"metric_type": "cpu", "window_avg": 55.147, "baseline_avg": 50.880,
-             "window_sum": None, "baseline_sum": None, "window_max": 100.0},
+             "window_sum": 330.882, "baseline_sum": None, "window_max": 100.0,
+             "window_samples": 6},
         ]),
     )
     res = diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
@@ -270,37 +278,125 @@ def test_a_brief_saturation_is_not_diluted_away_by_the_window_average():
     )
     spike = next(c for c in res["candidates"] if c["category"] == "metric_spike")
 
-    # The score has to come from the PEAK, not the diluted average. Off the average the
+    # The score has to come from the PEAK, not the diluted average: off the average the
     # spike_factor would be 1.0839/1.5 = 0.72, which would rank a full saturation BELOW
     # a metric that merely drifted 1.5x: in the list, and buried.
     assert spike["score_breakdown"]["qualified_by"] == "peak"
-    assert spike["score_breakdown"]["spike_factor"] > 1.0, spike["score_breakdown"]
+    assert spike["score_breakdown"]["spike_factor"] > 1.0839 / 1.5, spike["score_breakdown"]
     assert spike["evidence"]["window_max"] == 100.0
     assert round(spike["evidence"]["peak_ratio"], 3) == 1.965
 
+    # One sample carries the whole excess, so it is admitted at reduced confidence and
+    # says so. peak_ratio 1.9654 / 1.5 = 1.3103, times LONE_PEAK_CONFIDENCE 0.75.
+    assert spike["score_breakdown"]["lone_sample"] is True
+    assert round(spike["score_breakdown"]["spike_factor"], 3) == 0.983
+    assert spike["evidence"]["window_samples"] == 6
+
     # The summary must say which fact was used, or it contradicts the score.
     assert "peaked" in spike["summary"] and "max 100.0" in spike["summary"], spike["summary"]
+    assert "single sample of 6" in spike["summary"], spike["summary"]
 
 
-def test_a_sustained_elevation_still_qualifies_on_the_average():
-    """Negative control for the peak path: the original behaviour must be intact.
+def test_a_corroborated_peak_is_not_discounted_as_a_lone_sample():
+    """Two of six samples saturated: the maximum is supported, so full weight.
 
-    Without this, a change that scored everything off the peak would pass the test
-    above while silently relabelling every sustained elevation as a spike.
+    This is the discriminating partner of the test above. Both enter on the peak path
+    with by_avg False; only this one keeps the undiscounted spike_factor. Without it,
+    LONE_PEAK_CONFIDENCE could be applied to every peak and both tests still pass.
+    Values [50, 50, 50, 50, 100, 100] over a baseline of 50: window_avg 66.667,
+    ratio 1.333 (below the gate), peak_ratio 2.0, and the top sample carries half the
+    window's excess rather than all of it.
     """
     cache = _dispatching_cache(
         window_max=_qr([
-            {"metric_type": "cpu", "window_avg": 90.0, "baseline_avg": 30.0,
-             "window_sum": None, "baseline_sum": None, "window_max": 92.0},
+            {"metric_type": "cpu", "window_avg": 66.667, "baseline_avg": 50.0,
+             "window_sum": 400.0, "baseline_sum": None, "window_max": 100.0,
+             "window_samples": 6},
         ]),
     )
     res = diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
     spike = next(c for c in res["candidates"] if c["category"] == "metric_spike")
-    # avg ratio 3.0 beats peak ratio 3.067? No: peak is higher, so peak wins. What must
-    # hold is that a sustained move is NOT reported as a brief one when the average
-    # alone already clears the gate by a wide margin and the peak adds nothing.
+    assert spike["score_breakdown"]["qualified_by"] == "peak"
+    assert spike["score_breakdown"]["lone_sample"] is False
+    # 2.0 / 1.5, undiscounted.
+    assert round(spike["score_breakdown"]["spike_factor"], 3) == 1.333
+    assert "sample" not in spike["summary"], spike["summary"]
+
+
+def test_a_single_outlier_scores_below_the_same_peak_corroborated():
+    """One corrupt or bursty reading must not outrank corroborated evidence.
+
+    A lone 300 among five samples at 50 has a peak_ratio of 6.0, far above the
+    corroborated 2.0 saturation in the test above, so magnitude alone would put it on
+    top. It is admitted (in-window statistics at 5-minute cadence genuinely cannot
+    separate a bad reading from a real 5-minute excursion) but capped and flagged.
+    """
+    lone = _dispatching_cache(
+        window_max=_qr([
+            {"metric_type": "cpu", "window_avg": 91.667, "baseline_avg": 50.0,
+             "window_sum": 550.0, "baseline_sum": None, "window_max": 300.0,
+             "window_samples": 6},
+        ]),
+    )
+    res = diagnose_root_cause_impl(lone, "c1", around_time=ANCHOR, window_minutes=30)
+    spike = next(c for c in res["candidates"] if c["category"] == "metric_spike")
+    assert spike["score_breakdown"]["lone_sample"] is True
+    # Capped at 2.0 then discounted, so a 6x lone reading cannot beat a 2x corroborated
+    # spike by magnitude: 1.5 vs the 2.0 an uncapped corroborated peak would reach.
+    assert round(spike["score_breakdown"]["spike_factor"], 3) == 1.5
+    assert "single sample of 6" in spike["summary"], spike["summary"]
+
+
+def test_a_sustained_elevation_is_labelled_average_not_peak():
+    """Negative control for the peak path: the original behaviour must be intact.
+
+    `MAX >= AVG` holds by definition, so `peak_ratio >= ratio` is unconditionally true.
+    A peak path that wins on a bare `>` therefore claims EVERY candidate, and a metric
+    elevated flat across the window (avg 3.0x, peak 3.067x) gets reported and scored as
+    a brief saturation. The two readings call for different actions, so the label has to
+    follow the fact that actually qualified it.
+    """
+    cache = _dispatching_cache(
+        window_max=_qr([
+            {"metric_type": "cpu", "window_avg": 90.0, "baseline_avg": 30.0,
+             "window_sum": 540.0, "baseline_sum": None, "window_max": 92.0,
+             "window_samples": 6},
+        ]),
+    )
+    res = diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
+    spike = next(c for c in res["candidates"] if c["category"] == "metric_spike")
+    assert spike["score_breakdown"]["qualified_by"] == "average", spike["score_breakdown"]
+    assert spike["score_breakdown"]["lone_sample"] is False
     assert spike["evidence"]["ratio"] == 3.0
-    assert "cpu" in spike["summary"]
+    # Scored off the average: 3.0 / 1.5 = 2.0, at the cap.
+    assert round(spike["score_breakdown"]["spike_factor"], 3) == 2.0
+    assert "spiked 3.0x" in spike["summary"], spike["summary"]
+    assert "peaked" not in spike["summary"], spike["summary"]
+
+
+def test_the_metric_spike_query_selects_what_the_scorer_reads():
+    """The scorer reads window_sum and window_samples by name; SQL is their only source.
+
+    Documented exception to this file's no-SQL-assertions rule. The fake cache returns
+    rows without executing SQL, so a column that the query stops selecting still
+    reaches the scorer as None from the test fixtures. In production that turns every
+    peak candidate into an uncorroborated one and discounts them all by the same
+    factor, so no ranking, score, or signals_examined assertion can tell the difference.
+    """
+    cache = _dispatching_cache(
+        window_max=_qr([
+            {"metric_type": "cpu", "window_avg": 66.667, "baseline_avg": 50.0,
+             "window_sum": 400.0, "baseline_sum": None, "window_max": 100.0,
+             "window_samples": 6},
+        ]),
+    )
+    diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
+    spike_sql = next(
+        c.args[0] for c in cache.execute.call_args_list
+        if "window_max" in c.args[0] and "metric_snapshots" in c.args[0]
+    )
+    for column in ("window_max", "window_sum", "window_samples"):
+        assert f"AS {column}" in spike_sql, f"{column} is read by the scorer but not selected"
 
 
 def test_a_flat_metric_produces_no_spike_candidate():
@@ -309,7 +405,8 @@ def test_a_flat_metric_produces_no_spike_candidate():
     cache = _dispatching_cache(
         window_max=_qr([
             {"metric_type": "cpu", "window_avg": 50.0, "baseline_avg": 50.0,
-             "window_sum": None, "baseline_sum": None, "window_max": 51.0},
+             "window_sum": 300.0, "baseline_sum": None, "window_max": 51.0,
+             "window_samples": 6},
         ]),
     )
     res = diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
