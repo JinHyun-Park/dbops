@@ -87,13 +87,23 @@ def test_ranks_schema_change_event_and_metric_spike():
             {"metric_type": "connections", "window_avg": 50.0, "baseline_avg": 48.0},
         ]),
         query_stats=_qr([
+            # The GROUPED shape the collector now selects: one row per query_hash
+            # with the cumulative readings it measures a window delta between.
+            # 54000 in-window against a 12000 pre-window reading = 42000ms spent
+            # here, not the 54000 lifetime total the old shape reported as this
+            # incident's cost.
             {
                 "query_hash": "abc123",
                 "query_text": "SELECT * FROM orders WHERE status = $1",
-                "calls": 1200,
-                "total_time_ms": 54000.0,
+                "win_max": 54000.0,
+                "win_min": 48000.0,
+                "pre_max": 12000.0,
+                "calls_max": 1200,
+                "calls_min": 1100,
+                "pre_calls": 300,
                 "mean_time_ms": 45.0,
                 "snapshot_time": "2024-01-01T11:57:00Z",
+                "snapshots": 6,
             }
         ]),
     )
@@ -481,3 +491,108 @@ def test_a_real_engine_event_is_still_ranked():
     sources = {c["evidence"].get("source") for c in res["candidates"] if c["category"] == "event"}
     assert sources == {"aws.rds", "dbops-monitor"}, sources
     assert res["signals_examined"]["events"] == 2
+
+
+# ---------------------------------------------------------------------------
+# slow_queries: one row per query, costed by the window
+# ---------------------------------------------------------------------------
+
+def test_a_slow_query_is_costed_by_the_window_not_its_lifetime_total():
+    """total_time_ms is CUMULATIVE since the last stats reset.
+
+    pg_stat_statements and performance_schema both accumulate, so the number the
+    report used to show was a lifetime total presented as this incident's cost.
+    Measured on the real cluster: cumulative 4,959,817ms against a 60-minute window
+    delta of 15,861ms, an overstatement of 313x. A query that has run quietly for a
+    month then outranks one that started melting the database ten minutes ago.
+
+    Here: 900,000ms cumulative, 880,000ms of it already spent before the window, so
+    the window cost is 20,000ms and the summary must say 20,000, not 900,000.
+    """
+    cache = _dispatching_cache(
+        query_stats=_qr([
+            {"query_hash": "h1", "query_text": "SELECT 1",
+             "win_max": 900000.0, "win_min": 884000.0, "pre_max": 880000.0,
+             "calls_max": 5000, "calls_min": 4900, "pre_calls": 4800,
+             "mean_time_ms": 180.0, "snapshot_time": "2024-01-01T11:58:00Z",
+             "snapshots": 6},
+        ]),
+    )
+    res = diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
+    sq = next(c for c in res["candidates"] if c["category"] == "slow_query")
+    assert sq["evidence"]["window_time_ms"] == 20000.0, sq["evidence"]
+    assert sq["evidence"]["cumulative_time_ms"] == 900000.0
+    assert sq["evidence"]["window_calls"] == 200
+    assert sq["evidence"]["first_seen_in_window"] is False
+    assert "20000.0ms in window" in sq["summary"], sq["summary"]
+    assert "900000" not in sq["summary"], (
+        "the lifetime total is in the summary, which is the overstatement itself"
+    )
+
+
+def test_a_query_first_seen_in_the_window_is_costed_by_its_whole_reading():
+    """No pre-window reading means the query did not exist before, so its cumulative
+    value IS its in-window cost.
+
+    This branch is what keeps a brand new heavy query rankable. The obvious dedupe
+    (GROUP BY with HAVING COUNT(*) >= 2, so a delta can be taken) would drop exactly
+    the query that appeared during the incident, which is the one most worth seeing.
+    """
+    cache = _dispatching_cache(
+        query_stats=_qr([
+            {"query_hash": "new1", "query_text": "SELECT pg_sleep(9)",
+             "win_max": 41000.0, "win_min": 41000.0, "pre_max": None,
+             "calls_max": 12, "calls_min": 12, "pre_calls": None,
+             "mean_time_ms": 3416.0, "snapshot_time": "2024-01-01T11:59:00Z",
+             "snapshots": 1},
+        ]),
+    )
+    res = diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
+    sq = next(c for c in res["candidates"] if c["category"] == "slow_query")
+    assert sq["evidence"]["window_time_ms"] == 41000.0
+    assert sq["evidence"]["window_calls"] == 12
+    assert sq["evidence"]["first_seen_in_window"] is True
+    assert sq["evidence"]["snapshots_in_window"] == 1
+
+
+def test_a_stats_reset_mid_window_does_not_produce_a_negative_cost():
+    """MIN can come from before a reset and MAX from after it, so the delta goes
+    negative. A negative cost sorts to the bottom and reads as nonsense; clamped to
+    zero it simply carries no weight, which is the honest answer for a counter whose
+    history was wiped."""
+    cache = _dispatching_cache(
+        query_stats=_qr([
+            {"query_hash": "r1", "query_text": "SELECT 2",
+             "win_max": 50.0, "win_min": 10.0, "pre_max": 900000.0,
+             "calls_max": 3, "calls_min": 1, "pre_calls": 8000,
+             "mean_time_ms": 16.0, "snapshot_time": "2024-01-01T11:55:00Z",
+             "snapshots": 4},
+        ]),
+    )
+    res = diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
+    sq = next(c for c in res["candidates"] if c["category"] == "slow_query")
+    assert sq["evidence"]["window_time_ms"] == 0.0
+    assert sq["evidence"]["window_calls"] == 0
+
+
+def test_the_slow_query_statement_groups_by_hash_and_reads_the_baseline():
+    """Documented exception to this file's no-SQL-assertions rule, same reason as the
+    metric one: the fake never executes SQL.
+
+    Without the GROUP BY, the collector takes the top 3 ROWS, and the collector writes
+    one row per query per cycle. Measured on the real 2026-08-30 auto-RCA: candidates
+    2, 3 and 4 were the same query at 616380.7ms, 616380.7ms and 616254.2ms. One query
+    filled three of the four slots in the whole report, displacing the other evidence.
+    Without the baseline half there is nothing to take a delta FROM.
+    """
+    cache = _dispatching_cache()
+    diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
+    sql, params = next(
+        (c.args[0], c.args[1] if len(c.args) > 1 else {})
+        for c in cache.execute.call_args_list
+        if "FROM query_stats" in c.args[0]
+    )
+    assert "GROUP BY query_hash" in sql, "the statement can still return one query three times"
+    assert "baseline_start" in params, "no pre-window reading to measure a delta from"
+    for column in ("win_max", "pre_max", "calls_max", "pre_calls", "snapshots"):
+        assert f"AS {column}" in sql, f"{column} is read by the scorer but not selected"

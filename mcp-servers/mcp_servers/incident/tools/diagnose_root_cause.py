@@ -257,7 +257,12 @@ def diagnose_root_cause_impl(
             cache, cluster_id, start_iso, end_iso, baseline_start_iso, anchor, win, examined, skipped, family
         )
     )
-    candidates.extend(_collect_slow_queries(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
+    candidates.extend(
+        _collect_slow_queries(
+            cache, cluster_id, start_iso, end_iso, baseline_start_iso, anchor, win,
+            examined, skipped,
+        )
+    )
     candidates.extend(_collect_elasticache_signals(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped))
 
     # The unknown the accepted cost of this surface creates, in the words the other
@@ -917,24 +922,79 @@ def _counter_candidate(row, metric_type, floor, rf, start_iso, win):
     }
 
 
-def _collect_slow_queries(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped):
-    """Top slow / heavy queries in the window from ``query_stats``.
+def _collect_slow_queries(cache, cluster_id, start_iso, end_iso, baseline_start_iso, anchor,
+                          win, examined, skipped):
+    """Top heavy queries in the window from ``query_stats``, ONE ROW PER QUERY,
+    costed by what they spent INSIDE the window.
 
-    Surfaces the top 3 offenders by ``total_time_ms``. These are often symptoms
-    of an upstream cause (a missing index after a schema change, a spike in
-    calls), hence a medium weight, but they tell the DBA *where* the pain is.
+    Two things this used to get wrong, both visible in the same real auto-RCA
+    (2026-08-30, the only one this deployment had ever produced):
+
+    NO DEDUPE. The statement took the top 3 rows by total_time_ms with no grouping,
+    and the collector writes one row per query per cycle. So a query present through a
+    30-minute window has ~6 rows and could occupy the entire top 3. It did: that RCA's
+    candidates 2, 3 and 4 were the SAME query (`SELECT viewname, md5(pg_get_viewdef(`)
+    at 616380.7ms, 616380.7ms and 616254.2ms, which is one query counted three times.
+    Four candidates in the whole report, three of them duplicates, so the duplication
+    did not merely look untidy: it displaced the other evidence the ranker had found.
+
+    CUMULATIVE VALUES READ AS WINDOW COSTS. total_time_ms and calls come from
+    pg_stat_statements / performance_schema, which accumulate since the last stats
+    reset. The number shown was therefore a LIFETIME total presented as this
+    incident's cost. Measured on the same cluster: cumulative 4,959,817ms against a
+    60-minute window delta of 15,861ms, an overstatement of 313x. A query that has
+    been running quietly for a month outranks one that started melting the database
+    ten minutes ago, which is exactly backwards.
+
+    So the window cost is a DELTA. Where the query also has a reading from before the
+    window, the delta runs from that reading, which covers the whole window rather
+    than only the span between its first and last in-window sample. Where it does not
+    (`pre_max IS NULL`), the query FIRST APPEARED inside the window, and then its
+    cumulative reading IS its in-window cost: that branch is what keeps a brand new
+    heavy query rankable, which a `HAVING COUNT(*) >= 2` dedupe would have silently
+    dropped. A negative delta means the stats were reset mid-window and is clamped to
+    zero rather than trusted.
+
+    mean_time_ms is an average, not a counter, so it is reported as collected.
     """
     out = []
+    # The baseline half is read for `pre_max` only: the pre-window cumulative reading
+    # each query is measured FROM. It deliberately does not widen what is ranked.
     sql = """
-        SELECT query_hash, query_text, calls, total_time_ms, mean_time_ms, snapshot_time
-        FROM query_stats
-        WHERE cluster_id = :cluster_id
-          AND snapshot_time >= :start_time::timestamptz
-          AND snapshot_time < :end_time::timestamptz
-        ORDER BY total_time_ms DESC NULLS LAST
+        SELECT query_hash,
+               MAX(query_text)     FILTER (WHERE in_window) AS query_text,
+               MAX(total_time_ms)  FILTER (WHERE in_window) AS win_max,
+               MIN(total_time_ms)  FILTER (WHERE in_window) AS win_min,
+               MAX(total_time_ms)  FILTER (WHERE NOT in_window) AS pre_max,
+               MAX(calls)          FILTER (WHERE in_window) AS calls_max,
+               MIN(calls)          FILTER (WHERE in_window) AS calls_min,
+               MAX(calls)          FILTER (WHERE NOT in_window) AS pre_calls,
+               MAX(mean_time_ms)   FILTER (WHERE in_window) AS mean_time_ms,
+               MAX(snapshot_time)  FILTER (WHERE in_window) AS snapshot_time,
+               COUNT(*)            FILTER (WHERE in_window) AS snapshots
+        FROM (
+            SELECT query_hash, query_text, calls, total_time_ms, mean_time_ms,
+                   snapshot_time,
+                   snapshot_time >= :start_time::timestamptz AS in_window
+            FROM query_stats
+            WHERE cluster_id = :cluster_id
+              AND snapshot_time >= :baseline_start::timestamptz
+              AND snapshot_time < :end_time::timestamptz
+        ) q
+        GROUP BY query_hash
+        HAVING COUNT(*) FILTER (WHERE in_window) > 0
+        ORDER BY GREATEST(
+            COALESCE(MAX(total_time_ms) FILTER (WHERE in_window), 0)
+            - COALESCE(MAX(total_time_ms) FILTER (WHERE NOT in_window),
+                       MIN(total_time_ms) FILTER (WHERE in_window), 0), 0) DESC
         LIMIT 3
     """
-    params = {"cluster_id": cluster_id, "start_time": start_iso, "end_time": end_iso}
+    params = {
+        "cluster_id": cluster_id,
+        "start_time": start_iso,
+        "end_time": end_iso,
+        "baseline_start": baseline_start_iso,
+    }
     try:
         rows = cache.execute(sql, params).rows
     except Exception as e:
@@ -944,7 +1004,20 @@ def _collect_slow_queries(cache, cluster_id, start_iso, end_iso, anchor, win, ex
     examined["slow_queries"] = len(rows)
     for row in rows:
         when = row.get("snapshot_time")
-        total_ms = _to_float(row.get("total_time_ms")) or 0.0
+        win_max = _to_float(row.get("win_max"))
+        if win_max is None:
+            continue
+        pre_max = _to_float(row.get("pre_max"))
+        win_min = _to_float(row.get("win_min"))
+        # Mirrors the ORDER BY above. Computed in BOTH places on purpose: the unit
+        # tests use a fake cache that returns rows without executing SQL, so a
+        # SQL-only derivation is unverifiable by construction.
+        first_seen_in_window = pre_max is None
+        baseline = win_max if first_seen_in_window else pre_max
+        window_ms = win_max if first_seen_in_window else max(win_max - pre_max, 0.0)
+        calls_max = _to_float(row.get("calls_max")) or 0.0
+        pre_calls = _to_float(row.get("pre_calls"))
+        window_calls = calls_max if pre_calls is None else max(calls_max - pre_calls, 0.0)
         query_text = (row.get("query_text") or "").strip()
         snippet = (query_text[:120] + "…") if len(query_text) > 120 else query_text
         rf = _recency_factor(when, anchor, win)
@@ -958,14 +1031,27 @@ def _collect_slow_queries(cache, cluster_id, start_iso, end_iso, anchor, win, ex
                     "recency_factor": round(rf, 3),
                     "formula": "base × recency",
                 },
-                "summary": f"Heavy query ({round(total_ms, 1)}ms total, {row.get('calls')} calls): {snippet}",
+                "summary": (
+                    f"Heavy query ({round(window_ms, 1)}ms in window, "
+                    f"{int(window_calls)} calls): {snippet}"
+                ),
                 "evidence": {
                     "query_hash": row.get("query_hash"),
                     "query_text": query_text,
-                    "calls": row.get("calls"),
-                    "total_time_ms": total_ms,
+                    # What the query spent INSIDE the window, and the calls it made
+                    # there. The cumulative readings are kept beside them so the
+                    # delta can be checked rather than taken on trust.
+                    "window_time_ms": round(window_ms, 3),
+                    "window_calls": int(window_calls),
+                    "cumulative_time_ms": round(win_max, 3),
+                    "baseline_time_ms": round(baseline, 3) if baseline is not None else None,
+                    "first_seen_in_window": first_seen_in_window,
+                    "snapshots_in_window": int(_to_float(row.get("snapshots")) or 0),
                     "mean_time_ms": _to_float(row.get("mean_time_ms")),
                     "snapshot_time": when,
+                    # Retained for the window's own span, which is what a reader needs
+                    # to judge a delta built from two cumulative readings.
+                    "window_first_time_ms": round(win_min, 3) if win_min is not None else None,
                 },
                 "when": when,
                 "suggested_action": "EXPLAIN the query; check for a missing index or a plan regression coinciding with the incident.",
