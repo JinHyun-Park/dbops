@@ -63,6 +63,7 @@ that assert the observation block in each payload, not by this AST.
 
 import ast
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -227,6 +228,20 @@ _NOT_INTERPRETERS = {
     # tests/unit/data_pipeline/test_etl_purge.py, which EXECUTES it on a real
     # engine and asserts which rows survive.
     "data-pipeline/etl_collector/handler.py": "the retention purge, interprets nothing",
+    # The demo scenario runner. It is a WRITER and a DELETER of snapshot rows, never a
+    # reader: it INSERTs one row carrying a pre-built diff so the RCA has a DDL signal
+    # to rank, and DELETEs exactly the rows its own manifest names. It states no
+    # negative about any cluster's schemas, so there is no absence for an observation to
+    # qualify, and binding it to a comparability fragment would describe something it
+    # does not do.
+    #
+    # It also writes read_scope NULL on purpose. An earlier version SELECTed the
+    # cluster's newest real read_scope and copied it, which this file's rule 1 caught.
+    # Rule 1 was right for a second reason: a read_scope records which catalog a read
+    # actually reached, and no read reached anything here, so copying the label would
+    # have fabricated provenance on a synthetic row.
+    "api/scenarios/handler.py": "the demo scenario runner, writes and purges rows, "
+                                "interprets none",
 }
 
 # The two row sources a consumer builds a statement from. A function that reaches
@@ -479,6 +494,45 @@ def test_the_consumer_set_is_discovered_and_finds_the_ones_we_know_about():
         for root in _SCAN_ROOTS for p in (_ROOT / root).rglob("*.py")}, (
         "an allowlist entry names a file that no longer exists, so it is silently "
         "excluding nothing and hiding whatever replaced it")
+
+
+# The contract owns the row sources, so it is the only thing allowed to select them.
+_CONTRACT_COPIES = {p for p, why in _NOT_INTERPRETERS.items() if "the contract" in why}
+
+
+@pytest.mark.parametrize(
+    "name", sorted(set(_NOT_INTERPRETERS) - _CONTRACT_COPIES)
+)
+def test_an_allowlisted_file_still_may_not_select_snapshot_rows(name):
+    """RULE 1 BINDS THE ALLOWLIST TOO, because _NOT_INTERPRETERS skips DISCOVERY.
+
+    An entry there removes the file from _CONSUMERS entirely, so every rule below stops
+    applying to it, including rule 1. That turned the allowlist into what its own
+    comment warns about: the one place a later pass can hide. MEASURED while adding
+    api/scenarios: with its entry in place, reintroducing
+    `SELECT read_scope FROM schema_snapshots ...` into that file left the whole suite
+    green.
+
+    The allowlist's legitimate purpose is narrower than that. These files are exempt
+    from the OBSERVATION obligation because they state no negative about any cluster's
+    schemas: the purge deletes, the scenario runner writes. Neither needs to be exempt
+    from "do not write your own selection of these rows", and neither has a reason to.
+
+    Checked on SELECT specifically rather than reusing rule 1's substring: a DELETE
+    statement also contains "FROM schema_snapshots", and the retention purge is exactly
+    the file that must keep being allowed to issue one.
+    """
+    offenders = [
+        lit for lit in _sql_literals(_ROOT / name)
+        if ("FROM schema_snapshots" in lit or "JOIN schema_snapshots" in lit)
+        and re.match(r"^\s*(SELECT|WITH)\b", lit, re.I)
+    ]
+    assert not offenders, (
+        f"{name} is allowlisted as a non-interpreter but SELECTs snapshot rows. Being "
+        "exempt from the observation obligation is not exemption from rule 1: build "
+        "the statement from schema_diff_util, or do not read these rows at all.\n"
+        f"offending literals: {offenders}"
+    )
 
 
 def _sql_literals(path):

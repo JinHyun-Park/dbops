@@ -175,7 +175,19 @@ class AgentStack(cdk.Stack):
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
                 # Hybrid RCA: a single Bedrock call turns the deterministic
                 # ranked signals into a Korean narrative + recommendations.
-                "RCA_NARRATIVE_MODEL_ID": Settings.AGENT_MODEL_ID,
+                #
+                # Its own setting, defaulting to the chat model so existing
+                # deployments keep today's behaviour. Separate because the two calls
+                # have opposite economics: chat is per-turn and latency-sensitive,
+                # this is ONCE per incident and is the thing a DBA acts on at 3am.
+                # Measured 2026-09-15 on the same prompt: opus-5 spent 673 output
+                # tokens against sonnet-5's 668, and its narrative stated the
+                # evidentiary limit ("확보된 신호는 CPU 스파이크 단일 지표뿐") that
+                # sonnet-5's did not. Paying Opus rates a few times a day for the
+                # report that drives a remediation decision is the easy trade.
+                "RCA_NARRATIVE_MODEL_ID": getattr(
+                    Settings, "RCA_NARRATIVE_MODEL_ID", ""
+                ) or Settings.AGENT_MODEL_ID,
                 # Ticketing seam: "none" (default) keeps it inert. Flip via
                 # settings once a provider integration ships; an unwired name
                 # makes the worker's ticketing step fail loudly.
@@ -188,15 +200,17 @@ class AgentStack(cdk.Stack):
         foundation.grant_task_manage(task_worker)      # agent-tasks R/W + env
         foundation.grant_app_config_read(task_worker)  # DB-backed TICKETING_PROVIDER
         foundation.grant_alert_broadcast(task_worker)   # WS push on completion
-        # Bedrock for the hybrid narrative. RCA_NARRATIVE_MODEL_ID is AGENT_MODEL_ID,
-        # an APAC cross-region inference profile, which fans out to foundation models
-        # across regions, so the grant must cover both the profile ARNs and the
-        # underlying FM ARNs. `application-inference-profile/*` is a THIRD, distinct
-        # resource type that `inference-profile/*` does not match: it is included
-        # because AGENT_MODEL_ID comes from operator-edited settings.py and can legally
-        # be pointed at one of the Application Inference Profiles that
+        # Bedrock for the hybrid narrative. RCA_NARRATIVE_MODEL_ID defaults to
+        # AGENT_MODEL_ID and is a cross-region inference profile either way, which fans
+        # out to foundation models across regions, so the grant must cover both the
+        # profile ARNs and the underlying FM ARNs. `application-inference-profile/*` is
+        # a THIRD, distinct resource type that `inference-profile/*` does not match: it
+        # is included because both settings are operator-edited and can legally be
+        # pointed at one of the Application Inference Profiles that
         # data-pipeline/inference_profile_setup/ creates. Without it that config choice
         # degrades silently (the worker drops to no narrative rather than erroring).
+        # The wildcard REGION is what lets the two settings name different model
+        # families in different regions without a second grant.
         task_worker.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock:InvokeModel"],
             resources=[
@@ -1389,6 +1403,41 @@ class AgentStack(cdk.Stack):
             resources=[data.alert_topic.topic_arn, "*"],
         ))
 
+        # Failure-scenario demo runner: writes a burst of incident signals into the
+        # cache tables diagnose_root_cause reads, then enqueues an auto-RCA anchored on
+        # that burst, so a presenter gets a real report about a synthetic symptom.
+        #
+        # NOT in the VPC, like every other api/ Lambda here: it reaches the cache
+        # through the RDS Data API, whose endpoint is public. An in-VPC placement would
+        # make this feature depend on the NAT gateway, and a deleted NAT has already
+        # taken all 64 gateway tools dark once in this deployment.
+        #
+        # SCENARIO_CLUSTER_ID is read with a default rather than as a required setting:
+        # an operator who has not chosen a target cluster gets a catalog that renders
+        # with the buttons disabled and says why, not a stack that fails to synth.
+        scenarios_lambda = lambda_.Function(
+            self, "ScenariosApi",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("../api/scenarios"),
+            # One run issues ~16 sequential Data API statements, and the cache is
+            # Serverless v2 that can be resuming from zero ACU when the first one
+            # lands. 60s is sized for that cold resume, not for the steady state.
+            timeout=cdk.Duration.seconds(60),
+            environment={
+                "CACHE_DB_CLUSTER_ARN": data.cache_db.cluster_arn,
+                "CACHE_DB_SECRET_ARN": data.cache_db.secret.secret_arn,
+                "CACHE_DB_NAME": "dbops",
+                "SCENARIO_CLUSTER_ID": getattr(Settings, "SCENARIO_CLUSTER_ID", ""),
+            },
+        )
+        data.cache_db.secret.grant_read(scenarios_lambda)
+        data.cache_db.grant_data_api_access(scenarios_lambda)
+        # Sets AGENT_TASKS_TABLE and grants the put + GSI query task_enqueue needs.
+        # Without it enqueue_auto_rca returns None, the signals land, no RCA runs, and
+        # the response says rca_enqueued false: a demo with no report in it.
+        foundation.grant_task_enqueue(scenarios_lambda)
+
         # Slack interactive endpoint — verifies HMAC signature and acks
         # alerts in-place. Disabled when SLACK_SIGNING_SECRET is empty:
         # the env var is still set, the handler returns a self-explaining
@@ -1932,6 +1981,36 @@ class AgentStack(cdk.Stack):
             integration=integrations.HttpLambdaIntegration("ExplainIntegration", explain_lambda),
         )
 
+        # Failure-scenario demo. Kept on the API's DEFAULT authorizer, i.e. any
+        # signed-in user rather than admins only: the point is that whoever is watching
+        # the demo can press the button. It is deliberately not moved to
+        # public_authorizer, because POST writes rows into the shared cache database,
+        # and "anyone in the room" and "anyone on the internet" are different
+        # permissions. The run endpoint's own guardrails (one at a time per cluster, a
+        # fixed target cluster from settings, self-purging injected rows) are what keep
+        # a signed-in user from turning it into a load generator.
+        scenarios_integration = integrations.HttpLambdaIntegration(
+            "ScenariosIntegration", scenarios_lambda
+        )
+        self.api.add_routes(
+            path="/api/scenarios",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=scenarios_integration,
+        )
+        self.api.add_routes(
+            path="/api/scenarios/runs",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=scenarios_integration,
+        )
+        # `{id}/run` rather than POST on the collection: the handler dispatches on
+        # pathParameters.id, and a POST that arrives without one has fallen through to
+        # the wrong branch. That exact omission (a probe event with no pathParameters)
+        # made a POST look like a create and returned a misleading 403.
+        self.api.add_routes(
+            path="/api/scenarios/{id}/run",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=scenarios_integration,
+        )
         alerts_integration = integrations.HttpLambdaIntegration("AlertsIntegration", alerts_lambda)
         self.api.add_routes(
             path="/api/alert-rules",

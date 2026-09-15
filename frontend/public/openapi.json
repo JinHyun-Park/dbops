@@ -94,6 +94,9 @@
       "name": "scaleout-ops"
     },
     {
+      "name": "scenarios"
+    },
+    {
       "name": "scheduled-tasks"
     },
     {
@@ -2880,6 +2883,73 @@
       "post": {
         "tags": ["scaleout-ops"],
         "summary": "POST /api/scaleout-ops/{id}/cancel",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/scenarios": {
+      "get": {
+        "tags": ["scenarios"],
+        "summary": "GET /api/scenarios",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/scenarios/runs": {
+      "get": {
+        "tags": ["scenarios"],
+        "summary": "GET /api/scenarios/runs",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized (missing/invalid token)"
+          }
+        },
+        "security": [
+          {
+            "cognitoJwt": []
+          }
+        ]
+      }
+    },
+    "/api/scenarios/{id}/run": {
+      "post": {
+        "tags": ["scenarios"],
+        "summary": "POST /api/scenarios/{id}/run",
         "responses": {
           "200": {
             "description": "OK"

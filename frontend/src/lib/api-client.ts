@@ -1216,14 +1216,113 @@ export interface AgentTask {
       summary?: string;
       score?: number;
       when?: string;
+      // WHY this candidate scored what it did. The ranker computes
+      // base_weight × recency_factor × a per-category magnitude factor, and the
+      // extra keys are category-specific (metric_spike carries `qualified_by`
+      // and `lone_sample`, which distinguish a sustained elevation from a brief
+      // peak and flag a peak standing on one sample). Rendered, because a score
+      // with no derivation is a number a DBA cannot argue with.
       score_breakdown?: Record<string, unknown>;
+      // The measurements behind the summary line (ratios, counts, query text).
+      evidence?: Record<string, unknown>;
+      // Per-signal next step, distinct from the model's `recommendations`:
+      // deterministic, written by the collector that found the signal.
+      suggested_action?: string;
       [k: string]: unknown;
     }>;
     signals_examined?: Record<string, number>;
     skipped_sources?: string[];
     note?: string;
+    // The weight table the ranking used, and the sentence explaining it. Shown
+    // so "schema change outranks a CPU spike" reads as a stated policy rather
+    // than an arbitrary ordering.
+    scoring_weights?: Record<string, number>;
+    scoring_note?: string;
+    // What the schema read could NOT confirm. Absent for engines with no
+    // snapshot producer; when present it is the difference between "nothing
+    // changed" and "we could not see whether anything changed".
+    schema_observation?: Record<string, unknown>;
+    narrative?: string;
+    recommendations?: string[];
     [k: string]: unknown;
   };
+}
+
+// --- Failure-scenario demo ------------------------------------------------
+// Buttons that inject a realistic incident into the cache signal tables and
+// then run the real RCA over it. The target database is never touched.
+
+export interface ScenarioDef {
+  id: string;
+  title: string;
+  summary: string;
+  /** diagnose_root_cause candidate category this scenario is built to produce. */
+  category: string;
+  /** Its BASE_WEIGHTS entry, so the UI can explain the resulting ranking. */
+  weight: number;
+  signals: string[];
+}
+
+export interface ScenarioCatalog {
+  cluster_id: string;
+  /** False when no target cluster is configured: render disabled + say why. */
+  enabled: boolean;
+  window_minutes: number;
+  lock_minutes: number;
+  scenarios: ScenarioDef[];
+}
+
+export interface ScenarioRun {
+  id: number;
+  scenario_id: string;
+  title?: string;
+  cluster_id: string;
+  started_at: string;
+  anchor_at: string;
+  status: string; // running | injected | resolved
+  task_id?: string;
+  requested_by?: string;
+  resolved_at?: string;
+}
+
+export interface ScenarioRunResult {
+  run_id: number;
+  scenario_id: string;
+  cluster_id: string;
+  anchor_at: string;
+  task_id?: string | null;
+  signals_written: Array<{ table: string; rows: number }>;
+  /** False means the signals landed but no RCA was queued: say so, don't spin. */
+  rca_enqueued: boolean;
+}
+
+export async function fetchScenarios(): Promise<ScenarioCatalog> {
+  const res = await authedFetch(await api("/api/scenarios"));
+  if (!res.ok) throw new Error(`시나리오 목록 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function fetchScenarioRuns(): Promise<{ runs: ScenarioRun[] }> {
+  const res = await authedFetch(await api("/api/scenarios/runs"));
+  if (!res.ok) throw new Error(`시나리오 이력 조회 실패 (상태 ${res.status})`);
+  return res.json();
+}
+
+export async function runScenario(id: string): Promise<ScenarioRunResult> {
+  const res = await authedFetch(await api(`/api/scenarios/${enc(id)}/run`), {
+    method: "POST",
+  });
+  if (res.status === 409) {
+    // Another run holds the lock, or the scenario needs a different engine.
+    // Both carry an explanation worth showing verbatim.
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "다른 시나리오가 실행 중입니다");
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `시나리오 실행 실패 (상태 ${res.status})`);
+  }
+  return res.json();
 }
 
 export async function fetchTasks(params?: {

@@ -18,7 +18,10 @@ test_diagnose_family_signals.py.
 
 from unittest.mock import MagicMock
 
-from mcp_servers.incident.tools.diagnose_root_cause import diagnose_root_cause_impl
+from mcp_servers.incident.tools.diagnose_root_cause import (
+    SELF_EVENT_SOURCES,
+    diagnose_root_cause_impl,
+)
 from mcp_servers.shared.models import QueryResult
 
 ANCHOR = "2024-01-01T12:00:00Z"
@@ -412,6 +415,31 @@ def test_a_flat_metric_produces_no_spike_candidate():
     res = diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
     assert res["signals_examined"]["metric_spikes"] == 0
     assert not [c for c in res["candidates"] if c["category"] == "metric_spike"]
+
+
+def test_every_self_event_source_is_excluded_by_the_query_too():
+    """The SQL predicate and the Python filter must name the SAME sources.
+
+    They diverged the moment the set gained a second member: the predicate held one
+    literal, `AND COALESCE(source, '') <> 'dbops-alert-evaluator'`, while the Python
+    filter read the frozenset. The Python half hid it, so a scenario-runner row would
+    have crossed the wire and been dropped only in-process, and a future reader
+    trusting the query alone would have had it ranked.
+    """
+    cache = _dispatching_cache()
+    diagnose_root_cause_impl(cache, "c1", around_time=ANCHOR, window_minutes=30)
+    sql, params = next(
+        (c.args[0], c.args[1] if len(c.args) > 1 else {})
+        for c in cache.execute.call_args_list
+        if "FROM event_log" in c.args[0]
+    )
+    bound = {v for k, v in (params or {}).items() if k.startswith("self_src_")}
+    assert bound == set(SELF_EVENT_SOURCES), (
+        f"query excludes {bound}, Python filter excludes {set(SELF_EVENT_SOURCES)}"
+    )
+    # And the predicate must actually reference those parameters, not just bind them.
+    for i in range(len(SELF_EVENT_SOURCES)):
+        assert f":self_src_{i}" in sql
 
 
 def test_the_alert_that_triggered_the_rca_is_not_ranked_as_its_cause():

@@ -65,12 +65,23 @@ EVENT_SEVERITY_FACTOR = {
 # event_log sources that are DBOps telling itself something, not the database telling
 # us something. Excluded from event candidates.
 #
-# Only the alert emitter qualifies. `dbops-monitor` (proactive_monitor) writes anomaly_*
-# rows that ARE real measurements: a 3-sigma move in freeable_memory is evidence, and
-# there are 697 such rows in the last 30 days, so dropping them would make the diagnosis
-# worse rather than more honest. "An alert fired" carries no information about the
-# database; "freeable_memory is 4 sigma low" carries all of it.
-SELF_EVENT_SOURCES = frozenset({"dbops-alert-evaluator"})
+# Two sources qualify, and both are DBOps narrating its own actions:
+#   dbops-alert-evaluator  "an alert fired". Measured on the 2026-08-30 auto-RCA: this
+#                          row ranked #1 at score 3.6, so the top-ranked cause was the
+#                          alert that opened the investigation.
+#   dbops-scenario-runner  "a demo scenario was started". Same shape of mistake: the
+#                          scenario's bookkeeping row lands 1-2 seconds before the
+#                          anchor, right where the recency factor peaks, and would
+#                          outrank the symptoms the scenario just injected. The injected
+#                          SYMPTOM rows deliberately carry realistic sources instead and
+#                          are ranked normally: they are the thing under investigation.
+#
+# `dbops-monitor` (proactive_monitor) does NOT qualify. Its anomaly_* rows ARE real
+# measurements: a 3-sigma move in freeable_memory is evidence, and there are 697 such
+# rows in the last 30 days, so dropping them would make the diagnosis worse rather than
+# more honest. "An alert fired" carries no information about the database;
+# "freeable_memory is 4 sigma low" carries all of it.
+SELF_EVENT_SOURCES = frozenset({"dbops-alert-evaluator", "dbops-scenario-runner"})
 
 # Lookahead after the anchor: a cause can show up a few minutes before the
 # symptom is noticed, but the symptom can also slightly precede the log entry.
@@ -496,17 +507,24 @@ def _collect_events(cache, cluster_id, start_iso, end_iso, anchor, win, examined
           -- anchor 19:59:30.584. The top-ranked cause was the alert that opened the
           -- investigation, and it outscored every genuine signal.
           --
-          -- ONLY the alert emitter is excluded, and the distinction matters.
-          -- `dbops-monitor` (proactive_monitor) writes anomaly_* rows that ARE real
-          -- measurements of the cluster: a 3-sigma move in freeable_memory or
-          -- db_connections is evidence, and there are 697 such rows in the last 30
-          -- days. Dropping them to "exclude our own instrumentation" would make the
-          -- diagnosis worse, not more honest. "An alert fired" carries no information
-          -- about the database; "freeable_memory is 4 sigma low" carries all of it.
-          AND COALESCE(source, '') <> 'dbops-alert-evaluator'
+          -- ONLY sources that narrate DBOps' own actions are excluded, and the
+          -- distinction matters. `dbops-monitor` (proactive_monitor) writes anomaly_*
+          -- rows that ARE real measurements of the cluster: a 3-sigma move in
+          -- freeable_memory or db_connections is evidence, and there are 697 such rows
+          -- in the last 30 days. Dropping them to "exclude our own instrumentation"
+          -- would make the diagnosis worse, not more honest. "An alert fired" carries
+          -- no information about the database; "freeable_memory is 4 sigma low" carries
+          -- all of it. The excluded list is SELF_EVENT_SOURCES, bound below as named
+          -- parameters rather than spelled out here: this predicate held one literal
+          -- while the Python filter read the frozenset, so adding a second source
+          -- silently left the two halves disagreeing.
+          AND COALESCE(source, '') NOT IN ({self_sources_in})
         ORDER BY event_time DESC
-    """
+    """.format(
+        self_sources_in=", ".join(f":self_src_{i}" for i in range(len(SELF_EVENT_SOURCES)))
+    )
     params = {"cluster_id": cluster_id, "start_time": start_iso, "end_time": end_iso}
+    params.update({f"self_src_{i}": s for i, s in enumerate(sorted(SELF_EVENT_SOURCES))})
     try:
         rows = cache.execute(sql, params).rows
     except Exception as e:

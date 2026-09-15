@@ -11,9 +11,11 @@ alerting itself.
 
 VERBATIM COPY. This project shares cross-package code by duplicating the file plus a
 parity test, because data-pipeline Lambdas are separate assets with no shared layer.
-Copies live in alert_evaluator/, proactive_monitor/ and event_processor/, and
+Copies live in alert_evaluator/, proactive_monitor/, event_processor/ and
+api/scenarios/ (the demo scenario runner, which is an api/ Lambda and so cannot
+import from data-pipeline either), and
 tests/unit/data_pipeline/test_task_enqueue_parity.py asserts they stay byte-identical.
-Edit all three together.
+Edit all four together.
 
 See docs/superpowers/specs/2026-06-18-agent-tasks-design.md.
 """
@@ -37,6 +39,7 @@ def enqueue_auto_rca(
     *,
     trigger: str = "",
     observed_at: str = "",
+    dedupe: bool = True,
 ) -> str | None:
     """Create a pending auto_rca task for `cluster_id` unless a recent one exists.
 
@@ -54,6 +57,15 @@ def enqueue_auto_rca(
     19:54:00 and 19:56:00, the anchor landed at 19:59:30, and by 19:59:00 CPU was
     already back to 49.6. The RCA investigated the recovery, not the incident.
     Pass an ISO 8601 UTC string; empty means "anchor on now" as before.
+
+    `dedupe` exists for ONE caller: the demo scenario runner. DEDUPE_MINUTES is there
+    to stop a flapping alert from spawning a pile of duplicate RCAs, and a human
+    clicking a demo button is not a flapping alert. With dedupe on, the second and
+    third scenario a presenter runs inside 15 minutes return None and the demo shows
+    nothing, with no error to explain why. That caller has its own, stricter guard (one
+    scenario at a time, via the scenario_runs row), so the window here is redundant
+    for it and harmful. Leave it True everywhere else: automatic producers have no such
+    guard and this window is the only thing bounding them.
     """
     table_name = os.environ.get("AGENT_TASKS_TABLE")
     if not table_name or not cluster_id:
@@ -68,18 +80,19 @@ def enqueue_auto_rca(
         # string ordering == numeric ordering). FilterExpression on kind — note
         # we do NOT pass a Limit (a Limit applies BEFORE the filter and could
         # hide a matching row), we just read the small recent slice.
-        resp = table.query(
-            IndexName="cluster-created-index",
-            KeyConditionExpression="cluster_id = :cid AND created_at > :since",
-            FilterExpression="kind = :k",
-            ExpressionAttributeValues={
-                ":cid": cluster_id,
-                ":since": since,
-                ":k": "auto_rca",
-            },
-        )
-        if resp.get("Items"):
-            return None  # a recent auto-RCA is already pending/done
+        if dedupe:
+            resp = table.query(
+                IndexName="cluster-created-index",
+                KeyConditionExpression="cluster_id = :cid AND created_at > :since",
+                FilterExpression="kind = :k",
+                ExpressionAttributeValues={
+                    ":cid": cluster_id,
+                    ":since": since,
+                    ":k": "auto_rca",
+                },
+            )
+            if resp.get("Items"):
+                return None  # a recent auto-RCA is already pending/done
 
         task_id = str(uuid.uuid4())
         table.put_item(
@@ -91,7 +104,7 @@ def enqueue_auto_rca(
                 "trigger": trigger or f"alert:{rule_id}",
                 "status": "pending",
                 "created_at": str(now_ms),
-                "title": title or f"경보 자동 RCA · {cluster_id}",
+                "title": title or f"경보 자동 RCA: {cluster_id}",
                 # Read back by task_worker._run_rca and passed to
                 # diagnose_root_cause as around_time. Absent means anchor on now.
                 **({"observed_at": observed_at} if observed_at else {}),

@@ -546,33 +546,58 @@ def test_every_lambda_that_enqueues_an_auto_rca_gets_the_table_env(cdk_app):
     alarms and 5 genuine Aurora failovers produced ZERO RCAs.
 
     The expected set is derived from the SOURCE (which handlers import the module), so
-    adding a fourth producer fails here until its grant exists rather than shipping
-    another silent no-op. Each importer is then matched to its OWN Lambda by logical
-    id: an earlier version of this test compared COUNTS, and removing both new grants
-    still passed it because alert_evaluator and task_scheduler already had the env.
+    adding a producer fails here until its grant exists rather than shipping another
+    silent no-op. Each importer is then matched to its OWN Lambda by logical id: an
+    earlier version of this test compared COUNTS, and removing both new grants still
+    passed it because alert_evaluator and task_scheduler already had the env.
     A test that cannot fail is worse than no test, because it reads as coverage.
+
+    BOTH ROOTS AND BOTH STACKS. task_enqueue's fourth copy lives under api/scenarios,
+    whose Lambda is in the AGENT stack, so a scan of data-pipeline against the data
+    stack would have declared full coverage while leaving the newest producer
+    unguarded. Logical ids are not derivable across the two roots (data-pipeline
+    Lambdas are named from the directory, `proactive_monitor` -> `ProactiveMonitor`,
+    while the api ones carry an `Api` suffix under their own construct name), so the
+    mapping is explicit: an importer with no entry fails with a message telling the
+    next person to add one, rather than being skipped.
     """
     import pathlib as _pl
     import re as _re
 
     root = _pl.Path(__file__).resolve().parents[2]
-    pipeline = root / "data-pipeline"
     importers = sorted(
-        d.name for d in pipeline.iterdir()
+        f"{parent.name}/{d.name}"
+        for parent in (root / "data-pipeline", root / "api")
+        for d in parent.iterdir()
         if d.is_dir() and (d / "handler.py").is_file()
         and "task_enqueue" in (d / "handler.py").read_text()
     )
     assert importers, "no handler imports task_enqueue; did the module move?"
 
-    data = next(s for s in cdk_app.stacks if s.stack_name.endswith("-data"))
-    resources = (data.template or {}).get("Resources", {})
+    # importer -> (stack suffix, logical-id prefix of its Lambda)
+    EXPECTED = {
+        "data-pipeline/alert_evaluator": ("-data", "AlertEvaluator"),
+        "data-pipeline/proactive_monitor": ("-data", "ProactiveMonitor"),
+        "data-pipeline/event_processor": ("-data", "EventProcessor"),
+        "data-pipeline/task_scheduler": ("-data", "TaskScheduler"),
+        "api/scenarios": ("-agent", "ScenariosApi"),
+    }
+    unmapped = [i for i in importers if i not in EXPECTED]
+    assert unmapped == [], (
+        f"{unmapped} import task_enqueue but this test does not know which Lambda "
+        "they become. Add them to EXPECTED (stack suffix, logical-id prefix) so the "
+        "AGENT_TASKS_TABLE check actually covers them."
+    )
 
-    def _camel(snake: str) -> str:
-        return "".join(part.title() for part in snake.split("_"))
+    templates = {
+        suffix: (next(s for s in cdk_app.stacks if s.stack_name.endswith(suffix)).template or {})
+        for suffix in {v[0] for v in EXPECTED.values()}
+    }
 
     missing = []
     for owner in importers:
-        want = _camel(owner)  # proactive_monitor -> ProactiveMonitor
+        suffix, want = EXPECTED[owner]
+        resources = templates[suffix].get("Resources", {})
         logical = [
             k for k, r in resources.items()
             if r.get("Type") == "AWS::Lambda::Function"
@@ -587,5 +612,5 @@ def test_every_lambda_that_enqueues_an_auto_rca_gets_the_table_env(cdk_app):
     assert missing == [], (
         "these handlers import task_enqueue but their Lambda has no AGENT_TASKS_TABLE, "
         "so every enqueue is a silent no-op: " + ", ".join(missing)
-        + ". Add foundation.grant_task_enqueue(...) in cdk/stacks/data_stack.py."
+        + ". Add foundation.grant_task_enqueue(...) where that Lambda is defined."
     )

@@ -87,3 +87,35 @@ class Settings:
     # alert subscribers don't start receiving daily reports. Turn on once you
     # want scheduled reports delivered, not just viewable in /reports.
     REPORT_DELIVERY_ENABLED = False
+
+    # Target cluster for the failure-scenario demo page (/scenarios). Empty
+    # (default) leaves the page listing the scenarios with every button disabled
+    # and the reason shown, so the feature is off until you opt a cluster in.
+    #
+    # Pick a cluster you are happy to have synthetic incident rows written
+    # against, because that is what a scenario does: it INSERTs signal rows into
+    # the cache tables (metric_snapshots, event_log, blocking_locks, query_stats,
+    # schema_snapshots) for that cluster_id and then runs a real RCA over them.
+    # The rows are self-purging and the TARGET DATABASE IS NEVER TOUCHED, but the
+    # cluster's cached history does carry the injected rows until they age out, so
+    # a cluster whose dashboards you use for real capacity decisions is the wrong
+    # choice. A registered demo cluster is the right one.
+    #
+    # The schema-change scenario additionally needs PostgreSQL: schema_snapshots
+    # is PostgreSQL-only by decision, so on a MySQL target that one button
+    # refuses with an explanation and the rest still work.
+    SCENARIO_CLUSTER_ID = ""
+
+    # Model that writes the RCA narrative and recommendations. Empty (default)
+    # reuses AGENT_MODEL_ID, so an existing deployment behaves exactly as before.
+    #
+    # Worth separating from the chat model: chat runs per turn and is
+    # latency-sensitive, while this runs ONCE per incident and produces the
+    # report a DBA acts on. Measured 2026-09-15 on an identical prompt,
+    # claude-opus-5 spent 673 output tokens against claude-sonnet-5's 668 and
+    # stated the evidentiary limit of a single-signal diagnosis, which the
+    # smaller model did not. A few Opus calls a day is a cheap way to buy that.
+    #
+    # Must be a profile the deploy account can invoke; check with
+    # `aws bedrock list-inference-profiles --type-equals SYSTEM_DEFINED`.
+    RCA_NARRATIVE_MODEL_ID = ""
