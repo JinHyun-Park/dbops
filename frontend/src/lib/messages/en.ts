@@ -211,6 +211,17 @@ export const EN: Record<string, string> = {
   "관리자 전용 페이지": "Admins only",
   "저장된 기록이 없습니다": "Nothing stored yet",
   "작업 없음": "No tasks",
+  // RCA candidate categories (CATEGORY_LABEL in rca-candidate-detail.tsx).
+  // These render INSIDE an otherwise English sentence, so leaving them out
+  // produced "Leading hypothesis (이벤트): ..." on an English browser.
+  "스키마 변경": "Schema change",
+  이벤트: "Event",
+  "락 경합": "Lock contention",
+  "카운터 급증": "Counter spike",
+  "메트릭 급증": "Metric spike",
+  "슬로우 쿼리": "Slow query",
+  기타: "Other",
+  신호: "signal",
   "이 종류로는 아직 아무것도 없습니다. 범위를 모든 종류로 바꿔 보거나, 위에서 클러스터를 선택해 RCA를 직접 실행할 수 있습니다.":
     "Nothing of this kind yet. Widen the scope to every kind, or pick a cluster above and run an RCA yourself.",
   "조건을 만족하는 클러스터 없음": "No cluster matches the filter",

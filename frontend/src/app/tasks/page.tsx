@@ -737,7 +737,7 @@ function TaskRow({
           <span className="mt-1 block text-[14px] leading-relaxed text-zinc-200">
             {category && (
               <span className="text-zinc-500">
-                {t("유력 가설")}, {categoryLabel(category)}:{" "}
+                {t("유력 가설")} ({t(categoryLabel(category))}):{" "}
               </span>
             )}
             {headline}

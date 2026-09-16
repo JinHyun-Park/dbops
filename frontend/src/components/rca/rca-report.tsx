@@ -131,7 +131,7 @@ export function RcaReport({ row }: { row: AgentTask }) {
         <div className="mt-2 max-w-[68ch]">
           <div className="text-[11px] text-zinc-500">
             {t("유력 가설")}
-            {category ? `, ${categoryLabel(category)}` : ""}
+            {category ? ` (${t(categoryLabel(category))})` : ""}
           </div>
           <p className="mt-1 text-[16px] leading-relaxed text-zinc-100">
             {headline}
@@ -224,7 +224,7 @@ export function RcaReport({ row }: { row: AgentTask }) {
                   {o.when ? fmtClockKo(o.when) : "시각 미기록"}
                 </span>{" "}
                 <span className="text-zinc-500">
-                  {categoryLabel(o.category)}
+                  {t(categoryLabel(o.category))}
                 </span>{" "}
                 <span className="font-mono text-[12px] text-zinc-200">
                   {o.pairs
@@ -254,7 +254,7 @@ export function RcaReport({ row }: { row: AgentTask }) {
                     {s.from === "signal" && s.category && (
                       <span className="text-[11px] text-zinc-500">
                         {" "}
-                        ({categoryLabel(s.category)} 신호)
+                        ({t(categoryLabel(s.category))} {t("신호")})
                       </span>
                     )}
                   </li>
@@ -274,7 +274,7 @@ export function RcaReport({ row }: { row: AgentTask }) {
                     {s.from === "signal" && s.category && (
                       <span className="text-[11px] text-zinc-500">
                         {" "}
-                        ({categoryLabel(s.category)} 신호)
+                        ({t(categoryLabel(s.category))} {t("신호")})
                       </span>
                     )}
                   </li>
@@ -313,7 +313,7 @@ export function RcaReport({ row }: { row: AgentTask }) {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="text-[13px] text-zinc-500">
-                    {categoryLabel(c.category as string | undefined)}
+                    {t(categoryLabel(c.category as string | undefined))}
                   </span>{" "}
                   <span className="text-[14px] text-zinc-200">
                     {String(c.summary ?? "")}
