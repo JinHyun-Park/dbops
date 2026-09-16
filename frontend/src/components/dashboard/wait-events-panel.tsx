@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fetchWaitEvents } from "@/lib/api-client";
+import { useT } from "@/lib/i18n";
 
 interface WaitEvent {
   wait_event: string;
@@ -30,6 +31,7 @@ export function WaitEventsPanel({
   clusterId: string;
   hours?: number;
 }) {
+  const t = useT();
   const [events, setEvents] = useState<WaitEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -60,9 +62,11 @@ export function WaitEventsPanel({
         Wait Events ({hours}h)
       </div>
       {loading ? (
-        <div className="text-xs text-zinc-500">불러오는 중…</div>
+        <div className="text-xs text-zinc-500">{t("불러오는 중…")}</div>
       ) : events.length === 0 ? (
-        <div className="text-xs text-zinc-500">wait event 데이터가 없어요</div>
+        <div className="text-xs text-zinc-500">
+          {t("wait event 데이터가 없어요")}
+        </div>
       ) : (
         <div className="space-y-2">
           {events.slice(0, 8).map((e) => {

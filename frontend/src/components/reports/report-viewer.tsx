@@ -4,6 +4,7 @@ import { useState } from "react";
 import { fmtBytes, fmtDecimal, fmtDuration, fmtNumber } from "@/lib/format";
 import { buildReportMarkdown } from "@/lib/report-download";
 import { apiUrl, authedFetch } from "@/lib/api-client";
+import { useT } from "@/lib/i18n";
 
 interface ReportRow {
   id: number;
@@ -116,13 +117,14 @@ export function ReportViewer({
   detailLoading,
   onSelect,
 }: ReportViewerProps) {
+  const t = useT();
   const payload = parseData(detail?.data);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-6">
       <aside className="bg-zinc-950 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 text-[11px] font-medium text-zinc-500">
-          {reports.length} 개 리포트
+          {t("{n} 개 리포트").replace("{n}", String(reports.length))}
         </div>
         <div className="divide-y divide-zinc-800 max-h-[70vh] overflow-y-auto">
           {reports.map((r) => {
@@ -142,7 +144,7 @@ export function ReportViewer({
                 <div className="text-xs text-zinc-500 mt-1 truncate">
                   {r.cluster_id === FLEET_ID ? (
                     <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[10px] font-medium tracking-wide">
-                      Fleet 전체
+                      {t("Fleet 전체")}
                     </span>
                   ) : (
                     r.cluster_id
@@ -157,10 +159,10 @@ export function ReportViewer({
       <section className="bg-zinc-950 border border-zinc-800 p-6 min-h-[70vh]">
         {!selectedRow ? (
           <div className="h-full flex items-center justify-center text-sm text-zinc-500">
-            왼쪽에서 리포트를 선택하세요
+            {t("왼쪽에서 리포트를 선택하세요")}
           </div>
         ) : detailLoading ? (
-          <div className="text-sm text-zinc-500">불러오는 중…</div>
+          <div className="text-sm text-zinc-500">{t("불러오는 중…")}</div>
         ) : (
           <ReportDetailPanel
             key={detail?.id ?? selectedRow?.id}
@@ -183,6 +185,7 @@ function ReportDetailPanel({
   payload: ReportPayload | null;
   detail: ReportDetail | null;
 }) {
+  const t = useT();
   const [htmlLoading, setHtmlLoading] = useState(false);
   const [htmlUnavailable, setHtmlUnavailable] = useState(false);
   const isFleet = row.cluster_id === FLEET_ID;
@@ -238,7 +241,7 @@ function ReportDetailPanel({
               {row.report_type} report
             </div>
             <h2 className="text-2xl font-semibold tracking-tight text-zinc-50">
-              {row.report_date}, {clusterLabel(row.cluster_id)}
+              {row.report_date}, {t(clusterLabel(row.cluster_id))}
             </h2>
           </div>
           {detail && (
@@ -247,15 +250,15 @@ function ReportDetailPanel({
                 onClick={handleDownload}
                 className="px-3 py-1.5 text-xs font-medium border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 transition-colors"
               >
-                다운로드
+                {t("다운로드")}
               </button>
               <button
                 onClick={handleHtmlDownload}
                 disabled={htmlLoading || htmlUnavailable}
                 title={
                   htmlUnavailable
-                    ? "이 리포트는 HTML 미생성"
-                    : "HTML 파일을 새 탭에서 엽니다"
+                    ? t("이 리포트는 HTML 미생성")
+                    : t("HTML 파일을 새 탭에서 엽니다")
                 }
                 className={`px-3 py-1.5 text-xs font-medium border transition-colors ${
                   htmlUnavailable
@@ -265,7 +268,7 @@ function ReportDetailPanel({
                       : "border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
                 }`}
               >
-                {htmlLoading ? "…" : "HTML 다운로드"}
+                {htmlLoading ? "…" : t("HTML 다운로드")}
               </button>
             </div>
           )}
@@ -292,6 +295,7 @@ function ReportDetailPanel({
 }
 
 function FleetDetailPanel({ payload }: { payload: FleetPayload }) {
+  const t = useT();
   const totals = payload.totals || {};
   const worst = payload.worst_clusters || [];
   const clusters = payload.clusters || [];
@@ -302,12 +306,18 @@ function FleetDetailPanel({ payload }: { payload: FleetPayload }) {
     <div className="space-y-8">
       <section>
         <div className="text-[11px] font-medium text-zinc-500 mb-3">
-          Fleet 요약
+          {t("Fleet 요약")}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-px bg-zinc-800 border border-zinc-800">
-          <Cell label="클러스터 수" value={fmtNumber(payload.clusters_total)} />
-          <Cell label="총 경보" value={fmtNumber(totals.alerts)} />
-          <Cell label="총 슬로우 쿼리" value={fmtNumber(totals.slow_queries)} />
+          <Cell
+            label={t("클러스터 수")}
+            value={fmtNumber(payload.clusters_total)}
+          />
+          <Cell label={t("총 경보")} value={fmtNumber(totals.alerts)} />
+          <Cell
+            label={t("총 슬로우 쿼리")}
+            value={fmtNumber(totals.slow_queries)}
+          />
         </div>
       </section>
 
@@ -336,12 +346,12 @@ function FleetDetailPanel({ payload }: { payload: FleetPayload }) {
 
       {worst.length > 0 && (
         <FleetClusterTable
-          title="주의가 필요한 클러스터 (Top 5)"
+          title={t("주의가 필요한 클러스터 (Top 5)")}
           rows={worst}
         />
       )}
       {clusters.length > 0 && (
-        <FleetClusterTable title="전체 클러스터" rows={clusters} />
+        <FleetClusterTable title={t("전체 클러스터")} rows={clusters} />
       )}
     </div>
   );
@@ -354,6 +364,7 @@ function FleetClusterTable({
   title: string;
   rows: FleetClusterRow[];
 }) {
+  const t = useT();
   return (
     <section>
       <div className="text-[11px] font-medium text-zinc-500 mb-3">{title}</div>
@@ -361,14 +372,20 @@ function FleetClusterTable({
         <table className="w-full text-xs text-zinc-300">
           <thead>
             <tr className="text-zinc-500 border-b border-zinc-800">
-              <th className="text-left font-medium px-3 py-2">클러스터</th>
-              <th className="text-left font-medium px-3 py-2">엔진</th>
-              <th className="text-left font-medium px-3 py-2">상태</th>
+              <th className="text-left font-medium px-3 py-2">
+                {t("클러스터")}
+              </th>
+              <th className="text-left font-medium px-3 py-2">{t("엔진")}</th>
+              <th className="text-left font-medium px-3 py-2">{t("상태")}</th>
               <th className="text-right font-medium px-3 py-2">AAS avg</th>
               <th className="text-right font-medium px-3 py-2">AAS max</th>
-              <th className="text-right font-medium px-3 py-2">경보</th>
-              <th className="text-right font-medium px-3 py-2">슬로우</th>
-              <th className="text-right font-medium px-3 py-2">스토리지 Δ</th>
+              <th className="text-right font-medium px-3 py-2">{t("경보")}</th>
+              <th className="text-right font-medium px-3 py-2">
+                {t("슬로우")}
+              </th>
+              <th className="text-right font-medium px-3 py-2">
+                {t("스토리지 Δ")}
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
@@ -407,6 +424,7 @@ function FleetClusterTable({
 }
 
 function StatBlock({ payload }: { payload: ReportPayload }) {
+  const t = useT();
   const aas = payload.aas || {};
   const storage = payload.storage || {};
   const conns = payload.connections || {};
@@ -414,7 +432,7 @@ function StatBlock({ payload }: { payload: ReportPayload }) {
   return (
     <section>
       <div className="text-[11px] font-medium text-zinc-500 mb-3">
-        24시간 요약
+        {t("24시간 요약")}
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-zinc-800 border border-zinc-800">
         <Cell
@@ -426,7 +444,7 @@ function StatBlock({ payload }: { payload: ReportPayload }) {
           )}`}
         />
         <Cell
-          label="피크 AAS"
+          label={t("피크 AAS")}
           value={fmtDecimal(payload.aas_peak?.value, 2)}
           hint={
             payload.aas_peak?.ts
@@ -435,26 +453,29 @@ function StatBlock({ payload }: { payload: ReportPayload }) {
           }
         />
         <Cell
-          label={`AAS > ${payload.aas_busy_threshold ?? 5} 샘플`}
+          label={t("AAS > {n} 샘플").replace(
+            "{n}",
+            String(payload.aas_busy_threshold ?? 5),
+          )}
           value={fmtNumber(payload.aas_busy_minutes_above_threshold)}
-          hint="1분 단위"
+          hint={t("1분 단위")}
         />
         <Cell
-          label="활성 연결"
+          label={t("활성 연결")}
           value={fmtNumber(conns.max_conn)}
           hint={`avg ${fmtDecimal(conns.avg_conn, 1)}`}
         />
         <Cell
-          label="스토리지 변화"
+          label={t("스토리지 변화")}
           value={(deltaBytes >= 0 ? "+" : "") + fmtBytes(Math.abs(deltaBytes))}
           hint={`${fmtBytes(storage.start_bytes)} → ${fmtBytes(
             storage.end_bytes,
           )}`}
         />
         <Cell
-          label="샘플 수"
+          label={t("샘플 수")}
           value={fmtNumber(aas.samples)}
-          hint="AAS 메트릭"
+          hint={t("AAS 메트릭")}
         />
       </div>
     </section>
@@ -488,6 +509,7 @@ function Cell({
 }
 
 function SlowQueriesBlock({ rows }: { rows: SlowRow[] }) {
+  const t = useT();
   if (!rows.length) return null;
   return (
     <section>
@@ -502,8 +524,10 @@ function SlowQueriesBlock({ rows }: { rows: SlowRow[] }) {
                 {(q.query_hash || "").slice(0, 12)}…
               </div>
               <div className="text-xs text-zinc-400 tabular-nums">
-                {fmtDuration(q.total_ms)} 누적, {fmtNumber(q.calls)} calls, mean{" "}
-                {fmtDuration(q.mean_ms)}
+                {t("{a} 누적, {b} calls, mean {c}")
+                  .replace("{a}", fmtDuration(q.total_ms))
+                  .replace("{b}", fmtNumber(q.calls))
+                  .replace("{c}", fmtDuration(q.mean_ms))}
               </div>
             </div>
             <pre className="text-xs text-zinc-300 font-mono whitespace-pre-wrap break-all">
@@ -517,6 +541,7 @@ function SlowQueriesBlock({ rows }: { rows: SlowRow[] }) {
 }
 
 function AlertsBlock({ rows }: { rows: AlertRow[] }) {
+  const t = useT();
   if (!rows.length) return null;
   return (
     <section>
@@ -531,7 +556,7 @@ function AlertsBlock({ rows }: { rows: AlertRow[] }) {
           >
             <div className="text-sm text-zinc-200 font-mono">{a.rule_id}</div>
             <div className="text-xs text-zinc-500 tabular-nums">
-              {fmtNumber(a.fired_count)}회,{" "}
+              {t("{n}회").replace("{n}", fmtNumber(a.fired_count))},{" "}
               {a.last_fired ? new Date(a.last_fired).toLocaleString() : ""}
             </div>
           </div>
@@ -542,11 +567,12 @@ function AlertsBlock({ rows }: { rows: AlertRow[] }) {
 }
 
 function EventsBlock({ rows }: { rows: EventRow[] }) {
+  const t = useT();
   if (!rows.length) return null;
   return (
     <section>
       <div className="text-[11px] font-medium text-zinc-500 mb-3">
-        이벤트 분포
+        {t("이벤트 분포")}
       </div>
       <div className="flex flex-wrap gap-2">
         {rows.map((e, i) => (

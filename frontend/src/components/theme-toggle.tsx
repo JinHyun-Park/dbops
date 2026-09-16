@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 type Theme = "dark" | "light";
 const STORAGE_KEY = "dbops_theme";
@@ -14,6 +15,7 @@ function applyTheme(t: Theme) {
 export function ThemeToggle({ compact = false }: { compact?: boolean }) {
   const [theme, setTheme] = useState<Theme>("dark");
   const [mounted, setMounted] = useState(false);
+  const t = useT();
 
   useEffect(() => {
     const stored =
@@ -42,7 +44,7 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
       <button
         onClick={() => flip(theme === "dark" ? "light" : "dark")}
         aria-label={
-          theme === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"
+          theme === "dark" ? t("라이트 모드로 전환") : t("다크 모드로 전환")
         }
         title={theme === "dark" ? "Light mode" : "Dark mode"}
         className="w-8 h-8 flex items-center justify-center rounded-md border border-zinc-800 bg-zinc-900/40 hover:border-zinc-600 text-zinc-300 hover:text-zinc-100 transition-colors"

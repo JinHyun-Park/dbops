@@ -19,6 +19,7 @@ import {
   type ActiveSessionsResponse,
 } from "@/lib/api-client";
 import { useChartColors } from "@/lib/use-chart-colors";
+import { useT } from "@/lib/i18n";
 
 function fmtTime(iso: string) {
   const d = new Date(iso);
@@ -29,6 +30,7 @@ function fmtTime(iso: string) {
 
 export function ActiveSessionsPanel({ clusterId }: { clusterId: string }) {
   const colors = useChartColors();
+  const t = useT();
   const [data, setData] = useState<ActiveSessionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -64,11 +66,12 @@ export function ActiveSessionsPanel({ clusterId }: { clusterId: string }) {
       <div className="flex items-start justify-between mb-3">
         <div>
           <h2 className="text-sm font-semibold text-zinc-200">
-            활성 세션 (고해상 ~5초)
+            {t("활성 세션 (고해상 ~5초)")}
           </h2>
           <div className="text-[10px] text-zinc-500 mt-0.5">
-            최근 1시간, pg_stat_activity / processlist 5초 샘플: 5분 ETL이
-            놓치는 순간 스파이크 포착
+            {t(
+              "최근 1시간, pg_stat_activity / processlist 5초 샘플: 5분 ETL이 놓치는 순간 스파이크 포착",
+            )}
           </div>
         </div>
         <div className="text-right">
@@ -76,7 +79,7 @@ export function ActiveSessionsPanel({ clusterId }: { clusterId: string }) {
             {latest ? latest.active : "-"}
           </div>
           <div className="text-[10px] text-zinc-500">
-            현재, peak {peak}
+            {t("현재, peak {n}").replace("{n}", String(peak))}
             {latest?.top_wait ? `, ${latest.top_wait}` : ""}
           </div>
         </div>
@@ -84,11 +87,11 @@ export function ActiveSessionsPanel({ clusterId }: { clusterId: string }) {
       <div className="h-40">
         {loading ? (
           <div className="text-xs text-zinc-500 flex items-center h-full">
-            불러오는 중…
+            {t("불러오는 중…")}
           </div>
         ) : chart.length === 0 ? (
           <div className="text-xs text-zinc-500 flex items-center h-full">
-            샘플 없음 (샘플러 수집 대기)
+            {t("샘플 없음 (샘플러 수집 대기)")}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">

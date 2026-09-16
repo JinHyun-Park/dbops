@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, X, Pause, Play, Database } from "lucide-react";
 import { fetchLiveActivity, type LiveActivity } from "@/lib/api-client";
 import { fmtDecimal } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 // On-demand LIVE top (P2-⑧). A `top`/pg_activity-style view of the TARGET
 // cluster. LOAD-SAFETY INVARIANT: the browser polls the live endpoint ~2s ONLY
@@ -38,6 +39,7 @@ function stateClasses(state: string | null): string {
 }
 
 export function LiveTopPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [paused, setPaused] = useState(false);
   const [hidden, setHidden] = useState(false);
@@ -111,7 +113,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
         }
       } catch (e) {
         if (!cancelled)
-          setError(e instanceof Error ? e.message : "라이브 조회 실패");
+          setError(e instanceof Error ? e.message : t("라이브 조회 실패"));
       }
     };
     tick(); // immediate first poll, then every POLL_MS
@@ -147,7 +149,10 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
       const snap = await fetchLiveActivity(clusterId, { buffers: true });
       setBuffers(snap.buffercache ?? null);
     } catch {
-      setBuffers({ available: false, reason: "버퍼풀 조회에 실패했습니다" });
+      setBuffers({
+        available: false,
+        reason: t("버퍼풀 조회에 실패했습니다"),
+      });
     } finally {
       setBuffersLoading(false);
     }
@@ -162,7 +167,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
         className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 border border-zinc-700 text-zinc-300 hover:border-emerald-500/50 hover:text-emerald-200 transition-colors"
       >
         <Activity size={13} />
-        라이브 세션 (top)
+        {t("라이브 세션 (top)")}
       </button>
 
       {open && (
@@ -177,7 +182,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
                   <Activity size={15} className="text-emerald-300" />
-                  라이브 세션 (top)
+                  {t("라이브 세션 (top)")}
                   {!paused && !hidden && !unavailable && (
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   )}
@@ -191,16 +196,16 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
                   <button
                     onClick={() => setPaused((p) => !p)}
                     className="inline-flex items-center gap-1 text-[11px] px-2 py-1 border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
-                    title={paused ? "재개" : "일시정지"}
+                    title={paused ? t("재개") : t("일시정지")}
                   >
                     {paused ? <Play size={12} /> : <Pause size={12} />}
-                    {paused ? "재개" : "일시정지"}
+                    {paused ? t("재개") : t("일시정지")}
                   </button>
                 )}
                 <button
                   onClick={close}
                   className="text-zinc-500 hover:text-zinc-200 transition-colors"
-                  title="닫기 (Esc)"
+                  title={t("닫기 (Esc)")}
                 >
                   <X size={18} />
                 </button>
@@ -209,14 +214,16 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
 
             {/* Load-safety notice */}
             <div className="px-5 py-2 border-b border-zinc-800/60 text-[11px] text-zinc-500">
-              라이브 (이 창이 열려 있는 동안에만 대상 DB를 폴링합니다, ~2초)
+              {t(
+                "라이브 (이 창이 열려 있는 동안에만 대상 DB를 폴링합니다, ~2초)",
+              )}
               {hidden && (
                 <span className="text-amber-400/80">
-                  , 탭 비활성: 일시중단됨
+                  {t(", 탭 비활성: 일시중단됨")}
                 </span>
               )}
               {paused && (
-                <span className="text-amber-400/80">, 일시정지됨</span>
+                <span className="text-amber-400/80">{t(", 일시정지됨")}</span>
               )}
             </div>
 
@@ -229,7 +236,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
 
               {unavailable ? (
                 <div className="px-3 py-4 border border-zinc-700/60 bg-zinc-900/60 text-sm text-zinc-400">
-                  {data?.reason || "라이브 조회를 사용할 수 없습니다."}
+                  {data?.reason || t("라이브 조회를 사용할 수 없습니다.")}
                 </div>
               ) : (
                 <>
@@ -254,7 +261,10 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
                   {data?.blocking && data.blocking.length > 0 && (
                     <div className="border border-rose-500/40 bg-rose-500/5">
                       <div className="px-3 py-2 text-xs font-medium text-rose-300 border-b border-rose-500/20">
-                        블로킹 감지 ({data.blocking.length})
+                        {t("블로킹 감지 ({n})").replace(
+                          "{n}",
+                          String(data.blocking.length),
+                        )}
                       </div>
                       <div className="px-3 py-2 space-y-1 text-xs font-mono text-zinc-300">
                         {data.blocking.map((b) => (
@@ -274,9 +284,9 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
                   {/* Sessions table */}
                   <div>
                     <div className="text-xs text-zinc-500 mb-1.5">
-                      활성 세션{" "}
-                      {data?.sessions ? `(${data.sessions.length})` : ""}, age
-                      내림차순
+                      {t("활성 세션")}{" "}
+                      {data?.sessions ? `(${data.sessions.length})` : ""}
+                      {t(", age 내림차순")}
                     </div>
                     <div className="overflow-x-auto border border-zinc-800">
                       <table className="w-full text-xs">
@@ -343,7 +353,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
                                 colSpan={6}
                                 className="px-2 py-4 text-center text-zinc-600"
                               >
-                                활성 세션이 없습니다
+                                {t("활성 세션이 없습니다")}
                               </td>
                             </tr>
                           )}
@@ -357,29 +367,30 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
                     <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
                       <div className="text-xs text-zinc-400 flex items-center gap-1.5">
                         <Database size={13} className="text-sky-300" />
-                        버퍼풀 (pg_buffercache)
+                        {t("버퍼풀 (pg_buffercache)")}
                       </div>
                       <button
                         onClick={loadBuffers}
                         disabled={buffersLoading}
                         className="text-[11px] px-2 py-1 border border-zinc-700 text-zinc-400 hover:border-sky-500/50 hover:text-sky-200 disabled:opacity-50 transition-colors"
                       >
-                        {buffersLoading ? "조회 중…" : "새로고침"}
+                        {buffersLoading ? t("조회 중…") : t("새로고침")}
                       </button>
                     </div>
                     <div className="px-3 py-2 text-xs text-zinc-400">
                       {!buffers ? (
                         <span className="text-zinc-600">
-                          무거운 조회입니다. 폴링에 포함되지 않으며 버튼을 눌러
-                          1회만 조회합니다.
+                          {t(
+                            "무거운 조회입니다. 폴링에 포함되지 않으며 버튼을 눌러 1회만 조회합니다.",
+                          )}
                         </span>
                       ) : buffers.available === false ? (
                         <span className="text-zinc-500">{buffers.reason}</span>
                       ) : (
                         <div className="space-y-1.5">
                           <div className="font-mono">
-                            사용 {fmtDecimal(buffers.used ?? 0, 0)} /{" "}
-                            {fmtDecimal(buffers.total ?? 0, 0)} 버퍼
+                            {t("사용")} {fmtDecimal(buffers.used ?? 0, 0)} /{" "}
+                            {fmtDecimal(buffers.total ?? 0, 0)} {t("버퍼")}
                             {buffers.total
                               ? ` (${(
                                   ((buffers.used ?? 0) / buffers.total) *

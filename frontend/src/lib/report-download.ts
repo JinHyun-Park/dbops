@@ -1,4 +1,4 @@
-import { fmtBytes } from "@/lib/format";
+import { fmtBytes, tr } from "@/lib/format";
 
 interface SlowRow {
   query_hash?: string;
@@ -69,13 +69,13 @@ export function buildReportMarkdown(report: ReportForDownload): string {
   const { cluster_id, report_date, report_type, summary, data } = report;
   const lines: string[] = [];
 
-  lines.push(`# DBOps 리포트: ${cluster_id} (${report_date})`);
+  lines.push(`# ${tr("DBOps 리포트")}: ${cluster_id} (${report_date})`);
   lines.push("");
-  lines.push(`**유형:** ${report_type}`);
+  lines.push(`**${tr("유형")}:** ${report_type}`);
   lines.push("");
 
   if (summary) {
-    lines.push("## 요약");
+    lines.push(`## ${tr("요약")}`);
     lines.push("");
     lines.push(summary);
     lines.push("");
@@ -89,35 +89,35 @@ export function buildReportMarkdown(report: ReportForDownload): string {
     const conns = payload.connections || {};
     const deltaBytes = Number(storage.delta_bytes ?? 0);
 
-    lines.push("## 24시간 지표");
+    lines.push(`## ${tr("24시간 지표")}`);
     lines.push("");
-    lines.push("| 항목 | 값 |");
+    lines.push(tr("| 항목 | 값 |"));
     lines.push("| --- | --- |");
     lines.push(`| AAS avg | ${fmt(aas.avg_aas, 2)} |`);
     lines.push(`| AAS max | ${fmt(aas.max_aas, 2)} |`);
     lines.push(`| AAS p95 | ${fmt(aas.p95_aas, 2)} |`);
     lines.push(
-      `| 피크 AAS | ${fmt(payload.aas_peak?.value, 2)}${
+      `| ${tr("피크 AAS")} | ${fmt(payload.aas_peak?.value, 2)}${
         payload.aas_peak?.ts
           ? " (" + new Date(payload.aas_peak.ts).toLocaleString() + ")"
           : ""
       } |`,
     );
     lines.push(
-      `| AAS > ${payload.aas_busy_threshold ?? 5} 샘플 | ${fmt(
+      `| ${tr("AAS > {n} 샘플", payload.aas_busy_threshold ?? 5)} | ${fmt(
         payload.aas_busy_minutes_above_threshold,
-      )} 분 |`,
+      )} ${tr("분")} |`,
     );
-    lines.push(`| 활성 연결 max | ${fmt(conns.max_conn)} |`);
-    lines.push(`| 활성 연결 avg | ${fmt(conns.avg_conn, 1)} |`);
+    lines.push(`| ${tr("활성 연결")} max | ${fmt(conns.max_conn)} |`);
+    lines.push(`| ${tr("활성 연결")} avg | ${fmt(conns.avg_conn, 1)} |`);
     lines.push(
-      `| 스토리지 변화 | ${
+      `| ${tr("스토리지 변화")} | ${
         (deltaBytes >= 0 ? "+" : "") + fmtBytes(deltaBytes)
       } |`,
     );
-    lines.push(`| 스토리지 시작 | ${fmtBytes(storage.start_bytes)} |`);
-    lines.push(`| 스토리지 종료 | ${fmtBytes(storage.end_bytes)} |`);
-    lines.push(`| AAS 샘플 수 | ${fmt(aas.samples)} |`);
+    lines.push(`| ${tr("스토리지 시작")} | ${fmtBytes(storage.start_bytes)} |`);
+    lines.push(`| ${tr("스토리지 종료")} | ${fmtBytes(storage.end_bytes)} |`);
+    lines.push(`| ${tr("AAS 샘플 수")} | ${fmt(aas.samples)} |`);
     lines.push("");
 
     const slowQueries = payload.top_slow_queries || [];
@@ -160,7 +160,7 @@ export function buildReportMarkdown(report: ReportForDownload): string {
 
     const events = payload.events_by_type || [];
     if (events.length > 0) {
-      lines.push("## 이벤트 분포");
+      lines.push(`## ${tr("이벤트 분포")}`);
       lines.push("");
       lines.push("| event_type | count |");
       lines.push("| --- | --- |");

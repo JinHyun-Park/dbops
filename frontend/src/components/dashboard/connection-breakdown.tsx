@@ -15,6 +15,7 @@ import {
 import { fetchBatchTimeseries, fetchClusterSettings } from "@/lib/api-client";
 import { fmtExact, fmtNumber } from "@/lib/format";
 import { useChartColors } from "@/lib/use-chart-colors";
+import { useT } from "@/lib/i18n";
 
 interface Point {
   ts: string;
@@ -74,6 +75,7 @@ export function ConnectionBreakdown({
   clusterId: string;
   hours?: number;
 }) {
+  const t = useT();
   const [data, setData] = useState<Record<string, number | string>[]>([]);
   const [loading, setLoading] = useState(true);
   const [maxConn, setMaxConn] = useState<number | null>(null);
@@ -168,7 +170,9 @@ export function ConnectionBreakdown({
                       ? "text-amber-400 font-mono tabular-nums"
                       : "text-emerald-400 font-mono tabular-nums"
                 }
-                title={`max_connections ${maxConn} 중 ${total}개 사용`}
+                title={t("max_connections {a} 중 {b}개 사용")
+                  .replace("{a}", String(maxConn))
+                  .replace("{b}", String(total))}
               >
                 {((total / maxConn) * 100).toFixed(0)}%
               </span>
@@ -200,11 +204,11 @@ export function ConnectionBreakdown({
       <div className="h-56">
         {loading ? (
           <div className="text-xs text-zinc-500 flex items-center h-full">
-            불러오는 중…
+            {t("불러오는 중…")}
           </div>
         ) : data.length === 0 ? (
           <div className="text-xs text-zinc-500 flex items-center h-full">
-            아직 커넥션 데이터 없음
+            {t("아직 커넥션 데이터 없음")}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">

@@ -193,7 +193,7 @@ export default function QueryLabPage() {
     async (sql: string) => {
       if (!clusterId) {
         setExplainError({
-          message: "클러스터를 먼저 선택하세요.",
+          message: t("클러스터를 먼저 선택하세요."),
           kind: "infra",
         });
         setTab("plan");
@@ -239,7 +239,7 @@ export default function QueryLabPage() {
         setLoadingKind(null);
       }
     },
-    [clusterId],
+    [clusterId, t],
   );
 
   const handleGetInsight = useCallback(() => {
@@ -259,7 +259,9 @@ export default function QueryLabPage() {
       summary = summarizeMysqlPlanForLLM(plan);
     } else {
       setInsight(
-        "AI 진단은 PostgreSQL과 MySQL 플랜에 대해 제공됩니다. 이 엔진의 플랜 형식은 아직 지원하지 않습니다.",
+        t(
+          "AI 진단은 PostgreSQL과 MySQL 플랜에 대해 제공됩니다. 이 엔진의 플랜 형식은 아직 지원하지 않습니다.",
+        ),
       );
       return;
     }
@@ -294,12 +296,12 @@ export default function QueryLabPage() {
         setInsightLoading(false);
       },
     );
-  }, [explain, clusterId, lastSql]);
+  }, [explain, clusterId, lastSql, t]);
 
   const handleBulkReview = useCallback(
     (sqlText: string) => {
       if (!clusterId) {
-        setAnalysis("먼저 클러스터를 선택하세요.");
+        setAnalysis(t("먼저 클러스터를 선택하세요."));
         setTab("analysis");
         return;
       }
@@ -329,13 +331,13 @@ export default function QueryLabPage() {
         },
       );
     },
-    [clusterId],
+    [clusterId, t],
   );
 
   const handleAnalyze = useCallback(
     (sql: string) => {
       if (!clusterId) {
-        setAnalysis("먼저 클러스터를 선택하세요.");
+        setAnalysis(t("먼저 클러스터를 선택하세요."));
         setTab("analysis");
         return;
       }
@@ -360,13 +362,13 @@ export default function QueryLabPage() {
         },
       );
     },
-    [clusterId, presetPrompt],
+    [clusterId, presetPrompt, t],
   );
 
   const handleRewrite = useCallback(
     (sql: string) => {
       if (!clusterId) {
-        setAnalysis("먼저 클러스터를 선택하세요.");
+        setAnalysis(t("먼저 클러스터를 선택하세요."));
         setTab("analysis");
         return;
       }
@@ -429,8 +431,9 @@ export default function QueryLabPage() {
               beforePlan = orig.plan;
               beforeCost = planTotalCost(orig.plan);
             } catch {
-              planNote =
-                "원본 SQL의 plan-only EXPLAIN을 가져오지 못했습니다 (권한 또는 구문 오류).";
+              planNote = t(
+                "원본 SQL의 plan-only EXPLAIN을 가져오지 못했습니다 (권한 또는 구문 오류).",
+              );
             }
 
             try {
@@ -443,8 +446,10 @@ export default function QueryLabPage() {
               planNote =
                 planNote ||
                 (msg.includes("403") || msg.toLowerCase().includes("forbidden")
-                  ? "EXPLAIN 권한이 없습니다. plan 비교를 건너뜁니다."
-                  : "제안 SQL의 plan-only EXPLAIN을 가져오지 못했습니다 (구문 검증 필요).");
+                  ? t("EXPLAIN 권한이 없습니다. plan 비교를 건너뜁니다.")
+                  : t(
+                      "제안 SQL의 plan-only EXPLAIN을 가져오지 못했습니다 (구문 검증 필요).",
+                    ));
             }
           }
 
@@ -473,7 +478,7 @@ export default function QueryLabPage() {
         },
       );
     },
-    [clusterId, explain],
+    [clusterId, explain, t],
   );
 
   const applyPreset = (template: string, prompt: string) => {
@@ -505,8 +510,9 @@ export default function QueryLabPage() {
 
       <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-3 mb-4">
         <div className="text-[11px] text-zinc-500 uppercase tracking-wider mb-2">
-          quick presets: 템플릿을 클립보드에 복사하고 AI 분석 프롬프트를
-          준비합니다
+          {t(
+            "quick presets: 템플릿을 클립보드에 복사하고 AI 분석 프롬프트를 준비합니다",
+          )}
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           {PRESETS.map((p) => (
@@ -515,7 +521,7 @@ export default function QueryLabPage() {
               onClick={() => applyPreset(p.template, p.prompt)}
               className="text-xs px-3 py-1.5 rounded border border-zinc-700 text-zinc-300 hover:border-sky-500 hover:text-sky-400 transition"
             >
-              {p.label}
+              {t(p.label)}
             </button>
           ))}
           {presetPrompt && (
@@ -523,7 +529,7 @@ export default function QueryLabPage() {
               onClick={() => setPresetPrompt("")}
               className="text-xs px-3 py-1.5 rounded border border-zinc-700 text-zinc-500 hover:text-zinc-300 ml-auto"
             >
-              프리셋 해제
+              {t("프리셋 해제")}
             </button>
           )}
         </div>
@@ -568,17 +574,18 @@ export default function QueryLabPage() {
                 className="text-[10px] uppercase tracking-wider px-2 py-1 border border-zinc-700 text-zinc-300 hover:border-amber-500/60 hover:text-amber-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 title={
                   lastSql.trim()
-                    ? "현재 편집기의 SQL을 라이브러리에 저장"
-                    : "먼저 SQL을 작성하거나 EXPLAIN을 실행하세요"
+                    ? t("현재 편집기의 SQL을 라이브러리에 저장")
+                    : t("먼저 SQL을 작성하거나 EXPLAIN을 실행하세요")
                 }
               >
-                + 현재 SQL 저장
+                {t("+ 현재 SQL 저장")}
               </button>
             </div>
             {savedQueries.length === 0 ? (
               <div className="px-3 py-4 text-[11px] text-zinc-500">
-                저장된 쿼리가 없습니다. 자주 쓰는 진단/감사 SQL을 라이브러리에
-                넣어두면 다른 기기에서도 그대로 불러올 수 있습니다.
+                {t(
+                  "저장된 쿼리가 없습니다. 자주 쓰는 진단/감사 SQL을 라이브러리에 넣어두면 다른 기기에서도 그대로 불러올 수 있습니다.",
+                )}
               </div>
             ) : (
               <div className="divide-y divide-zinc-800 max-h-72 overflow-y-auto">
@@ -609,7 +616,12 @@ export default function QueryLabPage() {
                       </button>
                       <button
                         onClick={async () => {
-                          if (!confirm(`"${q.title}" 삭제할까요?`)) return;
+                          if (
+                            !confirm(
+                              t('"{n}" 삭제할까요?').replace("{n}", q.title),
+                            )
+                          )
+                            return;
                           try {
                             await deleteSavedQuery(q.id);
                             refreshSavedQueries();
@@ -622,7 +634,7 @@ export default function QueryLabPage() {
                         }}
                         className="opacity-0 group-hover:opacity-100 text-[10px] text-zinc-500 hover:text-rose-400 transition flex-shrink-0"
                       >
-                        삭제
+                        {t("삭제")}
                       </button>
                     </div>
                     {q.description && (
@@ -804,7 +816,9 @@ export default function QueryLabPage() {
           {tab === "plan" ? (
             <>
               {loadingKind === "explain" && (
-                <div className="text-sm text-zinc-500">EXPLAIN 실행 중…</div>
+                <div className="text-sm text-zinc-500">
+                  {t("EXPLAIN 실행 중…")}
+                </div>
               )}
               {explainError && (
                 <div
@@ -826,9 +840,9 @@ export default function QueryLabPage() {
               )}
               {!loadingKind && !explainError && !hasPlan && (
                 <div className="text-sm text-zinc-500">
-                  에디터에 SELECT를 붙여넣고{" "}
-                  <span className="text-amber-300">EXPLAIN</span> 버튼을
-                  눌러주세요.
+                  {t("에디터에 SELECT를 붙여넣고")}{" "}
+                  <span className="text-amber-300">EXPLAIN</span>{" "}
+                  {t("버튼을 눌러주세요.")}
                 </div>
               )}
               {hasPlan && (
@@ -837,7 +851,7 @@ export default function QueryLabPage() {
                   <div className="mt-4 border border-zinc-800 bg-zinc-900/40">
                     <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
                       <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
-                        AI 진단: 이 plan 기준
+                        {t("AI 진단: 이 plan 기준")}
                       </div>
                       <button
                         onClick={handleGetInsight}
@@ -845,19 +859,21 @@ export default function QueryLabPage() {
                         className="text-xs px-3 py-1 border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 disabled:opacity-50 transition-colors"
                       >
                         {insightLoading
-                          ? "분석 중…"
+                          ? t("분석 중…")
                           : insight
-                            ? "다시 진단"
-                            : "AI 진단 받기"}
+                            ? t("다시 진단")
+                            : t("AI 진단 받기")}
                       </button>
                     </div>
                     <div className="p-3">
                       {!insight && !insightLoading && (
                         <div className="text-xs text-zinc-500">
-                          <span className="text-sky-300">AI 진단 받기</span>{" "}
-                          버튼을 누르면 이 plan에 맞춰 2~3단계 권장안을 받아볼
-                          수 있어요 (raw plan이 아니라 구조화된 요약만 보내므로
-                          토큰 비용 적음).
+                          <span className="text-sky-300">
+                            {t("AI 진단 받기")}
+                          </span>{" "}
+                          {t(
+                            "버튼을 누르면 이 plan에 맞춰 2~3단계 권장안을 받아볼 수 있어요 (raw plan이 아니라 구조화된 요약만 보내므로 토큰 비용 적음).",
+                          )}
                         </div>
                       )}
                       {insight && (
@@ -882,9 +898,11 @@ export default function QueryLabPage() {
                 </div>
               ) : (
                 <div className="text-sm text-zinc-500">
-                  프리셋을 고르면 템플릿이 클립보드에 복사됩니다. 에디터에 SQL을
-                  붙여넣고
-                  <span className="text-sky-400"> AI 분석</span>을 누르세요.
+                  {t(
+                    "프리셋을 고르면 템플릿이 클립보드에 복사됩니다. 에디터에 SQL을 붙여넣고",
+                  )}
+                  <span className="text-sky-400"> {t("AI 분석")}</span>
+                  {t("을 누르세요.")}
                 </div>
               )}
             </>
@@ -893,22 +911,23 @@ export default function QueryLabPage() {
             <>
               {loadingKind === "rewrite" && (
                 <div className="text-sm text-zinc-500">
-                  리라이팅 제안 생성 중…
+                  {t("리라이팅 제안 생성 중…")}
                 </div>
               )}
               {!loadingKind && !rewrite && (
                 <div className="text-sm text-zinc-500">
-                  에디터에 SQL을 붙여넣고{" "}
-                  <span className="text-violet-300">리라이팅 제안</span> 버튼을
-                  눌러주세요.
+                  {t("에디터에 SQL을 붙여넣고")}{" "}
+                  <span className="text-violet-300">{t("리라이팅 제안")}</span>{" "}
+                  {t("버튼을 눌러주세요.")}
                 </div>
               )}
               {rewrite && (
                 <div className="space-y-4">
                   {/* Advisory banner */}
                   <div className="text-xs px-3 py-2 border border-amber-500/30 bg-amber-500/5 text-amber-200">
-                    AI 제안: 실행 전 동등성과 성능을 직접 검증하세요 (아래
-                    비교는 실행 없이 planner 추정 cost)
+                    {t(
+                      "AI 제안: 실행 전 동등성과 성능을 직접 검증하세요 (아래 비교는 실행 없이 planner 추정 cost)",
+                    )}
                   </div>
 
                   {/* Rewrite narrative */}
@@ -928,7 +947,7 @@ export default function QueryLabPage() {
                     <div className="border border-zinc-800 bg-zinc-900/40">
                       <div className="px-3 py-2 border-b border-zinc-800">
                         <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
-                          plan-only EXPLAIN 비교 (실행 없음)
+                          {t("plan-only EXPLAIN 비교 (실행 없음)")}
                         </div>
                       </div>
                       {/* Cost summary */}
@@ -936,7 +955,7 @@ export default function QueryLabPage() {
                         rewrite.afterCost !== null) && (
                         <div className="flex items-center gap-4 px-3 py-2 border-b border-zinc-800 text-xs">
                           <div className="text-zinc-400">
-                            원본 cost:{" "}
+                            {t("원본 cost:")}{" "}
                             <span className="font-mono text-zinc-200">
                               {rewrite.beforeCost !== null
                                 ? rewrite.beforeCost.toFixed(2)
@@ -944,7 +963,7 @@ export default function QueryLabPage() {
                             </span>
                           </div>
                           <div className="text-zinc-400">
-                            제안 cost:{" "}
+                            {t("제안 cost:")}{" "}
                             <span className="font-mono text-zinc-200">
                               {rewrite.afterCost !== null
                                 ? rewrite.afterCost.toFixed(2)
@@ -971,8 +990,8 @@ export default function QueryLabPage() {
                                 ).toFixed(1)}
                                 %{" "}
                                 {rewrite.afterCost < rewrite.beforeCost
-                                  ? "개선"
-                                  : "악화"}
+                                  ? t("개선")
+                                  : t("악화")}
                               </div>
                             )}
                         </div>
@@ -982,7 +1001,7 @@ export default function QueryLabPage() {
                         {rewrite.beforePlan && (
                           <div>
                             <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
-                              원본 plan
+                              {t("원본 plan")}
                             </div>
                             <PlanTree plan={rewrite.beforePlan} />
                           </div>
@@ -990,7 +1009,7 @@ export default function QueryLabPage() {
                         {rewrite.afterPlan && (
                           <div>
                             <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
-                              제안 plan
+                              {t("제안 plan")}
                             </div>
                             <PlanTree plan={rewrite.afterPlan} />
                           </div>
@@ -1020,10 +1039,10 @@ export default function QueryLabPage() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
-                  쿼리 저장
+                  {t("쿼리 저장")}
                 </div>
                 <h3 className="text-base font-medium text-zinc-100">
-                  현재 SQL을 라이브러리에 저장
+                  {t("현재 SQL을 라이브러리에 저장")}
                 </h3>
               </div>
               <button
@@ -1037,7 +1056,7 @@ export default function QueryLabPage() {
             <div className="space-y-3">
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-zinc-500">
-                  제목 <span className="text-rose-400">*</span>
+                  {t("제목")} <span className="text-rose-400">*</span>
                 </label>
                 <input
                   type="text"
@@ -1045,14 +1064,14 @@ export default function QueryLabPage() {
                   onChange={(e) =>
                     setSaveModal({ ...saveModal, title: e.target.value })
                   }
-                  placeholder="예: prod-pg-1 capacity probe"
+                  placeholder={t("예: prod-pg-1 capacity probe")}
                   maxLength={255}
                   className="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60"
                 />
               </div>
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-zinc-500">
-                  설명 (선택)
+                  {t("설명 (선택)")}
                 </label>
                 <input
                   type="text"
@@ -1060,14 +1079,14 @@ export default function QueryLabPage() {
                   onChange={(e) =>
                     setSaveModal({ ...saveModal, description: e.target.value })
                   }
-                  placeholder="목록에서 한 줄로 보일 메모"
+                  placeholder={t("목록에서 한 줄로 보일 메모")}
                   maxLength={500}
                   className="w-full bg-zinc-950 border border-zinc-800 text-zinc-300 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60"
                 />
               </div>
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-zinc-500">
-                  태그 (쉼표로 구분)
+                  {t("태그 (쉼표로 구분)")}
                 </label>
                 <input
                   type="text"
@@ -1081,10 +1100,10 @@ export default function QueryLabPage() {
               </div>
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-zinc-500">
-                  SQL 미리보기
+                  {t("SQL 미리보기")}
                 </label>
                 <pre className="bg-zinc-950 border border-zinc-800 p-2 text-[11px] text-zinc-300 font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto mt-1">
-                  {lastSql || "(미리보기할 SQL이 없습니다)"}
+                  {lastSql || t("(미리보기할 SQL이 없습니다)")}
                 </pre>
               </div>
               {saveModal.error && (
@@ -1095,21 +1114,21 @@ export default function QueryLabPage() {
                   onClick={() => setSaveModal(null)}
                   className="text-xs px-4 py-2 border border-zinc-700 text-zinc-400 hover:text-zinc-100 transition-colors"
                 >
-                  취소
+                  {t("취소")}
                 </button>
                 <button
                   onClick={async () => {
                     if (!saveModal.title.trim()) {
                       setSaveModal({
                         ...saveModal,
-                        error: "제목을 입력하세요",
+                        error: t("제목을 입력하세요"),
                       });
                       return;
                     }
                     if (!lastSql.trim()) {
                       setSaveModal({
                         ...saveModal,
-                        error: "저장할 SQL이 없습니다",
+                        error: t("저장할 SQL이 없습니다"),
                       });
                       return;
                     }
@@ -1142,7 +1161,7 @@ export default function QueryLabPage() {
                   disabled={saveModal.submitting}
                   className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors disabled:opacity-50"
                 >
-                  {saveModal.submitting ? "저장 중…" : "저장"}
+                  {saveModal.submitting ? t("저장 중…") : t("저장")}
                 </button>
               </div>
             </div>

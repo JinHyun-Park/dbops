@@ -7,6 +7,7 @@ import { fetchAnomalies } from "@/lib/api-client";
 import { streamChat } from "@/lib/agentcore-sse";
 import { fmtDecimal } from "@/lib/format";
 import { metricDef } from "@/lib/metric-glossary";
+import { useT } from "@/lib/i18n";
 
 interface Anomaly {
   metric_type: string;
@@ -64,6 +65,7 @@ function prettyMetric(m: string): string {
 type Meta = { mode?: string; checked?: number; failed?: boolean };
 
 export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [items, setItems] = useState<Anomaly[]>([]);
   const [meta, setMeta] = useState<Meta>({});
   const [loading, setLoading] = useState(true);
@@ -104,11 +106,11 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
           )}
         </div>
         <div className="text-[10px] text-zinc-500">
-          z-score ≥ 2.5 (7일 베이스라인 대비)
+          {t("z-score ≥ 2.5 (7일 베이스라인 대비)")}
         </div>
       </div>
       {loading ? (
-        <div className="text-zinc-500 text-sm">불러오는 중…</div>
+        <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
       ) : items.length === 0 ? (
         <EmptyState meta={meta} />
       ) : (
@@ -138,25 +140,32 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
               >
                 <div>
                   <div className="text-sm text-zinc-200 flex items-center gap-1.5">
-                    {prettyMetric(a.metric_type)}
+                    {t(prettyMetric(a.metric_type))}
                     {a.mode === "seasonal" ? (
                       <span
                         className="text-[9px] uppercase tracking-wider px-1 py-0.5 border border-emerald-500/40 text-emerald-300 rounded-sm"
-                        title="요일/시간대별 과거 분포(중앙값 + IQR)와 비교"
+                        title={t(
+                          "요일/시간대별 과거 분포(중앙값 + IQR)와 비교",
+                        )}
                       >
                         seasonal
                       </span>
                     ) : a.mode === "flat" ? (
                       <span
                         className="text-[9px] uppercase tracking-wider px-1 py-0.5 border border-zinc-700 text-zinc-500 rounded-sm"
-                        title="해당 시간대의 seasonal 베이스라인이 아직 학습되지 않아 단순 7일 평균±표준편차로 대체"
+                        title={t(
+                          "해당 시간대의 seasonal 베이스라인이 아직 학습되지 않아 단순 7일 평균±표준편차로 대체",
+                        )}
                       >
                         flat
                       </span>
                     ) : null}
                   </div>
                   <div className="text-[11px] text-zinc-500">
-                    베이스라인 {fmtDecimal(n(a.baseline_mean), 2)}, 최근 최댓값{" "}
+                    {t("베이스라인 {n}, 최근 최댓값").replace(
+                      "{n}",
+                      fmtDecimal(n(a.baseline_mean), 2),
+                    )}{" "}
                     <span className="text-zinc-300">
                       {fmtDecimal(n(a.recent_max), 2)}
                     </span>
@@ -183,17 +192,18 @@ export function AnomaliesPanel({ clusterId }: { clusterId: string }) {
 }
 
 function EmptyState({ meta }: { meta: Meta }) {
+  const t = useT();
   if (meta.failed) {
     return (
       <div className="text-sm">
         <div className="text-amber-300 flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-amber-500" />
-          이상 징후를 조회하지 못했습니다
+          {t("이상 징후를 조회하지 못했습니다")}
         </div>
         <div className="text-[11px] text-zinc-500 mt-1">
-          1분 뒤 자동으로 다시 조회합니다. 계속 실패하면 새로 고쳐 주세요. 지금
-          화면은 &quot;이상 없음&quot;이 아니라 &quot;확인하지 못한
-          상태&quot;입니다.
+          {t(
+            '1분 뒤 자동으로 다시 조회합니다. 계속 실패하면 새로 고쳐 주세요. 지금 화면은 "이상 없음"이 아니라 "확인하지 못한 상태"입니다.',
+          )}
         </div>
       </div>
     );
@@ -203,13 +213,12 @@ function EmptyState({ meta }: { meta: Meta }) {
       <div className="text-sm">
         <div className="text-amber-300 flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-amber-500" />
-          최근 4시간 지표가 없어 판단할 수 없습니다
+          {t("최근 4시간 지표가 없어 판단할 수 없습니다")}
         </div>
         <div className="text-[11px] text-zinc-500 mt-1">
-          최근 4시간 구간에 이 클러스터의 클러스터 레벨 지표가 한 건도 없습니다.
-          baseline 학습을 기다리는 상태가 아니라 비교할 데이터 자체가 없는
-          상태입니다. 방금 등록한 클러스터라면 첫 수집 주기를 기다리고, 그렇지
-          않다면 이 클러스터의 지표 수집(ETL)이 도는지 확인해 주세요.
+          {t(
+            "최근 4시간 구간에 이 클러스터의 클러스터 레벨 지표가 한 건도 없습니다. baseline 학습을 기다리는 상태가 아니라 비교할 데이터 자체가 없는 상태입니다. 방금 등록한 클러스터라면 첫 수집 주기를 기다리고, 그렇지 않다면 이 클러스터의 지표 수집(ETL)이 도는지 확인해 주세요.",
+          )}
         </div>
       </div>
     );
@@ -219,13 +228,12 @@ function EmptyState({ meta }: { meta: Meta }) {
       <div className="text-sm">
         <div className="text-amber-300 flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-amber-500" />
-          baseline 학습 전이라 아직 판단할 수 없습니다
+          {t("baseline 학습 전이라 아직 판단할 수 없습니다")}
         </div>
         <div className="text-[11px] text-zinc-500 mt-1">
-          지표는 수집되고 있지만 비교 기준이 되는 baseline이 아직
-          없습니다(요일/시간대별 seasonal, 7일 flat 모두). seasonal baseline은
-          이 시간대 지표가 약 2주치 쌓이면 자동으로 학습되니 그때까지 기다려
-          주세요.
+          {t(
+            "지표는 수집되고 있지만 비교 기준이 되는 baseline이 아직 없습니다(요일/시간대별 seasonal, 7일 flat 모두). seasonal baseline은 이 시간대 지표가 약 2주치 쌓이면 자동으로 학습되니 그때까지 기다려 주세요.",
+          )}
         </div>
       </div>
     );
@@ -237,9 +245,16 @@ function EmptyState({ meta }: { meta: Meta }) {
   // field the old API never sent would alarm every operator on every deploy.
   // Pinned by test_deploy_skew_undefined_mode_falls_through_to_the_all_clear.
   const note = [
-    meta.checked ? `지표 ${meta.checked}개를 baseline과 비교했습니다.` : "",
+    meta.checked
+      ? t("지표 {n}개를 baseline과 비교했습니다.").replace(
+          "{n}",
+          String(meta.checked),
+        )
+      : "",
     meta.mode === "flat"
-      ? "이 시간대의 seasonal baseline이 아직 없어 7일 flat 평균±σ 기준으로 판정했습니다(신뢰도 낮음)."
+      ? t(
+          "이 시간대의 seasonal baseline이 아직 없어 7일 flat 평균±σ 기준으로 판정했습니다(신뢰도 낮음).",
+        )
       : "",
   ]
     .filter(Boolean)
@@ -248,7 +263,7 @@ function EmptyState({ meta }: { meta: Meta }) {
     <div className="text-sm">
       <div className="text-emerald-400 flex items-center gap-2">
         <span className="w-2 h-2 rounded-full bg-emerald-500" />
-        최근 4시간 동안 이상 징후 없음
+        {t("최근 4시간 동안 이상 징후 없음")}
       </div>
       {note && <div className="text-[11px] text-zinc-500 mt-1">{note}</div>}
     </div>
@@ -266,6 +281,7 @@ function AnomalyDetailModal({
   prettyLabel: string;
   onClose: () => void;
 }) {
+  const t = useT();
   const [insight, setInsight] = useState("");
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState<string | null>(null);
@@ -336,25 +352,26 @@ function AnomalyDetailModal({
               <span
                 className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${sevBadge}`}
               >
-                이상 징후, σ{z.toFixed(1)}
+                {t("이상 징후, σ{n}").replace("{n}", z.toFixed(1))}
               </span>
               <span className="text-[10px] text-zinc-500 font-mono">
                 {anomaly.metric_type}
               </span>
             </div>
             <h2 className="text-lg font-semibold text-zinc-100">
-              {prettyLabel}
+              {t(prettyLabel)}
             </h2>
             <div className="text-xs text-zinc-400 mt-1">
-              베이스라인 {fmtDecimal(baseline, 2)} ± {fmtDecimal(stddev, 2)},
-              최근 최댓값{" "}
+              {t("베이스라인 {a} ± {b}, 최근 최댓값")
+                .replace("{a}", fmtDecimal(baseline, 2))
+                .replace("{b}", fmtDecimal(stddev, 2))}{" "}
               <span className="text-zinc-200">{fmtDecimal(recentMax, 2)}</span>
             </div>
           </div>
           <button
             onClick={onClose}
             className="text-zinc-500 hover:text-zinc-200 text-xl leading-none ml-3"
-            aria-label="닫기"
+            aria-label={t("닫기")}
           >
             ×
           </button>
@@ -363,19 +380,22 @@ function AnomalyDetailModal({
         <div className="flex-1 overflow-y-auto px-5 py-4">
           <div className="grid grid-cols-2 gap-3 mb-4">
             <Stat
-              label="최근 최댓값"
+              label={t("최근 최댓값")}
               value={fmtDecimal(recentMax, 2)}
               tone={sevTone}
             />
-            <Stat label="최근 평균" value={fmtDecimal(recentAvg, 2)} />
-            <Stat label="베이스라인 평균" value={fmtDecimal(baseline, 2)} />
-            <Stat label="베이스라인 σ" value={fmtDecimal(stddev, 2)} />
+            <Stat label={t("최근 평균")} value={fmtDecimal(recentAvg, 2)} />
+            <Stat
+              label={t("베이스라인 평균")}
+              value={fmtDecimal(baseline, 2)}
+            />
+            <Stat label={t("베이스라인 σ")} value={fmtDecimal(stddev, 2)} />
           </div>
 
           <div className="border-t border-zinc-800 pt-3">
             <div className="flex items-center justify-between mb-2">
               <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
-                AI 진단
+                {t("AI 진단")}
               </div>
               <button
                 onClick={handleAnalyze}
@@ -383,10 +403,10 @@ function AnomalyDetailModal({
                 className="text-xs px-3 py-1 border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 disabled:opacity-50 transition-colors"
               >
                 {insightLoading
-                  ? "분석 중…"
+                  ? t("분석 중…")
                   : insight
-                    ? "다시 진단"
-                    : "원인 진단 + 다음 점검"}
+                    ? t("다시 진단")
+                    : t("원인 진단 + 다음 점검")}
               </button>
             </div>
             {insightError && (
@@ -396,9 +416,12 @@ function AnomalyDetailModal({
             )}
             {!insight && !insightLoading && !insightError && (
               <div className="text-xs text-zinc-500">
-                <span className="text-sky-300">원인 진단 + 다음 점검</span>{" "}
-                버튼을 누르면 추정 원인, 운영 영향, 다음 점검 단계를 한 번에
-                받아볼 수 있어요.
+                <span className="text-sky-300">
+                  {t("원인 진단 + 다음 점검")}
+                </span>{" "}
+                {t(
+                  "버튼을 누르면 추정 원인, 운영 영향, 다음 점검 단계를 한 번에 받아볼 수 있어요.",
+                )}
               </div>
             )}
             {insight && (

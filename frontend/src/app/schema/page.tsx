@@ -94,19 +94,25 @@ export default function SchemaPage() {
               onClick={load}
               disabled={loading || !selectedCluster || mysqlSelected}
               title={
-                mysqlSelected ? "FK 그래프는 PostgreSQL 전용입니다" : undefined
+                mysqlSelected
+                  ? t("FK 그래프는 PostgreSQL 전용입니다")
+                  : undefined
               }
               className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors ml-auto"
             >
-              {loading ? "추출 중…" : data ? "새로고침" : "FK 추출 실행"}
+              {loading
+                ? t("추출 중…")
+                : data
+                  ? t("새로고침")
+                  : t("FK 추출 실행")}
             </button>
           </div>
 
           {mysqlSelected && (
             <div className="mb-4 text-xs text-amber-300 border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-              선택된 클러스터는 MySQL입니다. FK 그래프는 pg_constraint 기반의
-              PostgreSQL 전용 기능입니다. 우측 상단에서 PostgreSQL 클러스터로
-              전환하세요.
+              {t(
+                "선택된 클러스터는 MySQL입니다. FK 그래프는 pg_constraint 기반의 PostgreSQL 전용 기능입니다. 우측 상단에서 PostgreSQL 클러스터로 전환하세요.",
+              )}
             </div>
           )}
 
@@ -151,8 +157,10 @@ export default function SchemaPage() {
 
           {!data && !loading && !err && (
             <div className="text-zinc-500 text-sm">
-              <span className="text-amber-300">FK 추출 실행</span> 버튼을 누르면
-              pg_constraint를 조회해 외래키 그래프를 만듭니다.
+              <span className="text-amber-300">{t("FK 추출 실행")}</span>{" "}
+              {t(
+                "버튼을 누르면 pg_constraint를 조회해 외래키 그래프를 만듭니다.",
+              )}
             </div>
           )}
         </>
@@ -166,6 +174,7 @@ export default function SchemaPage() {
 // ---------------------------------------------------------------------------
 
 function SummaryTiles({ data }: { data: SchemaGraphResponse }) {
+  const t = useT();
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
       <Tile
@@ -179,7 +188,7 @@ function SummaryTiles({ data }: { data: SchemaGraphResponse }) {
       <Tile
         label="Isolated"
         value={fmtExact(data.isolated_count ?? 0)}
-        sub="들어오고 나가는 FK 없음"
+        sub={t("들어오고 나가는 FK 없음")}
         tone={(data.isolated_count ?? 0) > 0 ? "amber" : "zinc"}
       />
       <Tile
@@ -187,7 +196,7 @@ function SummaryTiles({ data }: { data: SchemaGraphResponse }) {
         value={fmtExact(
           data.tables.filter((t) => t.fk_in + t.fk_out >= 3).length,
         )}
-        sub="FK 합계 ≥ 3"
+        sub={t("FK 합계 ≥ 3")}
       />
     </div>
   );
@@ -247,6 +256,7 @@ function GraphCanvas({
   selected: string | null;
   onSelect: (name: string | null) => void;
 }) {
+  const t = useT();
   // Sort tables: hubs first (high degree), then alphabetical. Better than
   // pure alphabetical because frequently-referenced tables cluster near
   // the top-left where the eye lands first.
@@ -289,7 +299,7 @@ function GraphCanvas({
   if (layout.length === 0) {
     return (
       <div className="bg-zinc-900/40 border border-zinc-800 p-6 text-zinc-500 text-sm">
-        해당 스키마에 테이블이 없습니다.
+        {t("해당 스키마에 테이블이 없습니다.")}
       </div>
     );
   }
@@ -297,7 +307,7 @@ function GraphCanvas({
   return (
     <div className="bg-zinc-900/40 border border-zinc-800 overflow-auto">
       <div className="px-3 py-2 border-b border-zinc-800 text-[10px] uppercase tracking-wider text-zinc-500">
-        graph: 테이블을 클릭하면 해당 FK가 하이라이트됩니다
+        {t("graph: 테이블을 클릭하면 해당 FK가 하이라이트됩니다")}
       </div>
       <svg
         width={svgWidth}
@@ -465,7 +475,8 @@ function SelectedTableDetail({
   tableName: string;
   onSelect: (name: string) => void;
 }) {
-  const table = data.tables.find((t) => t.table_name === tableName);
+  const t = useT();
+  const table = data.tables.find((tb) => tb.table_name === tableName);
   const outgoing = data.edges.filter((e) => e.source_table === tableName);
   const incoming = data.edges.filter((e) => e.target_table === tableName);
 
@@ -487,14 +498,14 @@ function SelectedTableDetail({
 
       <FkSection
         label={`→ outgoing (${outgoing.length})`}
-        hint="이 테이블이 다른 테이블을 참조"
+        hint={t("이 테이블이 다른 테이블을 참조")}
         edges={outgoing}
         peerKey="target_table"
         onSelect={onSelect}
       />
       <FkSection
         label={`← incoming (${incoming.length})`}
-        hint="다른 테이블이 이 테이블을 참조. 변경시 영향도 확인 필요"
+        hint={t("다른 테이블이 이 테이블을 참조. 변경시 영향도 확인 필요")}
         edges={incoming}
         peerKey="source_table"
         onSelect={onSelect}
@@ -516,6 +527,7 @@ function FkSection({
   peerKey: "source_table" | "target_table";
   onSelect: (name: string) => void;
 }) {
+  const t = useT();
   return (
     <div className="border-b border-zinc-800">
       <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-zinc-500">
@@ -523,7 +535,7 @@ function FkSection({
       </div>
       <div className="text-[10px] text-zinc-600 px-3 -mt-1 mb-1">{hint}</div>
       {edges.length === 0 ? (
-        <div className="px-3 pb-3 text-[11px] text-zinc-600">없음</div>
+        <div className="px-3 pb-3 text-[11px] text-zinc-600">{t("없음")}</div>
       ) : (
         <ul className="divide-y divide-zinc-800/60">
           {edges.map((e) => (
@@ -559,6 +571,7 @@ function TableList({
   data: SchemaGraphResponse;
   onSelect: (name: string) => void;
 }) {
+  const t = useT();
   const sorted = useMemo(
     () =>
       [...data.tables].sort((a, b) => {
@@ -573,7 +586,7 @@ function TableList({
   return (
     <div className="bg-zinc-900/40 border border-zinc-800 max-h-[680px] overflow-y-auto">
       <div className="px-3 py-2 border-b border-zinc-800 sticky top-0 bg-zinc-900/95 backdrop-blur text-[10px] uppercase tracking-wider text-zinc-500">
-        tables: 클릭하면 FK 상세
+        {t("tables: 클릭하면 FK 상세")}
       </div>
       <ul className="divide-y divide-zinc-800/60">
         {sorted.map((t) => (

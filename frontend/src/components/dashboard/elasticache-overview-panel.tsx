@@ -21,6 +21,7 @@ import {
 import { Expandable } from "@/components/design-system/expandable";
 import { fmtDecimal, fmtExact } from "@/lib/format";
 import { useChartColors } from "@/lib/use-chart-colors";
+import { useT } from "@/lib/i18n";
 
 type Point = { ts: string; value: number | string };
 
@@ -83,6 +84,7 @@ function MiniChart({
   unit?: string;
   type?: "line" | "area";
 }) {
+  const tr = useT();
   const timeMap = new Map<string, Record<string, number>>();
   for (const s of series) {
     for (const p of s.points) {
@@ -119,11 +121,11 @@ function MiniChart({
         <div className="h-32">
           {loading ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              불러오는 중…
+              {tr("불러오는 중…")}
             </div>
           ) : data.length === 0 ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              데이터 없음
+              {tr("데이터 없음")}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -236,6 +238,7 @@ export function ElasticacheOverviewPanel({
   clusterId: string;
   range: TimeRange;
 }) {
+  const t = useT();
   const chart = useChartColors();
   const [details, setDetails] = useState<ElastiCacheDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(true);
@@ -322,10 +325,10 @@ export function ElasticacheOverviewPanel({
       {/* ─ Resource details tiles ─ */}
       <div className="bg-zinc-900/50 border border-zinc-800 p-5">
         <div className="text-sm text-zinc-200 font-medium mb-3">
-          클러스터 개요
+          {t("클러스터 개요")}
         </div>
         {detailsLoading ? (
-          <div className="text-zinc-500 text-sm">불러오는 중…</div>
+          <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             <StatTile
@@ -394,7 +397,7 @@ export function ElasticacheOverviewPanel({
       {/* ─ Memory + Hit Rate ─ */}
       <div>
         <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
-          메모리 / Hit Rate
+          {t("메모리 / Hit Rate")}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <MiniChart
@@ -565,7 +568,7 @@ export function ElasticacheOverviewPanel({
       {/* ─ Network throughput ─ */}
       <div>
         <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
-          네트워크 처리량 (Network Throughput)
+          {t("네트워크 처리량 (Network Throughput)")}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <MiniChart

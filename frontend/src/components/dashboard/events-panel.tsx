@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { EventDetailModal, type DashboardEvent } from "./event-detail-modal";
+import { useT } from "@/lib/i18n";
 
 const SEVERITY_STYLES: Record<string, string> = {
   critical: "border-l-red-500 bg-red-950/30",
@@ -38,14 +39,14 @@ function prettifyEventType(raw: string | null | undefined): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function relTime(iso: string) {
+function relTime(iso: string, t: (ko: string) => string) {
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.floor(ms / 60000);
-  if (m < 1) return "방금";
-  if (m < 60) return `${m}분 전`;
+  if (m < 1) return t("방금");
+  if (m < 60) return t("{n}분 전").replace("{n}", String(m));
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}시간 전`;
-  return `${Math.floor(h / 24)}일 전`;
+  if (h < 24) return t("{n}시간 전").replace("{n}", String(h));
+  return t("{n}일 전").replace("{n}", String(Math.floor(h / 24)));
 }
 
 export function EventsPanel({
@@ -55,6 +56,7 @@ export function EventsPanel({
   events: DashboardEvent[];
   clusterId?: string;
 }) {
+  const t = useT();
   const [active, setActive] = useState<DashboardEvent | null>(null);
 
   return (
@@ -63,12 +65,14 @@ export function EventsPanel({
         <div className="text-sm text-zinc-200 font-medium">Recent Events</div>
         {events.length > 0 && (
           <div className="text-[10px] text-zinc-600">
-            이벤트 클릭 시 상세 + AI 설명
+            {t("이벤트 클릭 시 상세 + AI 설명")}
           </div>
         )}
       </div>
       {events.length === 0 ? (
-        <div className="text-xs text-zinc-500 py-2">최근 이벤트 없음</div>
+        <div className="text-xs text-zinc-500 py-2">
+          {t("최근 이벤트 없음")}
+        </div>
       ) : (
         <div className="space-y-2 max-h-96 overflow-y-auto">
           {events.map((e, i) => {
@@ -102,7 +106,7 @@ export function EventsPanel({
                 >
                   <div className="flex items-center gap-2 mb-0.5">
                     <span className="text-xs font-medium text-zinc-200 truncate">
-                      {label}
+                      {t(label)}
                     </span>
                     <span
                       className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${badge}`}
@@ -115,13 +119,13 @@ export function EventsPanel({
                       </span>
                     )}
                     <span className="text-[10px] text-zinc-500 whitespace-nowrap">
-                      {relTime(e.ts)}
+                      {relTime(e.ts, t)}
                     </span>
                   </div>
                   <div className="text-xs text-zinc-400 leading-snug truncate">
                     {e.message || (
                       <span className="text-zinc-600 italic">
-                        메시지 없음: 클릭해 원본 이벤트 확인
+                        {t("메시지 없음: 클릭해 원본 이벤트 확인")}
                       </span>
                     )}
                   </div>
@@ -130,9 +134,9 @@ export function EventsPanel({
                   <Link
                     href={diagnoseHref}
                     className="shrink-0 self-center mr-2 ml-1 text-[10px] px-2 py-1 border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 rounded whitespace-nowrap transition-colors"
-                    title="이 인시던트를 Chat에서 RCA 진단"
+                    title={t("이 인시던트를 Chat에서 RCA 진단")}
                   >
-                    💬 진단
+                    {t("💬 진단")}
                   </Link>
                 )}
               </div>

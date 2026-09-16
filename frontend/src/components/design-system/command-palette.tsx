@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 import { isAdmin } from "@/lib/auth";
+import { useT } from "@/lib/i18n";
 
 interface Command {
   id: string;
@@ -176,6 +177,7 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
   const [admin, setAdmin] = useState(false);
   const router = useRouter();
+  const t = useT();
 
   useEffect(() => {
     setAdmin(isAdmin());
@@ -184,8 +186,10 @@ export function CommandPalette() {
   const q = query.trim().toLowerCase();
   // Pages/search only: cluster switching lives in the dedicated ClusterDropdown
   // now, so ⌘K and the cluster control no longer open the same overloaded modal.
+  // Search the DISPLAYED label, not the Korean source: otherwise an English
+  // reader types what is on screen and matches nothing.
   const filtered = commands.filter(
-    (c) => (!c.adminOnly || admin) && c.label.toLowerCase().includes(q),
+    (c) => (!c.adminOnly || admin) && t(c.label).toLowerCase().includes(q),
   );
 
   const open = useCallback(() => {
@@ -239,7 +243,7 @@ export function CommandPalette() {
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="페이지 검색..."
+            placeholder={t("페이지 검색...")}
             className="w-full py-3 bg-transparent text-zinc-100 focus:outline-none placeholder:text-zinc-600"
             onKeyDown={(e) => {
               if (e.key === "Enter" && filtered.length > 0) {
@@ -255,7 +259,7 @@ export function CommandPalette() {
               onClick={() => handleSelect(cmd)}
               className="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-zinc-800 transition-colors"
             >
-              <span className="text-sm text-zinc-200">{cmd.label}</span>
+              <span className="text-sm text-zinc-200">{t(cmd.label)}</span>
               <span className="text-[10px] uppercase tracking-wider text-emerald-300/70">
                 {cmd.group}
               </span>
@@ -263,12 +267,12 @@ export function CommandPalette() {
           ))}
           {filtered.length === 0 && (
             <div className="px-4 py-8 text-center text-zinc-500 text-sm">
-              결과 없음
+              {t("결과 없음")}
             </div>
           )}
         </div>
         <div className="px-4 py-2 border-t border-zinc-700 text-xs text-zinc-500">
-          ⌘K로 열기, Enter로 이동, Esc로 닫기
+          {t("⌘K로 열기, Enter로 이동, Esc로 닫기")}
         </div>
       </div>
     </div>

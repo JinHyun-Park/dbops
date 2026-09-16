@@ -9,6 +9,7 @@ import {
   type EndpointAction,
 } from "@/lib/api-client";
 import { isAdmin } from "@/lib/auth";
+import { useT } from "@/lib/i18n";
 
 // Built-in writer/reader vs custom endpoints get distinct pill colors so the
 // operator sees at a glance which are managed by AWS and which are theirs.
@@ -54,6 +55,7 @@ function parseMembers(text: string): string[] {
 }
 
 export function EndpointsPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [data, setData] = useState<EndpointsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [admin, setAdmin] = useState(false);
@@ -157,7 +159,7 @@ export function EndpointsPanel({ clusterId }: { clusterId: string }) {
               }}
               className="text-[10px] px-2 py-1 border border-zinc-700 text-zinc-300 hover:border-amber-500/60 hover:text-amber-200 transition-colors"
             >
-              + 커스텀 엔드포인트 추가
+              {t("+ 커스텀 엔드포인트 추가")}
             </button>
           )}
           <button
@@ -172,13 +174,15 @@ export function EndpointsPanel({ clusterId }: { clusterId: string }) {
 
       {admin ? (
         <div className="text-[11px] text-zinc-500 mb-3">
-          커스텀 엔드포인트 생성, 수정, 삭제는 DBA 승인이 필요합니다. 요청하면
-          승인 센터에 등록되고, 승인 즉시 실행됩니다.
+          {t(
+            "커스텀 엔드포인트 생성, 수정, 삭제는 DBA 승인이 필요합니다. 요청하면 승인 센터에 등록되고, 승인 즉시 실행됩니다.",
+          )}
         </div>
       ) : (
         <div className="text-[11px] text-zinc-500 mb-3">
-          커스텀 엔드포인트 변경은 관리자(DBA)만 요청할 수 있습니다. 이 패널은
-          읽기 전용입니다.
+          {t(
+            "커스텀 엔드포인트 변경은 관리자(DBA)만 요청할 수 있습니다. 이 패널은 읽기 전용입니다.",
+          )}
         </div>
       )}
 
@@ -190,7 +194,7 @@ export function EndpointsPanel({ clusterId }: { clusterId: string }) {
               href="/approvals"
               className="underline hover:text-emerald-100 font-medium"
             >
-              승인 센터로 이동
+              {t("승인 센터로 이동")}
             </a>
           </span>
           <button
@@ -206,8 +210,9 @@ export function EndpointsPanel({ clusterId }: { clusterId: string }) {
       {admin && createOpen && (
         <div className="mb-4 border border-zinc-800 bg-zinc-950 p-3 space-y-2">
           <div className="text-[11px] text-zinc-400">
-            READER 는 읽기 전용 리더만, ANY 는 writer와 reader 모두 라우팅
-            대상입니다. 멤버를 지정하지 않으면 모든 리더가 포함됩니다.
+            {t(
+              "READER 는 읽기 전용 리더만, ANY 는 writer와 reader 모두 라우팅 대상입니다. 멤버를 지정하지 않으면 모든 리더가 포함됩니다.",
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -238,7 +243,7 @@ export function EndpointsPanel({ clusterId }: { clusterId: string }) {
               disabled={submitting || !newId.trim()}
               className="text-xs font-medium px-3 py-1.5 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
             >
-              {submitting ? "요청 중…" : "승인 요청"}
+              {submitting ? t("요청 중…") : t("승인 요청")}
             </button>
             <button
               onClick={() => {
@@ -247,7 +252,7 @@ export function EndpointsPanel({ clusterId }: { clusterId: string }) {
               }}
               className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
             >
-              취소
+              {t("취소")}
             </button>
           </div>
           {error && <div className="text-[11px] text-rose-300">{error}</div>}
@@ -283,7 +288,7 @@ export function EndpointsPanel({ clusterId }: { clusterId: string }) {
       ) : (
         !data?.error && (
           <div className="text-[11px] text-zinc-500 border border-zinc-800 bg-zinc-800/20 px-3 py-2">
-            엔드포인트가 없습니다.
+            {t("엔드포인트가 없습니다.")}
           </div>
         )
       )}
@@ -303,6 +308,7 @@ function MemberInput({
   value: string;
   onValue: (v: string) => void;
 }) {
+  const t = useT();
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-3 text-[11px] text-zinc-300">
@@ -319,7 +325,7 @@ function MemberInput({
               checked={mode === m}
               onChange={() => onMode(m)}
             />
-            {label}
+            {t(label)}
           </label>
         ))}
       </div>
@@ -328,7 +334,7 @@ function MemberInput({
           type="text"
           value={value}
           onChange={(e) => onValue(e.target.value)}
-          placeholder="인스턴스 id (쉼표/공백 구분)"
+          placeholder={t("인스턴스 id (쉼표/공백 구분)")}
           className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 font-mono focus:outline-none focus:border-amber-500/60"
         />
       )}
@@ -356,12 +362,13 @@ function EndpointRow({
   }) => Promise<boolean>;
   clearError: () => void;
 }) {
+  const t = useT();
   const pill = typePill(ep.type);
   const isCustom = (ep.type || "").toUpperCase() === "CUSTOM";
   const members = ep.static_members?.length
-    ? { label: "포함", list: ep.static_members }
+    ? { label: t("포함"), list: ep.static_members }
     : ep.excluded_members?.length
-      ? { label: "제외", list: ep.excluded_members }
+      ? { label: t("제외"), list: ep.excluded_members }
       : null;
 
   // Per-row editors. Only one of edit/deleteConfirm is open at a time.
@@ -423,7 +430,7 @@ function EndpointRow({
                 }}
                 className="text-[10px] px-1.5 py-0.5 border border-zinc-700 text-zinc-300 hover:border-amber-500/60 hover:text-amber-200 transition-colors"
               >
-                멤버 편집
+                {t("멤버 편집")}
               </button>
               <button
                 onClick={() => {
@@ -433,7 +440,7 @@ function EndpointRow({
                 }}
                 className="text-[10px] px-1.5 py-0.5 border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 transition-colors"
               >
-                삭제
+                {t("삭제")}
               </button>
             </>
           )}
@@ -473,13 +480,13 @@ function EndpointRow({
               disabled={submitting}
               className="text-xs font-medium px-3 py-1.5 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
             >
-              {submitting ? "요청 중…" : "승인 요청"}
+              {submitting ? t("요청 중…") : t("승인 요청")}
             </button>
             <button
               onClick={() => setEditOpen(false)}
               className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
             >
-              취소
+              {t("취소")}
             </button>
           </div>
           {error && <div className="text-[11px] text-rose-300">{error}</div>}
@@ -490,9 +497,11 @@ function EndpointRow({
       {deleteConfirm && (
         <div className="mt-2 border border-rose-500/40 bg-rose-950/20 p-2.5 space-y-2">
           <div className="text-[11px] text-rose-200">
-            커스텀 엔드포인트 <span className="font-mono">{ep.identifier}</span>{" "}
-            삭제 승인을 요청합니다. writer/reader 내장 엔드포인트는 영향받지
-            않습니다.
+            {t("커스텀 엔드포인트")}{" "}
+            <span className="font-mono">{ep.identifier}</span>{" "}
+            {t(
+              "삭제 승인을 요청합니다. writer/reader 내장 엔드포인트는 영향받지 않습니다.",
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -500,13 +509,13 @@ function EndpointRow({
               disabled={submitting}
               className="text-xs font-medium px-3 py-1.5 bg-rose-600 text-white hover:bg-rose-500 disabled:opacity-50 transition-colors"
             >
-              {submitting ? "요청 중…" : "삭제 승인 요청"}
+              {submitting ? t("요청 중…") : t("삭제 승인 요청")}
             </button>
             <button
               onClick={() => setDeleteConfirm(false)}
               className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
             >
-              취소
+              {t("취소")}
             </button>
           </div>
           {error && <div className="text-[11px] text-rose-300">{error}</div>}

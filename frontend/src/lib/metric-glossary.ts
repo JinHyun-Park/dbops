@@ -9,6 +9,8 @@
 // a senior DBA ignores them, a new one gets the gist without leaving
 // the page.
 
+import { tr } from "@/lib/format";
+
 export interface MetricDef {
   /** Short human label (matches what's shown in the UI). */
   label: string;
@@ -248,7 +250,15 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
 };
 
 /** Lookup with graceful fallback: unknown metric returns null so
- *  callers can simply skip the hint rather than render an empty one. */
+ *  callers can simply skip the hint rather than render an empty one.
+ *
+ *  i18n: the table above is a module-level constant, so it cannot call the
+ *  `t()` hook, and both consumers reach it only through here. Translating on
+ *  the way out means every hint is localised with no consumer change, and the
+ *  Korean in the table stays the lookup key. `label` and `unit` are already
+ *  English (DBA jargon), so only the prose goes through `tr`. */
 export function metricDef(metric: string): MetricDef | null {
-  return METRIC_GLOSSARY[metric] ?? null;
+  const def = METRIC_GLOSSARY[metric];
+  if (!def) return null;
+  return { ...def, what: tr(def.what), why: tr(def.why) };
 }

@@ -1,14 +1,17 @@
 "use client";
 
+import { useT } from "@/lib/i18n";
+
 interface AasChartProps {
   data: { ts: string; value: number }[];
 }
 
 export function AasChart({ data }: AasChartProps) {
+  const t = useT();
   if (data.length === 0) {
     return (
       <div className="bg-zinc-900/50 border border-zinc-800 p-8 text-center text-zinc-500">
-        메트릭 데이터가 없습니다
+        {t("메트릭 데이터가 없습니다")}
       </div>
     );
   }

@@ -32,6 +32,7 @@ import {
   observations,
   reportHeadline,
   stepKind,
+  sourceLabel,
   topCaveats,
 } from "../src/lib/rca-report-model.ts";
 
@@ -104,17 +105,33 @@ const gaps = coverageGaps({
   signals_examined: { blocking: 0, events: 2, schema_changes: 0 },
   skipped_sources: ["metric_spikes", "schema_changes_unmigrated"],
 });
-assert.ok(gaps.includes("락 경합 데이터 없음"), gaps.join(" | "));
-assert.ok(gaps.includes("메트릭 급증 확인 불가"), gaps.join(" | "));
-// events had rows, so it is not a gap at all.
-assert.ok(!gaps.some((g) => g.startsWith("이벤트 로그")), gaps.join(" | "));
-// schema_changes was skipped WITH a reason, so the weaker "데이터 없음"
-// wording must not be added on top of it.
-assert.equal(
-  gaps.filter((g) => g.startsWith("스키마 변경 이력")).length,
-  1,
-  gaps.join(" | "),
+// Asserted on the STRUCTURE, because coverageGaps no longer pre-composes a
+// Korean sentence: rca-report.tsx rendered that string raw, so an English
+// operator read every coverage gap in Korean. The producer now returns
+// {source, kind} and the consumer looks the label up and translates it.
+const shown = (g) => `${g.source}/${g.kind}`;
+const seen = gaps.map(shown).join(" | ");
+assert.ok(
+  gaps.some((g) => g.source === "blocking" && g.kind === "nodata"),
+  seen,
 );
+assert.ok(
+  gaps.some((g) => g.source === "metric_spikes" && g.kind === "unchecked"),
+  seen,
+);
+// events had rows, so it is not a gap at all.
+assert.ok(!gaps.some((g) => g.source === "events"), seen);
+// schema_changes was skipped WITH a reason, so the weaker "nodata" kind must
+// not be added on top of it.
+assert.equal(
+  gaps.filter((g) => g.source.startsWith("schema_changes")).length,
+  1,
+  seen,
+);
+// The label lookup the consumer depends on still resolves, and an UNKNOWN
+// source falls through to its raw identifier rather than disappearing.
+assert.equal(sourceLabel("blocking"), "락 경합");
+assert.equal(sourceLabel("something_new"), "something_new");
 
 // 3. Narrative lead dedupe.
 const headline = "orders 테이블에 인덱스가 추가되었습니다";

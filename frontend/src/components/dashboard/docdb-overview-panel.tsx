@@ -21,6 +21,7 @@ import {
 import { Expandable } from "@/components/design-system/expandable";
 import { fmtDecimal } from "@/lib/format";
 import { useChartColors } from "@/lib/use-chart-colors";
+import { useT } from "@/lib/i18n";
 
 type Point = { ts: string; value: number | string };
 
@@ -80,6 +81,7 @@ function MiniChart({
   unit?: string;
   type?: "line" | "area";
 }) {
+  const tr = useT();
   const timeMap = new Map<string, Record<string, number>>();
   for (const s of series) {
     for (const p of s.points) {
@@ -116,11 +118,11 @@ function MiniChart({
         <div className="h-32">
           {loading ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              불러오는 중…
+              {tr("불러오는 중…")}
             </div>
           ) : data.length === 0 ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              데이터 없음
+              {tr("데이터 없음")}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -231,6 +233,7 @@ export function DocdbOverviewPanel({
   clusterId: string;
   range: TimeRange;
 }) {
+  const t = useT();
   const chart = useChartColors();
   const [details, setDetails] = useState<DocDbDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(true);
@@ -287,28 +290,28 @@ export function DocdbOverviewPanel({
       {/* ─ Resource details tiles ─ */}
       <div className="bg-zinc-900/50 border border-zinc-800 p-5">
         <div className="text-sm text-zinc-200 font-medium mb-3">
-          클러스터 개요
+          {t("클러스터 개요")}
         </div>
         {detailsLoading ? (
-          <div className="text-zinc-500 text-sm">불러오는 중…</div>
+          <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
         ) : (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
               <StatTile
-                label="인스턴스 수"
+                label={t("인스턴스 수")}
                 value={String(
                   details?.instance_count ?? instances.length ?? "-",
                 )}
               />
               <StatTile
-                label="엔진 버전"
+                label={t("엔진 버전")}
                 value={details?.engine_version ?? "-"}
               />
             </div>
             {instances.length > 0 && (
               <div className="space-y-1">
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                  인스턴스 목록
+                  {t("인스턴스 목록")}
                 </div>
                 {instances.map((inst) => (
                   <div
@@ -433,7 +436,7 @@ export function DocdbOverviewPanel({
       {/* ─ Opcounters ─ */}
       <div>
         <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
-          연산 카운터 (Opcounters)
+          {t("연산 카운터 (Opcounters)")}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <MiniChart
@@ -490,7 +493,7 @@ export function DocdbOverviewPanel({
       {/* ─ Memory + Storage + Latency + Disk Queue ─ */}
       <div>
         <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
-          스토리지 / 메모리 / 레이턴시
+          {t("스토리지 / 메모리 / 레이턴시")}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <MiniChart

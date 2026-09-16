@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { confirmPasswordReset, signIn } from "@/lib/auth";
+import { useT } from "@/lib/i18n";
 import { AuthLayout, Field } from "@/app/login/page";
 
 export default function ResetPage() {
@@ -15,6 +16,7 @@ export default function ResetPage() {
 }
 
 function ResetForm() {
+  const t = useT();
   const router = useRouter();
   const sp = useSearchParams();
   const [email, setEmail] = useState(sp.get("email") || "");
@@ -28,11 +30,11 @@ function ResetForm() {
     e.preventDefault();
     setErr(null);
     if (password !== confirm) {
-      setErr("비밀번호가 일치하지 않습니다");
+      setErr(t("비밀번호가 일치하지 않습니다"));
       return;
     }
     if (password.length < 8) {
-      setErr("비밀번호는 최소 8자 이상이어야 합니다");
+      setErr(t("비밀번호는 최소 8자 이상이어야 합니다"));
       return;
     }
     setBusy(true);
@@ -48,19 +50,21 @@ function ResetForm() {
         router.replace("/login");
       }
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "재설정 실패");
+      setErr(e2 instanceof Error ? e2.message : t("재설정 실패"));
       setBusy(false);
     }
   };
 
   return (
     <AuthLayout
-      eyebrow="복구"
-      title="새 비밀번호 설정"
-      subtitle="이메일로 받은 인증 코드를 입력하고 새 비밀번호를 설정하세요"
+      eyebrow={t("복구")}
+      title={t("새 비밀번호 설정")}
+      subtitle={t(
+        "이메일로 받은 인증 코드를 입력하고 새 비밀번호를 설정하세요",
+      )}
     >
       <form onSubmit={submit} className="space-y-4">
-        <Field label="이메일">
+        <Field label={t("이메일")}>
           <input
             type="email"
             value={email}
@@ -69,7 +73,7 @@ function ResetForm() {
             className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm focus:outline-none focus:border-amber-500/60"
           />
         </Field>
-        <Field label="인증 코드">
+        <Field label={t("인증 코드")}>
           <input
             type="text"
             inputMode="numeric"
@@ -80,7 +84,7 @@ function ResetForm() {
             className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm font-mono focus:outline-none focus:border-amber-500/60"
           />
         </Field>
-        <Field label="새 비밀번호">
+        <Field label={t("새 비밀번호")}>
           <input
             type="password"
             autoComplete="new-password"
@@ -90,7 +94,7 @@ function ResetForm() {
             className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm focus:outline-none focus:border-amber-500/60"
           />
         </Field>
-        <Field label="비밀번호 확인">
+        <Field label={t("비밀번호 확인")}>
           <input
             type="password"
             autoComplete="new-password"
@@ -110,15 +114,15 @@ function ResetForm() {
           disabled={busy}
           className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium py-2 disabled:opacity-50"
         >
-          {busy ? "재설정 중…" : "비밀번호 재설정"}
+          {busy ? t("재설정 중…") : t("비밀번호 재설정")}
         </button>
       </form>
       <div className="flex items-center justify-between text-xs text-zinc-500 pt-4">
         <Link href="/forgot" className="hover:text-amber-300 transition-colors">
-          ← 코드 재발송
+          ← {t("코드 재발송")}
         </Link>
         <Link href="/login" className="hover:text-amber-300 transition-colors">
-          로그인
+          {t("로그인")}
         </Link>
       </div>
     </AuthLayout>

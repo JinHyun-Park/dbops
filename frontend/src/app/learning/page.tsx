@@ -8,7 +8,7 @@ import {
   type RecentStatus,
 } from "@/lib/api-client";
 import { confidence, trackRecordLabel } from "@/lib/remediation";
-import { fmtExact } from "@/lib/format";
+import { fmtExact, localeTag } from "@/lib/format";
 import {
   PageHeader,
   PageBody,
@@ -31,6 +31,7 @@ function ConfidenceBar({ value }: { value: number }) {
 }
 
 function AggTable({ rows }: { rows: AggRow[] }) {
+  const t = useT();
   if (rows.length === 0) return null;
   return (
     <div className="overflow-hidden rounded-lg border border-slate-800">
@@ -44,10 +45,10 @@ function AggTable({ rows }: { rows: AggRow[] }) {
               Action class
             </th>
             <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-wider text-slate-500">
-              이력
+              {t("이력")}
             </th>
             <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-wider text-slate-500">
-              신뢰도 (Wilson)
+              {t("신뢰도 (Wilson)")}
             </th>
           </tr>
         </thead>
@@ -131,7 +132,7 @@ export default function LearningPage() {
           <EmptyState title={t("불러오지 못했습니다")} description={err} />
         ) : !data ? (
           <div className="py-16 text-center text-sm text-slate-500">
-            불러오는 중…
+            {t("불러오는 중…")}
           </div>
         ) : isEmpty ? (
           <EmptyState
@@ -146,7 +147,7 @@ export default function LearningPage() {
             {data.fleet.length > 0 && (
               <section>
                 <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Fleet 전체: 조치별 효과
+                  {t("Fleet 전체: 조치별 효과")}
                 </h2>
                 <AggTable rows={data.fleet} />
               </section>
@@ -156,7 +157,7 @@ export default function LearningPage() {
             {clusterEntries.length > 0 && (
               <section>
                 <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  클러스터별
+                  {t("클러스터별")}
                 </h2>
                 <div className="space-y-4">
                   {clusterEntries.map(([clusterId, rows]) => (
@@ -175,7 +176,7 @@ export default function LearningPage() {
             {data.recent.length > 0 && (
               <section>
                 <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  최근 평가 결과
+                  {t("최근 평가 결과")}
                 </h2>
                 <div className="space-y-1.5">
                   {data.recent.map((c, i) => (
@@ -197,7 +198,7 @@ export default function LearningPage() {
                         {c.symptom_class} → {c.action_class}
                       </span>
                       <span className="ml-auto text-slate-600">
-                        {new Date(c.evaluated_at).toLocaleString("ko-KR", {
+                        {new Date(c.evaluated_at).toLocaleString(localeTag(), {
                           month: "2-digit",
                           day: "2-digit",
                           hour: "2-digit",

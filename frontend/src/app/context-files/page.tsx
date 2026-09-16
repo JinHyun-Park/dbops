@@ -13,7 +13,7 @@ import {
   Section,
   EmptyState,
 } from "@/components/design-system/page-shell";
-import { fmtBytes } from "@/lib/format";
+import { fmtBytes, localeTag } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ function extOf(name: string): string {
 function fmtTs(ts?: string): string | null {
   if (!ts) return null;
   try {
-    return new Date(ts).toLocaleString("ko-KR", {
+    return new Date(ts).toLocaleString(localeTag(), {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -45,6 +45,7 @@ function fmtTs(ts?: string): string | null {
 }
 
 function BudgetBar({ items }: { items: ContextFile[] }) {
+  const t = useT();
   const used = items.reduce((sum, f) => sum + (f.size ?? 0), 0);
   const pct = Math.min(100, (used / TOTAL_BUDGET_BYTES) * 100);
   const over = used > TOTAL_BUDGET_BYTES;
@@ -56,7 +57,9 @@ function BudgetBar({ items }: { items: ContextFile[] }) {
   return (
     <div className="border border-zinc-800 bg-zinc-900/30 px-5 py-4">
       <div className="flex items-baseline justify-between mb-2.5">
-        <span className="text-xs text-zinc-400 font-medium">총 사용량</span>
+        <span className="text-xs text-zinc-400 font-medium">
+          {t("총 사용량")}
+        </span>
         <span
           className={`text-xs font-mono tabular-nums ${
             over ? "text-rose-400" : "text-zinc-300"
@@ -75,8 +78,9 @@ function BudgetBar({ items }: { items: ContextFile[] }) {
         />
       </div>
       <p className="mt-2 text-[11px] text-zinc-600 leading-relaxed">
-        업로드된 파일 내용은 에이전트가 호출될 때 참조 데이터로 주입됩니다.
-        명령(command)이 아닌 참고 정보로만 사용됩니다.
+        {t(
+          "업로드된 파일 내용은 에이전트가 호출될 때 참조 데이터로 주입됩니다. 명령(command)이 아닌 참고 정보로만 사용됩니다.",
+        )}
       </p>
     </div>
   );
@@ -93,6 +97,7 @@ function FileRow({
   onDelete: () => void;
   deleting: boolean;
 }) {
+  const t = useT();
   const ts = fmtTs(file.updated_at);
   return (
     <div className="border-t border-zinc-800 first:border-t-0 px-5 py-4 flex flex-col sm:flex-row sm:items-start gap-3">
@@ -124,9 +129,9 @@ function FileRow({
         onClick={onDelete}
         disabled={deleting}
         className="flex-shrink-0 text-xs px-3 py-1.5 border border-zinc-800 text-zinc-600 hover:border-rose-500/50 hover:text-rose-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        aria-label={`${file.name} 삭제`}
+        aria-label={t("{n} 삭제").replace("{n}", file.name)}
       >
-        {deleting ? "삭제 중…" : "삭제"}
+        {deleting ? t("삭제 중…") : t("삭제")}
       </button>
     </div>
   );
@@ -143,6 +148,7 @@ function UploadZone({
   uploading: boolean;
   uploadError: string | null;
 }) {
+  const t = useT();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -159,9 +165,9 @@ function UploadZone({
         <p className="text-xs text-zinc-400 mb-3">
           <code className="text-zinc-300">.md</code>,{" "}
           <code className="text-zinc-300">.txt</code>,{" "}
-          <code className="text-zinc-300">.csv</code> 형식만 허용, 파일당 최대{" "}
-          {fmtBytes(PER_FILE_MAX_BYTES)}, 전체 예산{" "}
-          {fmtBytes(TOTAL_BUDGET_BYTES)}
+          <code className="text-zinc-300">.csv</code>{" "}
+          {t("형식만 허용, 파일당 최대")} {fmtBytes(PER_FILE_MAX_BYTES)}
+          {t(", 전체 예산")} {fmtBytes(TOTAL_BUDGET_BYTES)}
         </p>
         <input
           ref={inputRef}
@@ -171,7 +177,7 @@ function UploadZone({
           disabled={uploading}
           className="hidden"
           id="context-file-input"
-          aria-label="컨텍스트 파일 선택"
+          aria-label={t("컨텍스트 파일 선택")}
         />
         <label
           htmlFor="context-file-input"
@@ -182,7 +188,7 @@ function UploadZone({
           }`}
           aria-disabled={uploading}
         >
-          {uploading ? "업로드 중…" : "파일 선택 후 업로드"}
+          {uploading ? t("업로드 중…") : t("파일 선택 후 업로드")}
         </label>
       </div>
 
@@ -238,15 +244,17 @@ export default function ContextFilesPage() {
     const ext = extOf(file.name);
     if (!ALLOWED_EXTENSIONS.has(ext)) {
       setUploadError(
-        `.${ext} 형식은 지원하지 않습니다. .md, .txt, .csv 파일만 업로드할 수 있습니다.`,
+        t(
+          ".{n} 형식은 지원하지 않습니다. .md, .txt, .csv 파일만 업로드할 수 있습니다.",
+        ).replace("{n}", ext),
       );
       return;
     }
     if (file.size > MAX_BYTES) {
       setUploadError(
-        `파일 크기가 ${fmtBytes(file.size)}입니다. 파일당 최대 ${fmtBytes(
-          MAX_BYTES,
-        )}까지 업로드할 수 있습니다.`,
+        t("파일 크기가 {a}입니다. 파일당 최대 {b}까지 업로드할 수 있습니다.")
+          .replace("{a}", fmtBytes(file.size))
+          .replace("{b}", fmtBytes(MAX_BYTES)),
       );
       return;
     }
@@ -255,13 +263,16 @@ export default function ContextFilesPage() {
     try {
       content = await file.text();
     } catch {
-      setUploadError("파일을 읽는 중 오류가 발생했습니다.");
+      setUploadError(t("파일을 읽는 중 오류가 발생했습니다."));
       return;
     }
 
     if (content.toLowerCase().includes(RESERVED_MARKER.toLowerCase())) {
       setUploadError(
-        `파일에 예약어 "${RESERVED_MARKER}"가 포함되어 있어 업로드할 수 없습니다.`,
+        t('파일에 예약어 "{n}"가 포함되어 있어 업로드할 수 없습니다.').replace(
+          "{n}",
+          RESERVED_MARKER,
+        ),
       );
       return;
     }
@@ -285,7 +296,9 @@ export default function ContextFilesPage() {
     setDeleteError(null);
     if (
       !confirm(
-        `"${name}" 파일을 삭제할까요? 에이전트 컨텍스트에서 즉시 제거됩니다.`,
+        t(
+          '"{n}" 파일을 삭제할까요? 에이전트 컨텍스트에서 즉시 제거됩니다.',
+        ).replace("{n}", name),
       )
     )
       return;
@@ -332,30 +345,36 @@ export default function ContextFilesPage() {
       />
 
       {/* ── How it works ── */}
-      <Section eyebrow="동작 원리" title="컨텍스트 주입 방식">
+      <Section eyebrow={t("동작 원리")} title={t("컨텍스트 주입 방식")}>
         <div className="border border-zinc-800 bg-zinc-900/30 px-5 py-4 text-xs text-zinc-400 leading-relaxed space-y-2">
           <p>
-            업로드된 파일은{" "}
-            <strong className="text-zinc-300">에이전트 시스템 프롬프트</strong>{" "}
-            뒤에 참조 섹션으로 삽입됩니다. 파일 내용은{" "}
-            <strong className="text-zinc-300">명령이 아닌 참조 데이터</strong>
-            로만 사용되며, 에이전트의 판단을 보조하는 용도입니다.
+            {t("업로드된 파일은")}{" "}
+            <strong className="text-zinc-300">
+              {t("에이전트 시스템 프롬프트")}
+            </strong>
+            {t(" 뒤에 참조 섹션으로 삽입됩니다. 파일 내용은")}{" "}
+            <strong className="text-zinc-300">
+              {t("명령이 아닌 참조 데이터")}
+            </strong>
+            {t("로만 사용되며, 에이전트의 판단을 보조하는 용도입니다.")}
           </p>
           <p>
-            예: 클러스터별 담당자 매핑, 점검 체크리스트, 내부 SLA 기준, 팀
-            컨벤션 등을 <code className="text-zinc-400">.md</code> 파일로
-            업로드하면 에이전트가 진단과 권고 시 이를 참조합니다.
+            {t(
+              "예: 클러스터별 담당자 매핑, 점검 체크리스트, 내부 SLA 기준, 팀 컨벤션 등을",
+            )}{" "}
+            <code className="text-zinc-400">.md</code>
+            {t(" 파일로 업로드하면 에이전트가 진단과 권고 시 이를 참조합니다.")}
           </p>
           <p>
-            파일당 최대{" "}
+            {t("파일당 최대")}{" "}
             <strong className="text-zinc-300">
               {fmtBytes(PER_FILE_MAX_BYTES)}
             </strong>
-            , 전체 예산{" "}
+            {t(", 전체 예산")}{" "}
             <strong className="text-zinc-300">
               {fmtBytes(TOTAL_BUDGET_BYTES)}
             </strong>
-            . 예산 초과 시 업로드가 거부됩니다.
+            {t(". 예산 초과 시 업로드가 거부됩니다.")}
           </p>
         </div>
       </Section>
@@ -368,11 +387,11 @@ export default function ContextFilesPage() {
       )}
 
       {loading ? (
-        <div className="text-sm text-zinc-500">불러오는 중…</div>
+        <div className="text-sm text-zinc-500">{t("불러오는 중…")}</div>
       ) : (
         <>
           {/* ── Budget bar ── */}
-          <Section eyebrow="Budget" title="예산 사용량">
+          <Section eyebrow="Budget" title={t("예산 사용량")}>
             <BudgetBar items={files} />
           </Section>
 
@@ -386,8 +405,8 @@ export default function ContextFilesPage() {
           {/* ── File list ── */}
           <Section
             eyebrow="Files"
-            title="등록된 파일"
-            description={`${files.length}개`}
+            title={t("등록된 파일")}
+            description={t("{n}개").replace("{n}", String(files.length))}
           >
             {files.length === 0 ? (
               <EmptyState
@@ -413,10 +432,11 @@ export default function ContextFilesPage() {
           {/* ── Upload ── */}
           <Section
             eyebrow="Upload"
-            title="파일 업로드"
-            description={`.md, .txt, .csv. 파일당 최대 ${fmtBytes(
-              PER_FILE_MAX_BYTES,
-            )}`}
+            title={t("파일 업로드")}
+            description={t(".md, .txt, .csv. 파일당 최대 {n}").replace(
+              "{n}",
+              fmtBytes(PER_FILE_MAX_BYTES),
+            )}
           >
             <UploadZone
               onUpload={handleUpload}

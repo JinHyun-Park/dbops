@@ -24,11 +24,14 @@ function statusColor(s: string | undefined): string {
   return "bg-rose-400";
 }
 
-function relTime(ms: number): string {
+// Takes `t` as an argument: this is a plain function, not a component, so it
+// cannot call the hook itself.
+function relTime(ms: number, t: (ko: string) => string): string {
   const diff = Date.now() - ms;
-  if (diff < 60_000) return "방금";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}분 전`;
-  return `${Math.floor(diff / 3_600_000)}시간 전`;
+  if (diff < 60_000) return t("방금");
+  if (diff < 3_600_000)
+    return t("{n}분 전").replace("{n}", String(Math.floor(diff / 60_000)));
+  return t("{n}시간 전").replace("{n}", String(Math.floor(diff / 3_600_000)));
 }
 
 export default function HealthPage() {
@@ -64,7 +67,7 @@ export default function HealthPage() {
             disabled={loading}
             className="text-xs font-medium px-3 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500/60 hover:text-amber-200 transition-colors disabled:opacity-50"
           >
-            {loading ? "확인 중…" : "새로고침"}
+            {loading ? t("확인 중…") : t("새로고침")}
           </button>
         }
       />
@@ -77,7 +80,8 @@ export default function HealthPage() {
 
       {data && (
         <div className="text-[11px] text-zinc-500 mb-6 font-mono">
-          last check {relTime(data.checked_at)}, {data.elapsed_ms}ms aggregate
+          last check {relTime(data.checked_at, t)}, {data.elapsed_ms}ms
+          aggregate
         </div>
       )}
 
@@ -117,11 +121,11 @@ export default function HealthPage() {
               />
               <Field
                 label="multi-AZ"
-                value={data.aurora.multi_az ? "예" : "아니오"}
+                value={data.aurora.multi_az ? t("예") : t("아니오")}
               />
               <Field
                 label="deletion-protection"
-                value={data.aurora.deletion_protection ? "켜짐" : "꺼짐"}
+                value={data.aurora.deletion_protection ? t("켜짐") : t("꺼짐")}
               />
             </div>
           </div>
@@ -136,29 +140,29 @@ export default function HealthPage() {
           <ErrorPanel msg={data.ddb.error} />
         ) : (
           <div className="border border-zinc-800 divide-y divide-zinc-800">
-            {(data.ddb.tables || []).map((t) => (
+            {(data.ddb.tables || []).map((tbl) => (
               <div
-                key={t.name}
+                key={tbl.name}
                 className="px-4 py-3 flex items-baseline justify-between gap-3"
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span
                     className={`w-2.5 h-2.5 rounded-full ${statusColor(
-                      t.status,
+                      tbl.status,
                     )}`}
                   />
                   <span className="text-sm text-zinc-100 font-mono">
-                    {t.label}
+                    {tbl.label}
                   </span>
                   <span className="text-[11px] text-zinc-500 truncate">
-                    {t.name}
+                    {tbl.name}
                   </span>
                 </div>
                 <div className="text-[11px] text-zinc-500 font-mono tabular-nums flex-shrink-0">
-                  {t.error
-                    ? t.error
-                    : `${fmtNumber(t.item_count ?? 0)} rows, ${fmtBytes(
-                        t.size_bytes ?? 0,
+                  {tbl.error
+                    ? tbl.error
+                    : `${fmtNumber(tbl.item_count ?? 0)} rows, ${fmtBytes(
+                        tbl.size_bytes ?? 0,
                       )}`}
                 </div>
               </div>
@@ -230,7 +234,8 @@ function Field({
 }
 
 function Loading() {
-  return <div className="text-sm text-zinc-500">불러오는 중…</div>;
+  const t = useT();
+  return <div className="text-sm text-zinc-500">{t("불러오는 중…")}</div>;
 }
 
 function ErrorPanel({ msg }: { msg: string }) {

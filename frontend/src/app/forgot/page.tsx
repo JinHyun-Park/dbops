@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { requestPasswordReset } from "@/lib/auth";
+import { useT } from "@/lib/i18n";
 import { AuthLayout, Field } from "@/app/login/page";
 
 export default function ForgotPage() {
+  const t = useT();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -20,7 +22,7 @@ export default function ForgotPage() {
       await requestPasswordReset(email.trim());
       router.replace(`/reset?email=${encodeURIComponent(email.trim())}`);
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "재설정 코드 발송 실패");
+      setErr(e2 instanceof Error ? e2.message : t("재설정 코드 발송 실패"));
     } finally {
       setBusy(false);
     }
@@ -28,12 +30,12 @@ export default function ForgotPage() {
 
   return (
     <AuthLayout
-      eyebrow="복구"
-      title="비밀번호 재설정"
-      subtitle="인증 코드를 이메일로 발송합니다"
+      eyebrow={t("복구")}
+      title={t("비밀번호 재설정")}
+      subtitle={t("인증 코드를 이메일로 발송합니다")}
     >
       <form onSubmit={submit} className="space-y-4">
-        <Field label="이메일">
+        <Field label={t("이메일")}>
           <input
             type="email"
             autoComplete="email"
@@ -53,12 +55,12 @@ export default function ForgotPage() {
           disabled={busy}
           className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium py-2 disabled:opacity-50"
         >
-          {busy ? "발송 중…" : "코드 발송"}
+          {busy ? t("발송 중…") : t("코드 발송")}
         </button>
       </form>
       <div className="flex items-center justify-between text-xs text-zinc-500 pt-4">
         <Link href="/login" className="hover:text-amber-300 transition-colors">
-          ← 로그인으로 돌아가기
+          ← {t("로그인으로 돌아가기")}
         </Link>
       </div>
     </AuthLayout>

@@ -48,10 +48,23 @@ export function sourceLabel(key: string): string {
  * beside the conclusion. "blocking: 0" as a number does not, and stays in the
  * details tier with the rest of `signals_examined`.
  */
-export function coverageGaps(result: RcaResult): string[] {
-  const gaps: string[] = [];
+/** One material gap. `source` is the raw source key, NOT a label: the consumer
+ *  looks the label up and translates it, then composes with the suffix. It used
+ *  to return a pre-composed Korean sentence, which rca-report.tsx rendered raw,
+ *  so an English operator read every coverage gap in Korean. A composed string
+ *  cannot be an i18n key, because the key table is looked up by exact equality
+ *  and the composition happens at runtime. This file stays free of any i18n
+ *  import (tools/rca-report-check.mjs loads it under bare node), which is why
+ *  the translation lives at the consumer. */
+export interface CoverageGap {
+  source: string;
+  kind: "unchecked" | "nodata";
+}
+
+export function coverageGaps(result: RcaResult): CoverageGap[] {
+  const gaps: CoverageGap[] = [];
   const skipped = (result.skipped_sources ?? []).map(String);
-  for (const s of skipped) gaps.push(`${sourceLabel(s)} 확인 불가`);
+  for (const s of skipped) gaps.push({ source: s, kind: "unchecked" });
   // A skipped source already reported its own gap, including the schema
   // reasons that suffix the source name (schema_changes_unmigrated and
   // friends). Saying "데이터 없음" for it too would repeat the same fact in
@@ -61,7 +74,7 @@ export function coverageGaps(result: RcaResult): string[] {
       (s) => s === src || s.startsWith(`${src}_`),
     );
     if (Number(count) === 0 && !alreadySaid) {
-      gaps.push(`${sourceLabel(src)} 데이터 없음`);
+      gaps.push({ source: src, kind: "nodata" });
     }
   }
   return gaps;

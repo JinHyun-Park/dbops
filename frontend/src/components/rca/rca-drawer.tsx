@@ -17,15 +17,8 @@ import { RCA_PROMPT } from "@/lib/rca-link";
 import { stashRcaHandoff } from "@/lib/rca-handoff";
 import { loadRcaCache, saveRcaCache } from "@/lib/rca-cache";
 import { prettyToolName } from "@/lib/tool-name";
-
-// Korean relative time for the "cached analysis" banner.
-function koAgo(ts: number): string {
-  const ms = Date.now() - ts;
-  if (ms < 60_000) return "방금";
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}분 전`;
-  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}시간 전`;
-  return `${Math.floor(ms / 86_400_000)}일 전`;
-}
+import { fmtAgoKo } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 // RCA runs IN PLACE: a right-side drawer that streams the agent's root-cause
 // analysis without leaving the page and, crucially, without writing into the
@@ -50,6 +43,7 @@ interface ToolCall {
 }
 
 export function RcaProvider({ children }: { children: React.ReactNode }) {
+  const t = useT();
   const [cluster, setCluster] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [tools, setTools] = useState<ToolCall[]>([]);
@@ -66,65 +60,68 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
   const toolsRef = useRef<ToolCall[]>([]);
   const router = useRouter();
 
-  const run = useCallback((clusterId: string) => {
-    abortRef.current?.abort();
-    const seq = ++runSeq.current;
-    setText("");
-    setTools([]);
-    setError(null);
-    setStreaming(true);
-    setCachedTs(null); // this is a live run, not a cached view
-    accRef.current = "";
-    toolsRef.current = [];
-    abortRef.current = streamChat(
-      RCA_PROMPT,
-      clusterId,
-      (token) => {
-        if (runSeq.current === seq) {
-          accRef.current += token;
-          setText((t) => t + token);
-        }
-      },
-      (name, status) => {
-        if (runSeq.current !== seq) return;
-        const i = toolsRef.current.findIndex((t) => t.name === name);
-        if (i >= 0) toolsRef.current[i] = { name, status };
-        else toolsRef.current = [...toolsRef.current, { name, status }];
-        setTools((prev) => {
-          const j = prev.findIndex((t) => t.name === name);
-          if (j >= 0) {
-            const next = [...prev];
-            next[j] = { name, status };
-            return next;
+  const run = useCallback(
+    (clusterId: string) => {
+      abortRef.current?.abort();
+      const seq = ++runSeq.current;
+      setText("");
+      setTools([]);
+      setError(null);
+      setStreaming(true);
+      setCachedTs(null); // this is a live run, not a cached view
+      accRef.current = "";
+      toolsRef.current = [];
+      abortRef.current = streamChat(
+        RCA_PROMPT,
+        clusterId,
+        (token) => {
+          if (runSeq.current === seq) {
+            accRef.current += token;
+            setText((t) => t + token);
           }
-          return [...prev, { name, status }];
-        });
-      },
-      () => {
-        if (runSeq.current === seq) {
-          setStreaming(false);
-          // Persist the completed analysis so reopening this cluster's drawer
-          // shows it instantly (no re-run). Snapshot from refs (state is stale).
-          if (accRef.current.trim()) {
-            saveRcaCache(clusterId, {
-              analysis: accRef.current,
-              tools: toolsRef.current,
-              ts: Date.now(),
-            });
+        },
+        (name, status) => {
+          if (runSeq.current !== seq) return;
+          const i = toolsRef.current.findIndex((t) => t.name === name);
+          if (i >= 0) toolsRef.current[i] = { name, status };
+          else toolsRef.current = [...toolsRef.current, { name, status }];
+          setTools((prev) => {
+            const j = prev.findIndex((t) => t.name === name);
+            if (j >= 0) {
+              const next = [...prev];
+              next[j] = { name, status };
+              return next;
+            }
+            return [...prev, { name, status }];
+          });
+        },
+        () => {
+          if (runSeq.current === seq) {
+            setStreaming(false);
+            // Persist the completed analysis so reopening this cluster's drawer
+            // shows it instantly (no re-run). Snapshot from refs (state is stale).
+            if (accRef.current.trim()) {
+              saveRcaCache(clusterId, {
+                analysis: accRef.current,
+                tools: toolsRef.current,
+                ts: Date.now(),
+              });
+            }
           }
-        }
-      },
-      (err) => {
-        if (runSeq.current === seq) {
-          setError(err?.message || "분석 중 오류가 발생했습니다");
-          setStreaming(false);
-        }
-      },
-      // Throwaway session: keeps the agent's chat memory + saved conversations
-      // clean. (chat sessions are dbops-session-*; this is rca-*.)
-      `rca-${clusterId}-${seq}`,
-    );
-  }, []);
+        },
+        (err) => {
+          if (runSeq.current === seq) {
+            setError(err?.message || t("분석 중 오류가 발생했습니다"));
+            setStreaming(false);
+          }
+        },
+        // Throwaway session: keeps the agent's chat memory + saved conversations
+        // clean. (chat sessions are dbops-session-*; this is rca-*.)
+        `rca-${clusterId}-${seq}`,
+      );
+    },
+    [t],
+  );
 
   const open = useCallback(
     (clusterId: string) => {
@@ -180,7 +177,7 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
                   <Sparkles size={15} className="text-amber-300" />
-                  근본 원인 분석
+                  {t("근본 원인 분석")}
                 </div>
                 <div className="text-[11px] font-mono text-zinc-500 mt-0.5 truncate">
                   {cluster}
@@ -189,7 +186,7 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
               <button
                 onClick={close}
                 className="text-zinc-500 hover:text-zinc-200 transition-colors"
-                title="닫기 (Esc)"
+                title={t("닫기 (Esc)")}
               >
                 <X size={18} />
               </button>
@@ -219,8 +216,9 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
                 <div className="mb-3 flex items-start gap-2 px-3 py-2 border border-zinc-700/60 bg-zinc-900/60 text-[11px] text-zinc-400">
                   <span className="text-zinc-500">🕘</span>
                   <span>
-                    {koAgo(cachedTs)} 저장된 분석입니다. 재분석 없이 다시 보는
-                    중. 최신 상태가 필요하면 아래 “다시 실행”을 누르세요.
+                    {t(
+                      "{n} 저장된 분석입니다. 재분석 없이 다시 보는 중. 최신 상태가 필요하면 아래 “다시 실행”을 누르세요.",
+                    ).replace("{n}", fmtAgoKo(cachedTs))}
                   </span>
                 </div>
               )}
@@ -238,7 +236,7 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
               ) : (
                 streaming && (
                   <div className="text-sm text-zinc-500">
-                    최근 신호를 상관분석하는 중…
+                    {t("최근 신호를 상관분석하는 중…")}
                   </div>
                 )
               )}
@@ -255,7 +253,7 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
                 className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-amber-500/50 hover:text-amber-200 disabled:opacity-50 transition-colors"
               >
                 <RefreshCw size={12} />
-                다시 실행
+                {t("다시 실행")}
               </button>
               <button
                 onClick={() => {
@@ -277,7 +275,7 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
                 disabled={!text}
                 className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-emerald-500/50 hover:text-emerald-200 disabled:opacity-50 transition-colors"
               >
-                전체 대화로 이어가기 →
+                {t("전체 대화로 이어가기 →")}
               </button>
             </div>
           </div>

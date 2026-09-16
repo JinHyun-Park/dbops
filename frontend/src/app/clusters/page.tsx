@@ -216,9 +216,11 @@ export default function ClustersPage() {
     fetchClusters()
       .then(setClusters)
       .catch((e) =>
-        setClustersError(e instanceof Error ? e.message : "클러스터 조회 실패"),
+        setClustersError(
+          e instanceof Error ? e.message : t("클러스터 조회 실패"),
+        ),
       );
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     loadClusters();
@@ -230,7 +232,7 @@ export default function ClustersPage() {
       .map((r) => r.trim())
       .filter(Boolean);
     if (regions.length === 0) {
-      setFeedback({ kind: "err", msg: "최소 1개 region이 필요합니다." });
+      setFeedback({ kind: "err", msg: t("최소 1개 region이 필요합니다.") });
       return;
     }
     setDiscovering(true);
@@ -262,7 +264,7 @@ export default function ClustersPage() {
       ) {
         setFeedback({
           kind: "warn",
-          msg: "검색된 Aurora 클러스터가 없습니다.",
+          msg: t("검색된 Aurora 클러스터가 없습니다."),
         });
       }
     } catch (e) {
@@ -312,11 +314,18 @@ export default function ClustersPage() {
       const tone = fail > 0 ? "warn" : "ok";
       setFeedback({
         kind: tone as "ok" | "warn",
-        msg: `등록 ${ok}개, 스킵 ${skip}개, 실패 ${fail}개${
-          fail > 0
-            ? `, 실패: ${res.failed.map((f) => f.cluster_id).join(", ")}`
-            : ""
-        }`,
+        msg:
+          t("등록 {a}개, 스킵 {b}개, 실패 {c}개")
+            .replace("{a}", String(ok))
+            .replace("{b}", String(skip))
+            .replace("{c}", String(fail)) +
+          (fail > 0
+            ? ", " +
+              t("실패: {n}").replace(
+                "{n}",
+                res.failed.map((f) => f.cluster_id).join(", "),
+              )
+            : ""),
       });
       setShowConfirm(false);
       setDiscoverOpen(false);
@@ -326,7 +335,7 @@ export default function ClustersPage() {
     } catch (e) {
       setFeedback({
         kind: "err",
-        msg: e instanceof Error ? e.message : "일괄 등록에 실패했습니다",
+        msg: e instanceof Error ? e.message : t("일괄 등록에 실패했습니다"),
       });
     } finally {
       setRegistering(false);
@@ -338,7 +347,7 @@ export default function ClustersPage() {
       if (!form.resource_name || !form.account_id || !form.region) {
         setFeedback({
           kind: "err",
-          msg: "Table name / account_id / region 모두 필요합니다.",
+          msg: t("Table name / account_id / region 모두 필요합니다."),
         });
         return;
       }
@@ -346,7 +355,7 @@ export default function ClustersPage() {
       if (!form.cluster_id || !form.account_id || !form.region) {
         setFeedback({
           kind: "err",
-          msg: "Cluster identifier / account_id / region 모두 필요합니다.",
+          msg: t("Cluster identifier / account_id / region 모두 필요합니다."),
         });
         return;
       }
@@ -354,7 +363,7 @@ export default function ClustersPage() {
       if (!form.cluster_id || !form.account_id || !form.region) {
         setFeedback({
           kind: "err",
-          msg: "cluster_id / account_id / region 모두 필요합니다.",
+          msg: t("cluster_id / account_id / region 모두 필요합니다."),
         });
         return;
       }
@@ -399,17 +408,21 @@ export default function ClustersPage() {
       if (status === "ok") {
         setFeedback({
           kind: "ok",
-          msg: `등록됨: ${displayId}, 연결 검증 통과`,
+          msg: t("등록됨: {n}, 연결 검증 통과").replace("{n}", displayId),
         });
       } else if (status === "failed") {
         setFeedback({
           kind: "warn",
-          msg: `등록은 됐지만 연결 검증 실패: ${
-            result?.connection_error || "AWS console 확인"
-          }`,
+          msg: t("등록은 됐지만 연결 검증 실패: {n}").replace(
+            "{n}",
+            result?.connection_error || t("AWS console 확인"),
+          ),
         });
       } else {
-        setFeedback({ kind: "ok", msg: `등록됨: ${displayId}` });
+        setFeedback({
+          kind: "ok",
+          msg: t("등록됨: {n}").replace("{n}", displayId),
+        });
       }
       setShowForm(false);
       setForm({
@@ -436,7 +449,9 @@ export default function ClustersPage() {
   const handleGenerateSample = async () => {
     if (seedingSample) return;
     const proceed = window.confirm(
-      "데모용 sample-cluster를 생성합니다. 24시간치 합성 메트릭/쿼리/이상 징후가 캐시 DB에 채워지고, 모든 페이지에서 DEMO 배지로 식별됩니다. 진행할까요?",
+      t(
+        "데모용 sample-cluster를 생성합니다. 24시간치 합성 메트릭/쿼리/이상 징후가 캐시 DB에 채워지고, 모든 페이지에서 DEMO 배지로 식별됩니다. 진행할까요?",
+      ),
     );
     if (!proceed) return;
     setSeedingSample(true);
@@ -446,13 +461,15 @@ export default function ClustersPage() {
       const total = Object.values(res.rows || {}).reduce((s, n) => s + n, 0);
       setFeedback({
         kind: "ok",
-        msg: `Sample 클러스터가 준비됐습니다 (${total.toLocaleString()} 행 시드). Dashboard에서 sample-cluster를 선택해 확인하세요.`,
+        msg: t(
+          "Sample 클러스터가 준비됐습니다 ({n} 행 시드). Dashboard에서 sample-cluster를 선택해 확인하세요.",
+        ).replace("{n}", total.toLocaleString()),
       });
       loadClusters();
     } catch (e) {
       setFeedback({
         kind: "err",
-        msg: e instanceof Error ? e.message : "샘플 생성에 실패했습니다",
+        msg: e instanceof Error ? e.message : t("샘플 생성에 실패했습니다"),
       });
     } finally {
       setSeedingSample(false);
@@ -463,15 +480,23 @@ export default function ClustersPage() {
     if (deletingId) return;
     const ok = window.confirm(
       c.is_demo
-        ? `데모 클러스터 ${c.cluster_id} 및 합성 데이터 전체를 삭제합니다.`
-        : `${c.cluster_id}를 레지스트리에서 해제합니다. 캐시 DB의 과거 메트릭은 그대로 남습니다.`,
+        ? t("데모 클러스터 {n} 및 합성 데이터 전체를 삭제합니다.").replace(
+            "{n}",
+            c.cluster_id,
+          )
+        : t(
+            "{n}를 레지스트리에서 해제합니다. 캐시 DB의 과거 메트릭은 그대로 남습니다.",
+          ).replace("{n}", c.cluster_id),
     );
     if (!ok) return;
     setDeletingId(c.cluster_id);
     setFeedback(null);
     try {
       await deleteCluster(c.cluster_id);
-      setFeedback({ kind: "ok", msg: `${c.cluster_id} 삭제됨.` });
+      setFeedback({
+        kind: "ok",
+        msg: t("{n} 삭제됨.").replace("{n}", c.cluster_id),
+      });
       loadClusters();
     } catch (e) {
       setFeedback({
@@ -497,23 +522,25 @@ export default function ClustersPage() {
               href="/fleet"
               className="text-xs px-3 py-2 border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 transition-colors"
             >
-              Fleet 전체 보기 →
+              {t("Fleet 전체 보기 →")}
             </Link>
             <button
               onClick={() => setSetupGuideOpen(true)}
               className="text-xs px-3 py-2 border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 transition-colors"
-              title="DBOps 전용 read-only 계정 + Secrets Manager 등록 가이드"
+              title={t(
+                "DBOps 전용 read-only 계정 + Secrets Manager 등록 가이드",
+              )}
             >
-              📋 설정 가이드
+              {t("📋 설정 가이드")}
             </button>
             {admin && (
               <button
                 onClick={handleGenerateSample}
                 disabled={seedingSample}
                 className="text-xs px-3 py-2 border border-purple-500/50 text-purple-300 hover:bg-purple-500/10 disabled:opacity-50 transition-colors"
-                title="합성 데이터로 sample-cluster 생성"
+                title={t("합성 데이터로 sample-cluster 생성")}
               >
-                {seedingSample ? "생성 중…" : "🎲 샘플 생성"}
+                {seedingSample ? t("생성 중…") : t("🎲 샘플 생성")}
               </button>
             )}
             {admin && (
@@ -524,7 +551,7 @@ export default function ClustersPage() {
                 }}
                 className="text-xs px-3 py-2 border border-sky-500/50 text-sky-300 hover:bg-sky-500/10 transition-colors"
               >
-                {discoverOpen ? "탐색 닫기" : "🔎 클러스터 자동 탐색"}
+                {discoverOpen ? t("탐색 닫기") : t("🔎 클러스터 자동 탐색")}
               </button>
             )}
             {admin && (
@@ -535,12 +562,12 @@ export default function ClustersPage() {
                 }}
                 className="text-xs font-medium px-3 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
               >
-                {showForm ? "취소" : "+ Register cluster"}
+                {showForm ? t("취소") : "+ Register cluster"}
               </button>
             )}
             {!admin && (
               <span className="text-[10px] uppercase tracking-wider text-zinc-500 px-2 py-1 border border-zinc-800">
-                viewer, 읽기 전용
+                {t("viewer, 읽기 전용")}
               </span>
             )}
           </>
@@ -563,9 +590,11 @@ export default function ClustersPage() {
 
       {discoverOpen && (
         <Section
-          eyebrow="일괄 탐색"
-          title="Aurora 클러스터 자동 탐색"
-          description="현재 계정 또는 cross-account role을 통해 RDS에서 Aurora 클러스터를 자동 enumerate. 선택한 항목만 한 번에 등록합니다."
+          eyebrow={t("일괄 탐색")}
+          title={t("Aurora 클러스터 자동 탐색")}
+          description={t(
+            "현재 계정 또는 cross-account role을 통해 RDS에서 Aurora 클러스터를 자동 enumerate. 선택한 항목만 한 번에 등록합니다.",
+          )}
         >
           <div className="border border-zinc-800 bg-zinc-900/40 p-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -598,12 +627,13 @@ export default function ClustersPage() {
               />
             </div>
             <p className="text-[11px] text-zinc-500 mt-3 leading-relaxed">
-              role ARN을 비우면 DBOps Lambda의 IAM role로 same-account에서 직접
-              조회합니다. cross-account의 경우 해당 role이{" "}
+              {t(
+                "role ARN을 비우면 DBOps Lambda의 IAM role로 same-account에서 직접 조회합니다. cross-account의 경우 해당 role이",
+              )}{" "}
               <span className="font-mono text-zinc-400">
                 rds:DescribeDBClusters
               </span>{" "}
-              권한을 가져야 합니다.
+              {t("권한을 가져야 합니다.")}
             </p>
             <div className="mt-5 flex gap-2">
               <button
@@ -611,7 +641,7 @@ export default function ClustersPage() {
                 disabled={discovering}
                 className="text-xs font-medium px-4 py-2 bg-sky-500 text-zinc-950 hover:bg-sky-400 disabled:opacity-50 transition-colors"
               >
-                {discovering ? "검색 중…" : "🔍 Run discovery"}
+                {discovering ? t("검색 중…") : "🔍 Run discovery"}
               </button>
               {discovered.length > 0 && (
                 <button
@@ -746,9 +776,11 @@ export default function ClustersPage() {
                               {c.is_internal && !c.already_registered && (
                                 <span
                                   className="ml-2 px-1.5 py-0.5 border border-sky-500/40 bg-sky-500/10 text-sky-300 text-[10px]"
-                                  title="DBOps 플랫폼 자체 리소스입니다 (캐시 DB 또는 컨트롤 플레인 테이블). 모니터링 대상으로 등록할 필요가 없어 자동 선택에서 제외했습니다."
+                                  title={t(
+                                    "DBOps 플랫폼 자체 리소스입니다 (캐시 DB 또는 컨트롤 플레인 테이블). 모니터링 대상으로 등록할 필요가 없어 자동 선택에서 제외했습니다.",
+                                  )}
                                 >
-                                  DBOps 내부
+                                  {t("DBOps 내부")}
                                 </span>
                               )}
                             </td>
@@ -801,17 +833,20 @@ export default function ClustersPage() {
             </h2>
             <div className="text-sm text-zinc-400 space-y-2 mb-5 leading-relaxed">
               <p>
-                DBOps는 등록된 클러스터에 대해{" "}
-                <span className="text-zinc-200">read-only 인스펙션 쿼리</span>
-                (pg_stat_*, information_schema 등)를 실행하고 메트릭을 캐시 DB에
-                저장합니다.
+                {t("DBOps는 등록된 클러스터에 대해")}{" "}
+                <span className="text-zinc-200">
+                  {t("read-only 인스펙션 쿼리")}
+                </span>
+                {t(
+                  "(pg_stat_*, information_schema 등)를 실행하고 메트릭을 캐시 DB에 저장합니다.",
+                )}
               </p>
               <p>
-                채팅과 AI insight를 사용할 때마다{" "}
-                <span className="text-zinc-200">Bedrock 토큰 비용</span>이
-                발생합니다. Cost 탭에서 모니터링 가능합니다.
+                {t("채팅과 AI insight를 사용할 때마다")}{" "}
+                <span className="text-zinc-200">{t("Bedrock 토큰 비용")}</span>
+                {t("이 발생합니다. Cost 탭에서 모니터링 가능합니다.")}
               </p>
-              <p>언제든 클러스터 행에서 등록을 해제할 수 있습니다.</p>
+              <p>{t("언제든 클러스터 행에서 등록을 해제할 수 있습니다.")}</p>
             </div>
             <div className="border-t border-zinc-800 pt-3 max-h-40 overflow-y-auto text-xs font-mono text-zinc-400 space-y-1">
               {selectedClusters.map((c) => (
@@ -830,15 +865,18 @@ export default function ClustersPage() {
                 className="flex-1 text-sm font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
               >
                 {registering
-                  ? "등록 중…"
-                  : `동의하고 ${selectedClusters.length}개 등록`}
+                  ? t("등록 중…")
+                  : t("동의하고 {n}개 등록").replace(
+                      "{n}",
+                      String(selectedClusters.length),
+                    )}
               </button>
               <button
                 onClick={() => setShowConfirm(false)}
                 disabled={registering}
                 className="text-sm px-4 py-2 border border-zinc-700 text-zinc-400 hover:text-zinc-200"
               >
-                취소
+                {t("취소")}
               </button>
             </div>
           </div>
@@ -846,7 +884,7 @@ export default function ClustersPage() {
       )}
 
       {showForm && (
-        <Section eyebrow="신규 등록" title="클러스터 / 리소스 등록">
+        <Section eyebrow={t("신규 등록")} title={t("클러스터 / 리소스 등록")}>
           <div className="border border-zinc-800 bg-zinc-900/40 p-6 space-y-5">
             {/* Engine selector: shown first so subsequent fields can be
                 conditioned on the selected engine family. */}
@@ -878,15 +916,16 @@ export default function ClustersPage() {
               </select>
               {form.engine === "dynamodb" && (
                 <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">
-                  DynamoDB는 CloudWatch 메트릭만 수집합니다 (시크릿 불필요).
+                  {t(
+                    "DynamoDB는 CloudWatch 메트릭만 수집합니다 (시크릿 불필요).",
+                  )}
                 </p>
               )}
               {form.engine === "docdb" && (
                 <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">
-                  기본은 CloudWatch 메트릭 수집입니다. Mongo 읽기 시크릿을
-                  넣으면 서버 상태와 장기 실행 op 딥 리드까지 수집합니다. 선택
-                  항목이며, 이후 PATCH /api/clusters/{"{id}"}/meta 로도 채울 수
-                  있습니다.
+                  {t(
+                    "기본은 CloudWatch 메트릭 수집입니다. Mongo 읽기 시크릿을 넣으면 서버 상태와 장기 실행 op 딥 리드까지 수집합니다. 선택 항목이며, 이후 PATCH /api/clusters/{id}/meta 로도 채울 수 있습니다.",
+                  )}
                 </p>
               )}
             </div>
@@ -896,7 +935,7 @@ export default function ClustersPage() {
               form.engine === "aurora-mysql") && (
               <div>
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
-                  배포 방식
+                  {t("배포 방식")}
                 </div>
                 <div className="grid grid-cols-2 border border-zinc-800">
                   {(
@@ -935,10 +974,10 @@ export default function ClustersPage() {
                             active ? "text-zinc-100" : "text-zinc-400"
                           }`}
                         >
-                          {m.title}
+                          {t(m.title)}
                         </div>
                         <div className="text-[11px] text-zinc-500 mt-0.5">
-                          {m.hint}
+                          {t(m.hint)}
                         </div>
                       </button>
                     );
@@ -992,7 +1031,7 @@ export default function ClustersPage() {
               {form.engine === "docdb" && (
                 <>
                   <Field
-                    label="Mongo 읽기 시크릿 ARN (선택)"
+                    label={t("Mongo 읽기 시크릿 ARN (선택)")}
                     value={form.mongo_secret_arn}
                     onChange={(v) => setForm({ ...form, mongo_secret_arn: v })}
                     placeholder="arn:aws:secretsmanager:...:secret:docdb-readonly"
@@ -1000,7 +1039,7 @@ export default function ClustersPage() {
                     fullWidth
                   />
                   <Field
-                    label="Mongo 쓰기 시크릿 ARN (선택)"
+                    label={t("Mongo 쓰기 시크릿 ARN (선택)")}
                     value={form.mongo_write_secret_arn}
                     onChange={(v) =>
                       setForm({ ...form, mongo_write_secret_arn: v })
@@ -1047,31 +1086,33 @@ export default function ClustersPage() {
               form.engine === "aurora-mysql") &&
               (registerMode === "same-account" ? (
                 <div className="border-l-2 border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-[11px] text-zinc-400 leading-relaxed">
-                  같은 계정의 Aurora를 등록합니다. DBOps의 Lambda execution
-                  role이 직접{" "}
+                  {t(
+                    "같은 계정의 Aurora를 등록합니다. DBOps의 Lambda execution role이 직접",
+                  )}{" "}
                   <span className="font-mono text-zinc-300">
                     rds:DescribeDBClusters
                   </span>{" "}
-                  권한을 가지면 추가 설정 없이 연결됩니다.
+                  {t("권한을 가지면 추가 설정 없이 연결됩니다.")}
                 </div>
               ) : (
                 <div className="border-l-2 border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[11px] text-zinc-400 leading-relaxed space-y-1">
                   <div>
-                    Cross-account 등록 시 spoke 계정에 STS AssumeRole + RDS
-                    describe 권한이 있는 role이 필요합니다. 등록 시점에 STS{" "}
+                    {t(
+                      "Cross-account 등록 시 spoke 계정에 STS AssumeRole + RDS describe 권한이 있는 role이 필요합니다. 등록 시점에 STS",
+                    )}{" "}
                     <span className="font-mono text-zinc-300">AssumeRole</span>{" "}
                     +{" "}
                     <span className="font-mono text-zinc-300">
                       rds:DescribeDBClusters
                     </span>{" "}
-                    로 연결을 검증한 뒤 저장합니다.
+                    {t("로 연결을 검증한 뒤 저장합니다.")}
                   </div>
                   <button
                     type="button"
                     onClick={() => setSetupGuideOpen(true)}
                     className="text-amber-300 hover:text-amber-200 underline underline-offset-2"
                   >
-                    Cross-account 설정 가이드 →
+                    {t("Cross-account 설정 가이드 →")}
                   </button>
                 </div>
               ))}
@@ -1083,10 +1124,10 @@ export default function ClustersPage() {
                 className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:bg-zinc-700 disabled:text-zinc-500 transition-colors"
               >
                 {submitting
-                  ? "등록 중…"
+                  ? t("등록 중…")
                   : form.engine === "dynamodb" || form.engine === "docdb"
-                    ? "등록"
-                    : "등록 + 연결 검증"}
+                    ? t("등록")
+                    : t("등록 + 연결 검증")}
               </button>
               {/* Connection pre-flight test: Aurora only */}
               {(form.engine === "aurora-postgresql" ||
@@ -1096,7 +1137,7 @@ export default function ClustersPage() {
                     if (!form.cluster_id || !form.region) {
                       setFeedback({
                         kind: "err",
-                        msg: "cluster_id + region 이 필요합니다.",
+                        msg: t("cluster_id + region 이 필요합니다."),
                       });
                       return;
                     }
@@ -1124,23 +1165,25 @@ export default function ClustersPage() {
                   }}
                   disabled={testing}
                   className="text-xs px-4 py-2 border border-zinc-700 text-zinc-300 hover:border-amber-500/60 hover:text-amber-200 disabled:opacity-50 transition-colors"
-                  title="저장 없이 AssumeRole + DescribeDBClusters 만 실행해 보기"
+                  title={t(
+                    "저장 없이 AssumeRole + DescribeDBClusters 만 실행해 보기",
+                  )}
                 >
-                  {testing ? "테스트 중…" : "연결만 테스트"}
+                  {testing ? t("테스트 중…") : t("연결만 테스트")}
                 </button>
               )}
               <button
                 onClick={() => setShowForm(false)}
                 className="text-xs px-4 py-2 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
               >
-                취소
+                {t("취소")}
               </button>
             </div>
 
             {testResult && (
               <div className="border border-zinc-800 bg-zinc-950 p-4 mt-3">
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
-                  Pre-flight 결과:{" "}
+                  {t("Pre-flight 결과:")}{" "}
                   <span
                     className={
                       testResult.ok ? "text-emerald-400" : "text-rose-400"
@@ -1191,24 +1234,31 @@ export default function ClustersPage() {
       )}
 
       <Section
-        eyebrow="등록 현황"
-        title={`등록된 클러스터 ${clusters.length}개`}
-        description="이 페이지는 등록/검증/관리 전용입니다. 실시간 메트릭은 Fleet 또는 Dashboard에서."
+        eyebrow={t("등록 현황")}
+        title={t("등록된 클러스터 {n}개").replace(
+          "{n}",
+          String(clusters.length),
+        )}
+        description={t(
+          "이 페이지는 등록/검증/관리 전용입니다. 실시간 메트릭은 Fleet 또는 Dashboard에서.",
+        )}
       >
         {clustersError ? (
           <div className="bg-rose-500/10 border border-rose-500/30 rounded-lg p-4 text-sm">
             <div className="text-rose-300 font-medium mb-1">
-              클러스터 목록을 불러오지 못했습니다
+              {t("클러스터 목록을 불러오지 못했습니다")}
             </div>
             <div className="text-zinc-400">
-              {clustersError}. 기존 등록 클러스터가 사라진 것이 아니라 조회 실패
-              상태입니다.
+              {clustersError}.{" "}
+              {t(
+                "기존 등록 클러스터가 사라진 것이 아니라 조회 실패 상태입니다.",
+              )}
             </div>
             <button
               onClick={loadClusters}
               className="mt-2 rounded border border-zinc-700 px-3 py-1 text-zinc-200 hover:bg-zinc-800"
             >
-              다시 시도
+              {t("다시 시도")}
             </button>
           </div>
         ) : clusters.length === 0 ? (
@@ -1462,8 +1512,10 @@ export default function ClustersPage() {
                                       className="text-[11px] text-zinc-500 hover:text-rose-300 disabled:opacity-50 transition-colors"
                                       title={
                                         c.is_demo
-                                          ? "데모 클러스터 및 합성 데이터 삭제"
-                                          : "레지스트리에서 해제"
+                                          ? t(
+                                              "데모 클러스터 및 합성 데이터 삭제",
+                                            )
+                                          : t("레지스트리에서 해제")
                                       }
                                     >
                                       {deletingId === c.cluster_id
@@ -1503,6 +1555,7 @@ function SecretSourceBadge({
   source?: "convention" | "master_fallback" | "missing";
   hasArn: boolean;
 }) {
+  const t = useT();
   // Server may not have emitted secret_source for cached or older payloads.
   // Fall back to the legacy "managed / manual" rendering so the column is never blank.
   if (!source) {
@@ -1516,7 +1569,7 @@ function SecretSourceBadge({
     return (
       <span
         className="px-1.5 py-0.5 border text-[10px] font-mono bg-emerald-500/10 text-emerald-300 border-emerald-500/40"
-        title="dbops/<cluster_id>/readonly 컨벤션 시크릿 자동 연결 (권장)"
+        title={t("dbops/<cluster_id>/readonly 컨벤션 시크릿 자동 연결 (권장)")}
       >
         ✓ convention
       </span>
@@ -1526,7 +1579,9 @@ function SecretSourceBadge({
     return (
       <span
         className="px-1.5 py-0.5 border text-[10px] font-mono bg-amber-500/10 text-amber-300 border-amber-500/40"
-        title="컨벤션 시크릿이 없어 master 시크릿으로 폴백. 프로덕션 사용 전 전용 계정 등록 권장."
+        title={t(
+          "컨벤션 시크릿이 없어 master 시크릿으로 폴백. 프로덕션 사용 전 전용 계정 등록 권장.",
+        )}
       >
         ⚠ master fallback
       </span>
@@ -1535,7 +1590,7 @@ function SecretSourceBadge({
   return (
     <span
       className="px-1.5 py-0.5 border text-[10px] font-mono bg-rose-500/10 text-rose-300 border-rose-500/40"
-      title="사용 가능한 시크릿이 없습니다. 설정 가이드를 참고하세요."
+      title={t("사용 가능한 시크릿이 없습니다. 설정 가이드를 참고하세요.")}
     >
       ✗ missing
     </span>

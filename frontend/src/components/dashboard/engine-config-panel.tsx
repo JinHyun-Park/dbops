@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchEngineConfig, type EngineConfigResponse } from "@/lib/api-client";
 import { engineFamily } from "@/lib/engine";
+import { useT } from "@/lib/i18n";
 
 // One config field rendered as a compact label + value cell. `tone` colors the
 // value for boolean posture fields (on/off) so a DBA can scan protections at a
@@ -46,6 +47,7 @@ export function EngineConfigPanel({
   clusterId: string;
   engine?: string;
 }) {
+  const t = useT();
   const [data, setData] = useState<EngineConfigResponse | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -76,7 +78,7 @@ export function EngineConfigPanel({
       <div className="text-sm text-zinc-200 font-medium">
         Configuration
         <span className="ml-2 px-1.5 py-0.5 bg-zinc-700/40 text-zinc-400 border border-zinc-700 text-[10px]">
-          읽기 전용
+          {t("읽기 전용")}
         </span>
       </div>
       <button
@@ -115,7 +117,7 @@ export function EngineConfigPanel({
         {errorBox}
         {notApplicable ? (
           <div className="text-[11px] text-zinc-500 border border-zinc-800 bg-zinc-800/20 px-3 py-2">
-            이 테이블의 구성 정보를 표시할 수 없습니다.
+            {t("이 테이블의 구성 정보를 표시할 수 없습니다.")}
           </div>
         ) : (
           !data?.error && (
@@ -125,16 +127,16 @@ export function EngineConfigPanel({
                 value={data?.table_class || "STANDARD"}
               />
               <ConfigCell
-                label="삭제 방지 (Deletion Protection)"
-                value={del.text}
+                label={t("삭제 방지 (Deletion Protection)")}
+                value={t(del.text)}
                 tone={del.tone}
               />
               <ConfigCell
-                label="암호화 (SSE)"
+                label={t("암호화 (SSE)")}
                 value={
                   data?.sse_status
                     ? `${data.sse_type || "AWS owned"} (${data.sse_status})`
-                    : "AWS 소유 키 (기본)"
+                    : t("AWS 소유 키 (기본)")
                 }
                 tone={data?.sse_status ? "good" : "neutral"}
               />
@@ -142,8 +144,8 @@ export function EngineConfigPanel({
                 label="DynamoDB Streams"
                 value={
                   stream.text === "활성" && data?.stream_view_type
-                    ? `활성 (${data.stream_view_type})`
-                    : stream.text
+                    ? t("활성 ({n})").replace("{n}", data.stream_view_type)
+                    : t(stream.text)
                 }
                 tone={stream.tone}
               />
@@ -151,10 +153,10 @@ export function EngineConfigPanel({
                 label="TTL"
                 value={
                   ttlOn && data?.ttl_attribute_name
-                    ? `활성 (${data.ttl_attribute_name})`
+                    ? t("활성 ({n})").replace("{n}", data.ttl_attribute_name)
                     : data?.ttl_status === "ENABLED"
-                      ? "활성"
-                      : "비활성"
+                      ? t("활성")
+                      : t("비활성")
                 }
                 tone={ttlOn ? "good" : "muted"}
               />
@@ -173,15 +175,15 @@ export function EngineConfigPanel({
       v == null
         ? { text: "-", tone: "muted" as const }
         : v
-          ? { text: "활성", tone: "good" as const }
-          : { text: "비활성", tone: "muted" as const };
+          ? { text: t("활성"), tone: "good" as const }
+          : { text: t("비활성"), tone: "muted" as const };
     const inTransit = posture(data?.transit_encryption_enabled);
     // At-rest: prefer the encryption TYPE (authoritative: a node can be
     // encrypted even when the legacy boolean reads false) and surface it.
     const atRest = posture(data?.at_rest_encryption_enabled);
     const atRestText =
       atRest.tone === "good" && data?.storage_encryption_type
-        ? `활성 (${data.storage_encryption_type})`
+        ? t("활성 ({n})").replace("{n}", data.storage_encryption_type)
         : atRest.text;
     // AUTH: a legacy auth token OR RBAC user groups both mean "authenticated";
     // both absent → unknown.
@@ -191,10 +193,10 @@ export function EngineConfigPanel({
     const authText = !authKnown
       ? "-"
       : authToken
-        ? "활성 (토큰)"
+        ? t("활성 (토큰)")
         : rbac
-          ? "활성 (RBAC)"
-          : "비활성";
+          ? t("활성 (RBAC)")
+          : t("비활성");
     const params = data?.parameters || {};
     const PARAM_LABELS: Record<string, string> = {
       "maxmemory-policy": "Eviction Policy (maxmemory-policy)",
@@ -217,42 +219,42 @@ export function EngineConfigPanel({
         {errorBox}
         {notApplicable ? (
           <div className="text-[11px] text-zinc-500 border border-zinc-800 bg-zinc-800/20 px-3 py-2">
-            이 클러스터의 구성 정보를 표시할 수 없습니다.
+            {t("이 클러스터의 구성 정보를 표시할 수 없습니다.")}
           </div>
         ) : (
           !data?.error && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <ConfigCell
-                  label="파라미터 그룹"
+                  label={t("파라미터 그룹")}
                   value={data?.parameter_group || "-"}
                 />
                 <ConfigCell
-                  label="유지보수 윈도우 (Maintenance Window)"
+                  label={t("유지보수 윈도우 (Maintenance Window)")}
                   value={data?.preferred_maintenance_window || "-"}
                 />
                 <ConfigCell
-                  label="스냅샷 보관 (Retention)"
+                  label={t("스냅샷 보관 (Retention)")}
                   value={
                     retention != null
                       ? retention > 0
                         ? `${retention}d`
-                        : "비활성"
+                        : t("비활성")
                       : "-"
                   }
                   tone={retention ? "neutral" : "muted"}
                 />
                 <ConfigCell
-                  label="스냅샷 윈도우 (Snapshot Window)"
+                  label={t("스냅샷 윈도우 (Snapshot Window)")}
                   value={data?.snapshot_window || "-"}
                 />
                 <ConfigCell
-                  label="저장 시 암호화 (At-Rest)"
+                  label={t("저장 시 암호화 (At-Rest)")}
                   value={atRestText}
                   tone={atRest.tone}
                 />
                 <ConfigCell
-                  label="전송 중 암호화 (In-Transit / TLS)"
+                  label={t("전송 중 암호화 (In-Transit / TLS)")}
                   value={inTransit.text}
                   tone={inTransit.tone}
                 />
@@ -262,7 +264,7 @@ export function EngineConfigPanel({
                   tone={authToken || rbac ? "good" : "muted"}
                 />
                 <ConfigCell
-                  label="자동 Failover"
+                  label={t("자동 Failover")}
                   value={data?.automatic_failover || "-"}
                   tone={
                     data?.automatic_failover === "enabled" ? "good" : "muted"
@@ -277,7 +279,7 @@ export function EngineConfigPanel({
               {paramKeys.length > 0 && (
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium mb-2 pt-2 border-t border-zinc-800/80">
-                    파라미터 (parameter group)
+                    {t("파라미터 (parameter group)")}
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     {paramKeys.map((k) => {
@@ -314,31 +316,31 @@ export function EngineConfigPanel({
       {errorBox}
       {notApplicable ? (
         <div className="text-[11px] text-zinc-500 border border-zinc-800 bg-zinc-800/20 px-3 py-2">
-          이 클러스터의 구성 정보를 표시할 수 없습니다.
+          {t("이 클러스터의 구성 정보를 표시할 수 없습니다.")}
         </div>
       ) : (
         !data?.error && (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <ConfigCell
-              label="유지보수 윈도우 (Maintenance Window)"
+              label={t("유지보수 윈도우 (Maintenance Window)")}
               value={data?.preferred_maintenance_window || "-"}
             />
             <ConfigCell
-              label="삭제 방지 (Deletion Protection)"
-              value={del.text}
+              label={t("삭제 방지 (Deletion Protection)")}
+              value={t(del.text)}
               tone={del.tone}
             />
             <ConfigCell
-              label="스토리지 암호화 (Encrypted)"
-              value={encrypted.text}
+              label={t("스토리지 암호화 (Encrypted)")}
+              value={t(encrypted.text)}
               tone={encrypted.tone}
             />
             <ConfigCell
-              label="클러스터 파라미터 그룹"
+              label={t("클러스터 파라미터 그룹")}
               value={data?.db_cluster_parameter_group || "-"}
             />
             <ConfigCell
-              label="백업 보관 기간 (Retention)"
+              label={t("백업 보관 기간 (Retention)")}
               value={retention != null ? `${retention}d` : "-"}
             />
           </div>

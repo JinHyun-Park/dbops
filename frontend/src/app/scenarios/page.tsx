@@ -96,15 +96,17 @@ export default function ScenariosPage() {
         const res = await runScenario(id);
         if (res.rca_enqueued) {
           setNotice(
-            `신호를 주입했습니다. 자동 RCA가 큐에 등록되었습니다 (작업 ${res.task_id}). ` +
-              "분석은 보통 수십 초 안에 끝납니다.",
+            t(
+              "신호를 주입했습니다. 자동 RCA가 큐에 등록되었습니다 (작업 {n}). 분석은 보통 수십 초 안에 끝납니다.",
+            ).replace("{n}", String(res.task_id)),
           );
         } else {
           // The signals landed but no task exists, so there is no report
           // coming. Saying so beats a spinner that never resolves.
           setNotice(
-            "신호는 주입했지만 자동 RCA를 큐에 넣지 못했습니다. " +
-              "에이전트 작업 테이블 설정을 확인하세요.",
+            t(
+              "신호는 주입했지만 자동 RCA를 큐에 넣지 못했습니다. 에이전트 작업 테이블 설정을 확인하세요.",
+            ),
           );
         }
         await loadRuns();
@@ -136,22 +138,22 @@ export default function ScenariosPage() {
 
       {/* What is real and what is not. A demo that does not say this invites
             the reasonable assumption that the incident is also fabricated. */}
-      <Section title="동작 방식">
+      <Section title={t("동작 방식")}>
         <div className="flex flex-col gap-1.5 text-xs text-zinc-400">
           <div>
-            시나리오는 캐시된 신호 테이블(metric_snapshots, event_log,
-            blocking_locks, query_stats, schema_snapshots)에 해당 장애가
-            관측되었을 때와 같은 행을 기록합니다.
+            {t(
+              "시나리오는 캐시된 신호 테이블(metric_snapshots, event_log, blocking_locks, query_stats, schema_snapshots)에 해당 장애가 관측되었을 때와 같은 행을 기록합니다.",
+            )}
           </div>
           <div>
-            그 다음은 전부 실제 경로입니다. 동일한 결정론적 랭커가 동일한
-            가중치로 신호를 채점하고, 동일한 모델 호출이 한국어 원인 설명과 권장
-            조치를 생성합니다.
+            {t(
+              "그 다음은 전부 실제 경로입니다. 동일한 결정론적 랭커가 동일한 가중치로 신호를 채점하고, 동일한 모델 호출이 한국어 원인 설명과 권장 조치를 생성합니다.",
+            )}
           </div>
           <div className="text-zinc-500">
-            대상 데이터베이스는 건드리지 않습니다. 주입된 행은 RCA 분석 구간(
-            {catalog?.window_minutes ?? 30}분)에서 벗어나면 자동으로 정리됩니다.
-            한 번에 하나의 시나리오만 실행됩니다.
+            {t(
+              "대상 데이터베이스는 건드리지 않습니다. 주입된 행은 RCA 분석 구간({n}분)에서 벗어나면 자동으로 정리됩니다. 한 번에 하나의 시나리오만 실행됩니다.",
+            ).replace("{n}", String(catalog?.window_minutes ?? 30))}
           </div>
         </div>
       </Section>
@@ -160,9 +162,9 @@ export default function ScenariosPage() {
         <div className="flex items-start gap-2 px-3 py-2 border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs">
           <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
           <span>
-            대상 클러스터가 설정되지 않아 실행이 비활성화되어 있습니다.
-            cdk/config/settings.py의 SCENARIO_CLUSTER_ID에 등록된 클러스터를
-            지정하고 agent 스택을 재배포하세요.
+            {t(
+              "대상 클러스터가 설정되지 않아 실행이 비활성화되어 있습니다. cdk/config/settings.py의 SCENARIO_CLUSTER_ID에 등록된 클러스터를 지정하고 agent 스택을 재배포하세요.",
+            )}
           </span>
         </div>
       )}
@@ -174,7 +176,7 @@ export default function ScenariosPage() {
             onClick={() => router.push("/tasks")}
             className="ml-auto inline-flex items-center gap-1 flex-shrink-0 text-emerald-200 hover:text-emerald-100"
           >
-            작업으로 이동
+            {t("작업으로 이동")}
             <ArrowRight size={12} />
           </button>
         </div>
@@ -186,15 +188,15 @@ export default function ScenariosPage() {
       )}
 
       <Section
-        title="시나리오"
+        title={t("시나리오")}
         description={
           catalog?.cluster_id
-            ? `대상 클러스터: ${catalog.cluster_id}`
+            ? t("대상 클러스터: {n}").replace("{n}", catalog.cluster_id)
             : undefined
         }
       >
         {!catalog ? (
-          <div className="text-xs text-zinc-500">불러오는 중...</div>
+          <div className="text-xs text-zinc-500">{t("불러오는 중...")}</div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
             {catalog.scenarios.map((s) => (
@@ -214,9 +216,11 @@ export default function ScenariosPage() {
                         where it does. The ordering is a stated policy. */}
                   <span
                     className="flex-shrink-0 text-[10px] px-1.5 py-0.5 border border-zinc-700 text-zinc-400"
-                    title={`랭킹 카테고리 ${s.category}, 기본 가중치 ${s.weight}`}
+                    title={t("랭킹 카테고리 {c}, 기본 가중치 {w}")
+                      .replace("{c}", s.category)
+                      .replace("{w}", String(s.weight))}
                   >
-                    {categoryLabel(s.category)} {s.weight}
+                    {t(categoryLabel(s.category))} {s.weight}
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-1">
@@ -237,12 +241,12 @@ export default function ScenariosPage() {
                   {busy === s.id ? (
                     <>
                       <Loader2 size={12} className="animate-spin" />
-                      주입 중
+                      {t("주입 중")}
                     </>
                   ) : (
                     <>
                       <Play size={12} />
-                      실행
+                      {t("실행")}
                     </>
                   )}
                 </button>
@@ -252,7 +256,7 @@ export default function ScenariosPage() {
         )}
       </Section>
 
-      <Section title="실행 이력">
+      <Section title={t("실행 이력")}>
         {runs.length === 0 ? (
           <EmptyState
             title={t("실행 이력 없음")}
@@ -286,11 +290,13 @@ export default function ScenariosPage() {
                     }
                     className="flex-shrink-0 inline-flex items-center gap-1 text-zinc-400 hover:text-amber-200 transition-colors"
                   >
-                    RCA 보기
+                    {t("RCA 보기")}
                     <ArrowRight size={11} />
                   </button>
                 ) : (
-                  <span className="flex-shrink-0 text-zinc-600">RCA 없음</span>
+                  <span className="flex-shrink-0 text-zinc-600">
+                    {t("RCA 없음")}
+                  </span>
                 )}
               </div>
             ))}

@@ -8,6 +8,7 @@ import {
   type RedundantIndexKind,
 } from "@/lib/api-client";
 import { fmtBytes, fmtExact } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 // Tiny chip: same visual language as the rest of the dashboard.
 const KIND_STYLES: Record<
@@ -32,6 +33,7 @@ const KIND_STYLES: Record<
 };
 
 export function RedundantIndexesPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [data, setData] = useState<RedundantIndexesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -73,14 +75,18 @@ export function RedundantIndexesPanel({ clusterId }: { clusterId: string }) {
             )}
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            prefix-covered / 완전 중복 / unused 인덱스를 라이브 클러스터에서
-            검출. PostgreSQL 전용.
+            {t(
+              "prefix-covered / 완전 중복 / unused 인덱스를 라이브 클러스터에서 검출. PostgreSQL 전용.",
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
           {data && data.indexes_scanned != null && (
             <span className="text-[10px] text-zinc-600 font-mono">
-              {fmtExact(data.indexes_scanned)}개 인덱스 스캔
+              {t("{n}개 인덱스 스캔").replace(
+                "{n}",
+                fmtExact(data.indexes_scanned),
+              )}
             </span>
           )}
           <button
@@ -88,7 +94,7 @@ export function RedundantIndexesPanel({ clusterId }: { clusterId: string }) {
             disabled={loading}
             className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
           >
-            {loading ? "검색 중…" : data ? "새로고침" : "검출 실행"}
+            {loading ? t("검색 중…") : data ? t("새로고침") : t("검출 실행")}
           </button>
         </div>
       </div>
@@ -96,13 +102,14 @@ export function RedundantIndexesPanel({ clusterId }: { clusterId: string }) {
       <div className="max-h-96 overflow-y-auto">
         {!data && !loading && !err && (
           <div className="p-6 text-zinc-500 text-sm">
-            <span className="text-amber-300">검출 실행</span> 버튼을 누르면
-            라이브 클러스터의 pg_index를 한 번 조회해서 후보를 뽑아냅니다.
-            인덱스가 많을수록 1~3초 정도 걸립니다.
+            <span className="text-amber-300">{t("검출 실행")}</span>{" "}
+            {t(
+              "버튼을 누르면 라이브 클러스터의 pg_index를 한 번 조회해서 후보를 뽑아냅니다. 인덱스가 많을수록 1~3초 정도 걸립니다.",
+            )}
           </div>
         )}
         {loading && (
-          <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
+          <div className="p-6 text-zinc-500 text-sm">{t("불러오는 중…")}</div>
         )}
         {err && (
           <div className="p-5">
@@ -133,31 +140,36 @@ export function RedundantIndexesPanel({ clusterId }: { clusterId: string }) {
         {data && !data.error && candidates.length === 0 && (
           <div className="p-6 text-emerald-400 text-sm flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            검출된 중복/미사용 인덱스 없음. 인덱스 구성 양호 🎉
+            {t("검출된 중복/미사용 인덱스 없음. 인덱스 구성 양호 🎉")}
           </div>
         )}
         {candidates.length > 0 && (
           <>
             <div className="px-4 py-2 border-b border-zinc-800 bg-zinc-900/40 text-[11px] text-zinc-400">
-              회수 가능 디스크 ≈{" "}
+              {t("회수 가능 디스크 ≈")}{" "}
               <span className="text-zinc-200 font-mono">
                 {fmtBytes(reclaimable)}
               </span>
-              , 드롭 전에 항상 <code className="text-amber-300">EXPLAIN</code>
-              으로 실제 쿼리 영향 검증 권장
+              {t(", 드롭 전에 항상")}{" "}
+              <code className="text-amber-300">EXPLAIN</code>
+              {t("으로 실제 쿼리 영향 검증 권장")}
             </div>
             <table className="w-full text-sm">
               <thead className="bg-zinc-900/60 border-b border-zinc-800 text-[10px] uppercase tracking-wider text-zinc-500 sticky top-0">
                 <tr>
-                  <th className="text-left px-3 py-2 font-medium">테이블</th>
-                  <th className="text-left px-3 py-2 font-medium">인덱스</th>
+                  <th className="text-left px-3 py-2 font-medium">
+                    {t("테이블")}
+                  </th>
+                  <th className="text-left px-3 py-2 font-medium">
+                    {t("인덱스")}
+                  </th>
                   <th className="text-left px-3 py-2 font-medium w-24">Kind</th>
                   <th className="text-right px-3 py-2 font-medium w-20">
-                    크기
+                    {t("크기")}
                   </th>
                   <th
                     className="text-right px-3 py-2 font-medium w-20"
-                    title="통계 리셋 이후 scan 횟수"
+                    title={t("통계 리셋 이후 scan 횟수")}
                   >
                     Scans
                   </th>
@@ -210,11 +222,12 @@ export function RedundantIndexesPanel({ clusterId }: { clusterId: string }) {
 }
 
 function KindBadge({ candidate }: { candidate: RedundantIndexCandidate }) {
+  const t = useT();
   const k = KIND_STYLES[candidate.kind];
   return (
     <span
       className={`px-1.5 py-0.5 border text-[10px] font-mono ${k.classes}`}
-      title={k.hint}
+      title={t(k.hint)}
     >
       {k.label}
     </span>

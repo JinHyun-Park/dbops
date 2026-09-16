@@ -50,7 +50,7 @@ export default function PreferencesPage() {
   }, [load]);
 
   const onDelete = async (rec: MemoryRecord) => {
-    if (!confirm("이 기록을 삭제할까요? 이후 Agent는 이 정보를 잊습니다.")) {
+    if (!confirm(t("이 기록을 삭제할까요? 이후 Agent는 이 정보를 잊습니다."))) {
       return;
     }
     setBusyId(rec.id);
@@ -98,8 +98,8 @@ export default function PreferencesPage() {
 
       <Section
         eyebrow={active.label}
-        title={`${records.length}개 기록`}
-        description={active.hint}
+        title={t("{n}개 기록").replace("{n}", String(records.length))}
+        description={t(active.hint)}
       >
         {error && (
           <div className="mb-4 px-3 py-2 border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs">
@@ -107,7 +107,7 @@ export default function PreferencesPage() {
           </div>
         )}
         {loading ? (
-          <div className="text-sm text-zinc-500">불러오는 중…</div>
+          <div className="text-sm text-zinc-500">{t("불러오는 중…")}</div>
         ) : records.length === 0 ? (
           <EmptyState
             eyebrow={active.label}
@@ -146,7 +146,7 @@ export default function PreferencesPage() {
                   disabled={busyId === r.id}
                   className="opacity-0 group-hover:opacity-100 text-[11px] text-zinc-500 hover:text-rose-400 transition disabled:opacity-30"
                 >
-                  {busyId === r.id ? "삭제 중…" : "잊기"}
+                  {busyId === r.id ? t("삭제 중…") : t("잊기")}
                 </button>
               </div>
             ))}

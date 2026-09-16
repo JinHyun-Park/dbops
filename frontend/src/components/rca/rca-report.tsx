@@ -40,6 +40,7 @@ import {
   nextSteps,
   observations,
   reportHeadline,
+  sourceLabel,
   topCaveats,
   type RcaCandidate,
 } from "@/lib/rca-report-model";
@@ -160,7 +161,12 @@ export function RcaReport({ row }: { row: AgentTask }) {
         {anchor && (
           <span>
             {t("인시던트 발생")} {fmtClockKo(anchor)}
-            {windowMinutes ? `, 분석 구간 ${windowMinutes}분` : ""}
+            {windowMinutes
+              ? `, ${t("분석 구간 {n}분").replace(
+                  "{n}",
+                  String(windowMinutes),
+                )}`
+              : ""}
           </span>
         )}
       </div>
@@ -169,9 +175,22 @@ export function RcaReport({ row }: { row: AgentTask }) {
           standalone "note" section is gone. */}
       {(gaps.length > 0 || caveats.length > 0 || result?.note) && (
         <div className="mt-3 max-w-[68ch] border-l-2 border-amber-500/40 pl-3 text-[13px] leading-relaxed text-amber-200/80">
-          {gaps.length > 0 && <div>근거가 불완전합니다: {gaps.join(", ")}</div>}
+          {gaps.length > 0 && (
+            <div>
+              {t("근거가 불완전합니다")}:{" "}
+              {gaps
+                .map((g) =>
+                  t(
+                    g.kind === "unchecked"
+                      ? "{n} 확인 불가"
+                      : "{n} 데이터 없음",
+                  ).replace("{n}", t(sourceLabel(g.source))),
+                )
+                .join(", ")}
+            </div>
+          )}
           {caveats.map((c) => (
-            <div key={c}>{c}</div>
+            <div key={c}>{t(c)}</div>
           ))}
           {result?.note && (
             <div className="text-zinc-400">{String(result.note)}</div>
@@ -181,11 +200,11 @@ export function RcaReport({ row }: { row: AgentTask }) {
 
       {err && (
         <div className="mt-3 text-sm text-rose-300">
-          리포트를 불러오지 못했습니다: {err}
+          {t("리포트를 불러오지 못했습니다")}: {err}
         </div>
       )}
       {!task && !err && (
-        <div className="mt-3 text-sm text-zinc-500">불러오는 중…</div>
+        <div className="mt-3 text-sm text-zinc-500">{t("불러오는 중…")}</div>
       )}
 
       {/* ── A scheduled digest is a report, not a diagnosis ───────────────── */}
@@ -203,7 +222,7 @@ export function RcaReport({ row }: { row: AgentTask }) {
       {/* ── Three short blocks ────────────────────────────────────────────── */}
       {narrativeParts.length > 0 && (
         <section className="mt-5 max-w-[68ch]">
-          <h4 className="text-[13px] font-medium text-zinc-300">평가</h4>
+          <h4 className="text-[13px] font-medium text-zinc-300">{t("평가")}</h4>
           <div className="mt-1.5 space-y-2 text-[15px] leading-[1.7] text-zinc-200">
             {narrativeParts.map((p, i) => (
               <p key={i}>{p}</p>
@@ -215,13 +234,13 @@ export function RcaReport({ row }: { row: AgentTask }) {
       {obs.length > 0 && (
         <section className="mt-5 max-w-[68ch]">
           <h4 className="text-[13px] font-medium text-zinc-300">
-            근거가 된 관측
+            {t("근거가 된 관측")}
           </h4>
           <ul className="mt-1.5 space-y-1.5">
             {obs.map((o, i) => (
               <li key={i} className="text-[13px] leading-relaxed">
                 <span className="text-zinc-500">
-                  {o.when ? fmtClockKo(o.when) : "시각 미기록"}
+                  {o.when ? fmtClockKo(o.when) : t("시각 미기록")}
                 </span>{" "}
                 <span className="text-zinc-500">
                   {t(categoryLabel(o.category))}
@@ -229,7 +248,8 @@ export function RcaReport({ row }: { row: AgentTask }) {
                 <span className="font-mono text-[12px] text-zinc-200">
                   {o.pairs
                     .map(
-                      ([k, v]) => `${evidenceLabel(k)} ${fmtEvidenceValue(v)}`,
+                      ([k, v]) =>
+                        `${t(evidenceLabel(k))} ${t(fmtEvidenceValue(v))}`,
                     )
                     .join(", ")}
                 </span>
@@ -241,11 +261,13 @@ export function RcaReport({ row }: { row: AgentTask }) {
 
       {steps.length > 0 && (
         <section className="mt-5 max-w-[68ch]">
-          <h4 className="text-[13px] font-medium text-zinc-300">다음 단계</h4>
+          <h4 className="text-[13px] font-medium text-zinc-300">
+            {t("다음 단계")}
+          </h4>
           {checks.length > 0 && (
             <div className="mt-2">
               <div className="text-[12px] text-sky-300/90">
-                확인 (읽기 전용)
+                {t("확인 (읽기 전용)")}
               </div>
               <ol className="mt-1 list-decimal space-y-1 pl-5 text-[14px] leading-relaxed text-zinc-200">
                 {checks.map((s, i) => (
@@ -265,7 +287,7 @@ export function RcaReport({ row }: { row: AgentTask }) {
           {changes.length > 0 && (
             <div className="mt-3">
               <div className="text-[12px] text-amber-300/90">
-                조치 (변경 작업, 승인 센터를 거칩니다)
+                {t("조치 (변경 작업, 승인 센터를 거칩니다)")}
               </div>
               <ol className="mt-1 list-decimal space-y-1 pl-5 text-[14px] leading-relaxed text-zinc-200">
                 {changes.map((s, i) => (
@@ -283,15 +305,18 @@ export function RcaReport({ row }: { row: AgentTask }) {
             </div>
           )}
           <p className="mt-2 text-[11px] text-zinc-600">
-            분류는 문구를 기준으로 추정합니다. 실행 전에 항목을 직접 확인하세요.
+            {t(
+              "분류는 문구를 기준으로 추정합니다. 실행 전에 항목을 직접 확인하세요.",
+            )}
           </p>
         </section>
       )}
 
       {task && !reportLines && candidates.length === 0 && (
         <div className="mt-4 max-w-[68ch] text-[14px] leading-relaxed text-zinc-400">
-          자동 수집 신호에서 순위를 매길 후보를 찾지 못했습니다. 위 범위 한계를
-          함께 보고 수동 점검을 권장합니다.
+          {t(
+            "자동 수집 신호에서 순위를 매길 후보를 찾지 못했습니다. 위 범위 한계를 함께 보고 수동 점검을 권장합니다.",
+          )}
         </div>
       )}
 
@@ -303,7 +328,7 @@ export function RcaReport({ row }: { row: AgentTask }) {
               size={12}
               className="transition-transform group-open:rotate-90"
             />
-            다른 가설 {candidates.length - 1}건
+            {t("다른 가설 {n}건").replace("{n}", String(candidates.length - 1))}
           </summary>
           <ol className="mt-2 flex flex-col gap-3">
             {candidates.slice(1).map((c, i) => (
@@ -322,9 +347,9 @@ export function RcaReport({ row }: { row: AgentTask }) {
                       score against the leader's, and when it happened. Never a
                       percentage, and never the word confidence. */}
                   <span className="mt-0.5 block font-mono text-[11px] text-zinc-500">
-                    순위 점수 {String(c.score ?? "-")}
+                    {t("순위 점수 {n}").replace("{n}", String(c.score ?? "-"))}
                     {top?.score !== undefined
-                      ? `, 1순위 ${String(top.score)}`
+                      ? `, ${t("1순위 {n}").replace("{n}", String(top.score))}`
                       : ""}
                     {c.when ? `, ${String(c.when)}` : ""}
                   </span>
@@ -347,7 +372,7 @@ export function RcaReport({ row }: { row: AgentTask }) {
               size={12}
               className="transition-transform group-open:rotate-90"
             />
-            분석 상세
+            {t("분석 상세")}
           </summary>
 
           {/* The leader's derivation, the one candidate whose score is not in
@@ -355,7 +380,10 @@ export function RcaReport({ row }: { row: AgentTask }) {
           {top && (
             <div className="mt-2">
               <div className="font-mono text-[11px] text-zinc-500">
-                1순위 순위 점수 {String(top.score ?? "-")}
+                {t("1순위 순위 점수 {n}").replace(
+                  "{n}",
+                  String(top.score ?? "-"),
+                )}
               </div>
               <RcaCandidateDetail
                 breakdown={top.score_breakdown}
@@ -373,7 +401,9 @@ export function RcaReport({ row }: { row: AgentTask }) {
 
           {result?.signals_examined && (
             <div className="mt-3">
-              <div className="text-[11px] text-zinc-500">검사한 신호 수</div>
+              <div className="text-[11px] text-zinc-500">
+                {t("검사한 신호 수")}
+              </div>
               <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 font-mono text-[11px] text-zinc-400">
                 {Object.entries(result.signals_examined).map(([src, cnt]) => (
                   <span key={src}>
@@ -387,10 +417,15 @@ export function RcaReport({ row }: { row: AgentTask }) {
           {task.trace && task.trace.length > 0 && (
             <div className="mt-3">
               <div className="flex items-center gap-3">
-                <span className="text-[11px] text-zinc-500">실행 추적</span>
+                <span className="text-[11px] text-zinc-500">
+                  {t("실행 추적")}
+                </span>
                 {task.duration_ms != null && (
                   <span className="font-mono text-[11px] text-zinc-500">
-                    총 {(Number(task.duration_ms) / 1000).toFixed(1)}s
+                    {t("총 {n}s").replace(
+                      "{n}",
+                      (Number(task.duration_ms) / 1000).toFixed(1),
+                    )}
                   </span>
                 )}
               </div>

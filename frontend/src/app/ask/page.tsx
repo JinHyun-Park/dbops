@@ -161,7 +161,9 @@ export default function AskPage() {
     const compiled = compile(query);
     if (!compiled) {
       setErr(
-        "쿼리에서 metric을 찾지 못했습니다. 'CPU', 'AAS', 'storage', 'deadlock', 'connection' 같은 단어가 포함돼야 합니다.",
+        t(
+          "쿼리에서 metric을 찾지 못했습니다. 'CPU', 'AAS', 'storage', 'deadlock', 'connection' 같은 단어가 포함돼야 합니다.",
+        ),
       );
       return;
     }
@@ -215,21 +217,21 @@ export default function AskPage() {
       >
         <label className="block">
           <div className="text-[11px] font-medium text-zinc-500 mb-2">
-            질문 (자연어)
+            {t("질문 (자연어)")}
           </div>
           <div className="flex gap-2">
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="예: 최근 24시간 동안 CPU 80% 넘은 클러스터"
+              placeholder={t("예: 최근 24시간 동안 CPU 80% 넘은 클러스터")}
               className="flex-1 bg-zinc-950 border border-zinc-700 text-zinc-200 text-sm px-3 py-2 font-mono focus:outline-none focus:border-amber-500/60"
             />
             <button
               type="submit"
               className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
             >
-              물어보기
+              {t("물어보기")}
             </button>
           </div>
         </label>
@@ -254,9 +256,12 @@ export default function AskPage() {
 
       {spec && (
         <Section
-          eyebrow="결과"
-          title={`매칭 클러스터 ${matched.length}개`}
-          description={describeSpec(spec)}
+          eyebrow={t("결과")}
+          title={t("매칭 클러스터 {n}개").replace(
+            "{n}",
+            String(matched.length),
+          )}
+          description={describeSpec(spec, t)}
           actions={
             <SaveViewButton
               spec={spec}
@@ -279,7 +284,7 @@ export default function AskPage() {
             </div>
           )}
           {loading ? (
-            <div className="text-zinc-500 text-sm">불러오는 중…</div>
+            <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
           ) : matched.length === 0 ? (
             <EmptyState
               title={t("조건을 만족하는 클러스터 없음")}
@@ -296,7 +301,7 @@ export default function AskPage() {
       )}
 
       {savedViews.length > 0 && (
-        <Section eyebrow="저장된 뷰" title="Saved views">
+        <Section eyebrow={t("저장된 뷰")} title="Saved views">
           <ul className="border border-zinc-800 bg-zinc-900/40 divide-y divide-zinc-800">
             {savedViews
               .slice()
@@ -319,7 +324,7 @@ export default function AskPage() {
                       {v.name}
                     </div>
                     <div className="text-[11px] text-zinc-500 font-mono">
-                      {describeSpec(v.spec)}
+                      {describeSpec(v.spec, t)}
                     </div>
                   </button>
                   <button
@@ -329,7 +334,7 @@ export default function AskPage() {
                     }
                     className="text-[11px] text-rose-400 hover:text-rose-300"
                   >
-                    삭제
+                    {t("삭제")}
                   </button>
                 </li>
               ))}
@@ -355,9 +360,10 @@ function StructuredEditor({
 }) {
   // Updating any field rewrites `raw` so the NL input + chips stay in
   // sync; the user gets to refine via either surface.
+  const t = useT();
   const update = (patch: Partial<FilterSpec>) => {
     const next = { ...spec, ...patch };
-    onChange({ ...next, raw: describeSpec(next) });
+    onChange({ ...next, raw: describeSpec(next, t) });
   };
   return (
     <div className="mt-4 pt-4 border-t border-zinc-800 grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
@@ -412,7 +418,7 @@ function StructuredEditor({
         onClick={onRerun}
         className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500 hover:text-amber-300 transition-colors"
       >
-        다시 실행
+        {t("다시 실행")}
       </button>
     </div>
   );
@@ -461,6 +467,7 @@ function SaveViewButton({
   onSave: (name: string) => void;
   onError: (msg: string | null) => void;
 }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   if (!editing) {
@@ -469,12 +476,12 @@ function SaveViewButton({
         type="button"
         onClick={() => {
           onError(null);
-          setName(describeSpec(spec).slice(0, 40));
+          setName(describeSpec(spec, t).slice(0, 40));
           setEditing(true);
         }}
         className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500 hover:text-amber-300 transition-colors"
       >
-        + 뷰 저장
+        {t("+ 뷰 저장")}
       </button>
     );
   }
@@ -484,7 +491,7 @@ function SaveViewButton({
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="뷰 이름"
+        placeholder={t("뷰 이름")}
         className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 w-44"
       />
       <button
@@ -492,11 +499,11 @@ function SaveViewButton({
         onClick={() => {
           const trimmed = name.trim();
           if (!trimmed) {
-            onError("이름이 비어있습니다");
+            onError(t("이름이 비어있습니다"));
             return;
           }
           if (savedViews.some((v) => v.name === trimmed)) {
-            onError("같은 이름의 뷰가 이미 있습니다. 덮어쓸까요?");
+            onError(t("같은 이름의 뷰가 이미 있습니다. 덮어쓸까요?"));
           }
           onSave(trimmed);
           setEditing(false);
@@ -504,7 +511,7 @@ function SaveViewButton({
         }}
         className="text-xs px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400"
       >
-        저장
+        {t("저장")}
       </button>
       <button
         type="button"
@@ -514,7 +521,7 @@ function SaveViewButton({
         }}
         className="text-xs text-zinc-500 hover:text-zinc-300"
       >
-        취소
+        {t("취소")}
       </button>
     </div>
   );
@@ -538,10 +545,10 @@ function formatMetric(m: Metric, v: ClusterRow[Metric]): string {
   return fmtExact(Math.round(n));
 }
 
-function describeSpec(spec: FilterSpec): string {
+function describeSpec(spec: FilterSpec, t: (ko: string) => string): string {
   const unit =
     spec.metric === "cpu" ? "%" : spec.metric === "storage_bytes" ? " GB" : "";
   return `${metricLabel(spec.metric)} ${spec.comparison} ${
     spec.threshold
-  }${unit}, 최근 ${spec.hours}h`;
+  }${unit}${t(", 최근 {n}h").replace("{n}", String(spec.hours))}`;
 }

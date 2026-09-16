@@ -5,7 +5,38 @@
  * rendered for a human.
  */
 
+import { detectLocale, translate } from "@/lib/i18n";
+
 const NUMBER_FORMATTER = new Intl.NumberFormat("en-US");
+
+/**
+ * i18n for a NON-COMPONENT module. `t()` is a hook, so a plain `.ts` helper
+ * (this file, api-client, report-download, ...) cannot call it; `translate()`
+ * is the plain-function form of the same lookup. `{n}` in the key is the one
+ * interpolated value. A missing entry falls back to the Korean key unchanged.
+ *
+ * Wrap at the RENDER site with `t()` wherever you are inside a component.
+ * This is only for the modules that have no component to sit in.
+ */
+export function tr(ko: string, n?: number | string): string {
+  const s = translate(detectLocale(), ko);
+  return n === undefined ? s : s.replace("{n}", String(n));
+}
+
+/**
+ * BCP-47 tag for `Intl` / `toLocale*String`, following the same ko/en toggle
+ * the copy follows. Seven call sites hardcoded "ko-KR", so an English operator
+ * read "2026. 9. 17. 오후 3:24" in a row of otherwise English text. en-CA
+ * because it is the ISO-ish form (2026-09-17, 24h) and unambiguous next to a
+ * log line, unlike en-US month/day.
+ *
+ * ponytail: a tag, not a wrapper per Intl option set. The six date sites each
+ * pass their own options and there is no shape shared by more than two of
+ * them, so a formatter-per-shape helper would be five helpers with one caller.
+ */
+export function localeTag(): string {
+  return detectLocale() === "ko" ? "ko-KR" : "en-CA";
+}
 
 /**
  * Human-readable count: 1234 → "1.2k", 1_234_567 → "1.2M", 1_234_567_890 → "1.23B".
@@ -132,11 +163,11 @@ export function fmtAgoKo(ms: number | string | null | undefined): string {
   const n = typeof ms === "number" ? ms : Number(ms);
   if (!Number.isFinite(n)) return "-";
   const diff = Date.now() - n;
-  if (diff < 0) return "방금";
-  if (diff < 60_000) return "방금";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}분 전`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}시간 전`;
-  return `${Math.floor(diff / 86_400_000)}일 전`;
+  if (diff < 0) return tr("방금");
+  if (diff < 60_000) return tr("방금");
+  if (diff < 3_600_000) return tr("{n}분 전", Math.floor(diff / 60_000));
+  if (diff < 86_400_000) return tr("{n}시간 전", Math.floor(diff / 3_600_000));
+  return tr("{n}일 전", Math.floor(diff / 86_400_000));
 }
 
 /** Wall-clock timestamp for a tooltip or a metadata line, from an ms-epoch
@@ -147,7 +178,9 @@ export function fmtClockKo(v: number | string | null | undefined): string {
   const n = typeof v === "number" ? v : Number(v);
   const d = Number.isFinite(n) ? new Date(n) : new Date(String(v));
   if (Number.isNaN(d.getTime())) return String(v);
-  return d.toLocaleString("ko-KR", {
+  // Not a wrappable literal, but "오후 03:24" is still Korean on screen, so the
+  // locale tag follows the same toggle the copy does.
+  return d.toLocaleString(localeTag(), {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

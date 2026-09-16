@@ -55,7 +55,9 @@ export default function AdminUsersPage() {
     const label = u.email || u.username;
     if (
       !window.confirm(
-        `${label} 사용자의 역할을 '${role}'(으)로 변경하시겠습니까?`,
+        t("{u} 사용자의 역할을 '{r}'(으)로 변경하시겠습니까?")
+          .replace("{u}", label)
+          .replace("{r}", role),
       )
     )
       return;
@@ -111,7 +113,7 @@ export default function AdminUsersPage() {
       )}
 
       {loading && items.length === 0 ? (
-        <div className="text-sm text-zinc-500">불러오는 중…</div>
+        <div className="text-sm text-zinc-500">{t("불러오는 중…")}</div>
       ) : items.length === 0 ? (
         <Section>
           <EmptyState
@@ -121,7 +123,7 @@ export default function AdminUsersPage() {
           />
         </Section>
       ) : (
-        <Section eyebrow="Identity" title="사용자">
+        <Section eyebrow="Identity" title={t("사용자")}>
           <div className="border border-zinc-800 bg-zinc-900/30">
             <table className="w-full text-sm">
               <thead>
@@ -129,7 +131,9 @@ export default function AdminUsersPage() {
                   <th className="px-4 py-2.5 font-medium">Email</th>
                   <th className="px-4 py-2.5 font-medium">Status</th>
                   <th className="px-4 py-2.5 font-medium">Role</th>
-                  <th className="px-4 py-2.5 font-medium text-right">변경</th>
+                  <th className="px-4 py-2.5 font-medium text-right">
+                    {t("변경")}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -148,14 +152,16 @@ export default function AdminUsersPage() {
                         )}
                         {isSelf && (
                           <span className="ml-2 text-[10px] text-emerald-400/80">
-                            (나)
+                            {t("(나)")}
                           </span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-zinc-400">
                         {u.status}
                         {!u.enabled && (
-                          <span className="ml-1 text-rose-400">(비활성)</span>
+                          <span className="ml-1 text-rose-400">
+                            {t("(비활성)")}
+                          </span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -170,7 +176,7 @@ export default function AdminUsersPage() {
                         </span>
                         {u.implicit && (
                           <span className="ml-2 text-[10px] text-zinc-500">
-                            (암묵: 명시 역할 미지정)
+                            {t("(암묵: 명시 역할 미지정)")}
                           </span>
                         )}
                       </td>
@@ -180,7 +186,7 @@ export default function AdminUsersPage() {
                           disabled={isSelf || busy === u.username}
                           title={
                             isSelf
-                              ? "자신의 역할은 변경할 수 없습니다"
+                              ? t("자신의 역할은 변경할 수 없습니다")
                               : undefined
                           }
                           onChange={(e) =>
@@ -208,7 +214,7 @@ export default function AdminUsersPage() {
               disabled={loading}
               className="mt-4 text-xs text-zinc-400 hover:text-zinc-200 border border-zinc-700 px-3 py-1.5 rounded disabled:opacity-40"
             >
-              더 불러오기
+              {t("더 불러오기")}
             </button>
           )}
         </Section>

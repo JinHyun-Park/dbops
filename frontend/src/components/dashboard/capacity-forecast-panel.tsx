@@ -8,6 +8,7 @@ import {
 } from "@/lib/api-client";
 import { fmtDecimal } from "@/lib/format";
 import { engineFamily } from "@/lib/engine";
+import { useT } from "@/lib/i18n";
 
 type MetricSpec = {
   key: CapacityMetric;
@@ -122,6 +123,7 @@ export function CapacityForecastPanel({
   clusterId: string;
   engine?: string;
 }) {
+  const t = useT();
   const metrics = useMemo(() => metricsFor(engine), [engine]);
   const defaultMetric = metrics[0].key;
 
@@ -194,9 +196,9 @@ export function CapacityForecastPanel({
             Capacity Forecast
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            최근 30일 metric_snapshots 선형 회귀로 30/60/90일 후 사용량 + 한도
-            도달 시점 추정. 값이 한도로 늘어나는 경우와 0으로 줄어드는 경우를
-            모두 다룹니다.
+            {t(
+              "최근 30일 metric_snapshots 선형 회귀로 30/60/90일 후 사용량 + 한도 도달 시점 추정. 값이 한도로 늘어나는 경우와 0으로 줄어드는 경우를 모두 다룹니다.",
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -210,14 +212,14 @@ export function CapacityForecastPanel({
                   : "border-zinc-800 text-zinc-500 hover:text-zinc-300"
               }`}
             >
-              {m.label}
+              {t(m.label)}
             </button>
           ))}
         </div>
       </div>
 
       {loading && !data && (
-        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
+        <div className="p-6 text-zinc-500 text-sm">{t("불러오는 중…")}</div>
       )}
       {err && (
         <div className="p-5">
@@ -240,15 +242,16 @@ export function CapacityForecastPanel({
         <div className="p-5">
           <div className="text-xs text-zinc-400 border border-zinc-700 bg-zinc-900/40 px-3 py-2">
             {data.reason ??
-              "이 지표는 현재 클러스터에서 용량 예측을 제공하지 않습니다."}
+              t("이 지표는 현재 클러스터에서 용량 예측을 제공하지 않습니다.")}
           </div>
         </div>
       )}
       {data && !data.error && !refused && data.samples < 7 && (
         <div className="p-5">
           <div className="text-xs text-zinc-400 border border-zinc-700 bg-zinc-900/40 px-3 py-2">
-            데이터 부족 ({data.samples}개 샘플). 신뢰성 있는 예측을 위해 최소
-            7개 이상의 일별 데이터 포인트가 필요합니다.
+            {t(
+              "데이터 부족 ({n}개 샘플). 신뢰성 있는 예측을 위해 최소 7개 이상의 일별 데이터 포인트가 필요합니다.",
+            ).replace("{n}", String(data.samples))}
           </div>
         </div>
       )}
@@ -258,7 +261,7 @@ export function CapacityForecastPanel({
           <div className="flex items-end justify-between gap-4 flex-wrap">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-                {down ? "현재 여유" : "현재"}
+                {down ? t("현재 여유") : t("현재")}
               </div>
               <div className="text-3xl text-zinc-100 tabular-nums">
                 {cur!.value}
@@ -275,19 +278,20 @@ export function CapacityForecastPanel({
                 {usagePct != null && (
                   <>
                     {down
-                      ? "할당 대비 "
+                      ? t("할당 대비") + " "
                       : lim
-                        ? `한도 ${lim.value}${
-                            lim.suffix ? ` ${lim.suffix}` : ""
-                          } 중 `
+                        ? t("한도 {n} 중").replace(
+                            "{n}",
+                            `${lim.value}${lim.suffix ? ` ${lim.suffix}` : ""}`,
+                          ) + " "
                         : ""}
-                    {usagePct.toFixed(1)}% 사용,{" "}
+                    {t("{n}% 사용,").replace("{n}", usagePct.toFixed(1))}{" "}
                   </>
                 )}
                 {usagePct == null && data.grounded === false && (
-                  <>한도 미확인, </>
+                  <>{t("한도 미확인,")} </>
                 )}
-                <span className={trend.cls}>{trend.text}</span>
+                <span className={trend.cls}>{t(trend.text)}</span>
               </div>
             </div>
 
@@ -295,40 +299,44 @@ export function CapacityForecastPanel({
               className={`px-3 py-2 border ${urgency.border} ${urgency.bg}`}
               title={
                 data.days_until_limit != null
-                  ? `현재 추세대로면 ${data.days_until_limit}일 후 ${
-                      down ? "소진" : "한도 도달"
-                    }`
+                  ? t("현재 추세대로면 {n}일 후 {x}")
+                      .replace("{n}", String(data.days_until_limit))
+                      .replace("{x}", down ? t("소진") : t("한도 도달"))
                   : data.reason ??
                     (down
-                      ? "현재 추세대로면 소진하지 않음"
-                      : "현재 추세대로면 한도에 도달하지 않음")
+                      ? t("현재 추세대로면 소진하지 않음")
+                      : t("현재 추세대로면 한도에 도달하지 않음"))
               }
             >
               <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-                {down ? "소진 예상" : "한도 도달"}
+                {down ? t("소진 예상") : t("한도 도달")}
               </div>
               <div className={`text-base font-medium ${urgency.text}`}>
                 {data.status === "limit_reached"
                   ? down
-                    ? "이미 소진"
-                    : "이미 한도"
+                    ? t("이미 소진")
+                    : t("이미 한도")
                   : data.status === "evicting"
-                    ? "eviction 중"
+                    ? t("eviction 중")
                     : data.days_until_limit != null
-                      ? `${data.days_until_limit}일 후`
+                      ? t("{n}일 후").replace(
+                          "{n}",
+                          String(data.days_until_limit),
+                        )
                       : data.grounded === false
-                        ? "예측 보류"
+                        ? t("예측 보류")
                         : down
-                          ? "소진 예상 없음"
-                          : "예측 한도 안전"}
+                          ? t("소진 예상 없음")
+                          : t("예측 한도 안전")}
               </div>
               <div className="text-[10px] text-zinc-500 mt-0.5">
-                {urgency.label}, 추세 {data.slope_per_day >= 0 ? "+" : "-"}
+                {t(urgency.label)}
+                {t(", 추세")} {data.slope_per_day >= 0 ? "+" : "-"}
                 {metricSpec.format(Math.abs(data.slope_per_day)).value}
                 {metricSpec.format(Math.abs(data.slope_per_day)).suffix && (
                   <> {metricSpec.format(Math.abs(data.slope_per_day)).suffix}</>
                 )}
-                /일
+                {t("/일")}
               </div>
             </div>
           </div>
@@ -356,7 +364,7 @@ export function CapacityForecastPanel({
                 <span>{usagePct.toFixed(1)}%</span>
                 <span>
                   {down
-                    ? "할당 100%"
+                    ? t("할당 100%")
                     : lim
                       ? `${lim.value}${lim.suffix ? ` ${lim.suffix}` : ""}`
                       : "100%"}
@@ -378,8 +386,8 @@ export function CapacityForecastPanel({
                   className="border border-zinc-800 bg-zinc-950 px-3 py-2"
                 >
                   <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-                    {p.label}
-                    {down && " 여유"}
+                    {t(p.label)}
+                    {down && ` ${t("여유")}`}
                   </div>
                   <div className="text-base text-zinc-100 mt-0.5 tabular-nums">
                     {p.value.value}
@@ -395,10 +403,12 @@ export function CapacityForecastPanel({
           )}
 
           <div className="text-[10px] text-zinc-600 font-mono">
-            기준: 최근 {data.days_lookback ?? 30}일, {data.samples}개 샘플
+            {t("기준: 최근 {a}일, {b}개 샘플")
+              .replace("{a}", String(data.days_lookback ?? 30))
+              .replace("{b}", String(data.samples))}
             {data.metric_type && `, ${data.metric_type}`}
-            {data.limit_basis && `, ${data.limit_basis}`}, 단순 선형 회귀
-            (시즌성/스파이크 미반영)
+            {data.limit_basis && `, ${data.limit_basis}`}
+            {t(", 단순 선형 회귀 (시즌성/스파이크 미반영)")}
           </div>
         </div>
       )}

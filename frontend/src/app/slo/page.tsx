@@ -162,7 +162,7 @@ export default function SloPage() {
 
           {!data && !loading && !err && (
             <div className="mt-6 text-zinc-500 text-sm">
-              데이터를 불러오는 중…
+              {t("데이터를 불러오는 중…")}
             </div>
           )}
         </>
@@ -184,6 +184,7 @@ function ConfigBar({
   onChange: (patch: Partial<SloConfig>) => void;
   loading: boolean;
 }) {
+  const t = useT();
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 px-4 py-3 flex flex-wrap items-center gap-4">
       <div className="flex items-center gap-2">
@@ -239,7 +240,9 @@ function ConfigBar({
           ))}
         </div>
         {loading && (
-          <span className="text-[10px] text-zinc-500 ml-2">로딩 중…</span>
+          <span className="text-[10px] text-zinc-500 ml-2">
+            {t("로딩 중…")}
+          </span>
         )}
       </div>
     </div>
@@ -251,6 +254,7 @@ function ConfigBar({
 // ---------------------------------------------------------------------------
 
 function AvailabilityCard({ data }: { data: SloResponse }) {
+  const t = useT();
   const a = data.availability;
   const meeting = a.actual_pct >= a.target_pct;
   const budget = a.budget_consumed_pct;
@@ -265,9 +269,9 @@ function AvailabilityCard({ data }: { data: SloResponse }) {
             ? "amber"
             : "rose"
       }
-      subtitle={`target ${fmtDecimal(a.target_pct, 2)}%, 윈도우 ${
-        data.window_days
-      }d`}
+      subtitle={t("target {a}%, 윈도우 {b}d")
+        .replace("{a}", fmtDecimal(a.target_pct, 2))
+        .replace("{b}", String(data.window_days))}
       budgetConsumedPct={budget}
       footer={
         <div className="grid grid-cols-3 gap-3 text-[11px]">
@@ -298,6 +302,7 @@ function AvailabilityCard({ data }: { data: SloResponse }) {
 }
 
 function LatencyCard({ data, engine }: { data: SloResponse; engine?: string }) {
+  const t = useT();
   const l = data.latency;
   const hasData = l.compliance_pct !== null;
   const meeting = (l.compliance_pct ?? 0) >= data.availability.target_pct;
@@ -314,9 +319,9 @@ function LatencyCard({ data, engine }: { data: SloResponse; engine?: string }) {
               ? "amber"
               : "rose"
       }
-      subtitle={`avg(mean_time_ms) ≤ ${fmtExact(l.target_ms)}ms, 윈도우 ${
-        data.window_days
-      }d`}
+      subtitle={t("avg(mean_time_ms) ≤ {a}ms, 윈도우 {b}d")
+        .replace("{a}", fmtExact(l.target_ms))
+        .replace("{b}", String(data.window_days))}
       budgetConsumedPct={l.budget_consumed_pct}
       footer={
         <div className="grid grid-cols-3 gap-3 text-[11px]">
@@ -348,11 +353,14 @@ function LatencyCard({ data, engine }: { data: SloResponse; engine?: string }) {
       }
       emptyNote={
         !hasData
-          ? `이 윈도우에서 query_stats 샘플 없음. ${
+          ? t("이 윈도우에서 query_stats 샘플 없음. {n} 확인하세요.").replace(
+              "{n}",
               isMysql(engine)
-                ? "performance_schema 문장 수집(events_statements_*)이 켜져 있는지"
-                : "pg_stat_statements 수집이 켜져 있는지"
-            } 확인하세요.`
+                ? t(
+                    "performance_schema 문장 수집(events_statements_*)이 켜져 있는지",
+                  )
+                : t("pg_stat_statements 수집이 켜져 있는지"),
+            )
           : undefined
       }
     />
@@ -414,6 +422,7 @@ function SloCard({
 }
 
 function BudgetBar({ consumedPct }: { consumedPct: number | null }) {
+  const t = useT();
   if (consumedPct === null) {
     return (
       <div>
@@ -459,10 +468,10 @@ function BudgetBar({ consumedPct }: { consumedPct: number | null }) {
       </div>
       <div className="text-[10px] text-zinc-600 mt-1">
         {consumedPct >= 100
-          ? "버짓 소진: 신규 배포 보류 권장"
+          ? t("버짓 소진: 신규 배포 보류 권장")
           : consumedPct >= 50
-            ? "버짓 절반 이상 소진: 변경 일정 재검토"
-            : "버짓 여유"}
+            ? t("버짓 절반 이상 소진: 변경 일정 재검토")
+            : t("버짓 여유")}
       </div>
     </div>
   );
@@ -499,6 +508,7 @@ function Stat({
 // ---------------------------------------------------------------------------
 
 function Timeline({ buckets }: { buckets: SloDayBucket[] }) {
+  const t = useT();
   const hasAny = useMemo(() => buckets.some((b) => !b.no_data), [buckets]);
 
   if (buckets.length === 0) return null;
@@ -508,17 +518,17 @@ function Timeline({ buckets }: { buckets: SloDayBucket[] }) {
       <div className="px-4 py-3 border-b border-zinc-800 flex items-baseline justify-between">
         <div>
           <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-            일별 타임라인
+            {t("일별 타임라인")}
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            각 칸 = 하루. 좌측이 가장 오래된 날.
+            {t("각 칸 = 하루. 좌측이 가장 오래된 날.")}
           </div>
         </div>
         <div className="flex items-center gap-3 text-[10px] text-zinc-500">
-          <LegendDot tone="emerald" label="정상" />
-          <LegendDot tone="amber" label="가용성 미달" />
-          <LegendDot tone="rose" label="지연 미달" />
-          <LegendDot tone="zinc" label="데이터 없음" />
+          <LegendDot tone="emerald" label={t("정상")} />
+          <LegendDot tone="amber" label={t("가용성 미달")} />
+          <LegendDot tone="rose" label={t("지연 미달")} />
+          <LegendDot tone="zinc" label={t("데이터 없음")} />
         </div>
       </div>
       <div className="p-4 grid grid-cols-2 gap-4">
@@ -537,7 +547,7 @@ function Timeline({ buckets }: { buckets: SloDayBucket[] }) {
       </div>
       {!hasAny && (
         <div className="px-4 pb-3 text-[11px] text-amber-300/80">
-          전 기간 데이터 없음. ETL 수집기가 동작 중인지 확인하세요.
+          {t("전 기간 데이터 없음. ETL 수집기가 동작 중인지 확인하세요.")}
         </div>
       )}
     </div>
@@ -551,6 +561,7 @@ function Strip({
   buckets: SloDayBucket[];
   kind: "availability" | "latency";
 }) {
+  const t = useT();
   return (
     <div className="flex gap-[2px] flex-wrap">
       {buckets.map((b) => {
@@ -573,7 +584,9 @@ function Strip({
         return (
           <div
             key={b.day}
-            title={noData ? `${b.day}, 데이터 없음` : titleMain}
+            title={
+              noData ? t("{n}, 데이터 없음").replace("{n}", b.day) : titleMain
+            }
             className={`w-4 h-6 border ${tone}`}
           />
         );

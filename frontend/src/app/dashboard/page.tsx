@@ -538,7 +538,7 @@ export default function DashboardPage() {
               title={
                 range.kind === "custom"
                   ? rangeLabel(range)
-                  : "임의 시간 범위 지정"
+                  : t("임의 시간 범위 지정")
               }
             >
               {range.kind === "custom" ? rangeLabel(range) : "custom"}
@@ -563,7 +563,7 @@ export default function DashboardPage() {
                   ? "bg-amber-500 text-zinc-950"
                   : "border border-zinc-700 text-zinc-400 hover:text-zinc-100"
               }`}
-              title="자주 보는 클러스터 + range 조합을 핀으로 저장"
+              title={t("자주 보는 클러스터 + range 조합을 핀으로 저장")}
             >
               ★ Views
               {views.length > 0 && (
@@ -610,9 +610,9 @@ export default function DashboardPage() {
               demo
             </span>
             <span>
-              합성 데이터로 채워진 데모 클러스터입니다. 실제 Aurora가 아니라
-              평가용 24시간 시드 데이터를 보고 있습니다. Clusters 페이지에서
-              언제든 삭제 가능합니다.
+              {t(
+                "합성 데이터로 채워진 데모 클러스터입니다. 실제 Aurora가 아니라 평가용 24시간 시드 데이터를 보고 있습니다. Clusters 페이지에서 언제든 삭제 가능합니다.",
+              )}
             </span>
           </div>
         )}
@@ -649,7 +649,7 @@ export default function DashboardPage() {
                     : "bg-zinc-900/60 text-zinc-400 hover:text-zinc-100"
                 }`}
               >
-                {d.label}
+                {t(d.label)}
               </button>
             ))}
           </div>
@@ -671,13 +671,16 @@ export default function DashboardPage() {
                             <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">
                               <div className="flex items-center justify-between mb-3 gap-3">
                                 <div className="text-sm text-zinc-200 font-medium">
-                                  클러스터 정보
+                                  {t("클러스터 정보")}
                                 </div>
                                 <div className="flex items-center gap-2">
                                   {/* Engine badge available immediately from clusters list */}
                                   <span
                                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 border text-[11px] font-mono uppercase tracking-wider ${badge.classes}`}
-                                    title={`엔진: ${activeEngine || "unknown"}`}
+                                    title={t("엔진: {n}").replace(
+                                      "{n}",
+                                      activeEngine || "unknown",
+                                    )}
                                   >
                                     <span
                                       className={`w-1.5 h-1.5 rounded-full ${badge.accent}`}
@@ -697,7 +700,7 @@ export default function DashboardPage() {
                                 ).map((label) => (
                                   <div key={label}>
                                     <div className="text-zinc-500 text-xs mb-1">
-                                      {label}
+                                      {t(label)}
                                     </div>
                                     <div className="h-4 w-20 rounded bg-zinc-700 animate-pulse" />
                                   </div>
@@ -717,12 +720,15 @@ export default function DashboardPage() {
                           <div className="lg:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-4">
                             <div className="flex items-center justify-between mb-3 gap-3">
                               <div className="text-sm text-zinc-200 font-medium">
-                                클러스터 정보
+                                {t("클러스터 정보")}
                               </div>
                               <div className="flex items-center gap-2">
                                 <span
                                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 border text-[11px] font-mono uppercase tracking-wider ${badge.classes}`}
-                                  title={`엔진: ${activeEngine || "unknown"}`}
+                                  title={t("엔진: {n}").replace(
+                                    "{n}",
+                                    activeEngine || "unknown",
+                                  )}
                                 >
                                   <span
                                     className={`w-1.5 h-1.5 rounded-full ${badge.accent}`}
@@ -753,7 +759,7 @@ export default function DashboardPage() {
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
                               <div>
                                 <div className="text-zinc-500 text-xs mb-1">
-                                  상태
+                                  {t("상태")}
                                 </div>
                                 <div className="text-emerald-400">
                                   {dashboardData.cluster?.status || "-"}
@@ -761,7 +767,7 @@ export default function DashboardPage() {
                               </div>
                               <div>
                                 <div className="text-zinc-500 text-xs mb-1">
-                                  인스턴스
+                                  {t("인스턴스")}
                                 </div>
                                 <div className="text-zinc-100 font-mono text-xs">
                                   {dashboardData.cluster?.instance_class || "-"}
@@ -769,7 +775,7 @@ export default function DashboardPage() {
                               </div>
                               <div>
                                 <div className="text-zinc-500 text-xs mb-1">
-                                  스토리지
+                                  {t("스토리지")}
                                 </div>
                                 <div className="text-zinc-100">
                                   {dashboardData.cluster?.storage_size_gb ??
@@ -1171,6 +1177,7 @@ function SavedViewsPopover({
   onRemove: (id: string) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const [name, setName] = useState("");
   const submit = () => {
     if (!name.trim()) return;
@@ -1186,17 +1193,17 @@ function SavedViewsPopover({
         <button
           onClick={onClose}
           className="text-zinc-500 hover:text-zinc-200 text-base leading-none"
-          aria-label="닫기"
+          aria-label={t("닫기")}
         >
           ×
         </button>
       </div>
       <div className="px-4 py-3 border-b border-zinc-800 space-y-2">
         <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-          현재 화면 저장
+          {t("현재 화면 저장")}
         </div>
         <div className="text-[11px] text-zinc-400 break-all">
-          {currentSummary || "클러스터 선택 후 저장 가능"}
+          {currentSummary || t("클러스터 선택 후 저장 가능")}
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -1205,7 +1212,9 @@ function SavedViewsPopover({
             onKeyDown={(e) => {
               if (e.key === "Enter") submit();
             }}
-            placeholder="이름 (예: prod-write incident, weekend ETL window)"
+            placeholder={t(
+              "이름 (예: prod-write incident, weekend ETL window)",
+            )}
             className="flex-1 bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 focus:outline-none focus:border-amber-500/60"
           />
           <button
@@ -1213,14 +1222,16 @@ function SavedViewsPopover({
             disabled={!canSave || !name.trim()}
             className="text-xs font-medium px-3 py-1.5 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:bg-zinc-700 disabled:text-zinc-500 transition-colors"
           >
-            핀
+            {t("핀")}
           </button>
         </div>
       </div>
       <div className="max-h-72 overflow-y-auto">
         {views.length === 0 ? (
           <div className="px-4 py-6 text-center text-zinc-500">
-            아직 저장된 view 없음, 위 입력란에 이름을 적고 [핀]을 누르세요
+            {t(
+              "아직 저장된 view 없음, 위 입력란에 이름을 적고 [핀]을 누르세요",
+            )}
           </div>
         ) : (
           <ul className="divide-y divide-zinc-800">
@@ -1238,13 +1249,16 @@ function SavedViewsPopover({
                     {v.cluster_id},{" "}
                     {v.range.kind === "preset"
                       ? `${v.range.hours}h`
-                      : `${new Date(v.range.from).toLocaleDateString()} 범위`}
+                      : t("{n} 범위").replace(
+                          "{n}",
+                          new Date(v.range.from).toLocaleDateString(),
+                        )}
                   </div>
                 </button>
                 <button
                   onClick={() => onRemove(v.id)}
                   className="text-zinc-500 hover:text-rose-300 text-[11px] flex-shrink-0"
-                  title="이 view 삭제"
+                  title={t("이 view 삭제")}
                 >
                   ×
                 </button>
@@ -1284,27 +1298,28 @@ function CustomRangePopover({
     };
   })();
 
+  const t = useT();
   const [from, setFrom] = useState(seed.from);
   const [to, setTo] = useState(seed.to);
   const [err, setErr] = useState<string | null>(null);
 
   const apply = () => {
     if (!from || !to) {
-      setErr("시작과 종료 시각을 모두 입력하세요.");
+      setErr(t("시작과 종료 시각을 모두 입력하세요."));
       return;
     }
     const fromMs = new Date(from).getTime();
     const toMs = new Date(to).getTime();
     if (Number.isNaN(fromMs) || Number.isNaN(toMs)) {
-      setErr("유효한 시간 형식이 아닙니다.");
+      setErr(t("유효한 시간 형식이 아닙니다."));
       return;
     }
     if (toMs <= fromMs) {
-      setErr("종료 시각은 시작 시각보다 늦어야 합니다.");
+      setErr(t("종료 시각은 시작 시각보다 늦어야 합니다."));
       return;
     }
     if (toMs - fromMs > 30 * 86_400_000) {
-      setErr("최대 30일 범위까지 조회 가능합니다.");
+      setErr(t("최대 30일 범위까지 조회 가능합니다."));
       return;
     }
     onApply({
@@ -1322,7 +1337,7 @@ function CustomRangePopover({
       <div className="space-y-3">
         <div>
           <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-            시작
+            {t("시작")}
           </label>
           <input
             type="datetime-local"
@@ -1333,7 +1348,7 @@ function CustomRangePopover({
         </div>
         <div>
           <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-            종료
+            {t("종료")}
           </label>
           <input
             type="datetime-local"
@@ -1349,20 +1364,20 @@ function CustomRangePopover({
         )}
         <div className="flex items-center justify-between pt-1">
           <div className="text-[10px] text-zinc-500">
-            URL에 from/to로 인코딩되어 공유 가능
+            {t("URL에 from/to로 인코딩되어 공유 가능")}
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={onCancel}
               className="text-zinc-400 hover:text-zinc-200 px-2 py-1"
             >
-              취소
+              {t("취소")}
             </button>
             <button
               onClick={apply}
               className="text-xs font-medium px-3 py-1.5 bg-amber-500 text-zinc-950 hover:bg-amber-400"
             >
-              적용
+              {t("적용")}
             </button>
           </div>
         </div>

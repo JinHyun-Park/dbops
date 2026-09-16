@@ -74,7 +74,10 @@ export default function AdminTeamsPage() {
       .then((d) => setAllUsers(d.items))
       .catch((e: unknown) =>
         setError(
-          `멤버 후보 조회 실패: ${e instanceof Error ? e.message : String(e)}`,
+          t("멤버 후보 조회 실패: {n}").replace(
+            "{n}",
+            e instanceof Error ? e.message : String(e),
+          ),
         ),
       );
     fetchClusters()
@@ -88,9 +91,10 @@ export default function AdminTeamsPage() {
       })
       .catch((e: unknown) =>
         setError(
-          `클러스터 목록 조회 실패: ${
-            e instanceof Error ? e.message : String(e)
-          }`,
+          t("클러스터 목록 조회 실패: {n}").replace(
+            "{n}",
+            e instanceof Error ? e.message : String(e),
+          ),
         ),
       );
   }, []);
@@ -139,7 +143,9 @@ export default function AdminTeamsPage() {
     if (!selected) return;
     if (
       !window.confirm(
-        `팀 '${selected.name}'을(를) 삭제하시겠습니까? 해당 팀에 할당된 클러스터는 할당 해제됩니다.`,
+        t(
+          "팀 '{n}'을(를) 삭제하시겠습니까? 해당 팀에 할당된 클러스터는 할당 해제됩니다.",
+        ).replace("{n}", selected.name),
       )
     )
       return;
@@ -161,7 +167,9 @@ export default function AdminTeamsPage() {
     if (!selected) return;
     if (
       !window.confirm(
-        `'${username}' 사용자를 팀 '${selected.name}'에서 제거하시겠습니까?`,
+        t("'{u}' 사용자를 팀 '{n}'에서 제거하시겠습니까?")
+          .replace("{u}", username)
+          .replace("{n}", selected.name),
       )
     )
       return;
@@ -194,7 +202,12 @@ export default function AdminTeamsPage() {
   const onUnassignCluster = async (clusterId: string) => {
     if (!selected) return;
     if (
-      !window.confirm(`클러스터 '${clusterId}'의 팀 할당을 해제하시겠습니까?`)
+      !window.confirm(
+        t("클러스터 '{n}'의 팀 할당을 해제하시겠습니까?").replace(
+          "{n}",
+          clusterId,
+        ),
+      )
     )
       return;
     setBusy(true);
@@ -272,9 +285,9 @@ export default function AdminTeamsPage() {
       )}
 
       {loading && teams.length === 0 ? (
-        <div className="text-sm text-zinc-500">불러오는 중…</div>
+        <div className="text-sm text-zinc-500">{t("불러오는 중…")}</div>
       ) : (
-        <Section eyebrow="Teams" title="팀 목록">
+        <Section eyebrow="Teams" title={t("팀 목록")}>
           {teams.length === 0 ? (
             <EmptyState
               eyebrow={t("비어 있음")}
@@ -286,34 +299,38 @@ export default function AdminTeamsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-[11px] uppercase tracking-wide text-zinc-500 border-b border-zinc-800">
-                    <th className="px-4 py-2.5 font-medium">이름</th>
-                    <th className="px-4 py-2.5 font-medium">멤버 수</th>
-                    <th className="px-4 py-2.5 font-medium text-right">관리</th>
+                    <th className="px-4 py-2.5 font-medium">{t("이름")}</th>
+                    <th className="px-4 py-2.5 font-medium">{t("멤버 수")}</th>
+                    <th className="px-4 py-2.5 font-medium text-right">
+                      {t("관리")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {teams.map((t) => (
+                  {teams.map((team) => (
                     <tr
-                      key={t.team_id}
+                      key={team.team_id}
                       className={`border-b border-zinc-800/60 last:border-0 cursor-pointer hover:bg-zinc-800/30 ${
-                        selected?.team_id === t.team_id ? "bg-zinc-800/50" : ""
+                        selected?.team_id === team.team_id
+                          ? "bg-zinc-800/50"
+                          : ""
                       }`}
-                      onClick={() => onSelectTeam(t)}
+                      onClick={() => onSelectTeam(team)}
                     >
-                      <td className="px-4 py-3 text-zinc-200">{t.name}</td>
+                      <td className="px-4 py-3 text-zinc-200">{team.name}</td>
                       <td className="px-4 py-3 text-zinc-400">
-                        {t.member_count}명
+                        {t("{n}명").replace("{n}", String(team.member_count))}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onSelectTeam(t);
+                            onSelectTeam(team);
                           }}
                           className="text-xs text-zinc-400 hover:text-zinc-200 border border-zinc-700 px-2 py-1 rounded"
                         >
-                          관리
+                          {t("관리")}
                         </button>
                       </td>
                     </tr>
@@ -330,7 +347,7 @@ export default function AdminTeamsPage() {
               value={newTeamName}
               onChange={(e) => setNewTeamName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && onCreateTeam()}
-              placeholder="새 팀 이름"
+              placeholder={t("새 팀 이름")}
               className="bg-zinc-800 border border-zinc-700 text-zinc-100 text-xs px-3 py-1.5 rounded w-48 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-500"
             />
             <button
@@ -339,7 +356,7 @@ export default function AdminTeamsPage() {
               disabled={creating || !newTeamName.trim()}
               className="text-xs text-zinc-200 bg-zinc-700 hover:bg-zinc-600 border border-zinc-600 px-3 py-1.5 rounded disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {creating ? "생성 중…" : "팀 만들기"}
+              {creating ? t("생성 중…") : t("팀 만들기")}
             </button>
           </div>
         </Section>
@@ -349,17 +366,17 @@ export default function AdminTeamsPage() {
       {selected && (
         <Section eyebrow="Team" title={selected.name}>
           {detailLoading ? (
-            <div className="text-sm text-zinc-500">불러오는 중…</div>
+            <div className="text-sm text-zinc-500">{t("불러오는 중…")}</div>
           ) : (
             <div className="space-y-6">
               {/* Members */}
               <div>
                 <h3 className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">
-                  멤버
+                  {t("멤버")}
                 </h3>
                 {selected.members.length === 0 ? (
                   <p className="text-xs text-zinc-500">
-                    이 팀에 멤버가 없습니다.
+                    {t("이 팀에 멤버가 없습니다.")}
                   </p>
                 ) : (
                   <div className="border border-zinc-800 bg-zinc-900/30">
@@ -386,7 +403,7 @@ export default function AdminTeamsPage() {
                                   onClick={() => onRemoveMember(username)}
                                   className="text-xs text-rose-400 hover:text-rose-300 border border-rose-800/60 px-2 py-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
-                                  제거
+                                  {t("제거")}
                                 </button>
                               </td>
                             </tr>
@@ -410,7 +427,7 @@ export default function AdminTeamsPage() {
                       className="bg-zinc-800 border border-zinc-700 text-zinc-100 text-xs px-2 py-1.5 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <option value="" disabled>
-                        멤버 추가…
+                        {t("멤버 추가…")}
                       </option>
                       {nonMembers.map((u) => (
                         <option key={u.username} value={u.username}>
@@ -425,11 +442,11 @@ export default function AdminTeamsPage() {
               {/* Clusters */}
               <div>
                 <h3 className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">
-                  클러스터
+                  {t("클러스터")}
                 </h3>
                 {selected.clusters.length === 0 ? (
                   <p className="text-xs text-zinc-500">
-                    이 팀에 할당된 클러스터가 없습니다.
+                    {t("이 팀에 할당된 클러스터가 없습니다.")}
                   </p>
                 ) : (
                   <div className="border border-zinc-800 bg-zinc-900/30">
@@ -450,7 +467,7 @@ export default function AdminTeamsPage() {
                                 onClick={() => onUnassignCluster(clusterId)}
                                 className="text-xs text-rose-400 hover:text-rose-300 border border-rose-800/60 px-2 py-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                               >
-                                할당 해제
+                                {t("할당 해제")}
                               </button>
                             </td>
                           </tr>
@@ -473,12 +490,14 @@ export default function AdminTeamsPage() {
                       className="bg-zinc-800 border border-zinc-700 text-zinc-100 text-xs px-2 py-1.5 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <option value="" disabled>
-                        클러스터 할당…
+                        {t("클러스터 할당…")}
                       </option>
                       {unassignedClusters.map((c) => (
                         <option key={c.cluster_id} value={c.cluster_id}>
                           {c.cluster_id}
-                          {c.team_id ? ` (현재: ${c.team_id})` : ""}
+                          {c.team_id
+                            ? ` ${t("(현재: {n})").replace("{n}", c.team_id)}`
+                            : ""}
                         </option>
                       ))}
                     </select>
@@ -494,7 +513,7 @@ export default function AdminTeamsPage() {
                   onClick={onDeleteTeam}
                   className="text-xs text-rose-400 hover:text-rose-300 border border-rose-800/60 px-3 py-1.5 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  팀 삭제
+                  {t("팀 삭제")}
                 </button>
               </div>
             </div>

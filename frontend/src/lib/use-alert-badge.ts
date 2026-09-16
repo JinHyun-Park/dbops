@@ -27,6 +27,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchMultiClusterOverview } from "@/lib/api-client";
 import { triage, type TriageInput } from "@/lib/cluster-triage";
+import { tr } from "@/lib/format";
 import { useSmartPoll } from "@/lib/use-smart-poll";
 import { subscribeAlertStream } from "@/lib/alert-stream";
 
@@ -186,16 +187,16 @@ export function useAlertBadge(): AlertBadgeState {
           if (newCritical.length === 1) {
             const c = newCritical[0];
             const name = c.resource_name || c.cluster_id;
-            addToast(`${name} critical 전환`, "critical", c.cluster_id);
+            addToast(tr("{n} critical 전환", name), "critical", c.cluster_id);
           } else if (newCritical.length > 1) {
             addToast(
-              `${newCritical.length}개 클러스터 critical 전환`,
+              tr("{n}개 클러스터 critical 전환", newCritical.length),
               "critical",
               // multiple clusters: no single deep-link target
             );
           } else if (crit + warn > seenBaseline.current) {
             addToast(
-              `경보 증가: critical ${crit} / warning ${warn}`,
+              `${tr("경보 증가")}: critical ${crit} / warning ${warn}`,
               "warning",
             );
           }
@@ -219,11 +220,17 @@ export function useAlertBadge(): AlertBadgeState {
         const href = a.task_id
           ? `/tasks?focus=${encodeURIComponent(a.task_id)}`
           : "/tasks";
-        addToast(a.title || "에이전트 작업 완료", severity, a.cluster_id, href);
+        addToast(
+          a.title || tr("에이전트 작업 완료"),
+          severity,
+          a.cluster_id,
+          href,
+        );
         return;
       }
       const label = a.cluster_id ? `${a.cluster_id}: ` : "";
-      const fallback = a.type === "incident" ? "외부 인시던트" : "새 경보";
+      const fallback =
+        a.type === "incident" ? tr("외부 인시던트") : tr("새 경보");
       addToast(`${label}${a.title || fallback}`, severity, a.cluster_id);
     });
     return unsub;

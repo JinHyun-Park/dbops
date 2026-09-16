@@ -5,6 +5,7 @@ import { eolFor } from "@/lib/engine";
 import { triage, type Level } from "@/lib/cluster-triage";
 import { useFleetOverview } from "@/lib/use-fleet-overview";
 import { RcaButton } from "@/components/design-system/rca-button";
+import { useT } from "@/lib/i18n";
 
 // Incident-first summary: when the selected cluster is not OK, lead the
 // dashboard with WHY (the triage reasons) and the next action (AI RCA), so the
@@ -29,6 +30,7 @@ const STYLE: Record<
 };
 
 export function IncidentSummary({ clusterId }: { clusterId: string }) {
+  const tr = useT();
   // Shared fleet poll (deduped with the cluster dropdown + strip): same source,
   // so the banner severity always matches the card pill and the Fleet page.
   const fleet = useFleetOverview();
@@ -46,11 +48,11 @@ export function IncidentSummary({ clusterId }: { clusterId: string }) {
           <span
             className={`shrink-0 px-2 py-0.5 text-[10px] font-mono tracking-wider uppercase border ${s.badge}`}
           >
-            {s.label}
+            {tr(s.label)}
           </span>
           <div className="min-w-0">
             <div className="text-sm text-zinc-100 font-medium">
-              {s.headline}
+              {tr(s.headline)}
             </div>
             {/* The exact signals that put this cluster over the line: the same
                 reasons the Fleet triage tooltip shows. */}
@@ -72,7 +74,7 @@ export function IncidentSummary({ clusterId }: { clusterId: string }) {
             href={`/timeline?cluster=${encodeURIComponent(clusterId)}`}
             className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 transition-colors"
           >
-            타임라인 →
+            {tr("타임라인 →")}
           </Link>
         </div>
       </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { authedFetch, apiUrl, fetchClusterSettings } from "@/lib/api-client";
+import { useT } from "@/lib/i18n";
 
 interface Setting {
   name: string;
@@ -177,6 +178,7 @@ export function SettingsPanel({
   clusterId: string;
   engine?: string;
 }) {
+  const t = useT();
   const [settings, setSettings] = useState<Setting[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -288,14 +290,18 @@ export function SettingsPanel({
           막는다: 값은 5분 주기 수집 캐시이고, 변경은 pending-reboot라 재시작
           전까지 동작값이 바뀌지 않는다. */}
       <div className="text-[11px] text-zinc-500 mb-3">
-        설정값은 5분 주기로 수집됩니다. 파라미터 변경은 pending-reboot로
-        적용되어 <span className="text-amber-300/90">인스턴스 재시작 후</span>{" "}
-        동작값에 반영됩니다.
+        {t(
+          "설정값은 5분 주기로 수집됩니다. 파라미터 변경은 pending-reboot로 적용되어",
+        )}{" "}
+        <span className="text-amber-300/90">{t("인스턴스 재시작 후")}</span>{" "}
+        {t("동작값에 반영됩니다.")}
       </div>
       {loading ? (
-        <div className="text-zinc-500 text-sm">불러오는 중…</div>
+        <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
       ) : settings.length === 0 ? (
-        <div className="text-zinc-500 text-sm">수집된 설정이 없습니다</div>
+        <div className="text-zinc-500 text-sm">
+          {t("수집된 설정이 없습니다")}
+        </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {settings.map((s) => {
@@ -318,7 +324,7 @@ export function SettingsPanel({
               <div
                 key={s.name}
                 className={`bg-zinc-950 border ${borderClass} rounded p-3`}
-                title={rec ? rec.why : undefined}
+                title={rec ? t(rec.why) : undefined}
               >
                 <div className="flex items-center justify-between mb-1 gap-1.5">
                   <div
@@ -365,21 +371,26 @@ export function SettingsPanel({
           className="text-sm text-zinc-200 font-medium flex items-center gap-1.5"
         >
           <span className="text-zinc-500">{diffOpen ? "▾" : "▸"}</span>
-          파라미터{diffAvailable ? ` (변경 ${diffCount})` : ""}
+          {t("파라미터")}
+          {diffAvailable
+            ? ` ${t("(변경 {n})").replace("{n}", String(diffCount))}`
+            : ""}
         </button>
         {diffOpen && (
           <div className="mt-2">
             {diffLoading ? (
-              <div className="text-zinc-500 text-sm">불러오는 중…</div>
+              <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
             ) : diffNotApplicable ? (
               <div className="text-zinc-500 text-sm">
-                이 엔진에는 파라미터 그룹 디폴트 비교가 적용되지 않습니다
+                {t("이 엔진에는 파라미터 그룹 디폴트 비교가 적용되지 않습니다")}
               </div>
             ) : !diffAvailable ? (
-              <div className="text-zinc-500 text-sm">디폴트 비교 미조회</div>
+              <div className="text-zinc-500 text-sm">
+                {t("디폴트 비교 미조회")}
+              </div>
             ) : params.length === 0 ? (
               <div className="text-zinc-500 text-sm">
-                수집된 파라미터가 없습니다
+                {t("수집된 파라미터가 없습니다")}
               </div>
             ) : (
               <>
@@ -387,7 +398,7 @@ export function SettingsPanel({
                   <input
                     value={diffQuery}
                     onChange={(e) => setDiffQuery(e.target.value)}
-                    placeholder="파라미터 이름 검색"
+                    placeholder={t("파라미터 이름 검색")}
                     className="bg-zinc-900 border border-zinc-800 text-zinc-200 text-xs rounded px-2 py-1 w-48"
                   />
                   <button
@@ -399,34 +410,38 @@ export function SettingsPanel({
                         : "text-zinc-400 hover:text-zinc-200"
                     }`}
                   >
-                    변경만 보기
+                    {t("변경만 보기")}
                   </button>
                   <div className="flex items-center gap-1">
-                    {(["all", "static", "dynamic"] as const).map((t) => (
+                    {(["all", "static", "dynamic"] as const).map((ty) => (
                       <button
-                        key={t}
+                        key={ty}
                         type="button"
-                        onClick={() => setDiffApplyType(t)}
+                        onClick={() => setDiffApplyType(ty)}
                         className={`px-2 py-1 rounded text-xs transition ${
-                          diffApplyType === t
+                          diffApplyType === ty
                             ? "bg-zinc-100 text-zinc-900"
                             : "text-zinc-400 hover:text-zinc-200"
                         }`}
                       >
-                        {t === "all" ? "전체" : t}
+                        {ty === "all" ? t("전체") : ty}
                       </button>
                     ))}
                   </div>
                 </div>
                 {filteredParams.length === 0 ? (
                   <div className="text-zinc-500 text-sm">
-                    일치하는 파라미터가 없습니다
+                    {t("일치하는 파라미터가 없습니다")}
                   </div>
                 ) : (
                   <>
                     <div className="flex items-center justify-between mb-2 text-[11px] text-zinc-500">
                       <span>
-                        {rangeFrom}-{rangeTo} / 총 {filteredParams.length}개
+                        {rangeFrom}-{rangeTo} /{" "}
+                        {t("총 {n}개").replace(
+                          "{n}",
+                          String(filteredParams.length),
+                        )}
                       </span>
                       {totalPages > 1 && (
                         <div className="flex items-center gap-1">
@@ -436,7 +451,7 @@ export function SettingsPanel({
                             disabled={safePage <= 1}
                             className="px-2 py-0.5 rounded border border-zinc-800 text-zinc-300 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
                           >
-                            이전
+                            {t("이전")}
                           </button>
                           <span className="text-zinc-400">
                             {safePage} / {totalPages}
@@ -447,7 +462,7 @@ export function SettingsPanel({
                             disabled={safePage >= totalPages}
                             className="px-2 py-0.5 rounded border border-zinc-800 text-zinc-300 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
                           >
-                            다음
+                            {t("다음")}
                           </button>
                         </div>
                       )}
@@ -457,13 +472,15 @@ export function SettingsPanel({
                         <thead>
                           <tr className="text-[11px] text-zinc-500 text-left">
                             <th className="font-normal pb-1.5 pr-3">
-                              파라미터
+                              {t("파라미터")}
                             </th>
-                            <th className="font-normal pb-1.5 pr-3">현재값</th>
                             <th className="font-normal pb-1.5 pr-3">
-                              디폴트값
+                              {t("현재값")}
                             </th>
-                            <th className="font-normal pb-1.5">적용</th>
+                            <th className="font-normal pb-1.5 pr-3">
+                              {t("디폴트값")}
+                            </th>
+                            <th className="font-normal pb-1.5">{t("적용")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -486,7 +503,7 @@ export function SettingsPanel({
                                 </span>
                                 {p.differs && (
                                   <span className="ml-2 text-[9px] px-1 py-0.5 rounded border border-amber-500/40 text-amber-300 align-middle">
-                                    변경됨
+                                    {t("변경됨")}
                                   </span>
                                 )}
                               </td>

@@ -1085,9 +1085,11 @@ def test_an_unknown_change_type_is_marked_unknown_and_not_silent():
     fallthrough existed, such a row rendered its name and NOTHING else."""
     for t in ("modified", "renamed", "some_future_type"):
         cell = panel_change_row({"change_type": t})
-        assert "{UNKNOWN_TYPE}" in cell, (t, cell)
+        # The constant, not "{UNKNOWN_TYPE}": i18n renders it as
+        # {t(UNKNOWN_TYPE)}. Still fails if the fallthrough stops rendering it.
+        assert "UNKNOWN_TYPE" in cell, (t, cell)
     for t in ("created", "dropped", "changed"):
-        assert "{UNKNOWN_TYPE}" not in panel_change_row({"change_type": t}), t
+        assert "UNKNOWN_TYPE" not in panel_change_row({"change_type": t}), t
     # and the const it renders says so in words the operator reads
     assert 'const UNKNOWN_TYPE = "알 수 없는 변경 유형";' in _PANEL
     assert 'const KNOWN_CHANGE = ["created", "dropped", "changed"];' in _PANEL, (

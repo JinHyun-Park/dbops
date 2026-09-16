@@ -6,6 +6,7 @@ import {
   type LogCategory,
   type LogInsightsResponse,
 } from "@/lib/api-client";
+import { useT } from "@/lib/i18n";
 
 const CATEGORIES: { key: LogCategory; label: string; hint: string }[] = [
   { key: "all", label: "All", hint: "기간 내 모든 로그 라인" },
@@ -51,18 +52,19 @@ function highlightSeverity(message: string): React.ReactNode {
   );
 }
 
-function relTime(iso?: string): string {
+function relTime(iso: string | undefined, t: (ko: string) => string): string {
   if (!iso) return "-";
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.floor(ms / 60_000);
-  if (m < 1) return "방금";
-  if (m < 60) return `${m}분 전`;
+  if (m < 1) return t("방금");
+  if (m < 60) return t("{n}분 전").replace("{n}", String(m));
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}시간 전`;
-  return `${Math.floor(h / 24)}일 전`;
+  if (h < 24) return t("{n}시간 전").replace("{n}", String(h));
+  return t("{n}일 전").replace("{n}", String(Math.floor(h / 24)));
 }
 
 export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [category, setCategory] = useState<LogCategory>("all");
   const [hours, setHours] = useState<number>(1);
   // Free-text incident search: space-separated keywords get AND-joined
@@ -131,8 +133,9 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
             )}
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            CloudWatch Logs Insights에서 카테고리별로 PostgreSQL 로그 라인을
-            가져옵니다. CW 스캔 비용이 발생하므로 자동 새로고침은 없습니다.
+            {t(
+              "CloudWatch Logs Insights에서 카테고리별로 PostgreSQL 로그 라인을 가져옵니다. CW 스캔 비용이 발생하므로 자동 새로고침은 없습니다.",
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -152,8 +155,10 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
             onKeyDown={(e) => {
               if (e.key === "Enter") load(category, hours, keywords);
             }}
-            placeholder="검색어 (space=AND)"
-            title="공백으로 구분된 키워드가 모두 포함된 라인만 보여줍니다. 예: 'ERROR connection refused'"
+            placeholder={t("검색어 (space=AND)")}
+            title={t(
+              "공백으로 구분된 키워드가 모두 포함된 라인만 보여줍니다. 예: 'ERROR connection refused'",
+            )}
             className="bg-zinc-900 border border-zinc-800 text-zinc-200 text-xs rounded px-2 py-1 w-44 focus:outline-none focus:border-amber-500/60"
           />
           <button
@@ -161,7 +166,11 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
             disabled={loading}
             className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
           >
-            {loading ? "검색 중…" : data ? "새로고침" : "로그 가져오기"}
+            {loading
+              ? t("검색 중…")
+              : data
+                ? t("새로고침")
+                : t("로그 가져오기")}
           </button>
         </div>
       </div>
@@ -174,7 +183,7 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
               setCategory(c.key);
               load(c.key, hours, keywords);
             }}
-            title={c.hint}
+            title={t(c.hint)}
             className={`text-[10px] uppercase tracking-wider px-2 py-1 border transition-colors ${
               category === c.key
                 ? "border-amber-500/60 text-amber-300 bg-amber-500/5"
@@ -186,7 +195,7 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
         ))}
         {refreshedAt && (
           <span className="ml-auto text-[10px] text-zinc-600">
-            {relTime(new Date(refreshedAt).toISOString())} 갱신
+            {relTime(new Date(refreshedAt).toISOString(), t)} {t("갱신")}
           </span>
         )}
         {cwConsoleUrl && (
@@ -195,9 +204,9 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
             target="_blank"
             rel="noopener noreferrer"
             className="text-[10px] text-sky-400 hover:text-sky-300"
-            title="CloudWatch 콘솔에서 원본 로그 보기"
+            title={t("CloudWatch 콘솔에서 원본 로그 보기")}
           >
-            CW 콘솔 열기 →
+            {t("CW 콘솔 열기 →")}
           </a>
         )}
       </div>
@@ -205,13 +214,14 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
       <div className="max-h-96 overflow-y-auto">
         {!data && !loading && (
           <div className="p-6 text-zinc-500 text-sm">
-            <span className="text-amber-300">로그 가져오기</span> 버튼을 눌러
-            카테고리를 선택하세요. 첫 호출은 CW Logs Insights 쿼리를 시작하며
-            5~10초 정도 걸립니다.
+            <span className="text-amber-300">{t("로그 가져오기")}</span>{" "}
+            {t(
+              "버튼을 눌러 카테고리를 선택하세요. 첫 호출은 CW Logs Insights 쿼리를 시작하며 5~10초 정도 걸립니다.",
+            )}
           </div>
         )}
         {loading && (
-          <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
+          <div className="p-6 text-zinc-500 text-sm">{t("불러오는 중…")}</div>
         )}
         {data?.error &&
           (() => {
@@ -234,21 +244,23 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
                   <div className="mb-1">{data.error}</div>
                   {isSetup && (
                     <div className="text-[11px] text-zinc-400 mt-2 leading-relaxed">
-                      <strong className="text-zinc-200">활성화 방법:</strong>{" "}
-                      RDS 콘솔 → Modify cluster → "Log exports" 섹션에서{" "}
-                      <code className="text-amber-300">postgresql</code> 체크 +
-                      적용. 또는 파라미터 그룹에서{" "}
+                      <strong className="text-zinc-200">
+                        {t("활성화 방법:")}
+                      </strong>{" "}
+                      {t('RDS 콘솔 → Modify cluster → "Log exports" 섹션에서')}{" "}
+                      <code className="text-amber-300">postgresql</code>{" "}
+                      {t("체크 + 적용. 또는 파라미터 그룹에서")}{" "}
                       <code className="text-amber-300">
                         log_statement / log_min_duration_statement
                       </code>{" "}
-                      + 인스턴스 reboot.{" "}
+                      {t("+ 인스턴스 reboot.")}{" "}
                       <a
                         href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.Concepts.PostgreSQL.html"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-sky-400 hover:text-sky-300"
                       >
-                        AWS 문서 →
+                        {t("AWS 문서 →")}
                       </a>
                     </div>
                   )}
@@ -259,7 +271,10 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
         {data && !data.error && data.entries.length === 0 && (
           <div className="p-6 text-emerald-400 text-sm flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            해당 카테고리에 매칭되는 로그 라인 없음 ({hours}h 기준)
+            {t("해당 카테고리에 매칭되는 로그 라인 없음 ({n}h 기준)").replace(
+              "{n}",
+              String(hours),
+            )}
           </div>
         )}
         {data && !data.error && data.entries.length > 0 && (

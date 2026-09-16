@@ -109,14 +109,14 @@ function paramFromUrl(name: string): string {
  *  actual state when there is not, and never "RCA completed": a row that says
  *  only that its task finished is the reason the operator had to open all
  *  eleven clusters. */
-function rowHeadline(task: AgentTask): string {
+function rowHeadline(task: AgentTask, t: (ko: string) => string): string {
   if (task.finding?.summary) return task.finding.summary;
-  if (task.status === "failed") return task.error || "원인 미상 실패";
-  if (task.status === "pending") return "분석 대기 중";
-  if (task.status === "running") return "분석 중";
+  if (task.status === "failed") return task.error || t("원인 미상 실패");
+  if (task.status === "pending") return t("분석 대기 중");
+  if (task.status === "running") return t("분석 중");
   if (task.summary) return task.summary;
   if (task.title) return task.title;
-  return "순위를 매길 후보를 찾지 못했습니다";
+  return t("순위를 매길 후보를 찾지 못했습니다");
 }
 
 export default function TasksPage() {
@@ -273,7 +273,9 @@ export default function TasksPage() {
     setRunMsg(null);
     try {
       await createTask(filterCluster, "manual_rca");
-      setRunMsg("RCA 작업을 시작했습니다. 잠시 후 아래에 결과가 나타납니다.");
+      setRunMsg(
+        t("RCA 작업을 시작했습니다. 잠시 후 아래에 결과가 나타납니다."),
+      );
       load();
     } catch (e) {
       setRunMsg(e instanceof Error ? e.message : String(e));
@@ -349,18 +351,18 @@ export default function TasksPage() {
         {stats && (
           <div className="mb-4 flex flex-wrap items-center gap-4 border border-zinc-800 bg-zinc-900/40 px-4 py-2.5 font-mono text-xs">
             <span className="text-zinc-400">
-              총 작업{" "}
+              {t("총 작업")}{" "}
               <span className="text-zinc-100">{fmtExact(stats.total)}</span>
             </span>
             <span className="text-zinc-400">
-              성공률{" "}
+              {t("성공률")}{" "}
               <span className="text-emerald-300">
                 {Math.round(stats.success_rate * 100)}%
               </span>
             </span>
             {stats.avg_duration_ms > 0 && (
               <span className="text-zinc-400">
-                평균 소요{" "}
+                {t("평균 소요")}{" "}
                 <span className="text-zinc-100">
                   {(stats.avg_duration_ms / 1000).toFixed(1)}s
                 </span>
@@ -374,20 +376,23 @@ export default function TasksPage() {
             ))}
             {stats.recent_failures > 0 && (
               <span className="text-rose-400">
-                최근 실패 {fmtExact(stats.recent_failures)}
+                {t("최근 실패 {n}").replace(
+                  "{n}",
+                  fmtExact(stats.recent_failures),
+                )}
               </span>
             )}
           </div>
         )}
 
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <span className="text-[11px] text-zinc-500">범위</span>
+          <span className="text-[11px] text-zinc-500">{t("범위")}</span>
           <SearchableClusterSelect
             value={filterCluster}
             onChange={setFilterCluster}
             clusters={clusterOptions}
             allowAll
-            allLabel="모든 클러스터"
+            allLabel={t("모든 클러스터")}
             className="w-64"
           />
           <select
@@ -395,21 +400,23 @@ export default function TasksPage() {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 focus:border-amber-500/60 focus:outline-none"
           >
-            <option value="">모든 상태</option>
-            <option value="pending">대기</option>
-            <option value="running">분석 중</option>
-            <option value="done">완료</option>
-            <option value="failed">실패</option>
+            <option value="">{t("모든 상태")}</option>
+            <option value="pending">{t("대기")}</option>
+            <option value="running">{t("분석 중")}</option>
+            <option value="done">{t("완료")}</option>
+            <option value="failed">{t("실패")}</option>
           </select>
           <select
             value={kindScope}
             onChange={(e) => setKindScope(e.target.value)}
             className="border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 focus:border-amber-500/60 focus:outline-none"
-            title="예약 리포트는 완료 상태를 RCA와 공유하므로 상태 필터로는 분리되지 않습니다"
+            title={t(
+              "예약 리포트는 완료 상태를 RCA와 공유하므로 상태 필터로는 분리되지 않습니다",
+            )}
           >
             {KIND_SCOPE.map((k) => (
               <option key={k.value} value={k.value}>
-                {k.label}
+                {t(k.label)}
               </option>
             ))}
           </select>
@@ -417,7 +424,7 @@ export default function TasksPage() {
             onClick={load}
             className="border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-amber-500/40 hover:text-amber-300"
           >
-            새로고침
+            {t("새로고침")}
           </button>
           {filterCluster && (
             <>
@@ -425,15 +432,18 @@ export default function TasksPage() {
                 onClick={() => setFilterCluster("")}
                 className="border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-500 hover:text-zinc-200"
               >
-                모든 클러스터 보기
+                {t("모든 클러스터 보기")}
               </button>
               <button
                 onClick={runManual}
                 disabled={running}
                 className="border border-emerald-500/40 px-3 py-1.5 text-xs text-emerald-300 transition-colors hover:bg-emerald-500/10 disabled:opacity-50"
-                title={`${filterCluster}에 대해 RCA를 즉시 실행`}
+                title={t("{n}에 대해 RCA를 즉시 실행").replace(
+                  "{n}",
+                  filterCluster,
+                )}
               >
-                {running ? "실행 중…" : "▶ RCA 실행"}
+                {running ? t("실행 중…") : t("▶ RCA 실행")}
               </button>
             </>
           )}
@@ -443,17 +453,20 @@ export default function TasksPage() {
             it does NOT do to the fleet watermark. */}
         {filterCluster && (
           <div className="mb-3 border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-[12px] text-sky-200/80">
-            {filterCluster} 한 대로 범위를 좁혀 보고 있습니다. 신규 표시는 전체
-            받은함 기준이며, 이 화면은 방문 기록을 갱신하지 않습니다.
+            {t(
+              "{n} 한 대로 범위를 좁혀 보고 있습니다. 신규 표시는 전체 받은함 기준이며, 이 화면은 방문 기록을 갱신하지 않습니다.",
+            ).replace("{n}", filterCluster)}
           </div>
         )}
         {runMsg && <div className="mb-3 text-xs text-zinc-400">{runMsg}</div>}
 
         {err && (
-          <div className="mb-3 text-sm text-rose-300">조회 실패: {err}</div>
+          <div className="mb-3 text-sm text-rose-300">
+            {t("조회 실패: {n}").replace("{n}", err)}
+          </div>
         )}
         {loading ? (
-          <div className="py-8 text-sm text-zinc-500">불러오는 중…</div>
+          <div className="py-8 text-sm text-zinc-500">{t("불러오는 중…")}</div>
         ) : tasks.length === 0 ? (
           <EmptyState
             title={t("작업 없음")}
@@ -494,10 +507,13 @@ export default function TasksPage() {
               disabled={loadingMore}
               className="border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-amber-500/40 hover:text-amber-300 disabled:opacity-50"
             >
-              {loadingMore ? "불러오는 중…" : "더 보기"}
+              {loadingMore ? t("불러오는 중…") : t("더 보기")}
             </button>
             <span className="text-[11px] text-zinc-500">
-              {tasks.length}건 표시, 이전 기록이 더 있습니다
+              {t("{n}건 표시, 이전 기록이 더 있습니다").replace(
+                "{n}",
+                String(tasks.length),
+              )}
             </span>
           </div>
         )}
@@ -571,15 +587,16 @@ function SchedulesSection({
   );
 
   return (
-    <Section title="예약 작업">
+    <Section title={t("예약 작업")}>
       <p className="mb-3 text-xs text-zinc-500">
-        반복 헬스 다이제스트를 예약합니다. 스케줄러가 주기마다 작업을 자동
-        등록하고, 결과는 위 목록과 토스트로 도착합니다.
+        {t(
+          "반복 헬스 다이제스트를 예약합니다. 스케줄러가 주기마다 작업을 자동 등록하고, 결과는 위 목록과 토스트로 도착합니다.",
+        )}
       </p>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className="font-mono text-xs text-zinc-400">
           {filterCluster ||
-            "위 범위에서 클러스터를 선택하면 예약을 추가할 수 있습니다"}
+            t("위 범위에서 클러스터를 선택하면 예약을 추가할 수 있습니다")}
         </span>
         {filterCluster && (
           <>
@@ -588,23 +605,25 @@ function SchedulesSection({
               onChange={(e) => setIntervalKind(e.target.value)}
               className="border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 focus:border-amber-500/60 focus:outline-none"
             >
-              <option value="hourly">매시간</option>
-              <option value="daily">매일</option>
-              <option value="weekly">매주</option>
+              <option value="hourly">{t("매시간")}</option>
+              <option value="daily">{t("매일")}</option>
+              <option value="weekly">{t("매주")}</option>
             </select>
             <button
               onClick={add}
               disabled={busy}
               className="border border-emerald-500/40 px-3 py-1.5 text-xs text-emerald-300 transition-colors hover:bg-emerald-500/10 disabled:opacity-50"
             >
-              {busy ? "추가 중…" : "+ 예약 추가"}
+              {busy ? t("추가 중…") : t("+ 예약 추가")}
             </button>
           </>
         )}
       </div>
       {msg && <div className="mb-3 text-xs text-rose-300">{msg}</div>}
       {schedules.length === 0 ? (
-        <div className="text-xs text-zinc-600">등록된 예약이 없습니다.</div>
+        <div className="text-xs text-zinc-600">
+          {t("등록된 예약이 없습니다.")}
+        </div>
       ) : (
         <div className="flex flex-col gap-1.5">
           {schedules.map((s) => (
@@ -627,15 +646,15 @@ function SchedulesSection({
               </span>
               <span className="flex-shrink-0 font-mono text-[11px] text-zinc-500">
                 {s.last_run_at
-                  ? `최근 ${fmtRelative(s.last_run_at)}`
-                  : "미실행"}
+                  ? t("최근 {n}").replace("{n}", fmtRelative(s.last_run_at))
+                  : t("미실행")}
               </span>
               <button
                 onClick={() => remove(s.id)}
                 className="flex-shrink-0 text-[11px] text-zinc-500 transition-colors hover:text-rose-300"
-                title="예약 삭제"
+                title={t("예약 삭제")}
               >
-                삭제
+                {t("삭제")}
               </button>
             </div>
           ))}
@@ -672,7 +691,7 @@ function TaskRow({
   }, []);
 
   const expandable = task.status === "done" || task.status === "failed";
-  const headline = rowHeadline(task);
+  const headline = rowHeadline(task, t);
   const category = task.finding?.category;
 
   return (
@@ -700,7 +719,7 @@ function TaskRow({
           {isNew && (
             <span
               className="block h-2 w-2 rounded-full bg-amber-400"
-              title="마지막 방문 이후 도착한 리포트"
+              title={t("마지막 방문 이후 도착한 리포트")}
             />
           )}
         </span>
@@ -721,7 +740,7 @@ function TaskRow({
             )}
             {isNew && (
               <span className="border border-amber-500/50 px-1.5 py-0.5 text-[10px] tracking-wider text-amber-300">
-                신규
+                {t("신규")}
               </span>
             )}
             <span
@@ -779,7 +798,7 @@ function TaskRow({
                 className="text-zinc-500"
                 title={fmtClockKo(task.created_at)}
               >
-                등록 {fmtAgoKo(task.created_at)}
+                {t("등록 {n}").replace("{n}", fmtAgoKo(task.created_at))}
               </span>
             )}
           </span>
@@ -791,7 +810,7 @@ function TaskRow({
 
       {open && task.status === "failed" && (
         <div className="border-t border-zinc-800/60 px-4 py-3 text-[13px] text-rose-300">
-          {task.error || "원인 미상 실패"}
+          {task.error || t("원인 미상 실패")}
         </div>
       )}
       {open && task.status === "done" && <RcaReport row={task} />}

@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { fetchQueryDetail } from "@/lib/api-client";
 import { fmtDuration, fmtExact, fmtNumber } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 import { useChartColors } from "@/lib/use-chart-colors";
 
 interface Snapshot {
@@ -40,6 +41,7 @@ export function QueryDetailModal({
   queryHash: string;
   onClose: () => void;
 }) {
+  const t = useT();
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -101,7 +103,7 @@ export function QueryDetailModal({
                 )}`}
                 className="text-xs bg-sky-600 hover:bg-sky-500 text-white rounded px-3 py-1.5 transition"
               >
-                Chat에서 분석
+                {t("Chat에서 분석")}
               </Link>
             )}
             <button
@@ -115,11 +117,11 @@ export function QueryDetailModal({
 
         <div className="overflow-y-auto p-6 space-y-6">
           {loading ? (
-            <div className="text-zinc-500 text-sm">불러오는 중…</div>
+            <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
           ) : err ? (
             <div className="text-red-400 text-sm">{err}</div>
           ) : !latest ? (
-            <div className="text-zinc-500 text-sm">스냅샷 없음</div>
+            <div className="text-zinc-500 text-sm">{t("스냅샷 없음")}</div>
           ) : (
             <>
               <div>

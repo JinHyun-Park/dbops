@@ -72,7 +72,7 @@ export default function WorkloadDiffPage() {
       <div className="border border-zinc-800 bg-zinc-900/40 p-4 mb-6 flex flex-wrap items-end gap-4">
         <label className="flex flex-col gap-1">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-            Before (기준 시점)
+            {t("Before (기준 시점)")}
           </span>
           <input
             type="datetime-local"
@@ -83,7 +83,7 @@ export default function WorkloadDiffPage() {
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-            After (비교 시점)
+            {t("After (비교 시점)")}
           </span>
           <input
             type="datetime-local"
@@ -94,7 +94,7 @@ export default function WorkloadDiffPage() {
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-            Regression 임계 (%)
+            {t("Regression 임계 (%)")}
           </span>
           <input
             type="number"
@@ -110,7 +110,7 @@ export default function WorkloadDiffPage() {
           disabled={loading}
           className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
         >
-          {loading ? "비교 중…" : "비교 실행"}
+          {loading ? t("비교 중…") : t("비교 실행")}
         </button>
       </div>
 
@@ -210,11 +210,12 @@ function QueryExcerpt({ text }: { text: string }) {
 }
 
 function NewBlock({ rows }: { rows: WorkloadDiffResponse["new"] }) {
+  const t = useT();
   if (!rows.length) return null;
   return (
     <section className="mb-6">
       <div className="text-[11px] font-medium text-zinc-500 mb-2">
-        🆕 New queries: before엔 없던 쿼리
+        {t("🆕 New queries: before엔 없던 쿼리")}
       </div>
       <div className="border border-zinc-800 divide-y divide-zinc-800">
         {rows.map((r) => (
@@ -282,11 +283,12 @@ function DisappearedBlock({
 }: {
   rows: WorkloadDiffResponse["disappeared"];
 }) {
+  const t = useT();
   if (!rows.length) return null;
   return (
     <section className="mb-6">
       <div className="text-[11px] font-medium text-zinc-500 mb-2">
-        👻 Disappeared: after엔 사라진 쿼리 (참고용)
+        {t("👻 Disappeared: after엔 사라진 쿼리 (참고용)")}
       </div>
       <div className="border border-zinc-800 divide-y divide-zinc-800">
         {rows.map((r) => (

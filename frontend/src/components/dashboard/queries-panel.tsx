@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchSlowQueries } from "@/lib/api-client";
 import { fmtDuration, fmtExact, fmtNumber } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 import { QueryDetailModal } from "./query-detail-modal";
 
 interface Query {
@@ -28,6 +29,7 @@ export function QueriesPanel({
   clusterId: string;
   topQueries: Query[];
 }) {
+  const t = useT();
   const [tab, setTab] = useState<"top" | "slow">("top");
   const [sort, setSort] = useState<SortKey>("total_time_ms");
   const [slow, setSlow] = useState<Query[]>([]);
@@ -96,7 +98,9 @@ export function QueriesPanel({
           </div>
         </div>
         {rows.length === 0 ? (
-          <div className="p-6 text-center text-zinc-500 text-sm">쿼리 없음</div>
+          <div className="p-6 text-center text-zinc-500 text-sm">
+            {t("쿼리 없음")}
+          </div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-zinc-900/50 border-b border-zinc-800">
@@ -106,19 +110,19 @@ export function QueriesPanel({
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium w-24"
-                  title="해당 정규화 쿼리가 이 윈도우 안에서 실행된 횟수"
+                  title={t("해당 정규화 쿼리가 이 윈도우 안에서 실행된 횟수")}
                 >
                   Calls
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium w-28"
-                  title="모든 호출의 누적 실행 시간"
+                  title={t("모든 호출의 누적 실행 시간")}
                 >
                   Total time
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium w-24"
-                  title="호출당 평균 시간 (총 시간 ÷ 호출 수)"
+                  title={t("호출당 평균 시간 (총 시간 ÷ 호출 수)")}
                 >
                   Mean / call
                 </th>
@@ -135,7 +139,7 @@ export function QueriesPanel({
                     className="px-4 py-2 text-zinc-200 font-mono text-xs truncate max-w-md"
                     title={q.query_text || ""}
                   >
-                    {q.query_text || "(원본 없음)"}
+                    {q.query_text || t("(원본 없음)")}
                   </td>
                   <td
                     className="px-4 py-2 text-right text-zinc-300 font-mono tabular-nums"

@@ -438,7 +438,7 @@ export default function FleetPage() {
       {/* Triage summary band: clickable to filter the table to that bucket. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-4">
         <SummaryChip
-          label="전체"
+          label={t("전체")}
           value={counts.total}
           tone="zinc"
           active={!level && !eolOnly}
@@ -462,14 +462,14 @@ export default function FleetPage() {
           onClick={() => setLevel(level === "warning" ? "" : "warning")}
         />
         <SummaryChip
-          label="정상"
+          label={t("정상")}
           value={counts.ok}
           tone="emerald"
           active={level === "ok"}
           onClick={() => setLevel(level === "ok" ? "" : "ok")}
         />
         <SummaryChip
-          label="EOL 주의"
+          label={t("EOL 주의")}
           value={counts.eolAttn}
           tone={counts.eolAttn ? "amber" : "zinc"}
           active={eolOnly}
@@ -483,11 +483,11 @@ export default function FleetPage() {
           type="text"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="클러스터 검색…"
+          placeholder={t("클러스터 검색…")}
           className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2.5 py-1.5 font-mono w-56 focus:outline-none focus:ring-1 focus:ring-amber-500"
         />
         <FacetSelect value={engine} onChange={setEngine} label="Engine">
-          <option value="">모든 엔진</option>
+          <option value="">{t("모든 엔진")}</option>
           {engines.map((e) => (
             <option key={e} value={e}>
               {e.replace("aurora-", "")}
@@ -495,31 +495,33 @@ export default function FleetPage() {
           ))}
         </FacetSelect>
         <FacetSelect value={status} onChange={setStatus} label="Status">
-          <option value="">모든 상태</option>
+          <option value="">{t("모든 상태")}</option>
           <option value="available">available</option>
-          <option value="other">available 아님</option>
+          <option value="other">{t("available 아님")}</option>
         </FacetSelect>
         <FacetSelect
           value={groupBy}
           onChange={(v) => setGroupBy(v as GroupBy)}
           label="Group by"
         >
-          <option value="none">그룹 없음</option>
-          <option value="account">계정</option>
-          <option value="engine">엔진</option>
-          <option value="region">리전</option>
-          <option value="severity">심각도</option>
+          <option value="none">{t("그룹 없음")}</option>
+          <option value="account">{t("계정")}</option>
+          <option value="engine">{t("엔진")}</option>
+          <option value="region">{t("리전")}</option>
+          <option value="severity">{t("심각도")}</option>
         </FacetSelect>
         {filtersActive && (
           <button
             onClick={clearAll}
             className="text-[11px] text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
           >
-            필터 초기화
+            {t("필터 초기화")}
           </button>
         )}
         <span className="text-[11px] text-zinc-500 font-mono ml-auto">
-          {view.length} / {counts.total} 표시
+          {t("{a} / {b} 표시")
+            .replace("{a}", String(view.length))
+            .replace("{b}", String(counts.total))}
         </span>
       </div>
 
@@ -527,7 +529,7 @@ export default function FleetPage() {
           stored presets as one-click chips (each deletable). */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-          뷰
+          {t("뷰")}
         </span>
         <input
           type="text"
@@ -536,7 +538,7 @@ export default function FleetPage() {
           onKeyDown={(e) => {
             if (e.key === "Enter") saveView();
           }}
-          placeholder="뷰 이름…"
+          placeholder={t("뷰 이름…")}
           className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2.5 py-1.5 font-mono w-40 focus:outline-none focus:ring-1 focus:ring-amber-500"
         />
         <button
@@ -544,7 +546,7 @@ export default function FleetPage() {
           disabled={!viewName.trim()}
           className="text-[11px] px-2 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500/50 hover:text-amber-300 disabled:opacity-40 disabled:hover:border-zinc-700 disabled:hover:text-zinc-300 transition-colors"
         >
-          저장
+          {t("저장")}
         </button>
         {savedViews.map((v) => (
           <span
@@ -554,14 +556,14 @@ export default function FleetPage() {
             <button
               onClick={() => applyView(v)}
               className="px-2 py-1 font-mono hover:text-amber-300 transition-colors"
-              title={`'${v.name}' 뷰 적용`}
+              title={t("'{n}' 뷰 적용").replace("{n}", v.name)}
             >
               {v.name}
             </button>
             <button
               onClick={() => deleteView(v.name)}
               className="px-1.5 py-1 text-zinc-500 hover:text-rose-400 transition-colors"
-              title={`'${v.name}' 삭제`}
+              title={t("'{n}' 삭제").replace("{n}", v.name)}
             >
               ✕
             </button>
@@ -570,7 +572,7 @@ export default function FleetPage() {
       </div>
 
       {loading ? (
-        <div className="text-zinc-500 text-sm">불러오는 중…</div>
+        <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
       ) : counts.total === 0 ? (
         <EmptyState
           eyebrow={t("클러스터 없음")}
@@ -582,12 +584,12 @@ export default function FleetPage() {
         />
       ) : view.length === 0 ? (
         <div className="bg-zinc-800/40 border border-zinc-700 rounded-lg px-4 py-8 text-center text-zinc-500 text-sm">
-          필터에 맞는 클러스터가 없습니다.{" "}
+          {t("필터에 맞는 클러스터가 없습니다.")}{" "}
           <button
             onClick={clearAll}
             className="text-amber-400 hover:text-amber-300 underline underline-offset-2"
           >
-            초기화
+            {t("초기화")}
           </button>
         </div>
       ) : (
@@ -723,19 +725,21 @@ export default function FleetPage() {
           {view.length > rowCap && (
             <div className="flex flex-wrap items-center gap-3 mt-4 text-xs">
               <span className="text-zinc-500 font-mono">
-                전체 {view.length}개 중 {capped.length}개 표시
+                {t("전체 {a}개 중 {b}개 표시")
+                  .replace("{a}", String(view.length))
+                  .replace("{b}", String(capped.length))}
               </span>
               <button
                 onClick={() => setRowCap((c) => c + ROW_CAP_STEP)}
                 className="px-2.5 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500/50 hover:text-amber-300 transition-colors"
               >
-                더 보기 (+100)
+                {t("더 보기 (+100)")}
               </button>
               <button
                 onClick={() => setRowCap(view.length)}
                 className="px-2.5 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500/50 hover:text-amber-300 transition-colors"
               >
-                모두 표시
+                {t("모두 표시")}
               </button>
             </div>
           )}
@@ -1252,8 +1256,11 @@ const DOT_TONE: Record<Level, string> = {
 };
 
 function SeverityDot({ level, reasons }: { level: Level; reasons: string[] }) {
+  const t = useT();
   const title =
-    level === "ok" ? "정상" : `${level.toUpperCase()}: ${reasons.join(", ")}`;
+    level === "ok"
+      ? t("정상")
+      : `${level.toUpperCase()}: ${reasons.join(", ")}`;
   return (
     <span
       title={title}

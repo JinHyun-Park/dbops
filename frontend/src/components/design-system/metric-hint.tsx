@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { metricDef } from "@/lib/metric-glossary";
+import { useT } from "@/lib/i18n";
 
 // MetricHint: a small "?" affordance that reveals a metric's
 // definition on hover/focus. Pure CSS-positioned popover (no portal,
@@ -14,13 +15,14 @@ import { metricDef } from "@/lib/metric-glossary";
 export function MetricHint({ metric }: { metric: string }) {
   const def = metricDef(metric);
   const [open, setOpen] = useState(false);
+  const t = useT();
   if (!def) return null;
 
   return (
     <span className="relative inline-flex">
       <button
         type="button"
-        aria-label={`${def.label} 설명`}
+        aria-label={t("{n} 설명").replace("{n}", def.label)}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
         onFocus={() => setOpen(true)}
@@ -43,10 +45,10 @@ export function MetricHint({ metric }: { metric: string }) {
             )}
           </span>
           <span className="block text-[11px] text-zinc-300 leading-relaxed mb-1.5">
-            {def.what}
+            {t(def.what)}
           </span>
           <span className="block text-[11px] text-zinc-500 leading-relaxed">
-            {def.why}
+            {t(def.why)}
           </span>
         </span>
       )}

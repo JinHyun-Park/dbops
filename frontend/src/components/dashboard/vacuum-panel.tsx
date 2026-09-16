@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { fetchVacuumStats, fetchHealthFindings } from "@/lib/api-client";
 import { fmtExact, fmtNumber } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 interface Table {
   schema_name: string;
@@ -35,18 +36,21 @@ function safeJSON(s: string): Record<string, unknown> | null {
   }
 }
 
-function relDays(iso: string | null) {
-  if (!iso) return "없음";
+/** Takes `t` because it is not a component: the caller passes the hook's
+ *  translator down rather than this module importing one. */
+function relDays(t: (ko: string) => string, iso: string | null) {
+  if (!iso) return t("없음");
   const ms = Date.now() - new Date(iso).getTime();
   const d = Math.floor(ms / 86400000);
   if (d < 1) {
     const h = Math.floor(ms / 3600000);
-    return h < 1 ? "<1시간" : `${h}시간 전`;
+    return h < 1 ? t("<1시간") : t("{n}시간 전").replace("{n}", String(h));
   }
-  return `${d}일 전`;
+  return t("{n}일 전").replace("{n}", String(d));
 }
 
 export function VacuumPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [tables, setTables] = useState<Table[]>([]);
   const [txidAgeByTable, setTxidAgeByTable] = useState<Record<string, number>>(
     {},
@@ -99,14 +103,14 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
       <div className="px-4 py-3 border-b border-zinc-800">
         <div className="text-sm text-zinc-200 font-medium">Vacuum & Bloat</div>
         <div className="text-[11px] text-zinc-500 mt-0.5">
-          bloat 비율(dead / 전체 튜플) 내림차순 정렬
+          {t("bloat 비율(dead / 전체 튜플) 내림차순 정렬")}
         </div>
       </div>
       {loading ? (
-        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
+        <div className="p-6 text-zinc-500 text-sm">{t("불러오는 중…")}</div>
       ) : tables.length === 0 ? (
         <div className="p-6 text-zinc-500 text-sm">
-          테이블 통계 없음 (PG 전용, 5분 주기 수집)
+          {t("테이블 통계 없음 (PG 전용, 5분 주기 수집)")}
         </div>
       ) : (
         <div className="max-h-96 overflow-y-auto">
@@ -124,33 +128,39 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="Dead tuples: VACUUM 대상으로 남아 있는 미회수 행 버전"
+                  title={t(
+                    "Dead tuples: VACUUM 대상으로 남아 있는 미회수 행 버전",
+                  )}
                 >
                   Dead rows
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="Dead ÷ (live + dead). 30% 초과 시 bloat 심각: VACUUM 권장"
+                  title={t(
+                    "Dead ÷ (live + dead). 30% 초과 시 bloat 심각: VACUUM 권장",
+                  )}
                 >
                   Dead / total
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="age(relfrozenxid): 마지막 FREEZE 이후 트랜잭션 수. 2억 = 경고, 15억 = wraparound 위험"
+                  title={t(
+                    "age(relfrozenxid): 마지막 FREEZE 이후 트랜잭션 수. 2억 = 경고, 15억 = wraparound 위험",
+                  )}
                 >
                   TXID age
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="마지막 autovacuum 또는 수동 VACUUM 이후 경과 시간"
+                  title={t("마지막 autovacuum 또는 수동 VACUUM 이후 경과 시간")}
                 >
                   Last vacuum
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-700">
-              {tables.map((t, i) => {
-                const bloat = n(t.bloat_ratio);
+              {tables.map((row, i) => {
+                const bloat = n(row.bloat_ratio);
                 const bloatColor =
                   bloat > 0.3
                     ? "text-rose-400"
@@ -158,7 +168,8 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
                       ? "text-amber-400"
                       : "text-zinc-300";
                 const txidAge =
-                  txidAgeByTable[`${t.schema_name}.${t.table_name}`] ?? null;
+                  txidAgeByTable[`${row.schema_name}.${row.table_name}`] ??
+                  null;
                 const txidColor =
                   txidAge == null
                     ? "text-zinc-600"
@@ -169,29 +180,29 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
                         : "text-zinc-300";
                 return (
                   <tr
-                    key={`${t.schema_name}-${t.table_name}-${i}`}
+                    key={`${row.schema_name}-${row.table_name}-${i}`}
                     className="hover:bg-zinc-900/40"
                   >
                     <td className="px-4 py-2 text-zinc-200 font-mono text-xs">
-                      <span className="text-zinc-500">{t.schema_name}.</span>
-                      {t.table_name}
+                      <span className="text-zinc-500">{row.schema_name}.</span>
+                      {row.table_name}
                     </td>
                     <td
                       className="px-4 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums"
-                      title={fmtExact(n(t.n_live_tup))}
+                      title={fmtExact(n(row.n_live_tup))}
                     >
-                      {fmtNumber(n(t.n_live_tup))}
+                      {fmtNumber(n(row.n_live_tup))}
                     </td>
                     <td
                       className="px-4 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums"
-                      title={fmtExact(n(t.n_dead_tup))}
+                      title={fmtExact(n(row.n_dead_tup))}
                     >
-                      {fmtNumber(n(t.n_dead_tup))}
+                      {fmtNumber(n(row.n_dead_tup))}
                     </td>
                     <td
                       className={`px-4 py-2 text-right font-mono text-xs tabular-nums ${bloatColor}`}
-                      title={`${n(t.n_dead_tup)} dead / ${
-                        n(t.n_live_tup) + n(t.n_dead_tup)
+                      title={`${n(row.n_dead_tup)} dead / ${
+                        n(row.n_live_tup) + n(row.n_dead_tup)
                       } total`}
                     >
                       {(bloat * 100).toFixed(1)}%
@@ -209,7 +220,7 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
                       {txidAge != null ? fmtNumber(txidAge) : "-"}
                     </td>
                     <td className="px-4 py-2 text-right text-zinc-400 font-mono text-xs">
-                      {relDays(t.last_vacuum)}
+                      {relDays(t, row.last_vacuum)}
                     </td>
                   </tr>
                 );

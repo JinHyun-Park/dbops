@@ -1,6 +1,7 @@
 "use client";
 
 import { useRca } from "@/components/rca/rca-drawer";
+import { useT } from "@/lib/i18n";
 
 // "AI 근본원인 분석" entry point. Opens the in-place RCA side panel (streams the
 // agent's diagnose_root_cause analysis without leaving the page and without
@@ -18,6 +19,7 @@ export function RcaButton({
   variant?: "default" | "prominent";
 }) {
   const { open } = useRca();
+  const t = useT();
   const base =
     variant === "prominent"
       ? "bg-amber-500 text-zinc-950 hover:bg-amber-400 border border-amber-500"
@@ -28,9 +30,11 @@ export function RcaButton({
       disabled={!clusterId}
       onClick={() => clusterId && open(clusterId)}
       className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 transition-colors disabled:opacity-50 ${base} ${className}`}
-      title="AI 에이전트가 최근 신호를 상관분석해 근본 원인 후보를 정리합니다"
+      title={t(
+        "AI 에이전트가 최근 신호를 상관분석해 근본 원인 후보를 정리합니다",
+      )}
     >
-      🔍 {label}
+      🔍 {t(label)}
     </button>
   );
 }

@@ -19,6 +19,7 @@ import {
   deleteChatSession,
 } from "@/lib/api-client";
 import { fmtExact } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 interface ClusterRow {
   cluster_id: string;
@@ -331,6 +332,7 @@ function relTime(ms: number): string {
 }
 
 export function ChatPanel() {
+  const t = useT();
   const [clusters, setClusters] = useState<ClusterRow[]>([]);
   const [clusterId, setClusterId] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -587,7 +589,7 @@ export function ChatPanel() {
   const scheduleSync = useCallback((conv: Conversation) => {
     const existing = syncTimerRef.current.get(conv.id);
     if (existing) clearTimeout(existing);
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       syncTimerRef.current.delete(conv.id);
       const usage = tokenTotalsRef.current.get(conv.id);
       putChatSession(conv.id, {
@@ -602,7 +604,7 @@ export function ChatPanel() {
         ),
       );
     }, 1500);
-    syncTimerRef.current.set(conv.id, t);
+    syncTimerRef.current.set(conv.id, timer);
   }, []);
 
   const persist = useCallback(
@@ -997,7 +999,7 @@ export function ChatPanel() {
         },
         (err) => {
           console.error("Stream error:", err);
-          setStreamError(err?.message || "알 수 없는 스트림 오류");
+          setStreamError(err?.message || t("알 수 없는 스트림 오류"));
           setIsStreaming(false);
           // Mark the partial assistant message as incomplete so a reopened
           // session shows the interruption notice (not a silently truncated answer).
@@ -1054,6 +1056,7 @@ export function ChatPanel() {
       generateFollowups,
       generateTitle,
       conversations,
+      t,
     ],
   );
 
@@ -1082,7 +1085,9 @@ export function ChatPanel() {
                 onClick={() => {
                   if (
                     window.confirm(
-                      `대화 ${conversations.length}개를 모두 삭제할까요? 되돌릴 수 없습니다.`,
+                      t(
+                        "대화 {n}개를 모두 삭제할까요? 되돌릴 수 없습니다.",
+                      ).replace("{n}", String(conversations.length)),
                     )
                   ) {
                     persist(() => []);
@@ -1106,7 +1111,8 @@ export function ChatPanel() {
         <div className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
           {conversations.length === 0 ? (
             <div className="px-3 py-6 text-center text-[11px] text-zinc-600">
-              <span className="text-amber-400">+ new</span> 를 눌러 시작하세요
+              <span className="text-amber-400">+ new</span>{" "}
+              {t("를 눌러 시작하세요")}
             </div>
           ) : (
             conversations
@@ -1137,7 +1143,7 @@ export function ChatPanel() {
                             (c.total_input_tokens ?? 0) +
                               (c.total_output_tokens ?? 0),
                           )}{" "}
-                          토큰
+                          {t("토큰")}
                         </div>
                       )}
                     </div>
@@ -1148,10 +1154,10 @@ export function ChatPanel() {
                         {c.last_error && (
                           <span
                             className="inline-block w-1.5 h-1.5 rounded-full bg-rose-500 flex-shrink-0"
-                            title={`마지막 오류: ${
-                              c.last_error.message ?? "알 수 없는 오류"
+                            title={`${t("마지막 오류")}: ${
+                              c.last_error.message ?? t("알 수 없는 오류")
                             }`}
-                            aria-label="마지막 오류"
+                            aria-label={t("마지막 오류")}
                           />
                         )}
                         <span className="text-[10px] text-zinc-600">
@@ -1188,7 +1194,7 @@ export function ChatPanel() {
               </span>
             </div>
             <div className="text-sm text-zinc-200 mt-0.5 truncate">
-              {active ? active.title : "새 대화를 시작하세요"}
+              {active ? active.title : t("새 대화를 시작하세요")}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -1232,7 +1238,7 @@ export function ChatPanel() {
                     );
                   }}
                   className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-amber-500/40 hover:text-amber-300 transition-colors"
-                  title="대화를 Markdown(.md)으로 다운로드"
+                  title={t("대화를 Markdown(.md)으로 다운로드")}
                 >
                   ⬇ md
                 </button>
@@ -1242,14 +1248,18 @@ export function ChatPanel() {
                     exportConversationToPdf(active);
                   }}
                   className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-amber-500/40 hover:text-amber-300 transition-colors"
-                  title="대화 전체를 PDF로 저장. 채팅 내용만 담긴 브라우저 인쇄 창이 열립니다."
+                  title={t(
+                    "대화 전체를 PDF로 저장. 채팅 내용만 담긴 브라우저 인쇄 창이 열립니다.",
+                  )}
                 >
                   🖨 pdf
                 </button>
                 <button
                   onClick={() => {
                     if (!active) return;
-                    if (window.confirm("이 대화의 모든 메시지를 지울까요?")) {
+                    if (
+                      window.confirm(t("이 대화의 모든 메시지를 지울까요?"))
+                    ) {
                       persist((prev) =>
                         prev.map((c) =>
                           c.id === active.id
@@ -1274,7 +1284,7 @@ export function ChatPanel() {
               <button
                 onClick={() => {
                   if (!active) return;
-                  if (window.confirm("이 대화를 삭제할까요?")) {
+                  if (window.confirm(t("이 대화를 삭제할까요?"))) {
                     removeConversation(active.id);
                   }
                 }}
@@ -1299,15 +1309,16 @@ export function ChatPanel() {
                 conversation primer
               </div>
               <div className="text-zinc-300 text-lg max-w-md mb-6">
-                자연어로 Aurora 운영을 위임하세요. agent가 MCP 툴로
-                메트릭/스키마/EXPLAIN을 호출합니다.
+                {t(
+                  "자연어로 Aurora 운영을 위임하세요. agent가 MCP 툴로 메트릭/스키마/EXPLAIN을 호출합니다.",
+                )}
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-w-2xl w-full">
                 {[
-                  "최근 1시간 동안 가장 느린 쿼리 5개 분석해줘",
-                  "현재 클러스터의 health score는?",
-                  "blocking lock 있으면 보여줘",
-                  "vacuum 안 된 테이블 찾아줘",
+                  t("최근 1시간 동안 가장 느린 쿼리 5개 분석해줘"),
+                  t("현재 클러스터의 health score는?"),
+                  t("blocking lock 있으면 보여줘"),
+                  t("vacuum 안 된 테이블 찾아줘"),
                 ].map((p) => (
                   <button
                     key={p}
@@ -1330,7 +1341,9 @@ export function ChatPanel() {
                   .trim()
                   .slice(0, 80);
                 const body = question
-                  ? `## 질문\n${question}\n\n## 진단 + 조치\n${assistant.content}`
+                  ? `${t("## 질문")}\n${question}\n\n${t("## 진단 + 조치")}\n${
+                      assistant.content
+                    }`
                   : assistant.content;
                 setRunbookSaveError(null);
                 setRunbookDraft({
@@ -1393,7 +1406,7 @@ export function ChatPanel() {
               onKeyDown={(e) =>
                 e.key === "Enter" && !e.shiftKey && handleSend()
               }
-              placeholder="예: prod-cluster의 slow query를 분석해줘"
+              placeholder={t("예: prod-cluster의 slow query를 분석해줘")}
               className="flex-1 bg-zinc-900 text-zinc-100 border border-zinc-800 rounded px-4 py-3 focus:outline-none focus:border-amber-500/60 transition-colors"
               disabled={isStreaming}
             />
@@ -1421,20 +1434,20 @@ export function ChatPanel() {
           >
             <div className="px-5 py-4 border-b border-zinc-800 flex items-baseline justify-between">
               <div className="text-base text-zinc-100 font-semibold">
-                Runbook으로 저장
+                {t("Runbook으로 저장")}
               </div>
               <button
                 type="button"
                 onClick={() => !runbookSaving && setRunbookDraft(null)}
                 className="text-zinc-500 hover:text-zinc-200 text-xs"
               >
-                ✕ 닫기
+                ✕ {t("닫기")}
               </button>
             </div>
             <div className="px-5 py-4 space-y-3 overflow-y-auto flex-1">
               <label className="block">
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                  제목
+                  {t("제목")}
                 </div>
                 <input
                   value={runbookDraft.title}
@@ -1446,7 +1459,7 @@ export function ChatPanel() {
               </label>
               <label className="block">
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                  본문 (Markdown: 자동 채워짐, 편집 가능)
+                  {t("본문 (Markdown: 자동 채워짐, 편집 가능)")}
                 </div>
                 <textarea
                   value={runbookDraft.body_md}
@@ -1462,7 +1475,7 @@ export function ChatPanel() {
               </label>
               <label className="block">
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                  태그 (콤마 구분)
+                  {t("태그 (콤마 구분)")}
                 </div>
                 <input
                   value={runbookDraft.tags_csv}
@@ -1489,7 +1502,7 @@ export function ChatPanel() {
                 disabled={runbookSaving}
                 className="text-xs text-zinc-400 px-3 py-1.5"
               >
-                취소
+                {t("취소")}
               </button>
               <button
                 type="button"
@@ -1523,7 +1536,7 @@ export function ChatPanel() {
                 }}
                 className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
               >
-                {runbookSaving ? "저장 중…" : "Runbook 저장"}
+                {runbookSaving ? t("저장 중…") : t("Runbook 저장")}
               </button>
             </div>
           </div>
@@ -1532,12 +1545,12 @@ export function ChatPanel() {
 
       {runbookSavedToast && (
         <div className="fixed bottom-6 right-6 z-50 bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 px-4 py-2 text-sm shadow-lg">
-          ✓ Runbook으로 저장됨.{" "}
+          ✓ {t("Runbook으로 저장됨.")}{" "}
           <a
             href="/runbooks"
             className="text-amber-300 hover:text-amber-200 underline underline-offset-2 ml-1"
           >
-            보기 →
+            {t("보기 →")}
           </a>
         </div>
       )}

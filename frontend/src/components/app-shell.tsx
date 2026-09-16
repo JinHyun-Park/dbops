@@ -433,6 +433,7 @@ function AlertBadgeButton({
   warningCount: number;
   onClick: () => void;
 }) {
+  const t = useT();
   const total = criticalCount + warningCount;
   const badgeColor =
     criticalCount > 0
@@ -443,8 +444,11 @@ function AlertBadgeButton({
 
   const ariaLabel =
     total === 0
-      ? "알림 없음"
-      : `알림 ${total}개: critical ${criticalCount}, warning ${warningCount}`;
+      ? t("알림 없음")
+      : t("알림 {n}개: critical {c}, warning {w}")
+          .replace("{n}", String(total))
+          .replace("{c}", String(criticalCount))
+          .replace("{w}", String(warningCount));
 
   return (
     <button
@@ -474,6 +478,7 @@ function ToastItem({
   onDismiss: (id: string) => void;
 }) {
   const router = useRouter();
+  const t = useT();
   const href =
     toast.href ||
     (toast.cluster_id
@@ -510,7 +515,7 @@ function ToastItem({
           e.stopPropagation();
           onDismiss(toast.id);
         }}
-        aria-label="알림 닫기"
+        aria-label={t("알림 닫기")}
         className="flex-shrink-0 opacity-60 hover:opacity-100 transition-opacity mt-px"
       >
         <X size={12} />

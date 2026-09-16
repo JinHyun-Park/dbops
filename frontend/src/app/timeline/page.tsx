@@ -174,7 +174,7 @@ export default function TimelinePage() {
                 href={`/workload-diff?cluster=${encodeURIComponent(clusterId)}`}
                 className="text-xs px-3 py-1.5 border border-zinc-800 text-zinc-400 hover:border-amber-500/60 hover:text-amber-200 transition-colors"
               >
-                워크로드 비교 →
+                {t("워크로드 비교 →")}
               </a>
             )}
           </div>
@@ -192,14 +192,18 @@ export default function TimelinePage() {
       {degraded.length > 0 && (
         <div className="mb-4 px-3 py-2 border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs">
           <div>
-            읽지 못한 signal:{" "}
+            {t("읽지 못한 signal:")}{" "}
             <span className="font-mono">{degraded.join(", ")}</span>
           </div>
           <div className="text-amber-200/70 mt-1 leading-relaxed">
-            아래 타임라인에 이 category가 없는 것은 발생하지 않았다는 뜻이
-            아니라, 조회에 실패해 확인하지 못했다는 뜻입니다.
+            {t(
+              "아래 타임라인에 이 category가 없는 것은 발생하지 않았다는 뜻이 아니라, 조회에 실패해 확인하지 못했다는 뜻입니다.",
+            )}
             {degraded.includes("schema_change") &&
-              " schema_change는 schema_snapshots에서 읽습니다: cache DB에 schema_v26 마이그레이션이 적용됐는지 확인하세요."}
+              " " +
+                t(
+                  "schema_change는 schema_snapshots에서 읽습니다: cache DB에 schema_v26 마이그레이션이 적용됐는지 확인하세요.",
+                )}
           </div>
         </div>
       )}
@@ -211,7 +215,7 @@ export default function TimelinePage() {
       {schemaNote && (
         <div className="mb-4 px-3 py-2 border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs">
           <div>
-            schema_change 판정 범위
+            {t("schema_change 판정 범위")}
             {(data?.observation?.unconfirmed_schemas?.length ?? 0) > 0 && (
               <span className="font-mono ml-1">
                 ({data?.observation?.unconfirmed_schemas?.join(", ")})
@@ -264,7 +268,7 @@ export default function TimelinePage() {
       )}
 
       {loading ? (
-        <div className="text-sm text-zinc-500">불러오는 중…</div>
+        <div className="text-sm text-zinc-500">{t("불러오는 중…")}</div>
       ) : !data || visibleItems.length === 0 ? (
         <EmptyState
           eyebrow={t("timeline")}

@@ -170,5 +170,10 @@ def test_flat_baseline_rows_keep_their_lower_confidence_qualifier():
     # so this one is guard-shaped rather than result-shaped: `flat` must still
     # earn the lower-confidence line the other modes do not get.
     all_clear = _rendered({"mode": "seasonal", "checked": 12})
-    assert 'meta.mode === "flat" ? "이 시간대의 seasonal baseline이' in all_clear
+    # Split in two because i18n moved the Korean inside t(), which prettier
+    # then wrapped across lines, so the old single-substring form pinned a
+    # source SHAPE rather than the behaviour. The guard and the text it earns
+    # are both still asserted.
+    assert 'meta.mode === "flat"' in all_clear, all_clear
+    assert "이 시간대의 seasonal baseline이" in all_clear
     assert "신뢰도 낮음" in all_clear

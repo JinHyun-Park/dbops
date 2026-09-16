@@ -60,13 +60,15 @@ export function DynamoDbCapacitySimulator({
   return (
     <Section
       eyebrow="DynamoDB Cost"
-      title="용량 모드 비용 시뮬레이션"
-      description="테이블의 실제 소비 용량(consumed RCU/WCU)을 기준으로 Provisioned ↔ On-Demand 월 비용을 실시간 AWS Pricing 단가로 비교합니다. 용량(capacity) 비용만 대상이며 storage, backup, replication은 제외합니다."
+      title={t("용량 모드 비용 시뮬레이션")}
+      description={t(
+        "테이블의 실제 소비 용량(consumed RCU/WCU)을 기준으로 Provisioned ↔ On-Demand 월 비용을 실시간 AWS Pricing 단가로 비교합니다. 용량(capacity) 비용만 대상이며 storage, backup, replication은 제외합니다.",
+      )}
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         {loading && (
           <div className="p-6 text-zinc-500 text-sm">
-            소비 용량과 리전별 단가를 불러오는 중입니다…
+            {t("소비 용량과 리전별 단가를 불러오는 중입니다…")}
           </div>
         )}
 
@@ -109,30 +111,30 @@ export function DynamoDbCapacitySimulator({
               {/* Header: current mode badge + region */}
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-                  현재 모드
+                  {t("현재 모드")}
                 </span>
                 <span className="px-1.5 py-0.5 border text-[10px] font-mono text-violet-300 border-violet-500/40 bg-violet-500/10">
                   {data.billing_mode ? MODE_KO[data.billing_mode] : "unknown"}
                 </span>
                 <span className="text-[10px] text-zinc-600 font-mono ml-auto">
-                  {data.region}, {fmtDecimal(data.window_hours, 0)}h 윈도우,{" "}
-                  {fmtDecimal(data.datapoints, 0)} datapoints
+                  {data.region}, {fmtDecimal(data.window_hours, 0)}
+                  {t("h 윈도우,")} {fmtDecimal(data.datapoints, 0)} datapoints
                 </span>
               </div>
 
               <StatRow cols={3}>
                 <Stat
-                  label="현재 월 비용"
+                  label={t("현재 월 비용")}
                   value={usd(data.current_monthly_usd)}
                   hint={
                     data.billing_mode
-                      ? `${MODE_KO[data.billing_mode]} 기준`
+                      ? t("{n} 기준").replace("{n}", MODE_KO[data.billing_mode])
                       : undefined
                   }
                   accent="neutral"
                 />
                 <Stat
-                  label="On-Demand 월 비용 (추정)"
+                  label={t("On-Demand 월 비용 (추정)")}
                   value={usd(data.on_demand_monthly_usd)}
                   hint="consumed × $/RRU, $/WRU"
                   accent={
@@ -142,7 +144,7 @@ export function DynamoDbCapacitySimulator({
                   }
                 />
                 <Stat
-                  label="Provisioned 월 비용 (추정)"
+                  label={t("Provisioned 월 비용 (추정)")}
                   value={usd(data.provisioned_monthly_usd)}
                   hint={
                     data.sizing
@@ -169,25 +171,29 @@ export function DynamoDbCapacitySimulator({
                     <span className="font-mono text-emerald-300">
                       {MODE_KO[data.recommended_mode]}
                     </span>
-                    로 전환 시 월{" "}
+                    {t("로 전환 시 월")}{" "}
                     <span className="font-mono text-emerald-300">
                       ${fmtDecimal(data.monthly_savings_usd, 2)}
                     </span>{" "}
-                    ({fmtDecimal(data.savings_pct, 1)}%) 절감이 예상됩니다.
+                    {t("({n}%) 절감이 예상됩니다.").replace(
+                      "{n}",
+                      fmtDecimal(data.savings_pct, 1),
+                    )}
                   </div>
                 ) : (
                   <div className="border border-zinc-700 bg-zinc-900/60 px-4 py-3 text-sm text-zinc-300">
-                    현재 모드(
+                    {t("현재 모드(")}
                     <span className="font-mono">
                       {data.billing_mode ? MODE_KO[data.billing_mode] : "-"}
                     </span>
-                    )가 두 모드 중 더 저렴합니다. 전환 이점이 없습니다.
+                    {t(")가 두 모드 중 더 저렴합니다. 전환 이점이 없습니다.")}
                   </div>
                 )
               ) : (
                 <div className="border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-200">
-                  일부 단가를 확인하지 못해 권장 모드를 산출하지 않았습니다(아래
-                  Pricing 출처 참고). 확인된 비용만 표시합니다.
+                  {t(
+                    "일부 단가를 확인하지 못해 권장 모드를 산출하지 않았습니다(아래 Pricing 출처 참고). 확인된 비용만 표시합니다.",
+                  )}
                 </div>
               )}
 
@@ -217,7 +223,7 @@ export function DynamoDbCapacitySimulator({
               {data.assumptions.length > 0 && (
                 <details className="text-[11px] text-zinc-500">
                   <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200 select-none">
-                    추정 가정 보기
+                    {t("추정 가정 보기")}
                   </summary>
                   <ul className="mt-2 space-y-1">
                     {data.assumptions.map((a, i) => (

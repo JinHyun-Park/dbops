@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { useT } from "@/lib/i18n";
+
 // Approval rows arrive from two slightly different writers:
 //   1. POST /api/approvals (old path), sets `tool_name`,
 //      `action_description`, `risk_level`, `parameters` (JSON string).
@@ -109,6 +111,11 @@ const ACTION_RISK: Record<string, string> = {
 // 점검해야 하는지" 가이드. 승인 카드만 보고는 요청의 의미와 위험을 알기
 // 어려워(파라미터 값만 보임) DBA가 매번 따로 판단해야 했다. 결정에 필요한
 // 컨텍스트를 카드 안에서 바로 제공한다.
+//
+// i18n: this is a module-level table, so it cannot call the t() hook. Every
+// string here is translated at its RENDER site (t(guide.what), t(r), t(c)
+// below), and its Korean text is the en.ts lookup key. Edit a string here and
+// you must edit the matching en.ts key, or that line silently renders Korean.
 interface ActionGuide {
   what: string;
   risks: string[];
@@ -425,6 +432,7 @@ export function ApprovalCard({
   onApprove,
   onReject,
 }: ApprovalCardProps) {
+  const t = useT();
   const action = approval.action_type || approval.tool_name || "unknown";
   const risk =
     approval.risk_level || ACTION_RISK[approval.action_type || ""] || "medium";
@@ -440,24 +448,38 @@ export function ApprovalCard({
           <span className="text-sm font-mono text-zinc-300">{action}</span>
           <span
             className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 border ${riskClass}`}
-            title="이 작업의 위험도"
+            title={t("이 작업의 위험도")}
           >
             {risk}
           </span>
           {approval.scaleout && (
             <span
               className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-sky-500/40 bg-sky-500/15 text-sky-300"
-              title="스케일아웃이 자동으로 대기열에 올린 예열 승인입니다"
+              title={t("스케일아웃이 자동으로 대기열에 올린 예열 승인입니다")}
             >
-              스케일아웃 자동 예열
+              {t("스케일아웃 자동 예열")}
             </span>
           )}
         </div>
         <StatusPill status={approval.approval_status} />
       </div>
 
-      {guide && (
-        <div className="text-[11px] text-zinc-400 mb-2">{guide.what}</div>
+      {/* The per-action guide is the richer description, so it wins. The
+          stored free-text `action_description` is the fallback for a row whose
+          action has no guide entry, and it is translated HERE rather than at
+          the POST: the stored value is the audit record every later reader
+          sees, so freezing the filing browser's language into it would make a
+          Korean operator read English (and vice versa) depending on who
+          happened to click the button. Korean stays the stored key; each
+          viewer gets their own language, old rows included. */}
+      {guide ? (
+        <div className="text-[11px] text-zinc-400 mb-2">{t(guide.what)}</div>
+      ) : (
+        approval.action_description && (
+          <div className="text-[11px] text-zinc-400 mb-2">
+            {t(approval.action_description)}
+          </div>
+        )
       )}
 
       {/* Per-action_type detail renderer */}
@@ -485,18 +507,18 @@ export function ApprovalCard({
             onClick={() => setShowGuide((v) => !v)}
             className="text-[11px] text-sky-400 hover:text-sky-300"
           >
-            {showGuide ? "▾" : "▸"} 리스크와 고려사항
+            {showGuide ? "▾" : "▸"} {t("리스크와 고려사항")}
           </button>
           {showGuide && (
             <div className="mt-2 space-y-2 border-l-2 border-zinc-700 pl-3">
               {guide.risks.length > 0 && (
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-rose-300/80 mb-1">
-                    리스크
+                    {t("리스크")}
                   </div>
                   <ul className="text-[11px] text-zinc-300 space-y-0.5 list-disc list-inside">
                     {guide.risks.map((r, i) => (
-                      <li key={i}>{r}</li>
+                      <li key={i}>{t(r)}</li>
                     ))}
                   </ul>
                 </div>
@@ -504,11 +526,11 @@ export function ApprovalCard({
               {guide.considerations.length > 0 && (
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-amber-300/80 mb-1">
-                    승인 전 점검
+                    {t("승인 전 점검")}
                   </div>
                   <ul className="text-[11px] text-zinc-300 space-y-0.5 list-disc list-inside">
                     {guide.considerations.map((c, i) => (
-                      <li key={i}>{c}</li>
+                      <li key={i}>{t(c)}</li>
                     ))}
                   </ul>
                 </div>
@@ -544,13 +566,13 @@ export function ApprovalCard({
             onClick={() => onApprove(approval.approval_id)}
             className="flex-1 py-2 bg-emerald-600 text-white text-sm hover:bg-emerald-500 transition-colors"
           >
-            승인
+            {t("승인")}
           </button>
           <button
             onClick={() => onReject(approval.approval_id)}
             className="flex-1 py-2 bg-red-600 text-white text-sm hover:bg-red-500 transition-colors"
           >
-            거부
+            {t("거부")}
           </button>
         </div>
       )}
@@ -590,6 +612,7 @@ function ActionDetails({
   action: string;
   details: Record<string, unknown>;
 }) {
+  const t = useT();
   // Legacy free-text description (no action_details).
   if (!details || Object.keys(details).length === 0) {
     return null;
@@ -670,8 +693,10 @@ function ActionDetails({
           />
         )}
         <div className="text-[11px] text-amber-300/90">
-          ⚠ 새 클러스터를 생성합니다 (과금 발생). 소스 클러스터는 변경되지
-          않습니다.
+          ⚠{" "}
+          {t(
+            "새 클러스터를 생성합니다 (과금 발생). 소스 클러스터는 변경되지 않습니다.",
+          )}
         </div>
       </div>
     );
@@ -715,7 +740,7 @@ function ActionDetails({
         />
         {!enabling && (
           <div className="text-[11px] text-rose-300">
-            ⚠ PITR 비활성화: 연속 백업 보호가 사라집니다 (force=true).
+            ⚠ {t("PITR 비활성화: 연속 백업 보호가 사라집니다 (force=true).")}
           </div>
         )}
       </div>
@@ -763,9 +788,10 @@ function ActionDetails({
           mono
         />
         <div className="text-[11px] text-rose-300/90">
-          ⚠ 이 커스텀 엔드포인트를 삭제합니다. 이 DNS 이름을 참조하는
-          클라이언트는 연결이 끊깁니다. writer/reader 내장 엔드포인트는 영향받지
-          않습니다.
+          ⚠{" "}
+          {t(
+            "이 커스텀 엔드포인트를 삭제합니다. 이 DNS 이름을 참조하는 클라이언트는 연결이 끊깁니다. writer/reader 내장 엔드포인트는 영향받지 않습니다.",
+          )}
         </div>
       </div>
     );
@@ -857,6 +883,7 @@ function buildEndpointCli(
 }
 
 function CliPreview({ cli }: { cli: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -872,13 +899,13 @@ function CliPreview({ cli }: { cli: string }) {
     <div className="mt-3">
       <div className="flex items-center justify-between mb-1">
         <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-          실행될 CLI (동등 명령)
+          {t("실행될 CLI (동등 명령)")}
         </span>
         <button
           onClick={copy}
           className="text-[10px] px-1.5 py-0.5 border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
         >
-          {copied ? "복사됨" : "복사"}
+          {copied ? t("복사됨") : t("복사")}
         </button>
       </div>
       <pre className="bg-zinc-950 border border-zinc-800 p-3 text-[11px] text-emerald-200/90 font-mono whitespace-pre-wrap break-all max-h-32 overflow-y-auto">

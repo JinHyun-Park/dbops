@@ -113,6 +113,7 @@ function UpgradePanel({
   clusterId: string;
   engine?: string;
 }) {
+  const t = useT();
   const [target, setTarget] = useState("");
   const [method, setMethod] = useState<"blue_green" | "in_place" | "clone">(
     "blue_green",
@@ -160,10 +161,10 @@ function UpgradePanel({
   return (
     <Section
       eyebrow="Upgrade"
-      title="버전 업그레이드 시뮬레이션"
-      description={`현재 ${
-        engine ?? "engine"
-      } 클러스터에서 target 버전으로 업그레이드할 때의 호환성, 메서드별 시간/다운타임/리스크, 단계별 실행 계획을 한 번에 추정합니다.`}
+      title={t("버전 업그레이드 시뮬레이션")}
+      description={t(
+        "현재 {engine} 클러스터에서 target 버전으로 업그레이드할 때의 호환성, 메서드별 시간/다운타임/리스크, 단계별 실행 계획을 한 번에 추정합니다.",
+      ).replace("{engine}", engine ?? "engine")}
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
@@ -174,7 +175,7 @@ function UpgradePanel({
             type="text"
             value={target}
             onChange={(e) => setTarget(e.target.value)}
-            placeholder="예: 16.4"
+            placeholder={t("예: 16.4")}
             className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-32"
           />
           <label className="text-[10px] uppercase tracking-wider text-zinc-500 ml-2">
@@ -196,7 +197,7 @@ function UpgradePanel({
             disabled={loading || !target.trim()}
             className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors ml-auto"
           >
-            {loading ? "추정 중…" : "시뮬레이션 실행"}
+            {loading ? t("추정 중…") : t("시뮬레이션 실행")}
           </button>
         </div>
 
@@ -215,11 +216,11 @@ function UpgradePanel({
                 </span>
                 {compat.is_compatible ? (
                   <span className="px-1.5 py-0.5 bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 text-[10px]">
-                    호환 가능
+                    {t("호환 가능")}
                   </span>
                 ) : (
                   <span className="px-1.5 py-0.5 bg-rose-500/15 text-rose-300 border border-rose-500/40 text-[10px]">
-                    직접 업그레이드 불가
+                    {t("직접 업그레이드 불가")}
                   </span>
                 )}
               </div>
@@ -236,7 +237,9 @@ function UpgradePanel({
               {!compat.is_compatible &&
                 compat.valid_upgrade_targets.length > 0 && (
                   <div className="text-[11px] text-zinc-400 mt-1">
-                    <span className="text-zinc-500">유효한 직접 대상: </span>
+                    <span className="text-zinc-500">
+                      {t("유효한 직접 대상: ")}
+                    </span>
                     {compat.valid_upgrade_targets.slice(0, 8).map((v) => (
                       <button
                         key={v}
@@ -260,10 +263,13 @@ function UpgradePanel({
               </span>
               {impact.upgrade_type && (
                 <span className="px-1.5 py-0.5 border text-[10px] text-zinc-300 border-zinc-700 bg-zinc-900/60">
-                  {impact.upgrade_type === "major" ? "메이저" : "마이너"}
+                  {impact.upgrade_type === "major" ? t("메이저") : t("마이너")}
                   {typeof impact.major_jump === "number" &&
                     impact.major_jump > 1 &&
-                    ` ${impact.major_jump}단계`}
+                    ` ${t("{n}단계").replace(
+                      "{n}",
+                      String(impact.major_jump),
+                    )}`}
                 </span>
               )}
               {impact.confidence && (
@@ -307,7 +313,7 @@ function UpgradePanel({
                               : ""
                           }`}
                           title={
-                            hasBasis ? "클릭하여 추정 근거 보기" : undefined
+                            hasBasis ? t("클릭하여 추정 근거 보기") : undefined
                           }
                         >
                           <td className="py-1.5 font-mono text-zinc-200 align-top">
@@ -319,16 +325,24 @@ function UpgradePanel({
                             {m.method}
                             {m.method === impact.recommendation && (
                               <span className="ml-2 text-[10px] text-emerald-400">
-                                ★ 권장
+                                {t("★ 권장")}
                               </span>
                             )}
                           </td>
                           <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums align-top">
-                            ~{m.estimated_minutes}분
+                            {t("~{n}분").replace(
+                              "{n}",
+                              String(m.estimated_minutes),
+                            )}
                             {typeof m.range_low_minutes === "number" &&
                               typeof m.range_high_minutes === "number" && (
                                 <span className="block text-[10px] text-zinc-600">
-                                  {m.range_low_minutes}-{m.range_high_minutes}분
+                                  {t("{a}-{b}분")
+                                    .replace("{a}", String(m.range_low_minutes))
+                                    .replace(
+                                      "{b}",
+                                      String(m.range_high_minutes),
+                                    )}
                                 </span>
                               )}
                           </td>
@@ -344,7 +358,12 @@ function UpgradePanel({
                             <td colSpan={4} className="px-2 pb-3 pt-1">
                               <div className="border-l-2 border-emerald-500/40 pl-3">
                                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                                  {m.method} ~{m.estimated_minutes}분 추정 근거
+                                  {t("{method} ~{n}분 추정 근거")
+                                    .replace("{method}", m.method)
+                                    .replace(
+                                      "{n}",
+                                      String(m.estimated_minutes),
+                                    )}
                                 </div>
                                 <ul className="space-y-1">
                                   {m.basis!.map((b, i) => (
@@ -362,12 +381,20 @@ function UpgradePanel({
                                 {typeof m.range_low_minutes === "number" &&
                                   typeof m.range_high_minutes === "number" && (
                                     <div className="text-[10px] text-zinc-600 mt-1.5">
-                                      추정 범위 {m.range_low_minutes}-
-                                      {m.range_high_minutes}분
+                                      {t("추정 범위 {a}-{b}분")
+                                        .replace(
+                                          "{a}",
+                                          String(m.range_low_minutes),
+                                        )
+                                        .replace(
+                                          "{b}",
+                                          String(m.range_high_minutes),
+                                        )}
                                       {impact.confidence &&
-                                        `, 신뢰도 ${
-                                          CONFIDENCE_KO[impact.confidence]
-                                        }`}
+                                        t(", 신뢰도 {c}").replace(
+                                          "{c}",
+                                          t(CONFIDENCE_KO[impact.confidence]),
+                                        )}
                                     </div>
                                   )}
                               </div>
@@ -383,7 +410,9 @@ function UpgradePanel({
             <div className="mt-3 space-y-1 border-t border-zinc-800 pt-2">
               {impact.recommendation_reason && (
                 <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  <span className="text-emerald-400/80 mr-1">권장 근거</span>
+                  <span className="text-emerald-400/80 mr-1">
+                    {t("권장 근거")}
+                  </span>
                   {impact.recommendation_reason}
                 </p>
               )}
@@ -413,17 +442,21 @@ function UpgradePanel({
                 )}
               </div>
               <div className="text-[10px] text-zinc-500 font-mono text-right">
-                ~{plan.estimated_total_minutes}분
+                {t("~{n}분").replace(
+                  "{n}",
+                  String(plan.estimated_total_minutes),
+                )}
                 {plan.estimated_range_minutes && (
                   <span className="text-zinc-600">
                     {" "}
-                    ({plan.estimated_range_minutes[0]}-
-                    {plan.estimated_range_minutes[1]}분)
+                    {t("({a}-{b}분)")
+                      .replace("{a}", String(plan.estimated_range_minutes[0]))
+                      .replace("{b}", String(plan.estimated_range_minutes[1]))}
                   </span>
                 )}
                 {plan.downtime_text && (
                   <span className="block text-zinc-600">
-                    다운타임 {plan.downtime_text}
+                    {t("다운타임 {n}").replace("{n}", plan.downtime_text)}
                   </span>
                 )}
               </div>
@@ -455,8 +488,9 @@ function UpgradePanel({
 
         {!compat && !loading && !err && (
           <div className="p-6 text-zinc-500 text-sm">
-            target 버전을 입력하고{" "}
-            <span className="text-amber-300">시뮬레이션 실행</span>을 누르세요.
+            {t("target 버전을 입력하고")}{" "}
+            <span className="text-amber-300">{t("시뮬레이션 실행")}</span>
+            {t("을 누르세요.")}
           </div>
         )}
       </div>
@@ -469,6 +503,7 @@ function UpgradePanel({
 // ---------------------------------------------------------------------------
 
 function ParameterPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [catalog, setCatalog] = useState<ParameterCatalogEntry[]>([]);
   const [param, setParam] = useState("");
   const [value, setValue] = useState("");
@@ -510,8 +545,10 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
   return (
     <Section
       eyebrow="Parameter"
-      title="파라미터 변경 시뮬레이션"
-      description="동적/정적 여부, 재시작 필요 여부, 영향 영역을 즉시 추정합니다."
+      title={t("파라미터 변경 시뮬레이션")}
+      description={t(
+        "동적/정적 여부, 재시작 필요 여부, 영향 영역을 즉시 추정합니다.",
+      )}
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
@@ -522,7 +559,7 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
             list="param-catalog"
             value={param}
             onChange={(e) => setParam(e.target.value)}
-            placeholder="예: work_mem"
+            placeholder={t("예: work_mem")}
             className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-48"
           />
           <datalist id="param-catalog">
@@ -536,7 +573,7 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
           <input
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            placeholder="예: 16MB"
+            placeholder={t("예: 16MB")}
             className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-32"
           />
           <button
@@ -544,7 +581,7 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
             disabled={loading || !param.trim() || !value.trim()}
             className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors ml-auto"
           >
-            {loading ? "추정 중…" : "시뮬레이션 실행"}
+            {loading ? t("추정 중…") : t("시뮬레이션 실행")}
           </button>
         </div>
 
@@ -571,7 +608,7 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
                   Value
                 </span>
                 <span className="font-mono text-zinc-300">
-                  {result.current_value ?? "(엔진 기본값)"}
+                  {result.current_value ?? t("(엔진 기본값)")}
                 </span>
                 <span className="text-zinc-600">→</span>
                 <span className="font-mono text-zinc-200">
@@ -579,12 +616,12 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
                 </span>
                 {result.is_modifiable === false && (
                   <span className="px-1.5 py-0.5 border text-[10px] text-rose-300 border-rose-500/40 bg-rose-500/10">
-                    수정 불가
+                    {t("수정 불가")}
                   </span>
                 )}
                 {result.allowed_values && (
                   <span className="text-[10px] text-zinc-500 font-mono">
-                    허용: {result.allowed_values}
+                    {t("허용: {n}").replace("{n}", result.allowed_values)}
                   </span>
                 )}
               </div>
@@ -614,7 +651,7 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
               </div>
               {!result.known && (
                 <div className="text-[10px] text-amber-400 mt-1">
-                  카탈로그 미등록: 결과는 보수적 기본값입니다
+                  {t("카탈로그 미등록: 결과는 보수적 기본값입니다")}
                 </div>
               )}
             </div>
@@ -623,9 +660,9 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
 
         {!result && !loading && !err && (
           <div className="p-6 text-zinc-500 text-sm">
-            파라미터명과 값을 입력하세요. 등록된{" "}
-            <span className="text-zinc-300">{catalog.length}</span>개의
-            파라미터에 대해 자동완성이 동작합니다.
+            {t("파라미터명과 값을 입력하세요. 등록된")}{" "}
+            <span className="text-zinc-300">{catalog.length}</span>
+            {t("개의 파라미터에 대해 자동완성이 동작합니다.")}
           </div>
         )}
       </div>
@@ -638,6 +675,7 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
 // ---------------------------------------------------------------------------
 
 function ScalingPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [minAcu, setMinAcu] = useState<string>("");
   const [maxAcu, setMaxAcu] = useState<string>("");
   const [instanceClass, setInstanceClass] = useState<string>("");
@@ -709,16 +747,18 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
   return (
     <Section
       eyebrow="Scaling"
-      title="스케일링 비용 시뮬레이션"
-      description="Aurora Serverless v2(ACU min/max) 또는 프로비저닝 인스턴스 클래스를 조정했을 때의 월 비용 변화를, 클러스터 리전과 에디션(I/O-Optimized) 기준 실시간 Pricing 단가로 추정합니다."
+      title={t("스케일링 비용 시뮬레이션")}
+      description={t(
+        "Aurora Serverless v2(ACU min/max) 또는 프로비저닝 인스턴스 클래스를 조정했을 때의 월 비용 변화를, 클러스터 리전과 에디션(I/O-Optimized) 기준 실시간 Pricing 단가로 추정합니다.",
+      )}
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
           {!result ? (
             <span className="text-[11px] text-zinc-500">
               {err
-                ? "모드 감지 실패. 아래 오류 확인"
-                : "클러스터 모드 감지 중…"}
+                ? t("모드 감지 실패. 아래 오류 확인")
+                : t("클러스터 모드 감지 중…")}
             </span>
           ) : provisioned ? (
             <>
@@ -767,7 +807,7 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
             disabled={loading || !result}
             className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors ml-auto"
           >
-            {loading ? "추정 중…" : "비용 추정"}
+            {loading ? t("추정 중…") : t("비용 추정")}
           </button>
         </div>
 
@@ -779,13 +819,13 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
               {provisioned ? (
                 <>
                   <InstanceCard
-                    label="현재"
+                    label={t("현재")}
                     instanceClass={result.current.instance_class}
                     monthly={result.cost_impact.current_monthly_usd}
                     tone="zinc"
                   />
                   <InstanceCard
-                    label="제안"
+                    label={t("제안")}
                     instanceClass={result.proposed.instance_class}
                     monthly={result.cost_impact.proposed_monthly_usd}
                     tone={delta != null && delta > 0 ? "amber" : "emerald"}
@@ -795,14 +835,14 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
               ) : (
                 <>
                   <RangeCard
-                    label="현재"
+                    label={t("현재")}
                     min={result.current.min_acu}
                     max={result.current.max_acu}
                     monthly={result.cost_impact.current_monthly_usd}
                     tone="zinc"
                   />
                   <RangeCard
-                    label="제안"
+                    label={t("제안")}
                     min={result.proposed.min_acu}
                     max={result.proposed.max_acu}
                     monthly={result.cost_impact.proposed_monthly_usd}
@@ -815,7 +855,7 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
             <div className="grid gap-2 sm:grid-cols-[1fr_auto] items-baseline border-t border-zinc-800 pt-2.5">
               <div className="text-xs text-zinc-400">
                 <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
-                  월 차액
+                  {t("월 차액")}
                 </span>
                 <span className={`font-mono ${deltaTone}`}>
                   {delta == null
@@ -831,11 +871,14 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
               <div className="flex flex-wrap items-center gap-2 text-[10px]">
                 {result.acu_basis === "observed" ? (
                   <span className="px-1.5 py-0.5 border text-emerald-300 border-emerald-500/40 bg-emerald-500/10">
-                    관측 ACU {fmtDecimal(result.observed_avg_acu ?? 0, 2)} 기준
+                    {t("관측 ACU {n} 기준").replace(
+                      "{n}",
+                      fmtDecimal(result.observed_avg_acu ?? 0, 2),
+                    )}
                   </span>
                 ) : (
                   <span className="px-1.5 py-0.5 border text-amber-300 border-amber-500/40 bg-amber-500/10">
-                    중간값 ACU 추정 (관측 데이터 없음)
+                    {t("중간값 ACU 추정 (관측 데이터 없음)")}
                   </span>
                 )}
                 {result.confidence && (
@@ -853,8 +896,9 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
 
         {!result && loading && (
           <div className="p-6 text-zinc-500 text-sm">
-            현재 구성과 월 비용을 불러오는 중입니다. 클러스터 모드(Serverless v2
-            / 프로비저닝)에 맞는 입력이 곧 표시됩니다.
+            {t(
+              "현재 구성과 월 비용을 불러오는 중입니다. 클러스터 모드(Serverless v2 / 프로비저닝)에 맞는 입력이 곧 표시됩니다.",
+            )}
           </div>
         )}
       </div>
@@ -873,6 +917,7 @@ function DdlPanel({
   clusterId: string;
   engine?: string;
 }) {
+  const t = useT();
   const [ddl, setDdl] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -910,8 +955,10 @@ function DdlPanel({
   return (
     <Section
       eyebrow="DDL"
-      title="DDL 영향 시뮬레이션"
-      description="ALTER / CREATE INDEX 등 DDL을 실행했을 때의 락 타입, 예상 소요 시간, 디스크 추가 사용량을 추정합니다."
+      title={t("DDL 영향 시뮬레이션")}
+      description={t(
+        "ALTER / CREATE INDEX 등 DDL을 실행했을 때의 락 타입, 예상 소요 시간, 디스크 추가 사용량을 추정합니다.",
+      )}
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
@@ -923,14 +970,14 @@ function DdlPanel({
             type="button"
             className="text-[10px] text-zinc-500 hover:text-zinc-300 underline underline-offset-2 font-mono"
           >
-            샘플 채우기
+            {t("샘플 채우기")}
           </button>
           <button
             onClick={run}
             disabled={loading || !ddl.trim()}
             className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors ml-auto"
           >
-            {loading ? "추정 중…" : "영향 추정"}
+            {loading ? t("추정 중…") : t("영향 추정")}
           </button>
         </div>
         <textarea
@@ -957,7 +1004,10 @@ function DdlPanel({
               )}
               {typeof result.throughput_mb_s === "number" && (
                 <span className="text-[10px] text-zinc-600 font-mono ml-auto">
-                  추정 처리량 ~{fmtDecimal(result.throughput_mb_s, 0)} MB/s
+                  {t("추정 처리량 ~{n} MB/s").replace(
+                    "{n}",
+                    fmtDecimal(result.throughput_mb_s, 0),
+                  )}
                 </span>
               )}
             </div>
@@ -1023,7 +1073,7 @@ function DdlPanel({
             {result.basis && result.basis.length > 0 && (
               <div className="border-l-2 border-emerald-500/40 pl-3">
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                  추정 근거
+                  {t("추정 근거")}
                 </div>
                 <ul className="space-y-0.5">
                   {result.basis.map((b, i) => (
@@ -1048,8 +1098,9 @@ function DdlPanel({
 
         {!result && !loading && !err && (
           <div className="p-6 text-zinc-500 text-sm">
-            DDL SQL을 입력하면 테이블 크기 추정과 락/온라인 가능 여부를
-            분석합니다.
+            {t(
+              "DDL SQL을 입력하면 테이블 크기 추정과 락/온라인 가능 여부를 분석합니다.",
+            )}
           </div>
         )}
       </div>
@@ -1062,6 +1113,7 @@ function DdlPanel({
 // ---------------------------------------------------------------------------
 
 function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [nodeType, setNodeType] = useState("");
   const [nodeCount, setNodeCount] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1109,24 +1161,26 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
   return (
     <Section
       eyebrow="ElastiCache Cost"
-      title="노드 리사이즈 비용 시뮬레이션"
-      description="ElastiCache 노드 타입과 노드 수를 변경했을 때의 월 비용 변화를 리전별 실시간 AWS Pricing 단가로 추정합니다. 노드-시간 비용만 대상이며 데이터 전송, 스냅샷, 예약 노드는 제외합니다."
+      title={t("노드 리사이즈 비용 시뮬레이션")}
+      description={t(
+        "ElastiCache 노드 타입과 노드 수를 변경했을 때의 월 비용 변화를 리전별 실시간 AWS Pricing 단가로 추정합니다. 노드-시간 비용만 대상이며 데이터 전송, 스냅샷, 예약 노드는 제외합니다.",
+      )}
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
           <label className="text-[10px] uppercase tracking-wider text-zinc-500">
-            새 노드 타입
+            {t("새 노드 타입")}
           </label>
           <input
             type="text"
             value={nodeType}
             onChange={(e) => setNodeType(e.target.value)}
-            placeholder="예: cache.r7g.large"
+            placeholder={t("예: cache.r7g.large")}
             spellCheck={false}
             className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-44"
           />
           <label className="text-[10px] uppercase tracking-wider text-zinc-500 ml-2">
-            노드 수
+            {t("노드 수")}
           </label>
           <input
             type="number"
@@ -1142,7 +1196,7 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
             disabled={loading}
             className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors ml-auto"
           >
-            {loading ? "추정 중…" : "비용 추정"}
+            {loading ? t("추정 중…") : t("비용 추정")}
           </button>
         </div>
 
@@ -1157,14 +1211,17 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className={`border px-3 py-2 ${TONE_CLASSES["zinc"]}`}>
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                  현재
+                  {t("현재")}
                 </div>
                 <div className="text-base font-mono break-all">
                   {result.current.node_type || "-"}
                 </div>
                 <div className="text-[11px] text-zinc-500 mt-0.5 font-mono">
                   {result.current.node_count != null
-                    ? `× ${fmtExact(result.current.node_count)} 노드`
+                    ? t("× {n} 노드").replace(
+                        "{n}",
+                        fmtExact(result.current.node_count),
+                      )
                     : ""}
                 </div>
                 <div className="text-[11px] text-zinc-400 mt-1 font-mono">
@@ -1179,14 +1236,17 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
                 }`}
               >
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                  제안
+                  {t("제안")}
                 </div>
                 <div className="text-base font-mono break-all">
                   {result.proposed.node_type || "-"}
                 </div>
                 <div className="text-[11px] text-zinc-500 mt-0.5 font-mono">
                   {result.proposed.node_count != null
-                    ? `× ${fmtExact(result.proposed.node_count)} 노드`
+                    ? t("× {n} 노드").replace(
+                        "{n}",
+                        fmtExact(result.proposed.node_count),
+                      )
                     : ""}
                 </div>
                 <div className="text-[11px] text-zinc-400 mt-1 font-mono">
@@ -1213,7 +1273,7 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
             <div className="grid gap-2 sm:grid-cols-[1fr_auto] items-baseline border-t border-zinc-800 pt-2.5">
               <div className="text-xs text-zinc-400">
                 <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
-                  월 차액
+                  {t("월 차액")}
                 </span>
                 <span className={`font-mono ${deltaTone}`}>
                   {delta == null
@@ -1229,7 +1289,7 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
             {result.status === "partial" && (
               <div className="flex items-center gap-2 text-[10px]">
                 <span className="px-1.5 py-0.5 border text-amber-300 border-amber-500/40 bg-amber-500/10">
-                  부분 추정: 일부 단가 미조회
+                  {t("부분 추정: 일부 단가 미조회")}
                 </span>
               </div>
             )}
@@ -1248,14 +1308,19 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
               </span>
               {result.current.price_per_hour != null && (
                 <span>
-                  현재 ${fmtDecimal(result.current.price_per_hour, 4)}/hr/node
+                  {t("현재 ${n}/hr/node").replace(
+                    "{n}",
+                    fmtDecimal(result.current.price_per_hour, 4),
+                  )}
                 </span>
               )}
               {result.proposed.price_per_hour != null &&
                 result.proposed.node_type !== result.current.node_type && (
                   <span>
-                    제안 ${fmtDecimal(result.proposed.price_per_hour, 4)}
-                    /hr/node
+                    {t("제안 ${n}/hr/node").replace(
+                      "{n}",
+                      fmtDecimal(result.proposed.price_per_hour, 4),
+                    )}
                   </span>
                 )}
             </div>
@@ -1268,9 +1333,11 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
 
         {!result && !loading && !err && (
           <div className="p-6 text-zinc-500 text-sm">
-            노드 타입 또는 노드 수를 입력하고{" "}
-            <span className="text-amber-300">비용 추정</span>을 누르세요. 입력
-            없이 실행하면 현재 구성 기준 월 비용을 조회합니다.
+            {t("노드 타입 또는 노드 수를 입력하고")}{" "}
+            <span className="text-amber-300">{t("비용 추정")}</span>
+            {t(
+              "을 누르세요. 입력 없이 실행하면 현재 구성 기준 월 비용을 조회합니다.",
+            )}
           </div>
         )}
       </div>
@@ -1293,6 +1360,7 @@ const RDS_ACTION_KO: Record<string, string> = {
 };
 
 function RdsActionBadge({ action }: { action?: string }) {
+  const t = useT();
   const tone =
     action === "downsize"
       ? "text-emerald-300 border-emerald-500/40 bg-emerald-500/10"
@@ -1303,7 +1371,7 @@ function RdsActionBadge({ action }: { action?: string }) {
     <span
       className={`px-1.5 py-0.5 border text-[10px] font-mono uppercase tracking-wider whitespace-nowrap ${tone}`}
     >
-      {action ? RDS_ACTION_KO[action] ?? action : "-"}
+      {action ? t(RDS_ACTION_KO[action] ?? action) : "-"}
     </span>
   );
 }
@@ -1360,8 +1428,10 @@ function RdsRightsizingSimulator({
   return (
     <Section
       eyebrow="RDS Instance Cost"
-      title="인스턴스 라이트사이징과 비용 시뮬레이션"
-      description="최근 CloudWatch 사용률(CPU, 연결, IOPS)을 기준으로 인스턴스 클래스 적정성을 진단하고, AWS Price List 실시간 단가로 현재 대비 제안 인스턴스의 월 비용을 추정합니다."
+      title={t("인스턴스 라이트사이징과 비용 시뮬레이션")}
+      description={t(
+        "최근 CloudWatch 사용률(CPU, 연결, IOPS)을 기준으로 인스턴스 클래스 적정성을 진단하고, AWS Price List 실시간 단가로 현재 대비 제안 인스턴스의 월 비용을 추정합니다.",
+      )}
     >
       <div className="bg-zinc-900/50 border border-zinc-800">
         <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center gap-3">
@@ -1376,7 +1446,7 @@ function RdsRightsizingSimulator({
             disabled={loading}
             className="text-xs font-medium px-3 py-1 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors ml-auto"
           >
-            {loading ? "분석 중…" : result ? "다시 계산" : "지금 계산"}
+            {loading ? t("분석 중…") : result ? t("다시 계산") : t("지금 계산")}
           </button>
         </div>
 
@@ -1388,7 +1458,7 @@ function RdsRightsizingSimulator({
 
         {loading && !result && !err && (
           <div className="p-6 text-zinc-500 text-sm">
-            CloudWatch 사용률과 AWS Price List 단가를 조회하는 중입니다…
+            {t("CloudWatch 사용률과 AWS Price List 단가를 조회하는 중입니다…")}
           </div>
         )}
 
@@ -1412,7 +1482,9 @@ function RdsRightsizingSimulator({
           (result.status === "error" ||
             result.status === "unsupported_engine") && (
             <div className="p-4 text-xs text-rose-300">
-              {result.message ?? result.reason ?? "시뮬레이션에 실패했습니다."}
+              {result.message ??
+                result.reason ??
+                t("시뮬레이션에 실패했습니다.")}
             </div>
           )}
 
@@ -1446,15 +1518,15 @@ function RdsRightsizingSimulator({
                 }
                 hint={
                   result.utilization?.window_hours != null
-                    ? `${fmtDecimal(
-                        result.utilization.window_hours,
-                        0,
-                      )}h 윈도우`
+                    ? t("{n}h 윈도우").replace(
+                        "{n}",
+                        fmtDecimal(result.utilization.window_hours, 0),
+                      )
                     : undefined
                 }
               />
               <Stat
-                label="피크 연결 수"
+                label={t("피크 연결 수")}
                 value={
                   result.utilization?.conn_peak != null
                     ? fmtDecimal(result.utilization.conn_peak, 0)
@@ -1492,7 +1564,7 @@ function RdsRightsizingSimulator({
             <div className="grid gap-3 sm:grid-cols-2">
               <div className={`border px-3 py-2 ${TONE_CLASSES["zinc"]}`}>
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                  현재
+                  {t("현재")}
                 </div>
                 <div className="text-base font-mono break-all">
                   {result.current?.instance_class || "-"}
@@ -1507,7 +1579,7 @@ function RdsRightsizingSimulator({
                 }`}
               >
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                  제안
+                  {t("제안")}
                 </div>
                 <div className="text-base font-mono break-all">
                   {result.recommendation?.instance_class ||
@@ -1524,7 +1596,7 @@ function RdsRightsizingSimulator({
             <div className="grid gap-2 sm:grid-cols-[1fr_auto] items-baseline border-t border-zinc-800 pt-2.5">
               <div className="text-xs text-zinc-400">
                 <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
-                  월 차액
+                  {t("월 차액")}
                 </span>
                 <span className={`font-mono ${deltaTone}`}>
                   {delta == null
@@ -1556,7 +1628,7 @@ function RdsRightsizingSimulator({
 
             {result.cost_impact?.pricing_source === "fallback_estimate" && (
               <div className="text-[11px] text-amber-300/80">
-                실시간 가격을 가져오지 못해 추정치입니다.
+                {t("실시간 가격을 가져오지 못해 추정치입니다.")}
               </div>
             )}
           </div>
@@ -1597,6 +1669,7 @@ function ConfidenceBadge({
 }: {
   confidence: "low" | "medium" | "high";
 }) {
+  const t = useT();
   const map = {
     high: {
       tone: "text-emerald-300 border-emerald-500/40 bg-emerald-500/10",
@@ -1613,7 +1686,9 @@ function ConfidenceBadge({
   } as const;
   const { tone, label } = map[confidence];
   return (
-    <span className={`px-1.5 py-0.5 border text-[10px] ${tone}`}>{label}</span>
+    <span className={`px-1.5 py-0.5 border text-[10px] ${tone}`}>
+      {t(label)}
+    </span>
   );
 }
 

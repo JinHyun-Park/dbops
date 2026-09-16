@@ -38,9 +38,21 @@ function walk(dir) {
 const raw = readFileSync(MESSAGES, "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "")
   .replace(/^\s*\/\/.*$/gm, "");
+// Any indentation, not exactly two spaces: prettier moves a long key onto its
+// own line with deeper indentation, and the old two-space anchor silently
+// skipped 6 real keys, which were precisely the long ones most likely to drift.
+// Single quotes too, which prettier uses for a key containing a double quote.
 const keys = [
-  ...raw.matchAll(/^\s{2}(?:"((?:[^"\\]|\\.)*)"|([^\s:"]+)):/gm),
-].map((m) => (m[1] !== undefined ? m[1].replace(/\\"/g, '"') : m[2]));
+  ...raw.matchAll(
+    /^\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s:"']+)):/gm,
+  ),
+].map((m) =>
+  m[1] !== undefined
+    ? m[1].replace(/\\"/g, '"')
+    : m[2] !== undefined
+      ? m[2].replace(/\\'/g, "'")
+      : m[3],
+);
 
 if (keys.length === 0) {
   console.error("i18n-check: parsed 0 keys out of en.ts. The parser is wrong.");
@@ -70,6 +82,68 @@ if (orphans.length) {
   );
   for (const o of orphans) console.error("  " + o);
 }
+// ---------------------------------------------------------------------------
+// THE HOLE THIS GATE USED TO HAVE
+//
+// Everything above checks ONE direction: an en.ts key still matches something
+// in src. It cannot see the opposite failure, and that is the one that reaches
+// a user. Measured 2026-09-17: 12 Korean strings rendered to an English
+// operator with tsc, the build and this check all green, among them the SIX
+// dashboard tab labels on the most-visited screen and the Tasks scope filter.
+//
+// They share one shape. The literal lives in a module-level constant and
+// reaches the UI through `t(<expression>)`:
+//
+//   const TAB_DEFS = [{ key: "overview", label: "개요" }, ...];
+//   ...
+//   {t(d.label)}
+//
+// The wrap is correct, so nothing looks wrong. But a scan for `t("...")`
+// literals never sees "개요", so no key is added and translate() falls back to
+// the Korean. The orphan test above cannot help: it only asks whether a key is
+// still used, never whether a rendered string has one.
+//
+// So any Korean literal in a display-ish property of a file that uses t() must
+// have a key. IGNORE holds the documented exceptions, each Korean ON PURPOSE.
+const DISPLAY_PROP =
+  /(?:label|hint|title|description|text|summary|name|eyebrow|placeholder|allLabel|tooltip)\s*:\s*"((?:[^"\\\n]|\\.)*)"/g;
+const HANGUL = /[가-힣]/;
+
+// Korean that is LOGIC or a model prompt, never display. Keep this short and
+// say why: every entry is a hole in the gate.
+const IGNORE = new Set([
+  // Reserved for a literal that must stay unwrapped because it is compared.
+  // engine-config-panel.tsx:39 is the live example: it produces
+  // { text: "활성" } and :144 compares stream.text === "활성". That one needs no
+  // entry here only because a 활성 key exists for the other, wrapped sites.
+]);
+
+const keySet = new Set(keys);
+const unkeyed = [];
+for (const file of walk(SRC)) {
+  const body = readFileSync(file, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  if (!/\bt\(/.test(body)) continue; // no translator in the file, nothing to render
+  for (const m of body.matchAll(DISPLAY_PROP)) {
+    const lit = m[1];
+    if (!HANGUL.test(lit)) continue;
+    if (keySet.has(lit) || IGNORE.has(lit)) continue;
+    unkeyed.push(`${file.replace(SRC + "/", "")}: ${lit}`);
+  }
+}
+if (unkeyed.length) {
+  failed = true;
+  console.error(
+    `i18n-check: ${unkeyed.length} Korean string(s) render through t(<expr>)` +
+      " with no en.ts key, so they show Korean on an English browser:",
+  );
+  for (const u of unkeyed) console.error("  " + u);
+}
+
 if (failed) process.exit(1);
 
-console.log(`i18n-check: ${keys.length} keys, all present in src/. ok`);
+console.log(
+  `i18n-check: ${keys.length} keys, all present in src/, and every t(<expr>)` +
+    " constant has one. ok",
+);

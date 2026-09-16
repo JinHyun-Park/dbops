@@ -87,6 +87,7 @@ function DataStatusBadge({
   status?: Rule["data_status"];
   latestTs?: string | null;
 }) {
+  const t = useT();
   // Fallback for API responses that pre-date the data_status field.
   if (!status) {
     return <span className="text-zinc-600 text-[10px] font-mono">-</span>;
@@ -124,7 +125,9 @@ function DataStatusBadge({
   return (
     <span
       className="px-1.5 py-0.5 border text-[10px] font-mono bg-rose-500/10 text-rose-300 border-rose-500/40"
-      title="이 cluster + metric 조합으로 수집된 metric_snapshot이 없습니다. 클러스터 등록 상태와 ETL 파이프라인을 확인하세요"
+      title={t(
+        "이 cluster + metric 조합으로 수집된 metric_snapshot이 없습니다. 클러스터 등록 상태와 ETL 파이프라인을 확인하세요",
+      )}
     >
       no data
     </span>
@@ -521,14 +524,14 @@ export default function AlertsPage() {
 
       {!admin && (
         <div className="mb-6 px-3 py-2 border border-zinc-800 text-[11px] uppercase tracking-wider text-zinc-500">
-          읽기 전용, viewer 권한. 쓰기 액션은 숨겨집니다
+          {t("읽기 전용, viewer 권한. 쓰기 액션은 숨겨집니다")}
         </div>
       )}
 
       {admin && (
         <Section
-          eyebrow="새 규칙"
-          title="알림 임계값 정의"
+          eyebrow={t("새 규칙")}
+          title={t("알림 임계값 정의")}
           actions={
             <div className="flex border border-zinc-700 font-mono">
               <button
@@ -540,7 +543,7 @@ export default function AlertsPage() {
                     : "text-zinc-400 hover:text-zinc-200"
                 }`}
               >
-                단순
+                {t("단순")}
               </button>
               <button
                 type="button"
@@ -551,7 +554,7 @@ export default function AlertsPage() {
                     : "text-zinc-400 hover:text-zinc-200"
                 }`}
               >
-                복합 (AND/OR)
+                {t("복합 (AND/OR)")}
               </button>
             </div>
           }
@@ -636,7 +639,7 @@ export default function AlertsPage() {
                 disabled={submitting}
                 className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors disabled:opacity-50"
               >
-                규칙 추가
+                {t("규칙 추가")}
               </button>
             </form>
           )}
@@ -651,23 +654,23 @@ export default function AlertsPage() {
                   every metric_type memorized. */}
               <div>
                 <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
-                  Template (선택)
+                  {t("Template (선택)")}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {RULE_TEMPLATES.map((t) => (
+                  {RULE_TEMPLATES.map((tpl) => (
                     <button
-                      key={t.label}
+                      key={tpl.label}
                       type="button"
                       onClick={() =>
                         setCompound({
-                          logic: t.logic,
-                          operands: t.operands.map((o) => ({ ...o })),
+                          logic: tpl.logic,
+                          operands: tpl.operands.map((o) => ({ ...o })),
                         })
                       }
-                      title={t.hint}
+                      title={tpl.hint}
                       className="text-[11px] px-3 py-1.5 border border-zinc-800 bg-zinc-950/60 text-zinc-300 hover:border-amber-500/60 hover:text-amber-200 transition-colors"
                     >
-                      {t.label}
+                      {t(tpl.label)}
                     </button>
                   ))}
                 </div>
@@ -693,7 +696,7 @@ export default function AlertsPage() {
                 </div>
                 <div>
                   <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                    결합 logic
+                    {t("결합 logic")}
                   </label>
                   <div className="flex border border-zinc-800 mt-1 font-mono">
                     {(["and", "or"] as const).map((l) => (
@@ -716,11 +719,11 @@ export default function AlertsPage() {
 
               <div className="space-y-2">
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-                  Operands: 모두{" "}
+                  {t("Operands: 모두")}{" "}
                   <span className="text-amber-300 font-mono">
                     {compound.logic.toUpperCase()}
                   </span>{" "}
-                  로 결합
+                  {t("로 결합")}
                 </div>
                 {compound.operands.map((op, i) => (
                   <div
@@ -805,7 +808,9 @@ export default function AlertsPage() {
                     <div>
                       <label
                         className="text-[10px] text-zinc-500 uppercase tracking-wider"
-                        title="평가 윈도우 (분): 이 시간 내 데이터로 agg 계산"
+                        title={t(
+                          "평가 윈도우 (분): 이 시간 내 데이터로 agg 계산",
+                        )}
                       >
                         Window (m)
                       </label>
@@ -827,7 +832,7 @@ export default function AlertsPage() {
                       onClick={() => removeOperand(i)}
                       disabled={compound.operands.length === 1}
                       className="text-[10px] uppercase tracking-wider px-2 py-1.5 text-zinc-500 hover:text-rose-300 disabled:opacity-30"
-                      title="이 조건 삭제"
+                      title={t("이 조건 삭제")}
                     >
                       ✕
                     </button>
@@ -840,14 +845,17 @@ export default function AlertsPage() {
                   disabled={compound.operands.length >= 8}
                   className="text-[10px] uppercase tracking-wider px-3 py-1 border border-zinc-700 text-zinc-300 hover:border-amber-500 hover:text-amber-300 transition-colors disabled:opacity-30"
                 >
-                  + 조건 추가 ({compound.operands.length}/8)
+                  {t("+ 조건 추가 ({n}/8)").replace(
+                    "{n}",
+                    String(compound.operands.length),
+                  )}
                 </button>
               </div>
 
               <div className="flex items-end justify-between gap-3 pt-2 border-t border-zinc-800">
                 <div className="flex-1">
                   <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                    규칙 이름 (선택)
+                    {t("규칙 이름 (선택)")}
                   </label>
                   <input
                     type="text"
@@ -855,7 +863,7 @@ export default function AlertsPage() {
                     onChange={(e) =>
                       setNewRule({ ...newRule, name: e.target.value })
                     }
-                    placeholder="자동 생성됨: 첫 operand + AND/OR + N"
+                    placeholder={t("자동 생성됨: 첫 operand + AND/OR + N")}
                     className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60"
                   />
                 </div>
@@ -864,12 +872,12 @@ export default function AlertsPage() {
                   disabled={submitting}
                   className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors disabled:opacity-50"
                 >
-                  복합 규칙 추가
+                  {t("복합 규칙 추가")}
                 </button>
               </div>
 
               <div className="text-[11px] text-zinc-500 font-mono border-l-2 border-zinc-700 pl-2">
-                평가 시점:{" "}
+                {t("평가 시점:")}{" "}
                 {compound.operands
                   .map(
                     (o) =>
@@ -883,12 +891,12 @@ export default function AlertsPage() {
       )}
 
       <Section
-        eyebrow="알림 채널"
-        title="구독자"
+        eyebrow={t("알림 채널")}
+        title={t("구독자")}
         description={
           topicArn
-            ? `SNS 토픽 ${topicArn}을 통해 fan-out`
-            : "SNS 토픽이 설정되어 있지 않음"
+            ? t("SNS 토픽 {n}을 통해 fan-out").replace("{n}", topicArn)
+            : t("SNS 토픽이 설정되어 있지 않음")
         }
       >
         <div className="border border-zinc-800 bg-zinc-900/40 p-6">
@@ -935,7 +943,9 @@ export default function AlertsPage() {
                         : newSub.protocol === "slack-webhook"
                           ? "https://hooks.slack.com/services/T.../B.../..."
                           : newSub.protocol === "teams-webhook"
-                            ? "https://<조직>.webhook.office.com/webhookb2/..."
+                            ? t(
+                                "https://<조직>.webhook.office.com/webhookb2/...",
+                              )
                             : newSub.protocol === "pagerduty-events-v2"
                               ? "PagerDuty integration key (32 hex chars)"
                               : "https://example.com/webhook"
@@ -944,8 +954,9 @@ export default function AlertsPage() {
                 />
                 {newSub.protocol === "teams-webhook" && (
                   <p className="mt-1 text-[11px] text-zinc-500">
-                    Incoming Webhook URL 또는 Workflows URL 모두 사용
-                    가능합니다.
+                    {t(
+                      "Incoming Webhook URL 또는 Workflows URL 모두 사용 가능합니다.",
+                    )}
                   </p>
                 )}
               </div>
@@ -954,7 +965,7 @@ export default function AlertsPage() {
                 disabled={submitting}
                 className="text-xs font-medium px-4 py-2 bg-emerald-500 text-zinc-950 hover:bg-emerald-400 transition-colors disabled:opacity-50"
               >
-                구독 추가
+                {t("구독 추가")}
               </button>
             </form>
           )}
@@ -1005,7 +1016,7 @@ export default function AlertsPage() {
                                 : "bg-emerald-500/10 text-emerald-300 border-emerald-500/40"
                             }`}
                           >
-                            {pending ? "승인 대기" : "활성"}
+                            {pending ? t("승인 대기") : t("활성")}
                           </span>
                         </td>
                         <td className="px-3 py-2 text-right">
@@ -1014,7 +1025,7 @@ export default function AlertsPage() {
                               onClick={() => removeSub(s.subscription_arn)}
                               className="text-rose-400 hover:text-rose-300 text-xs"
                             >
-                              구독 해지
+                              {t("구독 해지")}
                             </button>
                           )}
                         </td>
@@ -1026,8 +1037,9 @@ export default function AlertsPage() {
             </div>
           ) : (
             <div className="text-zinc-500 text-xs py-2">
-              아직 구독자가 없습니다. 이메일/SMS/Slack webhook을 추가하면 알림
-              발생 시 전달됩니다.
+              {t(
+                "아직 구독자가 없습니다. 이메일/SMS/Slack webhook을 추가하면 알림 발생 시 전달됩니다.",
+              )}
             </div>
           )}
         </div>
@@ -1036,9 +1048,11 @@ export default function AlertsPage() {
       <SlackAckSetupGuide />
 
       <Section
-        eyebrow="규칙"
-        title={`등록된 알림 규칙 ${rules.length}개`}
-        description="evaluator는 5분마다 실행되며, metric 데이터가 stale이거나 없는 규칙은 건너뜁니다."
+        eyebrow={t("규칙")}
+        title={t("등록된 알림 규칙 {n}개").replace("{n}", String(rules.length))}
+        description={t(
+          "evaluator는 5분마다 실행되며, metric 데이터가 stale이거나 없는 규칙은 건너뜁니다.",
+        )}
         actions={
           admin && clusters.length > 0 ? (
             <div className="flex items-center gap-2">
@@ -1047,7 +1061,7 @@ export default function AlertsPage() {
                 onChange={(e) =>
                   setNewRule({ ...newRule, cluster_id: e.target.value })
                 }
-                title="전체 스누즈 대상 클러스터"
+                title={t("전체 스누즈 대상 클러스터")}
                 className="bg-zinc-950 border border-zinc-800 text-zinc-300 text-[11px] px-2 py-1.5 focus:outline-none focus:border-amber-500/60"
               >
                 {clusters.map((c) => (
@@ -1061,32 +1075,34 @@ export default function AlertsPage() {
                 onChange={(e) => setBulkSnoozeMinutes(Number(e.target.value))}
                 className="bg-zinc-950 border border-zinc-800 text-zinc-300 text-[11px] px-2 py-1.5 focus:outline-none focus:border-amber-500/60"
               >
-                <option value={30}>30분</option>
-                <option value={60}>1시간</option>
-                <option value={240}>4시간</option>
-                <option value={1440}>24시간</option>
+                <option value={30}>{t("30분")}</option>
+                <option value={60}>{t("1시간")}</option>
+                <option value={240}>{t("4시간")}</option>
+                <option value={1440}>{t("24시간")}</option>
               </select>
               <button
                 type="button"
                 onClick={() => bulkSnooze(bulkSnoozeMinutes)}
                 className="text-[11px] uppercase tracking-wider px-2 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500 hover:text-amber-300 transition-colors whitespace-nowrap"
-                title="이 클러스터의 모든 규칙을 스누즈 (롤/인스턴스 단위 스누즈는 미지원, 클러스터 단위)"
+                title={t(
+                  "이 클러스터의 모든 규칙을 스누즈 (롤/인스턴스 단위 스누즈는 미지원, 클러스터 단위)",
+                )}
               >
-                클러스터 전체 스누즈
+                {t("클러스터 전체 스누즈")}
               </button>
               <button
                 type="button"
                 onClick={() => bulkSnooze(0)}
                 className="text-[11px] uppercase tracking-wider px-2 py-1.5 border border-zinc-700 text-zinc-500 hover:border-rose-500 hover:text-rose-300 transition-colors whitespace-nowrap"
               >
-                전체 해제
+                {t("전체 해제")}
               </button>
             </div>
           ) : undefined
         }
       >
         {loading ? (
-          <div className="text-zinc-500 text-sm">불러오는 중...</div>
+          <div className="text-zinc-500 text-sm">{t("불러오는 중...")}</div>
         ) : rules.length === 0 ? (
           <EmptyState
             eyebrow={t("규칙 없음")}
@@ -1101,22 +1117,22 @@ export default function AlertsPage() {
               <thead className="bg-zinc-900/60 border-b border-zinc-800 text-[10px] uppercase tracking-wider text-zinc-500">
                 <tr>
                   <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                    상태
+                    {t("상태")}
                   </th>
                   <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                    데이터
+                    {t("데이터")}
                   </th>
                   <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                    클러스터
+                    {t("클러스터")}
                   </th>
                   <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                    규칙
+                    {t("규칙")}
                   </th>
                   <th className="text-left px-3 py-2 text-zinc-400 font-medium">
-                    마지막 발생
+                    {t("마지막 발생")}
                   </th>
                   <th className="text-right px-3 py-2 text-zinc-400 font-medium">
-                    작업
+                    {t("작업")}
                   </th>
                 </tr>
               </thead>
@@ -1134,7 +1150,7 @@ export default function AlertsPage() {
                               : "bg-zinc-700/40 text-zinc-400 border-zinc-700 hover:bg-zinc-700/60"
                           } ${admin ? "" : "cursor-not-allowed opacity-70"}`}
                         >
-                          {r.enabled ? "활성" : "중지"}
+                          {r.enabled ? t("활성") : t("중지")}
                         </button>
                       </td>
                       <td className="px-3 py-2">
@@ -1234,7 +1250,7 @@ export default function AlertsPage() {
                       <td className="px-3 py-2 text-zinc-400 text-xs">
                         {r.last_triggered_at
                           ? new Date(r.last_triggered_at).toLocaleString()
-                          : "발화 이력 없음"}
+                          : t("발화 이력 없음")}
                         {(() => {
                           // Ack badge: only when ack is newer than the latest
                           // trigger. If the rule has fired again since the ack
@@ -1270,12 +1286,13 @@ export default function AlertsPage() {
                                 r.snooze_until,
                               ).toLocaleString()}`}
                             >
-                              스누즈됨 ~
-                              {new Date(r.snooze_until).toLocaleTimeString([], {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                              까지
+                              {t("스누즈됨 ~{n}까지").replace(
+                                "{n}",
+                                new Date(r.snooze_until).toLocaleTimeString(
+                                  [],
+                                  { hour: "2-digit", minute: "2-digit" },
+                                ),
+                              )}
                             </div>
                           )}
                       </td>
@@ -1285,9 +1302,11 @@ export default function AlertsPage() {
                             <button
                               onClick={() => openImpact(r.id)}
                               className="text-amber-300 hover:text-amber-200 text-xs underline underline-offset-2"
-                              title="이 룰이 발화한 시점의 슬로우 쿼리, 이벤트, 동시 알림"
+                              title={t(
+                                "이 룰이 발화한 시점의 슬로우 쿼리, 이벤트, 동시 알림",
+                              )}
                             >
-                              {impactOpenId === r.id ? "닫기" : "영향도"}
+                              {impactOpenId === r.id ? t("닫기") : t("영향도")}
                             </button>
                           )}
                           {admin && (
@@ -1298,17 +1317,17 @@ export default function AlertsPage() {
                                 snoozeRule(r.id, Number(e.target.value));
                                 e.target.value = "";
                               }}
-                              title="알림 스누즈"
+                              title={t("알림 스누즈")}
                               className="bg-zinc-950 border border-zinc-800 text-zinc-400 text-[10px] px-1 py-0.5 focus:outline-none focus:border-amber-500/60"
                             >
                               <option value="" disabled>
-                                스누즈
+                                {t("스누즈")}
                               </option>
-                              <option value={30}>30분</option>
-                              <option value={60}>1시간</option>
-                              <option value={240}>4시간</option>
-                              <option value={1440}>24시간</option>
-                              <option value={0}>해제</option>
+                              <option value={30}>{t("30분")}</option>
+                              <option value={60}>{t("1시간")}</option>
+                              <option value={240}>{t("4시간")}</option>
+                              <option value={1440}>{t("24시간")}</option>
+                              <option value={0}>{t("해제")}</option>
                             </select>
                           )}
                           {admin && (
@@ -1316,7 +1335,7 @@ export default function AlertsPage() {
                               onClick={() => remove(r.id)}
                               className="text-rose-400 hover:text-rose-300 text-xs"
                             >
-                              삭제
+                              {t("삭제")}
                             </button>
                           )}
                         </div>
@@ -1357,6 +1376,7 @@ export default function AlertsPage() {
 const SLACK_GUIDE_KEY = "dbops_slack_guide_open";
 
 function SlackAckSetupGuide() {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [endpoint, setEndpoint] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -1410,15 +1430,17 @@ function SlackAckSetupGuide() {
   return (
     <Section
       eyebrow="integration"
-      title="Slack 양방향 Ack 설정"
-      description="Slack 알림 메시지의 ✓ Ack 버튼을 활성화하려면 Slack 앱 측 설정이 한 번 필요합니다."
+      title={t("Slack 양방향 Ack 설정")}
+      description={t(
+        "Slack 알림 메시지의 ✓ Ack 버튼을 활성화하려면 Slack 앱 측 설정이 한 번 필요합니다.",
+      )}
       actions={
         <button
           type="button"
           onClick={toggle}
           className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500 hover:text-amber-300 transition-colors font-mono"
         >
-          {open ? "× 가이드 닫기" : "셋업 가이드 열기"}
+          {open ? t("× 가이드 닫기") : t("셋업 가이드 열기")}
         </button>
       }
     >
@@ -1427,7 +1449,7 @@ function SlackAckSetupGuide() {
           <ol className="space-y-3">
             <GuideStep
               num={1}
-              title="Slack 앱 생성"
+              title={t("Slack 앱 생성")}
               body={
                 <>
                   <a
@@ -1438,58 +1460,40 @@ function SlackAckSetupGuide() {
                   >
                     api.slack.com/apps
                   </a>
-                  에서{" "}
-                  <span className="text-zinc-200 font-mono">From scratch</span>
-                  로 새 앱 생성 → 워크스페이스 선택.
+                  <Mono
+                    text={t(
+                      "에서 `From scratch`로 새 앱 생성 → 워크스페이스 선택.",
+                    )}
+                  />
                 </>
               }
             />
             <GuideStep
               num={2}
-              title="Signing Secret 복사"
+              title={t("Signing Secret 복사")}
               body={
-                <>
-                  앱 페이지 좌측 메뉴 →{" "}
-                  <span className="text-zinc-200 font-mono">
-                    Basic Information
-                  </span>{" "}
-                  →{" "}
-                  <span className="text-zinc-200 font-mono">
-                    App Credentials
-                  </span>{" "}
-                  섹션의{" "}
-                  <span className="text-zinc-200 font-mono">
-                    Signing Secret
-                  </span>
-                  을 복사해서{" "}
-                  <span className="text-zinc-200 font-mono">
-                    cdk/config/settings.py
-                  </span>
-                  의{" "}
-                  <span className="text-zinc-200 font-mono">
-                    SLACK_SIGNING_SECRET
-                  </span>
-                  에 붙여넣기.
-                </>
+                <Mono
+                  text={t(
+                    "앱 페이지 좌측 메뉴 → `Basic Information` → `App Credentials` 섹션의 `Signing Secret`을 복사해서 `cdk/config/settings.py`의 `SLACK_SIGNING_SECRET`에 붙여넣기.",
+                  )}
+                />
               }
             />
             <GuideStep
               num={3}
-              title="Interactivity Request URL 등록"
+              title={t("Interactivity Request URL 등록")}
               body={
                 <>
                   <div>
-                    좌측 메뉴 →{" "}
-                    <span className="text-zinc-200 font-mono">
-                      Interactivity & Shortcuts
-                    </span>
-                    를 켜고{" "}
-                    <span className="text-zinc-200 font-mono">Request URL</span>
-                    에 아래 주소를 붙여넣기:
+                    <Mono
+                      text={t(
+                        "좌측 메뉴 → `Interactivity & Shortcuts`를 켜고 `Request URL`에 아래 주소를 붙여넣기:",
+                      )}
+                    />
                   </div>
                   <div className="mt-2 flex items-center gap-2 bg-zinc-950 border border-zinc-700 px-3 py-2">
                     <code className="flex-1 text-xs font-mono text-amber-300 break-all">
-                      {endpoint ?? "(URL 로딩 중…)"}
+                      {endpoint ?? t("(URL 로딩 중…)")}
                     </code>
                     <button
                       type="button"
@@ -1497,13 +1501,14 @@ function SlackAckSetupGuide() {
                       disabled={!endpoint}
                       className="text-[10px] uppercase tracking-wider px-2 py-1 border border-zinc-700 text-zinc-300 hover:border-amber-500 hover:text-amber-300 disabled:opacity-40 transition-colors shrink-0"
                     >
-                      {copied ? "✓ 복사됨" : "복사"}
+                      {copied ? t("✓ 복사됨") : t("복사")}
                     </button>
                   </div>
                   {copyFailed && (
                     <div className="mt-1.5 text-[11px] text-amber-300">
-                      클립보드 접근이 차단되었습니다. 위 주소를 직접 선택해
-                      복사하세요.
+                      {t(
+                        "클립보드 접근이 차단되었습니다. 위 주소를 직접 선택해 복사하세요.",
+                      )}
                     </div>
                   )}
                 </>
@@ -1511,47 +1516,69 @@ function SlackAckSetupGuide() {
             />
             <GuideStep
               num={4}
-              title="Incoming Webhook 추가 + 재배포"
+              title={t("Incoming Webhook 추가 + 재배포")}
               body={
                 <>
-                  좌측 메뉴 →{" "}
-                  <span className="text-zinc-200 font-mono">
-                    Incoming Webhooks
-                  </span>
-                  를 켜고 채널 webhook URL 발급 → 위{" "}
-                  <span className="font-mono">Subscribers</span> 섹션에 protocol{" "}
-                  <span className="font-mono">slack-webhook</span>으로 등록.
+                  <Mono
+                    text={t(
+                      "좌측 메뉴 → `Incoming Webhooks`를 켜고 채널 webhook URL 발급 → 위 `Subscribers` 섹션에 protocol `slack-webhook`으로 등록.",
+                    )}
+                  />
                   <br />
-                  마지막으로{" "}
-                  <span className="text-zinc-200 font-mono">
-                    cdk deploy dbops-dev-agent
-                  </span>
-                  로 새 signing secret을 Lambda 환경에 반영.
+                  <Mono
+                    text={t(
+                      "마지막으로 `cdk deploy dbops-dev-agent`로 새 signing secret을 Lambda 환경에 반영.",
+                    )}
+                  />
                 </>
               }
             />
           </ol>
 
           <div className="border-t border-zinc-800 pt-3 text-[11px] text-zinc-500">
-            <span className="text-zinc-400 font-medium">동작 확인:</span> 알림이
-            한 번 발사되면 Slack 메시지의{" "}
-            <span className="font-mono">✓ Ack alert</span> 버튼을 누르세요. 위
-            룰 테이블에{" "}
+            <span className="text-zinc-400 font-medium">{t("동작 확인:")}</span>{" "}
+            <Mono
+              text={t(
+                "알림이 한 번 발사되면 Slack 메시지의 `✓ Ack alert` 버튼을 누르세요. 위 룰 테이블에",
+              )}
+            />{" "}
             <span className="px-1 py-0.5 bg-emerald-500/10 text-emerald-300 border border-emerald-500/40 text-[10px] font-mono">
               ✓ acked @user
             </span>{" "}
-            배지가 즉시 표시되면 정상.
+            <Mono text={t("배지가 즉시 표시되면 정상.")} />
             <br />
-            <span className="text-zinc-400 font-medium">트러블슈팅:</span> 버튼
-            클릭 시{" "}
-            <span className="font-mono">
-              SLACK_SIGNING_SECRET not configured
+            <span className="text-zinc-400 font-medium">
+              {t("트러블슈팅:")}
             </span>{" "}
-            메시지가 뜨면 2~4단계 중 한 단계가 누락된 상태.
+            <Mono
+              text={t(
+                "버튼 클릭 시 `SLACK_SIGNING_SECRET not configured` 메시지가 뜨면 2~4단계 중 한 단계가 누락된 상태.",
+              )}
+            />
           </div>
         </div>
       )}
     </Section>
+  );
+}
+
+// Renders a translated sentence whose code tokens are marked with backticks.
+// The Slack guide interleaves Korean particles with styled tokens, and a
+// particle is not a translatable unit: `에` alone cannot become English. One
+// key per sentence keeps it translatable and keeps the token styling.
+function Mono({ text }: { text: string }) {
+  return (
+    <>
+      {text.split("`").map((part, i) =>
+        i % 2 === 1 ? (
+          <span key={i} className="text-zinc-200 font-mono">
+            {part}
+          </span>
+        ) : (
+          part
+        ),
+      )}
+    </>
   );
 }
 
@@ -1593,8 +1620,9 @@ function ImpactPanel({
   error: string | null;
   data: AlertImpact | null;
 }) {
+  const t = useT();
   if (loading) {
-    return <div className="text-xs text-zinc-500">불러오는 중…</div>;
+    return <div className="text-xs text-zinc-500">{t("불러오는 중…")}</div>;
   }
   if (error) {
     return <div className="text-xs text-rose-400">{error}</div>;
@@ -1603,7 +1631,7 @@ function ImpactPanel({
   if (!data.window) {
     return (
       <div className="text-xs text-zinc-500">
-        {data.info || "이 룰은 아직 발화 이력이 없습니다."}
+        {data.info || t("이 룰은 아직 발화 이력이 없습니다.")}
       </div>
     );
   }
@@ -1611,11 +1639,11 @@ function ImpactPanel({
   return (
     <div className="space-y-4">
       <div className="text-[11px] text-zinc-500">
-        기준 시각{" "}
+        {t("기준 시각")}{" "}
         <span className="font-mono text-zinc-300">
           {fmt(data.window.center)}
         </span>
-        , ±{data.window.minutes}분 윈도우
+        {t(", ±{n}분 윈도우").replace("{n}", String(data.window.minutes))}
       </div>
 
       <div>
@@ -1624,7 +1652,7 @@ function ImpactPanel({
         </div>
         {data.top_slow_queries.length === 0 ? (
           <div className="text-[11px] text-zinc-500 px-2 py-1.5 border border-zinc-800">
-            윈도우 안에 슬로우 쿼리 기록이 없습니다.
+            {t("윈도우 안에 슬로우 쿼리 기록이 없습니다.")}
           </div>
         ) : (
           <div className="border border-zinc-800 divide-y divide-zinc-800">
@@ -1654,11 +1682,11 @@ function ImpactPanel({
 
       <div>
         <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
-          동시 이벤트
+          {t("동시 이벤트")}
         </div>
         {data.concurrent_events.length === 0 ? (
           <div className="text-[11px] text-zinc-500 px-2 py-1.5 border border-zinc-800">
-            윈도우 안에 운영 이벤트가 없습니다.
+            {t("윈도우 안에 운영 이벤트가 없습니다.")}
           </div>
         ) : (
           <div className="border border-zinc-800 divide-y divide-zinc-800">
@@ -1684,11 +1712,11 @@ function ImpactPanel({
 
       <div>
         <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
-          동시 발화 알림 (cascading)
+          {t("동시 발화 알림 (cascading)")}
         </div>
         {data.concurrent_alerts.length === 0 ? (
           <div className="text-[11px] text-zinc-500 px-2 py-1.5 border border-zinc-800">
-            같은 윈도우에 다른 알림은 없었습니다.
+            {t("같은 윈도우에 다른 알림은 없었습니다.")}
           </div>
         ) : (
           <div className="border border-zinc-800 divide-y divide-zinc-800">

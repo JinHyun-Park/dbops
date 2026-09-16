@@ -294,9 +294,9 @@ export default function CostPage() {
             { id: "bedrock", label: "Bedrock" },
             { id: "rds", label: "Aurora / RDS" },
             { id: "elasticache", label: "ElastiCache" },
-            { id: "commitments", label: "커밋 할인 (RI/SP)" },
-            { id: "platform", label: "DBOps 플랫폼" },
-            { id: "tokens", label: "토큰" },
+            { id: "commitments", label: t("커밋 할인 (RI/SP)") },
+            { id: "platform", label: t("DBOps 플랫폼") },
+            { id: "tokens", label: t("토큰") },
           ] as { id: CostTab; label: string }[]
         ).map((t) => (
           <button
@@ -375,8 +375,9 @@ function BedrockCostView({
               {data.no_data_reason}.
               <br />
               <span className="text-zinc-600">
-                태그 활성화 후 약 24시간 기다리세요. (과거 비용은 소급 반영되지
-                않으며, 활성화 이후 호출분부터 집계됩니다.)
+                {t(
+                  "태그 활성화 후 약 24시간 기다리세요. (과거 비용은 소급 반영되지 않으며, 활성화 이후 호출분부터 집계됩니다.)",
+                )}
               </span>
             </>
           }
@@ -413,7 +414,7 @@ function BedrockCostView({
             <AnomalyPanel anomalies={data.anomalies} />
           )}
 
-          <Section eyebrow="추이" title="일별 Bedrock 사용액">
+          <Section eyebrow={t("추이")} title={t("일별 Bedrock 사용액")}>
             <div className="border border-zinc-800 bg-zinc-900/50 p-4 h-72">
               {loading ? (
                 <div className="text-zinc-500 text-sm">loading…</div>
@@ -476,7 +477,10 @@ function BedrockCostView({
             </div>
           </Section>
 
-          <Section eyebrow="세부 분석" title="모델 + token 방향별 비용">
+          <Section
+            eyebrow={t("세부 분석")}
+            title={t("모델 + token 방향별 비용")}
+          >
             {loading ? (
               <div className="text-zinc-500 text-sm">loading…</div>
             ) : !data || data.by_usage_type.length === 0 ? (
@@ -539,21 +543,21 @@ function BedrockCostView({
         </>
       )}
 
-      <Section eyebrow="동작 원리">
+      <Section eyebrow={t("동작 원리")}>
         <div className="border border-zinc-800 bg-zinc-900/30 p-5 text-sm text-zinc-400 leading-relaxed">
           <p>
-            CDK가 deploy 시점에 각 Claude 모델별로 Application Inference Profile
-            (AIP) 6종을 만들고
+            {t(
+              "CDK가 deploy 시점에 각 Claude 모델별로 Application Inference Profile (AIP) 6종을 만들고",
+            )}
             <code className="mx-1 px-1 py-0.5 bg-zinc-800 text-zinc-300 text-[11px] font-mono">
               Application=DBOps, Environment={data?.env || "..."}, ManagedBy=cdk
             </code>
-            태그를 부여합니다.
+            {t("태그를 부여합니다.")}
           </p>
           <p className="mt-2">
-            AgentCore Runtime이 base model 대신 AIP ARN으로 invoke하면 모든 토큰
-            비용이 자동으로 태그에 attributed됩니다. AWS Billing console에서
-            cost allocation tag로 "Application"을 활성화한 뒤 24시간 후부터 이
-            대시보드가 실 비용을 보여줍니다.
+            {t(
+              'AgentCore Runtime이 base model 대신 AIP ARN으로 invoke하면 모든 토큰 비용이 자동으로 태그에 attributed됩니다. AWS Billing console에서 cost allocation tag로 "Application"을 활성화한 뒤 24시간 후부터 이 대시보드가 실 비용을 보여줍니다.',
+            )}
           </p>
         </div>
       </Section>
@@ -581,7 +585,10 @@ function PlatformCostView({
       try {
         const url = await apiUrl(`/api/cost?view=platform&days=${days}`);
         const res = await authedFetch(url);
-        if (!res.ok) throw new Error(`플랫폼 비용 조회 실패: ${res.status}`);
+        if (!res.ok)
+          throw new Error(
+            t("플랫폼 비용 조회 실패: {n}").replace("{n}", String(res.status)),
+          );
         const d = (await res.json()) as PlatformCostData;
         if (!cancelled) setData(d);
       } catch (e) {
@@ -593,7 +600,7 @@ function PlatformCostView({
     return () => {
       cancelled = true;
     };
-  }, [days]);
+  }, [days, t]);
 
   const dailyAvg =
     data && data.daily.length > 0 ? data.total / data.daily.length : 0;
@@ -623,20 +630,23 @@ function PlatformCostView({
             <Stat
               label={`Total ${days}d`}
               value={loading ? "···" : `$${fmtDecimal(data?.total ?? 0, 2)}`}
-              hint={`USD, ${data?.range_days || days}일 윈도우`}
+              hint={t("USD, {n}일 윈도우").replace(
+                "{n}",
+                String(data?.range_days || days),
+              )}
               loading={loading}
               accent="amber"
             />
             <Stat
-              label="일 평균"
+              label={t("일 평균")}
               value={loading ? "···" : `$${fmtDecimal(dailyAvg, 2)}`}
-              hint="윈도우 평균"
+              hint={t("윈도우 평균")}
               loading={loading}
             />
             <Stat
-              label="월 환산"
+              label={t("월 환산")}
               value={loading ? "···" : `$${fmtDecimal(monthlyProjection, 2)}`}
-              hint="일 평균 × 30"
+              hint={t("일 평균 × 30")}
               loading={loading}
             />
           </StatRow>
@@ -645,13 +655,13 @@ function PlatformCostView({
             <AnomalyPanel anomalies={data.anomalies} />
           )}
 
-          <Section eyebrow="추이" title="일별 플랫폼 운영비">
+          <Section eyebrow={t("추이")} title={t("일별 플랫폼 운영비")}>
             <div className="border border-zinc-800 bg-zinc-900/50 p-4 h-72">
               {loading ? (
-                <div className="text-zinc-500 text-sm">불러오는 중…</div>
+                <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
               ) : !data || data.daily.length === 0 ? (
                 <div className="text-zinc-500 text-sm">
-                  아직 집계된 비용이 없습니다
+                  {t("아직 집계된 비용이 없습니다")}
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
@@ -678,7 +688,7 @@ function PlatformCostView({
                       }}
                       formatter={(v) => [
                         `$${fmtDecimal(Number(v) || 0, 4)}`,
-                        "비용",
+                        t("비용"),
                       ]}
                     />
                     <Area
@@ -694,12 +704,12 @@ function PlatformCostView({
             </div>
           </Section>
 
-          <Section eyebrow="세부 분해" title="서비스별 플랫폼 비용">
+          <Section eyebrow={t("세부 분해")} title={t("서비스별 플랫폼 비용")}>
             {loading ? (
-              <div className="text-zinc-500 text-sm">불러오는 중…</div>
+              <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
             ) : !data || data.by_service.length === 0 ? (
               <div className="text-zinc-500 text-sm">
-                서비스별 분해 데이터가 없습니다.
+                {t("서비스별 분해 데이터가 없습니다.")}
               </div>
             ) : (
               <div className="border border-zinc-800 divide-y divide-zinc-800">
@@ -713,7 +723,7 @@ function PlatformCostView({
                     >
                       <div className="flex-1 min-w-0">
                         <div className="text-sm text-zinc-200">
-                          {platformServiceLabel(row.service)}
+                          {t(platformServiceLabel(row.service))}
                         </div>
                         <div className="text-[10px] text-zinc-600 font-mono truncate">
                           {row.service}
@@ -803,8 +813,9 @@ function RdsCostView({
               {data.no_data_reason}
               <br />
               <span className="text-zinc-600">
-                Cost Explorer가 활성화돼 있는지 확인한 뒤 ~24h 후 다시
-                확인하세요.
+                {t(
+                  "Cost Explorer가 활성화돼 있는지 확인한 뒤 ~24h 후 다시 확인하세요.",
+                )}
               </span>
             </>
           }
@@ -841,7 +852,7 @@ function RdsCostView({
             <AnomalyPanel anomalies={data.anomalies} />
           )}
 
-          <Section eyebrow="추이" title="일별 Aurora / RDS 사용액">
+          <Section eyebrow={t("추이")} title={t("일별 Aurora / RDS 사용액")}>
             <div className="border border-zinc-800 bg-zinc-900/50 p-4 h-72">
               {loading ? (
                 <div className="text-zinc-500 text-sm">loading…</div>
@@ -905,9 +916,11 @@ function RdsCostView({
           </Section>
 
           <Section
-            eyebrow="클러스터별"
-            title="Aurora 클러스터별 비용"
-            description="cost-allocation 태그가 활성화된 경우에만 클러스터 단위로 분리됩니다."
+            eyebrow={t("클러스터별")}
+            title={t("Aurora 클러스터별 비용")}
+            description={t(
+              "cost-allocation 태그가 활성화된 경우에만 클러스터 단위로 분리됩니다.",
+            )}
           >
             {loading ? (
               <div className="text-zinc-500 text-sm">loading…</div>
@@ -963,7 +976,9 @@ function RdsCostView({
                 </div>
                 <p>
                   {data?.per_cluster_note ||
-                    "클러스터별 비용 분리는 cost-allocation 태그(예: dbops:cluster)를 활성화하고 Aurora 클러스터에 부여해야 합니다."}
+                    t(
+                      "클러스터별 비용 분리는 cost-allocation 태그(예: dbops:cluster)를 활성화하고 Aurora 클러스터에 부여해야 합니다.",
+                    )}
                 </p>
                 <a
                   href="https://console.aws.amazon.com/billing/home#/tags"
@@ -977,7 +992,7 @@ function RdsCostView({
             )}
           </Section>
 
-          <Section eyebrow="세부 분석" title="사용 유형별 비용">
+          <Section eyebrow={t("세부 분석")} title={t("사용 유형별 비용")}>
             {loading ? (
               <div className="text-zinc-500 text-sm">loading…</div>
             ) : !data || data.by_usage_type.length === 0 ? (
@@ -1040,25 +1055,29 @@ function RdsCostView({
         </>
       )}
 
-      <Section eyebrow="동작 원리">
+      <Section eyebrow={t("동작 원리")}>
         <div className="border border-zinc-800 bg-zinc-900/30 p-5 text-sm text-zinc-400 leading-relaxed">
           <p>
-            Aurora/RDS 비용은 AWS Cost Explorer GetCostAndUsage를 SERVICE =
+            {t(
+              "Aurora/RDS 비용은 AWS Cost Explorer GetCostAndUsage를 SERVICE =",
+            )}
             <code className="mx-1 px-1 py-0.5 bg-zinc-800 text-zinc-300 text-[11px] font-mono">
               Amazon Relational Database Service
             </code>
-            로 필터링해 집계합니다. 사용 유형(USAGE_TYPE)별 분해는 추가 비용
-            없이 바로 제공됩니다.
+            {t(
+              "로 필터링해 집계합니다. 사용 유형(USAGE_TYPE)별 분해는 추가 비용 없이 바로 제공됩니다.",
+            )}
           </p>
           <p className="mt-2">
-            클러스터별 분리는 Aurora 클러스터가 DBOps 소유가 아니므로 자동
-            태깅되지 않습니다. AWS Billing console에서 cost-allocation 태그(예{" "}
+            {t(
+              "클러스터별 분리는 Aurora 클러스터가 DBOps 소유가 아니므로 자동 태깅되지 않습니다. AWS Billing console에서 cost-allocation 태그(예",
+            )}{" "}
             <code className="mx-1 px-1 py-0.5 bg-zinc-800 text-zinc-300 text-[11px] font-mono">
               dbops:cluster
             </code>
-            )를 활성화하고 클러스터에 부여하면 ~24시간 후부터 클러스터별 비용이
-            채워집니다. 활성화 이전 비용은 소급 적용되지 않으며, resource-level
-            CE 데이터(추가 과금)는 사용하지 않습니다.
+            {t(
+              ")를 활성화하고 클러스터에 부여하면 ~24시간 후부터 클러스터별 비용이 채워집니다. 활성화 이전 비용은 소급 적용되지 않으며, resource-level CE 데이터(추가 과금)는 사용하지 않습니다.",
+            )}
           </p>
         </div>
       </Section>
@@ -1122,8 +1141,9 @@ function ElastiCacheCostView({
               {data.no_data_reason}
               <br />
               <span className="text-zinc-600">
-                Cost Explorer가 활성화돼 있는지 확인한 뒤 ~24h 후 다시
-                확인하세요.
+                {t(
+                  "Cost Explorer가 활성화돼 있는지 확인한 뒤 ~24h 후 다시 확인하세요.",
+                )}
               </span>
             </>
           }
@@ -1160,7 +1180,7 @@ function ElastiCacheCostView({
             <AnomalyPanel anomalies={data.anomalies} />
           )}
 
-          <Section eyebrow="추이" title="일별 ElastiCache 사용액">
+          <Section eyebrow={t("추이")} title={t("일별 ElastiCache 사용액")}>
             <div className="border border-zinc-800 bg-zinc-900/50 p-4 h-72">
               {loading ? (
                 <div className="text-zinc-500 text-sm">loading…</div>
@@ -1224,9 +1244,11 @@ function ElastiCacheCostView({
           </Section>
 
           <Section
-            eyebrow="클러스터별"
-            title="ElastiCache 클러스터별 비용"
-            description="cost-allocation 태그가 활성화된 경우에만 클러스터 단위로 분리됩니다."
+            eyebrow={t("클러스터별")}
+            title={t("ElastiCache 클러스터별 비용")}
+            description={t(
+              "cost-allocation 태그가 활성화된 경우에만 클러스터 단위로 분리됩니다.",
+            )}
           >
             {loading ? (
               <div className="text-zinc-500 text-sm">loading…</div>
@@ -1282,7 +1304,9 @@ function ElastiCacheCostView({
                 </div>
                 <p>
                   {data?.per_cluster_note ||
-                    "클러스터별 비용 분리는 cost-allocation 태그(예: dbops:cluster)를 활성화하고 ElastiCache 클러스터에 부여해야 합니다."}
+                    t(
+                      "클러스터별 비용 분리는 cost-allocation 태그(예: dbops:cluster)를 활성화하고 ElastiCache 클러스터에 부여해야 합니다.",
+                    )}
                 </p>
                 <a
                   href="https://console.aws.amazon.com/billing/home#/tags"
@@ -1296,7 +1320,7 @@ function ElastiCacheCostView({
             )}
           </Section>
 
-          <Section eyebrow="세부 분석" title="사용 유형별 비용">
+          <Section eyebrow={t("세부 분석")} title={t("사용 유형별 비용")}>
             {loading ? (
               <div className="text-zinc-500 text-sm">loading…</div>
             ) : !data || data.by_usage_type.length === 0 ? (
@@ -1359,25 +1383,29 @@ function ElastiCacheCostView({
         </>
       )}
 
-      <Section eyebrow="동작 원리">
+      <Section eyebrow={t("동작 원리")}>
         <div className="border border-zinc-800 bg-zinc-900/30 p-5 text-sm text-zinc-400 leading-relaxed">
           <p>
-            ElastiCache 비용은 AWS Cost Explorer GetCostAndUsage를 SERVICE =
+            {t(
+              "ElastiCache 비용은 AWS Cost Explorer GetCostAndUsage를 SERVICE =",
+            )}
             <code className="mx-1 px-1 py-0.5 bg-zinc-800 text-zinc-300 text-[11px] font-mono">
               Amazon ElastiCache
             </code>
-            로 필터링해 집계합니다. 사용 유형(USAGE_TYPE)별 분해는 추가 비용
-            없이 바로 제공됩니다.
+            {t(
+              "로 필터링해 집계합니다. 사용 유형(USAGE_TYPE)별 분해는 추가 비용 없이 바로 제공됩니다.",
+            )}
           </p>
           <p className="mt-2">
-            클러스터별 분리는 ElastiCache 클러스터가 DBOps 소유가 아니므로 자동
-            태깅되지 않습니다. AWS Billing console에서 cost-allocation 태그(예{" "}
+            {t(
+              "클러스터별 분리는 ElastiCache 클러스터가 DBOps 소유가 아니므로 자동 태깅되지 않습니다. AWS Billing console에서 cost-allocation 태그(예",
+            )}{" "}
             <code className="mx-1 px-1 py-0.5 bg-zinc-800 text-zinc-300 text-[11px] font-mono">
               dbops:cluster
             </code>
-            )를 활성화하고 클러스터에 부여하면 ~24시간 후부터 클러스터별 비용이
-            채워집니다. 활성화 이전 비용은 소급 적용되지 않으며, resource-level
-            CE 데이터(추가 과금)는 사용하지 않습니다.
+            {t(
+              ")를 활성화하고 클러스터에 부여하면 ~24시간 후부터 클러스터별 비용이 채워집니다. 활성화 이전 비용은 소급 적용되지 않으며, resource-level CE 데이터(추가 과금)는 사용하지 않습니다.",
+            )}
           </p>
         </div>
       </Section>
@@ -1430,7 +1458,7 @@ function TokensCostView({
           title={t("Bedrock 토큰 메트릭이 없습니다")}
           description={
             data.note ||
-            "아직 모델 호출 기록이 없거나 CloudWatch 메트릭 전파 전입니다."
+            t("아직 모델 호출 기록이 없거나 CloudWatch 메트릭 전파 전입니다.")
           }
           primary={{
             href: "https://console.aws.amazon.com/cloudwatch/home#metricsV2?graph=~()&namespace=AWS%2FBedrock",
@@ -1439,28 +1467,28 @@ function TokensCostView({
         />
       ) : (
         <>
-          <Section eyebrow="모델별" title="토큰 사용량 (모델별)">
+          <Section eyebrow={t("모델별")} title={t("토큰 사용량 (모델별)")}>
             {loading ? (
-              <div className="text-zinc-500 text-sm">불러오는 중…</div>
+              <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
             ) : (
               <div className="border border-zinc-800 overflow-x-auto">
                 <table className="w-full text-sm min-w-[560px]">
                   <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
                     <tr>
                       <th className="text-left px-4 py-2.5 font-medium">
-                        모델
+                        {t("모델")}
                       </th>
                       <th className="text-right px-4 py-2.5 font-medium">
-                        입력 토큰
+                        {t("입력 토큰")}
                       </th>
                       <th className="text-right px-4 py-2.5 font-medium">
-                        출력 토큰
+                        {t("출력 토큰")}
                       </th>
                       <th className="text-right px-4 py-2.5 font-medium">
-                        합계
+                        {t("합계")}
                       </th>
                       <th className="text-right px-4 py-2.5 font-medium">
-                        비율
+                        {t("비율")}
                       </th>
                     </tr>
                   </thead>
@@ -1503,13 +1531,13 @@ function TokensCostView({
             )}
           </Section>
 
-          <Section eyebrow="추이" title="일별 토큰 사용량">
+          <Section eyebrow={t("추이")} title={t("일별 토큰 사용량")}>
             <div className="border border-zinc-800 bg-zinc-900/50 p-4 h-72">
               {loading ? (
-                <div className="text-zinc-500 text-sm">불러오는 중…</div>
+                <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
               ) : !data || data.daily.length === 0 ? (
                 <div className="text-zinc-500 text-sm">
-                  일별 토큰 데이터가 없습니다.
+                  {t("일별 토큰 데이터가 없습니다.")}
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
@@ -1537,7 +1565,7 @@ function TokensCostView({
                       labelStyle={{ color: colors.tooltipText }}
                       formatter={(v, name) => [
                         fmtDecimal(Number(v) || 0, 0),
-                        name === "input" ? "입력" : "출력",
+                        t(name === "input" ? "입력" : "출력"),
                       ]}
                     />
                     <Area
@@ -1574,12 +1602,13 @@ function TokensCostView({
 }
 
 function DDayBadge({ days }: { days: number | null }) {
+  const t = useT();
   if (days === null)
     return <span className="text-zinc-600 font-mono text-xs">-</span>;
   if (days < 0)
     return (
       <span className="text-[10px] px-1.5 py-0.5 border border-rose-500/40 bg-rose-500/10 text-rose-300 font-mono">
-        만료됨
+        {t("만료됨")}
       </span>
     );
   const tone =
@@ -1609,7 +1638,13 @@ function CommitmentsCostView({ days }: { days: number }) {
       try {
         const url = await apiUrl(`/api/cost?view=commitments&days=${days}`);
         const res = await authedFetch(url);
-        if (!res.ok) throw new Error(`커밋 할인 현황 조회 실패: ${res.status}`);
+        if (!res.ok)
+          throw new Error(
+            t("커밋 할인 현황 조회 실패: {n}").replace(
+              "{n}",
+              String(res.status),
+            ),
+          );
         const d = (await res.json()) as CommitmentsCostData;
         if (!cancelled) setData(d);
       } catch (e) {
@@ -1621,7 +1656,7 @@ function CommitmentsCostView({ days }: { days: number }) {
     return () => {
       cancelled = true;
     };
-  }, [days]);
+  }, [days, t]);
 
   const ris = data?.ris ?? [];
 
@@ -1635,34 +1670,36 @@ function CommitmentsCostView({ days }: { days: number }) {
 
       <StatRow cols={3}>
         <Stat
-          label="보유 RI"
+          label={t("보유 RI")}
           value={loading ? "···" : fmtDecimal(data?.summary.total ?? 0, 0)}
-          hint="활성 Reserved Instance 수량"
+          hint={t("활성 Reserved Instance 수량")}
           loading={loading}
           accent="amber"
         />
         <Stat
-          label="만료 임박 (30일)"
+          label={t("만료 임박 (30일)")}
           value={
             loading ? "···" : fmtDecimal(data?.summary.expiring_30d ?? 0, 0)
           }
-          hint="30일 내 만료되는 RI 수량"
+          hint={t("30일 내 만료되는 RI 수량")}
           loading={loading}
         />
         <Stat
-          label="미사용 추정"
+          label={t("미사용 추정")}
           value={
             loading ? "···" : fmtDecimal(data?.summary.unused_estimate ?? 0, 0)
           }
-          hint="실행 인스턴스 없는 RI (추정)"
+          hint={t("실행 인스턴스 없는 RI (추정)")}
           loading={loading}
         />
       </StatRow>
 
       <Section
-        eyebrow="커버리지"
-        title="RI / Savings Plan 커버리지"
-        description="허브 계정 기준, 최근 30일 Cost Explorer 커버리지입니다."
+        eyebrow={t("커버리지")}
+        title={t("RI / Savings Plan 커버리지")}
+        description={t(
+          "허브 계정 기준, 최근 30일 Cost Explorer 커버리지입니다.",
+        )}
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-zinc-800 border border-zinc-800">
           <div className="bg-zinc-900/60 p-4">
@@ -1677,13 +1714,13 @@ function CommitmentsCostView({ days }: { days: number }) {
               </div>
             ) : (
               <div className="text-sm text-zinc-600">
-                CE 커버리지 미조회: 권한/데이터 없음
+                {t("CE 커버리지 미조회: 권한/데이터 없음")}
               </div>
             )}
           </div>
           <div className="bg-zinc-900/60 p-4">
             <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-              Savings Plan (전체 컴퓨트)
+              {t("Savings Plan (전체 컴퓨트)")}
             </div>
             {loading ? (
               <div className="text-zinc-500 text-sm">loading…</div>
@@ -1692,7 +1729,9 @@ function CommitmentsCostView({ days }: { days: number }) {
                 {data.coverage.savings_plans_pct.toFixed(1)}%
               </div>
             ) : (
-              <div className="text-sm text-zinc-600">Savings Plan 미조회</div>
+              <div className="text-sm text-zinc-600">
+                {t("Savings Plan 미조회")}
+              </div>
             )}
           </div>
         </div>
@@ -1700,8 +1739,10 @@ function CommitmentsCostView({ days }: { days: number }) {
 
       <Section
         eyebrow="Reserved Instance"
-        title="활성 RI 목록"
-        description="만료 임박순. D-day가 amber(≤30일)/rose(≤7일)면 갱신 또는 스케일링 결정을 재검토하세요."
+        title={t("활성 RI 목록")}
+        description={t(
+          "만료 임박순. D-day가 amber(≤30일)/rose(≤7일)면 갱신 또는 스케일링 결정을 재검토하세요.",
+        )}
       >
         {loading ? (
           <div className="text-zinc-500 text-sm">loading…</div>
@@ -1711,7 +1752,9 @@ function CommitmentsCostView({ days }: { days: number }) {
             title={t("활성 Reserved Instance가 없습니다")}
             description={
               data?.note ||
-              "등록된 Aurora 계정에서 활성 RI를 찾지 못했습니다. 모두 온디맨드 과금 중이거나, RI가 다른 계정/리전에 있습니다."
+              t(
+                "등록된 Aurora 계정에서 활성 RI를 찾지 못했습니다. 모두 온디맨드 과금 중이거나, RI가 다른 계정/리전에 있습니다.",
+              )
             }
           />
         ) : (
@@ -1719,14 +1762,24 @@ function CommitmentsCostView({ days }: { days: number }) {
             <table className="w-full text-sm min-w-[640px]">
               <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
                 <tr>
-                  <th className="text-left px-4 py-2.5 font-medium">계정</th>
-                  <th className="text-left px-4 py-2.5 font-medium">리전</th>
-                  <th className="text-left px-4 py-2.5 font-medium">클래스</th>
-                  <th className="text-right px-4 py-2.5 font-medium">수량</th>
                   <th className="text-left px-4 py-2.5 font-medium">
-                    약정 유형
+                    {t("계정")}
                   </th>
-                  <th className="text-right px-4 py-2.5 font-medium">만료</th>
+                  <th className="text-left px-4 py-2.5 font-medium">
+                    {t("리전")}
+                  </th>
+                  <th className="text-left px-4 py-2.5 font-medium">
+                    {t("클래스")}
+                  </th>
+                  <th className="text-right px-4 py-2.5 font-medium">
+                    {t("수량")}
+                  </th>
+                  <th className="text-left px-4 py-2.5 font-medium">
+                    {t("약정 유형")}
+                  </th>
+                  <th className="text-right px-4 py-2.5 font-medium">
+                    {t("만료")}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800">
@@ -1771,17 +1824,18 @@ function CommitmentsCostView({ days }: { days: number }) {
         )}
       </Section>
 
-      <Section eyebrow="Savings Plan" title="활성 Savings Plan">
+      <Section eyebrow="Savings Plan" title={t("활성 Savings Plan")}>
         {loading ? (
           <div className="text-zinc-500 text-sm">loading…</div>
         ) : data?.savings_plans == null ? (
           <div className="border border-zinc-800 bg-zinc-900/30 p-5 text-sm text-zinc-600">
-            Savings Plan 미조회: API/권한 없음 또는 이 계정에 Savings Plan이
-            없습니다.
+            {t(
+              "Savings Plan 미조회: API/권한 없음 또는 이 계정에 Savings Plan이 없습니다.",
+            )}
           </div>
         ) : data.savings_plans.length === 0 ? (
           <div className="border border-zinc-800 bg-zinc-900/30 p-5 text-sm text-zinc-500">
-            활성 Savings Plan이 없습니다.
+            {t("활성 Savings Plan이 없습니다.")}
           </div>
         ) : (
           <div className="border border-zinc-800 divide-y divide-zinc-800">
@@ -1813,15 +1867,18 @@ function CommitmentsCostView({ days }: { days: number }) {
 }
 
 function AnomalyPanel({ anomalies }: { anomalies: CostAnomaly[] }) {
+  const t = useT();
   const counts = {
     critical: anomalies.filter((a) => a.severity === "critical").length,
     warning: anomalies.filter((a) => a.severity === "warning").length,
   };
   return (
     <Section
-      eyebrow="이상치"
-      title="일별 사용액 spike 감지"
-      description="7일 baseline 대비 z-score > 2 + relative 50%↑ + 절대 차이 $0.5↑ 모두 만족하는 날을 표시합니다."
+      eyebrow={t("이상치")}
+      title={t("일별 사용액 spike 감지")}
+      description={t(
+        "7일 baseline 대비 z-score > 2 + relative 50%↑ + 절대 차이 $0.5↑ 모두 만족하는 날을 표시합니다.",
+      )}
     >
       <div className="border border-zinc-800 bg-zinc-900/40">
         <div className="px-4 py-2 border-b border-zinc-800 flex items-center gap-3">
@@ -1836,7 +1893,7 @@ function AnomalyPanel({ anomalies }: { anomalies: CostAnomaly[] }) {
             </span>
           )}
           <span className="text-[10px] text-zinc-500 ml-auto">
-            대형 spike는 트렌드 차트의 점으로도 표시됩니다
+            {t("대형 spike는 트렌드 차트의 점으로도 표시됩니다")}
           </span>
         </div>
         <ul className="divide-y divide-zinc-800/60">
@@ -1878,6 +1935,7 @@ function AnomalyPanel({ anomalies }: { anomalies: CostAnomaly[] }) {
 const GUIDE_STORAGE_KEY = "dbops_cost_guide_open";
 
 function ActivationGuide() {
+  const t = useT();
   // Default collapsed. The headline + "Activate tag →" button already
   // convey 80% of the message. localStorage carries the user's preference
   // across page loads.
@@ -1926,8 +1984,8 @@ function ActivationGuide() {
               activation required for tagged attribution
             </div>
             <div className="text-xs text-amber-100/90 mt-0.5 truncate group-hover:text-amber-100">
-              Application=DBOps cost allocation tag 활성화 한 번이면 끝:{" "}
-              {open ? "위 단계를 따라가세요" : "클릭해서 단계 보기"}
+              {t("Application=DBOps cost allocation tag 활성화 한 번이면 끝:")}{" "}
+              {t(open ? "위 단계를 따라가세요" : "클릭해서 단계 보기")}
             </div>
           </div>
         </button>
@@ -1947,18 +2005,19 @@ function ActivationGuide() {
           <ol className="px-5 py-4 space-y-3 text-sm text-zinc-200 border-t border-amber-500/20">
             <Step
               n={1}
-              title="AWS Billing → Cost allocation tags 페이지 열기"
+              title={t("AWS Billing → Cost allocation tags 페이지 열기")}
               body={
                 <>
-                  관리자 권한이 필요합니다(AWS Organizations 환경이면 management
-                  account).{" "}
+                  {t(
+                    "관리자 권한이 필요합니다(AWS Organizations 환경이면 management account).",
+                  )}{" "}
                   <a
                     href="https://console.aws.amazon.com/billing/home#/tags"
                     target="_blank"
                     rel="noreferrer"
                     className="text-sky-300 hover:text-sky-200 underline"
                   >
-                    직접 이동
+                    {t("직접 이동")}
                   </a>
                 </>
               }
@@ -1970,39 +2029,42 @@ function ActivationGuide() {
                   <span className="font-mono">
                     User-defined cost allocation tags
                   </span>{" "}
-                  탭에서{" "}
+                  {t("탭에서")}{" "}
                   <span className="font-mono text-amber-300">Application</span>{" "}
-                  찾고 체크 → <span className="text-amber-300">Activate</span>
+                  {t("찾고 체크 →")}{" "}
+                  <span className="text-amber-300">Activate</span>
                 </>
               }
               body={
                 <>
-                  여유가 되면 <span className="font-mono">Environment</span>도
-                  함께 체크해 env별(dev/prod) 분리도 활성화하세요.
+                  {t("여유가 되면")}{" "}
+                  <span className="font-mono">Environment</span>
+                  {t("도 함께 체크해 env별(dev/prod) 분리도 활성화하세요.")}
                 </>
               }
             />
             <Step
               n={3}
-              title="~24시간 대기 후 이 페이지 새로고침"
+              title={t("~24시간 대기 후 이 페이지 새로고침")}
               body={
                 <>
-                  AWS가 새 데이터를 인덱싱하면 차트와 모델별 분해표가 자동으로
-                  채워집니다.{" "}
+                  {t(
+                    "AWS가 새 데이터를 인덱싱하면 차트와 모델별 분해표가 자동으로 채워집니다.",
+                  )}{" "}
                   <span className="text-amber-300/80">
-                    활성화 시점 이전 비용은 소급 적용되지 않습니다.
+                    {t("활성화 시점 이전 비용은 소급 적용되지 않습니다.")}
                   </span>{" "}
-                  과거 spend는 영구히 untagged로 남습니다.
+                  {t("과거 spend는 영구히 untagged로 남습니다.")}
                 </>
               }
             />
           </ol>
 
           <div className="px-5 py-3 border-t border-amber-500/20 text-[11px] text-amber-200/70 leading-relaxed">
-            Why this isn't automatic: AWS는 보안상 cost allocation tag 활성화를
-            관리자 콘솔 액션으로만 허용합니다. CDK도 API도 활성화 자체는 못
-            합니다. 한 번 활성화하면 이후 모든 DBOps 비용이 자동 attribute
-            됩니다.
+            Why this isn't automatic:{" "}
+            {t(
+              "AWS는 보안상 cost allocation tag 활성화를 관리자 콘솔 액션으로만 허용합니다. CDK도 API도 활성화 자체는 못 합니다. 한 번 활성화하면 이후 모든 DBOps 비용이 자동 attribute 됩니다.",
+            )}
           </div>
         </>
       )}

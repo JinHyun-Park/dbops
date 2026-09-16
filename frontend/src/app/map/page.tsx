@@ -57,6 +57,7 @@ function DbCard({
   onOpen: (id: string) => void;
   onSaved: () => void;
 }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const [purpose, setPurpose] = useState(c.purpose || "");
   const [tags, setTags] = useState((c.service_tags || []).join(", "));
@@ -75,7 +76,7 @@ function DbCard({
         purpose: purpose.trim(),
         service_tags: tags
           .split(",")
-          .map((t) => t.trim())
+          .map((tag) => tag.trim())
           .filter(Boolean),
       });
       setEditing(false);
@@ -91,20 +92,20 @@ function DbCard({
     return (
       <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4">
         <div className="mb-2 text-xs font-medium text-slate-400">
-          {displayName(c)}: 노트 편집
+          {t("{n}: 노트 편집").replace("{n}", displayName(c))}
         </div>
         <label className="mb-1 block text-[11px] text-slate-500">
-          목적 (한 줄)
+          {t("목적 (한 줄)")}
         </label>
         <input
           value={purpose}
           onChange={(e) => setPurpose(e.target.value)}
           maxLength={200}
-          placeholder="예: 체크아웃 서비스 주 DB"
+          placeholder={t("예: 체크아웃 서비스 주 DB")}
           className="mb-3 w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-500 focus:outline-none"
         />
         <label className="mb-1 block text-[11px] text-slate-500">
-          연결 서비스 (쉼표로 구분)
+          {t("연결 서비스 (쉼표로 구분)")}
         </label>
         <input
           value={tags}
@@ -119,7 +120,7 @@ function DbCard({
             disabled={saving}
             className="inline-flex items-center gap-1 rounded-md bg-sky-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
           >
-            <Check size={13} /> {saving ? "저장 중…" : "저장"}
+            <Check size={13} /> {saving ? t("저장 중…") : t("저장")}
           </button>
           <button
             onClick={() => {
@@ -131,7 +132,7 @@ function DbCard({
             disabled={saving}
             className="inline-flex items-center gap-1 rounded-md border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
           >
-            <X size={13} /> 취소
+            <X size={13} /> {t("취소")}
           </button>
         </div>
       </div>
@@ -155,7 +156,7 @@ function DbCard({
         <div className="flex items-center gap-2 min-w-0">
           <span
             className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${STATUS_DOT[level]}`}
-            title={STATUS_TITLE[level]}
+            title={t(STATUS_TITLE[level])}
           />
           <span className="truncate font-medium text-slate-100">
             {displayName(c)}
@@ -167,7 +168,7 @@ function DbCard({
               e.stopPropagation();
               setEditing(true);
             }}
-            title="노트 편집"
+            title={t("노트 편집")}
             className="flex-shrink-0 rounded p-1 text-slate-500 opacity-0 transition hover:bg-slate-800 hover:text-slate-200 group-hover:opacity-100"
           >
             <Pencil size={13} />
@@ -188,13 +189,13 @@ function DbCard({
             {env}
           </span>
         )}
-        {(c.service_tags || []).slice(0, 3).map((t) => (
+        {(c.service_tags || []).slice(0, 3).map((tag) => (
           <span
-            key={t}
-            title="연결 서비스"
+            key={tag}
+            title={t("연결 서비스")}
             className="rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-300"
           >
-            {t}
+            {tag}
           </span>
         ))}
         {c.team_id && (
@@ -206,7 +207,7 @@ function DbCard({
         <p className="mt-2 line-clamp-2 text-xs text-slate-400">{c.purpose}</p>
       ) : (
         <p className="mt-2 text-xs italic text-slate-600">
-          {admin ? "목적 미설정 (편집으로 추가)" : "목적 미설정"}
+          {admin ? t("목적 미설정 (편집으로 추가)") : t("목적 미설정")}
         </p>
       )}
     </div>
@@ -259,7 +260,7 @@ export default function MapPage() {
       <PageBody>
         {loading ? (
           <div className="py-16 text-center text-sm text-slate-500">
-            불러오는 중…
+            {t("불러오는 중…")}
           </div>
         ) : err ? (
           <EmptyState
@@ -308,7 +309,7 @@ export default function MapPage() {
                           serverless ? "text-slate-500" : "text-sky-300"
                         }`}
                       >
-                        {serverless ? "Serverless / VPC 외" : g.vpcId}
+                        {serverless ? t("Serverless / VPC 외") : g.vpcId}
                       </h3>
                       {!serverless && g.azs.length > 0 && (
                         <span className="text-[10px] text-slate-500">

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { fetchIndexRecommendations } from "@/lib/api-client";
 import { fmtNumber, fmtExact } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 interface Candidate {
   schema_name: string;
@@ -20,6 +21,7 @@ function n(v: unknown) {
 }
 
 export function IndexRecsPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [items, setItems] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [minRatio, setMinRatio] = useState(0.5);
@@ -47,7 +49,9 @@ export function IndexRecsPanel({ clusterId }: { clusterId: string }) {
             Index Recommendations
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            sequential scan이 index scan보다 우세한 테이블: 신규 인덱스 후보
+            {t(
+              "sequential scan이 index scan보다 우세한 테이블: 신규 인덱스 후보",
+            )}
           </div>
         </div>
         <select
@@ -61,10 +65,10 @@ export function IndexRecsPanel({ clusterId }: { clusterId: string }) {
         </select>
       </div>
       {loading ? (
-        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
+        <div className="p-6 text-zinc-500 text-sm">{t("불러오는 중…")}</div>
       ) : items.length === 0 ? (
         <div className="p-6 text-zinc-500 text-sm">
-          후보 없음: 인덱스 상태 양호!
+          {t("후보 없음: 인덱스 상태 양호!")}
         </div>
       ) : (
         <div className="max-h-96 overflow-y-auto">
@@ -76,25 +80,29 @@ export function IndexRecsPanel({ clusterId }: { clusterId: string }) {
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="추정 live 행 수 (pg_stat_user_tables.n_live_tup)"
+                  title={t("추정 live 행 수 (pg_stat_user_tables.n_live_tup)")}
                 >
                   Rows
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="통계 리셋 이후의 sequential scan 횟수"
+                  title={t("통계 리셋 이후의 sequential scan 횟수")}
                 >
                   Seq scans
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="sequential scan ÷ (sequential + index scan). 값이 클수록 인덱스를 활용하지 못하는 쿼리가 많다는 의미."
+                  title={t(
+                    "sequential scan ÷ (sequential + index scan). 값이 클수록 인덱스를 활용하지 못하는 쿼리가 많다는 의미.",
+                  )}
                 >
                   Seq / total scans
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="sequential scan으로 읽은 행 수 (pg_stat_user_tables.seq_tup_read)"
+                  title={t(
+                    "sequential scan으로 읽은 행 수 (pg_stat_user_tables.seq_tup_read)",
+                  )}
                 >
                   Rows scanned
                 </th>

@@ -12,6 +12,7 @@ import {
 import { useFleetOverview } from "@/lib/use-fleet-overview";
 import { groupByEngineGroup, displayName } from "@/lib/group-by-family";
 import { prefetchDashboard } from "@/lib/api-client";
+import { useT } from "@/lib/i18n";
 
 interface ClusterInfo {
   cluster_id: string;
@@ -43,6 +44,7 @@ export function ClusterOverview({
   selectedId,
   onSelect,
 }: ClusterOverviewProps) {
+  const t = useT();
   // Shared fleet poll (deduped with the header dropdown + incident banner).
   const fleet = useFleetOverview();
   const metrics = useMemo(() => {
@@ -94,9 +96,9 @@ export function ClusterOverview({
   if (clusters.length === 0) {
     return (
       <div className="text-sm text-zinc-500">
-        등록된 클러스터가 없습니다.{" "}
+        {t("등록된 클러스터가 없습니다.")}{" "}
         <Link href="/clusters" className="text-emerald-300 hover:underline">
-          클러스터 등록 →
+          {t("클러스터 등록 →")}
         </Link>
       </div>
     );
@@ -131,7 +133,7 @@ export function ClusterOverview({
           href="/fleet"
           className="ml-auto text-zinc-500 hover:text-emerald-300 transition-colors"
         >
-          Fleet 전체 →
+          {t("Fleet 전체 →")}
         </Link>
       </div>
 
@@ -212,7 +214,7 @@ export function ClusterOverview({
                 href="/fleet"
                 className="inline-flex items-center px-2.5 py-1 rounded-md border border-zinc-800 bg-zinc-900/40 text-[12px] text-zinc-500 hover:text-emerald-300 hover:border-emerald-500/40 transition-colors"
               >
-                +{overflow}개 더 → Fleet
+                {t("+{n}개 더 → Fleet").replace("{n}", String(overflow))}
               </Link>
             )}
           </div>

@@ -21,6 +21,7 @@ import {
 import { Expandable } from "@/components/design-system/expandable";
 import { fmtDecimal, fmtBytes, fmtExact } from "@/lib/format";
 import { useChartColors } from "@/lib/use-chart-colors";
+import { useT } from "@/lib/i18n";
 
 // A series point carries the raw `dimensions` JSON text from the cache so the
 // panel can separate table-level points (`{}`/null) from per-GSI points
@@ -123,6 +124,7 @@ function TypeBadge({ type }: { type: string }) {
 }
 
 function KeyRow({ label, attr }: { label: string; attr?: DdbKeyAttr | null }) {
+  const t = useT();
   return (
     <div className="flex items-center gap-2 py-1">
       <span className="text-[11px] text-zinc-500 w-24 shrink-0">{label}</span>
@@ -132,7 +134,7 @@ function KeyRow({ label, attr }: { label: string; attr?: DdbKeyAttr | null }) {
           {attr.type && <TypeBadge type={attr.type} />}
         </span>
       ) : (
-        <span className="text-sm text-zinc-600">없음</span>
+        <span className="text-sm text-zinc-600">{t("없음")}</span>
       )}
     </div>
   );
@@ -190,6 +192,7 @@ function MiniChart({
 }) {
   const allKeys = series.map((s) => s.name);
   // Merge all series into one flat data array keyed by time
+  const tr = useT();
   const timeMap = new Map<string, Record<string, number>>();
   for (const s of series) {
     for (const p of s.points) {
@@ -228,11 +231,11 @@ function MiniChart({
         <div className="h-32">
           {loading ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              불러오는 중…
+              {tr("불러오는 중…")}
             </div>
           ) : data.length === 0 ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              데이터 없음
+              {tr("데이터 없음")}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -340,6 +343,7 @@ export function DynamodbOverviewPanel({
   clusterId: string;
   range: TimeRange;
 }) {
+  const t = useT();
   const chart = useChartColors();
   const [details, setDetails] = useState<DdbDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(true);
@@ -433,10 +437,10 @@ export function DynamodbOverviewPanel({
       {/* ─ Resource details tiles ─ */}
       <div className="bg-zinc-900/50 border border-zinc-800 p-5">
         <div className="text-sm text-zinc-200 font-medium mb-3">
-          테이블 개요
+          {t("테이블 개요")}
         </div>
         {detailsLoading ? (
-          <div className="text-zinc-500 text-sm">불러오는 중…</div>
+          <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             <StatTile
@@ -444,13 +448,13 @@ export function DynamodbOverviewPanel({
               value={details?.billing_mode ?? "-"}
             />
             <StatTile
-              label="아이템 수"
+              label={t("아이템 수")}
               value={
                 details?.item_count != null ? fmtExact(details.item_count) : "-"
               }
             />
             <StatTile
-              label="테이블 크기"
+              label={t("테이블 크기")}
               value={
                 details?.table_size_bytes != null
                   ? fmtBytes(details.table_size_bytes)
@@ -469,7 +473,7 @@ export function DynamodbOverviewPanel({
       <div className="bg-zinc-900/50 border border-zinc-800 p-5">
         <div className="text-sm text-zinc-200 font-medium mb-3">Key Schema</div>
         {detailsLoading ? (
-          <div className="text-zinc-500 text-sm">불러오는 중…</div>
+          <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
         ) : (
           <div className="divide-y divide-zinc-800/60">
             <KeyRow
@@ -488,13 +492,13 @@ export function DynamodbOverviewPanel({
             Global Secondary Indexes
           </div>
           <div className="text-[11px] text-zinc-500 font-mono">
-            {gsiList.length}개
+            {t("{n}개").replace("{n}", String(gsiList.length))}
           </div>
         </div>
         {detailsLoading ? (
-          <div className="text-zinc-500 text-sm">불러오는 중…</div>
+          <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
         ) : gsiList.length === 0 ? (
-          <div className="text-sm text-zinc-600">GSI 없음</div>
+          <div className="text-sm text-zinc-600">{t("GSI 없음")}</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-[12px]">
@@ -593,12 +597,12 @@ export function DynamodbOverviewPanel({
             </div>
             {!detailsLoading && (
               <div className="text-[11px] text-zinc-500 font-mono">
-                {lsiList.length}개
+                {t("{n}개").replace("{n}", String(lsiList.length))}
               </div>
             )}
           </div>
           {detailsLoading ? (
-            <div className="text-zinc-500 text-sm">불러오는 중…</div>
+            <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-[12px]">
@@ -649,7 +653,7 @@ export function DynamodbOverviewPanel({
       {/* ─ Capacity charts ─ */}
       <div>
         <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
-          용량 (Capacity Units)
+          {t("용량 (Capacity Units)")}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <MiniChart
@@ -716,7 +720,7 @@ export function DynamodbOverviewPanel({
       {/* ─ Throttle charts ─ */}
       <div>
         <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
-          스로틀 이벤트 (Throttles)
+          {t("스로틀 이벤트 (Throttles)")}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <MiniChart
@@ -767,7 +771,7 @@ export function DynamodbOverviewPanel({
       {metricGsiNames.length > 0 && (
         <div>
           <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
-            GSI별 용량/스로틀 (Per-GSI)
+            {t("GSI별 용량/스로틀 (Per-GSI)")}
           </div>
           <div className="space-y-6">
             {metricGsiNames.map((g) => (
@@ -823,7 +827,7 @@ export function DynamodbOverviewPanel({
       {/* ─ Latency charts ─ */}
       <div>
         <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
-          레이턴시 (Latency)
+          {t("레이턴시 (Latency)")}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <MiniChart
@@ -884,7 +888,7 @@ export function DynamodbOverviewPanel({
       {/* ─ Throughput ─ */}
       <div>
         <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
-          처리량 (Throughput)
+          {t("처리량 (Throughput)")}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <MiniChart

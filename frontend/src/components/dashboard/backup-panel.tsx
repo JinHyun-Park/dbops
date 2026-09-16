@@ -11,16 +11,20 @@ import {
 import { fmtNumber } from "@/lib/format";
 import { isAdmin } from "@/lib/auth";
 import { engineFamily } from "@/lib/engine";
+import { useT } from "@/lib/i18n";
 
-function relTime(iso: string | null | undefined): string {
+function relTime(
+  iso: string | null | undefined,
+  t: (ko: string) => string,
+): string {
   if (!iso) return "-";
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.floor(ms / 60000);
-  if (m < 1) return "방금";
-  if (m < 60) return `${m}분 전`;
+  if (m < 1) return t("방금");
+  if (m < 60) return t("{n}분 전").replace("{n}", String(m));
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}시간 전`;
-  return `${Math.floor(h / 24)}일 전`;
+  if (h < 24) return t("{n}시간 전").replace("{n}", String(h));
+  return t("{n}일 전").replace("{n}", String(Math.floor(h / 24)));
 }
 
 export function BackupPanel({
@@ -30,6 +34,7 @@ export function BackupPanel({
   clusterId: string;
   engine?: string;
 }) {
+  const t = useT();
   const [data, setData] = useState<BackupsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [showSnapshots, setShowSnapshots] = useState(false);
@@ -92,7 +97,10 @@ export function BackupPanel({
     setSnapError(null);
     try {
       const r = await createSnapshot(clusterId, snapName.trim() || undefined);
-      setSnapToast(r.message || `스냅샷 ${r.snapshot_id} 생성 시작`);
+      setSnapToast(
+        r.message ||
+          t("스냅샷 {n} 생성 시작").replace("{n}", String(r.snapshot_id)),
+      );
       setSnapOpen(false);
       setSnapName("");
       // Snapshot shows as "creating" immediately; reload picks it up.
@@ -131,7 +139,10 @@ export function BackupPanel({
           restoreMode === "pitr" && !useLatest ? restoreToTime : undefined,
         useLatest: restoreMode === "pitr" ? useLatest : undefined,
       });
-      setSnapToast(r.message || `복원 시작: ${r.new_cluster_id}`);
+      setSnapToast(
+        r.message ||
+          t("복원 시작: {n}").replace("{n}", String(r.new_cluster_id)),
+      );
       setRestoreMode(null);
       setNewClusterId("");
       setConfirmId("");
@@ -181,7 +192,7 @@ export function BackupPanel({
           <div className="text-sm text-zinc-200 font-medium">
             Backup &amp; Recovery
             <span className="ml-2 px-1.5 py-0.5 bg-zinc-700/40 text-zinc-400 border border-zinc-700 text-[10px]">
-              읽기 전용
+              {t("읽기 전용")}
             </span>
           </div>
           <button
@@ -215,7 +226,7 @@ export function BackupPanel({
                 pitr ? "text-emerald-400" : "text-zinc-500"
               }`}
             >
-              {pitr ? "활성" : "비활성"}
+              {pitr ? t("활성") : t("비활성")}
             </div>
           </div>
           <div>
@@ -225,7 +236,7 @@ export function BackupPanel({
           <div>
             <div className="text-zinc-500 text-xs mb-1">Latest Restorable</div>
             <div className="text-zinc-300 text-xs">
-              {relTime(data?.latest_restorable_time)}
+              {relTime(data?.latest_restorable_time, t)}
             </div>
           </div>
         </div>
@@ -235,7 +246,7 @@ export function BackupPanel({
           data?.latest_restorable_time && (
             <div className="mt-4">
               <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
-                Point-in-Time Recovery 윈도우
+                {t("Point-in-Time Recovery 윈도우")}
               </div>
               <div className="relative h-5 bg-zinc-800 border border-zinc-700 overflow-hidden">
                 <div
@@ -265,7 +276,7 @@ export function BackupPanel({
                   {b.name}
                 </span>
                 <div className="text-[10px] text-zinc-500 tabular-nums flex-shrink-0">
-                  {b.created ? relTime(b.created) : "-"}
+                  {b.created ? relTime(b.created, t) : "-"}
                   {b.size_bytes != null && (
                     <span className="ml-2">{fmtNumber(b.size_bytes)} B</span>
                   )}
@@ -277,8 +288,12 @@ export function BackupPanel({
           !data?.error && (
             <div className="mt-4 text-[11px] text-zinc-500 border border-zinc-800 bg-zinc-800/20 px-3 py-2">
               {pitr
-                ? "온디맨드 백업이 없습니다. PITR로 위 구간의 임의 시점 복원이 가능합니다."
-                : "PITR가 비활성이고 온디맨드 백업이 없습니다. DynamoDB 백업은 AWS Console 또는 CDK에서 설정하세요 (현재 플랫폼은 읽기 전용)."}
+                ? t(
+                    "온디맨드 백업이 없습니다. PITR로 위 구간의 임의 시점 복원이 가능합니다.",
+                  )
+                : t(
+                    "PITR가 비활성이고 온디맨드 백업이 없습니다. DynamoDB 백업은 AWS Console 또는 CDK에서 설정하세요 (현재 플랫폼은 읽기 전용).",
+                  )}
             </div>
           )
         )}
@@ -298,7 +313,7 @@ export function BackupPanel({
           )}
           {readOnly && (
             <span className="ml-2 px-1.5 py-0.5 bg-zinc-700/40 text-zinc-400 border border-zinc-700 text-[10px]">
-              읽기 전용
+              {t("읽기 전용")}
             </span>
           )}
         </div>
@@ -311,7 +326,7 @@ export function BackupPanel({
               }}
               className="text-[10px] px-2 py-1 border border-zinc-700 text-zinc-300 hover:border-amber-500/60 hover:text-amber-200 transition-colors"
             >
-              + 스냅샷 생성
+              {t("+ 스냅샷 생성")}
             </button>
           )}
           <button
@@ -340,16 +355,16 @@ export function BackupPanel({
       {!readOnly && snapOpen && (
         <div className="mb-4 border border-zinc-800 bg-zinc-950 p-3">
           <div className="text-[11px] text-zinc-400 mb-2">
-            수동 스냅샷을 생성합니다. 이름을 비워두면 자동으로 생성됩니다 (예:
-            manual-…-타임스탬프). 스냅샷 생성은 데이터를 변경하지 않는 안전한
-            작업입니다.
+            {t(
+              "수동 스냅샷을 생성합니다. 이름을 비워두면 자동으로 생성됩니다 (예: manual-…-타임스탬프). 스냅샷 생성은 데이터를 변경하지 않는 안전한 작업입니다.",
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <input
               type="text"
               value={snapName}
               onChange={(e) => setSnapName(e.target.value)}
-              placeholder="snapshot id (선택)"
+              placeholder={t("snapshot id (선택)")}
               className="flex-1 min-w-[180px] bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 font-mono focus:outline-none focus:border-amber-500/60"
             />
             <button
@@ -357,7 +372,7 @@ export function BackupPanel({
               disabled={creating}
               className="text-xs font-medium px-3 py-1.5 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
             >
-              {creating ? "생성 중…" : "생성"}
+              {creating ? t("생성 중…") : t("생성")}
             </button>
             <button
               onClick={() => {
@@ -366,7 +381,7 @@ export function BackupPanel({
               }}
               className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
             >
-              취소
+              {t("취소")}
             </button>
           </div>
           {snapError && (
@@ -380,20 +395,22 @@ export function BackupPanel({
       {!readOnly && restoreMode && (
         <div className="mb-4 border border-rose-500/40 bg-rose-950/20 p-3">
           <div className="text-[11px] text-rose-200 mb-2">
-            ⚠ 복원은 <strong>새 클러스터</strong>를 생성합니다 (과금 발생).
-            소스 클러스터 <span className="font-mono">{clusterId}</span> 는
-            변경되지 않습니다. 클러스터가 available 되면 writer 인스턴스가 자동
-            생성되고 DBOps에 자동 등록됩니다 (수 분 소요).
+            {t("⚠ 복원은")} <strong>{t("새 클러스터")}</strong>
+            {t("를 생성합니다 (과금 발생). 소스 클러스터")}{" "}
+            <span className="font-mono">{clusterId}</span>{" "}
+            {t(
+              "는 변경되지 않습니다. 클러스터가 available 되면 writer 인스턴스가 자동 생성되고 DBOps에 자동 등록됩니다 (수 분 소요).",
+            )}
           </div>
           <div className="text-[11px] text-zinc-400 mb-2">
             {restoreMode === "snapshot" ? (
               <>
-                스냅샷{" "}
+                {t("스냅샷")}{" "}
                 <span className="font-mono text-zinc-200">{restoreSnapId}</span>{" "}
-                에서 복원
+                {t("에서 복원")}
               </>
             ) : (
-              <>Point-in-Time 복원</>
+              <>{t("Point-in-Time 복원")}</>
             )}
           </div>
 
@@ -405,7 +422,7 @@ export function BackupPanel({
                   checked={useLatest}
                   onChange={(e) => setUseLatest(e.target.checked)}
                 />
-                최신 복원 가능 시점으로 복원 (latest restorable time)
+                {t("최신 복원 가능 시점으로 복원 (latest restorable time)")}
               </label>
               {!useLatest && (
                 <input
@@ -423,14 +440,14 @@ export function BackupPanel({
               type="text"
               value={newClusterId}
               onChange={(e) => setNewClusterId(e.target.value)}
-              placeholder="새 클러스터 id"
+              placeholder={t("새 클러스터 id")}
               className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 font-mono focus:outline-none focus:border-rose-500/60"
             />
             <input
               type="text"
               value={confirmId}
               onChange={(e) => setConfirmId(e.target.value)}
-              placeholder="확인을 위해 새 클러스터 id 를 다시 입력"
+              placeholder={t("확인을 위해 새 클러스터 id 를 다시 입력")}
               className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs px-2 py-1.5 font-mono focus:outline-none focus:border-rose-500/60"
             />
           </div>
@@ -445,7 +462,7 @@ export function BackupPanel({
               }
               className="text-xs font-medium px-3 py-1.5 bg-rose-600 text-white hover:bg-rose-500 disabled:opacity-40 transition-colors"
             >
-              {restoring ? "복원 시작 중…" : "복원 실행"}
+              {restoring ? t("복원 시작 중…") : t("복원 실행")}
             </button>
             <button
               onClick={() => {
@@ -454,11 +471,11 @@ export function BackupPanel({
               }}
               className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
             >
-              취소
+              {t("취소")}
             </button>
             {!confirmMatches && newClusterId.trim() && (
               <span className="text-[10px] text-zinc-500">
-                확인 입력이 일치해야 실행됩니다
+                {t("확인 입력이 일치해야 실행됩니다")}
               </span>
             )}
           </div>
@@ -501,7 +518,7 @@ export function BackupPanel({
         <div>
           <div className="text-zinc-500 text-xs mb-1">Latest Restore</div>
           <div className="text-zinc-300 text-xs">
-            {relTime(data?.latest_restorable_time)}
+            {relTime(data?.latest_restorable_time, t)}
           </div>
         </div>
         <div>
@@ -516,7 +533,7 @@ export function BackupPanel({
       {data?.earliest_restorable_time && data?.latest_restorable_time && (
         <div className="mt-4">
           <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
-            Point-in-Time Recovery 윈도우
+            {t("Point-in-Time Recovery 윈도우")}
           </div>
           <div className="relative h-5 bg-zinc-800 border border-zinc-700 overflow-hidden">
             <div
@@ -533,14 +550,14 @@ export function BackupPanel({
             </div>
           </div>
           <div className="text-[10px] text-zinc-600 mt-0.5">
-            이 구간의 아무 시점으로 복원할 수 있습니다 (PITR)
+            {t("이 구간의 아무 시점으로 복원할 수 있습니다 (PITR)")}
           </div>
           {admin && !readOnly && (
             <button
               onClick={() => openRestore("pitr")}
               className="mt-2 text-[10px] px-2 py-1 border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 transition-colors"
             >
-              ↻ 시점으로 복원 (새 클러스터)
+              {t("↻ 시점으로 복원 (새 클러스터)")}
             </button>
           )}
         </div>
@@ -588,6 +605,7 @@ function SnapshotRow({
   admin?: boolean;
   onRestore?: () => void;
 }) {
+  const t = useT();
   const isManual = s.type === "manual";
   return (
     <div className="px-3 py-2 flex items-baseline justify-between gap-3">
@@ -605,7 +623,7 @@ function SnapshotRow({
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         <div className="text-[10px] text-zinc-500 tabular-nums">
-          {s.created ? relTime(s.created) : "-"}
+          {s.created ? relTime(s.created, t) : "-"}
           {s.allocated_storage_gb != null && (
             <span className="ml-2">{fmtNumber(s.allocated_storage_gb)} GB</span>
           )}
@@ -613,10 +631,10 @@ function SnapshotRow({
         {admin && onRestore && (
           <button
             onClick={onRestore}
-            title="이 스냅샷에서 새 클러스터로 복원"
+            title={t("이 스냅샷에서 새 클러스터로 복원")}
             className="text-[10px] px-1.5 py-0.5 border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 transition-colors"
           >
-            복원
+            {t("복원")}
           </button>
         )}
       </div>

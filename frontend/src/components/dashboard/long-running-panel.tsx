@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fetchLongRunningQueries } from "@/lib/api-client";
+import { useT } from "@/lib/i18n";
 
 interface Query {
   pid: number | string;
@@ -28,6 +29,7 @@ function fmtDuration(sec: number) {
 }
 
 export function LongRunningPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [items, setItems] = useState<Query[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -53,13 +55,15 @@ export function LongRunningPanel({ clusterId }: { clusterId: string }) {
           Long Running Queries
         </div>
         <div className="text-[11px] text-zinc-500 mt-0.5">
-          5초 이상 실행 중인 활성 쿼리 (최근 15분)
+          {t("5초 이상 실행 중인 활성 쿼리 (최근 15분)")}
         </div>
       </div>
       {loading ? (
-        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
+        <div className="p-6 text-zinc-500 text-sm">{t("불러오는 중…")}</div>
       ) : items.length === 0 ? (
-        <div className="p-6 text-zinc-500 text-sm">장기 실행 쿼리 없음</div>
+        <div className="p-6 text-zinc-500 text-sm">
+          {t("장기 실행 쿼리 없음")}
+        </div>
       ) : (
         <div className="max-h-96 overflow-y-auto">
           <table className="w-full text-sm">

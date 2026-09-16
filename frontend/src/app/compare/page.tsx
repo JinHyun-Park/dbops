@@ -348,7 +348,7 @@ export default function ComparePage() {
       ? clusterA || "A"
       : mode === "instance"
         ? instanceA || "A"
-        : "현재";
+        : t("현재");
   const labelB =
     mode === "cluster"
       ? clusterB || "B"
@@ -418,7 +418,7 @@ export default function ComparePage() {
               : "border-zinc-800 text-zinc-500 hover:text-zinc-300"
           }`}
         >
-          인스턴스
+          {t("인스턴스")}
         </button>
       </div>
 
@@ -499,24 +499,27 @@ export default function ComparePage() {
 
       {mode === "instance" && instanceCluster && clusterInstances.length < 2 ? (
         <div className="border border-amber-500/30 bg-amber-500/5 text-amber-300 text-sm px-4 py-3 mb-4">
-          이 클러스터는 인스턴스가 1대뿐이라 비교할 수 없습니다. 인스턴스가 여러
-          대인 클러스터를 선택하세요.
+          {t(
+            "이 클러스터는 인스턴스가 1대뿐이라 비교할 수 없습니다. 인스턴스가 여러 대인 클러스터를 선택하세요.",
+          )}
         </div>
       ) : mode === "instance" &&
         instanceA &&
         instanceB &&
         instanceA === instanceB ? (
         <div className="border border-amber-500/30 bg-amber-500/5 text-amber-300 text-sm px-4 py-3 mb-4">
-          비교하려면 서로 다른 인스턴스를 선택하세요.
+          {t("비교하려면 서로 다른 인스턴스를 선택하세요.")}
         </div>
       ) : null}
 
       {crossFamilyMismatch && (
         <div className="border border-amber-500/30 bg-amber-500/5 text-amber-300 text-sm px-4 py-3 flex items-center justify-between gap-3 mb-4">
           <span>
-            A({FAMILY_META[famA].label})와 B({FAMILY_META[famB].label})가 다른
-            엔진 패밀리입니다. 같은 패밀리끼리만 비교할 수 있습니다. B를
-            초기화합니다.
+            {t(
+              "A({a})와 B({b})가 다른 엔진 패밀리입니다. 같은 패밀리끼리만 비교할 수 있습니다. B를 초기화합니다.",
+            )
+              .replace("{a}", FAMILY_META[famA].label)
+              .replace("{b}", FAMILY_META[famB].label)}
           </span>
           <button
             onClick={() => {
@@ -530,7 +533,7 @@ export default function ComparePage() {
             }}
             className="text-xs px-3 py-1.5 border border-amber-500/40 hover:bg-amber-500/15 transition-colors flex-shrink-0"
           >
-            B 초기화
+            {t("B 초기화")}
           </button>
         </div>
       )}
@@ -538,23 +541,26 @@ export default function ComparePage() {
       {clustersError ? (
         <div className="border border-rose-500/40 bg-rose-500/10 text-rose-300 text-sm px-4 py-3 flex items-center justify-between gap-3">
           <span>
-            클러스터 목록을 불러오지 못했습니다. 네트워크/세션 문제일 수
-            있습니다.
+            {t(
+              "클러스터 목록을 불러오지 못했습니다. 네트워크/세션 문제일 수 있습니다.",
+            )}
           </span>
           <button
             onClick={loadClusters}
             className="text-xs px-3 py-1.5 border border-rose-500/40 hover:bg-rose-500/15 transition-colors flex-shrink-0"
           >
-            다시 시도
+            {t("다시 시도")}
           </button>
         </div>
       ) : clusters.length < 2 && mode === "cluster" ? (
         <div className="border border-amber-500/30 bg-amber-500/5 text-amber-300 text-sm px-4 py-3">
-          Cluster vs Cluster 비교에는 등록된 클러스터가 2개 이상 필요합니다.{" "}
+          {t(
+            "Cluster vs Cluster 비교에는 등록된 클러스터가 2개 이상 필요합니다.",
+          )}{" "}
           <a href="/clusters" className="underline">
             Clusters
           </a>{" "}
-          페이지에서 추가 등록하거나 샘플 클러스터를 생성하세요.
+          {t("페이지에서 추가 등록하거나 샘플 클러스터를 생성하세요.")}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -575,11 +581,11 @@ export default function ComparePage() {
                   <div className="h-40">
                     {loading ? (
                       <div className="h-full flex items-center justify-center text-xs text-zinc-500">
-                        불러오는 중…
+                        {t("불러오는 중…")}
                       </div>
                     ) : data.length === 0 ? (
                       <div className="h-full flex items-center justify-center text-xs text-zinc-600">
-                        데이터 없음
+                        {t("데이터 없음")}
                       </div>
                     ) : (
                       <ResponsiveContainer width="100%" height="100%">
@@ -666,6 +672,7 @@ function InstancePicker({
   instances: ClusterInstance[];
   onChange: (v: string) => void;
 }) {
+  const t = useT();
   return (
     <div className="flex items-center gap-2 bg-zinc-900/40 border border-zinc-800 px-3 py-2">
       <span className="w-2 h-2 rounded-full" style={{ background: color }} />
@@ -677,7 +684,9 @@ function InstancePicker({
         onChange={(e) => onChange(e.target.value)}
         className="flex-1 bg-zinc-950 text-zinc-100 border border-zinc-800 px-2 py-1 text-xs focus:outline-none focus:border-amber-500/60"
       >
-        {instances.length === 0 && <option value="">(인스턴스 없음)</option>}
+        {instances.length === 0 && (
+          <option value="">{t("(인스턴스 없음)")}</option>
+        )}
         {instances.map((inst) => (
           <option key={inst.id} value={inst.id}>
             {inst.id} ({inst.role})

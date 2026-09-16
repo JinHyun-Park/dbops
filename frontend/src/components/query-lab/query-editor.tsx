@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useT } from "@/lib/i18n";
 
 interface QueryEditorProps {
   // Hits /api/explain directly and renders the structured plan tree.
@@ -28,6 +29,7 @@ export function QueryEditor({
   initialSql,
 }: QueryEditorProps) {
   const [sql, setSql] = useState(initialSql || "");
+  const t = useT();
 
   // Restore SQL whenever the parent prefill changes (history click / shared link).
   useEffect(() => {
@@ -53,7 +55,7 @@ export function QueryEditor({
             className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-500 disabled:opacity-50 transition-colors"
             title="Send the SQL to the agent for natural-language analysis"
           >
-            {loadingKind === "analyze" ? "실행 중..." : "AI 분석"}
+            {loadingKind === "analyze" ? t("실행 중...") : t("AI 분석")}
           </button>
           <button
             onClick={() => onBulkReview(sql)}
@@ -61,15 +63,17 @@ export function QueryEditor({
             className="px-3 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-500 disabled:opacity-50 transition-colors"
             title="Paste multiple SQLs (semicolon-separated): agent rates each as safe / risky / dangerous with notes"
           >
-            {loadingKind === "bulk" ? "검수 중..." : "Bulk review"}
+            {loadingKind === "bulk" ? t("검수 중...") : "Bulk review"}
           </button>
           <button
             onClick={() => onRewrite(sql)}
             disabled={!sql.trim() || isLoading}
             className="px-3 py-1 text-xs bg-violet-600 text-white rounded hover:bg-violet-500 disabled:opacity-50 transition-colors"
-            title="AI가 시맨틱을 보존하면서 성능 개선 재작성안을 제안합니다 (plan-only EXPLAIN 비교, 실행 없음)"
+            title={t(
+              "AI가 시맨틱을 보존하면서 성능 개선 재작성안을 제안합니다 (plan-only EXPLAIN 비교, 실행 없음)",
+            )}
           >
-            {loadingKind === "rewrite" ? "분석 중..." : "리라이팅 제안"}
+            {loadingKind === "rewrite" ? t("분석 중...") : t("리라이팅 제안")}
           </button>
         </div>
       </div>

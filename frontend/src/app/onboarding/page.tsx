@@ -78,6 +78,7 @@ function TemplateStep({
   copied,
   onCopy,
 }: TemplateStepProps) {
+  const t = useT();
   const deployCmd = `aws cloudformation deploy \\
   --template-file dbops-spoke-role.json \\
   --stack-name dbops-spoke-role \\
@@ -88,7 +89,7 @@ function TemplateStep({
       {/* Hub account info */}
       <div className="border border-zinc-800 bg-zinc-900/30 px-5 py-4 space-y-3">
         <div className="text-xs text-zinc-500 font-medium uppercase tracking-wider mb-3">
-          Hub 계정 정보
+          {t("Hub 계정 정보")}
         </div>
         <InfoRow label="Hub Account ID" value={tpl.hub_account_id} />
         <InfoRow label="Hub Role ARN" value={tpl.hub_role_arn} />
@@ -99,18 +100,19 @@ function TemplateStep({
       <div className="flex items-center justify-between border border-zinc-800 bg-zinc-900/30 px-5 py-3">
         <div>
           <div className="text-sm text-zinc-200 font-medium">
-            원격 조치(Remediation) 포함
+            {t("원격 조치(Remediation) 포함")}
           </div>
           <div className="text-xs text-zinc-500 mt-0.5">
-            에이전트가 파라미터 수정, 재시작 등 쓰기 작업을 수행할 수 있게
-            합니다. 읽기 전용 모니터링만 필요하면 비활성으로 두세요.
+            {t(
+              "에이전트가 파라미터 수정, 재시작 등 쓰기 작업을 수행할 수 있게 합니다. 읽기 전용 모니터링만 필요하면 비활성으로 두세요.",
+            )}
           </div>
         </div>
         <button
           onClick={onToggleRemediation}
           disabled={loadingRemediation}
           aria-pressed={remediation}
-          aria-label="원격 조치 포함 토글"
+          aria-label={t("원격 조치 포함 토글")}
           className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none disabled:opacity-40 ${
             remediation ? "bg-emerald-400" : "bg-zinc-700"
           }`}
@@ -127,14 +129,14 @@ function TemplateStep({
       <div>
         <div className="flex items-center justify-between mb-2">
           <div className="text-xs text-zinc-500 font-medium uppercase tracking-wider">
-            CloudFormation 템플릿
+            {t("CloudFormation 템플릿")}
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={onCopy}
               className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-100 transition-colors"
             >
-              {copied ? "복사됨 ✓" : "복사"}
+              {copied ? t("복사됨 ✓") : t("복사")}
             </button>
             <button
               onClick={() =>
@@ -142,7 +144,7 @@ function TemplateStep({
               }
               className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-100 transition-colors"
             >
-              다운로드
+              {t("다운로드")}
             </button>
           </div>
         </div>
@@ -154,16 +156,18 @@ function TemplateStep({
       {/* Deploy instructions */}
       <div className="border border-zinc-800 bg-zinc-900/30 px-5 py-4 space-y-3 text-sm text-zinc-400 leading-relaxed">
         <p>
-          <strong className="text-zinc-200">배포 방법</strong>: 멤버 계정의 AWS
-          CLI에서 아래 명령을 실행하세요. 파일을 다운로드한 디렉터리에서
-          실행해야 합니다.
+          <strong className="text-zinc-200">{t("배포 방법")}</strong>:{" "}
+          {t(
+            "멤버 계정의 AWS CLI에서 아래 명령을 실행하세요. 파일을 다운로드한 디렉터리에서 실행해야 합니다.",
+          )}
         </p>
         <pre className="bg-zinc-950 border border-zinc-800 text-emerald-300/80 text-xs font-mono px-4 py-3 overflow-x-auto">
           {deployCmd}
         </pre>
         <p className="text-xs text-zinc-500">
-          배포가 완료되면 아래 Step 2에서 연결을 확인한 뒤, Step 3에서
-          클러스터를 등록하세요.
+          {t(
+            "배포가 완료되면 아래 Step 2에서 연결을 확인한 뒤, Step 3에서 클러스터를 등록하세요.",
+          )}
         </p>
       </div>
     </div>
@@ -225,6 +229,7 @@ function ConnectionStep({
   result,
   testError,
 }: ConnectionStepProps) {
+  const t = useT();
   const inputCls =
     "w-full bg-zinc-950 border border-zinc-700 text-zinc-100 text-sm px-3 py-2 focus:outline-none focus:border-emerald-500/60 disabled:opacity-40 font-mono placeholder:text-zinc-600";
 
@@ -246,7 +251,7 @@ function ConnectionStep({
               aria-label="AWS Account ID"
             />
             <p className="mt-1 text-[11px] text-zinc-600">
-              멤버 계정 12자리 숫자
+              {t("멤버 계정 12자리 숫자")}
             </p>
           </div>
           <div>
@@ -263,7 +268,7 @@ function ConnectionStep({
               aria-label="Aurora cluster identifier"
             />
             <p className="mt-1 text-[11px] text-zinc-600">
-              Aurora 클러스터 식별자
+              {t("Aurora 클러스터 식별자")}
             </p>
           </div>
           <div>
@@ -280,7 +285,7 @@ function ConnectionStep({
               aria-label="AWS region"
             />
             <p className="mt-1 text-[11px] text-zinc-600">
-              클러스터가 위치한 리전
+              {t("클러스터가 위치한 리전")}
             </p>
           </div>
         </div>
@@ -300,7 +305,7 @@ function ConnectionStep({
             disabled={testing || !accountId || !clusterId || !region}
             className="text-xs font-medium px-5 py-2.5 bg-emerald-400/90 text-zinc-950 hover:bg-emerald-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {testing ? "테스트 중…" : "테스트"}
+            {testing ? t("테스트 중…") : t("테스트")}
           </button>
         </div>
       </div>
@@ -326,7 +331,9 @@ function ConnectionStep({
               result.ok ? "text-emerald-300" : "text-rose-300"
             }`}
           >
-            {result.ok ? "연결 성공" : "연결 실패. 아래 단계를 확인하세요"}
+            {result.ok
+              ? t("연결 성공")
+              : t("연결 실패. 아래 단계를 확인하세요")}
           </div>
           <div className="space-y-2">
             {result.steps.map((step, i) => (
@@ -367,25 +374,28 @@ function ConnectionStep({
 // ── Step 3: Register CTA ─────────────────────────────────────────────────────
 
 function RegisterStep() {
+  const t = useT();
   return (
     <div className="space-y-4">
       <div className="border border-zinc-800 bg-zinc-900/30 px-5 py-4 text-sm text-zinc-400 leading-relaxed space-y-2">
         <p>
-          스포크 역할 배포와 연결 확인이 완료되면{" "}
-          <strong className="text-zinc-200">Clusters</strong> 페이지에서
-          클러스터를 탐색하고 등록합니다.
+          {t("스포크 역할 배포와 연결 확인이 완료되면")}{" "}
+          <strong className="text-zinc-200">Clusters</strong>{" "}
+          {t("페이지에서 클러스터를 탐색하고 등록합니다.")}
         </p>
         <p className="text-xs text-zinc-500">
-          Clusters 페이지의 <code className="text-zinc-400">Discover</code>{" "}
-          기능이 멤버 계정의 Aurora 클러스터를 자동으로 탐색합니다. 탐색된
-          클러스터를 선택해 한번에 등록할 수 있습니다.
+          {t("Clusters 페이지의")}{" "}
+          <code className="text-zinc-400">Discover</code>{" "}
+          {t(
+            "기능이 멤버 계정의 Aurora 클러스터를 자동으로 탐색합니다. 탐색된 클러스터를 선택해 한번에 등록할 수 있습니다.",
+          )}
         </p>
       </div>
       <Link
         href="/clusters"
         className="inline-flex items-center gap-2 text-xs font-medium px-5 py-2.5 bg-emerald-400/90 text-zinc-950 hover:bg-emerald-300 transition-colors"
       >
-        Clusters 페이지로 이동
+        {t("Clusters 페이지로 이동")}
         <span aria-hidden="true">→</span>
       </Link>
     </div>
@@ -512,19 +522,21 @@ export default function OnboardingPage() {
       )}
 
       {loading ? (
-        <div className="text-sm text-zinc-500">불러오는 중…</div>
+        <div className="text-sm text-zinc-500">{t("불러오는 중…")}</div>
       ) : (
         <>
           {/* ── Step 1: 스포크 역할 생성 ── */}
           <Section
             eyebrow="Step 1"
-            title="스포크 역할 생성"
-            description="멤버 계정에 DBOps Hub가 AssumeRole할 수 있는 IAM 역할을 배포합니다."
+            title={t("스포크 역할 생성")}
+            description={t(
+              "멤버 계정에 DBOps Hub가 AssumeRole할 수 있는 IAM 역할을 배포합니다.",
+            )}
           >
             <div className="flex items-center gap-3 mb-5">
               <StepNumber n={1} />
               <span className="text-sm text-zinc-400">
-                아래 CloudFormation 템플릿을 멤버 계정에 배포하세요.
+                {t("아래 CloudFormation 템플릿을 멤버 계정에 배포하세요.")}
               </span>
             </div>
             {tpl ? (
@@ -537,20 +549,24 @@ export default function OnboardingPage() {
                 onCopy={handleCopy}
               />
             ) : (
-              <div className="text-sm text-zinc-500">템플릿 로딩 실패</div>
+              <div className="text-sm text-zinc-500">
+                {t("템플릿 로딩 실패")}
+              </div>
             )}
           </Section>
 
           {/* ── Step 2: 연결 확인 ── */}
           <Section
             eyebrow="Step 2"
-            title="연결 확인"
-            description="스포크 역할 배포 후, Hub에서 AssumeRole + DescribeDBClusters가 정상 동작하는지 확인합니다."
+            title={t("연결 확인")}
+            description={t(
+              "스포크 역할 배포 후, Hub에서 AssumeRole + DescribeDBClusters가 정상 동작하는지 확인합니다.",
+            )}
           >
             <div className="flex items-center gap-3 mb-5">
               <StepNumber n={2} />
               <span className="text-sm text-zinc-400">
-                멤버 계정 정보를 입력하고 테스트 버튼을 클릭하세요.
+                {t("멤버 계정 정보를 입력하고 테스트 버튼을 클릭하세요.")}
               </span>
             </div>
             <ConnectionStep
@@ -570,13 +586,17 @@ export default function OnboardingPage() {
           {/* ── Step 3: 클러스터 등록 ── */}
           <Section
             eyebrow="Step 3"
-            title="클러스터 등록"
-            description="연결이 확인된 계정의 클러스터를 Clusters 페이지에서 탐색하고 등록합니다."
+            title={t("클러스터 등록")}
+            description={t(
+              "연결이 확인된 계정의 클러스터를 Clusters 페이지에서 탐색하고 등록합니다.",
+            )}
           >
             <div className="flex items-center gap-3 mb-5">
               <StepNumber n={3} />
               <span className="text-sm text-zinc-400">
-                Clusters 페이지에서 멤버 계정을 탐색해 클러스터를 등록합니다.
+                {t(
+                  "Clusters 페이지에서 멤버 계정을 탐색해 클러스터를 등록합니다.",
+                )}
               </span>
             </div>
             <RegisterStep />

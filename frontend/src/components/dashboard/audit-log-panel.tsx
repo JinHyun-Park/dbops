@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fetchAuditLog } from "@/lib/api-client";
+import { useT } from "@/lib/i18n";
 
 interface Entry {
   id: number | string;
@@ -47,13 +48,13 @@ function normTs(iso: string): number {
   return new Date(norm).getTime();
 }
 
-function relTime(iso: string) {
+function relTime(iso: string, t: (ko: string) => string) {
   const m = Math.floor((Date.now() - normTs(iso)) / 60000);
-  if (m < 1) return "방금";
-  if (m < 60) return `${m}분 전`;
+  if (m < 1) return t("방금");
+  if (m < 60) return t("{n}분 전").replace("{n}", String(m));
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}시간 전`;
-  return `${Math.floor(h / 24)}일 전`;
+  if (h < 24) return t("{n}시간 전").replace("{n}", String(h));
+  return t("{n}일 전").replace("{n}", String(Math.floor(h / 24)));
 }
 
 function absTime(iso: string) {
@@ -65,18 +66,21 @@ function dayKey(iso: string) {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
-function dayLabel(iso: string) {
+function dayLabel(iso: string, t: (ko: string) => string) {
   const today = new Date();
   const yest = new Date();
   yest.setDate(today.getDate() - 1);
   const k = dayKey(iso);
-  if (k === dayKey(today.toISOString())) return "오늘";
-  if (k === dayKey(yest.toISOString())) return "어제";
+  if (k === dayKey(today.toISOString())) return t("오늘");
+  if (k === dayKey(yest.toISOString())) return t("어제");
   const d = new Date(normTs(iso));
-  return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+  return t("{m}월 {d}일")
+    .replace("{m}", String(d.getMonth() + 1))
+    .replace("{d}", String(d.getDate()));
 }
 
 export function AuditLogPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [entries, setEntries] = useState<Entry[]>([]);
   const [days, setDays] = useState(7);
   const [filter, setFilter] = useState("");
@@ -96,7 +100,7 @@ export function AuditLogPanel({ clusterId }: { clusterId: string }) {
         <div>
           <div className="text-sm text-zinc-200 font-medium">Audit Log</div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            DBA가 승인한 작업 및 변경 이력
+            {t("DBA가 승인한 작업 및 변경 이력")}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -107,7 +111,7 @@ export function AuditLogPanel({ clusterId }: { clusterId: string }) {
           >
             {ACTION_TYPES.map((a) => (
               <option key={a} value={a}>
-                {a || "전체 작업"}
+                {a || t("전체 작업")}
               </option>
             ))}
           </select>
@@ -123,9 +127,11 @@ export function AuditLogPanel({ clusterId }: { clusterId: string }) {
         </div>
       </div>
       {loading ? (
-        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
+        <div className="p-6 text-zinc-500 text-sm">{t("불러오는 중…")}</div>
       ) : entries.length === 0 ? (
-        <div className="p-6 text-zinc-500 text-sm">감사 기록이 없습니다</div>
+        <div className="p-6 text-zinc-500 text-sm">
+          {t("감사 기록이 없습니다")}
+        </div>
       ) : (
         <div className="max-h-96 overflow-y-auto px-4 py-4">
           <ol className="relative ml-2 border-l border-zinc-800 space-y-4">
@@ -140,7 +146,7 @@ export function AuditLogPanel({ clusterId }: { clusterId: string }) {
                 <li key={e.id} className="ml-4">
                   {showDay && (
                     <div className="-ml-4 mb-2 text-[10px] uppercase tracking-wider text-zinc-600">
-                      {dayLabel(e.created_at)}
+                      {dayLabel(e.created_at, t)}
                     </div>
                   )}
                   <div className="relative">
@@ -170,18 +176,18 @@ export function AuditLogPanel({ clusterId }: { clusterId: string }) {
                             className="text-[10px] text-zinc-500 font-mono"
                             title={absTime(e.created_at)}
                           >
-                            {relTime(e.created_at)}
+                            {relTime(e.created_at, t)}
                           </span>
                         </div>
                       </div>
                       <div className="text-[11px] text-zinc-400 mt-1">
-                        요청{" "}
+                        {t("요청")}{" "}
                         <span className="text-zinc-300">
                           {e.requested_by || "-"}
                         </span>
                         {e.approved_by && (
                           <>
-                            {" → 승인 "}
+                            {` → ${t("승인")} `}
                             <span className="text-zinc-300">
                               {e.approved_by}
                             </span>

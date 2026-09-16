@@ -1,3 +1,5 @@
+import { tr } from "@/lib/format";
+
 // Wilson score lower bound at 95%, so 1/1 doesn't outrank 9/10. Pure + testable.
 export function confidence(successes: number, attempts: number): number {
   if (attempts <= 0) return 0;
@@ -11,6 +13,6 @@ export function confidence(successes: number, attempts: number): number {
 }
 
 export function trackRecordLabel(successes: number, attempts: number): string {
-  if (attempts <= 0) return "이력 없음";
-  return `${successes}/${attempts}회 해결`;
+  if (attempts <= 0) return tr("이력 없음");
+  return tr("{n}회 해결", `${successes}/${attempts}`);
 }

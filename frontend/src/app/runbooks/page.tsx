@@ -124,13 +124,13 @@ export default function RunbooksPage() {
             onClick={() => setShowForm((v) => !v)}
             className="text-xs font-medium px-3 py-1.5 bg-amber-500 text-zinc-950 hover:bg-amber-400 transition-colors"
           >
-            {showForm ? "× 작성 닫기" : "+ 새 Runbook"}
+            {showForm ? t("× 작성 닫기") : t("+ 새 Runbook")}
           </button>
         }
       />
 
       {showForm && (
-        <Section eyebrow="새 Runbook" title="수동 작성">
+        <Section eyebrow={t("새 Runbook")} title={t("수동 작성")}>
           <ManualForm
             clusters={clusters}
             onCreated={() => {
@@ -142,9 +142,9 @@ export default function RunbooksPage() {
       )}
 
       <Section
-        eyebrow="필터"
-        title="등록된 Runbook"
-        description={`총 ${items.length}개`}
+        eyebrow={t("필터")}
+        title={t("등록된 Runbook")}
+        description={t("총 {n}개").replace("{n}", String(items.length))}
         actions={
           <div className="flex items-center gap-2">
             <SearchableClusterSelect
@@ -152,14 +152,14 @@ export default function RunbooksPage() {
               onChange={setFilterCluster}
               clusters={clusters}
               allowAll
-              allLabel="모든 클러스터"
+              allLabel={t("모든 클러스터")}
               className="w-48"
             />
             <input
               type="text"
               value={filterTag}
               onChange={(e) => setFilterTag(e.target.value)}
-              placeholder="태그"
+              placeholder={t("태그")}
               className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 font-mono w-28"
             />
           </div>
@@ -171,7 +171,7 @@ export default function RunbooksPage() {
           </div>
         )}
         {loading ? (
-          <div className="text-zinc-500 text-sm">불러오는 중…</div>
+          <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
         ) : items.length === 0 ? (
           <EmptyState
             title={t("저장된 Runbook 없음")}
@@ -241,10 +241,12 @@ export default function RunbooksPage() {
                   <button
                     type="button"
                     onClick={() => runWithAgent(rb)}
-                    title="이 Runbook을 채팅으로 가져가 에이전트가 단계별로 검토와 실행 (쓰기는 승인 필요)"
+                    title={t(
+                      "이 Runbook을 채팅으로 가져가 에이전트가 단계별로 검토와 실행 (쓰기는 승인 필요)",
+                    )}
                     className="text-[11px] px-2.5 py-1.5 border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 font-mono whitespace-nowrap transition-colors"
                   >
-                    ▶ 에이전트로 실행
+                    {t("▶ 에이전트로 실행")}
                   </button>
                 </div>
               </li>
@@ -278,6 +280,7 @@ function ManualForm({
   clusters: ClusterLite[];
   onCreated: () => void;
 }) {
+  const t = useT();
   // Hydrate from localStorage draft so a half-typed form survives nav.
   const [draft, setDraft] = useState<RunbookDraft>(() => {
     if (typeof window === "undefined") return DEFAULT_DRAFT;
@@ -308,7 +311,7 @@ function ManualForm({
     e.preventDefault();
     setErr(null);
     if (!draft.title.trim() || !draft.body_md.trim()) {
-      setErr("제목과 본문은 필수입니다");
+      setErr(t("제목과 본문은 필수입니다"));
       return;
     }
     setBusy(true);
@@ -347,25 +350,25 @@ function ManualForm({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <label className="block">
           <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-            제목
+            {t("제목")}
           </div>
           <input
             value={draft.title}
             onChange={(e) => update({ title: e.target.value })}
-            placeholder="예: idle-in-tx 누적 시 자동 cleanup"
+            placeholder={t("예: idle-in-tx 누적 시 자동 cleanup")}
             className="w-full bg-zinc-950 border border-zinc-700 text-zinc-200 text-sm px-2 py-1.5 font-mono"
           />
         </label>
         <label className="block">
           <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-            Cluster (선택)
+            {t("Cluster (선택)")}
           </div>
           <select
             value={draft.cluster_id}
             onChange={(e) => update({ cluster_id: e.target.value })}
             className="w-full bg-zinc-950 border border-zinc-700 text-zinc-200 text-sm px-2 py-1.5 font-mono"
           >
-            <option value="">(클러스터 무관)</option>
+            <option value="">{t("(클러스터 무관)")}</option>
             {clusters.map((c) => (
               <option key={c.cluster_id} value={c.cluster_id}>
                 {c.cluster_id}
@@ -376,30 +379,32 @@ function ManualForm({
       </div>
       <label className="block">
         <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-          요약 (선택, 한 줄)
+          {t("요약 (선택, 한 줄)")}
         </div>
         <input
           value={draft.summary_md}
           onChange={(e) => update({ summary_md: e.target.value })}
-          placeholder="목록에 표시되는 한 줄 요약"
+          placeholder={t("목록에 표시되는 한 줄 요약")}
           className="w-full bg-zinc-950 border border-zinc-700 text-zinc-200 text-sm px-2 py-1.5"
         />
       </label>
       <label className="block">
         <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-          본문 (Markdown)
+          {t("본문 (Markdown)")}
         </div>
         <textarea
           value={draft.body_md}
           onChange={(e) => update({ body_md: e.target.value })}
           rows={10}
-          placeholder={"## 증상\n...\n\n## 진단\n...\n\n## 조치\n```sql\n..."}
+          placeholder={t(
+            "## 증상\n...\n\n## 진단\n...\n\n## 조치\n```sql\n...",
+          )}
           className="w-full bg-zinc-950 border border-zinc-700 text-zinc-200 text-xs px-3 py-2 font-mono resize-y"
         />
       </label>
       <label className="block">
         <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-          태그 (콤마 구분, 최대 16개)
+          {t("태그 (콤마 구분, 최대 16개)")}
         </div>
         <input
           value={draft.tags_csv}
@@ -415,14 +420,14 @@ function ManualForm({
       )}
       <div className="flex items-center justify-end gap-2">
         <span className="text-[10px] text-zinc-600">
-          작성 중 내용은 자동으로 브라우저에 저장됩니다.
+          {t("작성 중 내용은 자동으로 브라우저에 저장됩니다.")}
         </span>
         <button
           type="submit"
           disabled={busy}
           className="text-xs font-medium px-4 py-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
         >
-          {busy ? "저장 중…" : "Runbook 저장"}
+          {busy ? t("저장 중…") : t("Runbook 저장")}
         </button>
       </div>
     </form>
@@ -481,14 +486,18 @@ function escapeHtml(s: string): string {
 // rendered markdown HTML from the open modal into an ISOLATED print window with
 // its own minimal stylesheet, then trigger the browser's print → "Save as PDF".
 // The body HTML is ReactMarkdown output (no raw HTML), so injecting it is safe.
-function exportRunbookPdf(rb: RunbookDetail) {
+// `t` is threaded in from the caller rather than read from a hook: this is a
+// plain function, not a component.
+function exportRunbookPdf(rb: RunbookDetail, t: (ko: string) => string) {
   const article = document.getElementById(`runbook-article-${rb.id}`);
   const bodyHtml = article ? article.innerHTML : "";
   const meta = [
-    rb.cluster_id ? `클러스터: ${rb.cluster_id}` : null,
-    `작성: ${new Date(rb.created_at).toLocaleString()}`,
-    rb.created_by ? `작성자: ${rb.created_by}` : null,
-    rb.tags.length ? `태그: ${rb.tags.map((t) => "#" + t).join(" ")}` : null,
+    rb.cluster_id ? t("클러스터: {n}").replace("{n}", rb.cluster_id) : null,
+    t("작성: {n}").replace("{n}", new Date(rb.created_at).toLocaleString()),
+    rb.created_by ? t("작성자: {n}").replace("{n}", rb.created_by) : null,
+    rb.tags.length
+      ? t("태그: {n}").replace("{n}", rb.tags.map((tag) => "#" + tag).join(" "))
+      : null,
   ]
     .filter(Boolean)
     .join(", ");
@@ -522,6 +531,7 @@ function RunbookModal({
   onClose: () => void;
   onDeleted: () => void;
 }) {
+  const t = useT();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -585,7 +595,7 @@ function RunbookModal({
             onClick={onClose}
             className="text-zinc-500 hover:text-zinc-200 text-xs"
           >
-            ✕ 닫기
+            {t("✕ 닫기")}
           </button>
         </div>
         <div className="px-5 py-4 overflow-y-auto flex-1">
@@ -603,17 +613,19 @@ function RunbookModal({
               type="button"
               onClick={() => exportRunbookMarkdown(runbook)}
               className="text-xs text-zinc-300 hover:text-zinc-100 transition-colors"
-              title="YAML front-matter + 본문을 .md 파일로 내보냅니다"
+              title={t("YAML front-matter + 본문을 .md 파일로 내보냅니다")}
             >
-              ⬇ Markdown 내보내기
+              {t("⬇ Markdown 내보내기")}
             </button>
             <button
               type="button"
-              onClick={() => exportRunbookPdf(runbook)}
+              onClick={() => exportRunbookPdf(runbook, t)}
               className="text-xs text-zinc-300 hover:text-zinc-100 transition-colors"
-              title="렌더된 런북을 PDF로 인쇄/저장합니다 (브라우저 인쇄 대화상자 → Save as PDF)"
+              title={t(
+                "렌더된 런북을 PDF로 인쇄/저장합니다 (브라우저 인쇄 대화상자 → Save as PDF)",
+              )}
             >
-              ⬇ PDF 내보내기
+              {t("⬇ PDF 내보내기")}
             </button>
             {confirmDelete ? (
               <>
@@ -623,7 +635,7 @@ function RunbookModal({
                   disabled={busy}
                   className="text-xs text-zinc-400 px-2 py-1"
                 >
-                  취소
+                  {t("취소")}
                 </button>
                 <button
                   type="button"
@@ -631,7 +643,7 @@ function RunbookModal({
                   disabled={busy}
                   className="text-xs px-3 py-1 bg-rose-500 text-zinc-950 hover:bg-rose-400 disabled:opacity-50 transition-colors"
                 >
-                  {busy ? "삭제 중…" : "정말 삭제"}
+                  {busy ? t("삭제 중…") : t("정말 삭제")}
                 </button>
               </>
             ) : (
@@ -640,7 +652,7 @@ function RunbookModal({
                 onClick={() => setConfirmDelete(true)}
                 className="text-xs text-rose-400 hover:text-rose-300"
               >
-                삭제
+                {t("삭제")}
               </button>
             )}
           </div>

@@ -7,6 +7,7 @@ import type {
   PgPlanNode,
   PgPlanRoot,
 } from "@/lib/api-client";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   plan: PgPlanRoot[] | Record<string, unknown> | null;
@@ -497,6 +498,7 @@ function IssuesPanel({
   root: PgPlanNode;
   totalTime: number;
 }) {
+  const t = useT();
   const issues = useMemo(
     () => detectIssues(root, totalTime),
     [root, totalTime],
@@ -561,7 +563,7 @@ function IssuesPanel({
                   className={`w-1.5 h-1.5 rounded-full ${tone.dot} flex-shrink-0 mt-0.5`}
                 />
                 <span className={`text-xs font-medium ${tone.title}`}>
-                  {iss.title}
+                  {t(iss.title)}
                 </span>
               </div>
               <div className="text-[11px] text-zinc-400 mt-1 ml-3.5 font-mono">
@@ -569,7 +571,7 @@ function IssuesPanel({
               </div>
               <div className="text-[11px] text-zinc-500 mt-1 ml-3.5">
                 <span className="text-zinc-600">→ </span>
-                {iss.fix}
+                {t(iss.fix)}
               </div>
             </li>
           );
@@ -757,16 +759,19 @@ function MysqlIssues({
   flags: MysqlFlags;
   queryCost: number | null;
 }) {
+  const t = useT();
   const issues: { severity: "high" | "medium" | "info"; text: string }[] = [];
-  for (const t of tables) {
-    const examined = t.rows_examined_per_scan ?? 0;
-    const filtered = Number(t.filtered);
-    if (t.access_type === "ALL" && examined >= MYSQL_BIG_SCAN_ROWS) {
+  for (const tb of tables) {
+    const examined = tb.rows_examined_per_scan ?? 0;
+    const filtered = Number(tb.filtered);
+    if (tb.access_type === "ALL" && examined >= MYSQL_BIG_SCAN_ROWS) {
       issues.push({
         severity: "high",
-        text: `${t.table_name}: access_type=ALL, ${fmtRows(
-          examined,
-        )} 행을 전부 훑습니다. WHERE와 JOIN 컬럼에 인덱스를 검토하세요.`,
+        text: t(
+          "{a}: access_type=ALL, {b} 행을 전부 훑습니다. WHERE와 JOIN 컬럼에 인덱스를 검토하세요.",
+        )
+          .replace("{a}", String(tb.table_name))
+          .replace("{b}", fmtRows(examined)),
       });
     }
     if (
@@ -776,28 +781,39 @@ function MysqlIssues({
     ) {
       issues.push({
         severity: "medium",
-        text: `${t.table_name}: ${fmtRows(examined)} 행을 읽어 약 ${fmtRows(
-          t.rows_produced_per_join,
-        )} 행만 남깁니다 (filtered ${filtered}%). 더 선택적인 인덱스가 읽는 행 수를 줄입니다.`,
+        text: t(
+          "{a}: {b} 행을 읽어 약 {c} 행만 남깁니다 (filtered {d}%). 더 선택적인 인덱스가 읽는 행 수를 줄입니다.",
+        )
+          .replace("{a}", String(tb.table_name))
+          .replace("{b}", fmtRows(examined))
+          .replace("{c}", fmtRows(tb.rows_produced_per_join))
+          .replace("{d}", String(filtered)),
       });
     }
   }
   if (flags.filesort) {
     issues.push({
       severity: "medium",
-      text: "using_filesort: 정렬을 인덱스 순서로 처리하지 못해 옵티마이저가 직접 정렬합니다. ORDER BY와 GROUP BY 컬럼에 맞는 인덱스로 정렬을 없앨 수 있습니다.",
+      text: t(
+        "using_filesort: 정렬을 인덱스 순서로 처리하지 못해 옵티마이저가 직접 정렬합니다. ORDER BY와 GROUP BY 컬럼에 맞는 인덱스로 정렬을 없앨 수 있습니다.",
+      ),
     });
   }
   if (flags.temporaryTable) {
     issues.push({
       severity: "medium",
-      text: "using_temporary_table: 내부 임시 테이블을 만듭니다 (인덱스로 해결되지 않는 GROUP BY, DISTINCT, UNION에서 흔합니다). 커지면 디스크로 스필합니다.",
+      text: t(
+        "using_temporary_table: 내부 임시 테이블을 만듭니다 (인덱스로 해결되지 않는 GROUP BY, DISTINCT, UNION에서 흔합니다). 커지면 디스크로 스필합니다.",
+      ),
     });
   }
   if (queryCost != null && queryCost >= 100_000) {
     issues.push({
       severity: "info",
-      text: `query_cost ${fmtCost(queryCost)}, 전체적으로 비싼 플랜입니다.`,
+      text: t("query_cost {n}, 전체적으로 비싼 플랜입니다.").replace(
+        "{n}",
+        fmtCost(queryCost),
+      ),
     });
   }
   if (issues.length === 0) return null;
@@ -834,6 +850,7 @@ function MysqlIssues({
 }
 
 function MysqlPlanView({ plan }: { plan: MysqlPlanRoot }) {
+  const t = useT();
   const { tables, flags, queryCost } = useMemo(
     () => mysqlPlanParts(plan),
     [plan],
@@ -876,7 +893,7 @@ function MysqlPlanView({ plan }: { plan: MysqlPlanRoot }) {
 
       <div className="border border-zinc-800 bg-zinc-900/40">
         <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 px-3 py-2 border-b border-zinc-800">
-          join order: 추정값입니다 (실행 통계 아님)
+          {t("join order: 추정값입니다 (실행 통계 아님)")}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -937,15 +954,16 @@ function MysqlPlanView({ plan }: { plan: MysqlPlanRoot }) {
       </div>
 
       <div className="text-[11px] text-zinc-500 mt-2 leading-relaxed">
-        MySQL의 plan-only EXPLAIN에는 옵티마이저 소요 시간과 실제 행 수가 없어,
-        추정 대비 실제 괴리(통계 부정확)와 디스크 스필 여부는 이 플랜으로 알 수
-        없습니다. EXPLAIN ANALYZE는 JSON을 내주지 않습니다.
+        {t(
+          "MySQL의 plan-only EXPLAIN에는 옵티마이저 소요 시간과 실제 행 수가 없어, 추정 대비 실제 괴리(통계 부정확)와 디스크 스필 여부는 이 플랜으로 알 수 없습니다. EXPLAIN ANALYZE는 JSON을 내주지 않습니다.",
+        )}
       </div>
     </div>
   );
 }
 
 export function PlanTree({ plan }: Props) {
+  const t = useT();
   if (!plan) {
     return (
       <div className="text-sm text-zinc-500">
@@ -967,8 +985,9 @@ export function PlanTree({ plan }: Props) {
     return (
       <div className="border border-zinc-800 bg-zinc-900/40 p-4">
         <div className="text-xs text-zinc-500 mb-2">
-          이 엔진의 플랜 형식은 아직 구조화 렌더링을 지원하지 않습니다. 원본
-          응답을 그대로 표시합니다.
+          {t(
+            "이 엔진의 플랜 형식은 아직 구조화 렌더링을 지원하지 않습니다. 원본 응답을 그대로 표시합니다.",
+          )}
         </div>
         <pre className="text-[11px] font-mono text-zinc-400 overflow-auto max-h-96 whitespace-pre-wrap">
           {JSON.stringify(plan, null, 2)}

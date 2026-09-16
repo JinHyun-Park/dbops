@@ -23,6 +23,7 @@ import {
   Download,
 } from "lucide-react";
 import { buildAuditCsv } from "@/lib/audit-export";
+import { localeTag, tr } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 
 // ---------------------------------------------------------------------------
@@ -155,7 +156,7 @@ function toDate(v: string | null | undefined): Date | null {
 }
 
 function fmtTime(d: Date): string {
-  return d.toLocaleTimeString("ko-KR", {
+  return d.toLocaleTimeString(localeTag(), {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -164,7 +165,7 @@ function fmtTime(d: Date): string {
 }
 
 function fmtDayLabel(dateKey: string): string {
-  if (dateKey === "(no date)") return "날짜 없음";
+  if (dateKey === "(no date)") return tr("날짜 없음");
   // dateKey is sv-SE = YYYY-MM-DD; parse as local date
   const d = new Date(dateKey + "T00:00:00");
   if (Number.isNaN(d.getTime())) return dateKey;
@@ -173,9 +174,9 @@ function fmtDayLabel(dateKey: string): string {
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayKey = yesterday.toLocaleDateString("sv-SE");
-  if (dateKey === todayKey) return "오늘";
-  if (dateKey === yesterdayKey) return "어제";
-  return d.toLocaleDateString("ko-KR", {
+  if (dateKey === todayKey) return tr("오늘");
+  if (dateKey === yesterdayKey) return tr("어제");
+  return d.toLocaleDateString(localeTag(), {
     year: "numeric",
     month: "long",
     day: "numeric",
@@ -261,9 +262,10 @@ export default function ActivityPage() {
                       // The message is interpolated in PARENTHESES, not
                       // followed by a bare period: e.message often ends in one
                       // already, which rendered "..".
-                      `감사 export 실패 (${
-                        e instanceof Error ? e.message : String(e)
-                      }). 다시 시도해 주세요.`,
+                      t("감사 export 실패 ({n}). 다시 시도해 주세요.").replace(
+                        "{n}",
+                        e instanceof Error ? e.message : String(e),
+                      ),
                     );
                     return; // do NOT download a misleading partial file
                   }
@@ -287,7 +289,7 @@ export default function ActivityPage() {
                 className="inline-flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 text-zinc-300 hover:border-zinc-600 hover:text-zinc-100 text-xs px-3 py-1.5 transition-colors duration-150"
               >
                 <Download size={12} strokeWidth={2} aria-hidden="true" />
-                CSV 내보내기
+                {t("CSV 내보내기")}
               </button>
             )}
             <SearchableClusterSelect
@@ -295,7 +297,7 @@ export default function ActivityPage() {
               onChange={setClusterFilter}
               clusters={clusters}
               allowAll
-              allLabel="모든 cluster"
+              allLabel={t("모든 cluster")}
               className="w-48"
             />
             <select
@@ -327,7 +329,7 @@ export default function ActivityPage() {
       )}
 
       {loading ? (
-        <div className="text-sm text-zinc-500 py-8">불러오는 중…</div>
+        <div className="text-sm text-zinc-500 py-8">{t("불러오는 중…")}</div>
       ) : items.length === 0 ? (
         <EmptyState
           eyebrow={t("activity")}
@@ -365,15 +367,16 @@ function DayGroup({
   rows: ActivityItem[];
   isFirst: boolean;
 }) {
+  const t = useT();
   return (
     <section>
       {/* Day header */}
       <div className="flex items-center gap-3 mb-5">
         <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500 select-none">
-          {fmtDayLabel(dayKey)}
+          {t(fmtDayLabel(dayKey))}
         </span>
         <span className="text-[10px] text-zinc-700 font-mono">
-          {rows.length}건
+          {t("{n}건").replace("{n}", String(rows.length))}
         </span>
         <div className="flex-1 h-px bg-zinc-800/70" />
       </div>
@@ -466,7 +469,7 @@ function TimelineEvent({
                   border ${cfg.labelBg} ${cfg.labelText} ${cfg.labelBorder}
                   flex-shrink-0
                 `}
-                aria-label={`상태: ${cfg.label}`}
+                aria-label={t("상태: {n}").replace("{n}", cfg.label)}
               >
                 <Icon
                   size={9}
@@ -512,11 +515,12 @@ function TimelineEvent({
               <span className="text-zinc-500">
                 {item.requested_by || "agent"}
               </span>{" "}
-              요청
+              {t("요청")}
             </span>
             {item.approved_by && (
               <span>
-                <span className="text-zinc-500">{item.approved_by}</span> 승인
+                <span className="text-zinc-500">{item.approved_by}</span>{" "}
+                {t("승인")}
               </span>
             )}
             <span className="text-zinc-700 ml-auto select-all">

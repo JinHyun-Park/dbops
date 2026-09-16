@@ -7,6 +7,7 @@ import {
   type TopologyResponse,
 } from "@/lib/api-client";
 import { fmtDecimal } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 // Auto-load on mount: topology is one fast describe call, low cost,
 // and DBAs expect this panel to be populated when they land. Different
@@ -58,6 +59,7 @@ function statusTone(status: string): string {
 }
 
 export function ReplicationTopologyPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [data, setData] = useState<TopologyResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -108,8 +110,9 @@ export function ReplicationTopologyPanel({ clusterId }: { clusterId: string }) {
             )}
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            Writer + readers: 인스턴스별 Replica Lag (CloudWatch 15분 윈도우
-            최신 datapoint)
+            {t(
+              "Writer + readers: 인스턴스별 Replica Lag (CloudWatch 15분 윈도우 최신 datapoint)",
+            )}
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -134,14 +137,14 @@ export function ReplicationTopologyPanel({ clusterId }: { clusterId: string }) {
             disabled={loading}
             className="text-xs font-medium px-3 py-1 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 disabled:opacity-50 transition-colors border border-zinc-700"
           >
-            {loading ? "불러오는 중…" : "새로고침"}
+            {loading ? t("불러오는 중…") : t("새로고침")}
           </button>
         </div>
       </div>
 
       <div>
         {!data && loading && (
-          <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
+          <div className="p-6 text-zinc-500 text-sm">{t("불러오는 중…")}</div>
         )}
         {err && (
           <div className="p-5">
@@ -165,7 +168,7 @@ export function ReplicationTopologyPanel({ clusterId }: { clusterId: string }) {
         )}
         {data && !data.error && !writer && readers.length === 0 && (
           <div className="p-6 text-zinc-500 text-sm">
-            클러스터 멤버 정보가 비어 있습니다.
+            {t("클러스터 멤버 정보가 비어 있습니다.")}
           </div>
         )}
         {data && !data.error && (writer || readers.length > 0) && (
@@ -178,7 +181,7 @@ export function ReplicationTopologyPanel({ clusterId }: { clusterId: string }) {
                 <NodeCard node={writer} isWriter />
               ) : (
                 <div className="text-xs text-zinc-500 border border-zinc-800 bg-zinc-900/40 px-3 py-4">
-                  writer 없음
+                  {t("writer 없음")}
                 </div>
               )}
             </div>
@@ -192,8 +195,9 @@ export function ReplicationTopologyPanel({ clusterId }: { clusterId: string }) {
               </div>
               {readers.length === 0 ? (
                 <div className="text-xs text-zinc-500 border border-zinc-800 bg-zinc-900/40 px-3 py-4">
-                  reader 없음: single-node 클러스터입니다. 운영 환경이면 최소
-                  1개 reader 추가를 권장 (failover RTO 단축).
+                  {t(
+                    "reader 없음: single-node 클러스터입니다. 운영 환경이면 최소 1개 reader 추가를 권장 (failover RTO 단축).",
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -236,6 +240,7 @@ function NodeCard({
   node: TopologyMember;
   isWriter?: boolean;
 }) {
+  const t = useT();
   const lag = lagTone(node.replica_lag_ms);
   return (
     <div
@@ -260,7 +265,7 @@ function NodeCard({
         ) : (
           <span
             className={`px-1.5 py-0.5 border text-[10px] font-mono shrink-0 flex items-center gap-1 ${lag.classes}`}
-            title="AuroraReplicaLag: CloudWatch 15분 윈도우 최신값"
+            title={t("AuroraReplicaLag: CloudWatch 15분 윈도우 최신값")}
           >
             <span className={`w-1.5 h-1.5 rounded-full ${lag.dot}`} />
             {lag.text}
@@ -291,7 +296,11 @@ function NodeCard({
         {node.promotion_tier !== null &&
           node.promotion_tier !== undefined &&
           !isWriter && (
-            <span title="Aurora promotion tier: 숫자가 낮을수록 failover 우선순위가 높습니다">
+            <span
+              title={t(
+                "Aurora promotion tier: 숫자가 낮을수록 failover 우선순위가 높습니다",
+              )}
+            >
               <span className="text-zinc-600">tier:</span>{" "}
               <span className="text-zinc-400">{node.promotion_tier}</span>
             </span>

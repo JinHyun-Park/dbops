@@ -16,6 +16,7 @@ import {
 import { fetchTimeseries } from "@/lib/api-client";
 import { Expandable } from "@/components/design-system/expandable";
 import { fmtDecimal } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 import { useChartColors } from "@/lib/use-chart-colors";
 
 type Point = { ts: string; value: number | string; dimensions?: string };
@@ -98,6 +99,7 @@ export function TimeseriesChart({
   externalPoints,
   externalLoading,
 }: Props) {
+  const t = useT();
   const usingExternal = externalPoints !== undefined;
   const [internalPoints, setInternalPoints] = useState<Point[]>([]);
   const [internalLoading, setInternalLoading] = useState(true);
@@ -161,7 +163,7 @@ export function TimeseriesChart({
         <div className="flex items-baseline justify-between mb-3 pr-8">
           <div className="text-sm text-zinc-200 font-medium">{title}</div>
           <div className="text-xs text-zinc-500">
-            최대: {displayMax}
+            {t("최대: {n}").replace("{n}", displayMax)}
             {unit ? ` ${unit}` : ""}
           </div>
         </div>
@@ -172,7 +174,7 @@ export function TimeseriesChart({
         <div className="h-32">
           {loading ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              불러오는 중…
+              {t("불러오는 중…")}
             </div>
           ) : err ? (
             <div className="text-xs text-red-400 flex items-center h-full">
@@ -180,7 +182,7 @@ export function TimeseriesChart({
             </div>
           ) : data.length === 0 ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              데이터 없음
+              {t("데이터 없음")}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -263,6 +265,7 @@ function StackedAreaChart({
   err: string | null;
   unit?: string;
 }) {
+  const t = useT();
   const waitColors = useWaitColors();
   const chart = useChartColors();
   const grouped = new Map<string, Map<string, number>>();
@@ -311,7 +314,7 @@ function StackedAreaChart({
         <div className="flex items-baseline justify-between mb-3 pr-8">
           <div className="text-sm text-zinc-200 font-medium">{title}</div>
           <div className="text-xs text-zinc-500">
-            최대: {fmtDecimal(max, 2)}
+            {t("최대: {n}").replace("{n}", String(fmtDecimal(max, 2)))}
             {unit ? ` ${unit}` : ""}
           </div>
         </div>
@@ -322,7 +325,7 @@ function StackedAreaChart({
         <div className="h-64">
           {loading ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              불러오는 중…
+              {t("불러오는 중…")}
             </div>
           ) : err ? (
             <div className="text-xs text-red-400 flex items-center h-full">
@@ -330,7 +333,7 @@ function StackedAreaChart({
             </div>
           ) : data.length === 0 ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              데이터 없음
+              {t("데이터 없음")}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">

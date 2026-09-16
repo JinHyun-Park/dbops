@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { signIn } from "@/lib/auth";
+import { useT } from "@/lib/i18n";
 
 export default function LoginPage() {
   return (
@@ -14,6 +15,7 @@ export default function LoginPage() {
 }
 
 function LoginForm() {
+  const t = useT();
   const router = useRouter();
   const sp = useSearchParams();
   const next = sp.get("next") || "/";
@@ -44,7 +46,7 @@ function LoginForm() {
       }
       router.replace(next);
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "로그인 실패");
+      setErr(e2 instanceof Error ? e2.message : t("로그인 실패"));
       setBusy(false);
     }
   };
@@ -53,11 +55,11 @@ function LoginForm() {
     e.preventDefault();
     setErr(null);
     if (newPw !== newPwConfirm) {
-      setErr("비밀번호가 일치하지 않습니다");
+      setErr(t("비밀번호가 일치하지 않습니다"));
       return;
     }
     if (newPw.length < 8) {
-      setErr("비밀번호는 최소 8자 이상이어야 합니다");
+      setErr(t("비밀번호는 최소 8자 이상이어야 합니다"));
       return;
     }
     setBusy(true);
@@ -65,7 +67,7 @@ function LoginForm() {
       await challenge!(newPw);
       router.replace(next);
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "비밀번호 설정 실패");
+      setErr(e2 instanceof Error ? e2.message : t("비밀번호 설정 실패"));
       setBusy(false);
     }
   };
@@ -74,11 +76,11 @@ function LoginForm() {
     return (
       <AuthLayout
         eyebrow="dbops"
-        title="새 비밀번호 설정"
-        subtitle="최초 로그인: 임시 비밀번호를 변경하세요"
+        title={t("새 비밀번호 설정")}
+        subtitle={t("최초 로그인: 임시 비밀번호를 변경하세요")}
       >
         <form onSubmit={submitNewPassword} className="space-y-4">
-          <Field label="새 비밀번호">
+          <Field label={t("새 비밀번호")}>
             <input
               type="password"
               autoComplete="new-password"
@@ -88,7 +90,7 @@ function LoginForm() {
               className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm focus:outline-none focus:border-amber-500/60"
             />
           </Field>
-          <Field label="비밀번호 확인">
+          <Field label={t("비밀번호 확인")}>
             <input
               type="password"
               autoComplete="new-password"
@@ -108,7 +110,7 @@ function LoginForm() {
             disabled={busy}
             className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium py-2 disabled:opacity-50"
           >
-            {busy ? "설정 중…" : "비밀번호 설정 후 로그인"}
+            {busy ? t("설정 중…") : t("비밀번호 설정 후 로그인")}
           </button>
         </form>
       </AuthLayout>
@@ -118,11 +120,11 @@ function LoginForm() {
   return (
     <AuthLayout
       eyebrow="dbops"
-      title="로그인"
+      title={t("로그인")}
       subtitle="Aurora operations console"
     >
       <form onSubmit={submit} className="space-y-4">
-        <Field label="이메일">
+        <Field label={t("이메일")}>
           <input
             type="email"
             autoComplete="email"
@@ -132,7 +134,7 @@ function LoginForm() {
             className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm focus:outline-none focus:border-amber-500/60"
           />
         </Field>
-        <Field label="비밀번호">
+        <Field label={t("비밀번호")}>
           <input
             type="password"
             autoComplete="current-password"
@@ -152,14 +154,14 @@ function LoginForm() {
           disabled={busy}
           className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium py-2 disabled:opacity-50"
         >
-          {busy ? "로그인 중…" : "로그인"}
+          {busy ? t("로그인 중…") : t("로그인")}
         </button>
       </form>
       <div className="flex items-center justify-between text-xs text-zinc-500 pt-4">
         <Link href="/forgot" className="hover:text-amber-300 transition-colors">
-          비밀번호 찾기
+          {t("비밀번호 찾기")}
         </Link>
-        <span className="text-zinc-700">공개 가입 없음, admin 전용</span>
+        <span className="text-zinc-700">{t("공개 가입 없음, admin 전용")}</span>
       </div>
     </AuthLayout>
   );

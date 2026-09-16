@@ -6,6 +6,7 @@ import {
   type InstalledExtension,
   type RecommendedExtension,
 } from "@/lib/api-client";
+import { useT } from "@/lib/i18n";
 
 export function ExtensionsCard({
   clusterId,
@@ -14,6 +15,7 @@ export function ExtensionsCard({
   clusterId: string;
   engine?: string;
 }) {
+  const t = useT();
   const [installed, setInstalled] = useState<InstalledExtension[]>([]);
   const [recommended, setRecommended] = useState<RecommendedExtension[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,7 +47,9 @@ export function ExtensionsCard({
     return (
       <div className="bg-zinc-900/50 border border-zinc-800 p-5">
         <div className="text-sm text-zinc-200 font-medium mb-2">Extensions</div>
-        <div className="text-xs text-zinc-500">PostgreSQL 전용 패널입니다.</div>
+        <div className="text-xs text-zinc-500">
+          {t("PostgreSQL 전용 패널입니다.")}
+        </div>
       </div>
     );
   }
@@ -66,14 +70,15 @@ export function ExtensionsCard({
             </span>
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            DBOps가 PG 클러스터에 권장하는 모듈: 미설치 항목은 hover로 이유
-            확인.
+            {t(
+              "DBOps가 PG 클러스터에 권장하는 모듈: 미설치 항목은 hover로 이유 확인.",
+            )}
           </div>
         </div>
       </div>
 
       {loading ? (
-        <div className="text-zinc-500 text-sm">불러오는 중…</div>
+        <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">

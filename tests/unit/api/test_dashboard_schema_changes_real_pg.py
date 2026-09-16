@@ -1190,10 +1190,14 @@ def test_unknown_row_count_is_not_rendered_as_zero(pg):
     src = _PANEL.read_text()
     body = src[src.index("function RowCount("):src.index("\nfunction ChangeRow(")]
     null_branch = body[body.index("if (value === null) {"):body.index("\n  }")]
-    assert "{UNKNOWN_ROWS}" in null_branch, null_branch
+    # Matched on the CONSTANT, not on "{UNKNOWN_ROWS}": i18n wrapped the render
+    # as {t(UNKNOWN_ROWS)}, and pinning the pre-wrap spelling made this fail for
+    # a reason that has nothing to do with the null row count. The branch is
+    # already sliced, so this still fails if the render is removed.
+    assert "UNKNOWN_ROWS" in null_branch, null_branch
     assert "table_stats는 매 주기 상위 100개" in null_branch, "the null branch lost its why"
     numeric = body[body.index("\n  }"):]
-    assert "{UNKNOWN_ROWS}" not in numeric
+    assert "UNKNOWN_ROWS" not in numeric
     assert "fmtNumber(value)" in numeric, numeric
     assert 'const UNKNOWN_ROWS = "행 수 미상";' in src
 

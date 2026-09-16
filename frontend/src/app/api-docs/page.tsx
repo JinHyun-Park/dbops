@@ -44,7 +44,9 @@ export default function ApiDocsPage() {
         return r.json();
       })
       .then(setSpec)
-      .catch((e) => setErr(e instanceof Error ? e.message : "스펙 로드 실패"));
+      .catch((e) =>
+        setErr(e instanceof Error ? e.message : t("스펙 로드 실패")),
+      );
   }, []);
 
   const byTag = useMemo(() => {
@@ -86,11 +88,13 @@ export default function ApiDocsPage() {
       />
       {err && (
         <div className="text-xs text-rose-300 border border-rose-500/40 bg-rose-500/10 px-3 py-2">
-          스펙 로드 실패: {err}. /openapi.json 이 배포됐는지 확인하세요.
+          {t(
+            "스펙 로드 실패: {n}. /openapi.json 이 배포됐는지 확인하세요.",
+          ).replace("{n}", err)}
         </div>
       )}
       {!spec && !err && (
-        <div className="text-zinc-500 text-sm">불러오는 중…</div>
+        <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
       )}
       {spec && tags.length === 0 && (
         <EmptyState
@@ -135,14 +139,14 @@ export default function ApiDocsPage() {
                   {op.security ? (
                     <span
                       className="text-amber-400/80"
-                      title="Cognito JWT 필요"
+                      title={t("Cognito JWT 필요")}
                     >
                       🔒 JWT
                     </span>
                   ) : (
                     <span
                       className="text-zinc-600"
-                      title="공개 (Slack HMAC 또는 health probe)"
+                      title={t("공개 (Slack HMAC 또는 health probe)")}
                     >
                       public
                     </span>

@@ -3,6 +3,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ToolStatus } from "./tool-status";
+import { useT } from "@/lib/i18n";
 
 export interface Message {
   id: string;
@@ -28,6 +29,7 @@ export function MessageList({
   onSaveAsRunbook,
   onRegenerate,
 }: MessageListProps) {
+  const t = useT();
   const lastIdx = messages.length - 1;
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -105,22 +107,24 @@ export function MessageList({
                     onSaveAsRunbook(msg, q);
                   }}
                   className="mt-1.5 text-[10px] text-zinc-500 hover:text-amber-300 transition-colors px-1"
-                  title="이 진단을 Runbook으로 저장: 같은 패턴 재발 시 곧바로 참조"
+                  title={t(
+                    "이 진단을 Runbook으로 저장: 같은 패턴 재발 시 곧바로 참조",
+                  )}
                 >
-                  ✓ Runbook 저장
+                  {t("✓ Runbook 저장")}
                 </button>
               )}
 
             {msg.role === "assistant" && msg.incomplete && (
               <div className="mt-2 flex items-center gap-2 max-w-[80%] text-xs text-zinc-500">
-                <span>응답이 중단되었습니다</span>
+                <span>{t("응답이 중단되었습니다")}</span>
                 {onRegenerate && (
                   <button
                     type="button"
                     onClick={() => onRegenerate(msg.id)}
                     className="px-2 py-0.5 border border-zinc-700 text-zinc-400 hover:border-amber-500/50 hover:text-amber-300 hover:bg-amber-500/5 transition-colors"
                   >
-                    다시 생성
+                    {t("다시 생성")}
                   </button>
                 )}
               </div>
@@ -170,12 +174,13 @@ function extractApprovalId(content: string): string | null {
 }
 
 function ApprovalCallout({ approvalId }: { approvalId: string }) {
+  const t = useT();
   return (
     <div className="mt-2 max-w-[80%] border-l-2 border-amber-500/60 bg-amber-500/5 px-3 py-2 flex items-start gap-2">
       <span className="text-amber-300 mt-0.5">🔔</span>
       <div className="flex-1 text-xs">
         <div className="text-amber-200 font-medium">
-          DBA 승인이 등록되었습니다
+          {t("DBA 승인이 등록되었습니다")}
         </div>
         <div className="text-zinc-400 mt-0.5 font-mono break-all">
           {approvalId}
@@ -186,7 +191,7 @@ function ApprovalCallout({ approvalId }: { approvalId: string }) {
           rel="noopener noreferrer"
           className="inline-block mt-1.5 text-amber-300 hover:text-amber-200 underline underline-offset-2"
         >
-          Approval Center 열기 →
+          {t("Approval Center 열기 →")}
         </a>
       </div>
     </div>

@@ -14,6 +14,7 @@ import {
   Section,
   EmptyState,
 } from "@/components/design-system/page-shell";
+import { localeTag } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -28,7 +29,7 @@ function parseApprovers(raw: string): string[] {
 function fmtTs(ts?: string): string | null {
   if (!ts) return null;
   try {
-    return new Date(ts).toLocaleString("ko-KR", {
+    return new Date(ts).toLocaleString(localeTag(), {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -100,6 +101,7 @@ function PolicyForm({
   onSubmit,
   onCancel,
 }: PolicyFormProps) {
+  const t = useT();
   const [form, setForm] = useState<PolicyFormState>(initial);
 
   // Sync initial only when the edit target changes, not on every new object ref
@@ -128,13 +130,14 @@ function PolicyForm({
             type="text"
             value={form.cluster_id}
             onChange={set("cluster_id")}
-            placeholder="* (전체) 또는 특정 cluster id"
+            placeholder={t("* (전체) 또는 특정 cluster id")}
             disabled={submitting}
             className={inputCls}
             aria-label="cluster_id"
           />
           <p className="mt-1 text-[11px] text-zinc-600">
-            <code className="text-zinc-500">*</code> = 모든 클러스터에 적용
+            <code className="text-zinc-500">*</code>{" "}
+            {t("= 모든 클러스터에 적용")}
           </p>
         </div>
 
@@ -147,7 +150,9 @@ function PolicyForm({
             type="text"
             value={form.action_type}
             onChange={set("action_type")}
-            placeholder="* 또는 execute_sql, create_custom_endpoint, add_reader_instance …"
+            placeholder={t(
+              "* 또는 execute_sql, create_custom_endpoint, add_reader_instance …",
+            )}
             disabled={submitting}
             className={inputCls}
             aria-label="action_type"
@@ -190,11 +195,13 @@ function PolicyForm({
             <option value="other" />
           </datalist>
           <p className="mt-1 text-[11px] text-zinc-600">
-            승인 요청의 action_type / tool_name과 매칭: SQL과 파라미터뿐 아니라
-            엔드포인트와 스케일 변경(create_custom_endpoint, add_reader_instance
-            등)도 지정 가능. 값이 요청의 action_type과{" "}
-            <strong className="text-zinc-400">정확히 일치</strong>해야
-            적용됩니다 (오타 시 정책이 매칭되지 않아 미승인 상태로 남음).
+            {t(
+              "승인 요청의 action_type / tool_name과 매칭: SQL과 파라미터뿐 아니라 엔드포인트와 스케일 변경(create_custom_endpoint, add_reader_instance 등)도 지정 가능. 값이 요청의 action_type과",
+            )}{" "}
+            <strong className="text-zinc-400">{t("정확히 일치")}</strong>
+            {t(
+              "해야 적용됩니다 (오타 시 정책이 매칭되지 않아 미승인 상태로 남음).",
+            )}
           </p>
         </div>
 
@@ -213,7 +220,7 @@ function PolicyForm({
             aria-label="approvers"
           />
           <p className="mt-1 text-[11px] text-zinc-600">
-            쉼표 또는 줄바꿈으로 구분, 최소 1명 필수
+            {t("쉼표 또는 줄바꿈으로 구분, 최소 1명 필수")}
           </p>
         </div>
 
@@ -226,7 +233,7 @@ function PolicyForm({
             type="text"
             value={form.description}
             onChange={set("description")}
-            placeholder="정책 설명 (선택)"
+            placeholder={t("정책 설명 (선택)")}
             disabled={submitting}
             className={inputCls}
             aria-label="description"
@@ -246,7 +253,7 @@ function PolicyForm({
           disabled={submitting}
           className="text-xs font-medium px-5 py-2.5 bg-emerald-400/90 text-zinc-950 hover:bg-emerald-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {submitting ? "저장 중…" : submitLabel}
+          {submitting ? t("저장 중…") : submitLabel}
         </button>
         {onCancel && (
           <button
@@ -254,7 +261,7 @@ function PolicyForm({
             disabled={submitting}
             className="text-xs font-medium px-4 py-2.5 border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 transition-colors disabled:opacity-40"
           >
-            취소
+            {t("취소")}
           </button>
         )}
       </div>
@@ -285,18 +292,19 @@ function PolicyRow({
   saving,
   editError,
 }: PolicyRowProps) {
+  const t = useT();
   if (editing) {
     return (
       <div className="border-t border-zinc-800 first:border-t-0">
         <div className="px-5 pt-4 pb-1 text-xs text-zinc-500 font-mono">
-          수정 중: {policy.policy_id}
+          {t("수정 중: {n}").replace("{n}", policy.policy_id)}
         </div>
         <PolicyForm
           initial={policyToForm(policy)}
           resetKey={policy.policy_id}
           submitting={saving}
           error={editError}
-          submitLabel="수정 저장"
+          submitLabel={t("수정 저장")}
           onSubmit={onSave}
           onCancel={onCancelEdit}
         />
@@ -329,10 +337,10 @@ function PolicyRow({
 
         {/* Approvers */}
         <div className="sm:col-start-1">
-          <div className="text-xs text-zinc-500 mb-0.5">승인자</div>
+          <div className="text-xs text-zinc-500 mb-0.5">{t("승인자")}</div>
           <div className="font-mono text-xs text-zinc-300 leading-relaxed">
             {policy.approvers.length === 0 ? (
-              <span className="text-rose-400">없음</span>
+              <span className="text-rose-400">{t("없음")}</span>
             ) : (
               policy.approvers.join(", ")
             )}
@@ -356,13 +364,13 @@ function PolicyRow({
           onClick={onEdit}
           className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-100 transition-colors"
         >
-          수정
+          {t("수정")}
         </button>
         <button
           onClick={onDelete}
           className="text-xs px-3 py-1.5 border border-zinc-800 text-zinc-600 hover:border-rose-500/50 hover:text-rose-400 transition-colors"
         >
-          삭제
+          {t("삭제")}
         </button>
       </div>
     </div>
@@ -451,7 +459,9 @@ export default function ApprovalPoliciesPage() {
   const handleDelete = async (id: string) => {
     if (
       !confirm(
-        "이 정책을 삭제하면 해당 조건의 승인 요청이 기본 승인(모든 관리자)으로 fallback됩니다. 계속할까요?",
+        t(
+          "이 정책을 삭제하면 해당 조건의 승인 요청이 기본 승인(모든 관리자)으로 fallback됩니다. 계속할까요?",
+        ),
       )
     )
       return;
@@ -496,25 +506,28 @@ export default function ApprovalPoliciesPage() {
       />
 
       {/* ── How it works ── */}
-      <Section eyebrow="동작 원리" title="정책 매칭 규칙">
+      <Section eyebrow={t("동작 원리")} title={t("정책 매칭 규칙")}>
         <div className="border border-zinc-800 bg-zinc-900/30 px-5 py-4 text-xs text-zinc-400 leading-relaxed space-y-2">
           <p>
-            <code className="text-emerald-300/80">*</code> 와일드카드는 모든
-            cluster_id 또는 action_type에 매칭됩니다.{" "}
-            <strong className="text-zinc-300">most-specific-wins</strong>:
-            cluster_id + action_type 둘 다 구체적인 정책이 우선 적용됩니다.
+            <code className="text-emerald-300/80">*</code>{" "}
+            {t("와일드카드는 모든 cluster_id 또는 action_type에 매칭됩니다.")}{" "}
+            <strong className="text-zinc-300">most-specific-wins</strong>
+            {t(
+              ": cluster_id + action_type 둘 다 구체적인 정책이 우선 적용됩니다.",
+            )}
           </p>
           <p>
-            정책이 매칭되면{" "}
+            {t("정책이 매칭되면")}{" "}
             <strong className="text-zinc-300">
-              목록에 없는 관리자는 승인할 수 없습니다
+              {t("목록에 없는 관리자는 승인할 수 없습니다")}
             </strong>{" "}
-            (명시된 승인자만 가능). 매칭되는 정책이 없으면 기본 동작(모든 관리자
-            승인 가능)으로 fallback.
+            {t(
+              "(명시된 승인자만 가능). 매칭되는 정책이 없으면 기본 동작(모든 관리자 승인 가능)으로 fallback.",
+            )}
           </p>
           <p>
-            <code className="text-zinc-400">action_type</code>은 승인 요청의
-            action_type / tool_name과 비교합니다. 예:{" "}
+            <code className="text-zinc-400">action_type</code>
+            {t("은 승인 요청의 action_type / tool_name과 비교합니다. 예:")}{" "}
             <code className="text-zinc-400">execute_sql</code>,{" "}
             <code className="text-zinc-400">modify_parameter</code>,{" "}
             <code className="text-zinc-400">create_snapshot</code>.
@@ -530,7 +543,7 @@ export default function ApprovalPoliciesPage() {
       )}
 
       {loading ? (
-        <div className="text-sm text-zinc-500">불러오는 중…</div>
+        <div className="text-sm text-zinc-500">{t("불러오는 중…")}</div>
       ) : (
         <>
           {/* ── Delete error ── */}
@@ -543,8 +556,8 @@ export default function ApprovalPoliciesPage() {
           {/* ── Existing policies ── */}
           <Section
             eyebrow="Policies"
-            title="등록된 정책"
-            description={`${policies.length}개`}
+            title={t("등록된 정책")}
+            description={t("{n}개").replace("{n}", String(policies.length))}
           >
             {policies.length === 0 ? (
               <EmptyState
@@ -581,15 +594,17 @@ export default function ApprovalPoliciesPage() {
           {/* ── Add new policy ── */}
           <Section
             eyebrow="Add"
-            title="정책 추가"
-            description="같은 cluster_id + action_type 조합이 여러 개면, 매칭 시 승인자 목록이 합산됩니다."
+            title={t("정책 추가")}
+            description={t(
+              "같은 cluster_id + action_type 조합이 여러 개면, 매칭 시 승인자 목록이 합산됩니다.",
+            )}
           >
             <PolicyForm
               initial={EMPTY_FORM}
               resetKey="__add__"
               submitting={addSubmitting}
               error={addError}
-              submitLabel="정책 추가"
+              submitLabel={t("정책 추가")}
               onSubmit={handleAdd}
             />
           </Section>

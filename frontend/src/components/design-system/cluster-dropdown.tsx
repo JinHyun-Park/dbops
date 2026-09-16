@@ -10,6 +10,7 @@ import { AnchoredPopover } from "@/components/design-system/anchored-popover";
 import { EngineBadge } from "@/components/design-system/engine-badge";
 import { groupByEngineGroup, displayName } from "@/lib/group-by-family";
 import { prefetchDashboard } from "@/lib/api-client";
+import { useT } from "@/lib/i18n";
 
 // A real, discoverable cluster switcher: click → a popover that lists the
 // clusters immediately (with a severity dot from the shared triage), with
@@ -33,6 +34,7 @@ export function ClusterDropdown({
   align?: "left" | "right";
 }) {
   const { clusters, selected, setSelected } = useSelectedCluster();
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
@@ -88,7 +90,11 @@ export function ClusterDropdown({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title={selected ? `${selected}: 클러스터 전환` : "클러스터 선택"}
+        title={
+          selected
+            ? t("{n}: 클러스터 전환").replace("{n}", selected)
+            : t("클러스터 선택")
+        }
         className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-zinc-800 bg-zinc-900/50 hover:border-emerald-500/40 transition-colors max-w-[280px]"
       >
         {selected && selLevel ? (
@@ -112,7 +118,9 @@ export function ClusterDropdown({
             )}
           </>
         ) : (
-          <span className="text-[12px] text-zinc-500">클러스터 선택</span>
+          <span className="text-[12px] text-zinc-500">
+            {t("클러스터 선택")}
+          </span>
         )}
         <ChevronDown
           size={13}
@@ -134,7 +142,7 @@ export function ClusterDropdown({
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="클러스터 검색…"
+              placeholder={t("클러스터 검색…")}
               className="w-full py-2.5 bg-transparent text-sm text-zinc-100 focus:outline-none placeholder:text-zinc-600"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && firstVisible)
@@ -145,7 +153,7 @@ export function ClusterDropdown({
           <div className="max-h-72 overflow-y-auto py-1">
             {grouped.length === 0 ? (
               <div className="px-3 py-6 text-center text-zinc-500 text-sm">
-                {clusters.length === 0 ? "클러스터 없음" : "결과 없음"}
+                {clusters.length === 0 ? t("클러스터 없음") : t("결과 없음")}
               </div>
             ) : (
               grouped.map(({ fam, meta, items }) => (
@@ -189,7 +197,7 @@ export function ClusterDropdown({
                         )}
                         {active && (
                           <span className="text-[10px] text-emerald-300/80 ml-1">
-                            현재
+                            {t("현재")}
                           </span>
                         )}
                       </button>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { streamChat } from "@/lib/agentcore-sse";
+import { useT } from "@/lib/i18n";
 
 export interface DashboardEvent {
   id?: number | string;
@@ -74,6 +75,7 @@ export function EventDetailModal({
   prettyLabel,
   onClose,
 }: Props) {
+  const t = useT();
   const [insight, setInsight] = useState("");
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState<string | null>(null);
@@ -86,7 +88,7 @@ export function EventDetailModal({
   const handleAnalyze = () => {
     if (!clusterId) {
       setInsightError(
-        "cluster_id를 가져오지 못했어요. 대시보드를 새로고침하세요",
+        t("cluster_id를 가져오지 못했어요. 대시보드를 새로고침하세요"),
       );
       return;
     }
@@ -151,7 +153,7 @@ export function EventDetailModal({
               <span className="text-[10px] text-zinc-500">{event.ts}</span>
             </div>
             <h2 className="text-lg font-semibold text-zinc-100 truncate">
-              {prettyLabel}
+              {t(prettyLabel)}
             </h2>
             {event.message && (
               <div className="text-xs text-zinc-400 mt-1 leading-snug">
@@ -162,7 +164,7 @@ export function EventDetailModal({
           <button
             onClick={onClose}
             className="text-zinc-500 hover:text-zinc-200 text-xl leading-none ml-3"
-            aria-label="닫기"
+            aria-label={t("닫기")}
           >
             ×
           </button>
@@ -177,7 +179,7 @@ export function EventDetailModal({
                 : "border-zinc-800 text-zinc-500 hover:text-zinc-300"
             }`}
           >
-            요약 + AI
+            {t("요약 + AI")}
           </button>
           <button
             onClick={() => setTab("raw")}
@@ -187,7 +189,7 @@ export function EventDetailModal({
                 : "border-zinc-800 text-zinc-500 hover:text-zinc-300"
             }`}
           >
-            원본 이벤트
+            {t("원본 이벤트")}
           </button>
         </div>
 
@@ -197,12 +199,12 @@ export function EventDetailModal({
               {keyFacts.length > 0 && (
                 <div className="mb-4">
                   <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 mb-2">
-                    주요 정보
+                    {t("주요 정보")}
                   </div>
                   <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                     {keyFacts.map((f, i) => (
                       <div key={i} className="contents">
-                        <dt className="text-zinc-500">{f.label}</dt>
+                        <dt className="text-zinc-500">{t(f.label)}</dt>
                         <dd className="text-zinc-300 font-mono break-all">
                           {f.value}
                         </dd>
@@ -215,7 +217,7 @@ export function EventDetailModal({
               <div className="border-t border-zinc-800 pt-3">
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
-                    AI 분석
+                    {t("AI 분석")}
                   </div>
                   <button
                     onClick={handleAnalyze}
@@ -223,10 +225,10 @@ export function EventDetailModal({
                     className="text-xs px-3 py-1 border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 disabled:opacity-50 transition-colors"
                   >
                     {insightLoading
-                      ? "분석 중…"
+                      ? t("분석 중…")
                       : insight
-                        ? "다시 분석"
-                        : "원인 설명 + 조치"}
+                        ? t("다시 분석")
+                        : t("원인 설명 + 조치")}
                   </button>
                 </div>
                 {insightError && (
@@ -236,9 +238,12 @@ export function EventDetailModal({
                 )}
                 {!insight && !insightLoading && !insightError && (
                   <div className="text-xs text-zinc-500">
-                    <span className="text-sky-300">원인 설명 + 조치</span>{" "}
-                    버튼을 누르면 변경 사항, 영향, 권장 조치 한 가지를 받을 수
-                    있어요.
+                    <span className="text-sky-300">
+                      {t("원인 설명 + 조치")}
+                    </span>{" "}
+                    {t(
+                      "버튼을 누르면 변경 사항, 영향, 권장 조치 한 가지를 받을 수 있어요.",
+                    )}
                   </div>
                 )}
                 {insight && (

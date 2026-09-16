@@ -12,6 +12,7 @@ import {
   Section,
   EmptyState,
 } from "@/components/design-system/page-shell";
+import { localeTag } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 
 // ── Inline toggle: no design-system toggle exists yet ──────────────────────
@@ -50,9 +51,10 @@ function Toggle({
 // ── Provenance line ─────────────────────────────────────────────────────────
 
 function Provenance({ item }: { item: AppConfigItem }) {
+  const t = useT();
   if (!item.updated_by && !item.updated_at) return null;
   const ts = item.updated_at
-    ? new Date(item.updated_at).toLocaleString("ko-KR", {
+    ? new Date(item.updated_at).toLocaleString(localeTag(), {
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
@@ -62,7 +64,7 @@ function Provenance({ item }: { item: AppConfigItem }) {
     : null;
   return (
     <div className="mt-1.5 text-[11px] font-mono text-zinc-600">
-      마지막 변경:{" "}
+      {t("마지막 변경:")}{" "}
       {item.updated_by && (
         <span className="text-zinc-500">{item.updated_by}</span>
       )}
@@ -190,14 +192,16 @@ export default function SettingsPage() {
       )}
 
       {loading ? (
-        <div className="text-sm text-zinc-500">불러오는 중…</div>
+        <div className="text-sm text-zinc-500">{t("불러오는 중…")}</div>
       ) : (
         <>
           {/* ── Report delivery ── */}
           <Section
             eyebrow="Notifications"
             title="Report delivery"
-            description="정기 운영 요약 리포트를 SNS/Slack 구독자에게 자동 발송합니다."
+            description={t(
+              "정기 운영 요약 리포트를 SNS/Slack 구독자에게 자동 발송합니다.",
+            )}
           >
             <div className="border border-zinc-800 bg-zinc-900/30">
               <div className="px-5 py-4 flex items-center justify-between gap-6">
@@ -206,9 +210,9 @@ export default function SettingsPage() {
                     Report delivery
                   </div>
                   <div className="mt-0.5 text-xs text-zinc-500 leading-relaxed max-w-lg">
-                    활성화하면 Tasks 페이지의 scheduled_report 결과가 SNS 토픽에
-                    등록된 이메일과 Slack 구독자에게 자동 발송됩니다. 구독자는
-                    Alerts 페이지에서 추가하세요.
+                    {t(
+                      "활성화하면 Tasks 페이지의 scheduled_report 결과가 SNS 토픽에 등록된 이메일과 Slack 구독자에게 자동 발송됩니다. 구독자는 Alerts 페이지에서 추가하세요.",
+                    )}
                   </div>
                   {reportItem && <Provenance item={reportItem} />}
                 </div>
@@ -225,7 +229,9 @@ export default function SettingsPage() {
           <Section
             eyebrow="Integrations"
             title="Ticketing provider"
-            description="이상 감지와 RCA 결과를 외부 티켓 시스템에 자동 등록할 제공자를 지정합니다."
+            description={t(
+              "이상 감지와 RCA 결과를 외부 티켓 시스템에 자동 등록할 제공자를 지정합니다.",
+            )}
           >
             <div className="border border-zinc-800 bg-zinc-900/30">
               <div className="px-5 py-4">
@@ -233,10 +239,12 @@ export default function SettingsPage() {
                   Provider name
                 </div>
                 <div className="text-xs text-zinc-500 leading-relaxed max-w-lg mb-3">
-                  현재 지원하는 값: <code className="text-zinc-400">none</code>{" "}
-                  (비활성). <code className="text-zinc-400">jira</code> 등 다른
-                  값을 입력해도 코드에 연동 구현이 없으면 아무 동작도 하지
-                  않습니다. 제공자 연동을 먼저 구현한 뒤 값을 바꾸세요.
+                  {t("현재 지원하는 값:")}{" "}
+                  <code className="text-zinc-400">none</code> {t("(비활성).")}{" "}
+                  <code className="text-zinc-400">jira</code>{" "}
+                  {t(
+                    "등 다른 값을 입력해도 코드에 연동 구현이 없으면 아무 동작도 하지 않습니다. 제공자 연동을 먼저 구현한 뒤 값을 바꾸세요.",
+                  )}
                 </div>
                 <input
                   type="text"
@@ -259,11 +267,13 @@ export default function SettingsPage() {
               disabled={saving}
               className="text-xs font-medium px-5 py-2.5 bg-emerald-400/90 text-zinc-950 hover:bg-emerald-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {saving ? "저장 중…" : "저장"}
+              {saving ? t("저장 중…") : t("저장")}
             </button>
 
             {saveResult === "success" && (
-              <span className="text-xs text-emerald-400">저장되었습니다</span>
+              <span className="text-xs text-emerald-400">
+                {t("저장되었습니다")}
+              </span>
             )}
             {saveResult === "error" && saveError && (
               <span className="text-xs text-rose-400">{saveError}</span>

@@ -7,15 +7,16 @@ import {
   type ChangeImpactDelta,
 } from "@/lib/api-client";
 import { fmtDecimal } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
-function relTime(iso: string) {
+function relTime(iso: string, t: (ko: string) => string) {
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.floor(ms / 60000);
-  if (m < 1) return "방금";
-  if (m < 60) return `${m}분 전`;
+  if (m < 1) return t("방금");
+  if (m < 60) return t("{n}분 전").replace("{n}", String(m));
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}시간 전`;
-  return `${Math.floor(h / 24)}일 전`;
+  if (h < 24) return t("{n}시간 전").replace("{n}", String(h));
+  return t("{n}일 전").replace("{n}", String(Math.floor(h / 24)));
 }
 
 // 변경 효과 판정: direction(lower/higher가 좋음)과 delta 방향을 결합.
@@ -37,6 +38,7 @@ const VERDICT_STYLE: Record<string, string> = {
 };
 
 function DeltaChip({ d }: { d: ChangeImpactDelta }) {
+  const t = useT();
   const v = verdict(d);
   const arrow = d.delta > 0 ? "▲" : d.delta < 0 ? "▼" : "=";
   const pct =
@@ -49,7 +51,7 @@ function DeltaChip({ d }: { d: ChangeImpactDelta }) {
       title={`${d.label}: ${fmtDecimal(d.before, 2)} → ${fmtDecimal(
         d.after,
         2,
-      )} (변경 전후 평균)`}
+      )} ${t("(변경 전후 평균)")}`}
     >
       <span className="font-medium">{d.label}</span>{" "}
       <span className="font-mono">
@@ -60,6 +62,7 @@ function DeltaChip({ d }: { d: ChangeImpactDelta }) {
 }
 
 export function ChangeImpactPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [changes, setChanges] = useState<ChangeImpactEvent[]>([]);
   const [windowHours, setWindowHours] = useState(2);
   const [loading, setLoading] = useState(true);
@@ -74,7 +77,7 @@ export function ChangeImpactPanel({ clusterId }: { clusterId: string }) {
         if (alive) setChanges(r.changes);
       })
       .catch((e) => {
-        if (alive) setError(e instanceof Error ? e.message : "조회 실패");
+        if (alive) setError(e instanceof Error ? e.message : t("조회 실패"));
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -87,9 +90,11 @@ export function ChangeImpactPanel({ clusterId }: { clusterId: string }) {
   return (
     <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4">
       <div className="flex items-center justify-between mb-1 gap-3">
-        <div className="text-sm text-zinc-200 font-medium">변경 영향 회고</div>
+        <div className="text-sm text-zinc-200 font-medium">
+          {t("변경 영향 회고")}
+        </div>
         <div className="flex items-center gap-1 text-[10px]">
-          <span className="text-zinc-500 mr-1">전후 윈도우</span>
+          <span className="text-zinc-500 mr-1">{t("전후 윈도우")}</span>
           {[1, 2, 6].map((h) => (
             <button
               key={h}
@@ -106,20 +111,20 @@ export function ChangeImpactPanel({ clusterId }: { clusterId: string }) {
         </div>
       </div>
       <div className="text-[11px] text-zinc-500 mb-3">
-        최근 7일 RDS 변경 이벤트(파라미터, 스케일링, 재시작 등)를 앵커로 전후 ±
-        {windowHours}시간 워크로드를 자동 비교합니다. 콘솔/CLI 직접 변경도
-        포착합니다.
+        {t(
+          "최근 7일 RDS 변경 이벤트(파라미터, 스케일링, 재시작 등)를 앵커로 전후 ±{n}시간 워크로드를 자동 비교합니다. 콘솔/CLI 직접 변경도 포착합니다.",
+        ).replace("{n}", String(windowHours))}
       </div>
 
       {error ? (
         <div className="text-xs text-rose-400">
-          불러오지 못했습니다: {error}
+          {t("불러오지 못했습니다:")} {error}
         </div>
       ) : loading ? (
-        <div className="text-zinc-500 text-sm py-2">불러오는 중…</div>
+        <div className="text-zinc-500 text-sm py-2">{t("불러오는 중…")}</div>
       ) : changes.length === 0 ? (
         <div className="text-zinc-500 text-sm py-2">
-          최근 7일간 기록된 변경 이벤트가 없습니다.
+          {t("최근 7일간 기록된 변경 이벤트가 없습니다.")}
         </div>
       ) : (
         <div className="space-y-3">
@@ -133,19 +138,20 @@ export function ChangeImpactPanel({ clusterId }: { clusterId: string }) {
                   <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
                     {c.event_type}
                   </span>
-                  {c.message || "(설명 없음)"}
+                  {c.message || t("(설명 없음)")}
                 </div>
                 <div
                   className="text-[10px] text-zinc-500 whitespace-nowrap"
                   title={c.event_time}
                 >
-                  {relTime(c.event_time)}
+                  {relTime(c.event_time, t)}
                 </div>
               </div>
               {c.deltas.length === 0 ? (
                 <div className="text-[11px] text-zinc-600">
-                  전후 메트릭 표본이 부족해 비교를 생략했습니다(변경 직후이거나
-                  수집 데이터 부족).
+                  {t(
+                    "전후 메트릭 표본이 부족해 비교를 생략했습니다(변경 직후이거나 수집 데이터 부족).",
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-1.5">

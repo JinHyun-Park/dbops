@@ -1,6 +1,10 @@
 // Runtime config: resolved on first call by fetching /config.json from the same origin.
 // During `next dev` (no /config.json), falls back to NEXT_PUBLIC_API_URL or window.location.origin.
 
+// i18n: `t()` is a hook and this file is not a component, so the error copy
+// goes through `tr()` (the plain `translate()` form). `{n}` is the HTTP status.
+import { tr } from "@/lib/format";
+
 interface RuntimeConfig {
   apiUrl: string;
   frontendUrl?: string;
@@ -77,7 +81,7 @@ export async function authedFetch(
 
 export async function fetchDashboard(clusterId: string) {
   const res = await authedFetch(await api(`/api/dashboard/${enc(clusterId)}`));
-  if (!res.ok) throw new Error(`대시보드 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("대시보드 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -116,7 +120,7 @@ export async function fetchTimeseries(
       )}&${rangeQs(rangeOrHours)}`,
     ),
   );
-  if (!res.ok) throw new Error(`시계열 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("시계열 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -144,7 +148,8 @@ export async function fetchBatchTimeseries(
       )}${offsetQs}${instanceQs}`,
     ),
   );
-  if (!res.ok) throw new Error(`배치 시계열 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("배치 시계열 조회 실패 (상태 {n})", res.status));
   return res.json() as Promise<{
     cluster_id: string;
     hours: number;
@@ -162,7 +167,8 @@ export async function fetchWaitEvents(clusterId: string, hours = 1) {
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/wait-events?hours=${hours}`),
   );
-  if (!res.ok) throw new Error(`Wait events 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("Wait events 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -178,7 +184,8 @@ export async function fetchSlowQueries(
       )}/slow-queries?hours=${hours}&threshold_ms=${thresholdMs}`,
     ),
   );
-  if (!res.ok) throw new Error(`Slow queries 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("Slow queries 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -190,7 +197,8 @@ export async function fetchQueryDetail(clusterId: string, queryHash: string) {
       )}`,
     ),
   );
-  if (!res.ok) throw new Error(`쿼리 상세 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("쿼리 상세 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -239,7 +247,8 @@ export async function fetchExtensions(clusterId: string): Promise<{
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/extensions`),
   );
-  if (!res.ok) throw new Error(`Extensions 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("Extensions 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -252,7 +261,8 @@ export async function fetchHealthFindings(clusterId: string): Promise<{
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/health-findings`),
   );
-  if (!res.ok) throw new Error(`헬스 점검 항목 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("헬스 점검 항목 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -268,7 +278,7 @@ export async function fetchTableIndexes(
       )}&table=${enc(table)}`,
     ),
   );
-  if (!res.ok) throw new Error(`인덱스 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("인덱스 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -276,7 +286,8 @@ export async function fetchVacuumStats(clusterId: string) {
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/vacuum-stats`),
   );
-  if (!res.ok) throw new Error(`Vacuum 통계 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("Vacuum 통계 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -291,7 +302,8 @@ export async function fetchIndexRecommendations(
       )}/index-recommendations?min_seq_ratio=${minSeqRatio}`,
     ),
   );
-  if (!res.ok) throw new Error(`인덱스 추천 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("인덱스 추천 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -299,7 +311,8 @@ export async function fetchLongRunningQueries(clusterId: string) {
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/long-running`),
   );
-  if (!res.ok) throw new Error(`장기 실행 쿼리 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("장기 실행 쿼리 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -307,7 +320,7 @@ export async function fetchBlockingLocks(clusterId: string) {
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/blocking-locks`),
   );
-  if (!res.ok) throw new Error(`Locks 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("Locks 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -349,7 +362,8 @@ export async function fetchLiveActivity(
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/live-activity${q}`),
   );
-  if (!res.ok) throw new Error(`라이브 세션 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("라이브 세션 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -357,7 +371,7 @@ export async function fetchClusterSettings(clusterId: string) {
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/settings`),
   );
-  if (!res.ok) throw new Error(`설정 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("설정 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -492,7 +506,8 @@ export async function fetchSchemaChanges(
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/schema-changes?days=${days}`),
   );
-  if (!res.ok) throw new Error(`스키마 변경 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("스키마 변경 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -508,7 +523,8 @@ export async function fetchAnomalies(
       )}/anomalies?hours=${hours}&threshold=${threshold}`,
     ),
   );
-  if (!res.ok) throw new Error(`이상 징후 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("이상 징후 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -521,7 +537,8 @@ export async function fetchAuditLog(
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/audit-log?days=${days}${at}`),
   );
-  if (!res.ok) throw new Error(`감사 로그 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("감사 로그 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -564,7 +581,8 @@ export async function fetchChangeImpact(
       )}/change-impact?window_hours=${windowHours}&days=${days}`,
     ),
   );
-  if (!res.ok) throw new Error(`변경 영향 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("변경 영향 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -599,7 +617,8 @@ export async function fetchLogInsights(
       `/api/dashboard/${enc(clusterId)}/log-insights?${params.toString()}`,
     ),
   );
-  if (!res.ok) throw new Error(`로그 인사이트 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("로그 인사이트 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -697,7 +716,8 @@ export async function fetchRedundantIndexes(
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/redundant-indexes`),
   );
-  if (!res.ok) throw new Error(`중복 인덱스 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("중복 인덱스 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -743,7 +763,8 @@ export async function fetchSchemaGraph(
       `/api/dashboard/${enc(clusterId)}/schema-graph?schema=${enc(schema)}`,
     ),
   );
-  if (!res.ok) throw new Error(`스키마 그래프 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("스키마 그래프 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -791,7 +812,7 @@ export async function fetchSlo(
       )}/slo?days=${days}&availability_target=${availabilityTargetPct}&latency_target_ms=${latencyTargetMs}`,
     ),
   );
-  if (!res.ok) throw new Error(`SLO 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("SLO 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -828,7 +849,7 @@ export async function fetchTopology(
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/topology`),
   );
-  if (!res.ok) throw new Error(`토폴로지 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("토폴로지 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -896,7 +917,8 @@ export async function fetchActiveSessions(
       `/api/dashboard/${enc(clusterId)}/active-sessions?hours=${hours}`,
     ),
   );
-  if (!res.ok) throw new Error(`활성 세션 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("활성 세션 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -906,7 +928,8 @@ export async function fetchEngineConfig(
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/engine-config`),
   );
-  if (!res.ok) throw new Error(`구성 정보 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("구성 정보 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -922,14 +945,15 @@ export async function fetchCapacityForecast(
       )}&days_lookback=${daysLookback}`,
     ),
   );
-  if (!res.ok) throw new Error(`용량 예측 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("용량 예측 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
 export async function fetchMultiClusterOverview() {
   const res = await authedFetch(await api(`/api/multi-cluster/overview`));
   if (!res.ok)
-    throw new Error(`멀티 클러스터 개요 조회 실패 (상태 ${res.status})`);
+    throw new Error(tr("멀티 클러스터 개요 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -937,7 +961,8 @@ export async function fetchTableSizes(clusterId: string) {
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/table-sizes`),
   );
-  if (!res.ok) throw new Error(`테이블 크기 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("테이블 크기 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -946,7 +971,8 @@ export async function fetchAlertRules(clusterId?: string) {
     ? await api(`/api/alert-rules?cluster_id=${enc(clusterId)}`)
     : await api(`/api/alert-rules`);
   const res = await authedFetch(url);
-  if (!res.ok) throw new Error(`알림 규칙 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("알림 규칙 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -980,7 +1006,8 @@ export async function createAlertRule(rule: {
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(rule),
   });
-  if (!res.ok) throw new Error(`알림 규칙 생성 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("알림 규칙 생성 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -998,7 +1025,8 @@ export async function updateAlertRule(
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(updates),
   });
-  if (!res.ok) throw new Error(`알림 규칙 수정 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("알림 규칙 수정 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1010,7 +1038,7 @@ export async function snoozeAlertRule(id: number, minutes: number) {
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify({ minutes }),
   });
-  if (!res.ok) throw new Error(`알림 스누즈 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("알림 스누즈 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1024,7 +1052,7 @@ export async function snoozeAlertRulesByCluster(
     body: JSON.stringify({ cluster_id: clusterId, minutes }),
   });
   if (!res.ok)
-    throw new Error(`클러스터 전체 스누즈 실패 (상태 ${res.status})`);
+    throw new Error(tr("클러스터 전체 스누즈 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1033,7 +1061,8 @@ export async function deleteAlertRule(id: number) {
     method: "DELETE",
     headers: { ...(await authHeaders()) },
   });
-  if (!res.ok) throw new Error(`알림 규칙 삭제 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("알림 규칙 삭제 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1068,13 +1097,15 @@ export interface AlertImpact {
 
 export async function fetchAlertImpact(id: number): Promise<AlertImpact> {
   const res = await authedFetch(await api(`/api/alert-rules/${id}/impact`));
-  if (!res.ok) throw new Error(`알림 영향 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("알림 영향 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
 export async function fetchAlertSubscriptions() {
   const res = await authedFetch(await api(`/api/alert-subscriptions`));
-  if (!res.ok) throw new Error(`알림 구독 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("알림 구독 조회 실패 (상태 {n})", res.status));
   return res.json() as Promise<{
     topic_arn: string;
     subscriptions: {
@@ -1094,7 +1125,7 @@ export async function createAlertSubscription(
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify({ protocol, endpoint }),
   });
-  if (!res.ok) throw new Error(`구독 생성 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("구독 생성 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1103,7 +1134,7 @@ export async function deleteAlertSubscription(subArn: string) {
     await api(`/api/alert-subscriptions?sub_arn=${enc(subArn)}`),
     { method: "DELETE", headers: { ...(await authHeaders()) } },
   );
-  if (!res.ok) throw new Error(`구독 삭제 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("구독 삭제 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1119,7 +1150,8 @@ export async function fetchClusterInstances(
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/instances`),
   );
-  if (!res.ok) throw new Error(`인스턴스 목록 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("인스턴스 목록 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1134,7 +1166,8 @@ export async function fetchClusters() {
     if (attempt > 0) await new Promise((r) => setTimeout(r, attempt * 1200));
     try {
       const res = await authedFetch(await api(`/api/clusters`));
-      if (!res.ok) throw new Error(`클러스터 조회 실패 (상태 ${res.status})`);
+      if (!res.ok)
+        throw new Error(tr("클러스터 조회 실패 (상태 {n})", res.status));
       return await res.json();
     } catch (e) {
       lastErr = e;
@@ -1170,7 +1203,7 @@ export async function patchClusterMeta(
       body: JSON.stringify(meta),
     },
   );
-  if (!res.ok) throw new Error(`메타 저장 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("메타 저장 실패 (상태 {n})", res.status));
 }
 
 // ── Agent Tasks: event-driven / scheduled / manual agent work ──────────────
@@ -1327,13 +1360,15 @@ export interface ScenarioRunResult {
 
 export async function fetchScenarios(): Promise<ScenarioCatalog> {
   const res = await authedFetch(await api("/api/scenarios"));
-  if (!res.ok) throw new Error(`시나리오 목록 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("시나리오 목록 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
 export async function fetchScenarioRuns(): Promise<{ runs: ScenarioRun[] }> {
   const res = await authedFetch(await api("/api/scenarios/runs"));
-  if (!res.ok) throw new Error(`시나리오 이력 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("시나리오 이력 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1345,11 +1380,13 @@ export async function runScenario(id: string): Promise<ScenarioRunResult> {
     // Another run holds the lock, or the scenario needs a different engine.
     // Both carry an explanation worth showing verbatim.
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || "다른 시나리오가 실행 중입니다");
+    throw new Error(body.error || tr("다른 시나리오가 실행 중입니다"));
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `시나리오 실행 실패 (상태 ${res.status})`);
+    throw new Error(
+      body.error || tr("시나리오 실행 실패 (상태 {n})", res.status),
+    );
   }
   return res.json();
 }
@@ -1399,19 +1436,21 @@ export async function fetchTasks(params?: {
   if (params?.cursor) qs.set("cursor", params.cursor);
   const q = qs.toString();
   const res = await authedFetch(await api(`/api/tasks${q ? "?" + q : ""}`));
-  if (!res.ok) throw new Error(`작업 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("작업 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
 export async function fetchTask(taskId: string): Promise<AgentTask> {
   const res = await authedFetch(await api(`/api/tasks/${enc(taskId)}`));
-  if (!res.ok) throw new Error(`작업 상세 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("작업 상세 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
 export async function fetchTaskStats(): Promise<TaskStats> {
   const res = await authedFetch(await api(`/api/tasks/stats`));
-  if (!res.ok) throw new Error(`작업 통계 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("작업 통계 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1425,7 +1464,7 @@ export async function createTask(
     body: JSON.stringify({ cluster_id: clusterId, kind }),
   });
   if (!res.ok) {
-    let msg = `작업 생성 실패 (상태 ${res.status})`;
+    let msg = tr("작업 생성 실패 (상태 {n})", res.status);
     try {
       const e = await res.json();
       if (e?.error) msg = e.error;
@@ -1453,7 +1492,8 @@ export async function fetchSchedules(
 ): Promise<{ schedules: AgentSchedule[] }> {
   const q = cluster ? `?cluster=${enc(cluster)}` : "";
   const res = await authedFetch(await api(`/api/scheduled-tasks${q}`));
-  if (!res.ok) throw new Error(`예약 작업 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("예약 작업 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1472,7 +1512,7 @@ export async function createSchedule(
     }),
   });
   if (!res.ok) {
-    let msg = `예약 생성 실패 (상태 ${res.status})`;
+    let msg = tr("예약 생성 실패 (상태 {n})", res.status);
     try {
       const e = await res.json();
       if (e?.error) msg = e.error;
@@ -1489,12 +1529,12 @@ export async function deleteSchedule(id: number): Promise<void> {
     method: "DELETE",
     headers: { ...(await authHeaders()) },
   });
-  if (!res.ok) throw new Error(`예약 삭제 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("예약 삭제 실패 (상태 {n})", res.status));
 }
 
 export async function fetchCost(days = 30) {
   const res = await authedFetch(await api(`/api/cost?days=${days}`));
-  if (!res.ok) throw new Error(`비용 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("비용 조회 실패 (상태 {n})", res.status));
   return res.json() as Promise<{
     env: string;
     range_days: number;
@@ -1523,13 +1563,14 @@ export async function fetchCostTokens(days = 30): Promise<TokensCost> {
   const res = await authedFetch(
     await api(`/api/cost?view=tokens&days=${days}`),
   );
-  if (!res.ok) throw new Error(`토큰 사용량 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("토큰 사용량 조회 실패 (상태 {n})", res.status));
   return res.json() as Promise<TokensCost>;
 }
 
 export async function fetchModels() {
   const res = await authedFetch(await api(`/api/models`));
-  if (!res.ok) throw new Error(`모델 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("모델 조회 실패 (상태 {n})", res.status));
   return res.json() as Promise<{
     default: string;
     region: string;
@@ -1557,7 +1598,8 @@ export async function fetchScaleoutOps(): Promise<{
   count: number;
 }> {
   const res = await authedFetch(await api(`/api/scaleout-ops`));
-  if (!res.ok) throw new Error(`스케일 작업 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("스케일 작업 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1569,7 +1611,7 @@ export async function cancelScaleoutOp(
     { method: "POST", headers: { "Content-Type": "application/json" } },
   );
   if (!res.ok) {
-    let msg = `취소 실패 (상태 ${res.status})`;
+    let msg = tr("취소 실패 (상태 {n})", res.status);
     try {
       const e = await res.json();
       if (e?.detail || e?.error) msg = e.detail || e.error;
@@ -1618,7 +1660,7 @@ export async function scaleoutAz(input: {
     body: JSON.stringify(input),
   });
   if (!res.ok) {
-    let msg = `AZ 스케일아웃 실패 (상태 ${res.status})`;
+    let msg = tr("AZ 스케일아웃 실패 (상태 {n})", res.status);
     try {
       const e = await res.json();
       if (e?.detail || e?.error) msg = e.detail || e.error;
@@ -1648,7 +1690,7 @@ export async function registerCluster(data: {
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error(`클러스터 등록 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("클러스터 등록 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1680,7 +1722,7 @@ export async function testClusterConnection(input: {
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(input),
   });
-  if (!res.ok) throw new Error(`연결 테스트 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("연결 테스트 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1697,7 +1739,7 @@ export async function generateSampleCluster(): Promise<{
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     throw new Error(
-      `샘플 생성 실패 (상태 ${res.status}): ${txt.slice(0, 200)}`,
+      `${tr("샘플 생성 실패 (상태 {n})", res.status)}: ${txt.slice(0, 200)}`,
     );
   }
   return res.json();
@@ -1710,7 +1752,7 @@ export async function deleteCluster(
     method: "DELETE",
     headers: { ...(await authHeaders()) },
   });
-  if (!res.ok) throw new Error(`삭제 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("삭제 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -1755,7 +1797,10 @@ export async function discoverClusters(input: {
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     throw new Error(
-      `클러스터 탐색 실패 (상태 ${res.status}): ${txt.slice(0, 200)}`,
+      `${tr("클러스터 탐색 실패 (상태 {n})", res.status)}: ${txt.slice(
+        0,
+        200,
+      )}`,
     );
   }
   return res.json();
@@ -1785,7 +1830,7 @@ export async function bulkRegisterClusters(
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     throw new Error(
-      `일괄 등록 실패 (상태 ${res.status}): ${txt.slice(0, 200)}`,
+      `${tr("일괄 등록 실패 (상태 {n})", res.status)}: ${txt.slice(0, 200)}`,
     );
   }
   return res.json();
@@ -1907,7 +1952,7 @@ export async function runExplain(
       parsed.message ||
       (await res.text().catch(() => "")) ||
       `HTTP ${res.status}`;
-    throw new Error(`EXPLAIN 실패: ${detail.slice(0, 300)}`);
+    throw new Error(`${tr("EXPLAIN 실패")}: ${detail.slice(0, 300)}`);
   }
   return res.json();
 }
@@ -2109,7 +2154,10 @@ async function simPost<T>(path: string, body: object): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(
-      `시뮬레이션 요청 실패 (상태 ${res.status}): ${text.slice(0, 200)}`,
+      `${tr("시뮬레이션 요청 실패 (상태 {n})", res.status)}: ${text.slice(
+        0,
+        200,
+      )}`,
     );
   }
   return res.json();
@@ -2120,7 +2168,7 @@ export async function fetchParameterCatalog(): Promise<{
 }> {
   const res = await authedFetch(await api(`/api/simulation/parameter-catalog`));
   if (!res.ok)
-    throw new Error(`파라미터 카탈로그 조회 실패 (상태 ${res.status})`);
+    throw new Error(tr("파라미터 카탈로그 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -2329,13 +2377,14 @@ export async function fetchRunbooks(opts?: {
   const qs = params.toString();
   const url = `/api/runbooks${qs ? "?" + qs : ""}`;
   const res = await authedFetch(await api(url));
-  if (!res.ok) throw new Error(`런북 목록 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("런북 목록 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
 export async function fetchRunbook(id: number): Promise<RunbookDetail> {
   const res = await authedFetch(await api(`/api/runbooks/${id}`));
-  if (!res.ok) throw new Error(`런북 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("런북 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -2356,7 +2405,7 @@ export async function createRunbook(input: {
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(
-      `런북 생성 실패 (상태 ${res.status}): ${detail.slice(0, 200)}`,
+      `${tr("런북 생성 실패 (상태 {n})", res.status)}: ${detail.slice(0, 200)}`,
     );
   }
   return res.json();
@@ -2367,7 +2416,7 @@ export async function deleteRunbook(id: number): Promise<void> {
     method: "DELETE",
     headers: { ...(await authHeaders()) },
   });
-  if (!res.ok) throw new Error(`런북 삭제 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("런북 삭제 실패 (상태 {n})", res.status));
 }
 
 // =====  Chat sessions (cross-device conversation persistence) =====
@@ -2402,7 +2451,8 @@ export async function listChatSessions(): Promise<ChatSessionSummary[]> {
   const res = await authedFetch(await api(`/api/chat/sessions`), {
     headers: { ...(await authHeaders()) },
   });
-  if (!res.ok) throw new Error(`채팅 세션 목록 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("채팅 세션 목록 조회 실패 (상태 {n})", res.status));
   const body = await res.json();
   return body.sessions || [];
 }
@@ -2414,7 +2464,8 @@ export async function fetchChatSession(id: string): Promise<ChatSessionDetail> {
       headers: { ...(await authHeaders()) },
     },
   );
-  if (!res.ok) throw new Error(`채팅 세션 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("채팅 세션 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -2438,7 +2489,8 @@ export async function putChatSession(
       body: JSON.stringify(payload),
     },
   );
-  if (!res.ok) throw new Error(`채팅 세션 저장 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("채팅 세션 저장 실패 (상태 {n})", res.status));
 }
 
 export async function deleteChatSession(id: string): Promise<void> {
@@ -2449,7 +2501,8 @@ export async function deleteChatSession(id: string): Promise<void> {
       headers: { ...(await authHeaders()) },
     },
   );
-  if (!res.ok) throw new Error(`채팅 세션 삭제 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("채팅 세션 삭제 실패 (상태 {n})", res.status));
 }
 
 // =====  Saved queries (Query Lab scratchpad) =====
@@ -2482,14 +2535,15 @@ export async function listSavedQueries(opts?: {
   const url = await api(`/api/saved-queries${qs ? `?${qs}` : ""}`);
   const res = await authedFetch(url);
   if (!res.ok)
-    throw new Error(`저장된 쿼리 목록 조회 실패 (상태 ${res.status})`);
+    throw new Error(tr("저장된 쿼리 목록 조회 실패 (상태 {n})", res.status));
   const body = await res.json();
   return body.queries || [];
 }
 
 export async function fetchSavedQuery(id: number): Promise<SavedQueryDetail> {
   const res = await authedFetch(await api(`/api/saved-queries/${id}`));
-  if (!res.ok) throw new Error(`저장된 쿼리 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("저장된 쿼리 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -2508,7 +2562,7 @@ export async function createSavedQuery(input: {
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(
-      `쿼리 저장 실패 (상태 ${res.status}): ${detail.slice(0, 200)}`,
+      `${tr("쿼리 저장 실패 (상태 {n})", res.status)}: ${detail.slice(0, 200)}`,
     );
   }
   return res.json();
@@ -2519,7 +2573,8 @@ export async function deleteSavedQuery(id: number): Promise<void> {
     method: "DELETE",
     headers: { ...(await authHeaders()) },
   });
-  if (!res.ok) throw new Error(`저장된 쿼리 삭제 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("저장된 쿼리 삭제 실패 (상태 {n})", res.status));
 }
 
 // =====  Self-monitoring health =====
@@ -2573,13 +2628,15 @@ export async function fetchResourceDetails(clusterId: string): Promise<{
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/resource-details`),
   );
-  if (!res.ok) throw new Error(`리소스 상세 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("리소스 상세 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
   const res = await authedFetch(await api(`/api/health`));
-  if (!res.ok) throw new Error(`헬스 상태 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("헬스 상태 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -2620,7 +2677,7 @@ export async function fetchActivity(opts?: {
   const qs = params.toString();
   const url = await api(`/api/activity${qs ? `?${qs}` : ""}`);
   const res = await authedFetch(url);
-  if (!res.ok) throw new Error(`활동 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("활동 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -2711,7 +2768,7 @@ export async function fetchBackups(
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}/backups`),
   );
-  if (!res.ok) throw new Error(`백업 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("백업 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -2746,7 +2803,8 @@ export async function fetchEndpoints(
   const res = await authedFetch(
     await api(`/api/dashboard/${enc(clusterId)}?view=endpoints`),
   );
-  if (!res.ok) throw new Error(`엔드포인트 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("엔드포인트 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -2793,7 +2851,7 @@ export async function createEndpointRequest(opts: {
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(
-      `승인 요청 실패 (상태 ${res.status}): ${detail.slice(0, 200)}`,
+      `${tr("승인 요청 실패 (상태 {n})", res.status)}: ${detail.slice(0, 200)}`,
     );
   }
   return res.json();
@@ -2825,7 +2883,10 @@ export async function createSnapshot(
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(
-      `스냅샷 생성 실패 (상태 ${res.status}): ${detail.slice(0, 200)}`,
+      `${tr("스냅샷 생성 실패 (상태 {n})", res.status)}: ${detail.slice(
+        0,
+        200,
+      )}`,
     );
   }
   return res.json();
@@ -2882,7 +2943,9 @@ export async function restoreCluster(
   );
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`복원 실패 (상태 ${res.status}): ${detail.slice(0, 300)}`);
+    throw new Error(
+      `${tr("복원 실패 (상태 {n})", res.status)}: ${detail.slice(0, 300)}`,
+    );
   }
   return res.json();
 }
@@ -2942,7 +3005,8 @@ export async function fetchWorkloadDiff(
     `/api/dashboard/${enc(clusterId)}/workload-diff?${params.toString()}`,
   );
   const res = await authedFetch(url);
-  if (!res.ok) throw new Error(`Workload diff 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("Workload diff 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -3007,7 +3071,7 @@ export async function fetchTimeline(
     `/api/dashboard/${enc(clusterId)}/timeline${qs ? `?${qs}` : ""}`,
   );
   const res = await authedFetch(url);
-  if (!res.ok) throw new Error(`타임라인 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("타임라인 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -3091,7 +3155,8 @@ export async function listMemoryRecords(
       headers: { ...(await authHeaders()) },
     },
   );
-  if (!res.ok) throw new Error(`메모리 목록 조회 실패 (상태 ${res.status})`);
+  if (!res.ok)
+    throw new Error(tr("메모리 목록 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -3106,7 +3171,7 @@ export async function deleteMemoryRecord(
       headers: { ...(await authHeaders()) },
     },
   );
-  if (!res.ok) throw new Error(`메모리 삭제 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("메모리 삭제 실패 (상태 {n})", res.status));
 }
 
 // =====  Approval policies (designated-approver routing, admin-gated) =====
@@ -3292,7 +3357,7 @@ export async function fetchAdminUsers(
     : "/api/admin/users";
   const res = await authedFetch(await apiUrl(path));
   if (res.status === 403) throw new Error("admin only");
-  if (!res.ok) throw new Error(`사용자 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("사용자 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -3310,7 +3375,7 @@ export async function updateUserRole(
   );
   if (res.status === 403) throw new Error("admin only");
   if (!res.ok) {
-    let msg = `역할 변경 실패 (상태 ${res.status})`;
+    let msg = tr("역할 변경 실패 (상태 {n})", res.status);
     try {
       const b = await res.json();
       if (b?.error) msg = b.error;
@@ -3342,7 +3407,7 @@ export interface TeamDetail {
 export async function fetchAdminTeams(): Promise<{ teams: AdminTeam[] }> {
   const res = await authedFetch(await apiUrl("/api/admin/teams"));
   if (res.status === 403) throw new Error("admin only");
-  if (!res.ok) throw new Error(`팀 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("팀 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -3351,7 +3416,7 @@ export async function fetchTeamDetail(teamId: string): Promise<TeamDetail> {
     await apiUrl(`/api/admin/teams/${enc(teamId)}`),
   );
   if (res.status === 403) throw new Error("admin only");
-  if (!res.ok) throw new Error(`팀 상세 조회 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("팀 상세 조회 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -3364,7 +3429,7 @@ export async function createTeam(
     body: JSON.stringify({ name }),
   });
   if (res.status === 403) throw new Error("admin only");
-  if (!res.ok) throw new Error(`팀 생성 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("팀 생성 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -3376,7 +3441,7 @@ export async function deleteTeam(
     { method: "DELETE" },
   );
   if (res.status === 403) throw new Error("admin only");
-  if (!res.ok) throw new Error(`팀 삭제 실패 (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr("팀 삭제 실패 (상태 {n})", res.status));
   return res.json();
 }
 
@@ -3387,7 +3452,7 @@ async function _teamMutate(
 ): Promise<void> {
   const res = await authedFetch(await apiUrl(path), { method });
   if (res.status === 403) throw new Error("admin only");
-  if (!res.ok) throw new Error(`${failMsg} (상태 ${res.status})`);
+  if (!res.ok) throw new Error(tr(failMsg, res.status));
 }
 
 export async function addTeamMember(
@@ -3397,7 +3462,7 @@ export async function addTeamMember(
   return _teamMutate(
     `/api/admin/teams/${enc(teamId)}/members/${enc(username)}`,
     "POST",
-    "멤버 추가 실패",
+    "멤버 추가 실패 (상태 {n})",
   );
 }
 
@@ -3408,7 +3473,7 @@ export async function removeTeamMember(
   return _teamMutate(
     `/api/admin/teams/${enc(teamId)}/members/${enc(username)}`,
     "DELETE",
-    "멤버 제거 실패",
+    "멤버 제거 실패 (상태 {n})",
   );
 }
 
@@ -3419,7 +3484,7 @@ export async function assignClusterToTeam(
   return _teamMutate(
     `/api/admin/teams/${enc(teamId)}/clusters/${enc(clusterId)}`,
     "POST",
-    "클러스터 할당 실패",
+    "클러스터 할당 실패 (상태 {n})",
   );
 }
 
@@ -3430,7 +3495,7 @@ export async function unassignClusterFromTeam(
   return _teamMutate(
     `/api/admin/teams/${enc(teamId)}/clusters/${enc(clusterId)}`,
     "DELETE",
-    "클러스터 할당 해제 실패",
+    "클러스터 할당 해제 실패 (상태 {n})",
   );
 }
 

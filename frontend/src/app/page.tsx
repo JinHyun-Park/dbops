@@ -8,6 +8,7 @@ import {
   fetchCost,
 } from "@/lib/api-client";
 import { OnboardingModal, useOnboarding } from "@/components/onboarding-modal";
+import { useT } from "@/lib/i18n";
 
 interface ClusterRow {
   cluster_id: string;
@@ -33,6 +34,7 @@ function n(v: unknown): number {
 }
 
 export default function HomePage() {
+  const t = useT();
   const [clusters, setClusters] = useState<ClusterRow[]>([]);
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [cost7d, setCost7d] = useState<number | null>(null);
@@ -69,43 +71,45 @@ export default function HomePage() {
       <header className="mb-10 flex items-start justify-between gap-6">
         <div>
           <div className="font-mono text-[11px] tracking-[0.25em] text-amber-400/70 uppercase mb-2">
-            운영 콘솔
+            {t("운영 콘솔")}
           </div>
           <h1 className="text-4xl font-semibold tracking-tight text-zinc-50">
-            한눈에 보는 Aurora.
+            {t("한눈에 보는 Aurora.")}
           </h1>
           <p className="mt-3 text-zinc-400 max-w-2xl">
-            AI agent + 실시간 메트릭 + DBA 등급 제어를 등록된 모든 클러스터에서.
+            {t(
+              "AI agent + 실시간 메트릭 + DBA 등급 제어를 등록된 모든 클러스터에서.",
+            )}
             <kbd className="mx-1.5 px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-[10px] font-mono">
               ⌘K
             </kbd>
-            로 command palette 열기.
+            {t("로 command palette 열기.")}
           </p>
         </div>
         <button
           onClick={onboarding.reopen}
           className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500/50 hover:text-amber-300 transition-colors"
-          title="튜토리얼 다시 보기"
+          title={t("튜토리얼 다시 보기")}
         >
           <span className="text-sm leading-none">?</span>
-          <span>튜토리얼</span>
+          <span>{t("튜토리얼")}</span>
         </button>
       </header>
 
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-zinc-800 border border-zinc-800 mb-10">
         <Stat
-          label="클러스터"
+          label={t("클러스터")}
           value={total}
           hint={`${healthy}/${total} available`}
           loading={loading}
         />
         <Stat
-          label="활성 알림 규칙"
+          label={t("활성 알림 규칙")}
           value={enabledRules}
           hint={
             recentTriggered > 0
-              ? `최근 24h ${recentTriggered}건 발화`
-              : "최근 발화 없음"
+              ? t("최근 24h {n}건 발화").replace("{n}", String(recentTriggered))
+              : t("최근 발화 없음")
           }
           loading={loading}
           accent={recentTriggered > 0 ? "amber" : "zinc"}
@@ -113,14 +117,14 @@ export default function HomePage() {
         <Stat
           label="Blocking locks"
           value={blockingCount}
-          hint={blockingCount > 0 ? "즉시 확인 필요" : "이상 없음"}
+          hint={blockingCount > 0 ? t("즉시 확인 필요") : t("이상 없음")}
           loading={loading}
           accent={blockingCount > 0 ? "rose" : "emerald"}
         />
         <Stat
           label="Bedrock 7d"
           value={cost7d === null ? "-" : `$${cost7d.toFixed(2)}`}
-          hint={cost7d === null ? "태그 미활성화" : "태그 기준 사용액"}
+          hint={cost7d === null ? t("태그 미활성화") : t("태그 기준 사용액")}
           loading={loading}
           accent={cost7d && cost7d > 50 ? "amber" : "zinc"}
         />
@@ -134,18 +138,18 @@ export default function HomePage() {
                 fleet
               </div>
               <div className="text-sm text-zinc-200 mt-0.5">
-                등록된 클러스터
+                {t("등록된 클러스터")}
               </div>
             </div>
             <Link
               href="/fleet"
               className="text-xs text-amber-400/90 hover:text-amber-300 transition-colors"
             >
-              전체 보기 →
+              {t("전체 보기 →")}
             </Link>
           </div>
           {loading ? (
-            <div className="p-8 text-sm text-zinc-500">불러오는 중…</div>
+            <div className="p-8 text-sm text-zinc-500">{t("불러오는 중…")}</div>
           ) : clusters.length === 0 ? (
             <EmptyFleet />
           ) : (
@@ -221,30 +225,36 @@ export default function HomePage() {
 
         <div className="border border-zinc-800 bg-zinc-900/50 p-5">
           <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 mb-1">
-            빠른 작업
+            {t("빠른 작업")}
           </div>
-          <div className="text-sm text-zinc-200 mb-5">자주 쓰는 진입점</div>
+          <div className="text-sm text-zinc-200 mb-5">
+            {t("자주 쓰는 진입점")}
+          </div>
           <div className="space-y-2.5">
             <QuickLink
               href="/chat"
-              title="Agent에게 물어보기"
-              hint="자연어 분석"
+              title={t("Agent에게 물어보기")}
+              hint={t("자연어 분석")}
             />
             <QuickLink
               href="/query-lab"
-              title="SQL 분석"
-              hint="EXPLAIN + index 추천"
+              title={t("SQL 분석")}
+              hint={t("EXPLAIN + index 추천")}
             />
-            <QuickLink href="/alerts" title="알림 관리" hint="규칙 + 구독자" />
+            <QuickLink
+              href="/alerts"
+              title={t("알림 관리")}
+              hint={t("규칙 + 구독자")}
+            />
             <QuickLink
               href="/clusters"
-              title="클러스터 등록"
-              hint="cross-account 지원"
+              title={t("클러스터 등록")}
+              hint={t("cross-account 지원")}
             />
             <QuickLink
               href="/approvals"
-              title="승인 대기"
-              hint="쓰기 작업 검토"
+              title={t("승인 대기")}
+              hint={t("쓰기 작업 검토")}
             />
           </div>
         </div>
@@ -317,19 +327,20 @@ function QuickLink({
 }
 
 function EmptyFleet() {
+  const t = useT();
   return (
     <div className="p-10 text-center">
       <div className="font-mono text-[10px] tracking-[0.2em] uppercase text-zinc-600 mb-2">
-        등록된 클러스터 없음
+        {t("등록된 클러스터 없음")}
       </div>
       <div className="text-sm text-zinc-400 mb-5">
-        첫 Aurora 클러스터를 등록하면 메트릭 수집이 시작됩니다.
+        {t("첫 Aurora 클러스터를 등록하면 메트릭 수집이 시작됩니다.")}
       </div>
       <Link
         href="/clusters"
         className="inline-block text-xs font-medium px-3 py-1.5 border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 transition-colors"
       >
-        + 클러스터 등록
+        {t("+ 클러스터 등록")}
       </Link>
     </div>
   );

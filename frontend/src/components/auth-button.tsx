@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { isLoggedIn, getUserFromToken, clearTokens } from "@/lib/auth";
+import { useT } from "@/lib/i18n";
 
 export function AuthButton() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
+  const t = useT();
 
   useEffect(() => {
     setLoggedIn(isLoggedIn());
@@ -20,7 +22,7 @@ export function AuthButton() {
         href="/login"
         className="text-xs px-3 py-1.5 bg-amber-500 text-zinc-950 font-medium hover:bg-amber-400 transition-colors"
       >
-        로그인
+        {t("로그인")}
       </Link>
     );
   }
@@ -54,7 +56,7 @@ export function AuthButton() {
         }}
         className="text-xs text-zinc-500 hover:text-zinc-200 transition-colors"
       >
-        로그아웃
+        {t("로그아웃")}
       </button>
     </div>
   );

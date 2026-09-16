@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { fmtExact } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 // Why this file exists: /tasks rendered a ranked candidate as "summary + score
 // 3.42" and nothing else. diagnose_root_cause returns the derivation of that
@@ -69,7 +71,7 @@ export function fmtEvidenceValue(v: unknown): string {
   if (v === null || v === undefined) return "-";
   if (typeof v === "boolean") return v ? "예" : "아니오";
   if (typeof v === "number") {
-    return Number.isInteger(v) ? v.toLocaleString("ko-KR") : String(v);
+    return Number.isInteger(v) ? fmtExact(v) : String(v);
   }
   if (typeof v === "object") return JSON.stringify(v);
   return String(v);
@@ -91,6 +93,7 @@ export function RcaCandidateDetail({
   evidence,
   suggestedAction,
 }: Props) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const hasBreakdown = !!breakdown && Object.keys(breakdown).length > 0;
   const hasEvidence = !!evidence && Object.keys(evidence).length > 0;
@@ -115,22 +118,24 @@ export function RcaCandidateDetail({
           aria-expanded={open}
         >
           {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-          {open ? "근거 접기" : "점수 근거"}
+          {open ? t("근거 접기") : t("점수 근거")}
         </button>
         {qualifiedBy && (
           <span
             className="text-[10px] font-mono px-1.5 py-0.5 border border-zinc-700 text-zinc-400"
-            title={QUALIFIED_BY_TEXT[qualifiedBy] ?? qualifiedBy}
+            title={t(QUALIFIED_BY_TEXT[qualifiedBy] ?? qualifiedBy)}
           >
-            {qualifiedBy === "peak" ? "최댓값 판정" : "평균 판정"}
+            {qualifiedBy === "peak" ? t("최댓값 판정") : t("평균 판정")}
           </span>
         )}
         {loneSample && (
           <span
             className="text-[10px] font-mono px-1.5 py-0.5 border border-amber-500/40 text-amber-300/90"
-            title="구간의 초과분을 최댓값 한 개가 전부 설명합니다. 정상적인 버스트나 잘못 기록된 값과 구분할 수 없어 점수를 낮춰 반영했습니다."
+            title={t(
+              "구간의 초과분을 최댓값 한 개가 전부 설명합니다. 정상적인 버스트나 잘못 기록된 값과 구분할 수 없어 점수를 낮춰 반영했습니다.",
+            )}
           >
-            단일 샘플 (신뢰도 하향)
+            {t("단일 샘플 (신뢰도 하향)")}
           </span>
         )}
       </div>
@@ -140,7 +145,7 @@ export function RcaCandidateDetail({
           {hasBreakdown && (
             <div>
               <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                점수 계산
+                {t("점수 계산")}
               </div>
               <div className="flex flex-col gap-0.5">
                 {Object.entries(breakdown!).map(([k, v]) => (
@@ -149,12 +154,12 @@ export function RcaCandidateDetail({
                     className="flex items-baseline gap-2 text-[11px]"
                   >
                     <span className="text-zinc-500 w-24 flex-shrink-0">
-                      {FACTOR_LABEL[k] ?? k}
+                      {t(FACTOR_LABEL[k] ?? k)}
                     </span>
                     <span className="font-mono text-zinc-300 break-all">
                       {k === "qualified_by"
-                        ? QUALIFIED_BY_TEXT[String(v)] ?? fmtEvidenceValue(v)
-                        : fmtEvidenceValue(v)}
+                        ? t(QUALIFIED_BY_TEXT[String(v)] ?? fmtEvidenceValue(v))
+                        : t(fmtEvidenceValue(v))}
                     </span>
                   </div>
                 ))}
@@ -165,7 +170,7 @@ export function RcaCandidateDetail({
           {hasEvidence && (
             <div>
               <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                측정값
+                {t("측정값")}
               </div>
               <div className="flex flex-col gap-0.5">
                 {Object.entries(evidence!)
@@ -178,10 +183,10 @@ export function RcaCandidateDetail({
                       className="flex items-baseline gap-2 text-[11px]"
                     >
                       <span className="text-zinc-500 w-24 flex-shrink-0">
-                        {EVIDENCE_LABEL[k] ?? k}
+                        {t(EVIDENCE_LABEL[k] ?? k)}
                       </span>
                       <span className="font-mono text-zinc-300 break-all">
-                        {fmtEvidenceValue(v)}
+                        {t(fmtEvidenceValue(v))}
                       </span>
                     </div>
                   ))}
@@ -211,7 +216,7 @@ export function RcaCandidateDetail({
           {suggestedAction && (
             <div>
               <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                이 신호에 대한 조치
+                {t("이 신호에 대한 조치")}
               </div>
               <div className="text-[11px] text-zinc-300">{suggestedAction}</div>
             </div>
@@ -233,6 +238,7 @@ export function RcaScoringPolicy({
   note,
   schemaObservation,
 }: ScoringPolicyProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const hasWeights = !!weights && Object.keys(weights).length > 0;
   const hasObs =
@@ -247,7 +253,7 @@ export function RcaScoringPolicy({
         aria-expanded={open}
       >
         {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-        채점 기준
+        {t("채점 기준")}
       </button>
       {open && (
         <div className="mt-2 flex flex-col gap-2">
@@ -259,7 +265,7 @@ export function RcaScoringPolicy({
                 .map(([k, v]) => (
                   <div key={k} className="flex items-center gap-3 text-[11px]">
                     <span className="text-zinc-400 w-28 flex-shrink-0">
-                      {categoryLabel(k)}
+                      {t(categoryLabel(k))}
                     </span>
                     <span className="font-mono text-zinc-300 w-10">{v}</span>
                     {/* Proportional bar, because the ordering IS the policy:
@@ -276,7 +282,7 @@ export function RcaScoringPolicy({
           {hasObs && (
             <div>
               <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                스키마 관측 범위
+                {t("스키마 관측 범위")}
               </div>
               <div className="flex flex-col gap-0.5">
                 {Object.entries(schemaObservation!).map(([k, v]) => (
@@ -288,7 +294,7 @@ export function RcaScoringPolicy({
                       {k}
                     </span>
                     <span className="font-mono text-zinc-300 break-all">
-                      {fmtEvidenceValue(v)}
+                      {t(fmtEvidenceValue(v))}
                     </span>
                   </div>
                 ))}

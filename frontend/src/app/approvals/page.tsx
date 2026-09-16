@@ -69,11 +69,13 @@ export default function ApprovalsPage() {
                     : "border border-zinc-700 text-zinc-400 hover:text-zinc-100"
                 }`}
               >
-                {s === "pending"
-                  ? "승인 대기"
-                  : s === "approved"
-                    ? "승인됨"
-                    : "거부됨"}
+                {t(
+                  s === "pending"
+                    ? "승인 대기"
+                    : s === "approved"
+                      ? "승인됨"
+                      : "거부됨",
+                )}
               </button>
             ))}
           </div>
@@ -83,17 +85,19 @@ export default function ApprovalsPage() {
       {loadError ? (
         <div className="bg-rose-500/10 border border-rose-500/30 rounded-lg p-4 text-sm">
           <div className="text-rose-300 font-medium mb-1">
-            승인 목록을 불러오지 못했습니다
+            {t("승인 목록을 불러오지 못했습니다")}
           </div>
           <div className="text-zinc-400">
-            {loadError}. 네트워크 또는 인증 문제일 수 있습니다. 빈 목록이 아니라
-            조회 실패 상태입니다.
+            {loadError}.{" "}
+            {t(
+              "네트워크 또는 인증 문제일 수 있습니다. 빈 목록이 아니라 조회 실패 상태입니다.",
+            )}
           </div>
           <button
             onClick={loadApprovals}
             className="mt-2 rounded border border-zinc-700 px-3 py-1 text-zinc-200 hover:bg-zinc-800"
           >
-            다시 시도
+            {t("다시 시도")}
           </button>
         </div>
       ) : approvals.length === 0 ? (

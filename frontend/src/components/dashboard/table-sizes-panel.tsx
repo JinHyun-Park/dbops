@@ -7,6 +7,7 @@ import {
   type TableIndex,
 } from "@/lib/api-client";
 import { fmtBytes, fmtExact, fmtNumber } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 interface Table {
   schema_name: string;
@@ -25,6 +26,7 @@ function n(v: unknown): number {
 }
 
 export function TableSizesPanel({ clusterId }: { clusterId: string }) {
+  const t = useT();
   const [tables, setTables] = useState<Table[]>([]);
   const [loading, setLoading] = useState(true);
   // Expansion state per table: keyed by `schema.table`. value is the loaded
@@ -79,7 +81,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
     };
   }, [clusterId]);
 
-  const totalBytes = tables.reduce((s, t) => s + n(t.total_bytes), 0);
+  const totalBytes = tables.reduce((s, row) => s + n(row.total_bytes), 0);
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 overflow-hidden">
@@ -87,15 +89,19 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
         <div>
           <div className="text-sm text-zinc-200 font-medium">Table Sizes</div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            전체 {fmtBytes(totalBytes)}, {tables.length}개 테이블 (상위 30)
+            {t("전체 {a}, {b}개 테이블 (상위 30)")
+              .replace("{a}", fmtBytes(totalBytes))
+              .replace("{b}", String(tables.length))}
           </div>
         </div>
       </div>
       {loading ? (
-        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
+        <div className="p-6 text-zinc-500 text-sm">{t("불러오는 중…")}</div>
       ) : tables.length === 0 ? (
         <div className="p-6 text-zinc-500 text-sm">
-          아직 테이블 크기 데이터 없음 (PG 전용, 다음 ETL 사이클에서 수집)
+          {t(
+            "아직 테이블 크기 데이터 없음 (PG 전용, 다음 ETL 사이클에서 수집)",
+          )}
         </div>
       ) : (
         <div className="max-h-96 overflow-y-auto">
@@ -107,58 +113,64 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                 </th>
                 <th
                   className="text-right px-3 py-2 text-zinc-400 font-medium"
-                  title="추정 live 행 수 (pg_stat_user_tables.n_live_tup)"
+                  title={t("추정 live 행 수 (pg_stat_user_tables.n_live_tup)")}
                 >
                   Rows
                 </th>
                 <th
                   className="text-right px-3 py-2 text-zinc-400 font-medium"
-                  title="디스크상 heap 크기 (인덱스/TOAST 제외)"
+                  title={t("디스크상 heap 크기 (인덱스/TOAST 제외)")}
                 >
                   Heap
                 </th>
                 <th
                   className="text-right px-3 py-2 text-zinc-400 font-medium"
-                  title="이 테이블의 모든 인덱스 크기 합계"
+                  title={t("이 테이블의 모든 인덱스 크기 합계")}
                 >
                   Indexes
                 </th>
                 <th
                   className="text-right px-3 py-2 text-zinc-400 font-medium"
-                  title="Heap + 인덱스 + TOAST"
+                  title={t("Heap + 인덱스 + TOAST")}
                 >
                   Total
                 </th>
                 <th
                   className="text-right px-3 py-2 text-zinc-400 font-medium"
-                  title="인덱스 크기 ÷ 전체 크기. 50%를 넘으면 인덱스가 heap보다 큰 상태. 중복 인덱스 검토 필요."
+                  title={t(
+                    "인덱스 크기 ÷ 전체 크기. 50%를 넘으면 인덱스가 heap보다 큰 상태. 중복 인덱스 검토 필요.",
+                  )}
                 >
                   Indexes / total
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-700">
-              {tables.map((t, i) => {
-                const total = n(t.total_bytes);
+              {tables.map((row, i) => {
+                const total = n(row.total_bytes);
                 const pct = totalBytes > 0 ? (total / totalBytes) * 100 : 0;
-                const idxRatio = n(t.index_ratio) * 100;
-                const rowCount = n(t.n_live_tup);
-                const expandKey = `${t.schema_name}.${t.table_name}`;
+                const idxRatio = n(row.index_ratio) * 100;
+                const rowCount = n(row.n_live_tup);
+                const expandKey = `${row.schema_name}.${row.table_name}`;
                 const expand = expanded[expandKey];
                 const isOpen = !!expand;
                 return (
-                  <Fragment key={`${t.schema_name}-${t.table_name}-${i}`}>
+                  <Fragment key={`${row.schema_name}-${row.table_name}-${i}`}>
                     <tr
                       className="hover:bg-zinc-900/40 relative cursor-pointer"
-                      onClick={() => toggleExpand(t.schema_name, t.table_name)}
-                      title="클릭해서 이 테이블의 인덱스 보기"
+                      onClick={() =>
+                        toggleExpand(row.schema_name, row.table_name)
+                      }
+                      title={t("클릭해서 이 테이블의 인덱스 보기")}
                     >
                       <td className="px-3 py-2 text-zinc-200 font-mono text-xs">
                         <span className="text-zinc-500 mr-1.5 inline-block w-3">
                           {isOpen ? "▾" : "▸"}
                         </span>
-                        <span className="text-zinc-500">{t.schema_name}.</span>
-                        {t.table_name}
+                        <span className="text-zinc-500">
+                          {row.schema_name}.
+                        </span>
+                        {row.table_name}
                       </td>
                       <td
                         className="px-3 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums"
@@ -167,10 +179,10 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                         {fmtNumber(rowCount)}
                       </td>
                       <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
-                        {fmtBytes(n(t.table_bytes))}
+                        {fmtBytes(n(row.table_bytes))}
                       </td>
                       <td className="px-3 py-2 text-right text-zinc-300 font-mono text-xs">
-                        {fmtBytes(n(t.index_bytes))}
+                        {fmtBytes(n(row.index_bytes))}
                       </td>
                       <td
                         className="px-3 py-2 text-right text-zinc-100 font-mono text-xs relative"
@@ -194,7 +206,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                               : "text-zinc-300"
                         }`}
                         title={`Indexes ${fmtBytes(
-                          n(t.index_bytes),
+                          n(row.index_bytes),
                         )} of total ${fmtBytes(total)}`}
                       >
                         {idxRatio.toFixed(0)}%
@@ -204,11 +216,11 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                       <tr className="bg-zinc-950/40">
                         <td colSpan={6} className="px-6 py-3">
                           <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 mb-2">
-                            indexes on {t.schema_name}.{t.table_name}
+                            indexes on {row.schema_name}.{row.table_name}
                           </div>
                           {expand?.loading && (
                             <div className="text-xs text-zinc-500">
-                              불러오는 중…
+                              {t("불러오는 중…")}
                             </div>
                           )}
                           {expand?.error && (
@@ -218,7 +230,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                           )}
                           {expand?.indexes && expand.indexes.length === 0 && (
                             <div className="text-xs text-zinc-500">
-                              인덱스 없음 (heap 전용 테이블)
+                              {t("인덱스 없음 (heap 전용 테이블)")}
                             </div>
                           )}
                           {expand?.indexes && expand.indexes.length > 0 && (
@@ -233,13 +245,15 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                                   </th>
                                   <th
                                     className="text-right py-1 px-3 font-medium"
-                                    title="이 인덱스가 쿼리에서 사용된 횟수 (pg_stat_user_indexes.idx_scan)"
+                                    title={t(
+                                      "이 인덱스가 쿼리에서 사용된 횟수 (pg_stat_user_indexes.idx_scan)",
+                                    )}
                                   >
                                     Scans
                                   </th>
                                   <th
                                     className="text-right py-1 pl-3 font-medium"
-                                    title="인덱스 디스크 크기"
+                                    title={t("인덱스 디스크 크기")}
                                   >
                                     Size
                                   </th>
@@ -257,7 +271,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                                         {idx.is_primary && (
                                           <span
                                             className="text-[9px] px-1 py-0.5 border border-amber-500/40 text-amber-300 rounded-sm"
-                                            title="기본 키"
+                                            title={t("기본 키")}
                                           >
                                             PK
                                           </span>
@@ -265,7 +279,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                                         {!idx.is_primary && idx.is_unique && (
                                           <span
                                             className="text-[9px] px-1 py-0.5 border border-sky-500/40 text-sky-300 rounded-sm"
-                                            title="유니크 인덱스"
+                                            title={t("유니크 인덱스")}
                                           >
                                             UQ
                                           </span>
@@ -273,7 +287,9 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                                         {!idx.is_valid && (
                                           <span
                                             className="text-[9px] px-1 py-0.5 border border-rose-500/40 text-rose-300 rounded-sm"
-                                            title="유효하지 않은 인덱스 (CONCURRENT 빌드 실패 등)"
+                                            title={t(
+                                              "유효하지 않은 인덱스 (CONCURRENT 빌드 실패 등)",
+                                            )}
                                           >
                                             !
                                           </span>
@@ -281,7 +297,9 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                                         {idx.idx_scan === 0 && (
                                           <span
                                             className="text-[9px] px-1 py-0.5 border border-zinc-700 text-zinc-500 rounded-sm"
-                                            title="통계 리셋 이후 한 번도 사용 안 됨: DROP 후보"
+                                            title={t(
+                                              "통계 리셋 이후 한 번도 사용 안 됨: DROP 후보",
+                                            )}
                                           >
                                             unused
                                           </span>

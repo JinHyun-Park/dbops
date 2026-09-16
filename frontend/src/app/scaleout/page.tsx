@@ -74,10 +74,10 @@ export default function ScaleoutPage() {
       .then((d) => setOps(d.ops || []))
       .catch((e) => {
         setOps([]);
-        setErr(e instanceof Error ? e.message : "조회 실패");
+        setErr(e instanceof Error ? e.message : t("조회 실패"));
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     load();
@@ -105,7 +105,7 @@ export default function ScaleoutPage() {
       setActionMsg(null);
       try {
         const r = await cancelScaleoutOp(id);
-        setActionMsg(r.note || "취소되었습니다.");
+        setActionMsg(r.note || t("취소되었습니다."));
         load();
       } catch (e) {
         setActionMsg(e instanceof Error ? e.message : String(e));
@@ -114,7 +114,7 @@ export default function ScaleoutPage() {
         setConfirmingId(null);
       }
     },
-    [load],
+    [load, t],
   );
 
   return (
@@ -130,7 +130,7 @@ export default function ScaleoutPage() {
             onClick={load}
             className="text-xs px-3 py-2 border border-zinc-700 text-zinc-400 hover:text-amber-300 hover:border-amber-500/40 transition-colors"
           >
-            새로고침
+            {t("새로고침")}
           </button>
         }
       />
@@ -139,8 +139,9 @@ export default function ScaleoutPage() {
 
       <Section>
         <p className="text-xs text-zinc-500 mb-4 leading-relaxed">
-          다른 예열 설정(top_n, 엔드포인트)을 원하면 이 작업을 취소한 뒤
-          채팅에서 prewarm_reader로 재요청하세요. 리더는 유지됩니다.
+          {t(
+            "다른 예열 설정(top_n, 엔드포인트)을 원하면 이 작업을 취소한 뒤 채팅에서 prewarm_reader로 재요청하세요. 리더는 유지됩니다.",
+          )}
         </p>
 
         {actionMsg && (
@@ -152,21 +153,23 @@ export default function ScaleoutPage() {
         {err ? (
           <div className="bg-rose-500/10 border border-rose-500/30 rounded-lg p-4 text-sm">
             <div className="text-rose-300 font-medium mb-1">
-              스케일 작업을 불러오지 못했습니다
+              {t("스케일 작업을 불러오지 못했습니다")}
             </div>
             <div className="text-zinc-400">
-              {err}. 네트워크 또는 인증 문제일 수 있습니다. 빈 목록이 아니라
-              조회 실패 상태입니다.
+              {err}.{" "}
+              {t(
+                "네트워크 또는 인증 문제일 수 있습니다. 빈 목록이 아니라 조회 실패 상태입니다.",
+              )}
             </div>
             <button
               onClick={load}
               className="mt-2 rounded border border-zinc-700 px-3 py-1 text-zinc-200 hover:bg-zinc-800"
             >
-              다시 시도
+              {t("다시 시도")}
             </button>
           </div>
         ) : loading ? (
-          <div className="text-zinc-500 text-sm py-8">불러오는 중…</div>
+          <div className="text-zinc-500 text-sm py-8">{t("불러오는 중…")}</div>
         ) : ops.length === 0 ? (
           <EmptyState
             eyebrow={t("스케일 관리")}
@@ -181,13 +184,17 @@ export default function ScaleoutPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-[11px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">
-                  <th className="py-2 pr-4 font-medium">클러스터</th>
-                  <th className="py-2 pr-4 font-medium">리더 인스턴스</th>
-                  <th className="py-2 pr-4 font-medium">상태</th>
-                  <th className="py-2 pr-4 font-medium">엔드포인트</th>
+                  <th className="py-2 pr-4 font-medium">{t("클러스터")}</th>
+                  <th className="py-2 pr-4 font-medium">
+                    {t("리더 인스턴스")}
+                  </th>
+                  <th className="py-2 pr-4 font-medium">{t("상태")}</th>
+                  <th className="py-2 pr-4 font-medium">{t("엔드포인트")}</th>
                   <th className="py-2 pr-4 font-medium">top_n</th>
-                  <th className="py-2 pr-4 font-medium">생성</th>
-                  <th className="py-2 pr-2 font-medium text-right">액션</th>
+                  <th className="py-2 pr-4 font-medium">{t("생성")}</th>
+                  <th className="py-2 pr-2 font-medium text-right">
+                    {t("액션")}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -228,21 +235,23 @@ export default function ScaleoutPage() {
                           confirmingId === op.approval_id ? (
                             <span className="inline-flex items-center gap-1.5">
                               <span className="text-[11px] text-zinc-500">
-                                취소할까요?
+                                {t("취소할까요?")}
                               </span>
                               <button
                                 onClick={() => doCancel(op.approval_id)}
                                 disabled={cancellingId === op.approval_id}
                                 className="text-[11px] px-2 py-1 border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 transition-colors disabled:opacity-50"
                               >
-                                {cancellingId === op.approval_id ? "…" : "확인"}
+                                {cancellingId === op.approval_id
+                                  ? "…"
+                                  : t("확인")}
                               </button>
                               <button
                                 onClick={() => setConfirmingId(null)}
                                 disabled={cancellingId === op.approval_id}
                                 className="text-[11px] px-2 py-1 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-50"
                               >
-                                아니오
+                                {t("아니오")}
                               </button>
                             </span>
                           ) : (
@@ -250,7 +259,7 @@ export default function ScaleoutPage() {
                               onClick={() => setConfirmingId(op.approval_id)}
                               className="text-[11px] px-2 py-1 border border-zinc-700 text-zinc-400 hover:text-rose-300 hover:border-rose-500/40 transition-colors"
                             >
-                              취소
+                              {t("취소")}
                             </button>
                           )
                         ) : (
@@ -345,13 +354,12 @@ function AzScaleoutRunbook() {
     <Section>
       <div className="mb-4">
         <h2 className="text-sm font-medium text-zinc-200">
-          AZ 스케일아웃 (선점)
+          {t("AZ 스케일아웃 (선점)")}
         </h2>
         <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
-          정상 AZ에 리더를 미리 분산 배치합니다. 위험이 예상되는 AZ 하나를
-          제외하고, 나머지 AZ에 리더 {count}대를 라운드로빈으로 계획합니다. 각
-          리더는 과금 대상인 개별 인스턴스이며, 승인 센터에서 하나씩 검토하고
-          승인해야 실제로 생성됩니다.
+          {t(
+            "정상 AZ에 리더를 미리 분산 배치합니다. 위험이 예상되는 AZ 하나를 제외하고, 나머지 AZ에 리더 {n}대를 라운드로빈으로 계획합니다. 각 리더는 과금 대상인 개별 인스턴스이며, 승인 센터에서 하나씩 검토하고 승인해야 실제로 생성됩니다.",
+          ).replace("{n}", String(count))}
         </p>
       </div>
 
@@ -368,7 +376,7 @@ function AzScaleoutRunbook() {
           <div className="flex flex-wrap items-end gap-4">
             <label className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-                클러스터
+                {t("클러스터")}
               </span>
               <select
                 value={clusterId}
@@ -385,7 +393,7 @@ function AzScaleoutRunbook() {
 
             <label className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-                제외할 AZ
+                {t("제외할 AZ")}
               </span>
               <select
                 value={excludeAz}
@@ -394,7 +402,7 @@ function AzScaleoutRunbook() {
                 className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm px-2 py-1.5 min-w-[12rem] focus:border-amber-500/50 focus:outline-none disabled:opacity-50"
               >
                 <option value="">
-                  {azLoading ? "AZ 불러오는 중…" : "(제외 없음)"}
+                  {t(azLoading ? "AZ 불러오는 중…" : "(제외 없음)")}
                 </option>
                 {azs.map((az) => (
                   <option key={az} value={az}>
@@ -406,7 +414,7 @@ function AzScaleoutRunbook() {
 
             <label className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-                리더 수 (1-10)
+                {t("리더 수 (1-10)")}
               </span>
               <input
                 type="number"
@@ -427,7 +435,7 @@ function AzScaleoutRunbook() {
               disabled={busy || !clusterId}
               className="text-xs px-4 py-2 border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
             >
-              {busy ? "생성 중…" : "리더 추가 승인 요청 생성"}
+              {t(busy ? "생성 중…" : "리더 추가 승인 요청 생성")}
             </button>
           </div>
 
@@ -442,9 +450,9 @@ function AzScaleoutRunbook() {
               <div className="text-sm text-zinc-200 mb-2">{result.message}</div>
               {result.instance_class && (
                 <div className="text-xs text-zinc-500 mb-2 font-mono">
-                  클래스 {result.instance_class}
+                  {t("클래스")} {result.instance_class}
                   {result.healthy_azs?.length
-                    ? `, 대상 AZ ${result.healthy_azs.join(", ")}`
+                    ? `, ${t("대상 AZ")} ${result.healthy_azs.join(", ")}`
                     : ""}
                 </div>
               )}
@@ -474,7 +482,7 @@ function AzScaleoutRunbook() {
                 href="/approvals"
                 className="text-xs text-amber-300 hover:underline"
               >
-                승인 센터에서 검토/승인 →
+                {t("승인 센터에서 검토/승인")} →
               </a>
             </div>
           )}

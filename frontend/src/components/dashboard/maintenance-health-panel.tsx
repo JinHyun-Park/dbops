@@ -9,6 +9,7 @@ import { streamChat } from "@/lib/agentcore-sse";
 import { fmtRelative } from "@/lib/format";
 import { confidence, trackRecordLabel } from "@/lib/remediation";
 import { engineBadge } from "@/lib/engine";
+import { useT } from "@/lib/i18n";
 
 const SEV_BADGE: Record<HealthFinding["severity"], string> = {
   critical: "bg-rose-500/20 text-rose-300 border border-rose-500/40",
@@ -160,6 +161,7 @@ export function MaintenanceHealthPanel({
   clusterId: string;
   engine?: string;
 }) {
+  const t = useT();
   const [findings, setFindings] = useState<HealthFinding[]>([]);
   const [counts, setCounts] = useState({ critical: 0, warning: 0, info: 0 });
   const [snapshotTime, setSnapshotTime] = useState<string | null>(null);
@@ -231,11 +233,12 @@ export function MaintenanceHealthPanel({
               Maintenance Health
             </div>
             <div className="text-[11px] text-zinc-500 mt-0.5">
-              DBA가 조치할 항목을 심각도 순으로 정렬했어요. 행을 클릭하면 AI가
-              조치를 제안합니다.
+              {t(
+                "DBA가 조치할 항목을 심각도 순으로 정렬했어요. 행을 클릭하면 AI가 조치를 제안합니다.",
+              )}
               {snapshotTime && (
                 <span className="ml-2 text-zinc-600">
-                  {fmtRelative(snapshotTime)} 갱신
+                  {t("{n} 갱신").replace("{n}", fmtRelative(snapshotTime))}
                 </span>
               )}
             </div>
@@ -259,19 +262,19 @@ export function MaintenanceHealthPanel({
           </div>
         </div>
         <div className="flex items-center gap-1 mt-3">
-          {tabs.map((t) => {
-            const isActive = tab === t;
+          {tabs.map((tb) => {
+            const isActive = tab === tb;
             return (
               <button
-                key={t}
-                onClick={() => setTab(t)}
+                key={tb}
+                onClick={() => setTab(tb)}
                 className={`text-[10px] uppercase tracking-wider px-2 py-1 border transition-colors ${
                   isActive
                     ? "border-amber-500/60 text-amber-300 bg-amber-500/5"
                     : "border-zinc-800 text-zinc-500 hover:text-zinc-300"
                 }`}
               >
-                {t}
+                {tb}
               </button>
             );
           })}
@@ -279,13 +282,13 @@ export function MaintenanceHealthPanel({
       </div>
 
       {loading ? (
-        <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
+        <div className="p-6 text-zinc-500 text-sm">{t("불러오는 중…")}</div>
       ) : filtered.length === 0 ? (
         <div className="p-6 text-emerald-400 text-sm flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-500" />
           {tab === "All"
-            ? "발견된 이슈가 없어요. 클러스터 상태 양호 🎉"
-            : `${tab} 카테고리에 해당하는 항목이 없어요`}
+            ? t("발견된 이슈가 없어요. 클러스터 상태 양호 🎉")
+            : t("{n} 카테고리에 해당하는 항목이 없어요").replace("{n}", tab)}
         </div>
       ) : (
         <div className="max-h-[28rem] overflow-y-auto divide-y divide-zinc-800">
@@ -332,7 +335,8 @@ export function MaintenanceHealthPanel({
                           f.outcome.successes,
                           f.outcome.attempts,
                         )}
-                        {", "}신뢰도{" "}
+                        {", "}
+                        {t("신뢰도")}{" "}
                         {Math.round(
                           confidence(f.outcome.successes, f.outcome.attempts) *
                             100,
@@ -371,6 +375,7 @@ function FindingDetailModal({
   engine?: string;
   onClose: () => void;
 }) {
+  const t = useT();
   const [insight, setInsight] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -420,7 +425,7 @@ function FindingDetailModal({
     streamChat(
       message,
       clusterId,
-      (t) => setInsight((p) => p + t),
+      (tok) => setInsight((p) => p + tok),
       () => {},
       () => setLoading(false),
       (err) => {
@@ -465,7 +470,7 @@ function FindingDetailModal({
           <button
             onClick={onClose}
             className="text-zinc-500 hover:text-zinc-200 text-xl leading-none ml-3"
-            aria-label="닫기"
+            aria-label={t("닫기")}
           >
             ×
           </button>
@@ -474,7 +479,7 @@ function FindingDetailModal({
         <div className="flex-1 overflow-y-auto px-5 py-4">
           <div className="mb-4">
             <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 mb-1">
-              초기 권장 조치
+              {t("초기 권장 조치")}
             </div>
             <div className="text-sm text-zinc-200">
               {finding.recommendation}
@@ -484,7 +489,7 @@ function FindingDetailModal({
           {details && Object.keys(details).length > 0 && (
             <div className="mb-4">
               <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500 mb-1">
-                상세 컨텍스트
+                {t("상세 컨텍스트")}
               </div>
               <pre className="text-[11px] font-mono text-zinc-400 bg-zinc-950 border border-zinc-800 px-3 py-2 overflow-auto">
                 {JSON.stringify(details, null, 2)}
@@ -495,14 +500,18 @@ function FindingDetailModal({
           <div className="border-t border-zinc-800 pt-3">
             <div className="flex items-center justify-between mb-2">
               <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
-                AI 조치 제안
+                {t("AI 조치 제안")}
               </div>
               <button
                 onClick={handleAnalyze}
                 disabled={loading}
                 className="text-xs px-3 py-1 border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 disabled:opacity-50 transition-colors"
               >
-                {loading ? "분석 중…" : insight ? "다시 분석" : "원인 + 조치"}
+                {loading
+                  ? t("분석 중…")
+                  : insight
+                    ? t("다시 분석")
+                    : t("원인 + 조치")}
               </button>
             </div>
             {error && (
@@ -512,8 +521,10 @@ function FindingDetailModal({
             )}
             {!insight && !loading && !error && (
               <div className="text-xs text-zinc-500">
-                <span className="text-sky-300">원인 + 조치</span> 버튼을 누르면
-                리스크 설명 + 정확한 명령어 + 검증 방법을 받아볼 수 있어요.
+                <span className="text-sky-300">{t("원인 + 조치")}</span>{" "}
+                {t(
+                  "버튼을 누르면 리스크 설명 + 정확한 명령어 + 검증 방법을 받아볼 수 있어요.",
+                )}
               </div>
             )}
             {insight && (
@@ -527,13 +538,15 @@ function FindingDetailModal({
                     승인 흐름으로. 이 버튼을 눌러야 승인 센터에 항목이 생긴다. */}
                 <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center justify-between gap-3">
                   <span className="text-[11px] text-zinc-500">
-                    설명만 확인했다면 닫아도 됩니다. 실제 조치가 필요하면:
+                    {t(
+                      "설명만 확인했다면 닫아도 됩니다. 실제 조치가 필요하면:",
+                    )}
                   </span>
                   <button
                     onClick={proceedInChat}
                     className="text-xs px-3 py-1.5 border border-amber-500/50 text-amber-300 hover:bg-amber-500/10 transition-colors whitespace-nowrap"
                   >
-                    Chat에서 조치 진행 →
+                    {t("Chat에서 조치 진행 →")}
                   </button>
                 </div>
               </>

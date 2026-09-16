@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { ChevronDown, Search } from "lucide-react";
 import { AnchoredPopover } from "@/components/design-system/anchored-popover";
 import { EngineBadge } from "@/components/design-system/engine-badge";
+import { useT } from "@/lib/i18n";
 
 // Controlled, searchable replacement for a native <select> of clusters in FORM
 // fields (chat conversation cluster, alert/runbook pickers). Unlike the header
@@ -31,6 +32,7 @@ export function SearchableClusterSelect({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const t = useT();
 
   const ql = q.trim().toLowerCase();
   const visible = ql
@@ -48,7 +50,7 @@ export function SearchableClusterSelect({
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center gap-2 bg-zinc-900 text-zinc-200 border border-zinc-800 px-3 py-1.5 text-sm focus:outline-none focus:border-amber-500/60 transition-colors"
-        title={value || placeholder}
+        title={value || t(placeholder)}
       >
         {selected?.engine && (
           <EngineBadge
@@ -62,7 +64,7 @@ export function SearchableClusterSelect({
             value ? "text-zinc-200" : "text-zinc-500"
           }`}
         >
-          {value || (allowAll ? allLabel : placeholder)}
+          {value || (allowAll ? t(allLabel) : t(placeholder))}
         </span>
         <ChevronDown
           size={13}
@@ -83,7 +85,7 @@ export function SearchableClusterSelect({
               autoFocus
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="검색…"
+              placeholder={t("검색…")}
               className="w-full py-2 bg-transparent text-sm text-zinc-100 focus:outline-none placeholder:text-zinc-600"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && visible.length > 0) {
@@ -109,7 +111,7 @@ export function SearchableClusterSelect({
                     : "text-zinc-300 hover:bg-zinc-800/50"
                 }`}
               >
-                {allLabel}
+                {t(allLabel)}
               </button>
             )}
             {visible.map((c) => (
@@ -139,7 +141,7 @@ export function SearchableClusterSelect({
             ))}
             {visible.length === 0 && (
               <div className="px-3 py-5 text-center text-zinc-500 text-sm">
-                {clusters.length === 0 ? "클러스터 없음" : "결과 없음"}
+                {clusters.length === 0 ? t("클러스터 없음") : t("결과 없음")}
               </div>
             )}
           </div>

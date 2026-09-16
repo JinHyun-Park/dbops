@@ -19,6 +19,7 @@ import {
 } from "@/lib/api-client";
 import { Expandable } from "@/components/design-system/expandable";
 import { fmtDecimal, fmtBytes } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 import { useChartColors } from "@/lib/use-chart-colors";
 
 type Point = { ts: string; value: number | string; dimensions?: string | null };
@@ -94,6 +95,7 @@ function MiniChart({
   type?: "line" | "area";
   formatValue?: (v: number) => string;
 }) {
+  const t = useT();
   const data = points.map((p) => ({
     ts: fmtTime(p.ts),
     value: Number(p.value) || 0,
@@ -123,11 +125,11 @@ function MiniChart({
         <div className="h-32">
           {loading ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              불러오는 중…
+              {t("불러오는 중…")}
             </div>
           ) : data.length === 0 ? (
             <div className="text-xs text-zinc-500 flex items-center h-full">
-              데이터 없음
+              {t("데이터 없음")}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -213,6 +215,7 @@ export function RdsInstanceOverviewPanel({
   // by `SELECT *`), so it's passed down instead of re-fetched.
   engineVersion?: string;
 }) {
+  const t = useT();
   const chart = useChartColors();
   const [details, setDetails] = useState<RdsInstanceDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(true);
@@ -312,13 +315,13 @@ export function RdsInstanceOverviewPanel({
       {/* ─ Resource details tiles ─ */}
       <div className="bg-zinc-900/50 border border-zinc-800 p-5">
         <div className="text-sm text-zinc-200 font-medium mb-3">
-          인스턴스 개요
+          {t("인스턴스 개요")}
         </div>
         {detailsLoading ? (
-          <div className="text-zinc-500 text-sm">불러오는 중…</div>
+          <div className="text-zinc-500 text-sm">{t("불러오는 중…")}</div>
         ) : detailsError ? (
           <div className="text-rose-300 text-sm">
-            인스턴스 상세 정보를 불러오지 못했습니다.
+            {t("인스턴스 상세 정보를 불러오지 못했습니다.")}
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
@@ -341,11 +344,11 @@ export function RdsInstanceOverviewPanel({
       {/* ─ Charts ─ */}
       <div>
         <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">
-          리소스 사용률 (Resource Usage)
+          {t("리소스 사용률 (Resource Usage)")}
         </div>
         {seriesError ? (
           <div className="text-rose-300 text-sm bg-zinc-900/50 border border-zinc-800 p-5">
-            메트릭을 불러오지 못했습니다. 잠시 후 다시 시도합니다.
+            {t("메트릭을 불러오지 못했습니다. 잠시 후 다시 시도합니다.")}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

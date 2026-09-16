@@ -19,6 +19,7 @@ import { fetchBatchTimeseries, type TimeRange } from "@/lib/api-client";
 import { engineKind } from "@/lib/engine";
 import { fmtDecimal } from "@/lib/format";
 import { useChartColors } from "@/lib/use-chart-colors";
+import { useT } from "@/lib/i18n";
 
 type Point = { ts: string; value: number | string; dimensions?: string };
 type MetricDef = { key: string; title: string; unit: string };
@@ -114,6 +115,7 @@ function TopWaitsCard({
   points: Point[];
   loading: boolean;
 }) {
+  const t = useT();
   const waits = latestWaitsByType(points).slice(0, 8);
   const total = waits.reduce((s, w) => s + w.value, 0);
   return (
@@ -122,9 +124,9 @@ function TopWaitsCard({
         Top Waits (ms)
       </div>
       {loading ? (
-        <div className="text-xs text-zinc-500">불러오는 중…</div>
+        <div className="text-xs text-zinc-500">{t("불러오는 중…")}</div>
       ) : waits.length === 0 ? (
-        <div className="text-xs text-zinc-500">wait 데이터가 없어요</div>
+        <div className="text-xs text-zinc-500">{t("wait 데이터가 없어요")}</div>
       ) : (
         <div className="space-y-2">
           {waits.map((w) => {
@@ -169,6 +171,7 @@ function MiniChart({
   loading: boolean;
   colors: ReturnType<typeof useChartColors>;
 }) {
+  const t = useT();
   const data = points.map((p) => ({
     ts: fmtTime(p.ts),
     v: Number(p.value) || 0,
@@ -179,7 +182,7 @@ function MiniChart({
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-4">
       <div className="flex items-baseline justify-between mb-2">
-        <div className="text-sm text-zinc-200 font-medium">{def.title}</div>
+        <div className="text-sm text-zinc-200 font-medium">{t(def.title)}</div>
         {def.unit && (
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
             {def.unit}
@@ -195,11 +198,11 @@ function MiniChart({
       <div className="h-24">
         {loading ? (
           <div className="text-xs text-zinc-500 flex items-center h-full">
-            불러오는 중…
+            {t("불러오는 중…")}
           </div>
         ) : data.length === 0 ? (
           <div className="text-xs text-zinc-500 flex items-center h-full">
-            데이터 없음
+            {t("데이터 없음")}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -246,6 +249,7 @@ export function EngineInternalsPanel({
   engine?: string;
   range: TimeRange;
 }) {
+  const t = useT();
   const colors = useChartColors();
   const kind = engineKind(engine);
   const mysql = kind === "mysql";
@@ -279,7 +283,9 @@ export function EngineInternalsPanel({
   return (
     <div>
       <div className="flex items-center gap-2 mb-3">
-        <h2 className="text-sm font-semibold text-zinc-300">엔진 내부 지표</h2>
+        <h2 className="text-sm font-semibold text-zinc-300">
+          {t("엔진 내부 지표")}
+        </h2>
         <span className="text-[10px] text-zinc-500">
           {mysql
             ? "InnoDB engine status"
