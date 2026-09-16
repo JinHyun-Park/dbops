@@ -49,7 +49,7 @@ export async function apiUrl(path: string): Promise<string> {
 const enc = encodeURIComponent;
 
 // Mutation calls send the Cognito ID token so the Lambda handlers can apply
-// RBAC (admin vs dbops-viewer). Read-only fetches don't need auth — the
+// RBAC (admin vs dbops-viewer). Read-only fetches don't need auth: the
 // dashboard handler doesn't gate them today. Get a *valid* token (auto-
 // refresh if expiring) so a long-idle tab can still mutate.
 async function authHeaders(): Promise<Record<string, string>> {
@@ -65,7 +65,7 @@ async function authHeaders(): Promise<Record<string, string>> {
 }
 
 // Every REST route is now behind the API Gateway Cognito JWT authorizer, so
-// EVERY call (reads included) must carry a token — not just mutations. This
+// EVERY call (reads included) must carry a token, not just mutations. This
 // wrapper injects the auth header centrally; explicit per-call headers win.
 export async function authedFetch(
   url: string,
@@ -339,7 +339,7 @@ export interface LiveActivity {
 }
 
 // On-demand LIVE top (P2-⑧). Polled ~2s ONLY while the live view is open;
-// `buffers:true` is a one-off manual fetch (the heavy pg_buffercache read) —
+// `buffers:true` is a one-off manual fetch (the heavy pg_buffercache read),
 // never in the poll loop.
 export async function fetchLiveActivity(
   clusterId: string,
@@ -551,7 +551,7 @@ export interface ChangeImpactResponse {
   changes: ChangeImpactEvent[];
 }
 
-// 변경 영향 자동 회고 — RDS 변경 이벤트 전후 워크로드 델타.
+// 변경 영향 자동 회고: RDS 변경 이벤트 전후 워크로드 델타.
 export async function fetchChangeImpact(
   clusterId: string,
   windowHours = 2,
@@ -832,7 +832,7 @@ export async function fetchTopology(
   return res.json();
 }
 
-// Engine-level config (read-only) — surfaces config the overview panels don't
+// Engine-level config (read-only): surfaces config the overview panels don't
 // already show. DocumentDB cluster settings + DynamoDB table settings. Returns
 // not_applicable for relational (which has the SettingsPanel instead).
 export interface EngineConfigResponse {
@@ -1128,7 +1128,7 @@ export async function fetchClusters() {
   // dropdown, compare's A/B selects). A single transient failure used to be
   // swallowed by callers' catch(() => {}) and left misleading empty states
   // ("no clusters" / "register more clusters") with no retry until a manual
-  // reload — so this one call retries briefly before giving up.
+  // reload, so this one call retries briefly before giving up.
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, attempt * 1200));
@@ -1173,7 +1173,7 @@ export async function patchClusterMeta(
   if (!res.ok) throw new Error(`메타 저장 실패 (상태 ${res.status})`);
 }
 
-// ── Agent Tasks — event-driven / scheduled / manual agent work ──────────────
+// ── Agent Tasks: event-driven / scheduled / manual agent work ──────────────
 
 export interface TraceStep {
   step: string;
@@ -1732,7 +1732,7 @@ export interface DiscoveredCluster {
   region: string;
   account_id: string;
   already_registered: boolean;
-  // DBOps 자기 자신의 캐시 DB — 자동 선택에서 제외되고 배지가 붙는다.
+  // DBOps 자기 자신의 캐시 DB: 자동 선택에서 제외되고 배지가 붙는다.
   is_internal?: boolean;
 }
 
@@ -1870,8 +1870,8 @@ export interface ExplainResponse {
   row_count: number;
 }
 
-// Distinguish SQL errors (user typed bad SQL — show as a warning) from
-// infrastructure errors (network, IAM, cluster down — show as a failure).
+// Distinguish SQL errors (user typed bad SQL: show as a warning) from
+// infrastructure errors (network, IAM, cluster down: show as a failure).
 export class ExplainSqlError extends Error {
   readonly kind = "sql" as const;
   readonly engine?: string;
@@ -1913,7 +1913,7 @@ export async function runExplain(
 }
 
 // ---------------------------------------------------------------------------
-// Simulation MCP — REST mirror
+// Simulation MCP: REST mirror
 // ---------------------------------------------------------------------------
 
 export interface ParameterCatalogEntry {
@@ -1937,7 +1937,7 @@ export interface UpgradeCompatibilityResponse {
 export interface UpgradeImpactMethod {
   method: "in_place" | "blue_green" | "clone";
   estimated_minutes: number;
-  // Low–high range conveying the genuine uncertainty of the estimate.
+  // Low-high range conveying the genuine uncertainty of the estimate.
   range_low_minutes?: number;
   range_high_minutes?: number;
   downtime_text: string;
@@ -2074,7 +2074,7 @@ export interface DdlImpactResponse {
 
 // DynamoDB capacity-mode (Provisioned ↔ On-Demand) cost what-if. Dollar fields
 // are null when the AWS Price List API couldn't resolve a price (status
-// "partial"/"no_data" → fallback) — the UI must render "n/a", never a fake $.
+// "partial"/"no_data" → fallback), the UI must render "n/a", never a fake $.
 export interface DdbCapacityCostResponse {
   status: "ok" | "partial" | "no_data" | "unsupported";
   cluster_id: string;
@@ -2204,7 +2204,7 @@ export function simulateDynamodbCapacityCost(
 }
 
 // ElastiCache node-resize cost what-if. Dollar fields are null when the AWS
-// Price List API couldn't resolve a price (status "partial") — the UI must
+// Price List API couldn't resolve a price (status "partial"), the UI must
 // render "n/a", never a fake $.
 export interface ElasticacheNodeResizeResponse {
   status: "ok" | "partial";
@@ -2244,7 +2244,7 @@ export function simulateElasticacheNodeResize(
 
 // RDS instance (MySQL/SQL Server, non-Aurora) right-sizing + cost what-if.
 // Dollar fields are null when the AWS Price List API couldn't resolve a price
-// (pricing_source "fallback_estimate") — the UI must render "n/a", never a fake $.
+// (pricing_source "fallback_estimate"), the UI must render "n/a", never a fake $.
 export interface RdsRightsizingResponse {
   status: "ok" | "insufficient_data" | "error" | "unsupported_engine";
   message?: string;
@@ -2381,7 +2381,7 @@ export interface ChatSessionSummary {
   message_count: number;
   // Added in token-usage tracking (Task 3 ProjectionExpression).
   // Optional: older sessions and any list that pre-dates the backend change
-  // will simply omit these fields — the UI guards with ?? 0.
+  // will simply omit these fields, the UI guards with ?? 0.
   total_input_tokens?: number;
   total_output_tokens?: number;
   last_error?: { message: string; at: number };
@@ -2676,7 +2676,7 @@ export interface BackupsResponse {
   status: string;
   error?: string;
   // true when `error` is an informational notice (demo/unregistered cluster),
-  // not a real failure — render neutral, not red.
+  // not a real failure, render neutral, not red.
   info?: boolean;
   backup_retention_days: number | null;
   preferred_backup_window: string | null;
@@ -2763,7 +2763,7 @@ export interface EndpointRequestResponse {
 }
 
 // N-① console-initiated custom-endpoint write. Admin-gated. Does NOT mutate
-// the endpoint immediately — it mints a payload-hashed approval that runs when
+// the endpoint immediately, it mints a payload-hashed approval that runs when
 // the DBA approves it in the Approval Center. static_members and
 // excluded_members are mutually exclusive (send at most one).
 export async function createEndpointRequest(opts: {
@@ -2808,7 +2808,7 @@ export interface CreateSnapshotResponse {
   message: string;
 }
 
-// Manual snapshot creation — admin-gated write. snapshotId optional;
+// Manual snapshot creation: admin-gated write. snapshotId optional;
 // backend auto-generates a valid id when omitted.
 export async function createSnapshot(
   clusterId: string,
@@ -2853,7 +2853,7 @@ export interface RestoreRequest {
   useLatest?: boolean; // mode=pitr → restore to latest restorable time
 }
 
-// Restore a snapshot or point-in-time into a NEW cluster — admin-gated +
+// Restore a snapshot or point-in-time into a NEW cluster: admin-gated +
 // type-to-confirm. The restored cluster is provisioned async (writer
 // instance added by the restore_finalizer once it is available).
 export async function restoreCluster(
@@ -3011,7 +3011,7 @@ export async function fetchTimeline(
   return res.json();
 }
 
-// =====  Hover-prefetch — warm the browser HTTP cache before navigation =====
+// =====  Hover-prefetch: warm the browser HTTP cache before navigation =====
 //
 // The dashboard panel APIs are served with Cache-Control: max-age=30,
 // stale-while-revalidate=120. Fetching them on hover (before the click) means
@@ -3019,9 +3019,9 @@ export async function fetchTimeline(
 //
 // Strategy: fire the same two calls the dashboard page makes on cluster select
 // so the browser caches them under the identical URLs.
-//   1. fetchDashboard(clusterId)          — cluster meta + top queries + events
+//   1. fetchDashboard(clusterId)          - cluster meta + top queries + events
 //   2. fetchBatchTimeseries(clusterId, PREFETCH_CHART_METRICS, DEFAULT_HOURS)
-//      — the 10-metric batch the timeseries charts read
+//      - the 10-metric batch the timeseries charts read
 //
 // Dedupe: skip if the same cluster was prefetched within 10 s to avoid
 // hover-spam on fast mouse movements across a dense fleet table.
@@ -3052,7 +3052,7 @@ const PREFETCH_DEDUPE_MS = 10_000; // 10 seconds
 /**
  * Fire-and-forget prefetch of the dashboard's two primary data calls.
  * Call this on cluster hover/focus. Never throws, never blocks the UI.
- * Returns void — callers should not await or chain on this.
+ * Returns void: callers should not await or chain on this.
  */
 export function prefetchDashboard(clusterId: string): void {
   if (!clusterId) return;
@@ -3061,7 +3061,7 @@ export function prefetchDashboard(clusterId: string): void {
   if (last !== undefined && now - last < PREFETCH_DEDUPE_MS) return;
   _prefetchTimestamps.set(clusterId, now);
 
-  // Fire both calls in parallel. Errors are silently swallowed — the only
+  // Fire both calls in parallel. Errors are silently swallowed: the only
   // purpose is populating the browser HTTP cache; UI never reads the result.
   fetchDashboard(clusterId).catch(() => {});
   fetchBatchTimeseries(
@@ -3435,7 +3435,7 @@ export async function unassignClusterFromTeam(
 }
 
 // ---------------------------------------------------------------------------
-// Onboarding — spoke-account CloudFormation template
+// Onboarding: spoke-account CloudFormation template
 // ---------------------------------------------------------------------------
 
 export interface OnboardingTemplate {

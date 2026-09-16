@@ -1,4 +1,4 @@
-"""sql_safety — shared SQL read-only/side-effect classification.
+"""sql_safety: shared SQL read-only/side-effect classification.
 
 Single source of truth for "is this statement actually read-only?" Used by the
 agent's execute_sql read fast-path AND by explain_plan's analyze=True gate
@@ -9,7 +9,7 @@ scanner here prevents the two call sites from drifting apart.
 
 import re
 
-# Statement PREFIXES that look like a read. Intent, not enforcement — pair with
+# Statement PREFIXES that look like a read. Intent, not enforcement: pair with
 # the side-effect / multi-statement checks below.
 SAFE_PATTERNS = [r"^\s*SELECT\b", r"^\s*EXPLAIN\b", r"^\s*SHOW\b", r"^\s*DESCRIBE\b"]
 
@@ -92,7 +92,7 @@ def strip_sql_literals(s: str) -> str:
             # MySQL executable comment `/*! ... */` (+ optional version
             # `/*!50000 ... */`)는 Aurora MySQL에서 내부 SQL이 실제 실행된다.
             # 일반 주석처럼 통째로 지우면 classifier가 내부의 DROP/TRUNCATE를
-            # 못 봐서 force 체크와 read/write 분류를 우회한다 — 내용을 보존해
+            # 못 봐서 force 체크와 read/write 분류를 우회한다. 내용을 보존해
             # 키워드 매칭이 내부 구문을 보게 한다. 선두 버전 숫자는 키워드
             # 매칭에 무해하므로 그대로 둔다.
             is_executable = i + 2 < n and s[i + 2] == "!"
@@ -159,8 +159,8 @@ def is_multi_statement(sql: str) -> bool:
     Dialect-agnostic on purpose: a keyword allowlist would only flag the second
     statement when it STARTS with a recognized verb, so on engines whose driver
     runs the whole ';'-batch (SQL Server via pytds) a dangerous verb not on the
-    list — SHUTDOWN, BACKUP, RESTORE, DENY, RECONFIGURE, DISABLE TRIGGER, a
-    custom EXEC — would slip through and auto-execute without approval."""
+    list (SHUTDOWN, BACKUP, RESTORE, DENY, RECONFIGURE, DISABLE TRIGGER, a
+    custom EXEC) would slip through and auto-execute without approval."""
     body = sql.strip().rstrip(";").strip()
     return bool(re.search(r";\s*\S", body))
 

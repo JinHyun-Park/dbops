@@ -190,7 +190,7 @@ function PolicyForm({
             <option value="other" />
           </datalist>
           <p className="mt-1 text-[11px] text-zinc-600">
-            승인 요청의 action_type / tool_name과 매칭 — SQL과 파라미터뿐 아니라
+            승인 요청의 action_type / tool_name과 매칭: SQL과 파라미터뿐 아니라
             엔드포인트와 스케일 변경(create_custom_endpoint, add_reader_instance
             등)도 지정 가능. 값이 요청의 action_type과{" "}
             <strong className="text-zinc-400">정확히 일치</strong>해야
@@ -213,7 +213,7 @@ function PolicyForm({
             aria-label="approvers"
           />
           <p className="mt-1 text-[11px] text-zinc-600">
-            쉼표 또는 줄바꿈으로 구분 — 최소 1명 필수
+            쉼표 또는 줄바꿈으로 구분, 최소 1명 필수
           </p>
         </div>
 
@@ -491,7 +491,7 @@ export default function ApprovalPoliciesPage() {
         eyebrow={t("Configure")}
         title={t("Approval policies")}
         description={t(
-          "클러스터와 액션 타입별로 지정 승인자를 라우팅합니다. 매칭된 정책이 있으면 목록에 없는 관리자는 승인 불가 — 미매칭 요청은 모든 관리자에게 fallback.",
+          "클러스터와 액션 타입별로 지정 승인자를 라우팅합니다. 매칭된 정책이 있으면 목록에 없는 관리자는 승인 불가. 미매칭 요청은 모든 관리자에게 fallback.",
         )}
       />
 
@@ -501,7 +501,7 @@ export default function ApprovalPoliciesPage() {
           <p>
             <code className="text-emerald-300/80">*</code> 와일드카드는 모든
             cluster_id 또는 action_type에 매칭됩니다.{" "}
-            <strong className="text-zinc-300">most-specific-wins</strong> —
+            <strong className="text-zinc-300">most-specific-wins</strong>:
             cluster_id + action_type 둘 다 구체적인 정책이 우선 적용됩니다.
           </p>
           <p>
@@ -514,7 +514,7 @@ export default function ApprovalPoliciesPage() {
           </p>
           <p>
             <code className="text-zinc-400">action_type</code>은 승인 요청의
-            action_type / tool_name과 비교합니다 — 예:{" "}
+            action_type / tool_name과 비교합니다. 예:{" "}
             <code className="text-zinc-400">execute_sql</code>,{" "}
             <code className="text-zinc-400">modify_parameter</code>,{" "}
             <code className="text-zinc-400">create_snapshot</code>.

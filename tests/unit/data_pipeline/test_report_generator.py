@@ -1,6 +1,6 @@
 """Tests for the report generator helpers.
 
-These focus on the deterministic pieces — _template_summary fallback and
+These focus on the deterministic pieces: _template_summary fallback and
 _build_summary_prompt construction. The Bedrock-invoke path is tested
 implicitly via Bedrock-failure simulation: the public entry point
 _write_nl_summary must fall back to _template_summary when bedrock-runtime
@@ -102,7 +102,7 @@ def test_build_summary_prompt_handles_no_slow_no_alerts():
 
 @patch.object(handler, "boto3")
 def test_write_nl_summary_falls_back_on_bedrock_error(mock_boto3):
-    """If invoke_model throws, the public entry point must NOT raise — it
+    """If invoke_model throws, the public entry point must NOT raise: it
     falls back to the deterministic template so the report row always
     has a usable summary column."""
     mock_bedrock = MagicMock()
@@ -139,7 +139,7 @@ def test_write_nl_summary_falls_back_when_bedrock_returns_empty(mock_boto3):
     mock_boto3.client.return_value = mock_bedrock
 
     text = handler._write_nl_summary("prod-pg-1", "2026-05-28", _sample_data())
-    assert text  # not empty — template kicked in
+    assert text  # not empty, template kicked in
     assert "prod-pg-1" in text
 
 

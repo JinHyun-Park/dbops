@@ -16,14 +16,14 @@ Query Lab는 SQL을 EXPLAIN(`/api/explain` → plan-tree), 분석(`handleAnalyze
 
 ### 1.2 핵심 설계 결정 (안전)
 
-- **제안은 advisory.** 의미적 동등성 자동 보장 안 함 — 에이전트 생성, DBA 검토와 검증, **실행/적용 없음**.
-- **🔴 before/after는 plan-only(추정 cost)로 비교한다 — 제안 SQL을 절대 실행하지 않는다.**
+- **제안은 advisory.** 의미적 동등성 자동 보장 안 함: 에이전트 생성, DBA 검토와 검증, **실행/적용 없음**.
+- **🔴 before/after는 plan-only(추정 cost)로 비교한다. 제안 SQL을 절대 실행하지 않는다.**
   현재 `/api/explain`(PG)은 `EXPLAIN (ANALYZE, …)` 로 **쿼리를 실제 실행**한다. 에이전트가 만든
   **미검증** 재작성을 ANALYZE하면 그 SELECT를 실행하게 되어(슬로우 쿼리 재작성이라 비싸고
   미검증이라 위험) 안 된다. → `/api/explain`에 `analyze` 플래그(기본 true=하위호환; rewrite 경로는
   **false=plan-only**, ANALYZE 없는 추정 cost)를 추가하고, before/after는 **양쪽 모두 plan-only
   추정 total cost**로 비교한다(공정, 안전).
-- **기존 인프라 재사용** — `streamChat`(에이전트), `/api/explain`(plan-only 모드 추가), plan-tree
+- **기존 인프라 재사용**: `streamChat`(에이전트), `/api/explain`(plan-only 모드 추가), plan-tree
   컴포넌트. 새 MCP 툴/CDK 없음. 새 openapi: `/api/explain`에 옵셔널 필드 추가뿐(라우트 불변).
 
 ### 1.3 Goals
@@ -33,14 +33,14 @@ Query Lab는 SQL을 EXPLAIN(`/api/explain` → plan-tree), 분석(`handleAnalyze
 - 제안 스트리밍 완료 후: 응답에서 `sql` 블록 추출 → **원본과 제안 모두 plan-only EXPLAIN** →
   **추정 total cost before/after + 양쪽 plan-tree** 비교 렌더. 제안 SQL이 invalid면 EXPLAIN 실패를
   곱게 표시(advisory).
-- `/api/explain`에 `analyze: boolean`(기본 true) 추가 — false면 PG도 `EXPLAIN (BUFFERS,
+- `/api/explain`에 `analyze: boolean`(기본 true) 추가: false면 PG도 `EXPLAIN (BUFFERS,
 VERBOSE, FORMAT JSON)`(ANALYZE 제외, 실행 안 함). SELECT 제한, RBAC 등 기존 가드 유지.
 - advisory 배너 + 기존 EXPLAIN/analyze/preset 동작 불변.
 
 ### 1.4 Non-Goals
 
 - 의미적 동등성 보장 / 재작성 자동 실행과 적용(쓰기 → 승인 게이트, 범위 밖).
-- 제안 SQL의 ANALYZE(실제 실행) — plan-only만.
+- 제안 SQL의 ANALYZE(실제 실행): plan-only만.
 - 새 performance MCP 툴, 새 REST 라우트, CDK.
 
 ## 2. Architecture
@@ -59,7 +59,7 @@ VERBOSE, FORMAT JSON)`(ANALYZE 제외, 실행 안 함). SELECT 제한, RBAC 등 
 ````
 
 plan-only EXPLAIN은 쿼리를 실행하지 않으므로 미검증 제안 SQL에도 안전. cost는 planner 추정치
-(real timing 아님) — advisory 비교로 충분하고 안전이 우선.
+(real timing 아님): advisory 비교로 충분하고 안전이 우선.
 
 ## 3. Components
 
@@ -83,10 +83,10 @@ plan-only EXPLAIN은 쿼리를 실행하지 않으므로 미검증 제안 SQL에
 
 ## 4. Safety
 
-- 읽기 전용, advisory. 제안 SQL은 **plan-only EXPLAIN(실행 안 함)** 으로만 평가 — 미검증 SQL 실행
+- 읽기 전용, advisory. 제안 SQL은 **plan-only EXPLAIN(실행 안 함)** 으로만 평가: 미검증 SQL 실행
   위험 제거. ANALYZE 경로는 사용자 직접 EXPLAIN(기존, analyze 기본 true)에서만.
 - 기존 SELECT-only, 서버측 RBAC, 인증 가드 유지. 새 권한과 엔드포인트 없음.
-- 프롬프트/EXPLAIN은 사용자 SQL + 자신의 plan만 — 외부 유출 없음.
+- 프롬프트/EXPLAIN은 사용자 SQL + 자신의 plan만: 외부 유출 없음.
 
 ## 5. Increments
 

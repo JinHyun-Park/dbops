@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make ElastiCache (Redis/Valkey/Memcached) a registered, metric-collected, dashboard-visible DBOps engine family — read-only, CloudWatch-only — reusing the existing multi-engine abstractions.
+**Goal:** Make ElastiCache (Redis/Valkey/Memcached) a registered, metric-collected, dashboard-visible DBOps engine family (read-only, CloudWatch-only) reusing the existing multi-engine abstractions.
 
 **Architecture:** Add an `elasticache` engine family to the canonical `engine_family()`/`CAPABILITIES` model (4 synced Python copies + the frontend mirror), then fill the existing engine branch points: registration/discovery in `api/clusters`, a CloudWatch ETL collector + dispatch branch, and a dashboard panel. No new infra construct.
 
@@ -11,17 +11,17 @@
 ## Global Constraints
 
 - **No `Co-Authored-By: Claude` trailer** in any commit (user rule).
-- **5-copy sync — VERBATIM:** `engine_family()` + `CAPABILITIES` are duplicated in `api/clusters/engine_family.py`, `api/dashboard/engine_family.py`, `data-pipeline/etl_collector/collectors/engine_family.py`, `mcp-servers/mcp_servers/shared/engine_family.py`. All four MUST get the identical edit. The frontend mirror is `frontend/src/lib/engine.ts`.
+- **5-copy sync, VERBATIM:** `engine_family()` + `CAPABILITIES` are duplicated in `api/clusters/engine_family.py`, `api/dashboard/engine_family.py`, `data-pipeline/etl_collector/collectors/engine_family.py`, `mcp-servers/mcp_servers/shared/engine_family.py`. All four MUST get the identical edit. The frontend mirror is `frontend/src/lib/engine.ts`.
 - **Engines in scope:** Redis OSS, Valkey, Memcached (node clusters + Redis/Valkey replication groups incl. cluster-mode). Serverless ElastiCache OUT of scope.
 - **EC-1 is read-only:** only `elasticache:Describe*` + CloudWatch reads. No mutation, no secret, no protocol connection (those are EC-3/EC-4).
 - **Registry PK = the real ElastiCache name** (matches the `^[a-zA-Z0-9-]{1,63}$` validator; no slug, unlike DynamoDB).
-- **metric_snapshots row shape:** `INSERT INTO metric_snapshots (cluster_id, ts, metric_type, value, dimensions)` — `ts` is `timestamptz`, `dimensions` is `jsonb`, `ON CONFLICT DO NOTHING`. Cluster-level rows carry `dimensions = '{}'`.
+- **metric_snapshots row shape:** `INSERT INTO metric_snapshots (cluster_id, ts, metric_type, value, dimensions)`: `ts` is `timestamptz`, `dimensions` is `jsonb`, `ON CONFLICT DO NOTHING`. Cluster-level rows carry `dimensions = '{}'`.
 - **Capability flags declared now, behavior later:** `CAPABILITIES[elasticache]` declares `findings`/`simulation`/`elasticache_write`/`live_read` but EC-1 acts only on metrics; later specs flip behavior without re-touching the map.
 - If any new API route is added, regenerate `frontend/public/openapi.json` via `python tools/openapi_gen.py` (route-table parity test). EC-1 adds NO new route (registration reuses `/api/clusters`).
 
 ---
 
-### Task 1: Engine-family model — add `elasticache` to all 5 copies
+### Task 1: Engine-family model (add `elasticache` to all 5 copies)
 
 **Files:**
 
@@ -387,7 +387,7 @@ def _register_elasticache(table, body):
         print(f"[discover] elasticache failed in {region}: {e}")
 ```
 
-(Adapt the variable names — `discovered`, `account_id`, `role_arn` — to whatever the existing discover function uses; read the function first and match it. If the discover entries use a different dict shape, match that shape.)
+(Adapt the variable names `discovered`, `account_id`, `role_arn` to whatever the existing discover function uses; read the function first and match it. If the discover entries use a different dict shape, match that shape.)
 
 - [ ] **Step 8: Add IAM.** In `cdk/stacks/agent_stack.py`, the clusters Lambda IAM block (~line 747, where `dynamodb:ListTables`/`DescribeTable` is granted), add a statement (or extend) for ElastiCache describe:
 
@@ -421,7 +421,7 @@ git commit -m "feat(elasticache): register + discover ElastiCache clusters (repl
 
 - Create: `data-pipeline/etl_collector/collectors/elasticache_cw_collector.py`
 - Modify: `data-pipeline/etl_collector/handler.py` (`_collect_one` dispatch branch + import)
-- Modify: `cdk/stacks/agent_stack.py` (ETL Lambda IAM: elasticache describe — only if the ETL role lacks it; cloudwatch read it already has)
+- Modify: `cdk/stacks/agent_stack.py` (ETL Lambda IAM: elasticache describe: only if the ETL role lacks it; cloudwatch read it already has)
 - Test: `tests/unit/data_pipeline/test_elasticache_collector.py` (create)
 
 **Interfaces:**
@@ -586,7 +586,7 @@ def collect_elasticache_metrics(cw, ec, cache_execute, cluster_id, resource_name
 from collectors.elasticache_cw_collector import collect_elasticache_metrics
 ```
 
-(match the existing import style — the dynamodb/docdb collectors are imported the same way; check the top of the file.)
+(match the existing import style: the dynamodb/docdb collectors are imported the same way; check the top of the file.)
 
 Then the branch:
 
@@ -608,7 +608,7 @@ Then the branch:
 
 (No findings collector in EC-1.)
 
-- [ ] **Step 6: Add ETL Lambda IAM if missing.** In `cdk/stacks/agent_stack.py`, find the ETL collector Lambda's IAM. It already has `cloudwatch:GetMetricStatistics`/`GetMetricData` (used for RDS). Add elasticache describe ONLY if the collector calls describe (this collector does not call describe in EC-1 — it uses `resource_name` from the registry — so `ec` client is passed but unused for metrics; you may still grant `elasticache:DescribeReplicationGroups`/`DescribeCacheClusters` for forward-compat). If the ETL role already covers `cloudwatch:GetMetricStatistics` broadly, no metric-IAM change is needed. Verify and add the elasticache describe statement to the ETL Lambda role if absent.
+- [ ] **Step 6: Add ETL Lambda IAM if missing.** In `cdk/stacks/agent_stack.py`, find the ETL collector Lambda's IAM. It already has `cloudwatch:GetMetricStatistics`/`GetMetricData` (used for RDS). Add elasticache describe ONLY if the collector calls describe (this collector does not call describe in EC-1: it uses `resource_name` from the registry, so `ec` client is passed but unused for metrics; you may still grant `elasticache:DescribeReplicationGroups`/`DescribeCacheClusters` for forward-compat). If the ETL role already covers `cloudwatch:GetMetricStatistics` broadly, no metric-IAM change is needed. Verify and add the elasticache describe statement to the ETL Lambda role if absent.
 
 - [ ] **Step 7: Run tests + synth.**
 
@@ -636,9 +636,9 @@ git commit -m "feat(elasticache): CloudWatch ETL collector + dispatch branch (Re
 
 - Consumes: the same metrics-fetch hook/props the `dynamodb-overview-panel.tsx` uses (read it first to match the data-loading pattern + props); `metric_type` series `memory_usage_pct`, `cache_hits`, `cache_misses`, `evictions`, `curr_connections`, `cache_cpu`, `engine_cpu`, `replication_lag`, `net_in`, `net_out`.
 
-- [ ] **Step 1: Read the template.** Read `frontend/src/components/dashboard/dynamodb-overview-panel.tsx` fully — its props (cluster id, time range), how it fetches metric series (which api-client function / batch-timeseries call), and how it renders cards/charts. Read the `fam === "dynamodb"` branch in `frontend/src/app/dashboard/page.tsx` to see exactly how the panel is mounted (props passed).
+- [ ] **Step 1: Read the template.** Read `frontend/src/components/dashboard/dynamodb-overview-panel.tsx` fully: its props (cluster id, time range), how it fetches metric series (which api-client function / batch-timeseries call), and how it renders cards/charts. Read the `fam === "dynamodb"` branch in `frontend/src/app/dashboard/page.tsx` to see exactly how the panel is mounted (props passed).
 
-- [ ] **Step 2: Create `frontend/src/components/dashboard/elasticache-overview-panel.tsx`.** Mirror `dynamodb-overview-panel.tsx`'s structure and data-loading exactly; render ElastiCache cards: **Memory usage %** (`memory_usage_pct`), **Hit rate** (derived: `cache_hits / (cache_hits + cache_misses)`, or `get_hits/(get_hits+get_misses)` for Memcached), **Evictions** (`evictions`), **Connections** (`curr_connections`), **CPU / Engine CPU** (`cache_cpu`, `engine_cpu`), **Replication lag** (`replication_lag`, hidden when the series is empty — Memcached / single-node), **Network throughput** (`net_in`/`net_out`). Use the existing chart components the dynamodb/docdb panels use (Recharts/Tremor per the codebase). Numbers ≥1000 use the existing `fmtDecimal`/`fmtExact` helpers (project rule); percentages/durations use raw `.toFixed`. Korean labels for descriptions/empty-states; metric jargon (hit rate, eviction, replication lag) stays as-is.
+- [ ] **Step 2: Create `frontend/src/components/dashboard/elasticache-overview-panel.tsx`.** Mirror `dynamodb-overview-panel.tsx`'s structure and data-loading exactly; render ElastiCache cards: **Memory usage %** (`memory_usage_pct`), **Hit rate** (derived: `cache_hits / (cache_hits + cache_misses)`, or `get_hits/(get_hits+get_misses)` for Memcached), **Evictions** (`evictions`), **Connections** (`curr_connections`), **CPU / Engine CPU** (`cache_cpu`, `engine_cpu`), **Replication lag** (`replication_lag`, hidden when the series is empty: Memcached / single-node), **Network throughput** (`net_in`/`net_out`). Use the existing chart components the dynamodb/docdb panels use (Recharts/Tremor per the codebase). Numbers ≥1000 use the existing `fmtDecimal`/`fmtExact` helpers (project rule); percentages/durations use raw `.toFixed`. Korean labels for descriptions/empty-states; metric jargon (hit rate, eviction, replication lag) stays as-is.
 
 - [ ] **Step 3: Mount the panel** in `frontend/src/app/dashboard/page.tsx`. Import it, and add the branch next to the existing `{fam === "dynamodb" && (...)}` / `{fam === "documentdb" && (...)}` blocks:
 
@@ -650,7 +650,7 @@ git commit -m "feat(elasticache): CloudWatch ETL collector + dispatch branch (Re
 }
 ```
 
-(Match the EXACT prop names the sibling panels receive — read the dynamodb branch and copy its prop shape.)
+(Match the EXACT prop names the sibling panels receive: read the dynamodb branch and copy its prop shape.)
 
 - [ ] **Step 4: Build.**
 
@@ -668,7 +668,7 @@ git commit -m "feat(elasticache): dashboard overview panel (memory/hit-rate/evic
 
 ## Post-implementation (controller, after all tasks reviewed clean)
 
-- Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD` — focus: all 4 engine_family.py copies + engine.ts mirror are byte-consistent for the new family; registration stores the correct `resource_type`/`resource_details`; the collector's metric_type strings match what the dashboard panel reads; read-only (no mutation/secret/protocol); no regression to relational/docdb/dynamodb branches.
-- Deploy dev: `cdk deploy dbops-dev-data dbops-dev-agent` (ETL collector lives in the **data** stack; clusters Lambda + IAM in the **agent** stack — confirm which stack each changed Lambda is in and deploy those). Frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-123456789012 --delete --exclude config.json --region ap-northeast-2` → CloudFront invalidation `E1234567890ABC`.
-- Live smoke: register a real dev ElastiCache cluster (or, if none exists, create a small `cache.t4g.micro` Redis via a one-off — per the CDK-only-scope memory, a temporary test resource via AWS CLI is acceptable with an identifying tag + teardown). Confirm: register → `connection_status=ok` + correct `resource_details`; after one ETL cycle, `metric_snapshots` has elasticache rows; the dashboard renders the ElastiCache panel. If no cluster is available, verify the family/register/collector via unit + a registration dry-run against a non-existent name (→ 207 warning) and note the metrics path is unit-covered.
+- Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`, focus: all 4 engine_family.py copies + engine.ts mirror are byte-consistent for the new family; registration stores the correct `resource_type`/`resource_details`; the collector's metric_type strings match what the dashboard panel reads; read-only (no mutation/secret/protocol); no regression to relational/docdb/dynamodb branches.
+- Deploy dev: `cdk deploy dbops-dev-data dbops-dev-agent` (ETL collector lives in the **data** stack; clusters Lambda + IAM in the **agent** stack: confirm which stack each changed Lambda is in and deploy those). Frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-123456789012 --delete --exclude config.json --region ap-northeast-2` → CloudFront invalidation `E1234567890ABC`.
+- Live smoke: register a real dev ElastiCache cluster (or, if none exists, create a small `cache.t4g.micro` Redis via a one-off: per the CDK-only-scope memory, a temporary test resource via AWS CLI is acceptable with an identifying tag + teardown). Confirm: register → `connection_status=ok` + correct `resource_details`; after one ETL cycle, `metric_snapshots` has elasticache rows; the dashboard renders the ElastiCache panel. If no cluster is available, verify the family/register/collector via unit + a registration dry-run against a non-existent name (→ 207 warning) and note the metrics path is unit-covered.
 - Then `superpowers:finishing-a-development-branch`.

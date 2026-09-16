@@ -1,9 +1,9 @@
-"""N-① — POST /api/endpoint-requests + approve auto-execute.
+"""N-①: POST /api/endpoint-requests + approve auto-execute.
 
 POST /api/endpoint-requests invokes the operations Lambda's request_approval
 (origin="ui") to mint a payload-hashed approval. On approve, an origin=="ui"
 endpoint row is auto-executed by invoking the endpoint tool with approved=true.
-A CHAT row (no origin) of the same action_type must NOT auto-execute — the agent
+A CHAT row (no origin) of the same action_type must NOT auto-execute: the agent
 replays those, so auto-executing would double-execute the write.
 """
 
@@ -132,7 +132,7 @@ def test_post_create_invokes_request_approval_without_origin_then_stamps(monkeyp
     assert cc["custom"]["tool_name"] == "request_approval"
 
     # The trusted API Lambda stamps origin="ui" on the (approval_id, created_at)
-    # row — this is the ONLY writer of origin, so the agent can't forge it.
+    # row. This is the ONLY writer of origin, so the agent can't forge it.
     approvals_table.update_item.assert_called_once()
     up = approvals_table.update_item.call_args.kwargs
     assert up["Key"] == {"approval_id": "new-1", "created_at": "1700000000000"}
@@ -280,7 +280,7 @@ def test_approve_ui_row_auto_executes(monkeypatch):
 
 def test_approve_chat_row_does_not_execute(monkeypatch):
     """A chat-initiated row (NO origin) of the same action_type must NOT be
-    auto-executed — the agent replays it. Double-exec guard."""
+    auto-executed: the agent replays it. Double-exec guard."""
     _, lam = _wire(monkeypatch, approvals_rows=[_endpoint_row(origin=None)])
     r = handler.lambda_handler(
         _event(method="PUT", path="/api/approvals/aid-1", approval_id="aid-1",
@@ -306,7 +306,7 @@ def test_approve_ui_row_execute_failure_surfaced_no_crash(monkeypatch):
 
 
 # ===========================================================================
-# add_reader_instance auto-execute (P2-⑥ AZ scale-out runbook) — same gate:
+# add_reader_instance auto-execute (P2-⑥ AZ scale-out runbook), same gate:
 # origin=="ui" rows auto-execute; chat rows (no origin) must NOT (double-exec).
 # ===========================================================================
 
@@ -350,7 +350,7 @@ def test_approve_ui_add_reader_row_auto_executes(monkeypatch):
 
 
 def test_approve_chat_add_reader_row_does_not_execute(monkeypatch):
-    """A CHAT add_reader_instance row (N-③, NO origin) must NOT auto-execute —
+    """A CHAT add_reader_instance row (N-③, NO origin) must NOT auto-execute:
     the agent replays it. Prevents a double create_db_instance."""
     _, lam = _wire(monkeypatch, approvals_rows=[_reader_row(origin=None)])
     r = handler.lambda_handler(

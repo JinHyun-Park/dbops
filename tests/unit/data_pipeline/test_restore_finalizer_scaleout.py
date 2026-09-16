@@ -113,8 +113,8 @@ def test_approved_invokes_operations_lambda(monkeypatch):
     assert "config" in fake_boto3.client.call_args.kwargs
     kw = lambda_client.invoke.call_args.kwargs
     assert kw["FunctionName"] == "dbops-dev-operations-mcp"
-    # RequestResponse (NOT async Event): Lambda only delivers ClientContext —
-    # carrying the tool name — on synchronous invokes.
+    # RequestResponse (NOT async Event): Lambda only delivers ClientContext,
+    # carrying the tool name, on synchronous invokes.
     assert kw["InvocationType"] == "RequestResponse"
     # ClientContext decodes to the tool_name the operations handler reads.
     ctx = json.loads(base64.b64decode(kw["ClientContext"]))

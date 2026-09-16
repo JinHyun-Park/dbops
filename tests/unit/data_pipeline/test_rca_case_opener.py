@@ -28,7 +28,7 @@ class _FakeTable:
         page = self._pages[self._call]
         self._call += 1
         result = {"Items": page}
-        # Emit LastEvaluatedKey for all pages except the last — terminates correctly
+        # Emit LastEvaluatedKey for all pages except the last, terminates correctly
         if self._call < len(self._pages):
             result["LastEvaluatedKey"] = {"task_id": {"S": f"page{self._call}"}}
         return result
@@ -115,7 +115,7 @@ def test_opens_rca_case_with_inferred_action():
 
 
 def test_non_metric_candidate_opens_no_case():
-    """Non-metric RCA (no evidence.metric_type) must NOT open a case — false-resolved guard."""
+    """Non-metric RCA (no evidence.metric_type) must NOT open a case: false-resolved guard."""
     q = _capturing_query()
     tbl = _FakeTable([[
         {
@@ -230,9 +230,9 @@ def test_metric_backed_non_top_candidate_opens_case():
             "completed_at": "9999999999999",
             "result": {
                 "candidates": [
-                    # rank-1: non-metric (blocking) — no metric_type in evidence
+                    # rank-1: non-metric (blocking), no metric_type in evidence
                     {"category": "blocking", "evidence": {"blocking_query": "SELECT 1 FOR UPDATE"}},
-                    # rank-2: metric-backed — should be chosen
+                    # rank-2: metric-backed, should be chosen
                     {"category": "metric_spike", "evidence": {"metric_type": "cpu"}},
                 ],
                 "recommendations": ["CPU 사용량을 줄이세요"],
@@ -247,7 +247,7 @@ def test_metric_backed_non_top_candidate_opens_case():
 
 
 def test_all_non_metric_candidates_opens_no_case():
-    """All candidates are non-metric — must open 0 cases."""
+    """All candidates are non-metric: must open 0 cases."""
     q = _capturing_query()
     tbl = _FakeTable([[
         {
@@ -268,14 +268,14 @@ def test_all_non_metric_candidates_opens_no_case():
 
 
 def test_missing_evidence_metric_type_skips_case():
-    """Candidate with no evidence.metric_type must be skipped — no false-resolved cases."""
+    """Candidate with no evidence.metric_type must be skipped: no false-resolved cases."""
     q = _capturing_query()
     tbl = _FakeTable([[
         {
             "task_id": "t7", "kind": "auto_rca", "status": "done", "cluster_id": "c1",
             "completed_at": "9999999999999",
             "result": {
-                # No evidence key at all — metric_type is absent
+                # No evidence key at all: metric_type is absent
                 "candidates": [{"category": "slow_query"}],
                 "recommendations": ["인덱스를 추가하세요"],
             },

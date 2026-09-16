@@ -40,7 +40,7 @@ MULTIENGINE_CHEATSHEET = """
   3. 용량 여유가 있는데도 throttle 발생 → hot partition 의심
 - Hot partition: 특정 partition key에 트래픽 집중 → 전체 WCU/RCU 헤드룸이 있어도 throttle 발생.
   진단: `get_maintenance_findings`의 recommendation에서 partition-key 분포 힌트 확인.
-  대응: partition key 설계 변경(write sharding, composite key) — 현재 플랫폼에서 직접 변경 불가; 권고안 제시.
+  대응: partition key 설계 변경(write sharding, composite key). 현재 플랫폼에서 직접 변경 불가; 권고안 제시.
 - GSI throttling: GSI는 기본 테이블과 별도 throughput 할당. GSI RCU/WCU도 독립 모니터링 필요.
 - Billing mode: PROVISIONED (예측 가능한 트래픽) vs PAY_PER_REQUEST (버스트/불규칙 트래픽).
   전환 자체는 쓰기 작업 → 현재 플랫폼에서 approve 필요.
@@ -53,7 +53,7 @@ MULTIENGINE_CHEATSHEET = """
 - Cursor timeout: 장시간 열린 cursor → CursorNotFound 에러. 원인은 느린 쿼리 또는 cursor 미닫기.
   대응: 쿼리 최적화, 애플리케이션에서 cursor 명시적 close.
 - Buffer cache hit ratio: 낮으면(< 90%) 메모리 부족 → 인스턴스 클래스 업그레이드 고려.
-  DocumentDB는 메모리 바운드 엔진 — 작업 셋이 RAM에 들어와야 성능 유지.
+  DocumentDB는 메모리 바운드 엔진: 작업 셋이 RAM에 들어와야 성능 유지.
 - 느린 op: profiler 로그가 `query_stats`에 누적되므로 `get_top_queries` /
   `get_slow_queries` / `detect_regressions` 로 조회합니다. 숫자는 profiler_threshold_ms를
   넘긴 op만의 집계이고 `query_text` 는 op shape(op + namespace + 필터 키)이라 EXPLAIN
@@ -73,11 +73,11 @@ MULTIENGINE_CHEATSHEET = """
 2. `get_maintenance_findings(cluster_id)` 호출 → findings + recommendations 확인
 3. findings 기반으로 위 항목과 매핑하여 원인 분석 및 권고안 제시
 4. 쓰기/구성 변경이 필요한 경우 권고안만 제공 (직접 remediation 불가)
-5. 시뮬레이션 도구(upgrade/parameter/DDL/scaling)는 Aurora 전용 — DocumentDB/DynamoDB엔
+5. 시뮬레이션 도구(upgrade/parameter/DDL/scaling)는 Aurora 전용. DocumentDB/DynamoDB엔
    호출 금지(게이트웨이가 unsupported_engine 반환). 용량/비용 what-if는 findings 권고안으로 대체.
 
 ## 독립형 RDS 인스턴스 (비-Aurora MySQL/SQL Server) 참고
-쿼리 통계는 캐시 기반 `get_top_queries` 등이 엔진 무관하게 그대로 동작 — Aurora MySQL과
+쿼리 통계는 캐시 기반 `get_top_queries` 등이 엔진 무관하게 그대로 동작. Aurora MySQL과
 동일한 진단 흐름(위 Aurora 섹션)을 그대로 사용하면 됩니다. SQL 직접 실행은 MySQL/SQL
 Server 모두 가능. SQL Server 진단은 DMV 기반(`sys.dm_exec_query_stats` 등)으로 쿼리/
 세션/대기 통계가 캐시에 수집됩니다.

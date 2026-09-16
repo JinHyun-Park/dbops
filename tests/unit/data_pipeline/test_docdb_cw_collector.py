@@ -1,4 +1,4 @@
-"""Unit tests for DocumentDB CloudWatch collector (TDD — write before implementation)."""
+"""Unit tests for DocumentDB CloudWatch collector (TDD, write before implementation)."""
 
 import importlib.util
 import sys
@@ -51,7 +51,7 @@ def _make_docdb(writer_id="docdb-1-writer"):
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — namespace is AWS/DocDB, writer instance dim used for instance metrics,
+# Test 1: namespace is AWS/DocDB, writer instance dim used for instance metrics,
 #           cluster dim used for cluster metrics, meta upsert includes resource_details
 # ---------------------------------------------------------------------------
 
@@ -115,7 +115,7 @@ def test_uses_docdb_namespace_and_writer_instance_dim():
 
 
 # ---------------------------------------------------------------------------
-# Test 2 — empty DBClusterMembers: no instance-scoped metrics queried
+# Test 2: empty DBClusterMembers: no instance-scoped metrics queried
 # ---------------------------------------------------------------------------
 
 def test_no_writer_skips_instance_metrics():
@@ -150,7 +150,7 @@ def test_no_writer_skips_instance_metrics():
 
 
 # ---------------------------------------------------------------------------
-# Test 3 — DatabaseConnectionsLimit is queried with DBInstanceIdentifier dim
+# Test 3: DatabaseConnectionsLimit is queried with DBInstanceIdentifier dim
 #           and inserted as metric_type='db_connections_limit'
 # ---------------------------------------------------------------------------
 

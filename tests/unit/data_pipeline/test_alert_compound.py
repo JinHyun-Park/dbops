@@ -8,7 +8,7 @@ path. These tests make sure:
   - Aggregator selection (max / min / avg / last) maps to the right SQL
   - Legacy paths still work when `conditions` is absent
 
-We mock the SQL fetch callback so the tests stay pure logic — no RDS."""
+We mock the SQL fetch callback so the tests stay pure logic, no RDS."""
 
 import importlib.util
 import sys
@@ -53,7 +53,7 @@ def _stub_query(returns_by_metric: dict[str, float | None]):
 
 
 def test_operand_no_data_does_not_match(h):
-    """Absent metric data must never produce a fire — explicit no-match,
+    """Absent metric data must never produce a fire: explicit no-match,
     not "true because the absence is also not a fail"."""
     q = _stub_query({})
     matched, obs, summary = h._evaluate_operand(
@@ -89,7 +89,7 @@ def test_operand_below_threshold(h):
 
 
 def test_operand_invalid_comparison_rejected(h):
-    """A rule with garbage comparison must not silently match — we
+    """A rule with garbage comparison must not silently match: we
     return False with an "invalid operand" summary."""
     q = _stub_query({"cpu": 100})
     matched, _, summary = h._evaluate_operand(
@@ -174,7 +174,7 @@ def test_compound_or_all_below_does_not_fire(h):
 
 
 def test_default_logic_is_and(h):
-    """Missing/empty `logic` field must default to AND, not OR — failing
+    """Missing/empty `logic` field must default to AND, not OR, failing
     safe (requires all conditions) instead of failing loud."""
     q = _stub_query({"cpu": 95, "db_connections": 20})  # only one fires
     matched, _ = h._evaluate_conditions(
@@ -200,7 +200,7 @@ def test_empty_operands_does_not_fire(h):
 
 def test_no_data_for_one_operand_in_and_does_not_fire(h):
     """AND with one operand having no data and another firing must NOT
-    fire — incomplete signal."""
+    fire, incomplete signal."""
     q = _stub_query({"cpu": 95})  # db_connections absent
     matched, _ = h._evaluate_conditions(
         q,
@@ -217,7 +217,7 @@ def test_no_data_for_one_operand_in_and_does_not_fire(h):
 
 
 def test_no_data_for_one_operand_in_or_does_fire_if_other_fires(h):
-    """OR with one firing and one absent — the firing one wins, total True."""
+    """OR with one firing and one absent: the firing one wins, total True."""
     q = _stub_query({"cpu": 95})
     matched, _ = h._evaluate_conditions(
         q,

@@ -1,4 +1,4 @@
-"""ElastiCache live deep-read — read-only Redis/Valkey/Memcached inspector.
+"""ElastiCache live deep-read: read-only Redis/Valkey/Memcached inspector.
 
 Connects over the native protocol from the in-VPC operations MCP Lambda and runs
 a FIXED allowlist of read-only inspector commands (Redis: INFO, SLOWLOG GET,

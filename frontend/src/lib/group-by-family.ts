@@ -39,7 +39,7 @@ export function displayName(it: HasEngine): string {
   return it.resource_name || it.cluster_id;
 }
 
-// Finer-grained grouping for display — relational splits into PG vs MySQL.
+// Finer-grained grouping for display: relational splits into PG vs MySQL.
 // (groupByEngineFamily still groups both under "relational" for capability gating.)
 export function groupByEngineGroup<T extends HasEngine>(
   items: T[],

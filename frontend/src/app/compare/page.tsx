@@ -47,7 +47,7 @@ interface MetricSpec {
   fmt?: (v: number) => string;
 }
 
-// Subset of dashboard metrics — fits 2x3 grid cleanly and covers the signals
+// Subset of dashboard metrics: fits 2x3 grid cleanly and covers the signals
 // a DBA usually compares (load, capacity, throughput).
 const METRICS: MetricSpec[] = [
   { id: "cpu", label: "CPU %", unit: "%", fmt: (v) => v.toFixed(1) },
@@ -103,9 +103,9 @@ function n(v: unknown): number {
 }
 
 // Merge two time series into a single chart-friendly array. The "B" series is
-// reindexed so points align with "A" by relative position (0, 5min, 10min, …)
-// — only practical way to overlay last-week vs this-week, since absolute ts
-// values differ by 7 days.
+// reindexed so points align with "A" by relative position (0, 5min, 10min, …).
+// This is the only practical way to overlay last-week vs this-week, since
+// absolute ts values differ by 7 days.
 function mergeForChart(
   a: SeriesPoint[],
   b: SeriesPoint[],
@@ -164,7 +164,7 @@ export default function ComparePage() {
   const [seriesB, setSeriesB] = useState<Record<string, SeriesPoint[]>>({});
 
   // Distinguish "the registry genuinely has <2 clusters" from "the list failed
-  // to load" — the old code swallowed failures and showed the misleading
+  // to load": the old code swallowed failures and showed the misleading
   // "register more clusters" banner with no way to retry short of a reload.
   const [clustersError, setClustersError] = useState(false);
 
@@ -256,7 +256,7 @@ export default function ComparePage() {
   const metricIds = visibleMetrics.map((m) => m.id);
   const metricsKey = metricIds.join(",");
 
-  // Cluster mode — fetch both clusters in parallel.
+  // Cluster mode: fetch both clusters in parallel.
   useEffect(() => {
     if (mode !== "cluster" || !clusterA || !clusterB || metricIds.length === 0)
       return;
@@ -278,7 +278,7 @@ export default function ComparePage() {
     };
   }, [mode, clusterA, clusterB, hours, metricsKey]);
 
-  // Period mode — fetch same cluster twice with different offsets.
+  // Period mode: fetch same cluster twice with different offsets.
   useEffect(() => {
     if (mode !== "period" || !periodCluster || metricIds.length === 0) return;
     let cancelled = false;
@@ -299,7 +299,7 @@ export default function ComparePage() {
     };
   }, [mode, periodCluster, hours, metricsKey]);
 
-  // Instance mode — fetch instances when the cluster changes and set defaults.
+  // Instance mode: fetch instances when the cluster changes and set defaults.
   useEffect(() => {
     if (!instanceCluster || mode !== "instance") return;
     fetchClusterInstances(instanceCluster)
@@ -314,7 +314,7 @@ export default function ComparePage() {
       .catch((e) => console.error("instances fetch failed:", e));
   }, [instanceCluster, mode]);
 
-  // Instance load effect — fetch both instances in parallel.
+  // Instance load effect: fetch both instances in parallel.
   useEffect(() => {
     if (
       mode !== "instance" ||
@@ -515,7 +515,7 @@ export default function ComparePage() {
         <div className="border border-amber-500/30 bg-amber-500/5 text-amber-300 text-sm px-4 py-3 flex items-center justify-between gap-3 mb-4">
           <span>
             A({FAMILY_META[famA].label})와 B({FAMILY_META[famB].label})가 다른
-            엔진 패밀리입니다 — 같은 패밀리끼리만 비교할 수 있습니다. B를
+            엔진 패밀리입니다. 같은 패밀리끼리만 비교할 수 있습니다. B를
             초기화합니다.
           </span>
           <button
@@ -538,7 +538,7 @@ export default function ComparePage() {
       {clustersError ? (
         <div className="border border-rose-500/40 bg-rose-500/10 text-rose-300 text-sm px-4 py-3 flex items-center justify-between gap-3">
           <span>
-            클러스터 목록을 불러오지 못했습니다 — 네트워크/세션 문제일 수
+            클러스터 목록을 불러오지 못했습니다. 네트워크/세션 문제일 수
             있습니다.
           </span>
           <button
@@ -615,7 +615,7 @@ export default function ComparePage() {
                             formatter={(value: unknown) => {
                               const num = Number(value);
                               if (!Number.isFinite(num))
-                                return String(value ?? "—");
+                                return String(value ?? "-");
                               return m.fmt ? m.fmt(num) : String(num);
                             }}
                           />
@@ -728,7 +728,7 @@ function ClusterPicker({
       >
         {clusters.length === 0 && <option value="">(no clusters)</option>}
         {groupSections.length === 1
-          ? // Single group — no optgroup needed, just plain options.
+          ? // Single group: no optgroup needed, just plain options.
             groupSections[0].items.map((c) => (
               <option key={c.cluster_id} value={c.cluster_id}>
                 {displayName(c)}

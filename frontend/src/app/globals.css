@@ -2,7 +2,7 @@
 @plugin "@tailwindcss/typography";
 
 /* ========================================================================
-   DBOps design tokens — see /DESIGN.md
+   DBOps design tokens: see /DESIGN.md
    ======================================================================== */
 :root {
   /* Surfaces */
@@ -59,11 +59,11 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* (Grain overlay removed — Linear/Vercel aesthetic prefers flat
+/* (Grain overlay removed: Linear/Vercel aesthetic prefers flat
    surfaces. Brought a vintage editorial feel that fought the rest of
    the design refresh.) */
 
-/* Selection highlight — monochrome to match the Linear-style refresh
+/* Selection highlight: monochrome to match the Linear-style refresh
    (the previous amber-tinted selection was the last amber leak). */
 ::selection {
   background: rgba(255, 255, 255, 0.18);
@@ -84,13 +84,13 @@ html[data-theme="light"] ::selection {
    overlay and selection color also flip with the theme.
    ========================================================================= */
 html[data-theme="light"] {
-  /* v3 — tuned for the chat panel specifically.
+  /* v3: tuned for the chat panel specifically.
      v2 collapsed the contrast ladder around the warm page tone, so the
      conversation sidebar (bg-zinc-950/60) read flat against the main card.
      We give the translucent surfaces a clearly different fill so the
      side-panel separates from the white message canvas, and we strengthen
      the text hierarchy (nav labels were too pale at #6e6e69). */
-  --surface-base: #f5f4ef; /* page — warm off-white */
+  --surface-base: #f5f4ef; /* page: warm off-white */
   --surface-raised: #ffffff; /* main content card */
   --surface-inset: #ebe9e2; /* input / code block / recessed strip */
   --border-subtle: #d6d3c8; /* clearly visible hairline on white */
@@ -109,7 +109,7 @@ html[data-theme="light"] body {
 }
 
 html[data-theme="light"] body::before {
-  /* Mute the grain overlay on light — it reads as dirt otherwise. */
+  /* Mute the grain overlay on light: it reads as dirt otherwise. */
   display: none;
 }
 
@@ -133,7 +133,7 @@ html[data-theme="light"] body::before {
    ========================================================================= */
 /* Surfaces.
    The dark theme uses bg-zinc-950 for both the page AND any side panels
-   that "float" on the page. In light we keep that pairing — page is the
+   that "float" on the page. In light we keep that pairing: page is the
    warm tint, and a side panel using `bg-zinc-950/N` reads as a slightly
    darker warm tone so it separates from the white main card sitting next
    to it. */
@@ -162,11 +162,11 @@ html[data-theme="light"] .bg-zinc-900 {
     0 1px 3px rgba(20, 20, 18, 0.08),
     0 0 0 1px rgba(20, 20, 18, 0.05);
 }
-/* Translucent card-on-dark variants — these are used for nested side panels
+/* Translucent card-on-dark variants: these are used for nested side panels
    (e.g. chat conversation list). On light they need to be visibly distinct
    from the white main canvas next to them, so we use the warm tint with a
    small step down. */
-/* EmptyState + maintenance-health row backgrounds use /30 — without the
+/* EmptyState + maintenance-health row backgrounds use /30: without the
    override they fall back to the dark zinc-900 token and read as solid
    black blocks on the warm page. Use a slightly warmer cream than /40 so
    the dashed-border empty state still reads as "softer than a card". */
@@ -196,7 +196,7 @@ html[data-theme="light"] .bg-zinc-800 {
   background-color: #ebe9e2;
 }
 
-/* Hover overlays — black-tinted alpha reads consistently whether the
+/* Hover overlays: black-tinted alpha reads consistently whether the
    underlying surface is white or warm-gray. */
 html[data-theme="light"] .bg-zinc-800\/40 {
   background-color: rgba(22, 22, 26, 0.06);
@@ -259,7 +259,7 @@ html[data-theme="light"] .divide-zinc-800 > * + * {
   border-color: #d6d3c8;
 }
 
-/* Form placeholders should be visibly faint — not the same color as
+/* Form placeholders should be visibly faint, not the same color as
    input text. Without this they inherit the input's `color` which we mapped
    to near-black above, making the placeholder look like a real value. */
 html[data-theme="light"] input::placeholder,
@@ -268,7 +268,7 @@ html[data-theme="light"] textarea::placeholder {
   opacity: 1;
 }
 
-/* Amber accent reads too bright on white — darken to amber-700 family for
+/* Amber accent reads too bright on white: darken to amber-700 family for
    primary fills, keep the lighter shades for fades/glows. The text color of
    amber-on-light buttons stays zinc-950 (effectively near-black) which is
    handled by the text-zinc-* mappings above. */
@@ -291,10 +291,10 @@ html[data-theme="light"] .text-amber-400 {
   color: #b45309;
 }
 html[data-theme="light"] .text-amber-400\/80 {
-  color: #92400e; /* amber-800 — solid 5.3:1 on cream (was rgba blend 3.58:1) */
+  color: #92400e; /* amber-800: solid 5.3:1 on cream (was rgba blend 3.58:1) */
 }
 html[data-theme="light"] .text-amber-400\/70 {
-  color: #92400e; /* amber-800 — solid 5.3:1 on cream (was rgba blend 3.30:1) */
+  color: #92400e; /* amber-800: solid 5.3:1 on cream (was rgba blend 3.30:1) */
 }
 html[data-theme="light"] .border-amber-500\/40 {
   border-color: rgba(180, 83, 9, 0.45);
@@ -318,12 +318,12 @@ html[data-theme="light"] .bg-amber-500\/5 {
   background-color: rgba(180, 83, 9, 0.06);
 }
 
-/* Orange family — used for the MySQL engine badge and the secondary tab in
+/* Orange family: used for the MySQL engine badge and the secondary tab in
    the cluster setup guide. Without overrides text-orange-300 stays at the
    default tailwind near-white-ish tint that washes out on the cream page.
    We collapse the 200/300/400 stops to orange-700 (#c2410c) so the badge
    has enough contrast against bg-orange-500/10, and convert the alpha
-   surfaces to the same warm-amber recipe used for amber/10–20. */
+   surfaces to the same warm-amber recipe used for amber/10-20. */
 html[data-theme="light"] .text-orange-200 {
   color: #9a3412;
 }
@@ -354,7 +354,7 @@ html[data-theme="light"] .bg-orange-500\/15 {
 html[data-theme="light"] .bg-orange-500\/20 {
   background-color: rgba(194, 65, 12, 0.18);
 }
-/* Light amber tints (100/200) used for emphasised text on amber-tinted bg —
+/* Light amber tints (100/200) used for emphasised text on amber-tinted bg:
    without these overrides they remain near-white and disappear on the cream
    page background. Match the rest of the amber family for light pages. */
 html[data-theme="light"] .text-amber-100 {
@@ -375,11 +375,11 @@ html[data-theme="light"] .text-amber-300\/80 {
 html[data-theme="light"] .text-amber-100\/90 {
   color: rgba(146, 64, 14, 0.92);
 }
-/* bg-amber-500/5 is too pale against the cream background — bump density */
+/* bg-amber-500/5 is too pale against the cream background: bump density */
 html[data-theme="light"] .bg-amber-500\/5 {
   background-color: rgba(180, 83, 9, 0.1);
 }
-/* amber-800 (used as solid badge bg in approval-card) — flip to a readable
+/* amber-800 (used as solid badge bg in approval-card): flip to a readable
    dark-amber on light pages while keeping the dark theme's near-black look. */
 html[data-theme="light"] .bg-amber-800 {
   background-color: #d97706;
@@ -495,7 +495,7 @@ html[data-theme="light"] .border-rose-500\/40 {
    StatusBadge, approval-card severity, events-panel severity rows etc.
    pick up "darker" tier classes (bg-emerald-900/50, border-amber-700)
    under the assumption of a dark canvas. In light mode they read as a
-   dark-green or dark-red block on cream — inverted from what the user
+   dark-green or dark-red block on cream, inverted from what the user
    needs. Remap to a light tinted background + the matching mid-tier
    border so the semantic color reads correctly. */
 html[data-theme="light"] .bg-emerald-900\/50,
@@ -534,7 +534,7 @@ html[data-theme="light"] .border-red-500 {
    which is invisible on the now-light banner background. Promote it to a
    readable dark-violet on light theme. */
 html[data-theme="light"] .text-purple-200 {
-  color: #581c87; /* deep violet — passes WCAG AA on the 10%-tinted bg */
+  color: #581c87; /* deep violet: passes WCAG AA on the 10%-tinted bg */
 }
 html[data-theme="light"] .text-purple-300 {
   color: #6d28d9;
@@ -567,7 +567,7 @@ html[data-theme="light"] .bg-zinc-950\/95 {
   background-color: rgba(245, 244, 239, 0.95);
 }
 
-/* Prose (react-markdown w/ prose-invert) — repaint for white pages.
+/* Prose (react-markdown w/ prose-invert): repaint for white pages.
 
    message-list.tsx and other ReactMarkdown containers stack lots of inline
    modifiers like `prose-strong:text-zinc-100` and `prose-code:text-amber-300`.
@@ -580,7 +580,7 @@ html[data-theme="light"] .bg-zinc-950\/95 {
    Cascade scoping means non-prose elements (e.g. `bg-zinc-100` elsewhere)
    keep their dark-theme value. */
 html[data-theme="light"] .prose-invert {
-  /* Tailwind v4 theme color tokens — only the ones we know modifiers use. */
+  /* Tailwind v4 theme color tokens: only the ones we know modifiers use. */
   --color-zinc-50: #16161a;
   --color-zinc-100: #16161a;
   --color-zinc-200: #1f1f23;
@@ -596,7 +596,7 @@ html[data-theme="light"] .prose-invert {
   --color-blue-300: #1d4ed8;
   --color-blue-400: #1d4ed8;
   /* Sky/emerald/rose tones referenced by inline `prose-strong:text-*`
-     modifiers in chat & query-lab — without these, light-theme assistant
+     modifiers in chat & query-lab: without these, light-theme assistant
      messages render colored text as near-white. */
   --color-sky-200: #1d4ed8;
   --color-sky-300: #1d4ed8;
@@ -610,7 +610,7 @@ html[data-theme="light"] .prose-invert {
   --color-red-200: #b91c1c;
   --color-red-300: #b91c1c;
 
-  /* typography plugin variables — body, lead, etc. */
+  /* typography plugin variables: body, lead, etc. */
   --tw-prose-body: #2e2d29;
   --tw-prose-headings: #16161a;
   --tw-prose-lead: #44443f;
@@ -638,8 +638,8 @@ html[data-theme="light"] .prose-invert {
   --tw-prose-invert-pre-bg: #1a1a18;
 }
 
-/* Code blocks inside prose use bg-zinc-900 which we mapped to white above —
-   that gives white-on-white code. Force a slightly recessed background for
+/* Code blocks inside prose use bg-zinc-900 which we mapped to white above.
+   That gives white-on-white code. Force a slightly recessed background for
    prose code/pre so it reads as a code surface. */
 html[data-theme="light"] .prose-invert code {
   background-color: #ebe9e2 !important;
@@ -654,7 +654,7 @@ html[data-theme="light"] .prose-invert pre code {
   color: inherit !important;
 }
 
-/* Print / save-as-PDF — chat conversation only.
+/* Print / save-as-PDF: chat conversation only.
  * The user hits the "🖨 pdf" button in the chat header, which calls
  * window.print(). We hide app chrome and force a clean light layout so
  * the saved PDF reads like a plain document.
@@ -697,12 +697,12 @@ html[data-theme="light"] .prose-invert pre code {
     color: #111 !important;
     border-color: #ccc !important;
   }
-  /* User bubble — invert blue→light gray border */
+  /* User bubble: invert blue→light gray border */
   .chat-printable [class*="bg-blue-600"] {
     background: white !important;
     border: 1px solid #888 !important;
   }
-  /* Assistant bubble — clean light gray */
+  /* Assistant bubble: clean light gray */
   .chat-printable [class*="bg-zinc-800"] {
     background: white !important;
     border: 1px solid #ccc !important;
@@ -719,34 +719,34 @@ html[data-theme="light"] .prose-invert pre code {
    - Each rule listed with its measured ratio in the original audit report.
    ========================================================================= */
 
-/* Sidebar nav hints on the active-item bg (#ddd9cc) — was 3.10:1 */
+/* Sidebar nav hints on the active-item bg (#ddd9cc), was 3.10:1 */
 html[data-theme="light"] .bg-zinc-800\/80 .text-zinc-600 {
   color: #4a4945;
 }
 
-/* amber-300 text on the zinc-800 inset surfaces — was 4.21:1 */
+/* amber-300 text on the zinc-800 inset surfaces, was 4.21:1 */
 html[data-theme="light"] .bg-zinc-800 .text-amber-300,
 html[data-theme="light"] .bg-zinc-850 .text-amber-300 {
   color: #7c2d12;
 }
 
-/* AND/OR badge — amber text on amber-tinted bg — was 3.89:1 */
+/* AND/OR badge: amber text on amber-tinted bg, was 3.89:1 */
 html[data-theme="light"] .bg-amber-500\/15.text-amber-300 {
   color: #7c2d12;
 }
 
-/* SLO empty-state body copy — amber-300/80 was unmapped (3.21:1) */
+/* SLO empty-state body copy: amber-300/80 was unmapped (3.21:1) */
 html[data-theme="light"] .text-amber-300\/80 {
   color: rgba(124, 45, 18, 0.92);
 }
 
-/* zinc-600 on the slightly darker inset surface (#edebe4) — was 3.67:1 */
+/* zinc-600 on the slightly darker inset surface (#edebe4), was 3.67:1 */
 html[data-theme="light"] .bg-zinc-800 .text-zinc-600,
 html[data-theme="light"] .bg-zinc-850 .text-zinc-600 {
   color: #4a4945;
 }
 
-/* emerald status badge text on the lightly tinted bg — was 3.96–4.10:1 */
+/* emerald status badge text on the lightly tinted bg, was 3.96-4.10:1 */
 html[data-theme="light"] .bg-emerald-500\/10.text-emerald-400 {
   color: #065f46;
 }
@@ -755,7 +755,7 @@ html[data-theme="light"] .bg-emerald-500\/10.text-emerald-400 {
    Linear-style micro motion (theme-independent)
    - Primary CTA buttons get a tiny scale-down on press for tactile feel.
    - Tappable nav rows get the same when held.
-   - We deliberately skip page-load card stagger animations — Recharts
+   - We deliberately skip page-load card stagger animations: Recharts
      paths interact poorly with transform animations mid-data-fetch.
    ========================================================================= */
 
@@ -770,7 +770,7 @@ a.bg-amber-500:active {
   transform: scale(0.97);
 }
 
-/* Sidebar nav rows — same press feedback so the bg fill feels tactile. */
+/* Sidebar nav rows: same press feedback so the bg fill feels tactile. */
 aside a.group {
   transition:
     background-color 150ms ease-out,
@@ -790,7 +790,7 @@ aside a.group:active {
 }
 
 /* =========================================================================
-   Primary CTA refresh — escape the "AI-built amber" identity.
+   Primary CTA refresh: escape the "AI-built amber" identity.
    Linear/Vercel use a near-monochrome primary (white on dark, black on
    light). We override .bg-amber-500 only when it lands on an actual
    button/link element so non-button uses (chart series, opacity badge
@@ -835,7 +835,7 @@ html[data-theme="light"] a.bg-amber-500:hover {
 }
 
 /* =========================================================================
-   Page-enter motion — subtle staggered fade for first paint.
+   Page-enter motion: subtle staggered fade for first paint.
    Targets Section blocks (they're the outermost rhythm unit). Triggers
    only on initial page load (CSS animation runs once and stops); a
    route change within the same React tree re-mounts the Section so it
@@ -881,7 +881,7 @@ section:nth-of-type(n + 6) {
    Mobile-safety for wide tables. Several pages render dense tabular
    data that doesn't fit a phone viewport. Adding overflow-x at the
    <table> element via media query so each affected page doesn't need
-   its own wrapper. The display:block flip is intentional — table-cell
+   its own wrapper. The display:block flip is intentional: table-cell
    layout doesn't honor overflow without the parent being a block. */
 @media (max-width: 767px) {
   table {
@@ -893,7 +893,7 @@ section:nth-of-type(n + 6) {
 }
 
 /* ========================================================================
-   Pointer affordances — Tailwind v4 dropped the implicit cursor:pointer
+   Pointer affordances: Tailwind v4 dropped the implicit cursor:pointer
    on <button>. Without this, clickable controls feel indistinguishable
    from static text since the mouse pointer stays as an arrow over
    everything. Restore the affordance globally and add it to the other

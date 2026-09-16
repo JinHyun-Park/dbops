@@ -137,7 +137,7 @@ export function clearTokens(): void {
   }
 }
 
-// Decode a JWT (no signature verification — exp/iat only).
+// Decode a JWT (no signature verification, exp/iat only).
 // Returns null on malformed input.
 function decodeJwt(
   token: string | null,
@@ -227,7 +227,7 @@ async function getPool(): Promise<CognitoUserPool> {
     });
     if (!pc)
       throw new Error(
-        "Cognito client id / user pool id missing — check /config.json",
+        "Cognito client id / user pool id missing. Check /config.json",
       );
     return new CognitoUserPool({
       UserPoolId: pc.userPoolId,
@@ -247,7 +247,7 @@ export interface Tokens {
 //   - status "new_password_required": the account is in FORCE_CHANGE_PASSWORD
 //     (admin-created user with a temporary password). The caller must collect a
 //     new password and call complete() to finish the challenge on the SAME
-//     CognitoUser instance — otherwise the invited user's first login dead-ends.
+//     CognitoUser instance, otherwise the invited user's first login dead-ends.
 export type SignInResult =
   | ({ status: "ok" } & Tokens)
   | {
@@ -277,8 +277,8 @@ export async function signIn(
       newPasswordRequired: () => {
         // Resolve with a continuation bound to THIS user instance. Pass {} as
         // required attributes: the pool's required attr (email) is already set
-        // at admin-creation time, and email/email_verified are immutable —
-        // passing them back errors. Extend only if the pool genuinely requires
+        // at admin-creation time, and email/email_verified are immutable.
+        // Passing them back errors. Extend only if the pool genuinely requires
         // a NEW attribute at first login.
         resolve({
           status: "new_password_required",
@@ -344,7 +344,7 @@ export function getUserFromToken(): { email?: string; sub?: string } | null {
 // admin if they have no group claim (single-admin deploys) or are in
 // dbops-admin; any other group set (dbops-viewer or otherwise) is denied.
 // This keeps existing single-admin deployments working without a migration.
-// Cosmetic gate only — the server's _is_admin is authoritative.
+// Cosmetic gate only: the server's _is_admin is authoritative.
 export function getUserGroups(): string[] {
   const claims = decodeJwt(getToken()) as {
     "cognito:groups"?: string[];
@@ -366,7 +366,7 @@ export function getUsername(): string | null {
 export function isAdmin(): boolean {
   const groups = getUserGroups();
   // Deny if a group set is present but lacks dbops-admin; empty groups (no
-  // claim) stays admin (single-admin default). Cosmetic gate only — the
+  // claim) stays admin (single-admin default). Cosmetic gate only: the
   // server enforces.
   if (groups.length > 0 && !groups.includes("dbops-admin")) return false;
   return true;

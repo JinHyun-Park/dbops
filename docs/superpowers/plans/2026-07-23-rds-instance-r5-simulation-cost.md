@@ -4,20 +4,20 @@
 
 **Goal:** Add CW-driven instance right-sizing with real-priced cost comparison (compute + storage/IOPS + SQL Server license-aware) for the `rds_instance` engine family (RDS MySQL + RDS SQL Server), as a single positive-gated simulation tool plus its frontend panel.
 
-**Architecture:** One read-only, no-approval MCP tool `simulate_rds_instance_rightsizing` in the simulation server, gated by a new `rds_cost_simulation` capability (positive gate, ElastiCache/DynamoDB precedent). It reads the instance's CloudWatch utilization from `metric_snapshots` (already collected by `cw_collector`), recommends a smaller/larger/hold instance class via a size ladder, and prices current-vs-recommended monthly cost through a new `rds_instance_pricing.py` helper that queries the AWS Price List API (RDS engines, SQL Server edition + license model, gp3 storage + provisioned IOPS). Pricing fails soft (null cost, marked as fallback) — never fabricated. Frontend adds an `rds_instance` branch to the simulator page.
+**Architecture:** One read-only, no-approval MCP tool `simulate_rds_instance_rightsizing` in the simulation server, gated by a new `rds_cost_simulation` capability (positive gate, ElastiCache/DynamoDB precedent). It reads the instance's CloudWatch utilization from `metric_snapshots` (already collected by `cw_collector`), recommends a smaller/larger/hold instance class via a size ladder, and prices current-vs-recommended monthly cost through a new `rds_instance_pricing.py` helper that queries the AWS Price List API (RDS engines, SQL Server edition + license model, gp3 storage + provisioned IOPS). Pricing fails soft (null cost, marked as fallback), never fabricated. Frontend adds an `rds_instance` branch to the simulator page.
 
 **Tech Stack:** Python 3.12 (MCP Lambda), boto3 `pricing` + `cloudwatch`/cache, RDS Data API cache reads, Next.js 16 / React (simulator page), CDK gateway schema.
 
 ## Global Constraints
 
 - **CDK-only infrastructure.** No code change touches AWS resources directly; the tool only reads (Price List API, describe, cache). No new approval action (read-only tool).
-- **`engine_family.py` is duplicated VERBATIM in 4 Python copies** — `mcp-servers/mcp_servers/shared/engine_family.py`, `api/clusters/engine_family.py`, `api/dashboard/engine_family.py`, `data-pipeline/etl_collector/collectors/engine_family.py` — plus the TS mirror `frontend/src/lib/engine.ts`. A byte-parity test enforces the 4 Python copies are identical. ANY edit to one MUST be applied byte-identically to all four, and mirrored in TS.
+- **`engine_family.py` is duplicated VERBATIM in 4 Python copies**: `mcp-servers/mcp_servers/shared/engine_family.py`, `api/clusters/engine_family.py`, `api/dashboard/engine_family.py`, `data-pipeline/etl_collector/collectors/engine_family.py`, plus the TS mirror `frontend/src/lib/engine.ts`. A byte-parity test enforces the 4 Python copies are identical. ANY edit to one MUST be applied byte-identically to all four, and mirrored in TS.
 - **Never fabricate a price.** If the Price List API cannot resolve a unit price, that cost field is `null` and `pricing_source` marks it a fallback/estimate. Same discipline as `aurora_pricing.py` / `scaling_simulation.py`.
 - **No `str(e)` in tool responses returned to the agent/UI** beyond a truncated `[:200]` reason at most, matching existing tools; never leak raw stack traces.
 - **Positive gate.** The tool refuses cleanly (`status: "unsupported_engine"`) for any family whose capability lacks `rds_cost_simulation: True`. A `None` family (missing/error) → refused (only a resolved rds_instance cluster passes). This is the OPPOSITE default from the generic `simulation` guard (which DEFAULT-PERMITs on unknown).
 - **Korean user-facing copy** for messages/labels; keep English DBA jargon (IOPS, vCPU, instance class, License Included) per project i18n rules.
 - **No `__pycache__` committed** anywhere under `agent/`. Validate agent prompt edits with `ast.parse`, not `python`/`py_compile`.
-- **Tests mock the Price List boto client** (`pricing.get_products`) and the cache `execute` — never hit real AWS in unit tests.
+- **Tests mock the Price List boto client** (`pricing.get_products`) and the cache `execute`, never hit real AWS in unit tests.
 
 ---
 
@@ -33,11 +33,11 @@ Greenfield Price List API helper for RDS (non-Aurora): instance-hour priced by e
 **Interfaces:**
 
 - Produces:
-  - `price_rds_instance_hour(region: str, engine: str, instance_class: str, edition: str | None = None, multi_az: bool = False) -> float | None`
-    — `engine` is the registry engine string (`"mysql"`, `"sqlserver-ex"`, `"sqlserver-se"`, `"sqlserver-web"`, `"sqlserver-ee"`). `edition` is derived from `engine` for SQL Server; `None` for MySQL. Returns OnDemand `$/hour` or `None` (soft fail).
-  - `price_rds_storage_month(region: str, storage_type: str, gb: float, provisioned_iops: int | None = None) -> dict`
-    — returns `{"storage_usd": float|None, "iops_usd": float|None}` (monthly). `storage_type` in `{"gp3","gp2","io1","io2"}`.
-  - `RDS_ENGINE_LABEL: dict[str, str]` — maps registry engine → Price List `databaseEngine` value.
+  - `price_rds_instance_hour(region: str, engine: str, instance_class: str, edition: str | None = None, multi_az: bool = False) -> float | None`.
+    `engine` is the registry engine string (`"mysql"`, `"sqlserver-ex"`, `"sqlserver-se"`, `"sqlserver-web"`, `"sqlserver-ee"`). `edition` is derived from `engine` for SQL Server; `None` for MySQL. Returns OnDemand `$/hour` or `None` (soft fail).
+  - `price_rds_storage_month(region: str, storage_type: str, gb: float, provisioned_iops: int | None = None) -> dict`.
+    Returns `{"storage_usd": float|None, "iops_usd": float|None}` (monthly). `storage_type` in `{"gp3","gp2","io1","io2"}`.
+  - `RDS_ENGINE_LABEL: dict[str, str]`, maps registry engine → Price List `databaseEngine` value.
 
 **Background the implementer needs:**
 
@@ -149,14 +149,14 @@ def test_storage_month_gp3_plus_iops():
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cd <repo> && python3 -m pytest tests/unit/shared/test_rds_instance_pricing.py -v`
-Expected: FAIL — `ModuleNotFoundError` / `AttributeError` (module not written yet).
+Expected: FAIL, `ModuleNotFoundError` / `AttributeError` (module not written yet).
 
 - [ ] **Step 3: Implement `rds_instance_pricing.py`**
 
-Use the labels confirmed in Step 0. Skeleton (fill `RDS_ENGINE_LABEL` from the probe; the SQL Server values below are the starting guess — REPLACE with probe output if different):
+Use the labels confirmed in Step 0. Skeleton (fill `RDS_ENGINE_LABEL` from the probe; the SQL Server values below are the starting guess: REPLACE with probe output if different):
 
 ```python
-"""rds_instance_pricing — REAL RDS (non-Aurora) prices from the AWS Price List API.
+"""rds_instance_pricing: REAL RDS (non-Aurora) prices from the AWS Price List API.
 
 RDS instances differ from Aurora: no I/O-Optimized variant, but a licenseModel /
 edition dimension (SQL Server) and SEPARATE storage + provisioned-IOPS SKUs.
@@ -295,13 +295,13 @@ def price_rds_storage_month(region, storage_type, gb, provisioned_iops=None):
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd <repo> && python3 -m pytest tests/unit/shared/test_rds_instance_pricing.py -v`
-Expected: PASS (4 tests). If `test_storage_month_gp3_plus_iops` filter fields differ from your implementation, align the test's `products()` stub with the actual filter set you send — do NOT weaken the assertion that storage_usd = unit × gb.
+Expected: PASS (4 tests). If `test_storage_month_gp3_plus_iops` filter fields differ from your implementation, align the test's `products()` stub with the actual filter set you send. Do NOT weaken the assertion that storage_usd = unit × gb.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add mcp-servers/mcp_servers/shared/rds_instance_pricing.py tests/unit/shared/test_rds_instance_pricing.py
-git commit -m "feat(shared): RDS instance Price List helper (engine/edition/license + storage/IOPS) — R-5"
+git commit -m "feat(shared): RDS instance Price List helper, engine/edition/license + storage/IOPS (R-5)"
 ```
 
 ---
@@ -314,15 +314,15 @@ The tool: read CW utilization from `metric_snapshots`, recommend a class (down i
 
 - Create: `mcp-servers/mcp_servers/simulation/tools/rds_rightsizing.py`
 - Modify: `mcp-servers/mcp_servers/simulation/handler.py` (add import, `TOOLS` entry, positive-gate branch)
-- Modify (all 4 byte-identical copies): `mcp-servers/mcp_servers/shared/engine_family.py`, `api/clusters/engine_family.py`, `api/dashboard/engine_family.py`, `data-pipeline/etl_collector/collectors/engine_family.py` — add `"rds_cost_simulation": True` to `CAPABILITIES[RDS_INSTANCE]`
+- Modify (all 4 byte-identical copies): `mcp-servers/mcp_servers/shared/engine_family.py`, `api/clusters/engine_family.py`, `api/dashboard/engine_family.py`, `data-pipeline/etl_collector/collectors/engine_family.py`: add `"rds_cost_simulation": True` to `CAPABILITIES[RDS_INSTANCE]`
 - Test: `tests/unit/simulation/test_rds_rightsizing.py`
 
 **Interfaces:**
 
-- Consumes: `price_rds_instance_hour`, `price_rds_storage_month`, `RDS_ENGINE_LABEL` (Task 1); the cache `execute` from the handler's `CacheClient`; the size-ladder helpers from `scaling_simulation` (`_SIZE_LADDER`, `_next_class_up`) — import and add a `_next_class_down`.
+- Consumes: `price_rds_instance_hour`, `price_rds_storage_month`, `RDS_ENGINE_LABEL` (Task 1); the cache `execute` from the handler's `CacheClient`; the size-ladder helpers from `scaling_simulation` (`_SIZE_LADDER`, `_next_class_up`). Import and add a `_next_class_down`.
 - Produces: `simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=168, headroom=0.5, new_instance_class=None, **_) -> dict`.
 
-**Return shape (contract for the frontend — Task 5 depends on it):**
+**Return shape (contract for the frontend, Task 5 depends on it):**
 
 ```python
 {
@@ -336,12 +336,12 @@ The tool: read CW utilization from `metric_snapshots`, recommend a class (down i
                   "write_iops_p95": 1.0, "window_hours": 168, "samples": 2016},
   "recommendation": {"action": "downsize|upsize|hold",
                      "instance_class": "db.t3.micro",
-                     "reason": "CPU p95 6%, 커넥션 최대 2 — 한 단계 축소 여력"},
+                     "reason": "CPU p95 6%, 커넥션 최대 2: 한 단계 축소 여력"},
   "cost_impact": {
      "current_monthly_usd": 42.10, "proposed_monthly_usd": 24.30,
      "delta_monthly_usd": -17.80, "change_pct": -42.3,
      "breakdown": {"compute_current": 30.0, "compute_proposed": 12.2,
-                   "storage": 2.28, "iops": 0.0, "license_note": "SQL Server Express — 라이선스 비용 $0"},
+                   "storage": 2.28, "iops": 0.0, "license_note": "SQL Server Express: 라이선스 비용 $0"},
      "pricing_source": "aws_price_list"   # or "fallback_estimate" if any unit price was null
   }
 }
@@ -420,12 +420,12 @@ def test_insufficient_data_when_no_metrics():
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cd <repo> && python3 -m pytest tests/unit/simulation/test_rds_rightsizing.py -v`
-Expected: FAIL — module missing.
+Expected: FAIL, module missing.
 
 - [ ] **Step 3: Implement `rds_rightsizing.py`**
 
 ```python
-"""simulate_rds_instance_rightsizing — CW-driven instance right-sizing with real
+"""simulate_rds_instance_rightsizing: CW-driven instance right-sizing with real
 Price List cost delta for the rds_instance family (RDS MySQL + SQL Server).
 Read-only, no approval. Recommends a smaller class when p95 CPU + connection +
 IOPS headroom allows, a larger class when hot, else hold; prices current vs
@@ -471,7 +471,7 @@ def _edition(engine):
 def _license_note(engine):
     e = (engine or "").lower()
     if e == "sqlserver-ex":
-        return "SQL Server Express — 라이선스 비용 $0 (License Included 요율에 반영)"
+        return "SQL Server Express: 라이선스 비용 $0 (License Included 요율에 반영)"
     if e.startswith("sqlserver"):
         return "SQL Server 라이선스는 License Included 인스턴스 요율에 포함되어 가격에 반영됨"
     return None
@@ -547,14 +547,14 @@ def simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=
     elif cpu_p95 >= 80:
         target = _next_class_up(cur_class) or cur_class
         action = "upsize" if target != cur_class else "hold"
-        reason = f"CPU p95 {util['cpu_p95']}% — 한 단계 확대 권장"
+        reason = f"CPU p95 {util['cpu_p95']}%: 한 단계 확대 권장"
     elif cpu_p95 <= 40 * headroom / 0.5 and conn_peak < 50:
         down = _next_class_down(cur_class)
         target, action = (down, "downsize") if down else (cur_class, "hold")
-        reason = (f"CPU p95 {util['cpu_p95']}%, 커넥션 최대 {util['conn_peak']} — 한 단계 축소 여력"
-                  if down else "이미 최소 클래스 — 축소 불가")
+        reason = (f"CPU p95 {util['cpu_p95']}%, 커넥션 최대 {util['conn_peak']}: 한 단계 축소 여력"
+                  if down else "이미 최소 클래스: 축소 불가")
     else:
-        target, action, reason = cur_class, "hold", f"CPU p95 {util['cpu_p95']}% — 현행 유지 적정"
+        target, action, reason = cur_class, "hold", f"CPU p95 {util['cpu_p95']}%: 현행 유지 적정"
 
     edition = _edition(engine)
     cur_hr = price_rds_instance_hour(region, engine, cur_class, edition, multi_az)
@@ -623,7 +623,7 @@ Add to the `TOOLS` dict (after the `simulate_elasticache_node_resize` entry, bef
     },
 ```
 
-Add the positive-gate branch in `lambda_handler` — insert a new `elif` BEFORE the final `else:` at line 198:
+Add the positive-gate branch in `lambda_handler`. Insert a new `elif` BEFORE the final `else:` at line 198:
 
 ```python
         elif tool_name == "simulate_rds_instance_rightsizing":
@@ -666,7 +666,7 @@ git add mcp-servers/mcp_servers/simulation/tools/rds_rightsizing.py \
         api/clusters/engine_family.py api/dashboard/engine_family.py \
         data-pipeline/etl_collector/collectors/engine_family.py \
         tests/unit/simulation/test_rds_rightsizing.py
-git commit -m "feat(simulation): RDS instance right-sizing + cost tool, positive-gated rds_cost_simulation — R-5"
+git commit -m "feat(simulation): RDS instance right-sizing + cost tool, positive-gated rds_cost_simulation (R-5)"
 ```
 
 ---
@@ -677,7 +677,7 @@ Register the tool in the Gateway schema so the agent can call it, and teach the 
 
 **Files:**
 
-- Modify: `cdk/tool_definitions.py` (`simulation_schema()` — add one `_tool(...)`)
+- Modify: `cdk/tool_definitions.py` (`simulation_schema()`: add one `_tool(...)`)
 - Modify: `agent/prompts/system_prompt.py` (mention the tool for rds_instance)
 - Modify: `agent/prompts/cheatsheet.py` (one-line usage)
 
@@ -715,7 +715,7 @@ In `agent/prompts/system_prompt.py`, find the simulation-tools guidance section 
 
 In `agent/prompts/cheatsheet.py`, add a one-line entry next to the other simulation tools mapping the intent ("인스턴스가 너무 크다/작다, 비용 절감") to `simulate_rds_instance_rightsizing`.
 
-- [ ] **Step 4: Validate prompt files parse (NO py_compile — leaves **pycache**)**
+- [ ] **Step 4: Validate prompt files parse (NO py_compile: leaves **pycache**)**
 
 Run:
 
@@ -734,7 +734,7 @@ find agent -name __pycache__ -newer AGENTS.md; echo "clean"
 
 ```bash
 git add cdk/tool_definitions.py agent/prompts/system_prompt.py agent/prompts/cheatsheet.py
-git commit -m "feat(agent): register simulate_rds_instance_rightsizing in gateway schema + prompts — R-5"
+git commit -m "feat(agent): register simulate_rds_instance_rightsizing in gateway schema + prompts (R-5)"
 ```
 
 ---
@@ -790,26 +790,26 @@ Expected: build succeeds, `out/` regenerated. Confirm the new component compiled
 ```bash
 cd <repo>
 git add frontend/src/app/simulator/page.tsx
-git commit -m "feat(ui): RDS instance right-sizing/cost simulator panel — R-5"
+git commit -m "feat(ui): RDS instance right-sizing/cost simulator panel (R-5)"
 ```
 
 ---
 
 ## Post-implementation: deploy + live verification (controller runs after final review)
 
-Not a task subagent step — the controller does this after the whole-branch review is clean, per the program's live-verify discipline:
+Not a task subagent step. The controller does this after the whole-branch review is clean, per the program's live-verify discipline:
 
 1. Deploy sequentially (never concurrent): `cd cdk && cdk deploy dbops-dev-agent dbops-dev-frontend --require-approval never`. Frontend deploy must S3-sync `out/` **excluding `config.json`**.
 2. Live: on `/simulator` with `dbops-demo-mssql` selected → the RDS panel renders; recommendation + a real (non-null) monthly cost from the Price List API appears; SQL Server Express shows the $0-license note. Repeat for `dbops-demo-mysql`.
-3. Live gate proof: the tool refuses for an Aurora cluster (`unsupported_engine`) — confirms the positive gate.
+3. Live gate proof: the tool refuses for an Aurora cluster (`unsupported_engine`), confirms the positive gate.
 4. Chat proof: "dbops-demo-mssql 인스턴스 비용 최적화 가능해?" → agent calls `simulate_rds_instance_rightsizing` and returns the recommendation + cost.
 
 ## Self-Review (completed by plan author)
 
 - **Spec coverage:** instance right-sizing (CW-driven) ✓ Task 2; storage/IOPS cost ✓ Task 1 `price_rds_storage_month` + Task 2 breakdown; SQL Server license-aware cost ✓ Task 1 edition/license label + Task 2 `license_note`; positive-gate pattern ✓ Task 2 handler + capability. Frontend surface ✓ Task 4. Agent access ✓ Task 3.
-- **Placeholder scan:** none — every code step carries full code.
+- **Placeholder scan:** none, every code step carries full code.
 - **Type consistency:** tool name `simulate_rds_instance_rightsizing` and capability key `rds_cost_simulation` used identically in Tasks 2/3/4; return-shape keys (`cost_impact.delta_monthly_usd`, `recommendation.action`) match between the Task 2 contract and the Task 4 consumer.
 - **Schema facts CONFIRMED by the plan author against source (do not re-verify):**
-  - `metric_snapshots` columns are `(cluster_id, ts, metric_type, value, dimensions)` — timestamp column is `ts` (timestamptz). rds_instance collects `metric_type` in exactly `cpu, db_connections, freeable_memory, free_storage_bytes, read_iops, write_iops, read_latency, write_latency, net_rx, net_tx, swap_usage` (`rds_instance_cw_collector._METRICS`). The tool's query set is a valid subset.
+  - `metric_snapshots` columns are `(cluster_id, ts, metric_type, value, dimensions)`: timestamp column is `ts` (timestamptz). rds_instance collects `metric_type` in exactly `cpu, db_connections, freeable_memory, free_storage_bytes, read_iops, write_iops, read_latency, write_latency, net_rx, net_tx, swap_usage` (`rds_instance_cw_collector._METRICS`). The tool's query set is a valid subset.
   - `cluster_meta` typed columns include `region, engine, engine_version, instance_class, status, resource_details, updated_at`. `resource_details` (JSONB) keys for rds_instance are exactly: `instance_class, multi_az, storage_type, allocated_storage_gb, license_model, publicly_accessible, pi_enabled, endpoint, port` (`rds_instance_cw_collector`). Use `allocated_storage_gb` and `multi_az`; there is NO `iops` key (provisioned IOPS not collected → gp3-baseline pricing).
-- **The ONE remaining live-verification point:** exact Price List `databaseEngine`/`licenseModel` label strings for RDS SQL Server editions (Task 1 Step 0 probe) — everything else is confirmed.
+- **The ONE remaining live-verification point:** exact Price List `databaseEngine`/`licenseModel` label strings for RDS SQL Server editions (Task 1 Step 0 probe), everything else is confirmed.

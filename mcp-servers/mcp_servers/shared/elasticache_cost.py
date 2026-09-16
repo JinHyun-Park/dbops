@@ -1,4 +1,4 @@
-"""elasticache_cost — pure node-resize cost math (no I/O), reused by the MCP tool
+"""elasticache_cost: pure node-resize cost math (no I/O), reused by the MCP tool
 and the REST handler. Prices via elasticache_pricing (Price List API); a missing
 price yields status=partial (never a fabricated figure). 730h/month."""
 

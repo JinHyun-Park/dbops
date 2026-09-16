@@ -20,7 +20,7 @@ import { useT } from "@/lib/i18n";
 export default function SchemaPage() {
   const t = useT();
   const { clusters, selected: selectedCluster } = useSelectedCluster();
-  // FK lineage reads pg_constraint — PG only. Guard MySQL selections up front
+  // FK lineage reads pg_constraint, PG only. Guard MySQL selections up front
   // instead of letting the run fail server-side with a cryptic error.
   const mysqlSelected = isMysql(
     clusters.find((c) => c.cluster_id === selectedCluster)?.engine,
@@ -104,7 +104,7 @@ export default function SchemaPage() {
 
           {mysqlSelected && (
             <div className="mb-4 text-xs text-amber-300 border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-              선택된 클러스터는 MySQL입니다 — FK 그래프는 pg_constraint 기반의
+              선택된 클러스터는 MySQL입니다. FK 그래프는 pg_constraint 기반의
               PostgreSQL 전용 기능입니다. 우측 상단에서 PostgreSQL 클러스터로
               전환하세요.
             </div>
@@ -229,7 +229,7 @@ function Tile({
 }
 
 // ---------------------------------------------------------------------------
-// SVG graph canvas — simple grid layout + bezier edges
+// SVG graph canvas: simple grid layout + bezier edges
 // ---------------------------------------------------------------------------
 
 const BOX_W = 160;
@@ -336,7 +336,7 @@ function GraphCanvas({
           const b = positions.get(e.target_table);
           if (!a || !b) return null;
           const highlighted = edgeHighlighted(e);
-          // Cubic bezier — control points are halfway between source and
+          // Cubic bezier: control points are halfway between source and
           // target on the X axis, pulled toward the source/target Y to
           // create a gentle curve rather than a sharp diagonal.
           const dx = b.cx - a.cx;
@@ -432,7 +432,7 @@ function GraphCanvas({
 }
 
 // ---------------------------------------------------------------------------
-// Side panel — selected table FK detail, or full table list
+// Side panel: selected table FK detail, or full table list
 // ---------------------------------------------------------------------------
 
 function TableSidebar({
@@ -494,7 +494,7 @@ function SelectedTableDetail({
       />
       <FkSection
         label={`← incoming (${incoming.length})`}
-        hint="다른 테이블이 이 테이블을 참조 — 변경시 영향도 확인 필요"
+        hint="다른 테이블이 이 테이블을 참조. 변경시 영향도 확인 필요"
         edges={incoming}
         peerKey="source_table"
         onSelect={onSelect}

@@ -11,13 +11,13 @@
 ## Global Constraints
 
 - **No `Co-Authored-By: Claude` trailer** in commits (user rule).
-- **Default-open, additive, backward-compatible:** a cluster with no `team_id` is visible to everyone; zero teams ⇒ behavior identical to today. The overlay NEVER grants access beyond today — it only removes assigned clusters from non-members.
-- **Admins always see all clusters** — `visible_cluster_ids` returns `None`, `cluster_visible` returns `True`.
+- **Default-open, additive, backward-compatible:** a cluster with no `team_id` is visible to everyone; zero teams ⇒ behavior identical to today. The overlay NEVER grants access beyond today: it only removes assigned clusters from non-members.
+- **Admins always see all clusters**: `visible_cluster_ids` returns `None`, `cluster_visible` returns `True`.
 - **Fail behavior on infra error:** unassigned clusters stay visible (fail-open to current behavior); an assigned cluster whose membership lookup errors is hidden (fail-closed). `my_team_ids` returns an empty set on error, which yields exactly this.
 - **`_is_admin`/identity is fail-closed:** no/invalid bearer ⇒ not admin ⇒ restricted set (not `None`).
-- **api/ Lambdas cannot share imports** — the overlay is VENDORED (byte-identical copies) with a parity test (mirror `tests/unit/test_engine_family.py`).
-- **All DynamoDB scans/queries paginate** (memory gotcha — single scan truncates at 1MB). Use the existing `_scan_all` pattern.
-- **New API routes ⇒ regenerate `frontend/public/openapi.json`** (`python tools/openapi_gen.py`) — route-table parity test.
+- **api/ Lambdas cannot share imports**: the overlay is VENDORED (byte-identical copies) with a parity test (mirror `tests/unit/test_engine_family.py`).
+- **All DynamoDB scans/queries paginate** (memory gotcha: single scan truncates at 1MB). Use the existing `_scan_all` pattern.
+- **New API routes ⇒ regenerate `frontend/public/openapi.json`** (`python tools/openapi_gen.py`): route-table parity test.
 - **CDK-only infra**; tables follow the `dbops-{ENV}-<name>` naming + PAY_PER_REQUEST + point_in_time_recovery + RemovalPolicy.DESTROY pattern (mirror `clusters_table` at `foundation_stack.py:89`).
 - Korean copy for user-facing notes; identifiers/tokens verbatim.
 
@@ -36,7 +36,7 @@
 - Produces: `is_admin(event) -> bool`, `caller_username(event) -> str`, `my_team_ids(username) -> set[str]`, `visible_cluster_ids(event, cluster_items) -> set[str] | None`, `cluster_visible(event, cluster_item) -> bool`.
 - Consumes: env `TEAM_MEMBERS_TABLE`, `TEAM_MEMBERS_BY_USER_INDEX` (Task 2 creates the table; Task 4/5 wire the env).
 
-- [ ] **Step 1: Write the failing test** — `tests/unit/api/test_tenancy.py`:
+- [ ] **Step 1: Write the failing test**: `tests/unit/api/test_tenancy.py`:
 
 ```python
 import importlib.util, os, sys
@@ -125,14 +125,14 @@ def test_no_bearer_not_admin_restricted():
     assert vis == {"c-open"}   # not admin => restricted, only unassigned
 ```
 
-- [ ] **Step 2: Run it to verify it fails** — `python -m pytest tests/unit/api/test_tenancy.py -q` → FAIL (module missing).
+- [ ] **Step 2: Run it to verify it fails**: `python -m pytest tests/unit/api/test_tenancy.py -q` → FAIL (module missing).
 
 - [ ] **Step 3: Create `api/clusters/tenancy.py`** (canonical):
 
 ```python
 """Multi-team cluster-visibility overlay.
 
-VENDORED MODULE — keep byte-identical across all api/*/tenancy.py copies
+VENDORED MODULE: keep byte-identical across all api/*/tenancy.py copies
 (tests/unit/api/test_tenancy_parity.py enforces this). api/ Lambdas are
 independent packages and cannot share imports, so the overlay is copied, like
 engine_family.py.
@@ -173,7 +173,7 @@ def _claims(event):
 
 
 def is_admin(event):
-    """Mirror api/clusters/handler.py::_is_admin — admin if dbops-admin in
+    """Mirror api/clusters/handler.py::_is_admin: admin if dbops-admin in
     groups OR no groups at all; fail-closed on missing/invalid bearer."""
     claims = _claims(event)
     if not claims:
@@ -253,9 +253,9 @@ def cluster_visible(event, cluster_item):
     return team in my_team_ids(caller_username(event))
 ```
 
-- [ ] **Step 4: Copy to `api/dashboard/tenancy.py`** — byte-identical (`cp api/clusters/tenancy.py api/dashboard/tenancy.py`).
+- [ ] **Step 4: Copy to `api/dashboard/tenancy.py`**: byte-identical (`cp api/clusters/tenancy.py api/dashboard/tenancy.py`).
 
-- [ ] **Step 5: Write the parity test** — `tests/unit/api/test_tenancy_parity.py`:
+- [ ] **Step 5: Write the parity test**: `tests/unit/api/test_tenancy_parity.py`:
 
 ```python
 from pathlib import Path
@@ -270,11 +270,11 @@ _COPIES = [
 def test_tenancy_copies_are_byte_identical():
     contents = [p.read_bytes() for p in _COPIES]
     assert all(c == contents[0] for c in contents), (
-        "api/*/tenancy.py copies drifted — keep them byte-identical"
+        "api/*/tenancy.py copies drifted: keep them byte-identical"
     )
 ```
 
-- [ ] **Step 6: Run tests** — `python -m pytest tests/unit/api/test_tenancy.py tests/unit/api/test_tenancy_parity.py -q` → PASS.
+- [ ] **Step 6: Run tests**: `python -m pytest tests/unit/api/test_tenancy.py tests/unit/api/test_tenancy_parity.py -q` → PASS.
 
 - [ ] **Step 7: Commit.**
 
@@ -285,7 +285,7 @@ git commit -m "feat(tenancy): cluster-visibility overlay module (vendored, defau
 
 ---
 
-### Task 2: CDK — teams + team_members tables + GSI
+### Task 2: CDK (teams + team_members tables + GSI)
 
 **Files:**
 
@@ -294,9 +294,9 @@ git commit -m "feat(tenancy): cluster-visibility overlay module (vendored, defau
 
 **Interfaces:**
 
-- Produces: `self.teams_table`, `self.team_members_table` (with GSI `by-user`) — consumed by Task 3/4/5 CDK wiring.
+- Produces: `self.teams_table`, `self.team_members_table` (with GSI `by-user`): consumed by Task 3/4/5 CDK wiring.
 
-- [ ] **Step 1: Add the tables** in `foundation_stack.py` immediately after the `clusters_table` block (mirror its config — PAY_PER_REQUEST, point_in_time_recovery, RemovalPolicy.DESTROY):
+- [ ] **Step 1: Add the tables** in `foundation_stack.py` immediately after the `clusters_table` block (mirror its config: PAY_PER_REQUEST, point_in_time_recovery, RemovalPolicy.DESTROY):
 
 ```python
         # ===== Multi-team tenancy =====
@@ -327,7 +327,7 @@ git commit -m "feat(tenancy): cluster-visibility overlay module (vendored, defau
         )
 ```
 
-- [ ] **Step 2: Run synth test** — `python -m pytest tests/cdk/test_synth.py -q` → PASS (synth succeeds with the two new tables + GSI). If the test snapshots resource counts, update the snapshot per its documented refresh command.
+- [ ] **Step 2: Run synth test**: `python -m pytest tests/cdk/test_synth.py -q` → PASS (synth succeeds with the two new tables + GSI). If the test snapshots resource counts, update the snapshot per its documented refresh command.
 
 - [ ] **Step 3: Commit.**
 
@@ -352,7 +352,7 @@ git commit -m "feat(tenancy): teams + team_members DynamoDB tables (by-user GSI)
 - Consumes: `teams_table`, `team_members_table` (Task 2); `clusters_table` (existing) for assign/unassign.
 - Produces: routes `GET/POST /api/admin/teams`, `GET/DELETE /api/admin/teams/{team_id}`, `POST/DELETE /api/admin/teams/{team_id}/members/{username}`, `POST/DELETE /api/admin/teams/{team_id}/clusters/{cluster_id}`.
 
-- [ ] **Step 1: Write the failing test** — `tests/unit/api/test_admin_teams.py`. Load the handler via importlib; mock `boto3.resource`/`boto3.client` DynamoDB tables. Assert:
+- [ ] **Step 1: Write the failing test**: `tests/unit/api/test_admin_teams.py`. Load the handler via importlib; mock `boto3.resource`/`boto3.client` DynamoDB tables. Assert:
   - viewer (token with `dbops-viewer`) → 403 on every route (GET list, POST create, member add, cluster assign). (The priv-esc fail-closed gate.)
   - admin POST `/api/admin/teams` `{"name":"Team A"}` → 201/200 with a generated `team_id`; a `teams_table.put_item` happened.
   - admin POST `/api/admin/teams/{tid}/members/{username}` → member row written to `team_members_table`.
@@ -414,9 +414,9 @@ def test_admin_assign_cluster_sets_team_id():
     assert clusters.update_item.called
 ```
 
-(Add the remaining asserts — member add/remove, unassign, delete-team-clears-clusters, list — following the same mock shape. Every route must have a viewer-403 case and an admin-happy case.)
+(Add the remaining asserts following the same mock shape: member add/remove, unassign, delete-team-clears-clusters, list. Every route must have a viewer-403 case and an admin-happy case.)
 
-- [ ] **Step 2: Run it to verify it fails** — `python -m pytest tests/unit/api/test_admin_teams.py -q` → FAIL (module missing).
+- [ ] **Step 2: Run it to verify it fails**: `python -m pytest tests/unit/api/test_admin_teams.py -q` → FAIL (module missing).
 
 - [ ] **Step 3: Create `api/admin_teams/handler.py`** (mirror `api/admin_users/handler.py` auth helpers + dispatch):
 
@@ -424,14 +424,14 @@ def test_admin_assign_cluster_sets_team_id():
 """Admin Teams & cluster-assignment management API (admin-gated).
 
 Routes:
-  GET    /api/admin/teams                                  — list teams
-  POST   /api/admin/teams                                  — create {name}
-  GET    /api/admin/teams/{team_id}                        — detail (members+clusters)
-  DELETE /api/admin/teams/{team_id}                        — delete (unassigns clusters)
-  POST   /api/admin/teams/{team_id}/members/{username}     — add member
-  DELETE /api/admin/teams/{team_id}/members/{username}     — remove member
-  POST   /api/admin/teams/{team_id}/clusters/{cluster_id}  — assign cluster
-  DELETE /api/admin/teams/{team_id}/clusters/{cluster_id}  — unassign cluster
+  GET    /api/admin/teams                                  - list teams
+  POST   /api/admin/teams                                  - create {name}
+  GET    /api/admin/teams/{team_id}                        - detail (members+clusters)
+  DELETE /api/admin/teams/{team_id}                        - delete (unassigns clusters)
+  POST   /api/admin/teams/{team_id}/members/{username}     - add member
+  DELETE /api/admin/teams/{team_id}/members/{username}     - remove member
+  POST   /api/admin/teams/{team_id}/clusters/{cluster_id}  - assign cluster
+  DELETE /api/admin/teams/{team_id}/clusters/{cluster_id}  - unassign cluster
 
 Teams gate cluster VISIBILITY (see api/*/tenancy.py); they do not change role.
 Admin-gated, fail-closed (mirror api/admin_users/handler.py)."""
@@ -648,9 +648,9 @@ def lambda_handler(event, context=None):
         return _resp(500, {"error": "operation failed"})
 ```
 
-- [ ] **Step 4: Run tests** — `python -m pytest tests/unit/api/test_admin_teams.py -q` → PASS.
+- [ ] **Step 4: Run tests**: `python -m pytest tests/unit/api/test_admin_teams.py -q` → PASS.
 
-- [ ] **Step 5: Wire the Lambda + routes in `cdk/stacks/agent_stack.py`** — mirror the `clusters_lambda`/`admin_users` blocks. Add after the admin_users Lambda definition:
+- [ ] **Step 5: Wire the Lambda + routes in `cdk/stacks/agent_stack.py`**: mirror the `clusters_lambda`/`admin_users` blocks. Add after the admin_users Lambda definition:
 
 ```python
         admin_teams_lambda = lambda_.Function(
@@ -684,7 +684,7 @@ def lambda_handler(event, context=None):
 
 (Confirm `apigwv2`/`integrations`/`lambda_` are the import aliases used in the file; match the existing admin_users wiring exactly. Use the same route-registration style the file already uses.)
 
-- [ ] **Step 6: Regenerate openapi + run synth/parity** — `python tools/openapi_gen.py`; `python -m pytest tests/cdk/test_synth.py tests/unit/test_openapi_spec.py -q` → PASS.
+- [ ] **Step 6: Regenerate openapi + run synth/parity**: `python tools/openapi_gen.py`; `python -m pytest tests/cdk/test_synth.py tests/unit/test_openapi_spec.py -q` → PASS.
 
 - [ ] **Step 7: Commit.**
 
@@ -707,7 +707,7 @@ git commit -m "feat(tenancy): admin Teams API (CRUD + members + cluster assignme
 
 - Consumes: `tenancy.visible_cluster_ids` (Task 1), `team_members_table` (Task 2).
 
-- [ ] **Step 1: Write the failing test** — in `tests/unit/api/test_clusters.py`, load the handler; mock `_scan_all`/`_enrich_with_meta` to return three items (`c-open` no team, `c-teamA`/`tA`, `c-teamB`/`tB`). Assert:
+- [ ] **Step 1: Write the failing test**: in `tests/unit/api/test_clusters.py`, load the handler; mock `_scan_all`/`_enrich_with_meta` to return three items (`c-open` no team, `c-teamA`/`tA`, `c-teamB`/`tB`). Assert:
   - admin GET → all 3 returned.
   - viewer in team A (patch `tenancy.my_team_ids` → `{"tA"}`) GET → only `c-open` + `c-teamA`.
   - viewer no teams → only `c-open`.
@@ -726,9 +726,9 @@ def test_clusters_list_filtered_for_viewer(monkeypatch, clusters_module):
     assert ids == {"c-open", "c-teamA"}
 ```
 
-- [ ] **Step 2: Run it to verify it fails** — `python -m pytest tests/unit/api/test_clusters.py -k filtered -q` → FAIL.
+- [ ] **Step 2: Run it to verify it fails**: `python -m pytest tests/unit/api/test_clusters.py -k filtered -q` → FAIL.
 
-- [ ] **Step 3: Implement** — at the top of `api/clusters/handler.py` add `import tenancy`. Change `_handle_list(table)` to accept the event and filter:
+- [ ] **Step 3: Implement**: at the top of `api/clusters/handler.py` add `import tenancy`. Change `_handle_list(table)` to accept the event and filter:
 
 ```python
 def _handle_list(table, event):
@@ -741,9 +741,9 @@ def _handle_list(table, event):
 
 And update the GET dispatch in `lambda_handler` from `return _handle_list(table)` to `return _handle_list(table, event)`.
 
-- [ ] **Step 4: Run tests** — `python -m pytest tests/unit/api/test_clusters.py -q` → PASS.
+- [ ] **Step 4: Run tests**: `python -m pytest tests/unit/api/test_clusters.py -q` → PASS.
 
-- [ ] **Step 5: Wire CDK** — in `agent_stack.py`, on the `clusters_lambda` block (~line 764) add to `environment`:
+- [ ] **Step 5: Wire CDK**: in `agent_stack.py`, on the `clusters_lambda` block (~line 764) add to `environment`:
 
 ```python
                 "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
@@ -752,7 +752,7 @@ And update the GET dispatch in `lambda_handler` from `return _handle_list(table)
 
 and after it: `foundation.team_members_table.grant_read_data(clusters_lambda)`.
 
-- [ ] **Step 6: Synth** — `python -m pytest tests/cdk/test_synth.py -q` → PASS.
+- [ ] **Step 6: Synth**: `python -m pytest tests/cdk/test_synth.py -q` → PASS.
 
 - [ ] **Step 7: Commit.**
 
@@ -767,7 +767,7 @@ git commit -m "feat(tenancy): filter /api/clusters list by caller team visibilit
 
 **Files:**
 
-- Modify: `api/dashboard/handler.py` (`lambda_handler` — resolve target cluster + 403 if not visible)
+- Modify: `api/dashboard/handler.py` (`lambda_handler`: resolve target cluster + 403 if not visible)
 - Modify: `cdk/stacks/agent_stack.py` (dashboard_lambda env + grant for team_members read)
 - Test: `tests/unit/api/test_dashboard_tenancy.py`
 
@@ -775,9 +775,9 @@ git commit -m "feat(tenancy): filter /api/clusters list by caller team visibilit
 
 - Consumes: `tenancy.cluster_visible` + `_lookup_cluster` (existing, `api/dashboard/handler.py:103`), `team_members_table` (Task 2).
 
-- [ ] **Step 1: Read** the dashboard `lambda_handler` to find where `cluster_id` is parsed from `pathParameters`/path and where routes branch — every per-cluster route resolves a `cluster_id`. Identify the single choke point (right after `cluster_id` is determined and before data is fetched) to insert the visibility gate. (If routes parse cluster_id in multiple places, add the gate in a small helper `_require_visible(event, cluster_id) -> Optional[resp]` and call it once per per-cluster branch.)
+- [ ] **Step 1: Read** the dashboard `lambda_handler` to find where `cluster_id` is parsed from `pathParameters`/path and where routes branch: every per-cluster route resolves a `cluster_id`. Identify the single choke point (right after `cluster_id` is determined and before data is fetched) to insert the visibility gate. (If routes parse cluster_id in multiple places, add the gate in a small helper `_require_visible(event, cluster_id) -> Optional[resp]` and call it once per per-cluster branch.)
 
-- [ ] **Step 2: Write the failing test** — `tests/unit/api/test_dashboard_tenancy.py`:
+- [ ] **Step 2: Write the failing test**: `tests/unit/api/test_dashboard_tenancy.py`:
 
 ```python
 def test_dashboard_viewer_blocked_on_other_team_cluster(monkeypatch, dash):
@@ -800,9 +800,9 @@ def test_dashboard_admin_always_allowed(monkeypatch, dash):
     assert r["statusCode"] != 403
 ```
 
-- [ ] **Step 3: Run it to verify it fails** — `python -m pytest tests/unit/api/test_dashboard_tenancy.py -q` → FAIL.
+- [ ] **Step 3: Run it to verify it fails**: `python -m pytest tests/unit/api/test_dashboard_tenancy.py -q` → FAIL.
 
-- [ ] **Step 4: Implement** — add `import tenancy` at the top of `api/dashboard/handler.py`, and a gate helper:
+- [ ] **Step 4: Implement**: add `import tenancy` at the top of `api/dashboard/handler.py`, and a gate helper:
 
 ```python
 def _require_visible(event, cluster_id):
@@ -819,9 +819,9 @@ def _require_visible(event, cluster_id):
 
 Call `forbid = _require_visible(event, cluster_id); if forbid: return forbid` once per per-cluster route, right after `cluster_id` is resolved. (Per the Step-1 reading, place it at the single choke point if there is one.)
 
-- [ ] **Step 5: Run tests** — `python -m pytest tests/unit/api/test_dashboard_tenancy.py -q` → PASS.
+- [ ] **Step 5: Run tests**: `python -m pytest tests/unit/api/test_dashboard_tenancy.py -q` → PASS.
 
-- [ ] **Step 6: Wire CDK** — on the `dashboard_lambda` block (~line 650) add to `environment`:
+- [ ] **Step 6: Wire CDK**: on the `dashboard_lambda` block (~line 650) add to `environment`:
 
 ```python
                 "TEAM_MEMBERS_TABLE": foundation.team_members_table.table_name,
@@ -830,7 +830,7 @@ Call `forbid = _require_visible(event, cluster_id); if forbid: return forbid` on
 
 and `foundation.team_members_table.grant_read_data(dashboard_lambda)`.
 
-- [ ] **Step 7: Full suite + synth** — `python -m pytest tests/unit -q` (no regression) and `python -m pytest tests/cdk/test_synth.py -q` → PASS.
+- [ ] **Step 7: Full suite + synth**: `python -m pytest tests/unit -q` (no regression) and `python -m pytest tests/cdk/test_synth.py -q` → PASS.
 
 - [ ] **Step 8: Commit.**
 
@@ -843,7 +843,7 @@ git commit -m "feat(tenancy): gate /api/dashboard per-cluster routes by team vis
 
 ## Post-implementation (controller, after all tasks reviewed clean)
 
-- **Final whole-branch review (opus — security-critical isolation):** the overlay is default-open + additive (zero teams = today's behavior); admins always get `None`/`True`; assigned-cluster-on-error fails closed while unassigned fails open; the clusters list filter + dashboard gate cover their paths; the vendored copies are byte-identical; admin API is fail-closed on every route (viewer 403); all scans paginate; openapi route parity. **Explicitly note: T-1 covers only clusters + dashboard — the other read paths (reports/approvals/cost/etc.) remain platform-wide until T-2, and the agent until T-4.**
+- **Final whole-branch review (opus: security-critical isolation):** the overlay is default-open + additive (zero teams = today's behavior); admins always get `None`/`True`; assigned-cluster-on-error fails closed while unassigned fails open; the clusters list filter + dashboard gate cover their paths; the vendored copies are byte-identical; admin API is fail-closed on every route (viewer 403); all scans paginate; openapi route parity. **Explicitly note: T-1 covers only clusters + dashboard. The other read paths (reports/approvals/cost/etc.) remain platform-wide until T-2, and the agent until T-4.**
 - **Deploy dev:** `cdk deploy dbops-dev-foundation dbops-dev-agent` (new tables + admin_teams Lambda + clusters/dashboard env+grants). No frontend change in T-1.
 - **Live smoke (viewer + admin tokens):** create a team via `POST /api/admin/teams`; add the e2e viewer as a member; assign one cluster to the team and leave another unassigned. Then: admin `GET /api/clusters` → sees all; viewer `GET /api/clusters` → sees unassigned + the team cluster, NOT a different team's cluster; viewer `GET /api/dashboard/{other-team-cluster}/overview` → 403; viewer on unassigned → 200. Confirm a deployment with NO teams still returns all clusters to a viewer (backward compat). Clean up the test team afterward.
 - Then `superpowers:finishing-a-development-branch` (ff-merge to main). T-2 follows.

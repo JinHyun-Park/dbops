@@ -141,7 +141,7 @@ def build_report_html(cluster_id, report_date, report_type, summary, data):
     return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DBOps 리포트 — {escape(str(cluster_id))} {escape(str(report_date))}</title>
+<title>DBOps 리포트: {escape(str(cluster_id))} {escape(str(report_date))}</title>
 <style>
 body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#18181b;margin:0;padding:24px;background:#fafafa}}
 h1{{font-size:20px;margin:0 0 4px}} .meta{{color:#71717a;font-size:13px;margin-bottom:20px}}
@@ -168,7 +168,10 @@ def _fmt_bytes(n):
     try:
         f = float(n)
     except (TypeError, ValueError):
-        return "—"
+        # An EMPTY cell, not the repo's usual "-" no-data placeholder: the very
+        # next line uses "-" as this formatter's NEGATIVE SIGN, so returning it
+        # here would render "no data" and a truncated negative identically.
+        return ""
     sign = "-" if f < 0 else ("+" if f > 0 else "")
     f = abs(f)
     for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -192,7 +195,7 @@ def _cluster_row_cells(r):
 
 
 def build_fleet_report_html(report_date, report_type, summary, fleet_data):
-    """Self-contained fleet rollup HTML — same inline-SVG/no-deps style as
+    """Self-contained fleet rollup HTML, same inline-SVG/no-deps style as
     build_report_html. Renders across all clusters, not one."""
     fleet_data = fleet_data or {}
     totals = fleet_data.get("totals") or {}
@@ -230,7 +233,7 @@ def build_fleet_report_html(report_date, report_type, summary, fleet_data):
     return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DBOps Fleet 리포트 — Fleet 전체 {escape(str(report_date))}</title>
+<title>DBOps Fleet 리포트: Fleet 전체 {escape(str(report_date))}</title>
 <style>
 body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#18181b;margin:0;padding:24px;background:#fafafa}}
 h1{{font-size:20px;margin:0 0 4px}} .meta{{color:#71717a;font-size:13px;margin-bottom:20px}}

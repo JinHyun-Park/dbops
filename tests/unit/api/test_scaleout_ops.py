@@ -1,4 +1,4 @@
-"""N-④ Phase 2 — /api/scaleout-ops list + cancel.
+"""N-④ Phase 2: /api/scaleout-ops list + cancel.
 
 GET /api/scaleout-ops: tenant-scoped list of scaleout=true prewarm approvals,
 with approval_status → derived state.
@@ -18,7 +18,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 # ---------------------------------------------------------------------------
-# Module loading — push api/approvals on sys.path so `import tenancy` resolves
+# Module loading: push api/approvals on sys.path so `import tenancy` resolves
 # ---------------------------------------------------------------------------
 
 _APPROVALS_DIR = Path(__file__).resolve().parents[3] / "api" / "approvals"
@@ -77,7 +77,7 @@ def _viewer_event(**kw):
 
 
 # ---------------------------------------------------------------------------
-# DDB mock — a scan() that paginates over real dict rows (hang-guard), plus an
+# DDB mock: a scan() that paginates over real dict rows (hang-guard), plus an
 # update_item that faithfully evaluates the cancel ConditionExpression.
 # ---------------------------------------------------------------------------
 
@@ -123,7 +123,7 @@ def _wire(monkeypatch, table):
 
 
 # ---------------------------------------------------------------------------
-# state derivation — one row per status → exact derived state
+# state derivation: one row per status → exact derived state
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("row,expected", [
@@ -145,7 +145,7 @@ def test_state_mapping(row, expected):
 
 
 def test_state_consumed_wins_over_warm_dispatched():
-    # A completed op carries warm_dispatched=True too — must read as warmed,
+    # A completed op carries warm_dispatched=True too: must read as warmed,
     # not warming.
     assert handler._scaleout_state(
         {"approval_status": "consumed", "warm_dispatched": True}
@@ -154,7 +154,7 @@ def test_state_consumed_wins_over_warm_dispatched():
 
 def test_state_warm_failed_outranks_warming_and_warmed():
     # A failed warm sets warm_dispatched=True (would read "warming") and may even
-    # carry status=consumed (would read "warmed") — warm_result=="failed" must
+    # carry status=consumed (would read "warmed"): warm_result=="failed" must
     # win over both so a failed op never shows as still-warming or completed.
     assert handler._scaleout_state(
         {"approval_status": "approved", "warm_dispatched": True, "warm_result": "failed"}

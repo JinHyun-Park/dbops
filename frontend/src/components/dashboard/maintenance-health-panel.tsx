@@ -41,36 +41,36 @@ const CHECK_LABELS: Record<string, string> = {
   // EVERY tab by the tab filter below, so the finding would be produced and never
   // shown.
   cost_storage_oversized: "Cost",
-  // Parameter Fitness — 이 클러스터 워크로드 기준 파라미터 적정성 진단.
+  // Parameter Fitness: 이 클러스터 워크로드 기준 파라미터 적정성 진단.
   param_max_connections: "Tuning",
   param_work_mem_risk: "Tuning", // PG
   param_effective_cache: "Tuning", // PG
   param_autovacuum_workers: "Tuning", // PG
   param_buffer_cache_hit: "Tuning",
   param_mysql_conn_buffers: "Tuning", // MySQL: per-connection 버퍼 × max_conn OOM 위험
-  // 고갈 예측 경보 — storage/connection/ACU 한계 도달 ETA.
+  // 고갈 예측 경보: storage/connection/ACU 한계 도달 ETA.
   capacity_forecast: "Capacity",
-  // 쿼리 성능 회귀 (구간 평균 대비 악화) — 엔진 무관.
+  // 쿼리 성능 회귀 (구간 평균 대비 악화), 엔진 무관.
   query_regression: "Tuning",
-  // MySQL InnoDB 내부 상태 (history list length 등) — rds_instance MySQL 딥리드.
+  // MySQL InnoDB 내부 상태 (history list length 등), rds_instance MySQL 딥리드.
   innodb_history_list_high: "Tuning",
   // MySQL 테이블스페이스 여유 공간 (DATA_FREE), mysql_health_checks가 넣는다. InnoDB에는
   // dead tuple이 없으므로 PG의 dead_tuples/table_bloat와 같은 수치를 두 번 내지
   // 않고 이 하나만 쓴다. "Bloat" 탭을 재사용한다(같은 운영 판단: 재구축 필요 여부).
   mysql_fragmentation: "Bloat",
-  // DynamoDB findings — ddb_* check_types from dynamodb_findings collector.
+  // DynamoDB findings: ddb_* check_types from dynamodb_findings collector.
   ddb_throttling: "Throttling",
   ddb_capacity_underprovisioned: "Capacity",
   ddb_capacity_overprovisioned: "Capacity",
   ddb_hot_partition: "Hot Partition",
   ddb_ondemand_high_throughput: "Cost",
-  // DocumentDB findings — docdb_* check_types from documentdb_findings collector.
+  // DocumentDB findings: docdb_* check_types from documentdb_findings collector.
   docdb_connection_saturation: "Connections",
   docdb_replica_lag: "Replica Lag",
   docdb_cursor_timeout: "Cursors",
   docdb_low_cache_hit: "Cache Hit",
   docdb_cost_oversized: "Cost",
-  // DocumentDB Mongo-protocol deep diagnosis — docdb_mongo_* check_types from
+  // DocumentDB Mongo-protocol deep diagnosis: docdb_mongo_* check_types from
   // the in-VPC docdb_mongo_collector (currentOp / serverStatus / profiler).
   docdb_mongo_long_running_ops: "Live Ops",
   // 프로파일러 CloudWatch 로그(/aws/docdb/{cluster}/profiler) 기반. 세 check_type은
@@ -115,7 +115,7 @@ const TABS_MYSQL = [
   "Cost",
 ] as const;
 // DynamoDB findings cover throttling, capacity sizing, hot-partition detection,
-// and on-demand cost signals — each gets its own filter tab.
+// and on-demand cost signals, each gets its own filter tab.
 const TABS_DYNAMODB = [
   "All",
   "Throttling",
@@ -125,7 +125,7 @@ const TABS_DYNAMODB = [
 ] as const;
 // DocumentDB findings cover connection saturation, replica lag, cursor timeouts,
 // buffer cache hit ratio, and Mongo-protocol live ops (currentOp / slow ops /
-// profiler) — each gets its own filter tab.
+// profiler), each gets its own filter tab.
 const TABS_DOCDB = [
   "All",
   "Connections",
@@ -284,7 +284,7 @@ export function MaintenanceHealthPanel({
         <div className="p-6 text-emerald-400 text-sm flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-500" />
           {tab === "All"
-            ? "발견된 이슈가 없어요 — 클러스터 상태 양호 🎉"
+            ? "발견된 이슈가 없어요. 클러스터 상태 양호 🎉"
             : `${tab} 카테고리에 해당하는 항목이 없어요`}
         </div>
       ) : (
@@ -378,7 +378,7 @@ function FindingDetailModal({
 
   const details = tryParse(finding.details);
 
-  // 사용자가 명시적으로 조치를 진행할 때만 chat으로 — 거기서 에이전트가
+  // 사용자가 명시적으로 조치를 진행할 때만 chat으로. 거기서 에이전트가
   // request_approval을 호출해 승인 센터에 올린다. "원인+조치"(설명)와
   // "승인 요청 생성"을 분리해, 단순 확인이 승인 센터를 오염시키지 않게 한다.
   const proceedInChat = () => {
@@ -402,9 +402,9 @@ function FindingDetailModal({
       `너는 시니어 ${
         engineBadge(engine).label
       } DBA야. 아래 유지보수 항목을 **한국어로** 다음 3개 섹션으로 짧고 명확하게 설명해줘:\n` +
-      `1. **왜 중요한지** — 운영 리스크 한 문장.\n` +
-      `2. **구체적 조치** — 실행해야 할 정확한 명령어 또는 파라미터 변경. schema.table 이름까지 포함해.\n` +
-      `3. **검증 방법** — 조치가 반영됐는지 확인할 쿼리나 점검 한 가지.\n\n` +
+      `1. **왜 중요한지**: 운영 리스크 한 문장.\n` +
+      `2. **구체적 조치**: 실행해야 할 정확한 명령어 또는 파라미터 변경. schema.table 이름까지 포함해.\n` +
+      `3. **검증 방법**: 조치가 반영됐는지 확인할 쿼리나 점검 한 가지.\n\n` +
       // 중요: 이 호출은 "설명만" 받는 읽기 전용이다. 도구를 호출하면
       // 에이전트가 request_approval을 자동 실행해 승인 센터에 항목이
       // 쌓인다(사용자는 확인만 하려던 것). 실제 승인 요청은 사용자가

@@ -1,4 +1,4 @@
-# Token Usage Tracking + Per-Session Error Surfacing — Design
+# Token Usage Tracking + Per-Session Error Surfacing: Design
 
 **Date:** 2026-06-23
 **Status:** approved
@@ -35,7 +35,7 @@ Two independent data paths converging in the UI:
 
 ### Components
 
-1. **Fleet token view — `api/cost/handler.py` + cost Lambda IAM**
+1. **Fleet token view: `api/cost/handler.py` + cost Lambda IAM**
 
    - Add `?view=tokens` to the existing `view` dispatch (alongside `rds`,
      `platform`, default `bedrock`). New `_handle_tokens_view(start, end, days)`:
@@ -47,11 +47,11 @@ Two independent data paths converging in the UI:
 "output", "total"}], "daily": [{"date", "input", "output"}], "note": ...}`.
    - **Caveat (documented in the `note`):** CloudWatch Bedrock token metrics are
      not DBOps-tag-filterable, so this view is **account-wide Bedrock token
-     usage by model** — same untagged-scope honesty the cost views already carry.
+     usage by model**: same untagged-scope honesty the cost views already carry.
    - IAM: add `cloudwatch:GetMetricData` + `cloudwatch:ListMetrics` to the
      `CostApi` Lambda role (it currently has only `ce:*`).
 
-2. **Fleet token UI — `frontend/src/app/cost/page.tsx` (+ api-client)**
+2. **Fleet token UI: `frontend/src/app/cost/page.tsx` (+ api-client)**
 
    - Add a "토큰" view toggle (next to the existing Bedrock/RDS/Platform views).
      Render `by_model` (a bar/table) + `daily` (a time-series chart) reusing the
@@ -59,24 +59,24 @@ Two independent data paths converging in the UI:
    - `api-client.ts`: extend the cost fetch to pass `view=tokens` and type the
      token response.
 
-3. **Agent usage emission — `agent/server.py`** (deployment-sensitive)
+3. **Agent usage emission: `agent/server.py`** (deployment-sensitive)
 
    - Factor a pure helper `_extract_usage(event) -> dict | None` that pulls
      `{input_tokens, output_tokens}` from a Strands `stream_async` event
-     (the event carrying the `AgentResult`/accumulated usage — the implementer
+     (the event carrying the `AgentResult`/accumulated usage: the implementer
      verifies the exact shape against the installed Strands SDK). Returns `None`
      when the event has no usage.
    - In the stream loop: accumulate the latest non-None usage; after the loop
      completes, `yield json.dumps({"type": "usage", "input_tokens", "output_tokens"})`
      so the runtime frames it as a terminal SSE `data:` line.
    - **FAIL-SAFE:** all usage extraction/emission is wrapped so any error is
-     swallowed and the chat stream is unaffected — a missing/changed usage shape
+     swallowed and the chat stream is unaffected: a missing/changed usage shape
      simply omits the marker. The chat answer must always stream normally.
    - Errors: a turn that raises already surfaces through the existing stream
      error path; no change needed beyond confirming the frontend can observe it
      (component 4 records it per-session).
 
-4. **Frontend capture + persist — `frontend/src/lib/agentcore-sse.ts`, the chat
+4. **Frontend capture + persist: `frontend/src/lib/agentcore-sse.ts`, the chat
    component, `api/chat_sessions/handler.py`**
 
    - `agentcore-sse.ts`: the SSE parser already dispatches on `parsed.type`; add
@@ -88,12 +88,12 @@ output})` callback (added to the stream function's params).
      `total_input_tokens`, `total_output_tokens`, `turn_count`, `last_error`
      in the existing `chat_sessions` PUT body.
    - `chat_sessions/handler.py`: the PUT persists these four additive fields
-     when present (never required — old sessions and non-usage turns omit them);
+     when present (never required: old sessions and non-usage turns omit them);
      the list `ProjectionExpression` adds `total_input_tokens` +
      `total_output_tokens` so the session list can show totals without a full
      item read.
 
-5. **Per-session surfacing UI — the chat session list/sidebar**
+5. **Per-session surfacing UI: the chat session list/sidebar**
    - Show per-session token total (input+output) next to each session, and an
      error indicator (e.g. a small badge) when `last_error` is set, with the
      error text on hover/expand. Korean labels for any explanatory text.
@@ -108,18 +108,18 @@ output})` callback (added to the stream function's params).
 
 ## Error Handling
 
-- Agent: `_extract_usage` + the usage emit are fully fail-safe — never raise,
+- Agent: `_extract_usage` + the usage emit are fully fail-safe: never raise,
   never block the answer stream. No usage shape found → no marker (graceful).
 - Fleet view: no CloudWatch data / metric absent → empty `by_model`/`daily`
   (valid empty view), not an error. A CloudWatch permission error → surfaced as
   the view's error string (mirrors the cost views).
-- Session fields are all additive + optional — a session that never received a
+- Session fields are all additive + optional: a session that never received a
   usage event simply has no token fields; the UI shows nothing for it.
 
 ## Testing
 
 - **Fleet (Increment 1):** `_handle_tokens_view` unit tests with a mocked
-  CloudWatch client — `list_metrics` discovery + `get_metric_data` aggregation
+  CloudWatch client: `list_metrics` discovery + `get_metric_data` aggregation
   into `by_model`/`daily`; empty-metrics → empty view; the `?view=tokens`
   dispatch routes correctly and other views are unchanged.
 - **Agent (Increment 2):** `_extract_usage` unit tests over representative
@@ -138,5 +138,5 @@ output})` callback (added to the stream function's params).
 - Per-session fields are token counts + an error string the user already saw in
   their own chat; stored on their own session record. No new authz surface
   (chat_sessions already enforces per-user session ownership).
-- The agent change only emits aggregate token counts — no prompt/response
+- The agent change only emits aggregate token counts: no prompt/response
   content beyond what already streams.

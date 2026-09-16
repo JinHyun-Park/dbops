@@ -69,7 +69,7 @@ const CHART_METRICS = [
   "aas",
   "cpu",
   // Canonical total-connections metric (CloudWatch DatabaseConnections),
-  // collected for every cluster — unlike the PI-only "connections".
+  // collected for every cluster, unlike the PI-only "connections".
   "db_connections",
   "read_iops",
   "write_iops",
@@ -120,7 +120,7 @@ const RANGES = [
   // Long-term trends: backend is uncapped and _bucket_seconds auto-downsamples
   // wide windows to ~TS_TARGET_POINTS, so these need no backend change. ponytail:
   // raw rows live in the hot cache (no purge); if growth ever bites, downsample
-  // old rows to hourly rollups — cheaper than an Athena/Iceberg cold layer.
+  // old rows to hourly rollups, cheaper than an Athena/Iceberg cold layer.
   { label: "7d", hours: 168 },
   { label: "30d", hours: 720 },
 ];
@@ -134,7 +134,7 @@ const DEFAULT_RANGE: TimeRange = { kind: "preset", hours: 1 };
 // Parse the initial range from the URL SYNCHRONOUSLY (used as the useState
 // initializer). This must NOT be deferred to an effect: the URL-sync effect
 // below runs on mount with whatever `range` currently is and rewrites the
-// query string — so if `range` started at the default, it would clobber a
+// query string, so if `range` started at the default, it would clobber a
 // shared `?range=24h` / `?from&to` URL back to 1h before any async loader
 // could read it. Seeding state from the URL up-front keeps shared windows.
 function readInitialRange(): TimeRange {
@@ -177,7 +177,7 @@ const TAB_DEFS: { key: TabKey; label: string }[] = [
   { key: "audit", label: "변경/감사" },
 ];
 
-// Which tabs each engine family renders — derived from the per-family panel
+// Which tabs each engine family renders, derived from the per-family panel
 // gating in the body below: a tab with zero applicable panels for a family is
 // omitted entirely (e.g. DynamoDB/DocDB/ElastiCache have no perf-SQL or PG
 // internals panels). Keep in sync with the fam-gated blocks in the return.
@@ -219,7 +219,7 @@ function rangeLabel(r: TimeRange): string {
   return `${fmt(f)} → ${fmt(t)}`;
 }
 
-// Approximate number of hours covered by a TimeRange — used for legacy panels
+// Approximate number of hours covered by a TimeRange, used for legacy panels
 // that still take `hours: number` (TimeseriesChart, ConnectionBreakdown).
 // For custom ranges, hours = ceil((to - from) in hours).
 function rangeToHours(r: TimeRange): number {
@@ -278,7 +278,7 @@ function persistViews(next: SavedView[]): void {
       JSON.stringify(next.slice(0, VIEWS_LIMIT)),
     );
   } catch {
-    // Quota — drop oldest and retry. Saved views are nice-to-have, not
+    // Quota: drop oldest and retry. Saved views are nice-to-have, not
     // load-bearing, so silent failure is acceptable.
     try {
       localStorage.setItem(VIEWS_STORAGE_KEY, JSON.stringify(next.slice(0, 5)));
@@ -316,7 +316,7 @@ export default function DashboardPage() {
   const hours = rangeToHours(range);
 
   // Load persisted views on mount. We also write back through every mutation
-  // path below so the list is always in sync — there's no separate "save"
+  // path below so the list is always in sync. There's no separate "save"
   // step on top of the per-action persist.
   useEffect(() => {
     setViews(loadViews());
@@ -358,7 +358,7 @@ export default function DashboardPage() {
             ? new URLSearchParams(window.location.search)
             : null;
         // Prefer the URL ?cluster=, then the globally-selected cluster (shared
-        // store / localStorage), then the first cluster — so the dashboard
+        // store / localStorage), then the first cluster, so the dashboard
         // honors a switch made via ⌘K / another page.
         const wanted = params?.get("cluster") || getSelectedCluster();
         const match =
@@ -366,7 +366,7 @@ export default function DashboardPage() {
           cs.find((c: { cluster_id: string }) => c.cluster_id === wanted);
         setSelectedCluster(match ? wanted : cs[0].cluster_id);
         // Time range is seeded synchronously from the URL via readInitialRange()
-        // (the useState initializer) — doing it here instead would race with the
+        // (the useState initializer). Doing it here instead would race with the
         // URL-sync effect and lose shared ?range / ?from&to windows.
       })
       .catch((e) => setError(`Failed to load clusters: ${e.message}`));
@@ -453,8 +453,8 @@ export default function DashboardPage() {
     setTsLoading(true);
   }, [selectedCluster, range]);
 
-  // deps drive an immediate re-fetch when the cluster or range changes —
-  // otherwise the charts sit on "불러오는 중…" until the next 30s tick because
+  // deps drive an immediate re-fetch when the cluster or range changes.
+  // Otherwise the charts sit on "불러오는 중…" until the next 30s tick because
   // the mount fire happens before the async cluster list resolves.
   useSmartPoll(loadTimeseries, 30000, [selectedCluster, JSON.stringify(range)]);
 
@@ -501,7 +501,7 @@ export default function DashboardPage() {
         eyebrow={t("모니터")}
         title={t("Dashboard")}
         description={t(
-          "단일 클러스터 deep dive — 시계열, wait events, locks, vacuum, schema changes 등 17개 패널.",
+          "단일 클러스터 deep dive: 시계열, wait events, locks, vacuum, schema changes 등 17개 패널.",
         )}
         actions={
           <div className="flex items-center gap-1 relative">
@@ -597,7 +597,7 @@ export default function DashboardPage() {
 
       {/* Incident-first: when the selected cluster isn't healthy, lead with
           WHY + the RCA action before the metric panels below.
-          RCA / incident diagnosis is Aurora-oriented — skip for non-relational. */}
+          RCA / incident diagnosis is Aurora-oriented. Skip for non-relational. */}
       {selectedCluster &&
         engineFamily(
           clusters.find((c) => c.cluster_id === selectedCluster)?.engine,
@@ -611,7 +611,7 @@ export default function DashboardPage() {
             </span>
             <span>
               합성 데이터로 채워진 데모 클러스터입니다. 실제 Aurora가 아니라
-              평가용 24시간 시드 데이터를 보고 있습니다 — Clusters 페이지에서
+              평가용 24시간 시드 데이터를 보고 있습니다. Clusters 페이지에서
               언제든 삭제 가능합니다.
             </span>
           </div>
@@ -623,9 +623,9 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Data API disabled banner — global (above tabs) because it explains why
+      {/* Data API disabled banner: global (above tabs) because it explains why
           the live-SQL panels across 성능/쿼리, 구성/백업, 변경/감사 sit on
-          "수집 대기". false only — NULL(uncollected)/true stay hidden. */}
+          "수집 대기". false only: NULL(uncollected)/true stay hidden. */}
       {selectedCluster &&
         fam === "relational" &&
         dashboardData?.cluster?.http_endpoint_enabled === false && (
@@ -634,7 +634,7 @@ export default function DashboardPage() {
 
       {selectedCluster && clusters.length > 0 && visibleTabs.length > 0 && (
         <>
-          {/* Section tabs — global, below the banners. Only the tabs that have
+          {/* Section tabs: global, below the banners. Only the tabs that have
               applicable panels for this engine family are shown; horizontal
               scroll on narrow widths. Active tab uses the product's amber
               accent (the same accent as the range/Views controls above). */}
@@ -663,7 +663,7 @@ export default function DashboardPage() {
                     {(() => {
                       const badge = engineBadge(activeEngine);
                       const eol = eolFor(activeEngine, ver);
-                      // /overview has not yet landed — render a same-dimension
+                      // /overview has not yet landed. Render a same-dimension
                       // skeleton so there is no layout shift when data arrives.
                       if (!dashboardData) {
                         return (
@@ -982,11 +982,11 @@ export default function DashboardPage() {
               </>
             )}
 
-            {/* ═══════════════ 성능/쿼리 (perf) — relational + rds_instance ═══════════════ */}
+            {/* ═══════════════ 성능/쿼리 (perf): relational + rds_instance ═══════════════ */}
             {activeTab === "perf" &&
               (fam === "relational" || fam === "rds_instance") && (
                 <>
-                  {/* On-demand LIVE top — PG only (pg_stat_activity / pg_buffercache
+                  {/* On-demand LIVE top: PG only (pg_stat_activity / pg_buffercache
                     are PG surfaces; MySQL SHOW PROCESSLIST is out of v1 scope). */}
                   {activeEngine.includes("postgresql") && (
                     <div className="flex justify-end">
@@ -1053,7 +1053,7 @@ export default function DashboardPage() {
               </>
             )}
 
-            {/* ═══════════════ 엔진 내부 (internals) — relational + rds_instance ═══════════════ */}
+            {/* ═══════════════ 엔진 내부 (internals): relational + rds_instance ═══════════════ */}
             {activeTab === "internals" &&
               (fam === "relational" || fam === "rds_instance") && (
                 <>
@@ -1062,7 +1062,7 @@ export default function DashboardPage() {
                     engine={activeEngine}
                     range={range}
                   />
-                  {/* Vacuum is PG-only — MySQL InnoDB has no equivalent surface. */}
+                  {/* Vacuum is PG-only. MySQL InnoDB has no equivalent surface. */}
                   {isPostgres(activeEngine) && (
                     <VacuumPanel clusterId={selectedCluster} />
                   )}
@@ -1150,7 +1150,7 @@ export default function DashboardPage() {
   );
 }
 
-/** Saved-views popover — shown when the user clicks "★ Views" in the header.
+/** Saved-views popover: shown when the user clicks "★ Views" in the header.
  *  Top row: name input + "save current" button (saves the active cluster +
  *  range combo). Below: scrollable list of pinned views with click-to-apply
  *  + delete (×). All persistence is localStorage-only for v1. */

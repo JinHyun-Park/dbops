@@ -1,4 +1,4 @@
-"""Unit tests for agent/tenancy.py — visible_cluster_ids_for.
+"""Unit tests for agent/tenancy.py: visible_cluster_ids_for.
 
 Identity comes from a JWKS-VERIFIED Cognito ID token passed in the invocation
 payload. The real JWKS verification (PyJWKClient + cryptography) can't run in

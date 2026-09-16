@@ -1,4 +1,4 @@
-"""upgrade_estimator — calibrated engine upgrade time/downtime model.
+"""upgrade_estimator: calibrated engine upgrade time/downtime model.
 
 Calibrated on Aurora, and the REST ``/upgrade-impact`` + ``/upgrade-plan``
 routes carry no engine-family gate, so a registered standalone RDS MySQL
@@ -17,7 +17,7 @@ WHY this replaces the old ``base + storage/100 * coeff`` heuristic
 The old model made wall-clock scale with raw storage. That is wrong for the
 mechanics AWS actually documents:
 
-* **MINOR upgrades just swap binaries** — no data-file rewrite — so the cost
+* **MINOR upgrades just swap binaries** (no data-file rewrite), so the cost
   is essentially a writer reboot plus a small per-reader patch. It is largely
   independent of data size *and* object count.
   (AWS: minor upgrades "only replace binaries without changing data files".)
@@ -30,12 +30,12 @@ mechanics AWS actually documents:
   in-place pg_upgrade downtime (AWS "Wiz" case study).
 
 * **The method changes DOWNTIME, not just total wall-clock:**
-    - ``in_place``  — the writer is offline for ~the whole upgrade compute
+    - ``in_place``: the writer is offline for ~the whole upgrade compute
       window (minutes for a minor, up to ~1 h for a large major).
-    - ``blue_green`` — the green environment is built and caught up in the
+    - ``blue_green``: the green environment is built and caught up in the
       background; the only downtime is the **switchover**, which RDS guardrails
-      bound to well under a minute (timeout configurable 30 s–1 h, default 5 m).
-    - ``clone``     — the source cluster is untouched; downtime is just the
+      bound to well under a minute (timeout configurable 30 s to 1 h, default 5 m).
+    - ``clone``: the source cluster is untouched; downtime is just the
       endpoint cutover.
 
 * **Object count drives majors**, so we read the live table count from the
@@ -64,7 +64,7 @@ _MAJOR_PER_JUMP_MIN = 6        # each major version crossed (e.g. 12->16 = 4)
 _MAJOR_PER_READER_MIN = 5      # each reader re-upgraded + lag-verified
 
 # Storage's ONLY real influence is the pre/post snapshot scan. Aurora snapshots
-# are incremental/fast, so this is deliberately small AND CAPPED — a multi-TB
+# are incremental/fast, so this is deliberately small AND CAPPED: a multi-TB
 # volume must never make a (size-independent) minor upgrade look expensive.
 _SNAPSHOT_PER_100GB_MIN = 0.5
 _SNAPSHOT_CAP_MIN = 10.0
@@ -240,7 +240,7 @@ def _core_minutes(upgrade_type, object_count, major_jumps, readers, storage_gb):
     if upgrade_type == "minor":
         core = _MINOR_WRITER_MIN + readers * _MINOR_PER_READER_MIN + storage_term
         basis = [
-            f"마이너 업그레이드(바이너리 교체, 데이터 파일 미변경) — writer 재시작 "
+            f"마이너 업그레이드(바이너리 교체, 데이터 파일 미변경): writer 재시작 "
             f"{_MINOR_WRITER_MIN}분 기준, 데이터 크기나 객체 수와 거의 무관",
         ]
         if readers:
@@ -252,7 +252,7 @@ def _core_minutes(upgrade_type, object_count, major_jumps, readers, storage_gb):
     reader_term = readers * _MAJOR_PER_READER_MIN
     core = _MAJOR_BASE_MIN + object_term + jump_term + reader_term + storage_term
     basis = [
-        f"메이저 업그레이드 — pg_upgrade/precheck의 catalog 변환이 지배적이며 "
+        f"메이저 업그레이드: pg_upgrade/precheck의 catalog 변환이 지배적이며 "
         f"객체(테이블) 수 ~{int(object_count)}개 기반 (+{round(object_term)}분)",
         f"메이저 버전 {major_jumps}단계 점프 (+{round(jump_term)}분)",
     ]
@@ -279,7 +279,7 @@ def _method_estimate(method, upgrade_type, core, object_term_only, basis_common)
         downtime_seconds = 30
         basis.append(
             "blue/green: green 환경 동기화는 백그라운드(프로덕션 영향 없음), 다운타임은 "
-            "switchover(<1분, 가드레일 강제)만 — green 복제 catch-up은 쓰기량에 비례"
+            "switchover(<1분, 가드레일 강제)만, green 복제 catch-up은 쓰기량에 비례"
         )
     elif method == "clone":
         total = core + _CLONE_PROVISION_MIN
@@ -387,7 +387,7 @@ def estimate_upgrade(
         object_count_basis = (
             f"table_stats 라이브 객체 수 {object_count}개"
             if table_count is not None
-            else "객체 수 미상 (table_stats 미수집) — 기본값으로 추정, 신뢰도 낮음"
+            else "객체 수 미상 (table_stats 미수집): 기본값으로 추정, 신뢰도 낮음"
         )
     else:
         object_count_basis = "마이너 업그레이드는 객체 수 무관"

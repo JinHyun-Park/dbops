@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
-# Module loading — push api/reports on sys.path so `import tenancy` resolves
+# Module loading: push api/reports on sys.path so `import tenancy` resolves
 # ---------------------------------------------------------------------------
 
 _REPORTS_DIR = Path(__file__).resolve().parents[3] / "api" / "reports"
@@ -253,7 +253,7 @@ def test_reports_html_allowed_when_visible(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Fleet ('*') rollup visibility — embeds real cluster names, so restricted
+# Fleet ('*') rollup visibility: embeds real cluster names, so restricted
 # viewers must NOT see it; admins and unrestricted viewers may.
 # ---------------------------------------------------------------------------
 

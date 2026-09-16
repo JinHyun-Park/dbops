@@ -85,9 +85,9 @@ REGION = os.environ.get("AWS_REGION_OVERRIDE", os.environ.get("AWS_REGION", "ap-
 # AgentCore Memory: when set, the agent persists turns + retrieves the caller's
 # long-term memory (facts/preferences/summaries). Empty disables it (fail-open).
 MEMORY_ID = os.environ.get("MEMORY_ID", "")
-# AWS MCP Server — AWS-MANAGED remote MCP (SigV4-authenticated) exposing
+# AWS MCP Server: AWS-MANAGED remote MCP (SigV4-authenticated) exposing
 # official AWS/Aurora documentation. We sign requests with the runtime's IAM
-# role and expose ONLY the read-only doc tools — never the AWS-API-execution
+# role and expose ONLY the read-only doc tools, never the AWS-API-execution
 # tools (call_aws/run_script) the same server also offers. Empty disables it.
 # Replaces the deprecated public knowledge-mcp endpoint (whose tools/call
 # returned 400 over plain streamable-HTTP).
@@ -105,7 +105,7 @@ def _extract_usage(event):
     {"result": AgentResult}. AgentResult.metrics is an EventLoopMetrics instance
     and .accumulated_usage is a Usage TypedDict with inputTokens/outputTokens.
 
-    Fully defensive — never raises (returns None on any unexpected shape).
+    Fully defensive: never raises (returns None on any unexpected shape).
     """
     try:
         result = event.get("result") if isinstance(event, dict) else None
@@ -239,7 +239,7 @@ def _aws_mcp_call(tool_name: str, arguments: dict, max_chars: int = 8000) -> str
 @tool
 def search_aws_documentation(search_phrase: str) -> str:
     """Search official AWS / Amazon Aurora documentation and return ranked
-    results (title + URL + context). Use for authoritative AWS behavior —
+    results (title + URL + context). Use for authoritative AWS behavior:
     parameter defaults, limits, error codes, version differences, upgrade
     paths. Then call read_aws_documentation on a result URL for the full text.
     Always cite the source URL in your answer."""
@@ -331,7 +331,7 @@ async def invoke(payload, context):
     gateway_client = make_mcp_client()
 
     # AWS Knowledge doc tools are STATELESS local tools (fresh connection per
-    # call — see _call_knowledge_tool), so they need no persistent context and
+    # call, see _call_knowledge_tool), so they need no persistent context and
     # just get appended. The Gateway client DOES need its context held open
     # for the duration of streaming (AWS keeps that session alive), so it
     # stays inside the ExitStack.
@@ -346,7 +346,7 @@ async def invoke(payload, context):
                 stack.enter_context(gateway_client)
                 # The Gateway paginates tools/list and list_tools_sync returns a
                 # SINGLE page (~30 tools). Follow the cursor so every target's
-                # tools load — otherwise whatever spills onto later pages is
+                # tools load. Otherwise whatever spills onto later pages is
                 # silently missing from the agent (we had 36 defined, 30 loaded).
                 gw_tools = []
                 page = gateway_client.list_tools_sync()
@@ -367,7 +367,7 @@ async def invoke(payload, context):
 
         # AgentCore Memory: persist this conversation's turns + auto-retrieve the
         # caller's long-term memory (facts / preferences / cross-session summaries)
-        # via the bundled Strands session manager. Fail-open — any wiring error
+        # via the bundled Strands session manager. Fail-open: any wiring error
         # just runs the agent without Memory and never breaks chat. actor_id is the
         # JWKS-verified user (LTM is per-user); session_id is the AgentCore runtime
         # session. Both required, else we skip rather than mis-scope memory.

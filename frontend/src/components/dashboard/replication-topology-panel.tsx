@@ -8,9 +8,9 @@ import {
 } from "@/lib/api-client";
 import { fmtDecimal } from "@/lib/format";
 
-// Auto-load on mount — topology is one fast describe call, low cost,
+// Auto-load on mount: topology is one fast describe call, low cost,
 // and DBAs expect this panel to be populated when they land. Different
-// from redundant-indexes (which scans every pg_index — expensive).
+// from redundant-indexes (which scans every pg_index, expensive).
 
 const LAG_THRESHOLDS = { warn: 100, crit: 1000 } as const;
 
@@ -192,7 +192,7 @@ export function ReplicationTopologyPanel({ clusterId }: { clusterId: string }) {
               </div>
               {readers.length === 0 ? (
                 <div className="text-xs text-zinc-500 border border-zinc-800 bg-zinc-900/40 px-3 py-4">
-                  reader 없음 — single-node 클러스터입니다. 운영 환경이면 최소
+                  reader 없음: single-node 클러스터입니다. 운영 환경이면 최소
                   1개 reader 추가를 권장 (failover RTO 단축).
                 </div>
               ) : (
@@ -260,7 +260,7 @@ function NodeCard({
         ) : (
           <span
             className={`px-1.5 py-0.5 border text-[10px] font-mono shrink-0 flex items-center gap-1 ${lag.classes}`}
-            title="AuroraReplicaLag — CloudWatch 15분 윈도우 최신값"
+            title="AuroraReplicaLag: CloudWatch 15분 윈도우 최신값"
           >
             <span className={`w-1.5 h-1.5 rounded-full ${lag.dot}`} />
             {lag.text}
@@ -291,7 +291,7 @@ function NodeCard({
         {node.promotion_tier !== null &&
           node.promotion_tier !== undefined &&
           !isWriter && (
-            <span title="Aurora promotion tier — 숫자가 낮을수록 failover 우선순위가 높습니다">
+            <span title="Aurora promotion tier: 숫자가 낮을수록 failover 우선순위가 높습니다">
               <span className="text-zinc-600">tier:</span>{" "}
               <span className="text-zinc-400">{node.promotion_tier}</span>
             </span>

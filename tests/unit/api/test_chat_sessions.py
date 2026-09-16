@@ -23,7 +23,7 @@ _spec.loader.exec_module(handler)
 
 
 def _jwt(sub: str = "user-a") -> str:
-    """Minimal unsigned JWT with sub claim — handler decodes payload only."""
+    """Minimal unsigned JWT with sub claim: handler decodes payload only."""
     payload = json.dumps({"sub": sub}).encode("utf-8")
     b64 = base64.urlsafe_b64encode(payload).rstrip(b"=").decode()
     return f"hdr.{b64}.sig"
@@ -98,7 +98,7 @@ def test_list_includes_last_error_when_present(mock_boto3):
 @patch.dict("os.environ", {"SESSIONS_TABLE": "sessions"})
 @patch.object(handler, "boto3")
 def test_list_session_without_last_error_is_unchanged(mock_boto3):
-    """Sessions without last_error still list fine — field is simply absent."""
+    """Sessions without last_error still list fine: field is simply absent."""
     table = MagicMock()
     table.query.return_value = {
         "Items": [{"session_id": "s-ok", "title": "Healthy session"}]
@@ -138,7 +138,7 @@ def test_get_session_owner_can_read(mock_boto3):
 @patch.dict("os.environ", {"SESSIONS_TABLE": "sessions"})
 @patch.object(handler, "boto3")
 def test_get_session_other_user_404s(mock_boto3):
-    """Cross-user reads must look like 'not found', not 403 — don't leak existence."""
+    """Cross-user reads must look like 'not found', not 403: don't leak existence."""
     table = MagicMock()
     table.get_item.return_value = {
         "Item": {"session_id": "s1", "user_id": "user-b", "title": "Other"}
@@ -335,7 +335,7 @@ def test_normalize_messages_persists_followups_and_incomplete():
         {
             "role": "assistant",
             "content": "done",
-            # No followups, no incomplete — must not appear in output.
+            # No followups, no incomplete: must not appear in output.
         },
     ]
     out = handler._normalize_messages(msgs)
@@ -387,7 +387,7 @@ def test_normalize_messages_followups_drops_non_string():
 @patch.dict("os.environ", {"SESSIONS_TABLE": "sessions"})
 @patch.object(handler, "boto3")
 def test_put_rejects_non_int_token_fields(mock_boto3):
-    """String and bool values for token fields must NOT be stored — the additive
+    """String and bool values for token fields must NOT be stored: the additive
     guard drops them silently rather than storing invalid types in DDB."""
     table = MagicMock()
     table.get_item.return_value = {}  # no existing row
@@ -397,9 +397,9 @@ def test_put_rejects_non_int_token_fields(mock_boto3):
         "title": "bad types",
         "cluster_id": "dev-pg-1",
         "messages": [],
-        # string — must be rejected
+        # string: must be rejected
         "total_input_tokens": "bad",
-        # bool — subclasses int in Python, must still be rejected
+        # bool: subclasses int in Python, must still be rejected
         "total_output_tokens": True,
         # also bool
         "turn_count": False,

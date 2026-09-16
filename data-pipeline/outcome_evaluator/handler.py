@@ -1,4 +1,4 @@
-"""outcome_evaluator — open remediation cases, then judge the due ones.
+"""outcome_evaluator: open remediation cases, then judge the due ones.
 
 EventBridge every 20 min. Public endpoints only (RDS Data API), so it lives in the
 data stack like proactive_monitor / alert_evaluator.
@@ -9,7 +9,7 @@ import boto3
 
 # Bare imports: Lambda asset bundles this directory's CONTENTS to /var/task, so
 # siblings (case_opener.py, evaluator.py, remediation_classify.py) are top-level
-# modules at runtime — same convention as etl_collector (from collectors.X import).
+# modules at runtime, same convention as etl_collector (from collectors.X import).
 import case_opener
 import evaluator
 
@@ -80,7 +80,7 @@ def lambda_handler(event, context):
         print(f"[outcome-eval] open_cases failed: {type(e).__name__}: {e}")
 
     # Phase 2: also open rca:<category> cases from recently-completed agent tasks.
-    # Isolated the same way as open_cases — failure does NOT block due-case evaluation.
+    # Isolated the same way as open_cases: failure does NOT block due-case evaluation.
     tasks_table_name = os.environ.get("AGENT_TASKS_TABLE")
     if tasks_table_name:
         ddb_table = boto3.resource("dynamodb").Table(tasks_table_name)

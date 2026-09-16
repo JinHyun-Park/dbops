@@ -1,6 +1,6 @@
 "use client";
 
-// Shared engine badge pill — reused by ClusterDropdown and FleetRow.
+// Shared engine badge pill: reused by ClusterDropdown and FleetRow.
 // Renders a compact colored pill with the engine short label + optional version.
 // Colors come from engineBadge() in @/lib/engine to stay in sync with the Fleet
 // table; don't duplicate the palette here.

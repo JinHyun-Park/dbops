@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** An admin-only `/admin/teams` page to create teams, manage members, and assign clusters — consuming the `/api/admin/teams*` API shipped in T-1, mirroring the existing `/admin/users` admin console for visual + structural consistency.
+**Goal:** An admin-only `/admin/teams` page to create teams, manage members, and assign clusters: consuming the `/api/admin/teams*` API shipped in T-1, mirroring the existing `/admin/users` admin console for visual + structural consistency.
 
 **Architecture:** Frontend-only (Next.js 16 static export). Task 1 adds the api-client functions + types for the teams API. Task 2 adds the `/admin/teams` page (team list + create + a detail view managing members + cluster assignments) and a nav entry, mirroring `src/app/admin/users/page.tsx` and the `adminOnly` nav pattern in `app-shell.tsx`.
 
@@ -11,19 +11,19 @@
 ## Global Constraints
 
 - **No `Co-Authored-By: Claude` trailer** in commits.
-- **Product-quality UI, not AI-generated feel** (user rule) — mirror `src/app/admin/users/page.tsx` EXACTLY for layout, zinc palette, typography, spacing, Korean copy, empty/loading/error states. Do not invent a new visual language.
-- **Admin-gated, cosmetic + server-enforced:** the nav item is `adminOnly: true` (hidden for viewers via `isAdmin()`); the page shows the admin-only `EmptyState` on a 403 (mirror admin/users `adminOnly` handling). The server (`/api/admin/teams*`) is the real gate (T-1) — the UI gate is cosmetic.
+- **Product-quality UI, not AI-generated feel** (user rule): mirror `src/app/admin/users/page.tsx` EXACTLY for layout, zinc palette, typography, spacing, Korean copy, empty/loading/error states. Do not invent a new visual language.
+- **Admin-gated, cosmetic + server-enforced:** the nav item is `adminOnly: true` (hidden for viewers via `isAdmin()`); the page shows the admin-only `EmptyState` on a 403 (mirror admin/users `adminOnly` handling). The server (`/api/admin/teams*`) is the real gate (T-1): the UI gate is cosmetic.
 - **Korean copy** for all labels/descriptions/confirms; identifiers (team_id, cluster_id, username) verbatim/mono.
 - **Reuse, don't duplicate:** member-picker uses `fetchAdminUsers`; cluster-picker uses `fetchClusters` (each cluster item already carries `cluster_id` + `team_id`); design-system `PageBody/PageHeader/Section/EmptyState`.
 - **Destructive actions confirm:** delete-team + remove-member + unassign-cluster use `window.confirm` with a Korean message (mirror admin/users `onChangeRole`).
-- **No `aws s3 sync` / deploy in the tasks** — controller deploys after review.
+- **No `aws s3 sync` / deploy in the tasks**: controller deploys after review.
 - Verification is `npm run build` (typecheck + static prerender); there are no frontend unit tests in this repo.
 
 **Grounding (read before implementing):**
 
-- Mirror page: `src/app/admin/users/page.tsx` (the full template — copy its structure).
+- Mirror page: `src/app/admin/users/page.tsx` (the full template: copy its structure).
 - api-client patterns: `src/lib/api-client.ts` `fetchAdminUsers`/`updateUserRole` (~:2540) + `AdminUser` interface (~:2520) + `fetchClusters` (returns the cluster array; items have `cluster_id`, `team_id?`).
-- Nav: `src/components/app-shell.tsx` — the admin group (~:200-237) with `adminOnly: true` items (`/admin/users` at :220, icon from `lucide-react`, `hint`); `isAdmin()` filters them (set at :512).
+- Nav: `src/components/app-shell.tsx`: the admin group (~:200-237) with `adminOnly: true` items (`/admin/users` at :220, icon from `lucide-react`, `hint`); `isAdmin()` filters them (set at :512).
 - Auth: `src/lib/auth.ts` `isAdmin()`, `getUsername()`.
 - The T-1 API response shapes: `GET /api/admin/teams` → `{teams: [{team_id, name, created_at, created_by, member_count}]}`; `GET /api/admin/teams/{team_id}` → `{team_id, name, members: string[], clusters: string[]}`; `POST /api/admin/teams {name}` → `{team_id, name}`; `POST/DELETE /api/admin/teams/{team_id}/members/{username}`; `POST/DELETE /api/admin/teams/{team_id}/clusters/{cluster_id}`; `DELETE /api/admin/teams/{team_id}` → `{team_id, deleted: true}`.
 
@@ -163,9 +163,9 @@ export async function unassignClusterFromTeam(
 }
 ```
 
-(Confirm `apiUrl` vs `api` — `fetchAdminUsers` uses `apiUrl`; match it. Confirm `enc` is the same encoder used by the admin-users functions.)
+(Confirm `apiUrl` vs `api`: `fetchAdminUsers` uses `apiUrl`; match it. Confirm `enc` is the same encoder used by the admin-users functions.)
 
-- [ ] **Step 3: Build** — `cd frontend && npm run build` → PASS (no type errors).
+- [ ] **Step 3: Build**: `cd frontend && npm run build` → PASS (no type errors).
 
 - [ ] **Step 4: Commit.** `git add frontend/src/lib/api-client.ts && git commit -m "feat(tenancy): api-client functions for the admin Teams API"`
 
@@ -180,7 +180,7 @@ export async function unassignClusterFromTeam(
 
 **Interfaces:** Consumes Task 1's `fetchAdminTeams`/`fetchTeamDetail`/`createTeam`/`deleteTeam`/`add|removeTeamMember`/`assign|unassignClusterFromTeam` + existing `fetchAdminUsers`, `fetchClusters`, `isAdmin`/`getUsername`.
 
-- [ ] **Step 1: Add the nav item** in `app-shell.tsx` — directly after the `/admin/users` item in the admin group, mirroring its shape:
+- [ ] **Step 1: Add the nav item** in `app-shell.tsx`: directly after the `/admin/users` item in the admin group, mirroring its shape:
 
 ```typescript
       {
@@ -188,24 +188,24 @@ export async function unassignClusterFromTeam(
         label: "Teams",
         icon: Users,
         adminOnly: true,
-        hint: "팀 관리 — 멤버/클러스터 가시성 (관리자)",
+        hint: "팀 관리: 멤버/클러스터 가시성 (관리자)",
       },
 ```
 
-(Import `Users` from `lucide-react` if not already imported. Use an icon already in the file's import set if `Users` isn't available — pick the closest, e.g. `UsersRound`/`UserCheck`.)
+(Import `Users` from `lucide-react` if not already imported. Use an icon already in the file's import set if `Users` isn't available: pick the closest, e.g. `UsersRound`/`UserCheck`.)
 
-- [ ] **Step 2: Create `src/app/admin/teams/page.tsx`** — mirror `src/app/admin/users/page.tsx`'s structure (`"use client"`, `PageBody/PageHeader/Section/EmptyState`, the `adminOnly` 403 empty state, loading/error states, zinc table styling, Korean copy). The page:
+- [ ] **Step 2: Create `src/app/admin/teams/page.tsx`**: mirror `src/app/admin/users/page.tsx`'s structure (`"use client"`, `PageBody/PageHeader/Section/EmptyState`, the `adminOnly` 403 empty state, loading/error states, zinc table styling, Korean copy). The page:
 
   - Loads `fetchAdminTeams()` on mount; 403 → admin-only `EmptyState` (eyebrow "접근 제한", title "관리자 전용 페이지").
-  - **Team list** (Section eyebrow "Teams"): a table — name, member_count, (load-detail-on-click). A "팀 만들기" inline input + button calling `createTeam(name)` then reloading.
+  - **Team list** (Section eyebrow "Teams"): a table: name, member_count, (load-detail-on-click). A "팀 만들기" inline input + button calling `createTeam(name)` then reloading.
   - **Selected-team detail** (Section, shown when a team is clicked → `fetchTeamDetail`):
     - **Members:** the team's `members` (usernames; show the email if resolvable from a `fetchAdminUsers` map) each with a "제거" button (`removeTeamMember` + `window.confirm`); an "추가" control = a `<select>` of users NOT already members (from `fetchAdminUsers`) → `addTeamMember`.
-    - **Clusters:** the team's `clusters` (cluster_ids) each with a "할당 해제" button (`unassignClusterFromTeam` + confirm); an "할당" control = a `<select>` of clusters not already on THIS team (from `fetchClusters`; a cluster already on another team can be reassigned — assigning overwrites its `team_id`, so show its current team if any) → `assignClusterToTeam`.
-    - A "팀 삭제" button (`deleteTeam` + `window.confirm` warning that its clusters will be unassigned) — mirror the destructive-action confirm idiom.
+    - **Clusters:** the team's `clusters` (cluster_ids) each with a "할당 해제" button (`unassignClusterFromTeam` + confirm); an "할당" control = a `<select>` of clusters not already on THIS team (from `fetchClusters`; a cluster already on another team can be reassigned: assigning overwrites its `team_id`, so show its current team if any) → `assignClusterToTeam`.
+    - A "팀 삭제" button (`deleteTeam` + `window.confirm` warning that its clusters will be unassigned): mirror the destructive-action confirm idiom.
   - After each mutation, re-fetch the detail (and the list for member/cluster counts) so the UI reflects server state; show a transient error banner on failure (mirror admin/users `error`).
-  - Use optimistic-free re-fetch (simpler + correct) OR optimistic updates mirroring admin/users — either is fine; prefer re-fetch for the detail to stay consistent.
+  - Use optimistic-free re-fetch (simpler + correct) OR optimistic updates mirroring admin/users: either is fine; prefer re-fetch for the detail to stay consistent.
 
-- [ ] **Step 3: Build** — `cd frontend && npm run build` → PASS, `/admin/teams` prerenders, no type errors.
+- [ ] **Step 3: Build**: `cd frontend && npm run build` → PASS, `/admin/teams` prerenders, no type errors.
 
 - [ ] **Step 4: Commit.** `git add frontend/src/app/admin/teams/page.tsx frontend/src/components/app-shell.tsx && git commit -m "feat(tenancy): admin Teams management page (create, members, cluster assignment)"`
 
@@ -213,7 +213,7 @@ export async function unassignClusterFromTeam(
 
 ## Post-implementation (controller, after both tasks reviewed clean)
 
-- **Final review (standard model — frontend, mirrors an existing page):** the page mirrors admin/users (consistent product UI, no AI-slop); all mutations confirm destructive actions; 403 → admin-only empty state; the nav item is `adminOnly`; member/cluster pickers reuse `fetchAdminUsers`/`fetchClusters`; no secrets/PII in URLs; Korean copy correct.
+- **Final review (standard model: frontend, mirrors an existing page):** the page mirrors admin/users (consistent product UI, no AI-slop); all mutations confirm destructive actions; 403 → admin-only empty state; the nav item is `adminOnly`; member/cluster pickers reuse `fetchAdminUsers`/`fetchClusters`; no secrets/PII in URLs; Korean copy correct.
 - **Build + deploy:** `cd frontend && npm run build` → `aws s3 sync out/ s3://dbops-dev-frontend-123456789012 --delete --exclude config.json --region ap-northeast-2` → CloudFront invalidate `E1234567890ABC`.
-- **Live smoke:** as the e2e VIEWER (no admin token available), confirm the COSMETIC gate: `/admin/teams` shows the admin-only empty state and the nav "Teams" item is hidden for the viewer. (The admin CRUD happy-path is covered by the `test_admin_teams.py` unit suite + the api-level T-1 work; a full admin browser flow needs an admin credential, which isn't available in this environment — note this in the smoke report rather than faking it.)
+- **Live smoke:** as the e2e VIEWER (no admin token available), confirm the COSMETIC gate: `/admin/teams` shows the admin-only empty state and the nav "Teams" item is hidden for the viewer. (The admin CRUD happy-path is covered by the `test_admin_teams.py` unit suite + the api-level T-1 work; a full admin browser flow needs an admin credential, which isn't available in this environment: note this in the smoke report rather than faking it.)
 - Then `superpowers:finishing-a-development-branch` (ff-merge to main). T-4 (agent SSE tenancy) is the remaining increment.

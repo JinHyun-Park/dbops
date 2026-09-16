@@ -1,4 +1,4 @@
-"""create_snapshot — agent-facing manual snapshot creation.
+"""create_snapshot: agent-facing manual snapshot creation.
 
 Mirrors the human path (api/backups) but for the AGENT. Because the
 agent isn't a trusted human, it goes through the same approval_guard

@@ -130,7 +130,7 @@ def test_delete_record_404(mock_boto3):
 
 @patch.dict("os.environ", {"MEMORY_ID": "mem-123"})
 def test_post_method_not_allowed():
-    """Memory is read+delete only — no POST/PUT (agent writes are
+    """Memory is read+delete only: no POST/PUT (agent writes are
     handled by AgentCore, not this UI surface)."""
     res = handler.lambda_handler(_event("POST"), None)
     assert res["statusCode"] == 405
@@ -139,7 +139,7 @@ def test_post_method_not_allowed():
 @patch.dict("os.environ", {"MEMORY_ID": "mem-123"})
 @patch.object(handler, "boto3")
 def test_cross_user_namespace_isolation(mock_boto3):
-    """sub from JWT must be the actor in the namespace path — user A
+    """sub from JWT must be the actor in the namespace path: user A
     can't peek at user B's preferences just by guessing record IDs."""
     mock_ac = MagicMock()
     mock_ac.list_memory_records.return_value = {"memoryRecordSummaries": []}

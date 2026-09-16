@@ -1,4 +1,4 @@
-"""query_activity_audit — agent-facing audit log for compliance + retro.
+"""query_activity_audit: agent-facing audit log for compliance + retro.
 
 DBAs (and compliance auditors) regularly ask:
   - "Who changed max_connections on prod-pg-1 in the last 7 days?"
@@ -9,7 +9,7 @@ Until now the agent had to compose multiple smaller tools (events,
 sessions, manual scan) and stitch the answer. This tool gives it a
 single primitive: query both the DDB approvals table (where every
 write proposal is tracked) and the audit_log PG table (where executed
-writes get stamped — currently sparse, but designed to fill in over
+writes get stamped, currently sparse, but designed to fill in over
 time as the agent migrates more execution paths to log there).
 
 Output shape mirrors what /api/activity returns to the UI so the agent
@@ -39,7 +39,7 @@ def query_activity_audit_impl(
     Args:
         cluster_id: filter to one cluster (empty = all clusters caller
             can see)
-        actor: requested_by OR approved_by match (single field — the
+        actor: requested_by OR approved_by match (single field, the
             DDB scan checks both)
         action_type: e.g. modify_parameter, execute_sql,
             modify_scaling, manage_maintenance
@@ -103,7 +103,7 @@ def query_activity_audit_impl(
                     ),
                     "actor": (
                         f"{r.get('requested_by') or 'agent'} → "
-                        f"{r.get('approved_by') or '—'}"
+                        f"{r.get('approved_by') or '-'}"
                     ),
                     "details_excerpt": details_str[:500],
                 })
@@ -147,7 +147,7 @@ def query_activity_audit_impl(
                 "action_type": r.get("action_type") or r.get("tool_name"),
                 "actor": (
                     f"{r.get('requested_by') or 'agent'} → "
-                    f"{r.get('approved_by') or '—'}"
+                    f"{r.get('approved_by') or '-'}"
                 ),
                 "details_excerpt": (r.get("sql_text") or "")[:500],
             })
@@ -155,7 +155,7 @@ def query_activity_audit_impl(
     except Exception as e:
         # audit_log table may exist with no rows, or the cache_client
         # may not have permission for some reason. Don't block the
-        # whole tool — surface what we got from DDB.
+        # whole tool: surface what we got from DDB.
         print(f"[query_activity_audit] audit_log skipped: {e}")
 
     # Sort newest first across sources.

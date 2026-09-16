@@ -16,7 +16,7 @@ export default function ApprovalsPage() {
   const [filter, setFilter] = useState<"pending" | "approved" | "rejected">(
     "pending",
   );
-  // 조회 실패를 빈 배열로 삼키면 장애가 "승인 요청 없음"으로 위장된다 —
+  // 조회 실패를 빈 배열로 삼키면 장애가 "승인 요청 없음"으로 위장된다.
   // 에러를 명시적으로 잡아 빈 상태와 구분한다(Codex 감사).
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -86,8 +86,8 @@ export default function ApprovalsPage() {
             승인 목록을 불러오지 못했습니다
           </div>
           <div className="text-zinc-400">
-            {loadError} — 네트워크 또는 인증 문제일 수 있습니다. 빈 목록이
-            아니라 조회 실패 상태입니다.
+            {loadError}. 네트워크 또는 인증 문제일 수 있습니다. 빈 목록이 아니라
+            조회 실패 상태입니다.
           </div>
           <button
             onClick={loadApprovals}

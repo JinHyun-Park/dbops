@@ -20,7 +20,7 @@ def _resolve_reader_count(cluster_id: str) -> tuple[int, str]:
 
     Counts non-writer members from ``DBClusterMembers``. Wrapped in try/except:
     if the describe fails (cluster not reachable, perms, table unset in tests)
-    we degrade to 0 readers and surface a note rather than failing the tool —
+    we degrade to 0 readers and surface a note rather than failing the tool:
     a missing reader count must not block an upgrade estimate.
 
     The note is interpolated into the response's ``reason``, so it is STATIC:
@@ -41,7 +41,7 @@ def _resolve_reader_count(cluster_id: str) -> tuple[int, str]:
 def _resolve_table_count(cache: CacheClient, cluster_id: str):
     """Live object-count proxy: distinct tables in the latest table_stats snapshot.
 
-    Object count (tables/indexes/routines) — NOT raw storage — is the dominant
+    Object count (tables/indexes/routines), NOT raw storage, is the dominant
     driver of MAJOR upgrade duration, so we surface it when the ETL has
     collected ``table_stats``. Returns ``None`` (not 0) when unavailable so the
     estimator can flag low confidence instead of pretending the DB is empty.
@@ -64,7 +64,7 @@ def _resolve_table_count(cache: CacheClient, cluster_id: str):
             return None
         n = int(n)
         return n if n > 0 else None
-    except Exception as e:  # noqa: BLE001 — table_stats is optional, degrade gracefully
+    except Exception as e:  # noqa: BLE001 (table_stats is optional, degrade gracefully)
         print(f"[upgrade_impact] table_stats count failed: {e}")
         return None
 

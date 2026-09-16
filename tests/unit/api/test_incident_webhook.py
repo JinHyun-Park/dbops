@@ -1,4 +1,4 @@
-"""Inbound incident webhook (P4) — auth, payload parsing, event_log write."""
+"""Inbound incident webhook (P4): auth, payload parsing, event_log write."""
 import importlib.util
 import json
 from pathlib import Path

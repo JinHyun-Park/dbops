@@ -48,7 +48,7 @@ def test_review_sql_insert_is_low_risk():
 
 
 def test_add_column_does_not_suggest_drop_column_rollback():
-    """The old behavior suggested DROP COLUMN as the rollback for ADD COLUMN —
+    """The old behavior suggested DROP COLUMN as the rollback for ADD COLUMN:
     data loss if the column was written to. Now: no auto-rollback, a note."""
     result = _review("ALTER TABLE users ADD COLUMN email VARCHAR(255)")
     assert result["risk_level"] == "high"

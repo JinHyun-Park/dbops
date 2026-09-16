@@ -2,7 +2,7 @@
 
 Aurora MySQL 8.0+ exposes statement aggregates via
 `performance_schema.events_statements_summary_by_digest`. Values are
-cumulative since the digest was first seen — same model as PG's
+cumulative since the digest was first seen, same model as PG's
 pg_stat_statements.calls/total_time, so the existing dashboard math works.
 """
 

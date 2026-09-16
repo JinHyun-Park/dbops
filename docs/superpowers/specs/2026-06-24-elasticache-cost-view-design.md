@@ -1,4 +1,4 @@
-# ElastiCache Cost-Explorer View (`?view=elasticache`) — Design
+# ElastiCache Cost-Explorer View (`?view=elasticache`): Design
 
 **Date:** 2026-06-24
 **Status:** approved (EC-5 follow-up; the deferred Cost-tab piece. Pure mirror of the existing `?view=rds` Cost-Explorer view.)
@@ -6,22 +6,22 @@
 ## Context
 
 EC-5 shipped node-resize cost SIMULATION + a right-sizing finding. The "Cost 탭"
-piece the user originally listed — actual ElastiCache SPEND from Cost Explorer —
+piece the user originally listed (actual ElastiCache SPEND from Cost Explorer)
 was deferred as a separate CE-query surface. This spec adds it as a new
 `?view=elasticache` arm of the existing `/api/cost` handler + a frontend Cost-page
 tab, a near-exact mirror of the already-shipped `?view=rds` view.
 
 ## Architecture
 
-### Backend — `api/cost/handler.py`
+### Backend: `api/cost/handler.py`
 
 Mirror `_handle_rds_view` (the RDS/Aurora CE view):
 
-1. **`_elasticache_services(ce, start, end)`** — mirror `_rds_services`: enumerate
+1. **`_elasticache_services(ce, start, end)`**, mirror `_rds_services`: enumerate
    `SERVICE` dimension values whose name (lower-cased) contains `"elasticache"`;
    fall back to a canonical default `["Amazon ElastiCache"]` on failure/empty.
-2. **`_handle_elasticache_view(ce, start, end, days)`** — mirror `_handle_rds_view`:
-   - `_query_total(ce, start, end, services)` (no tag filter — the customer's own
+2. **`_handle_elasticache_view(ce, start, end, days)`**, mirror `_handle_rds_view`:
+   - `_query_total(ce, start, end, services)` (no tag filter: the customer's own
      ElastiCache spend; DBOps doesn't tag customer clusters).
    - `_query_by_dimension(..., "USAGE_TYPE")` → spend by node-hours / data-transfer /
      backup-storage usage types.
@@ -37,12 +37,12 @@ _handle_elasticache_view(ce, start, end, days)` alongside the existing
 No new IAM (Cost Explorer `ce:GetCostAndUsage`/`GetDimensionValues` already granted
 for the rds/platform/bedrock views). No tag filter (account-wide ElastiCache spend).
 
-### Frontend — `frontend/src/app/cost/page.tsx`
+### Frontend: `frontend/src/app/cost/page.tsx`
 
 - Extend `CostTab` union with `"elasticache"`; add an "ElastiCache" tab.
 - Add the `view: "elasticache"` response type (same shape as the rds view type).
 - Fetch on tab select (mirror the rds fetch). Render: total, daily trend, by
-  usage-type table, per-cluster (or the activation note), anomalies — reusing the
+  usage-type table, per-cluster (or the activation note), anomalies, reusing the
   existing rds-view rendering components (the views are shape-identical, so the
   same table/chart/empty-state components apply). A `usageLabel` for ElastiCache
   usage types (mirror `rdsUsageLabel`) for readable rows (NodeUsage, etc.).
@@ -74,5 +74,5 @@ per-cluster(if tagged) + anomalies → rendered with the existing rds-view compo
 ## Security
 
 - Read-only Cost Explorer reads (existing IAM). Account-wide ElastiCache spend
-  (no tag filter) — same exposure as the rds view (admin/authz-gated dashboard).
+  (no tag filter): same exposure as the rds view (admin/authz-gated dashboard).
   No new permissions, no mutation.

@@ -1,10 +1,10 @@
-"""capacity_cost — DynamoDB Provisioned↔On-Demand $ what-if (READ-ONLY).
+"""capacity_cost: DynamoDB Provisioned↔On-Demand $ what-if (READ-ONLY).
 
 Reads the table's ACTUAL consumed capacity from the cache (metric_snapshots) and
 its billing_mode/region from cluster_meta, prices both modes with the REAL AWS
 Price List API for the table's region, and returns the monthly cost comparison +
 a recommendation. The math lives in the shared dynamodb_cost module (tested once,
-shared with the REST mirror); pricing lives in dynamodb_pricing. Both fail soft —
+shared with the REST mirror); pricing lives in dynamodb_pricing. Both fail soft:
 a missing price degrades to partial/fallback, never a fabricated dollar number.
 
 Capacity-unit semantics (must match the findings collector to avoid the
@@ -124,7 +124,7 @@ def simulate_dynamodb_capacity_cost_impl(
     `cluster_id` is the registry PK (ddb-* slug). `headroom` is the target
     utilization for provisioned sizing (default 0.70). `window_hours` caps the
     consumed lookback (default/cap 168h). Extra kwargs from the MCP dispatcher
-    are ignored. Never raises a pricing/data error into the caller — degrades to
+    are ignored. Never raises a pricing/data error into the caller, degrades to
     partial/fallback/no_data per the honesty contract."""
     try:
         window = float(window_hours)

@@ -1,14 +1,14 @@
-"""Runbooks API — CRUD over the `runbooks` cache table.
+"""Runbooks API: CRUD over the `runbooks` cache table.
 
 The agent's diagnoses are markdown by default, so we store them verbatim.
 Listing is keyed by cluster + recency; a future similarity layer (via the
 find_similar_incidents MCP tool) will key off the tags column.
 
 Routes:
-  GET    /api/runbooks                 — list (optional ?cluster_id, ?tag, ?limit)
-  POST   /api/runbooks                 — create
-  GET    /api/runbooks/{id}            — fetch one
-  DELETE /api/runbooks/{id}            — admin-only delete
+  GET    /api/runbooks:                  list (optional ?cluster_id, ?tag, ?limit)
+  POST   /api/runbooks:                  create
+  GET    /api/runbooks/{id}:             fetch one
+  DELETE /api/runbooks/{id}:             admin-only delete
 """
 
 import base64
@@ -20,7 +20,7 @@ import traceback
 import boto3
 
 # ---------------------------------------------------------------------------
-# Auth helpers (mirror api/alerts/handler.py — DBOps role gate)
+# Auth helpers (mirror api/alerts/handler.py, DBOps role gate)
 # ---------------------------------------------------------------------------
 
 

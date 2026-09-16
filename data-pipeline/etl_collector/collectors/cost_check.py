@@ -1,4 +1,4 @@
-"""Cost-optimization findings — engine-agnostic.
+"""Cost-optimization findings: engine-agnostic.
 
 The 17-panel dashboard already shows CPU utilization in the timeseries chart,
 but a long-running DBA wants the high-level "right-sized?" question
@@ -7,23 +7,23 @@ maintenance finding so it appears in the same ranked list as VACUUM /
 bloat / extension issues.
 
 Current rules:
-  - cost_oversized                    — avg 7d CPU < 30% AND p95 < 60% on a sized
+  - cost_oversized:                     avg 7d CPU < 30% AND p95 < 60% on a sized
                                         instance (not Serverless v2 / not burstable t-family)
                                         → recommend one-step downsize
-  - cost_serverless_max_too_high      — Serverless v2 cluster whose 7d p95 CPU
+  - cost_serverless_max_too_high:       Serverless v2 cluster whose 7d p95 CPU
                                         suggests the configured max ACU ceiling is
                                         wider than needed (waste under spike pricing)
-  - cost_serverless_min_too_low       — Serverless v2 cluster whose min ACU is set
+  - cost_serverless_min_too_low:        Serverless v2 cluster whose min ACU is set
                                         so low it causes per-cycle cold-start latency
                                         (proxy: many idle-to-active transitions)
-  - cost_savings_plan_opportunity     — Cost Explorer recommends an SP / RI purchase
+  - cost_savings_plan_opportunity:      Cost Explorer recommends an SP / RI purchase
                                         that would save >$10/mo on Bedrock or RDS
                                         spend tagged to this DBOps deployment
 
 Storage rightsizing is scaffolded as a no-op for Aurora today (auto-scaled
 storage, per-GB-used billing). The `_check_storage_rightsize` entry point
 is ready for when the collector grows to cover RDS non-Aurora / DocumentDB
-/ DynamoDB — see its docstring for the per-engine plan + the multi-engine
+/ DynamoDB. See its docstring for the per-engine plan + the multi-engine
 support epic in BACKLOG.md.
 """
 
@@ -34,7 +34,7 @@ CPU_AVG_THRESHOLD = 30.0
 CPU_P95_THRESHOLD = 60.0
 
 # Serverless v2 ACU heuristics, driven by the OBSERVED serverless_acu metric
-# (ServerlessDatabaseCapacity) — ACU is exactly what Sv2 bills, so we compare
+# (ServerlessDatabaseCapacity): ACU is exactly what Sv2 bills, so we compare
 # real consumed ACU against the configured min/max ceiling, not a CPU proxy.
 SV2_MAX_HEADROOM_FACTOR = 0.6  # 7d p95 ACU below (max × this) → ceiling overprovisioned
 SV2_SUGGEST_HEADROOM = 1.3     # suggested max = observed p95 ACU × this (burst headroom)
@@ -87,7 +87,7 @@ def _emit_finding(
     rds_data, cluster_arn, secret_arn, db_name,
     cluster_id, check_type, severity, subject, value_str, threshold_str, recommendation, details,
 ):
-    """Single INSERT into cluster_health_findings — used by every cost check."""
+    """Single INSERT into cluster_health_findings, used by every cost check."""
     _execute(
         rds_data, cluster_arn, secret_arn, db_name,
         "INSERT INTO cluster_health_findings "
@@ -108,7 +108,7 @@ def _emit_finding(
 
 
 def _check_oversized(rds_data, cache_arn, cache_secret, cache_db, cluster_id, meta, cpu):
-    """Provisioned-instance right-sizing — original P3.3 rule."""
+    """Provisioned-instance right-sizing: original P3.3 rule."""
     instance_class = meta.get("instance_class") or ""
     ic_lower = instance_class.lower()
     if "serverless" in ic_lower or ic_lower.startswith("db.t"):
@@ -122,7 +122,7 @@ def _check_oversized(rds_data, cache_arn, cache_secret, cache_db, cluster_id, me
         value_str=f"avg CPU {avg_cpu:.1f}% / p95 {p95_cpu:.1f}% / max {max_cpu:.1f}%",
         threshold_str=f"< {CPU_AVG_THRESHOLD:.0f}% avg & < {CPU_P95_THRESHOLD:.0f}% p95 → consider downsize",
         recommendation=(
-            f"{instance_class or '이 인스턴스'}의 7일 평균 CPU가 {avg_cpu:.1f}%입니다 — "
+            f"{instance_class or '이 인스턴스'}의 7일 평균 CPU가 {avg_cpu:.1f}%입니다. "
             "한 단계 작은 인스턴스를 검토하세요 (보통 월 30-50% 절감). "
             "축소 후 프로덕션 트래픽 1주를 지켜보고 재평가하세요."
         ),
@@ -140,7 +140,7 @@ def _check_oversized(rds_data, cache_arn, cache_secret, cache_db, cluster_id, me
 def _check_serverless_v2_acu(rds_data, cache_arn, cache_secret, cache_db, cluster_id, meta, acu):
     """Serverless v2 ACU rightsizing from the OBSERVED serverless_acu metric
     (ServerlessDatabaseCapacity). ACU is exactly what Sv2 bills, so we compare
-    real consumed ACU against the configured min/max ceiling — no CPU proxy.
+    real consumed ACU against the configured min/max ceiling, no CPU proxy.
     Skips (returns 0) when there is no ACU history rather than guessing."""
     sv2_min = meta.get("serverlessv2_min_acu")
     sv2_max = meta.get("serverlessv2_max_acu")
@@ -193,7 +193,7 @@ def _check_serverless_v2_acu(rds_data, cache_arn, cache_secret, cache_db, cluste
             recommendation=(
                 f"min ACU {sv2_min:.1f}로는 부하 대비 여유가 없습니다 (7일 p95 {p95_acu:.1f} ACU, 한도 {sv2_max:.1f}). "
                 f"min ACU를 ~{suggested_min:.1f}로 올리면 트래픽 스파이크 시 스케일업 지연이 줄어듭니다. "
-                "대신 평시 비용 하한이 올라가는 트레이드오프입니다 — cold-start 지연이 아프다면 수용하세요."
+                "대신 평시 비용 하한이 올라가는 트레이드오프입니다. cold-start 지연이 아프다면 수용하세요."
             ),
             details={
                 "current_min_acu": sv2_min,
@@ -363,11 +363,11 @@ def _check_savings_plan_opportunity(rds_data, cache_arn, cache_secret, cache_db,
     Cached daily in cost_recommendations_cache so we don't repay the
     $0.01-per-request CE fee on every 5-min ETL cycle.
 
-    Note: SP recommendations are account-wide, not cluster-scoped — but we
+    Note: SP recommendations are account-wide, not cluster-scoped, but we
     record under each registered DBOps cluster so the finding appears on
     every dashboard. The recommendation itself references the workload as
     'DBOps-tagged spend' so users know it's the same opportunity."""
-    # Reuse cached recommendation if it's fresh (< 23h old — under 24h so
+    # Reuse cached recommendation if it's fresh (< 23h old, under 24h so
     # daily CE refresh happens predictably).
     cached = _execute(
         rds_data, cache_arn, cache_secret, cache_db,
@@ -380,7 +380,7 @@ def _check_savings_plan_opportunity(rds_data, cache_arn, cache_secret, cache_db,
     )
     rec = cached[0] if cached else None
     if not rec:
-        # No cached row — fetch from Cost Explorer. Lazy boto3 import so unit
+        # No cached row: fetch from Cost Explorer. Lazy boto3 import so unit
         # tests that don't touch this path don't pay the import cost.
         try:
             import boto3  # type: ignore
@@ -462,7 +462,7 @@ def _check_savings_plan_opportunity(rds_data, cache_arn, cache_secret, cache_db,
 
 
 def collect_cost_findings(rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id, snapshot_ts=None):
-    """Top-level entry — runs every cost check and tallies findings."""
+    """Top-level entry: runs every cost check and tallies findings."""
     global _RUN_SNAPSHOT_TS
     _RUN_SNAPSHOT_TS = snapshot_ts
     meta_rows = _execute(
@@ -493,7 +493,7 @@ def collect_cost_findings(rds_data, cache_cluster_arn, cache_secret_arn, cache_d
         {"cid": cluster_id},
     )
     if not cpu_rows or cpu_rows[0]["samples"] is None or int(cpu_rows[0]["samples"] or 0) < 20:
-        # Still run the SP check — it doesn't depend on CPU history.
+        # Still run the SP check: it doesn't depend on CPU history.
         sp_emitted = _check_savings_plan_opportunity(
             rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id
         )
@@ -510,7 +510,7 @@ def collect_cost_findings(rds_data, cache_cluster_arn, cache_secret_arn, cache_d
     }
 
     # Observed Serverless v2 ACU (ServerlessDatabaseCapacity) for ACU rightsizing.
-    # None when there is no/insufficient history (non-Sv2 or just-registered) — the
+    # None when there is no/insufficient history (non-Sv2 or just-registered). The
     # Sv2 check then skips rather than guessing from CPU.
     acu_rows = _execute(
         rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,

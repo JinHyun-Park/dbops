@@ -2,7 +2,7 @@
 
 Positional twin of mysql_adapter.MySQLDataApiAdapter: the DMV collectors read
 rows BY POSITION via their _str/_long/_double helpers, so this returns only
-{"records": [[field...]]} — no columnMetadata (unlike shared/mssql_direct's
+{"records": [[field...]]}, no columnMetadata (unlike shared/mssql_direct's
 adapter, which execute_sql's name-based chat path needs). The collectors live
 in this Lambda's asset dir and can't import from mcp-servers, so the adapter is
 vendored here; _field is byte-identical to mysql_adapter._field."""

@@ -123,7 +123,7 @@ export default function LearningPage() {
         eyebrow={t("Monitor")}
         title={t("Learning")}
         description={t(
-          "권장 조치가 실제로 증상을 해소했는지 자동 측정해 누적한 효과 이력 — 입증된 조치를 우선합니다.",
+          "권장 조치가 실제로 증상을 해소했는지 자동 측정해 누적한 효과 이력: 입증된 조치를 우선합니다.",
         )}
       />
       <PageBody>
@@ -146,7 +146,7 @@ export default function LearningPage() {
             {data.fleet.length > 0 && (
               <section>
                 <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Fleet 전체 — 조치별 효과
+                  Fleet 전체: 조치별 효과
                 </h2>
                 <AggTable rows={data.fleet} />
               </section>

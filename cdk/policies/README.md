@@ -1,23 +1,23 @@
 # AgentCore Cedar Policies
 
 Cedar policies define authorization rules enforced at the AgentCore Gateway
-level. They are evaluated outside agent/tool code — the agent cannot bypass
+level. They are evaluated outside agent/tool code: the agent cannot bypass
 them. They are a **defense-in-depth outer gate**; the authoritative write
 control is the tool-level `approval_guard` (payload-hash + atomic single-use)
 in `mcp-servers/mcp_servers/operations/tools/`.
 
 ## Policy Files
 
-- `cedar/performance_policy.cedar` — READ-ONLY: permit all tools on the target
-- `cedar/incident_policy.cedar` — READ-ONLY: permit all tools on the target
-- `cedar/simulation_policy.cedar` — READ-ONLY: permit all tools on the target
-- `cedar/operations_policy.cedar` — MIXED (coarse permit for the LOG_ONLY
+- `cedar/performance_policy.cedar`: READ-ONLY, permit all tools on the target
+- `cedar/incident_policy.cedar`: READ-ONLY, permit all tools on the target
+- `cedar/simulation_policy.cedar`: READ-ONLY, permit all tools on the target
+- `cedar/operations_policy.cedar`: MIXED (coarse permit for the LOG_ONLY
   rollout; see the in-file STEP 2 comment for the per-tool ENFORCE refinement)
 
-## How Policies Are Applied (automated — `cdk deploy`)
+## How Policies Are Applied (automated: `cdk deploy`)
 
 `cdk/stacks/agent_stack.py` deploys these automatically as part of the agent
-stack — **no manual `agentcore policy create` step**. For each `.cedar` file it:
+stack, **no manual `agentcore policy create` step**. For each `.cedar` file it:
 
 1. Creates one `AWS::BedrockAgentCore::PolicyEngine` (`dbops-<env>-policy-engine`).
 2. Strips `//` comments, splits the file into individual statements (AgentCore
@@ -29,8 +29,8 @@ stack — **no manual `agentcore policy create` step**. For each `.cedar` file i
 
 ## AgentCore Cedar schema (gotchas that bit us)
 
-- **Policy name** must match `^[A-Za-z][A-Za-z0-9_]*$` — underscores only.
-- **One statement per policy** — a multi-statement file fails ("unexpected
+- **Policy name** must match `^[A-Za-z][A-Za-z0-9_]*$`, underscores only.
+- **One statement per policy**: a multi-statement file fails ("unexpected
   token forbid"). The CDK splits them.
 - **Resource** must be a _specific_ gateway for constrained-action policies:
   `resource == AgentCore::Gateway::"<gateway-arn>"` (not a wildcard or the bare
@@ -42,7 +42,7 @@ stack — **no manual `agentcore policy create` step**. For each `.cedar` file i
 - **`context.input.<param>`** is validated against the tool's _real_ declared
   parameters (auto-generated schema). Reference only params the tool actually
   has; guard optional ones with `context.input has <param> && ...`.
-- Cedar has **no** `toUpper` / `startsWith` / `contains` — only the
+- Cedar has **no** `toUpper` / `startsWith` / `contains`, only the
   case-SENSITIVE `like` operator. SQL-content rules (SELECT auto / DROP-TRUNCATE
   force) therefore live in the tool code (`execute_sql.py`), not in Cedar.
 - The Gateway role needs `bedrock-agentcore:GetPolicyEngine` (on the engine ARN)
@@ -54,7 +54,7 @@ stack — **no manual `agentcore policy create` step**. For each `.cedar` file i
 every decision to CloudWatch but never DENIES. This was chosen because these
 policies had never been validated against the live gateway. To enforce:
 
-1. Observe the CloudWatch decision logs against real agent tool-calls — confirm
+1. Observe the CloudWatch decision logs against real agent tool-calls: confirm
    reads are permitted and the intended writes/denies evaluate correctly.
 2. Add the per-tool write conditions to `operations_policy.cedar` (see its STEP
    2 comment), verifying each `context.input.<param>` via
@@ -63,4 +63,4 @@ policies had never been validated against the live gateway. To enforce:
    `"FAIL_ON_ANY_FINDINGS"`, then `cdk deploy`.
 
 Default posture is DENY (only explicitly permitted actions are allowed) and
-`forbid` rules override `permit` rules — but only once `mode = ENFORCE`.
+`forbid` rules override `permit` rules, but only once `mode = ENFORCE`.

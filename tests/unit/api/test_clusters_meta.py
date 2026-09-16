@@ -1,4 +1,4 @@
-"""PATCH /api/clusters/{id}/meta — admin-editable Map note (purpose + service_tags)."""
+"""PATCH /api/clusters/{id}/meta: admin-editable Map note (purpose + service_tags)."""
 import importlib.util
 import sys
 from pathlib import Path
@@ -39,7 +39,7 @@ def test_sets_purpose_and_tags_trimmed_deduped():
 
 def test_404_when_cluster_absent():
     # The conditional update (attribute_exists) fails atomically when the cluster
-    # is gone — translated to 404, never a phantom item.
+    # is gone: translated to 404, never a phantom item.
     from botocore.exceptions import ClientError
 
     t = MagicMock()

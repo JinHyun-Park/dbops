@@ -21,7 +21,7 @@ interface Point {
   value: number | string;
 }
 
-// Connection state palette — dark = bright on zinc, light = the matching
+// Connection state palette: dark = bright on zinc, light = the matching
 // -800 tier so Recharts inline strokes/fills stay above 4.5:1 on cream.
 const STATES_DARK = [
   { metric: "conn_active", label: "active", color: "#34d399" },

@@ -1,4 +1,4 @@
-"""Scoped alert push — WS $connect authorizer + broadcast helper."""
+"""Scoped alert push: WS $connect authorizer + broadcast helper."""
 import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -85,11 +85,11 @@ def test_broadcast_posts_and_prunes_gone(monkeypatch):
 def test_ws_notify_copies_are_identical():
     """broadcast() is copied verbatim into both broadcasting Lambdas (no shared
     layer). If the copies drift, a fix to one path (e.g. audience filtering)
-    silently skips the other — alerts get scoped but external incidents don't,
+    silently skips the other: alerts get scoped but external incidents don't,
     or vice versa. Pin them equal so a partial edit fails CI."""
     a = (_ROOT / "api/incident_webhook/ws_notify.py").read_bytes()
     b = (_ROOT / "data-pipeline/alert_evaluator/ws_notify.py").read_bytes()
-    assert a == b, "ws_notify.py copies drifted — re-sync the two files"
+    assert a == b, "ws_notify.py copies drifted: re-sync the two files"
 
 
 # --- broadcast efficiency: one scan per invocation, and bounded waits ---------

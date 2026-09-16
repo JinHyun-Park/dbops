@@ -1,4 +1,4 @@
-"""scale_out_with_warmup — approval-gated Aurora reader scale-OUT that also
+"""scale_out_with_warmup: approval-gated Aurora reader scale-OUT that also
 pre-queues a buffer-pool prewarm (N-④ Phase 1, semi-automatic).
 
 Two human approvals, one flow:
@@ -7,10 +7,10 @@ Two human approvals, one flow:
      DBA-visible).
   2. The scheduled restore_finalizer flips that prewarm approval to `pending`
      once the reader instance reaches `available` (now visible in the Approval
-     Center), then — after the DBA approves it — invokes THIS Lambda's
+     Center), then, after the DBA approves it, invokes THIS Lambda's
      prewarm_reader tool to actually warm the reader.
 
-The prewarm approval ROW is the whole state machine — no new table:
+The prewarm approval ROW is the whole state machine, no new table:
     awaiting_instance → pending → approved → consumed
 
 Why the prewarm approval is minted HERE (not in the finalizer): its
@@ -61,14 +61,14 @@ def scale_out_with_warmup_impl(
     # the cap rather than hard-code it so the two stay locked together.
     top_n = max(1, min(top_n, _TOP_N_CAP))
 
-    # The caller must name the new reader — the approval payload hash binds it.
+    # The caller must name the new reader: the approval payload hash binds it.
     if not new_instance_id:
         return {"status": "invalid_instance", "cluster_id": cluster_id,
                 "reason": "new_instance_id가 필요합니다."}
 
     if not approved:
         # Resolve the concrete class NOW so the approval payload hash binds the
-        # exact billable class the DBA sees — execute never picks a class after
+        # exact billable class the DBA sees: execute never picks a class after
         # approval.
         if not instance_class:
             try:
@@ -80,7 +80,7 @@ def scale_out_with_warmup_impl(
                 instance_class = ""
             if not instance_class:
                 return {"status": "needs_instance_class", "cluster_id": cluster_id,
-                        "reason": "instance_class를 결정할 수 없습니다 — 명시해 주세요 (예: db.serverless)."}
+                        "reason": "instance_class를 결정할 수 없습니다. 명시해 주세요 (예: db.serverless)."}
         return {
             "status": "approval_required",
             "cluster_id": cluster_id,
@@ -108,10 +108,10 @@ def scale_out_with_warmup_impl(
                 "reason": guard.get("reason", "approval guard rejected the request")}
 
     # The class was resolved in PREVIEW and hash-bound by the approval, so execute
-    # uses the exact class the DBA approved — never a post-approval lookup.
+    # uses the exact class the DBA approved, never a post-approval lookup.
     if not instance_class:
         return {"status": "add_failed", "cluster_id": cluster_id,
-                "reason": "instance_class가 승인에 바인딩되지 않았습니다 — 미리보기가 제안한 클래스로 다시 승인 요청하세요."}
+                "reason": "instance_class가 승인에 바인딩되지 않았습니다. 미리보기가 제안한 클래스로 다시 승인 요청하세요."}
 
     # --- a. create the reader (same logic as add_reader_instance) -------------
     rds = client_for_cluster(cluster_id, "rds")
@@ -120,7 +120,7 @@ def scale_out_with_warmup_impl(
     except Exception as e:
         print(f"[scale_out_with_warmup] describe_db_clusters failed for {cluster_id}: {e}")
         return {"status": "add_failed", "cluster_id": cluster_id,
-                "reason": "클러스터 조회에 실패했습니다 — 대상 클러스터 식별자를 확인하세요."}
+                "reason": "클러스터 조회에 실패했습니다. 대상 클러스터 식별자를 확인하세요."}
 
     real_cluster_id = dbc.get("DBClusterIdentifier") or cluster_id
     engine = dbc.get("Engine")
@@ -148,11 +148,11 @@ def scale_out_with_warmup_impl(
     warm_id = _queue_prewarm_approval(cluster_id, warm_details)
     if not warm_id:
         # The reader IS being created; we just couldn't queue the auto-warm.
-        # Surface it so the DBA can prewarm manually — do NOT fail the whole
+        # Surface it so the DBA can prewarm manually: do NOT fail the whole
         # scale-out (the billable reader already exists).
         return {"status": "scaleout_started", "cluster_id": cluster_id,
                 "instance_id": new_instance_id, "warm_approval_id": None,
-                "note": "리더 생성 중 — 예열 승인 자동 등록에 실패했습니다. "
+                "note": "리더 생성 중, 예열 승인 자동 등록에 실패했습니다. "
                         "available 후 prewarm_reader로 수동 예열하세요."}
 
     return {
@@ -160,7 +160,7 @@ def scale_out_with_warmup_impl(
         "cluster_id": cluster_id,
         "instance_id": new_instance_id,
         "warm_approval_id": warm_id,
-        "note": "리더 생성 중 — available되면 예열 승인이 자동으로 승인 대기열에 올라옵니다",
+        "note": "리더 생성 중, available되면 예열 승인이 자동으로 승인 대기열에 올라옵니다",
     }
 
 
@@ -171,12 +171,12 @@ def _queue_prewarm_approval(cluster_id: str, warm_details: dict) -> str:
 
     payload_hash is computed with the SAME canonical_action_hash that
     request_approval uses, over the SAME projection prewarm_reader.verify_approval
-    checks — so drift is impossible: it is literally the same function on the
+    checks, so drift is impossible: it is literally the same function on the
     same dict shape ({cluster_id, reader_instance_id, endpoint_identifier,
     top_n})."""
     table_name = os.environ.get("APPROVALS_TABLE", "")
     if not table_name:
-        print("[scale_out_with_warmup] APPROVALS_TABLE not configured — cannot queue prewarm")
+        print("[scale_out_with_warmup] APPROVALS_TABLE not configured, cannot queue prewarm")
         return ""
     reg = lookup_cluster(cluster_id)
     approval_id = str(uuid.uuid4())
@@ -184,7 +184,7 @@ def _queue_prewarm_approval(cluster_id: str, warm_details: dict) -> str:
         boto3.resource("dynamodb").Table(table_name).put_item(Item={
             "approval_id": approval_id,
             "created_at": str(int(time.time() * 1000)),  # ms-epoch string sort key
-            # 24h TTL like request_approval — the reader is available within
+            # 24h TTL like request_approval: the reader is available within
             # minutes, so this leaves the DBA the rest of the day to approve.
             "ttl": int(time.time()) + 24 * 60 * 60,
             # NOT yet DBA-visible; the finalizer flips this to "pending" once the

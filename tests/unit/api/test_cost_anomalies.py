@@ -29,7 +29,7 @@ def detector():
 
 def _series(amounts: list[float], start_day: int = 10):
     """Build a daily-amount series matching the Cost Explorer response shape.
-    `start_day` lets each test produce a unique day range — purely cosmetic."""
+    `start_day` lets each test produce a unique day range: purely cosmetic."""
     return [
         {"date": f"2026-05-{start_day + i:02d}", "amount": a}
         for i, a in enumerate(amounts)
@@ -37,7 +37,7 @@ def _series(amounts: list[float], start_day: int = 10):
 
 
 # ---------------------------------------------------------------------------
-# Series length floor — < 8 days never yields an anomaly
+# Series length floor: < 8 days never yields an anomaly
 # ---------------------------------------------------------------------------
 
 
@@ -49,7 +49,7 @@ def test_short_series_below_baseline_window_returns_empty(detector):
     """The detector needs 7 days of baseline + 1 evaluation day; fewer must
     produce no anomalies, even with an obvious spike, because the baseline
     isn't trustworthy."""
-    # 7 days only — no day has 7 preceding days to baseline against.
+    # 7 days only: no day has 7 preceding days to baseline against.
     assert detector(_series([0.5] * 6 + [50.0])) == []
 
 
@@ -61,13 +61,13 @@ def test_minimum_8_days_can_flag(detector):
 
 
 # ---------------------------------------------------------------------------
-# Triple gate — z-score AND relative AND absolute must all clear
+# Triple gate: z-score AND relative AND absolute must all clear
 # ---------------------------------------------------------------------------
 
 
 def test_small_absolute_jump_below_floor_not_flagged(detector):
     """$0.10 → $0.30 doubles relatively and has high z, but the $0.20 jump
-    is below the $0.50 absolute floor. Finance noise — don't flag."""
+    is below the $0.50 absolute floor. Finance noise: don't flag."""
     series = _series([0.1] * 7 + [0.3])
     assert detector(series) == []
 
@@ -92,7 +92,7 @@ def test_z_score_below_2_not_flagged_even_with_growth(detector):
 
 def test_relative_under_1_5x_not_flagged(detector):
     """Even a high-z, high-absolute jump that's only +40% of baseline is
-    not "spike-like enough" — relative gate rejects."""
+    not "spike-like enough": relative gate rejects."""
     series = _series([10.0] * 7 + [13.0])  # +30% with high absolute
     out = detector(series)
     assert out == []
@@ -156,7 +156,7 @@ def test_anomaly_payload_includes_audit_fields(detector):
 
 
 def test_zero_baseline_with_zero_amount_skipped(detector):
-    """Both flat zero — no anomaly. The detector must not divide-by-zero
+    """Both flat zero: no anomaly. The detector must not divide-by-zero
     in the relative-gate path."""
     series = _series([0.0] * 8)
     assert detector(series) == []

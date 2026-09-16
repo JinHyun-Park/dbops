@@ -104,7 +104,7 @@ def test_delete_no_bearer_prefix_denied():
 
 
 def test_delete_garbage_token_denied():
-    # "Bearer <non-jwt>" decodes to empty claims — must NOT be treated as dev-fallback admin.
+    # "Bearer <non-jwt>" decodes to empty claims: must NOT be treated as dev-fallback admin.
     res = handler.lambda_handler(
         _raw_event("DELETE", "Bearer not-a-real-jwt", path_params={"id": "3"}),
         None,

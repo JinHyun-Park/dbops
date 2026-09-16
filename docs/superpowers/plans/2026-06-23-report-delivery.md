@@ -4,7 +4,7 @@
 
 **Goal:** Deliver scheduled report digests to managed Slack subscribers + the SNS topic (email), opt-in, reusing the alert delivery infra; add a client-side report download on /reports.
 
-**Architecture:** `report_generator` (data stack, daily) gains an opt-in `_deliver_report` step that publishes the NL summary to the SNS topic and POSTs a Block Kit digest to enabled `slack-webhook` subscribers — mirroring `alert_evaluator`'s subscriber-delivery (copied per the repo's per-Lambda-copy convention). The `/reports` page adds a client-side markdown download of the already-fetched report (no backend change).
+**Architecture:** `report_generator` (data stack, daily) gains an opt-in `_deliver_report` step that publishes the NL summary to the SNS topic and POSTs a Block Kit digest to enabled `slack-webhook` subscribers: mirroring `alert_evaluator`'s subscriber-delivery (copied per the repo's per-Lambda-copy convention). The `/reports` page adds a client-side markdown download of the already-fetched report (no backend change).
 
 **Tech Stack:** Python 3.12 Lambda (RDS Data API via the handler's `cache_query`, boto3 SNS, urllib POST), AWS CDK (Python), Next.js 16 static export, pytest.
 
@@ -16,28 +16,28 @@
 - Reuse existing infra: `alert_subscribers_managed` table (cols `id, protocol, endpoint, enabled`), `ALERT_TOPIC_ARN` SNS topic, `self.alert_topic.grant_publish`. NO SES. PagerDuty is excluded (reports → slack-webhook + SNS only).
 - RDS Data API SQL via the handler's existing `cache_query`; named params; agent/audit SQL comment convention already handled by the helper.
 - Korean human-facing text (Slack digest title/labels, download content headings); DB jargon English.
-- Commits: conventional subject; NO `Co-Authored-By: Claude` trailer; no internal-roadmap refs. Frontend commit hits the prettier hook — `git add -A` + re-commit if it reformats.
+- Commits: conventional subject; NO `Co-Authored-By: Claude` trailer; no internal-roadmap refs. Frontend commit hits the prettier hook: `git add -A` + re-commit if it reformats.
 - Adding NO API route in this feature → no openapi regen needed (download is client-side; delivery is backend-only with no new route).
 
 ---
 
 ## File Structure
 
-**Increment 1 — Delivery (data stack)**
+**Increment 1: Delivery (data stack)**
 
-- Modify: `data-pipeline/report_generator/handler.py` — `_post_json`, `_build_report_slack_blocks`, `_deliver_report`; call from `lambda_handler` gated on `REPORT_DELIVERY_ENABLED`.
-- Modify: `cdk/stacks/data_stack.py` — report_generator env (`ALERT_TOPIC_ARN`, `REPORT_DELIVERY_ENABLED`) + `grant_publish`.
-- Modify: `cdk/config/settings.example.py` — documented `REPORT_DELIVERY_ENABLED = False`.
+- Modify: `data-pipeline/report_generator/handler.py` (`_post_json`, `_build_report_slack_blocks`, `_deliver_report`; call from `lambda_handler` gated on `REPORT_DELIVERY_ENABLED`).
+- Modify: `cdk/stacks/data_stack.py`: report_generator env (`ALERT_TOPIC_ARN`, `REPORT_DELIVERY_ENABLED`) + `grant_publish`.
+- Modify: `cdk/config/settings.example.py` (documented `REPORT_DELIVERY_ENABLED = False`).
 - Test: `tests/unit/data_pipeline/test_report_delivery.py` (new).
 
-**Increment 2 — Download (frontend only)**
+**Increment 2: Download (frontend only)**
 
-- Modify: `frontend/src/app/reports/page.tsx` — client-side markdown download button.
-- (Optional) Create: `frontend/src/lib/report-download.ts` — pure markdown-assembly helper (unit-testable).
+- Modify: `frontend/src/app/reports/page.tsx` (client-side markdown download button).
+- (Optional) Create: `frontend/src/lib/report-download.ts`: pure markdown-assembly helper (unit-testable).
 
 ---
 
-## Increment 1 — Delivery
+## Increment 1: Delivery
 
 ### Task 1: report_generator delivers digest (SNS + managed Slack), opt-in
 
@@ -50,11 +50,11 @@
 
 **Interfaces:**
 
-- Produces: nothing consumed by later tasks; behavioural — reports get delivered when `REPORT_DELIVERY_ENABLED` is truthy.
+- Produces: nothing consumed by later tasks; behavioural (reports get delivered when `REPORT_DELIVERY_ENABLED` is truthy).
 
-- [ ] **Step 1: Write failing tests** — `tests/unit/data_pipeline/test_report_delivery.py`:
+- [ ] **Step 1: Write failing tests**: `tests/unit/data_pipeline/test_report_delivery.py`:
 
-Read `report_generator/handler.py` first to match the real `lambda_handler` signature/flow and how `cache_query` + the report loop work; mirror the existing test style in `tests/unit/data_pipeline/`. The tests target the new `_deliver_report` directly (unit) — flag/subscriber/exception behaviour:
+Read `report_generator/handler.py` first to match the real `lambda_handler` signature/flow and how `cache_query` + the report loop work; mirror the existing test style in `tests/unit/data_pipeline/`. The tests target the new `_deliver_report` directly (unit): flag/subscriber/exception behaviour:
 
 ```python
 import importlib
@@ -100,7 +100,7 @@ def test_delivery_exception_is_swallowed(monkeypatch):
         h._deliver_report(cache_query, "c1", "2026-06-23", "daily", "요약")  # must not raise
 ```
 
-- [ ] **Step 2: Run, verify fail** — `python3 -m pytest tests/unit/data_pipeline/test_report_delivery.py -q` (no `_deliver_report`).
+- [ ] **Step 2: Run, verify fail**: `python3 -m pytest tests/unit/data_pipeline/test_report_delivery.py -q` (no `_deliver_report`).
 
 - [ ] **Step 3: Implement** in `report_generator/handler.py`:
 
@@ -146,9 +146,9 @@ def _deliver_report(cache_query, cluster_id, report_date, report_type, summary):
         print(f"[report-gen] delivery failed for {cluster_id}: {type(e).__name__}: {e}")
 ```
 
-3. In `lambda_handler`, after the report is stored + `summary` computed (the `reports` INSERT around lines 100–108), call `_deliver_report(cache_query, cid, report_date, report_type, summary)`. Use the variables already in scope; place it inside the per-cluster loop after storage, wrapped so a delivery issue can't skip remaining clusters (the function already swallows, but keep it after the INSERT).
+3. In `lambda_handler`, after the report is stored + `summary` computed (the `reports` INSERT around lines 100-108), call `_deliver_report(cache_query, cid, report_date, report_type, summary)`. Use the variables already in scope; place it inside the per-cluster loop after storage, wrapped so a delivery issue can't skip remaining clusters (the function already swallows, but keep it after the INSERT).
 
-- [ ] **Step 4: CDK** in `cdk/stacks/data_stack.py` — add to the `report_generator` `environment` dict:
+- [ ] **Step 4: CDK** in `cdk/stacks/data_stack.py`: add to the `report_generator` `environment` dict:
 
 ```python
                 "ALERT_TOPIC_ARN": self.alert_topic.topic_arn,
@@ -163,7 +163,7 @@ and after the existing grants:
 
 (`report_generator` already has cache read via `grant_data_api_access` + secret read, so the subscriber query needs no new grant.)
 
-- [ ] **Step 5: settings.example** — add to `cdk/config/settings.example.py` (near other notification settings):
+- [ ] **Step 5: settings.example**: add to `cdk/config/settings.example.py` (near other notification settings):
 
 ```python
     # Push generated report digests to managed Slack subscribers + the SNS
@@ -173,13 +173,13 @@ and after the existing grants:
     REPORT_DELIVERY_ENABLED = False
 ```
 
-- [ ] **Step 6: Run tests + synth** — `python3 -m pytest tests/unit/data_pipeline/test_report_delivery.py tests/unit/data_pipeline -q` (new pass + no regression); `cd cdk && cdk synth dbops-dev-data --quiet` exit 0.
+- [ ] **Step 6: Run tests + synth**: `python3 -m pytest tests/unit/data_pipeline/test_report_delivery.py tests/unit/data_pipeline -q` (new pass + no regression); `cd cdk && cdk synth dbops-dev-data --quiet` exit 0.
 
-- [ ] **Step 7: Commit** — add `data-pipeline/report_generator/handler.py cdk/stacks/data_stack.py cdk/config/settings.example.py tests/unit/data_pipeline/test_report_delivery.py` ; `git commit -m "feat(reports): deliver report digests to Slack subscribers + SNS (opt-in)"`
+- [ ] **Step 7: Commit**: add `data-pipeline/report_generator/handler.py cdk/stacks/data_stack.py cdk/config/settings.example.py tests/unit/data_pipeline/test_report_delivery.py` ; `git commit -m "feat(reports): deliver report digests to Slack subscribers + SNS (opt-in)"`
 
 ---
 
-## Increment 2 — Download (frontend only)
+## Increment 2: Download (frontend only)
 
 ### Task 2: client-side markdown download on /reports
 
@@ -190,11 +190,11 @@ and after the existing grants:
 
 **Interfaces:**
 
-- Consumes: the report object already fetched for the selected row (`summary`, `data`, `cluster_id`, `report_date`/equivalent fields — read the actual `Report` type in the page).
+- Consumes: the report object already fetched for the selected row (`summary`, `data`, `cluster_id`, `report_date`/equivalent fields: read the actual `Report` type in the page).
 
-- [ ] **Step 1: Read the page** — `frontend/src/app/reports/page.tsx`: the `Report`/row type (fields: `summary`, `data`, `s3_key`, `cluster_id`, date), how the selected report detail is fetched (`/api/reports/${id}`) and where its summary/data are rendered. Identify where to place a "다운로드" button (near the detail view).
+- [ ] **Step 1: Read the page**: `frontend/src/app/reports/page.tsx`: the `Report`/row type (fields: `summary`, `data`, `s3_key`, `cluster_id`, date), how the selected report detail is fetched (`/api/reports/${id}`) and where its summary/data are rendered. Identify where to place a "다운로드" button (near the detail view).
 
-- [ ] **Step 2: Add the markdown assembler + download** — build a markdown string from the fetched report: a title (`# DBOps 리포트 — {cluster_id} ({date})`), the summary, then the key `data` entries as a list/table. Then:
+- [ ] **Step 2: Add the markdown assembler + download**: build a markdown string from the fetched report: a title (`# DBOps 리포트: {cluster_id} ({date})`), the summary, then the key `data` entries as a list/table. Then:
 
 ```typescript
 const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
@@ -206,11 +206,11 @@ a.click();
 URL.revokeObjectURL(url);
 ```
 
-Render the "다운로드" button only when the report detail (with `data`/`summary`) is loaded; disable/hide otherwise. Reuse the page's existing button styling. If you extract the assembler to `lib/report-download.ts` as a pure function `buildReportMarkdown(report): string`, add a tiny unit test if the repo has frontend unit tests (else skip — build is the gate).
+Render the "다운로드" button only when the report detail (with `data`/`summary`) is loaded; disable/hide otherwise. Reuse the page's existing button styling. If you extract the assembler to `lib/report-download.ts` as a pure function `buildReportMarkdown(report): string`, add a tiny unit test if the repo has frontend unit tests (else skip: build is the gate).
 
-- [ ] **Step 3: Build** — `cd frontend && npm run build` → exit 0, `/reports` in the route list.
+- [ ] **Step 3: Build**: `cd frontend && npm run build` → exit 0, `/reports` in the route list.
 
-- [ ] **Step 4: Commit (mind prettier)** — `git add frontend/src/app/reports/page.tsx` (+ lib helper if created) ; `git commit -m "feat(reports): client-side markdown download of a report"` (if prettier reformats: `git add -A` + re-run).
+- [ ] **Step 4: Commit (mind prettier)**: `git add frontend/src/app/reports/page.tsx` (+ lib helper if created) ; `git commit -m "feat(reports): client-side markdown download of a report"` (if prettier reformats: `git add -A` + re-run).
 
 ---
 

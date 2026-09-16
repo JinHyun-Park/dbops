@@ -95,11 +95,11 @@ function compile(raw: string): FilterSpec | null {
     comparison = /이상|or more|이상인/.test(text) ? ">=" : ">";
   }
 
-  // Threshold — first numeric, accept % or units
+  // Threshold: first numeric, accept % or units
   const numMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:%|gb|gib|mb)?/);
   const threshold = numMatch ? Number(numMatch[1]) : 0;
 
-  // Hours — accept "24시간", "1일", "24h", "지난 6시간"
+  // Hours: accept "24시간", "1일", "24h", "지난 6시간"
   let hours = 1;
   const dayMatch = text.match(/(\d+)\s*(?:일|day)/);
   const hrMatch = text.match(/(\d+)\s*(?:시간|h\b|hour)/);
@@ -169,7 +169,7 @@ export default function AskPage() {
     runQuery(compiled);
   };
 
-  // Filter clusters on the client — overview already returns the latest
+  // Filter clusters on the client. Overview already returns the latest
   // per-metric values, so the threshold check is just a comparator. This
   // intentionally skips the time-window dimension; the overview endpoint
   // is "last 15 min" and we treat "지난 24시간" as a recency intent
@@ -496,7 +496,7 @@ function SaveViewButton({
             return;
           }
           if (savedViews.some((v) => v.name === trimmed)) {
-            onError("같은 이름의 뷰가 이미 있습니다 — 덮어쓸까요?");
+            onError("같은 이름의 뷰가 이미 있습니다. 덮어쓸까요?");
           }
           onSave(trimmed);
           setEditing(false);
@@ -529,9 +529,9 @@ function metricLabel(m: Metric): string {
 }
 
 function formatMetric(m: Metric, v: ClusterRow[Metric]): string {
-  if (v === null || v === undefined) return "—";
+  if (v === null || v === undefined) return "-";
   const n = Number(v);
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "-";
   if (m === "cpu") return `${fmtDecimal(n, 1)}%`;
   if (m === "storage_bytes") return fmtBytes(n);
   if (m === "aas") return fmtDecimal(n, 2);

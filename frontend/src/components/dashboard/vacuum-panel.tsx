@@ -124,19 +124,19 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="Dead tuples — VACUUM 대상으로 남아 있는 미회수 행 버전"
+                  title="Dead tuples: VACUUM 대상으로 남아 있는 미회수 행 버전"
                 >
                   Dead rows
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="Dead ÷ (live + dead). 30% 초과 시 bloat 심각 — VACUUM 권장"
+                  title="Dead ÷ (live + dead). 30% 초과 시 bloat 심각: VACUUM 권장"
                 >
                   Dead / total
                 </th>
                 <th
                   className="text-right px-4 py-2 text-zinc-400 font-medium"
-                  title="age(relfrozenxid) — 마지막 FREEZE 이후 트랜잭션 수. 2억 = 경고, 15억 = wraparound 위험"
+                  title="age(relfrozenxid): 마지막 FREEZE 이후 트랜잭션 수. 2억 = 경고, 15억 = wraparound 위험"
                 >
                   TXID age
                 </th>
@@ -206,7 +206,7 @@ export function VacuumPanel({ clusterId }: { clusterId: string }) {
                           : "below warn threshold or not yet observed"
                       }
                     >
-                      {txidAge != null ? fmtNumber(txidAge) : "—"}
+                      {txidAge != null ? fmtNumber(txidAge) : "-"}
                     </td>
                     <td className="px-4 py-2 text-right text-zinc-400 font-mono text-xs">
                       {relDays(t.last_vacuum)}

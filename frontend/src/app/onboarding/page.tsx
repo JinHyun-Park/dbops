@@ -154,7 +154,7 @@ function TemplateStep({
       {/* Deploy instructions */}
       <div className="border border-zinc-800 bg-zinc-900/30 px-5 py-4 space-y-3 text-sm text-zinc-400 leading-relaxed">
         <p>
-          <strong className="text-zinc-200">배포 방법</strong> — 멤버 계정의 AWS
+          <strong className="text-zinc-200">배포 방법</strong>: 멤버 계정의 AWS
           CLI에서 아래 명령을 실행하세요. 파일을 다운로드한 디렉터리에서
           실행해야 합니다.
         </p>
@@ -326,7 +326,7 @@ function ConnectionStep({
               result.ok ? "text-emerald-300" : "text-rose-300"
             }`}
           >
-            {result.ok ? "연결 성공" : "연결 실패 — 아래 단계를 확인하세요"}
+            {result.ok ? "연결 성공" : "연결 실패. 아래 단계를 확인하세요"}
           </div>
           <div className="space-y-2">
             {result.steps.map((step, i) => (

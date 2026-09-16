@@ -1,4 +1,4 @@
-"""modify_elasticache_node_type — approval-gated ElastiCache node-type scaling
+"""modify_elasticache_node_type: approval-gated ElastiCache node-type scaling
 (modify_replication_group CacheNodeType). Mirrors the operations write model:
 REQUEST describe → approval_required → verify_approval (consume) → EXECUTE.
 Cross-account via client_for_cluster (control-plane API). Never raises out.

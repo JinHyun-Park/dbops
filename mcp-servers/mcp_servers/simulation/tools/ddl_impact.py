@@ -1,9 +1,9 @@
-"""ddl_impact — estimate the lock + time footprint of a DDL statement.
+"""ddl_impact: estimate the lock + time footprint of a DDL statement.
 
 Thin wrapper over the shared :mod:`ddl_estimator` model. This tool's job is to
-resolve the REAL signals from the cache — the target table's size/rows from the
+resolve the REAL signals from the cache, the target table's size/rows from the
 pre-collected ``table_stats`` (cluster-scoped, latest snapshot) and the
-cluster's ``instance_class`` from ``cluster_meta`` — and hand them to the shared
+cluster's ``instance_class`` from ``cluster_meta``, and hand them to the shared
 estimator, which derives throughput from the instance class (not a hardcoded
 constant) and returns a range + confidence + the factors used. The MCP tool and
 the REST mirror share that estimator so they can never drift.
@@ -17,7 +17,7 @@ def simulate_ddl_impact_impl(cache: CacheClient, cluster_id: str, ddl_sql: str) 
     table = resolve_table(ddl_sql)
 
     # Instance class grounds the throughput estimate. I/O-Optimized isn't in
-    # cluster_meta, so default to Standard (conservative — slower) and let the
+    # cluster_meta, so default to Standard (conservative, slower) and let the
     # note flag it; a live describe would refine it but adds latency/perms.
     # Queried BEFORE the table_stats lookup so the size query stays the last
     # cache call (it carries the cluster-scoped contract the tests pin).
@@ -46,7 +46,7 @@ def simulate_ddl_impact_impl(cache: CacheClient, cluster_id: str, ddl_sql: str) 
     size_mb = 0.0
     if table:
         # Read the pre-collected `table_stats` cache (scoped to this cluster,
-        # latest snapshot for the named table) — NOT the cache DB's own
+        # latest snapshot for the named table), NOT the cache DB's own
         # pg_stat_user_tables.
         info_sql = """
             SELECT n_live_tup AS row_count, total_bytes AS size_bytes

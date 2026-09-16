@@ -2,12 +2,12 @@
 
 Simulation tools (upgrade/parameter/DDL/scaling) are Aurora-only. The handler
 must refuse them for non-relational engines (documentdb/dynamodb) with a clear
-`unsupported_engine` signal — mirroring the execute_sql guard (fix 9520191):
+`unsupported_engine` signal, mirroring the execute_sql guard (fix 9520191):
 DEFAULT-PERMIT when the family is unknown / the cluster isn't in cluster_meta /
 the cache lookup errors, so legacy and mock paths never false-positive.
 
 The handler instantiates `cache = CacheClient()` at import, which reads env
-vars — set dummy values BEFORE importing the handler (CacheClient.__init__ does
+vars: set dummy values BEFORE importing the handler (CacheClient.__init__ does
 no AWS call, just reads env into attributes)."""
 
 import json

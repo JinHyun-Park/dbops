@@ -38,12 +38,12 @@
 - Consumes: `verify_approval(approval_id, cluster_id, action_type, payload=)`, `client_for_cluster(cluster_id, service)`, `lookup_cluster(cluster_id)` (from shared).
 - Produces: `modify_elasticache_node_type_impl`, `create_elasticache_snapshot_impl`.
 
-- [ ] **Step 1: Read the templates.** Read `mcp-servers/mcp_servers/operations/tools/modify_dynamodb_capacity.py` (the full REQUEST→approval_required→verify_approval→EXECUTE flow), `mcp-servers/mcp_servers/shared/approval_guard.py` `_project_payload` (~line 89, the per-action branches; note the existing `create_snapshot`/`modify_scaling` relational projections — ours are NEW distinct action_types) + `verify_approval` signature (~245), and `mcp-servers/mcp_servers/operations/handler.py` (TOOLS entry shape, `_ENGINE_GATED_TOOLS` ~38, `_CAP_LABEL` ~51, import style). Confirm `client_for_cluster` + `lookup_cluster` in `mcp_servers/shared/cluster_targets.py`.
+- [ ] **Step 1: Read the templates.** Read `mcp-servers/mcp_servers/operations/tools/modify_dynamodb_capacity.py` (the full REQUEST→approval_required→verify_approval→EXECUTE flow), `mcp-servers/mcp_servers/shared/approval_guard.py` `_project_payload` (~line 89, the per-action branches; note the existing `create_snapshot`/`modify_scaling` relational projections: ours are NEW distinct action_types) + `verify_approval` signature (~245), and `mcp-servers/mcp_servers/operations/handler.py` (TOOLS entry shape, `_ENGINE_GATED_TOOLS` ~38, `_CAP_LABEL` ~51, import style). Confirm `client_for_cluster` + `lookup_cluster` in `mcp_servers/shared/cluster_targets.py`.
 
 - [ ] **Step 2: Write the failing test.** Create `tests/unit/mcp_servers/operations/test_elasticache_writes.py`:
 
 ```python
-"""ElastiCache write tools — approval-gated, FAIL-CLOSED."""
+"""ElastiCache write tools: approval-gated, FAIL-CLOSED."""
 import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -140,7 +140,7 @@ Run: `python -m pytest tests/unit/mcp_servers/operations/test_elasticache_writes
 - [ ] **Step 4: Create `modify_elasticache_node_type.py`:**
 
 ```python
-"""modify_elasticache_node_type — approval-gated ElastiCache node-type scaling
+"""modify_elasticache_node_type: approval-gated ElastiCache node-type scaling
 (modify_replication_group CacheNodeType). Mirrors the operations write model:
 REQUEST describe → approval_required → verify_approval (consume) → EXECUTE.
 Cross-account via client_for_cluster (control-plane API). Never raises out."""
@@ -194,7 +194,7 @@ def modify_elasticache_node_type_impl(cache, cluster_id=None, node_type=None,
 - [ ] **Step 5: Create `create_elasticache_snapshot.py`:**
 
 ```python
-"""create_elasticache_snapshot — approval-gated ElastiCache (Redis/Valkey) backup
+"""create_elasticache_snapshot: approval-gated ElastiCache (Redis/Valkey) backup
 (create_snapshot). Memcached has no snapshots → unsupported_engine. Mirrors the
 operations write model. Never raises out."""
 
@@ -268,7 +268,7 @@ def create_elasticache_snapshot_impl(cache, cluster_id=None, snapshot_name=None,
     },
 ```
 
-- [ ] **Step 8: Add 2 parity entries** to `cdk/tool_definitions.py` (mirror the format of the EC-3 `elasticache_live_read` entry / the dynamodb write entries — read the file to match `_tool(...)` shape).
+- [ ] **Step 8: Add 2 parity entries** to `cdk/tool_definitions.py` (mirror the format of the EC-3 `elasticache_live_read` entry / the dynamodb write entries: read the file to match `_tool(...)` shape).
 
 - [ ] **Step 9: Run tests.**
 
@@ -376,7 +376,7 @@ Run: `python -m pytest tests/unit/mcp_servers/operations/test_elasticache_writes
 - [ ] **Step 3: Create `reboot_elasticache.py`:**
 
 ```python
-"""reboot_elasticache — approval-gated reboot of the primary cache cluster of a
+"""reboot_elasticache: approval-gated reboot of the primary cache cluster of a
 replication group (reboot_cache_cluster). Brief disruption. Mirrors the write
 model; never raises out."""
 
@@ -430,7 +430,7 @@ def reboot_elasticache_impl(cache, cluster_id=None, approved=False, approval_id=
 - [ ] **Step 4: Create `test_elasticache_failover.py`:**
 
 ```python
-"""test_elasticache_failover — approval-gated failover test (test_failover) for a
+"""test_elasticache_failover: approval-gated failover test (test_failover) for a
 replication group that HAS a replica. No replica → invalid. Mirrors the write
 model; never raises out."""
 
@@ -513,7 +513,7 @@ git commit -m "feat(elasticache): approval-gated reboot + failover-test write to
 
 ---
 
-### Task 3: CDK IAM — ElastiCache write actions
+### Task 3: CDK IAM (ElastiCache write actions)
 
 **Files:**
 
@@ -552,7 +552,7 @@ git commit -m "feat(elasticache): operations MCP IAM for write tools (modify/sna
 
 ## Post-implementation (controller, after all tasks reviewed clean)
 
-- Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD` — focus: every tool is FAIL-CLOSED (no `approved` → `approval_required`; guard-fail → `approval_denied`, NO mutation); the 4 action_types each have a matching `_project_payload` branch (so the approval is payload-bound) AND the tool passes the SAME payload to `verify_approval` that `request_approval` would hash; engine-gated `elasticache_write` (all 4); snapshot/failover correctly refuse Memcached/no-replica; cross-account via `client_for_cluster`; no destructive op; `cdk/tool_definitions.py` parity for all 4; IAM is exactly the 4 write actions.
+- Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`, focus: every tool is FAIL-CLOSED (no `approved` → `approval_required`; guard-fail → `approval_denied`, NO mutation); the 4 action_types each have a matching `_project_payload` branch (so the approval is payload-bound) AND the tool passes the SAME payload to `verify_approval` that `request_approval` would hash; engine-gated `elasticache_write` (all 4); snapshot/failover correctly refuse Memcached/no-replica; cross-account via `client_for_cluster`; no destructive op; `cdk/tool_definitions.py` parity for all 4; IAM is exactly the 4 write actions.
 - Deploy dev: `cdk deploy dbops-dev-agent` (operations MCP Lambda code + IAM). No frontend change.
 - Live smoke: the approval→execute happy-path needs an admin token + a real cluster + the Approval Center; **unit-covered** (FAIL-CLOSED + execute paths). A lightweight live check: invoke the deployed tool (direct Lambda invoke, no `approved`) against a registered ElastiCache cluster → `approval_required` (proves the tool + gate + describe path live without mutating). Non-ElastiCache cluster → `unsupported_engine`. (Full approval-consume→mutate is unit-covered, same constraint as the DynamoDB/DocDB write tools.)
 - Then `superpowers:finishing-a-development-branch`.

@@ -1,4 +1,4 @@
-"""Tests for mysql_direct — pymysql connect + Data-API-shape adapter.
+"""Tests for mysql_direct: pymysql connect + Data-API-shape adapter.
 
 Mirrors data-pipeline/rds_direct_collector's field-mapping test cases, plus
 the two things that collector adapter deliberately lacks (positional-only):

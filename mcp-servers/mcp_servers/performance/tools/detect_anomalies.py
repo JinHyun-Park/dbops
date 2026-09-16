@@ -1,4 +1,4 @@
-"""detect_anomalies — seasonal, robust metric anomaly detection.
+"""detect_anomalies: seasonal, robust metric anomaly detection.
 
 Replaces the old flat 7-day mean/stddev z-score (which ignored daily/weekly
 seasonality and blew up on a cluster with a few legitimate spikes per day) with

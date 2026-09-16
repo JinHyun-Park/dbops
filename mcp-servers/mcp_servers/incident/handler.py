@@ -145,7 +145,7 @@ TOOLS = {
     "get_remediation_history": {
         "impl": get_remediation_history_impl,
         "description": (
-            "Get the learned remediation track record for a cluster — aggregated "
+            "Get the learned remediation track record for a cluster: aggregated "
             "success/attempt counts per action class and recent resolved/persisted cases"
         ),
         "input_schema": {

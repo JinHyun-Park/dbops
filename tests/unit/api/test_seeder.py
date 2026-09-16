@@ -1,7 +1,7 @@
 """Unit tests for api/clusters/seeder pure helpers.
 
-Verifies the math behind synthetic data generation without touching AWS —
-catches regressions in:
+Verifies the math behind synthetic data generation without touching AWS.
+Catches regressions in:
   - Timestamp formatting (RDS Data API rejects trailing tz suffix).
   - Metric value generator boundary behavior (must stay non-negative, must
     spike at the configured hour).
@@ -20,7 +20,7 @@ import seeder  # type: ignore
 
 
 def test_ts_param_strips_timezone_suffix():
-    """RDS Data API's TIMESTAMP typeHint rejects '+00:00' in the string —
+    """RDS Data API's TIMESTAMP typeHint rejects '+00:00' in the string:
     the seeder strips tzinfo before formatting."""
     dt = datetime(2026, 5, 13, 14, 30, 0, tzinfo=timezone.utc)
     p = seeder._ts_param("ts", dt)
@@ -30,7 +30,7 @@ def test_ts_param_strips_timezone_suffix():
 
 
 def test_metric_value_never_negative():
-    """`deadlocks` baseline is 0 with noise — value must clamp to 0."""
+    """`deadlocks` baseline is 0 with noise: value must clamp to 0."""
     profile = seeder.METRIC_PROFILES["deadlocks"]
     import random
     rng = random.Random(42)
@@ -41,7 +41,7 @@ def test_metric_value_never_negative():
 
 
 def test_metric_value_spikes_at_configured_hour():
-    """CPU profile has a spike at hour 14 — value must hit at least the
+    """CPU profile has a spike at hour 14: value must hit at least the
     spike threshold."""
     profile = seeder.METRIC_PROFILES["cpu"]
     spike_hour, spike_val = profile[3], profile[4]
@@ -52,14 +52,14 @@ def test_metric_value_spikes_at_configured_hour():
 
 
 def test_sample_cluster_id_is_stable():
-    """Frontend references `sample-cluster` as the demo identifier — must
+    """Frontend references `sample-cluster` as the demo identifier: must
     not change without intentional cascade."""
     assert seeder.SAMPLE_CLUSTER_ID == "sample-cluster"
 
 
 def test_findings_use_collector_shape():
     """Frontend VacuumPanel + MaintenanceHealthPanel parse findings details
-    via `{schema, table, age}` shape — the seeder must mirror it."""
+    via `{schema, table, age}` shape: the seeder must mirror it."""
     txid_findings = [f for f in seeder.FINDINGS if f[0] == "txid_age"]
     assert len(txid_findings) >= 1, "demo must seed at least one TXID age finding"
     for f in txid_findings:

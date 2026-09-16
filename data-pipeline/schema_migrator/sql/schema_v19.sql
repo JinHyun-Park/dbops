@@ -5,7 +5,7 @@
 -- single dominant wait (full per-wait breakdown at 5s is the upgrade path).
 --
 -- ponytail: plain table + (cluster_id, ts) index, not RANGE-partitioned like
--- metric_snapshots — at 7d the row count is small (~17k/day/cluster) and a daily
+-- metric_snapshots: at 7d the row count is small (~17k/day/cluster) and a daily
 -- DELETE is simpler than partition management. Partition by ts if a large fleet
 -- ever makes the prune DELETE expensive.
 CREATE TABLE IF NOT EXISTS active_session_samples (

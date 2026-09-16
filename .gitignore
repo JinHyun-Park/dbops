@@ -14,7 +14,7 @@ cdk/config/settings.py
 .omc/
 agent/_deps/
 
-# Claude Code — keep project-shared configs (settings.json, agents/,
+# Claude Code: keep project-shared configs (settings.json, agents/,
 # commands/, skills/) versioned so collaborators get the same workflow,
 # but ignore per-user runtime state.
 .claude/*.lock
@@ -23,12 +23,12 @@ agent/_deps/
 .claude/state/
 .pytest_cache/
 
-# Customer-facing demo/presentation materials — local only, not part of the
+# Customer-facing demo/presentation materials, local only, not part of the
 # product source. Intro deck (HTML), simulation guide, incident trigger/resolve
 # scripts. Kept out of the repo intentionally.
 /demo/
 
-# Subagent-driven-development scratch (briefs, reports, ledger) — local only
+# Subagent-driven-development scratch (briefs, reports, ledger), local only
 .superpowers/
 
 # One-off audit scratch files belong in the notes vault, not the repo.

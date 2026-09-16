@@ -1,14 +1,14 @@
 """Admin Teams & cluster-assignment management API (admin-gated).
 
 Routes:
-  GET    /api/admin/teams                                  — list teams
-  POST   /api/admin/teams                                  — create {name}
-  GET    /api/admin/teams/{team_id}                        — detail (members+clusters)
-  DELETE /api/admin/teams/{team_id}                        — delete (unassigns clusters)
-  POST   /api/admin/teams/{team_id}/members/{username}     — add member
-  DELETE /api/admin/teams/{team_id}/members/{username}     — remove member
-  POST   /api/admin/teams/{team_id}/clusters/{cluster_id}  — assign cluster
-  DELETE /api/admin/teams/{team_id}/clusters/{cluster_id}  — unassign cluster
+  GET    /api/admin/teams:                                   list teams
+  POST   /api/admin/teams:                                   create {name}
+  GET    /api/admin/teams/{team_id}:                         detail (members+clusters)
+  DELETE /api/admin/teams/{team_id}:                         delete (unassigns clusters)
+  POST   /api/admin/teams/{team_id}/members/{username}:      add member
+  DELETE /api/admin/teams/{team_id}/members/{username}:      remove member
+  POST   /api/admin/teams/{team_id}/clusters/{cluster_id}:   assign cluster
+  DELETE /api/admin/teams/{team_id}/clusters/{cluster_id}:   unassign cluster
 
 Teams gate cluster VISIBILITY (see api/*/tenancy.py); they do not change role.
 Admin-gated, fail-closed (mirror api/admin_users/handler.py)."""
@@ -48,7 +48,7 @@ def _is_admin(event):
     groups = claims.get("cognito:groups") or []
     if not isinstance(groups, list):
         return False
-    # Empty groups [] is treated as implicit admin — intentional single-admin-deploy
+    # Empty groups [] is treated as implicit admin: intentional single-admin-deploy
     # fallback, mirroring api/admin_users/handler.py exactly. This also gates all
     # team write operations (member add/remove, cluster assign/unassign).
     if groups and ADMIN_GROUP not in groups:

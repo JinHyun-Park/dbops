@@ -1,4 +1,4 @@
-"""modify_custom_endpoint — agent-facing Aurora custom endpoint member changes.
+"""modify_custom_endpoint: agent-facing Aurora custom endpoint member changes.
 
 Approval-gated. Changes the StaticMembers or ExcludedMembers of an existing
 CUSTOM endpoint (the two are mutually exclusive per endpoint). Reuses
@@ -56,7 +56,7 @@ def modify_custom_endpoint_impl(
                 "reason": "endpoint_identifier가 필요합니다"}
     if static_members and excluded_members:
         return {"status": "invalid_members", "cluster_id": cluster_id,
-                "reason": "static_members와 excluded_members는 상호 배타적입니다 — 하나만 지정하세요"}
+                "reason": "static_members와 excluded_members는 상호 배타적입니다. 하나만 지정하세요"}
     if not static_members and not excluded_members:
         return {"status": "nothing_to_modify", "cluster_id": cluster_id,
                 "reason": "static_members 또는 excluded_members 중 하나는 지정해야 합니다"}

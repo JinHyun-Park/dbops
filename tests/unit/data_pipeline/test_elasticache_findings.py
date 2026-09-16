@@ -32,7 +32,7 @@ def _fake_rds(meta_engine="redis", agg=None, node_type=None, cpu7d=None):
         if "INSERT INTO cluster_health_findings" in sql:
             inserts.append({p["name"]: list(p["value"].values())[0] for p in kwargs.get("parameters", [])})
             return {"columnMetadata": [], "records": []}
-        # 7-day CPU query (Rule 7) — distinguish by PERCENTILE_CONT
+        # 7-day CPU query (Rule 7), distinguish by PERCENTILE_CONT
         if "PERCENTILE_CONT" in sql and cpu7d is not None:
             c7 = cpu7d
             cols7 = ["avg_cpu", "p95_cpu", "n"]

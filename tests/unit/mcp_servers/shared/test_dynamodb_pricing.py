@@ -38,7 +38,7 @@ _FIXTURE = [
     _product("APN2-WriteCapacityUnit-Hrs", ("0.0000000000", "0"), ("0.0007049", "18600")),
     _product("APN2-ReadRequestUnits", ("0.0000001355", "0")),
     _product("APN2-WriteRequestUnits", ("0.00000068", "0")),
-    # Confounders — same suffixes, different (wrong) prices. Must be excluded.
+    # Confounders: same suffixes, different (wrong) prices. Must be excluded.
     _product("APN2-IA-ReadCapacityUnit-Hrs", ("0.0001762", "0")),
     _product("APN2-IA-WriteCapacityUnit-Hrs", ("0.000845", "0")),
     _product("APN2-ReplWriteCapacityUnit-Hrs", ("0.0007049", "18600")),

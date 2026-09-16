@@ -161,7 +161,7 @@ def test_register_hard_fails_on_describe_error(handler_module, mock_table):
             "cluster_id": "nope", "account_id": "123", "region": "ap-northeast-2"})
     assert resp["statusCode"] == 400
     mock_table.put_item.assert_not_called()
-    # Static reason — the raw exception text must NOT leak into the response.
+    # Static reason: the raw exception text must NOT leak into the response.
     assert "secret-sauce" not in resp["body"]
 
 

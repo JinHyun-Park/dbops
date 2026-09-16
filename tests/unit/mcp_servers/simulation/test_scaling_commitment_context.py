@@ -187,7 +187,7 @@ def test_describe_cluster_failure_yields_available_false():
 
 
 def test_ri_describe_failure_keeps_result_intact():
-    """describe_reserved_db_instances failing must NOT break the cost result —
+    """describe_reserved_db_instances failing must NOT break the cost result:
     RIs degrade to empty and current/proposed simply report no match."""
     rds = _rds(
         _provisioned_cluster(readers=0),

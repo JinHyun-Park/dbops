@@ -1,4 +1,4 @@
-"""RDS MySQL deep-read collector (rds_instance family) — in-VPC, direct TCP.
+"""RDS MySQL deep-read collector (rds_instance family): in-VPC, direct TCP.
 
 Clone of docdb_mongo_collector's architecture: own registry scan + per-cluster
 isolation; connects with pymysql over TLS (fail-closed, vendored
@@ -49,7 +49,7 @@ def _connect(host, port, user, password, database):
 
     if not os.path.exists(_CA_BUNDLE_PATH):
         raise RuntimeError(
-            f"TLS CA bundle missing at {_CA_BUNDLE_PATH} — refusing to connect "
+            f"TLS CA bundle missing at {_CA_BUNDLE_PATH}, refusing to connect "
             "without server certificate verification")
     return pymysql.connect(
         host=host,
@@ -82,7 +82,7 @@ def _connect_mssql(host, port, user, password, database):
 
     if not os.path.exists(_CA_BUNDLE_PATH):
         raise RuntimeError(
-            f"TLS CA bundle missing at {_CA_BUNDLE_PATH} — refusing to connect "
+            f"TLS CA bundle missing at {_CA_BUNDLE_PATH}, refusing to connect "
             "without server certificate verification")
     return pytds.connect(
         server=host,
@@ -102,7 +102,7 @@ _MSSQL_CONNECT_FACTORY = _connect_mssql
 
 
 def _scan_all(table):
-    """Paginated DynamoDB scan — never truncate at the 1MB page boundary."""
+    """Paginated DynamoDB scan: never truncate at the 1MB page boundary."""
     items = []
     kwargs = {}
     while True:
@@ -114,7 +114,7 @@ def _scan_all(table):
 
 
 def _make_cache_execute(rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name):
-    """RDS-Data execute helper for the cache DB — mirrors etl_collector.handler."""
+    """RDS-Data execute helper for the cache DB. Mirrors etl_collector.handler."""
 
     def cache_execute(sql, params):
         sql_params = []
@@ -159,7 +159,7 @@ def _eligible(rows):
 
 def _process_cluster(row, secrets, cache_execute, run_ts):
     """Connect to one RDS MySQL instance and run the vendored collectors through
-    the Data-API adapter. NEVER raises — any failure logs and returns an error
+    the Data-API adapter. NEVER raises: any failure logs and returns an error
     marker so other clusters still run. Host/port come from the REGISTRY ROW
     (RDS-managed master secrets hold only username/password)."""
     cluster_id = row.get("cluster_id", "?")
@@ -200,7 +200,7 @@ def _process_cluster(row, secrets, cache_execute, run_ts):
                     print(f"[rdsdirect] {cluster_id} mssql {name} error: {e}")
             return {"cluster_id": cluster_id, "collected": collected}
 
-        # system schema always exists — gives the session a default schema so
+        # system schema always exists: gives the session a default schema so
         # its own statements show up in the digest table.
         database = row.get("db_name") or "mysql"
 

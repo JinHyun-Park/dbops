@@ -14,7 +14,7 @@
 - **Canonical fail-closed `_is_admin`** (verbatim from the admin-model-hardening branch): no-`Bearer ` → deny; empty claims → deny; non-list groups → deny; `if groups and "dbops-admin" not in groups` → deny; no-group → admin (single-admin fallback). This handler MUST use that exact form.
 - **Cognito `Username` is a UUID** (= token `sub`/`cognito:username`); `email` is a display attribute only. Route `{username}` is the UUID; the self-demotion guard compares `{username}` to the caller's `cognito:username` (fallback `sub`).
 - **Self-demotion guard:** demoting yourself to viewer → `409` (guarantees ≥1 admin always; no global last-admin scan).
-- **No `str(e)` in error responses** — generic messages only (no internal leakage).
+- **No `str(e)` in error responses**: generic messages only (no internal leakage).
 - **IAM scoped** to `foundation.user_pool.user_pool_arn`; Cognito actions only.
 - **i18n scope:** descriptions/empty-state in Korean; role names (`admin`/`viewer`) and group names (`dbops-admin`/`dbops-viewer`) kept verbatim.
 - Frontend admin gating mirrors `/settings`: nav + ⌘K entries carry `adminOnly: true`; the page surfaces a 403 as an "admin only" notice.
@@ -268,8 +268,8 @@ Expected: collection/import error or failures (module `api/admin_users/handler.p
 """Admin user & role management API (admin-gated).
 
 Routes:
-  GET  /api/admin/users                   — list Cognito users + derived role
-  POST /api/admin/users/{username}/role   — set a user's role (admin|viewer)
+  GET  /api/admin/users                   - list Cognito users + derived role
+  POST /api/admin/users/{username}/role   - set a user's role (admin|viewer)
 
 The pool's Cognito Username is a UUID (== token sub / cognito:username); email
 is a display attribute. The self-demotion guard compares {username} to the
@@ -461,21 +461,21 @@ git commit -m "feat(admin-console): admin user/role management API (list users +
 
 ---
 
-### Task 2: CDK wiring — Lambda + IAM + routes
+### Task 2: CDK wiring (Lambda + IAM + routes)
 
 **Files:**
 
-- Modify: `cdk/stacks/agent_stack.py` (add the Lambda, IAM policy, and two routes — place near the existing `onboarding_lambda` block, around the App config / Onboarding route section)
+- Modify: `cdk/stacks/agent_stack.py` (add the Lambda, IAM policy, and two routes: place near the existing `onboarding_lambda` block, around the App config / Onboarding route section)
 
 **Interfaces:**
 
-- Consumes: `foundation.user_pool` (cognito.UserPool — has `.user_pool_id` and `.user_pool_arn`), `self.api` (HttpApi), `integrations`, `apigwv2`, `iam`, `lambda_`, `cdk` (all already imported in this file).
+- Consumes: `foundation.user_pool` (cognito.UserPool: has `.user_pool_id` and `.user_pool_arn`), `self.api` (HttpApi), `integrations`, `apigwv2`, `iam`, `lambda_`, `cdk` (all already imported in this file).
 - Produces: routes `GET /api/admin/users` and `POST /api/admin/users/{username}/role` behind the existing Cognito JWT authorizer.
 
 - [ ] **Step 1: Add the Lambda + IAM + routes.** In `cdk/stacks/agent_stack.py`, immediately AFTER the `onboarding_lambda` route registration block (the `self.api.add_routes(path="/api/onboarding/template", ...)` call), insert:
 
 ```python
-        # Admin console — Cognito user & role management (admin-gated)
+        # Admin console: Cognito user & role management (admin-gated)
         admin_users_lambda = lambda_.Function(
             self, "AdminUsersApi",
             runtime=lambda_.Runtime.PYTHON_3_12,
@@ -507,12 +507,12 @@ git commit -m "feat(admin-console): admin user/role management API (list users +
         )
 ```
 
-- [ ] **Step 2: Verify imports exist.** Confirm `iam`, `lambda_`, `integrations`, `apigwv2`, `cdk` are already imported at the top of `agent_stack.py` (they are — used by neighboring blocks like `onboarding_lambda`). If `foundation.user_pool` has no `user_pool_arn` attribute, it does (CDK `cognito.UserPool` exposes `.user_pool_arn`).
+- [ ] **Step 2: Verify imports exist.** Confirm `iam`, `lambda_`, `integrations`, `apigwv2`, `cdk` are already imported at the top of `agent_stack.py` (they are: used by neighboring blocks like `onboarding_lambda`). If `foundation.user_pool` has no `user_pool_arn` attribute, it does (CDK `cognito.UserPool` exposes `.user_pool_arn`).
 
 - [ ] **Step 3: Run the synth smoke test.**
 
 Run: `python -m pytest tests/cdk/test_synth.py -q`
-Expected: PASS (synth succeeds, 4 stacks present). This test is a structural smoke test, not a frozen snapshot — adding a Lambda + routes does not break it.
+Expected: PASS (synth succeeds, 4 stacks present). This test is a structural smoke test, not a frozen snapshot (adding a Lambda + routes does not break it).
 
 - [ ] **Step 4: Commit.**
 
@@ -523,7 +523,7 @@ git commit -m "feat(admin-console): wire admin-users Lambda + Cognito IAM + rout
 
 ---
 
-### Task 3: Frontend — `/admin/users` page + api-client + auth helper + nav/⌘K
+### Task 3: Frontend (`/admin/users` page + api-client + auth helper + nav/⌘K)
 
 **Files:**
 
@@ -535,7 +535,7 @@ git commit -m "feat(admin-console): wire admin-users Lambda + Cognito IAM + rout
 
 **Interfaces:**
 
-- Consumes: `authedFetch`, `apiUrl`, `enc` (api-client); `decodeJwt`, `getToken` (auth.ts — already used by `getUserGroups`); `isAdmin` (auth.ts); design-system `PageBody/PageHeader/Section/EmptyState`.
+- Consumes: `authedFetch`, `apiUrl`, `enc` (api-client); `decodeJwt`, `getToken` (auth.ts: already used by `getUserGroups`); `isAdmin` (auth.ts); design-system `PageBody/PageHeader/Section/EmptyState`.
 - Produces: an admin-only page at `/admin/users`.
 
 - [ ] **Step 1: Add `getUsername()` to `frontend/src/lib/auth.ts`.** After `getUserGroups()` (which uses `decodeJwt(getToken())`), add:
@@ -777,7 +777,7 @@ export default function AdminUsersPage() {
                         </span>
                         {u.implicit && (
                           <span className="ml-2 text-[10px] text-zinc-500">
-                            (암묵 — 명시 역할 미지정)
+                            (암묵: 명시 역할 미지정)
                           </span>
                         )}
                       </td>
@@ -833,18 +833,18 @@ export default function AdminUsersPage() {
         label: "Users",
         icon: UserCheck,
         adminOnly: true,
-        hint: "사용자 역할 관리 — admin/viewer (관리자)",
+        hint: "사용자 역할 관리: admin/viewer (관리자)",
       },
 ```
 
-(Place it adjacent to the other `adminOnly: true` items. Do NOT add a new icon import unless needed — reuse `UserCheck`.)
+(Place it adjacent to the other `adminOnly: true` items. Do NOT add a new icon import unless needed: reuse `UserCheck`.)
 
 - [ ] **Step 5: Add the ⌘K entry in `frontend/src/components/design-system/command-palette.tsx`.** In the `commands` array, near the other `adminOnly: true` Configure entries, add:
 
 ```tsx
   {
     id: "admin-users",
-    label: "Users — 사용자 역할 관리",
+    label: "Users: 사용자 역할 관리",
     path: "/admin/users",
     group: "Configure",
     adminOnly: true,
@@ -867,7 +867,7 @@ git commit -m "feat(admin-console): /admin/users page + nav/⌘K + api-client (a
 
 ## Post-implementation (controller, after all tasks reviewed clean)
 
-- Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD` — focus: the handler uses the canonical fail-closed `_is_admin`; self-demotion guard is correct (compares to caller `cognito:username`/`sub`); no `str(e)` leakage; IAM scoped to the one pool ARN; role-set is exclusive (add one group + remove the other); frontend gating mirrors `/settings`.
+- Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`, focus: the handler uses the canonical fail-closed `_is_admin`; self-demotion guard is correct (compares to caller `cognito:username`/`sub`); no `str(e)` leakage; IAM scoped to the one pool ARN; role-set is exclusive (add one group + remove the other); frontend gating mirrors `/settings`.
 - Deploy dev: `cdk deploy dbops-dev-agent` (new Lambda + IAM + routes). Frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-123456789012 --delete --exclude config.json --region ap-northeast-2` → CloudFront invalidation `E1234567890ABC`.
-- Live smoke (viewer e2e token): `GET /api/admin/users` with `Bearer` viewer → **403**; with raw scheme-less token → **403**; (admin happy-path GET/POST not reachable with the viewer-only e2e token — unit-covered). Confirm the new route exists (not 404-route).
+- Live smoke (viewer e2e token): `GET /api/admin/users` with `Bearer` viewer → **403**; with raw scheme-less token → **403**; (admin happy-path GET/POST not reachable with the viewer-only e2e token: unit-covered). Confirm the new route exists (not 404-route).
 - Then `superpowers:finishing-a-development-branch`.

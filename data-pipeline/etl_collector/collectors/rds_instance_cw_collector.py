@@ -1,6 +1,6 @@
 """RDS instance (non-Aurora MySQL / SQL Server) CloudWatch + meta -> cache.
 
-Namespace AWS/RDS with the DBInstanceIdentifier dimension — standalone DB
+Namespace AWS/RDS with the DBInstanceIdentifier dimension: standalone DB
 instances never expose DBClusterIdentifier. Rows land with dimensions='{}'
 (cluster-scoped) because the instance IS the monitored resource, so triage /
 alerts / capacity forecast read them unmodified."""

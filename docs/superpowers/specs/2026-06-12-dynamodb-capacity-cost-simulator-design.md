@@ -1,9 +1,9 @@
-# DynamoDB capacity-mode cost simulator — Design Spec
+# DynamoDB capacity-mode cost simulator: Design Spec
 
 - **Date**: 2026-06-12
 - **Status**: Proposed
 - **Program**: Multi-engine #P3.6 Group C (final remaining: this + NoSQL write/remediation)
-- **Decision basis**: ADR 2026-06-12 (Option A — first-party bounded reads, cache-first,
+- **Decision basis**: ADR 2026-06-12 (Option A: first-party bounded reads, cache-first,
   honest pricing) + Explore research of the existing simulation/pricing/cost surfaces.
 
 ## Goal
@@ -11,7 +11,7 @@
 Let a DBA see the **$ what-if of switching a DynamoDB table's billing mode**
 (Provisioned ↔ On-Demand), computed from the table's **actual consumed capacity**
 (already in the cache) priced with the **real AWS Price List API** for the table's
-region. A wrong number is worse than none — if pricing can't be resolved, show
+region. A wrong number is worse than none: if pricing can't be resolved, show
 `source: fallback` / no-data, never a fabricated figure (mirrors `aurora_pricing`).
 
 This is the DynamoDB analogue of the Aurora scaling-cost simulator. It is
@@ -25,7 +25,7 @@ This is the DynamoDB analogue of the Aurora scaling-cost simulator. It is
 - `aurora_pricing.py` is the proven pattern: Price List API, `regionCode` FILTER (not the
   client region), process-level `_CACHE`, soft-fail → `None`. We mirror it for DynamoDB.
 - `pricing:GetProducts` IAM is **already** on the simulation MCP Lambda and the simulation
-  REST Lambda (CDK `agent_stack.py:166, 444`) — **no CDK change needed**.
+  REST Lambda (CDK `agent_stack.py:166, 444`), **no CDK change needed**.
 - The simulator page already family-gates (`fam !== "relational"` → EmptyState). We open a
   `fam === "dynamodb"` branch. `FAMILY_PANELS["dynamodb"]` already lists `"cost"`.
 
@@ -43,7 +43,7 @@ filter. Process-level `_CACHE` keyed `(kind, region)`. Every lookup fails soft �
 Reuse the `_on_demand_usd(product)` extractor verbatim.
 
 Four prices, all `$ per unit`, matched by `usagetype` **suffix** (region prefix varies,
-so match suffix to stay region-agnostic — same technique as the ACU lookup):
+so match suffix to stay region-agnostic, same technique as the ACU lookup):
 
 | function                        | billing     | usagetype suffix to match | unit                          |
 | ------------------------------- | ----------- | ------------------------- | ----------------------------- |
@@ -56,14 +56,14 @@ so match suffix to stay region-agnostic — same technique as the ACU lookup):
 > `get_products(ServiceCode="AmazonDynamoDB", Filters=[regionCode])` sample during
 > implementation (suffixes above are from AWS docs; the API is source of truth). The
 > on-demand price is published per-request; AWS lists per **million** request units in
-> some regions and per-request in others — normalize to $/request-unit internally and
+> some regions and per-request in others: normalize to $/request-unit internally and
 > label clearly. If a suffix doesn't match, return `None` (→ fallback), never guess.
 
 Bound pagination with `_MAX_PAGES` like `aurora_pricing` (DynamoDB region SKU count is small).
 
 ### New MCP tool: `simulate_dynamodb_capacity_cost`
 
-`mcp-servers/mcp_servers/simulation/handler.py` — add to `TOOLS` + an `_impl`.
+`mcp-servers/mcp_servers/simulation/handler.py`: add to `TOOLS` + an `_impl`.
 
 - **Gate**: add a new positive capability key `ddb_cost_simulation: True` to the
   `"dynamodb"` block in **all 4** `engine_family.py` copies (leave `simulation: False`
@@ -80,18 +80,18 @@ Bound pagination with `_MAX_PAGES` like `aurora_pricing` (DynamoDB region SKU co
 - **Reads** (cache, RDS Data API):
   - `cluster_meta.resource_details->>'billing_mode'` (+ region from `cluster_meta`).
   - `consumed_rcu` / `consumed_wcu` 1-min Sum series, `dimensions = '{}'` only
-    (exclude per-GSI rows — same dimension-mixing trap fixed on the dashboard).
+    (exclude per-GSI rows, same dimension-mixing trap fixed on the dashboard).
   - If PROVISIONED: latest `provisioned_rcu` / `provisioned_wcu` for the _current_ cost.
 - **Math** (document every assumption in the response):
   - **On-Demand monthly** = `(total_RRU/1e6 × $/Mrru) + (total_WRU/1e6 × $/Mwru)`, where
     `total_RRU` = sum of `consumed_rcu` over the window scaled to 730h (1 consumed RCU ≈
-    1 RRU for ≤4KB strong reads — state the approximation). Same for writes.
+    1 RRU for ≤4KB strong reads, state the approximation). Same for writes.
   - **Provisioned monthly** = `rcu_sized × $/RCU-hr × 730 + wcu_sized × $/WCU-hr × 730`,
     where `rcu_sized = ceil( p99(consumed_rcu/60) / headroom )` per-second capacity
     (p99 not max, to avoid pricing a one-off spike; headroom models auto-scaling target).
   - **current_monthly** = the table's actual mode cost (provisioned: from the real
     provisioned units; on-demand: = the On-Demand figure).
-  - **recommendation** = cheaper of the two, with the $ delta and % — but only when BOTH
+  - **recommendation** = cheaper of the two, with the $ delta and %, but only when BOTH
     prices resolved. If either price is `None` → `status: "partial"`, `source: "fallback"`,
     omit the missing side, never fabricate.
 - **Output** (JSON): `{status, billing_mode, region, window_hours, datapoints,
@@ -103,15 +103,15 @@ headroom}, pricing_source:"aws_pricing_api"|"fallback", assumptions:[...]}`.
 
 ### REST API route (frontend path)
 
-`api/simulation/handler.py` — add a route/branch so the frontend calls it without the
-agent (the Aurora simulator panels already do this). Reuse the same `_impl` logic — factor
+`api/simulation/handler.py`: add a route/branch so the frontend calls it without the
+agent (the Aurora simulator panels already do this). Reuse the same `_impl` logic: factor
 the pure compute into a shared function imported by both the MCP tool and the REST handler,
-OR duplicate the small compute (match the existing simulation REST/MCP split — implementer
+OR duplicate the small compute (match the existing simulation REST/MCP split, implementer
 checks how Aurora scaling does it and mirrors). Route returns the same JSON shape.
 
 ### Frontend: open the simulator for DynamoDB
 
-`frontend/src/app/simulator/page.tsx` — replace the blanket non-relational EmptyState with:
+`frontend/src/app/simulator/page.tsx`: replace the blanket non-relational EmptyState with:
 
 ```tsx
 fam === "relational"   ? <UpgradePanel/.../>      // unchanged
@@ -124,12 +124,12 @@ New `frontend/src/components/dashboard/dynamodb-capacity-simulator.tsx` (or unde
 
 - Header: current billing mode badge + region.
 - A `StatRow` of three `Stat`s: **현재 월 비용** / **On-Demand 월 비용(추정)** / **Provisioned 월 비용(추정)**.
-- A recommendation banner: "On-Demand로 전환 시 월 $X (Y%) 절감 예상" / "현재 모드가 최적" —
+- A recommendation banner: "On-Demand로 전환 시 월 $X (Y%) 절감 예상" / "현재 모드가 최적",
   only when both prices resolved.
 - An assumptions disclosure (p99 sizing, headroom, 730h month, RRU≈RCU approximation).
 - Reuse the simulator page's `PricingContext` component (source badge: `aws_pricing_api`
   vs `fallback`, region). Mirror `cost/page.tsx PlatformCostView` for layout/number
-  formatting (천 단위 쉼표 via `fmtDecimal` — number-formatting memory rule).
+  formatting (천 단위 쉼표 via `fmtDecimal`, number-formatting memory rule).
 - `no_data` / `partial` / `fallback` states render an `EmptyState` / partial card, never a
   blank or a fake number.
 - i18n: Korean for explanations/labels; keep DBA jargon (RCU/WCU/On-Demand/Provisioned/p99)
@@ -145,18 +145,18 @@ New `frontend/src/components/dashboard/dynamodb-capacity-simulator.tsx` (or unde
   math, p99 sizing, recommendation direction, the `no_data` floor, and the `partial`/
   `fallback` path when a price is `None`. Pure-compute function tested directly.
 - **Cedar parity**: the existing `test_tool_schema_parity.py` requires every read-only
-  simulation tool to be in `simulation_policy.cedar` — **add the new tool action** to the
+  simulation tool to be in `simulation_policy.cedar`: **add the new tool action** to the
   Cedar allowlist + the parity test's `_READONLY_POLICY`, or the parity test fails.
 - **CDK**: no new resources → `cdk synth` unchanged (just confirm it still synths).
 - **Frontend**: `tsc --noEmit` + `npm run build`.
-- **Live**: verify against the kept DynamoDB demo table (`ddb-*`) in the browser — real
+- **Live**: verify against the kept DynamoDB demo table (`ddb-*`) in the browser, real
   consumed series + real Seoul pricing → a real dollar comparison.
 
 ## Out of scope
 
 - Reserved Capacity / free-tier / storage / backup / stream / global-table replication
-  cost — capacity (RCU/WCU) only; state this in the assumptions. (A later iteration can add
+  cost: capacity (RCU/WCU) only; state this in the assumptions. (A later iteration can add
   storage from `resource_details.table_size_bytes`.)
 - Auto-scaling schedule modeling beyond the single headroom factor.
-- Actually changing the billing mode — that's a WRITE and belongs with the gated NoSQL
+- Actually changing the billing mode: that's a WRITE and belongs with the gated NoSQL
   write/remediation work (the other remaining Group C item).

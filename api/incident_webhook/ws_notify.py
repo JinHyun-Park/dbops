@@ -2,7 +2,7 @@
 
 Pushes the payload to every connection in the WS connections table via the API
 Gateway Management API. Prunes stale (Gone) connections, never raises into the
-caller, and is a no-op when the WS push channel isn't configured (env unset) —
+caller, and is a no-op when the WS push channel isn't configured (env unset),
 so callers can broadcast unconditionally without guarding.
 
 TWO THINGS THAT ARE NOT PREMATURE OPTIMISATION
@@ -16,7 +16,7 @@ TWO THINGS THAT ARE NOT PREMATURE OPTIMISATION
 2. The management client carries EXPLICIT timeouts. Without them botocore's
    default read timeout is 60s, so a single unresponsive connection could stall
    an evaluator run past its own Lambda timeout and take the remaining
-   notifications with it — turning one dead socket into a missed alert. A push to
+   notifications with it, turning one dead socket into a missed alert. A push to
    a live socket returns in milliseconds; anything slower is already lost.
 
 Copied verbatim into each broadcasting Lambda's package (alert_evaluator,

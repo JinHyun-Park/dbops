@@ -1,4 +1,4 @@
-"""elasticache_pricing — REAL ElastiCache node prices from the AWS Price List
+"""elasticache_pricing: REAL ElastiCache node prices from the AWS Price List
 API. No hardcoded prices (regional staleness). Target region is the `regionCode`
 FILTER, not the client region. Process-cached, soft-fail (None on miss)."""
 

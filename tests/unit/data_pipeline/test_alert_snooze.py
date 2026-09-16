@@ -1,7 +1,7 @@
 """P2-⑦: alert_evaluator must not fire a snoozed rule.
 
 The evaluator excludes snoozed rules via a WHERE guard on the rules-eligibility
-query (real filtering happens in Postgres — see AGENTS.md's "no fixture
+query (real filtering happens in Postgres, see AGENTS.md's "no fixture
 divorced from producer shape" lesson, so the guard clause itself is asserted
 directly here, same pattern as the existing ::timestamptz-cast test in
 test_evaluator.py). The row-handling tests then simulate what the DB returns
@@ -94,7 +94,7 @@ def test_no_rules_fetched_means_nothing_triggers(monkeypatch):
 
 def test_rule_fires_when_db_returns_it_as_eligible(monkeypatch):
     """Simulates a rule with snooze_until NULL/in the past: the DB returns
-    it, and — given a metric value that would otherwise match — it fires."""
+    it, and (given a metric value that would otherwise match) it fires."""
     _stub_env(monkeypatch)
     h = _load("alert_evaluator_snooze_fires")
     mock_rds = MagicMock()

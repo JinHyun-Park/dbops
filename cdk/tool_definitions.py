@@ -19,7 +19,7 @@ def _tool(name, desc, props, required=None, enums=None):
 
 def performance_schema():
     return [
-        # 스키마는 핸들러 시그니처의 전체 파라미터를 노출해야 한다 — 누락된
+        # 스키마는 핸들러 시그니처의 전체 파라미터를 노출해야 한다. 누락된
         # 파라미터는 기본값으로만 동작해 에이전트 능력이 조용히 제한된다
         # (예: start_time/end_time이 없으면 "어제 14~15시 슬로우쿼리" 같은
         # 시간창 분석이 불가능). request_approval 누락 P0와 같은 패밀리.
@@ -159,7 +159,7 @@ def incident_schema():
         ),
         _tool(
             "get_remediation_history",
-            "Get the learned remediation track record for a cluster — aggregated "
+            "Get the learned remediation track record for a cluster: aggregated "
             "success/attempt counts per action class (remediation_outcomes_agg) and "
             "the 20 most recent resolved/persisted cases (remediation_cases). "
             "Use this to advise DBAs on which remediations have worked before.",
@@ -184,7 +184,7 @@ def operations_schema():
               ["cluster_id"]),
         _tool("get_schema_history", "Track schema change history",
               {"cluster_id": "string", "days": "integer"}, ["cluster_id"]),
-        # force는 DROP/TRUNCATE 차단 해제용 — 노출해도 인간 승인 게이트
+        # force는 DROP/TRUNCATE 차단 해제용. 노출해도 인간 승인 게이트
         # (approved+approval_id 검증)는 그대로 통과해야 하므로 안전 모델
         # 위반이 아니다. 미노출 시 차단 메시지가 force를 안내하는데 에이전트가
         # 전달할 방법이 없는 자기모순이 된다.
@@ -231,7 +231,7 @@ def operations_schema():
         _tool("modify_scaling", "Scale instance (requires approval)",
               {"cluster_id": "string", "min_capacity": "number", "max_capacity": "number", "approved": "boolean", "approval_id": "string"},
               ["cluster_id"]),
-        # 쓰기 툴 3종 모두 approved/approval_id를 스키마에 노출해야 한다 —
+        # 쓰기 툴 3종 모두 approved/approval_id를 스키마에 노출해야 한다.
         # 핸들러와 가드가 완비여도 스키마에 없으면 에이전트가 승인 후 재실행을
         # 못 해 승인 루프가 dead-end가 된다 (request_approval 누락 P0와 동일
         # 패밀리, 시나리오 테스트로 적발).
@@ -295,17 +295,17 @@ def operations_schema():
         # prewarm approval that becomes DBA-visible once the reader is available.
         # Every handler param must appear here or the impl<->schema parity test fails.
         _tool("scale_out_with_warmup",
-              "Aurora only (scale-out + auto-warmup): add a READER instance AND auto-queue its buffer-pool prewarm (semi-automatic, two approvals — this is approval #1; the prewarm auto-appears in the Approval Center once the reader is available); new_instance_id required; instance_class defaults to the writer's class; requires approval",
+              "Aurora only (scale-out + auto-warmup): add a READER instance AND auto-queue its buffer-pool prewarm (semi-automatic, two approvals: this is approval #1; the prewarm auto-appears in the Approval Center once the reader is available); new_instance_id required; instance_class defaults to the writer's class; requires approval",
               {"cluster_id": "string", "new_instance_id": "string", "instance_class": "string",
                "endpoint_identifier": "string", "top_n": "integer",
                "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "new_instance_id"]),
-        # AZ scale-out runbook planner (P2-⑥). READ-ONLY — no approved/approval_id
+        # AZ scale-out runbook planner (P2-⑥). READ-ONLY: no approved/approval_id
         # (it plans; the /scaleout-az API mints add_reader_instance approvals). Not
         # in request_approval's enum. Every handler param must appear here or the
         # impl<->schema parity test fails.
         _tool("plan_az_scaleout",
-              "Aurora only (read-only): plan a preemptive AZ scale-out — N reader instances spread round-robin over the cluster's healthy AZs, EXCLUDING one chosen AZ, each with a concrete instance_class + AZ + unique id. Creates nothing",
+              "Aurora only (read-only): plan a preemptive AZ scale-out. N reader instances spread round-robin over the cluster's healthy AZs, EXCLUDING one chosen AZ, each with a concrete instance_class + AZ + unique id. Creates nothing",
               {"cluster_id": "string", "exclude_az": "string", "count": "integer",
                "instance_class": "string"},
               ["cluster_id"]),
@@ -341,7 +341,7 @@ def operations_schema():
                "keys": "array", "name": "string", "approved": "boolean", "approval_id": "string"},
               ["cluster_id", "db", "collection", "keys", "name"]),
         _tool("elasticache_live_read",
-              "ElastiCache only: live Redis/Valkey/Memcached deep-read — INFO, SLOWLOG, CLIENT LIST, MEMORY STATS (Redis) or stats (Memcached). Read-only; no mutation.",
+              "ElastiCache only: live Redis/Valkey/Memcached deep-read. INFO, SLOWLOG, CLIENT LIST, MEMORY STATS (Redis) or stats (Memcached). Read-only; no mutation.",
               {"cluster_id": "string", "sections": "array"},
               ["cluster_id"]),
         _tool("modify_elasticache_node_type",
@@ -436,7 +436,7 @@ def simulation_schema():
               {"cluster_id": "string", "parameter_name": "string", "new_value": "string"},
               ["cluster_id", "parameter_name", "new_value"]),
         _tool("simulate_scaling",
-              "Simulate scaling cost with real AWS pricing — Serverless v2 ACU range (new_min_acu/new_max_acu) OR provisioned instance resize (new_instance_class)",
+              "Simulate scaling cost with real AWS pricing: Serverless v2 ACU range (new_min_acu/new_max_acu) OR provisioned instance resize (new_instance_class)",
               {"cluster_id": "string", "new_min_acu": "number", "new_max_acu": "number", "new_instance_class": "string"}, ["cluster_id"]),
         _tool("simulate_ddl_impact", "Estimate DDL execution impact (lock time, duration)",
               {"cluster_id": "string", "ddl_sql": "string"}, ["cluster_id", "ddl_sql"]),

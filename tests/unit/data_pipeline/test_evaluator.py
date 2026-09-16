@@ -145,7 +145,7 @@ def test_apply_verdict_writes_agg_before_marking_case():
 
 # F5: symptom_class with no colon returns inconclusive (does not raise)
 def test_evaluate_case_no_colon_symptom_class_is_inconclusive():
-    q = _query_router([])  # no DB rows needed — should short-circuit before querying
+    q = _query_router([])  # no DB rows needed, should short-circuit before querying
     case = {"cluster_id": "c1", "symptom_class": "legacy_no_colon",
             "symptom_subject": "s", "watch_metric": None,
             "action_class": "manual", "opened_at": "x"}

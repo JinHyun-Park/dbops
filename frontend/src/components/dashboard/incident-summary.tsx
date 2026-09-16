@@ -29,7 +29,7 @@ const STYLE: Record<
 };
 
 export function IncidentSummary({ clusterId }: { clusterId: string }) {
-  // Shared fleet poll (deduped with the cluster dropdown + strip) — same source,
+  // Shared fleet poll (deduped with the cluster dropdown + strip): same source,
   // so the banner severity always matches the card pill and the Fleet page.
   const fleet = useFleetOverview();
   const row = fleet.find((c) => c.cluster_id === clusterId) || null;
@@ -52,7 +52,7 @@ export function IncidentSummary({ clusterId }: { clusterId: string }) {
             <div className="text-sm text-zinc-100 font-medium">
               {s.headline}
             </div>
-            {/* The exact signals that put this cluster over the line — the same
+            {/* The exact signals that put this cluster over the line: the same
                 reasons the Fleet triage tooltip shows. */}
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {t.reasons.map((r) => (

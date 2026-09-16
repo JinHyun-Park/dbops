@@ -1,4 +1,4 @@
-"""C3: opportunistic plan-history — structural signature + flip-vs-growth."""
+"""C3: opportunistic plan-history, structural signature + flip-vs-growth."""
 import hashlib
 from unittest.mock import MagicMock
 

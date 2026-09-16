@@ -1,4 +1,4 @@
-"""simulate_rds_instance_rightsizing — CW-driven instance right-sizing with real
+"""simulate_rds_instance_rightsizing: CW-driven instance right-sizing with real
 Price List cost delta for the rds_instance family (RDS MySQL + SQL Server).
 Read-only, no approval. Recommends a smaller class when p95 CPU + connection +
 IOPS headroom allows, a larger class when hot, else hold; prices current vs
@@ -39,7 +39,7 @@ def _next_class_down(instance_class):
 
 def _ladder_direction(cur_class, target):
     """'downsize'/'upsize'/'hold' by size position on _SIZE_LADDER (the size
-    token — micro/small/large/… — is shared across db families, so the family
+    token, micro/small/large/…, is shared across db families, so the family
     prefix is irrelevant). 'hold' when equal, or when either token is unknown."""
     if not target or target == cur_class:
         return "hold"
@@ -59,7 +59,7 @@ def _ladder_direction(cur_class, target):
 def _license_note(engine):
     e = (engine or "").lower()
     if e == "sqlserver-ex":
-        return "SQL Server Express — 라이선스 비용 $0 (License Included 요율에 반영)"
+        return "SQL Server Express: 라이선스 비용 $0 (License Included 요율에 반영)"
     if e.startswith("sqlserver"):
         return "SQL Server 라이선스는 License Included 인스턴스 요율에 포함되어 가격에 반영됨"
     return None
@@ -153,26 +153,26 @@ def simulate_rds_instance_rightsizing_impl(cache, cluster_id=None, window_hours=
     # Recommendation: explicit override wins; else CPU-p95-driven with a hold band.
     if new_instance_class:
         # Explicit override: the action label is resolved AFTER the cost delta
-        # (below) so it can never contradict the numbers — a smaller requested
+        # (below) so it can never contradict the numbers: a smaller requested
         # class must read "downsize", not a hardcoded "upsize".
         target, action = new_instance_class, None
         reason = "요청한 인스턴스 클래스로 비용 비교"
     elif cpu_p95 >= 80:
         target = _next_class_up(cur_class) or cur_class
         action = "upsize" if target != cur_class else "hold"
-        reason = f"CPU p95 {util['cpu_p95']}% — 한 단계 확대 권장"
+        reason = f"CPU p95 {util['cpu_p95']}%: 한 단계 확대 권장"
     elif cpu_p95 <= min(40 * headroom / 0.5, 75) and conn_peak < 50:
         down = _next_class_down(cur_class)
         target, action = (down, "downsize") if down else (cur_class, "hold")
-        reason = (f"CPU p95 {util['cpu_p95']}%, 커넥션 최대 {util['conn_peak']} — 한 단계 축소 여력"
-                  if down else "이미 최소 클래스 — 축소 불가")
+        reason = (f"CPU p95 {util['cpu_p95']}%, 커넥션 최대 {util['conn_peak']}: 한 단계 축소 여력"
+                  if down else "이미 최소 클래스: 축소 불가")
     else:
-        target, action, reason = cur_class, "hold", f"CPU p95 {util['cpu_p95']}% — 현행 유지 적정"
+        target, action, reason = cur_class, "hold", f"CPU p95 {util['cpu_p95']}%: 현행 유지 적정"
 
     # edition is resolved INSIDE price_rds_instance_hour from the registry engine
     # (via _RDS_EDITION_LABEL → the Price List `databaseEdition` value). Passing an
     # edition here would have to be the Price-List label ("Express"), NOT the raw
-    # registry string — so leave it unset and let the helper map it, matching the
+    # registry string, so leave it unset and let the helper map it, matching the
     # pricing module's tested calling convention.
     cur_hr = price_rds_instance_hour(region, engine, cur_class, multi_az=multi_az)
     tgt_hr = price_rds_instance_hour(region, engine, target, multi_az=multi_az)

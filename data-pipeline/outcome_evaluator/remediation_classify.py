@@ -4,7 +4,7 @@ Pure + deterministic so the same (symptom, action) key is produced wherever a ca
 is opened. Order matters: the FIRST matching family wins, most-specific first.
 """
 
-# (substring, action_class) — checked in order; Korean + English keywords.
+# (substring, action_class): checked in order; Korean + English keywords.
 _RULES = [
     ("인덱스", "index_add"), ("index", "index_add"),
     ("vacuum", "vacuum"), ("배큠", "vacuum"), ("autovacuum", "vacuum"),

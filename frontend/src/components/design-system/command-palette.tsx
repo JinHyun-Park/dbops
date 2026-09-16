@@ -18,154 +18,154 @@ interface Command {
 const commands: Command[] = [
   {
     id: "fleet",
-    label: "Fleet — 전체 클러스터",
+    label: "Fleet: 전체 클러스터",
     path: "/fleet",
     group: "Monitor",
   },
   {
     id: "dashboard",
-    label: "Dashboard — 단일 클러스터",
+    label: "Dashboard: 단일 클러스터",
     path: "/dashboard",
     group: "Monitor",
   },
   {
     id: "compare",
-    label: "Compare — 비교 분석",
+    label: "Compare: 비교 분석",
     path: "/compare",
     group: "Monitor",
   },
   {
     id: "slo",
-    label: "SLO — 가용성과 지연 예산",
+    label: "SLO: 가용성과 지연 예산",
     path: "/slo",
     group: "Monitor",
   },
   {
     id: "schema",
-    label: "Schema — FK 계보와 의존성",
+    label: "Schema: FK 계보와 의존성",
     path: "/schema",
     group: "Monitor",
   },
 
-  { id: "chat", label: "Chat — AI 대화", path: "/chat", group: "Automate" },
+  { id: "chat", label: "Chat: AI 대화", path: "/chat", group: "Automate" },
   {
     id: "query-lab",
-    label: "Query Lab — SQL 분석",
+    label: "Query Lab: SQL 분석",
     path: "/query-lab",
     group: "Automate",
   },
   {
     id: "approvals",
-    label: "Approvals — 승인 센터",
+    label: "Approvals: 승인 센터",
     path: "/approvals",
     group: "Automate",
   },
   {
     id: "ask",
-    label: "Ask the fleet — 자연어 질의",
+    label: "Ask the fleet: 자연어 질의",
     path: "/ask",
     group: "Automate",
   },
   {
     id: "runbooks",
-    label: "Runbooks — 진단과 처방",
+    label: "Runbooks: 진단과 처방",
     path: "/runbooks",
     group: "Automate",
   },
   {
     id: "simulator",
-    label: "Simulator — what-if 시뮬",
+    label: "Simulator: what-if 시뮬",
     path: "/simulator",
     group: "Automate",
   },
 
   {
     id: "timeline",
-    label: "Timeline — 통합 인시던트 피드",
+    label: "Timeline: 통합 인시던트 피드",
     path: "/timeline",
     group: "Incident",
   },
   {
     id: "activity",
-    label: "Activity — 감사와 회고 로그",
+    label: "Activity: 감사와 회고 로그",
     path: "/activity",
     group: "Incident",
   },
   {
     id: "workload-diff",
-    label: "Workload diff — 쿼리 변화",
+    label: "Workload diff: 쿼리 변화",
     path: "/workload-diff",
     group: "Incident",
   },
 
   {
     id: "alerts",
-    label: "Alerts — 규칙과 구독자",
+    label: "Alerts: 규칙과 구독자",
     path: "/alerts",
     group: "Configure",
   },
   {
     id: "clusters",
-    label: "Clusters — 클러스터 관리",
+    label: "Clusters: 클러스터 관리",
     path: "/clusters",
     group: "Configure",
   },
   {
     id: "reports",
-    label: "Reports — 예약 리포트",
+    label: "Reports: 예약 리포트",
     path: "/reports",
     group: "Configure",
   },
   {
     id: "cost",
-    label: "Cost — Bedrock 비용",
+    label: "Cost: Bedrock 비용",
     path: "/cost",
     group: "Configure",
   },
   {
     id: "preferences",
-    label: "Memory — 에이전트 기억",
+    label: "Memory: 에이전트 기억",
     path: "/preferences",
     group: "Configure",
   },
   {
     id: "settings",
-    label: "Settings — 기능 토글, 티켓팅, 리포트 전달",
+    label: "Settings: 기능 토글, 티켓팅, 리포트 전달",
     path: "/settings",
     group: "Configure",
     adminOnly: true,
   },
   {
     id: "approval-policies",
-    label: "Approval policies — 지정 승인자 라우팅",
+    label: "Approval policies: 지정 승인자 라우팅",
     path: "/approval-policies",
     group: "Configure",
     adminOnly: true,
   },
   {
     id: "context-files",
-    label: "Context files — 에이전트 참조 컨텍스트",
+    label: "Context files: 에이전트 참조 컨텍스트",
     path: "/context-files",
     group: "Configure",
     adminOnly: true,
   },
   {
     id: "onboarding",
-    label: "Onboarding — 멤버 계정 연결 위저드",
+    label: "Onboarding: 멤버 계정 연결 위저드",
     path: "/onboarding",
     group: "Configure",
     adminOnly: true,
   },
   {
     id: "admin-users",
-    label: "Users — 사용자 역할 관리",
+    label: "Users: 사용자 역할 관리",
     path: "/admin/users",
     group: "Configure",
     adminOnly: true,
   },
   {
     id: "health",
-    label: "Health — 자체 모니터링",
+    label: "Health: 자체 모니터링",
     path: "/health",
     group: "Configure",
   },
@@ -182,7 +182,7 @@ export function CommandPalette() {
   }, []);
 
   const q = query.trim().toLowerCase();
-  // Pages/search only — cluster switching lives in the dedicated ClusterDropdown
+  // Pages/search only: cluster switching lives in the dedicated ClusterDropdown
   // now, so ⌘K and the cluster control no longer open the same overloaded modal.
   const filtered = commands.filter(
     (c) => (!c.adminOnly || admin) && c.label.toLowerCase().includes(q),
@@ -205,7 +205,7 @@ export function CommandPalette() {
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
     // The sidebar Search button (and anything else) can open the palette by
-    // dispatching this event — keeps the trigger decoupled from this state.
+    // dispatching this event, keeps the trigger decoupled from this state.
     window.addEventListener("dbops:open-command-palette", open);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);

@@ -1,4 +1,4 @@
-"""ddl_estimator — calibrated lock + time footprint for a DDL statement.
+"""ddl_estimator: calibrated lock + time footprint for a DDL statement.
 
 Single source of truth shared by the Simulation MCP tool
 (``simulate_ddl_impact``) and mirrored byte-for-byte into ``api/simulation/``
@@ -11,19 +11,19 @@ Two problems it fixes together:
 
 1. **Hardcoded throughput.** The runtime of a full-scan DDL (CREATE INDEX,
    table rewrite) was pinned to a flat ``40 MB/s`` regardless of the cluster's
-   instance size or storage type — the same over-fitting we removed from the
+   instance size or storage type: the same over-fitting we removed from the
    upgrade-time estimate. Sustained scan/rewrite throughput scales with the
    instance's IO bandwidth (≈ instance size) and is higher on I/O-Optimized
    storage, so we derive throughput from the cluster's REAL ``instance_class``
    (+ I/O-Optimized flag) instead of a constant.
 
 2. **REST/MCP drift.** The REST mirror timed DDL as ``row_count/100k*5`` while
-   the MCP tool used a size/operation model — so the dashboard and the agent
+   the MCP tool used a size/operation model, so the dashboard and the agent
    disagreed. Both now call this module, so they cannot drift.
 
 The estimate is OPERATION-CLASS driven (metadata-only ops are size-independent;
 full-scan ops scale with size ÷ throughput), returned as a point estimate plus
-a **range**, a **confidence**, and the **factors used** — directional guidance,
+a **range**, a **confidence**, and the **factors used**: directional guidance,
 not a guarantee. Exact wall-clock still depends on concurrent load and cache
 warmth, which we surface in the note.
 
@@ -213,7 +213,7 @@ def _mysql_index_lock(ddl_upper: str, algorithm, lock):
 def resolve_table(ddl_sql: str):
     """Best-effort target table name (schema + quotes stripped), or None.
 
-    Split on '.' FIRST, then strip quotes from the last segment — so a quoted
+    Split on '.' FIRST, then strip quotes from the last segment, so a quoted
     qualified name like ``"public"."orders"`` resolves to ``orders`` rather than
     ``"orders`` (stripping quotes first would leave an inner quote on the split)."""
     m = _TABLE_RX.search(ddl_sql or "")
@@ -399,7 +399,7 @@ def classify_ddl(ddl_upper: str, engine=None) -> dict:
             "online": False,
             "lock": "exclusive but metadata-only (fast)",
         }
-    return {"operation": "other", "scans_table": True, "online": False, "lock": "exclusive (assumed — unrecognized DDL)"}
+    return {"operation": "other", "scans_table": True, "online": False, "lock": "exclusive (assumed: unrecognized DDL)"}
 
 
 def _acu_tier(max_acu):
@@ -443,7 +443,7 @@ def throughput_mb_s(instance_class, io_optimized: bool, serverless_max_acu=None)
             tier = _SERVERLESS_TIER
             tier_known = True
             factors.append(
-                "Serverless v2 — ACU 범위가 아직 수집되지 않아 중간 처리량을 가정했습니다"
+                "Serverless v2: ACU 범위가 아직 수집되지 않아 중간 처리량을 가정했습니다"
                 "(실제 처리량은 ACU에 비례)"
             )
     elif ic:
@@ -454,11 +454,11 @@ def throughput_mb_s(instance_class, io_optimized: bool, serverless_max_acu=None)
             factors.append(f"인스턴스 {instance_class} (크기 tier ×{tier:g})")
         else:
             tier = 1.0
-            factors.append("인스턴스 클래스 미상 토큰 — large(×1.0) 기준 가정")
+            factors.append("인스턴스 클래스 미상 토큰: large(×1.0) 기준 가정")
     else:
         tier = 1.0
         tier_known = False
-        factors.append("인스턴스 클래스 미상 — large(×1.0) 기준 가정")
+        factors.append("인스턴스 클래스 미상: large(×1.0) 기준 가정")
 
     mb_s = _BASE_THROUGHPUT_MB_S * tier
     if io_optimized:
@@ -526,12 +526,12 @@ def estimate_ddl(
         basis.extend(tput_factors)
         size_known = size_mb > 0
         if not size_known:
-            basis.append("테이블 크기 미상(table_stats 미수집) — 최소값 적용")
+            basis.append("테이블 크기 미상(table_stats 미수집): 최소값 적용")
         confidence = "medium" if (tier_known and size_known) else "low"
         low, high = est * 0.5, est * 2.5
     else:
         est = float(_METADATA_ONLY_SECONDS)
-        basis.append("메타데이터 전용 — 테이블 크기나 인스턴스와 무관, 거의 즉시 완료")
+        basis.append("메타데이터 전용: 테이블 크기나 인스턴스와 무관, 거의 즉시 완료")
         confidence = "high"
         low, high = est, float(_METADATA_ONLY_SECONDS * 3)
 

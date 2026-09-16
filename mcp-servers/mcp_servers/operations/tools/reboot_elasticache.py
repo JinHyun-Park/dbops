@@ -1,4 +1,4 @@
-"""reboot_elasticache — approval-gated reboot of the primary cache cluster of a
+"""reboot_elasticache: approval-gated reboot of the primary cache cluster of a
 replication group (reboot_cache_cluster). Brief disruption. Mirrors the write
 model; never raises out.
 

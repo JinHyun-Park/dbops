@@ -39,7 +39,7 @@ def generate_upgrade_plan_impl(cache: CacheClient, cluster_id: str, target_versi
     extension/feature compatibility checks, and (PG) a pg_upgrade pre-check that
     a minor does not need; readers add a per-reader verification step. The time
     estimate comes from the shared :func:`estimate_upgrade` model (object-count
-    driven for majors, size-independent for minors) — not ``len(steps) * 5`` —
+    driven for majors, size-independent for minors), not ``len(steps) * 5``,
     and the chosen method's downtime/range/confidence are surfaced too.
     """
     meta_sql = "SELECT * FROM cluster_meta WHERE cluster_id = :cluster_id"
@@ -81,7 +81,7 @@ def generate_upgrade_plan_impl(cache: CacheClient, cluster_id: str, target_versi
     table_count = _resolve_table_count(cache, cluster_id)
     is_major = upgrade_type == "major"
     # Engine comes from the cluster_meta `engine` column (e.g. "aurora-postgresql"
-    # / "aurora-mysql") — authoritative, unlike inferring it from version text
+    # / "aurora-mysql"), authoritative, unlike inferring it from version text
     # (a MySQL "8.0" target would otherwise be misread as a PG major and get a
     # spurious pg_upgrade step).
     is_postgres = "postgres" in engine.lower()

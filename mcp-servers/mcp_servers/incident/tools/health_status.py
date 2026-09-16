@@ -32,7 +32,7 @@ import json
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.shared.metric_filters import CLUSTER_LEVEL_ONLY
 
-# Engines that are NOT relational Aurora clusters — for these we surface
+# Engines that are NOT relational Aurora clusters. For these we surface
 # engine + parsed resource_details so the agent has billing mode, capacity,
 # GSI/LSI counts, instance topology, etc. without a separate lookup.
 _NON_RELATIONAL_ENGINES = {"dynamodb", "docdb", "documentdb"}

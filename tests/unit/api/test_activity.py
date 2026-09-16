@@ -1,4 +1,4 @@
-"""Tests for /api/activity — the chronological audit feed routed
+"""Tests for /api/activity: the chronological audit feed routed
 through the approvals lambda."""
 
 import importlib.util
@@ -141,7 +141,7 @@ def test_activity_truncates_action_details(mock_boto3):
 def test_activity_limit_clamped(mock_boto3):
     """limit query param is clamped to [1, 500]."""
     mock_table = MagicMock()
-    # 600 rows — enough to test the cap.
+    # 600 rows: enough to test the cap.
     mock_table.scan.return_value = {
         "Items": [_row(aid=f"a-{i}", created=f"2026-05-15T10:{i:02d}:00") for i in range(60)]
     }
@@ -168,7 +168,7 @@ def test_activity_decimal_serialized(mock_boto3):
 
     res = handler.lambda_handler(_activity_event(), None)
     assert res["statusCode"] == 200
-    # Should not have thrown — Decimal coerced via default=str
+    # Should not have thrown: Decimal coerced via default=str
     json.loads(res["body"])
 
 

@@ -1,10 +1,10 @@
-"""restore_finalizer — async second half of the backup restore workflow.
+"""restore_finalizer: async second half of the backup restore workflow.
 
 Why this Lambda exists
 ----------------------
 RestoreDBClusterFromSnapshot / RestoreDBClusterToPointInTime only restore
 the *cluster volume*. Per the RDS docs you must call CreateDBInstance
-SEPARATELY, and only AFTER the cluster reaches `available` — which takes
+SEPARATELY, and only AFTER the cluster reaches `available`, which takes
 several minutes. That outlasts the synchronous request that kicked off
 the restore, so instance provisioning + final registration happen here,
 out of band.
@@ -28,7 +28,7 @@ status marked failed so we stop polling it.
 Cross-account / cross-region: each pending row carries the `region` and
 `spoke_role_arn` of the account the cluster was restored into (a restore
 lands in the same account+region as its source). The finalizer builds a
-per-row RDS client from those — assuming the spoke role when present — so it
+per-row RDS client from those (assuming the spoke role when present), so it
 can finalize restores in spoke accounts, not just the deploy account.
 """
 
@@ -45,12 +45,12 @@ _INSTANCE_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
 
 # The prewarm dispatch is a SYNCHRONOUS (RequestResponse) invoke that can run the
 # full operations Lambda timeout (120s). botocore's default read_timeout (~60s)
-# would fire first and raise mid-run — the finalizer would treat that as a
+# would fire first and raise mid-run: the finalizer would treat that as a
 # transient invoke error and retry next tick while the first prewarm is still
 # running server-side and may already have CONSUMED the approval → duplicate
 # attempts + noisy stuck states. So: read_timeout > operations timeout, and NO
 # auto-retry (a botocore retry would double-invoke). The finalizer Lambda timeout
-# is 150s (cdk/stacks/data_stack.py) — this matches.
+# is 150s (cdk/stacks/data_stack.py). This matches.
 _LAMBDA_CFG = Config(read_timeout=150, connect_timeout=10, retries={"max_attempts": 0})
 
 # Base64-encoded ClientContext so the operations Lambda's _extract_tool_name reads
@@ -136,7 +136,7 @@ def _finalize_one(rds, table, row: dict) -> dict:
         _event_log(cluster_id, "warning", f"Restore target {cluster_id} disappeared before finalization")
         return {"cluster_id": cluster_id, "result": "not_found"}
     except Exception as e:
-        # Transient describe error — leave the flag set, retry next tick.
+        # Transient describe error: leave the flag set, retry next tick.
         return {"cluster_id": cluster_id, "result": f"describe_error:{str(e)[:80]}"}
 
     if not clusters:
@@ -146,7 +146,7 @@ def _finalize_one(rds, table, row: dict) -> dict:
     cluster = clusters[0]
     status = cluster.get("Status", "")
     if status != "available":
-        # Still creating / backing-up / migrating — try again next tick.
+        # Still creating / backing-up / migrating: try again next tick.
         return {"cluster_id": cluster_id, "result": f"waiting:{status}"}
 
     members = cluster.get("DBClusterMembers") or []
@@ -164,12 +164,12 @@ def _finalize_one(rds, table, row: dict) -> dict:
             )
             _event_log(
                 cluster_id, "info",
-                f"Restored cluster {cluster_id} available — created writer instance {instance_id}",
+                f"Restored cluster {cluster_id} available, created writer instance {instance_id}",
             )
         except rds.exceptions.DBInstanceAlreadyExistsFault:
             pass  # idempotent: instance already created on a prior tick
         except Exception as e:
-            # Cluster is available but instance creation failed — surface it
+            # Cluster is available but instance creation failed: surface it
             # and clear the flag so we don't spin forever. The DBA can add an
             # instance manually from the restored cluster.
             _clear_pending(table, cluster_id, status="available_no_instance")
@@ -230,7 +230,7 @@ def _now_iso() -> str:
 
 
 # ===== Second pass: scale-out prewarm approvals (N-④ Phase 1) ================
-# The prewarm approval ROW is the whole state machine — this Lambda only moves it
+# The prewarm approval ROW is the whole state machine: this Lambda only moves it
 # between states and fires a Lambda invoke. It lives in its own package and CANNOT
 # import mcp_servers, so it never computes payload hashes and never connects to a
 # DB: awaiting_instance → (reader available) → pending → (DBA approves) →
@@ -286,7 +286,7 @@ def _advance_prewarm(table, ops_fn: str, row: dict, may_dispatch: bool = True) -
     reader_id = row.get("reader_instance_id", "")
     status = row.get("approval_status", "")
 
-    # Never touch rejected/consumed (or anything unexpected) — only the two
+    # Never touch rejected/consumed (or anything unexpected), only the two
     # states this pass owns.
     if status not in ("awaiting_instance", "approved"):
         return {"approval_id": approval_id, "result": f"skip:{status}"}
@@ -301,22 +301,22 @@ def _advance_prewarm(table, ops_fn: str, row: dict, may_dispatch: bool = True) -
             if "NotFound" in msg or "DBInstanceNotFound" in msg:
                 _set_approval(table, approval_id, created_at, status="awaiting_instance_failed")
                 _event_log(cluster_id, "warning",
-                           f"scale-out 예열 대상 리더 {reader_id} 소멸 — 예열 승인 취소")
+                           f"scale-out 예열 대상 리더 {reader_id} 소멸, 예열 승인 취소")
                 return {"approval_id": approval_id, "result": "instance_vanished"}
-            # Transient describe error — leave for next tick.
+            # Transient describe error: leave for next tick.
             return {"approval_id": approval_id, "result": f"describe_error:{msg[:60]}"}
         insts = di.get("DBInstances") or []
         if not insts:
             _set_approval(table, approval_id, created_at, status="awaiting_instance_failed")
             _event_log(cluster_id, "warning",
-                       f"scale-out 예열 대상 리더 {reader_id} 없음 — 예열 승인 취소")
+                       f"scale-out 예열 대상 리더 {reader_id} 없음, 예열 승인 취소")
             return {"approval_id": approval_id, "result": "instance_vanished"}
         inst_status = insts[0].get("DBInstanceStatus", "")
         if inst_status == "available":
             # Now DBA-visible in the Approval Center.
             _set_approval(table, approval_id, created_at, status="pending")
             _event_log(cluster_id, "info",
-                       f"리더 {reader_id} available — 예열 승인 대기열 등록")
+                       f"리더 {reader_id} available, 예열 승인 대기열 등록")
             return {"approval_id": approval_id, "result": "queued_pending"}
         return {"approval_id": approval_id, "result": f"waiting:{inst_status}"}
 
@@ -333,8 +333,8 @@ def _advance_prewarm(table, ops_fn: str, row: dict, may_dispatch: bool = True) -
     ad = row.get("action_details")
     if not isinstance(ad, dict):
         ad = {}
-    # Pass the SAME endpoint_identifier + top_n that were hashed into the approval
-    # — prewarm_reader.verify_approval re-projects them and refuses any mismatch.
+    # Pass the SAME endpoint_identifier + top_n that were hashed into the approval:
+    # prewarm_reader.verify_approval re-projects them and refuses any mismatch.
     payload = {
         "cluster_id": cluster_id,
         "reader_instance_id": reader_id,
@@ -344,9 +344,9 @@ def _advance_prewarm(table, ops_fn: str, row: dict, may_dispatch: bool = True) -
         "approval_id": approval_id,
     }
     try:
-        # SYNCHRONOUS (RequestResponse): Lambda only delivers ClientContext —
-        # which carries custom.tool_name so the operations handler routes to
-        # prewarm_reader — for RequestResponse, NOT for async Event invokes.
+        # SYNCHRONOUS (RequestResponse): Lambda only delivers ClientContext for
+        # RequestResponse, NOT for async Event invokes. It carries
+        # custom.tool_name, so the operations handler routes to prewarm_reader.
         # (The finalizer timeout is raised to accommodate the operations Lambda's
         # 120s, and we dispatch at most one warm per tick.)
         resp = boto3.client("lambda", config=_LAMBDA_CFG).invoke(
@@ -356,13 +356,13 @@ def _advance_prewarm(table, ops_fn: str, row: dict, may_dispatch: bool = True) -
             ClientContext=_PREWARM_CLIENT_CONTEXT,
         )
     except Exception as e:
-        # The invoke itself failed (throttle/network) — prewarm never started,
+        # The invoke itself failed (throttle/network), prewarm never started,
         # the approval is NOT consumed, so leave warm_dispatched unset to retry.
         return {"approval_id": approval_id, "result": f"invoke_error:{str(e)[:60]}"}
 
     # We got a response → the operations handler ran and prewarm_reader's
     # verify_approval has consumed the approval (or refused it). Either way the
-    # attempt is made; set warm_dispatched so we never re-invoke — a deterministic
+    # attempt is made; set warm_dispatched so we never re-invoke: a deterministic
     # failure won't fix on retry, and a post-verify failure already consumed the
     # approval so it can't be retried anyway (the DBA re-warms manually via chat).
     warm_status = "unknown"
@@ -375,7 +375,7 @@ def _advance_prewarm(table, ops_fn: str, row: dict, may_dispatch: bool = True) -
     fn_error = resp.get("FunctionError")
     # Record the ACTUAL outcome: only status=="prewarmed" is success. Anything
     # else (FunctionError, malformed payload, or a non-prewarmed status like
-    # connect_failed / approval_denied) is a failed warm — surfaced as a terminal
+    # connect_failed / approval_denied) is a failed warm, surfaced as a terminal
     # "warm_failed" state in the UI instead of an indefinite "warming".
     prewarmed = warm_status == "prewarmed" and not fn_error
     warm_result = "prewarmed" if prewarmed else "failed"
@@ -399,7 +399,7 @@ def _process_scaleout_prewarms() -> dict:
     ops_fn = os.environ.get("OPERATIONS_FUNCTION_NAME", "")
     table = boto3.resource("dynamodb").Table(table_name)
     rows = _scan_scaleout_prewarms(table)
-    # Cap to ONE synchronous warm dispatch per tick — each blocks this Lambda
+    # Cap to ONE synchronous warm dispatch per tick: each blocks this Lambda
     # for the operations Lambda's runtime. State-only transitions
     # (awaiting_instance → pending) are cheap and always run; only the
     # approved → invoke step consumes the budget, so once one fires the rest
@@ -417,7 +417,7 @@ def _process_scaleout_prewarms() -> dict:
 
 
 def lambda_handler(event, context):
-    # Independent second pass — runs even if the restore pass early-returns.
+    # Independent second pass, runs even if the restore pass early-returns.
     scaleout = _process_scaleout_prewarms()
 
     table_name = os.environ.get("CLUSTERS_TABLE", "")
@@ -441,7 +441,7 @@ def lambda_handler(event, context):
         return {"finalized": 0, "error": str(e)[:200], "scaleout": scaleout}
 
     # Build the RDS client PER ROW from its account+region (cross-account
-    # restores carry a spoke_role_arn) — a single hub client can't reach a
+    # restores carry a spoke_role_arn): a single hub client can't reach a
     # cluster that was restored into a spoke account.
     results = [
         _finalize_one(

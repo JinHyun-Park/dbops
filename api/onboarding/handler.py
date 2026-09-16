@@ -1,4 +1,4 @@
-"""Onboarding API — generates the spoke-account IAM role CloudFormation template
+"""Onboarding API: generates the spoke-account IAM role CloudFormation template
 (JSON) a member-account admin deploys so DBOps's hub account can assume into it.
 Admin-only, fail-closed (mirrors api/config/handler.py)."""
 
@@ -26,7 +26,7 @@ WRITE_ACTIONS = [
     "rds:ModifyDBParameterGroup", "rds:ModifyDBClusterParameterGroup",
     "rds:CreateDBClusterSnapshot", "rds:CreateDBSnapshot",
     "rds:RebootDBInstance", "rds:ApplyPendingMaintenanceAction",
-    # Aurora custom cluster endpoints (P2-⑤) — approval-gated in tool code.
+    # Aurora custom cluster endpoints (P2-⑤): approval-gated in tool code.
     # DescribeDBClusterEndpoints is already covered by rds:Describe* (READ_ACTIONS).
     "rds:CreateDBClusterEndpoint", "rds:DeleteDBClusterEndpoint", "rds:ModifyDBClusterEndpoint",
     "dynamodb:UpdateTable", "dynamodb:UpdateContinuousBackups", "dynamodb:UpdateTimeToLive",
@@ -86,7 +86,7 @@ def _build_template(hub_account_id: str, remediation: bool) -> dict:
                            "Action": list(WRITE_ACTIONS), "Resource": "*"})
     return {
         "AWSTemplateFormatVersion": "2010-09-09",
-        "Description": "DBOps spoke-account role — lets the DBOps hub account assume in for "
+        "Description": "DBOps spoke-account role: lets the DBOps hub account assume in for "
                        "read-only monitoring/analysis" + (" + approval-gated remediation" if remediation else ""),
         "Resources": {
             "DBOpsSpokeRole": {
@@ -109,7 +109,7 @@ def _build_template(hub_account_id: str, remediation: bool) -> dict:
             }
         },
         "Outputs": {
-            "RoleArn": {"Description": "Spoke role ARN — register this in DBOps",
+            "RoleArn": {"Description": "Spoke role ARN: register this in DBOps",
                         "Value": {"Fn::GetAtt": ["DBOpsSpokeRole", "Arn"]}},
         },
     }
@@ -124,7 +124,7 @@ def lambda_handler(event, context=None):
         return _resp(403, {"error": "admin only"})
 
     qs = event.get("queryStringParameters") or {}
-    # region is an advisory passthrough — echoed in the response for the caller's
+    # region is an advisory passthrough: echoed in the response for the caller's
     # `aws cloudformation deploy --region`; the IAM role template itself is region-agnostic.
     region = (qs.get("region") or "").strip() or None
     remediation = str(qs.get("remediation") or "").strip().lower() in ("true", "1", "yes", "on")

@@ -5,9 +5,9 @@ name: E2E smoke
 # (stacking-context burial) that unit tests and synthetic clicks cannot see.
 #
 # Requires repo secrets:
-#   DBOPS_E2E_EMAIL / DBOPS_E2E_PASSWORD  — the dedicated Cognito test user
-#   DBOPS_E2E_URL                         — the deployed dev frontend URL
-#     (required; playwright.config.ts throws if unset — no baked-in default)
+#   DBOPS_E2E_EMAIL / DBOPS_E2E_PASSWORD: the dedicated Cognito test user
+#   DBOPS_E2E_URL:                        the deployed dev frontend URL
+#     (required; playwright.config.ts throws if unset, no baked-in default)
 #
 # Runs nightly + on demand. NOT on every push: it hits live dev infra (and the
 # RCA spec invokes the agent once per run), so a deploy-then-test cadence fits

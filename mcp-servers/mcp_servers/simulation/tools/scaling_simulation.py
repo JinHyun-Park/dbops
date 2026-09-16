@@ -1,9 +1,9 @@
-"""scaling_simulation — estimate the monthly cost impact of resizing an Aurora
+"""scaling_simulation: estimate the monthly cost impact of resizing an Aurora
 cluster, for BOTH Serverless v2 (ACU range) AND provisioned (instance class).
 
 WHY this rewrite: the previous version (a) only understood Serverless v2 and
 (b) baked in a single us-east-1 Standard ACU rate ($0.12), which is wrong almost
-everywhere — Seoul I/O-Optimized is $0.26/ACU-hr. Directional "save vs spend"
+everywhere: Seoul I/O-Optimized is $0.26/ACU-hr. Directional "save vs spend"
 guidance built on a wrong unit price misleads DBAs in every non-us-east-1 region.
 
 This version grounds every number in LIVE facts:
@@ -15,7 +15,7 @@ This version grounds every number in LIVE facts:
 
 Every external lookup fails soft: if the describe is unavailable we return a
 graceful estimate dict (costs None) and if a price is unavailable we null that
-cost and mark the source as a fallback — we NEVER fabricate a baseline and we
+cost and mark the source as a fallback. We NEVER fabricate a baseline and we
 NEVER raise.
 """
 
@@ -118,7 +118,7 @@ def _member_instance_classes(rds, cluster_id: str) -> dict:
 # family (e.g. db.r6g.*), one step up the size axis. Missing/unknown size => no
 # next class (autoscale_vs_fixed is then omitted), never a fabricated guess.
 # "micro"/"small" are prepended for T-family (db.t3/db.t4g) RDS instances
-# (rds_instance family, R-5 right-sizing) — no Aurora r6g/etc class ever uses
+# (rds_instance family, R-5 right-sizing): no Aurora r6g/etc class ever uses
 # those size tokens, so this is additive and doesn't change Aurora behavior.
 _SIZE_LADDER = [
     "micro", "small", "medium", "large", "xlarge", "2xlarge", "4xlarge", "8xlarge",
@@ -146,7 +146,7 @@ def _next_class_up(instance_class: str):
 def _active_ris(rds) -> list:
     """Active RDS Reserved Instances in the cluster's account+region (via the
     same cross-account rds client the describe used). RDS RIs carry no end
-    field — end = StartTime + Duration. Fails soft to []; never raises."""
+    field: end = StartTime + Duration. Fails soft to []; never raises."""
     rows = []
     try:
         marker = None
@@ -193,7 +193,7 @@ def _commitment_context(rds, region, engine, io_optimized, result) -> dict:
     """Best-effort RI-awareness annotation for a scaling result. Reports
     whether the current/proposed instance classes are RI-covered, warns when a
     resize would leave an RI stranded, and (provisioned) compares scale-out vs
-    scale-up on ON-DEMAND unit prices only — never a fabricated RI discount.
+    scale-up on ON-DEMAND unit prices only, never a fabricated RI discount.
     Output-only; any failure yields {"available": False}."""
     ris = _active_ris(rds)
     mode = result.get("mode")
@@ -228,7 +228,7 @@ def _commitment_context(rds, region, engine, io_optimized, result) -> dict:
     ):
         until = f" 만료 {cur['expires']}까지" if cur.get("expires") else ""
         note = (
-            f"제안 클래스({proposed_class})는 보유 RI에 없음 — 변경분은 온디맨드로 "
+            f"제안 클래스({proposed_class})는 보유 RI에 없음: 변경분은 온디맨드로 "
             f"과금되어 표시된 절감액이 실효 절감과 다를 수 있습니다.{until} 기존 RI는 "
             "미사용으로 남습니다."
         )
@@ -269,7 +269,7 @@ def _commitment_context(rds, region, engine, io_optimized, result) -> dict:
 
 def _degraded_result(cluster_id: str, new_min_acu, new_max_acu, new_instance_class, region, note: str) -> dict:
     """Build the graceful "live describe unavailable" payload. WHY a helper:
-    keeps the no-data path honest — every cost is None, mode is best-effort, and
+    keeps the no-data path honest: every cost is None, mode is best-effort, and
     the shape still matches the contract so the REST mirror / frontend don't break."""
     mode = "provisioned" if new_instance_class else "serverless"
     if mode == "serverless":
@@ -354,7 +354,7 @@ def _serverless_result(
     basis_phrase = (
         f"관측 평균 {round(observed_acu, 2)} ACU 기준({acu_basis_note})"
         if observed_acu is not None
-        else f"중간값 ACU 기준 추정({acu_basis_note} — 관측 ACU 없음)"
+        else f"중간값 ACU 기준 추정({acu_basis_note}, 관측 ACU 없음)"
     )
     note = (
         f"{basis_phrase}, {HOURS_PER_MONTH}h × {member_count}개 인스턴스. "
@@ -566,7 +566,7 @@ def simulate_scaling_impl(
         )
 
     # RI-aware annotation (output-only, best-effort). A failure here must never
-    # touch the existing result — the cost sim is authoritative on its own.
+    # touch the existing result: the cost sim is authoritative on its own.
     try:
         result["commitment_context"] = _commitment_context(rds, region, engine, io_optimized, result)
     except Exception as e:  # pragma: no cover - defensive soft-fail

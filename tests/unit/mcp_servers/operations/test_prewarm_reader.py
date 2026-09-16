@@ -248,7 +248,7 @@ def test_denied_approval_never_connects():
 
 
 def test_payload_hash_mismatch_rejected():
-    """A real approval minted for top_n=20 cannot be consumed for top_n=99 —
+    """A real approval minted for top_n=20 cannot be consumed for top_n=99:
     the guard's payload_hash refuses it and nothing is executed."""
     row = {
         "approval_id": "aid-1", "created_at": "1", "approval_status": "approved",

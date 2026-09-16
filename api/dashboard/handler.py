@@ -119,7 +119,7 @@ _CLUSTERS_TABLE_NAME = os.environ.get("CLUSTERS_TABLE", "")
 
 def _lookup_cluster(cluster_id: str) -> dict:
     """Resolve cluster_arn / secret_arn / db_name from the DynamoDB clusters
-    registry — needed when an endpoint queries the live target cluster
+    registry, needed when an endpoint queries the live target cluster
     (e.g. listing indexes) instead of the cache DB."""
     if not cluster_id or not _CLUSTERS_TABLE_NAME:
         return {}
@@ -150,7 +150,7 @@ def _registry_engine(cluster_id: str):
       - str (possibly "")  when the registry row was read successfully
                            (including a legitimate missing Item → "").
       - None               when the registry lookup itself failed (DynamoDB
-                           error, network, etc.) — callers must treat None as
+                           error, network, etc.). Callers must treat None as
                            FAIL CLOSED: do NOT create AWS clients or run live
                            queries against an unknown cluster type.
     """
@@ -159,7 +159,7 @@ def _registry_engine(cluster_id: str):
     try:
         table = boto3.resource("dynamodb").Table(_CLUSTERS_TABLE_NAME)
         item = table.get_item(Key={"cluster_id": cluster_id}).get("Item") or {}
-        # Row found (or legitimately absent) — return engine string (possibly "").
+        # Row found (or legitimately absent): return engine string (possibly "").
         return item.get("engine", "")
     except Exception as e:
         print(f"[dashboard] _registry_engine lookup failed for {cluster_id}: {e}")
@@ -170,7 +170,7 @@ def _registry_engine(cluster_id: str):
 def _session_for(region: str = "", role_arn: str = "") -> boto3.session.Session:
     """A boto3 Session for a cluster's account+region. With `role_arn`, assume
     the spoke role (hub-spoke chaining) so live RDS/CloudWatch/Logs reads hit
-    the cluster's OWN account — not a same-named resource in the hub. With no
+    the cluster's OWN account, not a same-named resource in the hub. With no
     role (single-account deploys) this is a transparent local session, so the
     behavior is unchanged for clusters without a spoke role."""
     region = region or os.environ.get("AWS_REGION", "")
@@ -201,13 +201,13 @@ def _schema_graph(cluster_id: str, schema: str) -> dict:
 
     Used by the Schema lineage page to render an FK graph. We deliberately
     keep this as a live Data API call (vs caching the snapshot in PG cache)
-    because foreign-key topology is slow-moving but high-cardinality — a
+    because foreign-key topology is slow-moving but high-cardinality: a
     full snapshot per cluster would bloat the cache. Supports both
     engines: PostgreSQL via pg_class + pg_constraint, MySQL via
     information_schema.TABLES + KEY_COLUMN_USAGE."""
     eng = _registry_engine(cluster_id)
     if eng is None:
-        # Registry lookup failed — fail closed; do not create rds-data clients.
+        # Registry lookup failed: fail closed; do not create rds-data clients.
         return {"cluster_id": cluster_id, "not_applicable": True, "registry_unavailable": True,
                 "tables": [], "edges": []}
     if engine_family(eng) != "relational":
@@ -227,7 +227,7 @@ def _schema_graph(cluster_id: str, schema: str) -> dict:
         return {"error": "cluster registry missing cluster_arn/secret_arn", "tables": [], "edges": []}
 
     if is_mysql:
-        # MySQL has no schema namespace inside a database — the "schema"
+        # MySQL has no schema namespace inside a database, so the "schema"
         # filter the user picks is actually a database name. Default to
         # the cluster's primary db when the caller hasn't specified one.
         schema = (schema or db_name).strip() or db_name
@@ -260,7 +260,7 @@ def _schema_graph(cluster_id: str, schema: str) -> dict:
             "ORDER BY source_table, constraint_name"
         )
     else:
-        # Sanitise schema name — pg_namespace.nspname is a regular identifier;
+        # Sanitise schema name: pg_namespace.nspname is a regular identifier;
         # we pass it as a string param via Data API to avoid quoting concerns.
         schema = (schema or "public").strip() or "public"
 
@@ -332,7 +332,7 @@ def _schema_graph(cluster_id: str, schema: str) -> dict:
         tables = _run(tables_sql)
         edges = _run(edges_sql)
     except Exception as e:
-        # Never surface the raw boto3 fault to the client — it can carry ARNs /
+        # Never surface the raw boto3 fault to the client: it can carry ARNs /
         # account ids. Log it server-side (CloudWatch) for debugging instead.
         print(f"[dashboard] schema-graph query failed for {cluster_id}: {e}")
         return {
@@ -342,12 +342,12 @@ def _schema_graph(cluster_id: str, schema: str) -> dict:
             "edges": [],
         }
 
-    # Per-table FK degree — useful for the UI to highlight hub tables.
+    # Per-table FK degree: useful for the UI to highlight hub tables.
     in_deg: dict[str, int] = {}
     out_deg: dict[str, int] = {}
     for e in edges:
         out_deg[e["source_table"]] = out_deg.get(e["source_table"], 0) + 1
-        # Only count incoming edges from within-schema references — cross-
+        # Only count incoming edges from within-schema references. Cross-
         # schema targets would skew "isolated" detection.
         if e.get("target_schema") == schema:
             in_deg[e["target_table"]] = in_deg.get(e["target_table"], 0) + 1
@@ -371,17 +371,17 @@ def _schema_graph(cluster_id: str, schema: str) -> dict:
 
 
 def _redundant_indexes(cluster_id: str) -> dict:
-    """Find PG indexes that can likely be dropped — prefix-covered, exact
+    """Find PG indexes that can likely be dropped: prefix-covered, exact
     duplicates, or unused (idx_scan = 0 and not constraint-backing).
 
     pganalyze ships this as the "Index Advisor / Redundant Indexes" panel.
     Same idea here: catch the easy wasted disk + write amplification before
-    a DBA goes through `pg_stat_user_indexes` by hand. PG-only for v1 —
+    a DBA goes through `pg_stat_user_indexes` by hand. PG-only for v1.
     MySQL exposes a different index shape and the planner heuristics are
     different enough that we don't share logic."""
     eng = _registry_engine(cluster_id)
     if eng is None:
-        # Registry lookup failed — fail closed; do not create rds-data clients.
+        # Registry lookup failed: fail closed; do not create rds-data clients.
         return {"cluster_id": cluster_id, "not_applicable": True, "registry_unavailable": True,
                 "candidates": []}
     if engine_family(eng) != "relational":
@@ -404,7 +404,7 @@ def _redundant_indexes(cluster_id: str) -> dict:
     # is engine-agnostic.
     if is_mysql:
         # MySQL idx_scan via performance_schema.table_io_waits_summary_by_
-        # index_usage — COUNT_FETCH is the closest analog to pg_stat_user_
+        # index_usage: COUNT_FETCH is the closest analog to pg_stat_user_
         # indexes.idx_scan. Per-index byte size isn't cheaply available
         # from information_schema; report 0 and let the prefix/duplicate
         # heuristics still flag candidates by structure.
@@ -432,7 +432,7 @@ def _redundant_indexes(cluster_id: str) -> dict:
             "ORDER BY s.TABLE_SCHEMA, s.TABLE_NAME, s.INDEX_NAME"
         )
     else:
-        # PG pg_index — WITH ORDINALITY preserves column order so a (a,b)
+        # PG pg_index: WITH ORDINALITY preserves column order so a (a,b)
         # prefix is distinguishable from (b,a).
         sql = (
             "SELECT "
@@ -491,11 +491,11 @@ def _redundant_indexes(cluster_id: str) -> dict:
         indexes.append(row)
 
     # Group by (schema, table) and compute redundancy candidates. We treat:
-    #   - "prefix"   — this index's columns are a strict prefix of another's
-    #   - "duplicate"— same columns as another index (keep the larger; the
+    #   - "prefix":    this index's columns are a strict prefix of another's
+    #   - "duplicate": same columns as another index (keep the larger; the
     #                  smaller is usually a leftover migration artifact)
-    #   - "unused"   — idx_scan = 0 and not backing a unique/PK constraint
-    # An index can only show up once — we prefer prefix > duplicate > unused
+    #   - "unused":    idx_scan = 0 and not backing a unique/PK constraint
+    # An index can only show up once: we prefer prefix > duplicate > unused
     # so the DBA sees the most explainable reason first.
     findings: list[dict] = []
     by_table: dict[tuple[str, str], list[dict]] = {}
@@ -517,7 +517,7 @@ def _redundant_indexes(cluster_id: str) -> dict:
                 b_cols = (b.get("columns") or "").split(",")
                 b_name = b.get("index_name") or ""
                 if a_cols == b_cols:
-                    # Duplicate — keep whichever is larger / has more scans
+                    # Duplicate: keep whichever is larger / has more scans
                     a_size = int(a.get("bytes") or 0)
                     b_size = int(b.get("bytes") or 0)
                     if (a_size, int(a.get("idx_scan") or 0)) < (
@@ -532,7 +532,7 @@ def _redundant_indexes(cluster_id: str) -> dict:
                     and a_cols == b_cols[: len(a_cols)]
                     and not a.get("is_unique")
                 ):
-                    # Strict prefix — b covers every query a covers, plus
+                    # Strict prefix: b covers every query a covers, plus
                     # more. Unique-index prefixes are NOT redundant (they
                     # enforce a separate uniqueness constraint).
                     reason = "prefix"
@@ -540,7 +540,7 @@ def _redundant_indexes(cluster_id: str) -> dict:
                     break
 
             if reason is None and int(a.get("idx_scan") or 0) == 0:
-                # Unused — only flag if it's not enforcing a constraint.
+                # Unused: only flag if it's not enforcing a constraint.
                 if not a.get("is_unique"):
                     reason = "unused"
 
@@ -580,7 +580,7 @@ def _table_indexes(cluster_id: str, schema: str, table_name: str) -> dict:
         return {"error": "schema and table required"}
     eng = _registry_engine(cluster_id)
     if eng is None:
-        # Registry lookup failed — fail closed; do not create rds-data clients.
+        # Registry lookup failed: fail closed; do not create rds-data clients.
         return {"cluster_id": cluster_id, "not_applicable": True, "registry_unavailable": True,
                 "indexes": []}
     if engine_family(eng) != "relational":
@@ -677,12 +677,12 @@ def _table_indexes(cluster_id: str, schema: str, table_name: str) -> dict:
 
 
 # On-demand LIVE top (P2-⑧). Unlike every other dashboard read, this does NOT
-# hit the pre-collected cache and is NOT a background collector — it queries the
+# hit the pre-collected cache and is NOT a background collector: it queries the
 # TARGET cluster directly via RDS Data API, and ONLY while a DBA has the live
 # view open (the browser polls ~2s and clears the interval on close/unmount).
 # So the target sees load only while someone is actively watching. PostgreSQL
 # only: pg_stat_activity / pg_blocking_pids / pg_buffercache are PG surfaces.
-# MySQL SHOW PROCESSLIST is a different mechanism — out of v1 scope.
+# MySQL SHOW PROCESSLIST is a different mechanism, out of v1 scope.
 _LIVE_SESSIONS_SQL = (
     "SELECT pid, usename, state, "
     "  COALESCE(wait_event_type || ':' || wait_event, 'CPU') AS wait, "
@@ -693,7 +693,7 @@ _LIVE_SESSIONS_SQL = (
     "ORDER BY age_sec DESC NULLS LAST LIMIT 100"
 )
 # array_to_string keeps the pid[] out of Data API's arrayValue path (which the
-# generic scalar parser below ignores) — we split the CSV back into ints here.
+# generic scalar parser below ignores), so we split the CSV back into ints here.
 _LIVE_BLOCKING_SQL = (
     "SELECT pid, array_to_string(pg_blocking_pids(pid), ',') AS blockers "
     "FROM pg_stat_activity "
@@ -704,7 +704,7 @@ _LIVE_COUNTERS_SQL = (
     "  tup_inserted, tup_updated, tup_deleted, blks_read, blks_hit "
     "FROM pg_stat_database WHERE datname = current_database()"
 )
-# HEAVY — pg_buffercache scans the whole shared-buffer pool. Never in the poll;
+# HEAVY: pg_buffercache scans the whole shared-buffer pool. Never in the poll;
 # only on the manual "버퍼풀" button (?buffers=true).
 _LIVE_BUFFERCACHE_SQL = (
     "SELECT count(*) FILTER (WHERE relfilenode IS NOT NULL) AS used, "
@@ -721,12 +721,12 @@ _LIVE_BUFFERCACHE_TOP_SQL = (
 def _live_activity(cluster_id: str, buffers: bool = False) -> dict:
     """One live snapshot of the target PG cluster's active sessions, blocking
     chains and cumulative DB counters (the client computes per-second rates from
-    consecutive snapshots — no server-side state). buffers=True additionally runs
+    consecutive snapshots, no server-side state). buffers=True additionally runs
     the heavy pg_buffercache summary. PG-only; graceful when the cluster isn't PG
     or has no Data API. Never leaks str(e)."""
     eng = _registry_engine(cluster_id)
     if eng is None:
-        # Registry lookup failed — fail closed; do not create rds-data clients.
+        # Registry lookup failed: fail closed; do not create rds-data clients.
         return {"cluster_id": cluster_id, "available": False, "registry_unavailable": True}
     fam = engine_family(eng)
     if fam != "relational" or "mysql" in (eng or "").lower():
@@ -779,7 +779,7 @@ def _live_activity(cluster_id: str, buffers: bool = False) -> dict:
         blocking_rows = _run(_LIVE_BLOCKING_SQL)
         counter_rows = _run(_LIVE_COUNTERS_SQL)
     except Exception as e:
-        # Data API not enabled / cluster paused / connect fault — never surface
+        # Data API not enabled / cluster paused / connect fault: never surface
         # the raw boto3 fault (it can carry ARNs / account ids). Log server-side.
         print(f"[dashboard] live-activity query failed for {cluster_id}: {type(e).__name__}: {e}")
         return {
@@ -807,7 +807,7 @@ def _live_activity(cluster_id: str, buffers: bool = False) -> dict:
                 "top_relations": top,
             }
         except Exception as e:
-            # pg_buffercache extension missing / no privilege — degrade only the
+            # pg_buffercache extension missing / no privilege: degrade only the
             # buffer section, keep the rest of the snapshot usable.
             print(f"[dashboard] live buffercache failed for {cluster_id}: {type(e).__name__}: {e}")
             buffercache = {
@@ -844,7 +844,7 @@ def _response(status, body, max_age: int = 0):
     """Build the API Gateway response envelope.
 
     `max_age` adds a Cache-Control header so the browser caches
-    identical GETs for that many seconds. Use sparingly — only for
+    identical GETs for that many seconds. Use sparingly, only for
     endpoints whose payload genuinely is stable for that window
     (overview, timeseries, timeline). Default 0 = no cache (safe for
     mutations + per-call-fresh reads). We use `private` so a shared
@@ -886,7 +886,7 @@ def _response(status, body, max_age: int = 0):
 #
 # Lives in module memory → scoped to one warm container. Lambda scales out
 # horizontally, so the global ceiling is (concurrent containers × 1/ttl)
-# describe-bursts — still far below the per-request rate without it, and it
+# describe-bursts, still far below the per-request rate without it, and it
 # degrades gracefully (a cold container just does one live call). Kept at the
 # routing layer (not inside _topology/_backups/_engine_config) so those stay
 # pure + directly unit-testable.
@@ -900,7 +900,7 @@ _LIVE_NEG_TTL = 5.0
 
 # Defensive ceiling on the cache size. The real key space is 3 endpoints ×
 # registered clusters (bounded by the DynamoDB registry, ~hundreds), so this is
-# never reached in normal operation — it only guards a warm container against an
+# never reached in normal operation: it only guards a warm container against an
 # unforeseen key explosion. On overflow we drop the whole cache (cheap; it
 # refills on the next polls) rather than maintain a per-entry LRU.
 _LIVE_CACHE_MAX = 1024
@@ -908,7 +908,7 @@ _LIVE_CACHE_MAX = 1024
 
 class _CachedError:
     """Wraps an exception raised by a live-describe producer so the FAILURE is
-    cached for the negative TTL and re-raised on subsequent hits — otherwise a
+    cached for the negative TTL and re-raised on subsequent hits. Otherwise a
     producer that throws (e.g. sts:AssumeRole / rds:Describe* throttle or
     outage) would be retried live on every poll, the exact thundering-herd this
     cache exists to prevent, and precisely when AWS is already rate-limiting."""
@@ -921,7 +921,7 @@ class _CachedError:
 
 def _store_live(key: str, val, ttl: float):
     # Stamp the entry with the time AFTER producer() finished (not before it
-    # started) so a slow live call doesn't eat into the entry's effective TTL —
+    # started) so a slow live call doesn't eat into the entry's effective TTL. That
     # matters most for the 5s negative TTL, where a multi-second failure could
     # otherwise land already-expired.
     if len(_LIVE_CACHE) >= _LIVE_CACHE_MAX and key not in _LIVE_CACHE:
@@ -933,8 +933,8 @@ def _cached_live(key: str, ttl: float, producer):
     """Return producer()'s result, served from a warm-container TTL cache.
 
     `producer` is invoked only on a miss (or after the entry's TTL lapses),
-    bounding the live-AWS call rate behind this key. Both failure modes — an
-    error-shaped dict (truthy "error") and a raised exception — are cached for
+    bounding the live-AWS call rate behind this key. Both failure modes, an
+    error-shaped dict (truthy "error") and a raised exception, are cached for
     the shorter negative TTL so a transient fault is still throttled from
     every-poll down to once per window, without pinning a panel for a full
     minute."""
@@ -969,7 +969,7 @@ def _overview(query, cluster_id):
     # thread-safe for operation calls, so the shared rds-data client behind
     # `query` is safe to invoke concurrently. Throttle posture is unchanged:
     # still 4 Data API calls, just not serialized (Data API's region quota,
-    # ~1000 req/s, is not the binding constraint here — the live-describe
+    # ~1000 req/s, is not the binding constraint here: the live-describe
     # endpoints are; see _cached_live).
     reads = (
         (
@@ -1035,7 +1035,7 @@ def _overview(query, cluster_id):
 
 
 def _timeseries(query, cluster_id, metric_type, hours, from_iso=None, to_iso=None):
-    """Single-metric timeseries. Same window precedence as _batch_timeseries —
+    """Single-metric timeseries. Same window precedence as _batch_timeseries:
     absolute (from/to) overrides relative (hours). Server-side bucketed to a
     bounded point count (see _bucket_seconds) so a wide window doesn't return
     thousands of sub-pixel raw points."""
@@ -1114,11 +1114,11 @@ def _workload_diff(query, cluster_id, before_iso, after_iso, regression_pct, mat
     like around time T" picture.
 
     Buckets (by query_hash):
-      new          — present at `after`, absent at `before`
-      disappeared  — present at `before`, absent at `after`
-      regressed    — present both sides, mean_time_ms worsened by
+      new:           present at `after`, absent at `before`
+      disappeared:   present at `before`, absent at `after`
+      regressed:     present both sides, mean_time_ms worsened by
                      ≥ regression_pct
-      improved     — present both sides, mean_time_ms improved by
+      improved:      present both sides, mean_time_ms improved by
                      ≥ regression_pct (informational; helps confirm a
                      fix landed)
 
@@ -1232,7 +1232,7 @@ METRIC_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,49}$")
 
 
 # 변경 영향 회고에서 전후 델타가 의미 있는 핵심 메트릭. direction은 UI가
-# 개선/악화 색을 칠하는 기준 — 대부분 lower=좋음, 캐시 히트는 higher=좋음,
+# 개선/악화 색을 칠하는 기준: 대부분 lower=좋음, 캐시 히트는 higher=좋음,
 # 커넥션과 IOPS는 워크로드 자체라 중립(증감을 가치판단하지 않음).
 _IMPACT_METRICS = [
     ("cpu", "CPU", "lower"),
@@ -1246,13 +1246,13 @@ _IMPACT_METRICS = [
 
 
 def _change_impact(query, cluster_id, window_hours, days):
-    """변경 영향 자동 회고 — event_log의 RDS 변경 이벤트를 앵커로, 전후 동일
+    """변경 영향 자동 회고: event_log의 RDS 변경 이벤트를 앵커로, 전후 동일
     윈도우의 핵심 메트릭을 비교해 '이 변경 후 무엇이 좋아졌/나빠졌나'를 수치로
     보여준다. DBA가 compare 페이지에서 수동으로 기간을 맞춰 비교하던 일을
     변경 이벤트마다 자동으로 해준다.
 
     앵커는 RDS 컨트롤플레인 이벤트(source=aws.rds, configuration change /
-    maintenance / parameter / reboot / scaling / upgrade 류)다 — DBOps 경유
+    maintenance / parameter / reboot / scaling / upgrade 류)다. DBOps 경유
     여부와 무관하게 콘솔/CLI 직접 변경까지 포착한다. dbops-monitor가 만든
     anomaly_* 이벤트는 변경이 아니므로 source 필터로 제외한다."""
     events = query(
@@ -1302,7 +1302,7 @@ def _change_impact(query, cluster_id, window_hours, days):
             if not r or r.get("before_avg") is None or r.get("after_avg") is None:
                 continue
             if int(r.get("before_n") or 0) < 3 or int(r.get("after_n") or 0) < 3:
-                continue  # 표본 부족 — 노이즈 방지로 생략
+                continue  # 표본 부족: 노이즈 방지로 생략
             before = float(r["before_avg"])
             after = float(r["after_avg"])
             delta = after - before
@@ -1330,15 +1330,15 @@ def _change_impact(query, cluster_id, window_hours, days):
 # window returns ~1440 raw points/metric (×8 metrics, ×AAS wait-event
 # dimensions) → a ~1.4MB payload and ~2s of RDS Data API marshaling + JSON
 # serialize, and at the wide end brushes the Data API's 1MB result cap. We
-# instead bucket server-side to a bounded point count regardless of window —
+# instead bucket server-side to a bounded point count regardless of window,
 # bounding payload, query time, transfer, AND Data-API result size at once.
 TS_TARGET_POINTS = 240
 
 # Bucket boundary, computed from the UTC epoch so it's timezone-independent
 # (metric_snapshots.ts is timestamptz/UTC). to_char emits an explicit-Z ISO
-# string directly — sidestepping the _norm_ts path and any naive-datetime
+# string directly, sidestepping the _norm_ts path and any naive-datetime
 # ambiguity. The bucket string is zero-padded fixed-width, so its lexical order
-# IS chronological order — which lets the queries GROUP BY 1 / ORDER BY 1 on
+# IS chronological order, which lets the queries GROUP BY 1 / ORDER BY 1 on
 # this column (PG won't reliably match the nested floor() expression between
 # SELECT and GROUP BY when a parameter is involved; the ordinal sidesteps that).
 _BUCKET_TS_EXPR = (
@@ -1351,7 +1351,7 @@ _BUCKET_TS_EXPR = (
 def _bucket_seconds(hours, from_iso=None, to_iso=None):
     """Bucket width (≥60s, never finer than the 1-min source granularity) that
     keeps a window to ~TS_TARGET_POINTS points. For a 1h window this resolves
-    to 60s — i.e. a no-op that preserves the existing default-load behaviour —
+    to 60s (i.e. a no-op that preserves the existing default-load behaviour)
     and only downsamples once the window is wide enough to need it."""
     span = None
     if from_iso and to_iso:
@@ -1414,7 +1414,7 @@ def _batch_timeseries(
     # Bucketed read: AVG(value) per (time bucket, metric_type, dimensions).
     # Grouping by dimensions::text preserves the AAS per-wait-event breakdown
     # the stacked chart needs; non-dimensional metrics collapse to one series.
-    # AVG is a visual downsample — at the default 1h window bucket=60s is a
+    # AVG is a visual downsample: at the default 1h window bucket=60s is a
     # no-op (exact 1-min points); at wide windows it smooths sparse spikes
     # (e.g. a one-minute deadlock burst). That's acceptable here because spike
     # DETECTION lives in the raw-data endpoints (/anomalies, /events,
@@ -1479,7 +1479,7 @@ def _registered_clusters() -> dict[str, dict] | None:
     The registry is the source of truth in BOTH directions:
       - cache rows whose registration was deleted are ghosts → filtered out;
       - registered clusters with NO cache row yet (new registration, broken
-        ETL) must still APPEAR in Fleet — those are exactly the ones an
+        ETL) must still APPEAR in Fleet: those are exactly the ones an
         operator needs to notice, so the overview synthesizes a metric-less
         row for them instead of letting them vanish."""
     if not _CLUSTERS_TABLE_NAME:
@@ -1510,7 +1510,7 @@ def _learning_overview(query, event=None):
     ) or []
     # Compute visible cluster_id set (mirrors _multi_cluster_overview pattern).
     # fleet rows (cluster_id == '*') are an anonymized aggregate with no real
-    # cluster identity — always shown regardless of team membership.
+    # cluster identity: always shown regardless of team membership.
     visible = None  # None => admin => unfiltered
     if event is not None and not tenancy.is_admin(event):
         registered = _registered_clusters()
@@ -1547,7 +1547,7 @@ def _multi_cluster_overview(query, event=None):
         "  FROM metric_snapshots "
         # Bound BOTH ends of the window. Without the `ts <= NOW()` upper bound a
         # future-dated snapshot (clock skew, back-test injection) would sort
-        # first under `ORDER BY ts DESC` and masquerade as the "latest" value —
+        # first under `ORDER BY ts DESC` and masquerade as the "latest" value,
         # which made Fleet flip a cluster CRITICAL while the Dashboard health
         # score (computed via _batch_timeseries, already bounded at NOW()) still
         # read HEALTHY. Same now-boundary on both = the two surfaces agree.
@@ -1595,7 +1595,7 @@ def _multi_cluster_overview(query, event=None):
     if registered is not None:
         rows = [r for r in rows if r.get("cluster_id") in registered]
         # Registered but never collected (new registration / broken ETL):
-        # synthesize a metric-less row so the cluster is VISIBLE in Fleet —
+        # synthesize a metric-less row so the cluster is VISIBLE in Fleet:
         # the frontend renders null metrics as "-" and treats missing status
         # as neutral, so it surfaces without false-alarming.
         present = {r.get("cluster_id") for r in rows}
@@ -1639,7 +1639,7 @@ def _timeline_category(raw_type: str) -> str:
     set of categories the timeline frontend colors:
       alert / ack / proactive / rds_event  (+ schema_change, audit are
       stamped by their own source queries below).
-    Unknown families fall through to 'rds_event' — they all originate
+    Unknown families fall through to 'rds_event': they all originate
     from the RDS/CloudWatch event pipeline."""
     t = (raw_type or "").lower()
     if t == "alert":
@@ -1739,15 +1739,15 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
     Merges the four signal streams a DBA needs at 3am during incident
     triage into a single sorted list:
 
-      - alerts        — alert rule fires (event_log event_type='alert')
-      - rds_event     — RDS/CloudWatch events (event_log event_type='rds_event'
+      - alerts:         alert rule fires (event_log event_type='alert')
+      - rds_event:      RDS/CloudWatch events (event_log event_type='rds_event'
                         or whatever event_processor wrote)
-      - proactive     — proactive_monitor findings
-      - ack           — Slack acks of alerts
-      - schema_change : DDL from schema_snapshots (schema_v26), one item per
+      - proactive:      proactive_monitor findings
+      - ack:            Slack acks of alerts
+      - schema_change:  DDL from schema_snapshots (schema_v26), one item per
                         stored diff, i.e. per detected schema change
-      - audit         — audit_log (executed write operations)
-      - slow_peak     — query_stats rows whose total_time_ms jumped past
+      - audit:          audit_log (executed write operations)
+      - slow_peak:      query_stats rows whose total_time_ms jumped past
                         the per-cluster p95 in this window (the "what got
                         slow during the incident" signal)
 
@@ -1898,7 +1898,7 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
         # nothing to report.
         obs_note = _TL_NO_SNAPSHOTS
 
-    # audit_log — executed write operations (DDL via execute_sql,
+    # audit_log: executed write operations (DDL via execute_sql,
     # parameter changes, scaling). Empty in most deployments today;
     # included so it lights up automatically when the agent starts
     # writing here.
@@ -1920,7 +1920,7 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
                 "title": f"{r.get('tool_name') or r.get('action_type')}, {r.get('status')}",
                 "detail": (r.get("sql_text") or "")[:240],
                 "source": (
-                    f"{r.get('requested_by') or 'agent'} → {r.get('approved_by') or '—'}"
+                    f"{r.get('requested_by') or 'agent'} → {r.get('approved_by') or '-'}"
                 ),
                 "source_id": f"audit_log:{r.get('id')}",
             })
@@ -1928,7 +1928,7 @@ def _timeline(query, cluster_id: str, hours: int, categories: list[str] | None) 
         print(f"[timeline] audit source degraded: {type(e).__name__}: {e}")
         degraded.append("audit")
 
-    # Sort by ts DESC — most recent first.
+    # Sort by ts DESC: most recent first.
     items.sort(key=lambda x: str(x.get("ts") or ""), reverse=True)
 
     # Optional category filter post-sort so chip toggling is O(N) not N×SQL.
@@ -2902,7 +2902,7 @@ _RECOMMENDED_EXTENSIONS = [
     {"extname": "pg_stat_statements", "severity": "warning",
      "why": "Per-query latency aggregates feed slow-query panels + AI insight."},
     {"extname": "auto_explain", "severity": "info",
-     "why": "Auto-captures EXPLAIN for slow queries — invaluable for post-mortem."},
+     "why": "Auto-captures EXPLAIN for slow queries: invaluable for post-mortem."},
     {"extname": "pgstattuple", "severity": "warning",
      "why": "Precise bloat measurement instead of the size-based estimate."},
     {"extname": "pg_repack", "severity": "info",
@@ -2993,7 +2993,7 @@ def _health_findings(query, cluster_id):
     registry_unavailable so the UI can show a neutral placeholder."""
     eng = _registry_engine(cluster_id)
     if eng is None:
-        # Registry lookup failed — fail closed; do not query the cache DB.
+        # Registry lookup failed: fail closed; do not query the cache DB.
         return {
             "cluster_id": cluster_id,
             "snapshot_time": None,
@@ -3023,7 +3023,7 @@ def _health_findings(query, cluster_id):
         # single-snapshot cluster (the seeded demo writes findings once and
         # never re-emits) must keep showing them, and this is also what the
         # agent's get_maintenance_findings does, so the two never disagree.
-        # ponytail: MAX(snapshot_time) OVER, not ROW_NUMBER()=1 — capacity_forecast
+        # ponytail: MAX(snapshot_time) OVER, not ROW_NUMBER()=1: capacity_forecast
         # emits several subjects at one snapshot; ROW_NUMBER would keep only one.
         rows = query(
             f"SELECT {_COLS} FROM ("
@@ -3689,7 +3689,7 @@ def _capacity_forecast(query, cluster_id, metric, days_lookback):
 
 # PG log filter patterns per category. The model that drives the AI panel
 # can already query CloudWatch Logs through the search_logs MCP tool, but a
-# pre-categorized dashboard panel is what DBAs actually scan — pganalyze /
+# pre-categorized dashboard panel is what DBAs actually scan: pganalyze /
 # Datadog DBM ship the same shape (Log Insights / Database Logs).
 _LOG_CATEGORY_FILTERS = {
     "slow": "filter @message like /duration: [0-9.]+ ms/",
@@ -3719,14 +3719,14 @@ _MYSQL_LOG_CATEGORY_FILTERS = {
         "or @message like /Aborted connection/"
     ),
     # "slow" goes to a different log group entirely (/aws/rds/cluster/{cid}/slowquery)
-    # and the entire group is slow queries — no filter needed.
+    # and the entire group is slow queries, no filter needed.
     "slow": "",
     # MySQL has no autovacuum analog. We leave the key in place for UI
     # parity but use a filter that won't match anything useful.
     "vacuum": "filter @message like /InnoDB/",
 }
 
-# Per-category MySQL log group routing — slow queries and error log
+# Per-category MySQL log group routing: slow queries and error log
 # are separate streams. Default (and `all`) goes to the error log.
 _MYSQL_LOG_GROUPS = {
     "slow": "slowquery",
@@ -3742,7 +3742,7 @@ def _log_insights(cluster_id, hours, category, keywords: str = ""):
 
     Returns the most recent matching entries (raw @timestamp + @message) so
     the frontend can render them as a feed. We deliberately do NOT pre-
-    aggregate into time-buckets here — DBAs reach for log insights when
+    aggregate into time-buckets here: DBAs reach for log insights when
     they want to see the actual line, not a count. Tight default cap (100
     entries) keeps CW Insights scan cost predictable.
 
@@ -3751,7 +3751,7 @@ def _log_insights(cluster_id, hours, category, keywords: str = ""):
     across error / slowquery / general / audit streams so we pick the
     matching one per category.
 
-    Optional `keywords` — free-text DBA input compiled into an AND chain
+    Optional `keywords`: free-text DBA input compiled into an AND chain
     of `@message like /word/` filters. Empty string means no extra
     filter beyond category. We deliberately keep this compile-side (not
     LLM) so the user can see the resulting query in the response and
@@ -3761,7 +3761,7 @@ def _log_insights(cluster_id, hours, category, keywords: str = ""):
     import time
 
     # Gate: non-relational clusters have no /aws/rds/cluster/... log groups.
-    # Registry lookup failure (None) is also treated as fail closed — do NOT
+    # Registry lookup failure (None) is also treated as fail closed: do NOT
     # create CloudWatch Logs clients or build log-group paths for unknown types.
     eng = _registry_engine(cluster_id)
     if eng is None:
@@ -3832,7 +3832,7 @@ def _log_insights(cluster_id, hours, category, keywords: str = ""):
         # another account's region entirely.
         "region": (cluster.get("region") or "") if cluster else "",
         # Expose the compiled query + sanitized keywords so the UI can
-        # show "we ran this exact CW Insights query for you" — gives
+        # show "we ran this exact CW Insights query for you", which gives
         # DBAs a copy/paste-ready string to refine in the Console.
         "compiled_query": query_string,
         "keywords": " ".join(c.split("/")[1] for c in keyword_clauses)
@@ -3859,7 +3859,7 @@ def _log_insights(cluster_id, hours, category, keywords: str = ""):
         return {
             **base_result,
             "error": (
-                f"Log group {log_group} not found — enable {engine_hint} "
+                f"Log group {log_group} not found: enable {engine_hint} "
                 "log exports on the cluster (parameter group + Modify "
                 "cluster → Logs)."
             ),
@@ -3872,7 +3872,7 @@ def _log_insights(cluster_id, hours, category, keywords: str = ""):
         }
 
     qid = resp["queryId"]
-    for _ in range(25):  # ~25s budget — Lambda timeout is 30s
+    for _ in range(25):  # ~25s budget (Lambda timeout is 30s)
         r = client.get_query_results(queryId=qid)
         status = r.get("status")
         if status == "Complete":
@@ -3895,7 +3895,7 @@ def _log_insights(cluster_id, hours, category, keywords: str = ""):
             return {**base_result, "error": f"query {status.lower()}"}
         time.sleep(1)
 
-    return {**base_result, "error": "query timed out — try a smaller hours window"}
+    return {**base_result, "error": "query timed out: try a smaller hours window"}
 
 
 def _topology_docdb(cluster_id: str) -> dict:
@@ -3914,7 +3914,7 @@ def _topology_docdb(cluster_id: str) -> dict:
         "cluster_id": cluster_id,
         "engine_family": "documentdb",
         "error": (
-            "이 DocumentDB 클러스터의 토폴로지를 조회할 수 없습니다 — 등록되지 "
+            "이 DocumentDB 클러스터의 토폴로지를 조회할 수 없습니다. 등록되지 "
             "않았거나 접근 권한이 없습니다."
         ),
         "info": True,
@@ -3962,7 +3962,7 @@ def _topology_docdb(cluster_id: str) -> dict:
         is_writer = bool(m.get("IsClusterWriter"))
         meta = instance_meta.get(instance_id, {})
 
-        # Per-instance replica lag — DocDB publishes AWS/DocDB DBInstanceReplicaLag
+        # Per-instance replica lag: DocDB publishes AWS/DocDB DBInstanceReplicaLag
         # (ms) for readers; the writer is 0 by definition.
         lag_ms = 0.0 if is_writer else None
         if not is_writer:
@@ -4047,11 +4047,11 @@ def _topology(cluster_id: str) -> dict:
     not_real = {
         "cluster_id": cluster_id,
         "error": (
-            "이 클러스터의 복제 토폴로지를 조회할 수 없습니다 — 데모(합성) "
+            "이 클러스터의 복제 토폴로지를 조회할 수 없습니다. 데모(합성) "
             "클러스터이거나 실제 Aurora로 등록되지 않았습니다. 등록된 클러스터를 "
             "선택하면 writer/reader 구성과 Replica Lag이 표시됩니다."
         ),
-        # info (not error): demo/unregistered cluster — render as a neutral
+        # info (not error): demo/unregistered cluster. Render as a neutral
         # notice, not a red failure box.
         "info": True,
         "members": [],
@@ -4101,7 +4101,7 @@ def _topology(cluster_id: str) -> dict:
         is_writer = bool(m.get("IsClusterWriter"))
         meta = instance_meta.get(instance_id, {})
 
-        # Replica lag — writer is always 0 by definition (it's the
+        # Replica lag: writer is always 0 by definition (it's the
         # source). Readers get the latest 1-min datapoint over the past
         # 15 minutes; None means the metric has never been published
         # (instance still warming up or just promoted).
@@ -4187,7 +4187,7 @@ def _backups_docdb(cluster_id: str) -> dict:
         "cluster_id": cluster_id,
         "engine_family": "documentdb",
         "error": (
-            "이 DocumentDB 클러스터의 백업 정보를 조회할 수 없습니다 — 등록되지 "
+            "이 DocumentDB 클러스터의 백업 정보를 조회할 수 없습니다. 등록되지 "
             "않았거나 접근 권한이 없습니다."
         ),
         "info": True,
@@ -4299,7 +4299,7 @@ def _backups_dynamodb(cluster_id: str) -> dict:
         msg = str(e)
         if "ResourceNotFound" in msg or "not found" in msg.lower():
             result["error"] = (
-                "이 DynamoDB 테이블의 백업 정보를 조회할 수 없습니다 — 등록되지 "
+                "이 DynamoDB 테이블의 백업 정보를 조회할 수 없습니다. 등록되지 "
                 "않았거나 접근 권한이 없습니다."
             )
             result["info"] = True
@@ -4334,7 +4334,7 @@ def _backups(cluster_id: str) -> dict:
       - describe_db_clusters     → PITR window + retention + windows
       - describe_db_cluster_snapshots → manual + automated snapshots
 
-    No write actions here — this is the safe read tier of the backup
+    No write actions here: this is the safe read tier of the backup
     workflow. Manual snapshot creation / restore are separate
     approval-gated write tools (a later phase).
     """
@@ -4355,17 +4355,17 @@ def _backups(cluster_id: str) -> dict:
     # Cross-account-aware: describe the cluster in its own account+region.
     rds = _cluster_session(cluster_id).client("rds")
 
-    # Friendly fallback for clusters RDS can't describe — most often the
+    # Friendly fallback for clusters RDS can't describe, most often the
     # synthetic demo cluster (no real Aurora behind it) or one that isn't
     # registered. Never surface the raw boto3 fault string to the UI.
     not_real = {
         "cluster_id": cluster_id,
         "error": (
-            "이 클러스터의 실시간 백업 정보를 조회할 수 없습니다 — 데모(합성) "
+            "이 클러스터의 실시간 백업 정보를 조회할 수 없습니다. 데모(합성) "
             "클러스터이거나 실제 Aurora로 등록되지 않았습니다. 등록된 클러스터를 "
             "선택하면 스냅샷과 PITR 윈도우가 표시됩니다."
         ),
-        # info (not error): demo/unregistered cluster — render as a neutral notice.
+        # info (not error): demo/unregistered cluster. Render as a neutral notice.
         "info": True,
         "snapshots": [],
     }
@@ -4405,7 +4405,7 @@ def _backups(cluster_id: str) -> dict:
         except (TypeError, AttributeError):
             pitr_window_hours = None
 
-    # Snapshot inventory — both manual and automated. The API caps at
+    # Snapshot inventory: both manual and automated. The API caps at
     # 100/page; one page covers any realistic cluster snapshot count
     # for the dashboard view.
     snapshots = []
@@ -4469,7 +4469,7 @@ def _endpoints(cluster_id: str) -> dict:
     not_real = {
         "cluster_id": cluster_id,
         "error": (
-            "이 클러스터의 엔드포인트 정보를 조회할 수 없습니다 — 데모(합성) "
+            "이 클러스터의 엔드포인트 정보를 조회할 수 없습니다. 데모(합성) "
             "클러스터이거나 실제 Aurora로 등록되지 않았습니다."
         ),
         "info": True,
@@ -4499,7 +4499,7 @@ def _endpoints(cluster_id: str) -> dict:
             "static_members": ep.get("StaticMembers") or [],
             "excluded_members": ep.get("ExcludedMembers") or [],
         })
-    # Built-in writer/reader first, then custom — a stable, readable order.
+    # Built-in writer/reader first, then custom: a stable, readable order.
     _rank = {"WRITER": 0, "READER": 1, "CUSTOM": 2}
     endpoints.sort(key=lambda e: (_rank.get((e.get("type") or "").upper(), 3), e.get("identifier") or ""))
     return {
@@ -4514,7 +4514,7 @@ def _endpoints(cluster_id: str) -> dict:
 def _engine_config_docdb(cluster_id: str) -> dict:
     """DocumentDB engine-level config (read-only). Surfaces cluster settings
     the DocDB overview panel does NOT already show (engine/version are shown
-    there). Mirrors the friendly-fallback contract of _backups_docdb —
+    there). Mirrors the friendly-fallback contract of _backups_docdb:
     `cluster_id` IS the DocDB DBClusterIdentifier."""
     docdb = _cluster_session(cluster_id).client("docdb")
 
@@ -4522,7 +4522,7 @@ def _engine_config_docdb(cluster_id: str) -> dict:
         "cluster_id": cluster_id,
         "engine_family": "documentdb",
         "error": (
-            "이 DocumentDB 클러스터의 구성 정보를 조회할 수 없습니다 — 등록되지 "
+            "이 DocumentDB 클러스터의 구성 정보를 조회할 수 없습니다. 등록되지 "
             "않았거나 접근 권한이 없습니다."
         ),
         "info": True,
@@ -4582,7 +4582,7 @@ def _engine_config_dynamodb(cluster_id: str) -> dict:
         msg = str(e)
         if "ResourceNotFound" in msg or "not found" in msg.lower():
             result["error"] = (
-                "이 DynamoDB 테이블의 구성 정보를 조회할 수 없습니다 — 등록되지 "
+                "이 DynamoDB 테이블의 구성 정보를 조회할 수 없습니다. 등록되지 "
                 "않았거나 접근 권한이 없습니다."
             )
             result["info"] = True
@@ -4649,7 +4649,7 @@ def _engine_config_elasticache(cluster_id: str) -> dict:
     (Redis/Valkey) or the cache-cluster id (Memcached/standalone). Maintenance
     window + parameter group live on the cache CLUSTER (node), not the
     replication group, so they're read from a member node. Friendly-fallback
-    like the other engine-config helpers — never leak the raw boto3 fault."""
+    like the other engine-config helpers: never leak the raw boto3 fault."""
     row = _lookup_cluster(cluster_id)
     resource_name = (row.get("resource_name") if row else "") or cluster_id
     ec = _cluster_session(cluster_id, row=row).client("elasticache")
@@ -4674,7 +4674,7 @@ def _engine_config_elasticache(cluster_id: str) -> dict:
         "cluster_id": cluster_id,
         "engine_family": "elasticache",
         "error": (
-            "이 ElastiCache 클러스터의 구성 정보를 조회할 수 없습니다 — 등록되지 "
+            "이 ElastiCache 클러스터의 구성 정보를 조회할 수 없습니다. 등록되지 "
             "않았거나 접근 권한이 없습니다."
         ),
         "info": True,
@@ -4696,16 +4696,16 @@ def _engine_config_elasticache(cluster_id: str) -> dict:
         g = rg[0]
         result["snapshot_retention_limit"] = g.get("SnapshotRetentionLimit")
         result["snapshot_window"] = g.get("SnapshotWindow")
-        # At-rest: StorageEncryptionType is the authoritative posture — a node can
+        # At-rest: StorageEncryptionType is the authoritative posture: a node can
         # be encrypted (e.g. "sse-elasticache") even when the legacy boolean flag
-        # reads false — so treat EITHER signal as encrypted and surface the type.
+        # reads false, so treat EITHER signal as encrypted and surface the type.
         enc_type = g.get("StorageEncryptionType")
         result["storage_encryption_type"] = enc_type
         result["at_rest_encryption_enabled"] = bool(g.get("AtRestEncryptionEnabled")) or bool(
             enc_type and str(enc_type).lower() != "none"
         )
         result["transit_encryption_enabled"] = bool(g.get("TransitEncryptionEnabled"))
-        # AUTH posture covers BOTH a legacy auth token AND RBAC user groups — a
+        # AUTH posture covers BOTH a legacy auth token AND RBAC user groups: a
         # cluster authenticated via RBAC (UserGroupIds) carries no auth token but
         # is NOT open, so don't report it as "disabled".
         result["auth_enabled"] = bool(g.get("AuthTokenEnabled"))
@@ -4720,7 +4720,7 @@ def _engine_config_elasticache(cluster_id: str) -> dict:
         node_id = resource_name
 
     # Maintenance window + parameter-group NAME live on the cache cluster (node),
-    # not the replication group — read them (and fill any unset standalone fields).
+    # not the replication group, so read them (and fill any unset standalone fields).
     pg_name = None
     if node_id:
         try:
@@ -4737,7 +4737,7 @@ def _engine_config_elasticache(cluster_id: str) -> dict:
             c0 = ccs[0]
             result["preferred_maintenance_window"] = c0.get("PreferredMaintenanceWindow")
             pg_name = (c0.get("CacheParameterGroup") or {}).get("CacheParameterGroupName")
-            # Standalone path: the RG fields above were never set — fill from the node.
+            # Standalone path: the RG fields above were never set, so fill from the node.
             if result["snapshot_retention_limit"] is None:
                 result["snapshot_retention_limit"] = c0.get("SnapshotRetentionLimit")
             if result["snapshot_window"] is None:
@@ -4777,7 +4777,7 @@ def _engine_config_elasticache(cluster_id: str) -> dict:
 def _engine_config(cluster_id: str) -> dict:
     """Engine-level configuration for non-relational families (read-only).
 
-    Surfaces config NOT already shown in the overview panels — DocumentDB
+    Surfaces config NOT already shown in the overview panels: DocumentDB
     cluster settings (maintenance window, deletion protection, encryption,
     parameter group, retention), DynamoDB table settings (table class,
     deletion protection, SSE, streams, TTL), and ElastiCache settings
@@ -4786,7 +4786,7 @@ def _engine_config(cluster_id: str) -> dict:
 
     Relational clusters already have the SettingsPanel (cluster_settings),
     so they return not_applicable here. Same friendly-fallback contract as
-    _topology / _backups — never leak the raw boto3 fault string.
+    _topology / _backups: never leak the raw boto3 fault string.
     """
     eng = _registry_engine(cluster_id)
     if eng is None:
@@ -4798,7 +4798,7 @@ def _engine_config(cluster_id: str) -> dict:
         return _engine_config_dynamodb(cluster_id)
     if fam == "elasticache":
         return _engine_config_elasticache(cluster_id)
-    # relational already has the SettingsPanel — nothing engine-config-specific here.
+    # relational already has the SettingsPanel, nothing engine-config-specific here.
     return {"cluster_id": cluster_id, "not_applicable": True, "engine_family": fam}
 
 
@@ -4814,12 +4814,12 @@ def _param_diff(cluster_id: str) -> dict:
     share the identical materialized representation. (The engine-default
     catalog, describe_engine_default_cluster_parameters, returns EMPTY values
     for many params the group reports concretely, which produced pure
-    false-positive diffs — do not reintroduce it.)
+    false-positive diffs. Do not reintroduce it.)
 
-    Relational only — DocumentDB/DynamoDB/ElastiCache have their own config
+    Relational only. DocumentDB/DynamoDB/ElastiCache have their own config
     surface via _engine_config. Two fully-paginated cross-account describes
     (current values + the default group), so this is always called through
-    _cached_live with a multi-minute TTL — never per-render. Same
+    _cached_live with a multi-minute TTL, never per-render. Same
     friendly-fallback contract as _topology/_backups: never leak the raw
     boto3 fault string, `available: false` on any failure.
     """
@@ -4845,7 +4845,7 @@ def _param_diff(cluster_id: str) -> dict:
         if not family:
             return {"cluster_id": cluster_id, "available": False, "parameter_group": pg_name, "params": [], "diffs": []}
 
-        # Current values — no Source filter (AWS docs: Filters isn't actually
+        # Current values: no Source filter (AWS docs: Filters isn't actually
         # honored by this action), so pull the full group and diff in-memory.
         current = []
         marker = None
@@ -4889,7 +4889,7 @@ def _param_diff(cluster_id: str) -> dict:
             name = p.get("ParameterName")
             cur_val = p.get("ParameterValue", "")
             if not name or cur_val == "":
-                continue  # unset — inherits the default, nothing to surface
+                continue  # unset: inherits the default, nothing to surface
             default_val = defaults.get(name, "")
             params.append({
                 "name": name,
@@ -4931,13 +4931,13 @@ def _slo(
     """Compute a minimal-but-honest SLO report from the cache.
 
     Two SLIs:
-      • Availability — % of 1-minute windows in the lookback that had a
+      • Availability:  % of 1-minute windows in the lookback that had a
         successful metric scrape with positive uptime. We use `uptime_sec`
         because it's collected by every ETL run; absence = ETL outage OR
         cluster unreachable, which is exactly what we want to flag.
-      • Latency    — % of 1-minute windows where the average
+      • Latency:     % of 1-minute windows where the average
         `query_stats.mean_time_ms` (across all tracked statements) was
-        below the target. This is a coarse proxy — true p95/p99 would
+        below the target. This is a coarse proxy: true p95/p99 would
         require per-query histograms.
 
     Returns a flat shape ready for the UI: targets, actuals, error-budget
@@ -4998,7 +4998,7 @@ def _slo(
     latency_compliance_pct = (lat_ok / lat_total) * 100.0 if lat_total else None
     overall_avg_ms = float(lat.get("overall_avg_ms") or 0)
 
-    # Error budget — "how much of the allowed failure rate is consumed?"
+    # Error budget: "how much of the allowed failure rate is consumed?"
     # If actual_ok >= target, consumed is 0%; if actual_ok = target's allowed
     # floor (e.g. 99.9 target, 99.9 actual), consumed = 100%.
     def _budget_consumed(actual: float | None, target: float) -> float | None:
@@ -5129,7 +5129,7 @@ def _resource_details(query, cluster_id: str) -> dict:
     # cluster_meta has NO engine_family column (that lives on the DDB registry);
     # derive it from `engine` so this SELECT can't fail on a missing column.
     # engine_version is stored as a plain column (not inside resource_details JSONB)
-    # by the DocDB collector — SELECT it explicitly so the DocDB panel can render it.
+    # by the DocDB collector: SELECT it explicitly so the DocDB panel can render it.
     rows = query(
         "SELECT engine, engine_version, resource_details "
         "FROM cluster_meta WHERE cluster_id = :cid",
@@ -5153,8 +5153,8 @@ def _resource_details(query, cluster_id: str) -> dict:
     eng_ver = row.get("engine_version")
 
     # Normalise DocDB resource_details so the panel always gets a consistent shape:
-    #   engine_version — merge in from the cluster_meta column when absent from JSONB
-    #   instances      — collector stores plain strings; wrap each as {"instance_id": str}
+    #   engine_version:  merge in from the cluster_meta column when absent from JSONB
+    #   instances:       collector stores plain strings; wrap each as {"instance_id": str}
     if rd is not None and engine_family(eng) == "documentdb":
         if isinstance(rd, dict):
             # Merge engine_version from the column if not already present in JSONB
@@ -5221,14 +5221,14 @@ def lambda_handler(event, context):
     # Absolute window (Dashboard custom time picker). When both are present
     # and parseable, every endpoint that supports an absolute window will use
     # them in preference to the relative `hours` arg. We accept ISO-8601
-    # strings (e.g. "2026-05-18T14:00:00Z") — RDS Data API's timestamptz cast
+    # strings (e.g. "2026-05-18T14:00:00Z"). RDS Data API's timestamptz cast
     # tolerates either Z-suffix or "+00:00".
     from_iso = (qs.get("from") or "").strip() or None
     to_iso = (qs.get("to") or "").strip() or None
 
     try:
         # Custom endpoints panel (P2-⑤) rides the base dashboard route via a
-        # ?view=endpoints sub-view param — no new API route to register/regen.
+        # ?view=endpoints sub-view param: no new API route to register/regen.
         # Same live-describe throttle cache as topology/backups (25s server TTL).
         if qs.get("view") == "endpoints":
             return _response(
@@ -5289,7 +5289,7 @@ def lambda_handler(event, context):
             result = _table_indexes(cluster_id, schema, table_name)
             status = 400 if "error" in result and result.get("error") in ("schema and table required",) else 200
             if "error" in result and status == 200:
-                # cluster lookup / execution errors — surface as 502/404.
+                # cluster lookup / execution errors: surface as 502/404.
                 status = 404 if "not registered" in str(result.get("error")) else 502
             return _response(status, result)
         if raw_path.endswith("/long-running"):
@@ -5322,7 +5322,7 @@ def lambda_handler(event, context):
             # live view is open. Server-side min-interval throttle (1s TTL,
             # keyed per cluster + buffers flag) so N concurrent viewers polling
             # ~2s each still hit the target at most ~1×/s, not N×. No browser
-            # cache — every poll must reflect the latest snapshot; the throttle
+            # cache: every poll must reflect the latest snapshot; the throttle
             # (not HTTP caching) is what bounds DB load.
             buffers = (qs.get("buffers") or "").lower() == "true"
             return _response(
@@ -5394,7 +5394,7 @@ def lambda_handler(event, context):
                 max_age=30,
             )
         if raw_path.endswith("/backups"):
-            # 60s cache — snapshot inventory + PITR window move slowly
+            # 60s cache: snapshot inventory + PITR window move slowly
             # (automated snapshots are daily, PITR window slides by the
             # minute but minute-granularity staleness is fine here). Server
             # TTL (55s) caps the rds:Describe* rate across concurrent pollers.
@@ -5404,7 +5404,7 @@ def lambda_handler(event, context):
                 max_age=60,
             )
         if raw_path.endswith("/engine-config"):
-            # 60s cache — engine-level config (maintenance window, deletion
+            # 60s cache: engine-level config (maintenance window, deletion
             # protection, SSE, streams, TTL) is near-static; minute-grained
             # staleness is fine for a read-only config panel. Server TTL (55s)
             # caps the cross-account describe rate across concurrent pollers.
@@ -5414,7 +5414,7 @@ def lambda_handler(event, context):
                 max_age=60,
             )
         if raw_path.endswith("/param-diff"):
-            # 55s cache — same class as engine-config/backups: the ~500-param
+            # 55s cache, same class as engine-config/backups: the ~500-param
             # engine-default catalog is static per family, and current values
             # only move through the approval-gated modify_parameter tool, so
             # minute-grained staleness is fine. Server TTL (55s) caps the

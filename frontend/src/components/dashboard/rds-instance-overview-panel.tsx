@@ -23,7 +23,7 @@ import { useChartColors } from "@/lib/use-chart-colors";
 
 type Point = { ts: string; value: number | string; dimensions?: string | null };
 
-// RDS instance resource_details — MUST match the collector's JSON keys
+// RDS instance resource_details: MUST match the collector's JSON keys
 // (rds_instance_cw_collector.py builds this dict; 3-tier parity).
 interface RdsInstanceDetails {
   instance_class?: string;
@@ -65,7 +65,7 @@ function StatTile({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 function boolTile(v: boolean | undefined) {
-  if (v === undefined) return "—";
+  if (v === undefined) return "-";
   return (
     <span className={v ? "text-emerald-400" : "text-zinc-500"}>
       {v ? "Yes" : "No"}
@@ -207,7 +207,7 @@ export function RdsInstanceOverviewPanel({
   clusterId: string;
   range: TimeRange;
   // resource_details (fetchResourceDetails) has no engine_version for the
-  // rds_instance family — the handler only merges that column into
+  // rds_instance family: the handler only merges that column into
   // resource_details for DocumentDB. The caller already has it in scope via
   // the /overview response (cluster_meta.engine_version, selected universally
   // by `SELECT *`), so it's passed down instead of re-fetched.
@@ -225,7 +225,7 @@ export function RdsInstanceOverviewPanel({
 
   useEffect(() => {
     let cancelled = false;
-    // reqSeq: only the most recently *started* request may write state —
+    // reqSeq: only the most recently *started* request may write state:
     // guards against an out-of-order settle (distinct from `cancelled`,
     // which guards against a stale effect instance after unmount/re-run).
     let reqSeq = 0;
@@ -257,13 +257,13 @@ export function RdsInstanceOverviewPanel({
 
   useEffect(() => {
     let cancelled = false;
-    // reqSeq: the initial load and each 30s poll tick race independently —
-    // if the initial request is slow and a later poll tick settles first,
+    // reqSeq: the initial load and each 30s poll tick race independently.
+    // If the initial request is slow and a later poll tick settles first,
     // the initial request's late arrival must not overwrite the fresher
     // data with stale success or a stale error. Only the request whose id
     // still matches the latest-started one may write state.
     let reqSeq = 0;
-    // Clear stale series from the previous cluster/range up front — without
+    // Clear stale series from the previous cluster/range up front: without
     // this, a switch to a new cluster keeps rendering the old cluster's
     // charts (unmasked, no loading indicator) until the new fetch resolves.
     setSeries({} as Record<Metric, Point[]>);
@@ -271,7 +271,7 @@ export function RdsInstanceOverviewPanel({
     setSeriesError(false);
     // ponytail: only the first load (per clusterId/range) clears on failure
     // and surfaces an error card; later 30s poll failures on the same
-    // cluster keep showing the last-good data and retry silently — a
+    // cluster keep showing the last-good data and retry silently, a
     // transient blip shouldn't blank out charts the DBA is actively reading.
     const load = (isInitial: boolean) => {
       const id = ++reqSeq;
@@ -305,7 +305,7 @@ export function RdsInstanceOverviewPanel({
           details.allocated_storage_gb,
           0,
         )} GiB`
-      : "—";
+      : "-";
 
   return (
     <div className="space-y-6">
@@ -324,12 +324,12 @@ export function RdsInstanceOverviewPanel({
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
             <StatTile
               label="Instance Class"
-              value={details?.instance_class ?? "—"}
+              value={details?.instance_class ?? "-"}
             />
-            <StatTile label="Engine Version" value={engineVersion || "—"} />
+            <StatTile label="Engine Version" value={engineVersion || "-"} />
             <StatTile label="Multi-AZ" value={boolTile(details?.multi_az)} />
             <StatTile label="Storage" value={storageLabel} />
-            <StatTile label="License" value={details?.license_model ?? "—"} />
+            <StatTile label="License" value={details?.license_model ?? "-"} />
             <StatTile
               label="Performance Insights"
               value={boolTile(details?.pi_enabled)}

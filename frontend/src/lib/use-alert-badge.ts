@@ -1,7 +1,7 @@
 /**
- * useAlertBadge — global fleet-health alert badge state.
+ * useAlertBadge: global fleet-health alert badge state.
  *
- * Data source: reuses fetchMultiClusterOverview() + triage() — the exact same
+ * Data source: reuses fetchMultiClusterOverview() + triage(), the exact same
  * fetch the Fleet page performs, so no new endpoint needed. Derives a count
  * of clusters currently at "critical" or "warning" from the overview rows.
  *
@@ -39,10 +39,10 @@ export interface AlertToast {
   id: string;
   message: string;
   severity: "critical" | "warning";
-  /** cluster_id, if known — used by the toast to deep-link to /dashboard?cluster= */
+  /** cluster_id, if known, used by the toast to deep-link to /dashboard?cluster= */
   cluster_id?: string;
   /** Explicit deep-link target. Overrides the cluster_id-derived dashboard
-   *  link — e.g. an auto-RCA "task ready" toast links to /tasks?focus=… */
+   *  link, e.g. an auto-RCA "task ready" toast links to /tasks?focus=… */
   href?: string;
 }
 
@@ -78,7 +78,7 @@ function persistSeenCount(n: number): void {
   try {
     localStorage.setItem(SEEN_KEY, String(n));
   } catch {
-    // private mode / quota — ephemeral only
+    // private mode / quota: ephemeral only
   }
 }
 
@@ -87,7 +87,7 @@ export function useAlertBadge(): AlertBadgeState {
   const [warningCount, setWarningCount] = useState(0);
   const [toasts, setToasts] = useState<AlertToast[]>([]);
 
-  // Previous triaged state — used to detect net-new clusters tipping into
+  // Previous triaged state: used to detect net-new clusters tipping into
   // critical or warning since the last poll.
   const prevLevels = useRef<Map<string, "critical" | "warning" | "ok">>(
     new Map(),
@@ -191,7 +191,7 @@ export function useAlertBadge(): AlertBadgeState {
             addToast(
               `${newCritical.length}개 클러스터 critical 전환`,
               "critical",
-              // multiple clusters — no single deep-link target
+              // multiple clusters: no single deep-link target
             );
           } else if (crit + warn > seenBaseline.current) {
             addToast(
@@ -202,14 +202,14 @@ export function useAlertBadge(): AlertBadgeState {
         }
       })
       .catch(() => {
-        // Silent failure — badge simply stays at last known values.
+        // Silent failure: badge simply stays at last known values.
       });
   }, [addToast]);
 
   useSmartPoll(poll, BADGE_POLL_MS);
 
   // Real-time push: fired alerts / external incidents toast INSTANTLY instead
-  // of waiting for the next 45s badge poll. Additive — the poll still drives the
+  // of waiting for the next 45s badge poll. Additive: the poll still drives the
   // badge counts; the WS just delivers the toast the moment an alert fires.
   useEffect(() => {
     const unsub = subscribeAlertStream((a) => {

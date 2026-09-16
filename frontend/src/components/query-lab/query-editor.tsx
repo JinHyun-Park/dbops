@@ -12,7 +12,7 @@ interface QueryEditorProps {
   // Asks the agent to propose a semantically-equivalent rewrite.
   onRewrite: (sql: string) => void;
   isLoading: boolean;
-  // Which side button shows the spinner — null if idle.
+  // Which side button shows the spinner, null if idle.
   loadingKind?: "explain" | "analyze" | "bulk" | "rewrite" | null;
   // Used when restoring a plan from history or opening a shared link.
   initialSql?: string;
@@ -43,7 +43,7 @@ export function QueryEditor({
             onClick={() => onExplain(sql)}
             disabled={!sql.trim() || isLoading}
             className="px-3 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-500 disabled:opacity-50 transition-colors"
-            title="EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) — renders as a tree"
+            title="EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON): renders as a tree"
           >
             {loadingKind === "explain" ? "running…" : "EXPLAIN"}
           </button>
@@ -59,7 +59,7 @@ export function QueryEditor({
             onClick={() => onBulkReview(sql)}
             disabled={!sql.trim() || isLoading}
             className="px-3 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-500 disabled:opacity-50 transition-colors"
-            title="Paste multiple SQLs (semicolon-separated) — agent rates each as safe / risky / dangerous with notes"
+            title="Paste multiple SQLs (semicolon-separated): agent rates each as safe / risky / dangerous with notes"
           >
             {loadingKind === "bulk" ? "검수 중..." : "Bulk review"}
           </button>

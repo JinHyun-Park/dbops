@@ -18,7 +18,7 @@ _REPO = Path(__file__).resolve().parents[1]
 _STACK = _REPO / "cdk" / "stacks" / "agent_stack.py"
 _OUT = _REPO / "frontend" / "public" / "openapi.json"
 
-# Public routes (no Cognito JWT) authenticate differently — Slack via HMAC,
+# Public routes (no Cognito JWT) authenticate differently: Slack via HMAC,
 # /health is an open uptime probe. Everything else requires a Bearer token.
 _PUBLIC_MARKER = "public_authorizer"
 

@@ -4,9 +4,9 @@ Mirrors the mocking pattern in test_report_generator.py (importlib load under
 a unique module name, patch.object on the handler's boto3 reference).
 
 Two scenarios:
-  1. Happy path — one report cycle emits both a .json put_object AND a .html
+  1. Happy path: one report cycle emits both a .json put_object AND a .html
      put_object (ContentType text/html; charset=utf-8).
-  2. Resilience — if build_report_html raises, the JSON put, the DB INSERT,
+  2. Resilience: if build_report_html raises, the JSON put, the DB INSERT,
      and _deliver_report must all still complete.
 """
 

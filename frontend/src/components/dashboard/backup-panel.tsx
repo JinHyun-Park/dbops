@@ -13,7 +13,7 @@ import { isAdmin } from "@/lib/auth";
 import { engineFamily } from "@/lib/engine";
 
 function relTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
+  if (!iso) return "-";
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.floor(ms / 60000);
   if (m < 1) return "방금";
@@ -41,7 +41,7 @@ export function BackupPanel({
   const [creating, setCreating] = useState(false);
   const [snapError, setSnapError] = useState<string | null>(null);
   const [snapToast, setSnapToast] = useState<string | null>(null);
-  // Restore (phase 3). The strongest write in the backup workflow — it
+  // Restore (phase 3). The strongest write in the backup workflow: it
   // stands up a NEW billable cluster. restoreMode !== null opens the form;
   // type-to-confirm (re-typing the new cluster id) gates the submit.
   const [restoreMode, setRestoreMode] = useState<"snapshot" | "pitr" | null>(
@@ -165,11 +165,11 @@ export function BackupPanel({
         : "text-emerald-400";
 
   const fam = engineFamily(engine);
-  // Non-relational backup views are READ-ONLY — snapshot create / restore POST
+  // Non-relational backup views are READ-ONLY: snapshot create / restore POST
   // to the Aurora-only write handler, so those controls are hidden here.
   const readOnly = fam !== "relational";
 
-  // DynamoDB has no RDS-style cluster snapshots — show PITR posture + on-demand
+  // DynamoDB has no RDS-style cluster snapshots: show PITR posture + on-demand
   // backups instead. Enabling PITR / creating backups is an AWS Console/CDK
   // action (not yet in the platform's write surface).
   if (fam === "dynamodb") {
@@ -265,7 +265,7 @@ export function BackupPanel({
                   {b.name}
                 </span>
                 <div className="text-[10px] text-zinc-500 tabular-nums flex-shrink-0">
-                  {b.created ? relTime(b.created) : "—"}
+                  {b.created ? relTime(b.created) : "-"}
                   {b.size_bytes != null && (
                     <span className="ml-2">{fmtNumber(b.size_bytes)} B</span>
                   )}
@@ -336,7 +336,7 @@ export function BackupPanel({
         </div>
       )}
 
-      {/* Inline create-snapshot form — admin-only, opened by the button */}
+      {/* Inline create-snapshot form: admin-only, opened by the button */}
       {!readOnly && snapOpen && (
         <div className="mb-4 border border-zinc-800 bg-zinc-950 p-3">
           <div className="text-[11px] text-zinc-400 mb-2">
@@ -375,7 +375,7 @@ export function BackupPanel({
         </div>
       )}
 
-      {/* Inline restore form — admin-only, strongest gate (type-to-confirm).
+      {/* Inline restore form: admin-only, strongest gate (type-to-confirm).
           Opened from a snapshot row or the PITR section. */}
       {!readOnly && restoreMode && (
         <div className="mb-4 border border-rose-500/40 bg-rose-950/20 p-3">
@@ -485,7 +485,7 @@ export function BackupPanel({
         <div>
           <div className="text-zinc-500 text-xs mb-1">Retention</div>
           <div className={`font-mono ${retentionColor}`}>
-            {retention > 0 ? `${retention}d` : "—"}
+            {retention > 0 ? `${retention}d` : "-"}
           </div>
         </div>
         <div>
@@ -495,7 +495,7 @@ export function BackupPanel({
               ? data.pitr_window_hours < 24
                 ? `${data.pitr_window_hours}h`
                 : `${(data.pitr_window_hours / 24).toFixed(1)}d`
-              : "—"}
+              : "-"}
           </div>
         </div>
         <div>
@@ -507,7 +507,7 @@ export function BackupPanel({
         <div>
           <div className="text-zinc-500 text-xs mb-1">Backup Window</div>
           <div className="text-zinc-300 font-mono text-xs">
-            {data?.preferred_backup_window || "—"}
+            {data?.preferred_backup_window || "-"}
           </div>
         </div>
       </div>
@@ -546,7 +546,7 @@ export function BackupPanel({
         </div>
       )}
 
-      {/* Snapshot inventory — collapsed by default */}
+      {/* Snapshot inventory: collapsed by default */}
       {data && data.snapshots.length > 0 && (
         <div className="mt-4">
           <button
@@ -605,7 +605,7 @@ function SnapshotRow({
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         <div className="text-[10px] text-zinc-500 tabular-nums">
-          {s.created ? relTime(s.created) : "—"}
+          {s.created ? relTime(s.created) : "-"}
           {s.allocated_storage_gb != null && (
             <span className="ml-2">{fmtNumber(s.allocated_storage_gb)} GB</span>
           )}

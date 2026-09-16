@@ -64,7 +64,7 @@ def test_modify_scaling_approved_without_id_rejected(mock_rds_for):
 @patch("mcp_servers.operations.tools.modify_scaling.rds_client_for_cluster")
 def test_modify_scaling_provisioned_refused_before_approval(mock_rds_for):
     """Provisioned cluster (no Sv2 scaling config): refuse with not_applicable
-    BEFORE asking for approval — RDS would silently accept the Sv2 config and
+    BEFORE asking for approval: RDS would silently accept the Sv2 config and
     the tool would report a 'modified' that changes nothing, and the approval
     round-trip would burn a consumed approval on a no-op."""
     mock_rds = _rds_with_cluster(_PROVISIONED_CLUSTER)

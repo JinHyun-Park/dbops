@@ -60,7 +60,7 @@ def test_template_read_only_default(monkeypatch):
     props = tmpl["Resources"]["DBOpsSpokeRole"]["Properties"]
     assert props["RoleName"] == "dbops-spoke-role"
 
-    # Trust principal — hub account root
+    # Trust principal: hub account root
     trust_stmt = props["AssumeRolePolicyDocument"]["Statement"][0]
     assert trust_stmt["Principal"]["AWS"] == f"arn:aws:iam::{_ACCOUNT}:root"
 
@@ -105,7 +105,7 @@ def test_template_remediation_adds_write(monkeypatch):
 
     # Write action is added by remediation flag
     assert "rds:ModifyDBCluster" in all_actions
-    # Remediation is ADDITIVE — read actions are still present
+    # Remediation is ADDITIVE: read actions are still present
     assert "rds:Describe*" in all_actions
     assert body["remediation"] is True
 
@@ -147,7 +147,7 @@ def test_no_auth_header_denied():
 
 
 def test_garbage_token_denied():
-    # Bearer prefix present but payload is not a valid JWT — decodes to empty claims → 403.
+    # Bearer prefix present but payload is not a valid JWT: decodes to empty claims → 403.
     e = {
         "requestContext": {"http": {"method": "GET"}},
         "headers": {"Authorization": "Bearer notajwt"},

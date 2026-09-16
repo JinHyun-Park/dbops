@@ -27,7 +27,7 @@ function n(v: unknown): number {
 export function TableSizesPanel({ clusterId }: { clusterId: string }) {
   const [tables, setTables] = useState<Table[]>([]);
   const [loading, setLoading] = useState(true);
-  // Expansion state per table — keyed by `schema.table`. value is the loaded
+  // Expansion state per table: keyed by `schema.table`. value is the loaded
   // indexes list (or {loading:true} / {error:string}). Indexes are queried
   // lazily against the live cluster only when a row is expanded.
   const [expanded, setExpanded] = useState<
@@ -48,7 +48,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
       }
       return { ...prev, [key]: { loading: true } };
     });
-    // Side-effect fetch — separated from setState so React batching doesn't
+    // Side-effect fetch: separated from setState so React batching doesn't
     // skip it. We compute isExpanding from the current closure (pre-toggle).
     if (isExpanding) {
       fetchTableIndexes(clusterId, schema, table)
@@ -131,7 +131,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                 </th>
                 <th
                   className="text-right px-3 py-2 text-zinc-400 font-medium"
-                  title="인덱스 크기 ÷ 전체 크기. 50%를 넘으면 인덱스가 heap보다 큰 상태 — 중복 인덱스 검토 필요."
+                  title="인덱스 크기 ÷ 전체 크기. 50%를 넘으면 인덱스가 heap보다 큰 상태. 중복 인덱스 검토 필요."
                 >
                   Indexes / total
                 </th>
@@ -281,7 +281,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                                         {idx.idx_scan === 0 && (
                                           <span
                                             className="text-[9px] px-1 py-0.5 border border-zinc-700 text-zinc-500 rounded-sm"
-                                            title="통계 리셋 이후 한 번도 사용 안 됨 — DROP 후보"
+                                            title="통계 리셋 이후 한 번도 사용 안 됨: DROP 후보"
                                           >
                                             unused
                                           </span>

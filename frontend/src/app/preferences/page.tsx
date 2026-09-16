@@ -19,12 +19,12 @@ const KIND_OPTIONS: { value: MemoryKind; label: string; hint: string }[] = [
   {
     value: "preferences",
     label: "Preferences",
-    hint: "Agent가 추론한 당신의 운영 스타일 — 선호하는 응답 어조, 분석 깊이, 자주 쓰는 명령 등",
+    hint: "Agent가 추론한 당신의 운영 스타일: 선호하는 응답 어조, 분석 깊이, 자주 쓰는 명령 등",
   },
   {
     value: "facts",
     label: "Facts",
-    hint: "Agent가 대화에서 추출한 사실 — 클러스터 환경, 도메인 지식, 반복되는 패턴",
+    hint: "Agent가 대화에서 추출한 사실: 클러스터 환경, 도메인 지식, 반복되는 패턴",
   },
 ];
 
@@ -72,7 +72,7 @@ export default function PreferencesPage() {
         eyebrow={t("설정")}
         title={t("Agent가 기억하는 것")}
         description={t(
-          "AgentCore Memory에 저장된 당신의 선호와 사실. 잘못된 정보가 박혀 있으면 여기서 삭제하세요 — 이후 대화부터 다시 학습됩니다.",
+          "AgentCore Memory에 저장된 당신의 선호와 사실. 잘못된 정보가 박혀 있으면 여기서 삭제하세요. 이후 대화부터 다시 학습됩니다.",
         )}
         actions={
           <div className="flex border border-zinc-800">

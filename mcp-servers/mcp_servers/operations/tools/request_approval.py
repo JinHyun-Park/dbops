@@ -1,4 +1,4 @@
-"""request_approval — agent-facing primitive for creating DBA approval rows.
+"""request_approval: agent-facing primitive for creating DBA approval rows.
 
 When a write tool (`execute_sql` DDL/DML, `modify_parameter`, `modify_scaling`,
 `manage_maintenance`) returns `{"status": "approval_required", ...}`, the
@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 def _ddb_safe(value):
     """boto3의 DynamoDB resource는 Python float을 거부한다("Float types are
-    not supported") — ACU 범위(0.5, 4.0) 같은 숫자가 action_details에 오면
+    not supported"), ACU 범위(0.5, 4.0) 같은 숫자가 action_details에 오면
     put_item이 통째로 실패해 에이전트가 우회 재시도를 해야 했다. float은
     Decimal로, 중첩 구조는 재귀 변환한다. 해시는 변환 전 값으로 이미 계산되며
     _norm_val이 숫자/문자열을 동일 취급하므로 검증과도 일관된다."""
@@ -83,8 +83,8 @@ def request_approval_impl(
     The approve handler auto-executes only rows carrying origin=="ui", and that
     marker is stamped onto the row by the TRUSTED approvals API Lambda AFTER
     this tool returns (see api/approvals/handler.py `_handle_endpoint_requests`).
-    Keeping origin out of the tool means the agent — whose only channel here is
-    the gateway — has no way to set it, so a chat-initiated row can never be
+    Keeping origin out of the tool means the agent (whose only channel here is
+    the gateway) has no way to set it, so a chat-initiated row can never be
     mistaken for a UI-initiated one and auto-executed. `created_at` is returned
     so the API caller can address the row it just created to stamp origin."""
     table_name = os.environ.get("APPROVALS_TABLE", "")
@@ -318,7 +318,7 @@ def request_approval_impl(
         "action_details": _ddb_safe(action_details),
         # Bind the approval to this exact payload. verify_approval
         # re-derives the same hash from the tool's real args at execute
-        # time and refuses any mismatch — so an approval for one SQL
+        # time and refuses any mismatch, so an approval for one SQL
         # cannot be consumed for a different one on the same cluster.
         "payload_hash": canonical_action_hash(action_type, action_details),
         "requested_by": requested_by,

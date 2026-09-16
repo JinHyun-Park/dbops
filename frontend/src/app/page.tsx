@@ -119,7 +119,7 @@ export default function HomePage() {
         />
         <Stat
           label="Bedrock 7d"
-          value={cost7d === null ? "—" : `$${cost7d.toFixed(2)}`}
+          value={cost7d === null ? "-" : `$${cost7d.toFixed(2)}`}
           hint={cost7d === null ? "태그 미활성화" : "태그 기준 사용액"}
           loading={loading}
           accent={cost7d && cost7d > 50 ? "amber" : "zinc"}
@@ -192,24 +192,24 @@ export default function HomePage() {
                               : "text-zinc-300"
                         }`}
                       >
-                        {c.cpu === null ? "—" : `${cpu.toFixed(1)}%`}
+                        {c.cpu === null ? "-" : `${cpu.toFixed(1)}%`}
                       </td>
                       <td
                         className={`px-5 py-2 text-right font-mono text-xs ${
                           aas > 2 ? "text-amber-400" : "text-zinc-300"
                         }`}
                       >
-                        {c.aas === null ? "—" : aas.toFixed(2)}
+                        {c.aas === null ? "-" : aas.toFixed(2)}
                       </td>
                       <td className="px-5 py-2 text-right font-mono text-xs text-zinc-300">
-                        {conn || "—"}
+                        {conn || "-"}
                       </td>
                       <td
                         className={`px-5 py-2 text-right font-mono text-xs ${
                           blk > 0 ? "text-rose-400" : "text-zinc-500"
                         }`}
                       >
-                        {blk || "—"}
+                        {blk || "-"}
                       </td>
                     </tr>
                   );

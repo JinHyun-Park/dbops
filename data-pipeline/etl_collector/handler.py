@@ -119,7 +119,7 @@ def _session_for(region, role_arn=""):
     Registered clusters can live in spoke accounts; each registry row carries a
     ``spoke_role_arn`` (empty for same-account deploys). With a role we assume
     it (hub-spoke chaining) so every RDS / PI / CloudWatch / RDS-Data call for
-    that cluster runs in the cluster's OWN account — mirroring api ``_session_for``.
+    that cluster runs in the cluster's OWN account, mirroring api ``_session_for``.
     With no role this is a transparent local session, so single-account
     behaviour is unchanged. Creds are scoped to one collection run (900s, well
     over the 5-min ETL window); sessions are cached PER INVOCATION only (see
@@ -181,7 +181,7 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
 
     Dispatches on engine_family BEFORE making any RDS/PI/CloudWatch call so
     that DynamoDB and DocumentDB rows never hit Aurora-specific APIs.
-    The relational branch is the verbatim existing body — no behaviour change.
+    The relational branch is the verbatim existing body, no behaviour change.
     """
     cluster_id = resource["cluster_id"]
     account_id = resource.get("account_id", "")
@@ -194,7 +194,7 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
     family = resource.get("engine_family") or engine_family(engine)
 
     # ------------------------------------------------------------------
-    # DynamoDB path — no RDS/PI/SQL/findings calls
+    # DynamoDB path: no RDS/PI/SQL/findings calls
     # ------------------------------------------------------------------
     if family == "dynamodb":
         cw = get_client("cloudwatch", region)
@@ -221,7 +221,7 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         return result
 
     # ------------------------------------------------------------------
-    # DocumentDB path — no RDS-Aurora/PI/SQL/findings calls
+    # DocumentDB path: no RDS-Aurora/PI/SQL/findings calls
     # ------------------------------------------------------------------
     if family == "documentdb":
         cw = get_client("cloudwatch", region)
@@ -246,7 +246,7 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         return result
 
     # ------------------------------------------------------------------
-    # ElastiCache path — no RDS/PI/SQL/findings calls
+    # ElastiCache path: no RDS/PI/SQL/findings calls
     # ------------------------------------------------------------------
     if family == "elasticache":
         cw = get_client("cloudwatch", region)
@@ -273,7 +273,7 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         return result
 
     # ------------------------------------------------------------------
-    # RDS instance path (non-Aurora MySQL / SQL Server) — instance-dimensioned
+    # RDS instance path (non-Aurora MySQL / SQL Server): instance-dimensioned
     # CW + meta + PI; no Aurora-cluster/Data-API calls
     # ------------------------------------------------------------------
     if family == "rds_instance":
@@ -323,12 +323,12 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
             except Exception as e:
                 result["health_error"] = str(e)
                 print(f"[{cluster_id}] health checks error: {e}")
-        # Engine-agnostic cache-only advisory collectors — same set the relational
+        # Engine-agnostic cache-only advisory collectors, same set the relational
         # branch runs, all reading ONLY the hub cache DB (no target/VPC connection):
         # cost, capacity/storage forecast, query regression, seasonal baselines.
         # capacity_forecast picks up the DECREASING free_storage_bytes series that
         # rds_instance writes (Aurora has none) → disk-exhaustion ETA. All share
-        # run_ts so this cycle's findings land in one MAX(snapshot_time) batch —
+        # run_ts so this cycle's findings land in one MAX(snapshot_time) batch,
         # EXCEPT baselines, which writes its own NOW() into metric_baselines.
         try:
             result["cost"] = collect_cost_findings(
@@ -356,7 +356,7 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
         return result
 
     # ------------------------------------------------------------------
-    # Relational path (Aurora PostgreSQL / MySQL) — verbatim existing body
+    # Relational path (Aurora PostgreSQL / MySQL): verbatim existing body
     # ------------------------------------------------------------------
     target_cluster_arn = resource.get("cluster_arn", "")
     target_secret_arn = resource.get("secret_arn", "")
@@ -491,7 +491,7 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
             result["engine_internals_error"] = str(e)
             print(f"[{cluster_id}] engine internals error: {e}")
     elif target_cluster_arn and target_secret_arn and "mysql" in engine:
-        # MySQL counterparts — same cache tables, MySQL-flavored source queries.
+        # MySQL counterparts: same cache tables, MySQL-flavored source queries.
         try:
             result["stats"] = collect_mysql_query_stats(
                 target_rds_data, cache_execute, target_cluster_arn, target_secret_arn, cluster_id, target_db,
@@ -571,7 +571,7 @@ def _collect_one(resource, get_client, cache_rds_data, cache_execute,
     else:
         result["stats"] = {"skipped": f"engine={engine} or no secret"}
 
-    # Query latency-regression findings — engine-agnostic, reads query_stats
+    # Query latency-regression findings: engine-agnostic, reads query_stats
     # (which both the PG + MySQL stats collectors above populate this run).
     if target_cluster_arn and target_secret_arn and ("postgresql" in engine or "mysql" in engine):
         try:
@@ -617,7 +617,7 @@ def lambda_handler(event, context):
             if value is None:
                 # str(None) == "None" used to flow into stringValue and blow up
                 # numeric casts ("invalid input syntax for type double
-                # precision") — which silently dropped cluster_meta for every
+                # precision"), which silently dropped cluster_meta for every
                 # PROVISIONED cluster (sv2_min/max_acu are None there).
                 sql_params.append({"name": key, "value": {"isNull": True}})
             elif isinstance(value, bool):
@@ -645,7 +645,7 @@ def lambda_handler(event, context):
 
     def make_get_client(role_arn):
         """get_client(service, region) bound to one cluster's account. With no
-        spoke role this is a plain local client — identical to the previous
+        spoke role this is a plain local client, identical to the previous
         single-account behaviour."""
         def get_client(service, region):
             sk = (role_arn, region)
@@ -670,7 +670,7 @@ def lambda_handler(event, context):
     # Retention: metric_snapshots has no purge and grows unbounded (PARTITION BY
     # RANGE (ts) but only the DEFAULT partition exists). Keep ~90 days. The BRIN
     # index on ts (schema_v20) makes this an instant block-range check, so running
-    # it every invocation is cheap — it matches 0 rows until data ages past the
+    # it every invocation is cheap: it matches 0 rows until data ages past the
     # window. Best-effort: a purge failure must never break collection.
     # ponytail: DELETE over partition rotation; revisit at large-fleet scale.
     try:

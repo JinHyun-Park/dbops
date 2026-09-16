@@ -1,4 +1,4 @@
-"""Parameter Fitness — 이 클러스터의 실제 워크로드 기준 파라미터 적정성 진단.
+"""Parameter Fitness: 이 클러스터의 실제 워크로드 기준 파라미터 적정성 진단.
 
 기존 setting_misconfigured 점검(pg_health_checks)은 "log_connections는 on이
 좋다" 같은 워크로드-무관 정적 베스트프랙티스다. 이 모듈은 정반대로,
@@ -6,18 +6,18 @@
 인스턴스 메모리)에 비춰 현재 설정값이 과/소한지를 근거와 함께 판단한다.
 
 핵심 차별점:
-  1. 상호작용 위험 — 단일 파라미터가 아니라 work_mem × max_connections가
+  1. 상호작용 위험: 단일 파라미터가 아니라 work_mem × max_connections가
      인스턴스 메모리를 초과할 수 있는 조합을 잡는다(실제 OOM의 흔한 원인,
      상용 도구도 잘 못 짚는 부분).
-  2. Aurora 특수성 — Aurora PG는 shared_buffers, max_connections를 인스턴스
+  2. Aurora 특수성: Aurora PG는 shared_buffers, max_connections를 인스턴스
      메모리 공식으로 자동 설정하고 일부는 변경이 무의미하다. vanilla PG
      베스트프랙티스를 그대로 들이대지 않는다.
-  3. 확실한 것만 — 메모리 매핑이 안 되거나 표본이 부족하면 침묵한다. 틀린
+  3. 확실한 것만: 메모리 매핑이 안 되거나 표본이 부족하면 침묵한다. 틀린
      권고로 신뢰를 깨느니 안 내는 쪽.
 
 모든 입력 데이터는 캐시 DB에 이미 있다(cluster_settings는 pg_locks가,
 metric_snapshots는 cw/pi가, table_stats는 pg_table_stats가, cluster_meta는
-meta_collector가 채운다). 라이브 클러스터 접근 없이 캐시만 읽는다 —
+meta_collector가 채운다). 라이브 클러스터 접근 없이 캐시만 읽는다.
 cost_check와 동일한 패턴.
 """
 
@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 
 from collectors.instance_specs import instance_memory_gb
 
-# 워크로드 대비 과다 판정 임계 — 보수적으로 잡아 오탐을 줄인다.
+# 워크로드 대비 과다 판정 임계: 보수적으로 잡아 오탐을 줄인다.
 MAXCONN_USAGE_FLOOR = 0.15      # peak가 설정의 15% 미만이면 과다 의심
 MAXCONN_MIN_TO_FLAG = 100       # 너무 작은 max_connections는 굳이 안 건드림
 WORKMEM_RISK_PCT = 0.25         # work_mem×max_conn이 메모리의 25% 초과 시 경고
@@ -218,7 +218,7 @@ def collect_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, cache_d
             f"effective_cache_size가 인스턴스 메모리({mem_gb:.0f}GB)의 {cur_pct:.0f}%로 "
             f"설정돼 있습니다. 이 값이 낮으면 플래너가 OS/공유 캐시 효과를 과소평가해 "
             f"인덱스 스캔보다 seq scan을 선호할 수 있습니다. 일반적으로 메모리의 "
-            f"~{ECS_TARGET_PCT*100:.0f}%(약 {_fmt_gb(target)}) 권장 — 실제 메모리를 더 "
+            f"~{ECS_TARGET_PCT*100:.0f}%(약 {_fmt_gb(target)}) 권장. 실제 메모리를 더 "
             f"쓰는 게 아니라 플래너 힌트일 뿐이라 안전합니다.",
             {"current_gb": round(ecs_bytes / 1024 ** 3, 1), "instance_memory_gb": mem_gb,
              "current_pct": round(cur_pct, 1), "suggested_gb": round(target / 1024 ** 3, 1)},
@@ -270,7 +270,7 @@ def collect_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, cache_d
             f"{avg_hit:.1f}% ({WINDOW_DAYS}일 평균)",
             f"{CACHE_HIT_FLOOR:.0f}% 미만",
             f"버퍼 캐시 히트율이 {WINDOW_DAYS}일 평균 {avg_hit:.1f}%로 "
-            f"{CACHE_HIT_FLOOR:.0f}% 미만입니다 — "
+            f"{CACHE_HIT_FLOOR:.0f}% 미만입니다. "
             f"작업셋이 인스턴스 메모리를 초과해 디스크 I/O가 늘고 있을 수 있습니다. "
             f"Aurora PG는 shared_buffers를 인스턴스 메모리 비율로 크게 자동 설정하므로, "
             f"파라미터 조정보다 인스턴스 메모리 상향(또는 Serverless v2 max ACU 상향)이 "

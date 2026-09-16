@@ -2,7 +2,7 @@
 // analysis is otherwise a throwaway stream, so leaving the drawer (without
 // "전체 대화로 이어가기") discarded a long-running result. With this cache,
 // reopening the drawer for the same cluster shows the previous analysis
-// instantly — no re-run — with a "다시 실행" to refresh.
+// instantly (no re-run) with a "다시 실행" to refresh.
 //
 // Local-only (localStorage, this device), best-effort, and bounded to the most
 // recent N clusters so it can't grow unbounded.
@@ -49,6 +49,6 @@ export function saveRcaCache(clusterId: string, entry: RcaCacheEntry): void {
     }
     localStorage.setItem(KEY, JSON.stringify(all));
   } catch {
-    /* best-effort — quota / private mode */
+    /* best-effort: quota / private mode */
   }
 }

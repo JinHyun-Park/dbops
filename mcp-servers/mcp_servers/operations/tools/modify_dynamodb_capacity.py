@@ -1,9 +1,9 @@
-"""modify_dynamodb_capacity — approval-gated DynamoDB capacity / billing-mode
+"""modify_dynamodb_capacity: approval-gated DynamoDB capacity / billing-mode
 change (update_table), mirroring the operations-server write safety model.
 
 Two reads bracket the (approval-gated) write:
   - REQUEST-time describe_table surfaces AWS constraints (GSIs, current mode) as
-    `approval_required` warnings, and BLOCKS outright on any GSI (review fix #5 —
+    `approval_required` warnings, and BLOCKS outright on any GSI (review fix #5:
     GSIs don't inherit table throughput; per-GSI capacity is a v2 follow-up).
   - EXECUTE-time re-read IMMEDIATELY before update_table defeats TOCTOU (fix #6):
     the approval binds an expected current-state precondition; if the table drifted
@@ -11,7 +11,7 @@ Two reads bracket the (approval-gated) write:
     than apply a now-different effective change.
 
 Effective values are validated (RCU/WCU >= 1, fix #4) BEFORE hashing/verification so
-the hashed value == the executed value — never floored after the hash. All AWS calls
+the hashed value == the executed value, never floored after the hash. All AWS calls
 go through `client_for_cluster` (hub-spoke cross-account aware). Never raises into the
 caller: any boto3/guard error degrades to `{"status":"error", reason}` with a STATIC
 Korean reason, and the detail goes to the module logger. The raw exception MESSAGE must
@@ -70,7 +70,7 @@ def _validate_capacity(target_mode: str, rcu, wcu):
     """Validate the requested capacity for the EFFECTIVE target mode.
 
     Returns (effective_rcu, effective_wcu, error) where error is None on success.
-    Provisioned requires both RCU/WCU; each must be an integer >= 1 (fix #4 — reject
+    Provisioned requires both RCU/WCU; each must be an integer >= 1 (fix #4: reject
     <1 rather than silently flooring, so the hashed value equals the executed value).
     On-Demand drops capacity (returns None/None)."""
     if target_mode == "PAY_PER_REQUEST":
@@ -146,7 +146,7 @@ def modify_dynamodb_capacity_impl(
     if verr:
         return {"status": "error", "reason": verr, "cluster_id": cluster_id}
 
-    # The payload the approval is bound to — built from EFFECTIVE (validated >=1)
+    # The payload the approval is bound to: built from EFFECTIVE (validated >=1)
     # values + the explicit table target so no user-controllable field is outside
     # the hash (fix #1). force is unused for capacity in v1 but bound for parity.
     payload = {
@@ -214,7 +214,7 @@ def modify_dynamodb_capacity_impl(
             "cluster_id": cluster_id,
         }
     if fresh["gsi_names"]:
-        # A GSI appeared between request and execute — the approved change no
+        # A GSI appeared between request and execute: the approved change no
         # longer applies cleanly. Refuse rather than mis-apply.
         return {
             "status": "approval_denied",
@@ -229,7 +229,7 @@ def modify_dynamodb_capacity_impl(
         }
     # In-place capacity change (no mode switch): if the table's current capacity
     # already drifted from what we observed at request time, the approved effective
-    # change is now different — abort.
+    # change is now different. Abort.
     if (
         not requested_mode
         and target_mode == "PROVISIONED"

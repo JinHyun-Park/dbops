@@ -1,14 +1,14 @@
-"""recommend_index — derive concrete CREATE INDEX DDL from the query workload.
+"""recommend_index: derive concrete CREATE INDEX DDL from the query workload.
 
 The previous version LEFT JOINed query_stats to index_usage on cluster_id alone
 (a degenerate, cartesian-ish join), set a constant "reason" string, and emitted no
-DDL — so it told a DBA *that* a query was heavy but never *what index to build*.
+DDL, so it told a DBA *that* a query was heavy but never *what index to build*.
 
 This version reads the heavy queries out of the `query_stats` cache and PARSES
 their query_text to recover the table and the columns a composite index should
 cover. The output is actual `CREATE INDEX CONCURRENTLY ...` DDL the DBA can review.
 
-The parsing is deliberately HEURISTIC and PostgreSQL-flavored — it is regex over
+The parsing is deliberately HEURISTIC and PostgreSQL-flavored: it is regex over
 SQL text, not a real parser. It handles the common shapes (single driving table,
 flat WHERE predicates, simple equi-JOINs, ORDER BY) and intentionally *skips*
 queries it cannot parse confidently rather than emit garbage DDL. The emitted DDL
@@ -18,8 +18,8 @@ validated with EXPLAIN against a replica before building.
 
 The guiding principle throughout is ERR TOWARD SKIPPING: a missed recommendation
 is harmless, an invalid or misleading one is not. So anything we cannot attribute
-to a single concrete table+column with confidence — CTEs, subqueries, derived
-tables, expression/positional ORDER BY, quoted/reserved/case-folded identifiers —
+to a single concrete table+column with confidence (CTEs, subqueries, derived
+tables, expression/positional ORDER BY, quoted/reserved/case-folded identifiers)
 is dropped rather than guessed.
 """
 
@@ -94,7 +94,7 @@ _PREDICATE_RE = re.compile(
 )
 
 # Words we must never mistake for an alias or column when the regex over-matches,
-# AND reserved words that — if they appear unquoted as a table/column — mean the
+# AND reserved words that, if they appear unquoted as a table/column, mean the
 # source MUST have quoted them (e.g. "order", "user"). Since we refuse to emit
 # quoted DDL (the quote-folding bug), an unquoted reserved word is a skip signal.
 _SQL_KEYWORDS = {
@@ -114,7 +114,7 @@ _SQL_KEYWORDS = {
     "localtimestamp", "true", "false", "to", "do", "any", "some", "array",
 }
 
-# A simple, safe, unquoted PostgreSQL identifier — the ONLY shape we trust to emit
+# A simple, safe, unquoted PostgreSQL identifier, the ONLY shape we trust to emit
 # verbatim into DDL. Anything quoted, dotted-beyond-qualifier, or non-matching is
 # rejected rather than re-quoted (quoting would case-fold incorrectly).
 _SIMPLE_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
@@ -138,7 +138,7 @@ def _split_ref(ref: str) -> tuple[str, str]:
 
     Returns ("", name) when there is no qualifier. Only the LAST dotted segment is
     the column/table name; everything before it is treated as the qualifier. The
-    raw segments are returned WITHOUT quote stripping — callers gate on
+    raw segments are returned WITHOUT quote stripping: callers gate on
     `_is_simple_ident`, which rejects any quoted/reserved token, so a quoted source
     identifier never survives into emitted DDL.
     """
@@ -188,7 +188,7 @@ _LEADING_WITH_RE = re.compile(r"^\s*WITH\b", re.IGNORECASE)
 # A clean ORDER BY ITEM: a `(alias.)?ident` and NOTHING else but an optional
 # direction (ASC/DESC) and NULLS FIRST/LAST. Matching the WHOLE comma-item (not
 # just its first whitespace token) is what rejects expression sort keys like
-# `o.created_at + interval '1 day'` or `o.a || o.b` — those start with a valid
+# `o.created_at + interval '1 day'` or `o.a || o.b`, those start with a valid
 # column token but continue into an expression, so indexing the leading column
 # alone would be misleading. Also rejects positional (`1`) and `lower(x)`.
 _ORDER_ITEM_RE = re.compile(
@@ -243,13 +243,13 @@ def _parse_query(query_text: str) -> dict | None:
     if not from_match:
         return None
 
-    # A `FROM (` is a derived table — the regex won't have matched a name, but be
+    # A `FROM (` is a derived table: the regex won't have matched a name, but be
     # explicit and defensive in case the engine ever surfaces it differently.
     table_qual, table_name = _split_ref(from_match.group("table"))
 
     # Issue #3: the table must be a simple unquoted identifier. A quoted/reserved
     # table ("User", "order") would have to be re-quoted to be valid, and stripping
-    # the quotes case-folds it incorrectly — so we skip rather than emit bad DDL.
+    # the quotes case-folds it incorrectly, so we skip rather than emit bad DDL.
     if table_qual and not _is_simple_ident(table_qual):
         return None
     if not _is_simple_ident(table_name):
@@ -279,7 +279,7 @@ def _parse_query(query_text: str) -> dict | None:
 
     def _belongs_to_driving(qualifier: str) -> bool:
         # Unqualified columns are assumed to belong to the driving table (best
-        # effort — wrong for multi-table FROM lists, but we skip those via parse
+        # effort, wrong for multi-table FROM lists, but we skip those via parse
         # confidence elsewhere). Qualified columns must match a driving alias.
         return qualifier == "" or qualifier.lower() in driving_aliases
 
@@ -292,7 +292,7 @@ def _parse_query(query_text: str) -> dict | None:
             if _belongs_to_driving(qualifier):
                 _add(col, "WHERE predicate")
 
-    # 2) JOIN keys — index the driving-table side of each equi-join.
+    # 2) JOIN keys: index the driving-table side of each equi-join.
     for join in _JOIN_RE.finditer(stripped):
         for side in (join.group("left"), join.group("right")):
             qualifier, col = _split_ref(side)
@@ -300,7 +300,7 @@ def _parse_query(query_text: str) -> dict | None:
                 _add(col, "JOIN key")
 
     # 3) ORDER BY columns (let the index satisfy the sort). Accept ONLY a clean
-    # `(alias.)?ident` token — reject positional (`ORDER BY 1`) and expressions
+    # `(alias.)?ident` token: reject positional (`ORDER BY 1`) and expressions
     # (`ORDER BY lower(email)`). CRUCIALLY, only trust a token that is QUALIFIED by
     # the driving alias (`o.created_at`): a BARE token like `ORDER BY email_key`
     # could be a SELECT-list alias (`SELECT lower(email) AS email_key`), not a base
@@ -327,7 +327,7 @@ def _build_ddl(table: str, columns: list[str]) -> str:
     """Render the CREATE INDEX CONCURRENTLY DDL for a (table, columns) pair.
 
     CONCURRENTLY builds the index without taking an ACCESS EXCLUSIVE lock, so an
-    online table keeps serving writes during the build — at the cost of not being
+    online table keeps serving writes during the build, at the cost of not being
     runnable inside a transaction block (surfaced in the tool-level note).
     """
     short_table = table.split(".")[-1]
@@ -355,7 +355,7 @@ def _fetch_table_stats(cache: CacheClient, cluster_id: str) -> dict:
     """
     try:
         result = cache.execute(sql, {"cluster_id": cluster_id})
-    except Exception as e:  # noqa: BLE001 — degrade gracefully, table_stats is optional
+    except Exception as e:  # noqa: BLE001 (degrade gracefully, table_stats is optional)
         print(f"[recommend_index] table_stats lookup failed: {e}")
         return {}
 
@@ -432,7 +432,7 @@ def recommend_index_impl(cache: CacheClient, cluster_id: str, min_seq_scan_ratio
         clause_set = sorted(set(clauses.values()))
         rationale = (
             f"Columns {parsed['columns']} cover this query's "
-            f"{', '.join(clause_set)} — a composite index avoids the sequential scan."
+            f"{', '.join(clause_set)}, a composite index avoids the sequential scan."
         )
 
         total_time = float(row.get("total_time_ms") or 0)
@@ -454,7 +454,7 @@ def recommend_index_impl(cache: CacheClient, cluster_id: str, min_seq_scan_ratio
 
     # Prefix-dedup: a btree on (a, b, …) already serves prefix lookups on (a)
     # and (a, b), so a recommendation whose columns are a PREFIX of another's on
-    # the same table is redundant — drop it and fold its workload into the
+    # the same table is redundant: drop it and fold its workload into the
     # surviving longer index. (Longest-first so the composite is the survivor.)
     deduped = _prefix_dedupe(list(merged.values()))
 
@@ -470,7 +470,7 @@ def recommend_index_impl(cache: CacheClient, cluster_id: str, min_seq_scan_ratio
             rec["n_live_tup"] = stat["n_live_tup"]
             # Real sequential scanning corroborates the recommendation; flag it so
             # the agent/DBA can prioritize. We never DROP query-derived advice on a
-            # weak table — we just don't boost it.
+            # weak table, we just don't boost it.
             rec["seq_scan_confirmed"] = seq > idx * _SEQ_SCAN_DOMINANCE
         # This is UNVERIFIED advice: we can't see the cluster's existing indexes
         # or a real plan from the cache. Emit the exact SQL the DBA should run to
@@ -507,7 +507,7 @@ def recommend_index_impl(cache: CacheClient, cluster_id: str, min_seq_scan_ratio
         "note": (
             "heuristic suggestions from query-text parsing, prefix-deduped (a "
             "composite index subsumes its prefixes). UNVERIFIED: the cache has no "
-            "index inventory, so each rec carries a `verification` SQL — run "
+            "index inventory, so each rec carries a `verification` SQL: run "
             "check_existing_indexes to rule out a duplicate and EXPLAIN to confirm "
             "the benefit before creating. CREATE INDEX CONCURRENTLY avoids long "
             "locks but cannot run inside a transaction block."

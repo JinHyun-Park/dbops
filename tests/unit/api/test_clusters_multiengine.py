@@ -1,9 +1,9 @@
 """Tests for multi-engine cluster registration (Task 7).
 
 Covers:
-  1. DynamoDB table registration — slug cluster_id, no secret, no RDS call.
-  2. DocDB cluster registration — docdb API, no secret, no RDS call.
-  3. Aurora registration — existing path unchanged (engine defaults, cluster_id
+  1. DynamoDB table registration: slug cluster_id, no secret, no RDS call.
+  2. DocDB cluster registration: docdb API, no secret, no RDS call.
+  3. Aurora registration: existing path unchanged (engine defaults, cluster_id
      preserved).
 """
 
@@ -73,7 +73,7 @@ class _FakeTable:
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — DynamoDB registration
+# Test 1: DynamoDB registration
 # ---------------------------------------------------------------------------
 
 @patch.object(handler, "_rds_client_for")
@@ -136,7 +136,7 @@ def test_register_dynamodb_missing_resource_name_400(mock_ddb_for, mock_rds_for)
 
 
 # ---------------------------------------------------------------------------
-# Test 2 — DocumentDB registration
+# Test 2: DocumentDB registration
 # ---------------------------------------------------------------------------
 
 @patch.object(handler, "_rds_client_for")
@@ -388,7 +388,7 @@ def test_register_docdb_connectivity_failure_returns_207(mock_docdb_for, mock_rd
 
 
 # ---------------------------------------------------------------------------
-# Test 3 — Aurora path unchanged
+# Test 3: Aurora path unchanged
 # ---------------------------------------------------------------------------
 
 @patch.object(handler, "_rds_client_for")
@@ -428,7 +428,7 @@ def test_register_aurora_unchanged(mock_rds_for):
 
 
 # ---------------------------------------------------------------------------
-# Test 4 — bulk-register with a DynamoDB entry (resource_name threaded)
+# Test 4: bulk-register with a DynamoDB entry (resource_name threaded)
 # ---------------------------------------------------------------------------
 
 @patch.object(handler, "_rds_client_for")
@@ -496,7 +496,7 @@ def test_bulk_register_dynamodb_slug_matches_discovery(mock_ddb_for, mock_rds_fo
     # The slug _register_dynamodb produces with the same account_id
     registered_id = dynamodb_cluster_id(account_id, region, table_name)
     assert registered_id == expected_id, (
-        f"Discovery id {expected_id!r} != registration id {registered_id!r} — "
+        f"Discovery id {expected_id!r} != registration id {registered_id!r}: "
         "account_id must be threaded into _list_clusters_in_region"
     )
 
@@ -508,7 +508,7 @@ def test_bulk_register_dynamodb_slug_matches_discovery(mock_ddb_for, mock_rds_fo
 
 
 # ---------------------------------------------------------------------------
-# Test 5 — discovery must not duplicate Aurora as fake DocumentDB
+# Test 5: discovery must not duplicate Aurora as fake DocumentDB
 # ---------------------------------------------------------------------------
 
 def _paginator(pages_key, items):
@@ -521,7 +521,7 @@ def _paginator(pages_key, items):
 @patch.object(handler, "_session_for")
 def test_discover_docdb_path_excludes_non_docdb(mock_session_for, _mock_secret):
     """Regression: the docdb client shares the RDS control plane, so
-    docdb.describe_db_clusters returns Aurora / RDS / Neptune clusters too — not
+    docdb.describe_db_clusters returns Aurora / RDS / Neptune clusters too, not
     just DocumentDB. _list_clusters_in_region must keep only Engine=='docdb' from
     the docdb path; otherwise every Aurora cluster (already found via the rds
     paginator) is duplicated and mislabeled 'docdb', flooding discovery."""
@@ -568,7 +568,7 @@ def test_discover_docdb_path_excludes_non_docdb(mock_session_for, _mock_secret):
 
 
 # ---------------------------------------------------------------------------
-# Test 6 — discovery flags DBOps's own DynamoDB control-plane tables internal
+# Test 6: discovery flags DBOps's own DynamoDB control-plane tables internal
 # ---------------------------------------------------------------------------
 
 @patch.object(handler, "_list_clusters_in_region")
@@ -576,7 +576,7 @@ def test_discover_docdb_path_excludes_non_docdb(mock_session_for, _mock_secret):
 def test_discover_flags_dbops_own_dynamodb_internal(mock_cache_env, mock_list, monkeypatch):
     """DBOps's own DynamoDB control-plane tables (clusters / sessions /
     approvals, sharing the dbops-<env>- prefix of CLUSTERS_TABLE) must be
-    flagged is_internal — otherwise list_tables surfaces the platform's own
+    flagged is_internal, otherwise list_tables surfaces the platform's own
     tables (even the registry backing this call) as monitorable databases.
     Other tables (other projects', demo data) stay discoverable."""
     monkeypatch.setenv("CLUSTERS_TABLE", "dbops-dev-clusters")

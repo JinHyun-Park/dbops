@@ -107,7 +107,7 @@ def test_simulate_value_out_of_range_flagged_invalid():
 
     assert result["valid"] is False
     assert "validation_reason" in result
-    # A failed validation must not crash — the simulation still returns advice.
+    # A failed validation must not crash: the simulation still returns advice.
     assert result["data_source"].startswith("live")
 
 

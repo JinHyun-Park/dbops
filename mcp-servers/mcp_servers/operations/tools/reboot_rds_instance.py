@@ -1,12 +1,12 @@
-"""reboot_rds_instance — approval-gated reboot of a STANDALONE RDS DB instance
+"""reboot_rds_instance: approval-gated reboot of a STANDALONE RDS DB instance
 (non-Aurora: MySQL / SQL Server, the rds_instance engine family; R-3).
 
 The handler positive-gates this tool on the rds_instance-only `instance_write`
-capability (FAIL-CLOSED), so any other engine — or an unresolvable cluster —
+capability (FAIL-CLOSED), so any other engine (or an unresolvable cluster)
 gets unsupported_engine before the impl runs.
 
 SAFETY: an Aurora cluster member (the instance carries a DBClusterIdentifier) is
-refused — Aurora reboots go through cluster/reader tooling, never this
+refused: Aurora reboots go through cluster/reader tooling, never this
 instance-level tool.
 
 FAIL-CLOSED like every write tool: verify_approval must pass before the reboot,
@@ -101,7 +101,7 @@ def reboot_rds_instance_impl(
         return {"status": "approval_denied", "cluster_id": cluster_id,
                 "reason": guard.get("reason", "approval guard rejected the request")}
 
-    # TOCTOU: re-check on a FRESH describe immediately before the reboot — the
+    # TOCTOU: re-check on a FRESH describe immediately before the reboot. The
     # instance may have left `available` (or become a cluster member) in the
     # window since approval.
     fresh = _describe(rds, cluster_id)
@@ -123,7 +123,7 @@ def reboot_rds_instance_impl(
                 "reason": "Aurora 클러스터 멤버는 이 툴로 재부팅할 수 없습니다 (클러스터 도구를 사용하세요)."}
     if fresh.get("DBInstanceStatus") != "available":
         return {"status": "not_applicable", "cluster_id": cluster_id,
-                "reason": f"승인 이후 인스턴스 상태가 바뀌었습니다 (현재: {fresh.get('DBInstanceStatus')}) — 재부팅하지 않았습니다."}
+                "reason": f"승인 이후 인스턴스 상태가 바뀌었습니다 (현재: {fresh.get('DBInstanceStatus')}). 재부팅하지 않았습니다."}
 
     try:
         rds.reboot_db_instance(DBInstanceIdentifier=cluster_id)

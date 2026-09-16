@@ -43,7 +43,7 @@ def test_plain_create_index_is_blocking():
 
 
 def test_drop_column_is_metadata_only():
-    """DROP COLUMN is metadata-only — near-instant regardless of table size,
+    """DROP COLUMN is metadata-only: near-instant regardless of table size,
     and size-independent (empty stats still returns the metadata floor)."""
     mock_cache = MagicMock()
     mock_cache.execute.return_value = QueryResult(columns=[], rows=[], row_count=0)
@@ -86,7 +86,7 @@ def test_ddl_impact_reads_cluster_scoped_cache_not_local_catalog():
 
 def test_add_column_with_default_is_conservative_not_online():
     """ADD COLUMN with a DEFAULT (possibly volatile) or GENERATED may rewrite the
-    table — it must NOT be flagged online (the dangerous mis-flag Codex caught)."""
+    table: it must NOT be flagged online (the dangerous mis-flag Codex caught)."""
     mock_cache = MagicMock()
     mock_cache.execute.return_value = _stats()
     result = simulate_ddl_impact_impl(

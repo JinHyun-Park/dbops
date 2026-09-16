@@ -18,7 +18,7 @@ export function stashRcaHandoff(h: RcaHandoff): void {
   try {
     sessionStorage.setItem(KEY, JSON.stringify(h));
   } catch {
-    /* ignore — handoff is best-effort */
+    /* ignore: handoff is best-effort */
   }
 }
 

@@ -23,6 +23,6 @@ def test_index_and_param_and_scale():
 
 def test_vacuum_analyze_and_default():
     assert classify_action("autovacuum/VACUUM 점검 권장") == "vacuum"
-    assert classify_action("통계가 오래됨 — ANALYZE 실행") == "analyze"
+    assert classify_action("통계가 오래됨, ANALYZE 실행") == "analyze"
     assert classify_action("원인 불명, 수동 점검 필요") == "manual"
     assert classify_action("") == "manual"

@@ -1,10 +1,10 @@
 """Clusters API.
 
 Routes:
-  GET  /api/clusters              — list registered clusters (existing)
-  POST /api/clusters              — register one cluster (existing)
-  POST /api/clusters/discover     — list candidate clusters in an account+region
-  POST /api/clusters/bulk-register — register multiple discovered clusters
+  GET  /api/clusters:               list registered clusters (existing)
+  POST /api/clusters:               register one cluster (existing)
+  POST /api/clusters/discover:      list candidate clusters in an account+region
+  POST /api/clusters/bulk-register:  register multiple discovered clusters
 """
 
 import base64
@@ -56,7 +56,7 @@ def _norm_ts(s):
 
 
 def _decode_jwt_payload(token: str) -> dict:
-    """Decode a JWT payload (base64) — no signature verification.
+    """Decode a JWT payload (base64): no signature verification.
     Cognito-issued tokens originate from a trusted client we control, and a
     follow-up task wires API Gateway JWT authorizer for proper verification.
     Here we just want the `cognito:groups` claim for RBAC."""
@@ -74,7 +74,7 @@ def _is_admin(event: dict) -> bool:
     """Return True if the caller's token does not place them in dbops-viewer.
     Tokens without any group claim default to admin (one-admin deploys), matching
     the frontend isAdmin() semantics. Anonymous (no token) requests are NOT
-    considered admin — they fall through to 403 in callers that gate writes."""
+    considered admin: they fall through to 403 in callers that gate writes."""
     headers = event.get("headers") or {}
     auth = headers.get("authorization") or headers.get("Authorization") or ""
     if not auth.lower().startswith("bearer "):
@@ -151,7 +151,7 @@ def _enrich_with_meta(clusters):
         print(f"enrich error: {e}")
 
     # ETL health: per cluster, what's the freshest metric_snapshots row?
-    # Anything older than 15 minutes is suspect — the ETL collector runs
+    # Anything older than 15 minutes is suspect: the ETL collector runs
     # every 5 minutes by default, so two consecutive misses = stale.
     try:
         resp2 = rds_data.execute_statement(
@@ -236,7 +236,7 @@ def _cors():
 
 def _resp(status, body, max_age: int = 0):
     """Build the API Gateway response envelope. `max_age` (seconds)
-    adds Cache-Control: private, max-age=N for 2xx GETs only — used
+    adds Cache-Control: private, max-age=N for 2xx GETs only, used
     by the cluster registry list, which is loaded on every sidebar
     nav and changes slowly."""
     headers = _cors()
@@ -287,7 +287,7 @@ def _convention_secret_for(session: boto3.session.Session, cluster_id: str) -> s
     """Look up the dbops convention secret for a cluster.
 
     Convention: `dbops/<cluster_id>/readonly`. If the secret exists in the
-    target account+region we return its ARN — that's the credential the
+    target account+region we return its ARN: that's the credential the
     cluster will be registered with. If the secret is missing we return
     empty so the caller can fall back to the master user secret (and warn
     the user to run the dedicated-user setup).
@@ -300,7 +300,7 @@ def _convention_secret_for(session: boto3.session.Session, cluster_id: str) -> s
     except sm.exceptions.ResourceNotFoundException:
         return ""
     except Exception as e:
-        # Permission errors / throttling — log and fall back gracefully.
+        # Permission errors / throttling: log and fall back gracefully.
         print(f"[discover] convention secret lookup failed for {cluster_id}: {e}")
         return ""
 
@@ -316,7 +316,7 @@ def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = 
       - `master_secret_arn`: kept for transparency (UI can show "currently using master")
 
     `account_id` is threaded in from _handle_discover so that DynamoDB slug
-    computation uses the same account_id that _register_dynamodb will use —
+    computation uses the same account_id that _register_dynamodb will use:
     this guarantees discovery and registration produce the same `ddb-*` cluster_id.
     """
     session = _session_for(region, role_arn)
@@ -357,7 +357,7 @@ def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = 
                 "region": region,
             })
 
-    # DynamoDB tables — best-effort; missing permission doesn't break Aurora discovery.
+    # DynamoDB tables: best-effort; missing permission doesn't break Aurora discovery.
     # account_id is threaded from _handle_discover so the slug here matches the one
     # _register_dynamodb will compute (same account_id → same ddb-* cluster_id).
     try:
@@ -377,7 +377,7 @@ def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = 
     except Exception as e:
         print(f"[discover] dynamodb list_tables failed in {region}: {e}")
 
-    # DocumentDB clusters — best-effort.
+    # DocumentDB clusters: best-effort.
     try:
         docdb = _session_for(region, role_arn).client("docdb")
         docdb_paginator = docdb.get_paginator("describe_db_clusters")
@@ -385,7 +385,7 @@ def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = 
             for c in docdb_page.get("DBClusters", []):
                 # The docdb client shares the RDS control plane, so this call
                 # returns EVERY cluster in the account (Aurora / RDS / Neptune /
-                # DocumentDB) — not just DocumentDB. Without this guard, every
+                # DocumentDB), not just DocumentDB. Without this guard, every
                 # Aurora cluster already found via the rds paginator above is
                 # added a second time mislabeled as "docdb". Keep only real
                 # DocumentDB clusters.
@@ -406,7 +406,7 @@ def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = 
     except Exception as e:
         print(f"[discover] docdb describe_db_clusters failed in {region}: {e}")
 
-    # ElastiCache — replication groups (Redis/Valkey) then standalone cache clusters
+    # ElastiCache: replication groups (Redis/Valkey) then standalone cache clusters
     # (Memcached or non-cluster-mode Redis). Members of a replication group are
     # skipped in the cache-cluster pass to avoid duplicates.
     try:
@@ -447,7 +447,7 @@ def _list_clusters_in_region(region: str, role_arn: str = "", account_id: str = 
     except Exception as e:
         print(f"[discover] elasticache failed in {region}: {e}")
 
-    # RDS instance engines (non-Aurora MySQL / SQL Server) — best-effort.
+    # RDS instance engines (non-Aurora MySQL / SQL Server): best-effort.
     try:
         inst_paginator = rds.get_paginator("describe_db_instances")
         for ipage in inst_paginator.paginate():
@@ -481,7 +481,7 @@ def _handle_list(table, event):
     visible = tenancy.visible_cluster_ids(event, items)
     if visible is not None:
         items = [c for c in items if c.get("cluster_id") in visible]
-    # 30s browser cache — cluster registry doesn't change between
+    # 30s browser cache: cluster registry doesn't change between
     # admin actions, and EVERY page navigation hits this list.
     return _resp(200, items, max_age=30)
 
@@ -761,7 +761,7 @@ _RDS_INSTANCE_ENGINES = ("mysql", "sqlserver-ee", "sqlserver-se", "sqlserver-ex"
 def _register_rds_instance(table, body):
     """Standalone RDS DB instance (RDS for MySQL / SQL Server). Unlike the
     Aurora path this HARD-FAILS (400, no registry row) on describe errors or
-    cluster members — a half-registered instance row is useless downstream
+    cluster members: a half-registered instance row is useless downstream
     (no cluster_arn to fall back on)."""
     for f in ("cluster_id", "account_id", "region"):
         if not body.get(f):
@@ -919,7 +919,7 @@ def _register_dispatch(table, body: dict):
         return _register_elasticache(table, body)
     if fam == "rds_instance":
         return _register_rds_instance(table, body)
-    # relational (Aurora) — existing path unchanged below
+    # relational (Aurora): existing path unchanged below
 
     required = ["cluster_id", "account_id", "region"]
     for field in required:
@@ -1013,14 +1013,14 @@ def _handle_discover(table, body: dict):
 
     all_clusters = []
     errors_by_region = {}
-    # DBOps 자기 자신의 캐시 DB를 식별 — 디스커버리 결과에 같이 잡히는데
+    # DBOps 자기 자신의 캐시 DB를 식별: 디스커버리 결과에 같이 잡히는데
     # 기본 체크되면 모니터링 대상으로 실수 등록하기 쉽다(자기 자신을 자기가
     # 모니터링). UI가 자동 선택에서 빼고 배지를 달 수 있도록 마킹만 한다.
     cache_arn, _, _ = _cache_db_env()
     cache_cluster_id = cache_arn.rsplit(":", 1)[-1] if cache_arn else ""
     # DBOps's own DynamoDB control-plane tables (the cluster registry itself,
     # plus sessions / approvals / alert-dedup) all share the dbops-<env>- name
-    # prefix — derive it from the registry table name. Without this,
+    # prefix: derive it from the registry table name. Without this,
     # list_tables surfaces the platform's own tables (even the registry backing
     # THIS very call) as monitorable databases. Flag them internal like the
     # cache DB so the UI de-selects + badges them instead of listing them as
@@ -1084,7 +1084,7 @@ def _handle_bulk_register(table, body: dict):
                 "cluster_arn": c.get("cluster_arn", ""),
                 "secret_arn": c.get("secret_arn", ""),
                 "db_name": c.get("db_name", ""),
-                # Required for DynamoDB registration — _register_dynamodb checks
+                # Required for DynamoDB registration: _register_dynamodb checks
                 # resource_name (the table name) as a required field.
                 "resource_name": c.get("resource_name", ""),
             }
@@ -1119,7 +1119,7 @@ def _cache_db_env():
 
 
 def _handle_seed_sample(table):
-    """P1.4 Sample data / demo mode. Idempotent — re-running upserts the demo cluster."""
+    """P1.4 Sample data / demo mode. Idempotent: re-running upserts the demo cluster."""
     cluster_arn, secret_arn, db_name = _cache_db_env()
     if not (cluster_arn and secret_arn):
         return _resp(500, {"error": "cache DB not configured"})
@@ -1187,11 +1187,11 @@ _DB_NAME_RE = re.compile(r"^[A-Za-z0-9_$]{1,64}$")
 
 
 def _handle_update_meta(table, cluster_id: str, body: dict):
-    """PATCH /api/clusters/{id}/meta — admin sets the Map note: `purpose` (one
+    """PATCH /api/clusters/{id}/meta. Admin sets the Map note: `purpose` (one
     line) and/or `service_tags` (connected services, also the Map grouping key).
     Also backfills `db_secret_arn`/`db_write_secret_arn` for rds_instance rows
     registered without them (R-3: the execute_sql fail-closed message points
-    here), and `db_name` — the session default schema for rds_instance direct-TCP
+    here), and `db_name`: the session default schema for rds_instance direct-TCP
     writes (R-3: without it, unqualified writes hit the 'mysql' system schema
     and RDS denies them, error 1044, live-verified). Same for
     `mongo_secret_arn`/`mongo_write_secret_arn` on documentdb rows: the in-VPC
@@ -1199,7 +1199,7 @@ def _handle_update_meta(table, cluster_id: str, body: dict):
     no way to discover them (they are DB users, not RDS-managed secrets), so
     this is the only path that fills them. Only the provided fields
     are updated; all optional. The conditional update (attribute_exists) is
-    ATOMIC, so a missing — or just-deleted-in-a-race — cluster yields 404
+    ATOMIC, so a missing (or just-deleted-in-a-race) cluster yields 404
     rather than creating a phantom registry item."""
     updates: dict = {}
     if "purpose" in body:
@@ -1261,9 +1261,9 @@ def _test_connection(body: dict) -> dict:
     path which just stamps `connection_status=failed` on a saved row).
 
     Steps run in order, and the first failure short-circuits the rest:
-      1. assume_role  — only for cross-account; same-account skips this
-      2. describe_cluster — confirms the role can see the cluster id
-      3. master_user_secret — confirms Aurora has a managed secret
+      1. assume_role:   only for cross-account; same-account skips this
+      2. describe_cluster:  confirms the role can see the cluster id
+      3. master_user_secret:  confirms Aurora has a managed secret
          (the agent needs this for RDS Data API)
     """
     cluster_id = (body.get("cluster_id") or "").strip()
@@ -1293,7 +1293,7 @@ def _test_connection(body: dict) -> dict:
         steps.append({
             "name": "assume_role",
             "status": "skipped",
-            "note": "same-account — Lambda execution role used directly",
+            "note": "same-account: Lambda execution role used directly",
         })
 
     # Step 2: DescribeDBClusters
@@ -1337,14 +1337,14 @@ def _test_connection(body: dict) -> dict:
             "name": "master_user_secret",
             "status": "warning",
             "note": (
-                "Aurora cluster has no managed master secret — RDS Data API "
+                "Aurora cluster has no managed master secret. RDS Data API "
                 "calls will fail. Enable Secrets Manager-managed credentials "
                 "on the cluster or supply secret_arn manually."
             ),
         })
 
     # Step 4: Data API(HttpEndpoint). 컨트롤 플레인 점검만으로는 잡히지 않는
-    # 가장 흔한 함정 — 꺼져 있으면 라이브 SQL 수집과 에이전트 SQL이 전부 막히는데
+    # 가장 흔한 함정: 꺼져 있으면 라이브 SQL 수집과 에이전트 SQL이 전부 막히는데
     # 등록 자체는 성공하므로, 여기서 미리 경고해야 DBA가 영문 모를 빈 패널을
     # 보며 기다리는 사태를 막는다. 실패가 아닌 warning: CloudWatch 기반
     # 지표와 이벤트 수집은 Data API 없이도 정상 동작한다.
@@ -1355,7 +1355,7 @@ def _test_connection(body: dict) -> dict:
             "name": "data_api",
             "status": "warning",
             "note": (
-                "RDS Data API(HttpEndpoint)가 비활성입니다 — CloudWatch 지표는 수집되지만 "
+                "RDS Data API(HttpEndpoint)가 비활성입니다. CloudWatch 지표는 수집되지만 "
                 "라이브 SQL 기반 기능(테이블 통계, 커넥션, Top Queries, 에이전트 SQL)은 동작하지 않습니다. "
                 # Sv2/프로비저닝은 EnableHttpEndpoint(resource-arn) API다.
                 # modify-db-cluster --enable-http-endpoint는 legacy Serverless
@@ -1374,7 +1374,7 @@ def lambda_handler(event, context):
     method = event.get("requestContext", {}).get("http", {}).get("method", event.get("httpMethod", "GET"))
     path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path", "")
 
-    # Sub-route: POST /api/clusters/test-connection — pre-flight that
+    # Sub-route: POST /api/clusters/test-connection, a pre-flight that
     # runs AssumeRole + DescribeDBClusters without saving. Read-only;
     # viewer allowed since the body is non-persisting.
     if method == "POST" and path.endswith("/test-connection"):
@@ -1392,14 +1392,14 @@ def lambda_handler(event, context):
             return _resp(400, {"error": "invalid JSON"})
         return _handle_discover(table, body)
 
-    # Sub-route: POST /api/clusters/sample — write, admin only
+    # Sub-route: POST /api/clusters/sample (write, admin only)
     if method == "POST" and path.endswith("/sample"):
         forbid = _forbid_viewer(event)
         if forbid:
             return forbid
         return _handle_seed_sample(table)
 
-    # Sub-route: PATCH /api/clusters/{id}/meta — admin sets the Map blueprint note.
+    # Sub-route: PATCH /api/clusters/{id}/meta, admin sets the Map blueprint note.
     if method == "PATCH" and path.endswith("/meta"):
         forbid = _forbid_viewer(event)
         if forbid:
@@ -1413,7 +1413,7 @@ def lambda_handler(event, context):
             return _resp(400, {"error": "invalid JSON"})
         return _handle_update_meta(table, cluster_id, body)
 
-    # Sub-route: DELETE /api/clusters/{cluster_id} — write, admin only
+    # Sub-route: DELETE /api/clusters/{cluster_id} (write, admin only)
     if method == "DELETE":
         forbid = _forbid_viewer(event)
         if forbid:
@@ -1425,7 +1425,7 @@ def lambda_handler(event, context):
             return _resp(400, {"error": "cluster_id required"})
         return _handle_delete(table, cluster_id)
 
-    # Sub-route: POST /api/clusters/bulk-register — write, admin only
+    # Sub-route: POST /api/clusters/bulk-register (write, admin only)
     if method == "POST" and path.endswith("/bulk-register"):
         forbid = _forbid_viewer(event)
         if forbid:
@@ -1440,7 +1440,7 @@ def lambda_handler(event, context):
         return _handle_list(table, event)
 
     if method == "POST":
-        # Single-cluster registration — write, admin only.
+        # Single-cluster registration (write, admin only).
         forbid = _forbid_viewer(event)
         if forbid:
             return forbid

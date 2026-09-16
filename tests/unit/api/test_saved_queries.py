@@ -278,7 +278,7 @@ def test_put_no_bearer_prefix_denied():
 
 
 def test_put_garbage_token_denied():
-    # "Bearer <non-jwt>" decodes to empty claims — must NOT be treated as dev-fallback admin.
+    # "Bearer <non-jwt>" decodes to empty claims: must NOT be treated as dev-fallback admin.
     res = handler.lambda_handler(
         _raw_event("PUT", "Bearer not-a-real-jwt", path_params={"id": "7"},
                    body={"title": "T", "sql_text": "SELECT 1"}),

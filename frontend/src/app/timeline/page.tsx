@@ -23,7 +23,7 @@ const WINDOWS: { label: string; hours: number }[] = [
   { label: "7d", hours: 24 * 7 },
 ];
 
-// Category presentation — color the dot + chip by signal class so the
+// Category presentation: color the dot + chip by signal class so the
 // DBA can scan a long list and spot the "writes" (audit/schema_change)
 // vs the "noise" (proactive/ack) at a glance.
 const CATEGORY_STYLE: Record<
@@ -82,7 +82,7 @@ function relTime(iso: string): string {
 
 export default function TimelinePage() {
   const t = useT();
-  // Global cluster selection (shared store) — stays in sync with ⌘K / header.
+  // Global cluster selection (shared store): stays in sync with ⌘K / header.
   const { selected: clusterId } = useSelectedCluster();
   const [hours, setHours] = useState<number>(24);
   const [data, setData] = useState<TimelineResponse | null>(null);
@@ -166,7 +166,7 @@ export default function TimelinePage() {
             {/* "what happened?" → "why?": hand the incident context to the
                 AI agent for a ranked root-cause analysis. */}
             {clusterId && <RcaButton clusterId={clusterId} />}
-            {/* Deep-link into workload diff for this cluster — the
+            {/* Deep-link into workload diff for this cluster: the
                 natural next question after "what happened?" is "what
                 did it do to the query workload?". */}
             {clusterId && (

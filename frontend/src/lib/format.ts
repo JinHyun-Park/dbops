@@ -13,9 +13,9 @@ const NUMBER_FORMATTER = new Intl.NumberFormat("en-US");
  * the contrast against larger values is obvious.
  */
 export function fmtNumber(v: number | string | null | undefined): string {
-  if (v === null || v === undefined || v === "") return "—";
+  if (v === null || v === undefined || v === "") return "-";
   const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "-";
   const abs = Math.abs(n);
   if (abs < 1_000) return NUMBER_FORMATTER.format(Math.round(n * 100) / 100);
   if (abs < 1_000_000) return `${(n / 1_000).toFixed(abs < 10_000 ? 2 : 1)}k`;
@@ -30,26 +30,26 @@ export function fmtNumber(v: number | string | null | undefined): string {
  * grouping. Useful in tooltips / details panels where exact rows matter.
  */
 export function fmtExact(v: number | string | null | undefined): string {
-  if (v === null || v === undefined || v === "") return "—";
+  if (v === null || v === undefined || v === "") return "-";
   const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "-";
   return NUMBER_FORMATTER.format(n);
 }
 
-/** Locale-grouped decimal — same as `n.toFixed(digits)` but with thousand
+/** Locale-grouped decimal: same as `n.toFixed(digits)` but with thousand
  *  separators ("1,234,567.89" instead of "1234567.89"). Use this in big-
  *  number headlines (anomaly modal stats, timeseries current/peak,
  *  capacity projections etc.) where the raw .toFixed makes large values
  *  hard to scan. Percentages, durations < 1000ms, σ-scores etc. are
- *  better served by their own helpers — don't reach for this when the
+ *  better served by their own helpers, don't reach for this when the
  *  value is small. */
 export function fmtDecimal(
   v: number | string | null | undefined,
   digits = 2,
 ): string {
-  if (v === null || v === undefined || v === "") return "—";
+  if (v === null || v === undefined || v === "") return "-";
   const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "-";
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
@@ -60,9 +60,9 @@ export function fmtDecimal(
  * value > 1. We use SI (1000) intentionally so it matches AWS/Postgres
  * conventions rather than IEC (1024). */
 export function fmtBytes(v: number | string | null | undefined): string {
-  if (v === null || v === undefined || v === "") return "—";
+  if (v === null || v === undefined || v === "") return "-";
   const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "-";
   const abs = Math.abs(n);
   if (abs >= 1e12) return `${(n / 1e12).toFixed(2)} TB`;
   if (abs >= 1e9) return `${(n / 1e9).toFixed(2)} GB`;
@@ -73,9 +73,9 @@ export function fmtBytes(v: number | string | null | undefined): string {
 
 /** Duration (ms). Picks micro/ms/s/min/hr automatically. */
 export function fmtDuration(ms: number | string | null | undefined): string {
-  if (ms === null || ms === undefined || ms === "") return "—";
+  if (ms === null || ms === undefined || ms === "") return "-";
   const n = typeof ms === "number" ? ms : Number(ms);
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "-";
   const abs = Math.abs(n);
   if (abs < 1) return `${(n * 1000).toFixed(0)}µs`;
   if (abs < 1_000) return `${n.toFixed(abs < 10 ? 2 : abs < 100 ? 1 : 0)}ms`;
@@ -92,9 +92,9 @@ export function fmtPct(
   kind: "ratio" | "percent" = "ratio",
   decimals = 0,
 ): string {
-  if (v === null || v === undefined || v === "") return "—";
+  if (v === null || v === undefined || v === "") return "-";
   const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "-";
   const asPct = kind === "ratio" ? n * 100 : n;
   return `${asPct.toFixed(decimals)}%`;
 }
@@ -108,9 +108,9 @@ export function pctTone(pct: number): string {
 
 /** Hours/seconds since a timestamp ISO string. Used in panel "last refreshed". */
 export function fmtRelative(iso: string | null | undefined): string {
-  if (!iso) return "—";
+  if (!iso) return "-";
   const ms = Date.now() - new Date(iso).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return "—";
+  if (!Number.isFinite(ms) || ms < 0) return "-";
   if (ms < 60_000) return "just now";
   if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
   if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;

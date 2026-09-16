@@ -1,4 +1,4 @@
-"""dynamodb_pricing — look up REAL DynamoDB capacity prices from the AWS Price
+"""dynamodb_pricing: look up REAL DynamoDB capacity prices from the AWS Price
 List API, mirroring aurora_pricing.py.
 
 WHY: the capacity-mode cost simulator must compare Provisioned vs On-Demand with
@@ -11,7 +11,7 @@ region prefix like APN2- varies). Two confounders MUST be excluded because they
 share the same suffix:
   - "IA" (Infrequent Access table class): APN2-IA-ReadCapacityUnit-Hrs etc.
   - "Repl"/"ReplWrite" (global-table replicated writes): APN2-ReplWriteCapacityUnit-Hrs,
-    APN2-ReplWriteRequestUnits — these end with the same WriteCapacityUnit-Hrs /
+    APN2-ReplWriteRequestUnits: these end with the same WriteCapacityUnit-Hrs /
     WriteRequestUnits suffix, so suffix-match alone would mis-pick them.
 
 Confirmed live against get_products(ServiceCode="AmazonDynamoDB",

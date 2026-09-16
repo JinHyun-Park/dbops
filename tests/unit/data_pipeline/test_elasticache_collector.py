@@ -199,7 +199,7 @@ def _cw_dim_values(cw):
 def test_cw_dimension_uses_member_node_ids_not_rg_id():
     """REGRESSION: AWS/ElastiCache emits metrics per NODE (CacheClusterId=<rg>-001),
     never under the replication-group id. The collector must query the member
-    node ids — querying the RG id (resource_name) returns zero datapoints, so a
+    node ids: querying the RG id (resource_name) returns zero datapoints, so a
     replication-group cluster would silently collect nothing."""
     cw = _cw_with()
     ec = _ec_replication_group("my-redis")  # MemberClusters = my-redis-000{1,2}-00{1,2}

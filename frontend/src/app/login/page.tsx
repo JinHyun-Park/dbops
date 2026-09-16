@@ -75,7 +75,7 @@ function LoginForm() {
       <AuthLayout
         eyebrow="dbops"
         title="새 비밀번호 설정"
-        subtitle="최초 로그인 — 임시 비밀번호를 변경하세요"
+        subtitle="최초 로그인: 임시 비밀번호를 변경하세요"
       >
         <form onSubmit={submitNewPassword} className="space-y-4">
           <Field label="새 비밀번호">

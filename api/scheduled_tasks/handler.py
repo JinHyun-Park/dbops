@@ -1,4 +1,4 @@
-"""Scheduled Tasks REST API — list / create / delete recurring agent work.
+"""Scheduled Tasks REST API: list / create / delete recurring agent work.
 
 CRUD over the `scheduled_tasks` cache table. The task_scheduler Lambda reads
 these rows and enqueues agent-tasks when due. Read-only report schedules, so

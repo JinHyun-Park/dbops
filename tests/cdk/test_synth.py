@@ -3,11 +3,11 @@
 These tests verify the CDK app:
   1. Synthesises without error.
   2. Produces the expected 4 stacks (foundation / data / agent / frontend).
-  3. Applies Application=DBOps tag at the app level — regression catch for
+  3. Applies Application=DBOps tag at the app level, a regression catch for
      anyone removing the cdk.Tags.of(app).add(...) call in cdk/app.py, which
      would silently break cost attribution.
 
-We don't full-diff resources here — that'd flake on every CDK upgrade. The
+We don't full-diff resources here. That'd flake on every CDK upgrade. The
 goal is "did we keep the load-bearing structure?", not "did anything change?".
 """
 
@@ -29,22 +29,22 @@ def cdk_app():
 
     Stacks reference assets via relative paths like `../data-pipeline/...`,
     which only resolve correctly when CWD is the cdk/ directory. We swap
-    CWD for the synth and restore it after — pytest runs from repo root
+    CWD for the synth and restore it after: pytest runs from repo root
     by default."""
     sys.path.insert(0, str(CDK_DIR))
 
     # CI copies settings.example.py → settings.py before invoking pytest.
     if not (CDK_DIR / "config" / "settings.py").exists():
-        pytest.skip("cdk/config/settings.py missing — run `cp cdk/config/settings.example.py cdk/config/settings.py`")
+        pytest.skip("cdk/config/settings.py missing: run `cp cdk/config/settings.example.py cdk/config/settings.py`")
 
     # FrontendStack's BucketDeployment requires `frontend/out/` to exist
     # at synth time. CI hasn't run `npm run build` (frontend is a separate
-    # job that doesn't produce a CDK artifact) — stub a minimal directory
+    # job that doesn't produce a CDK artifact), so stub a minimal directory
     # so synth resolves the asset path. Local devs who already have a
     # built `out/` keep their real artifact.
     #
     # NOTE: the frontend stack now ships THREE deployments by cache policy, and
-    # the hashed-assets one sources `frontend/out/_next` as a SEPARATE asset —
+    # the hashed-assets one sources `frontend/out/_next` as a SEPARATE asset,
     # so that subtree must exist at synth time too, or synth fails with
     # CannotFindAsset on CI (where there's no real build). Stub both.
     # agent/_deps is gitignored, so it is absent here exactly as in a fresh clone, and
@@ -101,7 +101,7 @@ def test_app_config_table_present(cdk_app):
     so we cannot call Template.from_stack() directly on it. Instead we
     re-synth an isolated FoundationStack here, mirroring the fixture's
     CWD-swap + settings-fallback logic. The assertion matches on KeySchema
-    only (env-agnostic — no table-name check).
+    only (env-agnostic, no table-name check).
     """
     from aws_cdk.assertions import Template
 

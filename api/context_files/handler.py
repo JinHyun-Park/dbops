@@ -1,4 +1,4 @@
-"""Context-files API — operator-uploaded reference text injected into the agent
+"""Context-files API: operator-uploaded reference text injected into the agent
 prompt. Admin-only, fail-closed (mirrors api/config/handler.py). Text only;
 per-file 32KB; 64KB total budget."""
 

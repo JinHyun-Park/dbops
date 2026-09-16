@@ -1,4 +1,4 @@
-# Dev-only dependencies — installed in CI and locally for tests/linting.
+# Dev-only dependencies, installed in CI and locally for tests/linting.
 # Production Lambda deployments do NOT pick these up (each Lambda's own
 # requirements.txt is what gets packaged).
 

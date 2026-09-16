@@ -1,7 +1,7 @@
-"""delete_custom_endpoint — agent-facing Aurora custom endpoint deletion.
+"""delete_custom_endpoint: agent-facing Aurora custom endpoint deletion.
 
 Approval-gated like every write tool. Before touching anything it verifies via
-DescribeDBClusterEndpoints that the target exists and is a CUSTOM endpoint —
+DescribeDBClusterEndpoints that the target exists and is a CUSTOM endpoint:
 the built-in writer/reader endpoints (EndpointType WRITER/READER) are NEVER
 deletable through this tool, so a typo'd or malicious identifier can't drop the
 cluster's real connection endpoints.

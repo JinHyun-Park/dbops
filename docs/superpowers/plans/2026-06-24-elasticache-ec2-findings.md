@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Diagnose ElastiCache from the cached metrics — emit health findings (eviction/hit-rate/memory/lag/CPU/connections) into the existing multi-engine findings pipeline, and add ElastiCache signals to incident RCA.
+**Goal:** Diagnose ElastiCache from the cached metrics: emit health findings (eviction/hit-rate/memory/lag/CPU/connections) into the existing multi-engine findings pipeline, and add ElastiCache signals to incident RCA.
 
-**Architecture:** A new `elasticache_findings.py` collector (mirrors `docdb_findings.py`) writes `elasticache_*` rows to `cluster_health_findings`; the ETL handler calls it in the existing `elasticache` branch with the shared `run_ts`; a new RCA signal source surfaces cache spikes in `diagnose_root_cause`. Findings surface through the existing engine-agnostic `_health_findings` endpoint + `get_maintenance_findings` MCP tool — no new route/tool.
+**Architecture:** A new `elasticache_findings.py` collector (mirrors `docdb_findings.py`) writes `elasticache_*` rows to `cluster_health_findings`; the ETL handler calls it in the existing `elasticache` branch with the shared `run_ts`; a new RCA signal source surfaces cache spikes in `diagnose_root_cause`. Findings surface through the existing engine-agnostic `_health_findings` endpoint + `get_maintenance_findings` MCP tool: no new route/tool.
 
 **Tech Stack:** Python 3.12 (ETL Lambda collectors via RDS Data API; incident MCP Lambda).
 
@@ -13,7 +13,7 @@
 - **No `Co-Authored-By: Claude` trailer** in any commit (user rule).
 - **Read-only:** reads `metric_snapshots` + `cluster_meta`, writes only `cluster_health_findings`. No ElastiCache API call, no mutation, no new IAM/secret.
 - **Shared snapshot_ts (CRITICAL GOTCHA):** the handler passes `snapshot_ts=run_ts`; every finding INSERT uses that one timestamp so the dashboard `MAX(snapshot_time)` batch keeps them together. Never substitute `datetime.now()` per-finding.
-- **metric_snapshots reads filter cluster-level rows:** `AND (dimensions IS NULL OR dimensions::text = '{}')` (mirrors docdb_findings) — EC-1 wrote cluster-level rows with `dimensions='{}'`.
+- **metric_snapshots reads filter cluster-level rows:** `AND (dimensions IS NULL OR dimensions::text = '{}')` (mirrors docdb_findings): EC-1 wrote cluster-level rows with `dimensions='{}'`.
 - **check_type prefix:** all EC-2 findings use `elasticache_*` (application-enforced; no DB constraint). The 6 types: `elasticache_evictions_spike`, `elasticache_low_hit_rate`, `elasticache_memory_pressure`, `elasticache_replication_lag`, `elasticache_high_cpu`, `elasticache_connection_surge`.
 - **Engine branch:** Memcached (`cluster_meta.engine == "memcached"`) skips the replication-lag + memory-pressure rules and uses `get_hits`/`get_misses` for hit-rate; Redis/Valkey use `cache_hits`/`cache_misses` + `memory_usage_pct` + `replication_lag`.
 - **Korean** `value_str`/`threshold_str`/`recommendation`; metric jargon (hit rate, eviction, replication lag) stays English.
@@ -34,7 +34,7 @@
 - Consumes: `_execute(rds_data, cluster_arn, secret_arn, db_name, sql, params)` (mirror the one in `docdb_findings.py`); `cluster_meta.engine`; `metric_snapshots` rows.
 - Produces: `collect_elasticache_findings(rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name, cluster_id, snapshot_ts=None, window_hours=1) -> dict`. Writes `cluster_health_findings`.
 
-- [ ] **Step 1: Read the template.** Read `data-pipeline/etl_collector/collectors/docdb_findings.py` in FULL — copy its `_execute` helper verbatim, its `add(...)`/`findings` pattern, the single-aggregation-query approach, and the insert loop. Read the `elasticache` branch in `data-pipeline/etl_collector/handler.py` (added in EC-1) to see where the findings call goes.
+- [ ] **Step 1: Read the template.** Read `data-pipeline/etl_collector/collectors/docdb_findings.py` in FULL: copy its `_execute` helper verbatim, its `add(...)`/`findings` pattern, the single-aggregation-query approach, and the insert loop. Read the `elasticache` branch in `data-pipeline/etl_collector/handler.py` (added in EC-1) to see where the findings call goes.
 
 - [ ] **Step 2: Write the failing test.** Create `tests/unit/data_pipeline/test_elasticache_findings.py`:
 
@@ -155,7 +155,7 @@ Expected: FAIL (module missing).
 - [ ] **Step 4: Create `data-pipeline/etl_collector/collectors/elasticache_findings.py`:**
 
 ```python
-"""ElastiCache Findings Collector — eviction spike, low hit-rate, memory pressure,
+"""ElastiCache Findings Collector: eviction spike, low hit-rate, memory pressure,
 replication lag, high CPU, connection surge.
 
 Reads the cached metric_snapshots only (no live AWS). Writes elasticache_* rows
@@ -308,7 +308,7 @@ def collect_elasticache_findings(
             add("elasticache_memory_pressure", sev, "ElastiCache Memory Pressure",
                 f"memory {mem:.1f}%",
                 f"memory ≥ {int(MEMORY_CRITICAL_PCT)}%" if sev == "critical" else f"memory ≥ {int(MEMORY_WARNING_PCT)}%",
-                f"최근 {window_hours}시간 메모리 사용률 peak이 {mem:.1f}%입니다. eviction/OOM 위험 — 노드 타입 상향 또는 샤드 추가를 권장합니다.",
+                f"최근 {window_hours}시간 메모리 사용률 peak이 {mem:.1f}%입니다. eviction/OOM 위험: 노드 타입 상향 또는 샤드 추가를 권장합니다.",
                 {"max_memory_usage_pct": mem, "window_hours": window_hours})
 
     # Rule 4: replication lag (Redis/Valkey only)
@@ -322,7 +322,7 @@ def collect_elasticache_findings(
                 f"최근 {window_hours}시간 replication lag peak이 {lag:.0f} ms입니다. 쓰기 부하 완화 또는 리드 레플리카 확장을 점검하세요.",
                 {"max_replication_lag_ms": lag, "window_hours": window_hours})
 
-    # Rule 5: high CPU (prefer engine_cpu — Redis single-threaded bottleneck)
+    # Rule 5: high CPU (prefer engine_cpu: Redis single-threaded bottleneck)
     cpu = _f("max_engine_cpu")
     cpu_label = "engine CPU"
     if cpu is None:
@@ -381,7 +381,7 @@ In `_collect_one`, inside the existing `if family == "elasticache":` branch, AFT
             print(f"[{cluster_id}] elasticache findings error: {e}")
 ```
 
-(Match the exact parameter names the dynamodb/docdb findings calls use in this handler — read those two branches to confirm `cache_rds_data`/`cache_cluster_arn`/`cache_secret_arn`/`cache_db_name`/`run_ts` are the in-scope names.)
+(Match the exact parameter names the dynamodb/docdb findings calls use in this handler: read those two branches to confirm `cache_rds_data`/`cache_cluster_arn`/`cache_secret_arn`/`cache_db_name`/`run_ts` are the in-scope names.)
 
 - [ ] **Step 6: Run tests.**
 
@@ -402,7 +402,7 @@ git commit -m "feat(elasticache): findings collector (eviction/hit-rate/memory/l
 **Files:**
 
 - Modify: `mcp-servers/mcp_servers/incident/tools/diagnose_root_cause.py` (add `_collect_elasticache_signals` + `BASE_WEIGHTS["elasticache_spike"]` + the `candidates.extend(...)` call)
-- Test: `tests/unit/mcp_servers/incident/test_elasticache_signals.py` (create — match the existing incident test layout; if `tests/unit/mcp_servers/incident/` doesn't exist, place it where other diagnose_root_cause tests live — search for `test_diagnose_root_cause`)
+- Test: `tests/unit/mcp_servers/incident/test_elasticache_signals.py` (create: match the existing incident test layout. If `tests/unit/mcp_servers/incident/` doesn't exist, place it where other diagnose_root_cause tests live; search for `test_diagnose_root_cause`)
 
 **Interfaces:**
 
@@ -468,7 +468,7 @@ Run: `python -m pytest <test path> -q` → FAIL (`_collect_elasticache_signals` 
 ```python
 def _collect_elasticache_signals(cache, cluster_id, start_iso, end_iso, anchor, win, examined, skipped):
     """ElastiCache cache-specific signals from metric_snapshots: eviction spikes
-    and replication-lag spikes near the incident. Engine-safe — non-ElastiCache
+    and replication-lag spikes near the incident. Engine-safe: non-ElastiCache
     clusters have no such rows, so this yields nothing."""
     out = []
     sql = """
@@ -507,7 +507,7 @@ def _collect_elasticache_signals(cache, cluster_id, start_iso, end_iso, anchor, 
         else:
             title = "ElastiCache Eviction Spike"
             desc = f"{int(value)} evictions in a minute near the incident"
-            action = "Memory pressure — evictions spiking suggests the working set exceeds capacity; check maxmemory-policy and node size."
+            action = "Memory pressure: evictions spiking suggests the working set exceeds capacity; check maxmemory-policy and node size."
         out.append({
             "category": "elasticache_spike",
             "score": score,
@@ -542,7 +542,7 @@ git commit -m "feat(elasticache): RCA signal source (eviction + replication-lag 
 
 ## Post-implementation (controller, after both tasks reviewed clean)
 
-- Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD` — focus: collector reads cluster-level rows (`dimensions='{}'` filter) + shares `snapshot_ts` to every INSERT; the 6 rules' thresholds + Memcached branch (skips lag/memory, uses get*hits/get_misses) are correct; `check_type` strings are `elasticache*\*` and match nothing the dashboard would mis-route; RCA source is engine-safe (try/except → skipped, returns []) and doesn't perturb existing signal scoring; read-only (no mutation/IAM/secret).
-- Deploy dev: `cdk deploy dbops-dev-data` (ETL collector — the elasticache findings collector is packaged with the ETL Lambda) + `cdk deploy dbops-dev-agent` (incident MCP Lambda — the RCA change; confirm which stack the incident MCP Lambda lives in and deploy it). No frontend change.
-- Live smoke: after one ETL cycle on a registered ElastiCache cluster (if one exists), `GET /api/dashboard?cluster_id=<ec>&page=health` returns `elasticache_*` findings; the agent's `get_maintenance_findings` returns them. If no ElastiCache cluster is registered (admin-gated + needs a real cluster), the findings + RCA paths are unit-covered (same constraint as EC-1) — verify no regression to existing engines' findings (an Aurora cluster's `page=health` still returns its findings; `diagnose_root_cause` on an Aurora cluster is unchanged).
+- Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`, focus: collector reads cluster-level rows (`dimensions='{}'` filter) + shares `snapshot_ts` to every INSERT; the 6 rules' thresholds + Memcached branch (skips lag/memory, uses get*hits/get_misses) are correct; `check_type` strings are `elasticache*\*` and match nothing the dashboard would mis-route; RCA source is engine-safe (try/except → skipped, returns []) and doesn't perturb existing signal scoring; read-only (no mutation/IAM/secret).
+- Deploy dev: `cdk deploy dbops-dev-data` (ETL collector: the elasticache findings collector is packaged with the ETL Lambda) + `cdk deploy dbops-dev-agent` (incident MCP Lambda: the RCA change; confirm which stack the incident MCP Lambda lives in and deploy it). No frontend change.
+- Live smoke: after one ETL cycle on a registered ElastiCache cluster (if one exists), `GET /api/dashboard?cluster_id=<ec>&page=health` returns `elasticache_*` findings; the agent's `get_maintenance_findings` returns them. If no ElastiCache cluster is registered (admin-gated + needs a real cluster), the findings + RCA paths are unit-covered (same constraint as EC-1): verify no regression to existing engines' findings (an Aurora cluster's `page=health` still returns its findings; `diagnose_root_cause` on an Aurora cluster is unchanged).
 - Then `superpowers:finishing-a-development-branch`.

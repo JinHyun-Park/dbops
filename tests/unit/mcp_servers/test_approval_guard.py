@@ -1,6 +1,6 @@
 """Tests for the server-side approval guard.
 
-These tests cover every reason the guard can reject — missing id, wrong
+These tests cover every reason the guard can reject: missing id, wrong
 cluster, wrong action_type, stale resolved_at, status not approved,
 already-consumed, missing resolved_at, missing env var. The atomic
 consume path is also tested via the ConditionalCheckFailedException
@@ -89,7 +89,7 @@ def test_verify_approval_bypass_env_for_local_dev():
 )
 def test_bypass_refused_inside_lambda_runtime():
     """Even if APPROVAL_GUARD_BYPASS leaks onto a deployed Lambda, the guard
-    must NOT honor it — approvals stay enforced in production. With no
+    must NOT honor it: approvals stay enforced in production. With no
     APPROVALS_TABLE set, the bypass being refused means we fall through to the
     fail-closed 'table not configured' path rather than returning ok."""
     result = verify_approval("aid-1", "prod-pg-1", "execute_sql")
@@ -177,7 +177,7 @@ def test_verify_approval_wrong_action_type(mock_boto3):
 @patch("mcp_servers.shared.approval_guard.boto3")
 def test_verify_approval_action_type_other_is_permissive(mock_boto3):
     """If the approval row was registered with action_type='other' the
-    tool's specific action_type still has to match — but if both sides
+    tool's specific action_type still has to match, but if both sides
     say 'other', it passes."""
     mock_boto3.resource.return_value.Table.return_value = _scan_returning(
         _fresh_row(action_type="other")
@@ -222,7 +222,7 @@ def test_verify_approval_garbage_resolved_at(mock_boto3):
 @patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
 @patch("mcp_servers.shared.approval_guard.boto3")
 def test_verify_approval_concurrent_consume_loses(mock_boto3):
-    """The atomic consume can race — if another process consumed first,
+    """The atomic consume can race: if another process consumed first,
     we get ConditionalCheckFailedException and must reject."""
     table = _scan_returning(_fresh_row())
     err = ClientError(
@@ -274,7 +274,7 @@ def test_verify_approval_ddb_scan_error_rejected(mock_boto3):
 @patch("mcp_servers.shared.approval_guard.boto3")
 def test_find_approval_paginates_past_nonmatching_pages(mock_boto3):
     """Regression: scan used Limit=1, but DynamoDB applies Limit BEFORE
-    FilterExpression — with 2+ rows in the table the matching approval was
+    FilterExpression: with 2+ rows in the table the matching approval was
     never found and every approved write was refused. The lookup must follow
     LastEvaluatedKey across pages and must not pass Limit."""
     table = MagicMock()
@@ -327,7 +327,7 @@ def test_payload_mismatch_rejected(mock_boto3):
     )
     assert result["ok"] is False
     assert "does not match" in result["reason"]
-    # A mismatch must NOT consume the row — the legit approval stays usable.
+    # A mismatch must NOT consume the row: the legit approval stays usable.
     mock_boto3.resource.return_value.Table.return_value.update_item.assert_not_called()
 
 
@@ -346,7 +346,7 @@ def test_payload_bound_row_but_no_payload_passed_rejected(mock_boto3):
 @patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
 @patch("mcp_servers.shared.approval_guard.boto3")
 def test_legacy_row_without_hash_skips_binding(mock_boto3):
-    """Rows minted before payload-binding shipped have no payload_hash — the
+    """Rows minted before payload-binding shipped have no payload_hash: the
     guard must not break them across the deploy boundary."""
     mock_boto3.resource.return_value.Table.return_value = _scan_returning(_fresh_row())
     result = verify_approval(
@@ -410,7 +410,7 @@ def test_other_bucket_preserves_string_distinctness():
 @patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"})
 @patch("mcp_servers.shared.approval_guard.boto3")
 def test_empty_action_type_rejected_fail_closed(mock_boto3):
-    """action_type이 빈 승인 행은 거부한다 — 비어 있으면 매칭이 스킵되어
+    """action_type이 빈 승인 행은 거부한다. 비어 있으면 매칭이 스킵되어
     임의 쓰기 툴 승인으로 재사용될 수 있었다(Codex 감사)."""
     row = _fresh_row(action_type="")
     table = _scan_returning(row)
@@ -426,7 +426,7 @@ def test_empty_action_type_rejected_fail_closed(mock_boto3):
 
 
 def test_ddb_capacity_target_is_bound_in_hash():
-    """fix #1: the table target is INSIDE the capacity hash — an approval for
+    """fix #1: the table target is INSIDE the capacity hash. An approval for
     table A can't be redirected to table B even on the same (cluster, action)."""
     a = canonical_action_hash(
         "modify_dynamodb_capacity",
@@ -502,7 +502,7 @@ def test_ddb_pitr_force_changes_hash():
 
 
 def test_docdb_index_compound_key_order_hashes_differently():
-    """fix #2: compound-index field ORDER is semantically significant — the keys
+    """fix #2: compound-index field ORDER is semantically significant. The keys
     list must NOT be sorted, so [a,b] and [b,a] hash DIFFERENTLY."""
     ab = canonical_action_hash(
         "create_docdb_index",

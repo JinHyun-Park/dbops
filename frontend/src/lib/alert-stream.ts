@@ -1,5 +1,5 @@
 /**
- * alert-stream — singleton WebSocket client for the in-app alert push channel.
+ * alert-stream: singleton WebSocket client for the in-app alert push channel.
  *
  * Connects to the API Gateway WebSocket (config.json `webSocketUrl`). Browsers
  * cannot set WS headers, so the credential travels in the query string, and that
@@ -16,17 +16,17 @@
  * this path any more. Corrected because a stale comment claiming a bearer token
  * sits in a URL is the kind of thing a reader believes.
  *
- * Audience model: the push is FLEET-WIDE — every connected operator receives
+ * Audience model: the push is FLEET-WIDE. Every connected operator receives
  * every fired alert/incident. This is deliberately consistent with the REST
  * layer, which already serves fleet-wide alert metadata to any authenticated
  * user (cognito:groups gate WRITE actions, not which clusters you can SEE). The
  * WS channel therefore exposes nothing beyond the existing 45s poll. ("Scoped"
  * in the feature name means a scoped *slice* of the SSE-push backlog item, not
  * per-user scoping.) If per-cluster RBAC is ever added, the REST layer AND this
- * broadcast must grow audience filtering together — it is not a WS-only concern.
+ * broadcast must grow audience filtering together: it is not a WS-only concern.
  *
  * Additive to polling: if the channel isn't configured or the socket drops, the
- * existing 45s badge poll still covers fleet health — nothing breaks.
+ * existing 45s badge poll still covers fleet health, nothing breaks.
  *
  * Auth lifecycle: opens on the first subscriber once logged in; tears down on
  * `dbops:auth-logout` (so a logged-out user stops receiving pushes instead of
@@ -77,12 +77,12 @@ let closedByUs = false;
 let suspended = false;
 // Guards the await window inside connect() so two callers (e.g. the first
 // subscriber and a dbops:auth-login event firing together) can't both create a
-// socket — the second would orphan the first without closing it.
+// socket: the second would orphan the first without closing it.
 let connectInFlight = false;
 
 /**
  * Mint a WebSocket handshake ticket. Returns "" on any failure, which the caller
- * treats as "retry later" — the alert badge keeps polling meanwhile, so a failed
+ * treats as "retry later": the alert badge keeps polling meanwhile, so a failed
  * mint degrades the push channel rather than the product.
  *
  * Not cached and not retried here: a ticket is single-use and expires in 60s, so
@@ -110,7 +110,7 @@ async function connect(): Promise<void> {
     const base = await loadWsUrl();
     if (!base) return; // push channel not configured on this deployment
     if (!isLoggedIn()) {
-      scheduleReconnect(); // not logged in yet — retry later
+      scheduleReconnect(); // not logged in yet, retry later
       return;
     }
     // A single-use 60s TICKET, not the access token. The token would be a
@@ -199,7 +199,7 @@ export function subscribeAlertStream(cb: Listener): () => void {
 }
 
 // Tear down / re-arm on auth changes (emitted by auth.ts setTokens/clearTokens).
-// Without the logout teardown the socket — authorized only at $connect — would
+// Without the logout teardown the socket (authorized only at $connect) would
 // keep delivering pushes to a logged-out user until its 2h TTL.
 if (typeof window !== "undefined") {
   window.addEventListener("dbops:auth-logout", () => {

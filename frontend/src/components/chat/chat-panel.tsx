@@ -203,7 +203,7 @@ function buildConversationHtml(conv: Conversation): string {
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <title>${escapeHtml(conv.title)} — DBOps Chat</title>
+  <title>${escapeHtml(conv.title)} - DBOps Chat</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -266,7 +266,7 @@ function buildConversationHtml(conv: Conversation): string {
  * Render the conversation into an off-screen iframe and trigger its print
  * dialog. The iframe contains ONLY the chat content (no app chrome, no
  * scroll container), so the OS print preview shows every message across
- * however many pages it needs — none of the "captures the whole webpage,
+ * however many pages it needs, without the "captures the whole webpage,
  * one page only" issues that `window.print()` on the live page had.
  */
 function exportConversationToPdf(conv: Conversation) {
@@ -306,7 +306,7 @@ function exportConversationToPdf(conv: Conversation) {
       iframe.contentWindow?.print();
     } finally {
       // Give the print dialog a moment to grab the document before we remove
-      // the iframe — Safari otherwise cancels the print on rapid removal.
+      // the iframe: Safari otherwise cancels the print on rapid removal.
       window.setTimeout(() => iframe.remove(), 2000);
     }
   };
@@ -419,7 +419,7 @@ export function ChatPanel() {
     let stored = loadConversations();
     // RCA handoff: arriving from the RCA side panel's "전체 대화로 이어가기".
     // Materialize the question + the already-streamed analysis as a NEW
-    // conversation HERE — before the DDB merge below — so it's part of `stored`
+    // conversation HERE (before the DDB merge below) so it's part of `stored`
     // and survives the merge (a separate effect would race and get clobbered),
     // and as the newest entry it auto-activates.
     const handoff = takeRcaHandoff();
@@ -447,7 +447,7 @@ export function ChatPanel() {
     }
 
     // 일반 prompt 딥링크 (예: 대시보드 진단 모달의 "Chat에서 조치 진행").
-    // RCA handoff와 똑같이 NEW 대화로 시작해야 한다 — 단순 setInput은 마지막
+    // RCA handoff와 똑같이 NEW 대화로 시작해야 한다. 단순 setInput은 마지막
     // 대화 입력창에 prefill되어 기존 대화에 섞인다(이전에 RCA만 고쳐졌던
     // 핸드오프 버그의 나머지 절반). merge보다 먼저 stored에 prepend해야
     // 아래 listChatSessions 머지의 setConversations에 덮이지 않는다.
@@ -471,7 +471,7 @@ export function ChatPanel() {
       setActiveId(stored[0].id);
       if (stored[0].cluster_id) setClusterId(stored[0].cluster_id);
     }
-    // 입력창 prefill(자동 전송 X) — 사용자가 chat에서 검토 후 보내는 것이
+    // 입력창 prefill(자동 전송 X): 사용자가 chat에서 검토 후 보내는 것이
     // 곧 확인 단계다. URL 쿼리는 새로고침 재실행 방지로 즉시 제거.
     if (dlPrompt) setInput(dlPrompt);
     if (dlPrompt || dlCluster) {
@@ -491,7 +491,7 @@ export function ChatPanel() {
           const local = localById.get(id);
           const remote = remoteById.get(id);
           if (remote && (!local || remote.updated_at >= local.updated_at)) {
-            // Server has newer (or only) version — render a stub now and let
+            // Server has newer (or only) version: render a stub now and let
             // selection lazy-load full messages.
             merged.push({
               id: remote.session_id,
@@ -513,7 +513,7 @@ export function ChatPanel() {
             });
           } else if (local) {
             merged.push(local);
-            // Local has newer version (or remote missing) — push it up.
+            // Local has newer version (or remote missing): push it up.
             if (!remote || local.updated_at > remote.updated_at) {
               toPush.push(local);
             }
@@ -555,7 +555,7 @@ export function ChatPanel() {
         if (rows.length === 0) return;
         // Only default the cluster if one hasn't already been established (by a
         // restored conversation, a deep-link, or an RCA handoff). The functional
-        // updater reads the CURRENT clusterId — the effect closure captured the
+        // updater reads the CURRENT clusterId: the effect closure captured the
         // mount-time "" and would otherwise clobber a just-set cluster once this
         // async fetch resolves (the bug behind chats "continuing" on the wrong
         // cluster). Prefer the globally-selected cluster over rows[0] so a fresh
@@ -571,7 +571,7 @@ export function ChatPanel() {
       .catch((e) => console.error("Failed to load clusters:", e));
   }, []);
 
-  // (prompt/cluster 딥링크 처리는 위 초기 로드 useEffect로 통합됨 — 마지막
+  // (prompt/cluster 딥링크 처리는 위 초기 로드 useEffect로 통합됨, 마지막
   // 대화 prefill이 아니라 새 대화로 시작하도록.)
 
   const active = conversations.find((c) => c.id === activeId);
@@ -579,7 +579,7 @@ export function ChatPanel() {
 
   // Cross-device sync: debounce server PUTs by 1.5s so a streaming response
   // (which mutates messages on every token) doesn't fire N writes per turn.
-  // Keyed by conversation id — switching conversations cancels the pending
+  // Keyed by conversation id: switching conversations cancels the pending
   // write for the previous one.
   const syncTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
@@ -685,7 +685,7 @@ export function ChatPanel() {
   );
 
   // Generate 2-3 follow-up questions on a throwaway session so the main
-  // conversation memory isn't polluted. Best-effort — failures are silent.
+  // conversation memory isn't polluted. Best-effort: failures are silent.
   const generateFollowups = useCallback(
     (convId: string, userText: string, assistantText: string) => {
       // Skip if the answer is short (likely an error or one-liner).
@@ -693,7 +693,7 @@ export function ChatPanel() {
       followupAbortRef.current?.abort();
       setFollowupsLoading(true);
       const prompt =
-        `Suggest 3 short, specific follow-up questions a DBA might ask next, based on the Q&A below. Return ONLY a JSON array of 3 strings — no other text, no markdown, no code fences. Example: ["q1","q2","q3"].\n\n` +
+        `Suggest 3 short, specific follow-up questions a DBA might ask next, based on the Q&A below. Return ONLY a JSON array of 3 strings, no other text, no markdown, no code fences. Example: ["q1","q2","q3"].\n\n` +
         `Q: ${userText}\n\nA: ${assistantText.slice(0, 4000)}`;
       let buffer = "";
       followupAbortRef.current = streamChat(
@@ -742,7 +742,7 @@ export function ChatPanel() {
         modelId,
         (u) => {
           // Attribute followup LLM tokens to the real conversation's totals.
-          // Do NOT increment turn_count — this is a sub-call of the same turn.
+          // Do NOT increment turn_count: this is a sub-call of the same turn.
           const prev = tokenTotalsRef.current.get(convId) ?? {
             total_input_tokens: 0,
             total_output_tokens: 0,
@@ -760,7 +760,7 @@ export function ChatPanel() {
   );
 
   // Generate a concise Korean title after the first exchange on a throwaway
-  // session so the main conversation memory isn't polluted. Best-effort —
+  // session so the main conversation memory isn't polluted. Best-effort:
   // failures are silent and the first-message-slice title is kept.
   const generateTitle = useCallback(
     (convId: string, userText: string, assistantText: string) => {
@@ -768,7 +768,7 @@ export function ChatPanel() {
       if (assistantText.trim().length < 40) return;
       titleAbortRef.current?.abort();
       const prompt =
-        `이 질문/답변을 6단어 이내의 간결한 한국어 제목으로 요약해줘. 제목 텍스트만 출력 — 따옴표, 마크다운, 코드펜스, 접두어 금지.\n\n` +
+        `이 질문/답변을 6단어 이내의 간결한 한국어 제목으로 요약해줘. 제목 텍스트만 출력. 따옴표, 마크다운, 코드펜스, 접두어 금지.\n\n` +
         `Q: ${userText}\n\nA: ${assistantText.slice(0, 2000)}`;
       let buffer = "";
       titleAbortRef.current = streamChat(
@@ -799,14 +799,14 @@ export function ChatPanel() {
           );
         },
         () => {
-          // Silent failure — keep the first-message title.
+          // Silent failure: keep the first-message title.
         },
         // Throwaway session id so the agent's memory stays clean.
         `title-${convId}-${Date.now()}`,
         modelId,
         (u) => {
           // Attribute title LLM tokens to the real conversation's totals.
-          // Do NOT increment turn_count — this is a sub-call of the same turn.
+          // Do NOT increment turn_count: this is a sub-call of the same turn.
           const prev = tokenTotalsRef.current.get(convId) ?? {
             total_input_tokens: 0,
             total_output_tokens: 0,
@@ -1125,9 +1125,9 @@ export function ChatPanel() {
                     <div className="flex-1 min-w-0">
                       <div className="text-xs truncate">{c.title}</div>
                       <div className="text-[10px] text-zinc-600 mt-0.5 truncate font-mono">
-                        {c.cluster_id || "—"}
+                        {c.cluster_id || "-"}
                       </div>
-                      {/* Token total — only shown when the server has recorded
+                      {/* Token total: only shown when the server has recorded
                           usage (absent for local-only or pre-tracking sessions). */}
                       {(c.total_input_tokens ?? 0) +
                         (c.total_output_tokens ?? 0) >
@@ -1143,7 +1143,7 @@ export function ChatPanel() {
                     </div>
                     <div className="flex flex-col items-end gap-1">
                       <div className="flex items-center gap-1">
-                        {/* Error badge — shown when the session's last stream
+                        {/* Error badge: shown when the session's last stream
                             ended with an error. Red dot with hover tooltip. */}
                         {c.last_error && (
                           <span
@@ -1210,7 +1210,7 @@ export function ChatPanel() {
             <label className="text-[10px] uppercase tracking-wider text-zinc-500">
               cluster
             </label>
-            {/* Searchable — a native <select> of 100+ clusters is unscannable. */}
+            {/* Searchable: a native <select> of 100+ clusters is unscannable. */}
             <SearchableClusterSelect
               value={clusterId}
               onChange={setClusterId}
@@ -1242,7 +1242,7 @@ export function ChatPanel() {
                     exportConversationToPdf(active);
                   }}
                   className="text-xs px-3 py-1.5 border border-zinc-700 text-zinc-400 hover:border-amber-500/40 hover:text-amber-300 transition-colors"
-                  title="대화 전체를 PDF로 저장 — 채팅 내용만 담긴 브라우저 인쇄 창이 열립니다."
+                  title="대화 전체를 PDF로 저장. 채팅 내용만 담긴 브라우저 인쇄 창이 열립니다."
                 >
                   🖨 pdf
                 </button>
@@ -1357,7 +1357,7 @@ export function ChatPanel() {
                 if (userIdx < 0) return;
                 const userText = messages[userIdx].content;
                 // Excise the incomplete assistant bubble AND the user turn that
-                // sendText is about to re-add — prevents duplication.
+                // sendText is about to re-add, prevents duplication.
                 if (activeId) {
                   persist((prev) =>
                     prev.map((c) => {
@@ -1446,7 +1446,7 @@ export function ChatPanel() {
               </label>
               <label className="block">
                 <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
-                  본문 (Markdown — 자동 채워짐, 편집 가능)
+                  본문 (Markdown: 자동 채워짐, 편집 가능)
                 </div>
                 <textarea
                   value={runbookDraft.body_md}

@@ -49,7 +49,7 @@ def collect_dynamodb_metrics(cw, dynamo, cache_execute, cluster_id, table_name, 
     gsi_list = []  # populated inside the try block; empty on describe_table failure
     try:
         t = dynamo.describe_table(TableName=table_name)["Table"]
-        # A successful describe with no BillingModeSummary IS provisioned — keep that default.
+        # A successful describe with no BillingModeSummary IS provisioned. Keep that default.
         billing_mode = (t.get("BillingModeSummary") or {}).get("BillingMode", "PROVISIONED")
         # Attribute name -> type (S/N/B), so key schemas can show the data type.
         attrs = {a["AttributeName"]: a.get("AttributeType", "")

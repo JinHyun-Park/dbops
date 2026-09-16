@@ -1,9 +1,9 @@
-"""approval_guard — server-side verification that a write tool has a
+"""approval_guard: server-side verification that a write tool has a
 valid DBA approval before it executes.
 
 Before this module existed, write tools (`execute_sql`, `modify_parameter`,
 `modify_scaling`, `manage_maintenance`) treated `approved=true` as a soft
-parameter — the agent could set it without any external check. The system
+parameter: the agent could set it without any external check. The system
 prompt asked the agent to wait for DBA confirmation in chat, but that's
 suggestion-grade enforcement: a prompt-injected user message or a buggy
 agent could bypass it.
@@ -42,7 +42,7 @@ from botocore.exceptions import ClientError
 
 # Approvals older than this (measured from `resolved_at`, i.e. the moment the
 # DBA approved) cannot be replayed. Kept short so a long-stale approval can't be
-# executed against a world that has since moved on — but 60 min gives an operator
+# executed against a world that has since moved on, but 60 min gives an operator
 # realistic headroom to approve and let the agent execute.
 REPLAY_WINDOW_SECONDS = 60 * 60
 
@@ -51,7 +51,7 @@ def _bypass_enabled() -> bool:
     """Whether the local-dev approval bypass is active.
 
     APPROVAL_GUARD_BYPASS lets local dev and unit tests skip the DDB round-trip.
-    It is REFUSED inside any AWS Lambda runtime — even if the env var is somehow
+    It is REFUSED inside any AWS Lambda runtime, even if the env var is somehow
     set on a deployed function (misconfig, tampering, a copy-pasted template),
     the guard will not honor it in production. `AWS_LAMBDA_FUNCTION_NAME` /
     `AWS_EXECUTION_ENV` are always present in the Lambda runtime and absent
@@ -60,7 +60,7 @@ def _bypass_enabled() -> bool:
         return False
     if os.environ.get("AWS_LAMBDA_FUNCTION_NAME") or os.environ.get("AWS_EXECUTION_ENV"):
         print(
-            "[approval_guard] APPROVAL_GUARD_BYPASS is set but IGNORED — refusing "
+            "[approval_guard] APPROVAL_GUARD_BYPASS is set but IGNORED, refusing "
             "to bypass approval inside a Lambda runtime"
         )
         return False
@@ -104,7 +104,7 @@ def _project(action_type: str, details: dict) -> dict:
     """Reduce an action payload to the fields that DEFINE the operation, so
     the approval is bound to *what* gets executed, not just (cluster, action).
     Both request_approval (storing the hash) and verify_approval (checking it)
-    run the same projection — that's the whole point of keeping it here.
+    run the same projection: that's the whole point of keeping it here.
 
     Per-tool projections mirror each write tool's args. Aliases are tolerated
     (the approval_required response sometimes uses a different key than the
@@ -172,7 +172,7 @@ def _project(action_type: str, details: dict) -> dict:
             sid = ""
         return {"snapshot_id": sid}
     if action_type == "restore_cluster":
-        # Bind the full restore spec — an approval for "restore snapshot A into
+        # Bind the full restore spec: an approval for "restore snapshot A into
         # cluster X" must not be reusable for snapshot B or a PITR target.
         return {
             "new_cluster_id": str(d.get("new_cluster_id") or "").strip(),
@@ -183,7 +183,7 @@ def _project(action_type: str, details: dict) -> dict:
         }
     # ===== Aurora custom cluster endpoints (P2-⑤) =====
     # Member lists are an unordered SET (AWS ignores order), so sort before
-    # hashing — the agent may echo them in any order across request/execute.
+    # hashing: the agent may echo them in any order across request/execute.
     if action_type == "create_custom_endpoint":
         return {
             "endpoint_identifier": str(d.get("endpoint_identifier") or "").strip(),
@@ -238,7 +238,7 @@ def _project(action_type: str, details: dict) -> dict:
         }
     # ===== NoSQL write tools (multi-engine #P3.6 Group C) =====
     if action_type == "modify_dynamodb_capacity":
-        # Bind the table target explicitly (fix #1 — no user-controllable target
+        # Bind the table target explicitly (fix #1: no user-controllable target
         # outside the hash) + the EFFECTIVE (validated >=1) rcu/wcu so the hashed
         # value equals the executed value (fix #4). billing_mode is the requested
         # switch ("" when not switching). force is bound for parity (v1 unused).
@@ -258,7 +258,7 @@ def _project(action_type: str, details: dict) -> dict:
         }
     if action_type == "enable_dynamodb_pitr":
         # force is required to DISABLE (fix #7) and is hashed so the DBA approves
-        # the forceful variant specifically — a disable approval can't be reused
+        # the forceful variant specifically: a disable approval can't be reused
         # for a different (enable) shape and vice-versa.
         return {
             "enabled": as_bool(d.get("enabled")),
@@ -295,7 +295,7 @@ def _project(action_type: str, details: dict) -> dict:
         }
     if action_type == "create_docdb_index":
         # stage 2: handler impl lands later. keys is an ORDERED list of
-        # [field, direction] pairs (fix #2) — compound-index field order is
+        # [field, direction] pairs (fix #2): compound-index field order is
         # semantically significant, so we must NOT sort it: [["a",1],["b",1]] and
         # [["b",1],["a",1]] are different indexes and MUST hash differently.
         raw_keys = d.get("keys") or []
@@ -374,7 +374,7 @@ def _project(action_type: str, details: dict) -> dict:
             "parameter_group": str(d.get("parameter_group") or "").strip(),
         }
     # other / unknown: bind the FULL detail set VERBATIM (no numeric coercion).
-    # This closes the loose "other" bucket — an "other" approval now matches
+    # This closes the loose "other" bucket: an "other" approval now matches
     # only if the entire registered payload matches. We deliberately do NOT
     # run _norm_val here: collapsing distinct strings like "001" and 1 would
     # let two different "other" operations share a hash.
@@ -435,11 +435,11 @@ def _find_approval(table, approval_id: str) -> Optional[dict]:
     code paths write rows with different created_at formats (ms-epoch from
     `request_approval`, ISO from manual POSTs), so we have to scan by
     approval_id. The table is small (one row per write request) so a scan
-    is acceptable here — the alternative is a GSI which costs more than
+    is acceptable here: the alternative is a GSI which costs more than
     it saves.
 
     NO Limit here: DynamoDB applies Limit BEFORE FilterExpression, so
-    `Limit=1` means "scan one row, then filter" — as soon as the table held
+    `Limit=1` means "scan one row, then filter". As soon as the table held
     a second row the matching approval stopped being found and every write
     was refused with "not found". Paginate to the end instead."""
     kwargs = {
@@ -474,12 +474,12 @@ def verify_approval(
     `payload` is the operation the tool is ABOUT to execute (its real args).
     If the approval row was minted with a `payload_hash` (every row created by
     `request_approval` after payload-binding shipped), the projected hash of
-    `payload` must match — otherwise a harmless-looking approval cannot be
+    `payload` must match, otherwise a harmless-looking approval cannot be
     redirected to a different SQL/parameter/window on the same cluster.
 
     Returns `{"ok": True}` or `{"ok": False, "reason": "..."}`.
     """
-    # Local-dev escape hatch — gated by a server-side env var so the agent
+    # Local-dev escape hatch, gated by a server-side env var so the agent
     # cannot trigger it from tool arguments, AND refused inside the Lambda
     # runtime so a misconfigured deploy can't turn approvals into a no-op.
     # Checked BEFORE approval_id validation so unit tests don't have to thread
@@ -488,14 +488,14 @@ def verify_approval(
         return {"ok": True, "bypass": True}
 
     if not approval_id:
-        return {"ok": False, "reason": "approval_id missing — call request_approval first"}
+        return {"ok": False, "reason": "approval_id missing, call request_approval first"}
 
     table_name = os.environ.get("APPROVALS_TABLE", "")
     if not table_name:
         # Fail-closed: if the deployment forgot to wire the approvals
         # table we refuse to execute writes rather than silently allowing
         # them.
-        return {"ok": False, "reason": "APPROVALS_TABLE not configured — server cannot verify"}
+        return {"ok": False, "reason": "APPROVALS_TABLE not configured, server cannot verify"}
 
     ddb = boto3.resource("dynamodb").Table(table_name)
     row = _find_approval(ddb, approval_id)
@@ -504,7 +504,7 @@ def verify_approval(
 
     status = row.get("approval_status", "")
     if status == "consumed":
-        return {"ok": False, "reason": "approval already consumed — request a new one"}
+        return {"ok": False, "reason": "approval already consumed, request a new one"}
     if status != "approved":
         return {
             "ok": False,
@@ -522,7 +522,7 @@ def verify_approval(
         }
 
     row_action = row.get("action_type", "")
-    # 빈 action_type은 거부한다 — 비어 있으면 아래 매칭이 통째로 스킵되어
+    # 빈 action_type은 거부한다. 비어 있으면 아래 매칭이 통째로 스킵되어
     # 임의 write tool의 승인으로 재사용될 수 있다(Codex 감사 적발). 행이
     # tool_name만 있고 action_type이 없는 레거시/수동 POST가 이 구멍을
     # 만들었다. fail-closed: action_type이 없는 승인은 어떤 쓰기도 승인하지
@@ -530,7 +530,7 @@ def verify_approval(
     if not row_action:
         return {
             "ok": False,
-            "reason": "approval row has no action_type — cannot verify intent (fail-closed)",
+            "reason": "approval row has no action_type, cannot verify intent (fail-closed)",
         }
     # "other" is a permissive bucket the agent uses when the action doesn't
     # cleanly map. Tools that pass action_type="other" accept any approval
@@ -548,7 +548,7 @@ def verify_approval(
     # just an (action_type, cluster) pair. Rows minted by request_approval
     # carry a payload_hash; when present, the tool must pass the exact payload
     # it is about to run and it must hash-match. Rows without a payload_hash
-    # are legacy (pre-binding) — skip the check rather than break in-flight
+    # are legacy (pre-binding): skip the check rather than break in-flight
     # approvals across the deploy boundary.
     expected_hash = row.get("payload_hash")
     if expected_hash:
@@ -557,7 +557,7 @@ def verify_approval(
                 "ok": False,
                 "reason": (
                     "approval is payload-bound but the tool passed no payload "
-                    "to verify — server refuses to execute"
+                    "to verify, server refuses to execute"
                 ),
             }
         if canonical_action_hash(action_type, payload) != expected_hash:
@@ -565,25 +565,25 @@ def verify_approval(
                 "ok": False,
                 "reason": (
                     "approved payload does not match the operation being "
-                    "executed — request a new approval for this exact change"
+                    "executed, request a new approval for this exact change"
                 ),
             }
 
     resolved_at = _parse_resolved_at(row.get("resolved_at", ""))
     if resolved_at is None:
-        return {"ok": False, "reason": "approval has no resolved_at — was it actually approved?"}
+        return {"ok": False, "reason": "approval has no resolved_at, was it actually approved?"}
     age_seconds = time.time() - resolved_at
     if age_seconds > REPLAY_WINDOW_SECONDS:
         return {
             "ok": False,
             "reason": (
                 f"approval is {int(age_seconds // 60)} minutes old "
-                f"(replay window is {REPLAY_WINDOW_SECONDS // 60} min) — "
+                f"(replay window is {REPLAY_WINDOW_SECONDS // 60} min), "
                 "request a new approval"
             ),
         }
 
-    # Atomic consume: only succeeds if status is still "approved" — prevents
+    # Atomic consume: only succeeds if status is still "approved". Prevents
     # two concurrent re-issues from both passing the check above.
     try:
         ddb.update_item(

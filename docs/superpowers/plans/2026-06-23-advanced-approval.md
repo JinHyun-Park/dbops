@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let an admin define approval policies that route approval rights for specific clusters/actions to designated approvers, and prevent self-approval — with a safe fallback to today's "any admin" rule when no policy matches.
+**Goal:** Let an admin define approval policies that route approval rights for specific clusters/actions to designated approvers, and prevent self-approval, with a safe fallback to today's "any admin" rule when no policy matches.
 
 **Architecture:** A `dbops-{env}-approval-policies` DynamoDB table (FoundationStack); a pure `resolve_eligible_approvers()` matching function + enforcement in the existing `api/approvals/handler.py` PUT approve flow; an admin-only fail-closed CRUD API (`api/approval_policies/handler.py`) with agent-stack routes; an admin-only management UI hidden from viewers.
 
@@ -13,7 +13,7 @@
 - **No `Co-Authored-By: Claude` trailer** in any commit (user rule).
 - **OpenAPI parity:** any new route requires `python tools/openapi_gen.py` regen; `tests/unit/test_openapi_spec.py` enforces it.
 - **CDK-only infra:** all AWS resources via CDK stacks. No AWS CLI/console changes.
-- **Admin gate is server-side + fail-closed:** copy the hardened `api/config/handler.py` `_is_admin` exactly — `if not auth.lower().startswith("bearer "): return False`; `claims = _decode_jwt_payload(...)`; `if not claims: return False`; groups not a list → False; `dbops-viewer` without `dbops-admin` → False; else True. UI nav gating is cosmetic; the API enforces.
+- **Admin gate is server-side + fail-closed:** copy the hardened `api/config/handler.py` `_is_admin` exactly: `if not auth.lower().startswith("bearer "): return False`; `claims = _decode_jwt_payload(...)`; `if not claims: return False`; groups not a list → False; `dbops-viewer` without `dbops-admin` → False; else True. UI nav gating is cosmetic; the API enforces.
 - **Enforcement is additive + fallback:** a matched policy narrows approval to (admin AND in the designated set AND ≠ requester); no match → current behavior (any admin). Self-approval is always prevented. Both new checks apply to `action == "approve"` only; `reject` keeps the `_is_admin`-only gate.
 - **Fail-safe enforcement:** a policy-table read error in the approve path is swallowed → eligible set empty → fallback to any-admin. Never block the approval loop on policy-infra failure. Self-approval prevention does not depend on the table.
 - **Approver identity** is matched case-insensitively: stored approvers are trimmed + lower-cased; the caller identity is `_caller_name(event)` lower-cased.
@@ -21,7 +21,7 @@
 
 ---
 
-### Task 1: Foundation — `approval-policies` DynamoDB table + grant helpers
+### Task 1: Foundation (`approval-policies` DynamoDB table + grant helpers)
 
 **Files:**
 
@@ -30,12 +30,12 @@
 
 **Interfaces:**
 
-- Produces: `FoundationStack.approval_policies_table` (a `dynamodb.Table`); `FoundationStack.grant_approval_policy_read(fn)` and `FoundationStack.grant_approval_policy_write(fn)` — each sets `APPROVAL_POLICIES_TABLE` env on `fn` and grants read (or read/write).
+- Produces: `FoundationStack.approval_policies_table` (a `dynamodb.Table`); `FoundationStack.grant_approval_policy_read(fn)` and `FoundationStack.grant_approval_policy_write(fn)`: each sets `APPROVAL_POLICIES_TABLE` env on `fn` and grants read (or read/write).
 
 - [ ] **Step 1: Add the table.** In `cdk/stacks/foundation_stack.py`, immediately after the `self.app_config_table = dynamodb.Table(...)` block (the App Config table added in a prior feature), add:
 
 ```python
-        # ===== Approval Policies — designated-approver routing =====
+        # ===== Approval Policies: designated-approver routing =====
         # Admin-defined policies that restrict WHO may approve specific
         # cluster/action requests (advanced approval). Lives in foundation so
         # the policy CRUD API and the approvals API (both agent stack) reach it
@@ -94,7 +94,7 @@ def test_approval_policies_table_present(cdk_app):
     )
 ```
 
-(Mirror whatever shape `test_app_config_table_present` already uses for synthesizing the foundation stack — match it exactly; the block above mirrors the in-app-config feature's test.)
+(Mirror whatever shape `test_app_config_table_present` already uses for synthesizing the foundation stack: match it exactly; the block above mirrors the in-app-config feature's test.)
 
 - [ ] **Step 4: Run synth tests.**
 
@@ -110,7 +110,7 @@ git commit -m "feat(approval): approval-policies DynamoDB table + grant helpers 
 
 ---
 
-### Task 2: Policy CRUD API — handler + routes + OpenAPI
+### Task 2: Policy CRUD API (handler + routes + OpenAPI)
 
 **Files:**
 
@@ -128,13 +128,13 @@ git commit -m "feat(approval): approval-policies DynamoDB table + grant helpers 
 - [ ] **Step 1: Write the handler.** Create `api/approval_policies/handler.py`:
 
 ```python
-"""Approval-policies API — admin-defined designated-approver routing.
+"""Approval-policies API: admin-defined designated-approver routing.
 
 Routes:
-  GET    /api/approval-policies        — list all policies
-  POST   /api/approval-policies        — create (generates policy_id)
-  PUT    /api/approval-policies/{id}    — update
-  DELETE /api/approval-policies/{id}    — delete
+  GET    /api/approval-policies        - list all policies
+  POST   /api/approval-policies        - create (generates policy_id)
+  PUT    /api/approval-policies/{id}    - update
+  DELETE /api/approval-policies/{id}    - delete
 
 A policy = {policy_id, cluster_id, action_type, approvers[], description,
 updated_at, updated_by}. cluster_id / action_type are an exact value or "*".
@@ -420,7 +420,7 @@ Expected: PASS (all patch `_table`, no real AWS).
 - [ ] **Step 5: Add the CDK Lambda + routes.** In `cdk/stacks/agent_stack.py`, after the `approvals_lambda` block (after its grants/policy, ~line 783), add:
 
 ```python
-        # Approval-policies API — admin CRUD over designated-approver policies
+        # Approval-policies API: admin CRUD over designated-approver policies
         # that the approvals API enforces. Admin-gated + fail-closed in-handler.
         approval_policies_lambda = lambda_.Function(
             self, "ApprovalPoliciesApi",
@@ -435,7 +435,7 @@ Expected: PASS (all patch `_table`, no real AWS).
 Then near the approvals route registrations (~line 1540, after the `/api/approvals/{id}` route), add:
 
 ```python
-        # Approval policies — admin-gated designated-approver routing
+        # Approval policies: admin-gated designated-approver routing
         approval_policies_integration = integrations.HttpLambdaIntegration(
             "ApprovalPoliciesIntegration", approval_policies_lambda
         )
@@ -470,7 +470,7 @@ git commit -m "feat(approval): admin-gated CRUD /api/approval-policies + routes 
 
 ---
 
-### Task 3: Enforcement — matching function + designated/self-approval checks in approvals PUT
+### Task 3: Enforcement (matching function + designated/self-approval checks in approvals PUT)
 
 **Files:**
 
@@ -575,7 +575,7 @@ def _load_eligible_approvers(cluster_id, action_type) -> set:
         return set()
 ```
 
-Confirm `import os` and `import boto3` are already present at the top of `api/approvals/handler.py` (they are — the handler already uses both). If `boto3` is not imported, add it.
+Confirm `import os` and `import boto3` are already present at the top of `api/approvals/handler.py` (they are: the handler already uses both). If `boto3` is not imported, add it.
 
 - [ ] **Step 4: Run matching tests, expect PASS.**
 
@@ -585,7 +585,7 @@ Expected: PASS (the 4 matching tests).
 - [ ] **Step 5: Insert enforcement into the PUT approve flow.** In `api/approvals/handler.py`, find the PUT block. After the `_is_admin` 403 check and after `action = body.get("action")` is validated to be `"approve"`/`"reject"`, and BEFORE the `_scan_all(... approval_id ...)` lookup that fetches `item`, the code already loads `item`. Insert the new checks immediately AFTER `item = items[0]` and BEFORE the `try: table.update_item(... pending→approved ...)`:
 
 ```python
-        # Advanced approval — designated approvers + separation of duties.
+        # Advanced approval: designated approvers + separation of duties.
         # Applies to approve only; reject keeps the _is_admin-only gate so a
         # requester can still cancel their own request.
         if action == "approve":
@@ -596,7 +596,7 @@ Expected: PASS (the 4 matching tests).
                     "headers": headers,
                     "body": json.dumps({
                         "error": "self_approval",
-                        "reason": "자기 요청은 승인할 수 없습니다 — 다른 승인자가 처리해야 합니다.",
+                        "reason": "자기 요청은 승인할 수 없습니다. 다른 승인자가 처리해야 합니다.",
                     }),
                 }
             action_type = item.get("action_type") or item.get("tool_name")
@@ -614,7 +614,7 @@ Expected: PASS (the 4 matching tests).
 
 (The exact anchor: this block goes between `item = items[0]` and the comment `# pending 상태에서만 전이 허용` that precedes the `try: table.update_item(...)`. Use the surrounding lines to place it precisely.)
 
-- [ ] **Step 6: Add enforcement tests** to `tests/unit/api/test_approval_enforcement.py` (append). The approvals `lambda_handler` builds its DDB table inline as `table = boto3.resource("dynamodb").Table(os.environ["APPROVALS_TABLE"])` (no `_table()` helper — do NOT add one). So set `APPROVALS_TABLE` and patch `handler.boto3` so the inline table is a mock; patch `handler._scan_all` (the approval-row lookup) and `handler._load_eligible_approvers` (the policy resolution). Append a module-level env default near the top of the file (after the handler import):
+- [ ] **Step 6: Add enforcement tests** to `tests/unit/api/test_approval_enforcement.py` (append). The approvals `lambda_handler` builds its DDB table inline as `table = boto3.resource("dynamodb").Table(os.environ["APPROVALS_TABLE"])` (no `_table()` helper: do NOT add one). So set `APPROVALS_TABLE` and patch `handler.boto3` so the inline table is a mock; patch `handler._scan_all` (the approval-row lookup) and `handler._load_eligible_approvers` (the policy resolution). Append a module-level env default near the top of the file (after the handler import):
 
 ```python
 import os as _os
@@ -685,7 +685,7 @@ def test_no_policy_falls_back_to_any_admin():
     assert r["statusCode"] == 200
 ```
 
-Why this works: for the two 403 cases the handler returns before any `table.update_item`, so no AWS call. For the 200 cases the inline `table` is a `handler.boto3` mock, so `update_item` is a no-op MagicMock (no `ConditionalCheckFailedException`); `action_type="execute_sql"` skips the `enable_data_api` branch, so the handler returns 200. `_caller_name` resolves `approver` from the token's `preferred_username`. If reading the live handler reveals it routes the lookup differently (e.g. a different helper than `_scan_all` for the `approval_id` fetch), align the patch target to whatever the PUT path actually calls — keep `handler.boto3` patched regardless.
+Why this works: for the two 403 cases the handler returns before any `table.update_item`, so no AWS call. For the 200 cases the inline `table` is a `handler.boto3` mock, so `update_item` is a no-op MagicMock (no `ConditionalCheckFailedException`); `action_type="execute_sql"` skips the `enable_data_api` branch, so the handler returns 200. `_caller_name` resolves `approver` from the token's `preferred_username`. If reading the live handler reveals it routes the lookup differently (e.g. a different helper than `_scan_all` for the `approval_id` fetch), align the patch target to whatever the PUT path actually calls: keep `handler.boto3` patched regardless.
 
 - [ ] **Step 7: Run enforcement tests.**
 
@@ -712,7 +712,7 @@ git commit -m "feat(approval): enforce designated approvers + block self-approva
 
 ---
 
-### Task 4: Admin management UI — policy page + nav + api-client
+### Task 4: Admin management UI (policy page + nav + api-client)
 
 **Files:**
 
@@ -806,7 +806,7 @@ export async function deleteApprovalPolicy(id: string): Promise<void> {
   - Each policy row: an "수정" (edit → PUT via `updateApprovalPolicy`) and "삭제" (delete via `deleteApprovalPolicy`, with a `confirm()` guard) action; update local state from the response/removal.
   - Surface the backend error message (`error.message`) on failure (e.g. "approvers must contain at least one non-empty entry").
   - Korean helper copy: explain `*` wildcard, most-specific-wins, that a matched policy means ONLY listed approvers may approve (admins not listed are blocked), unmatched requests fall back to any admin, and `action_type` matches the request's action_type/tool_name (e.g. `execute_sql`, `modify_parameter`).
-  - Match the design quality bar — reuse design-system primitives, no raw-div inconsistency.
+  - Match the design quality bar: reuse design-system primitives, no raw-div inconsistency.
 
 - [ ] **Step 3: Add the nav entry.** In `frontend/src/components/app-shell.tsx`, in the `NAV` "Configure" group (where `/settings` lives, added by the in-app-config feature), add after the Settings entry:
 
@@ -816,18 +816,18 @@ export async function deleteApprovalPolicy(id: string): Promise<void> {
         label: "Approval policies",
         icon: UserCheck,
         adminOnly: true,
-        hint: "지정 승인자 라우팅 — 클러스터/액션별 승인자 (관리자)",
+        hint: "지정 승인자 라우팅: 클러스터/액션별 승인자 (관리자)",
       },
 ```
 
-Import `UserCheck` from `lucide-react` (add to the existing import block; if `UserCheck` is unavailable in the installed lucide version, use `ShieldCheck` or `UserCog`). The `adminOnly` field + the visible-items filter already exist on `NavItem` (from the in-app-config feature) — no type change needed.
+Import `UserCheck` from `lucide-react` (add to the existing import block; if `UserCheck` is unavailable in the installed lucide version, use `ShieldCheck` or `UserCog`). The `adminOnly` field + the visible-items filter already exist on `NavItem` (from the in-app-config feature): no type change needed.
 
 - [ ] **Step 4: Add the command-palette entry.** In `frontend/src/components/design-system/command-palette.tsx`, add to the `commands` array (Configure group), mirroring the existing `settings` entry's `adminOnly: true`:
 
 ```tsx
   {
     id: "approval-policies",
-    label: "Approval policies — 지정 승인자 라우팅",
+    label: "Approval policies: 지정 승인자 라우팅",
     path: "/approval-policies",
     group: "Configure",
     adminOnly: true,
@@ -852,5 +852,5 @@ git commit -m "feat(approval): admin UI for designated-approver policies (hidden
 
 - Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`.
 - Deploy dev: `cdk deploy dbops-dev-foundation dbops-dev-agent` (table + grants + both APIs), then frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-123456789012 --delete --exclude config.json` → CloudFront invalidation `E1234567890ABC`.
-- Live smoke (viewer e2e token): policy CRUD viewer → 403 (incl. no-Bearer / garbage → 403); `GET /api/approval-policies` admin shape. Designated-approver enforcement (approve requiring a designated user) needs an admin token + a seeded policy — cover by unit tests + document the live gap honestly.
+- Live smoke (viewer e2e token): policy CRUD viewer → 403 (incl. no-Bearer / garbage → 403); `GET /api/approval-policies` admin shape. Designated-approver enforcement (approve requiring a designated user) needs an admin token + a seeded policy: cover by unit tests + document the live gap honestly.
 - Then `superpowers:finishing-a-development-branch`.

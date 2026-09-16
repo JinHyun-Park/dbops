@@ -47,7 +47,7 @@ def test_manage_maintenance_modify_with_approval(mock_rds_for):
 def test_manage_maintenance_modify_approved_without_id_rejected():
     """Bare `approved=True` (no approval_id) must be rejected by the guard
     when APPROVALS_TABLE is configured."""
-    # NOTE: don't clear the env — manage_maintenance_impl constructs an
+    # NOTE: don't clear the env. manage_maintenance_impl constructs an
     # RDS client at the top of the function, which needs AWS_DEFAULT_REGION
     # to exist (CI pins it). We only need APPROVALS_TABLE present and
     # APPROVAL_GUARD_BYPASS empty for the guard's rejection branch.

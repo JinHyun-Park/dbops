@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-11-multi-engine-foundation-design.md`
 
-**Cross-engine convention:** there is no shared backend Lambda layer — `engine_family.py` is duplicated verbatim in each backend package (`api/clusters/`, `data-pipeline/etl_collector/collectors/`, `mcp-servers/mcp_servers/shared/`). The frontend has its own copy in `lib/engine.ts`. A header comment in each marks it canonical-sync.
+**Cross-engine convention:** there is no shared backend Lambda layer: `engine_family.py` is duplicated verbatim in each backend package (`api/clusters/`, `data-pipeline/etl_collector/collectors/`, `mcp-servers/mcp_servers/shared/`). The frontend has its own copy in `lib/engine.ts`. A header comment in each marks it canonical-sync.
 
 **Codex adversarial checkpoints (run between phases, per user request):**
 
@@ -25,26 +25,26 @@
 
 **New backend files:**
 
-- `data-pipeline/etl_collector/collectors/engine_family.py` — `engine_family()`, `CAPABILITIES`, `dynamodb_cluster_id()` (canonical).
-- `data-pipeline/etl_collector/collectors/docdb_cw_collector.py` — DocDB CloudWatch (`AWS/DocDB`).
-- `data-pipeline/etl_collector/collectors/dynamodb_cw_collector.py` — DynamoDB CloudWatch (`AWS/DynamoDB`) + `describe_table` meta.
-- `api/clusters/engine_family.py` — verbatim copy of the canonical helper.
-- `mcp-servers/mcp_servers/shared/engine_family.py` — verbatim copy (for the agent guard).
+- `data-pipeline/etl_collector/collectors/engine_family.py`: `engine_family()`, `CAPABILITIES`, `dynamodb_cluster_id()` (canonical).
+- `data-pipeline/etl_collector/collectors/docdb_cw_collector.py`: DocDB CloudWatch (`AWS/DocDB`).
+- `data-pipeline/etl_collector/collectors/dynamodb_cw_collector.py`: DynamoDB CloudWatch (`AWS/DynamoDB`) + `describe_table` meta.
+- `api/clusters/engine_family.py`: verbatim copy of the canonical helper.
+- `mcp-servers/mcp_servers/shared/engine_family.py`: verbatim copy (for the agent guard).
 
 **Modified backend files:**
 
-- `data-pipeline/etl_collector/handler.py` — dispatch by engine_family before RDS calls; gate cost/findings.
-- `data-pipeline/etl_collector/collectors/meta_collector.py` — write `resource_details` for relational (no behavior change) + accept it.
-- `data-pipeline/schema_migrator/sql/schema_v16.sql` — `ALTER TABLE cluster_meta ADD COLUMN resource_details JSONB`.
-- `api/clusters/handler.py` — per-family discovery + registration + test-connection.
-- `api/dashboard/handler.py` — gate topology/backups/capacity/health endpoints by engine_family.
+- `data-pipeline/etl_collector/handler.py`: dispatch by engine_family before RDS calls; gate cost/findings.
+- `data-pipeline/etl_collector/collectors/meta_collector.py`: write `resource_details` for relational (no behavior change) + accept it.
+- `data-pipeline/schema_migrator/sql/schema_v16.sql`: `ALTER TABLE cluster_meta ADD COLUMN resource_details JSONB`.
+- `api/clusters/handler.py`: per-family discovery + registration + test-connection.
+- `api/dashboard/handler.py`: gate topology/backups/capacity/health endpoints by engine_family.
 
 **New / modified frontend files:**
 
-- `frontend/src/lib/engine.ts` — add `engineFamily()`, family badge/label/noun, `CAPABILITIES`.
-- `frontend/src/lib/group-by-family.ts` — `groupByEngineFamily()` util (new).
-- `frontend/src/app/dashboard/page.tsx` — render panels from capability map.
-- `frontend/src/app/fleet/page.tsx`, `compare/page.tsx`, `clusters/page.tsx`, `components/design-system/cluster-dropdown.tsx`, `components/design-system/command-palette.tsx` — family grouping + display `resource_name`.
+- `frontend/src/lib/engine.ts`: add `engineFamily()`, family badge/label/noun, `CAPABILITIES`.
+- `frontend/src/lib/group-by-family.ts`: `groupByEngineFamily()` util (new).
+- `frontend/src/app/dashboard/page.tsx`: render panels from capability map.
+- `frontend/src/app/fleet/page.tsx`, `compare/page.tsx`, `clusters/page.tsx`, `components/design-system/cluster-dropdown.tsx`, `components/design-system/command-palette.tsx`: family grouping + display `resource_name`.
 - New dashboard panels: `components/dashboard/dynamodb-overview-panel.tsx`, `docdb-overview-panel.tsx`.
 
 **New test files:**
@@ -58,7 +58,7 @@
 
 ---
 
-# PHASE 1 — Engine-family model + data model + ETL dispatch
+# PHASE 1: Engine-family model + data model + ETL dispatch
 
 ### Task 1: `engine_family` helper + capability map (canonical)
 
@@ -178,7 +178,7 @@ CAPABILITIES = {
 def dynamodb_cluster_id(account_id, region, table_name):
     """Regex-safe registry PK for a DynamoDB table. Table names allow `_`/`.`
     and up to 255 chars, which the API validators (`^[a-zA-Z0-9-]{1,63}$`)
-    reject — so use a deterministic slug and keep the real name in resource_name."""
+    reject, so use a deterministic slug and keep the real name in resource_name."""
     h = hashlib.sha256(f"{account_id}:{region}:{table_name}".encode()).hexdigest()[:12]
     return f"ddb-{h}"
 ```
@@ -197,7 +197,7 @@ git commit -m "feat(multi-engine): engine_family + capability map + dynamodb slu
 
 ---
 
-### Task 2: Schema v16 — `resource_details` JSONB column
+### Task 2: Schema v16 (`resource_details` JSONB column)
 
 **Files:**
 
@@ -206,7 +206,7 @@ git commit -m "feat(multi-engine): engine_family + capability map + dynamodb slu
 - [ ] **Step 1: Write the migration**
 
 ```sql
--- schema_v16.sql — neutral resource meta for non-relational engines.
+-- schema_v16.sql: neutral resource meta for non-relational engines.
 -- Relational rows keep using the typed columns (instance_class, storage_size_gb…);
 -- DynamoDB/DocDB store engine-specific meta here (billing_mode, item_count,
 -- table_size_bytes, gsi[], instances[], ttl/pitr/streams flags).
@@ -346,7 +346,7 @@ Move the existing relational body (meta/pi/cw/stats/health/param/capacity/cost) 
 - [ ] **Step 4: Run the test + the existing ETL tests**
 
 Run: `python -m pytest tests/unit/data_pipeline/ -q`
-Expected: PASS (new dispatch test + all existing collector tests still green — the relational path is unchanged).
+Expected: PASS (new dispatch test + all existing collector tests still green; the relational path is unchanged).
 
 - [ ] **Step 5: Commit**
 
@@ -411,7 +411,7 @@ Cross-check findings against code; fold in valid ones before Phase 2.
 
 ---
 
-# PHASE 2 — New collectors + registration + backend gating
+# PHASE 2: New collectors + registration + backend gating
 
 ### Task 5: DynamoDB CloudWatch + meta collector
 
@@ -507,7 +507,7 @@ _PROVISIONED_METRICS_AVG = [
     ("ProvisionedReadCapacityUnits", "provisioned_rcu"),
     ("ProvisionedWriteCapacityUnits", "provisioned_wcu"),
 ]
-# latency requires an Operation dimension — collect a core op set
+# latency requires an Operation dimension: collect a core op set
 _LATENCY_OPS = ["GetItem", "Query", "PutItem", "Scan"]
 
 
@@ -745,7 +745,7 @@ git commit -m "feat(etl): DocumentDB CloudWatch collector (AWS/DocDB, cluster+wr
 **Files:**
 
 - Create: `api/clusters/engine_family.py` (verbatim copy of Task 1 canonical)
-- Modify: `api/clusters/handler.py` — `_list_clusters_in_region` (289-336), `_handle_register` (346-413)
+- Modify: `api/clusters/handler.py`: `_list_clusters_in_region` (289-336), `_handle_register` (346-413)
 - Test: `tests/unit/api/test_clusters_multiengine.py`
 
 - [ ] **Step 1: Copy the canonical helper**
@@ -875,7 +875,7 @@ git commit -m "feat(api): per-family cluster registration + discovery (dynamodb/
 
 **Files:**
 
-- Modify: `api/dashboard/handler.py` — topology (~1940), backups (~2064), capacity-forecast (~1652) endpoints; `_health_findings` (~1507)
+- Modify: `api/dashboard/handler.py`: topology (~1940), backups (~2064), capacity-forecast (~1652) endpoints; `_health_findings` (~1507)
 - Create: `api/dashboard/engine_family.py` (verbatim copy)
 - Test: `tests/unit/api/test_dashboard_engine_gating.py`
 
@@ -893,7 +893,7 @@ cp data-pipeline/etl_collector/collectors/engine_family.py api/dashboard/engine_
 # and assert no RDS describe call happens.
 ```
 
-(Implementer: model the test on existing `tests/unit/api/test_*` patterns — mock the clusters table get_item to return `{"engine": "dynamodb"}` and assert the RDS client's `describe_db_clusters` is never called and the response carries `not_applicable`.)
+(Implementer: model the test on existing `tests/unit/api/test_*` patterns: mock the clusters table get_item to return `{"engine": "dynamodb"}` and assert the RDS client's `describe_db_clusters` is never called and the response carries `not_applicable`.)
 
 - [ ] **Step 2: Run to confirm failure**
 
@@ -911,7 +911,7 @@ if not CAPABILITIES[fam]["rds_meta"]:
     return _resp(200, {"not_applicable": True, "engine_family": fam})
 ```
 
-For `_health_findings`, no RDS call, but ensure it only returns rows whose `check_type` belongs to `CAPABILITIES[fam]["findings"]` (today that set is empty for non-relational, so it returns none — preventing stray findings).
+For `_health_findings`, no RDS call, but ensure it only returns rows whose `check_type` belongs to `CAPABILITIES[fam]["findings"]` (today that set is empty for non-relational, so it returns none: preventing stray findings).
 
 - [ ] **Step 4: Run tests**
 
@@ -932,7 +932,7 @@ git commit -m "feat(api): gate RDS-live dashboard endpoints + findings by engine
 **Files:**
 
 - Create: `mcp-servers/mcp_servers/shared/engine_family.py` (verbatim copy)
-- Modify: `mcp-servers/mcp_servers/shared/cluster_targets.py` (target resolution) — return a clear `unsupported_engine` signal for non-relational families.
+- Modify: `mcp-servers/mcp_servers/shared/cluster_targets.py` (target resolution): return a clear `unsupported_engine` signal for non-relational families.
 - Test: extend an existing shared test or add `tests/unit/mcp_servers/shared/test_engine_guard.py`
 
 - [ ] **Step 1: Copy helper + write failing test**
@@ -1003,7 +1003,7 @@ per-family register/discover, api/dashboard engine gating, mcp engine guard, CDK
 (1) DynamoDB Provisioned* only queried for PROVISIONED tables; latency uses Operation dim; \
 Consumed* uses Sum. (2) DocDB uses AWS/DocDB + writer DBInstanceIdentifier for instance metrics. \
 (3) register/discover never hit RDS for dynamodb; slug cluster_id passes ^[a-zA-Z0-9-]{1,63}$. \
-(4) every RDS-live dashboard endpoint is gated (topology/backups/capacity) — grep for \
+(4) every RDS-live dashboard endpoint is gated (topology/backups/capacity): grep for \
 describe_db_clusters in api/dashboard/handler.py and confirm each is guarded. (5) IAM least- \
 privilege. Cite file:line. P0/P1/P2."
 ```
@@ -1012,7 +1012,7 @@ Cross-check; fold in valid findings before Phase 3.
 
 ---
 
-# PHASE 3 — Frontend grouping + dashboard shell
+# PHASE 3: Frontend grouping + dashboard shell
 
 ### Task 11: `engineFamily()` + family metadata in `lib/engine.ts`
 
@@ -1059,7 +1059,7 @@ export const FAMILY_META: Record<EngineFamily, FamilyMeta> = {
   },
 };
 
-// Frontend mirror of backend CAPABILITIES — which dashboard panels render per family.
+// Frontend mirror of backend CAPABILITIES: which dashboard panels render per family.
 export const FAMILY_PANELS: Record<EngineFamily, Set<string>> = {
   relational: new Set(["all-relational"]), // sentinel: render the existing full panel set
   documentdb: new Set([
@@ -1130,7 +1130,7 @@ export function displayName(it: HasEngine): string {
 
 For each of Fleet, ClusterDropdown, CommandPalette, Clusters page, Compare: replace the flat `.map` over the cluster list with `groupByEngineFamily(list)` rendered as labeled sections (use `FAMILY_META[fam].label` headers + count), and render `displayName(item)` + family badge instead of raw `cluster_id`. In Compare, filter candidate B to `engineFamily(b) === engineFamily(a)`.
 
-(Implementer: follow each file's existing list-render markup; only the iteration shape changes — wrap in family sections. Keep selection/search behavior. The dropdown search should match `displayName`.)
+(Implementer: follow each file's existing list-render markup; only the iteration shape changes: wrap in family sections. Keep selection/search behavior. The dropdown search should match `displayName`.)
 
 - [ ] **Step 3: Typecheck + lint**
 
@@ -1146,7 +1146,7 @@ git commit -m "feat(fe): group resource enumerations by engine family"
 
 ---
 
-### Task 13: Dashboard shell — render panels by family
+### Task 13: Dashboard shell (render panels by family)
 
 **Files:**
 
@@ -1179,7 +1179,7 @@ git commit -m "feat(fe): engine-family dashboard shell (DynamoDB/DocumentDB over
 
 ---
 
-### Task 14: Clusters registration form — DynamoDB/DocumentDB options
+### Task 14: Clusters registration form (DynamoDB/DocumentDB options)
 
 **Files:**
 
@@ -1219,7 +1219,7 @@ a dynamodb/documentdb resource (grep dashboard/page.tsx for the family guard aro
 - [ ] Deploy data + frontend: `cd cdk && cdk deploy dbops-dev-data --require-approval never` then `cd ../frontend && npm run build` then `cd ../cdk && cdk deploy dbops-dev-frontend --require-approval never`.
 - [ ] Register a real **DynamoDB table** in the dev account via the Clusters page (or `POST /api/clusters {engine: dynamodb, ...}`).
 - [ ] Invoke the ETL Lambda once; confirm `dynamodb` result has `metrics_inserted > 0`, no `_error`, and the RELATIONAL resources are unaffected (no regressions).
-- [ ] Query cache: `serverless_acu`-style check — confirm DynamoDB `metric_type` rows (`consumed_rcu`, `throttled_requests`, `latency_ms_getitem`) and `cluster_meta.resource_details` for the table.
+- [ ] Query cache: `serverless_acu`-style check: confirm DynamoDB `metric_type` rows (`consumed_rcu`, `throttled_requests`, `latency_ms_getitem`) and `cluster_meta.resource_details` for the table.
 - [ ] Browser: dashboard for the DynamoDB resource shows the DynamoDB overview shell, NOT Aurora/SQL panels; Fleet/dropdown group by family and show the table name; Maintenance Health/Capacity panels do not render for it.
 - [ ] Confirm Aurora dashboards are byte-for-byte unchanged.
 - [ ] DocumentDB: if a DocDB cluster exists in dev, repeat end-to-end; else verify via the unit tests + code review and note in the completion report.
@@ -1228,8 +1228,8 @@ a dynamodb/documentdb resource (grep dashboard/page.tsx for the family guard aro
 
 ## Self-Review (completed during planning)
 
-**Spec coverage:** Engine-family model → Task 1/11; resource_details → Task 2/5/6; ETL dispatch → Task 3; finding gating → Task 4/8; DynamoDB collector → Task 5; DocDB collector → Task 6; registration/discovery → Task 7; backend endpoint gating → Task 8; agent guard → Task 9; CDK IAM → Task 10; grouping → Task 12; dashboard shell → Task 13; registration form → Task 14; capability map → Task 1 (backend) + Task 11 (frontend). Cross-account explicitly deferred (spec §Cross-account) — no task, by design.
+**Spec coverage:** Engine-family model → Task 1/11; resource_details → Task 2/5/6; ETL dispatch → Task 3; finding gating → Task 4/8; DynamoDB collector → Task 5; DocDB collector → Task 6; registration/discovery → Task 7; backend endpoint gating → Task 8; agent guard → Task 9; CDK IAM → Task 10; grouping → Task 12; dashboard shell → Task 13; registration form → Task 14; capability map → Task 1 (backend) + Task 11 (frontend). Cross-account explicitly deferred (spec §Cross-account): no task, by design.
 
-**Placeholder scan:** Frontend integration tasks (12/13/14) describe changes against existing markup rather than reproducing entire large page files verbatim — this is deliberate (the files are large and the executor follows existing render patterns); the NEW modules and the exact gating logic are fully specified with code. No "TBD/handle edge cases" steps.
+**Placeholder scan:** Frontend integration tasks (12/13/14) describe changes against existing markup rather than reproducing entire large page files verbatim. This is deliberate (the files are large and the executor follows existing render patterns); the NEW modules and the exact gating logic are fully specified with code. No "TBD/handle edge cases" steps.
 
 **Type consistency:** `engine_family()`/`CAPABILITIES` names match across backend copies; `engineFamily()`/`FAMILY_META`/`FAMILY_PANELS`/`groupByEngineFamily`/`displayName` consistent across frontend tasks; `collect_dynamodb_metrics`/`collect_docdb_metrics` signatures match their handler call sites in Task 3.

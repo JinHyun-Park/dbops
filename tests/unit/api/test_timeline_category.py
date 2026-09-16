@@ -2,7 +2,7 @@
 
 Regression guard for a bug found via live verification: ack events are
 written with event_type='alert_ack' (not 'ack'), and event_processor
-writes 'alarm_ok' / arbitrary RDS detail_types — none of which the
+writes 'alarm_ok' / arbitrary RDS detail_types, none of which the
 original exact-match normalizer caught, so they fell through as raw
 category strings the frontend couldn't color.
 """

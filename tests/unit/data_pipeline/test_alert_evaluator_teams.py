@@ -109,7 +109,7 @@ def test_teams_delivery_loop_posts_to_endpoint(monkeypatch):
 
 
 def test_slack_delivery_loop_unchanged_for_slack_row(monkeypatch):
-    """Slack-webhook rows must still receive Slack Block Kit payloads —
+    """Slack-webhook rows must still receive Slack Block Kit payloads:
     adding teams-webhook must not break the existing slack path."""
     monkeypatch.delenv("FRONTEND_URL", raising=False)
     h = _load("alert_evaluator_teams_g")

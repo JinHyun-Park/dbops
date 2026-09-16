@@ -18,7 +18,7 @@ Central Account (Hub)            Target Account (Spoke)
 
 Each platform Lambda role assumes the spoke role **directly**. Access requires
 BOTH the spoke role's trust policy (trusts the hub account) AND the calling
-role's own identity policy (`sts:AssumeRole` on this spoke role ARN) — standard
+role's own identity policy (`sts:AssumeRole` on this spoke role ARN). Standard
 AWS hub-spoke.
 
 ## Setup Steps

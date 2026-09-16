@@ -59,7 +59,7 @@ def _str(field):
 def _long(field):
     # n_dead_tup (FLOOR of a division) and the seq/idx scan SUM() columns are
     # DECIMAL in MySQL, so the Data API sends stringValue and the pymysql
-    # adapter sends doubleValue — longValue-only silently zeroed them.
+    # adapter sends doubleValue: longValue-only silently zeroed them.
     if field.get("isNull"):
         return 0
     v = field.get("longValue")

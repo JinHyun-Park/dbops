@@ -28,7 +28,7 @@ function koAgo(ts: number): string {
 }
 
 // RCA runs IN PLACE: a right-side drawer that streams the agent's root-cause
-// analysis without leaving the page and — crucially — without writing into the
+// analysis without leaving the page and, crucially, without writing into the
 // user's chat history. It reuses the same agent SSE (streamChat) as the chat,
 // but on a throwaway session id, so the real diagnose_root_cause engine runs
 // and nothing pollutes saved conversations.
@@ -120,7 +120,7 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
           setStreaming(false);
         }
       },
-      // Throwaway session — keeps the agent's chat memory + saved conversations
+      // Throwaway session: keeps the agent's chat memory + saved conversations
       // clean. (chat sessions are dbops-session-*; this is rca-*.)
       `rca-${clusterId}-${seq}`,
     );
@@ -129,7 +129,7 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
   const open = useCallback(
     (clusterId: string) => {
       setCluster(clusterId);
-      // Show the last completed analysis instantly if we have one — no agent
+      // Show the last completed analysis instantly if we have one, no agent
       // call, no waiting. "다시 실행" re-runs for a fresh one.
       const cached = loadRcaCache(clusterId);
       if (cached) {
@@ -195,7 +195,7 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
               </button>
             </div>
 
-            {/* Tool calls — proof the real diagnose_root_cause engine ran. */}
+            {/* Tool calls: proof the real diagnose_root_cause engine ran. */}
             {tools.length > 0 && (
               <div className="px-5 py-2 border-b border-zinc-800/60 flex flex-wrap gap-1.5">
                 {tools.map((t) => (
@@ -219,7 +219,7 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
                 <div className="mb-3 flex items-start gap-2 px-3 py-2 border border-zinc-700/60 bg-zinc-900/60 text-[11px] text-zinc-400">
                   <span className="text-zinc-500">🕘</span>
                   <span>
-                    {koAgo(cachedTs)} 저장된 분석입니다 — 재분석 없이 다시 보는
+                    {koAgo(cachedTs)} 저장된 분석입니다. 재분석 없이 다시 보는
                     중. 최신 상태가 필요하면 아래 “다시 실행”을 누르세요.
                   </span>
                 </div>
@@ -261,7 +261,7 @@ export function RcaProvider({ children }: { children: React.ReactNode }) {
                 onClick={() => {
                   if (!cluster) return;
                   // Carry the question AND the streamed analysis into a fresh
-                  // chat conversation — so it's preserved + continuable, not
+                  // chat conversation, so it's preserved + continuable, not
                   // discarded into whatever thread was last open.
                   abortRef.current?.abort();
                   runSeq.current++;

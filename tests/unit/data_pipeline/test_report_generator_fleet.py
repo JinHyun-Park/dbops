@@ -3,7 +3,7 @@
 CRITICAL (past bug in this file pair): the HTML builder once read keys the data
 builder never emitted, yielding blank charts. So the contract test below feeds
 the REAL fleet-data builder's ACTUAL output into build_fleet_report_html and
-asserts the rendered HTML contains real cluster ids/numbers — no invented
+asserts the rendered HTML contains real cluster ids/numbers, no invented
 fixture keys.
 """
 

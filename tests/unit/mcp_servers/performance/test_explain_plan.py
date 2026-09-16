@@ -113,7 +113,7 @@ def test_explain_plan_unparseable_plan_returns_error():
 
 def test_analyze_rejects_data_modifying_cte():
     """A data-modifying CTE passes the SELECT/WITH shape check but EXPLAIN
-    ANALYZE would RUN the DELETE — analyze=True must reject it."""
+    ANALYZE would RUN the DELETE: analyze=True must reject it."""
     cache = MagicMock()
     out = explain_plan_impl(
         cache,
@@ -137,7 +137,7 @@ def test_analyze_rejects_side_effecting_function():
 
 def test_plan_only_allows_cte_without_executing(monkeypatch):
     """analyze=False is plan-only (EXPLAIN never executes), so even a
-    data-modifying CTE is safe to plan — it must NOT be rejected."""
+    data-modifying CTE is safe to plan: it must NOT be rejected."""
     from mcp_servers.shared.models import QueryResult
 
     plan = [{"Plan": {"Node Type": "Aggregate", "Total Cost": 5.0, "Plan Rows": 1}}]

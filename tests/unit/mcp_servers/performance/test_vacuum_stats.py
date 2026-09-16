@@ -24,7 +24,7 @@ def test_vacuum_stats_detects_bloat():
 
 def test_vacuum_stats_reads_cluster_scoped_cache_not_local_catalog():
     """Regression: must query the pre-collected `table_stats` cache filtered by
-    cluster_id — NOT the cache DB's own pg_stat_user_tables (which would report
+    cluster_id, NOT the cache DB's own pg_stat_user_tables (which would report
     DBOps' internal tables for every cluster)."""
     mock_cache = MagicMock()
     mock_cache.engine_of.return_value = "aurora-postgresql"

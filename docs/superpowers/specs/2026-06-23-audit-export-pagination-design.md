@@ -1,4 +1,4 @@
-# Audit Export — Unbounded (Cursor Pagination) — Design
+# Audit Export: Unbounded Cursor Pagination (Design)
 
 **Date:** 2026-06-23
 **Status:** approved
@@ -21,7 +21,7 @@ realistic table is small, but the export must not silently truncate.
 
 Non-goals: exporting from the S3/Iceberg archive (separate, larger scope);
 server-side CSV generation / S3 presigned download (cursor pagination needs no
-infra and is unbounded — revisit only if response-assembly on the client
+infra and is unbounded: revisit only if response-assembly on the client
 becomes a problem).
 
 ## Architecture
@@ -33,7 +33,7 @@ client-side, and builds the CSV with the existing `buildAuditCsv`. The default
 
 ### Components
 
-1. **Backend — `api/approvals/handler.py` `/api/activity`**
+1. **Backend: `api/approvals/handler.py` `/api/activity`**
 
    - New optional query params: `cursor` (an opaque base64 token) and the
      existing `limit` reinterpreted in cursor mode as the per-page size
@@ -44,9 +44,9 @@ client-side, and builds the CSV with the existing `buildAuditCsv`. The default
      unchanged (full `_scan_all` → sort desc → truncate to `min(limit,500)` →
      `{items, count}`).
    - **Paginated mode:** do a SINGLE `table.scan(**filters, Limit=<page>,
-ExclusiveStartKey=<decoded cursor>)` — one DDB page, NOT `_scan_all` (which
+ExclusiveStartKey=<decoded cursor>)`: one DDB page, NOT `_scan_all` (which
      would exhaust). Return the page's rows (same `compact` projection as today,
-     unsorted — global sort happens client-side once all pages are in) plus
+     unsorted: global sort happens client-side once all pages are in) plus
      `next_cursor`: a base64-encoded JSON of the scan's `LastEvaluatedKey`, or
      `null` when the scan is exhausted.
    - Response shape (paginated): `{"items": [...], "count": <page len>,
@@ -56,7 +56,7 @@ ExclusiveStartKey=<decoded cursor>)` — one DDB page, NOT `_scan_all` (which
      decode reverses it. A malformed/undecodable `cursor` → `400`
      (`{"error": "invalid cursor"}`), not a 500.
 
-2. **Frontend — `frontend/src/lib/api-client.ts`**
+2. **Frontend: `frontend/src/lib/api-client.ts`**
 
    - Extend `fetchActivity` opts with `cursor?: string` and `export?: boolean`;
      thread them into the query string. Return type gains
@@ -67,7 +67,7 @@ export: true, cursor})` accumulating `items` until `next_cursor` is null,
      if the ceiling is hit, stop and flag `capped: true`. Returns
      `{items: ActivityItem[], capped: boolean}`.
 
-3. **Frontend — `frontend/src/app/activity/page.tsx`**
+3. **Frontend: `frontend/src/app/activity/page.tsx`**
    - The export button's onClick calls `fetchAllActivity({...filters})` instead
      of the single `limit=500` fetch, sorts the accumulated rows by `created_at`
      desc client-side, builds the CSV with `buildAuditCsv`, and names the file
@@ -87,7 +87,7 @@ cursor=…` page by page → client accumulates all rows → sorts desc → CSV 
 - Malformed/expired `cursor` → `400 invalid cursor`. The client loop treats a
   non-OK page as a hard error (surface to the user), not a silent partial file.
 - Page-ceiling hit (pathological table size) → stop, mark the filename/UI as
-  capped — honest, not silent.
+  capped: honest, not silent.
 - Empty result → a valid CSV with the header row only.
 
 ## Testing
@@ -105,6 +105,6 @@ cursor=…` page by page → client accumulates all rows → sorts desc → CSV 
 
 - No new surface: same `/api/activity` route, same Cognito JWT authorizer, same
   read-only scan of the approvals table. The cursor is an opaque
-  base64(LastEvaluatedKey) — it leaks only a DDB key the caller already has
+  base64(LastEvaluatedKey): it leaks only a DDB key the caller already has
   access to via the same endpoint. No data beyond the existing `compact`
   projection is exposed.

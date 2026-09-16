@@ -1,10 +1,10 @@
-"""Approval-policies API — admin-defined designated-approver routing.
+"""Approval-policies API: admin-defined designated-approver routing.
 
 Routes:
-  GET    /api/approval-policies        — list all policies
-  POST   /api/approval-policies        — create (generates policy_id)
-  PUT    /api/approval-policies/{id}    — update
-  DELETE /api/approval-policies/{id}    — delete
+  GET    /api/approval-policies:         list all policies
+  POST   /api/approval-policies:         create (generates policy_id)
+  PUT    /api/approval-policies/{id}:     update
+  DELETE /api/approval-policies/{id}:     delete
 
 A policy = {policy_id, cluster_id, action_type, approvers[], description,
 updated_at, updated_by}. cluster_id / action_type are an exact value or "*".

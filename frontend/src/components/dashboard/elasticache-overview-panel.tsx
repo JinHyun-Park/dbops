@@ -24,7 +24,7 @@ import { useChartColors } from "@/lib/use-chart-colors";
 
 type Point = { ts: string; value: number | string };
 
-// ElastiCache resource_details shape — canonical fields from _register_elasticache
+// ElastiCache resource_details shape: canonical fields from _register_elasticache
 // and elasticache_cw_collector cluster_meta upsert.
 interface ElastiCacheDetails {
   engine?: string | null; // "redis" | "valkey" | "memcached"
@@ -335,10 +335,10 @@ export function ElasticacheOverviewPanel({
                   ? `${details.engine}${
                       details.engine_version ? ` ${details.engine_version}` : ""
                     }`
-                  : "—"
+                  : "-"
               }
             />
-            <StatTile label="Node Type" value={details?.node_type ?? "—"} />
+            <StatTile label="Node Type" value={details?.node_type ?? "-"} />
             {/* Redis: show Shards + Replicas/shard; Memcached: show Nodes */}
             {isMemcached ? (
               <StatTile
@@ -346,7 +346,7 @@ export function ElasticacheOverviewPanel({
                 value={
                   details?.num_cache_nodes != null
                     ? fmtExact(details.num_cache_nodes)
-                    : "—"
+                    : "-"
                 }
               />
             ) : (
@@ -355,7 +355,7 @@ export function ElasticacheOverviewPanel({
                 value={
                   details?.num_node_groups != null
                     ? fmtExact(details.num_node_groups)
-                    : "—"
+                    : "-"
                 }
                 sub={
                   details?.replicas_per_node_group != null
@@ -366,7 +366,7 @@ export function ElasticacheOverviewPanel({
                 }
               />
             )}
-            <StatTile label="Status" value={details?.status ?? "—"} />
+            <StatTile label="Status" value={details?.status ?? "-"} />
             <StatTile
               label="Cluster Mode"
               value={
@@ -374,7 +374,7 @@ export function ElasticacheOverviewPanel({
                   ? details.cluster_mode
                     ? "enabled"
                     : "disabled"
-                  : "—"
+                  : "-"
               }
             />
             <StatTile
@@ -384,7 +384,7 @@ export function ElasticacheOverviewPanel({
                   ? details.tls_enabled
                     ? "TLS"
                     : "none"
-                  : "—"
+                  : "-"
               }
             />
           </div>
@@ -538,7 +538,7 @@ export function ElasticacheOverviewPanel({
         </div>
       </div>
 
-      {/* ─ Replication lag — hidden for Memcached / single-node ─ */}
+      {/* ─ Replication lag: hidden for Memcached / single-node ─ */}
       {showReplicationLag && (
         <div>
           <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">

@@ -51,7 +51,7 @@ function handler(event) {
 
         distribution = cloudfront.Distribution(
             self, "Distribution",
-            # NB: minimum_protocol_version is intentionally NOT set — it's only
+            # NB: minimum_protocol_version is intentionally NOT set. It's only
             # valid with a custom ACM cert, and CFN rejects it alongside the
             # default *.cloudfront.net cert. The default cert already pins AWS's
             # modern TLS. cdk-nag AwsSolutions-CFR4 is suppressed accordingly;
@@ -91,7 +91,7 @@ function handler(event) {
         # `output: export` SPA is code-split into content-hashed chunks under
         # /_next/static. With NO Cache-Control, the browser heuristically caches
         # the HTML + runtime, so after a redeploy an already-open tab navigates
-        # with a STALE chunk manifest and 404s on the new hashed chunks — even
+        # with a STALE chunk manifest and 404s on the new hashed chunks, even
         # though CloudFront's edge was invalidated (that only clears the edge,
         # not the browser's local cache). Fix by splitting the deployment by
         # cache policy so HTML always revalidates and hashed assets are immutable.
@@ -121,7 +121,7 @@ function handler(event) {
             # once a build rotates, so old ones are harmless.
             prune=False,
         )
-        # 1) Content-hashed immutable assets (the whole /_next tree) — cache
+        # 1) Content-hashed immutable assets (the whole /_next tree): cache
         #    forever, never revalidate. Sourced from out/_next and re-prefixed to
         #    /_next so we can scope this deployment to just the hashed assets
         #    (Source.asset has no `include`, only `exclude`).
@@ -134,7 +134,7 @@ function handler(event) {
             )],
             **_deploy_common,
         )
-        # 2) Everything else (HTML, etc., minus /_next) — always revalidate so a
+        # 2) Everything else (HTML, etc., minus /_next): always revalidate so a
         #    redeploy is picked up on the next request (ETag → 304 or fresh HTML).
         s3_deploy.BucketDeployment(
             self, "DeployHtml",
@@ -144,7 +144,7 @@ function handler(event) {
             cache_control=[s3_deploy.CacheControl.from_string("no-cache")],
             **_deploy_common,
         )
-        # 3) Runtime config — never cached (login/runtime ARNs must be fresh).
+        # 3) Runtime config: never cached (login/runtime ARNs must be fresh).
         s3_deploy.BucketDeployment(
             self, "DeployConfig",
             sources=[s3_deploy.Source.json_data("config.json", runtime_config)],

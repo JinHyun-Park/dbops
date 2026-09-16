@@ -6,10 +6,10 @@ GB를 직접 주지 않는다(instance_class 문자열만). cluster_meta에 inst
 수집되므로 여기서 사양을 역매핑한다.
 
 매핑에 없는 클래스(미래 세대 등)는 (None, None)을 돌려주고, 호출부는 메모리
-의존 진단을 건너뛴다 — 틀린 메모리로 잘못된 권고를 내느니 침묵한다.
+의존 진단을 건너뛴다. 틀린 메모리로 잘못된 권고를 내느니 침묵한다.
 
 Serverless v2(db.serverless)는 메모리가 ACU에 비례(1 ACU ≈ 2 GB)해 고정값이
-없다 — cluster_meta.serverlessv2_max_acu로 별도 계산하므로 여기선 None.
+없다. cluster_meta.serverlessv2_max_acu로 별도 계산하므로 여기선 None.
 """
 
 # 크기 토큰 → (메모리 GB, vCPU). r/m/x 계열(메모리/범용 최적화)의 표준 비율.
@@ -37,9 +37,9 @@ _T_FAMILY = {
 
 
 def instance_memory_gb(instance_class: str):
-    """(memory_gb, vcpu) — 매핑 불가 시 (None, None).
+    """(memory_gb, vcpu). 매핑 불가 시 (None, None).
 
-    db.serverless는 (None, None) — ACU 기반이라 호출부가 max_acu로 계산해야 한다.
+    db.serverless는 (None, None). ACU 기반이라 호출부가 max_acu로 계산해야 한다.
     """
     ic = (instance_class or "").strip().lower()
     if not ic or ic == "db.serverless":

@@ -1,4 +1,4 @@
-"""ElastiCache Findings Collector — eviction spike, low hit-rate, memory pressure,
+"""ElastiCache Findings Collector: eviction spike, low hit-rate, memory pressure,
 replication lag, high CPU, connection surge.
 
 Reads the cached metric_snapshots only (no live AWS). Writes elasticache_* rows
@@ -167,7 +167,7 @@ def collect_elasticache_findings(
             add("elasticache_memory_pressure", sev, "ElastiCache Memory Pressure",
                 f"memory {mem:.1f}%",
                 f"memory ≥ {int(MEMORY_CRITICAL_PCT)}%" if sev == "critical" else f"memory ≥ {int(MEMORY_WARNING_PCT)}%",
-                f"최근 {window_hours}시간 메모리 사용률 peak이 {mem:.1f}%입니다. eviction/OOM 위험 — 노드 타입 상향 또는 샤드 추가를 권장합니다.",
+                f"최근 {window_hours}시간 메모리 사용률 peak이 {mem:.1f}%입니다. eviction/OOM 위험. 노드 타입 상향 또는 샤드 추가를 권장합니다.",
                 {"max_memory_usage_pct": mem, "window_hours": window_hours})
 
     # Rule 4: replication lag (Redis/Valkey only)
@@ -181,7 +181,7 @@ def collect_elasticache_findings(
                 f"최근 {window_hours}시간 replication lag peak이 {lag:.0f} ms입니다. 쓰기 부하 완화 또는 리드 레플리카 확장을 점검하세요.",
                 {"max_replication_lag_ms": lag, "window_hours": window_hours})
 
-    # Rule 5: high CPU (prefer engine_cpu — Redis single-threaded bottleneck)
+    # Rule 5: high CPU (prefer engine_cpu, Redis single-threaded bottleneck)
     cpu = _f("max_engine_cpu")
     cpu_label = "engine CPU"
     if cpu is None:
@@ -203,7 +203,7 @@ def collect_elasticache_findings(
             f"최근 {window_hours}시간 연결 수 peak이 {int(conn)}개입니다(Redis 한도 65000). connection pooling과 클라이언트 누수 점검을 권장합니다.",
             {"max_curr_connections": conn, "window_hours": window_hours})
 
-    # Rule 7: cost right-sizing (oversized) — 7-day CPU, skip burstable nodes
+    # Rule 7: cost right-sizing (oversized), 7-day CPU, skip burstable nodes
     if node_type and not node_type.startswith("cache.t"):
         try:
             cpu_rows = _execute(
@@ -227,7 +227,7 @@ def collect_elasticache_findings(
                     add("elasticache_cost_oversized", "info", "ElastiCache Oversized (cost)",
                         f"7일 CPU 평균 {float(avg_cpu):.1f}% / p95 {float(p95_cpu):.1f}%",
                         "avg < 30% & p95 < 60% → 다운사이즈 검토",
-                        f"{node_type}의 7일 CPU 평균이 {float(avg_cpu):.1f}%입니다 — 한 단계 작은 노드 타입을 검토하세요(보통 월 30-50% 절감). 축소 후 1주 관찰 권장.",
+                        f"{node_type}의 7일 CPU 평균이 {float(avg_cpu):.1f}%입니다. 한 단계 작은 노드 타입을 검토하세요(보통 월 30-50% 절감). 축소 후 1주 관찰 권장.",
                         {"node_type": node_type, "avg_cpu": float(avg_cpu), "p95_cpu": float(p95_cpu), "window_days": 7})
         except Exception as e:
             errors.append(f"cost_oversized: {e}")

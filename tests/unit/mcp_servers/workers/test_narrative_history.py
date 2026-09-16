@@ -1,4 +1,4 @@
-"""test_narrative_history — _history_line helper unit tests.
+"""test_narrative_history: _history_line helper unit tests.
 
 Tests the helper that fetches remediation track record from
 remediation_outcomes_agg and formats a one-line prompt insert.
@@ -50,7 +50,7 @@ def test_history_line_fallback_to_fleet():
 
 
 def test_history_line_returns_empty_on_cache_error():
-    """Cache failure must never propagate — returns '' (best-effort)."""
+    """Cache failure must never propagate, returns '' (best-effort)."""
     cache = MagicMock()
     cache.execute.side_effect = RuntimeError("db unavailable")
     line = tw._history_line(cache, "c1", "memory_pressure")

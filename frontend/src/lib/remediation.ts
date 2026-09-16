@@ -1,4 +1,4 @@
-// Wilson score lower bound at 95% — so 1/1 doesn't outrank 9/10. Pure + testable.
+// Wilson score lower bound at 95%, so 1/1 doesn't outrank 9/10. Pure + testable.
 export function confidence(successes: number, attempts: number): number {
   if (attempts <= 0) return 0;
   const z = 1.96;

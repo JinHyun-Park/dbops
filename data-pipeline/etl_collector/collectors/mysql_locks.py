@@ -33,7 +33,7 @@ WHERE VARIABLE_NAME IN (
   'innodb_flush_log_at_trx_commit', 'innodb_io_capacity',
   'innodb_read_io_threads', 'innodb_write_io_threads',
   'slow_query_log', 'long_query_time', 'log_bin',
-  -- Per-connection 버퍼 — mysql_param_fitness의 OOM 상호작용 규칙
+  -- Per-connection 버퍼: mysql_param_fitness의 OOM 상호작용 규칙
   -- (Σ버퍼 × max_connections vs 인스턴스 메모리)에 쓰인다. 모두 바이트.
   'sort_buffer_size', 'join_buffer_size', 'read_buffer_size',
   'read_rnd_buffer_size', 'tmp_table_size', 'max_heap_table_size',
@@ -105,7 +105,7 @@ def collect_mysql_locks(rds_data_client, cache_execute, target_cluster_arn, targ
             })
             inserted["blocking_locks"] += 1
     except Exception as e:
-        # sys.innodb_lock_waits may not exist on very old Aurora MySQL — log and continue.
+        # sys.innodb_lock_waits may not exist on very old Aurora MySQL: log and continue.
         print(f"[mysql_locks] blocking-locks query failed: {e}")
 
     # Settings

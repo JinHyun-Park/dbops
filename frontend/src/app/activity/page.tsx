@@ -240,7 +240,7 @@ export default function ActivityPage() {
         eyebrow={t("audit")}
         title={t("Activity log")}
         description={t(
-          "DBOps에서 일어난 모든 쓰기 의사결정의 시간순 기록 — 누가 요청했고 누가 승인했고 언제 실행됐는지. 컴플라이언스 감사와 사후 회고 (post-incident retro) 용도.",
+          "DBOps에서 일어난 모든 쓰기 의사결정의 시간순 기록: 누가 요청했고 누가 승인했고 언제 실행됐는지. 컴플라이언스 감사와 사후 회고 (post-incident retro) 용도.",
         )}
         actions={
           <div className="flex items-center gap-2 flex-wrap">
@@ -258,9 +258,12 @@ export default function ActivityPage() {
                     });
                   } catch (e) {
                     setError(
-                      `감사 export 실패: ${
+                      // The message is interpolated in PARENTHESES, not
+                      // followed by a bare period: e.message often ends in one
+                      // already, which rendered "..".
+                      `감사 export 실패 (${
                         e instanceof Error ? e.message : String(e)
-                      } — 다시 시도해 주세요.`,
+                      }). 다시 시도해 주세요.`,
                     );
                     return; // do NOT download a misleading partial file
                   }
@@ -377,7 +380,7 @@ function DayGroup({
 
       {/* Timeline column */}
       <div className="relative">
-        {/* Vertical rail — runs the full height of the group */}
+        {/* Vertical rail: runs the full height of the group */}
         {/* positioned at left: 11px to bisect the 22px node circle */}
         <div
           className="absolute top-0 bottom-0 left-[10px] w-px bg-zinc-800"
@@ -444,7 +447,7 @@ function TimelineEvent({
       <div
         className="flex-1 min-w-0 mb-1"
         role="listitem"
-        aria-label={`${cfg.label} — ${item.action_type} (${item.requested_by})`}
+        aria-label={`${cfg.label}: ${item.action_type} (${item.requested_by})`}
       >
         <div
           className="
@@ -479,7 +482,7 @@ function TimelineEvent({
                 {t(actionLabel(item.action_type))}
               </span>
 
-              {/* action_type identifier — monospace, for DBA scanning */}
+              {/* action_type identifier: monospace, for DBA scanning */}
               <span className="text-[10px] font-mono text-zinc-600 truncate inline max-sm:hidden">
                 {item.action_type}
               </span>
@@ -492,9 +495,9 @@ function TimelineEvent({
               )}
             </div>
 
-            {/* Timestamp block — right-aligned, never wraps */}
+            {/* Timestamp block: right-aligned, never wraps */}
             <div className="text-[11px] text-zinc-500 tabular-nums flex-shrink-0 text-right leading-relaxed">
-              {createdTs ? fmtTime(createdTs) : "—"}
+              {createdTs ? fmtTime(createdTs) : "-"}
               {consumedTs && (
                 <div className="text-[10px] text-sky-500/70 font-mono">
                   executed {fmtTime(consumedTs)}
@@ -521,7 +524,7 @@ function TimelineEvent({
             </span>
           </div>
 
-          {/* Details excerpt — only when present */}
+          {/* Details excerpt: only when present */}
           {hasDetails && (
             <pre
               className="

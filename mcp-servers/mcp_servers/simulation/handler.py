@@ -76,7 +76,7 @@ TOOLS = {
     },
     "simulate_scaling": {
         "impl": simulate_scaling_impl,
-        "description": "Simulate scaling cost with real AWS pricing — Serverless v2 ACU range or provisioned instance resize",
+        "description": "Simulate scaling cost with real AWS pricing: Serverless v2 ACU range or provisioned instance resize",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -146,7 +146,7 @@ TOOLS = {
 def _resolve_family(cluster_id):
     """Resolve the engine family from cluster_meta via the cache. Returns None
     (→ DEFAULT-PERMIT) when cluster_id is empty, the row is missing, or the
-    lookup errors — mirroring the execute_sql guard so legacy/mock/transient
+    lookup errors, mirroring the execute_sql guard so legacy/mock/transient
     paths never false-positive."""
     if not cluster_id:
         return None
@@ -165,7 +165,7 @@ def _resolve_family(cluster_id):
     #   - the `simulation` guard is DEFAULT-PERMIT on a None family, so the six
     #     Aurora-only tools ran on EVERY engine. Measured 2026-08-02: on a Valkey
     #     cluster, estimate_upgrade_impact answered "~23분 (pg_upgrade 동안 writer
-    #     중단)" — a PostgreSQL downtime figure for a Redis-protocol cache, which a
+    #     중단)", a PostgreSQL downtime figure for a Redis-protocol cache, which a
     #     DBA could plan a real maintenance window from.
     #   - the three POSITIVE gates (ddb_cost_simulation, elasticache_cost_simulation,
     #     rds_cost_simulation) refuse a None family, so those tools returned
@@ -243,7 +243,7 @@ def lambda_handler(event, context):
                 })}]}
         else:
             # Engine-family guard: the OTHER simulation tools (upgrade/parameter/
-            # DDL/scaling) are Aurora-specific — version-upgrade, SQL DDL, DB
+            # DDL/scaling) are Aurora-specific: version-upgrade, SQL DDL, DB
             # parameter groups, and ACU/instance resize have no NoSQL equivalent.
             # Refuse cleanly for documentdb/dynamodb. DEFAULT-PERMIT on unknown/
             # missing/error (mirror execute_sql).

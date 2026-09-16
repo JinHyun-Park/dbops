@@ -17,14 +17,14 @@ _DYNAMODB_ROW = {
     "cluster_id": "ddb-abc",
     "engine": "dynamodb",
     "engine_family": "dynamodb",
-    # Intentionally NO cluster_arn / secret_arn — a non-relational row never
+    # Intentionally NO cluster_arn / secret_arn: a non-relational row never
     # has these. The guard must fire before any target-resolution check.
 }
 
 _DOCDB_ROW = {
     "cluster_id": "docdb-xyz",
     "engine": "docdb",
-    # engine_family absent — must be derived from engine string
+    # engine_family absent, must be derived from engine string
     "cluster_arn": "arn:aws:rds:us-east-1:123456789012:cluster:docdb-xyz",
     "secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:docdb-xyz",
 }

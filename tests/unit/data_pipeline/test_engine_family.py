@@ -28,7 +28,7 @@ def test_capabilities_shape():
     assert ef.CAPABILITIES["dynamodb"]["cw_namespace"] == "AWS/DynamoDB"
     assert ef.CAPABILITIES["relational"]["findings"] == {"health", "cost", "param_fitness", "capacity_forecast"}
     assert ef.CAPABILITIES["documentdb"]["findings"] == {"docdb"}
-    # DynamoDB findings are now enabled — ddb_* check_types from dynamodb_findings collector.
+    # DynamoDB findings are now enabled: ddb_* check_types from dynamodb_findings collector.
     assert ef.CAPABILITIES["dynamodb"]["findings"] == {"ddb"}
 
 def test_dynamodb_cluster_id_is_regex_safe():
@@ -46,7 +46,7 @@ def test_rds_instance_family_derivation():
     assert ef.engine_family("sqlserver-se") == "rds_instance"
     assert ef.engine_family("sqlserver-web") == "rds_instance"
     assert ef.engine_family("SQLServer-EX") == "rds_instance"
-    # Aurora stays relational — the 'aurora' guard must win over the bare
+    # Aurora stays relational: the 'aurora' guard must win over the bare
     # 'mysql' substring.
     assert ef.engine_family("aurora-mysql") == "relational"
     assert ef.engine_family("aurora-postgresql") == "relational"
@@ -63,7 +63,7 @@ def test_rds_instance_capabilities():
     assert caps["prewarm"] is False
     assert caps["scale_instance"] is False
     # R-3: instance-level writes (reboot/snapshot/modify-class) are rds_instance
-    # ONLY — the positive, FAIL-CLOSED capability the handler gates them on.
+    # ONLY: the positive, FAIL-CLOSED capability the handler gates them on.
     assert caps["instance_write"] is True
     assert "instance_write" not in ef.CAPABILITIES["relational"]
     assert "instance_write" not in ef.CAPABILITIES["dynamodb"]

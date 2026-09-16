@@ -1,4 +1,4 @@
-# Advanced Approval — Designated Approvers — Design
+# Advanced Approval: Designated Approvers (Design)
 
 **Date:** 2026-06-23
 **Status:** approved
@@ -16,11 +16,11 @@ person, and nothing prevents an admin from approving their own request
 Let an admin define **approval policies** that route approval rights for
 specific clusters/actions to **designated approvers**, and prevent
 self-approval. When no policy matches a request, behavior is unchanged (any
-admin may approve) — so existing deploys keep working until policies are added.
+admin may approve), so existing deploys keep working until policies are added.
 
 Non-goals: per-request ad-hoc approver lists; Cognito-group-based approvers
 (named users only); capturing the human who triggered an agent action
-(`requested_by` stays "agent" for agent requests — see Self-approval below);
+(`requested_by` stays "agent" for agent requests, see Self-approval below);
 multi-stage / N-of-M approvals.
 
 ## Architecture
@@ -37,17 +37,17 @@ to the current "any admin" rule. Self-approval is **always** prevented.
 
 1. **`dbops-{env}-approval-policies` DynamoDB table** (FoundationStack)
 
-   - PK `policy_id` (S, generated UUID). Attributes: `cluster_id` (S — an exact
-     cluster id or `"*"`), `action_type` (S — an exact action_type/tool_name or
-     `"*"`), `approvers` (list of S — emails/usernames), `description` (S),
+   - PK `policy_id` (S, generated UUID). Attributes: `cluster_id` (S: an exact
+     cluster id or `"*"`), `action_type` (S: an exact action_type/tool_name or
+     `"*"`), `approvers` (list of S: emails/usernames), `description` (S),
      `updated_at` (S, ISO-UTC), `updated_by` (S).
-   - `PAY_PER_REQUEST`, PITR on, `DESTROY` removal — matches sibling tables.
+   - `PAY_PER_REQUEST`, PITR on, `DESTROY` removal, matches sibling tables.
    - Lives in foundation so both the policy API (agent stack) and the approvals
      API (agent stack) reach it via grant helpers; no cross-stack cycle.
    - Grant helpers: `grant_approval_policy_read(fn)` / `grant_approval_policy_write(fn)`
      (each sets `APPROVAL_POLICIES_TABLE` env + read or read/write grant).
 
-2. **Matching function** — pure, in `api/approvals/handler.py` (the enforcement
+2. **Matching function**: pure, in `api/approvals/handler.py` (the enforcement
    point) so it is unit-testable without AWS:
    `resolve_eligible_approvers(cluster_id, action_type, policies) -> set[str]`
 
@@ -59,9 +59,9 @@ to the current "any admin" rule. Self-approval is **always** prevented.
    - No match → **empty set** (policy not applicable → fallback).
    - Approver matching is case-insensitive on the stored strings and is compared
      against the caller's token identity (preferred_username / cognito:username /
-     email — the same fields `_caller_name` already resolves).
+     email, the same fields `_caller_name` already resolves).
 
-3. **Enforcement** — `api/approvals/handler.py` PUT approve, after the existing
+3. **Enforcement**: `api/approvals/handler.py` PUT approve, after the existing
    `_is_admin` check and before the pending→approved transition:
 
    - `approver = _caller_name(event)` (from the verified token, never the body).
@@ -74,11 +74,11 @@ to the current "any admin" rule. Self-approval is **always** prevented.
    - Empty `eligible` (no policy) → proceed (current behavior).
    - **Both new checks apply to `action == "approve"` only.** `reject` keeps the
      existing `_is_admin`-only gate (any admin may reject; a requester may reject
-     /cancel their own request — only _granting_ approval is restricted and
+     /cancel their own request: only _granting_ approval is restricted and
      self-approval-protected).
    - Wiring: `foundation.grant_approval_policy_read(approvals_lambda)` (table env + read).
 
-4. **Policy CRUD API** — `api/approval_policies/handler.py`, new `ApprovalPoliciesApi`
+4. **Policy CRUD API**: `api/approval_policies/handler.py`, new `ApprovalPoliciesApi`
    Lambda in AgentStack, routes `GET/POST /api/approval-policies` and
    `PUT/DELETE /api/approval-policies/{id}`.
 
@@ -92,7 +92,7 @@ to the current "any admin" rule. Self-approval is **always** prevented.
      updates by id; `DELETE` removes by id. `updated_by` stamped from the token.
    - OpenAPI: regenerate `frontend/public/openapi.json`; `test_openapi_spec.py` parity.
 
-5. **Admin management UI** — `frontend/src/app/approval-policies/page.tsx`,
+5. **Admin management UI**: `frontend/src/app/approval-policies/page.tsx`,
    admin-only, mirroring the Settings page shell + the hardened gating.
    - Nav entry under "Configure" with `adminOnly: true` → hidden from viewers in
      the sidebar AND the ⌘K command palette (`isAdmin()` gate). A viewer who
@@ -117,7 +117,7 @@ to the current "any admin" rule. Self-approval is **always** prevented.
 
 - API: invalid policy input → `400` (nothing written). Non-admin → `403`.
 - Enforcement: a policy-table read failure is swallowed → `eligible` empty →
-  fallback to any-admin (fail-SAFE — a policy-infra outage must not freeze the
+  fallback to any-admin (fail-SAFE: a policy-infra outage must not freeze the
   approval loop). Self-approval prevention does not depend on the table, so it
   still applies. Log the read failure once.
 - The pending→approved `ConditionExpression` (replay/idempotency guard) is
@@ -141,6 +141,6 @@ to the current "any admin" rule. Self-approval is **always** prevented.
 - Approve is server-side gated: `_is_admin` AND (designated check OR fallback)
   AND not-self. The UI nav gating is cosmetic; the API enforces.
 - The policy CRUD API is admin-only and fail-closed (the hardened pattern).
-- Policies store usernames/emails only — no secrets.
+- Policies store usernames/emails only: no secrets.
 - Self-approval prevention is a baseline applied to all approvals regardless of
   policy.

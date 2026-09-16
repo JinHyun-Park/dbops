@@ -414,7 +414,7 @@ export default function ContextFilesPage() {
           <Section
             eyebrow="Upload"
             title="파일 업로드"
-            description={`.md, .txt, .csv — 파일당 최대 ${fmtBytes(
+            description={`.md, .txt, .csv. 파일당 최대 ${fmtBytes(
               PER_FILE_MAX_BYTES,
             )}`}
           >

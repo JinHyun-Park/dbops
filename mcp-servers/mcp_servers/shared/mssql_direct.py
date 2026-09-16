@@ -1,4 +1,4 @@
-"""mssql_direct — pytds connect (enforced TLS) + Data-API-shape adapter for RDS SQL Server.
+"""mssql_direct: pytds connect (enforced TLS) + Data-API-shape adapter for RDS SQL Server.
 
 RDS for SQL Server has no Data API, so execute_sql's ad-hoc chat SQL against
 RDS SQL Server instances needs a direct TCP connection re-encoded into the
@@ -7,7 +7,7 @@ same response shape RDS Data API returns. Mirrors mysql_direct.py.
 TLS we enforce: RDS SQL Server does NOT force SSL by default (rds.force_ssl
 is off), unlike RDS MySQL/PostgreSQL. So this module always passes `cafile`
 (the vendored CA bundle) with `validate_host=True` to get verified TLS
-regardless of the instance's parameter group — never `enc_login_only=True`,
+regardless of the instance's parameter group, never `enc_login_only=True`,
 which would only encrypt the login packet and leave the rest of the session
 in plaintext.
 """
@@ -30,12 +30,12 @@ def connect(host, port, database, user, password):
 
     FAIL-CLOSED: the CA bundle check runs BEFORE the pytds import, so a
     missing CA raises RuntimeError even where pytds isn't installed (tests),
-    and this path never falls back to an unverified connection — it carries
+    and this path never falls back to an unverified connection: it carries
     DB credentials to a database instance (matches pg_direct/mysql_direct's
     contract)."""
     if not os.path.exists(_CA_BUNDLE_PATH):
         raise RuntimeError(
-            "RDS CA bundle (global-bundle.pem) not found in the asset — refusing "
+            "RDS CA bundle (global-bundle.pem) not found in the asset, refusing "
             "an unverified TLS connection to a database instance."
         )
     import pytds  # lazy: not importable in the test env

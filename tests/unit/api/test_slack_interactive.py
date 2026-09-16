@@ -1,6 +1,6 @@
 """Unit tests for the Slack interactive ack endpoint.
 
-The HMAC verification is the only authentication on this Lambda — if it
+The HMAC verification is the only authentication on this Lambda: if it
 fails open, any caller can mutate `alert_rules.last_acked_*` and inject
 fake event_log audit rows. These tests are the safety net for that path.
 
@@ -89,7 +89,7 @@ def _ack_payload(rule_id: int, cluster_id: str, user: str = "alice"):
 
 def test_missing_secret_rejected_with_helpful_message(monkeypatch):
     """When the deployment hasn't been wired up yet (signing secret blank)
-    the handler must say so explicitly — silent 500s mask the real cause."""
+    the handler must say so explicitly: silent 500s mask the real cause."""
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "")
     monkeypatch.setenv("CACHE_DB_CLUSTER_ARN", "arn:aws:rds:test:cluster")
     monkeypatch.setenv("CACHE_DB_SECRET_ARN", "arn:aws:secretsmanager:test:secret")
@@ -135,7 +135,7 @@ def test_wrong_signature_rejected(monkeypatch):
 
 
 def test_stale_timestamp_rejected(monkeypatch):
-    """A signed request from 10 minutes ago must be rejected — that's the
+    """A signed request from 10 minutes ago must be rejected: that's the
     replay-window defense (Slack docs spec 5 min)."""
     h = _load_handler(monkeypatch)
     event = _signed_event(_ack_payload(67, "prod-pg"), skew_seconds=-600)
@@ -146,7 +146,7 @@ def test_stale_timestamp_rejected(monkeypatch):
 
 
 def test_future_timestamp_rejected(monkeypatch):
-    """Clock skew in the *other* direction must also be rejected — an
+    """Clock skew in the *other* direction must also be rejected: an
     attacker pre-computing far-future signatures shouldn't get a free pass."""
     h = _load_handler(monkeypatch)
     event = _signed_event(_ack_payload(67, "prod-pg"), skew_seconds=600)
@@ -237,7 +237,7 @@ def test_missing_rule_in_db_returns_404_message(monkeypatch):
 def test_db_error_returns_ephemeral_without_leaking_details(monkeypatch):
     """An unexpected DB failure should yield a 200 + ephemeral warning to
     the user (so Slack doesn't show "we had trouble"), and the underlying
-    exception text must stay in CloudWatch — never in the response body."""
+    exception text must stay in CloudWatch, never in the response body."""
     h = _load_handler(monkeypatch)
     event = _signed_event(_ack_payload(67, "prod-pg"))
     with patch.object(h, "_execute") as mock_exec:
@@ -251,7 +251,7 @@ def test_db_error_returns_ephemeral_without_leaking_details(monkeypatch):
 
 def test_response_blocks_include_replace_original_flag(monkeypatch):
     """The Slack message that fired the button must be REPLACED, not
-    appended — replace_original keeps the channel from accumulating
+    appended: replace_original keeps the channel from accumulating
     duplicate alert messages after every ack."""
     h = _load_handler(monkeypatch)
     event = _signed_event(_ack_payload(67, "prod-pg", user="bob"))

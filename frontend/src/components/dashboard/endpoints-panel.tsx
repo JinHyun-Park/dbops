@@ -30,7 +30,7 @@ function typePill(type: string | null): { label: string; cls: string } {
       cls: "bg-amber-500/15 text-amber-300 border-amber-500/40",
     };
   return {
-    label: t || "—",
+    label: t || "-",
     cls: "bg-zinc-700/40 text-zinc-400 border-zinc-700",
   };
 }
@@ -95,7 +95,7 @@ export function EndpointsPanel({ clusterId }: { clusterId: string }) {
   }, [load]);
 
   // Shared submit for all three actions. On success we DON'T mutate the list
-  // optimistically — the change only lands after the DBA approves + it executes.
+  // optimistically, the change only lands after the DBA approves + it executes.
   const submit = useCallback(
     async (opts: {
       action: EndpointAction;
@@ -202,7 +202,7 @@ export function EndpointsPanel({ clusterId }: { clusterId: string }) {
         </div>
       )}
 
-      {/* Inline create form — admin only */}
+      {/* Inline create form: admin only */}
       {admin && createOpen && (
         <div className="mb-4 border border-zinc-800 bg-zinc-950 p-3 space-y-2">
           <div className="text-[11px] text-zinc-400">
@@ -438,7 +438,7 @@ function EndpointRow({
             </>
           )}
           <span className={`text-[10px] font-mono ${statusColor(ep.status)}`}>
-            {ep.status || "—"}
+            {ep.status || "-"}
           </span>
         </div>
       </div>
@@ -486,7 +486,7 @@ function EndpointRow({
         </div>
       )}
 
-      {/* Inline delete confirm — no browser confirm() */}
+      {/* Inline delete confirm: no browser confirm() */}
       {deleteConfirm && (
         <div className="mt-2 border border-rose-500/40 bg-rose-950/20 p-2.5 space-y-2">
           <div className="text-[11px] text-rose-200">

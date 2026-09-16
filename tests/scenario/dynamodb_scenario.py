@@ -15,7 +15,7 @@ to verify the collector captured, end to end:
   - resource_details {billing_mode, item_count, table_size_bytes, gsi, ...}
 
 Self-configures from the deployed ETL Lambda's environment (cache ARNs, clusters
-table) — no hardcoded account values. Repeatable. `--cleanup` tears it down.
+table), no hardcoded account values. Repeatable. `--cleanup` tears it down.
 
 Usage:
   python tests/scenario/dynamodb_scenario.py            # run the full cycle
@@ -265,7 +265,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--writes", type=int, default=900)
     # Consumed/throttle/latency are 1-min granularity, but Provisioned*CapacityUnits
-    # are 5-min granularity — a fresh table won't surface them until the first
+    # are 5-min granularity, and a fresh table won't surface them until the first
     # 5-min datapoint publishes. Default wait covers that so a single run captures
     # everything; drop to ~150 if you only care about consumed/throttle/latency.
     ap.add_argument("--cw-wait", type=int, default=330,

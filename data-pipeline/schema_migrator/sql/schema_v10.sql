@@ -1,10 +1,10 @@
--- v10: Custom alert conditions — compound AND/OR over multiple metric
+-- v10: Custom alert conditions, compound AND/OR over multiple metric
 -- thresholds, each with its own evaluation window and aggregator. The legacy
 -- single-threshold columns (metric_type / comparison / threshold) remain in
 -- place so existing rules keep working unchanged; the evaluator prefers
 -- `conditions` JSONB when present.
 --
--- DSL shape (v10 — flat, no nesting):
+-- DSL shape (v10, flat, no nesting):
 --   {
 --     "logic": "and" | "or",
 --     "operands": [

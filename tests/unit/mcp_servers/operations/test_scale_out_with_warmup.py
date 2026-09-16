@@ -124,7 +124,7 @@ def test_denied_approval_never_creates_or_queues():
 @patch(f"{_SO}.verify_approval", return_value={"ok": True})
 def test_execute_requires_bound_class(_guard):
     """Approved but instance_class empty (never bound at approval) → add_failed,
-    NO create, NO prewarm queue — execute never resolves a class post-approval."""
+    NO create, NO prewarm queue: execute never resolves a class post-approval."""
     rds = _rds()
     resource, table = _approvals()
     with patch(f"{_SO}.client_for_cluster", return_value=rds), \

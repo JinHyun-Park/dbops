@@ -1,4 +1,4 @@
-"""Bedrock cost dashboard data — uses Cost Explorer GetCostAndUsage to surface
+"""Bedrock cost dashboard data: uses Cost Explorer GetCostAndUsage to surface
 Application=DBOps tagged spend by day and by Claude model.
 
 NOTE: Cost Explorer is global, billed per request (~$0.01), and only returns
@@ -94,8 +94,8 @@ def _query_total(ce, start, end, services, tag_filter=None):
 # ===========================================================================
 # RDS / Aurora cost path (?view=rds)
 # ---------------------------------------------------------------------------
-# DBAs want "이 Aurora 클러스터가 한 달에 얼마지?". Unlike Bedrock — where DBOps
-# routes everything through Application Inference Profiles it controls — RDS/
+# DBAs want "이 Aurora 클러스터가 한 달에 얼마지?". Unlike Bedrock (where DBOps
+# routes everything through Application Inference Profiles it controls), RDS/
 # Aurora resources are the *customer's own clusters*, which DBOps does not tag
 # or own. So per-cluster attribution is only possible if the operator has
 # activated a cost-allocation tag (e.g. `dbops:cluster`) on their clusters.
@@ -204,7 +204,7 @@ def _query_per_cluster(ce, start, end, services):
         tag because it isn't activated, else a short message, else None.
 
     Per-cluster requires the operator to have activated the tag in AWS Billing
-    AND tagged their clusters with it — neither is something DBOps can do for
+    AND tagged their clusters with it: neither is something DBOps can do for
     customer-owned RDS resources. We never fabricate rows; an empty result
     means "not available", surfaced as a flag to the caller."""
     last_err = None
@@ -232,7 +232,7 @@ def _query_per_cluster(ce, start, end, services):
                 raw = g["Keys"][0]
                 value = raw.split("$", 1)[1] if "$" in raw else raw
                 if not value:
-                    continue  # skip the untagged bucket — not a real cluster
+                    continue  # skip the untagged bucket, not a real cluster
                 amount = float(g["Metrics"]["UnblendedCost"]["Amount"])
                 rollup[value] = rollup.get(value, 0.0) + amount
         rows = [
@@ -252,7 +252,7 @@ def _handle_rds_view(ce, start, end, days, event=None):
     RDS-specific per-cluster fields."""
     services = _rds_services(ce, start, end)
 
-    # No tag filter — RDS spend is the customer's own clusters; DBOps doesn't
+    # No tag filter: RDS spend is the customer's own clusters; DBOps doesn't
     # tag them. We report the whole account's RDS/Aurora bill.
     daily, total, total_err = _query_total(ce, start, end, services)
 
@@ -261,7 +261,7 @@ def _handle_rds_view(ce, start, end, days, event=None):
     per_cluster, cluster_tag, cluster_err = _query_per_cluster(ce, start, end, services)
 
     # Tenant filter: restrict per-cluster rows to the caller's visible clusters.
-    # Totals and by_usage_type are account-level aggregates (not per-cluster) —
+    # Totals and by_usage_type are account-level aggregates (not per-cluster),
     # intentionally left unfiltered; only the per-cluster breakdown is scoped.
     if event is not None:
         visible = tenancy.visible_set_from_registry(event)
@@ -284,7 +284,7 @@ def _handle_rds_view(ce, start, end, days, event=None):
     if total_err == "cost_allocation_tag_not_activated":
         # Shouldn't happen without a tag filter, but guard anyway.
         no_data_reason = (
-            "Cost Explorer가 RDS 데이터를 반환하지 않았습니다 — 이 계정에서 "
+            "Cost Explorer가 RDS 데이터를 반환하지 않았습니다. 이 계정에서 "
             "Cost Explorer가 활성화되어 있는지 확인 후 24시간 뒤 다시 확인하세요."
         )
     elif total == 0 and not daily:
@@ -323,7 +323,7 @@ def _handle_elasticache_view(ce, start, end, days, event=None):
     per_cluster, cluster_tag, cluster_err = _query_per_cluster(ce, start, end, services)
 
     # Tenant filter: restrict per-cluster rows to the caller's visible clusters.
-    # Totals and by_usage_type are account-level aggregates — intentionally
+    # Totals and by_usage_type are account-level aggregates, intentionally
     # left unfiltered; only the per-cluster breakdown is tenant-scoped.
     if event is not None:
         visible = tenancy.visible_set_from_registry(event)
@@ -376,13 +376,13 @@ def _handle_elasticache_view(ce, start, end, days, event=None):
 # resize: active RDS RIs (per account+region derived from the clusters
 # registry), a coarse cover/over/unused estimate (running instances vs RI
 # count per class), and best-effort CE reservation/SP coverage for the hub
-# account. Every external call fails soft to null/empty — we never leak str(e).
+# account. Every external call fails soft to null/empty: we never leak str(e).
 # ===========================================================================
 
 
 def _session_for(region: str, role_arn: str = "") -> boto3.session.Session:
     """boto3 Session for a target account+region; assume `role_arn` when given
-    (hub-spoke chaining), else a local session. Copied from api/clusters —
+    (hub-spoke chaining), else a local session. Copied from api/clusters:
     api/ Lambdas are independent packages and cannot share imports."""
     if not role_arn:
         return boto3.session.Session(region_name=region or None)
@@ -413,7 +413,7 @@ def _aurora_commitment_targets(event):
 
     Fail CLOSED: a registry-scan failure returns ([], True) so we surface
     nothing rather than risk leaking another tenant's accounts. (This is
-    stricter than the rds view's fail-open per-cluster filter — commitments
+    stricter than the rds view's fail-open per-cluster filter: commitments
     enumerate whole accounts, so a mis-scoped result is worse.)"""
     table_name = os.environ.get("CLUSTERS_TABLE", "")
     if not table_name:
@@ -448,7 +448,7 @@ def _aurora_commitment_targets(event):
 
 def _describe_active_ris(rds, account: str, region: str) -> list:
     """Active RDS Reserved Instances in one account+region. RDS RIs carry no
-    end field — end = StartTime + Duration. Fails soft to []."""
+    end field: end = StartTime + Duration. Fails soft to []."""
     rows = []
     try:
         marker = None
@@ -488,7 +488,7 @@ def _describe_active_ris(rds, account: str, region: str) -> list:
 
 def _running_aurora_counts(rds) -> dict:
     """{instance_class: count} of running Aurora instances in one account+
-    region — the denominator for the coarse cover/over/unused estimate. Fails
+    region: the denominator for the coarse cover/over/unused estimate. Fails
     soft to {}."""
     counts = {}
     try:
@@ -530,7 +530,7 @@ def _reservation_coverage(ce, start, end):
         print(f"[cost] get_reservation_coverage failed: {e}")
     try:
         # SP doesn't cover RDS, but the operator may run committed compute
-        # (EC2/Lambda/Fargate) — surfaced account-wide for full context.
+        # (EC2/Lambda/Fargate), surfaced account-wide for full context.
         resp = ce.get_savings_plans_coverage(
             TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
         )
@@ -545,7 +545,7 @@ def _reservation_coverage(ce, start, end):
 
 def _savings_plans_list():
     """Active Savings Plans (best-effort). None when the API/permission/bundled
-    botocore is unavailable — SP is optional context, not a hard dependency."""
+    botocore is unavailable: SP is optional context, not a hard dependency."""
     try:
         sp = boto3.client("savingsplans", region_name="us-east-1")
         resp = sp.describe_savings_plans(states=["active"])
@@ -630,7 +630,7 @@ def _handle_commitments_view(ce, start, end, days, event=None):
 # ===========================================================================
 # DBOps platform cost path (?view=platform)
 # ---------------------------------------------------------------------------
-# "DBOps 자체를 돌리는 데 얼마 드나" — every CDK-managed resource carries
+# "DBOps 자체를 돌리는 데 얼마 드나": every CDK-managed resource carries
 # Application=DBOps (app.py adds the tag app-wide), and that tag is already
 # activated for cost allocation (the Bedrock view depends on it). So one
 # tag-filtered CE query covers the whole platform: Lambdas, the Aurora cache,
@@ -689,7 +689,7 @@ def _handle_platform_view(ce, start, end, days):
     no_data_reason = None
     if total_err == "cost_allocation_tag_not_activated":
         no_data_reason = (
-            "Application 태그가 cost allocation tag로 활성화되지 않았습니다 — "
+            "Application 태그가 cost allocation tag로 활성화되지 않았습니다. "
             "AWS Billing 콘솔에서 활성화하면 ~24시간 후부터 집계됩니다."
         )
     elif total == 0 and not daily:
@@ -711,7 +711,7 @@ def _handle_platform_view(ce, start, end, days):
         "anomalies": _detect_anomalies(daily),
         "no_data_reason": no_data_reason,
         "note": (
-            "Application=DBOps 태그 기준 — 모니터링 대상 고객 클러스터는 태그가 "
+            "Application=DBOps 태그 기준: 모니터링 대상 고객 클러스터는 태그가 "
             "없어 제외됩니다. RDS 항목은 DBOps 캐시 DB(+CDK 샘플 클러스터)이며, "
             "Bedrock 항목은 Bedrock 탭과 동일한 비용입니다."
         ),
@@ -736,7 +736,7 @@ def _handle_tokens_view(start, end, days):
     })
     if not model_ids:
         return _response(200, {"view": "tokens", "days": days, "by_model": [], "daily": [],
-                               "note": "Bedrock 토큰 메트릭 없음 — 아직 모델 호출 기록이 없거나 메트릭 전파 전입니다."})
+                               "note": "Bedrock 토큰 메트릭 없음: 아직 모델 호출 기록이 없거나 메트릭 전파 전입니다."})
 
     # Build GetMetricData queries: per model, Input + Output, Sum, daily period.
     queries, idmap = [], {}
@@ -781,7 +781,7 @@ def _handle_tokens_view(start, end, days):
     daily_list = [{"date": d, "input": int(v["input"]), "output": int(v["output"])}
                   for d, v in sorted(daily.items())]
     return _response(200, {"view": "tokens", "days": days, "by_model": by_model, "daily": daily_list,
-                           "note": "계정 전체 Bedrock 토큰 사용량(모델별) — CloudWatch 메트릭은 태그 필터 불가."})
+                           "note": "계정 전체 Bedrock 토큰 사용량(모델별): CloudWatch 메트릭은 태그 필터 불가."})
 
 
 def lambda_handler(event, context=None):
@@ -797,7 +797,7 @@ def lambda_handler(event, context=None):
 
     view = (qs.get("view") or "bedrock").lower()
 
-    # Tokens path uses CloudWatch, not Cost Explorer — dispatch before building ce.
+    # Tokens path uses CloudWatch, not Cost Explorer: dispatch before building ce.
     if view == "tokens":
         return _handle_tokens_view(start, end, days)
 
@@ -808,13 +808,13 @@ def lambda_handler(event, context=None):
     # cluster (tag-based) attribution. Default view stays Bedrock.
     if view == "rds":
         return _handle_rds_view(ce, start, end, days, event)
-    # `?view=elasticache` — ElastiCache 클러스터 비용.
+    # `?view=elasticache`: ElastiCache 클러스터 비용.
     if view == "elasticache":
         return _handle_elasticache_view(ce, start, end, days, event)
-    # `?view=commitments` — RI/Savings Plan 현황 (RI-aware 비용 분석).
+    # `?view=commitments`: RI/Savings Plan 현황 (RI-aware 비용 분석).
     if view == "commitments":
         return _handle_commitments_view(ce, start, end, days, event)
-    # `?view=platform` — DBOps 플랫폼 자체 운영비 (Application=DBOps 태그 전체).
+    # `?view=platform`: DBOps 플랫폼 자체 운영비 (Application=DBOps 태그 전체).
     if view == "platform":
         return _handle_platform_view(ce, start, end, days)
 
@@ -824,13 +824,13 @@ def lambda_handler(event, context=None):
 
     # Single Cost Explorer query scoped to BOTH the Bedrock-family SERVICE
     # values AND the Application=DBOps tag. We deliberately don't compute an
-    # untagged "account-wide Bedrock" total — the account may host other
+    # untagged "account-wide Bedrock" total: the account may host other
     # projects' Bedrock workloads (Kiro, ad-hoc experiments) that have nothing
     # to do with DBOps, so mixing them in would misattribute spend.
     tagged_daily, tagged_total, tagged_err = _query_total(ce, start, end, services, tag_filter)
 
     # When tagged_total is 0, the most likely cause is that the user has not
-    # yet activated `Application` as a cost-allocation tag in AWS Billing —
+    # yet activated `Application` as a cost-allocation tag in AWS Billing.
     # CDK already stamps the tag on every AIP/Lambda/RDS resource, but Cost
     # Explorer ignores tags until they're explicitly activated, and activation
     # does NOT back-fill past spend. Surface a one-time activation guide.
@@ -840,7 +840,7 @@ def lambda_handler(event, context=None):
             "DBOps Bedrock calls are routed through tagged Application "
             "Inference Profiles, but the 'Application' cost allocation tag "
             "is not yet activated in the AWS Billing console (or you haven't "
-            "used Bedrock yet in this window). Activate the tag once — Cost "
+            "used Bedrock yet in this window). Activate the tag once: Cost "
             "Explorer starts attributing DBOps spend within ~24h. "
             "(Note: activation does not back-fill past spend.)"
         )
@@ -848,7 +848,7 @@ def lambda_handler(event, context=None):
     headline_total = tagged_total
     headline_daily = tagged_daily
 
-    # Per-model breakdown by USAGE_TYPE — scoped to the same Bedrock+tag
+    # Per-model breakdown by USAGE_TYPE: scoped to the same Bedrock+tag
     # filter so the table only shows DBOps spend.
     model_split = []
     try:
@@ -879,7 +879,7 @@ def lambda_handler(event, context=None):
     if tagged_err == "cost_allocation_tag_not_activated":
         no_data_reason = (
             "The 'Application' cost allocation tag is not activated in the "
-            "AWS Billing console — activate it, then re-check in 24h."
+            "AWS Billing console: activate it, then re-check in 24h."
         )
 
     anomalies = _detect_anomalies(headline_daily)
@@ -904,7 +904,7 @@ def lambda_handler(event, context=None):
 def _detect_anomalies(daily: list[dict]) -> list[dict]:
     """Walk the daily series and flag spikes vs a trailing 7-day baseline.
 
-    Rule (intentionally permissive on small absolute values — finance teams
+    Rule (intentionally permissive on small absolute values, finance teams
     don't care about a $0.10 → $0.30 jump):
 
       baseline = mean of the 7 days *preceding* this day
@@ -960,7 +960,7 @@ def _detect_anomalies(daily: list[dict]) -> list[dict]:
             }
         )
 
-    # Most recent first — the panel shows newest first so today/yesterday
+    # Most recent first: the panel shows newest first so today/yesterday
     # spikes are immediately visible without scrolling.
     out.sort(key=lambda a: a["date"], reverse=True)
     return out

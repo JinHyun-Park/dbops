@@ -5,7 +5,7 @@ because the Lambda asset bundles the directory's CONTENTS to /var/task. Tests
 insert the package dir onto sys.path so the same bare imports work locally.
 
 Each test module calls load() at import time and teardown_module() at the end
-to remove what THIS module added — keeping the suite order-independent.
+to remove what THIS module added, keeping the suite order-independent.
 """
 import importlib.util
 import sys

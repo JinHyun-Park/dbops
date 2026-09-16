@@ -6,7 +6,7 @@ State mapping:
   - PG `active`               → MySQL PROCESSLIST_COMMAND='Query'
   - PG `idle`                 → PROCESSLIST_COMMAND='Sleep'
   - PG `idle in transaction`  → PROCESSLIST_COMMAND='Sleep' with an active TRX
-                                (skipped — `information_schema.innodb_trx`
+                                (skipped: `information_schema.innodb_trx`
                                 join is fragile; reported as `conn_other`)
 
 Long-running queries come from threads with PROCESSLIST_COMMAND='Query' and

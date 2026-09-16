@@ -1,4 +1,4 @@
-"""DocumentDB Findings Collector — connection saturation, replica lag, cursor timeout, cache hit.
+"""DocumentDB Findings Collector: connection saturation, replica lag, cursor timeout, cache hit.
 
 캐시 DB(metric_snapshots)만 읽고 cluster_health_findings에 finding을 적재한다.
 라이브 AWS 호출 없음.
@@ -207,7 +207,7 @@ def collect_docdb_findings(
             "cursors_timed_out > 0",
             (
                 f"최근 {window_hours}시간 동안 cursor timeout이 {int(sum_cursors_timed_out)}건 발생했습니다. "
-                "앱이 cursor를 닫지 않거나 느린 쿼리가 cursor를 점유하고 있습니다 — "
+                "앱이 cursor를 닫지 않거나 느린 쿼리가 cursor를 점유하고 있습니다. "
                 "쿼리 패턴/cursor 수명 점검을 권장합니다."
             ),
             {
@@ -231,7 +231,7 @@ def collect_docdb_findings(
             f"avg buffer_cache_hit < {CACHE_HIT_WARNING_PCT:.0f}% (샘플 ≥ {MIN_CACHE_HIT_SAMPLES}개)",
             (
                 f"최근 {window_hours}시간 평균 buffer cache hit ratio가 {avg_hit:.1f}%로 낮습니다. "
-                "워킹셋이 인스턴스 메모리를 초과하고 있습니다 — 인스턴스 클래스 상향을 권장합니다."
+                "워킹셋이 인스턴스 메모리를 초과하고 있습니다. 인스턴스 클래스 상향을 권장합니다."
             ),
             {
                 "avg_buffer_cache_hit": round(avg_hit, 2),
@@ -277,7 +277,7 @@ def collect_docdb_findings(
                         f"7일 평균 CPU {avg_cpu:.1f}% / p95 {p95_cpu:.1f}% ({samples} 샘플)",
                         f"avg < {COST_CPU_AVG_THRESHOLD:.0f}% & p95 < {COST_CPU_P95_THRESHOLD:.0f}% → 한 단계 축소 검토",
                         (
-                            f"{instance_class}의 7일 평균 CPU가 {avg_cpu:.1f}%입니다 — 한 단계 작은 "
+                            f"{instance_class}의 7일 평균 CPU가 {avg_cpu:.1f}%입니다. 한 단계 작은 "
                             "인스턴스 클래스를 검토하세요 (보통 월 30-50% 절감). 축소 후 프로덕션 "
                             "트래픽 1주를 지켜보고 재평가하세요."
                         ),

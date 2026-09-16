@@ -8,7 +8,7 @@ Resolution precedence for a key:
 
 Values are cached per-key for a short TTL so the hot path doesn't hit DDB on
 every call; a freshly-changed setting takes effect within the TTL on a warm
-container. NEVER raises — any DDB/permission error falls back to env/default,
+container. NEVER raises: any DDB/permission error falls back to env/default,
 because this gates opt-in features and must not break the work it wraps.
 """
 

@@ -1,4 +1,4 @@
-"""rds_direct_collector — unit tests.
+"""rds_direct_collector: unit tests.
 
 Three concerns:
   1. The 5 vendored mysql_* collectors must stay byte-identical to the
@@ -133,7 +133,7 @@ def test_handler_filters_rds_instance_mysql_and_sqlserver_with_secret():
 
 def test_process_cluster_never_raises_and_isolates_failures():
     h = _load("handler")
-    # Real secret shape so json.loads succeeds — otherwise the parse dies first
+    # Real secret shape so json.loads succeeds: otherwise the parse dies first
     # and the injected connect failure below is never reached (dead path).
     secrets = MagicMock()
     secrets.get_secret_value.return_value = {"SecretString": json.dumps({"username": "u", "password": "p"})}
@@ -195,7 +195,7 @@ def test_mssql_query_stats_sql_has_top100_and_microsecond_conversion():
 def test_mssql_query_stats_sql_aggregates_one_row_per_query_hash():
     # dm_exec_query_stats is per-cached-plan, so one query_hash can span several
     # rows in a single snapshot. query_regression PARTITIONs BY query_hash and
-    # LAGs by snapshot_time — duplicate same-tick hashes corrupt the per-interval
+    # LAGs by snapshot_time: duplicate same-tick hashes corrupt the per-interval
     # delta. GROUP BY query_hash collapses plans to one row/hash (MySQL/PG shape).
     m = _load("mssql_query_stats")
     assert "GROUP BY qs.query_hash" in m.QUERY_STATS_SQL

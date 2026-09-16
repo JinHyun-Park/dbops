@@ -1,11 +1,11 @@
-"""parameter_estimator — shared logic for simulate_parameter_change.
+"""parameter_estimator: shared logic for simulate_parameter_change.
 
 Single source of truth (byte-mirrored into ``api/simulation/``) so the MCP tool
 and the REST dashboard mirror derive a parameter-change simulation from the SAME
 live metadata instead of the REST side guessing from a static table.
 
-Each caller supplies its own AWS describe glue — the MCP via the cross-account
-``rds_client_for_cluster``, the REST via a local ``boto3.client("rds")`` — and
+Each caller supplies its own AWS describe glue (the MCP via the cross-account
+``rds_client_for_cluster``, the REST via a local ``boto3.client("rds")``) and
 hands the resulting parameter ROW here. The derivation (dynamic vs static from
 ``ApplyType``, modifiability, allowed-value validation, recommendation) lives
 here so it can't drift. ``PARAMETER_INFO`` remains only as a coarse fallback for
@@ -14,7 +14,7 @@ cross-account denied, parameter absent) and as the autocomplete catalog source.
 """
 
 # Coarse static fallback / autocomplete catalog. NOT the source of truth for a
-# real simulation — the same parameter can be static on one engine version and
+# real simulation: the same parameter can be static on one engine version and
 # dynamic on another, which is exactly why the live describe path is preferred.
 # Every entry declares the ENGINES it applies to. Without that, the fallback said
 # `known: true` and "즉시 적용 가능" for the PostgreSQL `work_mem` on an Aurora MySQL
@@ -99,7 +99,7 @@ def describe_all_parameters(rds, pg_name: str) -> list:
     """Every parameter in ``pg_name``, following the RDS ``Marker`` pagination.
 
     A cluster parameter group has hundreds of parameters past the single page
-    size, so the target is frequently on a later page — paginating is what makes
+    size, so the target is frequently on a later page, paginating is what makes
     the lookup reliable. ``rds`` is the caller's client (cross-account or local).
     """
     params: list = []
@@ -144,7 +144,7 @@ def static_fallback(cluster_id: str, parameter_name: str, new_value: str, reason
             "실제 파라미터 그룹을 조회해 확인하세요."
         )
     elif info["restart"]:
-        recommendation = "재시작 필요 — 점검 윈도우에서 수행 권장"
+        recommendation = "재시작 필요: 점검 윈도우에서 수행 권장"
     else:
         recommendation = "즉시 적용 가능"
 
@@ -192,7 +192,7 @@ def build_live_result(cluster_id: str, parameter_name: str, new_value: str, row:
     if not is_modifiable:
         recommendation = "이 파라미터는 수정할 수 없습니다 (IsModifiable=false)."
     elif requires_restart:
-        recommendation = "재시작 필요 — 점검 윈도우에서 수행 권장"
+        recommendation = "재시작 필요: 점검 윈도우에서 수행 권장"
     else:
         recommendation = "즉시 적용 가능"
 

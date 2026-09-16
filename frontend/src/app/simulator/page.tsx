@@ -39,11 +39,11 @@ import { useT } from "@/lib/i18n";
 
 export default function SimulatorPage() {
   const t = useT();
-  // Global selection (shared store) — switching via ⌘K/header persists here.
+  // Global selection (shared store): switching via ⌘K/header persists here.
   const { clusters, selected: selectedCluster } = useSelectedCluster();
 
   const current = clusters.find((c) => c.cluster_id === selectedCluster);
-  // 시뮬레이션(업그레이드/파라미터/DDL/스케일링)은 Aurora 전용 — 버전 업그레이드,
+  // 시뮬레이션(업그레이드/파라미터/DDL/스케일링)은 Aurora 전용: 버전 업그레이드,
   // SQL DDL, DB 파라미터그룹, ACU/인스턴스 리사이즈는 NoSQL 등가물이 없다. DynamoDB는
   // 용량 모드 비용 what-if 전용 패널을 보여주고, DocumentDB는 안내 문구를 보여준다
   // (백엔드 핸들러 가드와 일관: dynamodb는 ddb_cost_simulation 능력만 양성 게이트).
@@ -103,7 +103,7 @@ export default function SimulatorPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Upgrade Wizard — compatibility → impact methods → plan steps
+// Upgrade Wizard: compatibility → impact methods → plan steps
 // ---------------------------------------------------------------------------
 
 function UpgradePanel({
@@ -328,7 +328,7 @@ function UpgradePanel({
                             {typeof m.range_low_minutes === "number" &&
                               typeof m.range_high_minutes === "number" && (
                                 <span className="block text-[10px] text-zinc-600">
-                                  {m.range_low_minutes}–{m.range_high_minutes}분
+                                  {m.range_low_minutes}-{m.range_high_minutes}분
                                 </span>
                               )}
                           </td>
@@ -362,7 +362,7 @@ function UpgradePanel({
                                 {typeof m.range_low_minutes === "number" &&
                                   typeof m.range_high_minutes === "number" && (
                                     <div className="text-[10px] text-zinc-600 mt-1.5">
-                                      추정 범위 {m.range_low_minutes}–
+                                      추정 범위 {m.range_low_minutes}-
                                       {m.range_high_minutes}분
                                       {impact.confidence &&
                                         `, 신뢰도 ${
@@ -417,7 +417,7 @@ function UpgradePanel({
                 {plan.estimated_range_minutes && (
                   <span className="text-zinc-600">
                     {" "}
-                    ({plan.estimated_range_minutes[0]}–
+                    ({plan.estimated_range_minutes[0]}-
                     {plan.estimated_range_minutes[1]}분)
                   </span>
                 )}
@@ -614,7 +614,7 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
               </div>
               {!result.known && (
                 <div className="text-[10px] text-amber-400 mt-1">
-                  카탈로그 미등록 — 결과는 보수적 기본값입니다
+                  카탈로그 미등록: 결과는 보수적 기본값입니다
                 </div>
               )}
             </div>
@@ -647,7 +647,7 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
 
   // 클러스터 선택 즉시 무변경 베이스라인 시뮬레이션을 자동 실행한다.
   // 이전에는 첫 실행 결과가 와야 mode를 알 수 있어서 프로비저닝 클러스터에도
-  // ACU 입력이 먼저 보였다(모드는 백엔드가 describe로 라이브 판별 — AWS는
+  // ACU 입력이 먼저 보였다(모드는 백엔드가 describe로 라이브 판별: AWS는
   // Sv2도 EngineMode "provisioned"로 보고하므로 프런트 단독 판별 불가).
   // 베이스라인 결과로 입력 컨트롤이 처음부터 실제 모드를 따르고, 현재
   // 구성과 월 비용도 입력 전에 보인다.
@@ -717,7 +717,7 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
           {!result ? (
             <span className="text-[11px] text-zinc-500">
               {err
-                ? "모드 감지 실패 — 아래 오류 확인"
+                ? "모드 감지 실패. 아래 오류 확인"
                 : "클러스터 모드 감지 중…"}
             </span>
           ) : provisioned ? (
@@ -853,8 +853,8 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
 
         {!result && loading && (
           <div className="p-6 text-zinc-500 text-sm">
-            현재 구성과 월 비용을 불러오는 중입니다 — 클러스터 모드(Serverless
-            v2 / 프로비저닝)에 맞는 입력이 곧 표시됩니다.
+            현재 구성과 월 비용을 불러오는 중입니다. 클러스터 모드(Serverless v2
+            / 프로비저닝)에 맞는 입력이 곧 표시됩니다.
           </div>
         )}
       </div>
@@ -975,7 +975,7 @@ function DdlPanel({
                   result.estimated_range_seconds
                     ? `~${fmtExact(result.estimated_seconds)} s (${fmtExact(
                         result.estimated_range_seconds[0],
-                      )}–${fmtExact(result.estimated_range_seconds[1])})`
+                      )}-${fmtExact(result.estimated_range_seconds[1])})`
                     : `~${fmtExact(result.estimated_seconds)} s`
                 }
                 tone={
@@ -1160,7 +1160,7 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
                   현재
                 </div>
                 <div className="text-base font-mono break-all">
-                  {result.current.node_type || "—"}
+                  {result.current.node_type || "-"}
                 </div>
                 <div className="text-[11px] text-zinc-500 mt-0.5 font-mono">
                   {result.current.node_count != null
@@ -1182,7 +1182,7 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
                   제안
                 </div>
                 <div className="text-base font-mono break-all">
-                  {result.proposed.node_type || "—"}
+                  {result.proposed.node_type || "-"}
                 </div>
                 <div className="text-[11px] text-zinc-500 mt-0.5 font-mono">
                   {result.proposed.node_count != null
@@ -1229,7 +1229,7 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
             {result.status === "partial" && (
               <div className="flex items-center gap-2 text-[10px]">
                 <span className="px-1.5 py-0.5 border text-amber-300 border-amber-500/40 bg-amber-500/10">
-                  부분 추정 — 일부 단가 미조회
+                  부분 추정: 일부 단가 미조회
                 </span>
               </div>
             )}
@@ -1282,7 +1282,7 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
 // RDS instance (MySQL/SQL Server, non-Aurora) right-sizing + cost simulator.
 // Backed by the REST route POST /api/simulation/rds-instance-rightsizing (the
 // api/simulation Lambda replicates the pricing/cost logic), matching every
-// sibling cost-sim panel — exact AWS Price List numbers with no LLM relay.
+// sibling cost-sim panel: exact AWS Price List numbers with no LLM relay.
 // RdsRightsizingResponse is defined in api-client.ts.
 // ---------------------------------------------------------------------------
 
@@ -1303,7 +1303,7 @@ function RdsActionBadge({ action }: { action?: string }) {
     <span
       className={`px-1.5 py-0.5 border text-[10px] font-mono uppercase tracking-wider whitespace-nowrap ${tone}`}
     >
-      {action ? RDS_ACTION_KO[action] ?? action : "—"}
+      {action ? RDS_ACTION_KO[action] ?? action : "-"}
     </span>
   );
 }
@@ -1369,7 +1369,7 @@ function RdsRightsizingSimulator({
             Engine
           </span>
           <span className="text-xs font-mono text-zinc-300">
-            {engine || "—"}
+            {engine || "-"}
           </span>
           <button
             onClick={run}
@@ -1420,7 +1420,7 @@ function RdsRightsizingSimulator({
           <div className="p-4 space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500 font-mono">
               <span className="px-1.5 py-0.5 border text-zinc-300 border-zinc-700 bg-zinc-900/60">
-                {result.current?.instance_class || "—"}
+                {result.current?.instance_class || "-"}
               </span>
               {result.current?.storage_gb != null && (
                 <span>
@@ -1495,7 +1495,7 @@ function RdsRightsizingSimulator({
                   현재
                 </div>
                 <div className="text-base font-mono break-all">
-                  {result.current?.instance_class || "—"}
+                  {result.current?.instance_class || "-"}
                 </div>
                 <MonthlyLine
                   monthly={result.cost_impact?.current_monthly_usd}
@@ -1512,7 +1512,7 @@ function RdsRightsizingSimulator({
                 <div className="text-base font-mono break-all">
                   {result.recommendation?.instance_class ||
                     result.current?.instance_class ||
-                    "—"}
+                    "-"}
                 </div>
                 <MonthlyLine
                   monthly={result.cost_impact?.proposed_monthly_usd}
@@ -1724,7 +1724,7 @@ function InstanceCard({
         {label}
       </div>
       <div className="text-base font-mono break-all">
-        {instanceClass || "—"}
+        {instanceClass || "-"}
       </div>
       <MonthlyLine monthly={monthly} deltaPct={deltaPct} />
     </div>

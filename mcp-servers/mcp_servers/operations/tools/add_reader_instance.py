@@ -1,6 +1,6 @@
-"""add_reader_instance — approval-gated Aurora reader scale-OUT (N-③).
+"""add_reader_instance: approval-gated Aurora reader scale-OUT (N-③).
 
-Adds a new READER instance to an Aurora cluster (PG or MySQL — this is
+Adds a new READER instance to an Aurora cluster (PG or MySQL, this is
 instance-level, not engine-specific). The handler positive-gates this tool on
 the relational-only `scale_instance` capability, so non-relational engines get
 unsupported_engine before the impl runs.
@@ -50,7 +50,7 @@ def add_reader_instance_impl(
     instance_class = (instance_class or "").strip()
     availability_zone = (availability_zone or "").strip()
 
-    # The caller must name the new reader — the approval payload hash binds it,
+    # The caller must name the new reader: the approval payload hash binds it,
     # so an auto-generated name (different each call) could never hash-match.
     if not new_instance_id:
         return {"status": "invalid_instance", "cluster_id": cluster_id,
@@ -58,7 +58,7 @@ def add_reader_instance_impl(
 
     if not approved:
         # Resolve the concrete class NOW so the approval payload hash binds the
-        # exact billable class the DBA sees — execute never picks a class after
+        # exact billable class the DBA sees: execute never picks a class after
         # approval.
         if not instance_class:
             try:
@@ -70,7 +70,7 @@ def add_reader_instance_impl(
                 instance_class = ""
             if not instance_class:
                 return {"status": "needs_instance_class", "cluster_id": cluster_id,
-                        "reason": "instance_class를 결정할 수 없습니다 — 명시해 주세요 (예: db.serverless)."}
+                        "reason": "instance_class를 결정할 수 없습니다. 명시해 주세요 (예: db.serverless)."}
         return {
             "status": "approval_required",
             "cluster_id": cluster_id,
@@ -95,10 +95,10 @@ def add_reader_instance_impl(
                 "reason": guard.get("reason", "approval guard rejected the request")}
 
     # The class was resolved in PREVIEW and hash-bound by the approval, so execute
-    # uses the exact class the DBA approved — never a post-approval lookup.
+    # uses the exact class the DBA approved, never a post-approval lookup.
     if not instance_class:
         return {"status": "add_failed", "cluster_id": cluster_id,
-                "reason": "instance_class가 승인에 바인딩되지 않았습니다 — 미리보기가 제안한 클래스로 다시 승인 요청하세요."}
+                "reason": "instance_class가 승인에 바인딩되지 않았습니다. 미리보기가 제안한 클래스로 다시 승인 요청하세요."}
 
     rds = client_for_cluster(cluster_id, "rds")
     try:
@@ -106,7 +106,7 @@ def add_reader_instance_impl(
     except Exception as e:
         print(f"[add_reader_instance] describe_db_clusters failed for {cluster_id}: {e}")
         return {"status": "add_failed", "cluster_id": cluster_id,
-                "reason": "클러스터 조회에 실패했습니다 — 대상 클러스터 식별자를 확인하세요."}
+                "reason": "클러스터 조회에 실패했습니다. 대상 클러스터 식별자를 확인하세요."}
 
     real_cluster_id = dbc.get("DBClusterIdentifier") or cluster_id
     engine = dbc.get("Engine")

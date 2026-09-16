@@ -7,7 +7,7 @@ import { EngineBadge } from "@/components/design-system/engine-badge";
 
 // Controlled, searchable replacement for a native <select> of clusters in FORM
 // fields (chat conversation cluster, alert/runbook pickers). Unlike the header
-// ClusterDropdown this is NOT tied to the global selection — it's a plain
+// ClusterDropdown this is NOT tied to the global selection: it's a plain
 // value/onChange field. A native <select> with 100+ options is unscannable;
 // this gives typeahead at fleet scale.
 export function SearchableClusterSelect({
@@ -24,7 +24,7 @@ export function SearchableClusterSelect({
   clusters: { cluster_id: string; engine?: string | null }[];
   placeholder?: string;
   className?: string;
-  // When true, an "all clusters" entry maps to value "" — for filter fields.
+  // When true, an "all clusters" entry maps to value "" (for filter fields).
   allowAll?: boolean;
   allLabel?: string;
 }) {

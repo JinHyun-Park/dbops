@@ -2,7 +2,7 @@
 
 
 def get_remediation_history_impl(cache, cluster_id: str, symptom_class: str = "") -> dict:
-    # ponytail: `where` is assembled from string literals only; user input goes in params — no injection risk.
+    # ponytail: `where` is assembled from string literals only; user input goes in params, no injection risk.
     where = "cluster_id = :cid"
     params = {"cid": cluster_id}
     if symptom_class:

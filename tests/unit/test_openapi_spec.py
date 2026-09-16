@@ -2,7 +2,7 @@
 
 The committed frontend/public/openapi.json must equal what tools/openapi_gen.py
 derives from the CDK route table. Add a route without regenerating the spec
-(`python tools/openapi_gen.py`) and this fails — no silent drift between the
+(`python tools/openapi_gen.py`) and this fails. No silent drift between the
 live API surface and its published docs.
 """
 import importlib.util
@@ -22,7 +22,7 @@ def test_committed_openapi_matches_route_table():
     generated = _mod.build_spec()
     committed = json.loads(_SPEC.read_text())
     assert generated == committed, (
-        "frontend/public/openapi.json is stale vs the CDK route table — "
+        "frontend/public/openapi.json is stale vs the CDK route table: "
         "run `python tools/openapi_gen.py` and commit the result."
     )
 

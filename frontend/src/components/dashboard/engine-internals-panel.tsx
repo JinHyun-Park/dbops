@@ -1,6 +1,6 @@
 "use client";
 
-// Engine-internal signals the CloudWatch metrics don't expose — collected by the
+// Engine-internal signals the CloudWatch metrics don't expose, collected by the
 // ETL collector from pg_stat_database / pg_stat_bgwriter (PostgreSQL) and
 // SHOW ENGINE INNODB STATUS (MySQL). Read straight from metric_snapshots via the
 // batch-timeseries endpoint (no per-metric backend allowlist).
@@ -85,7 +85,7 @@ function fmtTime(iso: string) {
 }
 
 // mssql_wait_ms is one metric_type dimensioned by wait_type (multiple rows
-// per timestamp bucket) — not a flat per-key series like MYSQL_METRICS/
+// per timestamp bucket), not a flat per-key series like MYSQL_METRICS/
 // PG_METRICS, so it gets a ranked bar list instead of a MiniChart grid.
 function latestWaitsByType(points: Point[]) {
   const latest = new Map<string, { ts: string; value: number }>();
@@ -95,7 +95,7 @@ function latestWaitsByType(points: Point[]) {
       try {
         waitType = JSON.parse(p.dimensions).wait_type ?? waitType;
       } catch {
-        // malformed dimensions JSON — keep "unknown" bucket
+        // malformed dimensions JSON: keep "unknown" bucket
       }
     }
     const value = Number(p.value) || 0;
@@ -187,7 +187,7 @@ function MiniChart({
         )}
       </div>
       <div className="text-2xl font-semibold text-zinc-100 mb-2">
-        {current == null ? "—" : fmtDecimal(current, 2)}
+        {current == null ? "-" : fmtDecimal(current, 2)}
         {current != null && def.unit && (
           <span className="text-sm text-zinc-500 ml-1">{def.unit}</span>
         )}

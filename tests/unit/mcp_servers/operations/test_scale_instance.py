@@ -26,7 +26,7 @@ _MTP = "mcp_servers.shared.managed_tag_preflight"
 
 
 def _rds_cluster(members, cluster_id="prod-pg-1", engine="aurora-postgresql", instances=None):
-    """An RDS MagicMock whose describe_* return real dicts (never bare mocks —
+    """An RDS MagicMock whose describe_* return real dicts (never bare mocks:
     a bare MagicMock in a paginate/iter loop hangs)."""
     rds = MagicMock()
     rds.describe_db_clusters.return_value = {
@@ -89,7 +89,7 @@ def test_add_preview_unresolvable_class_asks(mock_client):
 @patch(f"{_A}.client_for_cluster")
 def test_add_execute_requires_bound_class(mock_client, mock_guard):
     """Approved but instance_class empty (never bound at approval) → add_failed
-    and NO create — execute never resolves a class the DBA didn't approve."""
+    and NO create: execute never resolves a class the DBA didn't approve."""
     rds = _rds_cluster([{"DBInstanceIdentifier": "w", "IsClusterWriter": True}])
     mock_client.return_value = rds
     mock_guard.return_value = {"ok": True}
@@ -163,7 +163,7 @@ def test_add_failure_returns_friendly_no_leak(mock_client, mock_guard):
 @patch(f"{_A}.client_for_cluster")
 def test_add_payload_hash_mismatch_rejected(mock_client):
     """A real approval minted for class '' cannot be consumed to add the reader
-    with a different class — the guard's payload_hash refuses it, no create."""
+    with a different class: the guard's payload_hash refuses it, no create."""
     rds = _rds_cluster([{"DBInstanceIdentifier": "w", "IsClusterWriter": True}])
     mock_client.return_value = rds
     row = {
@@ -307,7 +307,7 @@ def test_remove_not_found(mock_client, mock_guard):
 @patch(f"{_R}.verify_approval")
 @patch(f"{_R}.client_for_cluster")
 def test_remove_protects_last_instance(mock_client, mock_guard):
-    """Even a reader must not be deleted if it is the cluster's ONLY instance —
+    """Even a reader must not be deleted if it is the cluster's ONLY instance:
     never leave a cluster with 0 instances."""
     rds = _rds_cluster([{"DBInstanceIdentifier": "r-only", "IsClusterWriter": False}])
     mock_client.return_value = rds
@@ -389,7 +389,7 @@ def test_remove_rechecks_writer_before_delete_toctou(mock_client, mock_guard):
 
 @patch(f"{_R}.client_for_cluster")
 def test_remove_payload_hash_mismatch_rejected(mock_client):
-    """A real approval minted for r1 cannot be consumed to delete r2 — the
+    """A real approval minted for r1 cannot be consumed to delete r2: the
     guard's payload_hash refuses it, no delete, no consume."""
     rds = _rds_cluster([
         {"DBInstanceIdentifier": "w", "IsClusterWriter": True},

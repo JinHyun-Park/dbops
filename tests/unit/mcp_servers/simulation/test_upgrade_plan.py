@@ -153,7 +153,7 @@ def test_keeps_rollback_plan_and_method(mock_rds_for):
 
 @patch("mcp_servers.simulation.tools.upgrade_plan.rds_client_for_cluster")
 def test_mysql_major_does_not_add_pg_upgrade_step(mock_rds_for):
-    """Engine comes from cluster_meta.engine — a MySQL major must NOT get a
+    """Engine comes from cluster_meta.engine: a MySQL major must NOT get a
     pg_upgrade step (the old version-text heuristic would have)."""
     mock_rds_for.return_value = _rds_with_readers(0)
     cache = _cache_with("200", "8.0.mysql_aurora.2.11.0", engine="aurora-mysql")
@@ -171,7 +171,7 @@ def test_mysql_major_does_not_add_pg_upgrade_step(mock_rds_for):
 @patch("mcp_servers.simulation.tools.upgrade_plan.rds_client_for_cluster")
 def test_clone_method_has_clone_steps_and_rollback(mock_rds_for):
     """method='clone' must produce clone-specific execution steps AND the clone
-    rollback plan — previously it got in-place steps with a clone rollback."""
+    rollback plan, previously it got in-place steps with a clone rollback."""
     mock_rds_for.return_value = _rds_with_readers(1)
     cache = _cache_with("100", "15.4")
 

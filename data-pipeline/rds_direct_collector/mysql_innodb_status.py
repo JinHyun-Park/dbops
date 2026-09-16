@@ -2,15 +2,15 @@
 
 Parses `SHOW ENGINE INNODB STATUS` (a single text blob) for the internal signals
 CloudWatch does NOT expose:
-  - History list length   — un-purged row versions; a sustained climb means the
+  - History list length: un-purged row versions; a sustained climb means the
     purge thread is falling behind a long-running transaction (→ undo bloat).
-  - Buffer pool hit rate  — reads served from the buffer pool vs disk.
-  - Checkpoint age (MB)   — distance between the log sequence number and the last
+  - Buffer pool hit rate: reads served from the buffer pool vs disk.
+  - Checkpoint age (MB): distance between the log sequence number and the last
     checkpoint; redo-log pressure.
-  - Pending I/O           — pending preads + pwrites (I/O backlog).
+  - Pending I/O: pending preads + pwrites (I/O backlog).
 
 The blob's exact wording varies across MySQL/Aurora versions, so each field is
-parsed independently and simply skipped when its pattern is absent — nothing
+parsed independently and simply skipped when its pattern is absent. Nothing
 raises. Findings are threshold checks on the parsed values.
 """
 
@@ -33,15 +33,15 @@ INSERT_FINDING = (
 _RE_HLL = re.compile(r"History list length\s+(\d+)")
 _RE_HIT = re.compile(r"Buffer pool hit rate\s+(\d+)\s*/\s*1000")
 # Log sequence / checkpoint exist on RDS MySQL but NOT on Aurora MySQL (its log
-# is the distributed storage volume, no local redo) — parsed when present,
+# is the distributed storage volume, no local redo), parsed when present,
 # silently absent on Aurora.
 _RE_LSN = re.compile(r"Log sequence number\s+(\d+)")
 _RE_CKP = re.compile(r"Last checkpoint at\s+(\d+)")
-# Pending I/O — Aurora MySQL format: "Pending normal aio reads: [..] , aio
+# Pending I/O. Aurora MySQL format: "Pending normal aio reads: [..] , aio
 # writes: [..] ," plus "Pending flushes (fsync) log: N; buffer pool: M".
 _RE_AIO = re.compile(r"Pending normal aio reads:\s*\[([\d,\s]*)\]\s*,\s*aio writes:\s*\[([\d,\s]*)\]")
 _RE_FSYNC = re.compile(r"Pending flushes \(fsync\)\s*log:\s*(\d+);\s*buffer pool:\s*(\d+)")
-# Row throughput — first "X inserts/s, Y updates/s, Z deletes/s, W reads/s" line
+# Row throughput: first "X inserts/s, Y updates/s, Z deletes/s, W reads/s" line
 # (user rows; the system-rows line comes after).
 _RE_ROWOPS = re.compile(
     r"([\d.]+) inserts/s,\s*([\d.]+) updates/s,\s*([\d.]+) deletes/s,\s*([\d.]+) reads/s")
@@ -127,7 +127,7 @@ def collect_mysql_innodb_status(
             "check_type": "innodb_history_list_high", "severity": sev,
             "subject": "InnoDB History List Length", "value_str": f"{int(hll):,}",
             "threshold_str": f"≤ {_HLL_WARN:,}",
-            "recommendation": ("un-purge된 행 버전이 많습니다 — 장기 트랜잭션이 purge를 막고 있을 수 "
+            "recommendation": ("un-purge된 행 버전이 많습니다. 장기 트랜잭션이 purge를 막고 있을 수 "
                                "있습니다. 오래된 트랜잭션(information_schema.innodb_trx)을 확인/종료하세요."),
             "details": "{}",
         })

@@ -6,7 +6,7 @@ payload; not_applicable pre-checks skip approval; approved + verify_approval
 mocked ok → executes with the right AWS call args; TOCTOU drift → refuses WITHOUT
 calling the mutating API; no str(e) leak on failure. Plus the allowlist/_project
 round-trip for the 3 new action_types (a real approval minted for one payload
-cannot be redirected to a different one — the guard's payload_hash refuses it).
+cannot be redirected to a different one, the guard's payload_hash refuses it).
 
 The handler engine-gate (unsupported_engine on non-rds_instance) is exercised in
 test_operations_engine_gate.py. Every describe_* MagicMock returns a real dict so
@@ -176,7 +176,7 @@ def test_snapshot_not_available_not_applicable(mock_client):
 @patch(f"{_SN}.client_for_cluster")
 def test_snapshot_execute_refuses_empty_id(mock_client, mock_guard):
     """Approved but snapshot_id empty (never bound at approval) → snapshot_failed
-    and NO create — execute never re-resolves a default the DBA didn't approve."""
+    and NO create: execute never re-resolves a default the DBA didn't approve."""
     rds = _rds_instance(status="available")
     mock_client.return_value = rds
     mock_guard.return_value = {"ok": True}
@@ -375,7 +375,7 @@ def test_new_action_types_in_request_approval_allowlist():
 
 
 def test_project_binds_new_action_type_fields():
-    """_project must bind EXACTLY the operation-defining fields per new action —
+    """_project must bind EXACTLY the operation-defining fields per new action:
     a different value must change the hash (payload binding)."""
     # reboot: cluster_id only
     assert canonical_action_hash("reboot_rds_instance", {"cluster_id": "a"}) != \

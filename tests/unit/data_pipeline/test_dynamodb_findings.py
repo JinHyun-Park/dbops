@@ -1,4 +1,4 @@
-"""DynamoDB findings collector — TDD test suite.
+"""DynamoDB findings collector: TDD test suite.
 
 Strategy: patch _execute at the module level so every SQL call is intercepted.
 Branch on SQL keywords to inject fake cache rows (cluster_meta billing_mode;
@@ -69,7 +69,7 @@ def _mock_execute(
         if "cluster_meta" in sql and "resource_details" in sql:
             return [{"resource_details": _json.dumps({"billing_mode": billing_mode})}]
 
-        # per-side throttle aggregate (Fix 1) — keyed by "read_throttle" column name
+        # per-side throttle aggregate (Fix 1): keyed by "read_throttle" column name
         if "read_throttle" in sql and "write_throttle" in sql and "cluster_meta" not in sql:
             return [
                 {
@@ -80,7 +80,7 @@ def _mock_execute(
                 }
             ]
 
-        # RCU lateral-join util query (Fix 2) — keyed by "peak_util_r"
+        # RCU lateral-join util query (Fix 2): keyed by "peak_util_r"
         if "peak_util_r" in sql:
             return [
                 {
@@ -90,7 +90,7 @@ def _mock_execute(
                 }
             ]
 
-        # WCU lateral-join util query (Fix 2) — keyed by "peak_util_w"
+        # WCU lateral-join util query (Fix 2): keyed by "peak_util_w"
         if "peak_util_w" in sql:
             return [
                 {
@@ -100,7 +100,7 @@ def _mock_execute(
                 }
             ]
 
-        # raw consumed aggregate (for on-demand rule) — keyed by "max_consumed_rcu"
+        # raw consumed aggregate (for on-demand rule): keyed by "max_consumed_rcu"
         if "max_consumed_rcu" in sql:
             return [
                 {
@@ -173,7 +173,7 @@ def _run(
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — heavy throttle (per-side) + low utilization → ddb_throttling (critical)
+# Test 1: heavy throttle (per-side) + low utilization → ddb_throttling (critical)
 #          + ddb_hot_partition (Fix 1: write side throttle, low write util)
 # ---------------------------------------------------------------------------
 
@@ -200,7 +200,7 @@ def test_heavy_throttle_low_util_critical_and_hot_partition():
 
 
 # ---------------------------------------------------------------------------
-# Test 2 — throttle ≥ 1 but < 100, < 10 minutes → warning throttle
+# Test 2: throttle ≥ 1 but < 100, < 10 minutes → warning throttle
 # ---------------------------------------------------------------------------
 
 def test_moderate_throttle_warning():
@@ -221,7 +221,7 @@ def test_moderate_throttle_warning():
 
 
 # ---------------------------------------------------------------------------
-# Test 3 — high utilization (≥80% sustained), no throttle
+# Test 3: high utilization (≥80% sustained), no throttle
 #          → ddb_capacity_underprovisioned (Fix 4: ≥3 high_minutes)
 # ---------------------------------------------------------------------------
 
@@ -245,7 +245,7 @@ def test_high_utilization_sustained_underprovisioned():
 
 
 # ---------------------------------------------------------------------------
-# Test 4 — idle provisioned (low util, enough samples) → ddb_capacity_overprovisioned
+# Test 4: idle provisioned (low util, enough samples) → ddb_capacity_overprovisioned
 # ---------------------------------------------------------------------------
 
 def test_idle_provisioned_overprovisioned():
@@ -269,7 +269,7 @@ def test_idle_provisioned_overprovisioned():
 
 
 # ---------------------------------------------------------------------------
-# Test 5 — idle provisioned but too few samples → no overprovisioned finding
+# Test 5: idle provisioned but too few samples → no overprovisioned finding
 # ---------------------------------------------------------------------------
 
 def test_idle_provisioned_too_few_samples_no_finding():
@@ -290,7 +290,7 @@ def test_idle_provisioned_too_few_samples_no_finding():
 
 
 # ---------------------------------------------------------------------------
-# Test 6 — PAY_PER_REQUEST: no provisioned rules; high consumed → ddb_ondemand_high_throughput
+# Test 6: PAY_PER_REQUEST: no provisioned rules; high consumed → ddb_ondemand_high_throughput
 # ---------------------------------------------------------------------------
 
 def test_pay_per_request_high_consumed_ondemand_info():
@@ -322,7 +322,7 @@ def test_pay_per_request_high_consumed_ondemand_info():
 
 
 # ---------------------------------------------------------------------------
-# Test 7 — PAY_PER_REQUEST, low throughput → no finding
+# Test 7: PAY_PER_REQUEST, low throughput → no finding
 # ---------------------------------------------------------------------------
 
 def test_pay_per_request_low_throughput_no_finding():
@@ -342,11 +342,11 @@ def test_pay_per_request_low_throughput_no_finding():
 
 
 # ---------------------------------------------------------------------------
-# Test 8 — healthy provisioned (no throttle, util 30–70%) → no findings
+# Test 8: healthy provisioned (no throttle, util 30-70%) → no findings
 # ---------------------------------------------------------------------------
 
 def test_healthy_provisioned_no_findings():
-    """Moderate utilization (30–70%), no throttle, enough samples → no findings."""
+    """Moderate utilization (30-70%), no throttle, enough samples → no findings."""
     emitted, _ = _run(
         billing_mode="PROVISIONED",
         read_throttle=0.0,
@@ -360,7 +360,7 @@ def test_healthy_provisioned_no_findings():
 
 
 # ---------------------------------------------------------------------------
-# Test 9 — missing provisioned data → provisioned rules silently skip
+# Test 9: missing provisioned data → provisioned rules silently skip
 # ---------------------------------------------------------------------------
 
 def test_missing_provisioned_data_skips_provisioned_rules():
@@ -382,7 +382,7 @@ def test_missing_provisioned_data_skips_provisioned_rules():
 
 
 # ---------------------------------------------------------------------------
-# Test 10 — resource_details comes back as a raw string (JSONB → str) → parsed correctly
+# Test 10: resource_details comes back as a raw string (JSONB → str) → parsed correctly
 # ---------------------------------------------------------------------------
 
 def test_billing_mode_string_jsonb_parsed():
@@ -425,7 +425,7 @@ def test_billing_mode_string_jsonb_parsed():
 
 
 # ---------------------------------------------------------------------------
-# Test 11 — run_ts is stored verbatim in snapshot_time param (shared ts check)
+# Test 11: run_ts is stored verbatim in snapshot_time param (shared ts check)
 # ---------------------------------------------------------------------------
 
 def test_snapshot_ts_is_shared():
@@ -461,7 +461,7 @@ def test_snapshot_ts_is_shared():
 
 
 # ---------------------------------------------------------------------------
-# Test 12 — per-GSI throttle > 0 → ddb_gsi_throttling (warning)
+# Test 12: per-GSI throttle > 0 → ddb_gsi_throttling (warning)
 # ---------------------------------------------------------------------------
 
 def test_gsi_throttling_emits_finding_when_throttle_nonzero():
@@ -517,7 +517,7 @@ def test_gsi_throttling_emits_finding_when_throttle_nonzero():
 
 
 # ---------------------------------------------------------------------------
-# Test 13 — per-GSI throttle = 0 for all GSIs → no ddb_gsi_throttling finding
+# Test 13: per-GSI throttle = 0 for all GSIs → no ddb_gsi_throttling finding
 # ---------------------------------------------------------------------------
 
 def test_gsi_throttling_silent_when_all_zero():
@@ -562,7 +562,7 @@ def test_gsi_throttling_silent_when_all_zero():
 
 
 # ---------------------------------------------------------------------------
-# Test 14 — no per-GSI rows at all → silent skip (no ddb_gsi_throttling)
+# Test 14: no per-GSI rows at all → silent skip (no ddb_gsi_throttling)
 # ---------------------------------------------------------------------------
 
 def test_gsi_throttling_silent_when_no_gsi_rows():
@@ -605,11 +605,11 @@ def test_gsi_throttling_silent_when_no_gsi_rows():
 
 
 # ===========================================================================
-# NEW TESTS for Fix 1–4
+# NEW TESTS for Fix 1-4
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# Test 15 (Fix 4) — write throttles + HIGH util_w (≥80% sustained ≥3 min)
+# Test 15 (Fix 4): write throttles + HIGH util_w (≥80% sustained ≥3 min)
 #   → ddb_capacity_underprovisioned fires, ddb_hot_partition does NOT
 # ---------------------------------------------------------------------------
 
@@ -636,7 +636,7 @@ def test_write_throttle_high_util_underprovisioned_not_hot_partition():
 
 
 # ---------------------------------------------------------------------------
-# Test 16 (Fix 1) — write throttles + LOW util_w (<50%)
+# Test 16 (Fix 1): write throttles + LOW util_w (<50%)
 #   → ddb_hot_partition fires
 # ---------------------------------------------------------------------------
 
@@ -662,7 +662,7 @@ def test_write_throttle_low_util_hot_partition():
 
 
 # ---------------------------------------------------------------------------
-# Test 17 (Fix 1) — read throttles + LOW util_r (<50%)
+# Test 17 (Fix 1): read throttles + LOW util_r (<50%)
 #   → ddb_hot_partition fires (read side)
 # ---------------------------------------------------------------------------
 
@@ -685,7 +685,7 @@ def test_read_throttle_low_util_hot_partition_read_side():
 
 
 # ---------------------------------------------------------------------------
-# Test 18 (Fix 1) — write throttle but write util UNKNOWN (no provisioned)
+# Test 18 (Fix 1): write throttle but write util UNKNOWN (no provisioned)
 #   → ddb_hot_partition silent
 # ---------------------------------------------------------------------------
 
@@ -711,7 +711,7 @@ def test_write_throttle_unknown_write_util_hot_partition_silent():
 
 
 # ---------------------------------------------------------------------------
-# Test 19 (Fix 3) — util >100% → recommendation contains burst explanation
+# Test 19 (Fix 3): util >100% → recommendation contains burst explanation
 # ---------------------------------------------------------------------------
 
 def test_util_over_100_burst_explanation_in_recommendation():
@@ -739,7 +739,7 @@ def test_util_over_100_burst_explanation_in_recommendation():
 
 
 # ---------------------------------------------------------------------------
-# Test 20 (Fix 4) — sustained requires ≥3 high minutes; 2 high minutes → silent
+# Test 20 (Fix 4): sustained requires ≥3 high minutes; 2 high minutes → silent
 # ---------------------------------------------------------------------------
 
 def test_underprovisioned_requires_3_high_minutes_two_is_not_enough():
@@ -761,7 +761,7 @@ def test_underprovisioned_requires_3_high_minutes_two_is_not_enough():
 
 
 # ---------------------------------------------------------------------------
-# Test 21 — healthy / missing inputs → completely silent
+# Test 21: healthy / missing inputs → completely silent
 # ---------------------------------------------------------------------------
 
 def test_completely_missing_cluster_meta_silent():

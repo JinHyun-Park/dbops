@@ -1,4 +1,4 @@
-# DB Map — Service Blueprint View
+# DB Map: Service Blueprint View
 
 **Date:** 2026-06-29
 **Status:** Approved (brainstorming → spec)
@@ -23,17 +23,17 @@ global selected cluster and navigates to its dashboard.
 
 ## Data model
 
-Two OPTIONAL fields on the cluster registry item (DynamoDB `clusters` table —
+Two OPTIONAL fields on the cluster registry item (DynamoDB `clusters` table:
 schemaless, so no migration; absent ⇒ no note / Unassigned):
 
-- `purpose: str` — one-line free text.
-- `service_tags: list[str]` — connected services/apps (also the grouping key).
+- `purpose: str`: one-line free text.
+- `service_tags: list[str]`: connected services/apps (also the grouping key).
 
 ## API
 
-- **Read:** reuse the existing `GET /api/clusters` — it returns registry items
+- **Read:** reuse the existing `GET /api/clusters`: it returns registry items
   verbatim, so the new fields ride along once set. No new read endpoint.
-- **Write:** new `PATCH /api/clusters/{cluster_id}/meta` — admin-gated
+- **Write:** new `PATCH /api/clusters/{cluster_id}/meta`: admin-gated
   (fail-closed, mirroring the existing `_is_admin` pattern), body
   `{purpose?: str, service_tags?: list[str]}`. Validates: cluster exists,
   `purpose` length cap (e.g. 200 chars), `service_tags` is a list of short
@@ -44,7 +44,7 @@ schemaless, so no migration; absent ⇒ no note / Unassigned):
   `prod | staging | dev | null` from the cluster name/tags (display-only; never
   written). Conservative: only tag when a clear token matches.
 
-## Frontend — `/map` page
+## Frontend: `/map` page
 
 - New route `frontend/src/app/map/page.tsx` + a "Map" entry in the Monitor nav
   group (`app-shell.tsx`), visible to all roles.
@@ -94,15 +94,15 @@ to an **architecture blueprint** per user feedback ("어느 VPC 있고 이런것
 - **Primary grouping is now Region → VPC** (nested containers, AWS-diagram feel),
   with connected-service tags demoted to a **chip overlay** on each DB node.
 - **New infra data**: `cluster_meta.vpc_id` + `availability_zones`, collected by
-  `meta_collector._vpc_info` via `describe_db_subnet_groups` (Aurora + DocumentDB)
-  — schema_v23; ETL role gains `rds:DescribeDBSubnetGroups`; surfaced through the
+  `meta_collector._vpc_info` via `describe_db_subnet_groups` (Aurora + DocumentDB),
+  schema_v23; ETL role gains `rds:DescribeDBSubnetGroups`; surfaced through the
   `/api/clusters` cluster_meta enrich.
 - **UI**: `/map` renders Region headers → VPC container boxes (VpcId + AZ list +
   count) → DB node grid. Clusters with no `vpc_id` (DynamoDB = serverless; or not
   yet collected) fall into a per-region "Serverless / VPC 외" box. `groupByVpc`
   in `lib/db-map.ts`.
 - **Follow-up (documented)**: ElastiCache + DocumentDB VPC collection (their
-  collectors use a different subnet-group API — `describe_cache_subnet_groups`);
+  collectors use a different subnet-group API: `describe_cache_subnet_groups`);
   until then they render in the serverless/other box. Aurora (the primary engines)
   gets full VPC nesting now.
 
@@ -110,6 +110,6 @@ to an **architecture blueprint** per user feedback ("어느 VPC 있고 이런것
 
 - Node-graph / dependency edges (we only have service→DB grouping, not a real
   dependency graph).
-- Auto-discovery of "connected service" (DBs don't self-report their apps —
+- Auto-discovery of "connected service" (DBs don't self-report their apps,
   hence the admin note).
 - A separate read endpoint or a new metrics path (reuses `/api/clusters`).

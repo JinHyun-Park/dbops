@@ -14,20 +14,20 @@ if (fs.existsSync(envFile)) {
 
 // Smoke E2E against a DEPLOYED environment (static export + real API), using
 // REAL mouse input. Raison d'être: the header cluster dropdown once rendered
-// fine but swallowed every real click (stacking-context burial) — a bug class
+// fine but swallowed every real click (stacking-context burial), a bug class
 // that synthetic element.click() can never catch. Playwright clicks are
 // hit-tested ("element intercepts pointer events" fails loudly), so these
 // specs are the regression net for exactly that.
 //
-// Target URL: DBOPS_E2E_URL — your deployed frontend's CloudFront URL.
+// Target URL: DBOPS_E2E_URL, your deployed frontend's CloudFront URL.
 // Required, with no baked-in default, so a public checkout never points the
 // suite at someone else's distribution. Set it in frontend/.env.e2e
 // (gitignored) for local runs or as a CI secret.
-// Auth: see e2e/auth.setup.ts — env credentials or a cached storage state.
+// Auth: see e2e/auth.setup.ts (env credentials or a cached storage state).
 const BASE_URL = process.env.DBOPS_E2E_URL;
 if (!BASE_URL) {
   throw new Error(
-    "DBOPS_E2E_URL is not set — point it at your deployed frontend " +
+    "DBOPS_E2E_URL is not set. Point it at your deployed frontend " +
       "(frontend/.env.e2e or a CI secret) before running the E2E suite.",
   );
 }
@@ -38,7 +38,7 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   retries: process.env.CI ? 1 : 0,
   // Specs mutate shared state (the globally selected cluster), so keep a
-  // single worker — parallel workers would race each other's selection.
+  // single worker. Parallel workers would race each other's selection.
   workers: 1,
   reporter: process.env.CI ? [["github"], ["list"]] : [["list"]],
   use: {

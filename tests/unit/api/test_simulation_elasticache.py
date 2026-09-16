@@ -88,7 +88,7 @@ def test_node_resize_happy_path(mod, monkeypatch):
 
 def test_node_resize_describes_in_cluster_region(mod, monkeypatch):
     """The elasticache client must be region-scoped to the cluster's registered
-    region (cluster_region), NOT the Lambda's default — else a cross-region
+    region (cluster_region), NOT the Lambda's default, else a cross-region
     cluster is described in the wrong region and mis-resolves to a misleading
     partial while pricing used the real region."""
     _patch_env(mod, monkeypatch, region="ap-northeast-2")  # Lambda default
@@ -140,7 +140,7 @@ def test_no_change_zero_delta(mod, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Pricing unavailable — status=partial, never fabricate
+# Pricing unavailable: status=partial, never fabricate
 # ---------------------------------------------------------------------------
 
 def test_pricing_miss_degrades_to_partial(mod, monkeypatch):
@@ -159,7 +159,7 @@ def test_pricing_miss_degrades_to_partial(mod, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Describe failure — graceful, no crash
+# Describe failure: graceful, no crash
 # ---------------------------------------------------------------------------
 
 def test_describe_failure_returns_partial(mod, monkeypatch):
@@ -176,7 +176,7 @@ def test_describe_failure_returns_partial(mod, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Dispatcher — /elasticache-node-resize route threads through body fields
+# Dispatcher: /elasticache-node-resize route threads through body fields
 # ---------------------------------------------------------------------------
 
 def test_dispatcher_elasticache_node_resize(mod, monkeypatch):

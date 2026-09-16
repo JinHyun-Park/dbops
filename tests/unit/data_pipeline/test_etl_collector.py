@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 # Import from the deployed path. There used to be a stale duplicate at
-# data-pipeline/data_pipeline/etl_collector/ (a 2024-era leftover) — this
+# data-pipeline/data_pipeline/etl_collector/ (a 2024-era leftover): this
 # import deliberately targets the real handler that CDK packages.
 from etl_collector.collectors.meta_collector import collect_cluster_meta
 

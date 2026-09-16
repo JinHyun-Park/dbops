@@ -1,4 +1,4 @@
-"""POST /api/ws-ticket — mint a short-lived, single-use ticket for the WS handshake.
+"""POST /api/ws-ticket: mint a short-lived, single-use ticket for the WS handshake.
 
 WHY THIS EXISTS
 ---------------

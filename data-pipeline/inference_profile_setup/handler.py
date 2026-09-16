@@ -2,7 +2,7 @@
 
 Creates one AIP per supported Claude generation, tags them with the same
 cost-allocation labels, and exports the AIP ARN map for the agent runtime to
-consume via SSM Parameter Store. Re-runs are safe — existing profiles are
+consume via SSM Parameter Store. Re-runs are safe: existing profiles are
 re-tagged in place.
 """
 
@@ -113,7 +113,7 @@ def lambda_handler(event, context):
             print(f"delete cleanup error: {e}")
         return {"PhysicalResourceId": "dbops-inference-profile-setup", "Data": {}}
 
-    # Create or Update — idempotent create + tag.
+    # Create or Update: idempotent create + tag.
     arn_map = {}
     for short, base_model, label in _BASE_MODELS:
         name = f"dbops-{_ENV}-{short}"
@@ -136,7 +136,7 @@ def lambda_handler(event, context):
             except Exception as e:
                 print(f"create {name} failed (base={base_arn}): {e}")
                 continue
-        # Re-apply tags (idempotent — replaces tag values to current intent).
+        # Re-apply tags (idempotent, replaces tag values to current intent).
         try:
             bedrock.tag_resource(resourceARN=arn, tags=_TAGS)
         except Exception as e:

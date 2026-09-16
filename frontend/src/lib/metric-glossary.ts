@@ -1,20 +1,20 @@
-// Metric glossary — one-line "what it is + why it matters" definitions
+// Metric glossary: one-line "what it is + why it matters" definitions
 // for the metrics DBOps surfaces. Keyed by the canonical metric_type
 // string the backend uses (matches ETL collector metric_type values +
 // health-score signal keys).
 //
 // Korean-translation rule (from project convention): DBA-known jargon
 // (AAS, Replica Lag, IOPS) stays English; the explanation is Korean.
-// These render as hover hints next to metric labels for onboarding —
+// These render as hover hints next to metric labels for onboarding:
 // a senior DBA ignores them, a new one gets the gist without leaving
 // the page.
 
 export interface MetricDef {
   /** Short human label (matches what's shown in the UI). */
   label: string;
-  /** One-line definition — what the number measures. */
+  /** One-line definition: what the number measures. */
   what: string;
-  /** Why a DBA cares — what a high/abnormal value implies. */
+  /** Why a DBA cares: what a high/abnormal value implies. */
   why: string;
   /** Optional unit hint shown in the tooltip footer. */
   unit?: string;
@@ -29,7 +29,7 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
   },
   aas: {
     label: "Load (AAS)",
-    what: "Average Active Sessions — 평균적으로 동시에 일하고 있던 세션 수.",
+    what: "Average Active Sessions: 평균적으로 동시에 일하고 있던 세션 수.",
     why: "vCPU 수를 넘으면 세션이 CPU/IO/lock을 기다리며 대기 중이라는 신호. Performance Insights의 핵심 지표.",
     unit: "sessions",
   },
@@ -39,7 +39,7 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
     why: "max_connections에 근접하면 신규 연결이 거부됨. 급증은 connection pool 누수 또는 트래픽 폭주.",
   },
   // Canonical total-connections metric (CloudWatch DatabaseConnections),
-  // collected for every cluster — same meaning as "connections", reliably
+  // collected for every cluster, same meaning as "connections", reliably
   // populated even when Performance Insights is off.
   db_connections: {
     label: "Connections",
@@ -247,7 +247,7 @@ export const METRIC_GLOSSARY: Record<string, MetricDef> = {
   },
 };
 
-/** Lookup with graceful fallback — unknown metric returns null so
+/** Lookup with graceful fallback: unknown metric returns null so
  *  callers can simply skip the hint rather than render an empty one. */
 export function metricDef(metric: string): MetricDef | null {
   return METRIC_GLOSSARY[metric] ?? null;

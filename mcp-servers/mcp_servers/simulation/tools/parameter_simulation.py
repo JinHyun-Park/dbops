@@ -1,4 +1,4 @@
-"""simulate_parameter_change — simulate a parameter change from the cluster's
+"""simulate_parameter_change: simulate a parameter change from the cluster's
 REAL parameter metadata.
 
 Thin wrapper: this tool owns the cross-account AWS describe glue (resolve the
@@ -65,7 +65,7 @@ def simulate_parameter_change_impl(cache: CacheClient, cluster_id: str, paramete
     if not pg_name:
         return static_fallback(cluster_id, parameter_name, new_value, "no parameter group on cluster", engine)
     # AWS-managed default.* groups can't be modified and their values aren't ours
-    # to read meaningfully — treat like the live path is unavailable.
+    # to read meaningfully: treat like the live path is unavailable.
     if pg_name.startswith("default."):
         return static_fallback(cluster_id, parameter_name, new_value, "AWS-default parameter group", engine)
 

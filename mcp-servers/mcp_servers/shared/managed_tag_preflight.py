@@ -1,4 +1,4 @@
-"""managed_tag_preflight — tell the DBA at REVIEW time that a cross-account write
+"""managed_tag_preflight: tell the DBA at REVIEW time that a cross-account write
 is likely to be denied, so the approval is never spent on it.
 
 WHAT IT IS FOR

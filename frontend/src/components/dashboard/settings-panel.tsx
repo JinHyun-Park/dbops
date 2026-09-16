@@ -32,7 +32,7 @@ const PARAM_PAGE_SIZE = 30;
 type Rec = { value: string; why: string; severity: "warning" | "info" };
 
 // Recommended values per setting. Mirrors the list in
-// pg_health_checks.RECOMMENDED_SETTINGS — keep these in sync so the panel
+// pg_health_checks.RECOMMENDED_SETTINGS: keep these in sync so the panel
 // diff matches the Maintenance Health findings.
 const PG_RECOMMENDED: Record<string, Rec> = {
   log_checkpoints: {
@@ -58,12 +58,12 @@ const PG_RECOMMENDED: Record<string, Rec> = {
   log_autovacuum_min_duration: {
     value: "0",
     severity: "warning",
-    why: "0이면 모든 autovacuum을 로깅 — pgBadger가 bloat와 상관분석합니다.",
+    why: "0이면 모든 autovacuum을 로깅합니다. pgBadger가 bloat와 상관분석합니다.",
   },
   log_min_duration_statement: {
     value: "1000",
     severity: "warning",
-    why: "1초 미만 쿼리는 로깅 제외가 적절 — 1000ms가 합리적인 하한입니다.",
+    why: "1초 미만 쿼리는 로깅 제외가 적절합니다. 1000ms가 합리적인 하한입니다.",
   },
   log_temp_files: {
     value: "0",
@@ -94,7 +94,7 @@ const NEGATIVE_SENTINEL: Record<string, string> = {
 // Memory-sized settings (innodb_buffer_pool_size, *_buffer_size,
 // max_connections, innodb_log_file_size, tmp_table_size, max_heap_table_size,
 // thread_stack, innodb_io_capacity, innodb_read/write_io_threads) are
-// intentionally absent — their correct values depend on the cluster's instance
+// intentionally absent, their correct values depend on the cluster's instance
 // memory and workload profile, and are computed per-cluster by the Maintenance
 // Health param-fitness panel. Adding static values here would be misleading.
 const MYSQL_RECOMMENDED: Record<string, Rec> = {
@@ -106,12 +106,12 @@ const MYSQL_RECOMMENDED: Record<string, Rec> = {
   long_query_time: {
     value: "1",
     severity: "info",
-    why: "1초 이상 쿼리를 느린 쿼리로 기록 — 워크로드에 따라 조정.",
+    why: "1초 이상 쿼리를 느린 쿼리로 기록. 워크로드에 따라 조정.",
   },
   innodb_flush_log_at_trx_commit: {
     value: "1",
     severity: "info",
-    why: "1이 완전한 ACID 내구성 — 성능을 위해 2로 낮추는 건 트레이드오프.",
+    why: "1이 완전한 ACID 내구성. 성능을 위해 2로 낮추는 건 트레이드오프.",
   },
   log_bin: {
     value: "ON",
@@ -129,7 +129,7 @@ function fmtValue(s: Setting): string {
   const v = s.value;
   const u = s.unit;
   const num = Number(v);
-  // Sentinel handling — -1 has setting-specific semantics in PG.
+  // Sentinel handling: -1 has setting-specific semantics in PG.
   if (Number.isFinite(num) && num < 0 && NEGATIVE_SENTINEL[s.name]) {
     return `${NEGATIVE_SENTINEL[s.name]} (${v})`;
   }
@@ -188,7 +188,7 @@ export function SettingsPanel({
       .finally(() => !cancelled && setLoading(false));
   }, [clusterId]);
 
-  // 파라미터 목록 — 별도 sub-view. 백엔드가 값이 설정된 전체 파라미터를
+  // 파라미터 목록: 별도 sub-view. 백엔드가 값이 설정된 전체 파라미터를
   // 반환하고 각 항목에 디폴트 대비 변경 여부(differs)를 표시한다. 이름 검색 +
   // 정적/동적 + "변경만 보기" 필터에 30개 페이지네이션.
   const [diffOpen, setDiffOpen] = useState(true);
@@ -225,7 +225,7 @@ export function SettingsPanel({
         setDiffNotApplicable(!d.available && !!d.not_applicable);
         // Prefer the full `params` list; fall back to `diffs` for backward-compat
         // with an older backend. `diffs` rows have no `differs` field but are all
-        // differing by definition, so normalize to differs:true — otherwise they
+        // differing by definition, so normalize to differs:true, otherwise they
         // wouldn't be highlighted and `변경만 보기` would filter every row out.
         const rows = d.available
           ? d.params || (d.diffs || []).map((r) => ({ ...r, differs: true }))
@@ -284,7 +284,7 @@ export function SettingsPanel({
       <div className="text-sm text-zinc-200 font-medium mb-1">
         {engineLabel} Configuration
       </div>
-      {/* 반영 지연 안내 — 파라미터 변경 승인 후 "바로 안 바뀐다"는 혼란을
+      {/* 반영 지연 안내: 파라미터 변경 승인 후 "바로 안 바뀐다"는 혼란을
           막는다: 값은 5분 주기 수집 캐시이고, 변경은 pending-reboot라 재시작
           전까지 동작값이 바뀌지 않는다. */}
       <div className="text-[11px] text-zinc-500 mb-3">
@@ -426,7 +426,7 @@ export function SettingsPanel({
                   <>
                     <div className="flex items-center justify-between mb-2 text-[11px] text-zinc-500">
                       <span>
-                        {rangeFrom}–{rangeTo} / 총 {filteredParams.length}개
+                        {rangeFrom}-{rangeTo} / 총 {filteredParams.length}개
                       </span>
                       {totalPages > 1 && (
                         <div className="flex items-center gap-1">
@@ -498,7 +498,7 @@ export function SettingsPanel({
                                 {p.current}
                               </td>
                               <td className="py-1.5 pr-3 font-mono text-zinc-500 text-xs">
-                                {p.default ?? "—"}
+                                {p.default ?? "-"}
                               </td>
                               <td className="py-1.5">
                                 <span

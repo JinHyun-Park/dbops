@@ -1,4 +1,4 @@
-"""create_elasticache_snapshot — approval-gated ElastiCache (Redis/Valkey) backup
+"""create_elasticache_snapshot: approval-gated ElastiCache (Redis/Valkey) backup
 (create_snapshot). Memcached has no snapshots → unsupported_engine. Mirrors the
 operations write model. Never raises out.
 

@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close the recommendation loop — when DBOps emits a recommendation, automatically judge whether the triggering symptom resolved, accumulate per-cluster/symptom/action success rates, and feed that evidence back into the findings UI (badge + re-rank) and the agent's narrative.
+**Goal:** Close the recommendation loop: when DBOps emits a recommendation, automatically judge whether the triggering symptom resolved, accumulate per-cluster/symptom/action success rates, and feed that evidence back into the findings UI (badge + re-rank) and the agent's narrative.
 
-**Architecture:** A single scheduled Lambda (`outcome_evaluator`) does two things each run: (1) **pull-based case opener** — scans recent `cluster_health_findings` and `event_log` anomaly rows and opens a `remediation_cases` row per live symptom (deduped); (2) **verdict pass** — for cases past their evaluation window, judges `resolved`/`persisted`/`inconclusive` from seasonal-baseline recovery (metric symptoms) or finding-recurrence clearance (derived findings), then increments `remediation_outcomes_agg` (per-cluster + a `'*'` fleet rollup). Consumers read the aggregate: the findings API attaches a track-record badge and re-ranks; (phase 2) the RCA worker injects the history into its prompt and a new MCP tool exposes it to the chat agent.
+**Architecture:** A single scheduled Lambda (`outcome_evaluator`) does two things each run: (1) **pull-based case opener**: scans recent `cluster_health_findings` and `event_log` anomaly rows and opens a `remediation_cases` row per live symptom (deduped); (2) **verdict pass**: for cases past their evaluation window, judges `resolved`/`persisted`/`inconclusive` from seasonal-baseline recovery (metric symptoms) or finding-recurrence clearance (derived findings), then increments `remediation_outcomes_agg` (per-cluster + a `'*'` fleet rollup). Consumers read the aggregate: the findings API attaches a track-record badge and re-ranks; (phase 2) the RCA worker injects the history into its prompt and a new MCP tool exposes it to the chat agent.
 
-**Why pull-based (deviation from spec's "enricher at emission points"):** opening cases by scanning the two tables the emitters already write (`cluster_health_findings`, `event_log`) lives in ONE place, touches none of the ~8 finding collectors or `proactive_monitor`, and satisfies the spec's "no emission point changes its own behavior." This supersedes the spec §3 "copied into both packages" packaging note — the `action_class` classifier now lives in exactly one package (`data-pipeline/outcome_evaluator/`).
+**Why pull-based (deviation from spec's "enricher at emission points"):** opening cases by scanning the two tables the emitters already write (`cluster_health_findings`, `event_log`) lives in ONE place, touches none of the ~8 finding collectors or `proactive_monitor`, and satisfies the spec's "no emission point changes its own behavior." This supersedes the spec §3 "copied into both packages" packaging note: the `action_class` classifier now lives in exactly one package (`data-pipeline/outcome_evaluator/`).
 
 **Tech Stack:** Python 3.12 Lambdas (RDS Data API via `boto3` `rds-data`), Aurora PostgreSQL Serverless v2 cache, AWS CDK (Python), Next.js 16 static export + TypeScript, pytest.
 
@@ -17,9 +17,9 @@
 - **RDS Data API reads need `includeResultMetadata=True`** or `columnMetadata` is missing and name-based rows become empty dicts.
 - **Data-pipeline unit tests mock `execute_statement` / the module `_query`**, not the high-level helper (mirror `tests/unit/data_pipeline/test_task_scheduler.py`).
 - **New API route ⇒ a dedicated `self.api.add_routes(...)` in `cdk/stacks/agent_stack.py`** (routes are registered per-path).
-- **Frontend:** Next.js 16 **static export**; **no JS unit runner** — cover pure helpers with `tsc --noEmit` + a Playwright smoke. **prettier pre-commit reformats on first commit** → `git add -A` and re-commit (do not chain commit+push). DBA jargon stays English (Replica Lag, AAS…); explanatory copy / empty states in Korean. Numbers ≥ 1000 use `fmtDecimal`/`fmtExact`.
+- **Frontend:** Next.js 16 **static export**; **no JS unit runner**: cover pure helpers with `tsc --noEmit` + a Playwright smoke. **prettier pre-commit reformats on first commit** → `git add -A` and re-commit (do not chain commit+push). DBA jargon stays English (Replica Lag, AAS…); explanatory copy / empty states in Korean. Numbers ≥ 1000 use `fmtDecimal`/`fmtExact`.
 - **No Claude `Co-Authored-By` trailer in commits.** Use the repo commit-trailer protocol (Constraint/Rejected/Confidence/…) when non-trivial.
-- **This feature observes and ranks only — it never auto-applies a change.** Writes still go through the existing `approval_guard`. Attribution is a hint, never a causal claim.
+- **This feature observes and ranks only: it never auto-applies a change.** Writes still go through the existing `approval_guard`. Attribution is a hint, never a causal claim.
 - **Phase 1 case sources = findings + anomalies** (both in PG). RCA-sourced cases are Phase 2 (they require an `agent-tasks` DynamoDB read). This is a deliberate scope line.
 
 ---
@@ -28,33 +28,33 @@
 
 **Phase 1**
 
-- `data-pipeline/schema_migrator/sql/schema_v24.sql` — _create:_ 3 tables + indexes.
-- `data-pipeline/outcome_evaluator/remediation_classify.py` — _create:_ pure `classify_action()`.
-- `data-pipeline/outcome_evaluator/case_opener.py` — _create:_ `open_cases(query)`.
-- `data-pipeline/outcome_evaluator/evaluator.py` — _create:_ `evaluate_case()`, `apply_verdict()`.
-- `data-pipeline/outcome_evaluator/handler.py` — _create:_ `_query` helper + `lambda_handler`.
-- `cdk/stacks/data_stack.py` — _modify:_ add `outcome_evaluator` Lambda + 20-min schedule + grants.
-- `api/dashboard/handler.py` — _modify:_ `_health_findings` enrichment (+ `/api/learning` early branch).
-- `cdk/stacks/agent_stack.py` — _modify:_ `add_routes("/api/learning")`.
-- `frontend/src/lib/remediation.ts` — _create:_ pure confidence/format helpers.
-- `frontend/src/lib/api-client.ts` — _modify:_ `fetchLearning()`.
-- `frontend/src/app/learning/page.tsx` — _create:_ Learning page.
-- `frontend/src/components/app-shell.tsx` — _modify:_ nav entry.
-- `frontend/e2e/smoke.spec.ts` — _modify:_ Learning render assertion.
+- `data-pipeline/schema_migrator/sql/schema_v24.sql` (_create:_ 3 tables + indexes).
+- `data-pipeline/outcome_evaluator/remediation_classify.py` (_create:_ pure `classify_action()`).
+- `data-pipeline/outcome_evaluator/case_opener.py` (_create:_ `open_cases(query)`).
+- `data-pipeline/outcome_evaluator/evaluator.py` (_create:_ `evaluate_case()`, `apply_verdict()`).
+- `data-pipeline/outcome_evaluator/handler.py` (_create:_ `_query` helper + `lambda_handler`).
+- `cdk/stacks/data_stack.py` (_modify:_ add `outcome_evaluator` Lambda + 20-min schedule + grants).
+- `api/dashboard/handler.py` (_modify:_ `_health_findings` enrichment (+ `/api/learning` early branch)).
+- `cdk/stacks/agent_stack.py` (_modify:_ `add_routes("/api/learning")`).
+- `frontend/src/lib/remediation.ts` (_create:_ pure confidence/format helpers).
+- `frontend/src/lib/api-client.ts` (_modify:_ `fetchLearning()`).
+- `frontend/src/app/learning/page.tsx` (_create:_ Learning page).
+- `frontend/src/components/app-shell.tsx` (_modify:_ nav entry).
+- `frontend/e2e/smoke.spec.ts` (_modify:_ Learning render assertion).
 
 **Phase 2**
 
-- `data-pipeline/outcome_evaluator/case_opener.py` — _modify:_ `open_rca_cases(query, ddb)`.
-- `cdk/stacks/data_stack.py` — _modify:_ grant `agent-tasks` read to `outcome_evaluator`.
-- `mcp-servers/mcp_servers/workers/task_worker.py` — _modify:_ inject history into `_narrative`.
-- `mcp-servers/mcp_servers/incident/tools/remediation_history.py` — _create:_ MCP tool.
-- `mcp-servers/mcp_servers/incident/handler.py` + gateway schema — _modify:_ register tool.
+- `data-pipeline/outcome_evaluator/case_opener.py` (_modify:_ `open_rca_cases(query, ddb)`).
+- `cdk/stacks/data_stack.py` (_modify:_ grant `agent-tasks` read to `outcome_evaluator`).
+- `mcp-servers/mcp_servers/workers/task_worker.py` (_modify:_ inject history into `_narrative`).
+- `mcp-servers/mcp_servers/incident/tools/remediation_history.py` (_create:_ MCP tool).
+- `mcp-servers/mcp_servers/incident/handler.py` + gateway schema (_modify:_ register tool).
 
 ---
 
 ## Phase 1
 
-### Task 1: Schema — `remediation_cases`, `remediation_outcomes_agg`
+### Task 1: Schema (`remediation_cases`, `remediation_outcomes_agg`)
 
 **Files:**
 
@@ -88,7 +88,7 @@ def test_agg_primary_key_is_three_cols():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/unit/data_pipeline/test_schema_v24.py -v`
-Expected: FAIL — file does not exist (`FileNotFoundError`).
+Expected: FAIL, file does not exist (`FileNotFoundError`).
 
 - [ ] **Step 3: Write the schema file**
 
@@ -146,7 +146,7 @@ Expected: PASS (2 passed).
 
 ```bash
 git add data-pipeline/schema_migrator/sql/schema_v24.sql tests/unit/data_pipeline/test_schema_v24.py
-git commit -m "feat(outcome-loop): schema_v24 — remediation_cases + outcomes_agg"
+git commit -m "feat(outcome-loop): schema_v24, remediation_cases + outcomes_agg"
 ```
 
 ---
@@ -175,19 +175,19 @@ def test_index_and_param_and_scale():
 
 def test_vacuum_analyze_and_default():
     assert classify_action("autovacuum/VACUUM 점검 권장") == "vacuum"
-    assert classify_action("통계가 오래됨 — ANALYZE 실행") == "analyze"
+    assert classify_action("통계가 오래됨: ANALYZE 실행") == "analyze"
     assert classify_action("원인 불명, 수동 점검 필요") == "manual"
     assert classify_action("") == "manual"
 ```
 
 (Run via `conftest`/`pyproject` that puts `data-pipeline/` on `sys.path`; the existing
 data_pipeline tests already import bare module names like `task_scheduler`, so the same
-path config applies — confirm by running an existing test first.)
+path config applies: confirm by running an existing test first.)
 
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `python -m pytest tests/unit/data_pipeline/test_remediation_classify.py -v`
-Expected: FAIL — `ModuleNotFoundError: outcome_evaluator`.
+Expected: FAIL (`ModuleNotFoundError: outcome_evaluator`).
 
 - [ ] **Step 3: Implement**
 
@@ -199,7 +199,7 @@ Pure + deterministic so the same (symptom, action) key is produced wherever a ca
 is opened. Order matters: the FIRST matching family wins, most-specific first.
 """
 
-# (substring, action_class) — checked in order; Korean + English keywords.
+# (substring, action_class): checked in order; Korean + English keywords.
 _RULES = [
     ("인덱스", "index_add"), ("index", "index_add"),
     ("vacuum", "vacuum"), ("배큠", "vacuum"), ("autovacuum", "vacuum"),
@@ -292,7 +292,7 @@ def test_no_rows_opens_nothing():
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `python -m pytest tests/unit/data_pipeline/test_case_opener.py -v`
-Expected: FAIL — `ModuleNotFoundError: outcome_evaluator.case_opener`.
+Expected: FAIL (`ModuleNotFoundError: outcome_evaluator.case_opener`).
 
 - [ ] **Step 3: Implement**
 
@@ -300,7 +300,7 @@ Expected: FAIL — `ModuleNotFoundError: outcome_evaluator.case_opener`.
 # data-pipeline/outcome_evaluator/case_opener.py
 """Pull-based case opener. Scans the two tables emitters already write
 (cluster_health_findings, event_log anomalies) and opens one remediation_cases
-row per live symptom. Idempotent via the partial unique index — re-emission while
+row per live symptom. Idempotent via the partial unique index: re-emission while
 a case is open only bumps last_seen_at.
 """
 from outcome_evaluator.remediation_classify import classify_action
@@ -308,8 +308,8 @@ from outcome_evaluator.remediation_classify import classify_action
 # How far back to scan each run. A little wider than the evaluator cadence so
 # nothing slips between runs; ON CONFLICT makes overlap harmless.
 SCAN_WINDOW = "INTERVAL '1 hour'"
-WIN_METRIC_MIN = 360    # 6h  — metric-symptom cases
-WIN_FINDING_MIN = 1440  # 24h — recurring-finding cases
+WIN_METRIC_MIN = 360    # 6h: metric-symptom cases
+WIN_FINDING_MIN = 1440  # 24h: recurring-finding cases
 
 _INSERT = (
     "INSERT INTO remediation_cases "
@@ -395,13 +395,13 @@ git commit -m "feat(outcome-loop): pull-based case opener (findings + anomalies)
 - Consumes: a `query(sql, params=None) -> list[dict]` callable.
 - Produces:
   - `evaluate_case(query, case: dict) -> str` → `'resolved' | 'persisted' | 'inconclusive'`.
-  - `apply_verdict(query, case: dict, verdict: str) -> None` — updates the case row and (on resolved/persisted) increments `remediation_outcomes_agg` for both `case['cluster_id']` and `'*'`.
+  - `apply_verdict(query, case: dict, verdict: str) -> None`: updates the case row and (on resolved/persisted) increments `remediation_outcomes_agg` for both `case['cluster_id']` and `'*'`.
 - `case` dict keys used: `case_id, cluster_id, symptom_class, symptom_subject, watch_metric, action_class, opened_at`.
 
 Verdict rules:
 
 - **Metric case** (`watch_metric` set): recent avg of the metric vs its `metric_baselines` bucket (`median ± K * IQR`, K=3). In band ⇒ `resolved`; out ⇒ `persisted`; no recent data or no baseline bucket ⇒ `inconclusive`.
-- **Finding case** (`watch_metric` NULL): did the same `(check_type, subject)` recur since `opened_at`? Recurred ⇒ `persisted`. Not recurred — but ONLY trust that if the collector actually ran in the window (**false-resolved guard**: the cluster produced _some_ finding row since `opened_at`); else ⇒ `inconclusive`. Cleared + collector ran ⇒ `resolved`.
+- **Finding case** (`watch_metric` NULL): did the same `(check_type, subject)` recur since `opened_at`? Recurred ⇒ `persisted`. Not recurred, but ONLY trust that if the collector actually ran in the window (**false-resolved guard**: the cluster produced _some_ finding row since `opened_at`); else ⇒ `inconclusive`. Cleared + collector ran ⇒ `resolved`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -474,7 +474,7 @@ def test_apply_verdict_resolved_bumps_both_agg_rows():
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `python -m pytest tests/unit/data_pipeline/test_evaluator.py -v`
-Expected: FAIL — `ModuleNotFoundError: outcome_evaluator.evaluator`.
+Expected: FAIL (`ModuleNotFoundError: outcome_evaluator.evaluator`).
 
 - [ ] **Step 3: Implement**
 
@@ -530,7 +530,7 @@ def _evaluate_finding(query, case) -> str:
     )
     if int(_first(recurred, "recurred", 0) or 0) > 0:
         return "persisted"
-    # False-resolved guard: only trust "cleared" if the collector actually ran —
+    # False-resolved guard: only trust "cleared" if the collector actually ran:
     # i.e. the cluster produced ANY finding row since the case opened.
     produced = query(
         "SELECT COUNT(*) AS produced FROM cluster_health_findings "
@@ -546,7 +546,7 @@ def apply_verdict(query, case, verdict) -> None:
         {"st": verdict, "id": case["case_id"]},
     )
     if verdict == "inconclusive":
-        return  # no signal — don't move the aggregate
+        return  # no signal: don't move the aggregate
     succ_inc = 1 if verdict == "resolved" else 0
     for cid in (case["cluster_id"], "*"):
         query(
@@ -621,13 +621,13 @@ def test_opens_then_evaluates_due_cases(monkeypatch):
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `python -m pytest tests/unit/data_pipeline/test_outcome_handler.py -v`
-Expected: FAIL — `ModuleNotFoundError: outcome_evaluator.handler`.
+Expected: FAIL (`ModuleNotFoundError: outcome_evaluator.handler`).
 
 - [ ] **Step 3: Implement** (copy the `_query` body from `data-pipeline/proactive_monitor/handler.py` verbatim, changing only the audit comment)
 
 ```python
 # data-pipeline/outcome_evaluator/handler.py
-"""outcome_evaluator — open remediation cases, then judge the due ones.
+"""outcome_evaluator: open remediation cases, then judge the due ones.
 
 EventBridge every 20 min. Public endpoints only (RDS Data API), so it lives in the
 data stack like proactive_monitor / alert_evaluator.
@@ -708,7 +708,7 @@ def lambda_handler(event, context):
     return {"opened": opened, "evaluated": evaluated}
 ```
 
-Note: the `isNull` param branch is required — `case_opener` passes `watch_metric=None`.
+Note: the `isNull` param branch is required: `case_opener` passes `watch_metric=None`.
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -727,12 +727,12 @@ git commit -m "feat(outcome-loop): evaluator Lambda handler (open + judge due ca
 
 ---
 
-### Task 6: CDK — wire `outcome_evaluator` Lambda + schedule
+### Task 6: CDK (wire `outcome_evaluator` Lambda + schedule)
 
 **Files:**
 
 - Modify: `cdk/stacks/data_stack.py` (after the `task_scheduler` block, ~line 416)
-- Test: `tests/cdk/test_synth.py` (run existing synth test — it must still pass)
+- Test: `tests/cdk/test_synth.py` (run existing synth test: it must still pass)
 
 **Interfaces:**
 
@@ -742,7 +742,7 @@ git commit -m "feat(outcome-loop): evaluator Lambda handler (open + judge due ca
 - [ ] **Step 1: Add the construct** (mirror the `TaskScheduler` block exactly)
 
 ```python
-        # Remediation Outcome Loop — opens a case per emitted recommendation and
+        # Remediation Outcome Loop: opens a case per emitted recommendation and
         # judges whether the symptom resolved (baseline recovery / finding
         # clearance), feeding remediation_outcomes_agg. Public endpoints only.
         self.outcome_evaluator = lambda_.Function(
@@ -789,13 +789,13 @@ git commit -m "feat(outcome-loop): deploy outcome_evaluator Lambda on 20-min sch
 
 **Files:**
 
-- Modify: `api/dashboard/handler.py` — `_health_findings(query, cluster_id)` (~line 1818)
+- Modify: `api/dashboard/handler.py`: `_health_findings(query, cluster_id)` (~line 1818)
 - Test: `tests/unit/api/test_health_findings_outcomes.py`
 
 **Interfaces:**
 
 - Consumes: the existing `query(sql, params)` callable inside the dashboard handler; tables `cluster_health_findings`, `remediation_outcomes_agg`.
-- Produces: each finding dict gains `outcome: {successes, attempts}` (cluster row, falling back to the `'*'` fleet row); findings re-ranked by `(severity, success_rate)`. **No `action_class` needed at read time** — aggregate per `symptom_class = 'finding:'||check_type` across actions.
+- Produces: each finding dict gains `outcome: {successes, attempts}` (cluster row, falling back to the `'*'` fleet row); findings re-ranked by `(severity, success_rate)`. **No `action_class` needed at read time** (aggregate per `symptom_class = 'finding:'||check_type` across actions).
 
 Read `_health_findings` first to get its exact current body, then make the change below.
 
@@ -828,9 +828,9 @@ def test_finding_carries_outcome_track_record():
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `python -m pytest tests/unit/api/test_health_findings_outcomes.py -v`
-Expected: FAIL — `KeyError: 'outcome'`.
+Expected: FAIL (`KeyError: 'outcome'`).
 
-- [ ] **Step 3: Implement** — after the findings `rows` are fetched in `_health_findings`, attach the track record and re-rank. Add before the `return`:
+- [ ] **Step 3: Implement**: after the findings `rows` are fetched in `_health_findings`, attach the track record and re-rank. Add before the `return`:
 
 ```python
     # Remediation Outcome Loop: attach each finding's track record (this cluster,
@@ -877,8 +877,8 @@ git commit -m "feat(outcome-loop): findings carry outcome track record + re-rank
 
 **Files:**
 
-- Modify: `api/dashboard/handler.py` — add a `/api/learning` early branch in `lambda_handler` (near the `/multi-cluster/overview` branch, ~line 3446)
-- Modify: `cdk/stacks/agent_stack.py` — `add_routes("/api/learning")` (near the other dashboard routes, ~line 1274)
+- Modify: `api/dashboard/handler.py`: add a `/api/learning` early branch in `lambda_handler` (near the `/multi-cluster/overview` branch, ~line 3446)
+- Modify: `cdk/stacks/agent_stack.py`: `add_routes("/api/learning")` (near the other dashboard routes, ~line 1274)
 - Test: `tests/unit/api/test_learning_endpoint.py`
 
 **Interfaces:**
@@ -914,12 +914,12 @@ def test_learning_overview_groups_fleet_and_clusters():
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `python -m pytest tests/unit/api/test_learning_endpoint.py -v`
-Expected: FAIL — `AttributeError: _learning_overview`.
+Expected: FAIL (`AttributeError: _learning_overview`).
 
 - [ ] **Step 3: Implement the helper + wire the route branch**
 
 ```python
-# api/dashboard/handler.py  — new helper
+# api/dashboard/handler.py: new helper
 def _learning_overview(query):
     rows = query(
         "SELECT cluster_id, symptom_class, action_class, successes, attempts, last_outcome "
@@ -939,7 +939,7 @@ def _learning_overview(query):
     return {"fleet": fleet, "clusters": clusters, "recent": recent}
 ```
 
-Add the early branch in `lambda_handler` (mirror the `/multi-cluster/overview` branch — same auth/CORS path it uses):
+Add the early branch in `lambda_handler` (mirror the `/multi-cluster/overview` branch: same auth/CORS path it uses):
 
 ```python
     if raw_path_early.endswith("/api/learning"):
@@ -987,11 +987,11 @@ git commit -m "feat(outcome-loop): /api/learning overview endpoint + route"
 - Consumes: `GET /api/learning` (Task 8) via `api-client`.
 - Produces: `confidence(successes, attempts): number` (Wilson lower bound, 0..1) and `trackRecordLabel(successes, attempts): string` in `remediation.ts`; a `/learning` page.
 
-- [ ] **Step 1: Write the pure helper** (`tsc` is the gate — no JS unit runner)
+- [ ] **Step 1: Write the pure helper** (`tsc` is the gate: no JS unit runner)
 
 ```ts
 // frontend/src/lib/remediation.ts
-// Wilson score lower bound at 95% — so 1/1 doesn't outrank 9/10. Pure + testable.
+// Wilson score lower bound at 95%, so 1/1 doesn't outrank 9/10. Pure + testable.
 export function confidence(successes: number, attempts: number): number {
   if (attempts <= 0) return 0;
   const z = 1.96;
@@ -1022,7 +1022,7 @@ export async function fetchLearning(): Promise<{
 }
 // types AggRow / RecentCase: define alongside (cluster_id, symptom_class, action_class,
 // successes, attempts, last_outcome / status, evaluated_at). Mirror the existing
-// authedFetch + API_BASE usage in this file — read it first.
+// authedFetch + API_BASE usage in this file: read it first.
 ```
 
 - [ ] **Step 3: Build the page** (mirror `frontend/src/app/map/page.tsx` shell: `PageHeader`/`PageBody`/`EmptyState`, loading + error states). Render: fleet track record, then per-cluster, then a "recent outcomes" list. Korean explanatory copy, English jargon, `fmtDecimal` for any count ≥ 1000.
@@ -1054,7 +1054,7 @@ export default function LearningPage() {
       <PageHeader
         eyebrow="Monitor"
         title="Learning"
-        description="권장 조치가 실제로 증상을 해소했는지 자동 측정해 누적한 효과 이력 — 입증된 조치를 우선합니다."
+        description="권장 조치가 실제로 증상을 해소했는지 자동 측정해 누적한 효과 이력: 입증된 조치를 우선합니다."
       />
       <PageBody>
         {err ? (
@@ -1093,7 +1093,7 @@ export default function LearningPage() {
 }
 ```
 
-- [ ] **Step 4: Add nav entry** in `frontend/src/components/app-shell.tsx` — find the array holding the "Map" / "Tasks" items and add `{ href: "/learning", label: "Learning", icon: <icon> }` matching the existing item shape (read the file to get the exact object shape + icon import).
+- [ ] **Step 4: Add nav entry** in `frontend/src/components/app-shell.tsx`: find the array holding the "Map" / "Tasks" items and add `{ href: "/learning", label: "Learning", icon: <icon> }` matching the existing item shape (read the file to get the exact object shape + icon import).
 
 - [ ] **Step 5: Typecheck + build**
 
@@ -1126,7 +1126,7 @@ git commit -m "feat(outcome-loop): Learning page + nav + confidence helper"
 **Files:**
 
 - Modify: `data-pipeline/outcome_evaluator/case_opener.py` (add `open_rca_cases(query, ddb, table_name)`), and call it from `handler.lambda_handler`
-- Modify: `cdk/stacks/data_stack.py` — grant the `agent-tasks` table read + pass `AGENT_TASKS_TABLE` env to `outcome_evaluator`
+- Modify: `cdk/stacks/data_stack.py` (grant the `agent-tasks` table read + pass `AGENT_TASKS_TABLE` env to `outcome_evaluator`)
 - Test: `tests/unit/data_pipeline/test_rca_case_opener.py`
 
 **Interfaces:**
@@ -1167,9 +1167,9 @@ def test_opens_rca_case_with_inferred_action():
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `python -m pytest tests/unit/data_pipeline/test_rca_case_opener.py -v`
-Expected: FAIL — `AttributeError: open_rca_cases`.
+Expected: FAIL (`AttributeError: open_rca_cases`).
 
-- [ ] **Step 3: Implement** — add to `case_opener.py`:
+- [ ] **Step 3: Implement**: add to `case_opener.py`:
 
 ```python
 def open_rca_cases(query, ddb_table) -> int:
@@ -1178,7 +1178,7 @@ def open_rca_cases(query, ddb_table) -> int:
     if ddb_table is None:
         return 0
     items, scan_kwargs = [], {}
-    while True:  # paginate — never trust a single scan page
+    while True:  # paginate: never trust a single scan page
         resp = ddb_table.scan(**scan_kwargs)
         items.extend(resp.get("Items", []))
         if "LastEvaluatedKey" not in resp:
@@ -1210,7 +1210,7 @@ def open_rca_cases(query, ddb_table) -> int:
     return opened
 ```
 
-Wire it in `handler.lambda_handler` (after `open_cases`): read `AGENT_TASKS_TABLE`, and if set, `ddb = boto3.resource("dynamodb").Table(name)`, then `opened += case_opener.open_rca_cases(q, ddb)`. Dedup across runs is handled by the same partial unique index. **Note:** to keep re-scans from re-opening cases for old completed tasks, filter the scan to `completed_at` within the last day (add a `FilterExpression`) — _do not add a `Limit`_ (Limit + FilterExpression silently drops rows; see prior DDB bug).
+Wire it in `handler.lambda_handler` (after `open_cases`): read `AGENT_TASKS_TABLE`, and if set, `ddb = boto3.resource("dynamodb").Table(name)`, then `opened += case_opener.open_rca_cases(q, ddb)`. Dedup across runs is handled by the same partial unique index. **Note:** to keep re-scans from re-opening cases for old completed tasks, filter the scan to `completed_at` within the last day (add a `FilterExpression`): _do not add a `Limit`_ (Limit + FilterExpression silently drops rows; see prior DDB bug).
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -1226,7 +1226,7 @@ Expected: PASS.
             "AGENT_TASKS_TABLE", foundation.agent_tasks_table.table_name)
 ```
 
-(Confirm the exact attribute name for the agent-tasks table on `foundation` — grep `agent_tasks` in `cdk/stacks/foundation_stack.py`; `grant_task_enqueue` already exposes it, so reuse that accessor if `agent_tasks_table` isn't public.)
+(Confirm the exact attribute name for the agent-tasks table on `foundation`: grep `agent_tasks` in `cdk/stacks/foundation_stack.py`; `grant_task_enqueue` already exposes it, so reuse that accessor if `agent_tasks_table` isn't public.)
 
 Run: `python -m pytest tests/cdk/test_synth.py -v` → PASS.
 
@@ -1243,7 +1243,7 @@ git commit -m "feat(outcome-loop): RCA-sourced cases from agent-tasks (phase 2)"
 
 **Files:**
 
-- Modify: `mcp-servers/mcp_servers/workers/task_worker.py` — `_narrative()` (~line 197)
+- Modify: `mcp-servers/mcp_servers/workers/task_worker.py`: `_narrative()` (~line 197)
 - Test: `tests/unit/mcp_servers/workers/test_narrative_history.py`
 
 **Interfaces:**
@@ -1271,9 +1271,9 @@ def test_history_line_built_from_agg():
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `python -m pytest tests/unit/mcp_servers/workers/test_narrative_history.py -v`
-Expected: FAIL — `AttributeError: _history_line`.
+Expected: FAIL (`AttributeError: _history_line`).
 
-- [ ] **Step 3: Implement** — add a helper and call it inside `_narrative`:
+- [ ] **Step 3: Implement**: add a helper and call it inside `_narrative`:
 
 ```python
 def _history_line(cache, cluster_id: str, category: str) -> str:
@@ -1348,7 +1348,7 @@ def test_returns_actions_for_symptom():
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `python -m pytest tests/unit/mcp_servers/incident/test_remediation_history.py -v`
-Expected: FAIL — `ModuleNotFoundError`.
+Expected: FAIL (`ModuleNotFoundError`).
 
 - [ ] **Step 3: Implement the impl** + register it exactly like a sibling incident tool (e.g. `find_similar_incidents`): add to the handler's tool map, the JSON tool-definition (name `get_remediation_history`, params `cluster_id` required, `symptom_class` optional), and the gateway tool list so semantic search can route it.
 
@@ -1395,9 +1395,9 @@ git commit -m "feat(outcome-loop): get_remediation_history MCP tool (phase 2)"
 
 **Spec coverage:**
 
-- §2 data model → Task 1. §3 case opening → Task 3 (findings+anomalies) + Task 10 (RCA). §4 evaluator (metric recovery + finding recurrence + false-resolved guard + agg, cluster + '\*') → Task 4. Scheduled Lambda → Tasks 5–6. §5 consumers: deterministic re-rank+badge → Task 7; prompt injection → Task 11; agent tool → Task 12. §6 UI → Tasks 8–9. §7 honesty (cold-start fleet fallback, attribution-as-hint, no auto-apply) → enforced in Tasks 4/7/8. §8 scope/phasing → task split. **action_class classifier** (§3) → Task 2. **All covered.**
-- One deliberate deviation, documented in Architecture: case opening is pull-based in the evaluator (not per-emitter), which removes the spec's "copy classifier into both packages" note — the classifier lives once (Task 2).
+- §2 data model → Task 1. §3 case opening → Task 3 (findings+anomalies) + Task 10 (RCA). §4 evaluator (metric recovery + finding recurrence + false-resolved guard + agg, cluster + '\*') → Task 4. Scheduled Lambda → Tasks 5-6. §5 consumers: deterministic re-rank+badge → Task 7; prompt injection → Task 11; agent tool → Task 12. §6 UI → Tasks 8-9. §7 honesty (cold-start fleet fallback, attribution-as-hint, no auto-apply) → enforced in Tasks 4/7/8. §8 scope/phasing → task split. **action_class classifier** (§3) → Task 2. **All covered.**
+- One deliberate deviation, documented in Architecture: case opening is pull-based in the evaluator (not per-emitter), which removes the spec's "copy classifier into both packages" note: the classifier lives once (Task 2).
 
-**Placeholder scan:** every code step has real code; commands have expected output. Two spots intentionally say "read the sibling first and mirror it" (the `/multi-cluster/overview` auth setup in Task 8; the nav item shape in Task 9; the `api-client` `authedFetch` usage) — these are reads against existing code whose exact shape must match, not deferred logic.
+**Placeholder scan:** every code step has real code; commands have expected output. Two spots intentionally say "read the sibling first and mirror it" (the `/multi-cluster/overview` auth setup in Task 8; the nav item shape in Task 9; the `api-client` `authedFetch` usage): these are reads against existing code whose exact shape must match, not deferred logic.
 
 **Type/name consistency:** `query(sql, params)` callable shape is consistent across Tasks 3/4/5/7/8. `remediation_cases` / `remediation_outcomes_agg` columns match between Task 1 (DDL), Task 4 (writes), Task 7/8 (reads). `classify_action(text, category="")` signature consistent across Tasks 2/3/10. `confidence(successes, attempts)` / `trackRecordLabel` consistent in Task 9. Aggregate key `(cluster_id, symptom_class, action_class)` consistent everywhere; findings badge aggregates on `symptom_class` only (no read-time classifier), noted in Task 7.

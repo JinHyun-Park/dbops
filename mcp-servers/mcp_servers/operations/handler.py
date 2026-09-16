@@ -54,7 +54,7 @@ cache = CacheClient()
 # FAIL-CLOSED for writes: a None family (missing row / lookup error / empty
 # cluster_id) resolves to .get(None,{}).get(key,False) == False → refused, so an
 # unknown/unregistered/lookup-failed cluster can NEVER slip a write through even
-# with a valid-looking approval (review fix #3 — opposite of simulation's read-side
+# with a valid-looking approval (review fix #3, opposite of simulation's read-side
 # DEFAULT-PERMIT).
 _ENGINE_GATED_TOOLS = {
     # Aurora CLUSTER parameter-group change (E-0). POSITIVE, FAIL-CLOSED gate on
@@ -66,7 +66,7 @@ _ENGINE_GATED_TOOLS = {
     # gate is POSITIVE and FAIL-CLOSED just like the NoSQL writes: only the
     # relational family has the custom_endpoint capability, so DynamoDB/DocDB/
     # ElastiCache (or any unresolvable cluster) get unsupported_engine before the
-    # impl runs — no ugly RDS fault on a ddb-* slug.
+    # impl runs, no ugly RDS fault on a ddb-* slug.
     "create_custom_endpoint": "custom_endpoint",
     "delete_custom_endpoint": "custom_endpoint",
     "modify_custom_endpoint": "custom_endpoint",
@@ -89,8 +89,8 @@ _ENGINE_GATED_TOOLS = {
     "modify_dynamodb_ttl": "ddb_write",
     "enable_dynamodb_pitr": "ddb_write",
     # DocumentDB Mongo-protocol write tools (stage 2). FAIL-CLOSED on None family
-    # too: a documentdb cluster missing the docdb_write capability — or any
-    # unresolvable cluster — refuses before reaching the impl (review fix #3).
+    # too: a documentdb cluster missing the docdb_write capability (or any
+    # unresolvable cluster) refuses before reaching the impl (review fix #3).
     "set_docdb_profiler": "docdb_write",
     "create_docdb_index": "docdb_write",
     "elasticache_live_read": "live_read",
@@ -99,7 +99,7 @@ _ENGINE_GATED_TOOLS = {
     "reboot_elasticache": "elasticache_write",
     "test_elasticache_failover": "elasticache_write",
     # Standalone RDS instance write tools (R-3): reboot / snapshot / modify-class.
-    # POSITIVE, FAIL-CLOSED gate on the rds_instance-only instance_write cap —
+    # POSITIVE, FAIL-CLOSED gate on the rds_instance-only instance_write cap.
     # Aurora (relational) and every non-relational family lack it, so those
     # clusters (and any unresolvable one) get unsupported_engine before the impl.
     "reboot_rds_instance": "instance_write",
@@ -182,7 +182,7 @@ TOOLS = {
         "impl": execute_sql_impl,
         "description": (
             "Execute SQL against a cluster. SELECT/EXPLAIN/SHOW/DESCRIBE run "
-            "directly. Write operations require approval — set approved=true "
+            "directly. Write operations require approval: set approved=true "
             "AND approval_id=<uuid from request_approval>. Dangerous SQL "
             "(DROP/TRUNCATE/DELETE) requires force=true."
         ),
@@ -192,7 +192,7 @@ TOOLS = {
                 "cluster_id": {"type": "string", "description": "Target Aurora cluster ID"},
                 "sql": {"type": "string", "description": "SQL statement to execute"},
                 "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
-                "approval_id": {"type": "string", "description": "UUID returned by request_approval — server verifies this against DDB before executing"},
+                "approval_id": {"type": "string", "description": "UUID returned by request_approval: server verifies this against DDB before executing"},
                 "force": {"type": "boolean", "default": False, "description": "Force execution of dangerous SQL"},
             },
             "required": ["cluster_id", "sql"],
@@ -257,7 +257,7 @@ TOOLS = {
         "description": (
             "Create a manual cluster snapshot (backup). Non-destructive but "
             "requires approved=true AND approval_id=<uuid from request_approval>. "
-            "snapshot_id is optional — auto-generated if omitted."
+            "snapshot_id is optional, auto-generated if omitted."
         ),
         "input_schema": {
             "type": "object",
@@ -274,7 +274,7 @@ TOOLS = {
         "impl": restore_cluster_impl,
         "description": (
             "Restore a cluster into a BRAND-NEW cluster from a snapshot or a "
-            "point in time. HIGH RISK — it stands up a new, billable Aurora "
+            "point in time. HIGH RISK: it stands up a new, billable Aurora "
             "cluster. The source cluster is NEVER modified. Requires "
             "approved=true AND approval_id=<uuid from request_approval>. "
             "mode='snapshot' needs snapshot_id; mode='pitr' needs "
@@ -284,7 +284,7 @@ TOOLS = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "cluster_id": {"type": "string", "description": "Source Aurora cluster ID (read-only — never modified)"},
+                "cluster_id": {"type": "string", "description": "Source Aurora cluster ID (read-only, never modified)"},
                 "new_cluster_id": {"type": "string", "description": "Identifier for the NEW restored cluster (must differ from source)"},
                 "mode": {"type": "string", "enum": ["snapshot", "pitr"], "default": "snapshot", "description": "Restore source type"},
                 "snapshot_id": {"type": "string", "description": "Snapshot to restore from (mode=snapshot)"},
@@ -303,7 +303,7 @@ TOOLS = {
             "routing a chosen subset of readers). endpoint_type is READER or ANY "
             "(never WRITER). static_members and excluded_members are mutually "
             "exclusive. Requires approved=true AND approval_id=<uuid from "
-            "request_approval>. Returns cli_preview — the exact aws rds "
+            "request_approval>. Returns cli_preview, the exact aws rds "
             "create-db-cluster-endpoint command this will execute."
         ),
         "input_schema": {
@@ -324,7 +324,7 @@ TOOLS = {
         "impl": delete_custom_endpoint_impl,
         "description": (
             "Aurora only: delete a CUSTOM DB cluster endpoint. Verifies the "
-            "endpoint exists and is CUSTOM first — the built-in writer/reader "
+            "endpoint exists and is CUSTOM first: the built-in writer/reader "
             "endpoints can NEVER be deleted through this tool. Requires "
             "approved=true AND approval_id=<uuid from request_approval>. Returns "
             "cli_preview."
@@ -437,7 +437,7 @@ TOOLS = {
             "auto-queue a buffer-pool prewarm for it (semi-automatic, TWO human "
             "approvals). This tool is approval #1 (creates the reader). Once the "
             "reader reaches 'available', a prewarm_reader approval auto-appears in "
-            "the Approval Center as approval #2 — after the DBA approves it, the "
+            "the Approval Center as approval #2: after the DBA approves it, the "
             "reader is warmed automatically before it takes traffic. new_instance_id "
             "is required; instance_class defaults to the writer's class (Serverless "
             "v2 → db.serverless). Requires approved=true AND approval_id=<uuid from "
@@ -460,7 +460,7 @@ TOOLS = {
     "plan_az_scaleout": {
         "impl": plan_az_scaleout_impl,
         "description": (
-            "Aurora only (READ-ONLY): plan a preemptive AZ scale-out — N reader "
+            "Aurora only (READ-ONLY): plan a preemptive AZ scale-out, N reader "
             "instances spread round-robin over the cluster's healthy AZs, "
             "EXCLUDING one chosen AZ. Resolves a concrete instance_class + AZ + "
             "unique id for each planned reader. Creates nothing; the /scaleout-az "
@@ -490,7 +490,7 @@ TOOLS = {
             "type": "object",
             "properties": {
                 "cluster_id": {"type": "string", "description": "Target DynamoDB table ID (ddb-* registry slug)"},
-                "billing_mode": {"type": "string", "description": "PROVISIONED or On-Demand — omit to keep current mode"},
+                "billing_mode": {"type": "string", "description": "PROVISIONED or On-Demand, omit to keep current mode"},
                 "rcu": {"type": "integer", "description": "Provisioned read capacity units (>=1; required for Provisioned)"},
                 "wcu": {"type": "integer", "description": "Provisioned write capacity units (>=1; required for Provisioned)"},
                 "approved": {"type": "boolean", "default": False, "description": "Set to true only when DBA has approved on /approvals"},
@@ -574,7 +574,7 @@ TOOLS = {
         "description": (
             "DocumentDB only: create an index on a collection via the Mongo "
             "protocol (create_index, background=true). keys is an ORDERED list "
-            "of [field, direction] pairs (direction 1=asc, -1=desc) — compound "
+            "of [field, direction] pairs (direction 1=asc, -1=desc): compound "
             "order is significant. name is required. Requires approved=true AND "
             "approval_id=<uuid from request_approval>. Idempotent (skips if the "
             "named index exists). Needs a configured write credential "
@@ -596,7 +596,7 @@ TOOLS = {
     },
     "elasticache_live_read": {
         "impl": elasticache_live_read_impl,
-        "description": "ElastiCache only: live Redis/Valkey/Memcached deep-read — "
+        "description": "ElastiCache only: live Redis/Valkey/Memcached deep-read. "
                        "INFO, SLOWLOG, CLIENT LIST, MEMORY STATS (Redis) or stats "
                        "(Memcached). Read-only; no mutation.",
         "input_schema": {
@@ -664,7 +664,7 @@ TOOLS = {
         "impl": create_rds_snapshot_impl,
         "description": (
             "Standalone RDS instance only (non-Aurora): create a manual DB "
-            "instance snapshot. snapshot_id is optional — a dbops-<id>-<ts> "
+            "instance snapshot. snapshot_id is optional: a dbops-<id>-<ts> "
             "default is resolved at approval time and bound to it. Requires "
             "approved=true AND approval_id=<uuid from request_approval>."
         ),
@@ -758,7 +758,7 @@ TOOLS = {
             "to answer compliance / retro questions like 'who changed "
             "max_connections in prod-pg-1 last week?' or 'show me every "
             "parameter modification approved by Alice this month'. "
-            "Returns merged + chronological list. Read-only — does NOT "
+            "Returns merged + chronological list. Read-only, does NOT "
             "execute anything."
         ),
         "input_schema": {
@@ -802,11 +802,11 @@ TOOLS = {
             "fenced ```sql blocks extracted as ordered `steps`. Use this to "
             "EXECUTE a runbook: present the steps to the DBA, then run each "
             "step's SQL via the execute_sql tool. execute_sql is "
-            "approval-gated — writes require request_approval then "
+            "approval-gated: writes require request_approval then "
             "execute_sql with approved=true AND approval_id. NEVER bypass "
             "approval. This tool is read-only and executes nothing itself. "
-            "When the query is ambiguous it returns a `candidates` list — "
-            "confirm the intended runbook with the DBA before proceeding."
+            "When the query is ambiguous it returns a `candidates` list. "
+            "Confirm the intended runbook with the DBA before proceeding."
         ),
         "input_schema": {
             "type": "object",
@@ -832,7 +832,7 @@ TOOLS = {
             "immediately after a write tool returns status=approval_required. "
             "Returns approval_id + review URL. After the DBA approves on the "
             "/approvals page, re-issue the original write tool with BOTH "
-            "approved=true AND approval_id=<returned uuid> — the server "
+            "approved=true AND approval_id=<returned uuid>: the server "
             "verifies the id against DDB and refuses replays."
         ),
         "input_schema": {
@@ -846,7 +846,7 @@ TOOLS = {
                 },
                 "action_details": {
                     "type": "object",
-                    "description": "The exact arguments the write tool would have been called with — DBA reviews this verbatim",
+                    "description": "The exact arguments the write tool would have been called with (DBA reviews this verbatim)",
                 },
                 "requested_by": {"type": "string", "default": "agent"},
             },
@@ -870,7 +870,7 @@ def _extract_tool_name(context):
 def _resolve_family(cluster_id):
     """Resolve the engine family from cluster_meta via the cache. Returns None
     when cluster_id is empty, the row is missing, or the lookup errors. For the
-    engine-gated WRITE tools a None family is FAIL-CLOSED (refused) — opposite of
+    engine-gated WRITE tools a None family is FAIL-CLOSED (refused), opposite of
     simulation's read-side default-permit (review fix #3)."""
     if not cluster_id:
         return None
@@ -901,7 +901,7 @@ def lambda_handler(event, context):
     if tool_name and tool_name in TOOLS:
         # POSITIVE engine-capability gate, FAIL-CLOSED for the NoSQL write tools
         # only (the Aurora tools stay ungated). A NoSQL tool called on an Aurora
-        # cluster — or on an unresolvable/unregistered cluster — refuses, so a
+        # cluster (or on an unresolvable/unregistered cluster) refuses, so a
         # valid-looking approval can never drive a write at the wrong engine.
         cap_key = _ENGINE_GATED_TOOLS.get(tool_name)
         if cap_key:

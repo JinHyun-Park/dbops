@@ -1,6 +1,6 @@
 // Shared root-cause-analysis prompt. Used by the in-dashboard RCA side panel
 // (streams via the agent SSE, see rca-drawer.tsx) AND by the optional "continue
-// in chat" deep-link below — so both surfaces ask the agent the same thing and
+// in chat" deep-link below, so both surfaces ask the agent the same thing and
 // the UI never duplicates the diagnose_root_cause scoring (which lives in the
 // incident MCP server).
 export const RCA_PROMPT =
@@ -11,7 +11,7 @@ export const RCA_PROMPT =
   "가장 가능성 높은 원인부터 근거(실제 수치)와 함께 정리하고, 다음 확인할 것과 " +
   "권장 조치를 제시해줘. 데이터가 부족하면 어떤 데이터가 없는지 명시해줘.";
 
-// Deep-link into the full chat with the RCA prompt + cluster pre-filled — the
+// Deep-link into the full chat with the RCA prompt + cluster pre-filled: the
 // "continue this as a conversation" escape hatch from the side panel.
 export function rcaChatHref(clusterId: string | null | undefined): string {
   const params = new URLSearchParams();

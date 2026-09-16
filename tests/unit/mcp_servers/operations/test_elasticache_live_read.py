@@ -1,4 +1,4 @@
-"""ElastiCache live deep-read tool — read-only, mocked connection."""
+"""ElastiCache live deep-read tool: read-only, mocked connection."""
 import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock

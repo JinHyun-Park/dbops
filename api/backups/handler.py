@@ -1,4 +1,4 @@
-"""Backup write operations — manual snapshot creation (phase 2).
+"""Backup write operations: manual snapshot creation (phase 2).
 
 The read tier (snapshot inventory + PITR window) lives in the dashboard
 handler at GET /api/dashboard/{cluster_id}/backups. This handler owns
@@ -10,12 +10,12 @@ This is a HUMAN-initiated write, distinct from the agent-proposed write
 path (execute_sql / modify_parameter / ...) which routes through the
 DDB approval_guard. The DBA clicking "Create snapshot" in the console
 IS the trusted authority the Approval Center exists to represent, so we
-gate on the Cognito admin role directly — the same pattern used by
+gate on the Cognito admin role directly, the same pattern used by
 cluster registration and alert-rule creation. No second approval round
 is required for a human admin's own click.
 
 Why this is safe to expose directly: CreateDBClusterSnapshot is
-NON-DESTRUCTIVE — it only adds a backup, never mutates or deletes data.
+NON-DESTRUCTIVE: it only adds a backup, never mutates or deletes data.
 It is the safest possible write in the backup workflow. (Restore, the
 phase-3 destructive-adjacent operation, gets a stronger gate.)
 
@@ -42,7 +42,7 @@ from botocore.exceptions import ClientError
 _SNAPSHOT_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
 _CLUSTER_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-]{0,254}$")
 # A NEW cluster id must satisfy the stricter RDS *create* rules (letter-start,
-# <=63, no leading/trailing/consecutive hyphens) — same shape as a snapshot id.
+# <=63, no leading/trailing/consecutive hyphens), same shape as a snapshot id.
 _NEW_CLUSTER_ID_RE = _SNAPSHOT_ID_RE
 
 
@@ -98,7 +98,7 @@ def _caller(event: dict) -> tuple[bool, str]:
 def _audit(cluster_id: str, username: str, action_type: str, params: dict,
            status: str, result: str = "", message: str = ""):
     """Best-effort write to audit_log (PG) + event_log (PG) via RDS Data
-    API. Failures here don't fail the operation — the AWS action already
+    API. Failures here don't fail the operation: the AWS action already
     happened; the audit trail is secondary. Logged so /activity and
     /timeline pick it up. Generic over action_type so both snapshot
     creation and cluster restore share one writer."""
@@ -251,7 +251,7 @@ def _register_pending(cluster_id: str, source_id: str, restore_source: str,
                 "account_id": (cluster_arn.split(":")[4] if cluster_arn.count(":") >= 4 else ""),
                 "region": region,
                 "engine": engine,
-                # Inherit the source's spoke role — the restored cluster lives
+                # Inherit the source's spoke role: the restored cluster lives
                 # in the same spoke account, so later ops must target it too.
                 "spoke_role_arn": spoke_role_arn,
                 "registered_at": datetime.now(timezone.utc).isoformat(),
@@ -278,7 +278,7 @@ def _handle_snapshot(cluster_id: str, username: str, body: dict):
         if not _SNAPSHOT_ID_RE.match(snapshot_id) or len(snapshot_id) > 63:
             return _resp(400, {
                 "error": (
-                    "invalid snapshot_id — must be 1-63 chars, start with a "
+                    "invalid snapshot_id: must be 1-63 chars, start with a "
                     "letter, alphanumeric + single hyphens (no leading/trailing "
                     "or consecutive hyphens)"
                 ),
@@ -337,7 +337,7 @@ def _handle_restore(cluster_id: str, username: str, body: dict):
 
     Stronger gate than snapshot creation: beyond the admin role, the caller
     must echo the target cluster id in `confirm` (type-to-confirm), since a
-    restore stands up a billable cluster. The source is never modified —
+    restore stands up a billable cluster. The source is never modified:
     RDS restore APIs only read it, and we refuse target == source.
     """
     new_id = (body.get("new_cluster_id") or "").strip()
@@ -346,17 +346,17 @@ def _handle_restore(cluster_id: str, username: str, body: dict):
 
     if not new_id or not _NEW_CLUSTER_ID_RE.match(new_id) or len(new_id) > 63:
         return _resp(400, {"error": (
-            "invalid new_cluster_id — 1-63 chars, start with a letter, "
+            "invalid new_cluster_id: 1-63 chars, start with a letter, "
             "alphanumeric + single hyphens"
         )})
     if new_id == cluster_id:
         return _resp(400, {"error": (
-            "new_cluster_id must differ from the source — restore always "
+            "new_cluster_id must differ from the source: restore always "
             "creates a NEW cluster"
         )})
     if confirm != new_id:
         return _resp(400, {"error": (
-            "confirmation failed — 'confirm' must exactly match new_cluster_id"
+            "confirmation failed: 'confirm' must exactly match new_cluster_id"
         )})
 
     # Cross-account-aware: restore runs in the source cluster's account+region,

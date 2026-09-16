@@ -106,13 +106,13 @@ def test_serverless_uses_real_acu_price_and_member_count():
 
 def test_serverless_uses_observed_acu_not_midpoint():
     """When CloudWatch has observed ACU, cost uses the OBSERVED average (clamped
-    into the range), not the min/max midpoint — a mostly-idle cluster costs far
+    into the range), not the min/max midpoint: a mostly-idle cluster costs far
     less than (min+max)/2 implies."""
     cache = _empty_cache()
     rds = MagicMock()
     rds.describe_db_clusters.return_value = {"DBClusters": [_serverless_cluster(readers=1)]}
 
-    # Observed ~3 ACU on a 2..16 range — midpoint would be 9, far higher.
+    # Observed ~3 ACU on a 2..16 range, midpoint would be 9, far higher.
     with patch(f"{MODULE}.rds_client_for_cluster", return_value=rds), patch(
         f"{MODULE}.lookup_cluster", return_value={"region": "ap-northeast-2"}
     ), patch(f"{MODULE}.price_per_acu_hour", return_value=0.26), patch(
@@ -198,7 +198,7 @@ def test_provisioned_resize_costs_more():
 
 def test_pricing_unavailable_yields_none_cost_and_fallback_source():
     """When a needed price is None, cost is None, data_source is an estimate and
-    unit_pricing.source is fallback — never a crash, never a fabricated number."""
+    unit_pricing.source is fallback, never a crash, never a fabricated number."""
     cache = _empty_cache()
     rds = MagicMock()
     rds.describe_db_clusters.return_value = {"DBClusters": [_serverless_cluster(readers=1)]}

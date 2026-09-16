@@ -2,7 +2,7 @@
 
 Seeds ~24h of realistic-looking metrics/queries/findings/etc. into the
 cache DB so a fresh evaluator can experience the full dashboard before
-connecting a real cluster. Idempotent — re-running for the same
+connecting a real cluster. Idempotent: re-running for the same
 cluster_id wipes prior demo rows and re-inserts relative to "now".
 """
 
@@ -88,7 +88,7 @@ TABLES = [
     ("analytics", "rollups",     4_200_000,    38_000,    1_200,    42_000_000, 18_000_000_000,  14_000_000_000,  4_000_000_000),
 ]
 
-# Synthetic operational findings — varied severity so dashboard demonstrates filtering.
+# Synthetic operational findings: varied severity so dashboard demonstrates filtering.
 FINDINGS = [
     ("txid_age", "warning", "public.audit_log",
      "age=612,000,000", "< 200,000,000",
@@ -118,7 +118,7 @@ FINDINGS = [
      "off", "on",
      "Lock waits are not logged. Turn log_lock_waits on so contention shows up in the slow-query log.",
      {"current": "off", "recommended": "on"}),
-    # P3.3.2 demos — Serverless v2 over-provisioned ceiling + Compute Savings Plan
+    # P3.3.2 demos: Serverless v2 over-provisioned ceiling + Compute Savings Plan
     # opportunity. Surfaces the new cost check_types in the Maintenance Health panel.
     ("cost_serverless_max_too_high", "info", "Serverless v2 (max 32.0 ACU)",
      "7d p95 CPU 38.2% / max 88.0%", "< 40% p95 CPU → max ACU likely overprovisioned",
@@ -126,7 +126,7 @@ FINDINGS = [
      {"current_min_acu": 0.5, "current_max_acu": 32.0, "suggested_max_acu": 16.0, "p95_cpu": 38.2, "max_cpu": 88.0}),
     ("cost_savings_plan_opportunity", "info", "Account-level Compute Savings Plan",
      "~$42.30/mo savings projected", "> $10/mo savings → worth committing",
-     "Commit $0.18/hr Compute Savings Plan (1-year, no upfront) — projected ~$42.30/mo savings. Cost Explorer → Savings Plans → Recommendations confirms the exact hourly commit.",
+     "Commit $0.18/hr Compute Savings Plan (1-year, no upfront): projected ~$42.30/mo savings. Cost Explorer → Savings Plans → Recommendations confirms the exact hourly commit.",
      {"estimated_monthly_savings_usd": 42.30, "hourly_commitment_usd": 0.18, "term_years": 1, "payment_option": "NO_UPFRONT", "lookback_days": 30}),
 ]
 
@@ -144,7 +144,7 @@ def _exec(rds_data, arn, secret, db, sql, params=None):
 
 def _ts_param(name, dt):
     # RDS Data API's TIMESTAMP typeHint rejects timezone suffix (e.g. "+00:00");
-    # drop tzinfo so we send "YYYY-MM-DD HH:MM:SS" — Aurora interprets it as UTC
+    # drop tzinfo so we send "YYYY-MM-DD HH:MM:SS". Aurora interprets it as UTC
     # by default and TIMESTAMPTZ columns coerce correctly.
     naive = dt.replace(tzinfo=None) if dt.tzinfo else dt
     return {"name": name, "value": {"stringValue": naive.isoformat(sep=" ", timespec="seconds")}, "typeHint": "TIMESTAMP"}

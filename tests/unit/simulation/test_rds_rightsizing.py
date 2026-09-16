@@ -66,7 +66,7 @@ def test_insufficient_data_when_no_metrics():
 
 def test_sqlserver_pricing_receives_resolvable_edition_not_raw_engine():
     """Regression (CRITICAL): the tool must NOT pass the raw registry engine
-    string as `edition` — price_rds_instance_hour expects the Price-List label
+    string as `edition`: price_rds_instance_hour expects the Price-List label
     (or None to self-resolve from engine). Passing "sqlserver-ex" matched zero
     SKUs → every SQL Server price silently fell back."""
     cache = _Cache(_meta("sqlserver-ex"), _metrics(cpu_p95=6.0))
@@ -87,7 +87,7 @@ def test_sqlserver_pricing_receives_resolvable_edition_not_raw_engine():
 
 def test_explicit_override_to_smaller_class_labels_downsize():
     """Regression (IMPORTANT-1): an explicit override to a SMALLER class must
-    read 'downsize', matching the negative cost delta — not a hardcoded 'upsize'."""
+    read 'downsize', matching the negative cost delta, not a hardcoded 'upsize'."""
     cache = _Cache(_meta("mysql"), _metrics(cpu_p95=50.0))
     # cur db.t3.small = 0.045/hr, requested db.t3.micro = 0.022/hr → cheaper.
     with patch.object(rr, "price_rds_instance_hour", side_effect=[0.045, 0.022]), \

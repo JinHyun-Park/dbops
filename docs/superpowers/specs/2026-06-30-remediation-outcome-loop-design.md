@@ -1,8 +1,8 @@
-# Remediation Outcome Loop (효과 학습 루프) — Design
+# Remediation Outcome Loop (효과 학습 루프): Design
 
 **Date:** 2026-06-30
 **Status:** Approved design, pre-implementation
-**Topic:** Close the recommendation loop — measure whether a recommended remediation
+**Topic:** Close the recommendation loop: measure whether a recommended remediation
 actually resolved the symptom, accumulate per-cluster/symptom/action success rates,
 and feed that evidence back into future recommendations.
 
@@ -10,7 +10,7 @@ and feed that evidence back into future recommendations.
 
 ## 1. Purpose & framing
 
-DBOps already _produces_ recommendations from three places — proactive anomaly
+DBOps already _produces_ recommendations from three places: proactive anomaly
 alerts (`proactive_monitor`), recurring health findings (`cluster_health_findings`),
 and RCA task narratives (`task_worker._run_rca`). What it does **not** do today is
 learn from outcomes: a recommendation goes out and nothing watches whether the
@@ -31,7 +31,7 @@ consumers:  findings re-rank + confidence badge   │   RCA/chat prompt injectio
 ### Design principles (decided)
 
 - **Core = outcome verification + learned memory.** Not just noise reduction.
-- **Fully automatic capture & measurement.** Zero human input — no "was this helpful?"
+- **Fully automatic capture & measurement.** Zero human input: no "was this helpful?"
   prompts. The verdict is derived from observed signals.
 - **Measurement is anchored to the triggering symptom, not a blind metric scan.**
   Only the metric / finding that _caused_ the recommendation is watched. This is what
@@ -49,7 +49,7 @@ consumers:  findings re-rank + confidence badge   │   RCA/chat prompt injectio
 Three new tables on the Aurora PG cache (`schema_v24.sql`; the migrator auto-applies
 `schema_v*.sql` in numeric order). All timestamps `timestamptz`.
 
-### 2.1 `remediation_cases` — one open case per live symptom
+### 2.1 `remediation_cases`: one open case per live symptom
 
 ```sql
 CREATE TABLE IF NOT EXISTS remediation_cases (
@@ -83,7 +83,7 @@ CREATE INDEX IF NOT EXISTS ix_remediation_cases_due
     ON remediation_cases (status, evaluate_after);
 ```
 
-### 2.2 `remediation_outcomes_agg` — the learned memory
+### 2.2 `remediation_outcomes_agg`: the learned memory
 
 ```sql
 CREATE TABLE IF NOT EXISTS remediation_outcomes_agg (
@@ -102,26 +102,26 @@ CREATE TABLE IF NOT EXISTS remediation_outcomes_agg (
 Every resolved/persisted case increments **two** rows: the cluster-specific row and
 the `cluster_id = '*'` fleet row. `inconclusive` increments neither (no signal).
 
-### 2.3 Attribution — no new table
+### 2.3 Attribution: no new table
 
 > **Status: deferred to a future increment (not in v1).** The `details` JSONB column
-> ships (default `'{}'`), but v1 does not populate `likely_change` hints — there is no
+> ships (default `'{}'`), but v1 does not populate `likely_change` hints: there is no
 > consumer wired to surface them yet (the Learning UI / MCP tool show verdicts + track
 > record, not per-case attribution), so writing them now would be a half-feature. The
 > design below is retained as the intended shape for when a consumer is added.
 
 Change/approval context would be read at evaluation time from existing stores:
 
-- `event_log` (cluster_id, event_time, event_type, source, message, raw_event) — schema
+- `event_log` (cluster_id, event_time, event_type, source, message, raw_event): schema
   changes, RDS events, alerts, anomalies, writes.
-- Approval records (DynamoDB) — what change was approved + executed and when.
+- Approval records (DynamoDB): what change was approved + executed and when.
 
 Any change in `[opened_at, evaluated_at]` would be attached to `remediation_cases.details`
 as a `likely_change` hint. **Never asserted as the cause** (see §7).
 
 ---
 
-## 3. Case lifecycle — opening
+## 3. Case lifecycle: opening
 
 A thin enricher opens/refreshes cases at the existing emission points. No emission
 point changes its own behavior; the case write is best-effort and never blocks it.
@@ -138,18 +138,18 @@ recommendation text / RCA category to a normalized action: keywords like
 `scale_up`, VACUUM→`vacuum`, ANALYZE→`analyze`; default `manual`. One pure function,
 unit-tested against the actual recommendation strings the collectors emit.
 
-**Packaging note:** the enricher runs in two Lambda packages that cannot share imports
-— `data-pipeline/` (proactive_monitor + ETL finding collectors) and
+**Packaging note:** the enricher runs in two Lambda packages that cannot share imports:
+`data-pipeline/` (proactive_monitor + ETL finding collectors) and
 `mcp-servers/mcp_servers/workers/` (task_worker). The classifier is therefore a tiny
 self-contained module **copied into both, kept in sync**, matching the existing
 `ws_notify` / `_broadcast` copy pattern in this repo. Both copies share the same unit
 test fixture so they can't silently diverge.
 
-**Dedup:** the partial unique index makes re-emission idempotent — `INSERT … ON
+**Dedup:** the partial unique index makes re-emission idempotent: `INSERT … ON
 CONFLICT (open case) DO UPDATE SET last_seen_at = NOW()`.
 
 **`evaluate_after` = opened_at + window(symptom_class).** Window is a per-class tuning
-knob (default 6h for metric symptoms, 24h for recurring findings — a finding only
+knob (default 6h for metric symptoms, 24h for recurring findings: a finding only
 re-runs each ETL so it needs a longer observation window to confirm clearance).
 
 ---
@@ -189,7 +189,7 @@ the window. If there's no evidence the collector ran → `inconclusive`, not res
 
 ```
 # ponytail: "finding disappeared" is only a success if the collector that emits it
-# actually ran in the window. No collector heartbeat table — proxy on "did this
+# actually ran in the window. No collector heartbeat table: proxy on "did this
 # cluster produce ANY finding/metric row in the window". Upgrade to a real
 # per-collector heartbeat only if the proxy mislabels.
 ```
@@ -197,7 +197,7 @@ the window. If there's no evidence the collector ran → `inconclusive`, not res
 ### 4.4 On verdict
 
 - Set `status`, `evaluated_at`. (Appending `likely_change` hints to `details` is
-  deferred — see §2.3; v1 leaves `details` at its `'{}'` default.)
+  deferred, see §2.3; v1 leaves `details` at its `'{}'` default.)
 - `resolved` → `attempts += 1, successes += 1` on both the cluster row and `'*'` row.
   `persisted` → `attempts += 1`. `inconclusive` → no agg change; optionally re-arm
   (push `evaluate_after` out once) so a slow signal gets a second look before giving up.
@@ -206,7 +206,7 @@ the window. If there's no evidence the collector ran → `inconclusive`, not res
 
 ## 5. Consumers (feedback into recommendations)
 
-### Phase 1 — deterministic re-rank + confidence badge (no LLM)
+### Phase 1: deterministic re-rank + confidence badge (no LLM)
 
 - Findings read path (`api/dashboard` / `api/alerts` findings endpoints) LEFT JOINs
   `remediation_outcomes_agg` on `(cluster_id, symptom_class, action_class)` with a
@@ -216,10 +216,10 @@ the window. If there's no evidence the collector ran → `inconclusive`, not res
   historically-failed actions sort down. Confidence is a simple smoothed rate
   (e.g. Wilson lower bound) so 1/1 doesn't outrank 9/10.
 
-### Phase 2 — LLM prompt injection + agent tool
+### Phase 2: LLM prompt injection + agent tool
 
 - `task_worker._narrative` fetches the relevant agg rows for the symptom and injects a
-  compact line into the RCA prompt ("과거 효과 — index_add 4/5, param_change 1/3"),
+  compact line into the RCA prompt ("과거 효과: index_add 4/5, param_change 1/3"),
   constrained so the model cites evidence rather than inventing it.
 - New gateway MCP tool `get_remediation_history(cluster_id, symptom_class)` (incident
   server) so the live chat agent can pull the track record on demand. Read-only, added
@@ -231,7 +231,7 @@ the window. If there's no evidence the collector ran → `inconclusive`, not res
 
 - **Inline:** confidence badge + "효과 이력" on each finding/recommendation card
   (dashboard, alerts, RCA result).
-- **Dedicated view:** a read-only "Learning" (효과 학습) page — per-cluster and fleet
+- **Dedicated view:** a read-only "Learning" (효과 학습) page: per-cluster and fleet
   remediation track record (symptom → action → success rate), recent resolved/persisted
   cases with their attribution hints. This is the "the platform is learning" screen.
   - **Placement:** new top-level nav page `app/learning/page.tsx` (eyebrow "Monitor"),
@@ -259,11 +259,11 @@ the window. If there's no evidence the collector ran → `inconclusive`, not res
 
 ## 8. Scope
 
-**In (v1):** the three existing emit points — `proactive_monitor` anomalies,
+**In (v1):** the three existing emit points: `proactive_monitor` anomalies,
 `cluster_health_findings` (query_regression, pg_param_fitness, capacity_forecast,
 pg_engine_internals, dynamodb/docdb/elasticache findings), and RCA task recommendations.
 
-**Out (v1):** `recommend_index` and other on-demand performance tools — they don't
+**Out (v1):** `recommend_index` and other on-demand performance tools: they don't
 persist a finding today, so there's no durable emit point to anchor a case. They fold
 in automatically if/when their output is persisted as a finding.
 

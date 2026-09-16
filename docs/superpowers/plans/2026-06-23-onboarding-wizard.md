@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A guided spoke-account onboarding wizard — generate the spoke-role CloudFormation template (hub-account trust + curated least-privilege perms, read-only default + write-remediation toggle), verify via the existing test-connection, hand off to existing discover/register.
+**Goal:** A guided spoke-account onboarding wizard: generate the spoke-role CloudFormation template (hub-account trust + curated least-privilege perms, read-only default + write-remediation toggle), verify via the existing test-connection, hand off to existing discover/register.
 
 **Architecture:** One new admin-gated endpoint (`GET /api/onboarding/template`) that emits a JSON CloudFormation template; a wizard UI that stitches it with the existing `/api/clusters/test-connection` and `/clusters` discover/register. No new ping endpoint, no new cross-account plumbing.
 
@@ -17,12 +17,12 @@
 - **Reuse, don't rebuild:** the connection check is the EXISTING `POST /api/clusters/test-connection`; discovery/registration is the EXISTING `/api/clusters/discover` + `/bulk-register`. This feature adds ONLY the template endpoint + the wizard UI.
 - **Trust = hub account root:** the generated spoke role trusts `arn:aws:iam::<HUB_ACCOUNT_ID>:root` (matches the direct-assume `_session_for`); role name fixed `dbops-spoke-role`. ExternalId is a documented follow-up (would require changing the shared `_session_for`).
 - **Read-only by default:** the template's permission policy is read-only unless `remediation=true`.
-- **CloudFormation as JSON** (CFN accepts JSON natively) — `json.dumps` of a template dict; NO PyYAML dependency.
+- **CloudFormation as JSON** (CFN accepts JSON natively): `json.dumps` of a template dict; NO PyYAML dependency.
 - **Korean UI copy** for explanatory/step text; keep AWS identifiers/ARNs as-is.
 
 ---
 
-### Task 1: Template-generation API — `GET /api/onboarding/template`
+### Task 1: Template-generation API (`GET /api/onboarding/template`)
 
 **Files:**
 
@@ -38,7 +38,7 @@
 - [ ] **Step 1: Write the handler.** Create `api/onboarding/handler.py`:
 
 ```python
-"""Onboarding API — generates the spoke-account IAM role CloudFormation template
+"""Onboarding API: generates the spoke-account IAM role CloudFormation template
 (JSON) a member-account admin deploys so DBOps's hub account can assume into it.
 Admin-only, fail-closed (mirrors api/config/handler.py)."""
 
@@ -123,7 +123,7 @@ def _build_template(hub_account_id: str, remediation: bool) -> dict:
                            "Action": list(WRITE_ACTIONS), "Resource": "*"})
     return {
         "AWSTemplateFormatVersion": "2010-09-09",
-        "Description": "DBOps spoke-account role — lets the DBOps hub account assume in for "
+        "Description": "DBOps spoke-account role: lets the DBOps hub account assume in for "
                        "read-only monitoring/analysis" + (" + approval-gated remediation" if remediation else ""),
         "Resources": {
             "DBOpsSpokeRole": {
@@ -146,7 +146,7 @@ def _build_template(hub_account_id: str, remediation: bool) -> dict:
             }
         },
         "Outputs": {
-            "RoleArn": {"Description": "Spoke role ARN — register this in DBOps",
+            "RoleArn": {"Description": "Spoke role ARN: register this in DBOps",
                         "Value": {"Fn::GetAtt": ["DBOpsSpokeRole", "Arn"]}},
         },
     }
@@ -180,11 +180,11 @@ def lambda_handler(event, context=None):
     })
 ```
 
-(The implementer may refine `READ_ACTIONS`/`WRITE_ACTIONS` against the actual cross-account call sites in the MCP servers/collectors — the lists above are the curated baseline; keep `Resource:"*"` for the describe/metric actions which don't support resource scoping, and the secrets statement scoped to `dbops/*`.)
+(The implementer may refine `READ_ACTIONS`/`WRITE_ACTIONS` against the actual cross-account call sites in the MCP servers/collectors: the lists above are the curated baseline; keep `Resource:"*"` for the describe/metric actions which don't support resource scoping, and the secrets statement scoped to `dbops/*`.)
 
 - [ ] **Step 2: Empty package marker.** Create `api/onboarding/__init__.py` (empty).
 
-- [ ] **Step 3: Write the tests.** Create `tests/unit/api/test_onboarding.py` (mirror `tests/unit/api/test_config.py` harness — importlib-load, `_jwt`/`_event` helpers, patch `boto3`/`get_caller_identity`):
+- [ ] **Step 3: Write the tests.** Create `tests/unit/api/test_onboarding.py` (mirror `tests/unit/api/test_config.py` harness: importlib-load, `_jwt`/`_event` helpers, patch `boto3`/`get_caller_identity`):
 
 ```python
 # load handler via importlib; _jwt(admin=...) builds a Bearer token.
@@ -250,7 +250,7 @@ git commit -m "feat(onboarding): spoke-role CloudFormation template API (read-on
 
 ---
 
-### Task 2: Wizard UI — `/onboarding` page + api-client + nav
+### Task 2: Wizard UI (`/onboarding` page + api-client + nav)
 
 **Files:**
 
@@ -293,16 +293,16 @@ export async function fetchOnboardingTemplate(opts?: {
 }
 ```
 
-Find the existing cluster test-connection client fn (search `test-connection` in api-client.ts); if none exists, add `testClusterConnection({account_id, region, role_arn})` that POSTs `/api/clusters/test-connection` (match the handler's request/response shape — read `api/clusters/handler.py`'s test-connection block for the exact body keys + response).
+Find the existing cluster test-connection client fn (search `test-connection` in api-client.ts); if none exists, add `testClusterConnection({account_id, region, role_arn})` that POSTs `/api/clusters/test-connection` (match the handler's request/response shape: read `api/clusters/handler.py`'s test-connection block for the exact body keys + response).
 
-- [ ] **Step 2: Build the wizard page.** Create `frontend/src/app/onboarding/page.tsx`. Mirror `frontend/src/app/approval-policies/page.tsx` (read it first) for the admin-page shell + `"admin only"` → notice + load/error. A 3-step flow (numbered sections, all visible — not a hard stepper):
+- [ ] **Step 2: Build the wizard page.** Create `frontend/src/app/onboarding/page.tsx`. Mirror `frontend/src/app/approval-policies/page.tsx` (read it first) for the admin-page shell + `"admin only"` → notice + load/error. A 3-step flow (numbered sections, all visible, not a hard stepper):
 
-  - **Step 1 — 스포크 역할 생성:** on mount, `fetchOnboardingTemplate({})`; show `hub_account_id` + `hub_role_arn`; a read-only ↔ remediation toggle that re-fetches with `remediation: true`; the `template` JSON in a `<pre>` with a copy button + a download-as-`dbops-spoke-role.json` button; Korean instructions to deploy it as a CloudFormation stack in the member account (`aws cloudformation deploy --template-file dbops-spoke-role.json --stack-name dbops-spoke-role --capabilities CAPABILITY_NAMED_IAM`).
-  - **Step 2 — 연결 확인:** `account_id` + `region` inputs → a "테스트" button → `testClusterConnection({account_id, region, role_arn: \`arn:aws:iam::${account_id}:role/dbops-spoke-role\`})` → green success (show the result) or red diagnostic (the handler's error).
-  - **Step 3 — 클러스터 등록:** a CTA/link to `/clusters` (the existing discover/register UI). Korean copy explaining discovery happens there.
+  - **Step 1 (스포크 역할 생성):** on mount, `fetchOnboardingTemplate({})`; show `hub_account_id` + `hub_role_arn`; a read-only ↔ remediation toggle that re-fetches with `remediation: true`; the `template` JSON in a `<pre>` with a copy button + a download-as-`dbops-spoke-role.json` button; Korean instructions to deploy it as a CloudFormation stack in the member account (`aws cloudformation deploy --template-file dbops-spoke-role.json --stack-name dbops-spoke-role --capabilities CAPABILITY_NAMED_IAM`).
+  - **Step 2 (연결 확인):** `account_id` + `region` inputs → a "테스트" button → `testClusterConnection({account_id, region, role_arn: \`arn:aws:iam::${account_id}:role/dbops-spoke-role\`})` → green success (show the result) or red diagnostic (the handler's error).
+  - **Step 3 (클러스터 등록):** a CTA/link to `/clusters` (the existing discover/register UI). Korean copy explaining discovery happens there.
   - Reuse design-system primitives; match the approval-policies/settings visual language; null-safe; surface backend error messages.
 
-- [ ] **Step 3: Nav + command-palette.** In `app-shell.tsx`, add to the "Configure" NAV group an entry `{ href: "/onboarding", label: "Onboarding", icon: Rocket, adminOnly: true, hint: "멤버 계정 연결 위저드 (관리자)" }` (import a lucide icon — `Rocket`/`PlugZap`/`Workflow`; if taken, pick an available one). In `command-palette.tsx`, add `{ id: "onboarding", label: "Onboarding — 멤버 계정 연결 위저드", path: "/onboarding", group: "Configure", adminOnly: true }`.
+- [ ] **Step 3: Nav + command-palette.** In `app-shell.tsx`, add to the "Configure" NAV group an entry `{ href: "/onboarding", label: "Onboarding", icon: Rocket, adminOnly: true, hint: "멤버 계정 연결 위저드 (관리자)" }` (import a lucide icon: `Rocket`/`PlugZap`/`Workflow`; if taken, pick an available one). In `command-palette.tsx`, add `{ id: "onboarding", label: "Onboarding: 멤버 계정 연결 위저드", path: "/onboarding", group: "Configure", adminOnly: true }`.
 
 - [ ] **Step 4: Build.** `cd frontend && npm run build` → PASS, no type errors.
 
@@ -319,5 +319,5 @@ git commit -m "feat(onboarding): spoke-account setup wizard UI (hidden from view
 
 - Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`.
 - Deploy dev: `cdk deploy dbops-dev-agent` (onboarding Lambda + route). Frontend build → `aws s3 sync frontend/out/ ... --delete --exclude config.json` → CloudFront invalidation `E1234567890ABC`.
-- Live smoke (viewer e2e token): `GET /api/onboarding/template` → 403 (admin-gated); (the admin path returns a valid template — unit-covered since the viewer token can't reach it). Confirm the route exists (not 404).
+- Live smoke (viewer e2e token): `GET /api/onboarding/template` → 403 (admin-gated); (the admin path returns a valid template: unit-covered since the viewer token can't reach it). Confirm the route exists (not 404).
 - Then `superpowers:finishing-a-development-branch`.

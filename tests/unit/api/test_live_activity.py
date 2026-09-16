@@ -176,7 +176,7 @@ def test_live_activity_data_api_fault_no_leak(monkeypatch):
 
     assert out["available"] is False
     assert "RDS Data API" in out["reason"]
-    # No str(e) — the exception's ARN-bearing message must not reach the client.
+    # No str(e): the exception's ARN-bearing message must not reach the client.
     assert secret not in json.dumps(out, ensure_ascii=False)
     assert "HttpEndpointNotEnabled" not in json.dumps(out, ensure_ascii=False)
 
@@ -193,7 +193,7 @@ def test_live_activity_missing_data_api(monkeypatch):
 
 
 def test_live_activity_throttle(monkeypatch):
-    """Two rapid endpoint calls within the min-interval hit the target once —
+    """Two rapid endpoint calls within the min-interval hit the target once:
     the second is served from the throttle cache (concurrent viewers can't
     multiply DB load)."""
     handler._LIVE_CACHE.clear()

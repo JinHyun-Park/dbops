@@ -7,7 +7,7 @@ from mcp_servers.shared.models import QueryResult
 def test_get_slow_queries_derives_from_query_stats():
     """The dedicated slow_queries table is never populated by any collector, so
     the tool must derive from query_stats by mean execution time (like the
-    dashboard). Assert the REAL _build_query arguments, not a mocked SQL string —
+    dashboard). Assert the REAL _build_query arguments, not a mocked SQL string:
     a mocked return value would hide a regression back to the dead table."""
     mock_cache = MagicMock()
     mock_cache._build_query.return_value = ("SELECT 1", {"cluster_id": "prod-pg-1"})

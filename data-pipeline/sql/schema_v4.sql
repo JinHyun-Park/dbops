@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS blocking_locks (
 CREATE INDEX IF NOT EXISTS idx_blocking_locks_lookup
   ON blocking_locks (cluster_id, snapshot_time DESC);
 
--- Per-cluster PostgreSQL config (max_connections, shared_buffers, etc.) — upserted by ETL.
+-- Per-cluster PostgreSQL config (max_connections, shared_buffers, etc.), upserted by ETL.
 CREATE TABLE IF NOT EXISTS cluster_settings (
     cluster_id VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,

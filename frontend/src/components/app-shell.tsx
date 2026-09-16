@@ -66,7 +66,7 @@ interface NavGroup {
   items: NavItem[];
 }
 
-// Icons give each row a distinct visual anchor — the single biggest
+// Icons give each row a distinct visual anchor, the single biggest
 // scannability win once the rail grows past ~10 items. Kept monochrome
 // (dim when idle, bright when active) so the palette stays neutral and
 // doesn't read as a stock template.
@@ -90,7 +90,7 @@ const NAV: NavGroup[] = [
         href: "/learning",
         label: "Learning",
         icon: GraduationCap,
-        hint: "조치 효과 이력 — 입증된 권장 조치 우선",
+        hint: "조치 효과 이력: 입증된 권장 조치 우선",
       },
       {
         href: "/dashboard",
@@ -190,7 +190,7 @@ const NAV: NavGroup[] = [
         href: "/activity",
         label: "Activity",
         icon: Activity,
-        hint: "누가 무엇을 승인하고 실행했는지 — 감사와 회고용",
+        hint: "누가 무엇을 승인하고 실행했는지: 감사와 회고용",
       },
       {
         href: "/workload-diff",
@@ -237,7 +237,7 @@ const NAV: NavGroup[] = [
         href: "/settings",
         label: "Settings",
         icon: SlidersHorizontal,
-        hint: "기능 토글 — 티켓팅과 리포트 전달 (관리자)",
+        hint: "기능 토글: 티켓팅과 리포트 전달 (관리자)",
         adminOnly: true,
       },
       {
@@ -245,21 +245,21 @@ const NAV: NavGroup[] = [
         label: "Approval policies",
         icon: UserCheck,
         adminOnly: true,
-        hint: "지정 승인자 라우팅 — 클러스터와 액션별 승인자 (관리자)",
+        hint: "지정 승인자 라우팅: 클러스터와 액션별 승인자 (관리자)",
       },
       {
         href: "/admin/users",
         label: "Users",
         icon: UserCheck,
         adminOnly: true,
-        hint: "사용자 역할 관리 — admin/viewer (관리자)",
+        hint: "사용자 역할 관리: admin/viewer (관리자)",
       },
       {
         href: "/admin/teams",
         label: "Teams",
         icon: Users,
         adminOnly: true,
-        hint: "팀 관리 — 멤버와 클러스터 가시성 (관리자)",
+        hint: "팀 관리: 멤버와 클러스터 가시성 (관리자)",
       },
       {
         href: "/context-files",
@@ -279,7 +279,7 @@ const NAV: NavGroup[] = [
         href: "/health",
         label: "Health",
         icon: HeartPulse,
-        hint: "DBOps 자체 모니터링 — Lambda, Aurora, DDB 상태",
+        hint: "DBOps 자체 모니터링: Lambda, Aurora, DDB 상태",
       },
     ],
   },
@@ -318,7 +318,7 @@ function humanize(segment: string): string {
 }
 
 function openCommandPalette() {
-  // Decoupled from CommandPalette's internals — it also listens for this
+  // Decoupled from CommandPalette's internals: it also listens for this
   // event, so the visible button and ⌘K share one open path.
   window.dispatchEvent(new CustomEvent("dbops:open-command-palette"));
 }
@@ -389,7 +389,7 @@ function SidebarItem({ item, active }: { item: NavItem; active: boolean }) {
   );
 }
 
-// Bottom tab bar — mobile only. The 5 most-used routes for one-thumb reach;
+// Bottom tab bar: mobile only. The 5 most-used routes for one-thumb reach;
 // the full grouped rail is back once the viewport widens.
 const MOBILE_TABS: { href: string; label: string; icon: IconType }[] = [
   { href: "/fleet", label: "Fleet", icon: Boxes },
@@ -444,7 +444,7 @@ function AlertBadgeButton({
   const ariaLabel =
     total === 0
       ? "알림 없음"
-      : `알림 ${total}개 — critical ${criticalCount}, warning ${warningCount}`;
+      : `알림 ${total}개: critical ${criticalCount}, warning ${warningCount}`;
 
   return (
     <button
@@ -595,7 +595,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </span>
             </Link>
 
-            {/* Search trigger — makes the (previously keyboard-only) command
+            {/* Search trigger: makes the (previously keyboard-only) command
               palette discoverable. Shares the open path with ⌘K. */}
             <div className="px-3 pb-3">
               <button
@@ -649,7 +649,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {/* relative z-40 is load-bearing: backdrop-blur creates a stacking
                 context, and with z-index auto the SIBLING <main>'s positioned
                 content (PageHeader etc.) hit-tested ABOVE the header's dropdown
-                popover — the menu looked fine but real clicks fell through to
+                popover. The menu looked fine but real clicks fell through to
                 the page underneath. */}
             <header
               data-app-header
@@ -657,7 +657,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <Breadcrumbs pathname={pathname} />
               <div className="flex items-center gap-2">
-                {/* Alert badge — bell icon with live critical/warning count.
+                {/* Alert badge: bell icon with live critical/warning count.
                     Clicking navigates to /fleet and marks the current count
                     as "seen" so a stable fleet doesn't re-toast on next load. */}
                 <AlertBadgeButton
@@ -668,7 +668,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     router.push("/fleet");
                   }}
                 />
-                {/* Cluster switcher — a real dropdown, not the ⌘K palette. Hidden
+                {/* Cluster switcher: a real dropdown, not the ⌘K palette. Hidden
                   on /chat, which manages its own per-conversation cluster. */}
                 {!pathname.startsWith("/chat") && (
                   <ClusterDropdown align="right" />
@@ -685,7 +685,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </main>
           </div>
         </div>
-        {/* Toast stack — fixed to the viewport, above the mobile tab bar */}
+        {/* Toast stack: fixed to the viewport, above the mobile tab bar */}
         <ToastStack toasts={toasts} onDismiss={dismissToast} />
       </RcaProvider>
     </AuthGuard>

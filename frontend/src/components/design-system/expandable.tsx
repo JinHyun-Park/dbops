@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Expandable — drop-in wrapper that adds a small "⛶ expand" button to the
+ * Expandable: drop-in wrapper that adds a small "⛶ expand" button to the
  * top-right of any panel/chart. Clicking opens a modal with the same content
  * rendered at ~90vw × 90vh so users can read dense charts without leaving
  * the page.
@@ -12,7 +12,7 @@
  *   </Expandable>
  *
  * The children render twice when expanded (once in place, once in the modal).
- * For most chart components this is fine — Recharts re-mounts cheaply. If a
+ * For most chart components this is fine: Recharts re-mounts cheaply. If a
  * child component is expensive or stateful, pass `freezeInline` to hide the
  * inline copy while expanded.
  */
@@ -90,7 +90,7 @@ export function Expandable({
             aria-label={title || "Expanded panel"}
           >
             <div
-              // No fixed height — modal hugs the content. `max-h-[92vh]` caps
+              // No fixed height: modal hugs the content. `max-h-[92vh]` caps
               // long content so the body scrolls inside the modal. Wrapping
               // with `overflow-hidden` keeps the rounded edge clean when the
               // body scrollbar appears.

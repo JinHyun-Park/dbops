@@ -297,12 +297,12 @@ export function DocdbOverviewPanel({
               <StatTile
                 label="인스턴스 수"
                 value={String(
-                  details?.instance_count ?? instances.length ?? "—",
+                  details?.instance_count ?? instances.length ?? "-",
                 )}
               />
               <StatTile
                 label="엔진 버전"
-                value={details?.engine_version ?? "—"}
+                value={details?.engine_version ?? "-"}
               />
             </div>
             {instances.length > 0 && (

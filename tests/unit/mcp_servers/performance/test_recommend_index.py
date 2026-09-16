@@ -166,7 +166,7 @@ def test_table_stats_annotates_and_confirms_seq_scan():
 
 
 def test_cte_query_yields_no_recommendation():
-    """A WITH/CTE query is skipped — we can't attribute inner columns to a concrete
+    """A WITH/CTE query is skipped: we can't attribute inner columns to a concrete
     base table, and indexing the CTE name would be invalid."""
     mock_cache = MagicMock()
     mock_cache.execute.side_effect = [
@@ -219,7 +219,7 @@ def test_subquery_in_where_not_attributed_to_driving_table():
 
 
 def test_order_by_positional_not_turned_into_column():
-    """`ORDER BY 1` is positional — never emit a column named '1'. Here the WHERE
+    """`ORDER BY 1` is positional, never emit a column named '1'. Here the WHERE
     equality still produces a valid recommendation, but ORDER BY adds nothing."""
     mock_cache = MagicMock()
     mock_cache.execute.side_effect = [
@@ -241,7 +241,7 @@ def test_order_by_positional_not_turned_into_column():
 
 
 def test_order_by_expression_not_turned_into_column():
-    """`ORDER BY lower(email)` is an expression — never emit an expression index.
+    """`ORDER BY lower(email)` is an expression, never emit an expression index.
     The WHERE equality column stands; the ORDER BY expression is dropped."""
     mock_cache = MagicMock()
     mock_cache.execute.side_effect = [
@@ -268,7 +268,7 @@ def test_order_by_expression_not_turned_into_column():
 
 
 def test_quoted_reserved_identifiers_are_skipped():
-    """`SELECT * FROM "User" WHERE "order" = 1` — quoted/reserved identifiers would
+    """`SELECT * FROM "User" WHERE "order" = 1`: quoted/reserved identifiers would
     case-fold or be invalid if we stripped the quotes, so the query is skipped and
     NO DDL is emitted."""
     mock_cache = MagicMock()
@@ -313,7 +313,7 @@ def test_reserved_word_column_dropped_but_simple_columns_kept():
 
 def test_order_by_select_list_alias_is_not_indexed():
     """A bare ORDER BY token that is actually a SELECT-list alias (not a base
-    column) must NOT become an index column — `ORDER BY` only trusts columns
+    column) must NOT become an index column: `ORDER BY` only trusts columns
     qualified by the driving alias. WHERE columns still come through."""
     from mcp_servers.performance.tools.recommend_index import _parse_query
 
@@ -355,7 +355,7 @@ def test_prefix_index_is_deduped_into_composite():
                 "query_text": "SELECT * FROM orders WHERE status = 'x' AND created_at > now()",
                 "total_time_ms": 3000.0, "calls": 30, "blocks_read": 5000, "blocks_hit": 10,
             },
-            {  # -> (status) — a prefix of the composite above
+            {  # -> (status), a prefix of the composite above
                 "query_hash": "p2",
                 "query_text": "SELECT * FROM orders WHERE status = 'y'",
                 "total_time_ms": 1000.0, "calls": 70, "blocks_read": 5000, "blocks_hit": 10,
@@ -384,7 +384,7 @@ def test_order_by_qualified_column_is_indexed():
 
 def test_order_by_expression_is_not_indexed():
     """An ORDER BY expression that merely STARTS with a column (e.g.
-    `o.created_at + interval '1 day'`) must not be reduced to a column index —
+    `o.created_at + interval '1 day'`) must not be reduced to a column index:
     the whole ORDER BY item must be a plain column (+ optional ASC/DESC/NULLS)."""
     from mcp_servers.performance.tools.recommend_index import _parse_query
 

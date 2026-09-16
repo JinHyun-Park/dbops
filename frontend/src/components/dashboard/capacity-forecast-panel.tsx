@@ -156,7 +156,7 @@ export function CapacityForecastPanel({
     [clusterId, cache],
   );
 
-  // Initial load — pull the engine's default metric forecast on mount /
+  // Initial load: pull the engine's default metric forecast on mount /
   // whenever the selected cluster (or its engine family) changes.
   useEffect(() => {
     setCache({});
@@ -166,7 +166,7 @@ export function CapacityForecastPanel({
   }, [clusterId, defaultMetric]);
 
   // The server computes the percentage for both response modes, so nothing here
-  // divides by `limit` — which is legitimately 0 when a value depletes toward a
+  // divides by `limit`, which is legitimately 0 when a value depletes toward a
   // floor, and 0 for an on-demand DynamoDB table with no provisioned ceiling.
   const usagePct = data?.usage_pct ?? null;
   const down = data?.direction === "down";
@@ -247,7 +247,7 @@ export function CapacityForecastPanel({
       {data && !data.error && !refused && data.samples < 7 && (
         <div className="p-5">
           <div className="text-xs text-zinc-400 border border-zinc-700 bg-zinc-900/40 px-3 py-2">
-            데이터 부족 ({data.samples}개 샘플) — 신뢰성 있는 예측을 위해 최소
+            데이터 부족 ({data.samples}개 샘플). 신뢰성 있는 예측을 위해 최소
             7개 이상의 일별 데이터 포인트가 필요합니다.
           </div>
         </div>
@@ -342,7 +342,7 @@ export function CapacityForecastPanel({
             </div>
           )}
 
-          {/* Usage bar — only when the server produced a percentage */}
+          {/* Usage bar: only when the server produced a percentage */}
           {usagePct != null && (
             <div>
               <div className="h-2 w-full bg-zinc-800 overflow-hidden">

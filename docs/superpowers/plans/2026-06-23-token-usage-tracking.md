@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Surface Bedrock token usage two ways — a fleet-aggregate read-only view (CloudWatch, by model + over time) and per-session token totals + last error captured from the agent stream — without ever breaking the chat stream.
+**Goal:** Surface Bedrock token usage two ways: a fleet-aggregate read-only view (CloudWatch, by model + over time) and per-session token totals + last error captured from the agent stream, without ever breaking the chat stream.
 
 **Architecture:** `GET /api/cost?view=tokens` reads CloudWatch `AWS/Bedrock` token metrics. The agent emits a terminal `usage` SSE event; the frontend accumulates it onto the session and persists via the existing `chat_sessions` PUT; the session list surfaces per-session tokens + errors.
 
@@ -11,15 +11,15 @@
 ## Global Constraints
 
 - **No `Co-Authored-By: Claude` trailer** in any commit (user rule).
-- **Chat stream is sacrosanct:** all agent-side usage capture/emit is FAIL-SAFE — wrapped so any error is swallowed and the answer always streams. A missing/changed Strands usage shape simply omits the `usage` marker.
+- **Chat stream is sacrosanct:** all agent-side usage capture/emit is FAIL-SAFE: wrapped so any error is swallowed and the answer always streams. A missing/changed Strands usage shape simply omits the `usage` marker.
 - **Agent deploy sensitivity:** `agent/server.py` runs in the AgentCore Runtime container. Do NOT leave a `__pycache__` under `agent/` at deploy time (it breaks the Runtime deploy). Validate agent code with `ast.parse`, not import-exec, in the deploy path; a unit test that imports the agent helper must clean `agent/__pycache__` (the deploy step also cleans it). AgentCore env/code changes take ~10 min to reach a warm container. See memory: agentcore-no-pycache.
-- **Additive only:** the new `chat_sessions` fields (`total_input_tokens`, `total_output_tokens`, `turn_count`, `last_error`) are optional — old sessions and non-usage turns omit them, and existing session behavior is unchanged.
-- **Fleet view scope honesty:** CloudWatch Bedrock token metrics are not DBOps-tag-filterable — the tokens view is account-wide Bedrock usage by model; say so in the response `note` (mirrors how the cost views disclose untagged scope).
+- **Additive only:** the new `chat_sessions` fields (`total_input_tokens`, `total_output_tokens`, `turn_count`, `last_error`) are optional: old sessions and non-usage turns omit them, and existing session behavior is unchanged.
+- **Fleet view scope honesty:** CloudWatch Bedrock token metrics are not DBOps-tag-filterable: the tokens view is account-wide Bedrock usage by model; say so in the response `note` (mirrors how the cost views disclose untagged scope).
 - **Korean UI copy** for explanatory/empty-state text; keep model ids / token jargon as-is.
 
 ---
 
-### Task 1: Fleet token view — `GET /api/cost?view=tokens` (backend + IAM + UI)
+### Task 1: Fleet token view, `GET /api/cost?view=tokens` (backend + IAM + UI)
 
 **Files:**
 
@@ -33,7 +33,7 @@
 
 - Produces: `GET /api/cost?view=tokens&days=N` → `{"view":"tokens","days":N,"by_model":[{"model","input","output","total"}],"daily":[{"date","input","output"}],"note":str}`.
 
-- [ ] **Step 1: Read** the current `api/cost/handler.py` — the `lambda_handler` view dispatch (`view = (qs.get("view") or "bedrock").lower()` ~line 386, branches for `rds`/`platform`), the `_response`/`_cors` helpers, and the `datetime`/`timedelta` imports (already present). Confirm `boto3` is imported.
+- [ ] **Step 1: Read** the current `api/cost/handler.py`: the `lambda_handler` view dispatch (`view = (qs.get("view") or "bedrock").lower()` ~line 386, branches for `rds`/`platform`), the `_response`/`_cors` helpers, and the `datetime`/`timedelta` imports (already present). Confirm `boto3` is imported.
 
 - [ ] **Step 2: Write the failing tests.** Create `tests/unit/api/test_cost_tokens.py` (load the handler via importlib like the sibling cost tests; read `tests/unit/api/test_cost_rds.py` for the existing pattern). Tests with a mocked CloudWatch client:
 
@@ -126,7 +126,7 @@ def _handle_tokens_view(start, end, days):
     })
     if not model_ids:
         return _response(200, {"view": "tokens", "days": days, "by_model": [], "daily": [],
-                               "note": "Bedrock 토큰 메트릭 없음 — 아직 모델 호출 기록이 없거나 메트릭 전파 전입니다."})
+                               "note": "Bedrock 토큰 메트릭 없음: 아직 모델 호출 기록이 없거나 메트릭 전파 전입니다."})
 
     # Build GetMetricData queries: per model, Input + Output, Sum, daily period.
     import datetime as _dt
@@ -161,7 +161,7 @@ def _handle_tokens_view(start, end, days):
             day = ts.date().isoformat() if hasattr(ts, "date") else str(ts)[:10]
             daily.setdefault(day, {"input": 0.0, "output": 0.0})[kind] += val
         if not res.get("Timestamps"):
-            # some mocks/edge return Values without Timestamps — fold into totals
+            # some mocks/edge return Values without Timestamps: fold into totals
             for val in res.get("Values", []):
                 totals[mid][kind] += val
     by_model = [{"model": mid, "input": int(t["input"]), "output": int(t["output"]),
@@ -171,7 +171,7 @@ def _handle_tokens_view(start, end, days):
     daily_list = [{"date": d, "input": int(v["input"]), "output": int(v["output"])}
                   for d, v in sorted(daily.items())]
     return _response(200, {"view": "tokens", "days": days, "by_model": by_model, "daily": daily_list,
-                           "note": "계정 전체 Bedrock 토큰 사용량(모델별) — CloudWatch 메트릭은 태그 필터 불가."})
+                           "note": "계정 전체 Bedrock 토큰 사용량(모델별): CloudWatch 메트릭은 태그 필터 불가."})
 ```
 
 And add the dispatch branch in `lambda_handler`, right after the `platform` branch (~line 391):
@@ -181,7 +181,7 @@ And add the dispatch branch in `lambda_handler`, right after the `platform` bran
         return _handle_tokens_view(start, end, days)
 ```
 
-(`start`/`end`/`days` are already computed above the dispatch. The `ce` client is built before the dispatch but `_handle_tokens_view` doesn't use it — harmless.)
+(`start`/`end`/`days` are already computed above the dispatch. The `ce` client is built before the dispatch but `_handle_tokens_view` doesn't use it: harmless.)
 
 - [ ] **Step 4: Run backend tests.** `python -m pytest tests/unit/api/test_cost_tokens.py -q` → PASS. Then `python -m pytest tests/unit/api -q` → no regression.
 
@@ -196,7 +196,7 @@ And add the dispatch branch in `lambda_handler`, right after the `platform` bran
 
 Run: `python -m pytest tests/cdk/test_synth.py -q` → PASS.
 
-- [ ] **Step 6: Frontend — api-client + cost page "토큰" view.** In `frontend/src/lib/api-client.ts`, find the cost fetch (search `"/api/cost"`); add an optional `view` param threaded into the query string + a `TokensCost` type `{ view: string; days: number; by_model: {model:string;input:number;output:number;total:number}[]; daily: {date:string;input:number;output:number}[]; note?: string }`. In `frontend/src/app/cost/page.tsx`, read the existing view-toggle (Bedrock/RDS/Platform) and add a "토큰" option that fetches `view=tokens` and renders: a by-model table/bar (model, input, output, total — use `fmtDecimal`/comma formatting for the counts per the number-formatting rule) and a daily time-series chart (reuse the chart component the page already uses for cost-over-time). Surface the `note` as a small caption. Korean labels.
+- [ ] **Step 6: Frontend, api-client + cost page "토큰" view.** In `frontend/src/lib/api-client.ts`, find the cost fetch (search `"/api/cost"`); add an optional `view` param threaded into the query string + a `TokensCost` type `{ view: string; days: number; by_model: {model:string;input:number;output:number;total:number}[]; daily: {date:string;input:number;output:number}[]; note?: string }`. In `frontend/src/app/cost/page.tsx`, read the existing view-toggle (Bedrock/RDS/Platform) and add a "토큰" option that fetches `view=tokens` and renders: a by-model table/bar (model, input, output, total) with `fmtDecimal`/comma formatting for the counts per the number-formatting rule, and a daily time-series chart (reuse the chart component the page already uses for cost-over-time). Surface the `note` as a small caption. Korean labels.
 
 Run: `cd frontend && npm run build` → PASS.
 
@@ -209,7 +209,7 @@ git commit -m "feat(token-usage): fleet Bedrock token view (GET /api/cost?view=t
 
 ---
 
-### Task 2: Agent usage emission — terminal `usage` SSE event
+### Task 2: Agent usage emission (terminal `usage` SSE event)
 
 **Files:**
 
@@ -220,7 +220,7 @@ git commit -m "feat(token-usage): fleet Bedrock token view (GET /api/cost?view=t
 
 - Produces: a terminal SSE `data:` line `{"type":"usage","input_tokens":N,"output_tokens":M}` after the answer stream (when usage is available). `_extract_usage(event) -> dict | None`.
 
-- [ ] **Step 1: Verify the Strands usage shape.** Read the installed Strands SDK (`agent/_deps/strands/…` or wherever `Agent`/`stream_async` lives) to find where `stream_async` exposes token usage — typically a final event carrying an `AgentResult` with `.metrics.accumulated_usage` (`{"inputTokens","outputTokens","totalTokens"}`), or an event dict with a `usage`/`metadata.usage` field. Note the exact path; `_extract_usage` must handle it AND return `None` for events without it.
+- [ ] **Step 1: Verify the Strands usage shape.** Read the installed Strands SDK (`agent/_deps/strands/…` or wherever `Agent`/`stream_async` lives) to find where `stream_async` exposes token usage: typically a final event carrying an `AgentResult` with `.metrics.accumulated_usage` (`{"inputTokens","outputTokens","totalTokens"}`), or an event dict with a `usage`/`metadata.usage` field. Note the exact path; `_extract_usage` must handle it AND return `None` for events without it.
 
 - [ ] **Step 2: Write the failing test.** Create `tests/unit/agent/test_extract_usage.py`. Because importing `agent/server.py` pulls heavy deps, import ONLY the helper via importlib from the file, and clean `agent/__pycache__` in teardown:
 
@@ -240,7 +240,7 @@ def _load():
 
 
 def teardown_module(_):
-    # Agent Runtime deploy rejects a __pycache__ under agent/ — clean it.
+    # Agent Runtime deploy rejects a __pycache__ under agent/: clean it.
     pc = _AGENT / "__pycache__"
     if pc.exists():
         shutil.rmtree(pc, ignore_errors=True)
@@ -266,16 +266,16 @@ def test_extract_usage_malformed_no_raise():
     assert h._extract_usage(None) is None
 ```
 
-If Step 1 shows a different real shape, adjust the `test_extract_usage_present` event AND `_extract_usage` to match — keep the absent/malformed cases.
+If Step 1 shows a different real shape, adjust the `test_extract_usage_present` event AND `_extract_usage` to match: keep the absent/malformed cases.
 
 Run: `python -m pytest tests/unit/agent/test_extract_usage.py -q` → FAIL (helper missing). Then confirm `agent/__pycache__` is gone after the run.
 
-- [ ] **Step 3: Implement `_extract_usage` + emit.** In `agent/server.py`, add the helper (module level, near the top) — adapt the body to the shape confirmed in Step 1:
+- [ ] **Step 3: Implement `_extract_usage` + emit.** In `agent/server.py`, add the helper (module level, near the top): adapt the body to the shape confirmed in Step 1:
 
 ```python
 def _extract_usage(event):
     """Pull {input_tokens, output_tokens} from a Strands stream event, or None.
-    Fully defensive — never raises (returns None on any unexpected shape)."""
+    Fully defensive: never raises (returns None on any unexpected shape)."""
     try:
         result = event.get("result") if isinstance(event, dict) else None
         usage = getattr(getattr(result, "metrics", None), "accumulated_usage", None)
@@ -352,7 +352,7 @@ git commit -m "feat(token-usage): agent emits terminal usage SSE event (fail-saf
 
 (Place it alongside the existing `parsed.type === "tool_use"` branch; do not disturb the text/`content_block_delta`/`data` branches.)
 
-- [ ] **Step 2: Accumulate + persist in the chat component.** In `frontend/src/components/chat/chat-panel.tsx`, find the `streamChat(...)` call and the place it persists the session (the `chat_sessions` PUT — search the file for the session-save call / `updateChatSession`/`putChatSession` in api-client). Maintain per-session running totals in component state (or a ref): on `onUsage`, add `input`→`totalInputTokens`, `output`→`totalOutputTokens`, increment `turnCount`; in `onError`, set `lastError = { message, at: Date.now() }`. When persisting the session, include `total_input_tokens`, `total_output_tokens`, `turn_count`, and `last_error` in the PUT body (extend the api-client save function's payload type to carry them, optional). Read the existing save call and thread these through without changing unrelated fields.
+- [ ] **Step 2: Accumulate + persist in the chat component.** In `frontend/src/components/chat/chat-panel.tsx`, find the `streamChat(...)` call and the place it persists the session (the `chat_sessions` PUT: search the file for the session-save call / `updateChatSession`/`putChatSession` in api-client). Maintain per-session running totals in component state (or a ref): on `onUsage`, add `input`→`totalInputTokens`, `output`→`totalOutputTokens`, increment `turnCount`; in `onError`, set `lastError = { message, at: Date.now() }`. When persisting the session, include `total_input_tokens`, `total_output_tokens`, `turn_count`, and `last_error` in the PUT body (extend the api-client save function's payload type to carry them, optional). Read the existing save call and thread these through without changing unrelated fields.
 
 - [ ] **Step 3: Persist fields in the handler (write the failing test first).** Extend `tests/unit/api/test_chat_sessions.py` (read it first for its helpers). Add a test that a PUT body including the four fields stores them and that the list projection includes the token totals:
 
@@ -396,7 +396,7 @@ git commit -m "feat(token-usage): capture per-session tokens + last error, persi
 
 ---
 
-### Task 4: Per-session surfacing UI — token total + error badge in the session list
+### Task 4: Per-session surfacing UI (token total + error badge in the session list)
 
 **Files:**
 
@@ -422,6 +422,6 @@ git commit -m "feat(token-usage): show per-session token total + error badge in 
 ## Post-implementation (controller, after all tasks reviewed clean)
 
 - Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`.
-- Deploy dev: `cdk deploy dbops-dev-agent` (cost Lambda CloudWatch IAM + the AgentCore Runtime if the agent code change is packaged through it — confirm how `agent/` deploys; the agent container/runtime update takes ~10 min to reach a warm container). Then frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-123456789012 --delete --exclude config.json` → CloudFront invalidation `E1234567890ABC`.
-- Live smoke (viewer e2e token): `GET /api/cost?view=tokens` → 200 with `by_model`/`daily`/`note` keys (possibly empty); default `GET /api/cost` unchanged. Per-session token capture (agent usage event → session field) needs an interactive chat turn after the agent warm-container refresh — verify in the browser or document the live gap honestly.
+- Deploy dev: `cdk deploy dbops-dev-agent` (cost Lambda CloudWatch IAM + the AgentCore Runtime if the agent code change is packaged through it: confirm how `agent/` deploys; the agent container/runtime update takes ~10 min to reach a warm container). Then frontend build → `aws s3 sync frontend/out/ s3://dbops-dev-frontend-123456789012 --delete --exclude config.json` → CloudFront invalidation `E1234567890ABC`.
+- Live smoke (viewer e2e token): `GET /api/cost?view=tokens` → 200 with `by_model`/`daily`/`note` keys (possibly empty); default `GET /api/cost` unchanged. Per-session token capture (agent usage event → session field) needs an interactive chat turn after the agent warm-container refresh: verify in the browser or document the live gap honestly.
 - Then `superpowers:finishing-a-development-branch`.

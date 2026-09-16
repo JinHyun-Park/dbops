@@ -160,7 +160,7 @@ export function DynamoDbCapacitySimulator({
                 />
               </StatRow>
 
-              {/* Recommendation banner — only when BOTH prices resolved */}
+              {/* Recommendation banner: only when BOTH prices resolved */}
               {data.recommended_mode &&
               data.monthly_savings_usd != null &&
               data.savings_pct != null ? (
@@ -179,9 +179,9 @@ export function DynamoDbCapacitySimulator({
                   <div className="border border-zinc-700 bg-zinc-900/60 px-4 py-3 text-sm text-zinc-300">
                     현재 모드(
                     <span className="font-mono">
-                      {data.billing_mode ? MODE_KO[data.billing_mode] : "—"}
+                      {data.billing_mode ? MODE_KO[data.billing_mode] : "-"}
                     </span>
-                    )가 두 모드 중 더 저렴합니다 — 전환 이점이 없습니다.
+                    )가 두 모드 중 더 저렴합니다. 전환 이점이 없습니다.
                   </div>
                 )
               ) : (

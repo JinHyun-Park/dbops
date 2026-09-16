@@ -61,7 +61,7 @@ function parsePayload(
 }
 
 function fmt(v: number | undefined, decimals = 0): string {
-  if (v == null) return "—";
+  if (v == null) return "-";
   return decimals > 0 ? v.toFixed(decimals) : String(v);
 }
 
@@ -69,7 +69,7 @@ export function buildReportMarkdown(report: ReportForDownload): string {
   const { cluster_id, report_date, report_type, summary, data } = report;
   const lines: string[] = [];
 
-  lines.push(`# DBOps 리포트 — ${cluster_id} (${report_date})`);
+  lines.push(`# DBOps 리포트: ${cluster_id} (${report_date})`);
   lines.push("");
   lines.push(`**유형:** ${report_type}`);
   lines.push("");
@@ -150,9 +150,9 @@ export function buildReportMarkdown(report: ReportForDownload): string {
       for (const a of alerts) {
         const lastFired = a.last_fired
           ? new Date(a.last_fired).toLocaleString()
-          : "—";
+          : "-";
         lines.push(
-          `| ${a.rule_id ?? "—"} | ${fmt(a.fired_count)} | ${lastFired} |`,
+          `| ${a.rule_id ?? "-"} | ${fmt(a.fired_count)} | ${lastFired} |`,
         );
       }
       lines.push("");
@@ -165,7 +165,7 @@ export function buildReportMarkdown(report: ReportForDownload): string {
       lines.push("| event_type | count |");
       lines.push("| --- | --- |");
       for (const e of events) {
-        lines.push(`| ${e.event_type ?? "—"} | ${fmt(e.cnt)} |`);
+        lines.push(`| ${e.event_type ?? "-"} | ${fmt(e.cnt)} |`);
       }
       lines.push("");
     }

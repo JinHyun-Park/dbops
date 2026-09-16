@@ -1,4 +1,4 @@
-# Multi-Engine Foundation — Design Spec
+# Multi-Engine Foundation: Design Spec
 
 - **Date**: 2026-06-11
 - **Status**: Approved design (pre-implementation)
@@ -22,16 +22,16 @@ group every place resources are enumerated **by DB engine family**.
 SQL-only panels with engine-appropriate equivalents; do NOT fabricate non-existent analogs
 (DynamoDB has no slow-query log / EXPLAIN / VACUUM / pg_settings / SQL locks).
 
-1. **Foundation (THIS SPEC)** — engine-family model, registration/discovery for the new engines,
+1. **Foundation (THIS SPEC)**: engine-family model, registration/discovery for the new engines,
    ETL dispatch + new CloudWatch collectors, a neutral resource-meta model, an **enforced
    capability-gating layer** (frontend panels + backend endpoints + collectors), engine-family
    grouping across all enumeration points, and engine-appropriate dashboard shells.
-2. **DocumentDB diagnosis** — deeper findings (connection saturation, replica lag, cursor/opcounter
+2. **DocumentDB diagnosis**: deeper findings (connection saturation, replica lag, cursor/opcounter
    pressure, cache-hit), Maintenance Health extension, optional profiler-based slow-op.
-3. **DynamoDB diagnosis** — capacity (consumed vs provisioned / on-demand), throttle, hot-partition,
+3. **DynamoDB diagnosis**: capacity (consumed vs provisioned / on-demand), throttle, hot-partition,
    GSI health, cost (capacity-mode), dedicated findings + dashboard depth.
-4. **MCP tools + AI** — per-engine MCP diagnosis/write tools, agent prompt/cheatsheet, approval reuse.
-5. **Simulation / Cost** — extend simulators and cost analysis to the new engines.
+4. **MCP tools + AI**: per-engine MCP diagnosis/write tools, agent prompt/cheatsheet, approval reuse.
+5. **Simulation / Cost**: extend simulators and cost analysis to the new engines.
 
 Each spec ships and is verified independently.
 
@@ -39,12 +39,12 @@ Each spec ships and is verified independently.
 
 - **Depth**: full parity, sequenced into the 5 specs above.
 - **DynamoDB unit**: **Table = resource**, grouped by account/region. (Tables are the unit of DBA
-  attention — capacity/throttle/GSI are per-table.)
-- **Generalization strategy**: **keep names** — `cluster_id` stays the registry PK and `/api/clusters`
+  attention: capacity/throttle/GSI are per-table.)
+- **Generalization strategy**: **keep names**, `cluster_id` stays the registry PK and `/api/clusters`
   routes are unchanged (no data migration, no broken deep links). `cluster_id` is semantically a
   "resource id." A thin engine-family + capability layer is added on top.
 - **Cross-account ETL**: **deferred**. Foundation collects resources in the deployment account only
-  (same limitation Aurora has today — the ETL is not assume-role-aware). Cross-account ETL is a
+  (same limitation Aurora has today: the ETL is not assume-role-aware). Cross-account ETL is a
   separate, pre-existing gap tracked as its own small spec. Documented as a known limitation.
 - **Spec structure**: Foundation is a **single spec** (data model + registration + ETL + gating +
   grouping/shell are tightly coupled).
@@ -58,7 +58,7 @@ Each spec ships and is verified independently.
   - `documentdb` ← `docdb`
   - `dynamodb` ← `dynamodb`
 - New `engine` values: DocumentDB = `docdb`, DynamoDB = `dynamodb`.
-- **`cluster_id` scheme** (resolves the validation blocker — see Risks/Finding #3):
+- **`cluster_id` scheme** (resolves the validation blocker, see Risks/Finding #3):
   - Relational/DocumentDB: `cluster_id` = the real cluster identifier (already matches the existing
     validator `^[a-zA-Z0-9-]{1,63}$`).
   - DynamoDB: `cluster_id` = **opaque regex-safe slug** `ddb-<12-hex of sha256(account:region:table)>`
@@ -71,11 +71,11 @@ Each spec ships and is verified independently.
   (`account_id`, `region`, `engine`, `engine_version`) retained.
 - Shared helpers:
   - Backend: `mcp-servers/.../shared/engine_family.py` (or a tiny module reused by `api/` and
-    `data-pipeline/`) — `engine_family(engine) -> str`, plus a `CAPABILITIES` map (see §5).
-  - Frontend: extend `frontend/src/lib/engine.ts` — `engineFamily()`, family labels/badges/colors,
+    `data-pipeline/`): `engine_family(engine) -> str`, plus a `CAPABILITIES` map (see §5).
+  - Frontend: extend `frontend/src/lib/engine.ts`: `engineFamily()`, family labels/badges/colors,
     per-family display noun ("클러스터" / "테이블"). Keep `engineKind()` for relational sub-typing.
 
-### 2. Data model — neutral resource meta
+### 2. Data model: neutral resource meta
 
 - The cache `cluster_meta` table is RDS-shaped (`instance_class`, `endpoint`, `storage_size_gb`,
   `max_connections`, `serverlessv2_*`...). DynamoDB/DocDB meta does not fit those columns.
@@ -86,7 +86,7 @@ Each spec ships and is verified independently.
   - DocumentDB: `instances: [{id, class, role}]`, `instance_class` (writer), engine version, etc.
     (DocDB largely fits existing columns; `resource_details` holds the extras.)
 - `metric_snapshots` (generic `cluster_id, ts, metric_type, value, dimensions`) is reused as-is for
-  all engines — no schema change for metrics. New `metric_type` strings per engine (see §4).
+  all engines: no schema change for metrics. New `metric_type` strings per engine (see §4).
 
 ### 3. Registration & discovery (per-family)
 
@@ -120,7 +120,7 @@ first**, then construct only the collectors valid for that family:
 - `dynamodb`: DynamoDB meta (`describe_table` → `resource_details`) + **new `dynamodb_cw_collector`**
   (namespace `AWS/DynamoDB`). No RDS/PI/SQL.
 
-**DocDB CloudWatch (verified, namespace `AWS/DocDB`)** — Foundation metric set:
+**DocDB CloudWatch (verified, namespace `AWS/DocDB`)**, Foundation metric set:
 `CPUUtilization`, `DatabaseConnections`, `DatabaseCursors`, `DatabaseCursorsTimedOut`,
 `DBClusterReplicaLagMaximum`, `BufferCacheHitRatio`, `FreeableMemory`, `VolumeBytesUsed`,
 `ReadLatency`, `WriteLatency`, `DiskQueueDepth`, `EngineUptime`, opcounters
@@ -130,7 +130,7 @@ first**, then construct only the collectors valid for that family:
   (CPU, connections, cache-hit, FreeableMemory) use `DBInstanceIdentifier` for the writer instance
   (enumerate instances from `describe_db_clusters`). Document which metric is cluster vs instance.
 
-**DynamoDB CloudWatch (verified, namespace `AWS/DynamoDB`, dimension `TableName`)** — capacity-mode aware:
+**DynamoDB CloudWatch (verified, namespace `AWS/DynamoDB`, dimension `TableName`)**, capacity-mode aware:
 
 - Always: `ConsumedReadCapacityUnits`, `ConsumedWriteCapacityUnits` (stat **`Sum`** for throughput math),
   `ReadThrottleEvents`, `WriteThrottleEvents`, `ThrottledRequests` (`Sum`), `ReturnedItemCount`,
@@ -147,7 +147,7 @@ first**, then construct only the collectors valid for that family:
 ### 5. Capability map + enforced gating (central deliverable)
 
 A declarative `engine_family -> capabilities` map, enforced on **both** ends (this is the part the
-review showed cannot be "out of scope" — unguarded code renders empty/misleading/garbage panels and
+review showed cannot be "out of scope": unguarded code renders empty/misleading/garbage panels and
 emits Aurora findings for non-relational resources):
 
 ```
@@ -178,11 +178,11 @@ dynamodb:   { capacity(consumed/provisioned/on-demand), throttles, latencyByOp, 
   "this resource type isn't supported in chat yet (phase 1)" instead of attempting SQL and failing
   silently. System prompt notes the supported families.
 
-### 6. Frontend — grouping + family-aware UI
+### 6. Frontend: grouping + family-aware UI
 
 - `lib/engine.ts`: add `engineFamily()` + family labels/badges/colors + display noun.
 - Shared `groupByEngineFamily(resources)` util applied to every enumeration point:
-  Fleet (`fleet/page.tsx` — currently groups by raw engine string; refine to family),
+  Fleet (`fleet/page.tsx`, currently groups by raw engine string; refine to family),
   dashboard chip-strip, `cluster-dropdown.tsx`, `command-palette.tsx`, `clusters/page.tsx`,
   `compare/page.tsx`. Each shows family headers + counts; dropdown/search display `resource_name`
   (not the opaque slug) with the family badge.
@@ -193,11 +193,11 @@ dynamodb:   { capacity(consumed/provisioned/on-demand), throttles, latencyByOp, 
   (billing mode, item count, size, GSIs), capacity (consumed vs provisioned/on-demand), throttles,
   latency-by-op, cost-by-mode. Driven by the capability map (§5).
 
-## Cross-account (deferred — documented limitation)
+## Cross-account (deferred: documented limitation)
 
 ETL `get_client(service, region)` is local-account only (no assume-role), unlike `api/` and
 `mcp-servers/.../shared/cluster_targets.py`. Foundation therefore collects metrics for resources in
-the **deployment account** only — identical to Aurora's current behavior. Cross-account ETL
+the **deployment account** only, identical to Aurora's current behavior. Cross-account ETL
 (assume-role keyed by `(service, region, role_arn)`, reusing the `cluster_targets` pattern) is a
 separate, pre-existing gap tracked as its own spec. Dev verification uses local-account resources.
 

@@ -1,4 +1,4 @@
-# Phase 2: Incident Analysis + Advanced Analytics — Implementation Plan
+# Phase 2: Incident Analysis + Advanced Analytics (Implementation Plan)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -126,10 +126,10 @@ git commit -m "feat: add schema v2 with event_log and reports tables"
 
 - [ ] **Step 1: Write tests for all 4 tools**
 
-`detect_anomalies` — Takes recent metrics, computes z-score against 7-day baseline, returns anomalous metrics.
-`detect_regressions` — Compares query performance before/after a given timestamp, returns queries that degraded.
-`forecast_capacity` — Linear regression on storage/connections over N days, returns projected limit date.
-`performance_summary` — Aggregates KPIs (avg AAS, top waits, slow query count, peak connections) for a period.
+`detect_anomalies`: Takes recent metrics, computes z-score against 7-day baseline, returns anomalous metrics.
+`detect_regressions`: Compares query performance before/after a given timestamp, returns queries that degraded.
+`forecast_capacity`: Linear regression on storage/connections over N days, returns projected limit date.
+`performance_summary`: Aggregates KPIs (avg AAS, top waits, slow query count, peak connections) for a period.
 
 Each tool takes a `CacheClient` and `cluster_id`, queries Aurora PG Cache, and returns structured results.
 
@@ -162,12 +162,12 @@ git commit -m "feat: add performance analysis tools (anomaly, regression, foreca
 
 - [ ] **Step 1: Write tests for all 6 tools**
 
-`get_health_status` — Queries cluster_meta + recent metric_snapshots for health overview.
-`get_recent_events` — Queries event_log table for recent events.
-`search_logs` — Calls CloudWatch Logs Insights API (mocked in tests).
-`correlate_signals` — Joins metric_snapshots + event_log on time axis, returns timeline.
-`get_incident_summary` — Aggregates event_log by type, computes MTTR.
-`find_similar_incidents` — Calls Bedrock KB retrieve (mocked in tests).
+`get_health_status`: Queries cluster_meta + recent metric_snapshots for health overview.
+`get_recent_events`: Queries event_log table for recent events.
+`search_logs`: Calls CloudWatch Logs Insights API (mocked in tests).
+`correlate_signals`: Joins metric_snapshots + event_log on time axis, returns timeline.
+`get_incident_summary`: Aggregates event_log by type, computes MTTR.
+`find_similar_incidents`: Calls Bedrock KB retrieve (mocked in tests).
 
 - [ ] **Step 2: Implement all 6 tools**
 
@@ -235,8 +235,8 @@ Lambda triggered by EventBridge schedule (daily 9am KST):
 
 - [ ] **Step 2: Implement reports API**
 
-GET /api/reports — list reports by cluster
-GET /api/reports/{id} — get specific report
+GET /api/reports: list reports by cluster
+GET /api/reports/{id}: get specific report
 
 - [ ] **Step 3: Update CDK stacks**
 
@@ -251,7 +251,7 @@ git commit -m "feat: add Report Generator Lambda and Reports API"
 
 ---
 
-## Task 6: Frontend — Query Lab + Reports Pages
+## Task 6: Frontend (Query Lab + Reports Pages)
 
 **Files:**
 

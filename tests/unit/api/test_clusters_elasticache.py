@@ -59,7 +59,7 @@ def test_register_redis_replication_group():
 
 def test_register_valkey_reads_actual_engine():
     """A Valkey replication group registers as engine=valkey even when the
-    request body says redis — the actual Engine from describe wins, so the badge
+    request body says redis: the actual Engine from describe wins, so the badge
     + family grouping reflect Valkey rather than mislabeling it Redis."""
     fake = MagicMock()
     fake.describe_replication_groups.return_value = {

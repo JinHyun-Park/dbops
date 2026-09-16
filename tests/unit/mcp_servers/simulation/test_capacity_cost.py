@@ -75,8 +75,8 @@ def test_provisioned_sizing_uses_p99_per_second_over_headroom_ceil():
 
 
 def test_provisioned_sizing_floors_at_one_unit_per_side():
-    """A near-idle table (p99≈0) still needs the 1 RCU + 1 WCU provisioned minimum
-    — sizing must floor at 1, not 0, so the provisioned estimate is the real $0.62-
+    """A near-idle table (p99≈0) still needs the 1 RCU + 1 WCU provisioned minimum:
+    sizing must floor at 1, not 0, so the provisioned estimate is the real $0.62-
     ish minimum and the recommendation isn't the degenerate 'Provisioned, save 100%'
     against an on-demand cost of ~$0."""
     consumed = _consumed(datapoints=120, sum_rcu=0.0, sum_wcu=0.0, p99_rcu=0.0, p99_wcu=0.0)

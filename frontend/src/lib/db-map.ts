@@ -1,4 +1,4 @@
-// Pure helpers for the DB Map (service-blueprint) view. No React, no fetch — so
+// Pure helpers for the DB Map (service-blueprint) view. No React, no fetch, so
 // they're trivially unit-testable and reusable.
 
 export interface MapCluster {
@@ -50,7 +50,7 @@ const WARNING_STATUS =
 
 /** Coarse availability level for the Map's status dot, from the registry/cache
  *  status (the Map reads /api/clusters, which carries status but not live
- *  metrics — full health is one click away on the dashboard). An EMPTY status
+ *  metrics: full health is one click away on the dashboard). An EMPTY status
  *  (not collected yet) reads as "unknown" (neutral gray) rather than false-green;
  *  a recognized non-critical/non-warning status reads as ok. */
 export function statusLevel(c: MapCluster): StatusLevel {

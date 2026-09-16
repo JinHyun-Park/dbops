@@ -1,4 +1,4 @@
-"""enable_data_api — 승인-즉시-실행 액션 테스트.
+"""enable_data_api: 승인-즉시-실행 액션 테스트.
 
 다른 쓰기 액션과 달리 replay(에이전트 재호출)가 없다: DBA가 PUT approve를
 누르는 순간 approvals 핸들러가 레지스트리에서 cluster_arn을 찾아
@@ -49,7 +49,7 @@ _ROW = {
 
 
 def _boto3_with(approvals_rows, registry_item=None, rds_client=None):
-    """handler.boto3 대체 — DDB resource(approvals/clusters 테이블)와
+    """handler.boto3 대체: DDB resource(approvals/clusters 테이블)와
     rds client를 한 번에 모킹한다."""
     mock = MagicMock()
     approvals_table = MagicMock()
@@ -104,7 +104,7 @@ def test_approve_execution_failure_returns_502_and_records_error():
     assert resp["statusCode"] == 502
     body = json.loads(resp["body"])
     assert body["execution"]["ok"] is False
-    # 실패 시 consumed가 아니라 execution_error만 기록 — 재승인이 재시도 경로.
+    # 실패 시 consumed가 아니라 execution_error만 기록: 재승인이 재시도 경로.
     update_calls = approvals_table.update_item.call_args_list
     assert len(update_calls) == 2
     assert ":e" in update_calls[1].kwargs["ExpressionAttributeValues"]
@@ -175,7 +175,7 @@ def test_post_creates_new_request_when_none_pending():
 
 def test_created_ms_orders_mixed_formats_chronologically():
     """ms-epoch 문자열(MCP request_approval)과 ISO(UI POST)가 섞여도
-    시간순으로 정렬돼야 한다 — 문자열 비교는 '2026...' > '1781...'이라
+    시간순으로 정렬돼야 한다. 문자열 비교는 '2026...' > '1781...'이라
     UI발 행이 무조건 최신으로 보이는 버그가 있었다."""
     older_epoch = {"created_at": "1781069757421"}   # 2026-06-10T05:35:57Z
     newer_iso = {"created_at": "2026-06-10T06:42:08"}
@@ -188,7 +188,7 @@ def test_created_ms_orders_mixed_formats_chronologically():
 
 @patch.dict("os.environ", {"APPROVALS_TABLE": "approvals", "CLUSTERS_TABLE": "clusters"})
 def test_put_on_already_consumed_returns_409():
-    """이미 consumed/rejected된 행은 PUT approve로 되살릴 수 없다 — 없으면
+    """이미 consumed/rejected된 행은 PUT approve로 되살릴 수 없다. 없으면
     guard의 consume-on-use replay 방어를 API에서 우회할 수 있다(Codex)."""
     from botocore.exceptions import ClientError
     row = dict(_ROW)
@@ -205,7 +205,7 @@ def test_put_on_already_consumed_returns_409():
 
 @patch.dict("os.environ", {"APPROVALS_TABLE": "approvals", "CLUSTERS_TABLE": "clusters"})
 def test_post_rejects_non_enable_data_api_write_action():
-    """UI POST로는 enable_data_api 외 쓰기 승인을 만들 수 없다 — payload_hash
+    """UI POST로는 enable_data_api 외 쓰기 승인을 만들 수 없다. payload_hash
     없는 쓰기 승인 생성을 봉쇄(Codex 감사 P0)."""
     mock_boto3, approvals_table, _ = _boto3_with([])
     with patch.object(handler, "boto3", mock_boto3):
@@ -224,7 +224,7 @@ def test_post_rejects_non_enable_data_api_write_action():
 
 @patch.dict("os.environ", {"APPROVALS_TABLE": "approvals", "CLUSTERS_TABLE": "clusters"})
 def test_put_approve_rejected_for_viewer():
-    """A viewer-role token must NOT be able to approve an operation — the DBA
+    """A viewer-role token must NOT be able to approve an operation. The DBA
     approval gate is the heart of the human-in-the-loop model. Server-side 403
     even though the frontend also hides the button."""
     rds = MagicMock()

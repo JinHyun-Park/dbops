@@ -6,7 +6,7 @@ alert_evaluator can't invoke the worker directly (data stack must not depend on
 agent stack), so the table is the decoupling point.
 
 No-op when AGENT_TASKS_TABLE isn't configured, so the caller can enqueue
-unconditionally. Never raises into the caller — a failed enqueue must not break
+unconditionally. Never raises into the caller: a failed enqueue must not break
 alerting itself.
 
 VERBATIM COPY. This project shares cross-package code by duplicating the file plus a
@@ -27,7 +27,7 @@ import uuid
 import boto3
 
 # Skip a fresh auto-RCA if one for the same cluster was enqueued within this
-# window — repeated/flapping alerts shouldn't spawn a pile of duplicate RCAs.
+# window: repeated/flapping alerts shouldn't spawn a pile of duplicate RCAs.
 DEDUPE_MINUTES = 15
 TTL_DAYS = 30
 
@@ -77,7 +77,7 @@ def enqueue_auto_rca(
         since = str(now_ms - DEDUPE_MINUTES * 60 * 1000)
 
         # Dedupe via the per-cluster GSI (created_at is fixed-width ms-epoch, so
-        # string ordering == numeric ordering). FilterExpression on kind — note
+        # string ordering == numeric ordering). FilterExpression on kind. Note
         # we do NOT pass a Limit (a Limit applies BEFORE the filter and could
         # hide a matching row), we just read the small recent slice.
         if dedupe:

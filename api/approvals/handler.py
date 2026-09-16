@@ -10,7 +10,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 # UI-initiated custom-endpoint writes (N-①). These action_types are executed
-# INLINE by this handler on approve — but ONLY when the row carries origin="ui".
+# INLINE by this handler on approve, but ONLY when the row carries origin="ui".
 # Chat-initiated rows of the same action_type have NO origin and are replayed by
 # the agent, so auto-executing them here would double-execute the write.
 _ENDPOINT_ACTIONS = (
@@ -33,14 +33,14 @@ _AUTO_EXEC_OK_STATUS = ("creating", "modifying", "deleting", "instance_added")
 # Endpoint create/modify/delete return in seconds and API Gateway caps at 29s,
 # so the default read_timeout is plenty. Set timeouts explicitly and DISABLE
 # botocore retries (max_attempts=0) so a slow/failed sync invoke can never
-# double-invoke — the tool's verify_approval consumes the approval single-use,
+# double-invoke: the tool's verify_approval consumes the approval single-use,
 # and a retry after a partial run would fail or double-execute.
 _OPS_LAMBDA_CFG = Config(read_timeout=25, connect_timeout=5, retries={"max_attempts": 0})
 
 
 def _client_context(tool_name: str) -> str:
     """Base64 ClientContext so the operations Lambda's _extract_tool_name reads
-    custom.tool_name — Lambda only delivers ClientContext on a SYNCHRONOUS
+    custom.tool_name. Lambda only delivers ClientContext on a SYNCHRONOUS
     (RequestResponse) invoke, so callers must invoke sync. Mirrors the
     restore_finalizer's construction."""
     return base64.b64encode(
@@ -55,7 +55,7 @@ def _invoke_operations(tool_name: str, payload: dict) -> dict:
     mcp_servers) delegates rather than duplicating that logic.
 
     Returns the tool's own result dict, or an {"status": "invoke_error", ...}
-    shape on any transport/parse failure — never raises, never leaks str(e)
+    shape on any transport/parse failure: never raises, never leaks str(e)
     beyond a short reason so the approve/POST paths don't crash."""
     ops_fn = os.environ.get("OPERATIONS_FUNCTION_NAME", "")
     if not ops_fn:
@@ -99,7 +99,7 @@ def _cluster_item(cluster_id: str) -> dict:
 
 
 def _decode_jwt_payload(token: str) -> dict:
-    """Base64-decode a JWT payload — no signature check needed here
+    """Base64-decode a JWT payload: no signature check needed here
     because API Gateway's Cognito JWT authorizer already verified the
     token before the Lambda was invoked."""
     try:
@@ -148,7 +148,7 @@ def _caller_name(event: dict) -> str:
 
 
 def _created_ms(item: dict) -> float:
-    """정렬용 created_at 정규화. 두 생성 경로가 다른 포맷을 쓴다 —
+    """정렬용 created_at 정규화. 두 생성 경로가 다른 포맷을 쓴다:
     request_approval(MCP)은 ms-epoch 문자열("1781069757421"), approvals
     POST(UI)는 ISO("2026-06-10T06:42:08"). 문자열 정렬은 "2026..." >
     "1781..."이라 UI발 행이 항상 에이전트발 행보다 최신으로 보이는
@@ -158,7 +158,7 @@ def _created_ms(item: dict) -> float:
         return float(raw)
     try:
         dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        # 이 핸들러가 쓰는 naive ISO는 utcnow() 산물 — UTC로 명시 고정해야
+        # 이 핸들러가 쓰는 naive ISO는 utcnow() 산물. UTC로 명시 고정해야
         # 실행 환경 타임존(Lambda=UTC, 로컬 테스트=KST)과 무관하게 같은 값.
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
@@ -169,7 +169,7 @@ def _created_ms(item: dict) -> float:
 
 def _scan_all(table, **kwargs) -> list:
     """LastEvaluatedKey를 끝까지 따라가는 scan. 단일 호출 scan은 1MB 페이지에서
-    조용히 잘린다 — 승인 이력이 쌓이면 활동 피드, 목록, approval_id 조회가
+    조용히 잘린다. 승인 이력이 쌓이면 활동 피드, 목록, approval_id 조회가
     임의로 누락되는, approval_guard의 Limit=1 버그와 같은 잘림 패밀리."""
     items = []
     while True:
@@ -206,13 +206,13 @@ def _compact_activity(items: list) -> list:
 def _scaleout_state(item: dict) -> str:
     """Derive the DBA-facing scale-out lifecycle state from a prewarm approval
     row. `consumed`/`cancelled`/`awaiting_instance_failed` are terminal and win
-    over `warm_dispatched` — a consumed row also carries warm_dispatched=True
+    over `warm_dispatched`: a consumed row also carries warm_dispatched=True
     (the finalizer sets warm_dispatched while status is still `approved`, then
     prewarm_reader flips it to consumed), so warming must be checked AFTER
     warmed or a completed op would read as still-warming.
 
     A recorded FAILED warm (`warm_result == "failed"`) outranks consumed AND
-    warm_dispatched — the finalizer sets warm_dispatched=True for any response,
+    warm_dispatched: the finalizer sets warm_dispatched=True for any response,
     including a prewarm that ran but failed, so without this check the row would
     show "warmed"/"warming" forever. A failed warm is terminal: the DBA re-warms
     manually via chat, the finalizer never retries."""
@@ -235,10 +235,10 @@ def _scaleout_state(item: dict) -> str:
 
 
 def _handle_scaleout(event, table, method, path, path_params, headers) -> dict:
-    """N-④ Phase 2 — scale-out ops management. Scale-out ops ARE approval rows
+    """N-④ Phase 2: scale-out ops management. Scale-out ops ARE approval rows
     (scaleout=true prewarm approvals); this resource surfaces them with a
     derived lifecycle state + a cancel that only stops the auto-warm."""
-    # GET /api/scaleout-ops — every scale-out op visible to the caller,
+    # GET /api/scaleout-ops: every scale-out op visible to the caller,
     # newest-first. Tenant-scoped exactly like the /api/approvals list.
     if method == "GET":
         rows = _scan_all(
@@ -268,9 +268,9 @@ def _handle_scaleout(event, table, method, path, path_params, headers) -> dict:
         return {"statusCode": 200, "headers": headers,
                 "body": json.dumps({"ops": ops, "count": len(ops)}, default=str)}
 
-    # POST /api/scaleout-ops/{id}/cancel — cancel an op that hasn't warmed.
+    # POST /api/scaleout-ops/{id}/cancel: cancel an op that hasn't warmed.
     if method == "POST":
-        # Same admin gate the approve/reject path uses — fail-closed (no bearer
+        # Same admin gate the approve/reject path uses: fail-closed (no bearer
         # => not admin => 403).
         if not _is_admin(event):
             return {"statusCode": 403, "headers": headers,
@@ -292,7 +292,7 @@ def _handle_scaleout(event, table, method, path, path_params, headers) -> dict:
         if not tenancy.cluster_visible(event, _cluster_item(item.get("cluster_id", ""))):
             return {"statusCode": 403, "headers": headers,
                     "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
-        # Only awaiting_instance / pending are cancellable — never an op that is
+        # Only awaiting_instance / pending are cancellable, never an op that is
         # already approved/warming/consumed. The ConditionExpression makes the
         # check atomic (a concurrent finalizer transition loses the race → 409).
         try:
@@ -314,7 +314,7 @@ def _handle_scaleout(event, table, method, path, path_params, headers) -> dict:
                 return {"statusCode": 409, "headers": headers,
                         "body": json.dumps({
                             "error": "cannot_cancel",
-                            "detail": f"현재 상태({_scaleout_state(item)})에서는 취소할 수 없습니다 — "
+                            "detail": f"현재 상태({_scaleout_state(item)})에서는 취소할 수 없습니다. "
                                       "이미 승인/예열/완료된 작업입니다.",
                         })}
             raise
@@ -322,7 +322,7 @@ def _handle_scaleout(event, table, method, path, path_params, headers) -> dict:
                 "body": json.dumps({
                     "approval_id": approval_id,
                     "state": "cancelled",
-                    "note": "자동 예열만 취소되었습니다 — 생성된 리더 인스턴스는 유지됩니다. "
+                    "note": "자동 예열만 취소되었습니다. 생성된 리더 인스턴스는 유지됩니다. "
                             "필요하면 스케일 인으로 별도 제거하세요.",
                 })}
 
@@ -369,21 +369,21 @@ def _load_eligible_approvers(cluster_id, action_type) -> set:
 
 
 def _execute_enable_data_api(item: dict) -> dict:
-    """enable_data_api 승인은 승인 즉시 이 핸들러가 직접 실행한다 — 에이전트
+    """enable_data_api 승인은 승인 즉시 이 핸들러가 직접 실행한다. 에이전트
     재호출(replay) 단계가 없어, 실행이 DBA의 인증된 승인 클릭 아래에서 일어난다.
 
     권한은 rds:EnableHttpEndpoint 단일 액션으로 스코프한다. ModifyDBCluster를
     쓰면 마스터 패스워드 변경과 삭제 보호 해제까지 가능한 광범위 권한을 플랫폼에
     줘야 하므로, 설정 1비트짜리 전용 API를 쓰는 것이 이 기능의 보안 전제다.
     (참고: modify-db-cluster --enable-http-endpoint는 legacy Serverless v1
-    전용으로 Sv2/프로비저닝에선 조용히 무시된다 — 실측 확인.)"""
+    전용으로 Sv2/프로비저닝에선 조용히 무시된다. 실측 확인.)"""
     cluster_id = item.get("cluster_id", "")
     table_name = os.environ.get("CLUSTERS_TABLE", "")
     if not table_name:
         return {"ok": False, "error": "CLUSTERS_TABLE not configured"}
     if not cluster_id:
         return {"ok": False, "error": "approval row has no cluster_id"}
-    # 레지스트리의 cluster_arn이 권위 — 크로스리전이어도 ARN에 리전이 담겨 있다.
+    # 레지스트리의 cluster_arn이 권위. 크로스리전이어도 ARN에 리전이 담겨 있다.
     try:
         row = (
             boto3.resource("dynamodb")
@@ -410,9 +410,9 @@ def _execute_enable_data_api(item: dict) -> dict:
 
     rds = boto3.client("rds")
     if not hasattr(rds, "enable_http_endpoint"):
-        # Lambda 런타임 boto3가 너무 오래된 경우의 명시적 실패 — raw
+        # Lambda 런타임 boto3가 너무 오래된 경우의 명시적 실패. raw
         # AttributeError보다 조치 가능한 메시지를 남긴다.
-        return {"ok": False, "error": "런타임 boto3가 EnableHttpEndpoint API를 지원하지 않습니다 — 런타임 업그레이드 필요"}
+        return {"ok": False, "error": "런타임 boto3가 EnableHttpEndpoint API를 지원하지 않습니다. 런타임 업그레이드 필요"}
     try:
         resp = rds.enable_http_endpoint(ResourceArn=arn)
     except Exception as e:
@@ -441,7 +441,7 @@ def _mint_ui_approval(cluster_id: str, action_type: str, action_details: dict,
     mint a payload-hashed PENDING approval, then stamp origin="ui" onto that row
     from THIS trusted API Lambda.
 
-    origin is metadata (not in payload_hash) and is written ONLY here — the
+    origin is metadata (not in payload_hash) and is written ONLY here: the
     agent's request_approval channel is the gateway, whose declared schema has
     no `origin`, so it can never forge origin=="ui". That makes origin=="ui" the
     trust boundary the approve-path auto-execute relies on. Shared by
@@ -474,20 +474,20 @@ def _mint_ui_approval(cluster_id: str, action_type: str, action_details: dict,
             origin_stamped = True
         except Exception as e:
             # Fail-SAFE: without the stamp the row simply won't auto-execute (it
-            # stays a normal pending approval) — never fail-open. Log, report soft.
+            # stays a normal pending approval), never fail-open. Log, report soft.
             print(f"[approvals] origin stamp failed for {approval_id}: {e}")
     return {"ok": True, "approval_id": approval_id, "created_at": created_at,
             "origin_stamped": origin_stamped}
 
 
 def _handle_endpoint_requests(event, method, headers) -> dict:
-    """POST /api/endpoint-requests — console-initiated custom-endpoint write.
+    """POST /api/endpoint-requests: console-initiated custom-endpoint write.
 
     Admin-gated + tenant-scoped. Validates the action + its required fields,
     then invokes the operations Lambda's request_approval tool (origin="ui") to
     mint a correctly payload-hashed PENDING approval. api/ CANNOT import
     mcp_servers, so the hash MUST be computed by the operations Lambda's
-    approval_guard — hence the invoke rather than writing the row directly.
+    approval_guard, hence the invoke rather than writing the row directly.
 
     The write itself does NOT run here; it runs when the DBA approves and the
     approve path auto-executes the origin="ui" row (see below)."""
@@ -508,7 +508,7 @@ def _handle_endpoint_requests(event, method, headers) -> dict:
     if not cluster_id:
         return {"statusCode": 400, "headers": headers,
                 "body": json.dumps({"error": "cluster_id_required"})}
-    # Tenant scope — the caller must be able to see this cluster (same visibility
+    # Tenant scope: the caller must be able to see this cluster (same visibility
     # check the write routes use). Non-visible → 403, never a silent pass.
     if not tenancy.cluster_visible(event, _cluster_item(cluster_id)):
         return {"statusCode": 403, "headers": headers,
@@ -523,7 +523,7 @@ def _handle_endpoint_requests(event, method, headers) -> dict:
     if static_members and excluded_members:
         return {"statusCode": 400, "headers": headers,
                 "body": json.dumps({"error": "invalid_members",
-                                    "detail": "static_members와 excluded_members는 상호 배타적입니다 — 하나만 지정하세요"})}
+                                    "detail": "static_members와 excluded_members는 상호 배타적입니다. 하나만 지정하세요"})}
 
     if action == "create_custom_endpoint":
         etype = str(body.get("endpoint_type") or "").strip().upper()
@@ -549,7 +549,7 @@ def _handle_endpoint_requests(event, method, headers) -> dict:
                 "body": json.dumps({"error": "request_failed",
                                     "detail": minted.get("reason")})}
     if not minted.get("origin_stamped"):
-        # The row exists but couldn't be marked for auto-execute — surface a soft
+        # The row exists but couldn't be marked for auto-execute: surface a soft
         # warning (never fail-open; it just stays a normal pending approval).
         return {"statusCode": 201, "headers": headers,
                 "body": json.dumps({
@@ -557,19 +557,19 @@ def _handle_endpoint_requests(event, method, headers) -> dict:
                     "cluster_id": cluster_id,
                     "action": action,
                     "origin_stamped": False,
-                    "message": "승인 요청은 생성됐지만 자동 실행 표식 기록에 실패했습니다 — 승인해도 자동 실행되지 않을 수 있습니다. 관리자에게 문의하세요.",
+                    "message": "승인 요청은 생성됐지만 자동 실행 표식 기록에 실패했습니다. 승인해도 자동 실행되지 않을 수 있습니다. 관리자에게 문의하세요.",
                 })}
     return {"statusCode": 201, "headers": headers,
             "body": json.dumps({
                 "approval_id": minted["approval_id"],
                 "cluster_id": cluster_id,
                 "action": action,
-                "message": "승인 요청이 생성되었습니다 — 승인 센터에서 검토하고 승인하면 실행됩니다.",
+                "message": "승인 요청이 생성되었습니다. 승인 센터에서 검토하고 승인하면 실행됩니다.",
             })}
 
 
 def _handle_scaleout_az(event, method, headers) -> dict:
-    """POST /api/scaleout-az (P2-⑥) — AZ scale-out runbook.
+    """POST /api/scaleout-az (P2-⑥): AZ scale-out runbook.
 
     Admin-gated + tenant-scoped (mirrors _handle_endpoint_requests). Body:
     {cluster_id, exclude_az?, count?, instance_class?}.
@@ -577,7 +577,7 @@ def _handle_scaleout_az(event, method, headers) -> dict:
     1) Invoke the READ-ONLY plan_az_scaleout tool → N planned readers, each with
        a CONCRETE instance_class + availability_zone.
     2) For each planned reader, mint an add_reader_instance approval (origin="ui")
-       via the shared _mint_ui_approval helper — each approval's action_details
+       via the shared _mint_ui_approval helper: each approval's action_details
        carries that reader's concrete class + AZ so its payload hash binds it.
     3) Return the created approvals (partial-success shape if some minting fails).
 
@@ -651,7 +651,7 @@ def _handle_scaleout_az(event, method, headers) -> dict:
                 "healthy_azs": plan.get("healthy_azs"),
                 "created": created,
                 "failed": failed,
-                "message": (f"{len(created)}개 리더 추가 승인 요청이 생성되었습니다 — "
+                "message": (f"{len(created)}개 리더 추가 승인 요청이 생성되었습니다. "
                             "승인 센터에서 각각 검토하고 승인하면 실행됩니다."),
             }, default=str)}
 
@@ -661,7 +661,7 @@ def _execute_ui_approval(item: dict) -> dict:
     generic over the action_type. Invokes <action_type> with approved=true +
     approval_id + the row's action_details (ClientContext tool_name=action_type);
     the tool's verify_approval sees status=approved, consumes the row single-use,
-    and runs the mutation — so execution happens under the DBA's authenticated
+    and runs the mutation, so execution happens under the DBA's authenticated
     approve click, exactly like enable_data_api. Covers the endpoint writes AND
     add_reader_instance (the AZ scale-out runbook's readers).
 
@@ -671,7 +671,7 @@ def _execute_ui_approval(item: dict) -> dict:
 
     On a non-success status the row is left consumed-or-approved by the tool
     (verify_approval only consumes on success), and the failure is surfaced so
-    the DBA sees it — the approve path never crashes."""
+    the DBA sees it: the approve path never crashes."""
     action_type = item.get("action_type") or item.get("tool_name")
     ad = item.get("action_details")
     if not isinstance(ad, dict):
@@ -702,26 +702,26 @@ def lambda_handler(event, context):
 
     headers = {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}
 
-    # /api/scaleout-ops (+ /{id}/cancel) — scale-out op management. Must come
+    # /api/scaleout-ops (+ /{id}/cancel): scale-out op management. Must come
     # BEFORE the generic GET-list arm: the list route also has no approval_id,
     # so it would otherwise swallow GET /api/scaleout-ops.
     if "/scaleout-ops" in path:
         return _handle_scaleout(event, table, method, path, path_params, headers)
 
-    # /api/endpoint-requests (N-①) — console-initiated custom-endpoint write.
+    # /api/endpoint-requests (N-①): console-initiated custom-endpoint write.
     # Must come BEFORE the generic POST arm below (which only allows
     # enable_data_api), or that arm would reject the endpoint action_type.
     if "/endpoint-requests" in path:
         return _handle_endpoint_requests(event, method, headers)
 
-    # /api/scaleout-az (P2-⑥) — AZ scale-out runbook. Plans N readers via the
+    # /api/scaleout-az (P2-⑥): AZ scale-out runbook. Plans N readers via the
     # read-only plan_az_scaleout tool, then mints one add_reader_instance
     # approval (origin="ui") per reader. Must come BEFORE the generic POST arm
     # (which only allows enable_data_api).
     if "/scaleout-az" in path:
         return _handle_scaleout_az(event, method, headers)
 
-    # /api/activity — chronological feed of every approval (any status)
+    # /api/activity: chronological feed of every approval (any status)
     # for compliance + retro queries ("what writes happened in cluster X
     # last week?"). The DDB scan is cheap because approvals are short-
     # lived: rows expire on TTL or get consumed by the next write.
@@ -737,7 +737,7 @@ def lambda_handler(event, context):
             filters.append("cluster_id = :cid")
             attr_values[":cid"] = cluster_filter
         if actor_filter:
-            # Match either requested_by or approved_by — DBA might be
+            # Match either requested_by or approved_by: DBA might be
             # asking "what did this person do?" not just "what did they
             # request?"
             filters.append("(requested_by = :a OR approved_by = :a)")
@@ -767,7 +767,7 @@ def lambda_handler(event, context):
                             "body": json.dumps({"error": "invalid cursor"})}
             scan_kwargs["Limit"] = page
             resp = table.scan(**scan_kwargs)
-            # Apply the same tenant filter as the normal arm — otherwise a
+            # Apply the same tenant filter as the normal arm, otherwise a
             # viewer could bypass cluster visibility via ?export=true and read
             # other teams' approval activity (cluster_id/action_type/requester).
             # Admin → visible is None → unfiltered. Post-filter page size varies;
@@ -781,7 +781,7 @@ def lambda_handler(event, context):
             lek = resp.get("LastEvaluatedKey")
             # NOTE: approvals keys are strings (approval_id, created_at), so the
             # json round-trip is lossless. default=str would coerce a Decimal/
-            # Binary key to a string — revisit this codec if the key schema
+            # Binary key to a string: revisit this codec if the key schema
             # ever gains a numeric/binary key.
             next_cursor = (
                 base64.urlsafe_b64encode(json.dumps(lek, default=str).encode()).decode()
@@ -805,7 +805,7 @@ def lambda_handler(event, context):
 
     if method == "GET" and not approval_id:
         status_filter = qsp.get("status", "pending")
-        # "승인됨" 탭은 consumed(승인 후 실행 완료)도 포함한다 — DBA의 멘탈
+        # "승인됨" 탭은 consumed(승인 후 실행 완료)도 포함한다. DBA의 멘탈
         # 모델에서 둘 다 "내가 승인한 작업"이고, consumed가 어느 탭에도 안
         # 보이면 실행된 승인이 UI에서 증발한 것처럼 보인다.
         if status_filter == "approved":
@@ -869,7 +869,7 @@ def lambda_handler(event, context):
 
         # 이 POST 경로(UI발)로는 enable_data_api 승인만 만들 수 있다. 다른
         # 쓰기 액션(execute_sql/modify_*/restore 등)은 반드시 MCP의
-        # request_approval을 거쳐야 한다 — 거기서만 payload_hash가 계산되어
+        # request_approval을 거쳐야 한다. 거기서만 payload_hash가 계산되어
         # 승인이 "특정 페이로드"에 바인딩된다. POST가 임의 action_type을
         # 받아들이면 payload_hash 없는(=guard가 페이로드 검증을 건너뛰는)
         # 쓰기 승인을 만들 수 있어, 한 승인을 다른 SQL/파라미터로 재사용하는
@@ -882,14 +882,14 @@ def lambda_handler(event, context):
                 "body": json.dumps({
                     "error": "unsupported_action_type",
                     "detail": (
-                        f"{action_type!r}는 이 경로로 승인 요청을 만들 수 없습니다 — "
+                        f"{action_type!r}는 이 경로로 승인 요청을 만들 수 없습니다. "
                         "쓰기 작업은 에이전트의 request_approval 도구를 통해 "
                         "페이로드 바인딩과 함께 등록해야 합니다."
                     ),
                 }),
             }
 
-        # UI발 enable_data_api 요청은 멱등 — 같은 클러스터의 pending 요청이
+        # UI발 enable_data_api 요청은 멱등: 같은 클러스터의 pending 요청이
         # 이미 있으면 새로 만들지 않고 그 행을 돌려준다 (버튼 더블클릭이나
         # 페이지 재방문으로 승인 대기열이 중복으로 쌓이는 것 방지).
         if action_type == "enable_data_api":
@@ -920,7 +920,7 @@ def lambda_handler(event, context):
             "requested_by": body.get("requested_by", "agent"),
             "approval_status": "pending",
         }
-        # 신형 스키마(action_type + action_details) — request_approval MCP 툴이
+        # 신형 스키마(action_type + action_details): request_approval MCP 툴이
         # 만드는 행과 같은 모양이라 Approval Center 카드 렌더러를 공유한다.
         if action_type:
             item["action_type"] = action_type
@@ -955,16 +955,16 @@ def lambda_handler(event, context):
 
         item = items[0]
 
-        # Advanced approval — designated approvers + separation of duties.
+        # Advanced approval: designated approvers + separation of duties.
         # Applies to approve only; reject keeps the _is_admin-only gate so a
         # requester can still cancel their own request.
         if action == "approve":
             approver = _caller_name(event)
             # Depends on the bearer being the Cognito ID token (the frontend
             # sends getValidIdToken()), which always carries cognito:username/
-            # email — so a logged-in admin never resolves to "unknown". If the
+            # email, so a logged-in admin never resolves to "unknown". If the
             # bearer ever switches to an access token (no username claims), this
-            # guard would 403 every approval — revisit _caller_name then.
+            # guard would 403 every approval. Revisit _caller_name then.
             if not approver or approver == "unknown":
                 return {
                     "statusCode": 403,
@@ -980,7 +980,7 @@ def lambda_handler(event, context):
                     "headers": headers,
                     "body": json.dumps({
                         "error": "self_approval",
-                        "reason": "자기 요청은 승인할 수 없습니다 — 다른 승인자가 처리해야 합니다.",
+                        "reason": "자기 요청은 승인할 수 없습니다. 다른 승인자가 처리해야 합니다.",
                     }),
                 }
             action_type = item.get("action_type") or item.get("tool_name")
@@ -995,7 +995,7 @@ def lambda_handler(event, context):
                     }),
                 }
 
-        # pending 상태에서만 전이 허용 — ConditionExpression이 없으면
+        # pending 상태에서만 전이 허용: ConditionExpression이 없으면
         # 이미 consumed/rejected된 행도 PUT approve로 다시 approved가 되어,
         # approval_guard의 consume-on-use replay 방어를 API에서 되살릴 수
         # 있다(Codex 감사 적발). 이미 처리된 승인은 409로 거부한다.
@@ -1018,12 +1018,12 @@ def lambda_handler(event, context):
                     "headers": headers,
                     "body": json.dumps({
                         "error": "already_resolved",
-                        "detail": f"승인 요청이 이미 {item.get('approval_status')} 상태입니다 — 재처리할 수 없습니다.",
+                        "detail": f"승인 요청이 이미 {item.get('approval_status')} 상태입니다. 재처리할 수 없습니다.",
                     }),
                 }
             raise
 
-        # enable_data_api는 승인 즉시 실행하는 액션 — 쓰기 도구 replay가 없다.
+        # enable_data_api는 승인 즉시 실행하는 액션: 쓰기 도구 replay가 없다.
         # 성공하면 행을 consumed로 마감해 Approval Center 의미론(실행된 승인은
         # 재사용 불가)을 유지하고, 실패하면 approved 상태로 남겨 재승인 클릭이
         # 자연스러운 재시도 경로가 되게 한다.
@@ -1048,7 +1048,7 @@ def lambda_handler(event, context):
                     ExpressionAttributeValues={":e": execution.get("error", "unknown")[:300]},
                 )
 
-        # N-① custom-endpoint auto-execute — ONLY origin=="ui" rows. The write
+        # N-① custom-endpoint auto-execute: ONLY origin=="ui" rows. The write
         # runs via the operations Lambda (which owns the tool + approval_guard);
         # its verify_approval consumes the row single-use on success. Chat rows
         # of the same action_type have NO origin → NOT executed here (the agent

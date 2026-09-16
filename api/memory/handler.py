@@ -1,22 +1,22 @@
 """Agent memory inspection API.
 
 Surfaces the user's AgentCore Memory records so the DBA can see what
-the agent has remembered about them — and delete entries that became
+the agent has remembered about them, and delete entries that became
 incorrect or were captured under a wrong assumption.
 
 Three namespaces are wired in the agent stack:
-  /users/{actorId}/facts        — semantic facts
-  /users/{actorId}/preferences  — user preferences (default tone, etc.)
-  /summaries/{actorId}/{sessionId} — per-session summaries
+  /users/{actorId}/facts:         semantic facts
+  /users/{actorId}/preferences:   user preferences (default tone, etc.)
+  /summaries/{actorId}/{sessionId}: per-session summaries
 
 This handler exposes the first two by `kind=facts|preferences`. Session
-summaries are intentionally not exposed — they're internal scaffolding
+summaries are intentionally not exposed: they're internal scaffolding
 the agent uses to keep context across turns, and editing them would
 break in-flight conversations.
 
 Routes:
-  GET    /api/memory                      — list records (?kind=)
-  DELETE /api/memory/{record_id}?kind=…   — delete one record
+  GET    /api/memory:                       list records (?kind=)
+  DELETE /api/memory/{record_id}?kind=…:    delete one record
 """
 
 from __future__ import annotations
@@ -115,7 +115,7 @@ def _list_records(agentcore, memory_id: str, namespace: str, kind: str) -> dict:
         )
     except ClientError as e:
         code = e.response.get("Error", {}).get("Code", "")
-        # ResourceNotFoundException means the actor has no records yet —
+        # ResourceNotFoundException means the actor has no records yet:
         # that's fine, just return an empty list rather than 500ing.
         if code in ("ResourceNotFoundException", "ValidationException"):
             return _resp(200, {"namespace": namespace, "kind": kind, "records": []})

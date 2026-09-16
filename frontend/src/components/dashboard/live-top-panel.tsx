@@ -9,7 +9,7 @@ import { fmtDecimal } from "@/lib/format";
 // cluster. LOAD-SAFETY INVARIANT: the browser polls the live endpoint ~2s ONLY
 // while this drawer is open, and the polling interval is cleared on close AND
 // on unmount (the useEffect cleanup below). So the target DB sees load only
-// while a DBA is actively watching — never as always-on background collection.
+// while a DBA is actively watching, never as always-on background collection.
 
 const POLL_MS = 2000;
 const RATE_KEYS: [string, string][] = [
@@ -20,14 +20,14 @@ const RATE_KEYS: [string, string][] = [
 ];
 
 function ageLabel(s: number | null): string {
-  if (s == null) return "—";
+  if (s == null) return "-";
   if (s < 1) return "<1s";
   if (s < 60) return `${s.toFixed(0)}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m ${Math.floor(s % 60)}s`;
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
 
-// active / idle-in-transaction / idle are visually distinct — a long
+// active / idle-in-transaction / idle are visually distinct, a long
 // idle-in-transaction is the classic silent lock-holder, so it gets a warning color.
 function stateClasses(state: string | null): string {
   const s = (state || "").toLowerCase();
@@ -46,14 +46,14 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
   const [rates, setRates] = useState<Record<string, number>>({});
   const [buffers, setBuffers] = useState<LiveActivity["buffercache"]>(null);
   const [buffersLoading, setBuffersLoading] = useState(false);
-  // Previous cumulative counters + capture time — for client-side per-second
+  // Previous cumulative counters + capture time, for client-side per-second
   // rate deltas. Ref (not state) so it doesn't retrigger the poll effect.
   const prevRef = useRef<{
     at: number;
     counters: Record<string, number>;
   } | null>(null);
 
-  // Pause polling when the browser tab is hidden — no point hammering the
+  // Pause polling when the browser tab is hidden, no point hammering the
   // target for a view nobody is looking at.
   useEffect(() => {
     const onVis = () => setHidden(document.visibilityState === "hidden");
@@ -63,7 +63,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
 
   // THE poll loop. Guarded on open && !paused && !hidden. The cleanup clears
   // the interval whenever ANY dep changes (close/pause/hide/cluster switch) OR
-  // the component unmounts — this is the load-safety guarantee.
+  // the component unmounts: this is the load-safety guarantee.
   useEffect(() => {
     if (!open || paused || hidden) return;
     let cancelled = false;
@@ -86,7 +86,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
         // STOP polling once a snapshot reports the view can't be served
         // (non-PG, registry/Data-API unavailable). Otherwise we'd re-hit the
         // target/Lambda every POLL_MS while the user only sees the unavailable
-        // message — the load-safety promise is "poll ONLY when actually live".
+        // message: the load-safety promise is "poll ONLY when actually live".
         // Reopening the drawer re-runs this effect and retries.
         if (!snap.available) {
           stop();
@@ -212,7 +212,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
               라이브 (이 창이 열려 있는 동안에만 대상 DB를 폴링합니다, ~2초)
               {hidden && (
                 <span className="text-amber-400/80">
-                  , 탭 비활성 — 일시중단됨
+                  , 탭 비활성: 일시중단됨
                 </span>
               )}
               {paused && (
@@ -244,7 +244,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
                           {label}/s
                         </div>
                         <div className="text-lg font-mono text-zinc-100 tabular-nums">
-                          {label in rates ? fmtDecimal(rates[label], 1) : "—"}
+                          {label in rates ? fmtDecimal(rates[label], 1) : "-"}
                         </div>
                       </div>
                     ))}
@@ -312,7 +312,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
                                 {s.pid}
                               </td>
                               <td className="px-2 py-1.5 text-zinc-400">
-                                {s.usename || "—"}
+                                {s.usename || "-"}
                               </td>
                               <td className="px-2 py-1.5">
                                 <span
@@ -320,7 +320,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
                                     s.state,
                                   )}`}
                                 >
-                                  {s.state || "—"}
+                                  {s.state || "-"}
                                 </span>
                               </td>
                               <td className="px-2 py-1.5 text-zinc-400">
@@ -333,7 +333,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
                                 className="px-2 py-1.5 text-zinc-400 max-w-md truncate"
                                 title={s.query || ""}
                               >
-                                {s.query || "—"}
+                                {s.query || "-"}
                               </td>
                             </tr>
                           ))}
@@ -352,7 +352,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
                     </div>
                   </div>
 
-                  {/* Buffer pool — HEAVY, manual one-off fetch only (never polled) */}
+                  {/* Buffer pool: HEAVY, manual one-off fetch only (never polled) */}
                   <div className="border border-zinc-800">
                     <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
                       <div className="text-xs text-zinc-400 flex items-center gap-1.5">
@@ -370,7 +370,7 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
                     <div className="px-3 py-2 text-xs text-zinc-400">
                       {!buffers ? (
                         <span className="text-zinc-600">
-                          무거운 조회입니다 — 폴링에 포함되지 않으며 버튼을 눌러
+                          무거운 조회입니다. 폴링에 포함되지 않으며 버튼을 눌러
                           1회만 조회합니다.
                         </span>
                       ) : buffers.available === false ? (

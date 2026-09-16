@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
-# Module loading — push api/scheduled_tasks on sys.path so `import tenancy` resolves
+# Module loading: push api/scheduled_tasks on sys.path so `import tenancy` resolves
 # ---------------------------------------------------------------------------
 
 _SCHED_DIR = Path(__file__).resolve().parents[3] / "api" / "scheduled_tasks"

@@ -29,7 +29,7 @@ Design (docs/superpowers/specs/2026-06-12-docdb-mongo-deep-diagnosis-design.md):
   - Per-cluster creds come from a Secrets Manager secret whose ARN is on the
     registry row (`mongo_secret_arn`). No secret → skip the MONGO half only;
     the profiler-log half still runs.
-  - READ-ONLY allowlist only — hardcoded commands, NO generic runCommand/eval.
+  - READ-ONLY allowlist only: hardcoded commands, NO generic runCommand/eval.
   - Hard fail-safe: any connect/command error logs + skips that cluster and
     NEVER raises, so one bad cluster can't break the whole run.
 
@@ -54,7 +54,7 @@ LONG_RUNNING_SECS = 10
 LONG_RUNNING_WARNING = 1   # ≥1 long op → warning
 LONG_RUNNING_CRITICAL = 5  # ≥5 long ops → critical
 
-# Mongo server-selection timeout — fail fast on an unreachable cluster.
+# Mongo server-selection timeout: fail fast on an unreachable cluster.
 SERVER_SELECTION_TIMEOUT_MS = 5000
 
 # --- CloudWatch profiler-log ingestion (E1-6) ------------------------------
@@ -122,7 +122,7 @@ _CLIENT_FACTORY = _client_factory
 
 
 def _scan_all(table):
-    """Paginated DynamoDB scan — never truncate at the 1MB page boundary."""
+    """Paginated DynamoDB scan: never truncate at the 1MB page boundary."""
     items = []
     kwargs = {}
     while True:
@@ -134,7 +134,7 @@ def _scan_all(table):
 
 
 def _make_cache_execute(rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name):
-    """RDS-Data execute helper for the cache DB — mirrors etl_collector.handler."""
+    """RDS-Data execute helper for the cache DB. Mirrors etl_collector.handler."""
 
     def cache_execute(sql, params):
         sql_params = []
@@ -263,12 +263,12 @@ def _insert_finding(cache_execute, cluster_id, ts, finding):
 
 # ---------------------------------------------------------------------------
 # Read-only command allowlist. Each helper issues ONE hardcoded command via the
-# pymongo command interface — there is NO generic runCommand/eval surface.
+# pymongo command interface: there is NO generic runCommand/eval surface.
 # ---------------------------------------------------------------------------
 
 
 def _run_server_status(client):
-    """`serverStatus` — connections, opcounters, mem (read-only diagnostic)."""
+    """`serverStatus`: connections, opcounters, mem (read-only diagnostic)."""
     return client.admin.command("serverStatus")
 
 
@@ -922,7 +922,7 @@ def _diagnose_cluster(client, cache_execute, cluster_id, run_ts):
 
 
 def _process_cluster(resource, secrets, cache_execute, run_ts):
-    """Connect to one DocumentDB cluster and diagnose it. NEVER raises — any
+    """Connect to one DocumentDB cluster and diagnose it. NEVER raises: any
     failure logs and returns a skip marker so other clusters still run."""
     cluster_id = resource.get("cluster_id", "?")
     secret_arn = resource.get("mongo_secret_arn")

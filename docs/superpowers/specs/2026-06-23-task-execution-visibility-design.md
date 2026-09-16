@@ -16,35 +16,35 @@ Agent Tasks(이벤트 자동 RCA, 예약 리포트, 수동 실행)는 현재 결
 
 본 기능은 두 가지를 추가한다:
 
-1. **per-task 실행 추적(trace)** — 워커가 실행한 단계(어떤 도구/생성기가 돌았는지),
+1. **per-task 실행 추적(trace)**: 워커가 실행한 단계(어떤 도구/생성기가 돌았는지),
    각 단계 소요시간, 검사/스킵한 신호 소스, 총 소요시간을 기록하고 `/tasks` 상세에
    노출한다.
-2. **작업 통계(stats)** — 상태/종류별 개수, 성공률, 평균 소요, 최근 실패 수를 집계하는
+2. **작업 통계(stats)**: 상태/종류별 개수, 성공률, 평균 소요, 최근 실패 수를 집계하는
    엔드포인트 + `/tasks` 상단 요약 스트립.
 
 ### 1.2 Goals
 
 - 결정론적 RCA가 검사한 신호 소스(`signals_examined`), 스킵(`skipped`)과 단계별 타이밍을
   `result`/row에 구조화해 기록하고 상세에 렌더.
-- 작업 row에 `trace`(단계 리스트), `duration_ms`(총 소요) 추가 — additive, 비파괴.
+- 작업 row에 `trace`(단계 리스트), `duration_ms`(총 소요) 추가: additive, 비파괴.
 - `GET /api/tasks/stats` 집계 엔드포인트 + `/tasks` 상단 통계 스트립.
 - 기존 task 흐름, RCA 엔진, 결과 렌더는 **불변**(trace 없는 과거 row도 정상 렌더).
 
 ### 1.3 Non-Goals
 
-- 분산 트레이싱/OpenTelemetry, LLM 토큰 단위 추적 — 범위 밖(경량 단계 trace만).
-- RCA 엔진(`diagnose_root_cause`) 로직 변경 — 그대로 두고 메타데이터만 노출.
-- 작업 재실행/취소 UI — 별도 후속.
+- 분산 트레이싱/OpenTelemetry, LLM 토큰 단위 추적: 범위 밖(경량 단계 trace만).
+- RCA 엔진(`diagnose_root_cause`) 로직 변경: 그대로 두고 메타데이터만 노출.
+- 작업 재실행/취소 UI: 별도 후속.
 
 ## 2. Architecture
 
-### 2.1 데이터 모델 — `dbops-{env}-agent-tasks` (추가 속성, 스키마리스)
+### 2.1 데이터 모델: `dbops-{env}-agent-tasks` (추가 속성, 스키마리스)
 
 `done`/`failed`로 마무리할 때 두 속성을 추가로 기록(있을 때만; 마이그레이션 불필요):
 
 - `trace` (List): 단계별 `{ "step": str, "tool": str, "ms": int, "detail": str }`.
   - 예(auto_rca): `[{"step":"진단","tool":"diagnose_root_cause","ms":420,"detail":"5개 소스 검사, 후보 3"}, {"step":"서술 생성","tool":"bedrock","ms":1180,"detail":"한국어 narrative+권장조치"}]`
-  - narrative 스킵 시: `{"step":"서술 생성","tool":"bedrock","ms":0,"detail":"모델 미설정 — 스킵"}`
+  - narrative 스킵 시: `{"step":"서술 생성","tool":"bedrock","ms":0,"detail":"모델 미설정, 스킵"}`
   - report: `[{"step":"헬스 다이제스트","tool":"health_status","ms":300,"detail":"엔진 aurora-postgresql, 5개 메트릭"}]`
 - `duration_ms` (int): 워커가 claim 이후 finish까지 소요한 총 ms.
 
@@ -73,7 +73,7 @@ Agent Tasks(이벤트 자동 RCA, 예약 리포트, 수동 실행)는 현재 결
 
 ### 2.3 실패 경로
 
-`failed`도 `trace`(끝까지 못 간 단계까지)와 `duration_ms`를 기록 — 어디서 멈췄는지 보이게.
+`failed`도 `trace`(끝까지 못 간 단계까지)와 `duration_ms`를 기록: 어디서 멈췄는지 보이게.
 trace 기록은 best-effort: trace 조립 실패가 작업 완료를 깨지 않는다(누락 시 trace 없이 finish).
 
 ## 3. Components
@@ -92,7 +92,7 @@ trace 기록은 best-effort: trace 조립 실패가 작업 완료를 깨지 않�
 
 - `api/tasks/handler.py`:
   - `GET /api/tasks/{id}`는 row 전체를 반환하므로 **trace 자동 노출**(변경 없음).
-  - **NEW** `GET /api/tasks/stats`: recency-index에서 최근 N(기본 500)건을 쿼리해 집계 —
+  - **NEW** `GET /api/tasks/stats`: recency-index에서 최근 N(기본 500)건을 쿼리해 집계:
     `{total, by_status:{...}, by_kind:{...}, success_rate, avg_duration_ms, recent_failures}`.
     `raw_path.endswith("/stats")` 분기로 같은 Lambda에서 처리.
 
@@ -117,9 +117,9 @@ trace 기록은 best-effort: trace 조립 실패가 작업 완료를 깨지 않�
 ## 4. Safety / Cost
 
 - 전 경로 **읽기 전용**(trace는 메타데이터 기록만). 인증 authorizer 하위.
-- trace에 시크릿과 쿼리 본문 없음 — 도구명, 카운트, 소요시간, 짧은 한국어 detail만.
-- stats는 최근 N건 쿼리 1회(인덱스) — 저비용. N 상한으로 스캔 비용 제한.
-- ms 타이밍은 `time.time()` 델타(int ms) — 기존 `_ddb_safe`로 DDB 안전.
+- trace에 시크릿과 쿼리 본문 없음: 도구명, 카운트, 소요시간, 짧은 한국어 detail만.
+- stats는 최근 N건 쿼리 1회(인덱스): 저비용. N 상한으로 스캔 비용 제한.
+- ms 타이밍은 `time.time()` 델타(int ms): 기존 `_ddb_safe`로 DDB 안전.
 
 ## 5. Increments (구현 순서)
 

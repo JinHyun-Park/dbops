@@ -1,6 +1,6 @@
 """Pull-based case opener. Scans the two tables emitters already write
 (cluster_health_findings, event_log anomalies) and opens one remediation_cases
-row per live symptom. Idempotent via the partial unique index — re-emission while
+row per live symptom. Idempotent via the partial unique index: re-emission while
 a case is open only bumps last_seen_at.
 """
 import time
@@ -11,8 +11,8 @@ from remediation_classify import classify_action
 # How far back to scan each run. A little wider than the evaluator cadence so
 # nothing slips between runs; ON CONFLICT makes overlap harmless.
 SCAN_WINDOW = "INTERVAL '1 hour'"
-WIN_METRIC_MIN = 360    # 6h  — metric-symptom cases
-WIN_FINDING_MIN = 1440  # 24h — recurring-finding cases
+WIN_METRIC_MIN = 360    # 6h:   metric-symptom cases
+WIN_FINDING_MIN = 1440  # 24h:  recurring-finding cases
 
 # DynamoDB scan window for completed RCA tasks.
 # Invariant: cadence (20 min) < RCA_SCAN_WINDOW < WIN_METRIC_MIN (6h = 360 min).
@@ -24,7 +24,7 @@ WIN_FINDING_MIN = 1440  # 24h — recurring-finding cases
 # even if the Lambda is down for up to ~4h before recovery.
 # agent-tasks rows store completed_at as epoch millis (13-digit string); lexicographic
 # >= on equal-width strings equals numeric compare for same-era values.
-RCA_SCAN_WINDOW_MS = 4 * 60 * 60 * 1000  # 4 hours in millis — tolerates outages, < 6h minimum
+RCA_SCAN_WINDOW_MS = 4 * 60 * 60 * 1000  # 4 hours in millis: tolerates outages, < 6h minimum
 
 _INSERT = (
     "INSERT INTO remediation_cases "
@@ -67,7 +67,7 @@ def open_cases(query) -> int:
     )
     for a in anomalies or []:
         metric = (a["event_type"] or "")[len("anomaly_"):]  # 'anomaly_cpu' -> 'cpu'
-        if not metric:  # malformed 'anomaly_' with no suffix — skip, nothing to watch
+        if not metric:  # malformed 'anomaly_' with no suffix: skip, nothing to watch
             continue
         query(_INSERT, {
             "cluster_id": a["cluster_id"],
@@ -95,7 +95,7 @@ def open_rca_cases(query, ddb_table) -> int:
     items, scan_kwargs = [], {
         "FilterExpression": Attr("completed_at").gte(cutoff),
     }
-    while True:  # paginate — never trust a single scan page; no Limit+FilterExpression
+    while True:  # paginate: never trust a single scan page; no Limit+FilterExpression
         resp = ddb_table.scan(**scan_kwargs)
         items.extend(resp.get("Items", []))
         if "LastEvaluatedKey" not in resp:
@@ -112,14 +112,14 @@ def open_rca_cases(query, ddb_table) -> int:
             continue
         # Pick the first candidate that carries a metric signal; skip if none do.
         # ponytail: top-ranked candidate may be non-metric (e.g. "blocking"); a lower-ranked
-        # metric_spike candidate is still learnable — search all, don't require rank-1.
+        # metric_spike candidate is still learnable: search all, don't require rank-1.
         chosen = next(
             (c for c in cands if (c.get("evidence") or {}).get("metric_type")),
             None,
         )
         if chosen is None:
             # Non-metric RCA (schema_change, blocking, slow_query, event…) has no
-            # automatic resolution signal — skip to avoid false-resolved verdicts.
+            # automatic resolution signal: skip to avoid false-resolved verdicts.
             continue
         category = chosen.get("category") or "unknown"
         metric = chosen["evidence"]["metric_type"]

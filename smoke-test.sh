@@ -62,7 +62,7 @@ fi
 if [ -n "$ID_TOKEN" ]; then
   pass "authenticated as the e2e viewer user"
 else
-  warn "no id token (frontend/.env.e2e missing or auth failed) — authenticated API checks are SKIPPED, not passed"
+  warn "no id token (frontend/.env.e2e missing or auth failed): authenticated API checks are SKIPPED, not passed"
 fi
 
 # GET an authenticated route. Echoes the body on success, empty on any failure,
@@ -159,7 +159,7 @@ fi
 if [ -z "$ID_TOKEN" ]; then
   warn "per-cluster dashboard checks SKIPPED (no token)"
 elif [ -z "$FIRST_CID" ]; then
-  warn "no clusters visible to the smoke user — register a cluster, or check that the smoke user's team can see one"
+  warn "no clusters visible to the smoke user: register a cluster, or check that the smoke user's team can see one"
 else
   pass "smoke testing against cluster: $FIRST_CID"
   for path in "" "/timeseries?metric=cpu&hours=1" "/wait-events?hours=1" "/slow-queries?hours=1" "/vacuum-stats" "/long-running" "/blocking-locks" "/settings" "/batch-timeseries?metrics=cpu,aas&hours=1"; do

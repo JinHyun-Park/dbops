@@ -1,4 +1,4 @@
-"""DocumentDB Mongo-protocol deep-diagnosis collector — unit tests.
+"""DocumentDB Mongo-protocol deep-diagnosis collector: unit tests.
 
 These tests MUST run without pymongo installed: the collector imports pymongo
 lazily inside its client factory, and we patch the module-level _CLIENT_FACTORY
@@ -41,7 +41,7 @@ _RUN_TS = "2026-06-12T00:00:00+00:00"
 
 
 # ---------------------------------------------------------------------------
-# Fake Mongo client — returns injected command results; never imports pymongo
+# Fake Mongo client: returns injected command results; never imports pymongo
 # ---------------------------------------------------------------------------
 
 
@@ -285,7 +285,7 @@ def _docdb_row(cluster_id, with_secret=True, family="documentdb"):
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — long-running ops finding fires (currentOp secs_running ≥ 10)
+# Test 1: long-running ops finding fires (currentOp secs_running ≥ 10)
 # ---------------------------------------------------------------------------
 
 
@@ -380,7 +380,7 @@ def test_no_profiler_setprofilinglevel_advice_in_source():
 
 
 # ---------------------------------------------------------------------------
-# Test 4 — serverStatus emits mongo_* metric rows
+# Test 4: serverStatus emits mongo_* metric rows
 # ---------------------------------------------------------------------------
 
 
@@ -437,7 +437,7 @@ def test_documentdb_without_mongo_secret_still_runs_profiler_pass():
 
 
 # ---------------------------------------------------------------------------
-# Test 6 — one cluster connection error → logged, no raise, others processed
+# Test 6: one cluster connection error → logged, no raise, others processed
 # ---------------------------------------------------------------------------
 
 
@@ -464,7 +464,7 @@ def test_connection_error_is_isolated_other_clusters_still_run():
 
 
 # ---------------------------------------------------------------------------
-# Test 7 — shared run_ts across all findings (one cycle, one snapshot_time)
+# Test 7: shared run_ts across all findings (one cycle, one snapshot_time)
 # ---------------------------------------------------------------------------
 
 
@@ -479,7 +479,7 @@ def test_shared_run_ts_across_findings():
 
 
 # ---------------------------------------------------------------------------
-# Test 8 — non-documentdb rows are skipped entirely
+# Test 8: non-documentdb rows are skipped entirely
 # ---------------------------------------------------------------------------
 
 

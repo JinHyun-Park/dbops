@@ -1,4 +1,4 @@
-# ElastiCache as a DBOps Engine Family — EC-1 Foundation — Design
+# ElastiCache as a DBOps Engine Family: EC-1 Foundation (Design)
 
 **Date:** 2026-06-24
 **Status:** approved (user approved the decomposition + EC-1 scope; design decisions per the "proceed" directive)
@@ -11,21 +11,21 @@ DBOps engine family, alongside the existing `relational` (Aurora MySQL/PG),
 multi-engine: a canonical `engine_family()` + `CAPABILITIES` map (4 verbatim
 copies + a frontend mirror), engine-branched registration/ETL/MCP-gating/
 approval projections, and per-family dashboard panels. ElastiCache fills in the
-same branch points — no new infrastructure abstraction.
+same branch points: no new infrastructure abstraction.
 
 Per the approved decomposition, the full vertical ships as a 5-spec program
 (mirroring the DocumentDB/DynamoDB program):
 
-- **EC-1 Foundation (THIS spec)** — engine-family extension, discover/register,
+- **EC-1 Foundation (THIS spec)**: engine-family extension, discover/register,
   cluster metadata, CloudWatch ETL collector, basic dashboard. Read-only,
   CloudWatch-only. Makes ElastiCache registered, collected, and visible.
-- **EC-2** — read diagnosis / findings (eviction, hit-rate, memory pressure,
+- **EC-2**: read diagnosis / findings (eviction, hit-rate, memory pressure,
   replication lag, connection saturation) + read MCP tools + incident RCA signals.
-- **EC-3** — live Redis/Memcached deep-read (in-VPC: INFO/SLOWLOG/CLIENT LIST/
+- **EC-3**: live Redis/Memcached deep-read (in-VPC: INFO/SLOWLOG/CLIENT LIST/
   MEMORY STATS + Memcached `stats`), AUTH-token secret, redis client bundle.
-- **EC-4** — approval-gated write tools (scaling, parameter groups, failover
-  test, reboot, snapshot, engine upgrade) — FAIL-CLOSED + Cedar `elasticache_write`.
-- **EC-5** — scaling/parameter/upgrade simulation + right-sizing + Cost tab.
+- **EC-4**: approval-gated write tools (scaling, parameter groups, failover
+  test, reboot, snapshot, engine upgrade): FAIL-CLOSED + Cedar `elasticache_write`.
+- **EC-5**: scaling/parameter/upgrade simulation + right-sizing + Cost tab.
 
 This spec covers **EC-1 only**. Engines in scope across the program:
 **Redis OSS + Valkey + Memcached** (node-based clusters + Redis/Valkey
@@ -40,7 +40,7 @@ fleet has no registration, no metrics, no dashboard for it inside DBOps.
 ## Goal (EC-1)
 
 Register ElastiCache clusters, collect their CloudWatch metrics into the Aurora
-PG cache on the existing ETL cadence, and render an ElastiCache dashboard — using
+PG cache on the existing ETL cadence, and render an ElastiCache dashboard, using
 the SAME abstractions as DynamoDB/DocumentDB so EC-2..EC-5 layer on cleanly.
 
 Non-goals (EC-1): findings/diagnosis (EC-2), live protocol deep-read (EC-3),
@@ -52,7 +52,7 @@ A new engine family `elasticache` added to the canonical model and its ~6 branch
 points. No new infra construct; the ETL Lambda, dashboard API, and frontend all
 already branch by family.
 
-### Component 1 — Engine-family model (5 synchronized copies)
+### Component 1: Engine-family model (5 synchronized copies)
 
 Add to all four `engine_family.py` copies (`api/clusters/`, `api/dashboard/`,
 `data-pipeline/etl_collector/collectors/`, `mcp-servers/mcp_servers/shared/`)
@@ -80,9 +80,9 @@ AND the frontend mirror `frontend/src/lib/engine.ts`:
   the `engineFamily()` string match, `FAMILY_META` (label "ElastiCache", color),
   and `FAMILY_PANELS.elasticache` (see Component 4).
 
-### Component 2 — Discovery + registration (`api/clusters/handler.py`)
+### Component 2: Discovery + registration (`api/clusters/handler.py`)
 
-- **Registration dispatch**: extend `_handle_register` —
+- **Registration dispatch**: extend `_handle_register`:
   `if fam == "elasticache": return _register_elasticache(table, body)`.
 - **`_register_elasticache`**: validate the resource exists via the ElastiCache
   control API:
@@ -90,7 +90,7 @@ AND the frontend mirror `frontend/src/lib/engine.ts`:
   - Standalone cache cluster / Memcached: `describe_cache_clusters(CacheClusterId=name, ShowCacheNodeInfo=True)`.
   - Try replication group first, fall back to cache cluster (a name can be either).
   - Registry PK: the real ElastiCache name (matches the existing
-    `^[a-zA-Z0-9-]{1,63}$` validator — ElastiCache names are
+    `^[a-zA-Z0-9-]{1,63}$` validator: ElastiCache names are
     `^[a-z][a-z0-9-]{0,49}$`, so NO slug needed, unlike DynamoDB).
   - Store: `engine` = the reported engine (`"redis"`/`"valkey"`/`"memcached"`),
     `engine_family="elasticache"`, `resource_type` =
@@ -101,7 +101,7 @@ AND the frontend mirror `frontend/src/lib/engine.ts`:
     `node_type`, `num_node_groups` (shards), `replicas_per_node_group`,
     `cluster_mode` (enabled/disabled), `num_cache_nodes` (Memcached),
     `auth_enabled` (Redis AUTH), `tls_enabled` (TransitEncryption), `status`.
-- **Discovery**: add ElastiCache enumeration to the discover path —
+- **Discovery**: add ElastiCache enumeration to the discover path:
   `describe_replication_groups` + `describe_cache_clusters` (paginated),
   returning candidate names + engine for the discover UI (same shape as the
   Aurora/DynamoDB discover entries).
@@ -109,7 +109,7 @@ AND the frontend mirror `frontend/src/lib/engine.ts`:
   `elasticache:DescribeCacheClusters` (+ for cross-account, via the existing
   assumed-role session helper). Read-only describe.
 
-### Component 3 — ETL CloudWatch collector
+### Component 3: ETL CloudWatch collector
 
 - New `data-pipeline/etl_collector/collectors/elasticache_cw_collector.py`,
   mirroring `dynamodb_cw_collector.py` / `docdb_cw_collector.py`:
@@ -121,7 +121,7 @@ AND the frontend mirror `frontend/src/lib/engine.ts`:
     `CacheMisses` (Sum → derive hit-rate downstream), `CurrConnections`,
     `NewConnections`, `Evictions`, `Reclaimed`, `ReplicationLag`, `SwapUsage`,
     `FreeableMemory`, `CurrItems`, `NetworkBytesIn`, `NetworkBytesOut`.
-  - Metrics (Memcached): the Memcached subset — `CPUUtilization`,
+  - Metrics (Memcached): the Memcached subset: `CPUUtilization`,
     `FreeableMemory`, `SwapUsage`, `CurrConnections`, `NewConnections`,
     `Evictions`, `Reclaimed`, `CurrItems`, `BytesUsedForCacheItems`,
     `NetworkBytesIn/Out`, `GetHits`, `GetMisses` (no replication/persistence).
@@ -143,7 +143,7 @@ AND the frontend mirror `frontend/src/lib/engine.ts`:
   collector in EC-1). The collector shares the handler `run_ts` (project memory:
   finding/metric collectors must share the handler timestamp).
 
-### Component 4 — Dashboard
+### Component 4: Dashboard
 
 - `frontend/src/lib/engine.ts` `FAMILY_PANELS.elasticache`:
   `{"overview", "memory", "hitRate", "connections", "evictions", "throughput", "replicationLag"}`
@@ -152,7 +152,7 @@ AND the frontend mirror `frontend/src/lib/engine.ts`:
 - New `frontend/src/components/dashboard/elasticache-overview-panel.tsx`
   (mirror `dynamodb-overview-panel.tsx`): memory usage %, hit rate (derived from
   hits/misses), evictions, current connections, CPU/engine-CPU, replication lag,
-  network throughput — reading the cached metric series.
+  network throughput, reading the cached metric series.
 - `frontend/src/app/dashboard/page.tsx`: add `{fam === "elasticache" && (
 <ElasticacheOverviewPanel ... /> )}` branch.
 - `api/dashboard/` backend: ensure the metrics endpoints return the ElastiCache
@@ -175,7 +175,7 @@ discovery. No SQL, no Data API, no cache-protocol connection in EC-1.
 - Collector: missing/empty CloudWatch series → store nothing for that metric
   (empty series tolerated downstream); never raise out of `_collect_one` for one
   resource (isolate per-resource like the existing collectors).
-- Dashboard: absent metrics → the panel shows an empty/`—` state (existing
+- Dashboard: absent metrics → the panel shows an empty / no-data state (existing
   panel-shell empty handling).
 
 ## Testing
@@ -194,7 +194,7 @@ discovery. No SQL, no Data API, no cache-protocol connection in EC-1.
   describe IAM; ETL Lambda unchanged structurally).
 - **Frontend**: `npm run build` clean; `engineFamily()` mirror test if present.
 - **OpenAPI**: if any new route is added, regenerate `frontend/public/openapi.json`
-  (`python tools/openapi_gen.py`) — route-table parity test. (EC-1 likely adds
+  (`python tools/openapi_gen.py`): route-table parity test. (EC-1 likely adds
   no new route; registration reuses `/api/clusters`.)
 
 ## Security

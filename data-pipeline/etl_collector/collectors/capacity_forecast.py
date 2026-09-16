@@ -1,8 +1,8 @@
-"""고갈 예측 경보 — storage/connection/ACU가 한계에 도달하는 ETA를 사전 경고.
+"""고갈 예측 경보: storage/connection/ACU가 한계에 도달하는 ETA를 사전 경고.
 
 대시보드의 Capacity Forecast 패널(_capacity_forecast)은 DBA가 직접 메트릭을
 골라 봐야 보인다. 이 collector는 그 예측을 매 수집 사이클에 자동으로 돌려,
-한계 도달이 임박(기본 14일 이내)하면 finding으로 띄운다 — DBA가 패널을
+한계 도달이 임박(기본 14일 이내)하면 finding으로 띄운다. DBA가 패널을
 들여다보지 않아도 "현 추세로 N일 후 connection 한도" 경고가 Maintenance
 Health에 능동적으로 올라온다.
 
@@ -13,7 +13,7 @@ Serverless v2 클러스터(엔진 불문)면 ServerlessDatabaseCapacity가 잡�
 
 선형 추세(REGR_SLOPE)를 실제 한계(connection=cluster_meta.max_connections,
 storage=Aurora 볼륨 상한 128 TiB)와 비교해 days_until을 계산한다. 추세가
-증가하지 않거나(slope≤0) 표본이 부족하면 침묵한다 — 노이즈로 거짓 경보를
+증가하지 않거나(slope≤0) 표본이 부족하면 침묵한다. 노이즈로 거짓 경보를
 내지 않는다. ETA가 가까울수록 심각도를 높인다(≤3일 critical, ≤7일 warning,
 ≤14일 info).
 
@@ -23,7 +23,7 @@ ACU는 특수 취급한다. Serverless v2의 ACU는 부하에 따라 하루에�
 "스케일 헤드룸 없음"(이미 천장), (2) peak가 상승 추세면 max ACU 도달 ETA를
 예측. 한계 = cluster_meta.serverlessv2_max_acu.
 
-캐시 전용(metric_snapshots, cluster_meta, cluster_settings) — cost_check /
+캐시 전용(metric_snapshots, cluster_meta, cluster_settings), cost_check /
 param_fitness와 동일 패턴. run_ts를 공유해 같은 사이클 finding과 한 배치로
 대시보드에 잡힌다.
 """
@@ -31,7 +31,7 @@ param_fitness와 동일 패턴. run_ts를 공유해 같은 사이클 finding과 
 import json
 from datetime import datetime, timezone
 
-# Aurora 클러스터 볼륨 상한(128 TiB) — 추정이 아닌 실제 플랫폼 한계.
+# Aurora 클러스터 볼륨 상한(128 TiB): 추정이 아닌 실제 플랫폼 한계.
 _AURORA_MAX_STORAGE_BYTES = 128 * 1024 ** 4
 
 ALERT_DAYS = 14          # 이 일수 이내 도달 예상이면 경보
@@ -40,12 +40,12 @@ SEV_CRIT_DAYS = 3
 SEV_WARN_DAYS = 7
 
 # 스토리지 소진(standalone RDS instance, FreeStorageSpace)은 커넥션이나 ACU보다
-# 느리게 차지만 디스크 full은 곧 인스턴스 다운이라 파급이 크다 — 더 긴 지평선
+# 느리게 차지만 디스크 full은 곧 인스턴스 다운이라 파급이 크다. 더 긴 지평선
 # (30일)에서 경고하고, 임박(14일 이내)하면 critical로 올린다.
 STORAGE_ALERT_DAYS = 30
 STORAGE_SEV_CRIT_DAYS = 14
 
-# ACU 예측 — 부하에 휘둘리는 원시 표본 대신 일별 peak로 천장 접근을 본다.
+# ACU 예측: 부하에 휘둘리는 원시 표본 대신 일별 peak로 천장 접근을 본다.
 ACU_SAT_FRAC = 0.95      # 일별 peak가 max ACU의 95% 이상이면 "포화"로 카운트
 ACU_MIN_DAYS = 3         # 일별 peak가 최소 3일치는 있어야 추세를 믿는다
 ACU_SAT_DAYS_FRAC = 0.6  # 관측일의 60% 이상이 포화면 "이미 천장" 경고
@@ -138,7 +138,7 @@ def collect_capacity_forecast(rds_data, cache_cluster_arn, cache_secret_arn, cac
     findings = []
     for metric_type, label, key in _FORECAST_METRICS:
         if key == "connections" and not max_conn:
-            continue  # 한계를 모르면 ETA 계산 불가 — 침묵
+            continue  # 한계를 모르면 ETA 계산 불가, 침묵
         rows = _execute(
             rds_data, cache_cluster_arn, cache_secret_arn, cache_db_name,
             "SELECT REGR_SLOPE(value::float, EXTRACT(EPOCH FROM ts) / 86400) AS slope, "
@@ -184,7 +184,7 @@ def collect_capacity_forecast(rds_data, cache_cluster_arn, cache_secret_arn, cac
                         + "을 검토하세요. "
                     )
                     if key == "connections" else
-                    "Aurora 스토리지는 자동 확장되지만 128 TiB가 하드 상한입니다 — "
+                    "Aurora 스토리지는 자동 확장되지만 128 TiB가 하드 상한입니다. "
                     "데이터 증가 원인(미사용 테이블, 로그 누적)을 점검하세요. "
                 )
                 + f"추세는 최근 {days_lookback}일 선형 회귀 기반이라 워크로드 변화 시 달라질 수 있습니다."
@@ -227,7 +227,7 @@ def collect_capacity_forecast(rds_data, cache_cluster_arn, cache_secret_arn, cac
         if acu_days >= ACU_MIN_DAYS:
             sat_ratio = sat_days / acu_days
             if sat_ratio >= ACU_SAT_DAYS_FRAC:
-                # (1) 이미 천장 — 며칠째 일별 peak가 max ACU 근처. 스케일 헤드룸 없음.
+                # (1) 이미 천장: 며칠째 일별 peak가 max ACU 근처. 스케일 헤드룸 없음.
                 findings.append({
                     "check_type": "capacity_forecast",
                     "severity": "critical",
@@ -236,7 +236,7 @@ def collect_capacity_forecast(rds_data, cache_cluster_arn, cache_secret_arn, cac
                     "threshold_str": f"{acu_days}일 중 {sat_days}일 max의 {ACU_SAT_FRAC*100:.0f}% 도달",
                     "recommendation": (
                         f"최근 {acu_days}일 중 {sat_days}일의 일별 peak ACU가 설정된 max "
-                        f"{max_acu:.1f} ACU의 {ACU_SAT_FRAC*100:.0f}% 이상에 도달했습니다 — "
+                        f"{max_acu:.1f} ACU의 {ACU_SAT_FRAC*100:.0f}% 이상에 도달했습니다. "
                         f"Serverless v2가 더 이상 위로 스케일할 헤드룸이 거의 없어, 수요가 더 "
                         f"몰리면 성능 저하(쿼리 지연, 연결 대기)로 이어집니다. "
                         f"serverlessv2_max_acu 상향을 검토하세요. ACU 상한은 비용 상한이기도 "
@@ -250,7 +250,7 @@ def collect_capacity_forecast(rds_data, cache_cluster_arn, cache_secret_arn, cac
                     }),
                 })
             elif acu_slope > 0 and latest_peak < max_acu:
-                # (2) 추세 상승 — 일별 peak가 오르며 max ACU 도달 ETA가 임박.
+                # (2) 추세 상승: 일별 peak가 오르며 max ACU 도달 ETA가 임박.
                 days_until = int((max_acu - latest_peak) / acu_slope)
                 if 0 <= days_until <= ALERT_DAYS:
                     severity = (

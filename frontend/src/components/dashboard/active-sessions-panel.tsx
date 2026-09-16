@@ -1,6 +1,6 @@
 "use client";
 
-// High-resolution (~5s) active-session timeline from the ASH sampler — catches
+// High-resolution (~5s) active-session timeline from the ASH sampler: catches
 // transient active/wait spikes the 5-min ETL misses. Reads active_session_samples
 // via /active-sessions (its own table + 7d retention, separate from metrics).
 
@@ -67,13 +67,13 @@ export function ActiveSessionsPanel({ clusterId }: { clusterId: string }) {
             활성 세션 (고해상 ~5초)
           </h2>
           <div className="text-[10px] text-zinc-500 mt-0.5">
-            최근 1시간, pg_stat_activity / processlist 5초 샘플 — 5분 ETL이
+            최근 1시간, pg_stat_activity / processlist 5초 샘플: 5분 ETL이
             놓치는 순간 스파이크 포착
           </div>
         </div>
         <div className="text-right">
           <div className="text-2xl font-semibold text-zinc-100">
-            {latest ? latest.active : "—"}
+            {latest ? latest.active : "-"}
           </div>
           <div className="text-[10px] text-zinc-500">
             현재, peak {peak}

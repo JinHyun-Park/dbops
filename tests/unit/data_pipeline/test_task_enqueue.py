@@ -1,4 +1,4 @@
-"""auto-RCA enqueue (alert_evaluator) — dedupe + payload + fail-safe.
+"""auto-RCA enqueue (alert_evaluator): dedupe + payload + fail-safe.
 
 The enqueue must: skip when a recent auto_rca already exists for the cluster
 (no duplicate RCAs on flapping alerts), write a well-formed pending row

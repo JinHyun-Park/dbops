@@ -19,7 +19,7 @@ function relTime(iso: string) {
 }
 
 // 변경 효과 판정: direction(lower/higher가 좋음)과 delta 방향을 결합.
-// |변화율| 5% 미만은 노이즈로 보고 중립 처리 — 작은 출렁임을 개선/악화로
+// |변화율| 5% 미만은 노이즈로 보고 중립 처리: 작은 출렁임을 개선/악화로
 // 과대 해석하지 않는다.
 function verdict(d: ChangeImpactDelta): "improve" | "regress" | "flat" {
   if (d.direction === "neutral") return "flat";
@@ -42,7 +42,7 @@ function DeltaChip({ d }: { d: ChangeImpactDelta }) {
   const pct =
     d.delta_pct !== null
       ? `${d.delta_pct > 0 ? "+" : ""}${fmtDecimal(d.delta_pct, 1)}%`
-      : "—";
+      : "-";
   return (
     <div
       className={`px-2 py-1 border text-[11px] ${VERDICT_STYLE[v]}`}

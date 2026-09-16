@@ -35,7 +35,7 @@ export const EN: Record<string, string> = {
   // ── App shell: nav hints ─────────────────────────────────────────────────
   "전체 클러스터 한눈에 트리아지": "Triage the whole fleet at a glance",
   "서비스별 DB 청사진": "Per-service DB blueprint",
-  "조치 효과 이력 — 입증된 권장 조치 우선":
+  "조치 효과 이력: 입증된 권장 조치 우선":
     "Remediation outcome history: proven actions rank first",
   "단일 클러스터 심층 분석": "Single-cluster deep dive",
   "클러스터 간, 기간 간 비교": "Cluster vs cluster, period vs period",
@@ -57,7 +57,7 @@ export const EN: Record<string, string> = {
     "Inject a failure scenario and let the real auto RCA work the cause",
   "알림, 이벤트, 쓰기 통합 인시던트 피드":
     "One incident feed: alerts, events, writes",
-  "누가 무엇을 승인하고 실행했는지 — 감사와 회고용":
+  "누가 무엇을 승인하고 실행했는지: 감사와 회고용":
     "Who approved and ran what, for audit and retro",
   "두 시점 사이 쿼리 워크로드 변화":
     "Query workload change between two points in time",
@@ -66,18 +66,18 @@ export const EN: Record<string, string> = {
   "정기 운영 요약 리포트": "Scheduled operations summary reports",
   "모델별 Bedrock 비용": "Bedrock cost by model",
   "에이전트가 기억하는 내용": "What the agent remembers about you",
-  "기능 토글 — 티켓팅과 리포트 전달 (관리자)":
+  "기능 토글: 티켓팅과 리포트 전달 (관리자)":
     "Feature toggles for ticketing and report delivery (admin)",
-  "지정 승인자 라우팅 — 클러스터와 액션별 승인자 (관리자)":
+  "지정 승인자 라우팅: 클러스터와 액션별 승인자 (관리자)":
     "Designated approver routing, per cluster and action (admin)",
-  "사용자 역할 관리 — admin/viewer (관리자)":
+  "사용자 역할 관리: admin/viewer (관리자)":
     "User role management, admin / viewer (admin)",
-  "팀 관리 — 멤버와 클러스터 가시성 (관리자)":
+  "팀 관리: 멤버와 클러스터 가시성 (관리자)":
     "Team management: members and cluster visibility (admin)",
   "에이전트 참조 컨텍스트 업로드 (관리자)":
     "Upload reference context for the agent (admin)",
   "멤버 계정 연결 위저드 (관리자)": "Member account onboarding wizard (admin)",
-  "DBOps 자체 모니터링 — Lambda, Aurora, DDB 상태":
+  "DBOps 자체 모니터링: Lambda, Aurora, DDB 상태":
     "DBOps self-monitoring: Lambda, Aurora, DynamoDB status",
 
   // ── PageHeader eyebrows ──────────────────────────────────────────────────
@@ -106,13 +106,13 @@ export const EN: Record<string, string> = {
   "API 문서": "API reference",
 
   // ── PageHeader descriptions ──────────────────────────────────────────────
-  "기능 토글 — 티켓팅 연동과 리포트 전달 제어 (관리자 전용)":
+  "기능 토글: 티켓팅 연동과 리포트 전달 제어 (관리자 전용)":
     "Feature toggles for the ticketing integration and report delivery (admin only).",
-  "기능 토글 — 티켓팅 연동과 리포트 전달 제어. 변경 사항은 즉시 적용됩니다.":
+  "기능 토글: 티켓팅 연동과 리포트 전달 제어. 변경 사항은 즉시 적용됩니다.":
     "Feature toggles for the ticketing integration and report delivery. Changes take effect immediately.",
   "EXPLAIN 버튼은 plan tree를 바로 렌더링하고, AI 분석은 SQL을 agent에 보내 자연어 해석을 받아옵니다.":
     "EXPLAIN renders the plan tree directly; AI analysis sends the SQL to the agent and returns a plain-language reading of it.",
-  "AgentCore Memory에 저장된 당신의 선호와 사실. 잘못된 정보가 박혀 있으면 여기서 삭제하세요 — 이후 대화부터 다시 학습됩니다.":
+  "AgentCore Memory에 저장된 당신의 선호와 사실. 잘못된 정보가 박혀 있으면 여기서 삭제하세요. 이후 대화부터 다시 학습됩니다.":
     "The preferences and facts AgentCore Memory holds about you. Delete anything wrong here and the agent relearns it from later conversations.",
   "클러스터를 하나씩 열지 않고 전체 RCA 리포트를 한 화면에서 읽습니다. 최근 도착한 리포트가 위에 오고, 마지막 방문 이후 도착한 리포트에는 표시가 붙습니다.":
     "Read every RCA report in one place instead of opening clusters one by one. The newest arrivals come first, and anything published since your last visit on this browser is marked.",
@@ -120,30 +120,30 @@ export const EN: Record<string, string> = {
     "Counted against your last visit on this browser. Not a read/unread state.",
   "자연어로 '최근 24h CPU 80% 넘은 클러스터' 처럼 물어보면 즉시 필터 결과를 카드로 보여줍니다. 필터는 편집 + 저장 가능.":
     'Ask in plain language, such as "clusters over 80% CPU in the last 24h", and get the matching clusters as cards. Filters can be edited and saved.',
-  "DBOps에서 일어난 모든 쓰기 의사결정의 시간순 기록 — 누가 요청했고 누가 승인했고 언제 실행됐는지. 컴플라이언스 감사와 사후 회고 (post-incident retro) 용도.":
+  "DBOps에서 일어난 모든 쓰기 의사결정의 시간순 기록: 누가 요청했고 누가 승인했고 언제 실행됐는지. 컴플라이언스 감사와 사후 회고 (post-incident retro) 용도.":
     "Every write decision made in DBOps, in order: who asked, who approved, when it ran. Built for compliance audits and post-incident retros.",
-  "권장 조치가 실제로 증상을 해소했는지 자동 측정해 누적한 효과 이력 — 입증된 조치를 우선합니다.":
+  "권장 조치가 실제로 증상을 해소했는지 자동 측정해 누적한 효과 이력: 입증된 조치를 우선합니다.":
     "Outcome history built by automatically measuring whether a recommended action actually cleared the symptom. Proven actions rank first.",
-  "DBOps 자체의 운영 상태 — Lambda 함수, Aurora cache, DynamoDB 테이블의 상태를 한 화면에. 30초마다 자동 새로고침.":
+  "DBOps 자체의 운영 상태: Lambda 함수, Aurora cache, DynamoDB 테이블의 상태를 한 화면에. 30초마다 자동 새로고침.":
     "DBOps' own operational state: Lambda functions, the Aurora cache and the DynamoDB tables on one screen. Auto-refreshes every 30s.",
   "Aurora 클러스터 등록과 cross-account 연결 관리. 메트릭/실시간 상태는 Fleet 또는 Dashboard에서 확인하세요.":
     "Register Aurora clusters and manage cross-account connections. For metrics and live state, use Fleet or Dashboard.",
-  "계정의 Aurora/RDS 비용 — Cost Explorer로 사용 유형(Aurora I/O, 스토리지, 인스턴스 시간, 백업)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다.":
+  "계정의 Aurora/RDS 비용: Cost Explorer로 사용 유형(Aurora I/O, 스토리지, 인스턴스 시간, 백업)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다.":
     "Account-wide Aurora / RDS cost, broken down by usage type (Aurora I/O, storage, instance hours, backup) through Cost Explorer. Per-cluster breakdown needs cost-allocation tags enabled. CE lags about 24 hours.",
-  "DBOps 자체를 운영하는 데 드는 전체 비용 — Application=DBOps 태그가 붙은 모든 리소스(Lambda, 캐시 Aurora, DynamoDB, CloudFront, AgentCore 등)를 서비스별로 분해합니다. 모니터링 대상 고객 DB 클러스터는 포함되지 않습니다.":
+  "DBOps 자체를 운영하는 데 드는 전체 비용: Application=DBOps 태그가 붙은 모든 리소스(Lambda, 캐시 Aurora, DynamoDB, CloudFront, AgentCore 등)를 서비스별로 분해합니다. 모니터링 대상 고객 DB 클러스터는 포함되지 않습니다.":
     "What it costs to run DBOps itself: every resource tagged Application=DBOps (Lambda, the cache Aurora, DynamoDB, CloudFront, AgentCore) broken down by service. The monitored database clusters are not included.",
-  "계정 전체 Bedrock 토큰 사용량(모델별) — CloudWatch AWS/Bedrock 메트릭 기반. 태그 필터 불가로 계정 전체 집계입니다.":
+  "계정 전체 Bedrock 토큰 사용량(모델별): CloudWatch AWS/Bedrock 메트릭 기반. 태그 필터 불가로 계정 전체 집계입니다.":
     "Account-wide Bedrock token usage by model, from the CloudWatch AWS/Bedrock metrics. These metrics cannot be tag-filtered, so the total is account-wide.",
-  "계정의 ElastiCache 비용 — Cost Explorer로 사용 유형(노드 시간, 데이터 스토리지, I/O)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다.":
+  "계정의 ElastiCache 비용: Cost Explorer로 사용 유형(노드 시간, 데이터 스토리지, I/O)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다.":
     "Account-wide ElastiCache cost, broken down by usage type (node hours, data storage, I/O) through Cost Explorer. Per-cluster breakdown needs cost-allocation tags enabled. CE lags about 24 hours.",
-  "등록된 Aurora 계정의 Reserved Instance / Savings Plan 현황 — 스케일링 권장이 RI 커버리지를 깨뜨려 오히려 비용이 늘지 않는지 확인합니다. 만료 임박, 미사용 RI를 함께 표시합니다.":
+  "등록된 Aurora 계정의 Reserved Instance / Savings Plan 현황: 스케일링 권장이 RI 커버리지를 깨뜨려 오히려 비용이 늘지 않는지 확인합니다. 만료 임박, 미사용 RI를 함께 표시합니다.":
     "Reserved Instance and Savings Plan coverage across the registered Aurora accounts, so a scaling recommendation does not break coverage and cost more. Expiring and unused RIs are called out.",
-  "DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다.":
+  "DBOps 호출의 Bedrock 비용: Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다.":
     "Bedrock cost for DBOps' own calls, routed through an Application Inference Profile tagged Application=DBOps. Cost Explorer reflects it after about 24 hours.",
   "사용자 역할 관리 (관리자 전용)": "User role management (admin only).",
   "사용자 목록과 역할(admin/viewer)을 관리합니다. 변경 사항은 즉시 적용됩니다.":
     "Manage the user list and each user's role (admin / viewer). Changes take effect immediately.",
-  "팀 관리 — 멤버와 클러스터 가시성 (관리자 전용)":
+  "팀 관리: 멤버와 클러스터 가시성 (관리자 전용)":
     "Team management: members and cluster visibility (admin only).",
   "팀을 만들고 멤버와 클러스터 가시성을 관리합니다.":
     "Create teams and manage their members and cluster visibility.",
@@ -153,11 +153,11 @@ export const EN: Record<string, string> = {
     "Manage the reference context files the agent reads (admin only).",
   "에이전트가 작업할 때 참조하는 운영 컨텍스트 파일을 관리합니다. 업로드한 내용은 매 호출마다 에이전트에 참조 데이터로 주입되며, 명령(command)으로 해석되지 않습니다.":
     "Manage the operational context files the agent reads while it works. Uploaded content is injected on every call as reference data, never interpreted as a command.",
-  "단일 클러스터 deep dive — 시계열, wait events, locks, vacuum, schema changes 등 17개 패널.":
+  "단일 클러스터 deep dive: 시계열, wait events, locks, vacuum, schema changes 등 17개 패널.":
     "Single-cluster deep dive: 17 panels covering time series, wait events, locks, vacuum and schema changes.",
   "현재 클러스터의 외래키(FK) 관계를 라이브로 추출해 표 의존성을 시각화합니다. PostgreSQL 전용.":
     "Reads the current cluster's foreign keys live and draws the table dependency graph. PostgreSQL only.",
-  "계정의 DB를 Region → VPC로 묶어 본 아키텍처 청사진 — 노드를 클릭하면 해당 대시보드로 이동하고 전역 선택이 바뀝니다.":
+  "계정의 DB를 Region → VPC로 묶어 본 아키텍처 청사진: 노드를 클릭하면 해당 대시보드로 이동하고 전역 선택이 바뀝니다.":
     "An architecture blueprint of the account's databases grouped Region to VPC. Clicking a node opens its dashboard and moves the global selection.",
   "업그레이드, 파라미터, 스케일링, DDL 영향을 실제 실행 전에 추정합니다. 모든 결과는 추정치이며 프로덕션 적용 전 별도 검증 필수.":
     "Estimates the impact of an upgrade, a parameter change, scaling or a DDL before you run it. Every number is an estimate and needs its own check before production.",
@@ -165,7 +165,7 @@ export const EN: Record<string, string> = {
     "One click injects realistic failure signals and the real auto RCA works out the cause and the fix.",
   "멀티 클러스터 비교 또는 같은 클러스터의 시간대별 변화를 사이드바이사이드로 확인.":
     "Compare clusters side by side, or the same cluster across two time windows.",
-  "두 시점의 쿼리 워크로드(pg_stat_statements)를 비교 — 배포 이후 새로 등장한 쿼리, 갑자기 느려진 쿼리, 사라진 쿼리를 자동 검출. '배포하고 느려졌다'는 신고에 30초 안에 용의자를 좁힙니다.":
+  "두 시점의 쿼리 워크로드(pg_stat_statements)를 비교: 배포 이후 새로 등장한 쿼리, 갑자기 느려진 쿼리, 사라진 쿼리를 자동 검출. '배포하고 느려졌다'는 신고에 30초 안에 용의자를 좁힙니다.":
     'Diffs the query workload (pg_stat_statements) between two points in time: queries that appeared, regressed or vanished after a deploy. Narrows down a "it got slow after the release" report in about 30 seconds.',
   "리더 추가(scale-out)와 자동 버퍼풀 예열 작업의 진행 상태입니다. 예열이 시작되기 전(리더 생성 중, 승인 대기)인 작업은 취소할 수 있습니다.":
     "Progress of reader scale-out and automatic buffer-pool warmup. Anything that has not started warming yet (reader provisioning, awaiting approval) can still be cancelled.",
@@ -177,7 +177,7 @@ export const EN: Record<string, string> = {
     "The gate where a DBA reviews and approves changes proposed by the agent or the dashboard (DDL, parameter, scaling, maintenance, snapshot / restore, enabling the Data API). The Approved tab also lists requests that have already been consumed.",
   "클러스터와 액션별 지정 승인자 라우팅 (관리자 전용)":
     "Designated approver routing per cluster and action (admin only).",
-  "클러스터와 액션 타입별로 지정 승인자를 라우팅합니다. 매칭된 정책이 있으면 목록에 없는 관리자는 승인 불가 — 미매칭 요청은 모든 관리자에게 fallback.":
+  "클러스터와 액션 타입별로 지정 승인자를 라우팅합니다. 매칭된 정책이 있으면 목록에 없는 관리자는 승인 불가. 미매칭 요청은 모든 관리자에게 fallback.":
     "Routes approvals to designated approvers per cluster and action type. Once a policy matches, admins outside its list cannot approve; unmatched requests fall back to every admin.",
   "단일 cluster의 모든 운영 신호를 시간축 한 줄에. 알림 발화, RDS 이벤트, 스키마 변경, 실행된 쓰기 작업이 모두 같은 흐름에 보입니다. 사고 시점 컨텍스트를 한 화면에 잡아두는 용도.":
     "Every operational signal for one cluster on a single time axis: alert firings, RDS events, schema changes and executed writes in the same stream. Built to hold the context of an incident on one screen.",
@@ -185,7 +185,7 @@ export const EN: Record<string, string> = {
     "Member account onboarding wizard (admin only).",
   "멤버 AWS 계정에 스포크 역할을 배포하고 DBOps Hub에 연결합니다.":
     "Deploys the spoke role into a member AWS account and connects it to the DBOps hub.",
-  "DBOps REST API. 모든 경로는 Cognito JWT(Authorization: Bearer)가 필요합니다 — Slack 웹훅(HMAC)과 /health 제외.":
+  "DBOps REST API. 모든 경로는 Cognito JWT(Authorization: Bearer)가 필요합니다. Slack 웹훅(HMAC)과 /health 제외.":
     "The DBOps REST API. Every route needs a Cognito JWT (Authorization: Bearer), except the Slack webhooks (HMAC) and /health.",
   // Interpolated headers: {n} is substituted at the call site so the rendered
   // Korean stays byte-identical to what it was before the wrap.

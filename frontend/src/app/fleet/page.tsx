@@ -118,7 +118,7 @@ function persistSavedViews(views: SavedView[]): void {
   try {
     window.localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(views));
   } catch {
-    /* private mode / quota — keep state in memory only */
+    /* private mode / quota: keep state in memory only */
   }
 }
 
@@ -134,7 +134,7 @@ export default function FleetPage() {
   const t = useT();
   const [rows, setRows] = useState<ClusterRow[]>([]);
   const [demoIds, setDemoIds] = useState<Set<string>>(new Set());
-  // Registry account/region keyed by cluster_id — only used for Group by.
+  // Registry account/region keyed by cluster_id. Only used for Group by.
   const [meta, setMeta] = useState<Map<string, RegistryMeta>>(new Map());
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -161,7 +161,7 @@ export default function FleetPage() {
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [viewName, setViewName] = useState("");
 
-  // Hydrate filters from the URL once on mount (client-only — static export).
+  // Hydrate filters from the URL once on mount (client-only, static export).
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     setQ(sp.get("q") || "");
@@ -175,7 +175,7 @@ export default function FleetPage() {
     setSavedViews(loadSavedViews());
   }, []);
 
-  // Reflect filters back into the URL (replace, not push — no history spam).
+  // Reflect filters back into the URL (replace, not push: no history spam).
   useEffect(() => {
     const sp = new URLSearchParams();
     if (q) sp.set("q", q);
@@ -305,7 +305,7 @@ export default function FleetPage() {
     [q, engine, status, level, eolOnly, groupBy],
   );
 
-  // The slice actually rendered — a no-op when the fleet fits under the cap.
+  // The slice actually rendered, a no-op when the fleet fits under the cap.
   const capped = useMemo(() => view.slice(0, rowCap), [view, rowCap]);
 
   const filtersActive = !!q || !!engine || !!status || !!level || eolOnly;
@@ -435,7 +435,7 @@ export default function FleetPage() {
           here would be a competing history. */}
       <NewRcaSummary />
 
-      {/* Triage summary band — clickable to filter the table to that bucket. */}
+      {/* Triage summary band: clickable to filter the table to that bucket. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-4">
         <SummaryChip
           label="전체"
@@ -592,7 +592,7 @@ export default function FleetPage() {
         </div>
       ) : (
         <>
-          {/* Mobile card stack — severity-sorted, with a left accent bar. */}
+          {/* Mobile card stack: severity-sorted, with a left accent bar. */}
           <div className="md:hidden space-y-3">
             {groupBy === "none"
               ? capped.map((d) => (
@@ -620,7 +620,7 @@ export default function FleetPage() {
                 })}
           </div>
 
-          {/* Desktop table — severity column leads; default sort is severity. */}
+          {/* Desktop table: severity column leads; default sort is severity. */}
           <div className="block max-md:hidden bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-zinc-900/50 border-b border-zinc-700">
@@ -718,7 +718,7 @@ export default function FleetPage() {
             </table>
           </div>
 
-          {/* Render cap footer — only when the filtered view exceeds the cap, so
+          {/* Render cap footer: only when the filtered view exceeds the cap, so
               a small fleet renders nothing extra (zero overhead). */}
           {view.length > rowCap && (
             <div className="flex flex-wrap items-center gap-3 mt-4 text-xs">
@@ -1075,27 +1075,27 @@ function FleetCard({ d, demoIds }: { d: Decorated; demoIds: Set<string> }) {
       <div className="grid grid-cols-3 gap-2 text-xs font-mono tabular-nums">
         <MobileStat
           label="CPU"
-          value={c.cpu === null ? "—" : cpu.toFixed(1)}
+          value={c.cpu === null ? "-" : cpu.toFixed(1)}
           tone={severityColor(cpu, 70, 90)}
         />
         <MobileStat
           label="AAS"
-          value={c.aas === null ? "—" : aas.toFixed(2)}
+          value={c.aas === null ? "-" : aas.toFixed(2)}
           tone={severityColor(aas, 2, 5)}
         />
-        <MobileStat label="Conn" value={conn ? String(conn) : "—"} />
+        <MobileStat label="Conn" value={conn ? String(conn) : "-"} />
         <MobileStat
           label="Storage"
-          value={c.storage_bytes ? fmtBytes(n(c.storage_bytes)) : "—"}
+          value={c.storage_bytes ? fmtBytes(n(c.storage_bytes)) : "-"}
         />
         <MobileStat
           label="Deadlocks"
-          value={dlk ? String(dlk) : "—"}
+          value={dlk ? String(dlk) : "-"}
           tone={dlk ? "text-rose-400" : "text-zinc-500"}
         />
         <MobileStat
           label="Blocks"
-          value={blk ? String(blk) : "—"}
+          value={blk ? String(blk) : "-"}
           tone={blk ? "text-rose-400" : "text-zinc-500"}
         />
       </div>
@@ -1103,7 +1103,7 @@ function FleetCard({ d, demoIds }: { d: Decorated; demoIds: Set<string> }) {
   );
 }
 
-// "🔴 2, 🟡 1" style rollup — only non-zero buckets, worst-first.
+// "🔴 2, 🟡 1" style rollup: only non-zero buckets, worst-first.
 function groupRollup(rows: Decorated[]): string {
   let critical = 0,
     warning = 0,
@@ -1253,7 +1253,7 @@ const DOT_TONE: Record<Level, string> = {
 
 function SeverityDot({ level, reasons }: { level: Level; reasons: string[] }) {
   const title =
-    level === "ok" ? "정상" : `${level.toUpperCase()} — ${reasons.join(", ")}`;
+    level === "ok" ? "정상" : `${level.toUpperCase()}: ${reasons.join(", ")}`;
   return (
     <span
       title={title}

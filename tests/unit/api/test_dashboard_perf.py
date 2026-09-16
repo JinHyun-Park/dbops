@@ -1,9 +1,9 @@
 """Tests for dashboard latency/throttle hardening:
 
-  1. _overview — the four cache-DB reads now fan out across a thread pool
+  1. _overview: the four cache-DB reads now fan out across a thread pool
      instead of running serially. Result SHAPE and the cold-resource registry
      fallback must be byte-for-byte unchanged; all four queries must still run.
-  2. _cached_live — warm-container TTL cache that fronts the expensive
+  2. _cached_live: warm-container TTL cache that fronts the expensive
      cross-account live-describe endpoints (topology/backups/engine-config).
      Bounds the rds:Describe* / cloudwatch:GetMetric* / sts:AssumeRole call
      rate so concurrent dashboard pollers don't exhaust region-level quotas.
@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 # ---------------------------------------------------------------------------
-# Module loading — mirror test_dashboard_engine_gating.py so engine_family
+# Module loading: mirror test_dashboard_engine_gating.py so engine_family
 # resolves and module-import env vars are satisfied.
 # ---------------------------------------------------------------------------
 
@@ -46,13 +46,13 @@ def _clear_live_cache():
 
 
 # ===========================================================================
-# 1. _overview — parallel fan-out preserves structure + runs all four reads
+# 1. _overview: parallel fan-out preserves structure + runs all four reads
 # ===========================================================================
 
 def test_overview_parallel_runs_all_four_reads_and_preserves_shape():
     """All four cache-DB reads must execute (one per table) and the returned
     dict must keep the exact {cluster, metrics, top_queries, events} shape the
-    frontend depends on — regardless of the now-concurrent execution."""
+    frontend depends on, regardless of the now-concurrent execution."""
     seen = []
     lock = threading.Lock()
 
@@ -136,7 +136,7 @@ def test_overview_parallel_propagates_query_error():
 
 
 # ===========================================================================
-# 2. _cached_live — warm-container TTL cache
+# 2. _cached_live: warm-container TTL cache
 # ===========================================================================
 
 # ===========================================================================
@@ -226,7 +226,7 @@ class _Clock:
 
 def test_cached_live_serves_from_cache_within_ttl(monkeypatch):
     """Producer runs once; a second call within the TTL is served from cache
-    (the producer is NOT re-invoked) — this is what caps the live-AWS rate."""
+    (the producer is NOT re-invoked): this is what caps the live-AWS rate."""
     clock = _Clock()
     monkeypatch.setattr(handler.time, "monotonic", clock)
 
@@ -280,7 +280,7 @@ def test_cached_live_keys_are_isolated(monkeypatch):
 def test_cached_live_error_uses_short_negative_ttl(monkeypatch):
     """An error-shaped result (dict with truthy 'error') is cached only for the
     short negative TTL, so a transient describe failure doesn't pin a panel for
-    the full minute — but is still throttled below every-poll."""
+    the full minute, but is still throttled below every-poll."""
     clock = _Clock()
     monkeypatch.setattr(handler.time, "monotonic", clock)
 
@@ -305,7 +305,7 @@ def test_cached_live_error_uses_short_negative_ttl(monkeypatch):
 
 def test_cached_live_caches_producer_exception_and_throttles(monkeypatch):
     """When producer() RAISES (e.g. sts:AssumeRole / rds:Describe* throttle),
-    the failure is cached for the negative TTL and re-raised on hits — so a
+    the failure is cached for the negative TTL and re-raised on hits, so a
     hard-failing cluster isn't retried live on every poll (the thundering-herd
     the cache exists to prevent). The exception still propagates (preserving the
     routing-layer 500), it's just throttled."""
@@ -349,7 +349,7 @@ def test_cached_live_negative_ttl_measured_after_producer(monkeypatch):
         return {"error": "describe slow-failed"}
 
     handler._cached_live("backups:slow", 55, _slow_error)
-    # 2s after the producer returned — well inside the 5s negative TTL even
+    # 2s after the producer returned, well inside the 5s negative TTL even
     # though the call itself took 10s. If the timestamp were captured BEFORE the
     # call, the entry would already be expired and the producer would re-run.
     clock.advance(2)
@@ -358,7 +358,7 @@ def test_cached_live_negative_ttl_measured_after_producer(monkeypatch):
 
 
 def test_cached_live_size_cap_drops_cache_on_overflow(monkeypatch):
-    """A pathological key explosion can't pin a warm container's memory — once
+    """A pathological key explosion can't pin a warm container's memory: once
     the cache hits _LIVE_CACHE_MAX, inserting a new key clears it first."""
     clock = _Clock()
     monkeypatch.setattr(handler.time, "monotonic", clock)
@@ -376,7 +376,7 @@ def test_cached_live_size_cap_drops_cache_on_overflow(monkeypatch):
 
 def test_cached_live_success_after_error_gets_full_ttl(monkeypatch):
     """A success following a cached error gets the FULL ttl (not the negative
-    one) — the negative TTL must not stick to the key permanently."""
+    one): the negative TTL must not stick to the key permanently."""
     clock = _Clock()
     monkeypatch.setattr(handler.time, "monotonic", clock)
 

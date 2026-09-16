@@ -150,7 +150,7 @@ def _resolve_node_ids(ec, resource_name, errors):
             if members:
                 return members
     except Exception:
-        pass  # not a replication group / no access — fall through to the name
+        pass  # not a replication group / no access, fall through to the name
     return [resource_name]
 
 
@@ -168,7 +168,7 @@ def collect_elasticache_metrics(cw, ec, cache_execute, cluster_id, resource_name
     metrics = _MEMCACHED_METRICS if eng == "memcached" else _REDIS_METRICS
 
     # AWS/ElastiCache publishes metrics per NODE under CacheClusterId=<node-id>
-    # (e.g. "<rg>-001"), NOT under the replication-group id — querying the RG id
+    # (e.g. "<rg>-001"), NOT under the replication-group id: querying the RG id
     # returns zero datapoints. Resolve the member node ids and query each.
     node_ids = _resolve_node_ids(ec, resource_name, errors)
 

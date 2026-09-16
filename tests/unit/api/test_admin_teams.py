@@ -1,4 +1,4 @@
-"""Tests for the admin Teams management handler (Task 3 — multi-team tenancy)."""
+"""Tests for the admin Teams management handler (Task 3, multi-team tenancy)."""
 
 import base64
 import importlib.util
@@ -302,7 +302,7 @@ def test_assign_cluster_to_nonexistent_team_404():
     assert not clusters.update_item.called
 
 
-# ---------- delete team — clears clusters + members ----------
+# ---------- delete team: clears clusters + members ----------
 
 def test_admin_delete_team_clears_clusters_and_members():
     t = _load()

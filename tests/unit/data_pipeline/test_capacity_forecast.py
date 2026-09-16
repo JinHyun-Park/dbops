@@ -26,7 +26,7 @@ cf = _load()
 
 
 def _mock_execute(max_conn, conn_regr):
-    """conn_regr: dict(slope, latest, samples) — db_connections 회귀 결과.
+    """conn_regr: dict(slope, latest, samples), db_connections 회귀 결과.
     storage는 평탄(slope 0)으로 둬 connection 규칙만 검증."""
     def fake(rds, arn, secret, db, sql, params=None):
         if "FROM cluster_meta" in sql:
@@ -162,9 +162,9 @@ _GB = 1024 ** 3
 def _mock_execute_storage(fs_agg, alloc_gb):
     """standalone RDS instance 전용 mock.
     connection/storage_bytes 루프와 ACU는 평탄/미상으로 둬 storage_exhaustion만 검증.
-    fs_agg: dict(slope, latest, samples) — free_storage_bytes 회귀 결과."""
+    fs_agg: dict(slope, latest, samples) 형태의 free_storage_bytes 회귀 결과."""
     def fake(rds, arn, secret, db, sql, params=None):
-        # allocated_storage_gb 조회 (resource_details) — cluster_meta 앞에서 먼저 매칭.
+        # allocated_storage_gb 조회 (resource_details): cluster_meta 앞에서 먼저 매칭.
         if "resource_details" in sql:
             return [{"gb": str(alloc_gb)}] if alloc_gb else [{"gb": None}]
         if "FROM cluster_meta" in sql:

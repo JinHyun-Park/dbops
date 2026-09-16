@@ -1,18 +1,18 @@
-"""Query latency-regression findings — catch queries whose plan likely flipped.
+"""Query latency-regression findings: catch queries whose plan likely flipped.
 
 pganalyze-style plan-history needs auto-EXPLAIN of every top query (param
 handling + planner load on the target). We get most of that value cheaply from
 data already in the cache: query_stats stores per-query (calls, total_time_ms)
 each ETL run for PG (pg_stat_statements) AND MySQL (the mysql stats collector).
 
-pg_stat_statements' mean_exec_time is the LIFETIME average — a regression gets
-diluted by history — so we compute the per-INTERVAL mean from consecutive
+pg_stat_statements' mean_exec_time is the LIFETIME average (a regression gets
+diluted by history), so we compute the per-INTERVAL mean from consecutive
 snapshots (Δtotal_time / Δcalls) and flag a query whose recent interval mean is
 >= 2x its median interval mean over the lookback. No EXPLAIN, no target-DB load.
 
 ponytail: median baseline over a 24h window; if noise shows up, widen the window
 or require N consecutive regressed intervals. Plan-HASH capture (confirm it's a
-plan flip vs data growth) is the heavier upgrade — add when the latency signal
+plan flip vs data growth) is the heavier upgrade: add when the latency signal
 alone isn't enough.
 """
 
@@ -117,7 +117,7 @@ def collect_query_regression(rds_data, cache_cluster_arn, cache_secret_arn, cach
             "value_str": f"{recent:.0f}ms (×{ratio:.1f})",
             "threshold_str": f"기준 {baseline:.0f}ms",
             "recommendation": (
-                "쿼리 구간 평균 실행시간이 기준 대비 크게 느려졌습니다 — 플랜 리그레션 또는 "
+                "쿼리 구간 평균 실행시간이 기준 대비 크게 느려졌습니다. 플랜 리그레션 또는 "
                 "데이터 증가가 의심됩니다. Query Lab에서 EXPLAIN으로 현재 플랜을 확인하고, "
                 "필요하면 인덱스/통계(ANALYZE)를 점검하세요."),
             "details": "{}",

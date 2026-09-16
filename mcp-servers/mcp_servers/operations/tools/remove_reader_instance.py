@@ -1,11 +1,11 @@
-"""remove_reader_instance — approval-gated Aurora reader scale-IN (N-③).
+"""remove_reader_instance: approval-gated Aurora reader scale-IN (N-③).
 
 Removes a READER instance from an Aurora cluster. The handler positive-gates
 this tool on the relational-only `scale_instance` capability, so non-relational
 engines get unsupported_engine before the impl runs.
 
 SAFETY: the target must be a READER member of THIS cluster and must not be the
-cluster's only instance — the writer is never deletable and a cluster is never
+cluster's only instance: the writer is never deletable and a cluster is never
 left with 0 instances.
 
 FAIL-CLOSED like every write tool: verify_approval must pass before any RDS
@@ -88,7 +88,7 @@ def remove_reader_instance_impl(
     except Exception as e:
         print(f"[remove_reader_instance] describe_db_clusters failed for {cluster_id}: {e}")
         return {"status": "remove_failed", "cluster_id": cluster_id,
-                "reason": "클러스터 조회에 실패했습니다 — 대상 클러스터 식별자를 확인하세요."}
+                "reason": "클러스터 조회에 실패했습니다. 대상 클러스터 식별자를 확인하세요."}
 
     members = dbc.get("DBClusterMembers") or []
     target = next((m for m in members if m.get("DBInstanceIdentifier") == instance_id), None)
@@ -110,7 +110,7 @@ def remove_reader_instance_impl(
     except Exception as e:
         print(f"[remove_reader_instance] pre-delete re-describe failed for {cluster_id}: {e}")
         return {"status": "remove_failed", "cluster_id": cluster_id,
-                "reason": "삭제 직전 클러스터 재확인에 실패했습니다 — 안전을 위해 삭제하지 않았습니다."}
+                "reason": "삭제 직전 클러스터 재확인에 실패했습니다. 안전을 위해 삭제하지 않았습니다."}
     fresh_members = fresh.get("DBClusterMembers") or []
     fresh_target = next(
         (m for m in fresh_members if m.get("DBInstanceIdentifier") == instance_id), None)
@@ -125,7 +125,7 @@ def remove_reader_instance_impl(
                 "reason": "마지막 인스턴스는 삭제할 수 없습니다."}
 
     try:
-        # Aurora cluster instances take no final snapshot — do NOT pass
+        # Aurora cluster instances take no final snapshot: do NOT pass
         # SkipFinalSnapshot (the API rejects it for cluster members).
         rds.delete_db_instance(DBInstanceIdentifier=instance_id)
     except Exception as e:

@@ -1,6 +1,6 @@
 -- v6: Maintenance Health findings.
 --
--- The dashboard panel is "findings-driven" — instead of multiple specialty
+-- The dashboard panel is "findings-driven": instead of multiple specialty
 -- panels (txid age, dead tuples, missing extensions, misconfigured logging
 -- params), the collector emits one row per detected issue. Front-end ranks
 -- by severity and surfaces an AI-explain action per row.

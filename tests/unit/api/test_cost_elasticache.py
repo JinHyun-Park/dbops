@@ -78,7 +78,7 @@ def _grouped_resp(groups_per_day):
 
 
 # ---------------------------------------------------------------------------
-# SERVICE discovery — keeps only ElastiCache-looking names, else falls back
+# SERVICE discovery: keeps only ElastiCache-looking names, else falls back
 # ---------------------------------------------------------------------------
 
 
@@ -114,7 +114,7 @@ def test_elasticache_services_falls_back_on_exception(mod):
 
 
 # ---------------------------------------------------------------------------
-# Full ElastiCache view envelope — shape + per_cluster_available flag + note
+# Full ElastiCache view envelope: shape + per_cluster_available flag + note
 # ---------------------------------------------------------------------------
 
 

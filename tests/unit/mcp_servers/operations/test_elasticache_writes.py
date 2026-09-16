@@ -1,4 +1,4 @@
-"""ElastiCache write tools — approval-gated, FAIL-CLOSED."""
+"""ElastiCache write tools: approval-gated, FAIL-CLOSED."""
 import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock

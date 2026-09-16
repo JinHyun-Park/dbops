@@ -9,7 +9,7 @@ fix to one is never shipped without the other.
 
 Only the module docstring is allowed to differ (the api copy carries an extra
 NOTE explaining the no-mcp_servers rule); EVERYTHING after the module docstring
-— imports and all code — MUST be identical. (Comparing only from `import boto3`
+(imports and all code) MUST be identical. (Comparing only from `import boto3`
 onward would miss a divergence in an earlier line like `import json`, so we
 strip exactly the leading docstring and compare the entire remainder.)
 """
@@ -49,6 +49,6 @@ def test_pricing_bodies_are_identical_after_docstring():
     replica = _code_after_docstring(_REPLICA)
     assert canonical == replica, (
         "rds_instance_pricing.py copies diverged (mcp_servers/shared vs "
-        "api/simulation). Any change to one MUST be mirrored in the other — "
+        "api/simulation). Any change to one MUST be mirrored in the other: "
         "they price real money and api/ cannot import mcp_servers. Re-sync them."
     )

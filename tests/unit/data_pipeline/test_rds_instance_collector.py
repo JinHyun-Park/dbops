@@ -1,7 +1,7 @@
 """Unit tests for the rds_instance CloudWatch + meta collector.
 
 Standalone RDS instances (non-Aurora MySQL / SQL Server) never expose
-DBClusterIdentifier — every CW call must be instance-dimensioned, and rows land
+DBClusterIdentifier: every CW call must be instance-dimensioned, and rows land
 with dimensions='{}' (the instance IS the monitored resource).
 """
 
@@ -52,7 +52,7 @@ def test_collect_uses_instance_dimension_and_writes_meta():
                                          "dbops-demo-mysql", "ap-northeast-2", "123")
     assert r["resource_id"] == "db-ABC" and r["pi_enabled"] is True
     assert r["metrics_inserted"] > 0
-    # Every CW call must be instance-dimensioned — DBClusterIdentifier does not
+    # Every CW call must be instance-dimensioned: DBClusterIdentifier does not
     # exist for standalone instances.
     for c in cw.get_metric_statistics.call_args_list:
         assert c.kwargs["Namespace"] == "AWS/RDS"

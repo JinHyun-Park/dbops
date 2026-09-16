@@ -4,7 +4,7 @@ The vendored mysql_* collectors were written against RDS Data API
 (execute_statement returning {"records": [[{"stringValue":...}, ...]]}).
 RDS for MySQL has no Data API, so this adapter runs their SQL over a direct
 pymysql connection and re-encodes rows in the exact field-dict shape the
-collectors' _str/_long/_double helpers unwrap — the collectors stay verbatim
+collectors' _str/_long/_double helpers unwrap, the collectors stay verbatim
 copies of the Aurora versions (parity-tested)."""
 from datetime import date, datetime
 from decimal import Decimal

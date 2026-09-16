@@ -18,7 +18,7 @@ WHY THE GATE IS ON sql_via AND NOT ON THE `sql` CAPABILITY
 `cache.execute_on_target` is Data-API-only. `rds_instance` HAS the `sql`
 capability but reaches SQL over direct TCP, so a Data-API call for it resolves no
 cluster_arn and returns an empty QueryResult. The old code read that emptiness as
-"cluster not registered or unreachable — register via /clusters" and said so for
+"cluster not registered or unreachable, register via /clusters" and said so for
 five perfectly registered clusters, which sends an operator to re-register
 something already correct. `sql_via == "data_api"` is the predicate that actually
 decides whether this code path can work.

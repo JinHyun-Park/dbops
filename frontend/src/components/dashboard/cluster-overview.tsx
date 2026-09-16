@@ -27,7 +27,7 @@ interface ClusterOverviewProps {
   onSelect: (id: string) => void;
 }
 
-// Hard cap on chips so the dashboard header stays compact at fleet scale — the
+// Hard cap on chips so the dashboard header stays compact at fleet scale: the
 // dashboard is a single-cluster deep dive, not the place to render 200 cards.
 // The worst clusters surface first; the rest live one click away in Fleet.
 const CHIP_CAP = 12;
@@ -104,7 +104,7 @@ export function ClusterOverview({
 
   return (
     <div className="border border-zinc-800 bg-zinc-900/40 rounded-lg p-3">
-      {/* Summary band — counts double as quick filters into Fleet. */}
+      {/* Summary band: counts double as quick filters into Fleet. */}
       <div className="flex flex-wrap items-center gap-2 mb-2.5 text-[11px]">
         <span className="text-zinc-500 uppercase tracking-wider">
           {counts.total} clusters
@@ -135,7 +135,7 @@ export function ClusterOverview({
         </Link>
       </div>
 
-      {/* Engine-family grouped chips — each family gets a small header label
+      {/* Engine-family grouped chips: each family gets a small header label
           then its severity-sorted chips. Empty families are skipped. */}
       {(() => {
         // Build a lookup from cluster_id → decorated entry for O(1) access.
@@ -155,7 +155,7 @@ export function ClusterOverview({
               return (
                 <div key={g}>
                   {/* Only show the group label row when there are multiple
-                      groups — keeps the UI clean for single-engine fleets. */}
+                      groups: keeps the UI clean for single-engine fleets. */}
                   {hasMultipleGroups && (
                     <div className="flex items-center gap-1.5 mb-1">
                       <span
@@ -184,7 +184,7 @@ export function ClusterOverview({
                           onMouseEnter={() => prefetchDashboard(c.cluster_id)}
                           title={
                             d.reasons.length
-                              ? `${c.cluster_id} — ${d.reasons.join(", ")}`
+                              ? `${c.cluster_id}: ${d.reasons.join(", ")}`
                               : c.cluster_id
                           }
                           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[12px] font-mono transition-colors max-w-[260px] ${

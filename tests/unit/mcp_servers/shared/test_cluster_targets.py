@@ -1,4 +1,4 @@
-"""Tests for cluster_targets — hub-spoke target resolution for control-plane
+"""Tests for cluster_targets: hub-spoke target resolution for control-plane
 RDS operations."""
 
 from unittest.mock import MagicMock, patch
@@ -58,7 +58,7 @@ def test_rds_client_for_unregistered_cluster_falls_back_local():
 
 def test_client_for_cluster_routes_any_service_cross_account():
     """client_for_cluster builds an arbitrary-service client (e.g. logs) via the
-    cluster's registry region+role — this is what makes search_logs and the
+    cluster's registry region+role: this is what makes search_logs and the
     dashboard panels cross-account."""
     row = {"region": "ap-northeast-2", "spoke_role_arn": "arn:aws:iam::444:role/spoke"}
     with patch.object(ct, "lookup_cluster", return_value=row), \

@@ -2,7 +2,7 @@
 
 The 3 DynamoDB write tools must REFUSE when the engine family cannot be resolved
 (None → unsupported_engine) or when the cluster is the wrong engine (Aurora). A
-valid-looking approval must NEVER drive a write at the wrong/unknown engine — so
+valid-looking approval must NEVER drive a write at the wrong/unknown engine, so
 we assert the AWS write method is never even reached (the impl is monkeypatched to
 a spy that fails the test if called)."""
 
@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 # The operations handler instantiates CacheClient() at import time, which reads
 # CACHE_DB_CLUSTER_ARN. Set a dummy before import so this file collects in
 # isolation too (mirrors simulation/test_engine_guard.py). The cache is never
-# actually queried — _resolve_family is monkeypatched in every test.
+# actually queried: _resolve_family is monkeypatched in every test.
 os.environ.setdefault("CACHE_DB_CLUSTER_ARN", "arn:aws:rds:ap-northeast-2:0:cluster:test")
 os.environ.setdefault("CACHE_DB_SECRET_ARN", "arn:aws:secretsmanager:ap-northeast-2:0:secret:test")
 os.environ.setdefault("CACHE_DB_NAME", "dbops")
@@ -38,7 +38,7 @@ def _patch_family(fam):
 
 def test_gate_none_family_fail_closed():
     """fix #3: family=None (unresolvable cluster) → unsupported_engine, impl
-    never invoked — even with approved=true + an approval_id present."""
+    never invoked, even with approved=true + an approval_id present."""
     spy = MagicMock()
     with _patch_family(None), patch.dict(
         handler.TOOLS["modify_dynamodb_capacity"], {"impl": spy}
@@ -81,7 +81,7 @@ def test_gate_dynamodb_family_passes_to_impl():
 
 
 def test_gate_aurora_tool_ungated():
-    """The Aurora tools stay UNGATED — execute_sql is not in the gate map, so a
+    """The Aurora tools stay UNGATED: execute_sql is not in the gate map, so a
     relational cluster reaches the impl without an engine check."""
     spy = MagicMock(return_value={"status": "ok"})
     with _patch_family("relational"), patch.dict(
@@ -160,7 +160,7 @@ def test_gate_modify_parameter_relational_passes_to_impl():
 
 def test_gate_docdb_none_family_fail_closed():
     """fix #3: set_docdb_profiler on an unresolvable cluster → unsupported_engine,
-    impl never invoked — so no Mongo connect even with a valid-looking approval."""
+    impl never invoked, so no Mongo connect even with a valid-looking approval."""
     spy = MagicMock()
     with _patch_family(None), patch.dict(
         handler.TOOLS["set_docdb_profiler"], {"impl": spy}
@@ -247,7 +247,7 @@ def test_gate_elasticache_family_passes_to_impl():
     spy.assert_called_once()
 
 
-# ===== Aurora custom-endpoint tools — RELATIONAL-only positive gate (P2-⑤) =====
+# ===== Aurora custom-endpoint tools: RELATIONAL-only positive gate (P2-⑤) =====
 
 
 def test_gate_custom_endpoint_wrong_engine_refused():
@@ -295,7 +295,7 @@ def test_gate_custom_endpoint_relational_passes_to_impl():
     spy.assert_called_once()
 
 
-# ===== Standalone RDS instance write tools — rds_instance-only positive gate (R-3) =====
+# ===== Standalone RDS instance write tools: rds_instance-only positive gate (R-3) =====
 
 
 def test_gate_instance_write_none_family_fail_closed():

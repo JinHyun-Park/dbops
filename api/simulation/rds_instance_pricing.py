@@ -1,4 +1,4 @@
-"""rds_instance_pricing — REAL RDS (non-Aurora) prices from the AWS Price List API.
+"""rds_instance_pricing: REAL RDS (non-Aurora) prices from the AWS Price List API.
 
 RDS instances differ from Aurora: no I/O-Optimized variant, but a licenseModel /
 edition dimension (SQL Server) and SEPARATE storage + provisioned-IOPS SKUs.
@@ -9,13 +9,13 @@ Single-AZ unless multi_az=True.
 Label strings below were confirmed against the live Price List API
 (ServiceCode=AmazonRDS, regionCode=ap-northeast-2, instanceType=db.t3.small):
 unlike Aurora, RDS's `databaseEngine` attribute does NOT vary by SQL Server
-edition — it is the flat string "SQL Server" for Express/Web/Standard/
+edition: it is the flat string "SQL Server" for Express/Web/Standard/
 Enterprise alike. Edition is carried in a separate `databaseEdition`
 attribute (seen values: "Express", "Web"; "Standard"/"Enterprise" inferred
 from AWS's documented edition set, not directly observed in the probe
 sample). `licenseModel` also differs by engine: RDS MySQL SKUs use
 "No license required" (MySQL has no AWS license fee), while RDS SQL Server
-SKUs use "License included" — a single hardcoded licenseModel value across
+SKUs use "License included", a single hardcoded licenseModel value across
 engines would silently return zero SKUs for MySQL.
 
 NOTE: this is a verbatim copy of mcp-servers/mcp_servers/shared/rds_instance_pricing.py.
@@ -84,7 +84,7 @@ def price_rds_instance_hour(region, engine, instance_class, edition=None, multi_
         return None
     deploy = "Multi-AZ" if multi_az else "Single-AZ"
     # SQL Server: databaseEngine is the flat "SQL Server" for every edition, so
-    # `label` does NOT discriminate edition — the cache key MUST include the
+    # `label` does NOT discriminate edition: the cache key MUST include the
     # edition discriminator (edition_label), else e.g. sqlserver-ex and
     # sqlserver-ee collide on one key and the second silently returns the first
     # edition's price. Resolve edition_label BEFORE building the key.
@@ -129,7 +129,7 @@ def price_rds_storage_month(region, storage_type, gb, provisioned_iops=None):
     st = (storage_type or "gp3").lower()
     # volumeType is confirmed distinct per storage type (gp3 has its OWN
     # "General Purpose-GP3" label, separate from gp2's plain "General
-    # Purpose" — mapping both to the same value would silently price gp3 at
+    # Purpose", mapping both to the same value would silently price gp3 at
     # the gp2 rate).
     vol_map = {
         "gp3": "General Purpose-GP3",

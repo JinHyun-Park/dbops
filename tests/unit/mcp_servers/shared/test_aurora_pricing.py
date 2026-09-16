@@ -1,4 +1,4 @@
-"""Tests for the AWS Price List lookups — esp. that an unmatched edition does
+"""Tests for the AWS Price List lookups, esp. that an unmatched edition does
 NOT silently return the wrong-edition price (it must return None)."""
 import json
 from unittest.mock import MagicMock, patch

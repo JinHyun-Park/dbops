@@ -1,4 +1,4 @@
-"""Tests for /api/slack/command — subcommand parsing + signature gate.
+"""Tests for /api/slack/command: subcommand parsing + signature gate.
 
 The signature math is identical to slack_interactive (already
 covered) so we mostly test that the dispatcher routes to the right

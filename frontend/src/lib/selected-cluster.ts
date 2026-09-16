@@ -1,4 +1,4 @@
-// Shared "currently selected cluster" store — the single source of truth that
+// Shared "currently selected cluster" store: the single source of truth that
 // lets the ⌘K switcher, the header chip, and (Phase 2 Step B) every page agree
 // on which cluster you're looking at, persisting across page navigations.
 //
@@ -34,11 +34,11 @@ export function setSelectedCluster(id: string): void {
   try {
     localStorage.setItem(KEY, id);
   } catch {
-    /* ignore quota/private-mode errors — selection still works in-session */
+    /* ignore quota/private-mode errors, selection still works in-session */
   }
   // Keep the URL ?cluster= in sync with the explicit choice. getSelectedCluster()
   // reads the URL FIRST, so without this a stale ?cluster= (present on every
-  // cluster-scoped page) shadows the new selection — the switch fires its event
+  // cluster-scoped page) shadows the new selection: the switch fires its event
   // but every listener re-reads the OLD cluster from the URL and ignores it.
   // This was why the dropdown appeared to "not change" the page.
   try {
@@ -65,7 +65,7 @@ export function onClusterChange(cb: () => void): () => void {
   };
 }
 
-// Normalize fetchClusters() — it may return an array or {clusters:[]}.
+// Normalize fetchClusters(), it may return an array or {clusters:[]}.
 export function normalizeClusters(r: unknown): ClusterLite[] {
   if (Array.isArray(r)) return r as ClusterLite[];
   const obj = r as { clusters?: ClusterLite[] } | null;

@@ -31,7 +31,7 @@ Resources:
       # access: every hub role is individually scoped by its OWN sts:AssumeRole
       # IAM policy (resource = this spoke role ARN), so the trust policy AND the
       # caller's identity policy must BOTH allow. This is the standard AWS
-      # hub-spoke pattern — the boundary is the hub account plus each role's
+      # hub-spoke pattern: the boundary is the hub account plus each role's
       # identity policy, not a single named role.
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -112,7 +112,7 @@ Resources:
                 # RDS-managed secrets are always named `rds!cluster-*` / `rds!db-*`,
                 # so scope by that ARN pattern. (The previous condition
                 # `ResourceTag/ManagedBy=rds` never matched: RDS tags its managed
-                # secrets `aws:secretsmanager:owningService=rds`, NOT ManagedBy — so
+                # secrets `aws:secretsmanager:owningService=rds`, NOT ManagedBy, so
                 # cross-account RDS Data API SQL collection failed with AccessDenied
                 # "Failed to fetch secret". Caught via live cross-account testing.)
                 Resource: "arn:aws:secretsmanager:*:*:secret:rds!*"

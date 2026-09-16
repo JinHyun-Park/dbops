@@ -1,4 +1,4 @@
-"""report_generator — generate per-cluster daily/weekly operations summaries.
+"""report_generator: generate per-cluster daily/weekly operations summaries.
 
 The earlier version of this Lambda wrote a literal one-line string
 ("daily report for X on YYYY-MM-DD") into the `summary` column and
@@ -9,7 +9,7 @@ This version produces a real operations report:
   - structured JSON in `data` column: AAS percentiles, peak time +
     duration above threshold, top 5 slow queries by total_time, top 5
     alert rules fired, storage delta, connection peak, event counts
-  - NL summary (Bedrock Claude) in `summary` column: 3–5 sentences that
+  - NL summary (Bedrock Claude) in `summary` column: 3-5 sentences that
     a DBA could skim during morning standup
 
 The Bedrock call is best-effort. If invocation fails (throttling, model
@@ -31,7 +31,7 @@ import boto3
 from app_config import get_config
 from botocore.exceptions import ClientError
 
-# Threshold above which we count "AAS minutes" — i.e. how long the
+# Threshold above which we count "AAS minutes", i.e. how long the
 # cluster spent in a notably busy state.
 AAS_BUSY_THRESHOLD = float(os.environ.get("REPORT_AAS_BUSY_THRESHOLD", "5"))
 
@@ -128,7 +128,7 @@ def lambda_handler(event, context):
                 "report_date": report_date,
                 "summary": summary_text,
                 "data": json.dumps(report_data, default=str),
-                # NULL when the JSON object wasn't written — never point the
+                # NULL when the JSON object wasn't written: never point the
                 # download link at a nonexistent S3 key.
                 "s3_key": s3_key if json_put_ok else None,
             },
@@ -137,7 +137,7 @@ def lambda_handler(event, context):
         reports_generated.append(cid)
 
     # Fleet rollup: one report across all clusters, generated after the
-    # per-cluster loop. Best-effort — a rollup failure must never fail the
+    # per-cluster loop. Best-effort: a rollup failure must never fail the
     # per-cluster reports already written. Skip entirely when 0 clusters.
     if fleet_rows:
         try:
@@ -213,7 +213,7 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
         {"cid": cluster_id},
     )
     # Alerts live in event_log with event_type='alert'. rule_id is buried
-    # inside raw_event JSONB — extract it via the ->> operator so we can
+    # inside raw_event JSONB. Extract it via the ->> operator so we can
     # group by rule.
     top_alerts = cache_query(
         "SELECT raw_event->>'rule_id' AS rule_id, "
@@ -243,7 +243,7 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
     )
     conn_peak = cache_query(
         # Canonical total-connections metric = db_connections (CloudWatch
-        # DatabaseConnections), populated for every cluster — the PI-only
+        # DatabaseConnections), populated for every cluster. The PI-only
         # "connections" was empty when Performance Insights was off, leaving
         # the report's connection peak blank.
         "SELECT MAX(value) AS max_conn, AVG(value) AS avg_conn FROM metric_snapshots "
@@ -276,7 +276,7 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
 
 
 def _write_nl_summary(cluster_id: str, report_date: str, data: dict) -> str:
-    """Ask Bedrock to write a 3–5 sentence DBA-readable summary. On any
+    """Ask Bedrock to write a 3-5 sentence DBA-readable summary. On any
     error, fall back to a deterministic template so the report row still
     has a usable summary."""
     try:
@@ -295,7 +295,7 @@ def _write_nl_summary(cluster_id: str, report_date: str, data: dict) -> str:
         if text:
             return text
     except Exception as e:
-        # Throttling, IAM, model unavailable — all land here. Falling
+        # Throttling, IAM, model unavailable: all land here. Falling
         # back is fine; the structured data column still has the numbers.
         print(f"[report_generator] Bedrock summary failed for {cluster_id}: {e}")
 
@@ -312,7 +312,7 @@ def _build_summary_prompt(cluster_id: str, report_date: str, data: dict) -> str:
     slow_lines = []
     for i, q in enumerate(data.get("top_slow_queries") or [], 1):
         slow_lines.append(
-            f"  {i}. total {q.get('total_ms', 0):.0f}ms over {q.get('calls', 0)} calls — "
+            f"  {i}. total {q.get('total_ms', 0):.0f}ms over {q.get('calls', 0)} calls: "
             f"{(q.get('query_excerpt') or '').strip()[:120]}"
         )
     slow_block = "\n".join(slow_lines) if slow_lines else "  (none)"
@@ -365,7 +365,7 @@ def _template_summary(cluster_id: str, report_date: str, data: dict) -> str:
 
 def _fleet_row(cluster_id: str, engine, report_data: dict) -> dict:
     """Compact per-cluster record for the fleet rollup, built from the numbers
-    _build_report_data already computed — NO extra queries.
+    _build_report_data already computed, NO extra queries.
 
     alert_count sums fired_count over the (top-5) alert rules; slow_query_count
     is the number of top slow queries surfaced (<=5). Both are report-scoped
@@ -411,7 +411,7 @@ def _build_fleet_data(rows: list[dict]) -> dict:
 
 
 def _fleet_summary(report_date: str, fleet_data: dict) -> str:
-    """Deterministic Korean rollup summary — no Bedrock call. Mirrors the
+    """Deterministic Korean rollup summary, no Bedrock call. Mirrors the
     _template_summary style."""
     n = fleet_data.get("clusters_total", 0)
     totals = fleet_data.get("totals") or {}

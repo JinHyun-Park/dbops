@@ -4,7 +4,7 @@ Pins the REST mirror's behaviour against the reviewed MCP tool
 (mcp_servers/simulation/tools/rds_rightsizing.py):
   - Downsize on low CPU + connection headroom, with a real cheaper cost and
     pricing_source="aws_price_list".
-  - SQL Server: the pricing fn is called WITHOUT edition="sqlserver-ex" — the
+  - SQL Server: the pricing fn is called WITHOUT edition="sqlserver-ex". The
     pricing helper resolves databaseEdition from the engine itself.
   - A non-rds_instance engine → status="unsupported_engine".
   - A null unit price → pricing_source="fallback_estimate" and null cost fields
@@ -81,7 +81,7 @@ def _patch_cache(mod, monkeypatch, meta=None, agg=None):
 
 
 # ---------------------------------------------------------------------------
-# Downsize happy path — real cheaper cost, aws_price_list
+# Downsize happy path: real cheaper cost, aws_price_list
 # ---------------------------------------------------------------------------
 
 def test_downsize_low_cpu_real_cheaper_cost(mod, monkeypatch):
@@ -147,7 +147,7 @@ def test_sqlserver_edition_not_passed_as_engine_string(mod, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Unsupported engine — positive guard
+# Unsupported engine: positive guard
 # ---------------------------------------------------------------------------
 
 def test_unsupported_engine_refused(mod, monkeypatch):
@@ -224,7 +224,7 @@ def test_override_action_from_cost_delta(mod, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Dispatcher — /rds-instance-rightsizing threads body fields
+# Dispatcher: /rds-instance-rightsizing threads body fields
 # ---------------------------------------------------------------------------
 
 def test_dispatcher_rds_rightsizing(mod, monkeypatch):

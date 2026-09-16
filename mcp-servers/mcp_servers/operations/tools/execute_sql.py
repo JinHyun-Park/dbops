@@ -39,8 +39,8 @@ def _decode_field(field: dict):
     not just the four scalar types: explicit SQL NULL (isNull), bytea
     (blobValue → base64 string), and arrays (arrayValue). NUMERIC/DECIMAL come
     back as stringValue from the Data API, so exact precision is preserved by
-    keeping the string. The previous decoder collapsed NULL/blob/array — and
-    any unrecognized field — to None, silently losing or misrepresenting data
+    keeping the string. The previous decoder collapsed NULL/blob/array (and
+    any unrecognized field) to None, silently losing or misrepresenting data
     in diagnostics and audit output."""
     if field.get("isNull"):
         return None
@@ -108,21 +108,21 @@ def _lookup_cluster(cluster_id: str) -> dict:
 # Shared direct-TCP (rds_instance MySQL / SQL Server) helpers.
 #
 # These exist so the metadata PRE-CHECK (pre-consume) and the post-consume
-# EXECUTE branch decide the reject reasons — and the execute branch resolves the
-# secret and builds the connection — through EXACTLY ONE code path each. A
+# EXECUTE branch decide the reject reasons (and the execute branch resolves the
+# secret and builds the connection) through EXACTLY ONE code path each. A
 # divergent second copy of the guard/connect logic is the failure this prevents.
 # ---------------------------------------------------------------------------
 
 
 def _missing_secret_reject(cluster_id: str, is_safe: bool) -> dict:
     """Reject dict for a direct-TCP target with no configured secret. Pure
-    metadata (a dict-key presence check) — no Secrets Manager fetch — so the
+    metadata (a dict-key presence check), no Secrets Manager fetch, so the
     write pre-check can use it BEFORE verify_approval without any resource
     access. Shared with _direct_write_secret_and_creds (single reason source)."""
     note = (
-        "read credentials not configured — set db_secret_arn"
+        "read credentials not configured: set db_secret_arn"
         if is_safe
-        else "write credentials not configured — set db_write_secret_arn"
+        else "write credentials not configured: set db_write_secret_arn"
     )
     return {
         "status": "unsupported_engine",
@@ -136,7 +136,7 @@ def _direct_write_secret_and_creds(cluster: dict, cluster_id: str, is_safe: bool
     target. Reads use db_secret_arn; approved writes use the separate
     db_write_secret_arn. Returns ``(secret_arn, creds)`` on success, or a REJECT
     dict (unsupported_engine for a missing secret; execution_failed for a fetch
-    failure — static reason, no str(e) leak). Single source of truth for the
+    failure: static reason, no str(e) leak). Single source of truth for the
     secret selection and its reject reasons."""
     secret_arn = cluster.get("db_secret_arn") if is_safe else cluster.get("db_write_secret_arn")
     if not secret_arn:
@@ -186,14 +186,14 @@ def _unsupported_other_engine(fam, cluster_id: str) -> dict:
 
 
 def _mssql_master_write_reject(cluster_id: str) -> dict:
-    """Reject dict for an approved SQL Server write with no target db_name — an
+    """Reject dict for an approved SQL Server write with no target db_name: an
     unqualified write would land in the master system DB (unlike MySQL, whose
     database=None errors out), so it is fail-closed BEFORE connecting."""
     return {
         "status": "unsupported_engine",
         "cluster_id": cluster_id,
         "reason": (
-            "SQL Server 쓰기는 대상 DB가 필요합니다 — db_name을 설정하세요 "
+            "SQL Server 쓰기는 대상 DB가 필요합니다. db_name을 설정하세요 "
             "(PATCH /api/clusters/{id}/meta). master 기본 접속으로의 무자격 쓰기 방지."
         ),
     }
@@ -222,7 +222,7 @@ def _direct_exec_failed(cluster: dict, cluster_id: str) -> dict:
 def _direct_write_precheck(cluster: dict, cluster_id: str, fam):
     """Metadata-ONLY guards for an APPROVED DIRECT-TCP write (rds_instance MySQL /
     SQL Server), run BEFORE verify_approval. Every check here is a pure
-    cluster_meta/dict inspection — NO Secrets Manager fetch, NO DB connection —
+    cluster_meta/dict inspection, NO Secrets Manager fetch, NO DB connection,
     so an unauthorized caller cannot trigger any privileged resource access
     before authz, and a metadata-rejectable write never burns the approval.
 
@@ -230,9 +230,9 @@ def _direct_write_precheck(cluster: dict, cluster_id: str, fam):
     the metadata-detectable cases; None to allow the single consume + execute.
 
     WHY metadata-only (deliberately NOT a connect probe): catching a genuine
-    connect/execute failure would require connecting BEFORE verify_approval —
+    connect/execute failure would require connecting BEFORE verify_approval,
     i.e. a write-secret fetch + write-capable DB login on an as-yet-unauthorized
-    request — a worse security posture than the rare, re-approvable burn on an
+    request, a worse security posture than the rare, re-approvable burn on an
     actual connect failure. The SYSTEMATIC burns (missing write secret, SQL
     Server master-write, unsupported engine) ARE metadata-detectable and are
     caught here; a true connect failure stays AFTER the consume (accepted
@@ -240,7 +240,7 @@ def _direct_write_precheck(cluster: dict, cluster_id: str, fam):
     engine = cluster.get("engine") or ""
     if "sqlserver" not in engine and "mysql" not in engine:
         return _unsupported_other_engine(fam, cluster_id)
-    # Presence check only (dict key) — the actual fetch happens post-consume.
+    # Presence check only (dict key). The actual fetch happens post-consume.
     if not cluster.get("db_write_secret_arn"):
         return _missing_secret_reject(cluster_id, is_safe=False)
     # SQL Server: an unqualified write with no db_name lands in master; reject
@@ -285,10 +285,10 @@ def execute_sql_impl(
             reason = (
                 "SQL looks read-only but contains a side-effecting/state-changing "
                 "construct (e.g. EXPLAIN ANALYZE, SELECT INTO, a locking clause, or "
-                "a function like pg_terminate_backend) — DBA approval required"
+                "a function like pg_terminate_backend), DBA approval required"
             )
         elif has_safe_prefix and is_multi:
-            reason = "Multiple SQL statements are not allowed on the read path — DBA approval required"
+            reason = "Multiple SQL statements are not allowed on the read path, DBA approval required"
         return {"status": "approval_required", "reason": reason, "sql": sql}
 
     # Resolve target cluster ARN/Secret from the DynamoDB clusters registry.
@@ -301,7 +301,7 @@ def execute_sql_impl(
     # PRE-CHECK (approved DIRECT-TCP write only): run the metadata-only guards
     # BEFORE consuming the single-use approval, so a metadata-rejectable write
     # (unsupported engine / missing write secret / SQL Server master-write) NEVER
-    # burns it — the DBA can retry without re-approving. This is METADATA-ONLY
+    # burns it: the DBA can retry without re-approving. This is METADATA-ONLY
     # (no secret fetch, no connect): touching resources before authz would be a
     # worse posture than the rare burn on an actual connect failure. This block
     # NEVER calls verify_approval; it only decides whether the single consume
@@ -312,18 +312,18 @@ def execute_sql_impl(
         if isinstance(_fam, str) and CAPABILITIES.get(_fam, {}).get("sql_via", "data_api") != "data_api":
             _reject = _direct_write_precheck(cluster, cluster_id, _fam)
             if _reject is not None:
-                # Approval NOT consumed — a metadata guard rejected the write.
+                # Approval NOT consumed: a metadata guard rejected the write.
                 return _reject
 
     # Server-side approval enforcement: a write tool that claims approved=true
     # must back it up with a verifiable approval_id. The guard refuses
     # mismatched cluster, stale/replayed approvals, and unapproved rows.
     #
-    # SECURITY INVARIANT — the SINGLE consume. A write executes IFF exactly one
+    # SECURITY INVARIANT: the SINGLE consume. A write executes IFF exactly one
     # successful verify_approval runs HERE. For the direct-TCP write path this
     # line is reached IFF the metadata pre-check passed (otherwise the pre-check
     # returned above, unconsumed). A genuine connect/execute failure happens
-    # AFTER this line (accepted burn — see _direct_write_precheck for why we do
+    # AFTER this line (accepted burn, see _direct_write_precheck for why we do
     # NOT connect pre-authz). A read (is_safe) NEVER reaches this. There is no
     # other verify_approval call, so no write path can execute without exactly
     # one consume.
@@ -347,7 +347,7 @@ def execute_sql_impl(
     # support the RDS Data API SQL path. Return a clear signal so the agent can
     # tell the user this resource type isn't supported in Phase 1 chat diagnostics
     # rather than failing with a confusing "no_target" or rds-data error.
-    # Only applies to a real registry dict — legacy env-var TARGET_* deployments
+    # Only applies to a real registry dict: legacy env-var TARGET_* deployments
     # (where _lookup_cluster yields no dict) fall straight through to the env path.
     if isinstance(cluster, dict) and cluster:
         fam = cluster.get("engine_family") or _engine_family(cluster.get("engine", ""))
@@ -361,34 +361,34 @@ def execute_sql_impl(
                 ),
             }
         # sql_via: Aurora reaches SQL via the RDS Data API; rds_instance (RDS for
-        # MySQL / SQL Server) has sql=True but sql_via="direct" — a direct-TCP
+        # MySQL / SQL Server) has sql=True but sql_via="direct", a direct-TCP
         # path. MySQL and SQL Server both run here. This runs AFTER all
         # classification/approval logic above, so approval semantics are
         # identical to the Aurora path.
         if isinstance(fam, str) and CAPABILITIES.get(fam, {}).get("sql_via", "data_api") != "data_api":
             # Direct-TCP SQL Server (rds_instance sqlserver-ee/se/ex/web). Same
-            # shape as the MySQL branch below — read/write secret selection,
-            # client_for_cluster fetch, audit marker, shared decode — but over
+            # shape as the MySQL branch below (read/write secret selection,
+            # client_for_cluster fetch, audit marker, shared decode) but over
             # mssql_direct. Sets resp then returns via the shared decoder, so the
             # T-SQL path never falls into the MySQL body.
             if "sqlserver" in (cluster.get("engine") or ""):
                 # Secret + creds via the shared helper (same reject reasons as the
-                # metadata pre-check and the MySQL branch — one source of truth).
+                # metadata pre-check and the MySQL branch, one source of truth).
                 res = _direct_write_secret_and_creds(cluster, cluster_id, is_safe)
                 if isinstance(res, dict):
                     return res
                 _secret_arn, creds = res
                 # SQL Server has no 'mysql'-style catch-all schema. With no db_name
                 # the connection uses the login/server default (master); reads work,
-                # and unqualified writes land in master — so the agent must qualify
+                # and unqualified writes land in master, so the agent must qualify
                 # with [db].[schema].[object]. database=None when db_name is unset.
                 database = cluster.get("db_name")
                 # Unlike MySQL (database=None → server error 1044 fail-safes an
                 # unqualified write), SQL Server would silently succeed against the
                 # master system DB. So reject an approved write with no target DB
-                # BEFORE connecting — reads are unaffected (master is harmless).
+                # BEFORE connecting. Reads are unaffected (master is harmless).
                 # (For an APPROVED write this guard already fired in the pre-flight,
-                # before the consume — this is the same fail-closed check for the
+                # before the consume: this is the same fail-closed check for the
                 # read path and defense-in-depth.)
                 if not is_safe and not database:
                     return _mssql_master_write_reject(cluster_id)
@@ -413,7 +413,7 @@ def execute_sql_impl(
             # Direct-TCP MySQL. Read (is_safe) statements use db_secret_arn;
             # approved writes use the separate db_write_secret_arn (mirrors the
             # DocDB read/write secret split). Missing the needed secret → fail
-            # closed with a static message (no str(e) leak). Shared helper — same
+            # closed with a static message (no str(e) leak). Shared helper: same
             # reject reasons as the metadata pre-check and the SQL Server branch.
             res = _direct_write_secret_and_creds(cluster, cluster_id, is_safe)
             if isinstance(res, dict):
@@ -421,12 +421,12 @@ def execute_sql_impl(
             _secret_arn, creds = res
             # Session default schema: db_name if set. Reads fall back to the
             # 'mysql' system schema (harmless for SELECT/SHOW/performance_schema);
-            # writes get NO fallback — an unqualified DDL/DML against the system
+            # writes get NO fallback: an unqualified DDL/DML against the system
             # schema is denied by RDS (error 1044, live-verified) and burns the
             # single-use approval. With database=None MySQL raises a clear
             # "No database selected" for unqualified writes instead. (This
-            # execute-time no-db failure is NOT metadata-detectable, so — unlike
-            # SQL Server master-write — it is not caught by the pre-check.)
+            # execute-time no-db failure is NOT metadata-detectable, so, unlike
+            # SQL Server master-write, it is not caught by the pre-check.)
             database = cluster.get("db_name") or ("mysql" if is_safe else None)
             conn = None
             try:
@@ -456,7 +456,7 @@ def execute_sql_impl(
             # which sends the operator to re-do the one thing already done.
             if not cluster:
                 reason = (
-                    f"cluster_id={cluster_id!r} not found in registry — "
+                    f"cluster_id={cluster_id!r} not found in registry, "
                     "register it via /clusters first"
                 )
             elif cluster.get("is_demo"):
@@ -486,7 +486,7 @@ def execute_sql_impl(
         except Exception as e:
             err = str(e)
             print(f"[execute_sql] Aurora Data API execution failed for {cluster_id}: {err}")
-            # Static reason only — never surface the raw boto exception in the
+            # Static reason only: never surface the raw boto exception in the
             # response (no str(e) leak, per the project-wide contract). `err`
             # stays LOCAL for the HttpEndpoint hint below + the log line above.
             result = {

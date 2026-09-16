@@ -58,7 +58,7 @@ def test_symptom_class_filter_included_when_provided():
 
 
 def test_recent_scoped_by_symptom_class_when_provided():
-    """recent[] must carry the symptom_class filter — not return all symptoms for the cluster."""
+    """recent[] must carry the symptom_class filter, not return all symptoms for the cluster."""
     cache = MagicMock()
     cache.execute.side_effect = [_empty(), _empty()]
     get_remediation_history_impl(cache, "c1", "finding:query_regression")

@@ -1,10 +1,10 @@
-"""task_scheduler — enqueue due recurring agent tasks.
+"""task_scheduler: enqueue due recurring agent tasks.
 
 Runs on an EventBridge schedule. Reads enabled rows from the `scheduled_tasks`
 cache table, lets PostgreSQL decide which are due (NOW() - last_run_at vs the
 row's interval_kind), and for each due row writes a pending row into the
-agent-tasks DynamoDB table — the same single processing path the task_worker
-drains — then stamps last_run_at so it won't re-fire until the next interval.
+agent-tasks DynamoDB table (the same single processing path the task_worker
+drains), then stamps last_run_at so it won't re-fire until the next interval.
 
 The scheduler only touches public endpoints (RDS Data API + DynamoDB), so it
 lives in the data stack and never references the agent stack: the agent-tasks

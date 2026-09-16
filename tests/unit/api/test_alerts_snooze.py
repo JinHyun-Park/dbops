@@ -147,7 +147,7 @@ def test_snooze_bulk_forbidden_when_cluster_not_visible(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# _update_rule — comparison is now updatable alongside threshold
+# _update_rule: comparison is now updatable alongside threshold
 # ---------------------------------------------------------------------------
 
 def test_update_rule_comparison_field():
@@ -184,7 +184,7 @@ def test_update_rule_threshold_still_works():
 
 
 # ---------------------------------------------------------------------------
-# _list_rules — snooze_until now selected
+# _list_rules: snooze_until now selected
 # ---------------------------------------------------------------------------
 
 def test_list_rules_selects_snooze_until():

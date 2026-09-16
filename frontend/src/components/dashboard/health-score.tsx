@@ -30,7 +30,7 @@ interface SignalDef {
   transform?: (v: number) => number;
   // When true, LOW values are unhealthy (e.g. buffer-cache-hit ratio): status
   // is crit when current <= crit, warn when current <= warn. Default false
-  // (HIGH is unhealthy). A signal with no datapoints is always "ok" — missing
+  // (HIGH is unhealthy). A signal with no datapoints is always "ok": missing
   // data never penalizes the score (esp. important for inverted signals).
   invert?: boolean;
 }
@@ -373,8 +373,8 @@ export function HealthScore({ clusterId, engine }: Props) {
 
   // Grade by WORST SIGNAL, not by the weighted score alone. A low-weight
   // signal in crit (e.g. deadlocks, weight 10) only drops the score to 90,
-  // which used to read "HEALTHY" right next to the CRITICAL incident banner —
-  // an active deadlock storm must never grade green regardless of arithmetic.
+  // which used to read "HEALTHY" right next to the CRITICAL incident banner.
+  // An active deadlock storm must never grade green regardless of arithmetic.
   const hasCrit = signals.some((s) => s.status === "crit");
   const hasWarn = signals.some((s) => s.status === "warn");
   const grade = hasCrit

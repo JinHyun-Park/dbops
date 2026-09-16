@@ -92,7 +92,7 @@ _ADMIN_EVENT = {
 
 
 # ---------------------------------------------------------------------------
-# ?view=rds  — viewer sees only c-open + c-teamA
+# ?view=rds: viewer sees only c-open + c-teamA
 # ---------------------------------------------------------------------------
 
 
@@ -138,7 +138,7 @@ def test_rds_view_per_cluster_available_false_when_all_filtered(mod, monkeypatch
 
 
 # ---------------------------------------------------------------------------
-# ?view=elasticache  — same filter logic
+# ?view=elasticache: same filter logic
 # ---------------------------------------------------------------------------
 
 

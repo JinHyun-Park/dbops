@@ -2,7 +2,7 @@
 
 // Single shared poll of the multi-cluster overview. The cluster dropdown, the
 // dashboard cluster strip, and the incident-summary banner all need per-cluster
-// severity — without this they each ran their OWN fetch + 30s interval, so the
+// severity: without this they each ran their OWN fetch + 30s interval, so the
 // browser hit /api/multi-cluster/overview 3× as often AND the three could show
 // momentarily inconsistent severity. One module-level store (useSyncExternal
 // store) dedupes the poll and keeps every consumer in lockstep.
@@ -35,7 +35,7 @@ function load() {
     })
     .catch(() => {
       // Keep the last good snapshot on a transient failure rather than
-      // blanking severity — a flap shouldn't make every cluster read "ok".
+      // blanking severity, a flap shouldn't make every cluster read "ok".
     });
 }
 

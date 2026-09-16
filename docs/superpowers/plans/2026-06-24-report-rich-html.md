@@ -12,15 +12,15 @@
 
 - **No `Co-Authored-By: Claude` trailer** (user rule).
 - **No third-party deps** (no Lambda bundle change): SVG built as strings in pure Python.
-- **No external fonts/scripts/images** in the HTML — fully self-contained (privacy + offline + attachable).
-- **HTML-escape ALL DB/AI-derived text** (summary, query excerpts, finding text) via `html.escape` — injection-safe.
+- **No external fonts/scripts/images** in the HTML: fully self-contained (privacy + offline + attachable).
+- **HTML-escape ALL DB/AI-derived text** (summary, query excerpts, finding text) via `html.escape`: injection-safe.
 - **No schema migration:** the HTML S3 key is the JSON key with `.json`→`.html`.
 - **Best-effort:** an HTML render/put failure must NOT break the existing JSON put / DB insert / delivery.
 - **Korean** copy; metric/engine tokens verbatim. Numbers ≥1000 formatted with thousands separators.
 
 ---
 
-### Task 1: `report_html.py` — SVG charts + HTML assembler
+### Task 1: `report_html.py` (SVG charts + HTML assembler)
 
 **Files:**
 
@@ -217,7 +217,7 @@ def build_report_html(cluster_id, report_date, report_type, summary, data):
     return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DBOps 리포트 — {escape(str(cluster_id))} {escape(str(report_date))}</title>
+<title>DBOps 리포트: {escape(str(cluster_id))} {escape(str(report_date))}</title>
 <style>
 body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#18181b;margin:0;padding:24px;background:#fafafa}}
 h1{{font-size:20px;margin:0 0 4px}} .meta{{color:#71717a;font-size:13px;margin-bottom:20px}}
@@ -282,7 +282,7 @@ git commit -m "feat(reports): self-contained HTML report builder with inline SVG
                 print(f"[report_generator] HTML render/put failed for {cid}: {e}")
 ```
 
-(Match the existing import style — the handler may import collectors as `from report_html import ...` or `from .report_html import ...`; check how `app_config` is imported in this handler and mirror it. The `try/except Exception` makes the HTML twin strictly best-effort.)
+(Match the existing import style: the handler may import collectors as `from report_html import ...` or `from .report_html import ...`; check how `app_config` is imported in this handler and mirror it. The `try/except Exception` makes the HTML twin strictly best-effort.)
 
 - [ ] **Step 4: Run tests.** `python -m pytest tests/unit/data_pipeline/ -q` → PASS. `python -m pytest tests/unit -q` → no regression.
 
@@ -308,7 +308,7 @@ git commit -m "feat(reports): store HTML twin alongside the JSON report (best-ef
 
 - Consumes: the `reports` row's `s3_key`. Produces: a presigned GET URL for the `.html` twin.
 
-- [ ] **Step 1: Read** `api/reports/handler.py` (the GET-by-id arm + how it reads `s3_key`), the api/reports route registration in `cdk/stacks/agent_stack.py` (is it `/api/reports` + `/api/reports/{id}` — add `/api/reports/{id}/html`?), the reports Lambda's S3 IAM, and `frontend/src/components/reports/report-viewer.tsx` (where to add the button) + the api-client.
+- [ ] **Step 1: Read** `api/reports/handler.py` (the GET-by-id arm + how it reads `s3_key`), the api/reports route registration in `cdk/stacks/agent_stack.py` (is it `/api/reports` + `/api/reports/{id}`: add `/api/reports/{id}/html`?), the reports Lambda's S3 IAM, and `frontend/src/components/reports/report-viewer.tsx` (where to add the button) + the api-client.
 
 - [ ] **Step 2: Write the failing test.** api/reports unit: `GET /api/reports/{id}/html` for a report whose `.html` exists (mock S3 head_object ok + generate_presigned_url) → 200 with a `url`; `.html` absent (head_object 404) → 404 with a Korean note. Mirror the existing api/reports test harness.
 
@@ -331,7 +331,7 @@ git commit -m "feat(reports): /reports HTML download (presigned) + viewer button
 
 ## Post-implementation (controller, after all tasks reviewed clean)
 
-- Final whole-branch review (most capable model) — focus: HTML is self-contained (no external refs/scripts); ALL DB/AI text HTML-escaped (no injection); HTML twin is best-effort (JSON/DB/delivery unaffected on failure); the `.html` key derivation matches both sides (generator writes, api derives the same key); download is read-only presigned + 404-on-missing for old reports; no new dep, no schema migration; openapi parity if a route was added.
+- Final whole-branch review (most capable model), focus: HTML is self-contained (no external refs/scripts); ALL DB/AI text HTML-escaped (no injection); HTML twin is best-effort (JSON/DB/delivery unaffected on failure); the `.html` key derivation matches both sides (generator writes, api derives the same key); download is read-only presigned + 404-on-missing for old reports; no new dep, no schema migration; openapi parity if a route was added.
 - Deploy dev: `cdk deploy dbops-dev-data` (report_generator) + `cdk deploy dbops-dev-agent` (api/reports + route). Frontend build → sync → invalidate `E1234567890ABC`.
 - Live smoke: trigger report_generator (direct Lambda invoke) for a cluster with data → confirm a `.html` lands in S3; `GET /api/reports/{id}/html` → 200 + a presigned url that fetches valid self-contained HTML; an old report → 404 + note. No-regression: the existing JSON report viewer + delivery still work.
 - Then `superpowers:finishing-a-development-branch`.

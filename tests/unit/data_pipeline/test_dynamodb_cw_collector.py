@@ -1,4 +1,4 @@
-"""Unit tests for DynamoDB CloudWatch collector (TDD — write before implementation)."""
+"""Unit tests for DynamoDB CloudWatch collector (TDD, write before implementation)."""
 
 import importlib.util
 import sys
@@ -50,7 +50,7 @@ def _make_dynamo(billing_mode="PAY_PER_REQUEST"):
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — PAY_PER_REQUEST: Sum metrics collected, Provisioned* NOT queried,
+# Test 1: PAY_PER_REQUEST: Sum metrics collected, Provisioned* NOT queried,
 #           cluster_meta upsert includes account_id, region, resource_details
 # ---------------------------------------------------------------------------
 
@@ -101,7 +101,7 @@ def test_collects_consumed_capacity_as_sum_and_inserts():
 
 
 # ---------------------------------------------------------------------------
-# Test 2 — PROVISIONED table: ProvisionedRead/WriteCapacityUnits ARE queried
+# Test 2: PROVISIONED table: ProvisionedRead/WriteCapacityUnits ARE queried
 # ---------------------------------------------------------------------------
 
 def test_provisioned_table_queries_provisioned_metrics():
@@ -123,7 +123,7 @@ def test_provisioned_table_queries_provisioned_metrics():
 
 
 # ---------------------------------------------------------------------------
-# Test 3 — SuccessfulRequestLatency always uses an Operation dimension
+# Test 3: SuccessfulRequestLatency always uses an Operation dimension
 # ---------------------------------------------------------------------------
 
 def test_latency_uses_operation_dimension():
@@ -152,7 +152,7 @@ def test_latency_uses_operation_dimension():
 
 
 # ---------------------------------------------------------------------------
-# Test 4 — describe_table failure must NOT fire Provisioned* CW queries
+# Test 4: describe_table failure must NOT fire Provisioned* CW queries
 # ---------------------------------------------------------------------------
 
 def test_describe_failure_skips_provisioned_queries():
@@ -192,7 +192,7 @@ def test_describe_failure_skips_provisioned_queries():
 
 
 # ---------------------------------------------------------------------------
-# Test 5 — resource_details captures key schema (PK/SK), rich GSI, and LSI
+# Test 5: resource_details captures key schema (PK/SK), rich GSI, and LSI
 # ---------------------------------------------------------------------------
 
 def test_resource_details_captures_key_schema_gsi_lsi():
@@ -260,7 +260,7 @@ def test_resource_details_captures_key_schema_gsi_lsi():
 
 
 # ---------------------------------------------------------------------------
-# Test 6 — per-GSI throttle/consumed metrics collected with GSI dimension
+# Test 6: per-GSI throttle/consumed metrics collected with GSI dimension
 # ---------------------------------------------------------------------------
 
 def test_gsi_metrics_collected_with_gsi_dimension():
@@ -351,7 +351,7 @@ def test_gsi_metrics_collected_with_gsi_dimension():
 
 
 # ---------------------------------------------------------------------------
-# Test 7 — GSI collection failure does NOT break table-level metrics
+# Test 7: GSI collection failure does NOT break table-level metrics
 # ---------------------------------------------------------------------------
 
 def test_gsi_failure_does_not_break_table_metrics():

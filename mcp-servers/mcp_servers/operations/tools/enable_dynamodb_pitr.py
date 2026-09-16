@@ -1,8 +1,8 @@
-"""enable_dynamodb_pitr — approval-gated DynamoDB Point-in-Time Recovery toggle
+"""enable_dynamodb_pitr: approval-gated DynamoDB Point-in-Time Recovery toggle
 (update_continuous_backups).
 
 Turning PITR ON is a pure data-protection improvement. Turning it OFF is a
-data-protection DEGRADATION, so disabling requires `force=true` (review fix #7) —
+data-protection DEGRADATION, so disabling requires `force=true` (review fix #7):
 the force flag is ALSO hashed into the approval payload so the DBA approves the
 forceful (disable) variant specifically, and Cedar `forbid`s the disable unless
 force==true at the Gateway. Idempotent. TOCTOU-safe (execute-time re-read).
@@ -60,13 +60,13 @@ def enable_dynamodb_pitr_impl(
 
     table = table_name_for_cluster(cluster_id)
 
-    # Disabling PITR degrades data protection — refuse without an explicit force
+    # Disabling PITR degrades data protection. Refuse without an explicit force
     # (fix #7). Checked before the approval round-trip so we never burn an approval
     # on a shape the policy will block.
     if not enabled and not force:
         return {
             "status": "error",
-            "reason": "PITR 비활성화는 데이터 보호 저하입니다 — force=true가 필요합니다.",
+            "reason": "PITR 비활성화는 데이터 보호 저하입니다. force=true가 필요합니다.",
             "cluster_id": cluster_id,
         }
 

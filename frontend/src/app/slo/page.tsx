@@ -18,7 +18,7 @@ import { ClusterPicker } from "@/components/design-system/cluster-picker";
 import { useT } from "@/lib/i18n";
 
 // Per-cluster target config persisted to localStorage. We keep this client-
-// side for v1 — there is no team-level "official" SLO yet, just a personal
+// side for v1: there is no team-level "official" SLO yet, just a personal
 // dial. Migration path: write the same shape into a future DDB table.
 interface SloConfig {
   availability_target_pct: number;
@@ -58,7 +58,7 @@ function saveConfig(clusterId: string, cfg: SloConfig) {
   try {
     window.localStorage.setItem(LS_KEY(clusterId), JSON.stringify(cfg));
   } catch {
-    // localStorage may be unavailable (private mode) — silently no-op
+    // localStorage may be unavailable (private mode), silently no-op
   }
 }
 
@@ -100,7 +100,7 @@ export default function SloPage() {
     config.latency_target_ms,
   ]);
 
-  // Auto-load when cluster or config changes — SLO calc is cheap (cache hit).
+  // Auto-load when cluster or config changes: SLO calc is cheap (cache hit).
   useEffect(() => {
     if (selectedCluster) load();
   }, [selectedCluster, load]);
@@ -172,7 +172,7 @@ export default function SloPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Config bar — editable targets + window selector
+// Config bar: editable targets + window selector
 // ---------------------------------------------------------------------------
 
 function ConfigBar({
@@ -304,7 +304,7 @@ function LatencyCard({ data, engine }: { data: SloResponse; engine?: string }) {
   return (
     <SloCard
       eyebrow="Query latency SLO"
-      title={hasData ? `${fmtDecimal(l.compliance_pct ?? 0, 2)}%` : "—"}
+      title={hasData ? `${fmtDecimal(l.compliance_pct ?? 0, 2)}%` : "-"}
       titleTone={
         !hasData
           ? "zinc"
@@ -329,13 +329,13 @@ function LatencyCard({ data, engine }: { data: SloResponse; engine?: string }) {
                       ((l.compliance_pct ?? 0) / 100) * l.samples_minutes,
                     ),
                   )
-                : "—"
+                : "-"
             }
             sub={`of ${fmtExact(l.samples_minutes)}`}
           />
           <Stat
             label="Avg latency"
-            value={hasData ? `${fmtDecimal(l.overall_avg_ms, 1)}ms` : "—"}
+            value={hasData ? `${fmtDecimal(l.overall_avg_ms, 1)}ms` : "-"}
             sub="window mean"
             tone={l.overall_avg_ms > l.target_ms ? "amber" : "zinc"}
           />
@@ -348,7 +348,7 @@ function LatencyCard({ data, engine }: { data: SloResponse; engine?: string }) {
       }
       emptyNote={
         !hasData
-          ? `이 윈도우에서 query_stats 샘플 없음 — ${
+          ? `이 윈도우에서 query_stats 샘플 없음. ${
               isMysql(engine)
                 ? "performance_schema 문장 수집(events_statements_*)이 켜져 있는지"
                 : "pg_stat_statements 수집이 켜져 있는지"
@@ -459,9 +459,9 @@ function BudgetBar({ consumedPct }: { consumedPct: number | null }) {
       </div>
       <div className="text-[10px] text-zinc-600 mt-1">
         {consumedPct >= 100
-          ? "버짓 소진 — 신규 배포 보류 권장"
+          ? "버짓 소진: 신규 배포 보류 권장"
           : consumedPct >= 50
-            ? "버짓 절반 이상 소진 — 변경 일정 재검토"
+            ? "버짓 절반 이상 소진: 변경 일정 재검토"
             : "버짓 여유"}
       </div>
     </div>
@@ -495,7 +495,7 @@ function Stat({
 }
 
 // ---------------------------------------------------------------------------
-// Day timeline — heatmap-style strip
+// Day timeline: heatmap-style strip
 // ---------------------------------------------------------------------------
 
 function Timeline({ buckets }: { buckets: SloDayBucket[] }) {
@@ -537,7 +537,7 @@ function Timeline({ buckets }: { buckets: SloDayBucket[] }) {
       </div>
       {!hasAny && (
         <div className="px-4 pb-3 text-[11px] text-amber-300/80">
-          전 기간 데이터 없음 — ETL 수집기가 동작 중인지 확인하세요.
+          전 기간 데이터 없음. ETL 수집기가 동작 중인지 확인하세요.
         </div>
       )}
     </div>

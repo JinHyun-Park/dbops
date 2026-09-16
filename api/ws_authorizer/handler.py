@@ -21,7 +21,7 @@ THREE THINGS THIS ENFORCES, and none of them is DynamoDB TTL:
     deleting after would be a race; this cannot be.
 
     The ConditionExpression is NOT what makes it single-use, and saying so would be
-    an overclaim — DeleteItem on an absent key succeeds and simply returns no
+    an overclaim: DeleteItem on an absent key succeeds and simply returns no
     Attributes. The condition earns its place by turning "already gone" into an
     explicit ConditionalCheckFailed we can log, and by failing loudly if someone
     later refactors this to stop requiring the old image.

@@ -1,8 +1,8 @@
-"""Tests for mssql_direct — pytds connect (enforced TLS) + Data-API-shape adapter.
+"""Tests for mssql_direct: pytds connect (enforced TLS) + Data-API-shape adapter.
 
 Mirrors test_mysql_direct.py's structure. pytds's cursor.description is a
 7-tuple (name, type_code, display_size, internal_size, precision, scale,
-null_ok) — name is index 0, same as mysql/pg DB-API cursors.
+null_ok): name is index 0, same as mysql/pg DB-API cursors.
 """
 
 from datetime import datetime

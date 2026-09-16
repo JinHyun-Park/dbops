@@ -1,4 +1,4 @@
-"""ETL dispatcher unit tests — engine_family routing.
+"""ETL dispatcher unit tests: engine_family routing.
 
 Verifies that _collect_one dispatches to the correct collector based on engine
 family and that no RDS/PI/cost calls leak into non-relational paths.
@@ -258,7 +258,7 @@ def test_rds_instance_routes_to_instance_collector_only():
     assert mock_cost.call_args.kwargs.get("snapshot_ts") == _rt
     assert mock_capforecast.call_args.kwargs.get("snapshot_ts") == _rt
     assert mock_qregr.call_args.kwargs.get("snapshot_ts") == _rt
-    # baselines writes its own NOW() — no snapshot_ts passed.
+    # baselines writes its own NOW(), no snapshot_ts passed.
     assert "snapshot_ts" not in mock_baselines.call_args.kwargs
     assert result["cluster_id"] == "dbops-demo-mysql"
 
@@ -329,7 +329,7 @@ def test_rds_instance_mysql_calls_param_fitness_with_cache_args():
 
 
 def test_rds_instance_sqlserver_does_not_call_param_fitness():
-    """SQL Server has no cache-only param_fitness finding — must not be called."""
+    """SQL Server has no cache-only param_fitness finding, must not be called."""
     handler = _load_handler()
 
     resource = {

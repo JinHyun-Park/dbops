@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
 // REAL-input smoke suite. Every interaction here goes through Playwright's
-// hit-tested clicks — if an overlay/stacking bug ever buries a control again
+// hit-tested clicks. If an overlay/stacking bug ever buries a control again
 // (the "menu renders but clicks fall through" class), these fail with
 // "element intercepts pointer events" instead of silently passing the way
 // synthetic element.click() checks did.
@@ -85,7 +85,7 @@ test("헤더 클러스터 드롭다운: 실클릭으로 열고 전환하면 대�
 
   // Selection propagates. The URL ?cluster= is written by the DASHBOARD's own
   // mirror effect, so asserting it proves the page component received the new
-  // selection — not just that the dropdown updated itself.
+  // selection, not just that the dropdown updated itself.
   await expect(page).toHaveURL(
     new RegExp(`cluster=${encodeURIComponent(targetId).slice(0, 24)}`),
   );
@@ -144,7 +144,7 @@ test("RCA 드로어: 페이지를 떠나지 않고 인플레이스로 열린다"
     page.getByRole("button", { name: /전체 대화로 이어가기/ }),
   ).toBeVisible();
 
-  // Close (aborts the throwaway agent stream) — page intact afterwards.
+  // Close (aborts the throwaway agent stream). Page intact afterwards.
   await page.keyboard.press("Escape");
   await expect(page.getByText("근본 원인 분석")).toHaveCount(0);
   await expect(page.locator("main h1").first()).toBeVisible();

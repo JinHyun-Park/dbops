@@ -2,7 +2,7 @@
 
 A console for DBAs operating Aurora at scale, with an AI agent
 on call. The design language has to read like infrastructure software
-— precise, dense, legible at a glance — without the generic
+(precise, dense, legible at a glance) without the generic
 "AI-generated dark dashboard" cliché (rounded blue buttons, gradient
 purple accents, evenly-distributed neon palettes).
 
@@ -11,7 +11,7 @@ purple accents, evenly-distributed neon palettes).
 - **Industrial editorial.** Engineering tool with editorial discipline:
   monospace section labels, all-caps tracked eyebrows, generous figure
   spacing for numbers, and exactly one accent color for emphasis.
-- **Information-first.** Every page exposes structured data — tables,
+- **Information-first.** Every page exposes structured data: tables,
   stats, time series. Chrome (cards, borders) recedes; data is loud.
 - **Authoritative, not friendly.** No mascots, no playful copy, no
   rounded corners trying to feel approachable. Sharp edges, terse copy.
@@ -24,7 +24,7 @@ purple accents, evenly-distributed neon palettes).
 --font-mono:     "IBM Plex Mono", "JetBrains Mono", ui-monospace
 ```
 
-IBM Plex is intentional — it is the typeface IBM commissioned for its
+IBM Plex is intentional: it is the typeface IBM commissioned for its
 own engineering products. It is open-source, distinctive (not Geist
 /Inter/Roboto), and reads as infrastructure software rather than
 consumer SaaS.
@@ -44,7 +44,7 @@ consumer SaaS.
 
 ## Color
 
-Single accent — **amber** (`#fbbf24`). It signals "DBOps brand" and
+Single accent: **amber** (`#fbbf24`). It signals "DBOps brand" and
 nothing else; not used for warnings (which use amber-300, distinct
 hue/value).
 
@@ -70,16 +70,16 @@ hue/value).
 --accent-strong:   rgb(245 158 11)  /* amber-500 */
 
 /* Signal */
---signal-critical: rgb(251 113 133) /* rose-400 — blocking locks, errors */
---signal-warn:     rgb(252 211 77)  /* amber-300 — degraded, high CPU    */
---signal-ok:       rgb(52  211 153) /* emerald-400 — healthy             */
---signal-info:     rgb(125 211 252) /* sky-300 — informational           */
+--signal-critical: rgb(251 113 133) /* rose-400: blocking locks, errors */
+--signal-warn:     rgb(252 211 77)  /* amber-300: degraded, high CPU    */
+--signal-ok:       rgb(52  211 153) /* emerald-400: healthy             */
+--signal-info:     rgb(125 211 252) /* sky-300: informational           */
 ```
 
 **Rules**
 
 - One accent color. Don't use amber and emerald-400 next to each other
-  for "primary action vs success" — pick one role.
+  for "primary action vs success". Pick one role.
 - Signal colors are reserved for data state, not decoration.
 - No gradients. No glow/blur effects. Single 1px borders.
 
@@ -96,17 +96,17 @@ hue/value).
 - Every page starts with `<PageHeader>` (eyebrow + title + description
   - actions).
 - Sections use `<Section>` with eyebrow.
-- Empty states use `<EmptyState>` with primary/secondary CTA — never
+- Empty states use `<EmptyState>` with primary/secondary CTA, never
   inline "no data" text.
 
 ## Components
 
-- `<PageHeader>` — page-scoped chrome. eyebrow (monospace), title
+- `<PageHeader>`: page-scoped chrome. eyebrow (monospace), title
   (3xl), description (max-w-2xl), actions (right-aligned).
-- `<PageBody>` — max-w-7xl + padding.
-- `<Section>` — content group with eyebrow + title + optional actions.
-- `<EmptyState>` — onboarding nudge with primary/secondary CTA.
-- `<Stat>` — keyed metric card with eyebrow + tabular value + hint.
+- `<PageBody>`: max-w-7xl + padding.
+- `<Section>`: content group with eyebrow + title + optional actions.
+- `<EmptyState>`: onboarding nudge with primary/secondary CTA.
+- `<Stat>`: keyed metric card with eyebrow + tabular value + hint.
 
 ## Borders & corners
 
@@ -138,5 +138,5 @@ hue/value).
 - ✅ Tabular-nums on every number that compares vertically.
 - ✅ One signature accent (amber), used sparingly.
 - ✅ 1px borders, sharp corners.
-- ✅ Empty states with explicit CTA — never silent.
+- ✅ Empty states with explicit CTA, never silent.
 - ✅ Dense tables with `<thead>` in monospace tracked uppercase.

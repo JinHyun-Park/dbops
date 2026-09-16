@@ -1,4 +1,4 @@
-# Phase 1: Performance Analysis Agent — Implementation Plan
+# Phase 1: Performance Analysis Agent (Implementation Plan)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -179,7 +179,7 @@ cdk/config/settings.py
 ```markdown
 # CLAUDE.md
 
-# DBOps — AI-Powered Database Operations Platform
+# DBOps: AI-Powered Database Operations Platform
 
 ## Quick Reference
 
@@ -246,7 +246,7 @@ class Settings:
 from config.settings_example import Settings  # noqa: F401
 ```
 
-Wait — `settings.py` is gitignored so we need a fallback. Better approach:
+Wait: `settings.py` is gitignored so we need a fallback. Better approach:
 
 ```python
 # cdk/config/settings.py
@@ -563,7 +563,7 @@ class DataStack(cdk.Stack):
 - [ ] **Step 3: Verify CDK synth**
 
 Run: `cd cdk && cdk synth dbops-dev-data --quiet`
-Expected: Template generated. May warn about missing Lambda code directory — that's expected, we'll create it in the next task.
+Expected: Template generated. May warn about missing Lambda code directory. That's expected, we'll create it in the next task.
 
 - [ ] **Step 4: Commit**
 
@@ -778,7 +778,7 @@ git commit -m "feat: add shared MCP cache client with Data API integration"
 
 ---
 
-## Task 5: Performance MCP Server — get_top_queries
+## Task 5: Performance MCP Server (get_top_queries)
 
 **Files:**
 
@@ -888,7 +888,7 @@ git commit -m "feat: add get_top_queries tool for Performance MCP Server"
 
 ---
 
-## Task 6: Performance MCP Server — remaining tools
+## Task 6: Performance MCP Server (remaining tools)
 
 **Files:**
 
@@ -1089,7 +1089,7 @@ git commit -m "feat: add pi_metrics, slow_queries, compare_periods tools"
 
 ---
 
-## Task 7: Performance MCP Server — Lambda Handler
+## Task 7: Performance MCP Server (Lambda Handler)
 
 **Files:**
 
@@ -2100,7 +2100,7 @@ git commit -m "feat: initialize Next.js frontend with auth, API client, and SSE 
 
 ---
 
-## Task 13: Frontend — Chat Page
+## Task 13: Frontend (Chat Page)
 
 **Files:**
 
@@ -2115,10 +2115,10 @@ git commit -m "feat: initialize Next.js frontend with auth, API client, and SSE 
 
 This step creates the functional chat interface. Detailed implementation code should follow the Claude Design handoff bundle for visual styling. The structure:
 
-- `chat-panel.tsx` — Main chat container with input, message list, cluster selector
-- `message-list.tsx` — Renders messages with markdown and tool call status
-- `tool-status.tsx` — Shows active tool execution (name + spinner)
-- `app/chat/page.tsx` — Page wrapper
+- `chat-panel.tsx`: Main chat container with input, message list, cluster selector
+- `message-list.tsx`: Renders messages with markdown and tool call status
+- `tool-status.tsx`: Shows active tool execution (name + spinner)
+- `app/chat/page.tsx`: Page wrapper
 
 - [ ] **Step 2: Verify dev server starts**
 
@@ -2134,7 +2134,7 @@ git commit -m "feat: add Chat page with SSE streaming and tool status display"
 
 ---
 
-## Task 14: Frontend — Dashboard Page
+## Task 14: Frontend (Dashboard Page)
 
 **Files:**
 
@@ -2144,15 +2144,15 @@ git commit -m "feat: add Chat page with SSE streaming and tool status display"
 - Create: `frontend/src/components/dashboard/aas-chart.tsx`
 - Create: `frontend/src/app/dashboard/page.tsx`
 
-> Note: Same as Task 13 — functional stubs. Full design via Claude Design handoff.
+> Note: Same as Task 13, functional stubs. Full design via Claude Design handoff.
 
 - [ ] **Step 1: Build dashboard components and page**
 
-- `metric-card.tsx` — Reusable card showing label + value + trend
-- `status-badge.tsx` — Healthy/Warning/Critical badge
-- `cluster-overview.tsx` — Grid of cluster cards with health status
-- `aas-chart.tsx` — Time-series chart for AAS metrics
-- `app/dashboard/page.tsx` — Page with TanStack Query polling (5s refresh)
+- `metric-card.tsx`: Reusable card showing label + value + trend
+- `status-badge.tsx`: Healthy/Warning/Critical badge
+- `cluster-overview.tsx`: Grid of cluster cards with health status
+- `aas-chart.tsx`: Time-series chart for AAS metrics
+- `app/dashboard/page.tsx`: Page with TanStack Query polling (5s refresh)
 
 - [ ] **Step 2: Verify dashboard page renders**
 

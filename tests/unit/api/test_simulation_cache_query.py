@@ -2,7 +2,7 @@
 
 A latent bug: `_cache_query` called rds-data `execute_statement` WITHOUT
 `includeResultMetadata=True`, so the Data API omitted `columnMetadata` and the
-column-name→value mapping produced EMPTY dict rows — every name-based `.get()`
+column-name→value mapping produced EMPTY dict rows: every name-based `.get()`
 returned None. The Aurora REST tools have live-describe fallbacks that masked it;
 the DynamoDB capacity-cost tool (cache-only) surfaced it as a permanent no_data
 (region="", datapoints=0) even though the cache had the rows.

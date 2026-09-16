@@ -1,5 +1,5 @@
 /**
- * useSmartPoll — visibility-aware polling hook.
+ * useSmartPoll: visibility-aware polling hook.
  *
  * Semantics:
  *  - Fires `callback` immediately on mount AND whenever `deps` change.
@@ -11,7 +11,7 @@
  *
  * `deps`: pass the values the callback reads (e.g. the selected cluster /
  * range). When they change, the hook re-fires `callback` IMMEDIATELY and
- * restarts the interval — without this, a callback whose inputs arrive after
+ * restarts the interval: without this, a callback whose inputs arrive after
  * mount (e.g. a cluster id resolved by an async fetch) would no-op on the
  * mount fire and then sit idle until the next interval tick, leaving the UI
  * "loading" for up to `activeMs`. Defaults to `[]` (mount-only) for callers
@@ -33,7 +33,7 @@ export function useSmartPoll(
   activeMs: number,
   deps: unknown[] = [],
 ): void {
-  // Use refs so the effect body captures stable references — changing
+  // Use refs so the effect body captures stable references, changing
   // `callback` or `activeMs` updates the ref without re-running the effect.
   const callbackRef = useRef(callback);
   const activeMsRef = useRef(activeMs);
@@ -68,7 +68,7 @@ export function useSmartPoll(
       if (document.visibilityState === "hidden") {
         stopInterval();
       } else {
-        // Tab became visible — fire immediately to catch up, then restart
+        // Tab became visible: fire immediately to catch up, then restart
         // the interval from this moment (avoids an awkward leading delay).
         callbackRef.current();
         startInterval();
@@ -88,7 +88,7 @@ export function useSmartPoll(
       stopInterval();
     };
     // Re-run (re-fire + restart) whenever `deps` change. `callback`/`activeMs`
-    // identity is intentionally excluded — they flow through the refs above so
+    // identity is intentionally excluded, they flow through the refs above so
     // a new callback closure every render doesn't tear down the listener; only
     // a real input change (deps) should re-fire.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -11,26 +11,26 @@
 ## Global Constraints
 
 - **No `Co-Authored-By: Claude` trailer** in any commit (user rule).
-- **Additive / backward-compatible:** the default (no `cursor`, no `export`) `GET /api/activity` behavior — full `_scan_all` → sort `created_at` desc → truncate to `min(limit,500)` → `{items, count}` — must be byte-for-byte unchanged. The timeline UI must not change.
-- **DDB scan `Limit` is applied BEFORE `FilterExpression`** — a filtered page can return fewer items than the page size (even 0) while still having a `LastEvaluatedKey`. The export loop therefore continues while `next_cursor != null`, NOT while a page is non-empty.
+- **Additive / backward-compatible:** the default (no `cursor`, no `export`) `GET /api/activity` behavior must be byte-for-byte unchanged: full `_scan_all` → sort `created_at` desc → truncate to `min(limit,500)` → `{items, count}`. The timeline UI must not change.
+- **DDB scan `Limit` is applied BEFORE `FilterExpression`**: a filtered page can return fewer items than the page size (even 0) while still having a `LastEvaluatedKey`. The export loop therefore continues while `next_cursor != null`, NOT while a page is non-empty.
 - **Cursor is opaque:** `next_cursor = base64.urlsafe_b64encode(json.dumps(LastEvaluatedKey))`; a malformed `cursor` → `400 invalid cursor`, never a 500.
 - **No new infra / no new route:** same `/api/activity`, same authorizer.
 - **Korean UI copy** for any user-facing text; keep DBA jargon in English.
 
 ---
 
-### Task 1: Backend — cursor pagination mode on `GET /api/activity`
+### Task 1: Backend (cursor pagination mode on `GET /api/activity`)
 
 **Files:**
 
 - Modify: `api/approvals/handler.py` (the `if method == "GET" and path.endswith("/activity"):` block, ~lines 191-250)
-- Test: `tests/unit/api/test_activity.py` (extend — it already exists)
+- Test: `tests/unit/api/test_activity.py` (extend, it already exists)
 
 **Interfaces:**
 
 - Produces: `GET /api/activity?export=true[&cursor=<b64>][&limit=<n>]` → `{"items": [...compact...], "count": <page len>, "next_cursor": "<b64>"|null}`. Default mode (no cursor/export) unchanged: `{"items", "count"}`. Filters (`cluster_id`, `actor`, `action_type`) apply in both modes.
 
-- [ ] **Step 1: Read the current `/activity` block** in `api/approvals/handler.py` (~lines 191-250) to see the exact filter-building + `compact` projection + the `_scan_all`/sort/truncate + `_created_ms` usage. Confirm `import base64` and `import json` are present at the top (they are — `_decode_jwt_payload` uses base64).
+- [ ] **Step 1: Read the current `/activity` block** in `api/approvals/handler.py` (~lines 191-250) to see the exact filter-building + `compact` projection + the `_scan_all`/sort/truncate + `_created_ms` usage. Confirm `import base64` and `import json` are present at the top (they are: `_decode_jwt_payload` uses base64).
 
 - [ ] **Step 2: Write the failing tests.** Extend `tests/unit/api/test_activity.py`. Read the file first to reuse its event/handler-loading helpers (it loads the handler via importlib and patches the DDB table). Add tests that patch the table's `scan` for paginated mode. Use this shape (adapt the handler/table access + event builder to the file's existing helpers):
 
@@ -176,7 +176,7 @@ def _compact_activity(items: list) -> list:
     return compact
 ```
 
-Keep the `limit = max(1, min(int(qsp.get("limit", "200")), 500))` line for the default mode (it still bounds the non-export view). Note the export mode re-reads `limit` with a 500 default / 1000 max for page size — that's intentional and separate.
+Keep the `limit = max(1, min(int(qsp.get("limit", "200")), 500))` line for the default mode (it still bounds the non-export view). Note the export mode re-reads `limit` with a 500 default / 1000 max for page size: that's intentional and separate.
 
 - [ ] **Step 4: Run tests.**
 
@@ -197,7 +197,7 @@ git commit -m "feat(audit-export): cursor pagination mode on GET /api/activity"
 
 ---
 
-### Task 2: Frontend — export loop over all pages
+### Task 2: Frontend (export loop over all pages)
 
 **Files:**
 
@@ -298,7 +298,7 @@ export async function fetchAllActivity(opts?: {
                 }}
 ```
 
-Match the exact names of the filter state variables in the file (`clusterFilter`/`actorFilter`/`actionFilter` may differ — read the component and use whatever it actually uses; preserve the existing button JSX/styling and any `URL.revokeObjectURL`/cleanup the current code does). The created_at values are mixed-format strings (ms-epoch for agent requests, ISO for UI) — sorting by `String.localeCompare` desc is a best-effort order consistent with the existing client view; do NOT introduce a new date parser here.
+Match the exact names of the filter state variables in the file (`clusterFilter`/`actorFilter`/`actionFilter` may differ: read the component and use whatever it actually uses; preserve the existing button JSX/styling and any `URL.revokeObjectURL`/cleanup the current code does). The created_at values are mixed-format strings (ms-epoch for agent requests, ISO for UI), so sorting by `String.localeCompare` desc is a best-effort order consistent with the existing client view; do NOT introduce a new date parser here.
 
 - [ ] **Step 3: Build the frontend.**
 

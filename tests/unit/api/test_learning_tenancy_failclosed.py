@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Module loading — push api/dashboard on sys.path so sibling imports resolve
+# Module loading: push api/dashboard on sys.path so sibling imports resolve
 # ---------------------------------------------------------------------------
 
 _DASHBOARD_DIR = Path(__file__).resolve().parents[3] / "api" / "dashboard"

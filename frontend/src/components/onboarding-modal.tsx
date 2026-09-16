@@ -34,7 +34,7 @@ const STEPS: Step[] = [
         <span className="font-mono text-amber-300">Clusters</span> 페이지에서
         시작하세요. 한두 개라면 수동 등록 폼을, 플릿 규모라면{" "}
         <span className="font-mono text-sky-300">🔎 Discover clusters</span>{" "}
-        버튼을 사용하면 됩니다 — DBOps가 계정 내(또는 크로스 어카운트 롤 경유)
+        버튼을 사용하면 됩니다. DBOps가 계정 내(또는 크로스 어카운트 롤 경유)
         모든 Aurora 클러스터를 나열하고, 체크한 것만 등록합니다.
       </>
     ),
@@ -181,7 +181,7 @@ export function useOnboarding() {
     try {
       if (!localStorage.getItem(STORAGE_KEY)) setOpen(true);
     } catch {
-      /* localStorage blocked — skip auto-open */
+      /* localStorage blocked: skip auto-open */
     }
   }, []);
 

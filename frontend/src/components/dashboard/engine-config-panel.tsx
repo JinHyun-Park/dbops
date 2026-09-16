@@ -68,7 +68,7 @@ export function EngineConfigPanel({
 
   const fam = engineFamily(engine);
 
-  // Relational has the SettingsPanel — this panel is documentdb/dynamodb only.
+  // Relational has the SettingsPanel: this panel is documentdb/dynamodb only.
   if (fam === "relational") return null;
 
   const header = (
@@ -166,17 +166,17 @@ export function EngineConfigPanel({
   }
 
   if (fam === "elasticache") {
-    // Security posture: null/undefined → unknown ("—"), explicit false →
+    // Security posture: null/undefined → unknown ("-"), explicit false →
     // "비활성". Rendering an unknown protection as "disabled" would misrepresent
     // it, so the three states stay distinct.
     const posture = (v: boolean | null | undefined) =>
       v == null
-        ? { text: "—", tone: "muted" as const }
+        ? { text: "-", tone: "muted" as const }
         : v
           ? { text: "활성", tone: "good" as const }
           : { text: "비활성", tone: "muted" as const };
     const inTransit = posture(data?.transit_encryption_enabled);
-    // At-rest: prefer the encryption TYPE (authoritative — a node can be
+    // At-rest: prefer the encryption TYPE (authoritative: a node can be
     // encrypted even when the legacy boolean reads false) and surface it.
     const atRest = posture(data?.at_rest_encryption_enabled);
     const atRestText =
@@ -189,7 +189,7 @@ export function EngineConfigPanel({
     const rbac = data?.rbac_enabled === true;
     const authKnown = data?.auth_enabled != null || data?.rbac_enabled != null;
     const authText = !authKnown
-      ? "—"
+      ? "-"
       : authToken
         ? "활성 (토큰)"
         : rbac
@@ -225,11 +225,11 @@ export function EngineConfigPanel({
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <ConfigCell
                   label="파라미터 그룹"
-                  value={data?.parameter_group || "—"}
+                  value={data?.parameter_group || "-"}
                 />
                 <ConfigCell
                   label="유지보수 윈도우 (Maintenance Window)"
-                  value={data?.preferred_maintenance_window || "—"}
+                  value={data?.preferred_maintenance_window || "-"}
                 />
                 <ConfigCell
                   label="스냅샷 보관 (Retention)"
@@ -238,13 +238,13 @@ export function EngineConfigPanel({
                       ? retention > 0
                         ? `${retention}d`
                         : "비활성"
-                      : "—"
+                      : "-"
                   }
                   tone={retention ? "neutral" : "muted"}
                 />
                 <ConfigCell
                   label="스냅샷 윈도우 (Snapshot Window)"
-                  value={data?.snapshot_window || "—"}
+                  value={data?.snapshot_window || "-"}
                 />
                 <ConfigCell
                   label="저장 시 암호화 (At-Rest)"
@@ -263,14 +263,14 @@ export function EngineConfigPanel({
                 />
                 <ConfigCell
                   label="자동 Failover"
-                  value={data?.automatic_failover || "—"}
+                  value={data?.automatic_failover || "-"}
                   tone={
                     data?.automatic_failover === "enabled" ? "good" : "muted"
                   }
                 />
                 <ConfigCell
                   label="Multi-AZ"
-                  value={data?.multi_az || "—"}
+                  value={data?.multi_az || "-"}
                   tone={data?.multi_az === "enabled" ? "good" : "muted"}
                 />
               </div>
@@ -282,14 +282,14 @@ export function EngineConfigPanel({
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     {paramKeys.map((k) => {
                       const v = params[k];
-                      // noeviction = writes fail once memory is full — flag it.
+                      // noeviction = writes fail once memory is full, flag it.
                       const risky =
                         k === "maxmemory-policy" && v === "noeviction";
                       return (
                         <ConfigCell
                           key={k}
                           label={PARAM_LABELS[k]}
-                          value={v ?? "—"}
+                          value={v ?? "-"}
                           tone={risky ? "warn" : "neutral"}
                         />
                       );
@@ -321,7 +321,7 @@ export function EngineConfigPanel({
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <ConfigCell
               label="유지보수 윈도우 (Maintenance Window)"
-              value={data?.preferred_maintenance_window || "—"}
+              value={data?.preferred_maintenance_window || "-"}
             />
             <ConfigCell
               label="삭제 방지 (Deletion Protection)"
@@ -335,11 +335,11 @@ export function EngineConfigPanel({
             />
             <ConfigCell
               label="클러스터 파라미터 그룹"
-              value={data?.db_cluster_parameter_group || "—"}
+              value={data?.db_cluster_parameter_group || "-"}
             />
             <ConfigCell
               label="백업 보관 기간 (Retention)"
-              value={retention != null ? `${retention}d` : "—"}
+              value={retention != null ? `${retention}d` : "-"}
             />
           </div>
         )

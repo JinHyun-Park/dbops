@@ -18,5 +18,5 @@ _COPIES = [
 def test_tenancy_copies_are_byte_identical():
     contents = [p.read_bytes() for p in _COPIES]
     assert all(c == contents[0] for c in contents), (
-        "api/*/tenancy.py copies drifted — keep them byte-identical"
+        "api/*/tenancy.py copies drifted: keep them byte-identical"
     )

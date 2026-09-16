@@ -1,4 +1,4 @@
-# Phase 4: Simulation + Cross-Account — Implementation Plan
+# Phase 4: Simulation + Cross-Account (Implementation Plan)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 

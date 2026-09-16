@@ -1,13 +1,13 @@
-"""create_rds_snapshot — approval-gated manual snapshot of a STANDALONE RDS DB
+"""create_rds_snapshot: approval-gated manual snapshot of a STANDALONE RDS DB
 instance (non-Aurora: MySQL / SQL Server, the rds_instance engine family; R-3).
 
 The handler positive-gates this tool on the rds_instance-only `instance_write`
-capability (FAIL-CLOSED), so any other engine — or an unresolvable cluster —
+capability (FAIL-CLOSED), so any other engine (or an unresolvable cluster)
 gets unsupported_engine before the impl runs.
 
 Non-destructive, but still approval-gated (it stands up a billable snapshot).
 The default snapshot_id is resolved NOW in preview and hash-bound into the
-approval — execute NEVER re-resolves it (mirrors add_reader_instance's billable-
+approval: execute NEVER re-resolves it (mirrors add_reader_instance's billable-
 value binding), so a stale/replayed approval can't create a differently-named
 snapshot than the DBA approved.
 
@@ -74,7 +74,7 @@ def create_rds_snapshot_impl(
 
     if not approved:
         # Resolve the concrete snapshot id NOW so the approval hash binds the
-        # exact identifier the DBA sees — execute never generates one after
+        # exact identifier the DBA sees: execute never generates one after
         # approval.
         if not snapshot_id:
             snapshot_id = f"dbops-{cluster_id}-{datetime.utcnow().strftime('%Y%m%d%H%M')}"
@@ -96,11 +96,11 @@ def create_rds_snapshot_impl(
         return {"status": "approval_denied", "cluster_id": cluster_id,
                 "reason": guard.get("reason", "approval guard rejected the request")}
 
-    # The id was resolved in PREVIEW and hash-bound by the approval — execute
+    # The id was resolved in PREVIEW and hash-bound by the approval: execute
     # uses the exact id the DBA approved and NEVER re-resolves an empty one.
     if not snapshot_id:
         return {"status": "snapshot_failed", "cluster_id": cluster_id,
-                "reason": "snapshot_id가 승인에 바인딩되지 않았습니다 — 미리보기가 제안한 id로 다시 승인 요청하세요."}
+                "reason": "snapshot_id가 승인에 바인딩되지 않았습니다. 미리보기가 제안한 id로 다시 승인 요청하세요."}
 
     # TOCTOU: re-check on a FRESH describe immediately before the snapshot.
     fresh = _describe(rds, cluster_id)

@@ -1,4 +1,4 @@
-# AI-Powered DBOps Platform — Design Specification
+# AI-Powered DBOps Platform: Design Specification
 
 > Version: 1.0
 > Date: 2026-05-08
@@ -357,7 +357,7 @@ Tier 2: Bedrock KB + S3 Vectors (retrieve 도구, ~100ms)
 Tier 3: AWS Knowledge MCP (on-demand, 1-5초)
   - 최신 릴리즈 노트, 신규 기능, What's New, 블로그
   - Well-Architected 가이드
-  - Skills (단계별 절차 — 업그레이드, 마이그레이션 등)
+  - Skills (단계별 절차: 업그레이드, 마이그레이션 등)
   - 리전별 서비스 가용성 정보
   - KB 결과 불충분 시 fallback
 ```
@@ -403,10 +403,10 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 
 **Knowledge (Agent 직접 등록):**
 
-| 도구          | 역할                                                   | 등록 방식                 |
-| ------------- | ------------------------------------------------------ | ------------------------- |
-| retrieve      | Bedrock KB + S3 Vectors (Tier 2)                       | Strands native            |
-| aws_knowledge | AWS Knowledge MCP — 문서, Skills, 리전 가용성 (Tier 3) | Gateway MCP Server target |
+| 도구          | 역할                                                  | 등록 방식                 |
+| ------------- | ----------------------------------------------------- | ------------------------- |
+| retrieve      | Bedrock KB + S3 Vectors (Tier 2)                      | Strands native            |
+| aws_knowledge | AWS Knowledge MCP: 문서, Skills, 리전 가용성 (Tier 3) | Gateway MCP Server target |
 
 ### 5.2 Performance MCP Server (10 tools, Custom)
 
@@ -425,22 +425,22 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 
 **캐시 기반 조회 (4):**
 
-- `get_top_queries` — Aurora PG Cache에서 Top-N 쿼리 (총 시간/호출 수/평균 시간 기준)
-- `get_pi_metrics` — Aurora PG Cache에서 PI 메트릭 (AAS, wait events, counter metrics)
-- `get_slow_queries` — Aurora PG Cache에서 슬로우 쿼리 목록 (MySQL: slow query log 파싱, PG: pg_stat_statements 기반)
-- `compare_periods` — 두 기간의 메트릭 비교 분석
+- `get_top_queries`: Aurora PG Cache에서 Top-N 쿼리 (총 시간/호출 수/평균 시간 기준)
+- `get_pi_metrics`: Aurora PG Cache에서 PI 메트릭 (AAS, wait events, counter metrics)
+- `get_slow_queries`: Aurora PG Cache에서 슬로우 쿼리 목록 (MySQL: slow query log 파싱, PG: pg_stat_statements 기반)
+- `compare_periods`: 두 기간의 메트릭 비교 분석
 
 **사전 연산 분석 (4):**
 
-- `detect_anomalies` — 최근 N시간 메트릭을 7일 이동평균 baseline 대비 z-score로 이상 탐지
-- `detect_regressions` — 특정 시점 전후 쿼리 성능 비교 (배포 후 느려진 쿼리 탐지)
-- `forecast_capacity` — 스토리지/연결 수 선형 회귀 예측 (N일 후 한계 도달 예상)
-- `get_performance_summary` — 지정 기간 핵심 KPI 요약 (avg_aas, top_waits, slow_query_count 등)
+- `detect_anomalies`: 최근 N시간 메트릭을 7일 이동평균 baseline 대비 z-score로 이상 탐지
+- `detect_regressions`: 특정 시점 전후 쿼리 성능 비교 (배포 후 느려진 쿼리 탐지)
+- `forecast_capacity`: 스토리지/연결 수 선형 회귀 예측 (N일 후 한계 도달 예상)
+- `get_performance_summary`: 지정 기간 핵심 KPI 요약 (avg_aas, top_waits, slow_query_count 등)
 
 **캐시 기반 상세 모니터링 (2):**
 
-- `recommend_index` — index_usage + query_stats 조합 분석으로 인덱스 추천
-- `get_vacuum_stats` — (PG) autovacuum 현황, dead tuples, bloat ratio
+- `recommend_index`: index_usage + query_stats 조합 분석으로 인덱스 추천
+- `get_vacuum_stats`: (PG) autovacuum 현황, dead tuples, bloat ratio
 
 **공식 AWS MCP로 이관된 기능:**
 
@@ -459,12 +459,12 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 
 `get_alarm_history`와 `get_connections`는 공식 CloudWatch/Aurora MCP로 이관.
 
-- `get_health_status` — 클러스터 건강 상태 종합 (캐시 기반 인스턴스 상태, 연결, 복제 지연)
-- `get_recent_events` — DynamoDB event_history에서 RDS Events, 알람, failover 이력
-- `search_logs` — CloudWatch Logs Insights로 Aurora error/audit log 검색
-- `correlate_signals` — 메트릭 + 이벤트 + 로그를 시간축 정렬하여 장애 타임라인 구성
-- `get_incident_summary` — 최근 N일 장애/이벤트 통계 (MTTR, 빈도, 유형별 분류)
-- `find_similar_incidents` — Bedrock KB에서 현재 증상과 유사한 과거 장애 사례 검색
+- `get_health_status`: 클러스터 건강 상태 종합 (캐시 기반 인스턴스 상태, 연결, 복제 지연)
+- `get_recent_events`: DynamoDB event_history에서 RDS Events, 알람, failover 이력
+- `search_logs`: CloudWatch Logs Insights로 Aurora error/audit log 검색
+- `correlate_signals`: 메트릭 + 이벤트 + 로그를 시간축 정렬하여 장애 타임라인 구성
+- `get_incident_summary`: 최근 N일 장애/이벤트 통계 (MTTR, 빈도, 유형별 분류)
+- `find_similar_incidents`: Bedrock KB에서 현재 증상과 유사한 과거 장애 사례 검색
 
 **공식 AWS MCP로 이관된 기능:**
 
@@ -483,20 +483,20 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 
 **캐시 기반 조회 (2, 자동 허용):**
 
-- `get_schema_diff` — 두 환경/시점 간 스키마 비교 (캐시된 schema_snapshots 사용)
-- `get_schema_history` — 스키마 변경 이력 추적 (캐시 기반)
+- `get_schema_diff`: 두 환경/시점 간 스키마 비교 (캐시된 schema_snapshots 사용)
+- `get_schema_history`: 스키마 변경 이력 추적 (캐시 기반)
 
 **실행 (4, 승인 필요):**
 
-- `execute_sql` — SQL 실행 (SELECT 자동 허용, DDL/DML 승인 필요)
-- `modify_parameter` — DB 파라미터 변경
-- `modify_scaling` — 인스턴스 스케일링
-- `manage_maintenance` — 유지보수 윈도우 관리
+- `execute_sql`: SQL 실행 (SELECT 자동 허용, DDL/DML 승인 필요)
+- `modify_parameter`: DB 파라미터 변경
+- `modify_scaling`: 인스턴스 스케일링
+- `manage_maintenance`: 유지보수 윈도우 관리
 
 **분석 (2, 자동 허용):**
 
-- `review_sql` — DDL/DML 실행 전 자동 리뷰 (위험도, 영향 행 수, 락 시간 추정, 롤백 SQL)
-- `audit_permissions` — DB 사용자/역할 권한 감사 (과도한 권한, 미사용 계정 탐지)
+- `review_sql`: DDL/DML 실행 전 자동 리뷰 (위험도, 영향 행 수, 락 시간 추정, 롤백 SQL)
+- `audit_permissions`: DB 사용자/역할 권한 감사 (과도한 권한, 미사용 계정 탐지)
 
 **공식 AWS MCP로 이관된 기능:**
 
@@ -510,12 +510,12 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 > `simulate_dynamodb_capacity_cost`, `simulate_elasticache_node_resize` and
 > `simulate_rds_instance_rightsizing`.
 
-- `check_upgrade_compatibility` — 버전 업그레이드 호환성 체크 (deprecated 기능, 새 기능, 호환 SQL)
-- `estimate_upgrade_impact` — 업그레이드 방식별 예상 시간/다운타임/리스크 분석
-- `generate_upgrade_plan` — 업그레이드 실행 계획서 생성 (체크리스트, 절차, 롤백 계획)
-- `simulate_parameter_change` — 파라미터 변경 영향 분석 (static/dynamic, 영향 범위, 연관 파라미터)
-- `simulate_scaling` — 스케일 업/다운 비용-성능 트레이드오프 분석
-- `simulate_ddl_impact` — DDL 영향도 분석 (테이블 크기, 예상 락 시간, 온라인 DDL 가능 여부)
+- `check_upgrade_compatibility`: 버전 업그레이드 호환성 체크 (deprecated 기능, 새 기능, 호환 SQL)
+- `estimate_upgrade_impact`: 업그레이드 방식별 예상 시간/다운타임/리스크 분석
+- `generate_upgrade_plan`: 업그레이드 실행 계획서 생성 (체크리스트, 절차, 롤백 계획)
+- `simulate_parameter_change`: 파라미터 변경 영향 분석 (static/dynamic, 영향 범위, 연관 파라미터)
+- `simulate_scaling`: 스케일 업/다운 비용-성능 트레이드오프 분석
+- `simulate_ddl_impact`: DDL 영향도 분석 (테이블 크기, 예상 락 시간, 온라인 DDL 가능 여부)
 
 ### 5.6 Knowledge (2 tools)
 
@@ -525,8 +525,8 @@ MCP Server는 **Custom (자체 구현)** + **Official AWS (awslabs 제공)** 하
 > which SigV4-proxy the AWS-managed docs MCP from inside the Runtime
 > (`agent/server.py`).
 
-- `retrieve` — Bedrock KB + S3 Vectors 검색 (Tier 2). Strands 네이티브 도구로 Agent에 직접 등록.
-- `aws_knowledge` — AWS Knowledge MCP Server 조회 (Tier 3). Gateway에 외부 MCP Server 타겟으로 등록. Documentation MCP보다 넓은 범위: 공식 문서 + What's New + 블로그 + Well-Architected + Skills(단계별 절차) + 리전 가용성 포함.
+- `retrieve`: Bedrock KB + S3 Vectors 검색 (Tier 2). Strands 네이티브 도구로 Agent에 직접 등록.
+- `aws_knowledge`: AWS Knowledge MCP Server 조회 (Tier 3). Gateway에 외부 MCP Server 타겟으로 등록. Documentation MCP보다 넓은 범위: 공식 문서 + What's New + 블로그 + Well-Architected + Skills(단계별 절차) + 리전 가용성 포함.
 
 ---
 
@@ -650,8 +650,8 @@ forbid(
 
 - Dark Mode First (DBA의 터미널 작업 환경에 맞춤)
 - Information Density > White Space (한 화면에 필요한 정보 최대 표시)
-- Command Palette (Cmd+K) — 모든 기능에 키보드 접근
-- Contextual AI Panel — 어디서든 슬라이드 패널로 AI 대화 가능
+- Command Palette (Cmd+K): 모든 기능에 키보드 접근
+- Contextual AI Panel: 어디서든 슬라이드 패널로 AI 대화 가능
 - 전용 컬러 팔레트 (기본 shadcn 컬러 사용 금지)
 
 **디자인 레퍼런스:** Linear (미니멀 레이아웃), Grafana (대시보드 그리드), pganalyze (DB 전용 UI), Vercel Dashboard (모노톤), Raycast (커맨드 팔레트)
@@ -767,7 +767,7 @@ cdk deploy --all
 
 - 모든 환경 차이는 `config/settings.py`에서 관리
 - 기능 토글, 리전, 인스턴스 크기 등을 config로 제어
-- AWS CLI로 직접 리소스 수정 금지 — 항상 CDK를 통해 변경
+- AWS CLI로 직접 리소스 수정 금지: 항상 CDK를 통해 변경
 
 ### 9.3 Config Structure
 

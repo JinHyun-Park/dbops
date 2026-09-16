@@ -30,7 +30,7 @@ def _build_instance_list(rds_client, cluster_id: str, members: list) -> list:
 
 def _writer_instance_class(rds_client, cluster_id: str, members: list) -> str:
     """Writer 인스턴스의 DBInstanceClass. Sv2는 "db.serverless", 프로비저닝은
-    db.r6g.large 같은 실제 클래스 — 한 필드로 두 모드를 다 표현한다.
+    db.r6g.large 같은 실제 클래스. 한 필드로 두 모드를 다 표현한다.
     describe 권한 문제 등으로 실패하면 빈 문자열(컬럼 유지)."""
     writer_id = next(
         (m.get("DBInstanceIdentifier") for m in members if m.get("IsClusterWriter")),
@@ -47,7 +47,7 @@ def _writer_instance_class(rds_client, cluster_id: str, members: list) -> str:
 
 
 def _vpc_info(rds_client, cluster):
-    """(vpc_id, comma-joined sorted AZs) for the cluster's DB subnet group — the
+    """(vpc_id, comma-joined sorted AZs) for the cluster's DB subnet group, the
     network context the DB Map nests by. Best-effort: returns ('', '') on any
     failure so meta collection never breaks. Works for Aurora + DocumentDB (both
     use the rds: DescribeDBSubnetGroups API)."""
@@ -72,7 +72,7 @@ def collect_cluster_meta(rds_client, cache_execute, cluster_id, account_id, regi
 
     # Serverless v2 carries ScalingConfiguration with MinCapacity/MaxCapacity
     # in ACUs (Aurora Capacity Units). Provisioned clusters return no such
-    # field, so we leave the columns NULL — cost_check uses NULL as the
+    # field, so we leave the columns NULL: cost_check uses NULL as the
     # signal to skip the ACU advice.
     sv2 = cluster.get("ServerlessV2ScalingConfiguration") or {}
     engine_mode = cluster.get("EngineMode") or ("serverless" if sv2 else "provisioned")

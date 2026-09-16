@@ -1,9 +1,9 @@
--- schema_v17 — scheduled agent tasks (Agent Tasks, increment 4)
+-- schema_v17: scheduled agent tasks (Agent Tasks, increment 4)
 --
 -- Recurring agent work definitions, mirrored on the alert_rules pattern. The
 -- task_scheduler Lambda (EventBridge) reads enabled rows, decides which are due
 -- by interval_kind vs last_run_at, and enqueues a pending row into the
--- agent-tasks DynamoDB table — the same single processing path the
+-- agent-tasks DynamoDB table, the same single processing path the
 -- task_worker drains. See docs/superpowers/specs/2026-06-18-agent-tasks-design.md.
 
 CREATE TABLE IF NOT EXISTS scheduled_tasks (

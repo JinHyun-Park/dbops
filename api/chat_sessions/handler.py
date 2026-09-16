@@ -1,4 +1,4 @@
-"""Chat sessions API — DynamoDB-backed conversation persistence.
+"""Chat sessions API: DynamoDB-backed conversation persistence.
 
 The chat UI used to keep conversations only in browser localStorage.
 That works fine on one device but breaks the moment the DBA opens the
@@ -7,20 +7,20 @@ handler is the cross-device source of truth: conversation rows live in
 the `sessions` DDB table, keyed by user (Cognito sub or username).
 
 Table layout (table already exists in foundation_stack with TTL):
-  PK   session_id (string) — UUID prefixed with `dbops-session-`
-  GSI  user-updated-index  — partition user_id, sort updated_at desc
+  PK   session_id (string):  UUID prefixed with `dbops-session-`
+  GSI  user-updated-index:   partition user_id, sort updated_at desc
   attrs: title, cluster_id, message_count, messages (list), ttl
 
-Messages are embedded directly in the row. DDB items max out at 400KB —
+Messages are embedded directly in the row. DDB items max out at 400KB:
 that's roughly 4000 plain-text messages or 1000 messages with tool calls.
 A future migration to a separate `chat_messages` table can lift this
 ceiling when we actually hit it.
 
 Routes (registered as proxy in agent_stack):
-  GET    /api/chat/sessions                    — list caller's sessions
-  GET    /api/chat/sessions/{id}               — fetch one with full messages
-  PUT    /api/chat/sessions/{id}               — upsert whole session
-  DELETE /api/chat/sessions/{id}               — delete one
+  GET    /api/chat/sessions:                     list caller's sessions
+  GET    /api/chat/sessions/{id}:                fetch one with full messages
+  PUT    /api/chat/sessions/{id}:                upsert whole session
+  DELETE /api/chat/sessions/{id}:                delete one
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
-# 90 days of retention by default — enough to recover prior week's
+# 90 days of retention by default, enough to recover prior week's
 # incident transcripts but not so long that orphan sessions accumulate.
 SESSION_TTL_SECONDS = int(os.environ.get("SESSION_TTL_SECONDS", str(90 * 24 * 3600)))
 
@@ -56,7 +56,7 @@ def _decode_jwt_payload(token: str) -> dict:
 
 
 def _caller_id(event: dict) -> str:
-    """Cognito `sub` is the stable identifier across username changes —
+    """Cognito `sub` is the stable identifier across username changes:
     prefer it over username/email which can be remapped."""
     headers = event.get("headers") or {}
     auth = headers.get("authorization") or headers.get("Authorization") or ""
@@ -87,7 +87,7 @@ def _response(status: int, body) -> dict:
 
 
 def _json_default(o):
-    """DDB returns Decimal for numbers — convert to plain int/float for JSON."""
+    """DDB returns Decimal for numbers: convert to plain int/float for JSON."""
     if isinstance(o, Decimal):
         return float(o) if o % 1 else int(o)
     return str(o)
@@ -165,7 +165,7 @@ def _list_sessions(table, user_id: str, qsp: dict) -> dict:
             KeyConditionExpression=Key("user_id").eq(user_id),
             ScanIndexForward=False,  # most recent first
             Limit=limit,
-            # Don't pull `messages` blob in list view — keeps payload small.
+            # Don't pull `messages` blob in list view, keeps payload small.
             ProjectionExpression="session_id, title, cluster_id, updated_at, message_count, created_at, total_input_tokens, total_output_tokens, last_error",
         )
     except ClientError as e:

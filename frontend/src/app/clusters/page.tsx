@@ -40,7 +40,7 @@ interface Cluster {
   registered_at?: string;
   is_demo?: boolean;
   resource_name?: string;
-  // ETL freshness — derived from MAX(ts) in metric_snapshots for this
+  // ETL freshness: derived from MAX(ts) in metric_snapshots for this
   // cluster. "fresh" within 15min, "stale" older, "no_data" never
   // collected. Useful for spotting ETL pipeline failures per-cluster.
   etl_status?: "fresh" | "stale" | "no_data" | "unknown";
@@ -81,7 +81,7 @@ function EtlBadge({
   rows?: number;
 }) {
   if (!status || status === "unknown") {
-    return <span className="text-zinc-600 text-[10px] font-mono">—</span>;
+    return <span className="text-zinc-600 text-[10px] font-mono">-</span>;
   }
   const map: Record<
     NonNullable<Cluster["etl_status"]>,
@@ -108,7 +108,7 @@ function EtlBadge({
         ts
           ? `last metric ${new Date(
               ts,
-            ).toLocaleString()} — ETL has not committed in 15+ minutes (${
+            ).toLocaleString()}. ETL has not committed in 15+ minutes (${
               n ?? 0
             } rows in 24h)`
           : "metric stream stale",
@@ -117,7 +117,7 @@ function EtlBadge({
       label: "no data",
       classes: "bg-rose-500/10 text-rose-300 border-rose-500/40",
       title: () =>
-        "metric_snapshots has no rows for this cluster — check the ETL collector logs and the cluster registration",
+        "metric_snapshots has no rows for this cluster. Check the ETL collector logs and the cluster registration",
     },
     unknown: {
       label: "?",
@@ -137,9 +137,9 @@ function EtlBadge({
 }
 
 function relTime(iso?: string): string {
-  if (!iso) return "—";
+  if (!iso) return "-";
   // registered_at은 naive UTC isoformat으로 저장돼 왔다(시간대 표기 없음).
-  // 그대로 파싱하면 로컬로 해석돼 KST에서 +9h 오차 — 미표기면 Z를 붙인다.
+  // 그대로 파싱하면 로컬로 해석돼 KST에서 +9h 오차. 미표기면 Z를 붙인다.
   const norm = /Z$|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + "Z";
   const diff = Date.now() - new Date(norm).getTime();
   if (diff < 60_000) return "just now";
@@ -208,7 +208,7 @@ export default function ClustersPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [registering, setRegistering] = useState(false);
 
-  // 조회 실패를 빈 배열로 삼키면 기존 등록 클러스터가 사라진 것처럼 보인다 —
+  // 조회 실패를 빈 배열로 삼키면 기존 등록 클러스터가 사라진 것처럼 보인다.
   // 에러를 명시적으로 잡아 "0개"와 "조회 실패"를 구분한다(Codex 감사).
   const [clustersError, setClustersError] = useState<string | null>(null);
   const loadClusters = useCallback(() => {
@@ -246,7 +246,7 @@ export default function ClustersPage() {
       });
       setDiscovered(res.clusters);
       setDiscoverErrors(res.errors || {});
-      // Auto-select unregistered clusters — DBOps 내부 캐시 DB(is_internal)는
+      // Auto-select unregistered clusters: DBOps 내부 캐시 DB(is_internal)는
       // 제외한다. 자기 자신을 모니터링 대상으로 실수 등록하는 것 방지;
       // 수동 체크로는 여전히 선택 가능(의도적 등록은 막지 않는다).
       setSelectedIds(
@@ -314,7 +314,7 @@ export default function ClustersPage() {
         kind: tone as "ok" | "warn",
         msg: `등록 ${ok}개, 스킵 ${skip}개, 실패 ${fail}개${
           fail > 0
-            ? ` — 실패: ${res.failed.map((f) => f.cluster_id).join(", ")}`
+            ? `, 실패: ${res.failed.map((f) => f.cluster_id).join(", ")}`
             : ""
         }`,
       });
@@ -682,7 +682,7 @@ export default function ClustersPage() {
                       </th>
                     </tr>
                   </thead>
-                  {/* Group discovered resources by engine family — each family
+                  {/* Group discovered resources by engine family: each family
                       is its own <tbody> with a bordered header row, so the list
                       reads as separated sections instead of one mixed table. */}
                   {(() => {
@@ -736,7 +736,7 @@ export default function ClustersPage() {
                                   slug; show the table name (resource_name) so
                                   the list is readable. Aurora/DocDB have no
                                   resource_name, so displayName falls back to
-                                  cluster_id — unchanged for them. */}
+                                  cluster_id, unchanged for them. */}
                               {displayName(c)}
                               {c.already_registered && (
                                 <span className="ml-2 text-[10px] text-zinc-500">
@@ -746,7 +746,7 @@ export default function ClustersPage() {
                               {c.is_internal && !c.already_registered && (
                                 <span
                                   className="ml-2 px-1.5 py-0.5 border border-sky-500/40 bg-sky-500/10 text-sky-300 text-[10px]"
-                                  title="DBOps 플랫폼 자체 리소스입니다 (캐시 DB 또는 컨트롤 플레인 테이블) — 모니터링 대상으로 등록할 필요가 없어 자동 선택에서 제외했습니다."
+                                  title="DBOps 플랫폼 자체 리소스입니다 (캐시 DB 또는 컨트롤 플레인 테이블). 모니터링 대상으로 등록할 필요가 없어 자동 선택에서 제외했습니다."
                                 >
                                   DBOps 내부
                                 </span>
@@ -766,10 +766,10 @@ export default function ClustersPage() {
                                 STATUS_STYLES[c.status] || "text-zinc-500"
                               }`}
                             >
-                              {c.status || "—"}
+                              {c.status || "-"}
                             </td>
                             <td className="px-3 py-2 text-[10px] text-zinc-500 font-mono truncate max-w-xs">
-                              {c.endpoint || "—"}
+                              {c.endpoint || "-"}
                             </td>
                             <td className="px-3 py-2 text-[10px]">
                               <SecretSourceBadge
@@ -848,7 +848,7 @@ export default function ClustersPage() {
       {showForm && (
         <Section eyebrow="신규 등록" title="클러스터 / 리소스 등록">
           <div className="border border-zinc-800 bg-zinc-900/40 p-6 space-y-5">
-            {/* Engine selector — shown first so subsequent fields can be
+            {/* Engine selector: shown first so subsequent fields can be
                 conditioned on the selected engine family. */}
             <div>
               <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
@@ -891,7 +891,7 @@ export default function ClustersPage() {
               )}
             </div>
 
-            {/* Mode toggle — only relevant for Aurora engines */}
+            {/* Mode toggle: only relevant for Aurora engines */}
             {(form.engine === "aurora-postgresql" ||
               form.engine === "aurora-mysql") && (
               <div>
@@ -1027,7 +1027,7 @@ export default function ClustersPage() {
                 mono
               />
 
-              {/* Spoke role — Aurora cross-account only */}
+              {/* Spoke role: Aurora cross-account only */}
               {(form.engine === "aurora-postgresql" ||
                 form.engine === "aurora-mysql") &&
                 registerMode === "cross-account" && (
@@ -1088,7 +1088,7 @@ export default function ClustersPage() {
                     ? "등록"
                     : "등록 + 연결 검증"}
               </button>
-              {/* Connection pre-flight test — Aurora only */}
+              {/* Connection pre-flight test: Aurora only */}
               {(form.engine === "aurora-postgresql" ||
                 form.engine === "aurora-mysql") && (
                 <button
@@ -1169,7 +1169,7 @@ export default function ClustersPage() {
                             ? "✗"
                             : s.status === "warning"
                               ? "⚠"
-                              : "—"}
+                              : "-"}
                       </span>
                       <span className="font-mono text-zinc-300 w-40 flex-shrink-0">
                         {s.name}
@@ -1201,8 +1201,8 @@ export default function ClustersPage() {
               클러스터 목록을 불러오지 못했습니다
             </div>
             <div className="text-zinc-400">
-              {clustersError} — 기존 등록 클러스터가 사라진 것이 아니라 조회
-              실패 상태입니다.
+              {clustersError}. 기존 등록 클러스터가 사라진 것이 아니라 조회 실패
+              상태입니다.
             </div>
             <button
               onClick={loadClusters}
@@ -1241,7 +1241,7 @@ export default function ClustersPage() {
 
               return sections.map(({ grp, meta, items }, sIdx) => (
                 <div key={grp} className={sIdx > 0 ? "mt-6" : ""}>
-                  {/* Family section header — matches the table's existing label
+                  {/* Family section header: matches the table's existing label
                       treatment: muted caps with a coloured accent dot. */}
                   <div className="flex items-center gap-2 mb-2">
                     <span
@@ -1281,14 +1281,14 @@ export default function ClustersPage() {
                                 )}
                               </div>
                               <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
-                                {c.engine || "—"}
+                                {c.engine || "-"}
                                 {c.engine_version ? ` ${c.engine_version}` : ""}
                               </div>
                             </div>
                             <span
                               className={`shrink-0 text-[10px] font-mono ${statusColor}`}
                             >
-                              {c.status || "—"}
+                              {c.status || "-"}
                             </span>
                           </div>
                           <div className="grid grid-cols-2 gap-1.5 text-[11px] mb-2">
@@ -1408,7 +1408,7 @@ export default function ClustersPage() {
                               </td>
                               <td className="px-4 py-2.5">
                                 <div className="text-zinc-300 text-xs">
-                                  {c.engine || "—"}
+                                  {c.engine || "-"}
                                 </div>
                                 {c.engine_version && (
                                   <div className="text-[10px] text-zinc-500 font-mono">
@@ -1425,7 +1425,7 @@ export default function ClustersPage() {
                               <td
                                 className={`px-4 py-2.5 text-xs ${statusColor}`}
                               >
-                                {c.status || "—"}
+                                {c.status || "-"}
                               </td>
                               <td className="px-4 py-2.5">
                                 <span
@@ -1503,12 +1503,12 @@ function SecretSourceBadge({
   source?: "convention" | "master_fallback" | "missing";
   hasArn: boolean;
 }) {
-  // Server may not have emitted secret_source for cached or older payloads —
-  // fall back to the legacy "managed / manual" rendering so the column is never blank.
+  // Server may not have emitted secret_source for cached or older payloads.
+  // Fall back to the legacy "managed / manual" rendering so the column is never blank.
   if (!source) {
     return (
       <span className="text-zinc-500 font-mono text-[10px]">
-        {hasArn ? "✓ managed" : "— manual"}
+        {hasArn ? "✓ managed" : "- manual"}
       </span>
     );
   }

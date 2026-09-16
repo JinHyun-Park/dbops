@@ -1,6 +1,6 @@
 """Unit tests for alert_evaluator URL builder + dedup window math.
 
-These are pure-function smoke tests — no AWS calls, no network. They catch
+These are pure-function smoke tests: no AWS calls, no network. They catch
 regressions in:
   - Dashboard deep-link construction (Slack button URL).
   - PagerDuty dedup_key bucketing (TTL window).
@@ -72,7 +72,7 @@ def test_slack_payload_includes_actions_block(handler):
 
 def test_slack_payload_keeps_ack_button_without_frontend_url(monkeypatch):
     """Without FRONTEND_URL the deep-link buttons are skipped, but the Ack
-    button must still be present — workspace-only setups (no CloudFront
+    button must still be present: workspace-only setups (no CloudFront
     domain configured) can still close out alerts from Slack."""
     monkeypatch.delenv("FRONTEND_URL", raising=False)
     h = _fresh_handler()
@@ -121,7 +121,7 @@ def test_dedup_window_seconds_default(handler, monkeypatch):
 def test_pagerduty_links_present_when_frontend_url_set(handler):
     rule = {"id": 5, "cluster_id": "c", "name": "n", "metric_type": "m", "comparison": ">", "threshold": 0.0}
     payload = handler._build_pagerduty_payload(rule, 1.0, "KEY")
-    # Timeline + dashboard + alerts — the on-call's incident-triage
+    # Timeline + dashboard + alerts: the on-call's incident-triage
     # links in order of usefulness at 3am.
     links = payload.get("links") or []
     assert len(links) == 3
@@ -132,7 +132,7 @@ def test_pagerduty_links_present_when_frontend_url_set(handler):
 
 
 def test_slack_payload_includes_timeline_button(handler):
-    """The timeline deep-link is the highest-value Slack action at 3am —
+    """The timeline deep-link is the highest-value Slack action at 3am:
     it shows the full cluster incident context (alerts + schema changes
     + RDS events + writes) on one page. Make sure it ships first."""
     rule = {

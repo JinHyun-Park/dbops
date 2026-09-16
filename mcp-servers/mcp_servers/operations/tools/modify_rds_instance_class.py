@@ -1,8 +1,8 @@
-"""modify_rds_instance_class — approval-gated compute resize of a STANDALONE RDS
+"""modify_rds_instance_class: approval-gated compute resize of a STANDALONE RDS
 DB instance (non-Aurora: MySQL / SQL Server, the rds_instance engine family; R-3).
 
 The handler positive-gates this tool on the rds_instance-only `instance_write`
-capability (FAIL-CLOSED), so any other engine — or an unresolvable cluster —
+capability (FAIL-CLOSED), so any other engine (or an unresolvable cluster)
 gets unsupported_engine before the impl runs.
 
 The instance's CURRENT class is read in preview and hash-bound into the approval
@@ -115,7 +115,7 @@ def modify_rds_instance_class_impl(
                 "reason": guard.get("reason", "approval guard rejected the request")}
 
     # TOCTOU: re-read the live class and refuse if it drifted from the class the
-    # approval was bound to — never resize on top of an unexpected state.
+    # approval was bound to, never resize on top of an unexpected state.
     fresh = _describe(rds, cluster_id)
     if fresh is _LOOKUP_FAILED:
         # The approval is SINGLE-USE and was consumed above, so say so: this is the

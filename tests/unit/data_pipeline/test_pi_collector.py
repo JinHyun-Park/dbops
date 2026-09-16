@@ -1,7 +1,7 @@
 """Unit tests for the PI collector's injectable metric list.
 
 rds_instance engines (MySQL/SQL Server RDS instances) can't use the full
-Aurora-shaped PI_METRIC_QUERIES list — PI's GetResourceMetrics rejects the
+Aurora-shaped PI_METRIC_QUERIES list: PI's GetResourceMetrics rejects the
 whole batched call if any single metric is unknown for the engine. The
 `metrics` param lets callers swap in an engine-safe list; default (None)
 preserves the existing Aurora behavior.

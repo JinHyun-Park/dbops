@@ -35,7 +35,7 @@ def _decode_jwt_payload(token: str) -> dict:
 
 
 def _is_admin(event: dict) -> bool:
-    """True if caller is admin (or has no group at all — default admin).
+    """True if caller is admin (or has no group at all, default admin).
     False if explicitly in dbops-viewer or no token at all."""
     headers = event.get("headers") or {}
     auth = headers.get("authorization") or headers.get("Authorization") or ""
@@ -173,9 +173,9 @@ def _make_query(rds_data, cluster_arn, secret_arn, database):
 
 def _list_rules(query, cluster_id):
     # LATERAL JOIN mirrors the evaluator window (10 min). data_status:
-    #   fresh    — metric snapshot within 10 min, rule eligible to fire
-    #   stale    — metric snapshot exists but older than 10 min, rule will skip
-    #   no_data  — no snapshot at all, likely a misconfigured cluster_id/metric pair
+    #   fresh:     metric snapshot within 10 min, rule eligible to fire
+    #   stale:     metric snapshot exists but older than 10 min, rule will skip
+    #   no_data:   no snapshot at all, likely a misconfigured cluster_id/metric pair
     base = (
         "SELECT r.id, r.cluster_id, r.name, r.metric_type, r.comparison, r.threshold, r.enabled, "
         "  r.last_triggered_at, r.last_acked_at, r.last_acked_by, r.snooze_until, "
@@ -277,7 +277,7 @@ def _create_rule(query, body):
         )
         return _response(201, {"rule": rows[0] if rows else None})
 
-    # Legacy single-threshold path — unchanged behaviour.
+    # Legacy single-threshold path: unchanged behaviour.
     metric_type = body.get("metric_type", "")
     comparison = body.get("comparison", "")
     threshold = body.get("threshold")
@@ -372,7 +372,7 @@ def _update_rule(query, rule_id, body):
 def _snooze_rule(query, rule_id, body):
     """Snooze (minutes > 0) or clear (minutes <= 0) a single rule. The
     evaluator re-checks snooze_until on every run, so no un-snooze job is
-    needed — it just fires again once the timestamp passes."""
+    needed: it just fires again once the timestamp passes."""
     try:
         rule_id_int = int(rule_id)
     except (TypeError, ValueError):
@@ -404,7 +404,7 @@ def _snooze_bulk(event, query, body):
     """Snooze (or clear) every rule for one cluster in one shot.
 
     ponytail: alert_rules is keyed by (cluster_id, metric), not by instance
-    role, so there's no writer/reader-scoped snooze here — per-cluster is
+    role, so there's no writer/reader-scoped snooze here: per-cluster is
     the finest-grained bulk control the schema supports today.
     """
     cluster_id = body.get("cluster_id", "")
@@ -456,7 +456,7 @@ def _list_subscriptions(sns_client, topic_arn, query):
             if not next_token:
                 break
 
-    # Managed (RDS-backed) subscribers — Slack / PagerDuty.
+    # Managed (RDS-backed) subscribers: Slack / PagerDuty.
     try:
         rows = query(
             "SELECT id, protocol, endpoint, label, enabled FROM alert_subscribers_managed "
@@ -473,7 +473,7 @@ def _list_subscriptions(sns_client, topic_arn, query):
                 "managed": True,
             })
     except Exception as e:
-        # Table may not exist yet on first deploy — fall through.
+        # Table may not exist yet on first deploy, fall through.
         print(f"[alerts] list managed subscribers failed: {e}")
 
     return {"subscriptions": subs, "topic_arn": topic_arn or ""}
@@ -485,7 +485,7 @@ def _create_subscription(sns_client, topic_arn, body, query):
     if not endpoint:
         return _response(400, {"error": "endpoint required"})
 
-    # Managed protocols (Slack / PD) — stored in RDS, posted by evaluator.
+    # Managed protocols (Slack / PD): stored in RDS, posted by evaluator.
     if protocol in _MANAGED_PROTOCOLS:
         if protocol == "slack-webhook" and not endpoint.startswith("https://hooks.slack.com/"):
             return _response(400, {"error": "slack-webhook endpoint must be https://hooks.slack.com/..."})
@@ -559,7 +559,7 @@ def _rule_impact(query, rule_id):
     """Return the operational context around a rule's most-recent trigger.
 
     When an alert fires the DBA wants to know "what else was going on at
-    that moment?" — top slow queries, other alerts that fired in the
+    that moment?": top slow queries, other alerts that fired in the
     same window, recent ops events. This endpoint stitches those signals
     into a single response so the UI doesn't have to make N round-trips.
 
@@ -611,7 +611,7 @@ def _rule_impact(query, rule_id):
 
     # Non-alert events in the same window (RDS events, scaling, vacuum,
     # backup completion etc.). Excludes 'alert' event_type to avoid
-    # double-rendering — those go in concurrent_alerts below.
+    # double-rendering: those go in concurrent_alerts below.
     concurrent_events = query(
         "SELECT event_time, event_type, severity, LEFT(message, 240) AS message "
         "FROM event_log "
@@ -622,7 +622,7 @@ def _rule_impact(query, rule_id):
         {"cid": cluster_id, "tat": triggered_at},
     )
 
-    # Other rules that fired within the same window — useful for spotting
+    # Other rules that fired within the same window: useful for spotting
     # cascading failures (CPU spike + connection burst together).
     concurrent_alerts = query(
         "SELECT event_time, raw_event->>'rule_id' AS rule_id, "
@@ -707,7 +707,7 @@ def lambda_handler(event, context):
                 return _delete_subscription(sns_client, qs.get("sub_arn"), query)
             return _response(405, {"error": f"method {method} not allowed"})
 
-        # /api/alerts/{id}/impact — operational context around the rule's
+        # /api/alerts/{id}/impact: operational context around the rule's
         # most recent firing. Read-only; no admin gate needed.
         if method == "GET" and raw_path.rstrip("/").endswith("/impact"):
             rule_id = path_params.get("id")
@@ -725,14 +725,14 @@ def lambda_handler(event, context):
                     return _response(403, {"error": "이 클러스터에 대한 접근 권한이 없습니다."})
             return _rule_impact(query, rule_id)
 
-        # /api/alert-rules/snooze-bulk — snooze/clear every rule for a cluster.
+        # /api/alert-rules/snooze-bulk: snooze/clear every rule for a cluster.
         if method == "POST" and raw_path.rstrip("/").endswith("/snooze-bulk"):
             forbid = _forbid_viewer(event)
             if forbid:
                 return forbid
             return _snooze_bulk(event, query, body)
 
-        # /api/alert-rules/{id}/snooze — body {minutes}; minutes<=0 clears.
+        # /api/alert-rules/{id}/snooze: body {minutes}; minutes<=0 clears.
         if method == "POST" and raw_path.rstrip("/").endswith("/snooze"):
             forbid = _forbid_viewer(event)
             if forbid:

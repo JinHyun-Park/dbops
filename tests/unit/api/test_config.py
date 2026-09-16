@@ -93,7 +93,7 @@ def test_put_viewer_denied():
 
 
 def test_options_bypasses_auth():
-    # CORS preflight must pass even for non-admin tokens — no auth gate before OPTIONS return.
+    # CORS preflight must pass even for non-admin tokens: no auth gate before OPTIONS return.
     r = handler.lambda_handler(_event("OPTIONS", admin=False))
     assert r["statusCode"] == 200
 
@@ -110,7 +110,7 @@ def test_put_malformed_json_body_400():
 
 
 def test_put_missing_config_key_400():
-    # Empty body dict has no "config" key — must be rejected and nothing written.
+    # Empty body dict has no "config" key: must be rejected and nothing written.
     table = _fake_table()
     with patch.object(handler, "_table", return_value=table):
         r = handler.lambda_handler(_event("PUT", {}))
@@ -119,7 +119,7 @@ def test_put_missing_config_key_400():
 
 
 def test_get_raw_token_no_bearer_denied():
-    # A scheme-less token (no "Bearer " prefix) must be rejected — fail-closed.
+    # A scheme-less token (no "Bearer " prefix) must be rejected: fail-closed.
     # The API Gateway JWT authorizer can forward such tokens; Lambda must not
     # treat the resulting empty claims as the one-admin dev fallback.
     e = {
@@ -131,7 +131,7 @@ def test_get_raw_token_no_bearer_denied():
 
 
 def test_get_no_auth_header_denied():
-    # No Authorization header at all must be rejected — fail-closed.
+    # No Authorization header at all must be rejected: fail-closed.
     e = {
         "requestContext": {"http": {"method": "GET"}},
         "headers": {},
@@ -155,7 +155,7 @@ def test_put_raw_token_no_bearer_denied_no_write():
 
 
 def test_bearer_garbage_token_denied():
-    # "Bearer <non-jwt>" decodes to empty claims — must NOT be treated as the
+    # "Bearer <non-jwt>" decodes to empty claims: must NOT be treated as the
     # one-admin dev fallback (which only applies to a VALID token lacking a
     # group claim). Defense-in-depth behind the gateway JWT authorizer.
     e = {
@@ -170,7 +170,7 @@ def test_dev_fallback_valid_token_no_groups_is_admin():
     # A VALID (decodable) token with NO cognito:groups claim is the one-admin
     # dev fallback → admin. This must still work after the empty-claims guard.
     # NOTE: a real Cognito token always carries sub/iss/aud/email etc., so the
-    # dev-fallback principal is non-empty — see test_empty_payload_jwt_denied
+    # dev-fallback principal is non-empty: see test_empty_payload_jwt_denied
     # for why an empty {} payload is intentionally NOT the fallback.
     payload = {"preferred_username": "solo"}  # no cognito:groups
     b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
@@ -196,8 +196,8 @@ def test_get_analyst_group_denied():
 
 
 def test_empty_payload_jwt_denied():
-    # A decodable token whose payload is exactly {} has no identity (no sub/iss)
-    # — it is NOT a real Cognito principal and must NOT get the one-admin dev
+    # A decodable token whose payload is exactly {} has no identity (no sub/iss).
+    # It is NOT a real Cognito principal and must NOT get the one-admin dev
     # fallback. The narrowing from "decodable" to "non-empty decodable" is
     # deliberate: real Cognito tokens are always non-empty, so this only
     # excludes the degenerate empty-payload case. Fail-closed.

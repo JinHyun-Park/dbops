@@ -81,7 +81,7 @@ def _patch_env_region(mod, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Serverless v2 — REAL ACU price, midpoint, member count
+# Serverless v2: REAL ACU price, midpoint, member count
 # ---------------------------------------------------------------------------
 
 
@@ -145,7 +145,7 @@ def test_serverless_resize_changes_cost_and_pct(mod, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Provisioned — instance class pricing + resize via new_instance_class
+# Provisioned: instance class pricing + resize via new_instance_class
 # ---------------------------------------------------------------------------
 
 
@@ -203,7 +203,7 @@ def test_provisioned_resize_with_new_instance_class(mod, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Pricing unavailable — degrade to estimate, never crash, never fabricate
+# Pricing unavailable: degrade to estimate, never crash, never fabricate
 # ---------------------------------------------------------------------------
 
 
@@ -245,7 +245,7 @@ def test_provisioned_pricing_none_degrades_to_fallback(mod, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Dispatcher — new_instance_class threads through /scaling
+# Dispatcher: new_instance_class threads through /scaling
 # ---------------------------------------------------------------------------
 
 
@@ -270,7 +270,7 @@ def test_lambda_handler_passes_new_instance_class(mod, monkeypatch):
 
 
 def test_describe_failure_degrades_gracefully_no_crash(mod, monkeypatch):
-    """An RDS describe failure must NOT crash — return a cost-free estimate that
+    """An RDS describe failure must NOT crash: return a cost-free estimate that
     still matches the contract (the 'never crash' promise)."""
     _patch_env_region(mod, monkeypatch)
     rds = MagicMock()

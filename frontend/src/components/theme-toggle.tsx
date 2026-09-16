@@ -32,12 +32,12 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
     try {
       localStorage.setItem(STORAGE_KEY, next);
     } catch {
-      /* quota — ignore */
+      /* quota: ignore */
     }
   };
 
   if (compact) {
-    // Mobile / tight spaces — single icon button, swaps on click.
+    // Mobile / tight spaces: single icon button, swaps on click.
     return (
       <button
         onClick={() => flip(theme === "dark" ? "light" : "dark")}
@@ -60,7 +60,7 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
     );
   }
 
-  // Desktop — segmented two-state pill: both icons visible, current is filled.
+  // Desktop: segmented two-state pill. Both icons visible, current is filled.
   const isDark = theme === "dark";
   return (
     <div

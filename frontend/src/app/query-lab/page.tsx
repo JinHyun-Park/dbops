@@ -99,7 +99,7 @@ function savePlanHistory(next: SavedPlan[]): void {
       JSON.stringify(next.slice(0, PLAN_HISTORY_LIMIT)),
     );
   } catch {
-    // quota — drop oldest and retry once
+    // quota: drop oldest and retry once
     try {
       localStorage.setItem(PLAN_HISTORY_KEY, JSON.stringify(next.slice(0, 5)));
     } catch {
@@ -130,14 +130,14 @@ export default function QueryLabPage() {
   const [tab, setTab] = useState<Tab>("plan");
   const [presetPrompt, setPresetPrompt] = useState<string>("");
   // AI insight on the current plan (separate stream from the chat-driven
-  // "AI 분석" tab — this one consumes the structured plan summary, not the
+  // "AI 분석" tab: this one consumes the structured plan summary, not the
   // raw SQL).
   const [insight, setInsight] = useState<string>("");
   const [insightLoading, setInsightLoading] = useState(false);
   const [lastSql, setLastSql] = useState<string>("");
   const [rewrite, setRewrite] = useState<RewriteComparison | null>(null);
   const [history, setHistory] = useState<SavedPlan[]>([]);
-  // Prefilled SQL — passed to QueryEditor on history-restore / share-link open.
+  // Prefilled SQL: passed to QueryEditor on history-restore / share-link open.
   const [prefilledSql, setPrefilledSql] = useState<string>("");
 
   // Saved-queries library (cross-device, DDB-backed). Distinct from the
@@ -157,7 +157,7 @@ export default function QueryLabPage() {
     setHistory(loadPlanHistory());
   }, []);
 
-  // Saved-queries library — best-effort fetch; failures stay silent so
+  // Saved-queries library: best-effort fetch; failures stay silent so
   // the page still works when the backend is mid-deploy.
   const refreshSavedQueries = useCallback(() => {
     listSavedQueries({ limit: 50 })
@@ -208,7 +208,7 @@ export default function QueryLabPage() {
       try {
         const res = await runExplain(clusterId, sql);
         setExplain(res);
-        // Save to history (dedupe on identical sql+cluster — keep newest).
+        // Save to history (dedupe on identical sql+cluster, keep newest).
         setHistory((prev) => {
           const filtered = prev.filter(
             (h) => !(h.sql === sql && h.cluster_id === clusterId),
@@ -315,7 +315,7 @@ export default function QueryLabPage() {
         `Risk 값: **safe** (read-only / 파라미터 바인딩된 DML), **risky** (대량 스캔, WHERE 누락, ` +
         `락 헤비), **dangerous** (DDL, WHERE 없는 DROP/TRUNCATE/DELETE, hot 테이블에 ALTER TABLE).\n` +
         `Notes는 그 쿼리에 특화된 짧은 한 문장.\n` +
-        `테이블 다음에 "Summary" 섹션 — dangerous 쿼리들의 인덱스 목록 + 추천하는 다음 단계 한 가지.\n\n` +
+        `테이블 다음에 "Summary" 섹션: dangerous 쿼리들의 인덱스 목록 + 추천하는 다음 단계 한 가지.\n\n` +
         `Batch:\n\`\`\`sql\n${sqlText.trim()}\n\`\`\``;
       streamChat(
         message,
@@ -416,7 +416,7 @@ export default function QueryLabPage() {
           const proposedSql = extractSqlBlock(fullText);
 
           // Fetch plan-only EXPLAIN (analyze:false) for both SQLs.
-          // SAFETY: proposed SQL is never executed — plan-only only.
+          // SAFETY: proposed SQL is never executed, plan-only only.
           let beforePlan: ExplainResponse["plan"] | null = null;
           let afterPlan: ExplainResponse["plan"] | null = null;
           let beforeCost: number | null = null;
@@ -505,7 +505,7 @@ export default function QueryLabPage() {
 
       <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-3 mb-4">
         <div className="text-[11px] text-zinc-500 uppercase tracking-wider mb-2">
-          quick presets — 템플릿을 클립보드에 복사하고 AI 분석 프롬프트를
+          quick presets: 템플릿을 클립보드에 복사하고 AI 분석 프롬프트를
           준비합니다
         </div>
         <div className="flex flex-wrap gap-2 items-center">
@@ -546,7 +546,7 @@ export default function QueryLabPage() {
             initialSql={prefilledSql}
           />
 
-          {/* Saved-queries library — durable bookmark of the SQL the
+          {/* Saved-queries library: durable bookmark of the SQL the
               DBA wants to keep around across devices. Distinct from
               "recent plans" below, which tracks EXPLAIN runs. */}
           <div className="border border-zinc-800 bg-zinc-900/40">
@@ -837,7 +837,7 @@ export default function QueryLabPage() {
                   <div className="mt-4 border border-zinc-800 bg-zinc-900/40">
                     <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
                       <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-zinc-500">
-                        AI 진단 — 이 plan 기준
+                        AI 진단: 이 plan 기준
                       </div>
                       <button
                         onClick={handleGetInsight}
@@ -907,7 +907,7 @@ export default function QueryLabPage() {
                 <div className="space-y-4">
                   {/* Advisory banner */}
                   <div className="text-xs px-3 py-2 border border-amber-500/30 bg-amber-500/5 text-amber-200">
-                    AI 제안 — 실행 전 동등성과 성능을 직접 검증하세요 (아래
+                    AI 제안: 실행 전 동등성과 성능을 직접 검증하세요 (아래
                     비교는 실행 없이 planner 추정 cost)
                   </div>
 
@@ -940,7 +940,7 @@ export default function QueryLabPage() {
                             <span className="font-mono text-zinc-200">
                               {rewrite.beforeCost !== null
                                 ? rewrite.beforeCost.toFixed(2)
-                                : "—"}
+                                : "-"}
                             </span>
                           </div>
                           <div className="text-zinc-400">
@@ -948,7 +948,7 @@ export default function QueryLabPage() {
                             <span className="font-mono text-zinc-200">
                               {rewrite.afterCost !== null
                                 ? rewrite.afterCost.toFixed(2)
-                                : "—"}
+                                : "-"}
                             </span>
                           </div>
                           {rewrite.beforeCost !== null &&
@@ -1005,7 +1005,7 @@ export default function QueryLabPage() {
         </div>
       </div>
 
-      {/* Save modal — small inline form rather than its own component
+      {/* Save modal: small inline form rather than its own component
           because the state shape is one-off. SQL is taken implicitly
           from lastSql (set whenever EXPLAIN/Analyze ran). */}
       {saveModal && (

@@ -1,4 +1,4 @@
-// Simulation MCP target: READ-ONLY (what-if estimates, no mutation) — permit
+// Simulation MCP target: READ-ONLY (what-if estimates, no mutation). Permit
 // all tools on the target.
 //
 // AgentCore action form is target-as-action-group: `action in

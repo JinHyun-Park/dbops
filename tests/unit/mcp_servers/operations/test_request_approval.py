@@ -1,4 +1,4 @@
-"""Tests for request_approval — verify all action_types including EC-4 are accepted."""
+"""Tests for request_approval: verify all action_types including EC-4 are accepted."""
 import importlib.util
 import os
 from pathlib import Path
@@ -117,7 +117,7 @@ def _put_item(action_type="create_custom_endpoint", details=None, **kw):
 
 
 def test_tool_never_writes_origin():
-    """Trust boundary: request_approval must NOT write an origin marker — the
+    """Trust boundary: request_approval must NOT write an origin marker. The
     auto-execute gate keys on origin=="ui", and only the trusted approvals API
     Lambda stamps it (after this tool returns). If the tool wrote origin, the
     agent could mint a UI-looking row via the gateway and get a chat-initiated
@@ -127,7 +127,7 @@ def test_tool_never_writes_origin():
 
 
 def test_tool_rejects_origin_kwarg():
-    """origin is not a parameter of this tool — passing it must raise, proving
+    """origin is not a parameter of this tool: passing it must raise, proving
     the agent has no channel to set it through the tool."""
     import pytest
     with pytest.raises(TypeError):

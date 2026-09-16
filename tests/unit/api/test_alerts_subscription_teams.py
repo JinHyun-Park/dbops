@@ -56,7 +56,7 @@ def test_pagerduty_still_in_managed_protocols():
 
 
 # ---------------------------------------------------------------------------
-# _create_subscription — teams-webhook valid https endpoint → 201
+# _create_subscription: teams-webhook valid https endpoint → 201
 # ---------------------------------------------------------------------------
 
 def test_create_teams_subscription_https_returns_201():

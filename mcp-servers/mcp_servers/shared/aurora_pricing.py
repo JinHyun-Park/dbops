@@ -1,13 +1,13 @@
-"""aurora_pricing — look up REAL Aurora prices from the AWS Price List API.
+"""aurora_pricing: look up REAL Aurora prices from the AWS Price List API.
 
 WHY: simulations must not hardcode a single region/edition price (the old
 scaling tool baked in a us-east-1 Standard ACU rate of $0.12, which is wrong
-almost everywhere — Seoul I/O-Optimized is $0.26). This resolves the actual
+almost everywhere: Seoul I/O-Optimized is $0.26). This resolves the actual
 $/hour for a cluster's region, engine, edition (Standard vs I/O-Optimized),
 and either its Serverless v2 ACU rate or a provisioned instance class.
 
 The Price List API ("pricing") is only served from a few endpoints; us-east-1
-is always valid, and the TARGET region is passed as the `regionCode` FILTER —
+is always valid, and the TARGET region is passed as the `regionCode` FILTER,
 NOT the client region. Results are cached per process and every lookup fails
 soft (returns None) so a pricing outage degrades a simulation to an estimate
 rather than breaking it.
@@ -72,7 +72,7 @@ def price_per_acu_hour(region: str, engine: str, io_optimized: bool):
     server-side beyond region+engine; we page and match the usagetype suffix
     (`ServerlessV2IOOptimizedUsage` vs `ServerlessV2Usage`). The region prefix
     on usagetype (e.g. APN2-) varies, so we match the suffix to stay region-
-    agnostic — no hardcoded region codes."""
+    agnostic, no hardcoded region codes."""
     key = ("acu", region, engine, bool(io_optimized), "")
     if key in _CACHE:
         return _CACHE[key]

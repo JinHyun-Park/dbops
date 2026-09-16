@@ -140,7 +140,7 @@ export default function ScaleoutPage() {
       <Section>
         <p className="text-xs text-zinc-500 mb-4 leading-relaxed">
           다른 예열 설정(top_n, 엔드포인트)을 원하면 이 작업을 취소한 뒤
-          채팅에서 prewarm_reader로 재요청하세요 — 리더는 유지됩니다.
+          채팅에서 prewarm_reader로 재요청하세요. 리더는 유지됩니다.
         </p>
 
         {actionMsg && (
@@ -155,7 +155,7 @@ export default function ScaleoutPage() {
               스케일 작업을 불러오지 못했습니다
             </div>
             <div className="text-zinc-400">
-              {err} — 네트워크 또는 인증 문제일 수 있습니다. 빈 목록이 아니라
+              {err}. 네트워크 또는 인증 문제일 수 있습니다. 빈 목록이 아니라
               조회 실패 상태입니다.
             </div>
             <button
@@ -202,7 +202,7 @@ export default function ScaleoutPage() {
                         {op.cluster_id}
                       </td>
                       <td className="py-2.5 pr-4 font-mono text-zinc-400">
-                        {op.reader_instance_id || "—"}
+                        {op.reader_instance_id || "-"}
                       </td>
                       <td className="py-2.5 pr-4">
                         <span
@@ -215,10 +215,10 @@ export default function ScaleoutPage() {
                         </span>
                       </td>
                       <td className="py-2.5 pr-4 font-mono text-zinc-500 text-xs">
-                        {op.endpoint_identifier || "—"}
+                        {op.endpoint_identifier || "-"}
                       </td>
                       <td className="py-2.5 pr-4 font-mono text-zinc-400">
-                        {op.top_n ?? "—"}
+                        {op.top_n ?? "-"}
                       </td>
                       <td className="py-2.5 pr-4 text-[11px] text-zinc-500 font-mono whitespace-nowrap">
                         {fmtRelative(isoFromMs(op.created_at))}
@@ -254,7 +254,7 @@ export default function ScaleoutPage() {
                             </button>
                           )
                         ) : (
-                          <span className="text-zinc-700 text-xs">—</span>
+                          <span className="text-zinc-700 text-xs">-</span>
                         )}
                       </td>
                     </tr>
@@ -269,7 +269,7 @@ export default function ScaleoutPage() {
   );
 }
 
-// AZ 스케일아웃 (선점) — admin-only runbook. Adds N readers spread over the
+// AZ 스케일아웃 (선점): admin-only runbook. Adds N readers spread over the
 // cluster's healthy AZs, EXCLUDING one chosen AZ, as individually-approved
 // add_reader_instance requests. Preemptive spread away from an at-risk AZ.
 function AzScaleoutRunbook() {
@@ -348,7 +348,7 @@ function AzScaleoutRunbook() {
           AZ 스케일아웃 (선점)
         </h2>
         <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
-          정상 AZ에 리더를 미리 분산 배치합니다 — 위험이 예상되는 AZ 하나를
+          정상 AZ에 리더를 미리 분산 배치합니다. 위험이 예상되는 AZ 하나를
           제외하고, 나머지 AZ에 리더 {count}대를 라운드로빈으로 계획합니다. 각
           리더는 과금 대상인 개별 인스턴스이며, 승인 센터에서 하나씩 검토하고
           승인해야 실제로 생성됩니다.
@@ -406,7 +406,7 @@ function AzScaleoutRunbook() {
 
             <label className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-                리더 수 (1–10)
+                리더 수 (1-10)
               </span>
               <input
                 type="number"
@@ -465,7 +465,7 @@ function AzScaleoutRunbook() {
                 <ul className="text-xs text-rose-300 space-y-1 mb-2">
                   {result.failed.map((f, i) => (
                     <li key={i} className="font-mono">
-                      <span>✗</span> {f.new_instance_id} — {f.reason}
+                      <span>✗</span> {f.new_instance_id}: {f.reason}
                     </li>
                   ))}
                 </ul>

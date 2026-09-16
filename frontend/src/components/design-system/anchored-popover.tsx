@@ -14,7 +14,7 @@ import { createPortal } from "react-dom";
 // Why a portal instead of `absolute` inside the trigger's tree: an ancestor
 // with backdrop-filter / transform creates a stacking context, and a z-50
 // popover trapped inside it can PAINT fine yet be HIT-TESTED below later
-// siblings — the header cluster dropdown looked open but every real click on
+// siblings: the header cluster dropdown looked open but every real click on
 // its options fell through to the page underneath (only synthetic .click()
 // worked, which is why earlier testing missed it). Rendering at document.body
 // with an explicit z-index is immune to any ancestor stacking context.
@@ -27,13 +27,13 @@ export function AnchoredPopover({
   className = "",
   children,
 }: {
-  // The trigger's wrapper — used for positioning AND excluded from
+  // The trigger's wrapper: used for positioning AND excluded from
   // outside-click closing (the trigger toggles itself).
   anchorRef: React.RefObject<HTMLElement | null>;
   open: boolean;
   onClose: () => void;
   align?: "left" | "right";
-  // Size the popover to the trigger width (min 16rem) — for form fields.
+  // Size the popover to the trigger width (min 16rem), for form fields.
   matchWidth?: boolean;
   className?: string;
   children: React.ReactNode;

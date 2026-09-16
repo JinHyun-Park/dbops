@@ -8,7 +8,7 @@ import "./globals.css";
 // Geist is the Vercel/Linear-adjacent default. Replaces IBM Plex which
 // reads as the "AI-tool default" font. We keep both --font-plex-sans /
 // --font-plex-mono CSS variables so existing class references continue
-// to resolve — the swap is invisible to component code.
+// to resolve: the swap is invisible to component code.
 const geistSans = Geist({
   variable: "--font-plex-sans",
   subsets: ["latin"],

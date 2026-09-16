@@ -1,4 +1,4 @@
-"""plan_az_scaleout — READ-ONLY preview for the AZ scale-out runbook (P2-⑥).
+"""plan_az_scaleout: READ-ONLY preview for the AZ scale-out runbook (P2-⑥).
 
 Plans `count` Aurora reader instances spread round-robin over the cluster's
 healthy AZs, EXCLUDING one chosen AZ (preemptive spread away from an at-risk
@@ -6,7 +6,7 @@ AZ). READ-ONLY: no RDS writes, no approval, never in approval_guard.
 
 The trusted API (POST /api/scaleout-az) turns each planned reader into an
 add_reader_instance approval (origin="ui"), so the plan resolves a CONCRETE
-instance_class + availability_zone for every reader — that's exactly what the
+instance_class + availability_zone for every reader, that's exactly what the
 approval payload hash binds, so add_reader_instance's execute refuses an empty
 class and never picks one post-approval.
 
@@ -70,10 +70,10 @@ def plan_az_scaleout_impl(
     except Exception as e:
         print(f"[plan_az_scaleout] describe failed for {cluster_id}: {e}")
         return {"status": "error", "cluster_id": cluster_id,
-                "reason": "클러스터 조회에 실패했습니다 — 대상 클러스터 식별자를 확인하세요."}
+                "reason": "클러스터 조회에 실패했습니다. 대상 클러스터 식별자를 확인하세요."}
 
     # The cluster's subnet AZs (where a reader can be placed). Round-robin over
-    # these minus the excluded one — an AZ that has NO instance yet is a valid
+    # these minus the excluded one: an AZ that has NO instance yet is a valid
     # spread target (that's the point of a preemptive spread).
     cluster_azs = [a for a in (dbc.get("AvailabilityZones") or []) if a]
     members = dbc.get("DBClusterMembers") or []
@@ -103,7 +103,7 @@ def plan_az_scaleout_impl(
         if not instance_class:
             return {"status": "needs_instance_class", "cluster_id": cluster_id,
                     "available_azs": cluster_azs,
-                    "reason": "instance_class를 결정할 수 없습니다 — 명시해 주세요 (예: db.serverless)."}
+                    "reason": "instance_class를 결정할 수 없습니다. 명시해 주세요 (예: db.serverless)."}
 
     tail = _tail(cluster_id)
     taken = set(existing_ids)

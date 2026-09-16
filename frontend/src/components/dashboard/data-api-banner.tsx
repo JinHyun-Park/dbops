@@ -6,7 +6,7 @@ import { apiUrl, authedFetch } from "@/lib/api-client";
 // RDS Data API(HttpEndpoint) 비활성 클러스터의 경고 + 인앱 활성화 요청.
 //
 // "활성화 요청" 버튼은 직접 실행이 아니라 Approval Center에 승인 요청을
-// 등록한다 — DBA가 승인하는 순간 approvals API가 rds:EnableHttpEndpoint
+// 등록한다. DBA가 승인하는 순간 approvals API가 rds:EnableHttpEndpoint
 // (단일 액션, ModifyDBCluster 불필요)를 호출한다. 모든 변경은 사람이
 // 승인한다는 DBOps 안전 모델을 그대로 따른다.
 export function DataApiBanner({ clusterId }: { clusterId: string }) {
@@ -16,7 +16,7 @@ export function DataApiBanner({ clusterId }: { clusterId: string }) {
   const [error, setError] = useState<string | null>(null);
 
   // 이미 대기 중인 요청이 있으면 버튼 대신 "승인 대기 중"을 보여준다.
-  // 조회 실패는 무시 — POST 경로가 서버에서 멱등(중복 pending 방지)이다.
+  // 조회 실패는 무시: POST 경로가 서버에서 멱등(중복 pending 방지)이다.
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -77,7 +77,7 @@ export function DataApiBanner({ clusterId }: { clusterId: string }) {
         CloudWatch 지표는 정상 수집되지만, 라이브 SQL 기반 패널(Vacuum &amp;
         Bloat, Table Sizes, Connection Activity, Top Queries, Configuration)과
         AI 에이전트의 SQL 실행은 이 클러스터에서 동작하지 않습니다. 다운타임
-        없이 활성화할 수 있습니다 — 활성화 시 IAM 권한 기반으로 SQL 실행 경로가
+        없이 활성화할 수 있습니다. 활성화 시 IAM 권한 기반으로 SQL 실행 경로가
         열립니다.
       </div>
 
@@ -85,7 +85,7 @@ export function DataApiBanner({ clusterId }: { clusterId: string }) {
         {phase === "pending" ? (
           <div className="flex items-center gap-2 text-amber-200">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-            활성화 승인 대기 중 —{" "}
+            활성화 승인 대기 중:{" "}
             <a href="/approvals" className="underline hover:text-amber-100">
               Approval Center에서 검토
             </a>
@@ -107,7 +107,7 @@ export function DataApiBanner({ clusterId }: { clusterId: string }) {
       </div>
 
       {/* CLI 직접 실행 경로(보조). Serverless v2와 프로비저닝의 Data API는
-          EnableHttpEndpoint(resource-arn 기반, CLI v2 전용)다 —
+          EnableHttpEndpoint(resource-arn 기반, CLI v2 전용)다.
           modify-db-cluster의 --enable-http-endpoint는 legacy Serverless v1
           전용이며 그 외 클러스터에선 조용히 무시된다(실측 확인). */}
       <details className="mt-2">

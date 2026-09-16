@@ -2,7 +2,7 @@
 // band, and the Dashboard cluster cards all derive severity from THIS one
 // function so a cluster never reads "critical" in one place and "healthy" in
 // another. Severity blends live operating signals (CPU / load / deadlocks /
-// blocking) with RDS lifecycle status and engine EOL — a missing metric never
+// blocking) with RDS lifecycle status and engine EOL, a missing metric never
 // counts against a cluster (null != a problem).
 import { type EolInfo } from "@/lib/engine";
 

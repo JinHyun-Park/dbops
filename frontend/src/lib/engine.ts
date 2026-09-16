@@ -83,7 +83,7 @@ export function engineBadge(engine: string | null | undefined): EngineBadge {
         accent: "bg-purple-400",
       };
     case "elasticache": {
-      // ElastiCache covers Redis/Valkey/Memcached — reflect the specific engine
+      // ElastiCache covers Redis/Valkey/Memcached: reflect the specific engine
       // in the badge while sharing the family's rose accent.
       const e = (engine || "").toLowerCase();
       const label = e.includes("memcached")
@@ -118,13 +118,13 @@ export function engineBadge(engine: string | null | undefined): EngineBadge {
 // Major-version EOL schedule. Sourced from AWS RDS/Aurora release notes
 // (Aurora MySQL: https://docs.aws.amazon.com/AmazonRDS/latest/AuroraMySQLReleaseNotes/Welcome.html,
 //  Aurora PostgreSQL: https://docs.aws.amazon.com/AmazonRDS/latest/AuroraPostgreSQLReleaseNotes/AuroraPostgreSQL.Updates.html).
-// "Standard support" end-of-life — after this date AWS RDS Extended Support kicks
+// "Standard support" end-of-life: after this date AWS RDS Extended Support kicks
 // in at extra cost. We surface this so DBAs upgrade ahead of the cliff.
 //
 // Update annually as new majors GA and old ones EOL.
 //
 // Match by version major prefix (PG) or aurora variant (MySQL); keep this
-// table small — we don't need every minor. Tighter dates win (the row's
+// table small: we don't need every minor. Tighter dates win (the row's
 // `version_prefix` is matched against the cluster's reported engine_version
 // using startsWith after a normalized lowercase compare).
 interface EolEntry {
@@ -136,7 +136,7 @@ interface EolEntry {
 }
 
 const EOL_TABLE: EolEntry[] = [
-  // --- Aurora PostgreSQL — standard support end-of-life ---
+  // --- Aurora PostgreSQL: standard support end-of-life ---
   {
     engine: "postgres",
     version_prefix: "11.",
@@ -182,13 +182,13 @@ const EOL_TABLE: EolEntry[] = [
     eol: "2029-11-08",
   },
 
-  // --- Aurora MySQL — version strings look like "5.7.mysql_aurora.2.x" or "8.0.mysql_aurora.3.x" ---
+  // --- Aurora MySQL: version strings look like "5.7.mysql_aurora.2.x" or "8.0.mysql_aurora.3.x" ---
   {
     engine: "mysql",
     version_prefix: "5.7",
     display_name: "MySQL 5.7 (Aurora v2)",
     eol: "2024-10-31",
-    note: "Aurora MySQL v2 — Extended Support active",
+    note: "Aurora MySQL v2: Extended Support active",
   },
   {
     engine: "mysql",
@@ -260,16 +260,16 @@ export function eolHint(info: EolInfo): string {
   if (info.status === "expired") {
     return `${info.display_name} reached EOL ${Math.abs(
       info.days_remaining,
-    )} days ago (${info.eol})${info.note ? " — " + info.note : ""}`;
+    )} days ago (${info.eol})${info.note ? ", " + info.note : ""}`;
   }
   return `${info.display_name} EOL on ${info.eol} (${
     info.days_remaining
-  } days remaining)${info.note ? " — " + info.note : ""}`;
+  } days remaining)${info.note ? ", " + info.note : ""}`;
 }
 
 // --- Finer-grained engine groups for DISPLAY/enumeration ---
 // Relational splits into PG vs MySQL here. Capability gating still uses
-// engineFamily — PG and MySQL are both "relational" → same SQL panels.
+// engineFamily: PG and MySQL are both "relational" → same SQL panels.
 export type EngineGroup =
   | "aurora-postgresql"
   | "aurora-mysql"
@@ -367,7 +367,7 @@ export function engineFamily(engine: string | null | undefined): EngineFamily {
     e.includes("elasticache")
   )
     return "elasticache";
-  // RDS instance engines (non-Aurora). 'aurora-mysql' contains 'mysql' — the
+  // RDS instance engines (non-Aurora). 'aurora-mysql' contains 'mysql', the
   // aurora guard keeps Aurora MySQL relational. Mirrors engine_family.py.
   if (e.includes("sqlserver")) return "rds_instance";
   if (e.includes("mysql") && !e.includes("aurora")) return "rds_instance";
@@ -417,7 +417,7 @@ export const FAMILY_META: Record<EngineFamily, FamilyMeta> = {
 // Which dashboard panels a family renders. The `relational` sentinel means
 // "render the existing full Aurora panel set"; the new families enumerate their
 // own panel keys (consumed by dashboard/page.tsx gating). Mirrors backend
-// CAPABILITIES — keep in sync.
+// CAPABILITIES: keep in sync.
 export const FAMILY_PANELS: Record<EngineFamily, Set<string>> = {
   relational: new Set(["all-relational"]),
   documentdb: new Set([

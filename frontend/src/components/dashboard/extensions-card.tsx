@@ -19,7 +19,7 @@ export function ExtensionsCard({
   const [loading, setLoading] = useState(true);
   const [showAll, setShowAll] = useState(false);
 
-  // Currently PG-only — MySQL has no pg_extension equivalent.
+  // Currently PG-only: MySQL has no pg_extension equivalent.
   const isPg = (engine || "").includes("postgresql");
 
   useEffect(() => {
@@ -66,7 +66,7 @@ export function ExtensionsCard({
             </span>
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            DBOps가 PG 클러스터에 권장하는 모듈 — 미설치 항목은 hover로 이유
+            DBOps가 PG 클러스터에 권장하는 모듈: 미설치 항목은 hover로 이유
             확인.
           </div>
         </div>

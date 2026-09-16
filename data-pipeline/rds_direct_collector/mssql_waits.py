@@ -5,12 +5,12 @@ cumulative wait time per wait type since the last server restart / DBCC
 SQLPERF reset. We emit the top waits as an engine-scoped `mssql_wait_ms` gauge
 dimensioned by wait_type, so it never collides with the MySQL innodb_* metrics.
 
-The benign idle/background waits are excluded (a well-known list — server
+The benign idle/background waits are excluded (a well-known list: server
 housekeeping that is always "waiting" and would otherwise dominate the top-N).
 """
 import json
 
-# Benign idle/background waits — always present, not a performance signal.
+# Benign idle/background waits: always present, not a performance signal.
 # Trimmed subset of the standard sys.dm_os_wait_stats exclusion list.
 WAITS_SQL = """
 SELECT TOP 20

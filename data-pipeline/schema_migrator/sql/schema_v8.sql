@@ -4,7 +4,7 @@
 -- seasonality (e.g. CPU is naturally higher 09:00 KST than 03:00 KST).
 -- We bucket history by hour-of-week (0..167) and store median + IQR per
 -- bucket. Detection at query time compares the latest value against the
--- bucket the current timestamp falls into — a robust z-score that doesn't
+-- bucket the current timestamp falls into, a robust z-score that doesn't
 -- false-positive on daily cycles.
 
 CREATE TABLE IF NOT EXISTS metric_baselines (

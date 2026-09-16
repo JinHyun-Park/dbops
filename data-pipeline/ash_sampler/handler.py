@@ -12,7 +12,7 @@ directly via RDS Data API). Cross-account spoke-role sampling is a follow-up,
 mirroring the ETL collector's assume-role path.
 
 ponytail: self-looping Lambda (sleeps between samples) is the lazy fit for the
-existing Lambda-based stack — it bills ~50s/min of mostly-idle wait, single-digit
+existing Lambda-based stack: it bills ~50s/min of mostly-idle wait, single-digit
 $/mo for a small fleet. A continuously-connected Fargate task is cheaper only at
 large fleet scale; revisit then.
 """
@@ -24,7 +24,7 @@ import boto3
 
 INTERVAL_SEC = 5
 SAMPLES_PER_RUN = 10
-# Hard wall-clock budget per run — must stay below the 60s Lambda timeout AND the
+# Hard wall-clock budget per run: must stay below the 60s Lambda timeout AND the
 # 1-min schedule so a run never gets killed mid-sample or overlaps the next. The
 # loop stops early when the budget is spent, so a large fleet just takes fewer
 # samples/run (graceful) instead of running over.

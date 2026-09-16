@@ -1,6 +1,6 @@
 -- v13: Saved SQL queries. The Query Lab page had a localStorage history
 -- of recent EXPLAIN runs but no way to bookmark a tuned query for later.
--- This table is the durable scratchpad — DBAs save canonical queries
+-- This table is the durable scratchpad: DBAs save canonical queries
 -- (slow-query repros, capacity probes, audit selects) once and pull them
 -- back up across browsers and devices.
 --

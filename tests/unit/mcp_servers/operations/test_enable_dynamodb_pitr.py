@@ -1,4 +1,4 @@
-"""Tests for enable_dynamodb_pitr — 3-state flow, idempotency, TOCTOU drift,
+"""Tests for enable_dynamodb_pitr: 3-state flow, idempotency, TOCTOU drift,
 and the force-to-disable rule (#7)."""
 
 from unittest.mock import MagicMock, patch

@@ -1,8 +1,8 @@
 """Admin user & role management API (admin-gated).
 
 Routes:
-  GET  /api/admin/users                   — list Cognito users + derived role
-  POST /api/admin/users/{username}/role   — set a user's role (admin|viewer)
+  GET  /api/admin/users:                    list Cognito users + derived role
+  POST /api/admin/users/{username}/role:    set a user's role (admin|viewer)
 
 The pool's Cognito Username is a UUID (== token sub / cognito:username); email
 is a display attribute. The self-demotion guard compares {username} to the

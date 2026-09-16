@@ -34,7 +34,7 @@ def test_sqlserver_express_uses_express_label():
         price = rp.price_rds_instance_hour("ap-northeast-2", "sqlserver-ex", "db.t3.small")
         assert price == 0.052
     # databaseEngine is the flat "SQL Server" for every edition, so it does NOT
-    # discriminate — the edition MUST be carried by a separate databaseEdition
+    # discriminate: the edition MUST be carried by a separate databaseEdition
     # filter. Assert both: the flat engine label AND the Express edition filter.
     sent = fake.get_products.call_args.kwargs["Filters"]
     assert any(f["Field"] == "databaseEngine" and f["Value"] == rp.RDS_ENGINE_LABEL["sqlserver-ex"] for f in sent)
@@ -43,7 +43,7 @@ def test_sqlserver_express_uses_express_label():
 
 def test_sqlserver_editions_do_not_share_cache_key():
     """Regression: databaseEngine is "SQL Server" for all editions, so the cache
-    key must include the edition — else the second edition priced silently
+    key must include the edition, else the second edition priced silently
     returns the first edition's cached price."""
     fake = MagicMock()
 
@@ -85,7 +85,7 @@ def test_storage_month_gp3_plus_iops():
         out = rp.price_rds_storage_month("ap-northeast-2", "gp3", 100, provisioned_iops=None)
         assert out["storage_usd"] == 100 * 0.114
         assert out["iops_usd"] in (0.0, None)  # gp3 baseline 3000 IOPS free → 0 or null
-    # gp3 MUST query its own volumeType, never gp2's "General Purpose" — else it
+    # gp3 MUST query its own volumeType, never gp2's "General Purpose", else it
     # silently returns the gp2 rate for a gp3 request (fabricated wrong price).
     storage_filters = {f["Field"]: f["Value"] for f in fake.get_products.call_args_list[0].kwargs["Filters"]}
     assert storage_filters.get("volumeType") == "General Purpose-GP3"

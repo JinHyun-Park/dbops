@@ -294,7 +294,7 @@ TOOLS = {
             "(PostgreSQL only) Emit concrete CREATE INDEX CONCURRENTLY DDL by parsing the heavy "
             "queries in the cache: derives the driving table and composite column order (WHERE "
             "equality, then JOIN keys, then ORDER BY) from query_text, corroborated by "
-            "table_stats seq_scan/idx_scan when available. Read-only advice — never executed; "
+            "table_stats seq_scan/idx_scan when available. Read-only advice, never executed; "
             "validate with EXPLAIN and create via the approval flow. MySQL returns "
             "status=unsupported_engine: the candidate filter needs shared_blks_read/hit, which "
             "the MySQL collector does not populate, so an empty answer would be 'not measured', "

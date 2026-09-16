@@ -286,11 +286,11 @@ function AnomalyDetailModal({
       // DynamoDB and ElastiCache too, and naming planner regressions or lock
       // storms to a Redis operator biases the diagnosis. The agent resolves the
       // engine family from cluster_id and picks the mechanisms itself.
-      `1. **추정 원인** — 메트릭 종류와 패턴을 보고 가장 그럴듯한 설명 ` +
+      `1. **추정 원인**: 메트릭 종류와 패턴을 보고 가장 그럴듯한 설명 ` +
       `(워크로드 급증, 비효율 접근 패턴, 배포/설정 변경, 용량 한계/스로틀, 경합 등). ` +
       `이 엔진에 실제로 해당하는 원인만 제시해줘.\n` +
-      `2. **운영 영향** — 지금 사용자나 애플리케이션이 어떤 경험을 하고 있을지.\n` +
-      `3. **다음 점검 단계** — 원인을 확정하기 위해 실행할 구체적인 쿼리 1건 또는 MCP 도구 1개. ` +
+      `2. **운영 영향**: 지금 사용자나 애플리케이션이 어떤 경험을 하고 있을지.\n` +
+      `3. **다음 점검 단계**: 원인을 확정하기 위해 실행할 구체적인 쿼리 1건 또는 MCP 도구 1개. ` +
       `안전하다면 직접 실행해서 결과까지 포함해줘.\n\n` +
       `Cluster: ${clusterId}\n` +
       `Metric: ${anomaly.metric_type} (${prettyLabel})\n` +

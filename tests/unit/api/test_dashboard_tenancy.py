@@ -19,7 +19,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
-# Module loading — push api/dashboard on sys.path so engine_family + tenancy resolve
+# Module loading: push api/dashboard on sys.path so engine_family + tenancy resolve
 # ---------------------------------------------------------------------------
 
 _DASHBOARD_DIR = Path(__file__).resolve().parents[3] / "api" / "dashboard"
@@ -215,7 +215,7 @@ def test_registered_clusters_projection_includes_team_id():
     """Source-level guard (whole-branch review M1): the fleet filter is only
     correct if _registered_clusters projects team_id. The mock-based fleet
     tests above can't catch a projection regression (they mock the function
-    away), so assert the real ProjectionExpression carries team_id — dropping
+    away), so assert the real ProjectionExpression carries team_id: dropping
     it would silently turn the fleet filter into a no-op (cross-team leak)."""
     src = _PATH.read_text()
     proj_lines = [ln for ln in src.splitlines() if "ProjectionExpression" in ln]
@@ -226,6 +226,6 @@ def test_registered_clusters_projection_includes_team_id():
     registry_projs = [ln for ln in proj_lines if "cluster_id" in ln]
     assert registry_projs, "no cluster_id ProjectionExpression found (registry scan)"
     assert all("team_id" in ln for ln in registry_projs), (
-        "the _registered_clusters ProjectionExpression dropped team_id — the fleet "
+        "the _registered_clusters ProjectionExpression dropped team_id: the fleet "
         "visibility filter would silently leak other teams' clusters"
     )

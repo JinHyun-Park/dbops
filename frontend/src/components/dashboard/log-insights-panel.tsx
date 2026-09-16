@@ -52,7 +52,7 @@ function highlightSeverity(message: string): React.ReactNode {
 }
 
 function relTime(iso?: string): string {
-  if (!iso) return "—";
+  if (!iso) return "-";
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.floor(ms / 60_000);
   if (m < 1) return "방금";
@@ -72,7 +72,7 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
   const [data, setData] = useState<LogInsightsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
-  // We deliberately don't auto-load on mount — CW Logs Insights is billed
+  // We deliberately don't auto-load on mount: CW Logs Insights is billed
   // per GB scanned, so the first query is gated behind an explicit click.
   // Once the user opens a category we cache that category's result.
 
@@ -101,7 +101,7 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
     [clusterId],
   );
 
-  // Reset when cluster changes — old cluster's logs aren't relevant.
+  // Reset when cluster changes: old cluster's logs aren't relevant.
   useEffect(() => {
     setData(null);
     setRefreshedAt(null);
@@ -216,7 +216,7 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
         {data?.error &&
           (() => {
             // "Log group not found" is a setup requirement, not a system
-            // error — render it as an amber info notice with a deep-link to
+            // error: render it as an amber info notice with a deep-link to
             // the AWS docs page that explains how to enable PG log exports.
             // Real failures (timeout, throttling, etc.) stay in rose.
             const isSetup =
@@ -277,7 +277,7 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
                   className="hover:bg-zinc-900/40 align-top"
                 >
                   <td className="px-3 py-2 text-zinc-400 font-mono text-[11px] whitespace-nowrap">
-                    {entry.ts ? new Date(entry.ts).toLocaleString() : "—"}
+                    {entry.ts ? new Date(entry.ts).toLocaleString() : "-"}
                   </td>
                   <td className="px-3 py-2 text-zinc-200 font-mono text-[11px] break-all">
                     {highlightSeverity(entry.message)}

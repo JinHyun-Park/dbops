@@ -107,8 +107,8 @@ def test_param_diff_no_parameter_group_unavailable(monkeypatch):
 
 
 def test_param_diff_relational_filters_to_differing_only(monkeypatch):
-    """Only params whose current value differs from the DEFAULT GROUP value —
-    and is actually set — survive. Unset (empty ParameterValue) and matching-
+    """Only params whose current value differs from the DEFAULT GROUP value,
+    and is actually set, survive. Unset (empty ParameterValue) and matching-
     default params are excluded. The matching-default case (random_page_cost)
     is the false-positive regression: the old engine-default catalog reported
     it blank and flagged it as changed; the default group reports the same
@@ -149,7 +149,7 @@ def test_param_diff_relational_filters_to_differing_only(monkeypatch):
     assert result["total_params"] == 4
     names = {d["name"] for d in result["diffs"]}
     # work_mem and max_connections differ; shared_buffers is unset (skip);
-    # random_page_cost matches the default group value (skip — regression).
+    # random_page_cost matches the default group value (skip: regression).
     assert names == {"work_mem", "max_connections"}
     assert result["diff_count"] == 2
     wm = next(d for d in result["diffs"] if d["name"] == "work_mem")
@@ -180,7 +180,7 @@ def test_param_diff_relational_filters_to_differing_only(monkeypatch):
 
 def test_param_diff_paginates_current_params_with_marker_hang_guard(monkeypatch):
     """The current group is paginated via Marker. A MagicMock (non-str) Marker
-    on the last page must terminate the loop instead of hanging forever — this
+    on the last page must terminate the loop instead of hanging forever: this
     is exactly what a naive mock in a test (or a stray boto3 response shape)
     would otherwise trigger."""
     monkeypatch.setattr(handler, "_registry_engine", lambda cid: "aurora-postgresql")
@@ -283,7 +283,7 @@ def test_param_diff_no_raw_boto_leak_on_error(monkeypatch):
 
 def test_param_diff_default_group_describe_failure_available_false(monkeypatch):
     """If describing default.<family> raises, the outer try/except must return
-    the friendly available:false — NOT fall back to the engine-default
+    the friendly available:false, NOT fall back to the engine-default
     catalog (the removed buggy baseline)."""
     monkeypatch.setattr(handler, "_registry_engine", lambda cid: "aurora-postgresql")
 

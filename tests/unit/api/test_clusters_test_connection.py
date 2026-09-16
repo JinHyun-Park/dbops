@@ -1,4 +1,4 @@
-"""Tests for /api/clusters/test-connection — pre-flight verification
+"""Tests for /api/clusters/test-connection: pre-flight verification
 that runs STS AssumeRole + DescribeDBClusters + master_user_secret
 checks without persisting anything."""
 
@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 _CLUSTERS_DIR = Path(__file__).resolve().parents[3] / "api" / "clusters"
-# clusters/handler.py does `import seeder` — its sibling. Push the
+# clusters/handler.py does `import seeder`, its sibling. Push the
 # directory onto sys.path so the import resolves before exec.
 sys.path.insert(0, str(_CLUSTERS_DIR))
 

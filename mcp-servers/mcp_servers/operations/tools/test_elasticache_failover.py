@@ -1,4 +1,4 @@
-"""test_elasticache_failover — approval-gated failover test (test_failover) for a
+"""test_elasticache_failover: approval-gated failover test (test_failover) for a
 replication group that HAS a replica. No replica → invalid. Mirrors the write
 model; never raises out.
 

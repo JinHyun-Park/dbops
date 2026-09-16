@@ -1,13 +1,13 @@
-"""get_runbook — fetch a stored runbook and extract its SQL steps.
+"""get_runbook: fetch a stored runbook and extract its SQL steps.
 
 Runbooks are markdown playbooks the DBA (or the agent) saved on /runbooks.
-Until now they were a library only — view/list/create. This tool lets the
+Until now they were a library only: view/list/create. This tool lets the
 agent RETRIEVE a saved runbook, by id or by a fuzzy title/tag match, and
 get back the markdown plus the fenced ```sql blocks pulled out as ordered
 `steps`.
 
 The agent's job after calling this is to PRESENT the plan to the DBA and
-then run each step's SQL through `execute_sql` — which is approval-gated.
+then run each step's SQL through `execute_sql`, which is approval-gated.
 This tool NEVER executes anything; it is strictly read-only over the
 `runbooks` cache table (same table api/runbooks/handler.py writes).
 """
@@ -115,7 +115,7 @@ def get_runbook_impl(
         "Present this runbook to the DBA, then run each step's SQL via the "
         "execute_sql tool. Writes (DDL/DML) require approval: call "
         "request_approval, then re-issue execute_sql with approved=true AND "
-        "approval_id. NEVER bypass approval — this tool does not execute "
+        "approval_id. NEVER bypass approval: this tool does not execute "
         "anything itself."
     )
     if not steps:

@@ -84,7 +84,7 @@ export function summarizePlanForLLM(root: PgPlanRoot): string {
           }-estimate]`
         : "";
     lines.push(
-      `  - ${r.label} — ${r.pct.toFixed(1)}% (${r.ms.toFixed(2)}ms)${misest}`,
+      `  - ${r.label}: ${r.pct.toFixed(1)}% (${r.ms.toFixed(2)}ms)${misest}`,
     );
     for (const d of r.details) lines.push(`      ${d}`);
   }
@@ -150,14 +150,14 @@ function nodeLabel(node: PgPlanNode): string {
 }
 
 function fmtMs(ms: number | undefined): string {
-  if (ms == null) return "—";
+  if (ms == null) return "-";
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
   if (ms >= 1) return `${ms.toFixed(2)}ms`;
   return `${(ms * 1000).toFixed(0)}µs`;
 }
 
 function fmtRows(n: number | undefined): string {
-  if (n == null) return "—";
+  if (n == null) return "-";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return `${n}`;
@@ -295,7 +295,7 @@ function NodeRow({
             </div>
             <div>
               width:{" "}
-              <span className="text-zinc-400">{node["Plan Width"] ?? "—"}</span>
+              <span className="text-zinc-400">{node["Plan Width"] ?? "-"}</span>
             </div>
             {(sharedHit != null || sharedRead != null) && (
               <div className="col-span-2">
@@ -326,7 +326,7 @@ function NodeRow({
 
 // ----- Anti-pattern detection ----------------------------------------------
 //
-// These rules mirror what pgmustard / pganalyze surface as "issues" — they
+// These rules mirror what pgmustard / pganalyze surface as "issues": they
 // catch the patterns that explain plan readers learn to look for by hand.
 // Each rule returns null (not a hit) or an Issue. We tune thresholds high
 // enough that small-table noise (sample dbs, dev queries) doesn't dominate.
@@ -355,7 +355,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
     const actualRows = ((n["Actual Rows"] ?? 0) as number) * loops;
     const planRows = (n["Plan Rows"] ?? 0) as number;
 
-    // 1. Slow Seq Scan — full table scan eating > 20% of execution
+    // 1. Slow Seq Scan: full table scan eating > 20% of execution
     if (n["Node Type"] === "Seq Scan" && pct > 20 && actualRows > 10_000) {
       issues.push({
         severity: pct > 40 ? "critical" : "warning",
@@ -395,11 +395,11 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
         title: "Hash 멀티배치 (디스크 스필)",
         detail: `${label}, ${hashBatches} batches`,
         node: label,
-        fix: "work_mem 부족 — 빌드측 테이블이 hash table에 안 맞음. work_mem 증가 또는 join order 변경 검토",
+        fix: "work_mem 부족: 빌드측 테이블이 hash table에 안 맞음. work_mem 증가 또는 join order 변경 검토",
       });
     }
 
-    // 4. Lossy bitmap recheck — index scan re-read many rows after bitmap
+    // 4. Lossy bitmap recheck: index scan re-read many rows after bitmap
     const rechecked = n["Rows Removed by Recheck"] as number | undefined;
     if (rechecked && rechecked > 10_000) {
       issues.push({
@@ -407,11 +407,11 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
         title: "Bitmap recheck에서 다량 행 폐기",
         detail: `${label}, ${fmtRows(rechecked)} rows discarded after bitmap`,
         node: label,
-        fix: "work_mem 부족으로 lossy bitmap이 됨 — 해당 인덱스 selectivity 재확인 또는 work_mem 상향",
+        fix: "work_mem 부족으로 lossy bitmap이 됨. 해당 인덱스 selectivity 재확인 또는 work_mem 상향",
       });
     }
 
-    // 5. Misestimate — planner badly wrong about row count
+    // 5. Misestimate: planner badly wrong about row count
     if (planRows > 0 && actualRows > 0) {
       const ratio = actualRows / planRows;
       if (ratio > 100 || ratio < 0.01) {
@@ -440,7 +440,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
       }
     }
 
-    // 6. Cold buffer reads — high disk reads relative to cache hits
+    // 6. Cold buffer reads: high disk reads relative to cache hits
     const sharedRead = n["Shared Read Blocks"] as number | undefined;
     const sharedHit = n["Shared Hit Blocks"] as number | undefined;
     if (sharedRead && sharedRead > 1000) {
@@ -459,7 +459,7 @@ function detectIssues(root: PgPlanNode, totalTime: number): Issue[] {
       }
     }
 
-    // 7. Nested Loop with high inner-loop count — n*m blow-up
+    // 7. Nested Loop with high inner-loop count: n*m blow-up
     if (n["Node Type"] === "Nested Loop" && (n.Plans?.length ?? 0) >= 2) {
       const inner = n.Plans![1];
       const innerLoops = (inner["Actual Loops"] ?? 0) as number;
@@ -702,7 +702,7 @@ const MYSQL_BIG_SCAN_ROWS = 10_000;
 const MYSQL_LOW_FILTERED_PCT = 50;
 
 function fmtCost(n: number | null): string {
-  if (n == null) return "—";
+  if (n == null) return "-";
   return n >= 1000 ? Math.round(n).toLocaleString() : n.toFixed(2);
 }
 
@@ -908,13 +908,13 @@ function MysqlPlanView({ plan }: { plan: MysqlPlanRoot }) {
                       {i + 1}
                     </td>
                     <td className="px-3 py-1.5 font-mono">
-                      {t.table_name ?? "—"}
+                      {t.table_name ?? "-"}
                     </td>
                     <td className="px-3 py-1.5 font-mono">
-                      {t.access_type ?? "—"}
+                      {t.access_type ?? "-"}
                     </td>
                     <td className="px-3 py-1.5 font-mono text-zinc-400">
-                      {t.key ?? "—"}
+                      {t.key ?? "-"}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">
                       {fmtRows(t.rows_examined_per_scan)}
@@ -923,7 +923,7 @@ function MysqlPlanView({ plan }: { plan: MysqlPlanRoot }) {
                       {fmtRows(t.rows_produced_per_join)}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                      {t.filtered != null ? `${t.filtered}%` : "—"}
+                      {t.filtered != null ? `${t.filtered}%` : "-"}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                       {fmtCost(Number(t.cost_info?.prefix_cost) || null)}

@@ -431,7 +431,7 @@ function StatBlock({ payload }: { payload: ReportPayload }) {
           hint={
             payload.aas_peak?.ts
               ? new Date(payload.aas_peak.ts).toLocaleString()
-              : "—"
+              : "-"
           }
         />
         <Cell

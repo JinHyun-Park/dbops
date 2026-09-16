@@ -1,4 +1,4 @@
-"""mysql_direct — pymysql connect + Data-API-shape adapter for RDS MySQL.
+"""mysql_direct: pymysql connect + Data-API-shape adapter for RDS MySQL.
 
 RDS for MySQL has no Data API, so execute_sql's ad-hoc chat SQL against RDS
 MySQL clusters needs a direct TCP connection re-encoded into the same
@@ -6,7 +6,7 @@ response shape RDS Data API returns.
 
 data-pipeline/rds_direct_collector/mysql_adapter.py is a sibling adapter that
 already does this for the vendored deep-read collectors, which unwrap rows by
-POSITION and never look at columnMetadata — so that copy stays minimal by
+POSITION and never look at columnMetadata, so that copy stays minimal by
 design. execute_sql decodes RDS Data API responses by COLUMN NAME
 (resp["columnMetadata"]), so THIS adapter additionally synthesizes
 columnMetadata from cursor.description and surfaces write-statement rowcount
@@ -33,11 +33,11 @@ def connect(host, port, database, user, password):
 
     FAIL-CLOSED: the CA bundle check runs BEFORE the pymysql import, so a
     missing CA raises RuntimeError even where pymysql isn't installed (tests),
-    and this path never falls back to an unverified connection — it carries
+    and this path never falls back to an unverified connection: it carries
     DB credentials to a database instance (matches pg_direct's contract)."""
     if not os.path.exists(_CA_BUNDLE_PATH):
         raise RuntimeError(
-            "RDS CA bundle (global-bundle.pem) not found in the asset — refusing "
+            "RDS CA bundle (global-bundle.pem) not found in the asset, refusing "
             "an unverified TLS connection to a database instance."
         )
     import pymysql  # lazy: not importable in the test env

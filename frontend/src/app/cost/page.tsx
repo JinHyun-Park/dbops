@@ -176,7 +176,7 @@ function platformServiceLabel(svc: string): string {
 }
 
 // RDS usage-type labels are like "APN1-Aurora:StorageIOUsage" or
-// "APN1-InstanceUsage:db.r6g.large" — strip the region prefix and humanize the
+// "APN1-InstanceUsage:db.r6g.large". Strip the region prefix and humanize the
 // remaining segment so the table reads cleanly while keeping the raw value
 // visible underneath (matching the Bedrock breakdown's two-line cell).
 function rdsUsageLabel(ut: string): string {
@@ -187,7 +187,7 @@ function rdsUsageLabel(ut: string): string {
 }
 
 // ElastiCache usage-type labels are like "APN1-NodeUsage:cache.r6g.large" or
-// "APN1-ElastiCache:DataStorage" — same strip-prefix pattern as RDS.
+// "APN1-ElastiCache:DataStorage". Same strip-prefix pattern as RDS.
 function elasticacheUsageLabel(ut: string): string {
   const parts = ut.split(":");
   const head = (parts[0] || ut).replace(/^[A-Z0-9]+-/, "");
@@ -255,16 +255,16 @@ export default function CostPage() {
         )}
         description={t(
           tab === "rds"
-            ? "계정의 Aurora/RDS 비용 — Cost Explorer로 사용 유형(Aurora I/O, 스토리지, 인스턴스 시간, 백업)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다."
+            ? "계정의 Aurora/RDS 비용: Cost Explorer로 사용 유형(Aurora I/O, 스토리지, 인스턴스 시간, 백업)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다."
             : tab === "platform"
-              ? "DBOps 자체를 운영하는 데 드는 전체 비용 — Application=DBOps 태그가 붙은 모든 리소스(Lambda, 캐시 Aurora, DynamoDB, CloudFront, AgentCore 등)를 서비스별로 분해합니다. 모니터링 대상 고객 DB 클러스터는 포함되지 않습니다."
+              ? "DBOps 자체를 운영하는 데 드는 전체 비용: Application=DBOps 태그가 붙은 모든 리소스(Lambda, 캐시 Aurora, DynamoDB, CloudFront, AgentCore 등)를 서비스별로 분해합니다. 모니터링 대상 고객 DB 클러스터는 포함되지 않습니다."
               : tab === "tokens"
-                ? "계정 전체 Bedrock 토큰 사용량(모델별) — CloudWatch AWS/Bedrock 메트릭 기반. 태그 필터 불가로 계정 전체 집계입니다."
+                ? "계정 전체 Bedrock 토큰 사용량(모델별): CloudWatch AWS/Bedrock 메트릭 기반. 태그 필터 불가로 계정 전체 집계입니다."
                 : tab === "elasticache"
-                  ? "계정의 ElastiCache 비용 — Cost Explorer로 사용 유형(노드 시간, 데이터 스토리지, I/O)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다."
+                  ? "계정의 ElastiCache 비용: Cost Explorer로 사용 유형(노드 시간, 데이터 스토리지, I/O)별로 분해합니다. 클러스터별 분리는 cost-allocation 태그를 활성화해야 합니다. CE는 약 24시간 지연됩니다."
                   : tab === "commitments"
-                    ? "등록된 Aurora 계정의 Reserved Instance / Savings Plan 현황 — 스케일링 권장이 RI 커버리지를 깨뜨려 오히려 비용이 늘지 않는지 확인합니다. 만료 임박, 미사용 RI를 함께 표시합니다."
-                    : "DBOps 호출의 Bedrock 비용 — Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다.",
+                    ? "등록된 Aurora 계정의 Reserved Instance / Savings Plan 현황: 스케일링 권장이 RI 커버리지를 깨뜨려 오히려 비용이 늘지 않는지 확인합니다. 만료 임박, 미사용 RI를 함께 표시합니다."
+                    : "DBOps 호출의 Bedrock 비용: Application=DBOps 태그가 박힌 Application Inference Profile을 경유합니다. Cost Explorer는 약 24시간 지연돼서 반영됩니다.",
         )}
         actions={
           <div className="flex items-center gap-1">
@@ -1575,7 +1575,7 @@ function TokensCostView({
 
 function DDayBadge({ days }: { days: number | null }) {
   if (days === null)
-    return <span className="text-zinc-600 font-mono text-xs">—</span>;
+    return <span className="text-zinc-600 font-mono text-xs">-</span>;
   if (days < 0)
     return (
       <span className="text-[10px] px-1.5 py-0.5 border border-rose-500/40 bg-rose-500/10 text-rose-300 font-mono">
@@ -1677,7 +1677,7 @@ function CommitmentsCostView({ days }: { days: number }) {
               </div>
             ) : (
               <div className="text-sm text-zinc-600">
-                CE 커버리지 미조회 — 권한/데이터 없음
+                CE 커버리지 미조회: 권한/데이터 없음
               </div>
             )}
           </div>
@@ -1701,7 +1701,7 @@ function CommitmentsCostView({ days }: { days: number }) {
       <Section
         eyebrow="Reserved Instance"
         title="활성 RI 목록"
-        description="만료 임박순 — D-day가 amber(≤30일)/rose(≤7일)면 갱신 또는 스케일링 결정을 재검토하세요."
+        description="만료 임박순. D-day가 amber(≤30일)/rose(≤7일)면 갱신 또는 스케일링 결정을 재검토하세요."
       >
         {loading ? (
           <div className="text-zinc-500 text-sm">loading…</div>
@@ -1736,10 +1736,10 @@ function CommitmentsCostView({ days }: { days: number }) {
                     className="hover:bg-zinc-900/40"
                   >
                     <td className="px-4 py-2 text-zinc-300 font-mono text-xs tabular-nums">
-                      {r.account || "—"}
+                      {r.account || "-"}
                     </td>
                     <td className="px-4 py-2 text-zinc-300 font-mono text-xs">
-                      {r.region || "—"}
+                      {r.region || "-"}
                     </td>
                     <td className="px-4 py-2 text-zinc-100 font-mono text-xs">
                       {r.instance_class}
@@ -1753,7 +1753,7 @@ function CommitmentsCostView({ days }: { days: number }) {
                       {fmtDecimal(r.count, 0)}
                     </td>
                     <td className="px-4 py-2 text-zinc-400 text-xs">
-                      {r.offering_type || "—"}
+                      {r.offering_type || "-"}
                     </td>
                     <td className="px-4 py-2 text-right">
                       <div className="flex items-center justify-end gap-2">
@@ -1776,7 +1776,7 @@ function CommitmentsCostView({ days }: { days: number }) {
           <div className="text-zinc-500 text-sm">loading…</div>
         ) : data?.savings_plans == null ? (
           <div className="border border-zinc-800 bg-zinc-900/30 p-5 text-sm text-zinc-600">
-            Savings Plan 미조회 — API/권한 없음 또는 이 계정에 Savings Plan이
+            Savings Plan 미조회: API/권한 없음 또는 이 계정에 Savings Plan이
             없습니다.
           </div>
         ) : data.savings_plans.length === 0 ? (
@@ -1790,7 +1790,7 @@ function CommitmentsCostView({ days }: { days: number }) {
                 key={`${p.type}-${i}`}
                 className="px-4 py-2.5 flex items-center gap-4 text-sm"
               >
-                <span className="text-zinc-200 flex-1">{p.type || "—"}</span>
+                <span className="text-zinc-200 flex-1">{p.type || "-"}</span>
                 <span className="text-zinc-400 font-mono text-xs tabular-nums">
                   ${p.commitment}/hr
                 </span>
@@ -1878,7 +1878,7 @@ function AnomalyPanel({ anomalies }: { anomalies: CostAnomaly[] }) {
 const GUIDE_STORAGE_KEY = "dbops_cost_guide_open";
 
 function ActivationGuide() {
-  // Default collapsed — the headline + "Activate tag →" button already
+  // Default collapsed. The headline + "Activate tag →" button already
   // convey 80% of the message. localStorage carries the user's preference
   // across page loads.
   const [open, setOpen] = useState(false);
@@ -1926,7 +1926,7 @@ function ActivationGuide() {
               activation required for tagged attribution
             </div>
             <div className="text-xs text-amber-100/90 mt-0.5 truncate group-hover:text-amber-100">
-              Application=DBOps cost allocation tag 활성화 한 번이면 끝 —{" "}
+              Application=DBOps cost allocation tag 활성화 한 번이면 끝:{" "}
               {open ? "위 단계를 따라가세요" : "클릭해서 단계 보기"}
             </div>
           </div>
@@ -1990,9 +1990,9 @@ function ActivationGuide() {
                   AWS가 새 데이터를 인덱싱하면 차트와 모델별 분해표가 자동으로
                   채워집니다.{" "}
                   <span className="text-amber-300/80">
-                    활성화 시점 이전 비용은 소급 적용되지 않습니다
-                  </span>
-                  — 과거 spend는 영구히 untagged로 남습니다.
+                    활성화 시점 이전 비용은 소급 적용되지 않습니다.
+                  </span>{" "}
+                  과거 spend는 영구히 untagged로 남습니다.
                 </>
               }
             />

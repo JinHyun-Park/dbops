@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
-# Module loading — push api/dashboard on sys.path so sibling imports resolve
+# Module loading: push api/dashboard on sys.path so sibling imports resolve
 # ---------------------------------------------------------------------------
 
 _DASHBOARD_DIR = Path(__file__).resolve().parents[3] / "api" / "dashboard"
@@ -132,11 +132,11 @@ def test_learning_overview_tenancy_scopes_viewer(monkeypatch):
     def query(sql, params=None):
         if "remediation_outcomes_agg" in sql:
             return [
-                # fleet aggregate — no real cluster identity
+                # fleet aggregate: no real cluster identity
                 {"cluster_id": "*",  "symptom_class": "anomaly:cpu",   "action_class": "manual",    "successes": 5, "attempts": 6, "last_outcome": "resolved"},
                 # Team A cluster
                 {"cluster_id": "c1", "symptom_class": "finding:slow",   "action_class": "index_add", "successes": 2, "attempts": 2, "last_outcome": "resolved"},
-                # Team B cluster — should be hidden from Team A viewer
+                # Team B cluster: should be hidden from Team A viewer
                 {"cluster_id": "c2", "symptom_class": "finding:cpu",    "action_class": "manual",    "successes": 1, "attempts": 3, "last_outcome": "persisted"},
             ]
         if "FROM remediation_cases" in sql:

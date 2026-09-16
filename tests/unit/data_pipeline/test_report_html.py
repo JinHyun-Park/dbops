@@ -46,7 +46,7 @@ def test_build_html_is_self_contained_and_has_charts():
 
 def test_real_data_renders_non_empty_content():
     """Content assertion: real-shaped fixture must produce a polyline (line chart
-    drew data), a rect bar with query text, and the rule_id from top_alerts —
+    drew data), a rect bar with query text, and the rule_id from top_alerts,
     i.e. the HTML is NOT the empty-placeholder shell."""
     html = rh.build_report_html("my-cluster", "2026-06-24", "daily", "요약 텍스트", _DATA)
     # Line chart drew data (AAS series has 3 points >= 2)

@@ -1,14 +1,14 @@
-"""Slack slash command endpoint — `/dbops <subcommand> [args]`.
+"""Slack slash command endpoint: `/dbops <subcommand> [args]`.
 
 Lets the on-call DBA hit DBOps from inside Slack without context-
 switching to the web console. Mirror of slack_interactive's HMAC v0
 verification + 5-min replay window.
 
 Supported subcommands (parsed from the `text` field):
-  status <cluster>     — connection + ETL freshness + last alert
-  timeline <cluster>   — deep-link to /timeline?cluster=<id>
-  clusters             — list registered clusters
-  help                 — usage panel
+  status <cluster>:      connection + ETL freshness + last alert
+  timeline <cluster>:    deep-link to /timeline?cluster=<id>
+  clusters:              list registered clusters
+  help:                  usage panel
 
 Configuration in Slack app:
   Request URL: <api-gateway>/api/slack/command (POST)
@@ -36,7 +36,7 @@ _MAX_REQUEST_AGE_S = 60 * 5
 
 
 def _verify_slack_signature(headers: dict, raw_body: str) -> tuple[bool, str]:
-    """Slack v0 HMAC verification. Same shape as slack_interactive —
+    """Slack v0 HMAC verification. Same shape as slack_interactive,
     duplicated rather than imported to avoid a Lambda layer just for
     two functions."""
     secret = os.environ.get(_SIGNING_SECRET_ENV)
@@ -52,7 +52,7 @@ def _verify_slack_signature(headers: dict, raw_body: str) -> tuple[bool, str]:
     except ValueError:
         return False, "invalid timestamp"
     if abs(time.time() - ts_int) > _MAX_REQUEST_AGE_S:
-        return False, "stale request — replay window exceeded"
+        return False, "stale request: replay window exceeded"
     basestring = f"v0:{ts}:{raw_body}"
     expected = (
         "v0="
@@ -136,11 +136,11 @@ def _help_block(user_name: str) -> list:
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    f"hi {user_name or 'there'} — DBOps shortcuts:\n"
-                    "• `/dbops status <cluster>` — connection + ETL freshness\n"
-                    "• `/dbops timeline <cluster>` — incident context deep-link\n"
-                    "• `/dbops clusters` — registered clusters\n"
-                    "• `/dbops help` — this message"
+                    f"hi {user_name or 'there'}, DBOps shortcuts:\n"
+                    "• `/dbops status <cluster>`: connection + ETL freshness\n"
+                    "• `/dbops timeline <cluster>`: incident context deep-link\n"
+                    "• `/dbops clusters`: registered clusters\n"
+                    "• `/dbops help`: this message"
                 ),
             },
         },
@@ -172,8 +172,8 @@ def _cmd_status(args: list[str]) -> dict:
         )
     conn = item.get("connection_status") or "untested"
     conn_emoji = {"ok": "🟢", "failed": "🔴", "untested": "⚪"}.get(conn, "⚪")
-    region = item.get("region", "—")
-    engine = item.get("engine", "—")
+    region = item.get("region", "-")
+    engine = item.get("engine", "-")
     fe = _frontend_url()
     lines = [
         f"*{cluster_id}*  ({engine}, {region})",
@@ -213,7 +213,7 @@ def _cmd_timeline(args: list[str]) -> dict:
     fe = _frontend_url()
     if not fe:
         return _slack_text(
-            "⚠ FRONTEND_URL is not configured — set it on the agent stack."
+            "⚠ FRONTEND_URL is not configured: set it on the agent stack."
         )
     url = f"{fe}/timeline?cluster={urllib.parse.quote(cluster_id)}"
     return _slack_blocks([
@@ -222,7 +222,7 @@ def _cmd_timeline(args: list[str]) -> dict:
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    f"*Timeline for `{cluster_id}`* — 알람, RDS 이벤트, 스키마 "
+                    f"*Timeline for `{cluster_id}`*. 알람, RDS 이벤트, 스키마 "
                     "변경, 실행된 쓰기가 시간순으로:"
                 ),
             },
@@ -262,7 +262,7 @@ def _cmd_clusters() -> dict:
         conn = it.get("connection_status") or "untested"
         emoji = {"ok": "🟢", "failed": "🔴", "untested": "⚪"}.get(conn, "⚪")
         lines.append(
-            f"{emoji} `{it.get('cluster_id')}`, {it.get('engine', '—')}"
+            f"{emoji} `{it.get('cluster_id')}`, {it.get('engine', '-')}"
         )
     return _slack_blocks([
         {

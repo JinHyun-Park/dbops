@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Dev-env live smoke — READ-ONLY, best-effort. Refreshes a Cognito token from
+# Dev-env live smoke: READ-ONLY, best-effort. Refreshes a Cognito token from
 # the local Playwright session (frontend/e2e/.auth/state.json) and curls a few
 # key API endpoints. Prints 'SMOKE: PASS' / 'SMOKE: FAIL' (or 'SMOKE: SKIP' when
-# no usable session — never fails the tester just because a session expired).
+# no usable session, never fails the tester just because a session expired).
 #
 # This is a STARTER smoke (only /api/clusters). Extend ENDPOINTS for richer
 # coverage. Config resolution, in order: DBOPS_API_URL / DBOPS_COGNITO_CLIENT_ID
@@ -38,7 +38,7 @@ ENDPOINTS=("/api/clusters")
 # SKIP, never FAIL: this smoke is best-effort by contract, and an unconfigured
 # checkout is not a test failure. Same posture as the missing-session skips below.
 if [ -z "$API" ] || [ -z "$CLIENT_ID" ]; then
-    echo "SMOKE: SKIP (no API URL / Cognito client id — set DBOPS_API_URL and" \
+    echo "SMOKE: SKIP (no API URL / Cognito client id: set DBOPS_API_URL and" \
          "DBOPS_COGNITO_CLIENT_ID, or build+deploy the frontend so $CFG exists)"
     exit 0
 fi
@@ -55,7 +55,7 @@ for o in json.load(open(sys.argv[1])).get('origins',[]):
 TOK="$(aws cognito-idp initiate-auth --auth-flow REFRESH_TOKEN_AUTH \
   --client-id "$CLIENT_ID" --auth-parameters REFRESH_TOKEN="$RT" \
   --region "$REGION" --query 'AuthenticationResult.IdToken' --output text 2>/dev/null)"
-{ [ -z "$TOK" ] || [ "$TOK" = "None" ]; } && { echo "SMOKE: SKIP (token refresh failed — session likely expired)"; exit 0; }
+{ [ -z "$TOK" ] || [ "$TOK" = "None" ]; } && { echo "SMOKE: SKIP (token refresh failed: session likely expired)"; exit 0; }
 
 FAIL=0
 for path in "${ENDPOINTS[@]}"; do

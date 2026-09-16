@@ -13,7 +13,7 @@ from mcp_servers.shared.cache_client import CacheClient
 _EMBED_MODEL = "amazon.titan-embed-text-v2:0"
 _EMBED_DIM = 1024
 # Cosine-distance ceiling: rows farther than this (similarity < ~0.25) aren't
-# "similar" enough to surface — if none clear it, fall back to keyword search.
+# "similar" enough to surface. If none clear it, fall back to keyword search.
 _MAX_COS_DISTANCE = 0.75
 _bedrock = None
 
@@ -108,7 +108,7 @@ def _tokenize(symptoms: str) -> list[str]:
 def _search_events(cache: CacheClient, keywords: list[str], cluster_id: str) -> list[dict]:
     """Return matching warning/critical event_log rows for ONE cluster.
 
-    ALWAYS cluster-scoped — there is no fleet-wide mode (a fleet search would
+    ALWAYS cluster-scoped: there is no fleet-wide mode (a fleet search would
     surface other teams' incident events to a caller who can't see those
     clusters; this MCP tool has no caller identity to scope safely). cluster_id
     is required; each row is scored by keyword matches (match_count) and ordered
@@ -195,7 +195,7 @@ def find_similar_incidents_impl(
     Read-only, cluster-scoped. Embeds the symptoms (Titan) and does a pgvector
     cosine search over event_log + runbooks; falls back to keyword ILIKE search
     when nothing is embedded yet, nothing is similar enough, or Bedrock is
-    unavailable. Always cluster-scoped for tenancy (no fleet-wide fallback — event
+    unavailable. Always cluster-scoped for tenancy (no fleet-wide fallback: event
     messages carry hostnames/query fragments the caller may not be allowed to see,
     and this MCP tool has no caller identity to scope a fleet search safely).
     """

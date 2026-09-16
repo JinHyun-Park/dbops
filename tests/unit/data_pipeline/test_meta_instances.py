@@ -30,6 +30,6 @@ def test_build_instance_list_empty_on_error():
     rds = MagicMock()
     rds.describe_db_instances.side_effect = RuntimeError("denied")
     members = [{"DBInstanceIdentifier": "w1", "IsClusterWriter": True}]
-    # falls back to role-only entries (class "") — never raises
+    # falls back to role-only entries (class ""), never raises
     out = mc._build_instance_list(rds, "c1", members)
     assert out == [{"id": "w1", "role": "writer", "class": ""}]

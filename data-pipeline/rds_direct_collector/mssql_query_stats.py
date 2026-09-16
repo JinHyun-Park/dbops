@@ -6,7 +6,7 @@ cache). That is FINER-grained than MySQL's events_statements_summary_by_digest
 / PG's pg_stat_statements, which emit exactly ONE row per query_hash: a single
 query_hash can have multiple cached plans, so a raw DMV snapshot holds several
 rows sharing one hash. query_regression PARTITIONs BY query_hash and LAGs by
-snapshot_time, so duplicate same-tick hashes corrupt the per-interval delta —
+snapshot_time, so duplicate same-tick hashes corrupt the per-interval delta:
 we GROUP BY query_hash here to emit exactly one row per hash per snapshot,
 matching the MySQL/PG shape. Output goes to the SAME `query_stats` cache table.
 

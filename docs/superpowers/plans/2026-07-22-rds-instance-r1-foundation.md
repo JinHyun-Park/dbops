@@ -2,24 +2,24 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Register, discover, collect (CloudWatch + meta), and render RDS for MySQL / SQL Server instances as a new `rds_instance` engine family — plus provision the two standing demo instances.
+**Goal:** Register, discover, collect (CloudWatch + meta), and render RDS for MySQL / SQL Server instances as a new `rds_instance` engine family, plus provision the two standing demo instances.
 
-**Architecture:** New `rds_instance` family with early-return dispatch (DocDB/DynamoDB/ElastiCache pattern) across the 4 Python classifier copies + TS mirror. Registration/discovery via `describe_db_instances` (instances with `DBClusterIdentifier` are rejected — they're cluster members). CW collection uses `AWS/RDS` + `DBInstanceIdentifier` dimension writing standard metric_type names with `dimensions='{}'` so triage/alerts/forecast work unmodified. Spec: `docs/superpowers/specs/2026-07-22-rds-instance-engines-design.md`.
+**Architecture:** New `rds_instance` family with early-return dispatch (DocDB/DynamoDB/ElastiCache pattern) across the 4 Python classifier copies + TS mirror. Registration/discovery via `describe_db_instances` (instances with `DBClusterIdentifier` are rejected: they're cluster members). CW collection uses `AWS/RDS` + `DBInstanceIdentifier` dimension writing standard metric_type names with `dimensions='{}'` so triage/alerts/forecast work unmodified. Spec: `docs/superpowers/specs/2026-07-22-rds-instance-engines-design.md`.
 
 **Tech Stack:** Python 3.13 (Lambda), boto3, pytest; Next.js 16 + TS + recharts; CDK Python; AWS CLI (demo instances).
 
 ## Global Constraints
 
-- `engine_family.py` is duplicated VERBATIM: `api/clusters/`, `api/dashboard/`, `data-pipeline/etl_collector/collectors/`, `mcp-servers/mcp_servers/shared/` — all 4 edited in lockstep via `cp` from the canonical `mcp-servers` copy; TS mirror `frontend/src/lib/engine.ts`.
+- `engine_family.py` is duplicated VERBATIM: `api/clusters/`, `api/dashboard/`, `data-pipeline/etl_collector/collectors/`, `mcp-servers/mcp_servers/shared/`: all 4 edited in lockstep via `cp` from the canonical `mcp-servers` copy; TS mirror `frontend/src/lib/engine.ts`.
 - API error responses NEVER include `str(e)` (static reasons only).
-- `cluster_meta.engine` is VARCHAR(20) — `sqlserver-ex` (12) fits; never store longer engine strings.
+- `cluster_meta.engine` is VARCHAR(20): `sqlserver-ex` (12) fits; never store longer engine strings.
 - EC2/RDS resource descriptions sent to AWS: ASCII only (no em-dash).
 - Frontend commits: prettier pre-commit reformats → first commit attempt may fail → `git add -A` and re-commit. NO Claude co-author trailer.
-- `cdk deploy`: NEVER run two concurrently — one process, multiple stacks: `cdk deploy A B C`.
-- Frontend stack ships prebuilt `out/` — `npm run build` BEFORE `cdk deploy dbops-dev-frontend`.
-- `cdk/config/settings.py` is the user's real config — never cp/overwrite/rm.
+- `cdk deploy`: NEVER run two concurrently. One process, multiple stacks: `cdk deploy A B C`.
+- Frontend stack ships prebuilt `out/`: `npm run build` BEFORE `cdk deploy dbops-dev-frontend`.
+- `cdk/config/settings.py` is the user's real config, never cp/overwrite/rm.
 - Cross-account is OUT OF SCOPE for this family in v1 (registration form: same-account only).
-- Demo instances are STANDING resources — tag them, do NOT tear down.
+- Demo instances are STANDING resources: tag them, do NOT tear down.
 
 ---
 
@@ -33,9 +33,9 @@
 
 **Interfaces:**
 
-- Produces: `RDS_INSTANCE = "rds_instance"` constant; `engine_family("mysql") == "rds_instance"`, `engine_family("sqlserver-*") == "rds_instance"`; `CAPABILITIES["rds_instance"]` dict; new `sql_via` key on `relational` (`"data_api"`) and `rds_instance` (`"direct"`). Tasks 2–5 rely on the family string `"rds_instance"` exactly.
+- Produces: `RDS_INSTANCE = "rds_instance"` constant; `engine_family("mysql") == "rds_instance"`, `engine_family("sqlserver-*") == "rds_instance"`; `CAPABILITIES["rds_instance"]` dict; new `sql_via` key on `relational` (`"data_api"`) and `rds_instance` (`"direct"`). Tasks 2-5 rely on the family string `"rds_instance"` exactly.
 
-- [ ] **Step 1: Write the failing tests** — append to `tests/unit/data_pipeline/test_engine_family.py`:
+- [ ] **Step 1: Write the failing tests**. Append to `tests/unit/data_pipeline/test_engine_family.py`:
 
 ```python
 def test_rds_instance_family_derivation():
@@ -45,7 +45,7 @@ def test_rds_instance_family_derivation():
     assert ef.engine_family("sqlserver-se") == "rds_instance"
     assert ef.engine_family("sqlserver-web") == "rds_instance"
     assert ef.engine_family("SQLServer-EX") == "rds_instance"
-    # Aurora stays relational — the 'aurora' guard must win over the bare
+    # Aurora stays relational: the 'aurora' guard must win over the bare
     # 'mysql' substring.
     assert ef.engine_family("aurora-mysql") == "relational"
     assert ef.engine_family("aurora-postgresql") == "relational"
@@ -81,7 +81,7 @@ def test_all_python_copies_are_verbatim_identical():
 Run: `python3 -m pytest tests/unit/data_pipeline/test_engine_family.py -v`
 Expected: 3 new tests FAIL (`rds_instance` unknown → classified `relational`; no `CAPABILITIES["rds_instance"]`).
 
-- [ ] **Step 3: Edit the canonical copy** — `mcp-servers/mcp_servers/shared/engine_family.py`:
+- [ ] **Step 3: Edit the canonical copy**, `mcp-servers/mcp_servers/shared/engine_family.py`:
 
 Add constant after line 17 (`ELASTICACHE = ...`):
 
@@ -116,12 +116,12 @@ In `CAPABILITIES`: add `"sql_via": "data_api",` to the RELATIONAL entry (right a
 
 ```python
     RDS_INSTANCE: {
-        # SQL-capable but NOT via RDS Data API (Aurora-only) — R-3 wires the
+        # SQL-capable but NOT via RDS Data API (Aurora-only). R-3 wires the
         # direct-TCP path; until then execute_sql's Data API call must not be
         # reached for this family (sql_via is the dispatch key).
         "sql": True, "sql_via": "direct",
         "rds_meta": True, "perf_insights": True, "simulation": False,
-        # Cluster/reader-topology concepts — never applicable to a standalone
+        # Cluster/reader-topology concepts, never applicable to a standalone
         # DB instance.
         "custom_endpoint": False, "prewarm": False, "scale_instance": False,
         # Shared namespace with Aurora but instance-dimensioned
@@ -166,15 +166,15 @@ git commit -m "feat(engine): rds_instance family + sql_via capability (R-1)"
 **Files:**
 
 - Modify: `api/clusters/handler.py` (register: after `_register_elasticache` ~line 588; dispatch in `_handle_register` ~line 591; discovery block in `_list_clusters_in_region` after the ElastiCache block ~line 448)
-- Modify: `cdk/stacks/agent_stack.py` (clusters Lambda IAM — verify/add `rds:DescribeDBInstances`)
+- Modify: `cdk/stacks/agent_stack.py` (clusters Lambda IAM: verify/add `rds:DescribeDBInstances`)
 - Test: `tests/unit/api/test_register_rds_instance.py` (new)
 
 **Interfaces:**
 
-- Consumes: `engine_family()` returning `"rds_instance"` (Task 1 — the api/clusters copy).
-- Produces: registry items with `engine_family="rds_instance"`, `engine` = real AWS engine string (`mysql` / `sqlserver-ex` …), `resource_type=f"rds-{engine}"`, `endpoint`, `port`, optional `db_secret_arn`/`db_write_secret_arn` (empty in R-1, consumed by R-2/R-3). Register API accepts `{engine: "mysql"|"sqlserver", cluster_id, account_id, region}` — the stored `engine` comes from the AWS describe response, not the request body.
+- Consumes: `engine_family()` returning `"rds_instance"` (Task 1, the api/clusters copy).
+- Produces: registry items with `engine_family="rds_instance"`, `engine` = real AWS engine string (`mysql` / `sqlserver-ex` …), `resource_type=f"rds-{engine}"`, `endpoint`, `port`, optional `db_secret_arn`/`db_write_secret_arn` (empty in R-1, consumed by R-2/R-3). Register API accepts `{engine: "mysql"|"sqlserver", cluster_id, account_id, region}`. The stored `engine` comes from the AWS describe response, not the request body.
 
-- [ ] **Step 1: Write the failing tests** — create `tests/unit/api/test_register_rds_instance.py`. Copy the handler module-loading pattern from an existing file in `tests/unit/api/` (e.g. the importlib/sys.modules stubbing used by the clusters tests there; if none loads `api/clusters/handler.py` yet, mirror `tests/unit/data_pipeline/test_engine_family.py`'s `importlib.util.spec_from_file_location` approach, stubbing `boto3` and the `tenancy` import in `sys.modules` before exec):
+- [ ] **Step 1: Write the failing tests**. Create `tests/unit/api/test_register_rds_instance.py`. Copy the handler module-loading pattern from an existing file in `tests/unit/api/` (e.g. the importlib/sys.modules stubbing used by the clusters tests there; if none loads `api/clusters/handler.py` yet, mirror `tests/unit/data_pipeline/test_engine_family.py`'s `importlib.util.spec_from_file_location` approach, stubbing `boto3` and the `tenancy` import in `sys.modules` before exec):
 
 ```python
 def _mk_instance(engine="mysql", cluster_member=None):
@@ -219,7 +219,7 @@ def test_register_hard_fails_on_describe_error(handler_module, mock_table):
             "cluster_id": "nope", "account_id": "123", "region": "ap-northeast-2"})
     assert resp["statusCode"] == 400
     mock_table.put_item.assert_not_called()
-    # Static reason — the raw exception text must NOT leak into the response.
+    # Static reason: the raw exception text must NOT leak into the response.
     assert "secret-sauce" not in resp["body"]
 
 def test_handle_register_dispatches_rds_instance(handler_module, mock_table):
@@ -234,9 +234,9 @@ def test_handle_register_dispatches_rds_instance(handler_module, mock_table):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `python3 -m pytest tests/unit/api/test_register_rds_instance.py -v`
-Expected: FAIL — `_register_rds_instance` does not exist.
+Expected: FAIL, `_register_rds_instance` does not exist.
 
-- [ ] **Step 3: Implement registration** — in `api/clusters/handler.py`, add after `_register_elasticache` (~line 588):
+- [ ] **Step 3: Implement registration**. In `api/clusters/handler.py`, add after `_register_elasticache` (~line 588):
 
 ```python
 # RDS instance engines (non-Aurora). Engine strings from the RDS API.
@@ -246,7 +246,7 @@ _RDS_INSTANCE_ENGINES = ("mysql", "sqlserver-ee", "sqlserver-se", "sqlserver-ex"
 def _register_rds_instance(table, body):
     """Standalone RDS DB instance (RDS for MySQL / SQL Server). Unlike the
     Aurora path this HARD-FAILS (400, no registry row) on describe errors or
-    cluster members — a half-registered instance row is useless downstream
+    cluster members: a half-registered instance row is useless downstream
     (no cluster_arn to fall back on)."""
     for f in ("cluster_id", "account_id", "region"):
         if not body.get(f):
@@ -298,10 +298,10 @@ In `_handle_register` (~line 591), add the 4th family branch:
         return _register_rds_instance(table, body)
 ```
 
-- [ ] **Step 4: Implement discovery** — in `_list_clusters_in_region`, append after the ElastiCache try/except block (~line 448), before `return out`:
+- [ ] **Step 4: Implement discovery**. In `_list_clusters_in_region`, append after the ElastiCache try/except block (~line 448), before `return out`:
 
 ```python
-    # RDS instance engines (non-Aurora MySQL / SQL Server) — best-effort.
+    # RDS instance engines (non-Aurora MySQL / SQL Server): best-effort.
     try:
         inst_paginator = rds.get_paginator("describe_db_instances")
         for ipage in inst_paginator.paginate():
@@ -328,10 +328,10 @@ In `_handle_register` (~line 591), add the 4th family branch:
         print(f"[discover] rds instances failed in {region}: {e}")
 ```
 
-- [ ] **Step 5: IAM check** — grep the clusters Lambda's policy in `cdk/stacks/agent_stack.py`:
+- [ ] **Step 5: IAM check**. Grep the clusters Lambda's policy in `cdk/stacks/agent_stack.py`:
 
 Run: `grep -n "DescribeDBInstances\|DescribeDBClusters" cdk/stacks/agent_stack.py`
-If the clusters API Lambda's statement lists `rds:DescribeDBClusters` but NOT `rds:DescribeDBInstances`, add `"rds:DescribeDBInstances"` to that same statement's actions list. (The ETL collector in data_stack already has it — relational PI lookup uses it today.)
+If the clusters API Lambda's statement lists `rds:DescribeDBClusters` but NOT `rds:DescribeDBInstances`, add `"rds:DescribeDBInstances"` to that same statement's actions list. (The ETL collector in data_stack already has it: relational PI lookup uses it today.)
 
 - [ ] **Step 6: Run tests to verify they pass**
 
@@ -347,20 +347,20 @@ git commit -m "feat(clusters): register/discover standalone RDS instances (R-1)"
 
 ---
 
-### Task 3: ETL collection — CW metrics + cluster_meta for rds_instance
+### Task 3: ETL collection (CW metrics + cluster_meta for rds_instance)
 
 **Files:**
 
 - Create: `data-pipeline/etl_collector/collectors/rds_instance_cw_collector.py`
-- Modify: `data-pipeline/etl_collector/handler.py` (`_collect_one` — new branch after the elasticache block ~line 163, before the relational path; plus the import next to `collect_docdb_metrics`'s import)
+- Modify: `data-pipeline/etl_collector/handler.py` (`_collect_one`: new branch after the elasticache block ~line 163, before the relational path; plus the import next to `collect_docdb_metrics`'s import)
 - Test: `tests/unit/data_pipeline/test_rds_instance_collector.py` (new)
 
 **Interfaces:**
 
 - Consumes: family string `"rds_instance"` (Task 1), registry rows from Task 2 (`cluster_id` = instance identifier).
-- Produces: `collect_rds_instance_metrics(cw, rds_client, cache_execute, cluster_id, region, account_id) -> dict` returning `{"cluster_id", "metrics_inserted", "errors", "resource_id", "pi_enabled"}`; metric_snapshots rows with metric_type in `cpu, db_connections, freeable_memory, free_storage_bytes, read_iops, write_iops, read_latency, write_latency, net_rx, net_tx, swap_usage` and `dimensions='{}'`; a `cluster_meta` row with `resource_details` JSONB (keys: `instance_class, multi_az, storage_type, allocated_storage_gb, license_model, publicly_accessible, pi_enabled, endpoint, port`) — Task 5's panel interface MUST match these key names exactly (3-tier parity).
+- Produces: `collect_rds_instance_metrics(cw, rds_client, cache_execute, cluster_id, region, account_id) -> dict` returning `{"cluster_id", "metrics_inserted", "errors", "resource_id", "pi_enabled"}`; metric_snapshots rows with metric_type in `cpu, db_connections, freeable_memory, free_storage_bytes, read_iops, write_iops, read_latency, write_latency, net_rx, net_tx, swap_usage` and `dimensions='{}'`; a `cluster_meta` row with `resource_details` JSONB (keys: `instance_class, multi_az, storage_type, allocated_storage_gb, license_model, publicly_accessible, pi_enabled, endpoint, port`). Task 5's panel interface MUST match these key names exactly (3-tier parity).
 
-- [ ] **Step 1: Write the failing tests** — `tests/unit/data_pipeline/test_rds_instance_collector.py` (load the module with the same `importlib.util.spec_from_file_location` pattern as `test_engine_family.py`):
+- [ ] **Step 1: Write the failing tests**, `tests/unit/data_pipeline/test_rds_instance_collector.py` (load the module with the same `importlib.util.spec_from_file_location` pattern as `test_engine_family.py`):
 
 ```python
 def _mk_clients():
@@ -388,7 +388,7 @@ def test_collect_uses_instance_dimension_and_writes_meta():
                                          "dbops-demo-mysql", "ap-northeast-2", "123")
     assert r["resource_id"] == "db-ABC" and r["pi_enabled"] is True
     assert r["metrics_inserted"] > 0
-    # Every CW call must be instance-dimensioned — DBClusterIdentifier does not
+    # Every CW call must be instance-dimensioned: DBClusterIdentifier does not
     # exist for standalone instances.
     for c in cw.get_metric_statistics.call_args_list:
         assert c.kwargs["Namespace"] == "AWS/RDS"
@@ -414,14 +414,14 @@ def test_describe_failure_is_nonfatal():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `python3 -m pytest tests/unit/data_pipeline/test_rds_instance_collector.py -v`
-Expected: FAIL — module does not exist.
+Expected: FAIL, module does not exist.
 
-- [ ] **Step 3: Implement the collector** — create `data-pipeline/etl_collector/collectors/rds_instance_cw_collector.py`:
+- [ ] **Step 3: Implement the collector**. Create `data-pipeline/etl_collector/collectors/rds_instance_cw_collector.py`:
 
 ```python
 """RDS instance (non-Aurora MySQL / SQL Server) CloudWatch + meta -> cache.
 
-Namespace AWS/RDS with the DBInstanceIdentifier dimension — standalone DB
+Namespace AWS/RDS with the DBInstanceIdentifier dimension: standalone DB
 instances never expose DBClusterIdentifier. Rows land with dimensions='{}'
 (cluster-scoped) because the instance IS the monitored resource, so triage /
 alerts / capacity forecast read them unmodified."""
@@ -506,7 +506,7 @@ def collect_rds_instance_metrics(cw, rds_client, cache_execute, cluster_id, regi
             "errors": errors, "resource_id": resource_id, "pi_enabled": pi_enabled}
 ```
 
-- [ ] **Step 4: Wire the dispatch branch** — in `data-pipeline/etl_collector/handler.py`, add the import next to the existing collector imports (match their exact style — check the top of the file, they import like `from collectors.docdb_cw_collector import collect_docdb_metrics`):
+- [ ] **Step 4: Wire the dispatch branch**. In `data-pipeline/etl_collector/handler.py`, add the import next to the existing collector imports (match their exact style: check the top of the file, they import like `from collectors.docdb_cw_collector import collect_docdb_metrics`):
 
 ```python
 from collectors.rds_instance_cw_collector import collect_rds_instance_metrics
@@ -516,7 +516,7 @@ Then in `_collect_one`, after the elasticache block's `return result` (~line 163
 
 ```python
     # ------------------------------------------------------------------
-    # RDS instance path (non-Aurora MySQL / SQL Server) — instance-dimensioned
+    # RDS instance path (non-Aurora MySQL / SQL Server): instance-dimensioned
     # CW + meta + PI; no Aurora-cluster/Data-API calls
     # ------------------------------------------------------------------
     if family == "rds_instance":
@@ -541,7 +541,7 @@ Then in `_collect_one`, after the elasticache block's `return result` (~line 163
         return result
 ```
 
-- [ ] **Step 5: Add a dispatch test** — append to `tests/unit/data_pipeline/test_etl_dispatch.py` (it already has `_load_handler()`, `_fake_get_client`, `_COMMON_KWARGS` at the top — reuse them):
+- [ ] **Step 5: Add a dispatch test**. Append to `tests/unit/data_pipeline/test_etl_dispatch.py` (it already has `_load_handler()`, `_fake_get_client`, `_COMMON_KWARGS` at the top, reuse them):
 
 ```python
 # ---------------------------------------------------------------------------
@@ -640,9 +640,9 @@ git commit -m "feat(etl): rds_instance CW/meta/PI collection branch (R-1)"
 **Interfaces:**
 
 - Consumes: backend family string `"rds_instance"`, engine strings `mysql` / `sqlserver-*`.
-- Produces: `EngineKind "sqlserver"`, `EngineFamily "rds_instance"`, `EngineGroup "rds-mysql" | "rds-sqlserver"` — Task 5 gates panels on `fam === "rds_instance"`.
+- Produces: `EngineKind "sqlserver"`, `EngineFamily "rds_instance"`, `EngineGroup "rds-mysql" | "rds-sqlserver"`. Task 5 gates panels on `fam === "rds_instance"`.
 
-- [ ] **Step 1: engine.ts — kind + badge.** In `EngineKind` add `| "sqlserver"` after `"mysql"`. In `engineKind()` insert BEFORE the mysql check:
+- [ ] **Step 1: engine.ts (kind + badge).** In `EngineKind` add `| "sqlserver"` after `"mysql"`. In `engineKind()` insert BEFORE the mysql check:
 
 ```ts
 if (e.includes("sqlserver")) return "sqlserver";
@@ -660,10 +660,10 @@ In `engineBadge()` add a case before `docdb`:
       };
 ```
 
-- [ ] **Step 2: engine.ts — family + group.** `EngineFamily`: add `| "rds_instance"`. In `engineFamily()` insert before `return "relational";`:
+- [ ] **Step 2: engine.ts (family + group).** `EngineFamily`: add `| "rds_instance"`. In `engineFamily()` insert before `return "relational";`:
 
 ```ts
-// RDS instance engines (non-Aurora). 'aurora-mysql' contains 'mysql' — the
+// RDS instance engines (non-Aurora). 'aurora-mysql' contains 'mysql', the
 // aurora guard keeps Aurora MySQL relational. Mirrors engine_family.py.
 if (e.includes("sqlserver")) return "rds_instance";
 if (e.includes("mysql") && !e.includes("aurora")) return "rds_instance";
@@ -711,9 +711,9 @@ if (fam === "rds_instance")
   rds_instance: ["overview", "audit"],
 ```
 
-(The audit tab already renders `EventsPanel` for `fam !== "relational"` — no gating change needed; RDS instance events flow through the engine-agnostic event_processor.)
+(The audit tab already renders `EventsPanel` for `fam !== "relational"`, no gating change needed; RDS instance events flow through the engine-agnostic event_processor.)
 
-- [ ] **Step 4: Registration form** — `frontend/src/app/clusters/page.tsx`:
+- [ ] **Step 4: Registration form**, `frontend/src/app/clusters/page.tsx`:
 
 Options (~L854):
 
@@ -747,7 +747,7 @@ Payload (~L368): extend the docdb payload branch the same way:
       }
 ```
 
-Field visibility (~L925): the `cluster_id` input's condition currently lists the two aurora literals — add the new engines so the identifier field shows:
+Field visibility (~L925): the `cluster_id` input's condition currently lists the two aurora literals. Add the new engines so the identifier field shows:
 
 ```ts
               {(form.engine === "aurora-postgresql" ||
@@ -756,17 +756,17 @@ Field visibility (~L925): the `cluster_id` input's condition currently lists the
                 form.engine === "sqlserver") && (
 ```
 
-Do NOT add the new engines to the cross-account mode toggle condition (~L868) — v1 is same-account only.
+Do NOT add the new engines to the cross-account mode toggle condition (~L868): v1 is same-account only.
 
-- [ ] **Step 5: Compile check — the exhaustive Records are the safety net**
+- [ ] **Step 5: Compile check (the exhaustive Records are the safety net)**
 
 Run: `cd frontend && npx tsc --noEmit 2>&1 | head -20`
-Expected: zero errors. If any `Record<EngineFamily|EngineGroup, …>` site was missed, tsc names it — fix each by adding the new key(s) following the sibling entries.
+Expected: zero errors. If any `Record<EngineFamily|EngineGroup, …>` site was missed, tsc names it. Fix each by adding the new key(s) following the sibling entries.
 
-- [ ] **Step 6: Commit** (prettier may reformat on first attempt — re-add and re-commit)
+- [ ] **Step 6: Commit** (prettier may reformat on first attempt: re-add and re-commit)
 
 ```bash
-git add -A && git commit -m "feat(ui): rds_instance family — classification, groups, registration form (R-1)" || (git add -A && git commit -m "feat(ui): rds_instance family — classification, groups, registration form (R-1)")
+git add -A && git commit -m "feat(ui): rds_instance family classification, groups, registration form (R-1)" || (git add -A && git commit -m "feat(ui): rds_instance family classification, groups, registration form (R-1)")
 ```
 
 ---
@@ -781,14 +781,14 @@ git add -A && git commit -m "feat(ui): rds_instance family — classification, g
 **Interfaces:**
 
 - Consumes: `fetchResourceDetails(clusterId)` → `{engine, engine_family, resource_details}` where `resource_details` keys are EXACTLY Task 3's: `instance_class, multi_az, storage_type, allocated_storage_gb, license_model, publicly_accessible, pi_enabled, endpoint, port`. Timeseries via the same batch-timeseries client call the DynamoDB panel uses, with metric types from Task 3: `cpu, db_connections, freeable_memory, free_storage_bytes`.
-- Produces: `<RdsInstanceOverviewPanel clusterId={...} range={...} />` (accept the SAME props the sibling panels receive at dashboard/page.tsx:910-947 — read those lines and match).
+- Produces: `<RdsInstanceOverviewPanel clusterId={...} range={...} />` (accept the SAME props the sibling panels receive at dashboard/page.tsx:910-947, read those lines and match).
 
 - [ ] **Step 1: Read the template.** Read `frontend/src/components/dashboard/dynamodb-overview-panel.tsx` fully. Reuse verbatim: its imports (recharts, `fetchResourceDetails`, `fetchBatchTimeseries`, `TimeRange`, `Expandable`, `fmtDecimal`/`fmtBytes`, `useChartColors`), its fetch/refresh `useEffect` scaffolding, and its chart-card layout. Verify `fetchBatchTimeseries`'s exact signature in `frontend/src/lib/api-client.ts` before calling it.
 
 - [ ] **Step 2: Write the panel.** Structure (mirror the template's JSX patterns; Korean explanatory text, English jargon per project convention):
 
 ```tsx
-// RDS instance resource_details — MUST match the collector's JSON keys
+// RDS instance resource_details: MUST match the collector's JSON keys
 // (rds_instance_cw_collector.py builds this dict; 3-tier parity).
 interface RdsInstanceDetails {
   instance_class?: string;
@@ -810,7 +810,7 @@ const METRICS = [
 ];
 ```
 
-Panel body: (a) a resource card grid showing instance_class / engine_version(from the outer detail response) / Multi-AZ / storage (`{storage_type}, {allocated_storage_gb} GiB`) / license_model / PI enabled — dashes for missing values (honest empty states, no fabrication); (b) four chart cards (CPU %, Connections, Freeable Memory via fmtBytes, Free Storage via fmtBytes) using the template's Area/Line chart card markup with `useChartColors`.
+Panel body: (a) a resource card grid showing instance_class / engine_version(from the outer detail response) / Multi-AZ / storage (`{storage_type}, {allocated_storage_gb} GiB`) / license_model / PI enabled, dashes for missing values (honest empty states, no fabrication); (b) four chart cards (CPU %, Connections, Freeable Memory via fmtBytes, Free Storage via fmtBytes) using the template's Area/Line chart card markup with `useChartColors`.
 
 - [ ] **Step 3: Render it in the dashboard.** In `dashboard/page.tsx`: add the import next to the sibling panels (~L60), then in the overview tab where `DynamodbOverviewPanel`/`DocdbOverviewPanel` render (~L904-947), add an adjacent block with IDENTICAL props to the siblings:
 
@@ -839,7 +839,7 @@ git add -A && git commit -m "feat(dashboard): RDS instance overview panel (R-1)"
 
 ### Task 6: Provision the standing demo instances (live AWS)
 
-**Files:** none (one-off AWS CLI; standing demo resources — this is the project-sanctioned exception to CDK-only, with identifying tags)
+**Files:** none (one-off AWS CLI; standing demo resources: this is the project-sanctioned exception to CDK-only, with identifying tags)
 
 **Interfaces:**
 
@@ -900,7 +900,7 @@ aws rds describe-db-instances --db-instance-identifier dbops-demo-mysql --query 
 aws rds describe-db-instances --db-instance-identifier dbops-demo-mssql --query "DBInstances[0].[DBInstanceStatus,Engine,EngineVersion,Endpoint.Address]" --output text
 ```
 
-Expected: both `available` with endpoints. START THIS TASK FIRST (before Task 1) if executing sequentially — creation overlaps with the code tasks.
+Expected: both `available` with endpoints. START THIS TASK FIRST (before Task 1) if executing sequentially: creation overlaps with the code tasks.
 
 ---
 
@@ -939,7 +939,7 @@ curl -s -X POST "$API_BASE/api/clusters" -H "Authorization: Bearer $TOKEN" -H "C
 
 Expected: both 201 `{"status":"registered","connection_status":"ok"}`; the mssql row's stored engine is the REAL edition (`sqlserver-ex`).
 
-- [ ] **Step 4: Verify collection after one ETL interval (~5 min)** — query the cache via RDS Data API (remember `includeResultMetadata=True`):
+- [ ] **Step 4: Verify collection after one ETL interval (~5 min)**. Query the cache via RDS Data API (remember `includeResultMetadata=True`):
 
 ```
 SELECT metric_type, count(*), max(ts) FROM metric_snapshots
@@ -951,19 +951,19 @@ FROM cluster_meta WHERE cluster_id LIKE 'dbops-demo-%';
 
 Expected: cpu/db_connections/freeable_memory/free_storage_bytes (+iops/latency) rows for BOTH ids; cluster_meta rows with engine `mysql` / `sqlserver-ex` and instance_class populated.
 
-- [ ] **Step 5: Browser verification (Chrome MCP — never AppleScript)**
+- [ ] **Step 5: Browser verification (Chrome MCP, never AppleScript)**
 
   - Fleet/⌘K/ClusterDropdown: both demo instances appear under new groups "RDS MySQL" / "RDS SQL Server" with correct badges.
   - Dashboard for each: overview tab shows the resource card (instance class, storage, license) + 4 charts with real datapoints; audit tab shows events (or an honest empty state); NO relational-only tabs (성능, 쿼리 etc.) visible.
   - Registration form: the two new options render, cluster_id field shows, cross-account toggle absent for them.
 
-- [ ] **Step 6: Update memory/backlog + report** — record R-1 completion (and any deviations) in the session report to the user. Commit any leftover fixes.
+- [ ] **Step 6: Update memory/backlog + report**. Record R-1 completion (and any deviations) in the session report to the user. Commit any leftover fixes.
 
 ---
 
 ## Execution notes (orchestrator)
 
-- Model routing per the user's standing instruction: Tasks 1–3 (backend) → Opus 4.8 subagents; Tasks 4–5 (frontend) → Sonnet 5 subagents; Task 6–7 (CLI/deploy/verify) → orchestrator (Fable) directly, since they touch live AWS + browser.
-- Task 6 first (background) — instance creation overlaps the code tasks.
-- Tasks 1→2→3 sequential (2 and 3 consume 1's family string; 3 is independent of 2 but shares the classifier). Task 4 can run parallel to 2–3 after Task 1 lands. Task 5 after 3+4 (needs the resource_details contract + engine.ts).
+- Model routing per the user's standing instruction: Tasks 1-3 (backend) → Opus 4.8 subagents; Tasks 4-5 (frontend) → Sonnet 5 subagents; Task 6-7 (CLI/deploy/verify) → orchestrator (Fable) directly, since they touch live AWS + browser.
+- Task 6 first (background): instance creation overlaps the code tasks.
+- Tasks 1→2→3 sequential (2 and 3 consume 1's family string; 3 is independent of 2 but shares the classifier). Task 4 can run parallel to 2-3 after Task 1 lands. Task 5 after 3+4 (needs the resource_details contract + engine.ts).
 - Every subagent's "done" claim is verified by the orchestrator: run their tests, `git status`/diff inspection (feedback_verify_subagent_writes).

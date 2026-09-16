@@ -1,7 +1,7 @@
-# Multi-Team Tenancy — Program Design
+# Multi-Team Tenancy: Program Design
 
 **Date:** 2026-06-24
-**Status:** approved-direction (user delegated: "보편적으로 적용 가능한 방향으로 진행" — universal, additive, default-open). Decomposed into a 4-spec program; this doc is the program architecture + the T-1 sub-spec in implementable detail. T-2..T-4 are scoped here and get their own design+plan when reached.
+**Status:** approved-direction (user delegated: "보편적으로 적용 가능한 방향으로 진행", universal, additive, default-open). Decomposed into a 4-spec program; this doc is the program architecture + the T-1 sub-spec in implementable detail. T-2..T-4 are scoped here and get their own design+plan when reached.
 
 ## Context
 
@@ -13,7 +13,7 @@ access distinction is **role** (admin vs viewer, via Cognito groups
 
 Operators running many clusters across teams want **team-scoped visibility**: a
 DBA on team A should not see team B's clusters. This must be **additive and
-backward-compatible** — an existing single-team deployment that never creates a
+backward-compatible**: an existing single-team deployment that never creates a
 team keeps working exactly as today.
 
 ### Grounded current contract (verified, file:line)
@@ -23,25 +23,25 @@ team keeps working exactly as today.
   is the stable per-user key; `cognito:groups` carries the role. The membership
   key for teams is **`cognito:username`** (`api/admin_users/handler.py:54-56`
   `_caller_username`).
-- **Role:** `_is_admin(event)` (duplicated in ~11 handlers, NO shared module —
-  api/ Lambdas are independent packages, see memory) — admin if `dbops-admin` in
+- **Role:** `_is_admin(event)` (duplicated in ~11 handlers, NO shared module:
+  api/ Lambdas are independent packages, see memory), admin if `dbops-admin` in
   groups OR **no groups at all** (single-admin-deploy fallback); viewer if
   `dbops-viewer`; **fail-closed** on missing/invalid bearer. Roles assigned via
   Cognito `admin_add_user_to_group` (`api/admin_users/handler.py`).
-- **Cluster registry:** `foundation_stack.py:89` `clusters_table` — DynamoDB,
+- **Cluster registry:** `foundation_stack.py:89` `clusters_table`, DynamoDB,
   PK=`cluster_id` (STRING), no sort key, **no team/owner attribute** (greenfield).
   Listed via `table.scan()` (`api/clusters/handler.py:31`), env `CLUSTERS_TABLE`.
 - **Cluster-read surfaces (the leak-prevention inventory):** api/clusters
   (list), api/dashboard (~14 per-cluster routes), api/reports, api/approvals,
   api/cost (`?per_cluster`), api/saved_queries, search/logs, api/simulation,
   api/explain, api/alerts, api/scheduled_tasks, api/tasks, api/memory,
-  api/context_files — each takes a `cluster_id` or lists clusters.
+  api/context_files: each takes a `cluster_id` or lists clusters.
 - **Agent/MCP gap:** `agent/server.py` has **no caller-identity extraction**;
   the chat agent + the 5 MCP servers are fully cluster-agnostic (cluster_id
   arrives as a tool param with no ownership check). This is the hardest surface
   → isolated into T-4.
 
-## Architecture — the visibility overlay
+## Architecture: the visibility overlay
 
 A single conceptual primitive, applied everywhere a cluster is exposed:
 
@@ -50,25 +50,25 @@ A single conceptual primitive, applied everywhere a cluster is exposed:
 - Returns `None` ⇒ "all clusters" (the caller is an **admin**, or tenancy is
   effectively off). Callers treat `None` as no-filter.
 - Returns a `set` ⇒ the exact cluster*ids the caller may see: the union of
-  (a) **unassigned clusters** (no `team_id`) — \_default-open*, and (b) clusters
+  (a) **unassigned clusters** (no `team_id`), \_default-open*, and (b) clusters
   whose `team_id` is a team the caller is a **member** of.
 - A **viewer with no team memberships** sees only unassigned clusters (today's
   behavior is preserved while no teams exist).
 
 **Invariants (the security contract):**
 
-1. **Admins always see all clusters** (management role) — overlay returns `None`.
+1. **Admins always see all clusters** (management role): overlay returns `None`.
 2. **Unassigned cluster ⇒ visible to everyone** (additive: zero teams = today).
 3. **Assigned cluster ⇒ visible only to its team's members + admins.**
 4. **Default-open, never default-deny:** a cluster is hidden ONLY when it has an
    explicit `team_id` the caller isn't in. Missing data (no team*id, lookup
    error) fails **open to the current behavior** for reads (never hides a
-   cluster a user sees today) — EXCEPT the overlay itself must be correct, so a
+   cluster a user sees today), EXCEPT the overlay itself must be correct, so a
    membership-lookup failure for an \_assigned* cluster fails **closed** (hide),
    to avoid leaking an assigned cluster on a transient error. (Reads only;
    writes already gated by role.)
 
-### Storage (DynamoDB — matches the existing pattern)
+### Storage (DynamoDB, matches the existing pattern)
 
 - **`teams`** table: PK=`team_id` (STRING). Attrs: `name`, `created_at`,
   `created_by`. (One row per team.)
@@ -77,20 +77,20 @@ A single conceptual primitive, applied everywhere a cluster is exposed:
   (PK=`username`) gives "my teams" in O(1) for the per-request overlay.
 - **cluster→team:** an additive **`team_id`** attribute on the existing
   `clusters_table` item (nullable; absent ⇒ unassigned ⇒ default-open). One team
-  per cluster (YAGNI — many-to-many deferred; extensible later via a mapping
+  per cluster (YAGNI: many-to-many deferred; extensible later via a mapping
   table without breaking the overlay's set contract).
 
-### The overlay helper — duplication vs layer
+### The overlay helper: duplication vs layer
 
 `_is_admin` is copied per-handler today. The overlay
 (`visible_cluster_ids` + `cluster_visible(event, cluster_id)`) is more logic
 (two DynamoDB reads) and will be needed by ~14 handlers. **Decision:** ship it as
 a tiny self-contained module **vendored (copied) into each handler package that
-needs it**, exactly like `_is_admin` / `engine_family.py` (4-copy pattern) — api/
+needs it**, exactly like `_is_admin` / `engine_family.py` (4-copy pattern): api/
 Lambdas can't share imports, and a Lambda layer for api/ doesn't exist today.
 A byte-identical-copy test (mirror the engine_family parity test) keeps the
 copies in sync. (If the copy count becomes painful, a follow-up introduces an
-api/ shared layer — out of scope here.)
+api/ shared layer: out of scope here.)
 
 ## Decomposition (4 sub-specs, built in order)
 
@@ -106,7 +106,7 @@ api/ shared layer — out of scope here.)
   tasks, memory, context_files). The leak-prevention sweep. Per-handler list +
   the expected filter/403 behavior, with a test per handler.
 - **T-3 Frontend:** admin **Teams** management UI in `/settings` (create team,
-  manage members, assign clusters) — admin-gated, nav hidden for viewers
+  manage members, assign clusters): admin-gated, nav hidden for viewers
   (mirror admin_users). The cluster dropdown / shared selection store already
   consumes the now-filtered `/api/clusters`, so non-admins simply receive fewer
   clusters; verify the ⌘K palette + shared store handle an empty/!visible
@@ -123,7 +123,7 @@ merged/deployed before the next.
 
 ---
 
-## T-1 — Foundation + Primary Enforcement (implementable detail)
+## T-1: Foundation + Primary Enforcement (implementable detail)
 
 ### Components
 
@@ -135,7 +135,7 @@ merged/deployed before the next.
    - Grant the relevant Lambdas access: the new `admin_teams` Lambda
      (read/write teams + members + clusters_table team_id), and **read** on
      teams/team_members/clusters for the enforcement handlers (clusters,
-     dashboard) — env vars `TEAMS_TABLE`, `TEAM_MEMBERS_TABLE`,
+     dashboard): env vars `TEAMS_TABLE`, `TEAM_MEMBERS_TABLE`,
      `TEAM_MEMBERS_BY_USER_INDEX`.
    - API routes: `GET/POST /api/admin/teams`, `GET/DELETE
 /api/admin/teams/{team_id}`, `POST/DELETE
@@ -143,13 +143,13 @@ merged/deployed before the next.
 /api/admin/teams/{team_id}/clusters/{cluster_id}` (assign) + `DELETE`
      (unassign). Regenerate `openapi.json` (route-table parity).
 
-2. **`api/_tenancy/tenancy.py` (the vendored overlay module — source of truth),
+2. **`api/_tenancy/tenancy.py` (the vendored overlay module, source of truth),
    copied byte-identical into `api/clusters/` and `api/dashboard/` (and, in T-2,
    the rest):**
 
-   - `my_team_ids(username) -> set[str]` — query `team_members` GSI by username.
-   - `assigned_team_id(cluster_item) -> Optional[str]` — read `team_id` attr.
-   - `visible_cluster_ids(event, all_cluster_items) -> Optional[set[str]]` —
+   - `my_team_ids(username) -> set[str]`: query `team_members` GSI by username.
+   - `assigned_team_id(cluster_item) -> Optional[str]`: read `team_id` attr.
+   - `visible_cluster_ids(event, all_cluster_items) -> Optional[set[str]]`:
      `None` if `_is_admin(event)`; else compute the allowed set per the
      invariants. (Takes the already-scanned items for the list path; a
      `cluster_visible(event, cluster_id, cluster_item)` variant for single-cluster
@@ -171,7 +171,7 @@ merged/deployed before the next.
    - Teams CRUD; member add/remove; cluster assign/unassign (writes
      `clusters_table` item `team_id`, or removes it). DynamoDB **scan/query must
      paginate** (memory gotcha). Deleting a team unassigns its clusters
-     (clear `team_id`) — no dangling assignment.
+     (clear `team_id`): no dangling assignment.
 
 ### Data flow
 
@@ -184,7 +184,7 @@ caller's visible set and filters/403s. Unassigned clusters stay visible to all.
 
 - Overlay infra error (DynamoDB): unassigned clusters stay visible (fail-open to
   today); an assigned cluster with a failed membership check is hidden
-  (fail-closed) — never leak an assigned cluster on error.
+  (fail-closed): never leak an assigned cluster on error.
 - Admin teams API: validate team_id/username/cluster_id exist; 404 on missing;
   paginate all scans; idempotent assign/unassign.
 - `_is_admin` stays fail-closed (no bearer → not admin → overlay returns a
@@ -201,7 +201,7 @@ caller's visible set and filters/403s. Unassigned clusters stay visible to all.
 - **dashboard**: viewer hitting a non-visible cluster → 403; visible → 200;
   admin → always 200.
 - **admin_teams**: CRUD + member + assign/unassign happy paths; viewer → 403 on
-  every route (raw-token live-smoke style — the priv-esc gotcha); pagination;
+  every route (raw-token live-smoke style, the priv-esc gotcha); pagination;
   delete-team clears cluster team_id.
 - **vendored-copy parity** (mirror engine_family test): the `tenancy.py` copies
   are byte-identical.
@@ -213,10 +213,10 @@ caller's visible set and filters/403s. Unassigned clusters stay visible to all.
 - Admin-gated management (fail-closed `_is_admin`, viewer 403 on all
   `/api/admin/teams*`).
 - Reads scoped by membership; writes already role-gated. The overlay never
-  _grants_ access beyond today — it only _removes_ assigned clusters from
+  _grants_ access beyond today: it only _removes_ assigned clusters from
   non-members.
 - T-1 covers the two primary read paths; **T-2 closes the rest (the full
-  inventory) — until T-2 ships, the other read endpoints remain platform-wide,
+  inventory): until T-2 ships, the other read endpoints remain platform-wide,
   so T-1 is NOT a complete isolation boundary on its own.** This is stated so the
   partial coverage isn't mistaken for full tenancy. T-4 covers the agent.
 

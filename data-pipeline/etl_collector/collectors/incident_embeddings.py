@@ -1,4 +1,4 @@
-"""incident_embeddings — backfill pgvector embeddings for incident similarity.
+"""incident_embeddings: backfill pgvector embeddings for incident similarity.
 
 Embeds event_log messages + runbooks with amazon.titan-embed-text-v2 (1024-dim)
 into the `embedding vector(1024)` columns (schema_v21), so find_similar_incidents
@@ -6,11 +6,11 @@ can do semantic cosine search instead of keyword ILIKE matching.
 
 Cache-global (not per-cluster): runs once per ETL invocation, bounded to a small
 batch so a large backlog drains gradually without ballooning Bedrock cost/latency.
-Best-effort — any failure is logged and never breaks the ETL run. New rows written
+Best-effort: any failure is logged and never breaks the ETL run. New rows written
 between runs simply get embedded on a later pass; the tool keyword-falls-back for
 rows not yet embedded.
 
-ponytail: poll-and-embed in the 5-min ETL rather than embed-on-write — event_log is
+ponytail: poll-and-embed in the 5-min ETL rather than embed-on-write. event_log is
 written from many places (event_processor, finding collectors), so one centralized
 backfill is far less code than hooking every writer.
 """

@@ -16,7 +16,7 @@ def evaluate_case(query, case) -> str:
 
 def _evaluate_metric(query, case) -> str:
     recent = query(
-        # ponytail: EVAL_LOOKBACK_MIN is a module constant (not user input) — f-string is injection-safe
+        # ponytail: EVAL_LOOKBACK_MIN is a module constant (not user input), f-string is injection-safe
         "SELECT AVG(value) AS v FROM metric_snapshots "
         "WHERE cluster_id = :cid AND metric_type = :m "
         f"AND ts > NOW() - INTERVAL '{EVAL_LOOKBACK_MIN} minutes' "
@@ -44,19 +44,19 @@ def _evaluate_metric(query, case) -> str:
 def _evaluate_finding(query, case) -> str:
     parts = case["symptom_class"].split(":", 1)
     if len(parts) < 2:
-        # F2: malformed/legacy symptom_class (no colon) — can't extract check_type
+        # F2: malformed/legacy symptom_class (no colon), can't extract check_type
         return "inconclusive"
     recurred = query(
         "SELECT COUNT(*) AS recurred FROM cluster_health_findings "
         "WHERE cluster_id = :cid AND check_type = :ct AND subject = :subj "
-        # opened_at is bound as text via RDS Data API — cast or `timestamptz > text` fails.
+        # opened_at is bound as text via RDS Data API: cast or `timestamptz > text` fails.
         "AND snapshot_time > :since::timestamptz",
         {"cid": case["cluster_id"], "ct": parts[1],
          "subj": case["symptom_subject"], "since": case["opened_at"]},
     )
     if int(_first(recurred, "recurred", 0) or 0) > 0:
         return "persisted"
-    # False-resolved guard: only trust "cleared" if the collector actually ran —
+    # False-resolved guard: only trust "cleared" if the collector actually ran,
     # i.e. the cluster produced ANY finding row since the case opened.
     produced = query(
         "SELECT COUNT(*) AS produced FROM cluster_health_findings "
@@ -68,7 +68,7 @@ def _evaluate_finding(query, case) -> str:
 
 def apply_verdict(query, case, verdict) -> None:
     if verdict == "inconclusive":
-        # No signal — don't move the aggregate; just close the case.
+        # No signal: don't move the aggregate; just close the case.
         query(
             "UPDATE remediation_cases SET status = :st, evaluated_at = NOW() WHERE case_id = :id",
             {"st": verdict, "id": case["case_id"]},
@@ -76,7 +76,7 @@ def apply_verdict(query, case, verdict) -> None:
         return
     succ_inc = 1 if verdict == "resolved" else 0
     # F1: agg upserts FIRST, case UPDATE last.
-    # ponytail: best-effort, not transactional — a failure between the two agg writes
+    # ponytail: best-effort, not transactional. A failure between the two agg writes
     # leaves the case status='open' so the next run retries (may double-count by 1);
     # full atomicity via an RDS Data API transaction is the upgrade path.
     for cid in (case["cluster_id"], "*"):

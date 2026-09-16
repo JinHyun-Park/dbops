@@ -10,39 +10,39 @@
 
 ## Global Constraints
 
-- CDK-only infrastructure — never modify AWS resources directly (AGENTS.md).
+- CDK-only infrastructure: never modify AWS resources directly (AGENTS.md).
 - Non-breaking: existing task rows (no `trace`/`duration_ms`) must render and aggregate fine; the deterministic RCA engine (`diagnose_root_cause`) is unchanged; existing task_worker tests stay valid (the `_finish` write count for a done task stays 2: claim + finish).
 - Adding the `/api/tasks/stats` route REQUIRES regenerating `frontend/public/openapi.json` via `python3 tools/openapi_gen.py` (the `test_openapi_spec` test gates this).
-- DynamoDB rows reject Python `float` — any numeric written must pass through the worker's existing `_ddb_safe` (ints are fine; avoid floats).
+- DynamoDB rows reject Python `float`: any numeric written must pass through the worker's existing `_ddb_safe` (ints are fine; avoid floats).
 - Korean translation scope: DB jargon stays English (Replica Lag, IOPS…); human-facing labels/empty-states/`detail` strings are Korean. Trace step labels are Korean ("진단", "서술 생성", "헬스 다이제스트").
 - Numbers ≥1000 in the frontend use the existing `fmtDecimal`/`fmtExact` helpers; durations in ms/seconds may use plain formatting.
-- Commits: conventional subject; NO `Co-Authored-By: Claude` trailer; do NOT reference internal roadmaps/wikis. Frontend commits hit a prettier pre-commit hook — if it reformats, `git add -A` and re-commit (do not chain commit+push).
-- No secrets or query bodies in the trace — tool names, counts, durations, short Korean `detail` only.
+- Commits: conventional subject; NO `Co-Authored-By: Claude` trailer; do NOT reference internal roadmaps/wikis. Frontend commits hit a prettier pre-commit hook: if it reformats, `git add -A` and re-commit (do not chain commit+push).
+- No secrets or query bodies in the trace: tool names, counts, durations, short Korean `detail` only.
 
 ---
 
 ## File Structure
 
-**Increment 1 — Backend trace (agent stack)**
+**Increment 1: Backend trace (agent stack)**
 
-- Modify: `mcp-servers/mcp_servers/workers/task_worker.py` — record `trace` + `duration_ms`; extend `_finish`.
+- Modify: `mcp-servers/mcp_servers/workers/task_worker.py` (record `trace` + `duration_ms`; extend `_finish`).
 - Test: `tests/unit/mcp_servers/workers/test_task_worker.py` (extend).
 
-**Increment 2 — API stats (agent stack)**
+**Increment 2: API stats (agent stack)**
 
-- Modify: `api/tasks/handler.py` — `GET /api/tasks/stats` branch + `_stats()`.
-- Modify: `cdk/stacks/agent_stack.py` — register `GET /api/tasks/stats`.
-- Modify: `frontend/public/openapi.json` — regenerated.
+- Modify: `api/tasks/handler.py` (`GET /api/tasks/stats` branch + `_stats()`).
+- Modify: `cdk/stacks/agent_stack.py` (register `GET /api/tasks/stats`).
+- Modify: `frontend/public/openapi.json` (regenerated).
 - Test: `tests/unit/api/test_tasks_stats.py` (new).
 
-**Increment 3 — Frontend (tasks page)**
+**Increment 3: Frontend (tasks page)**
 
-- Modify: `frontend/src/lib/api-client.ts` — `AgentTask.trace`/`duration_ms`, `TaskStats`, `fetchTaskStats()`.
-- Modify: `frontend/src/app/tasks/page.tsx` — trace/signals/duration in `TaskRow`; stats strip.
+- Modify: `frontend/src/lib/api-client.ts` (`AgentTask.trace`/`duration_ms`, `TaskStats`, `fetchTaskStats()`).
+- Modify: `frontend/src/app/tasks/page.tsx` (trace/signals/duration in `TaskRow`; stats strip).
 
 ---
 
-## Increment 1 — Backend trace
+## Increment 1: Backend trace
 
 ### Task 1: task_worker records trace + duration
 
@@ -90,7 +90,7 @@ def test_failed_task_still_records_trace_and_duration():
     assert ":dur" in finish  # duration recorded even on failure
 ```
 
-- [ ] **Step 2: Run, verify they fail** — `python3 -m pytest tests/unit/mcp_servers/workers/test_task_worker.py -q` (KeyError `:trace`/`:dur`).
+- [ ] **Step 2: Run, verify they fail**: `python3 -m pytest tests/unit/mcp_servers/workers/test_task_worker.py -q` (KeyError `:trace`/`:dur`).
 
 - [ ] **Step 3: Implement**
 
@@ -137,9 +137,9 @@ def _run_rca(cluster_id: str):
                           "detail": "한국어 narrative+권장조치"})
         else:
             steps.append({"step": "서술 생성", "tool": "bedrock", "ms": 0,
-                          "detail": "모델 미설정/실패 — 스킵"})
+                          "detail": "모델 미설정/실패: 스킵"})
     summary = (cands[0].get("summary") or cands[0].get("category") or "신호 감지") if cands \
-        else "자동 수집 신호에서 뚜렷한 원인 미발견 — 수동 점검 권장"
+        else "자동 수집 신호에서 뚜렷한 원인 미발견: 수동 점검 권장"
     return res, summary, steps
 ```
 
@@ -167,15 +167,15 @@ Mirror for `_run_report` (one step `{"step":"헬스 다이제스트","tool":"hea
                     error=str(e), duration_ms=int((time.time() - t0) * 1000))
 ```
 
-(On failure `steps` may be undefined — do NOT pass `trace` there; just `duration_ms`. If you want partial trace on failure, initialize `steps=[]` before the try and append inside `_run_*`; simplest correct version: only duration on the failure path. The failure test only asserts `:dur`.)
+(On failure `steps` may be undefined: do NOT pass `trace` there; just `duration_ms`. If you want partial trace on failure, initialize `steps=[]` before the try and append inside `_run_*`; simplest correct version: only duration on the failure path. The failure test only asserts `:dur`.)
 
-- [ ] **Step 4: Run tests** — `python3 -m pytest tests/unit/mcp_servers/workers -q` → all pass (existing + 2 new). Confirm `test_auto_rca_happy_path` still asserts 2 writes (trace folds into the single finish write).
+- [ ] **Step 4: Run tests**: `python3 -m pytest tests/unit/mcp_servers/workers -q` → all pass (existing + 2 new). Confirm `test_auto_rca_happy_path` still asserts 2 writes (trace folds into the single finish write).
 
-- [ ] **Step 5: Commit** — `git add mcp-servers/mcp_servers/workers/task_worker.py tests/unit/mcp_servers/workers/test_task_worker.py` ; `git commit -m "feat(tasks): record per-task execution trace + duration"`
+- [ ] **Step 5: Commit**: `git add mcp-servers/mcp_servers/workers/task_worker.py tests/unit/mcp_servers/workers/test_task_worker.py` ; `git commit -m "feat(tasks): record per-task execution trace + duration"`
 
 ---
 
-## Increment 2 — API stats
+## Increment 2: API stats
 
 ### Task 2: GET /api/tasks/stats
 
@@ -189,7 +189,7 @@ Mirror for `_run_report` (one step `{"step":"헬스 다이제스트","tool":"hea
 
 - Produces: `GET /api/tasks/stats` → `{total, by_status, by_kind, success_rate, avg_duration_ms, recent_failures}` (read by `fetchTaskStats` in Increment 3).
 
-- [ ] **Step 1: Write failing test** — `tests/unit/api/test_tasks_stats.py`:
+- [ ] **Step 1: Write failing test**: `tests/unit/api/test_tasks_stats.py`:
 
 ```python
 import json
@@ -230,7 +230,7 @@ def test_stats_empty_is_zero_safe(monkeypatch):
     assert body["total"] == 0 and body["success_rate"] == 0 and body["avg_duration_ms"] == 0
 ```
 
-- [ ] **Step 2: Run, verify fail** — `python3 -m pytest tests/unit/api/test_tasks_stats.py -q` (no `/stats` branch / no `_recent_for_stats`).
+- [ ] **Step 2: Run, verify fail**: `python3 -m pytest tests/unit/api/test_tasks_stats.py -q` (no `/stats` branch / no `_recent_for_stats`).
 
 - [ ] **Step 3: Implement** in `api/tasks/handler.py`:
 
@@ -286,7 +286,7 @@ In `lambda_handler`, near the top of the GET handling (before the `task_id`/list
 
 (Place it BEFORE the `if method == "GET" and task_id:` branch. `/stats` has no `{id}` path param so it won't collide, but the explicit suffix check keeps it unambiguous.)
 
-- [ ] **Step 4: Register route** in `cdk/stacks/agent_stack.py` — find where `/api/tasks` routes are registered (`GET /api/tasks`, `GET /api/tasks/{id}`, `POST /api/tasks`) and add, reusing the SAME integration var those use:
+- [ ] **Step 4: Register route** in `cdk/stacks/agent_stack.py`: find where `/api/tasks` routes are registered (`GET /api/tasks`, `GET /api/tasks/{id}`, `POST /api/tasks`) and add, reusing the SAME integration var those use:
 
 ```python
 self.api.add_routes(
@@ -296,7 +296,7 @@ self.api.add_routes(
 )
 ```
 
-Register `/api/tasks/stats` BEFORE `/api/tasks/{id}` if the framework is order-sensitive (a literal segment vs a path param) — HTTP API matches literals over greedy params, but register stats adjacent to the others for clarity. Copy the exact integration variable name from the neighbouring task route registration; do not invent one.
+Register `/api/tasks/stats` BEFORE `/api/tasks/{id}` if the framework is order-sensitive (a literal segment vs a path param): HTTP API matches literals over greedy params, but register stats adjacent to the others for clarity. Copy the exact integration variable name from the neighbouring task route registration; do not invent one.
 
 - [ ] **Step 5: Validate synth + regenerate openapi**
 
@@ -304,15 +304,15 @@ Register `/api/tasks/stats` BEFORE `/api/tasks/{id}` if the framework is order-s
   - `python3 tools/openapi_gen.py` ; confirm `/api/tasks/stats` is in `frontend/public/openapi.json`.
   - `python3 -m pytest tests/unit/test_openapi_spec.py -q` → pass.
 
-- [ ] **Step 6: Run tests** — `python3 -m pytest tests/unit/api -q` (new stats tests + no regression).
+- [ ] **Step 6: Run tests**: `python3 -m pytest tests/unit/api -q` (new stats tests + no regression).
 
-- [ ] **Step 7: Commit** — add `api/tasks/handler.py cdk/stacks/agent_stack.py frontend/public/openapi.json tests/unit/api/test_tasks_stats.py` ; `git commit -m "feat(tasks): /api/tasks/stats aggregate endpoint"`
+- [ ] **Step 7: Commit**: add `api/tasks/handler.py cdk/stacks/agent_stack.py frontend/public/openapi.json tests/unit/api/test_tasks_stats.py` ; `git commit -m "feat(tasks): /api/tasks/stats aggregate endpoint"`
 
 ---
 
-## Increment 3 — Frontend
+## Increment 3: Frontend
 
-### Task 3: api-client — trace/duration types + fetchTaskStats
+### Task 3: api-client (trace/duration types + fetchTaskStats)
 
 **Files:**
 
@@ -348,10 +348,10 @@ export async function fetchTaskStats(): Promise<TaskStats> {
 }
 ```
 
-- [ ] **Step 2: Typecheck** — `cd frontend && npx --no-install tsc --noEmit` → no errors.
-- [ ] **Step 3: Commit** — `git add frontend/src/lib/api-client.ts` ; `git commit -m "feat(tasks): api-client — task stats + trace types"`
+- [ ] **Step 2: Typecheck**: `cd frontend && npx --no-install tsc --noEmit` → no errors.
+- [ ] **Step 3: Commit**: `git add frontend/src/lib/api-client.ts` ; `git commit -m "feat(tasks): api-client, task stats + trace types"`
 
-### Task 4: tasks page — trace/signals/duration + stats strip
+### Task 4: tasks page (trace/signals/duration + stats strip)
 
 **Files:**
 
@@ -361,16 +361,16 @@ export async function fetchTaskStats(): Promise<TaskStats> {
 
 - Consumes: `fetchTaskStats`, `AgentTask.trace`/`duration_ms`, `result.signals_examined`/`skipped`.
 
-- [ ] **Step 1: Stats strip** — in `TasksPage`, add `const [stats, setStats] = useState<TaskStats | null>(null);` and load it in the existing load effect (call `fetchTaskStats().then(setStats).catch(() => {})`, refreshed on the same 5s interval as `load`). Render a compact strip above the task list: 총 작업(`stats.total`), 성공률(`Math.round(stats.success_rate*100)%`), 평균 소요(`stats.avg_duration_ms` ms→ `${(ms/1000).toFixed(1)}s`), 종류별 카운트. Numbers ≥1000 via `fmtDecimal`. Hide/skeleton when `stats` null.
+- [ ] **Step 1: Stats strip**: in `TasksPage`, add `const [stats, setStats] = useState<TaskStats | null>(null);` and load it in the existing load effect (call `fetchTaskStats().then(setStats).catch(() => {})`, refreshed on the same 5s interval as `load`). Render a compact strip above the task list: 총 작업(`stats.total`), 성공률(`Math.round(stats.success_rate*100)%`), 평균 소요(`stats.avg_duration_ms` ms→ `${(ms/1000).toFixed(1)}s`), 종류별 카운트. Numbers ≥1000 via `fmtDecimal`. Hide/skeleton when `stats` null.
 
-- [ ] **Step 2: Trace + signals in `TaskRow` detail** — inside the `open && (done||failed)` block, after the existing narrative/candidates/lines, add:
+- [ ] **Step 2: Trace + signals in `TaskRow` detail**: inside the `open && (done||failed)` block, after the existing narrative/candidates/lines, add:
 
-  - **실행 추적**: if `task.trace?.length`, an ordered list of `step` — `tool`, `detail`, `{ms}ms` (monospace, muted). Show total: `task.duration_ms` as `${(duration_ms/1000).toFixed(1)}s` when present.
+  - **실행 추적**: if `task.trace?.length`, an ordered list of `step`: `tool`, `detail`, `{ms}ms` (monospace, muted). Show total: `task.duration_ms` as `${(duration_ms/1000).toFixed(1)}s` when present.
   - **검사한 신호** (RCA only): if `task.result?.signals_examined`, a small key→count table (source → count); list `skipped` sources muted if present.
     Reuse the existing detail container styling (border-zinc / text-xs / font-mono). Korean labels.
 
-- [ ] **Step 3: Build** — `cd frontend && npm run build` → exit 0, `/tasks` in route list.
-- [ ] **Step 4: Commit (mind prettier)** — `git add frontend/src/app/tasks/page.tsx` ; `git commit -m "feat(tasks): execution trace + examined signals + stats strip on /tasks"` (if prettier reformats: `git add -A` then re-run).
+- [ ] **Step 3: Build**: `cd frontend && npm run build` → exit 0, `/tasks` in route list.
+- [ ] **Step 4: Commit (mind prettier)**: `git add frontend/src/app/tasks/page.tsx` ; `git commit -m "feat(tasks): execution trace + examined signals + stats strip on /tasks"` (if prettier reformats: `git add -A` then re-run).
 
 ---
 
@@ -378,7 +378,7 @@ export async function fetchTaskStats(): Promise<TaskStats> {
 
 - Spec §2.1 (trace/duration_ms additive) → Task 1. ✓
 - Spec §3.1 (/api/tasks/stats) → Task 2. ✓
-- Spec §3.3 (frontend trace/signals/duration + stats strip) → Tasks 3–4. ✓
+- Spec §3.3 (frontend trace/signals/duration + stats strip) → Tasks 3-4. ✓
 - Spec §6 (tests) → Task 1 unit, Task 2 unit + parity, Task 4 build + e2e checkpoint. ✓
 - Type consistency: `TraceStep {step,tool,ms,detail}` (Task 3) == worker step dict (Task 1) == `trace` attribute. `TaskStats` (Task 3) == `_stats()` return (Task 2). ✓
 - Non-breaking: `_finish` write count unchanged (trace folds into the one finish write); old rows lack `trace` → frontend guards with `?.`; stats tolerates missing `duration_ms`. ✓

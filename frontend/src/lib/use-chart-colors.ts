@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 // Shared theme-aware palette for Recharts (and any other inline-styled
 // SVG). Recharts injects series colors as inline `stroke` / `fill` props
-// on the rendered SVG, which CSS class overrides cannot reach — so we
+// on the rendered SVG, which CSS class overrides cannot reach, so we
 // have to swap the hex values themselves when the user flips to light.
 //
 // The light values are the darker WCAG-AA-safe counterparts of each dark
@@ -16,7 +16,7 @@ export interface ChartColors {
   sky: string;
   emerald: string;
   rose: string;
-  // Chart chrome — grid + axis tick + tooltip background/border. These
+  // Chart chrome: grid + axis tick + tooltip background/border. These
   // were hardcoded inline in several Recharts components ("#27272a",
   // "#71717a") which rendered as near-black on the light-theme cream
   // canvas, producing axis ticks the user couldn't read.

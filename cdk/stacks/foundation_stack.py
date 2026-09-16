@@ -103,7 +103,7 @@ class FoundationStack(cdk.Stack):
 
         # RBAC groups. Default model: every user is admin UNLESS explicitly
         # placed in dbops-viewer. This is the pragmatic stance for an
-        # ops-team product — opt-in restriction rather than opt-in privilege.
+        # ops-team product: opt-in restriction rather than opt-in privilege.
         cognito.CfnUserPoolGroup(
             self,
             "AdminGroup",
@@ -186,12 +186,12 @@ class FoundationStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
-        # ===== Agent Tasks — event-driven & scheduled agent work =====
+        # ===== Agent Tasks: event-driven & scheduled agent work =====
         # Records of autonomous agent work: auto-RCA on alert, scheduled
         # reports, manual runs. Lives in foundation so data (alert_evaluator,
         # task_scheduler) can ENQUEUE and agent (task_worker, tasks API) can
         # PROCESS without a cross-stack cycle. The table's STREAM is the single
-        # processing trigger — any pending row, from any source, drives the
+        # processing trigger: any pending row, from any source, drives the
         # worker. See docs/superpowers/specs/2026-06-18-agent-tasks-design.md.
         self.agent_tasks_table = dynamodb.Table(
             self, "AgentTasksTable",
@@ -220,12 +220,12 @@ class FoundationStack(cdk.Stack):
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
-        # ===== App Config — in-app, DB-backed feature toggles =====
+        # ===== App Config: in-app, DB-backed feature toggles =====
         # Small key-value store an ADMIN edits from the web UI (GET/PUT
         # /api/config) to flip opt-in features (ticketing provider, report
         # delivery) WITHOUT a redeploy. Lives in foundation so the agent stack
         # (config API + task worker) and the data stack (report generator) can
-        # all reach it without a cross-stack cycle — same rationale as the
+        # all reach it without a cross-stack cycle, same rationale as the
         # agent_tasks_table above. Read precedence at consumers is
         # DB value -> env var -> default, so a fresh deploy with no rows here
         # behaves exactly as the baked-in env defaults.
@@ -238,7 +238,7 @@ class FoundationStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
-        # ===== Approval Policies — designated-approver routing =====
+        # ===== Approval Policies: designated-approver routing =====
         # Admin-defined policies that restrict WHO may approve specific
         # cluster/action requests (advanced approval). Lives in foundation so
         # the policy CRUD API and the approvals API (both agent stack) reach it
@@ -254,7 +254,7 @@ class FoundationStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
-        # ===== Context Files — operator-uploaded reference context =====
+        # ===== Context Files: operator-uploaded reference context =====
         # Small text files (org charts, tagging conventions, account↔owner
         # mappings) an ADMIN uploads; their text is injected into the agent's
         # system prompt as fenced operator-provided reference DATA (not
@@ -282,7 +282,7 @@ class FoundationStack(cdk.Stack):
             resources=["arn:aws:iam::*:role/dbops-spoke-role"],
         ))
 
-        # ===== In-app alert push (scoped) — WebSocket channel =====
+        # ===== In-app alert push (scoped): WebSocket channel =====
         # Real-time push of fired alerts / external incidents to connected
         # operators so they don't wait for the next dashboard poll. Lives in
         # foundation so data (alert_evaluator), agent (incident_webhook) and

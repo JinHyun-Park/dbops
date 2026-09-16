@@ -107,7 +107,7 @@ def test_resource_details_not_found():
 
 
 def test_resource_details_malformed_json():
-    """Malformed JSON in resource_details must NOT raise — returns None."""
+    """Malformed JSON in resource_details must NOT raise: returns None."""
     rows = [{
         "engine": "dynamodb",
         "engine_family": "dynamodb",
@@ -142,7 +142,7 @@ def test_resource_details_docdb_engine_version_not_overwritten():
     rows = [{
         "engine": "docdb",
         "engine_version": "5.0.0",  # column says 5.0.0
-        "resource_details": rd_payload,  # JSONB says 4.0.0 — keep this
+        "resource_details": rd_payload,  # JSONB says 4.0.0, keep this
     }]
     result = handler._resource_details(_make_query(rows), "my-docdb")
 

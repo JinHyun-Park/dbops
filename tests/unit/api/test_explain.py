@@ -1,4 +1,4 @@
-"""Tests for the explain API handler — _build_explain_sql plan-only mode."""
+"""Tests for the explain API handler: _build_explain_sql plan-only mode."""
 
 import importlib.util
 from pathlib import Path

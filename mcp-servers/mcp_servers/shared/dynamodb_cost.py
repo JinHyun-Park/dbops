@@ -1,4 +1,4 @@
-"""dynamodb_cost — PURE compute for the DynamoDB capacity-mode cost simulator.
+"""dynamodb_cost: PURE compute for the DynamoDB capacity-mode cost simulator.
 
 Separated from data access and pricing so BOTH the MCP tool
 (mcp_servers/simulation) and the REST handler (api/simulation) call the same
@@ -9,22 +9,22 @@ engine_family.py / dynamodb_pricing.py).
 INPUTS the caller must gather from the cache (this module does NO I/O):
   - billing_mode: "PROVISIONED" | "PAY_PER_REQUEST" | None
   - region: str (for the response + pricing already done by the caller)
-  - window_hours: float — span of the consumed series actually observed (cap 168)
+  - window_hours: float, span of the consumed series actually observed (cap 168)
   - consumed: dict with per-side aggregates over the window:
       {"datapoints": int,            # number of 1-min consumed_rcu rows
        "sum_rcu": float,             # Σ consumed_rcu (1-min Sum units) over window
        "sum_wcu": float,             # Σ consumed_wcu
        "p99_rcu_per_min": float,     # p99 of the per-minute consumed_rcu Sum
        "p99_wcu_per_min": float}     # p99 of the per-minute consumed_wcu Sum
-  - provisioned: dict or None — latest real provisioned per-second units for a
+  - provisioned: dict or None, latest real provisioned per-second units for a
       PROVISIONED table: {"rcu": float, "wcu": float}; None for on-demand.
-  - prices: dict — already resolved (each may be None):
+  - prices: dict, already resolved (each may be None):
       {"rcu_hr", "wcu_hr", "m_rru", "m_wru"}
 
 THE MATH (every assumption is echoed into response["assumptions"]):
   - Scale the observed window to a 730h month: month_factor = 730/window_hours.
   - On-Demand monthly = (Σrcu/1e6) × $/Mrru × month_factor + (Σwcu/1e6) × $/Mwru × month_factor.
-    1 consumed RCU ≈ 1 RRU (≤4KB strongly-consistent read) — stated approximation.
+    1 consumed RCU ≈ 1 RRU (≤4KB strongly-consistent read), stated approximation.
   - Provisioned sizing: capacity is per-second, so convert the per-MINUTE p99 Sum
     to per-second (÷60), divide by headroom (target utilization), ceil:
       rcu_sized = ceil( (p99_rcu_per_min/60) / headroom ).
@@ -32,7 +32,7 @@ THE MATH (every assumption is echoed into response["assumptions"]):
   - Provisioned monthly = rcu_sized × $/RCU-hr × 730 + wcu_sized × $/WCU-hr × 730.
   - current_monthly = the table's ACTUAL mode cost (PROVISIONED: from the real
     provisioned units; on-demand: = the On-Demand figure).
-  - recommendation: cheaper mode + $ delta + % — ONLY when both prices resolved.
+  - recommendation: cheaper mode + $ delta + %, ONLY when both prices resolved.
 
 HONESTY CONTRACT (project rule): a price that won't resolve → that side's figure
 is None and status becomes "partial"/source "fallback"; a number is NEVER
@@ -64,7 +64,7 @@ def compute_capacity_cost(
     is_global_table: bool = False,
 ) -> dict:
     """Pure compute. See module docstring for the input contract. Never raises
-    on a missing price/provisioned value — it degrades to partial/fallback.
+    on a missing price/provisioned value: it degrades to partial/fallback.
 
     Scope: STANDARD, non-global tables only. STANDARD_INFREQUENT_ACCESS and
     global tables use different capacity pricing SKUs; this simulator returns
@@ -145,8 +145,8 @@ def compute_capacity_cost(
         on_demand_monthly = rru_month * p_m_rru + wru_month * p_m_wru
 
     # --- Provisioned sizing (p99 per-second / headroom, ceil) ---
-    # DynamoDB provisioned mode has a HARD minimum of 1 RCU + 1 WCU per table —
-    # you cannot provision 0 — so floor each side at 1. Without this a near-idle
+    # DynamoDB provisioned mode has a HARD minimum of 1 RCU + 1 WCU per table
+    # (you cannot provision 0), so floor each side at 1. Without this a near-idle
     # table would be priced at an impossible $0 and the recommendation would read
     # "switch to Provisioned, save 100%" against an on-demand cost of ~$0.
     rcu_sized = max(1, math.ceil((p99_rcu_min / 60.0) / headroom))
@@ -198,7 +198,7 @@ def compute_capacity_cost(
         f"(RCU {rcu_sized} / WCU {wcu_sized}), 프로비저닝 최소치인 면당 1 RCU/1 WCU로 하한 적용. "
         "1분 CloudWatch 집계 기준의 평활화된 추정으로, 1분 미만 burst는 관측되지 않으므로 실제 필요 "
         "Provisioned 용량(과 비용)은 이 추정보다 높을 수 있습니다.",
-        "RCU/WCU(capacity)만 비교합니다 — storage, backup, stream, global-table replication, free-tier는 제외합니다.",
+        "RCU/WCU(capacity)만 비교합니다. storage, backup, stream, global-table replication, free-tier는 제외합니다.",
     ]
     if not pricing_resolved:
         assumptions.append(

@@ -238,7 +238,7 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
                   ? "bg-zinc-800 text-zinc-100"
                   : "text-zinc-500 hover:text-zinc-200"
               }`}
-              title="평면 목록 — (대기, 보유) 쌍을 한 행씩"
+              title="평면 목록: (대기, 보유) 쌍을 한 행씩"
             >
               list
             </button>
@@ -249,7 +249,7 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
                   ? "bg-zinc-800 text-zinc-100"
                   : "text-zinc-500 hover:text-zinc-200"
               }`}
-              title="의존성 체인 — 루트 보유자 → 대기자, 재귀 구조"
+              title="의존성 체인: 루트 보유자 → 대기자, 재귀 구조"
             >
               chain
             </button>
@@ -267,7 +267,7 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
         <div className="max-h-[28rem] overflow-y-auto py-2">
           {graph.roots.length === 0 ? (
             <div className="p-6 text-zinc-500 text-sm">
-              순환 데드락 감지 — 명확한 루트 보유자가 없습니다. 원본 엣지는 목록
+              순환 데드락 감지. 명확한 루트 보유자가 없습니다. 원본 엣지는 목록
               뷰에서 확인하세요.
             </div>
           ) : (

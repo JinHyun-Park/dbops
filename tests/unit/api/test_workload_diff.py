@@ -13,7 +13,7 @@ _spec.loader.exec_module(handler)
 
 
 def _make_query(before_rows, after_rows):
-    """The handler issues the same side_sql twice — first call is the
+    """The handler issues the same side_sql twice: first call is the
     `before` side, second is `after`. Return a query() stub that hands
     back each list in order."""
     calls = {"n": 0}
@@ -93,7 +93,7 @@ def test_small_change_under_threshold_ignored():
 
 
 def test_zero_baseline_skipped():
-    """A before-mean of 0 can't produce a ratio — skip rather than
+    """A before-mean of 0 can't produce a ratio: skip rather than
     divide by zero."""
     q = _make_query(
         before_rows=[_row("a", 0)],

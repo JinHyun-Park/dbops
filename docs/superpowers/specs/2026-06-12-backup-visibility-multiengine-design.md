@@ -1,8 +1,8 @@
-# Backup / snapshot visibility for new engines — Design Spec
+# Backup / snapshot visibility for new engines: Design Spec
 
 - **Date**: 2026-06-12
 - **Status**: Proposed
-- **Depends on**: multi-engine program #1–#5 (deployed). Follow-up from the Codex
+- **Depends on**: multi-engine program #1-#5 (deployed). Follow-up from the Codex
   dashboard-parity audit (BACKLOG.md P3.6).
 
 ## Goal
@@ -10,7 +10,7 @@
 Give DocumentDB and DynamoDB dashboards the **backup/snapshot visibility** that
 Aurora already has (the `BackupPanel`), **read-only**. This is the highest-value
 demoable parity gap: unlike metric-based panels (cost/healthscore/per-GSI) which
-are flat on idle demo clusters, backup data is **always present** — the
+are flat on idle demo clusters, backup data is **always present**: the
 `dbops-docdb-test` demo cluster has a real automated snapshot + restore window
 right now. Snapshot **create/restore** (writes) stay Aurora-only and are deferred
 to the NoSQL-write/remediation backlog item.
@@ -27,10 +27,10 @@ to the NoSQL-write/remediation backlog item.
 
 The backup **read** lives in `api/dashboard/handler.py:_backups()` (endpoint
 `/api/dashboard/{id}/backups`), currently gated `if fam != "relational": return`
-(line ~2189). The **write** path is a separate POST Lambda (`api/backups/handler.py`)
-— unchanged, stays Aurora-only.
+(line ~2189). The **write** path is a separate POST Lambda (`api/backups/handler.py`),
+unchanged, stays Aurora-only.
 
-### Backend — `_backups()` (`api/dashboard/handler.py`)
+### Backend: `_backups()` (`api/dashboard/handler.py`)
 
 - Replace the relational-only early return with per-family branches (mirror the
   existing `_registry_engine` + region/spoke-role resolution used by `_topology`/
@@ -38,7 +38,7 @@ The backup **read** lives in `api/dashboard/handler.py:_backups()` (endpoint
   - **documentdb**: `docdb` client → `describe_db_cluster_snapshots(DBClusterIdentifier=cid)`
     (manual + automated) + `describe_db_clusters(DBClusterIdentifier=cid)` for
     `BackupRetentionPeriod` / `PreferredBackupWindow` / `EarliestRestorableTime` /
-    `LatestRestorableTime`. DocDB snapshot shape mirrors RDS — reuse the same
+    `LatestRestorableTime`. DocDB snapshot shape mirrors RDS: reuse the same
     snapshot serialization as the relational branch.
   - **dynamodb**: `dynamodb` client → `describe_continuous_backups(TableName=name)`
     (PITR status + `EarliestRestorableDateTime`/`LatestRestorableDateTime`) +
@@ -67,9 +67,9 @@ Add to the **dashboard Lambda's execution role** (and the cross-account spoke ro
 policy if/where defined): `docdb:DescribeDBClusterSnapshots`, `docdb:DescribeDBClusters`,
 `dynamodb:DescribeContinuousBackups`, `dynamodb:ListBackups`. Locate the dashboard
 Lambda in `cdk/stacks/agent_stack.py` (per project structure, dashboard routes are
-in the agent stack). CDK-only — never touch IAM directly.
+in the agent stack). CDK-only: never touch IAM directly.
 
-### Frontend — `backup-panel.tsx` + `dashboard/page.tsx`
+### Frontend: `backup-panel.tsx` + `dashboard/page.tsx`
 
 - Render `<BackupPanel>` for documentdb + dynamodb (currently relational-gated at
   `page.tsx:613`). Pass `engine`.
@@ -78,7 +78,7 @@ in the agent stack). CDK-only — never touch IAM directly.
   Aurora-only write handler). Show only the read views.
 - Engine-appropriate rendering (branch on `engine_family` in the response):
   - **documentdb**: snapshot table (id/type/status/created) + retention-days +
-    backup window + restore window (earliest→latest) — same layout as Aurora.
+    backup window + restore window (earliest→latest), same layout as Aurora.
   - **dynamodb**: PITR status badge (enabled/disabled) + restorable window
     (earliest→latest, when enabled) + on-demand backup list (name/status/created/size).
     A clear empty state when PITR is off and no on-demand backups exist.
@@ -105,5 +105,5 @@ dashboard API). The write handler is unchanged. No approval surface added.
 ## Out of scope (deferred to NoSQL-write/remediation backlog)
 
 - Snapshot **create** / **restore** for DocumentDB; **enable-PITR** / on-demand
-  **backup create** / **restore** for DynamoDB — all writes, need Cedar/approval.
+  **backup create** / **restore** for DynamoDB: all writes, need Cedar/approval.
 - Cross-account backup reads for spoke accounts beyond the existing session pattern.

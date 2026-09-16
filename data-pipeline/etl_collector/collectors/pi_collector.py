@@ -19,7 +19,7 @@ PI_METRIC_QUERIES = [
 # RDS instance engines (non-Aurora): only db.load.avg is universally supported
 # across MySQL AND SQL Server PI (SQL Server exposes NO os.* counters and no
 # PG-shaped db.* counters; one unknown metric fails the whole batched
-# GetResourceMetrics call — live-verified 2026-07-22). Engine-specific PI
+# GetResourceMetrics call, live-verified 2026-07-22). Engine-specific PI
 # depth lands in R-2 (MySQL) / R-4 (SQL Server).
 PI_METRICS_RDS_INSTANCE = [
     {"Metric": "db.load.avg", "GroupBy": {"Group": "db.wait_event"}, "metric_type": "aas"},

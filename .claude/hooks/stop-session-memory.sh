@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stop hook: fires when the assistant is about to stop responding. We use
 # this to surface a reminder when the most recent commit count vs. the
-# previous "checkpoint" suggests a real cycle just finished — at that
+# previous "checkpoint" suggests a real cycle just finished. At that
 # point the assistant should persist a note to project_memory so the
 # next session can resume cleanly.
 #

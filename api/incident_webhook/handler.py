@@ -1,10 +1,10 @@
-"""Inbound incident webhook — Datadog / PagerDuty → event_log (P4).
+"""Inbound incident webhook: Datadog / PagerDuty → event_log (P4).
 
 External monitors POST an incident here; we authenticate with a shared secret,
 extract (cluster, title, severity, link), and write an `external_incident` row
 to event_log. That row surfaces in the dashboard Events panel, where each
 external incident gets a one-click "Chat에서 진단" deep-link (the deep-link
-inbox model — a DBA starts the agent RCA; we never auto-run the agent).
+inbox model: a DBA starts the agent RCA; we never auto-run the agent).
 
   POST /api/incident-webhook   (public route; authenticated by shared secret)
 

@@ -2,8 +2,8 @@
 --
 -- The existing /api/alert-subscriptions flow uses SNS native subscribers
 -- (email, sms, https). Slack incoming webhooks and PagerDuty events-v2 need
--- a structured JSON body — neither plays well with SNS's default HTTPS
--- envelope — so we keep them out of SNS and let the alert_evaluator POST
+-- a structured JSON body (neither plays well with SNS's default HTTPS
+-- envelope), so we keep them out of SNS and let the alert_evaluator POST
 -- directly using a payload format that each platform expects.
 
 CREATE TABLE IF NOT EXISTS alert_subscribers_managed (

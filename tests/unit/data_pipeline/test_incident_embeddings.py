@@ -1,4 +1,4 @@
-"""incident_embeddings backfill collector — embed un-embedded rows into pgvector."""
+"""incident_embeddings backfill collector: embed un-embedded rows into pgvector."""
 import importlib.util
 import json
 from pathlib import Path

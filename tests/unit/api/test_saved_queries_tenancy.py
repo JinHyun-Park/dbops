@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
-# Module loading — push api/saved_queries on sys.path so `import tenancy` resolves
+# Module loading: push api/saved_queries on sys.path so `import tenancy` resolves
 # ---------------------------------------------------------------------------
 
 _SQ_DIR = Path(__file__).resolve().parents[3] / "api" / "saved_queries"

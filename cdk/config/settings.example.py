@@ -28,14 +28,14 @@ class Settings:
     MODEL_SCAN_REGIONS = ""
     GATEWAY_SEMANTIC_SEARCH = True
 
-    # AWS MCP Server (AWS-managed, SigV4) — official AWS/Aurora docs. The agent
+    # AWS MCP Server (AWS-managed, SigV4): official AWS/Aurora docs. The agent
     # runtime signs requests with its IAM role and exposes ONLY the read-only
     # doc tools. Regional endpoint (us-east-1 / eu-central-1 only). Empty = doc
     # tools not registered. Replaces the deprecated public knowledge-mcp server.
     AWS_MCP_URL = "https://aws-mcp.us-east-1.api.aws/mcp"
     AWS_MCP_REGION = "us-east-1"
 
-    # PI metrics are collected inside the stats/ETL cycle below — there is no
+    # PI metrics are collected inside the stats/ETL cycle below: there is no
     # separate Performance Insights cadence (the old PI_COLLECTION_INTERVAL_MIN
     # was never read by any code).
     STATS_COLLECTION_INTERVAL_MIN = 5
@@ -47,12 +47,12 @@ class Settings:
     # tier down to cheaper storage (IA → Glacier Instant Retrieval → Deep
     # Archive). Set to a positive number of days to EXPIRE (delete) archived
     # objects after that age for your org's retention policy; 0 = keep forever
-    # (default — never auto-delete the audit archive).
+    # (default: never auto-delete the audit archive).
     ARCHIVE_RETENTION_DAYS = 0
 
     # Frontend deep-link base URL used by alert dispatchers (Slack button,
     # PagerDuty links). Fill in your CloudFront domain after the first
-    # frontend stack deploy — leave empty to disable the deep-link.
+    # frontend stack deploy. Leave empty to disable the deep-link.
     FRONTEND_URL = ""
 
     # PagerDuty dedup key bucket width. Same rule firing within the window
@@ -60,7 +60,7 @@ class Settings:
     # opens so on-call sees the alert is still active.
     ALERT_DEDUP_WINDOW_MINUTES = 30
 
-    # Slack signing secret — used by /api/slack/interactive to verify v0
+    # Slack signing secret: used by /api/slack/interactive to verify v0
     # HMAC signatures on Block Kit ack button posts. Leave empty to
     # disable Slack two-way ack; the endpoint will refuse all calls with
     # a friendly "not configured" message until you set this. Get it
@@ -74,7 +74,7 @@ class Settings:
     INCIDENT_WEBHOOK_SECRET = ""
 
     # Ticketing provider for completed agent tasks (auto-RCA, scheduled
-    # reports). "none" (default) keeps ticketing disabled — the task worker's
+    # reports). "none" (default) keeps ticketing disabled: the task worker's
     # ticketing seam is inert and nothing is created. The provider integration
     # itself is not shipped yet; this is the config switch that will turn it on
     # once a provider is wired (e.g. "jira"). Setting an unwired provider name

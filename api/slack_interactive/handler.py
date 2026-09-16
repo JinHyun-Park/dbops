@@ -1,4 +1,4 @@
-"""Slack interactive endpoint — handles button clicks from outbound DBOps
+"""Slack interactive endpoint: handles button clicks from outbound DBOps
 alert messages.
 
 The outbound side (data-pipeline/alert_evaluator) adds an "Ack" Block Kit
@@ -61,7 +61,7 @@ def _verify_slack_signature(headers: dict, raw_body: str) -> tuple[bool, str]:
     except ValueError:
         return False, "invalid timestamp"
     if abs(time.time() - ts_int) > _MAX_REQUEST_AGE_S:
-        return False, "stale request — replay window exceeded"
+        return False, "stale request: replay window exceeded"
     basestring = f"v0:{ts}:{raw_body}"
     expected = (
         "v0="
@@ -157,7 +157,7 @@ def _acked_blocks(
     user_display: str,
     when_iso: str,
 ) -> dict:
-    """Return the Slack response body that REPLACES the original message —
+    """Return the Slack response body that REPLACES the original message:
     same header, but the "Ack" button disappears and an acknowledgement
     section is appended so subsequent viewers see who took the page."""
     return {
@@ -211,7 +211,7 @@ def lambda_handler(event, context):
             200,
             {
                 "response_type": "ephemeral",
-                "text": f":warning: DBOps could not verify this request — {why}",
+                "text": f":warning: DBOps could not verify this request: {why}",
             },
         )
 
@@ -246,7 +246,7 @@ def lambda_handler(event, context):
             },
         )
 
-    # Value format: "<rule_id>:<cluster_id>" — keep it compact (Slack caps
+    # Value format: "<rule_id>:<cluster_id>", keep it compact (Slack caps
     # button values at 2000 chars).
     try:
         rule_id_str, cluster_id = value.split(":", 1)
@@ -275,7 +275,7 @@ def lambda_handler(event, context):
                 },
             )
         rule = rows[0]
-        # Audit trail — keep the original alert + the ack in one queryable
+        # Audit trail: keep the original alert + the ack in one queryable
         # place. event_log is the same sink the alert_evaluator writes to.
         _execute(
             "INSERT INTO event_log (cluster_id, event_time, event_type, source, "
@@ -302,7 +302,7 @@ def lambda_handler(event, context):
             200,
             {
                 "response_type": "ephemeral",
-                "text": ":warning: DBOps could not persist the ack — see CloudWatch logs",
+                "text": ":warning: DBOps could not persist the ack: see CloudWatch logs",
             },
         )
 

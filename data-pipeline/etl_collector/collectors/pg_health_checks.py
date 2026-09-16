@@ -3,7 +3,7 @@
 A "finding" is one actionable observation a DBA should look at. Each finding
 has a check_type, severity, subject, value vs threshold, and a one-line
 recommendation. The dashboard renders them ranked by severity at the top of
-the page. New finding types are added here — no new dashboard panel needed.
+the page. New finding types are added here, no new dashboard panel needed.
 
 Check types covered in this collector:
   - txid_age            : age(relfrozenxid) approaching wraparound
@@ -23,7 +23,7 @@ TXID_CRITICAL = 180_000_000
 DEAD_RATIO_WARN_PCT = 20.0
 DEAD_RATIO_CRITICAL_PCT = 40.0
 VACUUM_OVERDUE_DAYS = 7
-UNUSED_INDEX_MIN_BYTES = 10 * 1024 * 1024  # 10 MB — below this, churn cost is negligible
+UNUSED_INDEX_MIN_BYTES = 10 * 1024 * 1024  # 10 MB: below this, churn cost is negligible
 BLOAT_WARN_PCT = 20.0
 BLOAT_CRITICAL_PCT = 40.0
 
@@ -31,7 +31,7 @@ BLOAT_CRITICAL_PCT = 40.0
 # Extensions DBOps recommends. Each entry: (name, criticality, why).
 RECOMMENDED_EXTENSIONS = [
     ("pg_stat_statements", "warning", "쿼리별 지연 집계가 슬로우 쿼리 패널과 AI 분석의 원천입니다."),
-    ("auto_explain",        "info",    "느린 쿼리의 EXPLAIN을 자동 수집 — 사후 분석에 필수입니다."),
+    ("auto_explain",        "info",    "느린 쿼리의 EXPLAIN을 자동 수집합니다. 사후 분석에 필수입니다."),
     ("pgstattuple",         "warning", "크기 기반 추정 대신 정밀한 bloat 측정을 제공합니다."),
     ("pg_repack",           "info",    "배타 락 없이 동작하는 VACUUM FULL 대안입니다."),
     ("pg_hint_plan",        "info",    "통계가 부정확할 때 플래너 선택을 강제할 수 있습니다."),
@@ -46,8 +46,8 @@ RECOMMENDED_SETTINGS = [
     ("log_connections",                  "on",     "info",    "pgBadger 세션 리포트에 필요합니다."),
     ("log_disconnections",               "on",     "info",    "pgBadger 세션 리포트에 필요합니다."),
     ("log_lock_waits",                   "on",     "warning", "락 경합 진단이 이 설정에 의존합니다."),
-    ("log_autovacuum_min_duration",      "0",      "warning", "0이면 모든 autovacuum을 로깅 — pgBadger가 bloat와 상관분석합니다."),
-    ("log_min_duration_statement",       "1000",   "warning", "1초 미만 쿼리는 로깅 제외가 적절 — 1000ms가 합리적인 하한입니다."),
+    ("log_autovacuum_min_duration",      "0",      "warning", "0이면 모든 autovacuum을 로깅합니다. pgBadger가 bloat와 상관분석합니다."),
+    ("log_min_duration_statement",       "1000",   "warning", "1초 미만 쿼리는 로깅 제외가 적절합니다. 1000ms가 합리적인 하한입니다."),
     ("log_temp_files",                   "0",      "info",    "디스크로 스필하는 쿼리를 잡아냅니다."),
 ]
 
@@ -117,7 +117,7 @@ def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target
             if age_val >= TXID_CRITICAL:
                 add("txid_age", "critical", f"db:{db_name}", f"age={age_val:,}",
                     f"< {TXID_CRITICAL:,}",
-                    "핫 테이블에 즉시 VACUUM FREEZE를 실행하세요 — wraparound 위험이 임박했습니다.",
+                    "핫 테이블에 즉시 VACUUM FREEZE를 실행하세요. wraparound 위험이 임박했습니다.",
                     {"db_name": db_name, "age": age_val})
             elif age_val >= TXID_WARN:
                 add("txid_age", "warning", f"db:{db_name}", f"age={age_val:,}",
@@ -148,7 +148,7 @@ def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target
             if age_val >= TXID_CRITICAL:
                 add("txid_age", "critical", f"{schema}.{relname}", f"age={age_val:,}",
                     f"< {TXID_CRITICAL:,}",
-                    f"VACUUM FREEZE {schema}.{relname} now — wraparound risk.",
+                    f"VACUUM FREEZE {schema}.{relname} now: wraparound risk.",
                     {"schema": schema, "table": relname, "age": age_val})
             elif age_val >= TXID_WARN:
                 add("txid_age", "warning", f"{schema}.{relname}", f"age={age_val:,}",
@@ -191,7 +191,7 @@ def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target
                 add("vacuum_overdue", "warning", f"{schema}.{relname}",
                     f"{days:.0f}d since last vacuum",
                     f"< {VACUUM_OVERDUE_DAYS}d",
-                    f"{n_live:,}행 테이블에 {days:.0f}일간 autovacuum이 없었습니다 — autovacuum 임계값을 확인하세요.",
+                    f"{n_live:,}행 테이블에 {days:.0f}일간 autovacuum이 없었습니다. autovacuum 임계값을 확인하세요.",
                     {"schema": schema, "table": relname, "days_since_vacuum": days})
     except Exception as e:
         print(f"[health] dead tuple check failed: {e}")
@@ -275,7 +275,7 @@ def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target
                 "ORDER BY pg_total_relation_size(schemaname || '.' || relname) DESC LIMIT 10"
             )
         else:
-            # Rough estimate — overhead = (total - heap) / total. Indexes inflate
+            # Rough estimate: overhead = (total - heap) / total. Indexes inflate
             # this so the number is approximate; we flag anything >= warn threshold.
             sql = (
                 "SELECT schemaname, relname, "
@@ -311,7 +311,7 @@ def collect_pg_health_checks(rds_data, cache_execute, target_cluster_arn, target
     # All rows share one snapshot_time so the dashboard's MAX(snapshot_time)
     # query returns the full set together. Without this, NOW() evaluates
     # per-row at millisecond resolution and only the last finding surfaces.
-    # handler가 넘긴 공유 ts를 우선 사용 — 같은 사이클의 cost/param_fitness
+    # handler가 넘긴 공유 ts를 우선 사용: 같은 사이클의 cost/param_fitness
     # finding과 snapshot_time을 맞춰야 대시보드 MAX(snapshot_time)에 함께 잡힌다.
     from datetime import datetime, timezone
     snapshot_ts = snapshot_ts or datetime.now(timezone.utc).isoformat()

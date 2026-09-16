@@ -1,7 +1,7 @@
-# Admin-Gate Model Hardening (codebase-wide `_is_admin`) — Design
+# Admin-Gate Model Hardening (codebase-wide `_is_admin`): Design
 
 **Date:** 2026-06-24
-**Status:** approved (autonomous — design decisions made by the implementer per the user's "proceed without asking" directive)
+**Status:** approved (autonomous: design decisions made by the implementer per the user's "proceed without asking" directive)
 
 ## Problem
 
@@ -9,7 +9,7 @@ The admin gate `_is_admin` is copied into 11 API handlers with inconsistent,
 partly fail-OPEN logic (surfaced repeatedly across this session's reviews):
 
 - **FAIL-OPEN (real priv-esc):** `api/saved_queries` + `api/runbooks` have
-  `if not groups: return True` with NO `Bearer ` guard — a scheme-less or
+  `if not groups: return True` with NO `Bearer ` guard: a scheme-less or
   bearer-less request decodes to empty groups and is treated as **admin**. These
   are WRITE-gated endpoints (saved-query/runbook PUT/DELETE), so a viewer (or
   anyone) can write by omitting the `Bearer ` prefix.
@@ -32,10 +32,10 @@ unknown-group hole), and PRESERVES the intentional single-admin dev fallback
 
 Non-goals: removing the no-group→admin single-admin fallback (foundation does
 not auto-create/assign a `dbops-admin` group, so requiring explicit membership
-would lock out fresh single-admin deploys — out of scope / would need a
+would lock out fresh single-admin deploys: out of scope / would need a
 deploy-time group assignment); changing what each endpoint gates (only the
 gate's correctness changes); a shared Lambda layer for the helper (handlers
-stay independent — the canonical form is copied identically, as today).
+stay independent: the canonical form is copied identically, as today).
 
 ## Architecture
 
@@ -52,7 +52,7 @@ matching `isAdmin()` (TypeScript) in the frontend. Behavior table (the contract)
 
 ### Components
 
-1. **Canonical Python `_is_admin`** — applied to `api/{saved_queries, runbooks,
+1. **Canonical Python `_is_admin`**: applied to `api/{saved_queries, runbooks,
 clusters, alerts, approvals, explain, backups, config, approval_policies,
 context_files, onboarding}/handler.py`:
 
@@ -81,13 +81,13 @@ context_files, onboarding}/handler.py`:
    context_files, onboarding differ only in the final group-check line) get just
    the group-check line changed to the `if groups and ...` form.
 
-2. **Frontend `isAdmin()`** — `frontend/src/lib/auth.ts`:
+2. **Frontend `isAdmin()`**: `frontend/src/lib/auth.ts`:
 
    ```typescript
    export function isAdmin(): boolean {
      const groups = getUserGroups();
      // Deny if a group set is present but lacks dbops-admin; empty groups
-     // (no claim) stays admin (single-admin default). Cosmetic gate only —
+     // (no claim) stays admin (single-admin default). Cosmetic gate only:
      // the server enforces.
      if (groups.length > 0 && !groups.includes("dbops-admin")) return false;
      return true;
@@ -99,7 +99,7 @@ context_files, onboarding}/handler.py`:
 
 ## Data Flow
 
-Unchanged — `_is_admin` is called at the top of each handler's write/mutating
+Unchanged: `_is_admin` is called at the top of each handler's write/mutating
 paths (and GET on the admin-only ones). Only the boolean result changes for the
 previously-mis-classified cases (bearer-less, garbage, unknown-group).
 
@@ -110,14 +110,14 @@ exception-safe). Denied → the handler's existing `403`.
 
 ## Testing
 
-- **Per representative handler** (at minimum the two FAIL-OPEN ones —
-  `saved_queries`, `runbooks` — plus one already-hardened one as a regression
-  guard): a parametrized set asserting the contract table — no-bearer → deny,
+- **Per representative handler** (at minimum the two FAIL-OPEN ones,
+  `saved_queries`, `runbooks`, plus one already-hardened one as a regression
+  guard): a parametrized set asserting the contract table: no-bearer → deny,
   `Bearer <garbage>` → deny, viewer → deny, other-group (`dbops-analyst`) →
   deny, no-group → admin, `dbops-admin` → admin. For the FAIL-OPEN handlers,
   explicitly assert a no-bearer WRITE (PUT/DELETE) is now 403 (was the priv-esc).
 - The existing `_is_admin` tests across handlers (which use `Bearer` + admin/
-  viewer tokens) must still pass — admin still admin, viewer still denied.
+  viewer tokens) must still pass: admin still admin, viewer still denied.
 - Full unit suite green; `npm run build` for the frontend.
 
 ## Security

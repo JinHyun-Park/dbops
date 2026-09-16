@@ -9,7 +9,7 @@ import {
 } from "@/lib/api-client";
 import { fmtBytes, fmtExact } from "@/lib/format";
 
-// Tiny chip — same visual language as the rest of the dashboard.
+// Tiny chip: same visual language as the rest of the dashboard.
 const KIND_STYLES: Record<
   RedundantIndexKind,
   { label: string; classes: string; hint: string }
@@ -22,7 +22,7 @@ const KIND_STYLES: Record<
   duplicate: {
     label: "duplicate",
     classes: "bg-rose-500/10 text-rose-300 border-rose-500/40",
-    hint: "다른 인덱스와 컬럼 구성이 완전히 같습니다. 마이그레이션 잔여물일 가능성 — 작은 쪽을 드롭.",
+    hint: "다른 인덱스와 컬럼 구성이 완전히 같습니다. 마이그레이션 잔여물일 가능성. 작은 쪽을 드롭.",
   },
   unused: {
     label: "unused",
@@ -35,7 +35,7 @@ export function RedundantIndexesPanel({ clusterId }: { clusterId: string }) {
   const [data, setData] = useState<RedundantIndexesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  // Don't auto-load on mount — this hits the live cluster via Data API and
+  // Don't auto-load on mount: this hits the live cluster via Data API and
   // can be slow on big schemas. Manual button matches Log Insights.
 
   const load = async () => {
@@ -51,7 +51,7 @@ export function RedundantIndexesPanel({ clusterId }: { clusterId: string }) {
     }
   };
 
-  // Reset when cluster changes — the old cluster's index list isn't useful.
+  // Reset when cluster changes: the old cluster's index list isn't useful.
   useEffect(() => {
     setData(null);
     setErr(null);
@@ -133,7 +133,7 @@ export function RedundantIndexesPanel({ clusterId }: { clusterId: string }) {
         {data && !data.error && candidates.length === 0 && (
           <div className="p-6 text-emerald-400 text-sm flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            검출된 중복/미사용 인덱스 없음 — 인덱스 구성 양호 🎉
+            검출된 중복/미사용 인덱스 없음. 인덱스 구성 양호 🎉
           </div>
         )}
         {candidates.length > 0 && (

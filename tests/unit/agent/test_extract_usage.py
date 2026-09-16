@@ -2,7 +2,7 @@
 
 agent/server.py imports heavy runtime deps (strands, bedrock_agentcore, rpds…)
 that are not installed in the unit-test environment. We extract the
-_extract_usage function via ast — its body has zero external imports — compile
+_extract_usage function via ast (its body has zero external imports), compile
 it into a minimal throwaway module, and test that compiled function directly.
 
 teardown_module cleans agent/__pycache__ because the AgentCore Runtime deploy
@@ -39,12 +39,12 @@ def _load_extract_usage():
     code = compile(mod_ast, str(_SERVER), "exec")
 
     ns: dict = {}
-    exec(code, ns)  # noqa: S102 — test-only, not untrusted input
+    exec(code, ns)  # noqa: S102  (test-only, not untrusted input)
     return ns["_extract_usage"]
 
 
 def teardown_module(_):
-    # AgentCore Runtime deploy rejects a __pycache__ under agent/ — clean it.
+    # AgentCore Runtime deploy rejects a __pycache__ under agent/, so clean it.
     pc = _AGENT / "__pycache__"
     if pc.exists():
         shutil.rmtree(pc, ignore_errors=True)
@@ -74,7 +74,7 @@ def test_extract_usage_absent_returns_none():
 
 
 def test_extract_usage_malformed_no_raise():
-    """Unexpected/malformed event shapes must never raise — return None."""
+    """Unexpected/malformed event shapes must never raise: return None."""
     fn = _load_extract_usage()
     assert fn({"result": "weird"}) is None
     assert fn(None) is None

@@ -40,7 +40,7 @@ def test_read_only_safe_ignores_keywords_inside_literals():
 def test_strip_and_multi_statement_helpers():
     assert "';UPDATE" not in strip_sql_literals("SELECT '--' ; x")
     assert is_multi_statement("SELECT 1; DROP TABLE t") is True
-    # ';' inside a literal is data — but is_multi_statement's contract is to
+    # ';' inside a literal is data, but is_multi_statement's contract is to
     # receive literal-STRIPPED text (all callers strip first), so test it that
     # way. On raw text the any-';' rule would (correctly) see the literal's ';'.
     assert is_multi_statement(strip_sql_literals("SELECT 1 WHERE x = 'a;b'")) is False
@@ -48,7 +48,7 @@ def test_strip_and_multi_statement_helpers():
 
 def test_multi_statement_flags_any_stacked_verb_not_just_allowlisted():
     """R-4 C1 regression: SQL Server's direct path (pytds) runs the WHOLE
-    ';'-batch, so ANY second statement is dangerous — not only ones starting
+    ';'-batch, so ANY second statement is dangerous, not only ones starting
     with a keyword the old allowlist happened to list. A safe SELECT prefix
     followed by a T-SQL verb that was NOT allowlisted (SHUTDOWN/BACKUP/RESTORE/
     DENY/RECONFIGURE/DISABLE TRIGGER/a custom EXEC) was auto-executing without
@@ -69,7 +69,7 @@ def test_multi_statement_flags_any_stacked_verb_not_just_allowlisted():
 
 def test_single_statement_with_trailing_semicolon_is_not_multi():
     """A single statement, with or without a trailing ';' (and whitespace, or
-    repeated empty ';'), is NOT multi — the rule strips trailing separators
+    repeated empty ';'), is NOT multi: the rule strips trailing separators
     before looking for an interior one."""
     for sql in ["SELECT 1", "SELECT 1;", "SELECT 1 ;  ", "SELECT 1;;"]:
         assert is_multi_statement(strip_sql_literals(sql)) is False, sql
@@ -103,13 +103,13 @@ def test_mysql_versioned_executable_comment_preserved():
 
 
 def test_plain_block_comment_still_stripped():
-    """비실행 주석은 종전대로 제거 — 주석 속 키워드로 인한 오탐 방지."""
+    """비실행 주석은 종전대로 제거: 주석 속 키워드로 인한 오탐 방지."""
     stripped = strip_sql_literals("SELECT 1 /* DROP TABLE users */")
     assert "DROP" not in stripped.upper()
 
 
 def test_mysql_side_effecting_patterns():
-    """MySQL equivalents of PG_TERMINATE_BACKEND/PG_SLEEP/advisory locks —
+    """MySQL equivalents of PG_TERMINATE_BACKEND/PG_SLEEP/advisory locks:
     KILL, SLEEP(), GET_LOCK/RELEASE_LOCK, LOAD_FILE, LOCK/UNLOCK TABLES, BENCHMARK
     must classify as side-effecting (not safe) for the R-3 direct-TCP path."""
     for sql in [
@@ -138,7 +138,7 @@ def test_mysql_plain_reads_stay_safe():
 
 def test_tsql_side_effecting_patterns():
     """T-SQL: pytds sends the whole batch and SQL Server runs ALL of it (no
-    multi-statement guard from the driver, unlike pymysql) — these must
+    multi-statement guard from the driver, unlike pymysql), these must
     classify as side-effecting regardless of statement position."""
     for sql in [
         "WAITFOR DELAY '00:00:10'",
@@ -156,7 +156,7 @@ def test_tsql_side_effecting_patterns():
 
 
 def test_tsql_batch_stacked_statement_is_dangerous_and_unsafe():
-    """T-SQL executes `;`-separated statements as one native batch — the
+    """T-SQL executes `;`-separated statements as one native batch: the
     existing multi-statement + DANGEROUS_PATTERNS scan of the whole text must
     still catch this (R-4 recon fact), not just a PG/MySQL-shaped payload."""
     sql = "SELECT 1; DROP TABLE x"

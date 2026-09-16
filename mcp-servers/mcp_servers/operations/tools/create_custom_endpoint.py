@@ -1,4 +1,4 @@
-"""create_custom_endpoint — agent-facing Aurora custom endpoint creation.
+"""create_custom_endpoint: agent-facing Aurora custom endpoint creation.
 
 Custom cluster endpoints let a DBA route a chosen subset of readers behind a
 stable DNS name (e.g. an analytics-only endpoint). Creating one is an RDS
@@ -31,7 +31,7 @@ _VALID_TYPES = ("READER", "ANY")
 
 def build_cli_preview(cluster_id, endpoint_identifier, endpoint_type, static_members, excluded_members):
     """The exact `aws rds create-db-cluster-endpoint ...` this operation runs.
-    ASCII only (AWS-bound) — shown on the approval card so the operator reads
+    ASCII only (AWS-bound), shown on the approval card so the operator reads
     precisely what will execute."""
     parts = [
         "aws rds create-db-cluster-endpoint",
@@ -68,11 +68,11 @@ def create_custom_endpoint_impl(
                 "reason": f"endpoint_type은 {_VALID_TYPES} 중 하나여야 합니다 (커스텀 엔드포인트는 WRITER 불가)"}
     if static_members and excluded_members:
         return {"status": "invalid_members", "cluster_id": cluster_id,
-                "reason": "static_members와 excluded_members는 상호 배타적입니다 — 하나만 지정하세요"}
+                "reason": "static_members와 excluded_members는 상호 배타적입니다. 하나만 지정하세요"}
 
     cli = build_cli_preview(cluster_id, endpoint_identifier, etype, static_members, excluded_members)
 
-    # Validate members are real cluster instances BEFORE asking for approval —
+    # Validate members are real cluster instances BEFORE asking for approval.
     # AWS would reject a bogus member at create time, and the approval round-trip
     # would burn a consumed approval on a doomed call (same reasoning as
     # modify_scaling's pre-approval engine-mode check).

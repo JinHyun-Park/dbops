@@ -1,4 +1,4 @@
-"""ASH sampler — relational filter + Data API row parse."""
+"""ASH sampler: relational filter + Data API row parse."""
 import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock

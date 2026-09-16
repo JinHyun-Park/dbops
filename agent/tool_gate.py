@@ -1,6 +1,6 @@
 """Strands BeforeToolCall hook: hard-block a tool call whose cluster_id is not
 in the caller's visible set. The system-prompt constraint is advisory; THIS is
-the guarantee that survives prompt manipulation — the tool never executes on a
+the guarantee that survives prompt manipulation: the tool never executes on a
 cluster the caller can't see."""
 
 try:
@@ -16,7 +16,7 @@ _DENY = "이 클러스터에 대한 접근 권한이 없습니다."
 # non-admin. For these, a missing/empty cluster_id is DENIED for non-admins
 # (admins skip the gate entirely). Genuinely cluster-agnostic tools (doc lookups,
 # runbooks) are NOT listed and pass through with no cluster_id. Any NEW tool that
-# can enumerate across clusters MUST be added here — the default for an unlisted
+# can enumerate across clusters MUST be added here: the default for an unlisted
 # no-cluster_id tool is "allowed".
 _FLEET_CAPABLE = {"query_activity_audit", "find_similar_incidents"}
 
@@ -39,11 +39,11 @@ class ClusterVisibilityGate(HookProvider):
             args = tool_use.get("input") or {}
             cid = args.get("cluster_id") if isinstance(args, dict) else None
         except Exception:
-            return  # can't parse — let it through (fleet/doc tools have no cluster_id)
+            return  # can't parse, let it through (fleet/doc tools have no cluster_id)
         if not cid:
             # No cluster scope. Cluster-agnostic tools are fine, but a
             # fleet-capable tool would enumerate ALL clusters server-side for a
-            # non-admin — deny it (the model must name a specific, visible
+            # non-admin: deny it (the model must name a specific, visible
             # cluster, which the cid-in-visible check below then enforces).
             if name in _FLEET_CAPABLE:
                 event.cancel_tool = _DENY

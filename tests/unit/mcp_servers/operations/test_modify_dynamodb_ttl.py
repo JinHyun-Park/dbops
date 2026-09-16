@@ -1,4 +1,4 @@
-"""Tests for modify_dynamodb_ttl — 3-state flow, idempotency skip, TOCTOU drift,
+"""Tests for modify_dynamodb_ttl: 3-state flow, idempotency skip, TOCTOU drift,
 and the never-raise error path."""
 
 from unittest.mock import MagicMock, patch

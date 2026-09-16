@@ -50,7 +50,7 @@ def _is_unrestricted(event):
 
     ponytail: does its own registry scan (the LIST path already scanned via
     visible_set_from_registry); tenancy's vendored API exposes no way to reuse
-    that scan, and this only runs for non-admin reports access — cheap enough.
+    that scan, and this only runs for non-admin reports access, cheap enough.
     """
     if tenancy.is_admin(event):
         return True
@@ -140,7 +140,7 @@ def lambda_handler(event, context):
 
     headers = {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}
 
-    # GET /api/reports/{id}/html — presigned URL for the HTML twin
+    # GET /api/reports/{id}/html: presigned URL for the HTML twin
     if report_id and raw_path.endswith("/html"):
         if not str(report_id).isdigit():
             return {"statusCode": 400, "headers": headers,
@@ -194,7 +194,7 @@ def lambda_handler(event, context):
     try:
         if report_id:
             # RDS Data API binds named params as text, and reports.id is
-            # BIGSERIAL — `bigint = text` has no operator in PostgreSQL and
+            # BIGSERIAL: `bigint = text` has no operator in PostgreSQL and
             # 500s. Validate numeric, then cast the param to bigint.
             if not str(report_id).isdigit():
                 return {"statusCode": 400, "headers": headers,

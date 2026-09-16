@@ -128,7 +128,7 @@ def test_create_executes_when_approved(mock_rds_for, mock_guard):
 @patch(f"{_CE}.rds_client_for_cluster")
 def test_create_payload_hash_mismatch_rejected(mock_rds_for):
     """A real approval minted for members [i-1] cannot be consumed to create the
-    same endpoint with members [i-2] — the guard's payload_hash refuses it."""
+    same endpoint with members [i-2]: the guard's payload_hash refuses it."""
     mock_rds_for.return_value = _rds_with_members(["i-1", "i-2"])
     row = {
         "approval_id": "aid-1", "created_at": "1", "approval_status": "approved",

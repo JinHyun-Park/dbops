@@ -121,7 +121,7 @@ def test_post_over_total_budget_413():
         "updated_by": "alice",
     }
     table = _fake_table({"existing-1": existing_item})
-    # New file is 100 bytes — existing(65526) + 100 > 65536
+    # New file is 100 bytes: existing(65526) + 100 > 65536
     new_content = "y" * 100
     with patch.object(handler, "_table", return_value=table):
         r = handler.lambda_handler(_event("POST", body={
@@ -130,7 +130,7 @@ def test_post_over_total_budget_413():
             "content_type": "txt",
         }))
     assert r["statusCode"] == 413
-    # Only the existing item should remain — no new write
+    # Only the existing item should remain: no new write
     assert len(table._store) == 1
 
 

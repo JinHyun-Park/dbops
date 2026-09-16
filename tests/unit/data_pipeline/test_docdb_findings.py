@@ -1,4 +1,4 @@
-"""DocumentDB findings collector — TDD test suite.
+"""DocumentDB findings collector: TDD test suite.
 
 Strategy: patch _execute at the module level so every SQL call is intercepted.
 Branch on SQL keywords to inject fake cache rows (metric_snapshots aggregates),
@@ -40,7 +40,7 @@ _FIXED_TS = "2026-06-12T00:00:00Z"
 
 
 # ---------------------------------------------------------------------------
-# Mock builder — branch on SQL keyword to inject aggregated metric rows
+# Mock builder: branch on SQL keyword to inject aggregated metric rows
 # ---------------------------------------------------------------------------
 
 
@@ -71,7 +71,7 @@ def _mock_execute(
         if sql.strip().upper().startswith("INSERT"):
             return []
 
-        # Single aggregation query — identified by metric_type names in the IN list
+        # Single aggregation query: identified by metric_type names in the IN list
         # The collector issues one SELECT over metric_snapshots with multiple metrics.
         # We detect it by the presence of these metric names in the SQL.
         if "db_connections" in sql_lower and "replica_lag_ms" in sql_lower:
@@ -152,7 +152,7 @@ def _run(
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — connection saturation ≥ 80% → warning
+# Test 1: connection saturation ≥ 80% → warning
 # ---------------------------------------------------------------------------
 
 def test_connection_saturation_warning():
@@ -174,7 +174,7 @@ def test_connection_saturation_warning():
 
 
 # ---------------------------------------------------------------------------
-# Test 2 — connection saturation ≥ 95% → critical
+# Test 2: connection saturation ≥ 95% → critical
 # ---------------------------------------------------------------------------
 
 def test_connection_saturation_critical():
@@ -191,7 +191,7 @@ def test_connection_saturation_critical():
 
 
 # ---------------------------------------------------------------------------
-# Test 3 — connection saturation < 80% → silent
+# Test 3: connection saturation < 80% → silent
 # ---------------------------------------------------------------------------
 
 def test_connection_saturation_below_threshold_silent():
@@ -205,7 +205,7 @@ def test_connection_saturation_below_threshold_silent():
 
 
 # ---------------------------------------------------------------------------
-# Test 4 — limit missing (NULL) → connection saturation rule silently skipped
+# Test 4: limit missing (NULL) → connection saturation rule silently skipped
 # ---------------------------------------------------------------------------
 
 def test_connection_saturation_limit_missing_silent():
@@ -222,7 +222,7 @@ def test_connection_saturation_limit_missing_silent():
 
 
 # ---------------------------------------------------------------------------
-# Test 5 — limit = 0 → connection saturation rule silently skipped (division guard)
+# Test 5: limit = 0 → connection saturation rule silently skipped (division guard)
 # ---------------------------------------------------------------------------
 
 def test_connection_saturation_limit_zero_silent():
@@ -237,7 +237,7 @@ def test_connection_saturation_limit_zero_silent():
 
 
 # ---------------------------------------------------------------------------
-# Test 6 — replica lag ≥ 1000 ms → warning
+# Test 6: replica lag ≥ 1000 ms → warning
 # ---------------------------------------------------------------------------
 
 def test_replica_lag_warning():
@@ -251,7 +251,7 @@ def test_replica_lag_warning():
 
 
 # ---------------------------------------------------------------------------
-# Test 7 — replica lag ≥ 10000 ms → critical
+# Test 7: replica lag ≥ 10000 ms → critical
 # ---------------------------------------------------------------------------
 
 def test_replica_lag_critical():
@@ -265,7 +265,7 @@ def test_replica_lag_critical():
 
 
 # ---------------------------------------------------------------------------
-# Test 8 — replica lag < 1000 ms → silent (single-instance cluster ~0)
+# Test 8: replica lag < 1000 ms → silent (single-instance cluster ~0)
 # ---------------------------------------------------------------------------
 
 def test_replica_lag_below_threshold_silent():
@@ -276,7 +276,7 @@ def test_replica_lag_below_threshold_silent():
 
 
 # ---------------------------------------------------------------------------
-# Test 9 — cursor timeouts > 0 → warning
+# Test 9: cursor timeouts > 0 → warning
 # ---------------------------------------------------------------------------
 
 def test_cursor_timeout_warning():
@@ -290,7 +290,7 @@ def test_cursor_timeout_warning():
 
 
 # ---------------------------------------------------------------------------
-# Test 10 — cursor timeouts = 0 → silent
+# Test 10: cursor timeouts = 0 → silent
 # ---------------------------------------------------------------------------
 
 def test_cursor_timeout_zero_silent():
@@ -301,7 +301,7 @@ def test_cursor_timeout_zero_silent():
 
 
 # ---------------------------------------------------------------------------
-# Test 11 — low buffer cache hit (avg < 95%, enough samples) → warning
+# Test 11: low buffer cache hit (avg < 95%, enough samples) → warning
 # ---------------------------------------------------------------------------
 
 def test_low_cache_hit_warning():
@@ -318,7 +318,7 @@ def test_low_cache_hit_warning():
 
 
 # ---------------------------------------------------------------------------
-# Test 12 — low cache hit but too few samples → silent (brand-new idle cluster)
+# Test 12: low cache hit but too few samples → silent (brand-new idle cluster)
 # ---------------------------------------------------------------------------
 
 def test_low_cache_hit_too_few_samples_silent():
@@ -334,7 +334,7 @@ def test_low_cache_hit_too_few_samples_silent():
 
 
 # ---------------------------------------------------------------------------
-# Test 13 — cache hit ≥ 95% → silent
+# Test 13: cache hit ≥ 95% → silent
 # ---------------------------------------------------------------------------
 
 def test_cache_hit_adequate_silent():
@@ -348,7 +348,7 @@ def test_cache_hit_adequate_silent():
 
 
 # ---------------------------------------------------------------------------
-# Test 14 — all metrics healthy → no findings
+# Test 14: all metrics healthy → no findings
 # ---------------------------------------------------------------------------
 
 def test_all_healthy_no_findings():
@@ -366,7 +366,7 @@ def test_all_healthy_no_findings():
 
 
 # ---------------------------------------------------------------------------
-# Test 15 — multiple rules fire simultaneously
+# Test 15: multiple rules fire simultaneously
 # ---------------------------------------------------------------------------
 
 def test_multiple_rules_fire_simultaneously():
@@ -387,7 +387,7 @@ def test_multiple_rules_fire_simultaneously():
 
 
 # ---------------------------------------------------------------------------
-# Test 16 — snapshot_ts is shared across all INSERTs (shared run_ts check)
+# Test 16: snapshot_ts is shared across all INSERTs (shared run_ts check)
 # ---------------------------------------------------------------------------
 
 def test_snapshot_ts_is_shared():
@@ -419,7 +419,7 @@ def test_snapshot_ts_is_shared():
 
 
 # ---------------------------------------------------------------------------
-# Test 17 — empty result set from aggregation query → silent (missing inputs)
+# Test 17: empty result set from aggregation query → silent (missing inputs)
 # ---------------------------------------------------------------------------
 
 def test_empty_aggregation_result_silent():
@@ -443,7 +443,7 @@ def test_empty_aggregation_result_silent():
 
 
 # ---------------------------------------------------------------------------
-# Test 18 — result dict contains cluster_id and findings_emitted
+# Test 18: result dict contains cluster_id and findings_emitted
 # ---------------------------------------------------------------------------
 
 def test_result_dict_structure():
@@ -455,7 +455,7 @@ def test_result_dict_structure():
 
 
 # ---------------------------------------------------------------------------
-# Rule 5 — docdb_cost_oversized (7-day CPU rightsizing on a SIZED instance)
+# Rule 5: docdb_cost_oversized (7-day CPU rightsizing on a SIZED instance)
 # ---------------------------------------------------------------------------
 
 def test_cost_oversized_sized_low_cpu_emits():

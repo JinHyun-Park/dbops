@@ -1,8 +1,8 @@
-# DocumentDB Diagnosis — Design Spec (program spec #2)
+# DocumentDB Diagnosis: Design Spec (program spec #2)
 
 - **Date**: 2026-06-12
 - **Status**: Proposed
-- **Depends on**: #1 Foundation (deployed). ADR 2026-06-12: **Option A** for v1 — findings from
+- **Depends on**: #1 Foundation (deployed). ADR 2026-06-12: **Option A** for v1, findings from
   the AWS/DocDB CloudWatch metrics we already collect; **no Mongo connectivity in v1**.
 
 ## Goal
@@ -28,19 +28,19 @@ supports any family with a non-empty findings set).
 
 ## Proposed findings (conservative; silent when inputs missing)
 
-| check_type                    | severity         | signal (threshold)                                                                   | recommendation                                                                                    |
-| ----------------------------- | ---------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `docdb_connection_saturation` | warning→critical | peak db_connections / db_connections_limit ≥ 80% (crit ≥ 95%); skip if limit unknown | connection pooling / raise instance class / check leaks                                           |
-| `docdb_replica_lag`           | warning→critical | peak replica_lag_ms ≥ 1000 (crit ≥ 10000), sustained                                 | reduce write load / scale readers / investigate long-running ops                                  |
-| `docdb_cursor_timeout`        | warning          | SUM(cursors_timed_out) over window > 0 (sustained)                                   | app not closing cursors / slow queries holding cursors — review query patterns + cursor lifecycle |
-| `docdb_low_cache_hit`         | warning          | avg buffer_cache_hit < 95% (enough samples)                                          | working set exceeds instance memory — raise instance class (Aurora-style: memory-bound)           |
+| check_type                    | severity         | signal (threshold)                                                                   | recommendation                                                                                   |
+| ----------------------------- | ---------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `docdb_connection_saturation` | warning→critical | peak db_connections / db_connections_limit ≥ 80% (crit ≥ 95%); skip if limit unknown | connection pooling / raise instance class / check leaks                                          |
+| `docdb_replica_lag`           | warning→critical | peak replica_lag_ms ≥ 1000 (crit ≥ 10000), sustained                                 | reduce write load / scale readers / investigate long-running ops                                 |
+| `docdb_cursor_timeout`        | warning          | SUM(cursors_timed_out) over window > 0 (sustained)                                   | app not closing cursors / slow queries holding cursors: review query patterns + cursor lifecycle |
+| `docdb_low_cache_hit`         | warning          | avg buffer_cache_hit < 95% (enough samples)                                          | working set exceeds instance memory: raise instance class (Aurora-style: memory-bound)           |
 
-(CPU/opcounter signals: collected + shown on the overview panel, but no finding in v1 — too
+(CPU/opcounter signals: collected + shown on the overview panel, but no finding in v1, too
 generic without a baseline.)
 
 ## Out of scope (later)
 
-- **Mongo-protocol deep diagnosis** (`serverStatus`, `currentOp`, slow-op/profiler) — needs the
+- **Mongo-protocol deep diagnosis** (`serverStatus`, `currentOp`, slow-op/profiler): needs the
   A-vs-B connectivity decision from the ADR (thin pymongo read collector in a VPC Lambda vs AWS
   DocDB MCP read-only with credential-level least-privilege). Deferred to a follow-up.
 - MCP/agent chat diagnosis for DocumentDB (program spec #4).
@@ -48,6 +48,6 @@ generic without a baseline.)
 ## Testing
 
 - Unit tests per rule (boundaries; silent-when-uncertain), mirroring test_dynamodb_findings.py.
-- Live: `dbops-docdb-test` (idle single-instance) — most rules correctly silent; drive a few
+- Live: `dbops-docdb-test` (idle single-instance), most rules correctly silent; drive a few
   connections / verify replica-lag-silent (single instance). Validate the panel renders + the
   collector runs without error; thresholds tuned against live metrics.

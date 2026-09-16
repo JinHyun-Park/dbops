@@ -18,7 +18,7 @@ const SEVERITY_BADGES: Record<string, string> = {
   info: "bg-sky-500/15 text-sky-300 border border-sky-500/30",
 };
 
-// snake_case / CamelCase → "Title Case" — keeps event_type human-readable
+// snake_case / CamelCase → "Title Case", keeps event_type human-readable
 // without needing a back-end migration of historical rows.
 function prettifyEventType(raw: string | null | undefined): string {
   if (!raw) return "이벤트";
@@ -78,7 +78,7 @@ export function EventsPanel({
             const badge = SEVERITY_BADGES[sev] || SEVERITY_BADGES.info;
             const label = prettifyEventType(e.event_type);
             // External incidents (Datadog/PagerDuty via the inbound webhook)
-            // get a one-click "diagnose in chat" deep-link — the deep-link
+            // get a one-click "diagnose in chat" deep-link: the deep-link
             // inbox: the DBA starts the agent RCA, we don't auto-run it.
             const isExternal = e.event_type === "external_incident";
             const diagnoseHref =
@@ -121,7 +121,7 @@ export function EventsPanel({
                   <div className="text-xs text-zinc-400 leading-snug truncate">
                     {e.message || (
                       <span className="text-zinc-600 italic">
-                        메시지 없음 — 클릭해 원본 이벤트 확인
+                        메시지 없음: 클릭해 원본 이벤트 확인
                       </span>
                     )}
                   </div>

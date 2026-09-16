@@ -1,4 +1,4 @@
-"""POST /api/explain — runs EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) on a SELECT
+"""POST /api/explain: runs EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) on a SELECT
 against the target cluster and returns the parsed plan tree.
 
 Restricted to SELECT statements to avoid `EXPLAIN ANALYZE INSERT/UPDATE/DELETE`
@@ -23,7 +23,7 @@ _CORS = {
 
 
 def _decode_jwt_payload(token: str) -> dict:
-    """Base64-decode a JWT payload — API Gateway has already verified the
+    """Base64-decode a JWT payload. API Gateway has already verified the
     signature before this Lambda is invoked."""
     try:
         import base64
@@ -91,7 +91,7 @@ def _build_explain_sql(sql: str, engine: str, analyze: bool = True) -> str:
     inner = _strip_explain_prefix(sql).rstrip().rstrip(";")
     if engine.startswith("aurora-mysql") or engine == "mysql":
         # MySQL 8.0+: EXPLAIN FORMAT=JSON returns one row with a JSON string.
-        # We deliberately skip ANALYZE — its output isn't JSON-formatted.
+        # We deliberately skip ANALYZE: its output isn't JSON-formatted.
         return f"EXPLAIN FORMAT=JSON {inner}"
     # Default: PostgreSQL.
     if analyze:

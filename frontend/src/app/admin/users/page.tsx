@@ -170,7 +170,7 @@ export default function AdminUsersPage() {
                         </span>
                         {u.implicit && (
                           <span className="ml-2 text-[10px] text-zinc-500">
-                            (암묵 — 명시 역할 미지정)
+                            (암묵: 명시 역할 미지정)
                           </span>
                         )}
                       </td>

@@ -152,13 +152,13 @@ class AgentStack(cdk.Stack):
             resources=["arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0"],
         ))
 
-        # ===== Agent Tasks worker — stream-driven task executor =====
+        # ===== Agent Tasks worker: stream-driven task executor =====
         # Runs the deterministic RCA (and, later, scheduled reports) for tasks
         # enqueued by alert_evaluator / the scheduler / the manual API. Shares
         # the MCP asset so it imports diagnose_root_cause + CacheClient exactly
         # like the incident server. NO VPC: it only touches public AWS endpoints
         # (RDS Data API for the cache, DynamoDB, Secrets Manager, execute-api for
-        # the WS push) — same as alert_evaluator, which reads the cache + pushes
+        # the WS push), same as alert_evaluator, which reads the cache + pushes
         # WS without a VPC. The agent-tasks STREAM is the single trigger, so
         # data-stack enqueuers never invoke this Lambda directly.
         task_worker = lambda_.Function(
@@ -248,7 +248,7 @@ class AgentStack(cdk.Stack):
             handler="mcp_servers.operations.handler.lambda_handler",
             # Explicit, deterministic name so the restore_finalizer (in data_stack,
             # which agent_stack depends on) can grant invoke + set its env by
-            # literal string — referencing this construct from data_stack would be
+            # literal string. Referencing this construct from data_stack would be
             # a dependency cycle. Must match the OPERATIONS_FUNCTION_NAME literal
             # in data_stack (both derive from Settings.ENV).
             function_name=f"dbops-{Settings.ENV}-operations-mcp",
@@ -364,7 +364,7 @@ class AgentStack(cdk.Stack):
             resources=["*"],
         ))
         # Target DB secrets are registry-defined (arbitrary ARNs), so this can't be
-        # ARN-scoped, but it is bounded to the hub account — cross-account targets
+        # ARN-scoped, but it is bounded to the hub account. Cross-account targets
         # read their secret via the assumed spoke role, not this one.
         operations_mcp_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
@@ -432,7 +432,7 @@ class AgentStack(cdk.Stack):
                 # (replaces the hardcoded ACU rate). Price List API is read-only.
                 "pricing:GetProducts",
                 # Observed Serverless v2 ACU draw for the scaling cost sim
-                # (ServerlessDatabaseCapacity) — replaces the min/max midpoint.
+                # (ServerlessDatabaseCapacity). Replaces the min/max midpoint.
                 "cloudwatch:GetMetricStatistics",
                 # Hub-spoke: assume the cluster's spoke role to describe it in its
                 # own account+region (same pattern as the operations write tools).
@@ -504,7 +504,7 @@ class AgentStack(cdk.Stack):
         # The Gateway evaluates these Cedar policies on every tool call: reads
         # auto-allowed, writes need approved==true, DROP/TRUNCATE forbidden
         # without force. They used to be applied MANUALLY via
-        # `agentcore policy create` — so on a fresh `cdk deploy` they were never
+        # `agentcore policy create`, so on a fresh `cdk deploy` they were never
         # applied and Cedar was DARK (the tool-level approval_guard was the only
         # active control). Wire them into the deploy: one PolicyEngine + one
         # Policy per .cedar file, bound to the Gateway.
@@ -535,7 +535,7 @@ class AgentStack(cdk.Stack):
             ("operations", "operations_policy.cedar"),
         ):
             # AgentCore CreatePolicy accepts exactly ONE Cedar statement per
-            # policy — a multi-statement file fails with "unexpected token
+            # policy: a multi-statement file fails with "unexpected token
             # forbid". Strip // comments FIRST (they can contain ';', e.g.
             # "(no DB change);", which would otherwise corrupt the split), then
             # split the file into individual statements and create one Policy
@@ -569,7 +569,7 @@ class AgentStack(cdk.Stack):
                 _policy = agentcore_cfn.CfnPolicy(
                     self, f"CedarPolicy{_key.title()}{_i}",
                     policy_engine_id=self.policy_engine.attr_policy_engine_id,
-                    # Name must match ^[A-Za-z][A-Za-z0-9_]*$ — underscores only,
+                    # Name must match ^[A-Za-z][A-Za-z0-9_]*$. Underscores only,
                     # NO hyphens (CFN property validation rejects hyphens).
                     name=f"dbops_{Settings.ENV}_{_key}_{_i}",
                     definition=agentcore_cfn.CfnPolicy.PolicyDefinitionProperty(
@@ -580,7 +580,7 @@ class AgentStack(cdk.Stack):
                     # IGNORE_ALL_FINDINGS during the LOG_ONLY rollout: these
                     # statements aren't yet validated against the live AgentCore
                     # Cedar schema (action / context attribute names), so
-                    # FAIL_ON_ANY_FINDINGS could block creation — and we WANT
+                    # FAIL_ON_ANY_FINDINGS could block creation, and we WANT
                     # them CREATED so their decisions are observable in
                     # CloudWatch. Tighten to FAIL_ON_ANY_FINDINGS when flipping
                     # to ENFORCE (after the logs confirm they match).
@@ -596,7 +596,7 @@ class AgentStack(cdk.Stack):
 
         # Bind the engine to the Gateway. The installed CfnGateway L1 predates
         # the PolicyEngineConfiguration property (the service added it 2026-03),
-        # so set it via the escape hatch — the service schema in this region
+        # so set it via the escape hatch. The service schema in this region
         # accepts it (get-gateway returns a policyEngineConfiguration field).
         cfn_gateway = self.gateway.node.default_child
         cfn_gateway.add_property_override(
@@ -625,7 +625,7 @@ class AgentStack(cdk.Stack):
                 # the generated id suffix, rather than referencing
                 # self.gateway.gateway_arn. A token reference would make THIS
                 # policy depend on the Gateway, while the Gateway also depends on
-                # this policy (the binding-ordering dependency above) — a
+                # this policy (the binding-ordering dependency above), a
                 # circular dependency. The wildcard matches the real gateway id
                 # (e.g. dbops-dev-gateway-abc123xyz9).
                 f"arn:aws:bedrock-agentcore:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}"
@@ -634,7 +634,7 @@ class AgentStack(cdk.Stack):
         ))
         # The Gateway's PolicyEngineConfiguration update calls GetPolicyEngine
         # using the Gateway role, so it must run AFTER the role's policy (with
-        # that permission) is in place. CFN doesn't infer this ordering — make
+        # that permission) is in place. CFN doesn't infer this ordering: make
         # it explicit (same pattern as the gateway targets above), else the
         # binding fails with "Access denied while calling GetPolicyEngine".
         _gw_default_policy = self.gateway.role.node.try_find_child("DefaultPolicy")
@@ -700,8 +700,8 @@ class AgentStack(cdk.Stack):
                 "MEMORY_ID": self.memory.memory_id,
                 "GATEWAY_MCP_URL": gateway_mcp_url,
                 # Outbound auth to the Gateway (OAuth2 client-credentials). The
-                # default Cognito M2M client the Gateway construct created for us
-                # — WITHOUT these the agent's get_gateway_token() returns None,
+                # default Cognito M2M client the Gateway construct created for us.
+                # WITHOUT these the agent's get_gateway_token() returns None,
                 # make_mcp_client() returns None, and ZERO of the 42 MCP tools
                 # load: the agent could only reach the AWS doc tools, so every DB
                 # capability (diagnose_root_cause, execute_sql, query_metrics, …)
@@ -710,7 +710,7 @@ class AgentStack(cdk.Stack):
                 "GATEWAY_CLIENT_ID": self.gateway.user_pool_client.user_pool_client_id,
                 "GATEWAY_CLIENT_SECRET": self.gateway.user_pool_client.user_pool_client_secret.unsafe_unwrap(),
                 "GATEWAY_SCOPE": cdk.Fn.join(" ", self.gateway.oauth_scopes),
-                # AWS MCP Server (managed, SigV4) — official AWS/Aurora docs.
+                # AWS MCP Server (managed, SigV4): official AWS/Aurora docs.
                 # The runtime signs requests with its own IAM role; doc reads
                 # need no extra IAM action. getattr defaults keep synth working
                 # if a local settings.py predates these keys. Empty disables.
@@ -718,7 +718,7 @@ class AgentStack(cdk.Stack):
                     Settings, "AWS_MCP_URL", "https://aws-mcp.us-east-1.api.aws/mcp"
                 ),
                 "AWS_MCP_REGION": getattr(Settings, "AWS_MCP_REGION", "us-east-1"),
-                # Operator-uploaded context files table — read at prompt-build time.
+                # Operator-uploaded context files table: read at prompt-build time.
                 # grant_context_files_read() is for Lambdas (calls fn.add_environment);
                 # the Runtime env is set here directly, and the role grant is below.
                 "CONTEXT_FILES_TABLE": foundation.context_files_table.table_name,
@@ -743,7 +743,7 @@ class AgentStack(cdk.Stack):
             ),
         )
         # Grant the Runtime's IAM role read access to the context-files table.
-        # (grant_context_files_read() is for Lambda fns — it calls fn.add_environment
+        # (grant_context_files_read() is for Lambda fns: it calls fn.add_environment
         # which is unsupported on the Runtime construct. Set env above; grant role here.)
         foundation.context_files_table.grant_read_data(self.runtime.role)
         # Tenancy: allow the Runtime to read cluster registry + team membership.
@@ -826,7 +826,7 @@ class AgentStack(cdk.Stack):
 
         # Cognito JWT authorizer for the REST API. API Gateway verifies the
         # token signature, issuer, and expiry BEFORE the request reaches any
-        # Lambda — so the per-handler base64 decode only ever sees a token the
+        # Lambda, so the per-handler base64 decode only ever sees a token the
         # gateway already validated, closing the forged-admin-token hole.
         # Audience is the WebClient id; HTTP API JWT authorizers accept Cognito
         # access tokens by matching the `client_id` claim, which is what the
@@ -836,7 +836,7 @@ class AgentStack(cdk.Stack):
             foundation.user_pool,
             user_pool_clients=[foundation.user_pool_client],
         )
-        # Routes that must NOT carry a Cognito JWT — Slack webhooks authenticate
+        # Routes that must NOT carry a Cognito JWT: Slack webhooks authenticate
         # via HMAC signature, and /health is polled by external uptime monitors.
         public_authorizer = apigwv2.HttpNoneAuthorizer()
 
@@ -856,7 +856,7 @@ class AgentStack(cdk.Stack):
         # the rate-limited downstream (RDS Data API, Bedrock). HTTP API
         # has no built-in usage plans, so we set burst + steady-state
         # via CfnStage escape-hatch. The numbers are intentionally
-        # generous — DBOps is a UI-driven app with low natural QPS;
+        # generous: DBOps is a UI-driven app with low natural QPS;
         # anything above ~50 rps sustained is a bug, not a feature.
         cfn_stage = self.api.default_stage.node.default_child
         cfn_stage.default_route_settings = {
@@ -873,19 +873,19 @@ class AgentStack(cdk.Stack):
             # 128MB (CDK default) ≈ 0.07 vCPU. This handler serializes ~13KB
             # JSON, marshals RDS Data API params/results, and ran at Max Memory
             # ~110/128MB (near the ceiling). 512MB ≈ 0.3 vCPU + headroom cuts the
-            # CPU-bound part of the 0.34–0.63s Duration. Cost is memory×duration,
+            # CPU-bound part of the 0.34-0.63s Duration. Cost is memory×duration,
             # offset by the shorter duration; safe, reversible.
             memory_size=512,
             # Retain published versions so the "live" alias has prior versions
             # to roll back to (a deploy publishes a new version + shifts the
             # alias; keeping the old ones is a free rollback target). See the
-            # DashboardLiveAlias below — the API integrations point at the alias
+            # DashboardLiveAlias below: the API integrations point at the alias
             # for zero-downtime deploys.
             current_version_options=lambda_.VersionOptions(
                 removal_policy=cdk.RemovalPolicy.RETAIN,
             ),
             # SnapStart cuts cold-init by restoring from a snapshot of the
-            # initialized container instead of cold-booting Python+boto3 — the
+            # initialized container instead of cold-booting Python+boto3. The
             # win shows up on scale-out (many users → many fresh containers) and
             # first-load-after-idle. Free for Python (only a small snapshot
             # cache cost). Safe here: the handler creates no boto3 clients /
@@ -938,7 +938,7 @@ class AgentStack(cdk.Stack):
                 "arn:aws:logs:*:*:log-group:/aws/rds/cluster/*:*",
             ],
         ))
-        # DescribeLogGroups is unscoped (AWS limitation — Insights queries
+        # DescribeLogGroups is unscoped (AWS limitation: Insights queries
         # need it to validate group existence before scanning).
         dashboard_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=["logs:DescribeLogGroups"],
@@ -951,29 +951,29 @@ class AgentStack(cdk.Stack):
             actions=[
                 "rds:DescribeDBClusters",
                 "rds:DescribeDBInstances",
-                # Backup inventory panel — read-only snapshot listing.
+                # Backup inventory panel: read-only snapshot listing.
                 "rds:DescribeDBClusterSnapshots",
-                # Custom endpoints panel (P2-⑤) — read-only listing of built-in
+                # Custom endpoints panel (P2-⑤): read-only listing of built-in
                 # + custom cluster endpoints.
                 "rds:DescribeDBClusterEndpoints",
-                # Parameter-diff panel — compare cluster params vs engine
+                # Parameter-diff panel: compare cluster params vs engine
                 # defaults (single-account path; spoke uses rds:Describe* wildcard).
                 "rds:DescribeDBClusterParameters",
                 "rds:DescribeDBClusterParameterGroups",
                 "rds:DescribeEngineDefaultClusterParameters",
-                # DocumentDB backup + topology panels — DocDB mirrors the RDS
+                # DocumentDB backup + topology panels: DocDB mirrors the RDS
                 # cluster/snapshot API on its own namespace (read-only).
                 "docdb:DescribeDBClusters",
                 "docdb:DescribeDBClusterSnapshots",
                 "docdb:DescribeDBInstances",
-                # DynamoDB backup panel — PITR window + on-demand backups (read-only).
+                # DynamoDB backup panel: PITR window + on-demand backups (read-only).
                 "dynamodb:DescribeContinuousBackups",
                 "dynamodb:ListBackups",
-                # DynamoDB engine-config panel — table class, SSE, streams, TTL,
+                # DynamoDB engine-config panel: table class, SSE, streams, TTL,
                 # deletion protection (read-only).
                 "dynamodb:DescribeTable",
                 "dynamodb:DescribeTimeToLive",
-                # ElastiCache engine-config panel — replication group / cache
+                # ElastiCache engine-config panel: replication group / cache
                 # cluster settings + parameter-group values (read-only).
                 "elasticache:DescribeReplicationGroups",
                 "elasticache:DescribeCacheClusters",
@@ -986,7 +986,7 @@ class AgentStack(cdk.Stack):
             resources=["*"],
         ))
 
-        # Simulation API — REST mirror of the Simulation MCP tool surface
+        # Simulation API: REST mirror of the Simulation MCP tool surface
         # so the dashboard UI can render "what-if" panels without going
         # through the chat agent.
         simulation_lambda = lambda_.Function(
@@ -1018,7 +1018,7 @@ class AgentStack(cdk.Stack):
                 "rds:DescribeDBInstances",
                 "rds:DescribeDBEngineVersions",
                 # Live parameter-group metadata for the parameter-change sim
-                # (ApplyType/IsModifiable/AllowedValues) — same as the MCP tool.
+                # (ApplyType/IsModifiable/AllowedValues), same as the MCP tool.
                 "rds:DescribeDBClusterParameters",
                 # Real region/edition/instance pricing for scaling cost sims.
                 "pricing:GetProducts",
@@ -1140,10 +1140,10 @@ class AgentStack(cdk.Stack):
         # Invoke the operations MCP Lambda for the N-① endpoint request/execute
         # flow (request_approval + create/modify/delete_custom_endpoint).
         operations_mcp_lambda.grant_invoke(approvals_lambda)
-        # 의도적으로 rds:EnableHttpEndpoint 단일 액션만 — ModifyDBCluster를
+        # 의도적으로 rds:EnableHttpEndpoint 단일 액션만. ModifyDBCluster를
         # 주면 마스터 패스워드 변경과 삭제 보호 해제까지 가능한 광범위 권한이
         # 플랫폼에 생긴다. 전용 API(설정 1비트)로 블래스트 반경을 좁히는 것이
-        # 이 기능의 보안 전제. Disable은 의도적으로 제외 — 켜는 것만 자동화하고
+        # 이 기능의 보안 전제. Disable은 의도적으로 제외: 켜는 것만 자동화하고
         # 끄는 것은 사람이 콘솔/CLI에서 하도록 남겨둔다.
         approvals_lambda.add_to_role_policy(
             iam.PolicyStatement(
@@ -1152,7 +1152,7 @@ class AgentStack(cdk.Stack):
             )
         )
 
-        # Approval-policies API — admin CRUD over designated-approver policies
+        # Approval-policies API: admin CRUD over designated-approver policies
         # that the approvals API enforces. Admin-gated + fail-closed in-handler.
         approval_policies_lambda = lambda_.Function(
             self, "ApprovalPoliciesApi",
@@ -1163,7 +1163,7 @@ class AgentStack(cdk.Stack):
         )
         foundation.grant_approval_policy_write(approval_policies_lambda)  # R/W + env
 
-        # Context Files API — admin CRUD over operator-uploaded reference text
+        # Context Files API: admin CRUD over operator-uploaded reference text
         # injected into the agent prompt (per-file 32KB, 64KB total budget).
         context_files_lambda = lambda_.Function(
             self, "ContextFilesApi",
@@ -1174,7 +1174,7 @@ class AgentStack(cdk.Stack):
         )
         foundation.grant_context_files_write(context_files_lambda)  # R/W + CONTEXT_FILES_TABLE env
 
-        # Agent Tasks API — list / get / create over the agent-tasks DDB table.
+        # Agent Tasks API: list / get / create over the agent-tasks DDB table.
         # Read path backs the /tasks UI + the alert toast deep link; POST writes
         # a pending manual_rca row that the stream worker then executes.
         tasks_lambda = lambda_.Function(
@@ -1193,7 +1193,7 @@ class AgentStack(cdk.Stack):
         foundation.clusters_table.grant_read_data(tasks_lambda)
         foundation.team_members_table.grant_read_data(tasks_lambda)
 
-        # Scheduled Tasks API — CRUD over the scheduled_tasks cache table (the
+        # Scheduled Tasks API: CRUD over the scheduled_tasks cache table (the
         # task_scheduler reads these and enqueues agent-tasks when due).
         scheduled_tasks_lambda = lambda_.Function(
             self, "ScheduledTasksApi",
@@ -1215,7 +1215,7 @@ class AgentStack(cdk.Stack):
         foundation.clusters_table.grant_read_data(scheduled_tasks_lambda)
         foundation.team_members_table.grant_read_data(scheduled_tasks_lambda)
 
-        # Config API — admin-edits DB-backed feature toggles (ticketing
+        # Config API: admin-edits DB-backed feature toggles (ticketing
         # provider, report delivery) so they flip without a redeploy.
         config_lambda = lambda_.Function(
             self, "ConfigApi",
@@ -1239,7 +1239,7 @@ class AgentStack(cdk.Stack):
         )
         foundation.grant_ws_ticket_mint(ws_ticket_lambda)
 
-        # Runbooks API — CRUD over the `runbooks` cache table. AI-generated
+        # Runbooks API: CRUD over the `runbooks` cache table. AI-generated
         # diagnoses can be saved as reusable playbooks for pattern recurrence.
         runbooks_lambda = lambda_.Function(
             self, "RunbooksApi",
@@ -1264,7 +1264,7 @@ class AgentStack(cdk.Stack):
             resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
 
-        # Backups write API — manual snapshot creation (phase 2). Human-
+        # Backups write API: manual snapshot creation (phase 2). Human-
         # initiated admin write, audit-logged to PG. Separate from the
         # read tier (dashboard /backups) and from the agent approval path.
         backups_lambda = lambda_.Function(
@@ -1291,7 +1291,7 @@ class AgentStack(cdk.Stack):
                 # backup). AddTags lets us stamp dbops:created-by.
                 "rds:CreateDBClusterSnapshot",
                 # Restore creates a BRAND-NEW cluster from a snapshot or a
-                # point in time — it never mutates the source. DescribeDBClusters
+                # point in time. It never mutates the source. DescribeDBClusters
                 # reads the source VPC/scaling config to clone networking onto
                 # the restored cluster.
                 "rds:RestoreDBClusterFromSnapshot",
@@ -1310,7 +1310,7 @@ class AgentStack(cdk.Stack):
             resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
 
-        # Chat Sessions API — persists chat conversations across devices.
+        # Chat Sessions API: persists chat conversations across devices.
         # Backed by the existing `sessions` DDB table (PK session_id) plus
         # a user-updated GSI for cheap list-by-user.
         chat_sessions_lambda = lambda_.Function(
@@ -1325,7 +1325,7 @@ class AgentStack(cdk.Stack):
         )
         foundation.sessions_table.grant_read_write_data(chat_sessions_lambda)
 
-        # Saved Queries API — durable Query Lab scratchpad
+        # Saved Queries API: durable Query Lab scratchpad
         saved_queries_lambda = lambda_.Function(
             self, "SavedQueriesApi",
             runtime=lambda_.Runtime.PYTHON_3_12,
@@ -1354,7 +1354,7 @@ class AgentStack(cdk.Stack):
             resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
         ))
 
-        # Agent Memory API — read + delete user's AgentCore Memory records
+        # Agent Memory API: read + delete user's AgentCore Memory records
         # so the DBA can see (and prune) what the agent has remembered.
         memory_lambda = lambda_.Function(
             self, "MemoryApi",
@@ -1372,7 +1372,7 @@ class AgentStack(cdk.Stack):
                 "bedrock-agentcore:GetMemoryRecord",
                 "bedrock-agentcore:DeleteMemoryRecord",
             ],
-            # Scope to this memory resource specifically — no chance of
+            # Scope to this memory resource specifically, no chance of
             # the API leaking into another memory store in the account.
             resources=[self.memory.memory_arn],
         ))
@@ -1438,7 +1438,7 @@ class AgentStack(cdk.Stack):
         # the response says rca_enqueued false: a demo with no report in it.
         foundation.grant_task_enqueue(scenarios_lambda)
 
-        # Slack interactive endpoint — verifies HMAC signature and acks
+        # Slack interactive endpoint: verifies HMAC signature and acks
         # alerts in-place. Disabled when SLACK_SIGNING_SECRET is empty:
         # the env var is still set, the handler returns a self-explaining
         # 200 ephemeral message so the user can fix configuration without
@@ -1457,7 +1457,7 @@ class AgentStack(cdk.Stack):
             },
         )
 
-        # Slack slash-command endpoint — `/dbops status|timeline|
+        # Slack slash-command endpoint: `/dbops status|timeline|
         # clusters [args]`. Shares the signing secret with the
         # interactive Lambda so workspaces don't need a second secret.
         slack_command_lambda = lambda_.Function(
@@ -1474,7 +1474,7 @@ class AgentStack(cdk.Stack):
         )
         foundation.clusters_table.grant_read_data(slack_command_lambda)
 
-        # Inbound incident webhook (P4) — Datadog / PagerDuty POST an incident;
+        # Inbound incident webhook (P4): Datadog / PagerDuty POST an incident;
         # we record it to event_log so it surfaces in the Events panel with a
         # "Chat에서 진단" deep-link. Shared-secret auth (X-DBOps-Webhook-Token);
         # 503 until INCIDENT_WEBHOOK_SECRET is set, 401 on a bad token.
@@ -1540,7 +1540,7 @@ class AgentStack(cdk.Stack):
         # swap, $LATEST invocations can transiently fail (observed ~30 API-GW
         # 503s under a 15-way concurrent probe mid-deploy; a clean low-traffic
         # deploy showed 0). With an alias, CDK publishes the new version and
-        # shifts the alias only once it is ready — no in-flight gap. This is
+        # shifts the alias only once it is ready, no in-flight gap. This is
         # also the prerequisite for SnapStart, which only optimizes published
         # versions.
         dashboard_alias = lambda_.Alias(
@@ -1587,7 +1587,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardParamDiffIntegration", dashboard_alias),
         )
-        # Workload diff — pg_stat_statements snapshot delta between two
+        # Workload diff: pg_stat_statements snapshot delta between two
         # points in time (new / regressed / improved / disappeared
         # queries). Wired from the timeline for "what changed around
         # this deploy".
@@ -1650,14 +1650,14 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardTopologyIntegration", dashboard_alias),
         )
-        # Backup inventory — snapshots + PITR window (read-only tier of
+        # Backup inventory: snapshots + PITR window (read-only tier of
         # the backup workflow). Live RDS Describe calls.
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/backups",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardBackupsIntegration", dashboard_alias),
         )
-        # Engine-level config (read-only) — DocumentDB cluster settings +
+        # Engine-level config (read-only): DocumentDB cluster settings +
         # DynamoDB table settings the overview panels don't already show.
         # Live docdb/dynamodb Describe calls.
         self.api.add_routes(
@@ -1665,7 +1665,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardEngineConfigIntegration", dashboard_alias),
         )
-        # Manual snapshot creation (phase 2 write tier) — admin-gated,
+        # Manual snapshot creation (phase 2 write tier): admin-gated,
         # routed to the dedicated backups Lambda (not the read-only
         # dashboard handler).
         self.api.add_routes(
@@ -1673,27 +1673,27 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.POST],
             integration=integrations.HttpLambdaIntegration("BackupsSnapshotIntegration", backups_lambda),
         )
-        # Restore (phase 3 write tier) — snapshot or PITR into a NEW cluster.
+        # Restore (phase 3 write tier): snapshot or PITR into a NEW cluster.
         # Same backups Lambda, dispatched by path. admin + type-to-confirm.
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/restore",
             methods=[apigwv2.HttpMethod.POST],
             integration=integrations.HttpLambdaIntegration("BackupsRestoreIntegration", backups_lambda),
         )
-        # SLO tracker — availability + latency SLI computed from the cache,
+        # SLO tracker: availability + latency SLI computed from the cache,
         # error budget burn-down, per-day timeline.
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/slo",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardSloIntegration", dashboard_alias),
         )
-        # Schema lineage / FK graph — live pg_constraint introspection.
+        # Schema lineage / FK graph: live pg_constraint introspection.
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/schema-graph",
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardSchemaGraphIntegration", dashboard_alias),
         )
-        # Resource details — engine-specific metadata (DynamoDB table info,
+        # Resource details: engine-specific metadata (DynamoDB table info,
         # DocDB instance list) from cluster_meta.resource_details JSONB.
         # Used by the engine-family dashboard panels.
         self.api.add_routes(
@@ -1701,7 +1701,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardResourceDetailsIntegration", dashboard_alias),
         )
-        # Instance list — Aurora cluster member list (writer + readers) for
+        # Instance list: Aurora cluster member list (writer + readers) for
         # the Compare instance picker. Populated by the meta collector into
         # cluster_meta.instances; cached 30s (membership changes rarely).
         self.api.add_routes(
@@ -1711,7 +1711,7 @@ class AgentStack(cdk.Stack):
                 "DashboardInstancesIntegration", dashboard_alias
             ),
         )
-        # Simulation API — REST mirror of Simulation MCP tools. All write-
+        # Simulation API: REST mirror of Simulation MCP tools. All write-
         # like operations are simulations, never DDL execution, so POST is
         # safe without an approval flow.
         sim_integration = integrations.HttpLambdaIntegration(
@@ -1742,7 +1742,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardSchemaChangesIntegration", dashboard_alias),
         )
-        # Unified incident timeline — merges event_log + schema_changes +
+        # Unified incident timeline: merges event_log + schema_changes +
         # audit_log into one chronological feed for incident triage.
         self.api.add_routes(
             path="/api/dashboard/{cluster_id}/timeline",
@@ -1759,7 +1759,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardActiveSessionsIntegration", dashboard_alias),
         )
-        # On-demand LIVE top (P2-⑧) — queries the TARGET cluster via Data API
+        # On-demand LIVE top (P2-⑧): queries the TARGET cluster via Data API
         # while the live view is open. Uses the same dashboard Lambda IAM
         # (rds-data:ExecuteStatement + GetSecretValue already granted above);
         # server-side throttle bounds DB load.
@@ -1773,7 +1773,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("DashboardAuditLogIntegration", dashboard_alias),
         )
-        # 변경 영향 회고 — RDS 변경 이벤트 전후 워크로드 델타. dashboard
+        # 변경 영향 회고: RDS 변경 이벤트 전후 워크로드 델타. dashboard
         # 라우트는 path별 개별 등록이라(greedy proxy 아님) 새 sub-path는
         # 반드시 여기 추가해야 한다(없으면 핸들러가 구현돼 있어도 404).
         self.api.add_routes(
@@ -2047,7 +2047,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE],
             integration=alerts_integration,
         )
-        # Slack interactive ack — the URL paired with the Slack app's
+        # Slack interactive ack: the URL paired with the Slack app's
         # "Interactivity Request URL" setting.
         self.api.add_routes(
             path="/api/slack/interactive",
@@ -2055,7 +2055,7 @@ class AgentStack(cdk.Stack):
             integration=integrations.HttpLambdaIntegration("SlackInteractiveIntegration", slack_interactive_lambda),
             authorizer=public_authorizer,
         )
-        # Slack slash command — URL paired with the Slack app's
+        # Slack slash command: URL paired with the Slack app's
         # `/dbops` command settings. Same signing secret as interactive.
         self.api.add_routes(
             path="/api/slack/command",
@@ -2063,7 +2063,7 @@ class AgentStack(cdk.Stack):
             integration=integrations.HttpLambdaIntegration("SlackCommandIntegration", slack_command_lambda),
             authorizer=public_authorizer,
         )
-        # Inbound incident webhook (Datadog / PagerDuty) — public route,
+        # Inbound incident webhook (Datadog / PagerDuty): public route,
         # authenticated by the shared-secret token the handler checks.
         self.api.add_routes(
             path="/api/incident-webhook",
@@ -2071,7 +2071,7 @@ class AgentStack(cdk.Stack):
             integration=integrations.HttpLambdaIntegration("IncidentWebhookIntegration", incident_webhook_lambda),
             authorizer=public_authorizer,
         )
-        # DBOps self-monitoring health endpoint — public so external uptime
+        # DBOps self-monitoring health endpoint: public so external uptime
         # monitors can poll it without a Cognito token.
         self.api.add_routes(
             path="/api/health",
@@ -2110,7 +2110,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.POST],
             integration=clusters_integration,
         )
-        # DELETE /api/clusters/{id} — removes the DDB row + demo cache rows if is_demo.
+        # DELETE /api/clusters/{id}: removes the DDB row + demo cache rows if is_demo.
         self.api.add_routes(
             path="/api/clusters/{id}",
             methods=[apigwv2.HttpMethod.DELETE],
@@ -2147,7 +2147,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PUT],
             integration=integrations.HttpLambdaIntegration("ApprovalDetailIntegration", approvals_lambda),
         )
-        # Scale-out ops (N-④ Phase 2) — same approvals table/Lambda; scale-out
+        # Scale-out ops (N-④ Phase 2): same approvals table/Lambda; scale-out
         # ops ARE scaleout=true prewarm approval rows. List + cancel-the-warm.
         self.api.add_routes(
             path="/api/scaleout-ops",
@@ -2159,7 +2159,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.POST],
             integration=integrations.HttpLambdaIntegration("ScaleoutOpsCancelIntegration", approvals_lambda),
         )
-        # Endpoint requests (N-①) — console-initiated custom-endpoint writes.
+        # Endpoint requests (N-①): console-initiated custom-endpoint writes.
         # Same approvals Lambda; it invokes the operations Lambda to mint the
         # payload-hashed approval (origin="ui") and to auto-execute on approve.
         self.api.add_routes(
@@ -2167,7 +2167,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.POST],
             integration=integrations.HttpLambdaIntegration("EndpointRequestsIntegration", approvals_lambda),
         )
-        # AZ scale-out runbook (P2-⑥) — same approvals Lambda. It invokes the
+        # AZ scale-out runbook (P2-⑥): same approvals Lambda. It invokes the
         # operations Lambda's read-only plan_az_scaleout, then mints one
         # add_reader_instance approval (origin="ui") per planned reader; the
         # approve path auto-executes those origin="ui" rows. Reuses the existing
@@ -2177,7 +2177,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.POST],
             integration=integrations.HttpLambdaIntegration("ScaleoutAzIntegration", approvals_lambda),
         )
-        # Approval policies — admin-gated designated-approver routing
+        # Approval policies: admin-gated designated-approver routing
         approval_policies_integration = integrations.HttpLambdaIntegration(
             "ApprovalPoliciesIntegration", approval_policies_lambda
         )
@@ -2191,7 +2191,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.PUT, apigwv2.HttpMethod.DELETE],
             integration=approval_policies_integration,
         )
-        # DBOps activity log — chronological feed of every approval
+        # DBOps activity log: chronological feed of every approval
         # (any status) for retro + compliance. Reads the same DDB
         # table; routed through the approvals lambda to avoid wiring
         # a second one.
@@ -2200,7 +2200,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("ActivityIntegration", approvals_lambda),
         )
-        # Context files — admin-gated operator-uploaded reference text
+        # Context files: admin-gated operator-uploaded reference text
         context_files_integration = integrations.HttpLambdaIntegration("ContextFilesIntegration", context_files_lambda)
         self.api.add_routes(path="/api/context-files",
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
@@ -2208,7 +2208,7 @@ class AgentStack(cdk.Stack):
         self.api.add_routes(path="/api/context-files/{id}",
             methods=[apigwv2.HttpMethod.DELETE],
             integration=context_files_integration)
-        # Agent Tasks — autonomous/scheduled/manual agent work
+        # Agent Tasks: autonomous/scheduled/manual agent work
         tasks_integration = integrations.HttpLambdaIntegration("TasksIntegration", tasks_lambda)
         self.api.add_routes(
             path="/api/tasks",
@@ -2216,7 +2216,7 @@ class AgentStack(cdk.Stack):
             integration=tasks_integration,
         )
         # Aggregate stats (counts by status/kind, success rate, avg duration).
-        # Registered before /{id} — literal segment takes precedence over path
+        # Registered before /{id}: literal segment takes precedence over path
         # param, but explicit ordering keeps intent unambiguous.
         self.api.add_routes(
             path="/api/tasks/stats",
@@ -2242,14 +2242,14 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.DELETE],
             integration=scheduled_integration,
         )
-        # App config — admin-gated DB-backed feature toggles
+        # App config: admin-gated DB-backed feature toggles
         config_integration = integrations.HttpLambdaIntegration("ConfigIntegration", config_lambda)
         self.api.add_routes(
             path="/api/config",
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PUT],
             integration=config_integration,
         )
-        # Onboarding — generates the spoke-account IAM role CloudFormation
+        # Onboarding: generates the spoke-account IAM role CloudFormation
         # template an admin deploys so the hub account can assume into it.
         onboarding_lambda = lambda_.Function(
             self, "OnboardingApi",
@@ -2267,7 +2267,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET],
             integration=integrations.HttpLambdaIntegration("OnboardingIntegration", onboarding_lambda),
         )
-        # Admin console — Cognito user & role management (admin-gated)
+        # Admin console: Cognito user & role management (admin-gated)
         admin_users_lambda = lambda_.Function(
             self, "AdminUsersApi",
             runtime=lambda_.Runtime.PYTHON_3_12,
@@ -2297,7 +2297,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.POST],
             integration=admin_users_integration,
         )
-        # Admin console — Teams CRUD + member/cluster assignment (admin-gated)
+        # Admin console: Teams CRUD + member/cluster assignment (admin-gated)
         admin_teams_lambda = lambda_.Function(
             self, "AdminTeamsApi",
             runtime=lambda_.Runtime.PYTHON_3_12,
@@ -2336,7 +2336,7 @@ class AgentStack(cdk.Stack):
             methods=[apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE],
             integration=_admin_teams_int,
         )
-        # Runbooks — AI-generated playbooks
+        # Runbooks: AI-generated playbooks
         runbooks_integration = integrations.HttpLambdaIntegration(
             "RunbooksIntegration", runbooks_lambda
         )
@@ -2351,7 +2351,7 @@ class AgentStack(cdk.Stack):
             integration=runbooks_integration,
         )
 
-        # Chat sessions — cross-device conversation persistence
+        # Chat sessions: cross-device conversation persistence
         chat_sessions_integration = integrations.HttpLambdaIntegration(
             "ChatSessionsIntegration", chat_sessions_lambda
         )
@@ -2385,7 +2385,7 @@ class AgentStack(cdk.Stack):
             integration=memory_integration,
         )
 
-        # Saved queries — durable Query Lab scratchpad
+        # Saved queries: durable Query Lab scratchpad
         saved_queries_integration = integrations.HttpLambdaIntegration(
             "SavedQueriesIntegration", saved_queries_lambda
         )

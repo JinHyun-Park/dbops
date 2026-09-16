@@ -3,7 +3,7 @@
 --
 -- Aurora Serverless v2 exposes ServerlessV2ScalingConfiguration on
 -- DescribeDBClusters (MinCapacity / MaxCapacity, in ACUs). DescribeDBClusters
--- also returns the `EngineMode` field — "serverless" for Serverless v2,
+-- also returns the `EngineMode` field: "serverless" for Serverless v2,
 -- otherwise "provisioned". We persist these so cost_check can recommend
 -- min/max ACU adjustments without re-querying RDS on every cycle.
 
@@ -14,7 +14,7 @@ ALTER TABLE cluster_meta
 
 -- Cache for Cost Explorer Savings Plan / RI recommendations. CE charges
 -- $0.01 per request so we don't want to call it on every 5-min ETL cycle.
--- One row per (cluster_id, recommendation_type) — overwritten daily.
+-- One row per (cluster_id, recommendation_type), overwritten daily.
 CREATE TABLE IF NOT EXISTS cost_recommendations_cache (
     cluster_id VARCHAR(255) NOT NULL,
     recommendation_type VARCHAR(64) NOT NULL,

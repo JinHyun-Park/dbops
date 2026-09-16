@@ -1,4 +1,4 @@
-# Microsoft Teams Alert/Report Delivery — Design
+# Microsoft Teams Alert/Report Delivery: Design
 
 **Date:** 2026-06-23
 **Status:** approved
@@ -18,7 +18,7 @@ new infra; best-effort delivery (existing failure-recording pattern).
 
 Non-goals: Teams bot / two-way interaction; Adaptive Cards via Power Automate
 Workflows (MessageCard via classic Incoming Webhook is the simplest working
-path — see Migration note); changing the Slack/PagerDuty paths.
+path, see Migration note); changing the Slack/PagerDuty paths.
 
 ## Architecture
 
@@ -28,9 +28,9 @@ the subscriber allowlist + validated, and a Teams option in the alerts UI.
 
 ### Components
 
-1. **Alert delivery — `data-pipeline/alert_evaluator/handler.py`**
+1. **Alert delivery: `data-pipeline/alert_evaluator/handler.py`**
 
-   - `_build_teams_payload(rule, latest) -> dict` — a Teams **MessageCard**:
+   - `_build_teams_payload(rule, latest) -> dict`: a Teams **MessageCard**:
      `{"@type":"MessageCard","@context":"http://schema.org/extensions","summary",
 "themeColor": <severity hex>, "title": "🚨 DBOps alert: {cluster_id}",
 "sections":[{"facts":[Rule/Metric/Threshold/Observed], "markdown": true}],
@@ -41,25 +41,25 @@ FRONTEND_URL is set]}`. Mirrors `_build_slack_payload`'s content +
 _build_teams_payload(rule, latest); url = endpoint`. Reuses the existing
      `_post_json` + `last_used_at`/`last_error` recording.
 
-2. **Report delivery — `data-pipeline/report_generator/handler.py`**
+2. **Report delivery: `data-pipeline/report_generator/handler.py`**
 
-   - `_build_report_teams_card(cluster_id, report_date, report_type, summary) -> dict`
-     — a MessageCard with the digest summary (mirrors `_build_report_slack_blocks`).
+   - `_build_report_teams_card(cluster_id, report_date, report_type, summary) -> dict`:
+     a MessageCard with the digest summary (mirrors `_build_report_slack_blocks`).
    - `_deliver_report` currently queries `protocol = 'slack-webhook'` subscribers.
      Broaden to also fetch `teams-webhook` subscribers and POST the Teams card to
      each (same best-effort try/except per subscriber). Keep `REPORT_DELIVERY_ENABLED`
      gating unchanged.
 
-3. **Subscriber registration — `api/alerts/handler.py`**
+3. **Subscriber registration: `api/alerts/handler.py`**
 
    - Add `"teams-webhook"` to `_MANAGED_PROTOCOLS` (the add/list/delete managed
      paths are generic). In `_create_subscription`, validate the teams endpoint:
      `if protocol == "teams-webhook" and not endpoint.startswith("https://"):
-return 400` (Teams Incoming Webhook hosts vary — `*.webhook.office.com`,
-     `*.logic.azure.com` — so require https + non-empty, lenient like Slack but
+return 400` (Teams Incoming Webhook hosts vary: `*.webhook.office.com`,
+     `*.logic.azure.com`, so require https + non-empty, lenient like Slack but
      not host-locked).
 
-4. **UI — `frontend/src/app/alerts/page.tsx`** (the alerts subscriber form)
+4. **UI: `frontend/src/app/alerts/page.tsx`** (the alerts subscriber form)
    - Add a "Microsoft Teams" option to the add-subscriber protocol selector
      (value `teams-webhook`), with a Korean hint + a placeholder for the Teams
      Incoming Webhook URL. Mirror the existing Slack option's UX. If the form's
@@ -78,7 +78,7 @@ endpoint:<webhook url>, label}` → validated → `alert_subscribers_managed` ro
 ## Error Handling
 
 - Delivery is best-effort (existing pattern): a non-2xx or exception is recorded
-  to `last_error` and the loop continues — never aborts alert/report processing.
+  to `last_error` and the loop continues: never aborts alert/report processing.
 - Subscriber add: non-https teams endpoint → `400`; empty endpoint → `400`.
 
 ## Testing

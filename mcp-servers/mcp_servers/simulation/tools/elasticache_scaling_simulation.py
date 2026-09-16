@@ -1,4 +1,4 @@
-"""simulate_elasticache_node_resize — estimate the monthly cost of resizing an
+"""simulate_elasticache_node_resize: estimate the monthly cost of resizing an
 ElastiCache cluster's node type / count. Read-only (describe + Price List API),
 no approval. Cross-account via client_for_cluster.
 

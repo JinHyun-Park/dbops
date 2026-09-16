@@ -1,4 +1,4 @@
-"""task_scheduler — enqueue due recurring tasks.
+"""task_scheduler: enqueue due recurring tasks.
 
 Due detection lives in SQL (mocked here); these assert the loop: a due row
 enqueues one pending agent-task + stamps last_run_at, no due rows enqueue

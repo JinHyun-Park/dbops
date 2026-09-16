@@ -1,4 +1,4 @@
-"""Tests for modify_dynamodb_capacity — the 3-state approval flow plus the
+"""Tests for modify_dynamodb_capacity, the 3-state approval flow plus the
 safety-fix regressions: <1 rejection (#4), GSI block (#5), TOCTOU drift (#6),
 table-target binding into the hash (#1).
 
@@ -18,7 +18,7 @@ from mcp_servers.operations.tools.modify_dynamodb_capacity import (
 @pytest.fixture(autouse=True)
 def _mock_table_name():
     """The real table name comes from the cluster registry (table_name_for_cluster),
-    NOT cluster_meta — pin it to 'orders' so the target-binding assertions exercise
+    NOT cluster_meta: pin it to 'orders' so the target-binding assertions exercise
     the real resolution path."""
     with patch(
         "mcp_servers.operations.tools.modify_dynamodb_capacity.table_name_for_cluster",

@@ -7,21 +7,21 @@
 
 PG 모듈과 같은 철학이되 MySQL 고유의 메모리 모델을 따른다:
 
-  1. 상호작용 위험(핵심) — MySQL의 진짜 OOM 원인은 단일 파라미터가 아니라
+  1. 상호작용 위험(핵심): MySQL의 진짜 OOM 원인은 단일 파라미터가 아니라
      **per-connection 버퍼(sort/join/read/read_rnd/thread_stack)의 합 ×
      max_connections**가 인스턴스 메모리를 잠식하는 조합이다. Aurora MySQL은
      InnoDB 버퍼 풀을 인스턴스 메모리의 ~75%로 자동 설정하므로, per-thread
-     버퍼는 남은 ~25%를 두고 경쟁한다 — 이 합이 메모리의 25%를 넘으면 동시
+     버퍼는 남은 ~25%를 두고 경쟁한다. 이 합이 메모리의 25%를 넘으면 동시
      부하 시 OOM/스왑 위험.
   2. 엔진 분기: innodb_buffer_pool_size는 Aurora에서는 인스턴스 메모리
      공식으로 자동 관리되므로(PG의 shared_buffers와 동일) 직접 권고하지 않는다.
      표준 RDS MySQL에서는 그 반대로 **직접 튜닝 대상**이며, 실측 사례로
      db.t4g.micro(1GB)에서 128MB가 그대로 남아 있었다.
-  3. 확실한 것만 — 메모리 매핑이 안 되거나 표본이 부족하면 침묵한다.
+  3. 확실한 것만: 메모리 매핑이 안 되거나 표본이 부족하면 침묵한다.
 
 입력은 모두 캐시 DB에 이미 있다(cluster_settings는 mysql_locks가 global
 variables를 채우고, metric_snapshots는 cw가, cluster_meta는 meta_collector가).
-라이브 클러스터 접근 없이 캐시만 읽는다 — pg_param_fitness와 동일한 패턴.
+라이브 클러스터 접근 없이 캐시만 읽는다. pg_param_fitness와 동일한 패턴.
 """
 
 import json
@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 
 from collectors.instance_specs import instance_memory_gb
 
-# 워크로드 대비 임계 — 보수적으로 잡아 오탐을 줄인다(PG 모듈과 정합).
+# 워크로드 대비 임계: 보수적으로 잡아 오탐을 줄인다(PG 모듈과 정합).
 MAXCONN_USAGE_FLOOR = 0.15       # peak가 설정의 15% 미만이면 과다 의심
 MAXCONN_MIN_TO_FLAG = 100        # 너무 작은 max_connections는 굳이 안 건드림
 CONN_BUFFER_RISK_PCT = 0.25      # per-thread 버퍼 합×max_conn이 메모리 25% 초과 시 경고
@@ -268,7 +268,7 @@ def collect_mysql_param_fitness(rds_data, cache_cluster_arn, cache_secret_arn, c
             f"{avg_hit:.1f}% ({WINDOW_DAYS}일 평균)",
             f"{CACHE_HIT_FLOOR:.0f}% 미만",
             f"버퍼 캐시 히트율이 {WINDOW_DAYS}일 평균 {avg_hit:.1f}%로 "
-            f"{CACHE_HIT_FLOOR:.0f}% 미만입니다 — "
+            f"{CACHE_HIT_FLOOR:.0f}% 미만입니다. "
             f"작업셋이 인스턴스 메모리(InnoDB 버퍼 풀)를 초과해 디스크 I/O가 늘고 있을 수 "
             f"있습니다. "
             + (

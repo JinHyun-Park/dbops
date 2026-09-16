@@ -1,8 +1,8 @@
-"""explain_plan — run EXPLAIN (FORMAT JSON) on a target cluster and turn the raw
+"""explain_plan: run EXPLAIN (FORMAT JSON) on a target cluster and turn the raw
 plan tree into a structured analysis the agent can reason over.
 
 The frontend already has POST /api/explain, but that returns the raw plan JSON
-for client-side rendering only — the chat agent has no way to *interpret* a plan.
+for client-side rendering only: the chat agent has no way to *interpret* a plan.
 This tool walks the PostgreSQL plan tree and surfaces the signals a DBA actually
 looks for (seq scans on big tables, bad row estimates, disk spills, nested loops
 over large inputs) plus a short list of the most expensive nodes, so the agent can
@@ -40,7 +40,7 @@ from mcp_servers.shared.sql_safety import is_read_only_safe, strip_sql_literals
 # expects to read a meaningful number of rows. 10k is a pragmatic line in the sand.
 _SEQ_SCAN_ROW_THRESHOLD = 10_000
 # Estimate/actual divergence of 10x is the classic "stale stats / missing index"
-# tell — the planner picked a plan for a row count that turned out to be very wrong.
+# tell: the planner picked a plan for a row count that turned out to be very wrong.
 _ESTIMATE_MISS_FACTOR = 10
 # A nested loop re-scans its inner side once per outer row, so it only hurts when
 # the outer side is large.
@@ -83,7 +83,7 @@ def _strip_explain_prefix(sql: str) -> str:
 def _is_select(sql: str) -> bool:
     # Mirror of api/explain/handler.py._is_select: only plan/run read-only
     # statements. EXPLAIN ANALYZE actually executes, so an INSERT/UPDATE/DELETE
-    # here would mutate the target — block anything that isn't SELECT / WITH...SELECT.
+    # here would mutate the target: block anything that isn't SELECT / WITH...SELECT.
     stripped = sql.strip().rstrip(";").lstrip()
     head = stripped[:6].upper()
     if head == "SELECT":
@@ -135,7 +135,7 @@ def _node_relation(node: dict) -> str | None:
 
 def _plan_signature(nodes: list) -> str:
     """STRUCTURAL fingerprint of a plan: ordered (node type, relation, index,
-    join type) per node — costs/rows/timings EXCLUDED on purpose. Same signature
+    join type) per node, costs/rows/timings EXCLUDED on purpose. Same signature
     + worse latency = data growth; a different signature = a plan flip."""
     return "\n".join(
         "|".join(str(x or "") for x in (
@@ -193,7 +193,7 @@ def _capture_plan_history(cache: CacheClient, cluster_id: str, inner_sql: str, n
             "changed": False,
             "plan_hash": plan_hash,
             "previous_seen": str(prev.get("captured_at")),
-            "note": "Same plan structure as the last EXPLAIN — a slowdown here points to "
+            "note": "Same plan structure as the last EXPLAIN, a slowdown here points to "
                     "data growth / stale stats, not a plan flip.",
         }
     return {
@@ -201,7 +201,7 @@ def _capture_plan_history(cache: CacheClient, cluster_id: str, inner_sql: str, n
         "plan_hash": plan_hash,
         "previous_plan_hash": prev.get("plan_hash"),
         "previous_seen": prev.get("captured_at"),
-        "note": "Plan STRUCTURE changed since the last EXPLAIN — likely a plan flip "
+        "note": "Plan STRUCTURE changed since the last EXPLAIN, likely a plan flip "
                 "(index/join switch), not just data growth.",
     }
 
@@ -214,7 +214,7 @@ def _analyze_node(node: dict, analyze: bool, findings: list) -> None:
     actual_rows = node.get("Actual Rows") if analyze else None
     relation = _node_relation(node)
 
-    # Sequential scan on a large table — the #1 candidate for a missing index.
+    # Sequential scan on a large table, the #1 candidate for a missing index.
     if node_type == "Seq Scan" and plan_rows >= _SEQ_SCAN_ROW_THRESHOLD:
         findings.append({
             "severity": "high",
@@ -225,7 +225,7 @@ def _analyze_node(node: dict, analyze: bool, findings: list) -> None:
             "relation": relation,
         })
 
-    # Row estimate miss (analyze only) — planner expected N, got something 10x+ off.
+    # Row estimate miss (analyze only): planner expected N, got something 10x+ off.
     # This is the strongest signal for stale statistics or a missing index.
     if analyze and actual_rows is not None:
         hi = max(actual_rows, plan_rows)
@@ -236,12 +236,12 @@ def _analyze_node(node: dict, analyze: bool, findings: list) -> None:
                 "severity": "medium",
                 "issue": f"Planner row estimate off by {factor}x",
                 "detail": f"{node_type} estimated {plan_rows} rows but actually produced "
-                          f"{actual_rows} — likely stale stats (ANALYZE) or a missing index.",
+                          f"{actual_rows}, likely stale stats (ANALYZE) or a missing index.",
                 "node": node_type,
                 "relation": relation,
             })
 
-    # Nested loop over a large outer input — inner side gets rescanned per outer row.
+    # Nested loop over a large outer input: inner side gets rescanned per outer row.
     if node_type == "Nested Loop":
         children = node.get("Plans", []) or []
         outer_rows = (children[0].get("Plan Rows", 0) or 0) if children else 0
@@ -255,13 +255,13 @@ def _analyze_node(node: dict, analyze: bool, findings: list) -> None:
                 "relation": relation,
             })
 
-    # Sort/Hash that spilled to disk — work_mem too small for this operation.
+    # Sort/Hash that spilled to disk: work_mem too small for this operation.
     sort_method = node.get("Sort Method", "") or ""
     if sort_method and ("external" in sort_method.lower() or "disk" in sort_method.lower()):
         findings.append({
             "severity": "medium",
             "issue": "Operation spilled to disk",
-            "detail": f"{node_type} used '{sort_method}' — work_mem was too small and it spilled to disk.",
+            "detail": f"{node_type} used '{sort_method}', work_mem was too small and it spilled to disk.",
             "node": node_type,
             "relation": relation,
         })
@@ -569,13 +569,13 @@ def _explain_mysql(cache: CacheClient, cluster_id: str, inner: str, analyze: boo
 def explain_plan_impl(cache: CacheClient, cluster_id: str, sql: str, analyze: bool = False) -> dict:
     """Run EXPLAIN on a target Aurora cluster and parse the plan into structured analysis.
 
-    analyze=False (default): EXPLAIN (FORMAT JSON, VERBOSE) — plans only, does NOT
+    analyze=False (default): EXPLAIN (FORMAT JSON, VERBOSE), plans only, does NOT
         execute the query. Safe and instant; use this for "why might this be slow".
-    analyze=True: EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) — ACTUALLY RUNS
+    analyze=True: EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON), ACTUALLY RUNS
         the SELECT to capture real timings and row counts. Use only when you need
         the planner-vs-reality comparison (row estimate misses, disk spills).
 
-    Only SELECT / WITH...SELECT is accepted — EXPLAIN ANALYZE on a write statement
+    Only SELECT / WITH...SELECT is accepted: EXPLAIN ANALYZE on a write statement
     would mutate the target, so non-SELECT input is rejected outright.
 
     On Aurora MySQL the statement becomes `EXPLAIN FORMAT=JSON` and the MySQL
@@ -588,7 +588,7 @@ def explain_plan_impl(cache: CacheClient, cluster_id: str, sql: str, analyze: bo
     if not _is_select(inner):
         return {"status": "rejected", "reason": "explain_plan only supports SELECT / WITH...SELECT"}
 
-    # analyze=True EXECUTES the statement. A SELECT prefix isn't enough — a
+    # analyze=True EXECUTES the statement. A SELECT prefix isn't enough: a
     # data-modifying CTE (`WITH x AS (DELETE ... RETURNING *) SELECT ...`) or a
     # side-effecting function (pg_terminate_backend, etc.) would actually run.
     # Gate it on the shared read-only-safe check; plan-only (analyze=False) never
@@ -700,7 +700,7 @@ def explain_plan_impl(cache: CacheClient, cluster_id: str, sql: str, analyze: bo
         expensive_nodes.append(entry)
 
     # Plan-history (C3): structural signature capture + flip-vs-growth comparison
-    # against the last EXPLAIN of this query. Best-effort — a cache write failure
+    # against the last EXPLAIN of this query. Best-effort: a cache write failure
     # must never break the analysis result.
     plan_change = None
     try:

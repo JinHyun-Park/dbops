@@ -45,8 +45,8 @@ function gsiOf(dimensions?: string | null): string | null {
 }
 
 /** Table-level points only: dimensions null/`{}` (and not a per-GSI point).
- *  Non-GSI metrics (latency, provisioned, returned_item_count) are unaffected
- *  — they never carry a gsi dimension, so this is a no-op for them. */
+ *  Non-GSI metrics (latency, provisioned, returned_item_count) are unaffected:
+ *  they never carry a gsi dimension, so this is a no-op for them. */
 function tableLevelPoints(pts: Point[]): Point[] {
   return pts.filter((p) => gsiOf(p.dimensions) === null);
 }
@@ -144,7 +144,7 @@ function projectionLabel(
   projection?: string | null,
   attrs?: string[] | null,
 ): string {
-  if (!projection) return "—";
+  if (!projection) return "-";
   if (projection === "INCLUDE" && attrs && attrs.length > 0) {
     return `INCLUDE (${attrs.join(", ")})`;
   }
@@ -441,12 +441,12 @@ export function DynamodbOverviewPanel({
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             <StatTile
               label="Billing Mode"
-              value={details?.billing_mode ?? "—"}
+              value={details?.billing_mode ?? "-"}
             />
             <StatTile
               label="아이템 수"
               value={
-                details?.item_count != null ? fmtExact(details.item_count) : "—"
+                details?.item_count != null ? fmtExact(details.item_count) : "-"
               }
             />
             <StatTile
@@ -454,12 +454,12 @@ export function DynamodbOverviewPanel({
               value={
                 details?.table_size_bytes != null
                   ? fmtBytes(details.table_size_bytes)
-                  : "—"
+                  : "-"
               }
             />
             <StatTile
               label="Table Status"
-              value={details?.table_status ?? "—"}
+              value={details?.table_status ?? "-"}
             />
           </div>
         )}
@@ -544,7 +544,7 @@ export function DynamodbOverviewPanel({
                           </span>
                         ) : null}
                         {!g.partition_key && !g.sort_key && (
-                          <span className="text-zinc-600">—</span>
+                          <span className="text-zinc-600">-</span>
                         )}
                       </div>
                     </td>
@@ -559,7 +559,7 @@ export function DynamodbOverviewPanel({
                             : "text-zinc-400"
                         }
                       >
-                        {g.status ?? "—"}
+                        {g.status ?? "-"}
                       </span>
                     </td>
                     <td className="py-2 text-right text-zinc-400 align-top whitespace-nowrap">
@@ -573,7 +573,7 @@ export function DynamodbOverviewPanel({
                           )}
                         </span>
                       ) : (
-                        "—"
+                        "-"
                       )}
                     </td>
                   </tr>
@@ -631,7 +631,7 @@ export function DynamodbOverviewPanel({
                             )}
                           </span>
                         ) : (
-                          <span className="text-zinc-600">—</span>
+                          <span className="text-zinc-600">-</span>
                         )}
                       </td>
                       <td className="py-2 text-zinc-400 align-top max-w-[200px] break-words">
@@ -777,7 +777,7 @@ export function DynamodbOverviewPanel({
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <MiniChart
-                    title={`${g} — Consumed RCU/WCU`}
+                    title={`${g}: Consumed RCU/WCU`}
                     series={[
                       {
                         name: "consumed_rcu",
@@ -794,7 +794,7 @@ export function DynamodbOverviewPanel({
                     colors={chart}
                   />
                   <MiniChart
-                    title={`${g} — Throttle Events`}
+                    title={`${g}: Throttle Events`}
                     series={[
                       {
                         name: "read_throttle_events",

@@ -1,6 +1,6 @@
 """Multi-team cluster-visibility overlay.
 
-VENDORED MODULE — keep byte-identical across all api/*/tenancy.py copies
+VENDORED MODULE: keep byte-identical across all api/*/tenancy.py copies
 (tests/unit/api/test_tenancy_parity.py enforces this). api/ Lambdas are
 independent packages and cannot share imports, so the overlay is copied, like
 engine_family.py.
@@ -41,7 +41,7 @@ def _claims(event):
 
 
 def is_admin(event):
-    """Mirror api/clusters/handler.py::_is_admin — admin if dbops-admin in
+    """Mirror api/clusters/handler.py::_is_admin: admin if dbops-admin in
     groups OR no groups at all; fail-closed on missing/invalid bearer."""
     claims = _claims(event)
     if not claims:
@@ -113,7 +113,7 @@ def visible_set_from_registry(event):
     """Convenience for LIST handlers that don't already hold the cluster
     registry: scan CLUSTERS_TABLE for {cluster_id, team_id} and return the
     visible cluster_id set. None for admins (no filter). On a registry-scan
-    failure returns None (fail-open to current behavior — consistent with the
+    failure returns None (fail-open to current behavior, consistent with the
     fleet filter; a transient DDB outage must not blank a list)."""
     if is_admin(event):
         return None

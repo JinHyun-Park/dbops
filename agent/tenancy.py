@@ -2,8 +2,8 @@
 
 Resolves the caller's identity from a JWKS-VERIFIED Cognito ID token the
 frontend passes in the INVOCATION PAYLOAD (`payload["id_token"]`). AgentCore's
-managed data plane does NOT forward the inbound `Authorization` header — nor any
-custom request header — to the agent container (verified empirically:
+managed data plane does NOT forward the inbound `Authorization` header (nor any
+custom request header) to the agent container (verified empirically:
 `context.request_headers` is empty). The invocation body, however, always
 reaches the agent, so the ID token rides there as a dedicated field.
 
@@ -12,7 +12,7 @@ Cognito's JWKS (signature + issuer + audience + expiry + token_use=id) before an
 claim is trusted. An unverifiable / forged / absent token yields no trusted
 claims, which the visibility logic treats as a no-team viewer (unassigned
 clusters only). A forged admin token can never grant access because it fails
-signature verification — the only way to be recognized as admin or a team member
+signature verification: the only way to be recognized as admin or a team member
 is a genuine, Cognito-signed token.
 
 Returns the set of cluster_ids the caller may see, or None for admins
@@ -29,7 +29,7 @@ ADMIN_GROUP = "dbops-admin"
 
 log = logging.getLogger("dbops.agent.tenancy")
 
-_jwks_client = None  # cached PyJWKClient — fetches Cognito JWKS once per container
+_jwks_client = None  # cached PyJWKClient: fetches Cognito JWKS once per container
 
 
 def _cognito_issuer():
@@ -118,7 +118,7 @@ def _my_team_ids(username):
 def actor_id_for(id_token):
     """Stable per-user identity for AgentCore Memory (the ``actor_id`` that scopes
     LTM facts/preferences/summaries). Returns the JWKS-verified Cognito
-    username/sub, or None when the token is absent/unverifiable — the caller then
+    username/sub, or None when the token is absent/unverifiable. The caller then
     skips Memory wiring rather than mis-attributing one user's memory to another."""
     claims = _verify_token(id_token or "")
     if not claims:
@@ -131,7 +131,7 @@ def visible_cluster_ids_for(id_token):
     ID token, passed in the invocation payload. None => admin / all clusters (no
     restriction). Else the set of cluster_ids the caller may see (unassigned +
     their teams'). Unverified / absent token => a non-admin with no teams
-    (unassigned clusters only — the default-open baseline; a forged token cannot
+    (unassigned clusters only, the default-open baseline; a forged token cannot
     escalate because verification fails). Registry-scan failure => None (fail-open;
     never break chat on a DDB outage)."""
     claims = _verify_token(id_token or "")

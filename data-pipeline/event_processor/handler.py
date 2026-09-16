@@ -18,7 +18,7 @@ import os
 
 import boto3
 
-# CloudTrail API names that change cluster state — we surface these as warnings
+# CloudTrail API names that change cluster state: we surface these as warnings
 # so an operator sees the destructive ones at a glance.
 _WRITE_API_PATTERNS = (
     "create", "delete", "modify", "reboot", "failover", "restore", "stop", "start",
@@ -50,9 +50,9 @@ def _classify_rds(detail: dict, detail_type: str) -> tuple[str, str, str]:
             msg_parts.append(f"on {identifier}")
         msg_parts.append(f"by {actor}")
         message = " ".join(msg_parts)
-        # If the API call failed, AWS sets errorCode/errorMessage — bump severity.
+        # If the API call failed, AWS sets errorCode/errorMessage. Bump severity.
         if detail.get("errorCode"):
-            return action, f"{message} — error: {detail['errorCode']}", "warning"
+            return action, f"{message} (error: {detail['errorCode']})", "warning"
         # Write actions get warning, read actions stay info.
         if any(p in action.lower() for p in _WRITE_API_PATTERNS):
             return action, message, "warning"

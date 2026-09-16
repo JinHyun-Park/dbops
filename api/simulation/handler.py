@@ -1,4 +1,4 @@
-"""Simulation REST API — exposes the Simulation MCP tool surface to the
+"""Simulation REST API: exposes the Simulation MCP tool surface to the
 dashboard UI.
 
 The agent path (AgentCore Gateway → MCP) still serves these tools to the
@@ -34,7 +34,7 @@ from rds_instance_pricing import price_rds_instance_hour, price_rds_storage_mont
 from upgrade_estimator import classify_upgrade, estimate_upgrade
 
 # ---------------------------------------------------------------------------
-# Cache (PG) helper — minimal Data API wrapper. Inlined rather than imported
+# Cache (PG) helper: minimal Data API wrapper. Inlined rather than imported
 # from mcp-servers to keep this Lambda's code asset self-contained.
 # ---------------------------------------------------------------------------
 
@@ -66,7 +66,7 @@ def _cache_query(sql: str, params: dict | None = None) -> list[dict]:
         parameters=sql_params,
         # REQUIRED: without this the Data API omits columnMetadata, so the
         # column-name → value mapping below produces empty dict rows and every
-        # name-based .get() returns None. (Latent bug — all REST simulation
+        # name-based .get() returns None. (Latent bug: all REST simulation
         # cache reads silently returned empty until the DynamoDB cost tool, which
         # has no live-describe fallback, surfaced it.)
         includeResultMetadata=True,
@@ -88,7 +88,7 @@ def _cache_query(sql: str, params: dict | None = None) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Cluster registry lookup — for tenancy gate
+# Cluster registry lookup: for tenancy gate
 # ---------------------------------------------------------------------------
 
 
@@ -183,7 +183,7 @@ def _resolve_upgrade_readers(cluster_id: str) -> int:
 def _resolve_table_count(cluster_id: str):
     """Object-count proxy: distinct tables in the latest table_stats snapshot.
 
-    Object count — not raw storage — dominates MAJOR upgrade duration, so we
+    Object count (not raw storage) dominates MAJOR upgrade duration, so we
     read it from the ETL's ``table_stats`` cache. Returns ``None`` when
     unavailable so the estimator flags low confidence rather than assuming 0.
     """
@@ -293,7 +293,7 @@ def _generate_upgrade_plan(
     # engine-family gate, so a registered rds_instance cluster reaches here.
     upgrade_type = classify_upgrade(current_version, target_version, engine)
     is_major = upgrade_type == "major"
-    # Engine from cluster_meta (authoritative) — a MySQL major must NOT get a
+    # Engine from cluster_meta (authoritative): a MySQL major must NOT get a
     # PG-only pg_upgrade step.
     is_postgres = "postgres" in engine.lower()
 
@@ -359,7 +359,7 @@ def _generate_upgrade_plan(
                 f"리더 {readers}개가 함께 업그레이드된 뒤 replica lag, 복제 상태 점검",
             )
         add("검증", "버전 확인, 애플리케이션 정상 동작 확인")
-        rollback = "스냅샷 복원으로만 롤백 가능 — 시간 소요. 적용 전 스냅샷 필수."
+        rollback = "스냅샷 복원으로만 롤백 가능. 시간 소요. 적용 전 스냅샷 필수."
 
     # Time from the shared object-count-driven model (not len(steps)*5).
     est = estimate_upgrade(
@@ -399,7 +399,7 @@ def _generate_upgrade_plan(
 def _simulate_parameter_change(
     cluster_id: str, parameter_name: str, new_value: str
 ) -> dict:
-    """REST mirror — reads the cluster's LIVE parameter group (same shared
+    """REST mirror: reads the cluster's LIVE parameter group (same shared
     derivation as the MCP tool) instead of a static catalog, so the dashboard
     reports the real ApplyType/IsModifiable/AllowedValues. Degrades to the
     coarse heuristic only when the live describe is unavailable.
@@ -659,7 +659,7 @@ def _scaling_serverless(
     basis_phrase = (
         f"관측 평균 {round(observed_acu, 2)} ACU 기준({acu_basis_note})"
         if observed_acu is not None
-        else f"중간값 ACU 기준 추정({acu_basis_note} — 관측 ACU 없음)"
+        else f"중간값 ACU 기준 추정({acu_basis_note}, 관측 ACU 없음)"
     )
 
     return {
@@ -793,7 +793,7 @@ def _scaling_provisioned(
 # ---------------------------------------------------------------------------
 
 def _simulate_ddl_impact(cluster_id: str, ddl_sql: str) -> dict:
-    """REST mirror of the DDL impact tool — shares the object/size + instance-
+    """REST mirror of the DDL impact tool: shares the object/size + instance-
     derived-throughput model with the MCP tool (no more row_count/100k*5)."""
     table = resolve_table(ddl_sql)
 
@@ -939,7 +939,7 @@ def _ddb_provisioned(cluster_id: str):
 def _simulate_dynamodb_capacity_cost(
     cluster_id: str, headroom: float = 0.70, window_hours: float = 168
 ) -> dict:
-    """REST mirror of the MCP tool — gathers the consumed series + billing
+    """REST mirror of the MCP tool: gathers the consumed series + billing
     mode/region from the cache, resolves both modes' prices via the Price List
     API, and delegates the math to the shared compute. Same JSON shape as the
     MCP tool; never fabricates a dollar number (partial/fallback on a miss)."""
@@ -988,7 +988,7 @@ def _simulate_elasticache_node_resize(
     new_node_count: int | None = None,
 ) -> dict:
     """Estimate the monthly cost impact of resizing an ElastiCache node type or
-    count using REAL AWS pricing (Price List API — same source as the MCP tool).
+    count using REAL AWS pricing (Price List API, same source as the MCP tool).
 
     The cluster's current node type + count are resolved live from
     DescribeReplicationGroups in the local account (the ElastiCache cluster
@@ -1023,7 +1023,7 @@ def _simulate_elasticache_node_resize(
         rd = rd_raw
 
     engine = (rd.get("engine") or row.get("engine") or "redis").lower()
-    # Strip "elasticache" wrapper — the underlying engine is redis/valkey/memcached.
+    # Strip "elasticache" wrapper: the underlying engine is redis/valkey/memcached.
     if engine == "elasticache":
         engine = "redis"
     cluster_region = row.get("region") or region
@@ -1034,7 +1034,7 @@ def _simulate_elasticache_node_resize(
     cur_count: int = 1
     describe_err: str | None = None
     try:
-        # Region-scope the client to the cluster's registered region — pricing
+        # Region-scope the client to the cluster's registered region: pricing
         # already uses cluster_region, so describing in the Lambda's default
         # region would mis-resolve a cross-region cluster (not found → a
         # misleading "partial" while pricing was computed for the real region).
@@ -1053,7 +1053,7 @@ def _simulate_elasticache_node_resize(
         describe_err = "라이브 클러스터 조회에 실패했습니다 (자세한 원인은 서버 로그를 확인하세요)"
 
     if cur_type is None and describe_err is None:
-        # describe succeeded but group not found — a genuinely different, and
+        # describe succeeded but group not found: a genuinely different, and
         # more actionable, verdict than a failed describe.
         describe_err = "해당 이름의 replication group을 찾을 수 없습니다"
 
@@ -1150,7 +1150,7 @@ def _simulate_elasticache_node_resize(
 # ---------------------------------------------------------------------------
 
 # T-family size tokens ("micro"/"small") prepended for rds_instance (RDS
-# MySQL/SQL Server) — no Aurora class uses those, so this is additive.
+# MySQL/SQL Server): no Aurora class uses those, so this is additive.
 _SIZE_LADDER = [
     "micro", "small", "medium", "large", "xlarge", "2xlarge", "4xlarge", "8xlarge",
     "12xlarge", "16xlarge", "24xlarge", "32xlarge", "48xlarge",
@@ -1212,7 +1212,7 @@ def _ladder_direction(cur_class, target):
 def _rds_license_note(engine):
     e = (engine or "").lower()
     if e == "sqlserver-ex":
-        return "SQL Server Express — 라이선스 비용 $0 (License Included 요율에 반영)"
+        return "SQL Server Express: 라이선스 비용 $0 (License Included 요율에 반영)"
     if e.startswith("sqlserver"):
         return "SQL Server 라이선스는 License Included 인스턴스 요율에 포함되어 가격에 반영됨"
     return None
@@ -1226,7 +1226,7 @@ def _simulate_rds_instance_rightsizing(
 ) -> dict:
     """CW-driven RDS-instance (MySQL/SQL Server) right-sizing with real Price
     List cost delta. Read-only. Faithful REST mirror of the MCP tool
-    simulate_rds_instance_rightsizing_impl — reads cluster_meta + metric_snapshots
+    simulate_rds_instance_rightsizing_impl: reads cluster_meta + metric_snapshots
     via the cache (Data API) instead of the mcp_servers cache client.
     Never fabricates a price: any null unit price → pricing_source
     'fallback_estimate' and null costs."""
@@ -1323,18 +1323,18 @@ def _simulate_rds_instance_rightsizing(
     elif cpu_p95 >= 80:
         target = _next_class_up(cur_class) or cur_class
         action = "upsize" if target != cur_class else "hold"
-        reason = f"CPU p95 {util['cpu_p95']}% — 한 단계 확대 권장"
+        reason = f"CPU p95 {util['cpu_p95']}%: 한 단계 확대 권장"
     elif cpu_p95 <= min(40 * headroom / 0.5, 75) and conn_peak < 50:
         down = _next_class_down(cur_class)
         target, action = (down, "downsize") if down else (cur_class, "hold")
-        reason = (f"CPU p95 {util['cpu_p95']}%, 커넥션 최대 {util['conn_peak']} — 한 단계 축소 여력"
-                  if down else "이미 최소 클래스 — 축소 불가")
+        reason = (f"CPU p95 {util['cpu_p95']}%, 커넥션 최대 {util['conn_peak']}: 한 단계 축소 여력"
+                  if down else "이미 최소 클래스: 축소 불가")
     else:
-        target, action, reason = cur_class, "hold", f"CPU p95 {util['cpu_p95']}% — 현행 유지 적정"
+        target, action, reason = cur_class, "hold", f"CPU p95 {util['cpu_p95']}%, 현행 유지 적정"
 
     # edition is resolved INSIDE price_rds_instance_hour from the registry engine
     # (via _RDS_EDITION_LABEL → the Price List `databaseEdition`). Passing the raw
-    # engine string ("sqlserver-ex") as edition would match zero SKUs — leave it
+    # engine string ("sqlserver-ex") as edition would match zero SKUs: leave it
     # unset and let the helper map it (matching the pricing module's convention).
     cur_hr = price_rds_instance_hour(region, engine, cur_class, multi_az=multi_az)
     tgt_hr = price_rds_instance_hour(region, engine, target, multi_az=multi_az)
@@ -1425,7 +1425,7 @@ def lambda_handler(event, context):
         if raw_path.endswith("/parameter-catalog"):
             return _response(200, {"parameters": _parameter_catalog()}, origin)
 
-        # POST routes — all simulation tools accept a JSON body so the UI
+        # POST routes: all simulation tools accept a JSON body so the UI
         # can send rich payloads (long DDL strings, decimals for ACU) without
         # URL encoding.
         body = _parse_body(event)

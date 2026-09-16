@@ -9,7 +9,7 @@
 
 핸들러에 파라미터를 추가하면 이 테스트가 스키마 추가를 강제한다. 반대
 방향(스키마에만 있는 파라미터)은 핸들러가 **kwargs 없이 TypeError를 내므로
-역시 잡는다. cdk 패키지 임포트 없이 텍스트 파싱 — CI에 aws-cdk 불필요.
+역시 잡는다. cdk 패키지 임포트 없이 텍스트 파싱하므로 CI에 aws-cdk는 불필요.
 """
 
 import ast
@@ -23,7 +23,7 @@ _CEDAR_ROOT = _REPO / "cdk" / "policies" / "cedar"
 
 # READ-ONLY MCP 서버 → 그 서버 전 툴이 permit 되어야 하는 Cedar 정책 파일.
 # 이 서버들은 모든 툴이 read-only이므로 단일 permit allowlist에 전부 들어가야
-# 한다(performance/incident는 진단 read, simulation은 what-if 추정만 — 변경
+# 한다(performance/incident는 진단 read, simulation은 what-if 추정만, 변경
 # 없음). operations는 MIXED(write는 approved=true 필요)라 정책 구조가 달라 이
 # 불변식에서 의도적으로 제외한다.
 _READONLY_POLICY = {
@@ -88,15 +88,15 @@ def _parse_handler_tools(server: str) -> set[str]:
 
 
 # AgentCore Cedar grants come in two forms (see cdk/policies/README.md):
-#   • target-wide — `action in AgentCore::Action::"__TARGET__"` permits EVERY
+#   • target-wide: `action in AgentCore::Action::"__TARGET__"` permits EVERY
 #     tool on the target. This is the LOG_ONLY rollout form all policies use now.
-#   • per-tool    — `AgentCore::Action::"<target>___<tool>"` (THREE underscores)
+#   • per-tool:    `AgentCore::Action::"<target>___<tool>"` (THREE underscores)
 #     permits one tool. This is the ENFORCE refinement form (STEP 2).
 _TARGET_WIDE_RE = re.compile(r'action\s+in\s+AgentCore::Action::"__TARGET__"')
 
 
 def _policy_permits_all_tools(policy_file: str) -> bool:
-    """True when the policy grants its whole target — which covers every tool on
+    """True when the policy grants its whole target, which covers every tool on
     that target, so no per-tool allowlisting is needed (the LOG_ONLY form)."""
     src = (_CEDAR_ROOT / policy_file).read_text()
     return bool(_TARGET_WIDE_RE.search(src))
@@ -139,7 +139,7 @@ def test_every_readonly_tool_is_permitted_in_cedar_policy():
         if missing:
             problems.append(f"{server} ({policy_file}): allowlist 누락 {missing}")
     assert not problems, (
-        "READ-ONLY 툴이 Cedar permit allowlist에 없음 — Gateway 기본 DENY에서 "
+        "READ-ONLY 툴이 Cedar permit allowlist에 없음: Gateway 기본 DENY에서 "
         "차단됩니다. cdk/policies/cedar/*.cedar에 Action을 추가하세요:\n"
         + "\n".join(problems)
     )
@@ -147,13 +147,13 @@ def test_every_readonly_tool_is_permitted_in_cedar_policy():
 
 def test_nosql_write_actions_in_operations_cedar_write_block():
     """The 5 NoSQL write actions (multi-engine #P3.6 Group C) must be in the
-    operations Cedar policy — otherwise the Gateway default-DENY silently blocks
+    operations Cedar policy, otherwise the Gateway default-DENY silently blocks
     them despite the handler + guard being complete (same failure family as the
     create_snapshot/restore_cluster + request_approval Explore findings).
 
     Under the LOG_ONLY rollout the operations policy is a single target-wide
-    permit, which already covers every operations tool (incl. the NoSQL writes)
-    — actual write-gating lives in the tool-level approval_guard, and per-tool
+    permit, which already covers every operations tool (incl. the NoSQL writes).
+    Actual write-gating lives in the tool-level approval_guard, and per-tool
     Cedar `approved==true` conditions are the ENFORCE/STEP-2 refinement. Once
     that refinement lands (per-tool grants), this test enforces each required
     action is present."""
@@ -175,7 +175,7 @@ def test_nosql_write_actions_in_operations_cedar_write_block():
     }
     missing = sorted(required - actions)
     assert not missing, (
-        "operations_policy.cedar에 누락된 Action — Gateway 기본 DENY에서 차단됩니다: "
+        "operations_policy.cedar에 누락된 Action. Gateway 기본 DENY에서 차단됩니다: "
         + ", ".join(missing)
     )
 
@@ -196,6 +196,6 @@ def test_every_handler_param_is_exposed_in_gateway_schema():
         if missing:
             problems.append(f"{tool}: 스키마에 누락된 파라미터 {missing}")
     assert not problems, (
-        "핸들러↔스키마 불일치 — cdk/tool_definitions.py에 노출하거나 "
+        "핸들러↔스키마 불일치: cdk/tool_definitions.py에 노출하거나 "
         "_INTENTIONALLY_HIDDEN에 사유와 함께 등록하세요:\n" + "\n".join(problems)
     )

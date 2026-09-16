@@ -35,7 +35,7 @@ interface Props {
   externalLoading?: boolean;
 }
 
-// Wait-event series palette — 10 hues that read clearly on the dark zinc
+// Wait-event series palette: 10 hues that read clearly on the dark zinc
 // background. The light variant uses the matching -700/-800 tier of each
 // hue so all series stay above 4.5:1 against the cream + white surfaces.
 const WAIT_COLORS_DARK = [

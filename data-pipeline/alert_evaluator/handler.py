@@ -105,7 +105,7 @@ def _dashboard_url(rule: dict, path: str = "/dashboard") -> str:
 
 
 def _build_slack_payload(rule: dict, latest: float) -> dict:
-    """Slack Block Kit — color-coded section + dashboard/alerts/timeline
+    """Slack Block Kit: color-coded section + dashboard/alerts/timeline
     buttons. The "Open timeline" button is the highest-value link at 3am
     because it shows the cluster's full incident context (alerts +
     schema changes + RDS events + writes) in one screen instead of three.
@@ -131,9 +131,9 @@ def _build_slack_payload(rule: dict, latest: float) -> dict:
             ],
         },
     ]
-    # Deep-link buttons — only when FRONTEND_URL is set so users without a
+    # Deep-link buttons: only when FRONTEND_URL is set so users without a
     # deployed CloudFront domain still get a usable message. The Ack button
-    # is added regardless of FRONTEND_URL — DBAs can close out a page from
+    # is added regardless of FRONTEND_URL: DBAs can close out a page from
     # a phone without opening the console.
     action_elements: list[dict] = [
         {
@@ -185,7 +185,7 @@ def _build_slack_payload(rule: dict, latest: float) -> dict:
 
 
 def _build_teams_payload(rule: dict, latest: float) -> dict:
-    """Teams MessageCard mirroring _build_slack_payload — facts + OpenUri deep
+    """Teams MessageCard mirroring _build_slack_payload: facts + OpenUri deep
     links. MessageCard works with classic Teams Incoming Webhooks."""
     # No severity field on rule; use a fixed warning orange-red.
     theme = "D93F0B"
@@ -225,7 +225,7 @@ def _dedup_window_seconds() -> int:
 
 
 def _build_pagerduty_payload(rule: dict, latest: float, integration_key: str) -> dict:
-    """PagerDuty Events API v2 — dedup_key now uses a TTL bucket so a flapping
+    """PagerDuty Events API v2: dedup_key now uses a TTL bucket so a flapping
     rule re-opens an incident every ALERT_DEDUP_WINDOW_MINUTES (default 30m)
     instead of being silenced for the lifetime of a single incident."""
     window = _dedup_window_seconds()
@@ -409,7 +409,7 @@ def lambda_handler(event, context):
                 if all("no data" in s for s in summaries):
                     skipped += 1
                 continue
-            # Pull a representative observed value — re-resolve the first
+            # Pull a representative observed value: re-resolve the first
             # operand so we have a number to embed in the notification text.
             first_op = (compound.get("operands") or [{}])[0]
             _, latest, _ = _evaluate_operand(q, rule["cluster_id"], first_op)
@@ -419,7 +419,7 @@ def lambda_handler(event, context):
             )
             message = f"{rule['name']}: {joiner.join(summaries)}"
         else:
-            # Legacy single-threshold path — unchanged.
+            # Legacy single-threshold path: unchanged.
             # Carries the TIMESTAMP of the peak, not just its value. MAX(value)
             # alone discarded when the breach happened, which is what made every
             # auto-RCA anchor on task-execution time and diagnose the recovery
@@ -452,7 +452,7 @@ def lambda_handler(event, context):
                 f"{rule['comparison']} {threshold}"
             )
 
-        # Build the audit-log payload — compound rules carry their full DSL,
+        # Build the audit-log payload: compound rules carry their full DSL,
         # legacy rules just the single threshold. Either way every alert keeps
         # full reproducibility of what fired.
         raw_event = {

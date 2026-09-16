@@ -86,7 +86,7 @@ def test_modify_parameter_with_approval(mock_rds_for):
     assert call_kwargs["DBClusterParameterGroupName"] == CUSTOM_PG
     assert call_kwargs["Parameters"][0]["ParameterName"] == "max_connections"
     assert call_kwargs["Parameters"][0]["ParameterValue"] == "200"
-    # pending-reboot 안내가 결과에 포함돼야 한다 — 에이전트가 "재시작 후
+    # pending-reboot 안내가 결과에 포함돼야 한다. 에이전트가 "재시작 후
     # 적용"을 사용자에게 전달하게 하는 핵심(승인 후 즉시 반영 오해 방지).
     assert call_kwargs["Parameters"][0]["ApplyMethod"] == "pending-reboot"
     assert result["apply_method"] == "pending-reboot"
@@ -282,7 +282,7 @@ def test_unknown_parameter_is_refused_before_the_approval_is_consumed(
         mock_rds_for, mock_verify):
     """A name the engine family does not have is accepted by
     modify_db_cluster_parameter_group into a group nothing reads, or rejected
-    outright — either way the DBA's approval must not pay for finding out."""
+    outright. Either way, the DBA's approval must not pay for finding out."""
     mock_verify.return_value = {"ok": True}
     mock_rds = _rds(params=[P_OK])
     mock_rds_for.return_value = mock_rds

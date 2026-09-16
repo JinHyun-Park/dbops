@@ -172,7 +172,7 @@ def test_uses_parameterized_ilike_query():
 
 def test_semantic_search_when_embedding_available(monkeypatch):
     """When the symptoms embed, the tool does a pgvector cosine search (<=>) and
-    tags each hit with a similarity score — not the keyword ILIKE path."""
+    tags each hit with a similarity score, not the keyword ILIKE path."""
     monkeypatch.setattr(si, "_embed", lambda *_a, **_k: "[0.1,0.2,0.3]")
     mock_cache = MagicMock()
     event_rows = QueryResult(

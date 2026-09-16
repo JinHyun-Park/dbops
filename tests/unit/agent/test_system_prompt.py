@@ -1,4 +1,4 @@
-"""Tests for build_system_prompt(extra_context, visible_clusters) — Task 3 tenancy.
+"""Tests for build_system_prompt(extra_context, visible_clusters): Task 3 tenancy.
 
 Loaded via importlib to avoid importing the agent package directly (which would
 create __pycache__ under agent/ and cause AgentCore Runtime deploy failures).

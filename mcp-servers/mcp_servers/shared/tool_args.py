@@ -1,4 +1,4 @@
-"""tool_args — turn an argument mistake into something the caller can fix itself.
+"""tool_args: turn an argument mistake into something the caller can fix itself.
 
 THE PROBLEM
 -----------

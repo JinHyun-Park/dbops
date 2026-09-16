@@ -1,8 +1,8 @@
-"""modify_dynamodb_ttl — approval-gated DynamoDB TTL change (update_time_to_live).
+"""modify_dynamodb_ttl: approval-gated DynamoDB TTL change (update_time_to_live).
 
 Enables or disables an attribute TTL. Idempotent: if the table is already in the
 requested state the tool reports `skipped` without burning the write (AWS also
-rejects re-enabling an already-enabled TTL). Approval-gated and TOCTOU-safe — the
+rejects re-enabling an already-enabled TTL). Approval-gated and TOCTOU-safe: the
 execute-time re-read confirms the table hasn't drifted from the approved state.
 Cross-account via `client_for_cluster`. Never raises into the caller, and never
 returns raw exception text: static Korean reason + module logger (an AWS error

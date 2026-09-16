@@ -27,7 +27,7 @@ class _PipLocalBundling:
     the RDS/DocDB CA bundle.
 
     CDK's default path bundles inside Docker, but Docker isn't always available
-    (CI / the demo host) — and the tests/cdk synth smoke test must stay
+    (CI / the demo host), and the tests/cdk synth smoke test must stay
     Docker-free. If local `pip` is present we build the asset on the host
     (pip install the linux manylinux wheels for py3.12 + copy source + fetch the
     CA); otherwise try_bundle returns False and CDK falls back to Docker.

@@ -51,7 +51,7 @@ def _hash_schema_dir(rel_path: str) -> str:
     migration file auto-triggers a re-run on the next `cdk deploy`.
 
     Falls back to a sentinel string if the directory is missing so synth
-    doesn't fail in a partial checkout — the migrator will simply not
+    doesn't fail in a partial checkout: the migrator will simply not
     pick up new schema until the directory exists again.
     """
     base = Path(__file__).resolve().parent.parent / rel_path
@@ -122,10 +122,10 @@ class DataStack(cdk.Stack):
         )
 
         # Archive bucket (S3 Tables / Iceberg + report exports). Without a
-        # lifecycle it grows unbounded — old archived metrics/reports are rarely
+        # lifecycle it grows unbounded: old archived metrics/reports are rarely
         # read, so tier them down to cheaper storage automatically. Retention
         # (object expiration) is OPT-IN per org via ARCHIVE_RETENTION_DAYS
-        # (default 0 = keep forever — never delete a deployer's audit archive by
+        # (default 0 = keep forever, never delete a deployer's audit archive by
         # surprise); transitions always run (pure cost savings, no data loss).
         _retention_days = getattr(Settings, "ARCHIVE_RETENTION_DAYS", 0)
         self.archive_bucket = s3.Bucket(
@@ -166,7 +166,7 @@ class DataStack(cdk.Stack):
             ],
         )
 
-        # Schema migrator — runs all schema_v*.sql on stack create/update via Custom Resource.
+        # Schema migrator: runs all schema_v*.sql on stack create/update via Custom Resource.
         # This replaces the manual `aws rds-data execute-statement` loop from deploy.sh.
         self.schema_migrator = lambda_.Function(
             self, "SchemaMigrator",
@@ -182,7 +182,7 @@ class DataStack(cdk.Stack):
         )
         self.cache_db.secret.grant_read(self.schema_migrator)
         self.cache_db.grant_data_api_access(self.schema_migrator)
-        # Custom Resource: re-run migration on every stack deploy. Idempotent — all DDL
+        # Custom Resource: re-run migration on every stack deploy. Idempotent: all DDL
         # uses IF NOT EXISTS so reruns are safe.
         migrate_provider = cr.Provider(
             self, "SchemaMigratorProvider",
@@ -240,7 +240,7 @@ class DataStack(cdk.Stack):
                      "pi:GetResourceMetrics", "pi:DescribeDimensionKeys",
                      "rds-data:ExecuteStatement", "rds-data:BatchExecuteStatement",
                      "cloudwatch:GetMetricStatistics", "cloudwatch:GetMetricData",
-                     # Cost Explorer — Savings Plan / RI recommendations for the
+                     # Cost Explorer: Savings Plan / RI recommendations for the
                      # cost_savings_plan_opportunity finding. Cached 23h on the
                      # cache DB so the per-call $0.01 fee fires once per day at most.
                      "ce:GetSavingsPlansPurchaseRecommendation",
@@ -291,7 +291,7 @@ class DataStack(cdk.Stack):
         # DocumentDB Mongo-protocol deep-diagnosis collector. UNLIKE the ETL
         # collector (which is NOT in a VPC and only calls public AWS APIs), this
         # one connects to DocumentDB over the Mongo wire protocol on TLS 27017,
-        # which lives inside the private VPC — so it MUST be in-VPC and bundle
+        # which lives inside the private VPC, so it MUST be in-VPC and bundle
         # pymongo + the RDS/DocDB CA (not in the Lambda runtime). It scans the
         # registry for documentdb rows carrying `mongo_secret_arn`, runs a
         # read-only command allowlist, and writes findings/metrics to the cache.
@@ -374,7 +374,7 @@ class DataStack(cdk.Stack):
         ))
         # Per-cluster read-only Mongo creds live in arbitrary Secrets Manager
         # secrets whose ARNs are on the registry rows (mongo_secret_arn), so this
-        # must be resource "*" — the deployer scopes each secret to one RO user.
+        # must be resource "*": the deployer scopes each secret to one RO user.
         self.docdb_mongo_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
             resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
@@ -389,7 +389,7 @@ class DataStack(cdk.Stack):
         # RDS-instance direct collector. Like the DocDB Mongo collector (and
         # UNLIKE the ETL collector, which only calls public AWS APIs), this one
         # connects to the target MySQL over the wire protocol on 3306, which
-        # lives inside the private VPC — so it MUST be in-VPC and bundle pymysql
+        # lives inside the private VPC, so it MUST be in-VPC and bundle pymysql
         # + the RDS CA (not in the Lambda runtime). It scans the registry for
         # rows carrying a db_secret_arn and pulls activity/InnoDB/lock stats.
         rds_direct_sg = ec2.SecurityGroup(
@@ -439,7 +439,7 @@ class DataStack(cdk.Stack):
         foundation.clusters_table.grant_read_data(self.rds_direct_lambda)
         # Per-cluster DB creds live in arbitrary Secrets Manager secrets whose
         # ARNs are on the registry rows (db_secret_arn), so this must be
-        # resource "*" — the deployer scopes each secret to one cluster.
+        # resource "*": the deployer scopes each secret to one cluster.
         self.rds_direct_lambda.add_to_role_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
             resources=[f"arn:aws:secretsmanager:*:{self.account}:secret:*"],
@@ -471,7 +471,7 @@ class DataStack(cdk.Stack):
                 "ALERT_TOPIC_ARN": self.alert_topic.topic_arn,
                 # Slack button / PagerDuty link target. Empty disables the deep-link.
                 "FRONTEND_URL": Settings.FRONTEND_URL,
-                # PagerDuty dedup TTL — same rule re-opens an incident every N minutes.
+                # PagerDuty dedup TTL: same rule re-opens an incident every N minutes.
                 "ALERT_DEDUP_WINDOW_MINUTES": str(Settings.ALERT_DEDUP_WINDOW_MINUTES),
             },
         )
@@ -529,7 +529,7 @@ class DataStack(cdk.Stack):
             targets=[targets.LambdaFunction(self.ash_sampler)],
         )
 
-        # Recurring agent work — reads due scheduled_tasks and enqueues a pending
+        # Recurring agent work: reads due scheduled_tasks and enqueues a pending
         # agent-tasks row for each (the worker then runs the report). Public
         # endpoints only (Data API + DynamoDB), no agent-stack dependency.
         self.task_scheduler = lambda_.Function(
@@ -553,7 +553,7 @@ class DataStack(cdk.Stack):
             targets=[targets.LambdaFunction(self.task_scheduler)],
         )
 
-        # Remediation Outcome Loop — opens a case per emitted recommendation and
+        # Remediation Outcome Loop: opens a case per emitted recommendation and
         # judges whether the symptom resolved (baseline recovery / finding
         # clearance), feeding remediation_outcomes_agg. Public endpoints only.
         self.outcome_evaluator = lambda_.Function(
@@ -638,7 +638,7 @@ class DataStack(cdk.Stack):
         self.archive_bucket.grant_write(self.report_generator)
         self.alert_topic.grant_publish(self.report_generator)
         # NL summary path invokes a Bedrock Claude model. Failure to invoke
-        # falls back to a template, so this permission is best-effort —
+        # falls back to a template, so this permission is best-effort,
         # but without it every report is template-summary which is dull.
         # `application-inference-profile/*` is a THIRD, distinct resource type that
         # `inference-profile/*` does NOT match. REPORT_SUMMARY_MODEL_ID is
@@ -687,7 +687,7 @@ class DataStack(cdk.Stack):
         )
 
         # Restore finalizer (phase 3). RestoreDBCluster* only restores the
-        # cluster volume — the writer instance must be added AFTER the cluster
+        # cluster volume: the writer instance must be added AFTER the cluster
         # reaches `available`, which outlasts the synchronous restore request.
         # This scheduled Lambda scans the registry for `pending_instance` rows
         # and finishes the job: create one db.serverless writer + backfill the
@@ -698,8 +698,8 @@ class DataStack(cdk.Stack):
             handler="handler.lambda_handler",
             code=lambda_.Code.from_asset("../data-pipeline/restore_finalizer"),
             # 150s > the operations Lambda's 120s: the scale-out warm pass invokes
-            # prewarm_reader SYNCHRONOUSLY (Lambda only delivers ClientContext —
-            # which carries the tool name — on RequestResponse, not async Event),
+            # prewarm_reader SYNCHRONOUSLY (Lambda only delivers ClientContext,
+            # which carries the tool name, on RequestResponse, not async Event),
             # and dispatches at most one warm per tick.
             timeout=cdk.Duration.seconds(150),
             environment={
@@ -712,7 +712,7 @@ class DataStack(cdk.Stack):
                 # invokes the operations Lambda's prewarm_reader on approval. The
                 # operations function NAME is a literal derived from Settings.ENV
                 # (the SAME literal agent_stack sets as its function_name) so this
-                # stack takes NO cross-stack reference on agent_stack — that would
+                # stack takes NO cross-stack reference on agent_stack: that would
                 # be a dependency cycle (agent already depends on data).
                 "APPROVALS_TABLE": foundation.approvals_table.table_name,
                 "OPERATIONS_FUNCTION_NAME": f"dbops-{Settings.ENV}-operations-mcp",
@@ -741,7 +741,7 @@ class DataStack(cdk.Stack):
         ))
         # Invoke the operations MCP Lambda's prewarm_reader on an approved
         # scale-out warm. Scoped to the deterministic operations function name
-        # (built from Settings.ENV + pseudo account/region intrinsics — no
+        # (built from Settings.ENV + pseudo account/region intrinsics: no
         # agent_stack token, so no dependency cycle).
         self.restore_finalizer.add_to_role_policy(iam.PolicyStatement(
             actions=["lambda:InvokeFunction"],

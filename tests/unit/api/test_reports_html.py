@@ -1,4 +1,4 @@
-"""Tests for GET /api/reports/{id}/html — presigned URL for the HTML twin."""
+"""Tests for GET /api/reports/{id}/html: presigned URL for the HTML twin."""
 
 import importlib.util
 import json

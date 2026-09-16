@@ -1,4 +1,4 @@
-"""ticketing — pluggable incident/task ticketing seam.
+"""ticketing: pluggable incident/task ticketing seam.
 
 This is an INTEGRATION SEAM, not a working integration. The task worker calls
 ``get_provider().create_ticket(...)`` after a task completes; by default that is

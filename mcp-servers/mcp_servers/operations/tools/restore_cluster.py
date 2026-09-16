@@ -1,8 +1,8 @@
-"""restore_cluster — agent-facing cluster restore (snapshot or PITR).
+"""restore_cluster: agent-facing cluster restore (snapshot or PITR).
 
 This is the most consequential write the agent can initiate: it spins up a
 brand-new Aurora cluster (cost-incurring) from either a snapshot or a
-point in time. It NEVER touches the source cluster — RDS restore APIs are
+point in time. It NEVER touches the source cluster: RDS restore APIs are
 inherently non-destructive to the source, and we additionally refuse to
 reuse the source id as the target.
 
@@ -14,7 +14,7 @@ result is a live, billable cluster.
 The agent only kicks off the restore and registers the new cluster with
 `pending_instance=true`; the restore_finalizer Lambda adds the writer
 instance and finalizes registration once the cluster is available
-(CreateDBInstance can't run until then — see that handler).
+(CreateDBInstance can't run until then, see that handler).
 
 Failures return a STATIC Korean reason and log the detail with the module
 logger: raw exception text must never reach a tool response.
@@ -139,7 +139,7 @@ def restore_cluster_impl(
             "cluster_id": cluster_id,
         }
 
-    # Target id must be valid AND distinct from the source — restore always
+    # Target id must be valid AND distinct from the source: restore always
     # produces a NEW cluster; we never restore in place.
     nid = (new_cluster_id or "").strip()
     if not nid or not _CLUSTER_ID_RE.match(nid) or len(nid) > 63:

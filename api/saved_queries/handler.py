@@ -1,13 +1,13 @@
-"""Saved SQL queries API — durable scratchpad for Query Lab.
+"""Saved SQL queries API: durable scratchpad for Query Lab.
 
 Routes:
-  GET    /api/saved-queries                 — list (?cluster_id, ?tag, ?limit)
-  POST   /api/saved-queries                 — create
-  GET    /api/saved-queries/{id}            — fetch one
-  PUT    /api/saved-queries/{id}            — update (admin-only)
-  DELETE /api/saved-queries/{id}            — delete (admin-only)
+  GET    /api/saved-queries:                  list (?cluster_id, ?tag, ?limit)
+  POST   /api/saved-queries:                  create
+  GET    /api/saved-queries/{id}:             fetch one
+  PUT    /api/saved-queries/{id}:             update (admin-only)
+  DELETE /api/saved-queries/{id}:             delete (admin-only)
 
-The body is plain SQL text. We don't validate SQL syntax here — the
+The body is plain SQL text. We don't validate SQL syntax here: the
 Query Lab editor takes whatever the DBA types and the eventual run
 goes through execute_sql which has its own guardrails.
 """
@@ -21,7 +21,7 @@ import boto3
 import tenancy
 
 # ---------------------------------------------------------------------------
-# Auth helpers — mirror api/runbooks/handler.py
+# Auth helpers: mirror api/runbooks/handler.py
 # ---------------------------------------------------------------------------
 
 
@@ -252,7 +252,7 @@ def _list(event: dict, qsp: dict) -> dict:
         params["cid"] = cluster_id
     if tag:
         # ANY pattern lets a single tag filter match rows whose tag array
-        # contains that tag — no special-case for multi-tag here.
+        # contains that tag, no special-case for multi-tag here.
         clauses.append(":tag = ANY(tags)")
         params["tag"] = tag
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""

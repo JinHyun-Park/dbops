@@ -1,4 +1,4 @@
-"""prewarm_reader — approval-gated Aurora PostgreSQL reader buffer-cache prewarm.
+"""prewarm_reader: approval-gated Aurora PostgreSQL reader buffer-cache prewarm.
 
 A new/cold reader instance has an empty buffer pool, so its first production
 queries hit storage (slow). This tool warms the reader's buffer pool BEFORE it
@@ -6,7 +6,7 @@ takes traffic:
 
   1. (optional) Exclude the reader from a custom endpoint so no prod traffic
      reaches it while cold.
-  2. CREATE EXTENSION IF NOT EXISTS pg_prewarm/pg_buffercache — run on the WRITER
+  2. CREATE EXTENSION IF NOT EXISTS pg_prewarm/pg_buffercache, run on the WRITER
      via RDS Data API (readers are read-only; Aurora shares the catalog through
      storage, so the extensions then exist cluster-wide).
   3. Connect DIRECTLY to the reader INSTANCE endpoint (Data API is cluster-scoped
@@ -19,7 +19,7 @@ Engine gate: the handler positive-gates this tool on the relational-only
 `prewarm` capability, so non-relational engines get unsupported_engine before the
 impl runs. pg_prewarm is PostgreSQL-specific, so the impl additionally refuses
 Aurora MySQL.
-# ponytail: MySQL buffer warming would be scan-based (SELECT the hot tables) —
+# ponytail: MySQL buffer warming would be scan-based (SELECT the hot tables),
 # a different mechanism, explicitly out of scope for v1. Upgrade path: add a
 # MySQL branch that runs `SELECT COUNT(*)`-style table scans if demand appears.
 
@@ -42,18 +42,18 @@ from mcp_servers.shared.managed_tag_preflight import (
 
 # ponytail: cap relations + wall-clock. Lambda timeout is 120s; stop launching
 # new prewarms past the budget and never warm an unbounded number of relations.
-# Ceiling: a huge cold reader won't be fully warmed in one call — re-run to
+# Ceiling: a huge cold reader won't be fully warmed in one call. Re-run to
 # continue, or raise the budget if the Lambda timeout is raised too.
 _TOP_N_CAP = 50
 _WALL_BUDGET_SECONDS = 60
 
 # Direct-connection queries (pg8000, not routed through CacheClient) must carry
-# the /* source=dbops-agent */ audit marker themselves — the CacheClient Data-API
+# the /* source=dbops-agent */ audit marker themselves: the CacheClient Data-API
 # path injects it automatically, but this path does not.
 _SRC = "/* source=dbops-agent */ "
 
 # User relations only. Excluding just pg_catalog/information_schema is NOT
-# enough — pg_toast (and pg_temp*) are separate schemas whose largest members
+# enough: pg_toast (and pg_temp*) are separate schemas whose largest members
 # (e.g. system-catalog TOAST indexes) sort to the top by size, and the Aurora
 # master user (rds_superuser, not a real superuser) can't pg_prewarm system
 # TOAST → the whole run aborts with "permission denied". `left(nspname,3) <>
@@ -125,7 +125,7 @@ def _resolve_reader(rds, cluster_id, reader_instance_id):
     except Exception as e:
         print(f"[prewarm_reader] describe_db_clusters failed for {cluster_id}: {e}")
         return {"status": "error", "cluster_id": cluster_id,
-                "reason": "클러스터 조회에 실패했습니다 — 대상 클러스터 식별자를 확인하세요."}
+                "reason": "클러스터 조회에 실패했습니다. 대상 클러스터 식별자를 확인하세요."}
 
     members = {m.get("DBInstanceIdentifier"): m for m in dbc.get("DBClusterMembers") or []}
     member = members.get(reader_instance_id)
@@ -134,7 +134,7 @@ def _resolve_reader(rds, cluster_id, reader_instance_id):
                 "reason": f"{reader_instance_id!r} 인스턴스가 이 클러스터의 멤버가 아닙니다."}
     if member.get("IsClusterWriter"):
         return {"status": "not_a_reader", "cluster_id": cluster_id,
-                "reason": f"{reader_instance_id!r} 는 writer 인스턴스입니다 — 리더만 예열 대상입니다."}
+                "reason": f"{reader_instance_id!r} 는 writer 인스턴스입니다. 리더만 예열 대상입니다."}
 
     # describe_db_instances filter name is `db-cluster-id` (RDS API).
     try:
@@ -167,9 +167,9 @@ def _endpoint_excluded_members(rds, endpoint_identifier):
 
 
 def _set_reader_excluded(rds, endpoint_identifier, reader_instance_id, excluded):
-    """Add or remove the reader from the endpoint's ExcludedMembers (a set — AWS
+    """Add or remove the reader from the endpoint's ExcludedMembers (a set, AWS
     ignores order). ponytail: only ExcludedMembers are managed; a StaticMembers
-    (explicit-include) endpoint isn't touched here — excluding is moot when the
+    (explicit-include) endpoint isn't touched here: excluding is moot when the
     reader isn't in the static list. Upgrade path: also prune StaticMembers if a
     static-endpoint use case appears."""
     current = _endpoint_excluded_members(rds, endpoint_identifier)
@@ -186,7 +186,7 @@ def _reinclude_with_retry(rds, endpoint_identifier, reader_instance_id, attempts
     """Re-include the reader, retrying while the endpoint is still settling from
     the earlier exclude. A member-list change puts the endpoint in 'modifying'
     for tens of seconds, so an immediate re-include races it and raises
-    InvalidDBClusterEndpointStateFault — which is exactly how a fast failure (or
+    InvalidDBClusterEndpointStateFault, which is exactly how a fast failure (or
     a fast warm) could strand the reader OUT of the endpoint. Bounded so the
     Lambda can't hang past its timeout (attempts*delay stays well under 120s)."""
     for i in range(attempts):
@@ -302,7 +302,7 @@ def prewarm_reader_impl(
     rds = client_for_cluster(cluster_id, "rds")
     resolved = _resolve_reader(rds, cluster_id, reader_instance_id)
     if resolved.get("status") != "ok":
-        return resolved  # no writes done yet — nothing to undo
+        return resolved  # no writes done yet, nothing to undo
     host, port = resolved["address"], resolved["port"]
 
     excluded = False
@@ -313,7 +313,7 @@ def prewarm_reader_impl(
 
         # CREATE EXTENSION runs on the WRITER via Data API. IF NOT EXISTS makes
         # it idempotent; log (don't fail) so a transient DDL hiccup surfaces in
-        # CloudWatch rather than aborting — a missing extension fails loudly at
+        # CloudWatch rather than aborting: a missing extension fails loudly at
         # the pg_prewarm/pg_buffercache query below anyway.
         for ext in ("pg_prewarm", "pg_buffercache"):
             try:
@@ -341,7 +341,7 @@ def prewarm_reader_impl(
             deadline = time.time() + _WALL_BUDGET_SECONDS
             for r in rels:
                 if time.time() > deadline:
-                    break  # ponytail: budget exhausted — stop starting new prewarms
+                    break  # ponytail: budget exhausted, stop starting new prewarms
                 # Per-relation guard: one relation we can't prewarm (permission,
                 # dropped mid-run) must not abort the whole warm. pg8000 runs in
                 # autocommit so a failed statement doesn't poison the next.

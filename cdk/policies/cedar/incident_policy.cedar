@@ -1,4 +1,4 @@
-// Incident MCP target: READ-ONLY — permit all tools on the target.
+// Incident MCP target: READ-ONLY. Permit all tools on the target.
 //
 // AgentCore action form is target-as-action-group: `action in
 // AgentCore::Action::"<target>"` permits every tool under that target.

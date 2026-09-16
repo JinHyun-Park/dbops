@@ -5,7 +5,7 @@
 //   - the active cluster is the GLOBAL one (URL ?cluster= ?? localStorage),
 //     validated against the real cluster list (else the first cluster),
 //   - switching anywhere (⌘K palette, header chip, another page) LIVE-updates
-//     this page via the change event — selection persists across navigation,
+//     this page via the change event, selection persists across navigation,
 //   - setSelected writes back to the shared store so everyone else follows.
 import { useCallback, useEffect, useState } from "react";
 import { fetchClusters } from "@/lib/api-client";

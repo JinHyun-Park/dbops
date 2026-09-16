@@ -93,7 +93,7 @@ export function MessageList({
                 <button
                   type="button"
                   onClick={() => {
-                    // Walk back to the immediately preceding user message —
+                    // Walk back to the immediately preceding user message:
                     // that's the question this assistant turn answered.
                     let q: string | null = null;
                     for (let i = idx - 1; i >= 0; i--) {
@@ -105,7 +105,7 @@ export function MessageList({
                     onSaveAsRunbook(msg, q);
                   }}
                   className="mt-1.5 text-[10px] text-zinc-500 hover:text-amber-300 transition-colors px-1"
-                  title="이 진단을 Runbook으로 저장 — 같은 패턴 재발 시 곧바로 참조"
+                  title="이 진단을 Runbook으로 저장: 같은 패턴 재발 시 곧바로 참조"
                 >
                   ✓ Runbook 저장
                 </button>
@@ -157,7 +157,7 @@ export function MessageList({
   );
 }
 
-// UUID v4 pattern — matches what the request_approval tool returns.
+// UUID v4 pattern: matches what the request_approval tool returns.
 const APPROVAL_ID_RX =
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
 

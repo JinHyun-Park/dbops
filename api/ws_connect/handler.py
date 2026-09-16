@@ -1,4 +1,4 @@
-"""WebSocket $connect — record the connection so broadcasters can reach it.
+"""WebSocket $connect: record the connection so broadcasters can reach it.
 
 Auth already happened in the REQUEST authorizer (Cognito access token); here we
 just persist the connectionId (+ the authorizer's sub) with a TTL safety net so

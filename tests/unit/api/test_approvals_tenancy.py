@@ -16,7 +16,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
-# Module loading — push api/approvals on sys.path so `import tenancy` resolves
+# Module loading: push api/approvals on sys.path so `import tenancy` resolves
 # ---------------------------------------------------------------------------
 
 _APPROVALS_DIR = Path(__file__).resolve().parents[3] / "api" / "approvals"
@@ -182,7 +182,7 @@ def test_approvals_activity_admin_sees_all(monkeypatch):
 
 def test_approvals_activity_export_arm_viewer_excludes_other_team(monkeypatch):
     """Whole-branch review Minor-1: the ?export=true / cursor arm must apply the
-    SAME tenant filter as the normal arm — else a viewer bypasses visibility via
+    SAME tenant filter as the normal arm, else a viewer bypasses visibility via
     ?export=true and reads other teams' approval activity."""
     monkeypatch.setattr(handler, "boto3", MagicMock(resource=lambda *a, **kw: _mock_dynamodb(_LIST_ROWS)))
     monkeypatch.setattr(

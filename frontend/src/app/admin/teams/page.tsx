@@ -244,7 +244,7 @@ export default function AdminTeamsPage() {
         <PageHeader
           eyebrow={t("Admin")}
           title={t("Teams")}
-          description={t("팀 관리 — 멤버와 클러스터 가시성 (관리자 전용)")}
+          description={t("팀 관리: 멤버와 클러스터 가시성 (관리자 전용)")}
         />
         <Section>
           <EmptyState

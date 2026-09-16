@@ -14,7 +14,7 @@ import {
 } from "@/components/design-system/page-shell";
 import { useT } from "@/lib/i18n";
 
-// ── Inline toggle — no design-system toggle exists yet ─────────────────────
+// ── Inline toggle: no design-system toggle exists yet ──────────────────────
 
 function Toggle({
   checked,
@@ -158,7 +158,7 @@ export default function SettingsPage() {
           eyebrow={t("Configure")}
           title={t("Settings")}
           description={t(
-            "기능 토글 — 티켓팅 연동과 리포트 전달 제어 (관리자 전용)",
+            "기능 토글: 티켓팅 연동과 리포트 전달 제어 (관리자 전용)",
           )}
         />
         <Section>
@@ -178,7 +178,7 @@ export default function SettingsPage() {
         eyebrow={t("Configure")}
         title={t("Settings")}
         description={t(
-          "기능 토글 — 티켓팅 연동과 리포트 전달 제어. 변경 사항은 즉시 적용됩니다.",
+          "기능 토글: 티켓팅 연동과 리포트 전달 제어. 변경 사항은 즉시 적용됩니다.",
         )}
       />
 
@@ -236,7 +236,7 @@ export default function SettingsPage() {
                   현재 지원하는 값: <code className="text-zinc-400">none</code>{" "}
                   (비활성). <code className="text-zinc-400">jira</code> 등 다른
                   값을 입력해도 코드에 연동 구현이 없으면 아무 동작도 하지
-                  않습니다 — 제공자 연동을 먼저 구현한 뒤 값을 바꾸세요.
+                  않습니다. 제공자 연동을 먼저 구현한 뒤 값을 바꾸세요.
                 </div>
                 <input
                   type="text"

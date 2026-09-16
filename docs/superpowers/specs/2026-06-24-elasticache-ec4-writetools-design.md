@@ -1,4 +1,4 @@
-# ElastiCache EC-4 — Write Tools (approval-gated) — Design
+# ElastiCache EC-4: Write Tools (approval-gated) Design
 
 **Date:** 2026-06-24
 **Status:** approved (EC-4 scope = the user-chosen "core ops set": node-type scaling + snapshot + reboot + failover-test; all approval-gated, mirroring the existing NoSQL write tools)
@@ -10,19 +10,19 @@ live deep-read). EC-4 adds the first ElastiCache **mutations**, each behind the
 existing human-in-the-loop approval gate (`approval_guard` FAIL-CLOSED), exactly
 like the DynamoDB (`modify_dynamodb_capacity`) and DocDB write tools. These are
 ElastiCache **control-plane** APIs (AWS APIs), so cross-account works cleanly via
-the existing `client_for_cluster` assume-role path — NO VPC peering needed
+the existing `client_for_cluster` assume-role path: NO VPC peering needed
 (unlike EC-3's native protocol).
 
-User-chosen scope — the **core ops set** (4 tools):
+User-chosen scope: the **core ops set** (4 tools):
 
-1. **Node-type scaling** — `modify_replication_group(CacheNodeType=…)`.
-2. **Snapshot** — `create_snapshot` (Redis/Valkey only — Memcached has no backups).
-3. **Reboot** — `reboot_cache_cluster`.
-4. **Failover test** — `test_failover` (cluster-mode / multi-replica only).
+1. **Node-type scaling**: `modify_replication_group(CacheNodeType=…)`.
+2. **Snapshot**: `create_snapshot` (Redis/Valkey only: Memcached has no backups).
+3. **Reboot**: `reboot_cache_cluster`.
+4. **Failover test**: `test_failover` (cluster-mode / multi-replica only).
 
 Deferred (not this spec): parameter-group changes, shard/replica resharding,
 engine-version upgrade. Cedar is NOT wired (LOG_ONLY per the closed decision); the
-`approval_guard` is the real, active enforcement — same as every other NoSQL write.
+`approval_guard` is the real, active enforcement: same as every other NoSQL write.
 
 ## Architecture
 
@@ -35,7 +35,7 @@ row (payload-hash, single-use) → EXECUTE the mutation. All via
 Engine-gated on `elasticache_write` (FAIL-CLOSED for non-ElastiCache). Each tool
 NEVER raises out → `{"status": "error"|"approval_required"|"approval_denied"|..., ...}`.
 
-### Component 1 — Four write tools (`mcp-servers/mcp_servers/operations/tools/`)
+### Component 1: Four write tools (`mcp-servers/mcp_servers/operations/tools/`)
 
 Each `..._impl(cache, cluster_id=None, approved=False, approval_id=None, **kw) -> dict`:
 
@@ -46,7 +46,7 @@ Each `..._impl(cache, cluster_id=None, approved=False, approval_id=None, **kw) -
   - EXECUTE: `modify_replication_group(ReplicationGroupId, CacheNodeType=node_type, ApplyImmediately=True)`.
 - **`create_elasticache_snapshot.py`** (action_type `create_elasticache_snapshot`):
   - args: `snapshot_name`.
-  - **Redis/Valkey only** — if engine is Memcached → `{"status":"unsupported_engine","reason":"Memcached는 스냅샷 미지원"}`.
+  - **Redis/Valkey only**: if engine is Memcached → `{"status":"unsupported_engine","reason":"Memcached는 스냅샷 미지원"}`.
   - EXECUTE: `create_snapshot(ReplicationGroupId, SnapshotName=snapshot_name)`.
 - **`reboot_elasticache.py`** (action_type `reboot_elasticache`):
   - REQUEST: resolve the member cache-cluster/node ids via describe (warn that a
@@ -56,13 +56,13 @@ Each `..._impl(cache, cluster_id=None, approved=False, approval_id=None, **kw) -
     member cache cluster.)
 - **`test_elasticache_failover.py`** (action_type `test_elasticache_failover`):
   - args: optional `node_group_id` (default the first/only shard).
-  - **Requires a replica / multi-AZ** — reject (`unsupported_engine`/`invalid`) if
+  - **Requires a replica / multi-AZ**: reject (`unsupported_engine`/`invalid`) if
     the group has no replica to fail over to.
   - EXECUTE: `test_failover(ReplicationGroupId, NodeGroupId=node_group_id)`.
 
-Resolution of the ElastiCache name + cross-account client: `client_for_cluster(cluster_id, "elasticache")` + `lookup_cluster` for `resource_name`/engine (mirror the dynamodb tool's `table_name_for_cluster` analog — use `lookup_cluster(cluster_id)["resource_name"]`).
+Resolution of the ElastiCache name + cross-account client: `client_for_cluster(cluster_id, "elasticache")` + `lookup_cluster` for `resource_name`/engine (mirror the dynamodb tool's `table_name_for_cluster` analog: use `lookup_cluster(cluster_id)["resource_name"]`).
 
-### Component 2 — Approval payload projections (`mcp-servers/mcp_servers/shared/approval_guard.py`)
+### Component 2: Approval payload projections (`mcp-servers/mcp_servers/shared/approval_guard.py`)
 
 Add four branches to `_project_payload(action_type, payload)` so the approval row
 binds to the exact operation (payload-hash single-use):
@@ -74,20 +74,20 @@ binds to the exact operation (payload-hash single-use):
 
 (`target` = cluster_id, matching the existing projections' convention.)
 
-### Component 3 — Handler registration + engine gate (`mcp-servers/mcp_servers/operations/handler.py`)
+### Component 3: Handler registration + engine gate (`mcp-servers/mcp_servers/operations/handler.py`)
 
 - Import the four impls; add four `TOOLS` entries (description marks them
   "ElastiCache only", input_schema with `cluster_id` + op args + `approved`/
   `approval_id`).
 - Add all four to `_ENGINE_GATED_TOOLS` with capability `"elasticache_write"`
-  (FAIL-CLOSED — a non-ElastiCache cluster, or unresolvable family, is refused).
+  (FAIL-CLOSED: a non-ElastiCache cluster, or unresolvable family, is refused).
 - Add `_CAP_LABEL["elasticache_write"] = "ElastiCache 클러스터"` (the gate-refusal
   message label).
 
-### Component 4 — `cdk/tool_definitions.py` parity + CDK IAM
+### Component 4: `cdk/tool_definitions.py` parity + CDK IAM
 
 - Add the four tools to `cdk/tool_definitions.py` (the handler↔schema parity test).
-- `cdk/stacks/agent_stack.py` operations MCP Lambda IAM — add the write actions
+- `cdk/stacks/agent_stack.py` operations MCP Lambda IAM: add the write actions
   (real mutations, scoped to `*` like the existing dynamodb/docdb write grants):
   `elasticache:ModifyReplicationGroup`, `elasticache:CreateSnapshot`,
   `elasticache:RebootCacheCluster`, `elasticache:TestFailover` (+ the describe
@@ -99,7 +99,7 @@ Agent calls a write tool (no `approved`) → `approval_required` (with the proje
 payload + warnings) → `request_approval` (DDB row, payload-hash) → DBA approves on
 `/approvals` → agent re-calls with `approved=True, approval_id` → `verify_approval`
 consumes the row → `client_for_cluster(...).<mutation>(...)`. Cross-account via
-assume-role (control-plane API — no network path needed).
+assume-role (control-plane API: no network path needed).
 
 ## Error Handling
 
@@ -108,7 +108,7 @@ assume-role (control-plane API — no network path needed).
   drift / expired) → `approval_denied` with the guard reason.
 - Engine gate → `unsupported_engine` for non-ElastiCache; op-not-applicable
   (snapshot/failover on Memcached or no-replica) → `unsupported_engine`/`invalid`.
-- boto3 `ClientError` → `{"status":"error", reason: str(e)[:200]}` — never raises out.
+- boto3 `ClientError` → `{"status":"error", reason: str(e)[:200]}`: never raises out.
 - **TOCTOU:** snapshot/reboot/node-type re-describe at EXECUTE is light (these are
   not capacity-precondition-sensitive like DynamoDB), but node-type still
   re-checks the current type hasn't already changed to the target (idempotency).
@@ -133,7 +133,7 @@ assume-role (control-plane API — no network path needed).
 ## Security
 
 - **Every mutation is approval-gated** (`approval_guard` FAIL-CLOSED, payload-bound,
-  single-use) — identical to the DynamoDB/DocDB write model. No write executes
+  single-use): identical to the DynamoDB/DocDB write model. No write executes
   without a consumed approval row matching the exact operation.
 - Engine-gated `elasticache_write` (FAIL-CLOSED): a non-ElastiCache or unresolvable
   cluster is refused before any AWS call.

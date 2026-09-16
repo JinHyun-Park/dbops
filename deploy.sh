@@ -2,7 +2,7 @@
 set -e
 
 echo "========================================="
-echo "  DBOps Platform — Full Deployment"
+echo "  DBOps Platform: Full Deployment"
 echo "========================================="
 echo ""
 

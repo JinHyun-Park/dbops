@@ -1,8 +1,8 @@
-# gitleaks allowlist — reviewed false positives (fingerprint = commit:path:rule:line)
+# gitleaks allowlist: reviewed false positives (fingerprint = commit:path:rule:line)
 #
 # Verified false positive (2026-06-17): the `generic-api-key` rule flags the
 # high-entropy string in `const STORAGE_KEY = "dbops_conversations_v1"`
-# (frontend/src/components/chat/chat-panel.tsx) — but that is a browser
+# (frontend/src/components/chat/chat-panel.tsx), but that is a browser
 # localStorage key name for chat history, NOT a credential. No secret, no
 # rotation needed.
 8d1c95997a4b1f3a87fc5b584acfa36c70a233fb:frontend/src/components/chat/chat-panel.tsx:generic-api-key:41
@@ -13,7 +13,7 @@
 # quoting it; the test uses a non-JWT-shaped value), but gitleaks git mode scans
 # COMMIT DIFFS, so the strings survive in 8cda6fc / a2d67ba regardless. Rewriting
 # history for two non-secrets would break every clone, so they are suppressed by
-# fingerprint with the reason stated — which is what this file is for.
+# fingerprint with the reason stated, which is what this file is for.
 #
 # 1. The pre-flip checklist quoted `chat-panel.tsx`'s STORAGE_KEY (a browser
 #    localStorage key name) while explaining why that same string is suppressed

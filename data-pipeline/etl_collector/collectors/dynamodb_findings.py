@@ -1,4 +1,4 @@
-"""DynamoDB Findings Collector — throttling, capacity fit, hot-partition 진단.
+"""DynamoDB Findings Collector: throttling, capacity fit, hot-partition 진단.
 
 캐시 DB(cluster_meta.resource_details + metric_snapshots)만 읽고
 cluster_health_findings에 finding을 적재한다. 라이브 AWS 호출 없음.
@@ -22,13 +22,13 @@ Fix 3: util > 100% 시 value_str/recommendation에 burst 설명을 추가한다.
   WCU/RCU/burst 등 전문 용어는 영어 유지.
 
 Fix 4: ddb_capacity_underprovisioned는 단일 분 peak이 아닌 sustained 고부하
-(high_minutes ≥ 3 — ≥80% 유틸이 3분 이상)일 때만 발생한다.
+(high_minutes ≥ 3, ≥80% 유틸이 3분 이상)일 때만 발생한다.
 """
 
 import json
 from datetime import datetime, timezone
 
-# on-demand 고처리량 판정 임계 — 1분 Sum ≥ 6000 ≈ 100 RCU/s 지속
+# on-demand 고처리량 판정 임계: 1분 Sum ≥ 6000 ≈ 100 RCU/s 지속
 ONDEMAND_HIGH_THRESHOLD = 6000.0
 
 # 과다 프로비저닝 판정: peak util(r AND w) ≤ 이 값 + 충분한 표본
@@ -124,7 +124,7 @@ def collect_dynamodb_findings(
         if isinstance(rd, dict):
             billing_mode = rd.get("billing_mode")
 
-    # --- 2) throttle aggregates — per-side split (Fix 1) ---
+    # --- 2) throttle aggregates: per-side split (Fix 1) ---
     # read_throttle  = SUM(read_throttle_events)
     # write_throttle = SUM(write_throttle_events + throttled_requests)
     #   throttled_requests is a general/write-ish metric → grouped with write side
@@ -402,7 +402,7 @@ def collect_dynamodb_findings(
             f"util {side_str} 인데 throttle 발생",
             f"side throttle > 0 AND 해당 side peak util < {HOT_PARTITION_UTIL_CAP*100:.0f}%",
             (
-                f"프로비저닝 헤드룸이 있음에도 throttle이 발생했습니다({side_str}) — "
+                f"프로비저닝 헤드룸이 있음에도 throttle이 발생했습니다({side_str}). "
                 "partition key 편중으로 특정 파티션만 throttle 되는 전형적 패턴입니다. "
                 "partition key 설계를 재검토하거나 write sharding을 고려하세요."
             ),
@@ -449,7 +449,7 @@ def collect_dynamodb_findings(
             f"GSI {gsi_nm} throttle {int(gsi_throttle)}건",
             "GSI throttle > 0",
             (
-                f"GSI {gsi_nm}이(가) under-provisioned이거나 hot — "
+                f"GSI {gsi_nm}이(가) under-provisioned이거나 hot. "
                 "GSI 용량 상향 또는 GSI 키 재설계 검토"
             ),
             {

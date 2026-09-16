@@ -38,18 +38,18 @@ interface Rule {
   last_triggered_at: string | null;
   created_at: string;
   // Backend-computed health of the metric stream feeding this rule.
-  // Older API payloads (cached) may omit these — guard for undefined.
+  // Older API payloads (cached) may omit these. Guard for undefined.
   latest_metric_ts?: string | null;
   data_status?: "fresh" | "stale" | "no_data";
   // Compound rules carry their JSON-encoded conditions DSL. Older payloads
   // (and legacy single-threshold rules) omit it.
   conditions_json?: string | null;
-  // Slack-ack state — written by the /api/slack/interactive endpoint.
+  // Slack-ack state: written by the /api/slack/interactive endpoint.
   // The badge only renders when last_acked_at is after last_triggered_at;
   // older acks are considered stale once the rule fires again.
   last_acked_at?: string | null;
   last_acked_by?: string | null;
-  // Snooze — evaluator skips firing while this is in the future. NULL/past
+  // Snooze: evaluator skips firing while this is in the future. NULL/past
   // means "not snoozed"; older payloads (pre-P2-⑦) omit the field entirely.
   snooze_until?: string | null;
 }
@@ -89,7 +89,7 @@ function DataStatusBadge({
 }) {
   // Fallback for API responses that pre-date the data_status field.
   if (!status) {
-    return <span className="text-zinc-600 text-[10px] font-mono">—</span>;
+    return <span className="text-zinc-600 text-[10px] font-mono">-</span>;
   }
   if (status === "fresh") {
     return (
@@ -113,8 +113,8 @@ function DataStatusBadge({
           latestTs
             ? `last metric: ${new Date(
                 latestTs,
-              ).toLocaleString()} — evaluator skips this rule until newer data arrives`
-            : "metric stream stale — evaluator will skip this rule"
+              ).toLocaleString()}. Evaluator skips this rule until newer data arrives`
+            : "metric stream stale. Evaluator will skip this rule"
         }
       >
         stale
@@ -124,7 +124,7 @@ function DataStatusBadge({
   return (
     <span
       className="px-1.5 py-0.5 border text-[10px] font-mono bg-rose-500/10 text-rose-300 border-rose-500/40"
-      title="이 cluster + metric 조합으로 수집된 metric_snapshot이 없습니다 — 클러스터 등록 상태와 ETL 파이프라인을 확인하세요"
+      title="이 cluster + metric 조합으로 수집된 metric_snapshot이 없습니다. 클러스터 등록 상태와 ETL 파이프라인을 확인하세요"
     >
       no data
     </span>
@@ -146,7 +146,7 @@ const METRIC_OPTIONS = [
 
 const COMP_OPS = [">", ">=", "<", "<=", "==", "!="] as const;
 
-// Curated rule presets — one click to populate the builder with a
+// Curated rule presets: one click to populate the builder with a
 // DBA-canonical condition. Keeps the builder accessible to operators
 // who don't have every metric_type memorized. Each template is shown
 // as a clickable chip above the operand grid.
@@ -521,7 +521,7 @@ export default function AlertsPage() {
 
       {!admin && (
         <div className="mb-6 px-3 py-2 border border-zinc-800 text-[11px] uppercase tracking-wider text-zinc-500">
-          읽기 전용, viewer 권한 — 쓰기 액션은 숨겨집니다
+          읽기 전용, viewer 권한. 쓰기 액션은 숨겨집니다
         </div>
       )}
 
@@ -646,7 +646,7 @@ export default function AlertsPage() {
               onSubmit={submitCompound}
               className="border border-zinc-800 bg-zinc-900/40 p-6 space-y-4"
             >
-              {/* Rule templates — one click populates the builder with a
+              {/* Rule templates: one click populates the builder with a
                   DBA-canonical condition. Helps operators who don't have
                   every metric_type memorized. */}
               <div>
@@ -805,7 +805,7 @@ export default function AlertsPage() {
                     <div>
                       <label
                         className="text-[10px] text-zinc-500 uppercase tracking-wider"
-                        title="평가 윈도우 (분) — 이 시간 내 데이터로 agg 계산"
+                        title="평가 윈도우 (분): 이 시간 내 데이터로 agg 계산"
                       >
                         Window (m)
                       </label>
@@ -855,7 +855,7 @@ export default function AlertsPage() {
                     onChange={(e) =>
                       setNewRule({ ...newRule, name: e.target.value })
                     }
-                    placeholder="자동 생성됨 — 첫 operand + AND/OR + N"
+                    placeholder="자동 생성됨: 첫 operand + AND/OR + N"
                     className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 text-sm px-3 py-2 mt-1 focus:outline-none focus:border-amber-500/60"
                   />
                 </div>
@@ -1070,7 +1070,7 @@ export default function AlertsPage() {
                 type="button"
                 onClick={() => bulkSnooze(bulkSnoozeMinutes)}
                 className="text-[11px] uppercase tracking-wider px-2 py-1.5 border border-zinc-700 text-zinc-300 hover:border-amber-500 hover:text-amber-300 transition-colors whitespace-nowrap"
-                title="이 클러스터의 모든 규칙을 스누즈 (롤/인스턴스 단위 스누즈는 미지원 — 클러스터 단위)"
+                title="이 클러스터의 모든 규칙을 스누즈 (롤/인스턴스 단위 스누즈는 미지원, 클러스터 단위)"
               >
                 클러스터 전체 스누즈
               </button>
@@ -1151,7 +1151,7 @@ export default function AlertsPage() {
                           const comp = parseConditions(r.conditions_json);
                           if (!comp) {
                             // Legacy single-threshold rules are inline-editable
-                            // for admins — compound (AND/OR) rules aren't,
+                            // for admins, compound (AND/OR) rules aren't,
                             // since their DSL lives in `conditions`, not the
                             // comparison/threshold columns rendered here.
                             if (admin) {
@@ -1345,7 +1345,7 @@ export default function AlertsPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Slack ack setup guide — collapsible, persists state to localStorage.
+// Slack ack setup guide: collapsible, persists state to localStorage.
 //
 // The Slack interactive Lambda is wired in CDK but the workspace-side setup
 // (create Slack app + paste signing secret + set Request URL) can only be
@@ -1377,7 +1377,7 @@ function SlackAckSetupGuide() {
     if (!open || endpoint) return;
     apiUrl("/api/slack/interactive")
       .then((u) => setEndpoint(u))
-      .catch(() => setEndpoint("(unable to resolve — check /config.json)"));
+      .catch(() => setEndpoint("(unable to resolve, check /config.json)"));
   }, [open, endpoint]);
 
   const toggle = () => {
@@ -1399,7 +1399,7 @@ function SlackAckSetupGuide() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // 클립보드 API가 차단된 환경(비-HTTPS, 권한 거부) — 조용히 실패하지
+      // 클립보드 API가 차단된 환경(비-HTTPS, 권한 거부): 조용히 실패하지
       // 않고 직접 선택해 복사하라고 안내한다. 주소는 위 code 블록에서
       // 선택 가능하다.
       setCopyFailed(true);
@@ -1502,7 +1502,7 @@ function SlackAckSetupGuide() {
                   </div>
                   {copyFailed && (
                     <div className="mt-1.5 text-[11px] text-amber-300">
-                      클립보드 접근이 차단되었습니다 — 위 주소를 직접 선택해
+                      클립보드 접근이 차단되었습니다. 위 주소를 직접 선택해
                       복사하세요.
                     </div>
                   )}
@@ -1578,7 +1578,7 @@ function GuideStep({
 }
 
 // ---------------------------------------------------------------------------
-// Impact panel — what was going on at the moment a rule fired. Rendered
+// Impact panel: what was going on at the moment a rule fired. Rendered
 // inline below the table row when the DBA clicks "영향도". Three sections:
 // top slow queries, concurrent ops events (RDS / backup / vacuum etc.),
 // and sibling alerts (other rules that fired in the same window).
@@ -1607,7 +1607,7 @@ function ImpactPanel({
       </div>
     );
   }
-  const fmt = (iso?: string) => (iso ? new Date(iso).toLocaleString() : "—");
+  const fmt = (iso?: string) => (iso ? new Date(iso).toLocaleString() : "-");
   return (
     <div className="space-y-4">
       <div className="text-[11px] text-zinc-500">

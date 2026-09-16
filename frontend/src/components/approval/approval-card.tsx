@@ -3,9 +3,9 @@
 import { useState } from "react";
 
 // Approval rows arrive from two slightly different writers:
-//   1. POST /api/approvals (old path) — sets `tool_name`,
+//   1. POST /api/approvals (old path), sets `tool_name`,
 //      `action_description`, `risk_level`, `parameters` (JSON string).
-//   2. mcp-servers request_approval tool (new path) — sets
+//   2. mcp-servers request_approval tool (new path), sets
 //      `action_type` + `action_details` (object), no risk_level.
 // Render handles both shapes so a single page can mix legacy + new
 // approvals while migration is in flight.
@@ -57,11 +57,11 @@ const ACTION_RISK: Record<string, string> = {
   // Restore stands up a NEW billable cluster → high risk (source untouched).
   restore_cluster: "high",
   // Data API 활성화: 데이터 변경은 없지만 SQL 실행 경로가 IAM 경계로
-  // 열리는 설정 변경 — 중간 위험으로 표시해 DBA가 의미를 인지하고 승인.
+  // 열리는 설정 변경: 중간 위험으로 표시해 DBA가 의미를 인지하고 승인.
   enable_data_api: "medium",
   // DynamoDB write/remediation. Capacity/billing-mode 전환은 throttle과 비용
   // 영향(medium); TTL 토글은 만료 정책 변경(medium); PITR 활성화는 보호
-  // 강화(low)지만 비활성화는 보호 저하(high) — 카드 단계에선 medium 고정.
+  // 강화(low)지만 비활성화는 보호 저하(high). 카드 단계에선 medium 고정.
   modify_dynamodb_capacity: "medium",
   modify_dynamodb_ttl: "medium",
   enable_dynamodb_pitr: "medium",
@@ -107,7 +107,7 @@ const ACTION_RISK: Record<string, string> = {
 
 // action_type별 "이 작업이 무엇이고, 무슨 리스크가 있고, 승인 전 무엇을
 // 점검해야 하는지" 가이드. 승인 카드만 보고는 요청의 의미와 위험을 알기
-// 어려워(파라미터 값만 보임) DBA가 매번 따로 판단해야 했다 — 결정에 필요한
+// 어려워(파라미터 값만 보임) DBA가 매번 따로 판단해야 했다. 결정에 필요한
 // 컨텍스트를 카드 안에서 바로 제공한다.
 interface ActionGuide {
   what: string;
@@ -119,8 +119,8 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
   execute_sql: {
     what: "임의 SQL(DDL/DML)을 대상 클러스터에서 직접 실행합니다.",
     risks: [
-      "락 경합 — DDL은 테이블 잠금을 유발해 운영 쿼리를 막을 수 있습니다.",
-      "롤백 난이도 — DML은 트랜잭션이지만 DDL은 대부분 즉시 확정됩니다.",
+      "락 경합: DDL은 테이블 잠금을 유발해 운영 쿼리를 막을 수 있습니다.",
+      "롤백 난이도: DML은 트랜잭션이지만 DDL은 대부분 즉시 확정됩니다.",
       "force=true면 DROP/TRUNCATE/DELETE 같은 파괴적 구문입니다.",
     ],
     considerations: [
@@ -132,12 +132,12 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
   modify_parameter: {
     what: "DB 파라미터 그룹의 설정값을 변경합니다.",
     risks: [
-      "static 파라미터는 적용에 인스턴스 재시작이 필요 — 짧은 다운타임 발생.",
+      "static 파라미터는 적용에 인스턴스 재시작이 필요. 짧은 다운타임 발생.",
       "메모리 계열(work_mem 등)은 max_connections와 곱해져 OOM을 유발할 수 있습니다.",
       "플래너 파라미터는 쿼리 플랜을 바꿔 성능 회귀 가능.",
     ],
     considerations: [
-      "static/dynamic 여부 확인 — static이면 재시작 타이밍 계획",
+      "static/dynamic 여부 확인: static이면 재시작 타이밍 계획",
       "Simulator의 파라미터 영향 추정으로 사전 검토",
       "변경 후 변경 영향 회고 패널로 전후 비교",
     ],
@@ -160,14 +160,14 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
   },
   create_snapshot: {
     what: "수동 클러스터 스냅샷(백업)을 생성합니다.",
-    risks: ["비파괴적 — 데이터 변경 없음. 스냅샷 스토리지 비용만 발생."],
+    risks: ["비파괴적: 데이터 변경 없음. 스냅샷 스토리지 비용만 발생."],
     considerations: ["대용량이면 생성에 시간 소요", "보존 정책 확인"],
   },
   restore_cluster: {
     what: "스냅샷 또는 특정 시점(PITR)을 새 클러스터로 복원합니다.",
     risks: [
-      "원본 클러스터는 영향 없음 — 새 클러스터가 생성됩니다.",
-      "새 클러스터는 과금 대상 — 사용 후 정리 필요.",
+      "원본 클러스터는 영향 없음. 새 클러스터가 생성됩니다.",
+      "새 클러스터는 과금 대상. 사용 후 정리 필요.",
       "복원에 수십 분 소요될 수 있습니다.",
     ],
     considerations: [
@@ -182,7 +182,7 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
       "rds-data:ExecuteStatement + 시크릿 권한이 있으면 어디서든 쿼리 가능.",
     ],
     considerations: [
-      "다운타임 없음 — 설정 변경만",
+      "다운타임 없음, 설정 변경만",
       "활성화 후 라이브 SQL 수집과 에이전트 SQL이 동작",
     ],
   },
@@ -201,7 +201,7 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
   modify_dynamodb_ttl: {
     what: "DynamoDB 테이블의 속성 TTL(자동 만료)을 활성화하거나 비활성화합니다.",
     risks: [
-      "TTL을 켜면 해당 속성의 epoch가 지난 항목이 백그라운드로 삭제됩니다 — 비가역.",
+      "TTL을 켜면 해당 속성의 epoch가 지난 항목이 백그라운드로 삭제됩니다. 비가역.",
       "TTL 변경은 테이블당 약 1시간에 한 번만 가능합니다.",
     ],
     considerations: [
@@ -212,12 +212,12 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
   enable_dynamodb_pitr: {
     what: "DynamoDB 테이블의 Point-in-Time Recovery(PITR)를 켜거나 끕니다.",
     risks: [
-      "켜기는 데이터 보호 강화(35일 연속 백업) — 약간의 추가 비용.",
-      "끄기는 데이터 보호 저하 — 복구 가능 시점이 즉시 단절됩니다(force=true 필요).",
+      "켜기는 데이터 보호 강화(35일 연속 백업), 약간의 추가 비용.",
+      "끄기는 데이터 보호 저하. 복구 가능 시점이 즉시 단절됩니다(force=true 필요).",
     ],
     considerations: [
       "비활성화 요청이면 force=true가 포함됐는지, 정말 보호를 끌 의도인지 확인",
-      "다운타임 없음 — 백업 설정 변경만",
+      "다운타임 없음, 백업 설정 변경만",
     ],
   },
   create_custom_endpoint: {
@@ -244,7 +244,7 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
   delete_custom_endpoint: {
     what: "CUSTOM 클러스터 엔드포인트를 삭제합니다.",
     risks: [
-      "이 DNS 이름을 사용하는 클라이언트는 연결이 끊깁니다 — 사용처 확인 필수.",
+      "이 DNS 이름을 사용하는 클라이언트는 연결이 끊깁니다. 사용처 확인 필수.",
       "내장 writer/reader 엔드포인트는 이 도구로 삭제할 수 없습니다.",
     ],
     considerations: [
@@ -256,7 +256,7 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     risks: [
       "CREATE EXTENSION(pg_prewarm/pg_buffercache)은 writer에서 실행되는 DDL입니다.",
       "pg_prewarm은 대상 리더에 상당한 읽기 I/O를 유발합니다.",
-      "엔드포인트 지정 시 예열 중 리더를 제외했다 재편입 — 라우팅이 잠시 바뀝니다.",
+      "엔드포인트 지정 시 예열 중 리더를 제외했다 재편입. 라우팅이 잠시 바뀝니다.",
     ],
     considerations: [
       "대상이 writer가 아닌 reader 인스턴스인지 확인",
@@ -268,7 +268,7 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     what: "리더 인스턴스를 추가해 읽기 용량을 확장합니다 (scale-out).",
     risks: [
       "신규 인스턴스는 과금 대상이며 생성에 수 분이 걸립니다.",
-      "생성될 인스턴스 클래스가 아래에 명시되어 있습니다 — 이 클래스로 승인되고 생성됩니다.",
+      "생성될 인스턴스 클래스가 아래에 명시되어 있습니다. 이 클래스로 승인되고 생성됩니다.",
     ],
     considerations: [
       "명시된 인스턴스 클래스가 필요한 읽기 용량과 비용에 적정한지 확인",
@@ -289,8 +289,8 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
     what: "리더를 추가하고, available되면 버퍼풀 예열 승인을 자동으로 대기열에 올립니다 (scale-out + 자동 예열, 2단계 승인 중 1단계).",
     risks: [
       "신규 인스턴스는 과금 대상이며 생성에 수 분이 걸립니다.",
-      "이 승인은 리더 생성만 합니다 — 예열은 별도 2차 승인이 필요합니다.",
-      "생성될 인스턴스 클래스가 아래에 명시되어 있습니다 — 이 클래스로 승인되고 생성됩니다.",
+      "이 승인은 리더 생성만 합니다. 예열은 별도 2차 승인이 필요합니다.",
+      "생성될 인스턴스 클래스가 아래에 명시되어 있습니다. 이 클래스로 승인되고 생성됩니다.",
     ],
     considerations: [
       "리더가 available되면 예열 승인이 자동으로 승인 대기열에 나타납니다",
@@ -305,13 +305,13 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
       "Aurora 클러스터 멤버 인스턴스는 이 툴로 재부팅할 수 없습니다(거부됨).",
     ],
     considerations: [
-      "Multi-AZ 여부 확인 — 아니라면 연결 끊김에 대비",
+      "Multi-AZ 여부 확인: 아니라면 연결 끊김에 대비",
       "저트래픽 시간대 권장",
     ],
   },
   create_rds_snapshot: {
     what: "독립형(비-Aurora) RDS 인스턴스의 수동 스냅샷(백업)을 생성합니다.",
-    risks: ["비파괴적 — 무중단, 데이터 변경 없음. 스토리지 비용만 소폭 발생."],
+    risks: ["비파괴적: 무중단, 데이터 변경 없음. 스토리지 비용만 소폭 발생."],
     considerations: [
       "스냅샷 식별자는 이 승인 시점에 고정됩니다(재승인 시 새 이름으로 생성)",
       "대용량이면 생성에 시간 소요",
@@ -399,8 +399,8 @@ const ACTION_GUIDE: Record<string, ActionGuide> = {
       "승인 이후 클래스가 드리프트되면 안전을 위해 변경이 거부됩니다.",
     ],
     considerations: [
-      "target class / current class(아래 표시)를 확인 — 의도한 방향(업/다운사이즈)인지",
-      "Multi-AZ 여부 확인 — 아니라면 재기동 중 연결 끊김",
+      "target class / current class(아래 표시)를 확인: 의도한 방향(업/다운사이즈)인지",
+      "Multi-AZ 여부 확인: 아니라면 재기동 중 연결 끊김",
     ],
   },
   modify_rds_instance_params: {
@@ -464,7 +464,7 @@ export function ApprovalCard({
       <ActionDetails action={action} details={details} />
 
       {/* CLI preview. For the endpoint actions the reconstruction from the
-          hash-bound action_details ALWAYS wins — an agent-composed cli_preview
+          hash-bound action_details ALWAYS wins: an agent-composed cli_preview
           could misrepresent what approval actually enforces, so we never trust
           the payload string for actions we can rebuild deterministically.
           Other actions fall back to the payload's own cli_preview. */}
@@ -477,7 +477,7 @@ export function ApprovalCard({
         return cli ? <CliPreview cli={cli} /> : null;
       })()}
 
-      {/* 리스크와 고려사항 — 승인 결정에 필요한 컨텍스트를 카드 안에서 바로
+      {/* 리스크와 고려사항: 승인 결정에 필요한 컨텍스트를 카드 안에서 바로
           제공한다. 기본 접힘(공간 절약), 클릭 시 펼침. */}
       {guide && (guide.risks.length > 0 || guide.considerations.length > 0) && (
         <div className="mt-2">
@@ -520,7 +520,7 @@ export function ApprovalCard({
 
       <div className="flex items-center justify-between text-[11px] text-zinc-500 mt-3 pt-3 border-t border-zinc-800/80">
         <span className="font-mono">{approval.cluster_id}</span>
-        {/* created_at is a ms-epoch stored as a DDB STRING (sort key) —
+        {/* created_at is a ms-epoch stored as a DDB STRING (sort key),
             new Date("1781…") is Invalid Date, so cast numerics first. */}
         <span>
           {new Date(
@@ -532,7 +532,7 @@ export function ApprovalCard({
       </div>
 
       {/* approval_id is what the agent needs when re-issuing the write
-          tool — DBA can copy it into chat if the agent forgot to surface
+          tool: DBA can copy it into chat if the agent forgot to surface
           it. */}
       <div className="text-[10px] font-mono text-zinc-600 mt-1 truncate">
         id: {approval.approval_id}
@@ -604,7 +604,7 @@ function ActionDetails({
         </pre>
         {details.force === true && (
           <div className="text-[11px] text-rose-300">
-            ⚠ force=true — DROP/TRUNCATE/DELETE class statement
+            ⚠ force=true: DROP/TRUNCATE/DELETE class statement
           </div>
         )}
       </div>
@@ -715,7 +715,7 @@ function ActionDetails({
         />
         {!enabling && (
           <div className="text-[11px] text-rose-300">
-            ⚠ PITR 비활성화 — 연속 백업 보호가 사라집니다 (force=true).
+            ⚠ PITR 비활성화: 연속 백업 보호가 사라집니다 (force=true).
           </div>
         )}
       </div>
@@ -789,7 +789,7 @@ function MemberRow({ label, members }: { label: string; members: unknown }) {
 }
 
 // Action types whose CLI preview we reconstruct deterministically (and never
-// take from the payload — see the render gate above).
+// take from the payload, see the render gate above).
 const ENDPOINT_ACTIONS = [
   "create_custom_endpoint",
   "delete_custom_endpoint",
@@ -806,7 +806,7 @@ function sh(v: string): string {
 
 // Deterministic CLI reconstruction for the Aurora custom-endpoint actions.
 // request_approval params are composed by the LLM, so cli_preview may be
-// dropped or wrong in the stored payload — the card rebuilds the exact command
+// dropped or wrong in the stored payload: the card rebuilds the exact command
 // from the hash-bound action_details instead of trusting the agent.
 function buildEndpointCli(
   action: string,
@@ -864,7 +864,7 @@ function CliPreview({ cli }: { cli: string }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // clipboard unavailable (insecure context) — the block is still
+      // clipboard unavailable (insecure context): the block is still
       // selectable, so this is a nice-to-have, not a requirement.
     }
   };
@@ -905,13 +905,13 @@ function DetailRow({
       <span
         className={`text-sm text-zinc-100 break-all ${mono ? "font-mono" : ""}`}
       >
-        {value || "—"}
+        {value || "-"}
       </span>
     </div>
   );
 }
 
 function fmt(v: unknown): string {
-  if (v === null || v === undefined || v === "") return "—";
+  if (v === null || v === undefined || v === "") return "-";
   return String(v);
 }

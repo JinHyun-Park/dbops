@@ -80,13 +80,13 @@ export default function ApiDocsPage() {
         description={
           spec?.info?.description ||
           t(
-            "DBOps REST API. 모든 경로는 Cognito JWT(Authorization: Bearer)가 필요합니다 — Slack 웹훅(HMAC)과 /health 제외.",
+            "DBOps REST API. 모든 경로는 Cognito JWT(Authorization: Bearer)가 필요합니다. Slack 웹훅(HMAC)과 /health 제외.",
           )
         }
       />
       {err && (
         <div className="text-xs text-rose-300 border border-rose-500/40 bg-rose-500/10 px-3 py-2">
-          스펙 로드 실패: {err} — /openapi.json 이 배포됐는지 확인하세요.
+          스펙 로드 실패: {err}. /openapi.json 이 배포됐는지 확인하세요.
         </div>
       )}
       {!spec && !err && (

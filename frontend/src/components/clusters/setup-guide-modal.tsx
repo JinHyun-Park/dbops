@@ -4,7 +4,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 
 /**
- * Setup guide modal — shows DBAs exactly what to do BEFORE bulk Discover.
+ * Setup guide modal: shows DBAs exactly what to do BEFORE bulk Discover.
  *
  * Two tabs (PostgreSQL / MySQL). Each tab walks through:
  *  1. Create the dedicated `dbops_readonly` role
@@ -22,7 +22,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   // Pre-fills the SQL snippets with the cluster_id the user is about to set up.
-  // Optional — when missing, snippets use a placeholder.
+  // Optional: when missing, snippets use a placeholder.
   clusterId?: string;
   // Same for region (used in the CLI snippet for `aws secretsmanager create-secret`).
   region?: string;
@@ -43,7 +43,7 @@ CREATE ROLE dbops_readonly LOGIN PASSWORD '<생성한-비밀번호-붙여넣기>
 -- 2) DBOps에 필요한 최소 권한만 부여
 GRANT pg_monitor TO dbops_readonly;            -- pg_stat_statements, pg_stat_activity 등
 GRANT pg_read_all_settings TO dbops_readonly;
-GRANT pg_read_all_stats TO dbops_readonly;     -- PG15+ — pg_stat_user_indexes / tables 포함
+GRANT pg_read_all_stats TO dbops_readonly;     -- PG15+: pg_stat_user_indexes / tables 포함
 -- (선택) 특정 스키마 내부까지 인스펙션이 필요할 때만:
 -- GRANT USAGE ON SCHEMA public TO dbops_readonly;
 -- GRANT SELECT ON ALL TABLES IN SCHEMA public TO dbops_readonly;`;
@@ -70,7 +70,7 @@ aws secretsmanager create-secret \\
   --description "DBOps readonly access for ${cid}" \\
   --secret-string "{\\"username\\":\\"dbops_readonly\\",\\"password\\":\\"$PASSWORD\\"}"
 
-# DBOps Discover가 이 시크릿을 자동으로 찾아 연결합니다 — ARN 수동 입력 불필요.`;
+# DBOps Discover가 이 시크릿을 자동으로 찾아 연결합니다. ARN 수동 입력 불필요.`;
 
   const body = (
     <div
@@ -156,7 +156,7 @@ aws secretsmanager create-secret \\
               <span className="font-mono text-zinc-200">
                 AWS Secrets Manager
               </span>
-              에 등록 — bulk Discover가 자동으로 찾아 연결합니다
+              에 등록: bulk Discover가 자동으로 찾아 연결합니다
             </div>
             <Code text={secretsManagerCli} />
           </section>
@@ -171,7 +171,7 @@ aws secretsmanager create-secret \\
               DBOps에 그 수준의 접근권을 부여하면 DBOps Lambda가 침해됐을 때
               모든 스키마와 자격증명이 노출됩니다. 위에서 만든{" "}
               <code>dbops_readonly</code> 롤은 모니터링 카탈로그와 테이블 통계는
-              읽을 수 있지만 데이터 변경이나 롤 관리는 불가능 — blast radius가
+              읽을 수 있지만 데이터 변경이나 롤 관리는 불가능. blast radius가
               훨씬 작습니다.
               <br />
               <br />
@@ -184,7 +184,7 @@ aws secretsmanager create-secret \\
               <span className="text-emerald-400">convention</span> 배지와 함께
               자동 연결. 시크릿이 없으면 master 시크릿으로 폴백하면서{" "}
               <span className="text-amber-400">master_fallback</span> 경고가
-              표시됩니다 — 런타임은 동작하지만 프로덕션 전환 전에 전용 계정을
+              표시됩니다. 런타임은 동작하지만 프로덕션 전환 전에 전용 계정을
               등록하는 게 좋습니다.
             </div>
           </section>

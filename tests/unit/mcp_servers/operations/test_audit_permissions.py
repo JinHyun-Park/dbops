@@ -104,7 +104,7 @@ def test_no_superusers_yields_no_warnings():
     ("valkey", "elasticache"),
 ])
 def test_engines_without_the_data_api_are_refused_not_misreported(engine, family):
-    """The old code returned "cluster not registered or unreachable — register via
+    """The old code returned "cluster not registered or unreachable, register via
     /clusters" for these, which is false: the clusters ARE registered and the real
     reason is that execute_on_target is Data-API-only."""
     cache = _cache(engine)

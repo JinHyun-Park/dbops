@@ -1,6 +1,6 @@
 "use client";
 
-// DB Map — service blueprint. Every registered DB grouped by the service/app it
+// DB Map: service blueprint. Every registered DB grouped by the service/app it
 // serves (service_tags), with auto-inferred facts + an admin-editable note.
 // Clicking a card sets the GLOBAL selected cluster and opens its dashboard.
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -32,8 +32,8 @@ const STATUS_DOT: Record<StatusLevel, string> = {
 };
 const STATUS_TITLE: Record<StatusLevel, string> = {
   ok: "정상 (available)",
-  warning: "주의 — 상태 전이 중",
-  critical: "위험 — 중단/실패 상태",
+  warning: "주의 (상태 전이 중)",
+  critical: "위험 (중단/실패 상태)",
   unknown: "상태 미수집",
 };
 const ENV_CHIP: Record<string, string> = {
@@ -91,7 +91,7 @@ function DbCard({
     return (
       <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4">
         <div className="mb-2 text-xs font-medium text-slate-400">
-          {displayName(c)} — 노트 편집
+          {displayName(c)}: 노트 편집
         </div>
         <label className="mb-1 block text-[11px] text-slate-500">
           목적 (한 줄)
@@ -206,7 +206,7 @@ function DbCard({
         <p className="mt-2 line-clamp-2 text-xs text-slate-400">{c.purpose}</p>
       ) : (
         <p className="mt-2 text-xs italic text-slate-600">
-          {admin ? "목적 미설정 — 편집으로 추가" : "목적 미설정"}
+          {admin ? "목적 미설정 (편집으로 추가)" : "목적 미설정"}
         </p>
       )}
     </div>
@@ -253,7 +253,7 @@ export default function MapPage() {
         eyebrow={t("Monitor")}
         title={t("Map")}
         description={t(
-          "계정의 DB를 Region → VPC로 묶어 본 아키텍처 청사진 — 노드를 클릭하면 해당 대시보드로 이동하고 전역 선택이 바뀝니다.",
+          "계정의 DB를 Region → VPC로 묶어 본 아키텍처 청사진: 노드를 클릭하면 해당 대시보드로 이동하고 전역 선택이 바뀝니다.",
         )}
       />
       <PageBody>

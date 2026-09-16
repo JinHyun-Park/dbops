@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A `?view=elasticache` Cost-Explorer view in `/api/cost` + a frontend Cost-page tab showing actual ElastiCache spend — a near-exact mirror of the existing `?view=rds`.
+**Goal:** A `?view=elasticache` Cost-Explorer view in `/api/cost` + a frontend Cost-page tab showing actual ElastiCache spend: a near-exact mirror of the existing `?view=rds`.
 
 **Architecture:** Add `_elasticache_services` + `_handle_elasticache_view` (mirror `_rds_services`/`_handle_rds_view`) + a dispatch arm; extend the Cost page with an ElastiCache tab. No new IAM, no tag filter.
 
@@ -12,7 +12,7 @@
 
 - **No `Co-Authored-By: Claude` trailer** (user rule).
 - Mirror `?view=rds` EXACTLY (same envelope, no tag filter, same per-cluster + anomalies + no_data_reason handling). Only the SERVICE filter ("elasticache") + `"view": "elasticache"` differ.
-- Read-only Cost Explorer (existing `ce:GetCostAndUsage`/`GetDimensionValues` IAM — no new grant).
+- Read-only Cost Explorer (existing `ce:GetCostAndUsage`/`GetDimensionValues` IAM: no new grant).
 - Korean copy for notes; usage-type/service tokens verbatim.
 
 ---
@@ -33,7 +33,7 @@
 - [ ] **Step 2: Write the failing test.** Extend/create the cost test (mirror the rds-view test if one exists; else create `tests/unit/api/test_cost_elasticache.py`). Load the handler via importlib; mock the CE client. Assert:
 
   - `_elasticache_services` keeps SERVICE values whose name contains "elasticache" (case-insensitive) and falls back to the default when CE returns none/errors.
-  - `_handle_elasticache_view` returns a 200 response whose body has `view == "elasticache"`, `total`, `daily`, `by_usage_type`, `per_cluster_available`, `anomalies` keys (mock `_query_total`→(daily,total,None), `_query_by_dimension`, `_query_per_cluster` or the CE client beneath them — match how the rds-view test mocks).
+  - `_handle_elasticache_view` returns a 200 response whose body has `view == "elasticache"`, `total`, `daily`, `by_usage_type`, `per_cluster_available`, `anomalies` keys (mock `_query_total`→(daily,total,None), `_query_by_dimension`, `_query_per_cluster` or the CE client beneath them: match how the rds-view test mocks).
   - `lambda_handler` with `queryStringParameters={"view":"elasticache"}` routes to the elasticache view (body `view == "elasticache"`).
 
   (If no rds-view test exists to mirror, write a minimal one: patch `_query_total`/`_query_by_dimension`/`_query_per_cluster`/`_detect_anomalies` on the module to return canned values and assert the envelope.)
@@ -133,13 +133,13 @@ git commit -m "feat(elasticache): Cost Explorer view (?view=elasticache) mirrori
 **Files:**
 
 - Modify: `frontend/src/app/cost/page.tsx` (CostTab union + tab + view type + fetch + render)
-- Modify: `frontend/src/lib/api-client.ts` (if the cost fetch is centralized there; else the page fetches inline — match the existing rds tab)
+- Modify: `frontend/src/lib/api-client.ts` (if the cost fetch is centralized there; else the page fetches inline: match the existing rds tab)
 
 **Interfaces:**
 
 - Consumes: the `?view=elasticache` response (same shape as the rds view).
 
-- [ ] **Step 1: Read the template.** Read `frontend/src/app/cost/page.tsx`: the `CostTab` union (~82), the rds view type (~63), how a tab is rendered + fetched (the `tab === "rds"` path, `rdsUsageLabel` ~128, `isRds` ~173), and how the fetch is triggered per tab (~152-167). The ElastiCache view is shape-identical to rds — reuse the rds rendering.
+- [ ] **Step 1: Read the template.** Read `frontend/src/app/cost/page.tsx`: the `CostTab` union (~82), the rds view type (~63), how a tab is rendered + fetched (the `tab === "rds"` path, `rdsUsageLabel` ~128, `isRds` ~173), and how the fetch is triggered per tab (~152-167). The ElastiCache view is shape-identical to rds: reuse the rds rendering.
 
 - [ ] **Step 2: Add the tab + view.**
 
@@ -147,7 +147,7 @@ git commit -m "feat(elasticache): Cost Explorer view (?view=elasticache) mirrori
   - Add the `view: "elasticache"` response type (clone the rds view type, change the `view` literal).
   - Add an "ElastiCache" tab button next to the RDS tab (same styling).
   - Fetch `?view=elasticache&days=...` on tab select (mirror the rds fetch path).
-  - Render with the SAME components the rds tab uses (total/daily/by_usage_type/per_cluster/anomalies) — since the shapes match, treat `tab === "elasticache"` like `tab === "rds"` for rendering (e.g. broaden `isRds`-style guards to include elasticache, or render both via a shared block). Add an `elasticacheUsageLabel` (or reuse a generic usage-label) for readable usage-type rows. Korean tab label/notes.
+  - Render with the SAME components the rds tab uses (total/daily/by_usage_type/per_cluster/anomalies). Since the shapes match, treat `tab === "elasticache"` like `tab === "rds"` for rendering (e.g. broaden `isRds`-style guards to include elasticache, or render both via a shared block). Add an `elasticacheUsageLabel` (or reuse a generic usage-label) for readable usage-type rows. Korean tab label/notes.
 
 - [ ] **Step 3: Build.** `cd frontend && npm run build` → PASS, no type errors; `/cost` prerenders.
 
@@ -162,7 +162,7 @@ git commit -m "feat(elasticache): Cost page ElastiCache spend tab"
 
 ## Post-implementation (controller, after both tasks reviewed clean)
 
-- Final whole-branch review (standard model — small mirror): the elasticache view envelope matches the rds view exactly (only SERVICE filter + view label differ); no tag filter; no new IAM; the dispatch arm doesn't disturb the existing views; the frontend tab reuses the rds rendering without breaking the other tabs.
+- Final whole-branch review (standard model: small mirror): the elasticache view envelope matches the rds view exactly (only SERVICE filter + view label differ); no tag filter; no new IAM; the dispatch arm doesn't disturb the existing views; the frontend tab reuses the rds rendering without breaking the other tabs.
 - Deploy dev: `cdk deploy dbops-dev-agent` (api/cost Lambda). Frontend build → sync → invalidate `E1234567890ABC`.
-- Live smoke: `GET /api/cost?view=elasticache&days=30` (viewer token) → 200 with the envelope (`view: "elasticache"`, total/daily/by_usage_type; likely $0 or small in dev — that's fine, the envelope + no_data_reason is the check). Confirm the other views (rds/bedrock/platform/tokens) still return 200 (no regression).
+- Live smoke: `GET /api/cost?view=elasticache&days=30` (viewer token) → 200 with the envelope (`view: "elasticache"`, total/daily/by_usage_type; likely $0 or small in dev: that's fine, the envelope + no_data_reason is the check). Confirm the other views (rds/bedrock/platform/tokens) still return 200 (no regression).
 - Then `superpowers:finishing-a-development-branch`.

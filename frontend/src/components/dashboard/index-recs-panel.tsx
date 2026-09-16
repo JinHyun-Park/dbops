@@ -47,7 +47,7 @@ export function IndexRecsPanel({ clusterId }: { clusterId: string }) {
             Index Recommendations
           </div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            sequential scan이 index scan보다 우세한 테이블 — 신규 인덱스 후보
+            sequential scan이 index scan보다 우세한 테이블: 신규 인덱스 후보
           </div>
         </div>
         <select
@@ -64,7 +64,7 @@ export function IndexRecsPanel({ clusterId }: { clusterId: string }) {
         <div className="p-6 text-zinc-500 text-sm">불러오는 중…</div>
       ) : items.length === 0 ? (
         <div className="p-6 text-zinc-500 text-sm">
-          후보 없음 — 인덱스 상태 양호!
+          후보 없음: 인덱스 상태 양호!
         </div>
       ) : (
         <div className="max-h-96 overflow-y-auto">
@@ -145,7 +145,7 @@ export function IndexRecsPanel({ clusterId }: { clusterId: string }) {
                       className="px-4 py-2 text-right text-zinc-300 font-mono text-xs tabular-nums"
                       title={`${fmtExact(
                         seqTupRead,
-                      )} rows read by seq scans — high values indicate wasted IO`}
+                      )} rows read by seq scans, high values indicate wasted IO`}
                     >
                       {fmtNumber(seqTupRead)}
                     </td>

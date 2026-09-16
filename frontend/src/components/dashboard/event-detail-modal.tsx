@@ -86,7 +86,7 @@ export function EventDetailModal({
   const handleAnalyze = () => {
     if (!clusterId) {
       setInsightError(
-        "cluster_id를 가져오지 못했어요 — 대시보드를 새로고침하세요",
+        "cluster_id를 가져오지 못했어요. 대시보드를 새로고침하세요",
       );
       return;
     }
@@ -96,9 +96,9 @@ export function EventDetailModal({
     const detailJson = JSON.stringify(parsed ?? {}, null, 2).slice(0, 8000);
     const message =
       `Aurora 클러스터에서 운영 이벤트가 기록됐어. **한국어로** 다음 3개 섹션으로 짧고 명확하게 설명해줘:\n` +
-      `1. **무슨 일이 일어났는지** — 한 문장.\n` +
-      `2. **영향** — 무엇이 깨지거나 달라질 수 있는지 (1–2문장, 이 클러스터의 런타임 관점에서 구체적으로).\n` +
-      `3. **권장 조치** — DBA가 지금 취해야 할 구체적인 행동 한 가지 ` +
+      `1. **무슨 일이 일어났는지**: 한 문장.\n` +
+      `2. **영향**: 무엇이 깨지거나 달라질 수 있는지 (1-2문장, 이 클러스터의 런타임 관점에서 구체적으로).\n` +
+      `3. **권장 조치**: DBA가 지금 취해야 할 구체적인 행동 한 가지 ` +
       `(영향이 없으면 "조치 불필요"라고 답해줘).\n\n` +
       `Event metadata:\n` +
       `- Cluster: ${clusterId}\n` +
@@ -146,7 +146,7 @@ export function EventDetailModal({
                 {sev}
               </span>
               <span className="text-[10px] text-zinc-500 font-mono">
-                {event.source || "—"}
+                {event.source || "-"}
               </span>
               <span className="text-[10px] text-zinc-500">{event.ts}</span>
             </div>

@@ -1,4 +1,4 @@
-"""Unit tests for agent/tool_gate.py — ClusterVisibilityGate BeforeToolCall hook."""
+"""Unit tests for agent/tool_gate.py: ClusterVisibilityGate BeforeToolCall hook."""
 
 import importlib.util
 import sys
@@ -23,7 +23,7 @@ if "strands" not in sys.modules:
         _hooks = types.ModuleType("strands.hooks")
         _events = types.ModuleType("strands.hooks.events")
 
-        class HookProvider:  # minimal base — register_hooks is overridden
+        class HookProvider:  # minimal base, register_hooks is overridden
             pass
 
         class HookRegistry:

@@ -76,8 +76,8 @@ const TOOL_TAG_PATTERN =
 const BLOCK_OPEN_RE = /<use_tool\b[^>]*>/i;
 const BLOCK_CLOSE_RE = /<\/use_tool\s*>/i;
 
-// Partial-tag detector — hold back chunks that end with a possibly-incomplete
-// marker tag. Matches: `<`, `</`, `<inv…`, `</invoke…`, etc. — bounded by
+// Partial-tag detector: hold back chunks that end with a possibly-incomplete
+// marker tag. Matches: `<`, `</`, `<inv…`, `</invoke…`, etc., bounded by
 // requiring no `>` between the trailing `<` and end-of-stream. Plain prose
 // like "if x < 5" doesn't match (`< 5` has a non-letter after `<` and isn't
 // at end-of-string after `<`); "<a href=…>link</a>" doesn't match because
@@ -102,7 +102,7 @@ function makeSanitizer(): (chunk: string) => string {
       if (inBlock) {
         const close = text.match(BLOCK_CLOSE_RE);
         if (!close || close.index === undefined) {
-          // No close tag yet — drop everything we have and wait.
+          // No close tag yet: drop everything we have and wait.
           return out;
         }
         text = text.slice(close.index + close[0].length);
@@ -110,7 +110,7 @@ function makeSanitizer(): (chunk: string) => string {
       } else {
         const open = text.match(BLOCK_OPEN_RE);
         if (!open || open.index === undefined) {
-          // No more openings — process remainder with bare-tag strip +
+          // No more openings: process remainder with bare-tag strip +
           // partial-tag holdback.
           const stripped = text.replace(TOOL_TAG_PATTERN, "");
           const tail = stripped.match(PARTIAL_TAG_RE);
@@ -161,12 +161,12 @@ export function streamChat(
   getValidAccessToken()
     .then((token) => {
       if (!token) {
-        // Refresh token also expired or no current Cognito user — bounce to /login.
+        // Refresh token also expired or no current Cognito user: bounce to /login.
         if (typeof window !== "undefined") {
           const next = window.location.pathname + window.location.search;
           window.location.replace(`/login?next=${encodeURIComponent(next)}`);
         }
-        throw new Error("Session expired — please log in again");
+        throw new Error("Session expired. Please log in again");
       }
       console.log("[streamChat] start", {
         tokenLen: token.length,
@@ -178,8 +178,8 @@ export function streamChat(
     .then(({ url, token }) => {
       console.log("[streamChat] invoke URL", url);
       // AgentCore's Cognito authorizer validates + consumes the Authorization
-      // header (access token) and does NOT forward it — nor any custom request
-      // header — to the agent container. To let the agent identify the caller
+      // header (access token) and does NOT forward it (nor any custom request
+      // header) to the agent container. To let the agent identify the caller
       // for team-scoped cluster visibility, pass the ID token (carries
       // cognito:username + cognito:groups) in the invocation BODY, which always
       // reaches the agent; the agent re-verifies it against Cognito's JWKS

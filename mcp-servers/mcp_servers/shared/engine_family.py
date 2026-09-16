@@ -54,7 +54,7 @@ CAPABILITIES = {
         # Positive gate like custom_endpoint.
         "prewarm": True,
         # scale_instance: Aurora reader scale-out/scale-in (N-③) is instance-level
-        # (both PG and MySQL). Positive gate — non-relational engines can't add/
+        # (both PG and MySQL). Positive gate: non-relational engines can't add/
         # remove an RDS DB instance this way.
         "scale_instance": True,
         # query_stats: does this family have a PRODUCER for the query_stats
@@ -109,17 +109,17 @@ CAPABILITIES = {
         "findings": {"elasticache"},
     },
     RDS_INSTANCE: {
-        # SQL-capable but NOT via RDS Data API (Aurora-only) — R-3 wires the
+        # SQL-capable but NOT via RDS Data API (Aurora-only): R-3 wires the
         # direct-TCP path; until then execute_sql's Data API call must not be
         # reached for this family (sql_via is the dispatch key).
         "sql": True, "sql_via": "direct",
         "rds_meta": True, "perf_insights": True, "simulation": False,
         "rds_cost_simulation": True,
-        # Cluster/reader-topology concepts — never applicable to a standalone
+        # Cluster/reader-topology concepts, never applicable to a standalone
         # DB instance.
         "custom_endpoint": False, "prewarm": False, "scale_instance": False,
         # Instance-level writes (reboot / snapshot / modify-class; R-3) apply
-        # ONLY to standalone RDS instances — Aurora uses cluster/reader tooling.
+        # ONLY to standalone RDS instances: Aurora uses cluster/reader tooling.
         # Positive, FAIL-CLOSED gate: no other family carries this capability.
         "instance_write": True,
         # query_stats rows do arrive here (direct-TCP collectors). explain and
@@ -146,6 +146,6 @@ CAPABILITIES = {
 def dynamodb_cluster_id(account_id, region, table_name):
     """Regex-safe registry PK for a DynamoDB table. Table names allow `_`/`.`
     and up to 255 chars, which the API validators (`^[a-zA-Z0-9-]{1,63}$`)
-    reject — so use a deterministic slug and keep the real name in resource_name."""
+    reject, so use a deterministic slug and keep the real name in resource_name."""
     h = hashlib.sha256(f"{account_id}:{region}:{table_name}".encode()).hexdigest()[:12]
     return f"ddb-{h}"

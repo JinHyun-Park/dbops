@@ -11,7 +11,7 @@ import {
 import { fmtBytes, fmtNumber } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 
-// Health dot — visual punchline per panel. Green if everything came
+// Health dot: visual punchline per panel. Green if everything came
 // back ok, amber if a section errored (degraded but the page still
 // renders), rose if the section itself failed.
 function statusColor(s: string | undefined): string {
@@ -56,7 +56,7 @@ export default function HealthPage() {
         eyebrow={t("self")}
         title={t("DBOps health")}
         description={t(
-          "DBOps 자체의 운영 상태 — Lambda 함수, Aurora cache, DynamoDB 테이블의 상태를 한 화면에. 30초마다 자동 새로고침.",
+          "DBOps 자체의 운영 상태: Lambda 함수, Aurora cache, DynamoDB 테이블의 상태를 한 화면에. 30초마다 자동 새로고침.",
         )}
         actions={
           <button
@@ -111,8 +111,8 @@ export default function HealthPage() {
               <Field label="endpoint" value={data.aurora.endpoint} mono />
               <Field
                 label="Serverless v2 ACU"
-                value={`${data.aurora.serverless_min_acu ?? "—"} ~ ${
-                  data.aurora.serverless_max_acu ?? "—"
+                value={`${data.aurora.serverless_min_acu ?? "-"} ~ ${
+                  data.aurora.serverless_max_acu ?? "-"
                 }`}
               />
               <Field
@@ -223,7 +223,7 @@ function Field({
         {label}
       </div>
       <div className={`text-zinc-200 break-all ${mono ? "font-mono" : ""}`}>
-        {value ?? "—"}
+        {value ?? "-"}
       </div>
     </div>
   );

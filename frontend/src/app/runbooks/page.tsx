@@ -434,7 +434,7 @@ function ManualForm({
 // ---------------------------------------------------------------------------
 
 // Export a runbook as a portable Markdown file (YAML front-matter + body) so it
-// can be moved into git / a wiki / an incident ticket. Browser Blob download —
+// can be moved into git / a wiki / an incident ticket. Browser Blob download,
 // no new dependency. (PDF export is exportRunbookPdf below.)
 function exportRunbookMarkdown(rb: RunbookDetail) {
   const fm = [
@@ -526,7 +526,7 @@ function RunbookModal({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Esc closes the modal — standard expectation
+  // Esc closes the modal, standard expectation
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();

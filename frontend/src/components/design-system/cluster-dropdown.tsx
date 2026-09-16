@@ -14,7 +14,7 @@ import { prefetchDashboard } from "@/lib/api-client";
 // A real, discoverable cluster switcher: click → a popover that lists the
 // clusters immediately (with a severity dot from the shared triage), with
 // typeahead for large fleets. Replaces the old chip that opened the ⌘K search
-// palette — ⌘K is now pages/search only, so the two no longer collide.
+// palette: ⌘K is now pages/search only, so the two no longer collide.
 const DOT: Record<Level, string> = {
   critical: "bg-rose-500",
   warning: "bg-amber-400",
@@ -88,7 +88,7 @@ export function ClusterDropdown({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title={selected ? `${selected} — 클러스터 전환` : "클러스터 선택"}
+        title={selected ? `${selected}: 클러스터 전환` : "클러스터 선택"}
         className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-zinc-800 bg-zinc-900/50 hover:border-emerald-500/40 transition-colors max-w-[280px]"
       >
         {selected && selLevel ? (
@@ -150,7 +150,7 @@ export function ClusterDropdown({
             ) : (
               grouped.map(({ fam, meta, items }) => (
                 <div key={fam}>
-                  {/* Family section header — a small label row that matches the
+                  {/* Family section header: a small label row that matches the
                       surrounding typography: muted caps label + dot accent. */}
                   <div className="flex items-center gap-1.5 px-3 pt-2 pb-1">
                     <span

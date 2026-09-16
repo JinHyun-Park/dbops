@@ -1,4 +1,4 @@
-"""review_sql — pre-execution SQL risk review.
+"""review_sql: pre-execution SQL risk review.
 
 Two correctness fixes over the old first-word/raw-text version:
 
@@ -8,7 +8,7 @@ Two correctness fixes over the old first-word/raw-text version:
    ``'a;b'`` literal no longer looks multi-statement.
 
 2. **No data-loss "rollback" advice.** The old code suggested
-   ``DROP COLUMN`` as the rollback for ``ADD COLUMN`` — but by the time you
+   ``DROP COLUMN`` as the rollback for ``ADD COLUMN``, but by the time you
    roll back, the new column may hold data, so that "rollback" destroys it. We
    now emit ``rollback_sql`` ONLY for genuinely reversible operations
    (CREATE INDEX → DROP INDEX, RENAME → reverse RENAME); for ADD COLUMN we
@@ -43,7 +43,7 @@ _RANK = {"safe": 0, "low": 1, "medium": 2, "high": 3, "critical": 4, "unknown": 
 
 
 def _safe_rollback(sql: str):
-    """Return (rollback_sql, rollback_note) — but only emit rollback_sql for
+    """Return (rollback_sql, rollback_note), but only emit rollback_sql for
     operations that reverse WITHOUT data loss. Matches the ORIGINAL sql
     (case-insensitive) so identifier case is preserved in the suggestion."""
     su = sql.upper()
@@ -78,11 +78,11 @@ def _safe_rollback(sql: str):
         return f"ALTER TABLE {m.group(2)} RENAME TO {m.group(1)}", None
 
     # ADD COLUMN: deliberately NO auto-rollback. DROP COLUMN would delete any
-    # data written to the column after the change — that is data loss, not a
+    # data written to the column after the change: that is data loss, not a
     # rollback.
     if "ADD COLUMN" in su:
         return None, (
-            "자동 롤백 미제공 — DROP COLUMN으로 되돌리면 적용 이후 컬럼에 기록된 데이터가 함께 "
+            "자동 롤백 미제공: DROP COLUMN으로 되돌리면 적용 이후 컬럼에 기록된 데이터가 함께 "
             "삭제됩니다. 되돌리려면 데이터 백업 후 수동으로 처리하세요."
         )
 
@@ -105,17 +105,17 @@ def review_sql_impl(cache: CacheClient, cluster_id: str, sql: str) -> dict:
 
     issues = []
     if re.search(r"\bDELETE\s+FROM\b", stripped_upper) and "WHERE" not in stripped_upper:
-        issues.append("DELETE without WHERE clause — will delete all rows")
+        issues.append("DELETE without WHERE clause, will delete all rows")
     if re.search(r"\bUPDATE\b", stripped_upper) and "WHERE" not in stripped_upper:
-        issues.append("UPDATE without WHERE clause — will update all rows")
+        issues.append("UPDATE without WHERE clause, will update all rows")
     if re.search(r"\bDROP\b", stripped_upper):
         issues.append("DROP is irreversible")
     if re.search(r"\bTRUNCATE\b", stripped_upper):
         issues.append("TRUNCATE is irreversible")
     if is_multi_statement(stripped):
-        issues.append("multiple statements in one request — review each separately")
+        issues.append("multiple statements in one request, review each separately")
     # Side-effect patterns (SELECT ... INTO, FOR UPDATE, pg_terminate_backend …)
-    # only matter for statements that LOOK read-only — an INSERT legitimately
+    # only matter for statements that LOOK read-only: an INSERT legitimately
     # contains "INTO", so don't flag writes here (they're already risk-rated).
     if first_word in ("SELECT", "EXPLAIN", "SHOW", "WITH") and any(
         re.search(p, stripped_upper) for p in SIDE_EFFECTING_PATTERNS

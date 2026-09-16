@@ -21,7 +21,7 @@ _spec.loader.exec_module(handler)
 # Register in sys.modules so unittest.mock.patch can resolve the target by name.
 sys.modules["dashboard_handler"] = handler
 
-# The module was registered as "dashboard_handler" — patch targets use that name.
+# The module was registered as "dashboard_handler": patch targets use that name.
 _MODULE_NAME = "dashboard_handler"
 
 

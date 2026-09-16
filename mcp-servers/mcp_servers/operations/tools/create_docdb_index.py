@@ -1,7 +1,7 @@
-"""create_docdb_index — approval-gated DocumentDB index creation over the Mongo
+"""create_docdb_index: approval-gated DocumentDB index creation over the Mongo
 wire protocol (`db[collection].create_index(keys, background=True, name=name)`).
 
-A hardcoded single-command WRITE — there is NO generic runCommand/eval surface,
+A hardcoded single-command WRITE: there is NO generic runCommand/eval surface,
 mirroring the read collector's allowlist. `background=True` so a large-collection
 build does not block the primary.
 
@@ -13,7 +13,7 @@ Safety model (mirrors set_docdb_profiler + the DynamoDB write tools):
   - Approval-gated 3-state flow.
   - Idempotent: if an index with the requested `name` already exists, no-change.
   - Ordered keys (fix #2): compound-index field ORDER is semantically significant,
-    so keys is an ORDERED list of (field, direction) tuples — NEVER sorted. The
+    so keys is an ORDERED list of (field, direction) tuples, NEVER sorted. The
     approval binds the exact ordered list, and we execute that same ordered list.
   - NEVER raises into the caller: any pymongo/guard error → {"status":"error", ...}
     with a STATIC Korean reason; the detail goes to the module logger. Raw exception
@@ -67,7 +67,7 @@ _CLIENT_FACTORY = _client_factory
 
 
 def _write_creds(cluster_id: str):
-    """Resolve the RW Mongo secret. Returns (creds, error) — error is a status
+    """Resolve the RW Mongo secret. Returns (creds, error): error is a status
     dict the caller returns verbatim. SEPARATE field from the collector's
     read-only `mongo_secret_arn`."""
     row = lookup_cluster(cluster_id)
@@ -125,7 +125,7 @@ def _write_creds(cluster_id: str):
 def _normalize_keys(keys):
     """Validate + normalize the index key spec into an ORDERED list of
     (field, direction) tuples, preserving the caller's order (compound-index
-    order is semantic — never sort). Accepts an ordered list/tuple of
+    order is semantic, never sort). Accepts an ordered list/tuple of
     [field, dir] pairs OR a dict (insertion-ordered in py3.7+).
 
     Returns (keys_list, error) where keys_list is [(field, dir), ...] and
@@ -302,7 +302,7 @@ def create_docdb_index_impl(
                 "cluster_id": cluster_id,
             }
         if name in fresh:
-            # The index appeared between request and execute — refuse rather than
+            # The index appeared between request and execute. Refuse rather than
             # error on a duplicate-name create.
             return {
                 "status": "approval_denied",

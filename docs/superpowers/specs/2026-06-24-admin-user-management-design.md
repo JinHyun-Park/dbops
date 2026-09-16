@@ -1,21 +1,21 @@
-# DBOps Admin Console — User & Role Management (B1) — Design
+# DBOps Admin Console: User & Role Management (B1) Design
 
 **Date:** 2026-06-24
-**Status:** approved (autonomous — design decisions made by the implementer per the user's "proceed without asking" directive)
+**Status:** approved (autonomous: design decisions made by the implementer per the user's "proceed without asking" directive)
 
 ## Context & Decomposition
 
 The backlog item "DBOps Admin 관리 기능 (admin console + 멀티팀 접근/공유)" spans two
 independent subsystems. Per the brainstorming scope-check, it is decomposed:
 
-- **B1 (this spec) — Admin User & Role Management.** A console where an admin
+- **B1 (this spec): Admin User & Role Management.** A console where an admin
   lists the Cognito users of the pool and sets each user's role (admin /
   viewer). Self-contained: reuses the EXISTING two-group RBAC
   (`dbops-admin` / `dbops-viewer`) and the just-hardened canonical `_is_admin`.
   No new tenancy architecture. Today an operator can only manage who is
-  admin/viewer through the raw AWS Cognito console — this closes that gap
+  admin/viewer through the raw AWS Cognito console: this closes that gap
   inside DBOps.
-- **B2 (DEFERRED — needs user architectural direction) — Multi-team tenancy +
+- **B2 (DEFERRED, needs user architectural direction): Multi-team tenancy +
   team-scoped cluster/view sharing.** This is product-architecture-defining:
   the team model shape, default cluster visibility (open vs closed), whether
   teams map to Cognito-group-per-team vs a DB membership table, integration
@@ -50,18 +50,18 @@ attributes other than group membership.
 - Therefore the API's `{username}` path segment is the UUID, `ListUsers`
   returns that UUID as `Username`, and the **self-demotion guard compares the
   `{username}` to the caller's `cognito:username` (fallback `sub`)** decoded
-  from the bearer token — NOT the email.
+  from the bearer token, NOT the email.
 - Two groups exist (CDK-managed `CfnUserPoolGroup`): `dbops-admin`,
   `dbops-viewer`. Role derivation:
   - in `dbops-admin` → **admin**
   - in `dbops-viewer` and not `dbops-admin` → **viewer**
-  - in NO group → **admin (implicit)** — this matches the canonical
+  - in NO group → **admin (implicit)**: this matches the canonical
     `_is_admin` single-admin dev fallback; surfaced with an `implicit: true`
-    flag so the UI can show "implicit admin — assign an explicit role".
+    flag so the UI can show "implicit admin, assign an explicit role".
 
 ## Architecture
 
-### Component 1 — `api/admin_users/handler.py` (new Lambda, agent stack)
+### Component 1: `api/admin_users/handler.py` (new Lambda, agent stack)
 
 Mirrors `api/config/handler.py` structure: its own exception-safe
 `_decode_jwt_payload` + the **canonical fail-closed `_is_admin`** (verbatim from
@@ -79,7 +79,7 @@ Routes (the HTTP API's Cognito JWT authorizer already fronts every route):
 implicit}], "next_cursor": <PaginationToken or null>}`. `created` is the
     `UserCreateDate` ISO string. `email`/`status` from the user record.
   - `cursor` is the opaque Cognito `PaginationToken` passed straight through
-    (no base64 wrapping needed — it is already an opaque string). Absent on
+    (no base64 wrapping needed: it is already an opaque string). Absent on
     the last page.
 - `POST /api/admin/users/{username}/role` (admin-only), body `{"role": "admin"|"viewer"}`:
   - Validate `role ∈ {admin, viewer}` → else `400`.
@@ -97,14 +97,14 @@ implicit}], "next_cursor": <PaginationToken or null>}`. `created` is the
       `admin_add_user_to_group` is idempotent.
   - Returns `{"username", "role"}` on `200`.
   - `UserNotFoundException` → `404`; any other boto error → `500` with a
-    GENERIC message (never `str(e)` — no leaking internal detail; mirrors the
+    GENERIC message (never `str(e)`: no leaking internal detail; mirrors the
     dashboard str(e) lesson).
 - Any other method/path → `405` / `404` as appropriate.
 
 `_caller_username(event)`: decode the bearer payload, return
 `claims["cognito:username"] or claims["sub"]` (used by the guard).
 
-### Component 2 — CDK wiring (`cdk/stacks/agent_stack.py`)
+### Component 2: CDK wiring (`cdk/stacks/agent_stack.py`)
 
 Mirror the `onboarding_lambda` block:
 
@@ -141,9 +141,9 @@ self.api.add_routes(
 ```
 
 IAM is scoped to the single user-pool ARN. No `dynamodb`/`secretsmanager`
-grants — Cognito-only.
+grants: Cognito-only.
 
-### Component 3 — Frontend `/admin/users` page
+### Component 3: Frontend `/admin/users` page
 
 - New route `frontend/src/app/admin/users/page.tsx` (admin-only; gated like
   `/settings`). Add a nav entry hidden for viewers (mirror how `/settings` is
@@ -154,7 +154,7 @@ grants — Cognito-only.
   Changing the select pops a confirm, then `POST .../role` via `authedFetch`,
   then refetches the list.
 - The acting admin's own row has its role control **disabled** with a tooltip
-  ("you cannot change your own role") — the client knows its own username from
+  ("you cannot change your own role"): the client knows its own username from
   the decoded token (`getUserGroups` already decodes; add a small
   `getUsername()` helper returning `cognito:username || sub`). The server
   enforces the 409 regardless; the UI disable is cosmetic.
@@ -191,7 +191,7 @@ JSON back. No DB, no cache, no cross-account.
   - **Admin-gate contract** (the just-hardened canonical form): no-bearer → `403`;
     `Bearer <garbage>` → `403`; viewer (`dbops-viewer`) → `403`; no-group → not-403;
     `dbops-admin` → not-403.
-- **CDK:** snapshot test stays green (new construct added — update/accept snapshot).
+- **CDK:** snapshot test stays green (new construct added: update/accept snapshot).
 - **Frontend:** `npm run build` clean.
 
 ## Security

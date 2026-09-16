@@ -59,7 +59,7 @@ def test_execute_sql_explain_is_safe():
 
 def test_execute_sql_write_approved_without_id_rejected():
     """A write statement with bare `approved=True` (no approval_id) must
-    be rejected by the guard — agent cannot bypass DBA approval by just
+    be rejected by the guard: agent cannot bypass DBA approval by just
     flipping the boolean."""
     with patch.dict("os.environ", {"APPROVALS_TABLE": "approvals"}, clear=True):
         mock_cache = MagicMock()
@@ -78,7 +78,7 @@ def test_execute_sql_write_approved_without_id_rejected():
 
 def test_select_calling_pg_terminate_backend_needs_approval():
     """`SELECT pg_terminate_backend(pid)` reads like a SELECT but kills a
-    session — it must require approval, not execute silently."""
+    session: it must require approval, not execute silently."""
     out = execute_sql_impl(
         MagicMock(), cluster_id="prod-pg-1", sql="SELECT pg_terminate_backend(12345)"
     )
@@ -98,7 +98,7 @@ def test_explain_analyze_needs_approval():
 
 
 def test_explain_analyze_of_delete_is_blocked_as_dangerous():
-    """EXPLAIN ANALYZE of a DELETE would run the DELETE — DELETE FROM trips the
+    """EXPLAIN ANALYZE of a DELETE would run the DELETE: DELETE FROM trips the
     dangerous-pattern block first, requiring force=true."""
     out = execute_sql_impl(
         MagicMock(), cluster_id="prod-pg-1",
@@ -236,7 +236,7 @@ def test_decode_field_handles_full_type_set():
     assert _decode_field({"stringValue": "x"}) == "x"
     assert _decode_field({"longValue": 7}) == 7
     assert _decode_field({"booleanValue": False}) is False
-    # NUMERIC/DECIMAL arrive as stringValue — exact precision preserved
+    # NUMERIC/DECIMAL arrive as stringValue, exact precision preserved
     assert _decode_field({"stringValue": "123.4500"}) == "123.4500"
     # bytea -> base64 string (JSON-safe), round-trips to original bytes
     blob = b"\x00\x01\xfe"
@@ -278,8 +278,8 @@ def test_execute_sql_decodes_null_and_array_rows(mock_boto3):
 @patch("mcp_servers.operations.tools.execute_sql.boto3")
 def test_execute_sql_rds_instance_other_engine_unsupported(mock_boto3, mock_lookup):
     """An rds_instance engine that is neither MySQL nor SQL Server (both direct
-    paths now shipped) returns a generic unsupported_engine message — no stale
-    "R-4" wording — and, even with legacy TARGET_* env fallbacks set (the exact
+    paths now shipped) returns a generic unsupported_engine message (no stale
+    "R-4" wording) and, even with legacy TARGET_* env fallbacks set (the exact
     condition that let this slip through to the wrong cluster before), must
     never reach the RDS Data API."""
     mock_rds_data = MagicMock()
@@ -359,7 +359,7 @@ def test_direct_mysql_approved_write_without_write_secret_fails_closed(
     mock_lookup, mock_cfc, mock_md, mock_boto3, mock_verify
 ):
     """An approved write on a MySQL row with NO db_write_secret_arn fails closed
-    with a static message — no secret fetch, no connect."""
+    with a static message: no secret fetch, no connect."""
     mock_verify.return_value = {"ok": True}
     mock_lookup.return_value = dict(_MYSQL_ROW)  # has db_secret_arn, no write secret
 
@@ -432,7 +432,7 @@ def test_direct_mysql_approved_write_executes_with_write_secret(
 def test_direct_mysql_safe_select_no_db_name_defaults_to_mysql_schema(
     mock_lookup, mock_cfc, mock_md, mock_boto3
 ):
-    """A safe read with no db_name set connects with database='mysql' — the
+    """A safe read with no db_name set connects with database='mysql': the
     system schema is harmless for SELECT/SHOW/performance_schema reads."""
     row = dict(_MYSQL_ROW)
     row.pop("db_name")
@@ -455,9 +455,9 @@ def test_direct_mysql_safe_select_no_db_name_defaults_to_mysql_schema(
 def test_direct_mysql_approved_write_no_db_name_connects_with_none(
     mock_lookup, mock_cfc, mock_md, mock_boto3, mock_verify
 ):
-    """An approved write with no db_name set must get database=None — NOT the
+    """An approved write with no db_name set must get database=None, NOT the
     'mysql' system schema fallback (RDS denies unqualified writes there,
-    error 1044, live-verified — and burns the single-use approval)."""
+    error 1044, live-verified, and burns the single-use approval)."""
     mock_verify.return_value = {"ok": True}
     row = dict(_MYSQL_ROW)
     row.pop("db_name")
@@ -488,7 +488,7 @@ def test_direct_mysql_approved_write_with_db_name_connects_with_it(
     mock_lookup, mock_cfc, mock_md, mock_boto3, mock_verify
 ):
     """An approved write on a cluster WITH db_name set connects with that
-    schema — the fix must not disturb the configured case."""
+    schema: the fix must not disturb the configured case."""
     mock_verify.return_value = {"ok": True}
     row = dict(_MYSQL_ROW)  # db_name="appdb"
     row["db_write_secret_arn"] = "arn:db-write"
@@ -516,8 +516,8 @@ def test_direct_mysql_approved_write_with_db_name_connects_with_it(
 def test_direct_mysql_execution_failure_returns_actionable_static_message(
     mock_lookup, mock_cfc, mock_md, mock_boto3
 ):
-    """The execution-failure branch must return a static, actionable hint —
-    never str(e) — and must not leak the underlying exception text."""
+    """The execution-failure branch must return a static, actionable hint
+    (never str(e)) and must not leak the underlying exception text."""
     mock_lookup.return_value = dict(_MYSQL_ROW)
     mock_cfc.return_value = _fake_sm()
     mock_md.connect.side_effect = Exception("secret internal detail 1044")
@@ -606,7 +606,7 @@ def test_direct_mssql_approved_write_without_write_secret_fails_closed(
     mock_lookup, mock_cfc, mock_ms, mock_boto3, mock_verify
 ):
     """An approved write on a SQL Server row with NO db_write_secret_arn fails
-    closed with a static message — no secret fetch, no connect."""
+    closed with a static message: no secret fetch, no connect."""
     mock_verify.return_value = {"ok": True}
     mock_lookup.return_value = dict(_MSSQL_ROW)  # has db_secret_arn, no write secret
 
@@ -621,7 +621,7 @@ def test_direct_mssql_approved_write_without_write_secret_fails_closed(
     assert "db_write_secret_arn" in result["reason"]
     mock_cfc.assert_not_called()
     mock_ms.connect.assert_not_called()
-    # R-5: rejected before the consume (pre-flight) — approval not burned.
+    # R-5: rejected before the consume (pre-flight), approval not burned.
     mock_verify.assert_not_called()
 
 
@@ -676,7 +676,7 @@ def test_direct_mssql_approved_write_no_db_name_fails_closed(
     mock_lookup, mock_cfc, mock_ms, mock_verify
 ):
     """An approved SQL Server write with a write secret but NO db_name must fail
-    closed — SQL Server would otherwise silently write to the master system DB
+    closed: SQL Server would otherwise silently write to the master system DB
     (unlike MySQL, whose database=None errors out). No connect."""
     mock_verify.return_value = {"ok": True}
     row = dict(_MSSQL_ROW)
@@ -695,7 +695,7 @@ def test_direct_mssql_approved_write_no_db_name_fails_closed(
     assert result["status"] == "unsupported_engine"
     assert "db_name" in result["reason"]
     mock_ms.connect.assert_not_called()
-    # R-5: master-write guard now precedes the consume (pre-flight) — not burned.
+    # R-5: master-write guard now precedes the consume (pre-flight), not burned.
     mock_verify.assert_not_called()
 
 
@@ -707,7 +707,7 @@ def test_direct_mssql_approved_write_no_db_name_fails_closed(
 def test_direct_mysql_row_still_routes_to_mysql_not_mssql(
     mock_lookup, mock_cfc, mock_md, mock_ms, mock_boto3
 ):
-    """Regression: a MySQL row must keep routing to mysql_direct — never the
+    """Regression: a MySQL row must keep routing to mysql_direct, never the
     new SQL Server adapter."""
     mock_lookup.return_value = dict(_MYSQL_ROW)
     mock_cfc.return_value = _fake_sm()
@@ -726,7 +726,7 @@ def test_direct_mysql_row_still_routes_to_mysql_not_mssql(
 @patch("mcp_servers.operations.tools.execute_sql._lookup_cluster")
 def test_side_effecting_tsql_on_mssql_row_needs_approval(mock_lookup, mock_cfc, mock_ms):
     """A side-effecting T-SQL read (OPENQUERY reaches a remote server) on a SQL
-    Server row must require approval — not auto-execute over the direct path."""
+    Server row must require approval, not auto-execute over the direct path."""
     mock_lookup.return_value = dict(_MSSQL_ROW)
     out = execute_sql_impl(
         MagicMock(),
@@ -751,7 +751,7 @@ _LEAK = "host=internal-db.corp user=svc password=hunter2 pwd-in-stacktrace"
 def test_direct_mysql_error_does_not_leak_exception_text(
     mock_lookup, mock_cfc, mock_md, mock_boto3
 ):
-    """A MySQL direct-TCP connect/execute failure must return a static reason —
+    """A MySQL direct-TCP connect/execute failure must return a static reason:
     the raw exception (host/creds/internal detail) must never appear in ANY
     field of the response. Same no-str(e)-leak contract as the secret-fetch path."""
     mock_lookup.return_value = dict(_MYSQL_ROW)
@@ -788,7 +788,7 @@ def test_direct_mssql_error_does_not_leak_exception_text(
 )
 @patch("mcp_servers.operations.tools.execute_sql.boto3")
 def test_aurora_data_api_failure_does_not_leak_exception_text(mock_boto3):
-    """The Aurora RDS-Data-API path must return a STATIC reason on failure —
+    """The Aurora RDS-Data-API path must return a STATIC reason on failure,
     never the raw boto exception (no str(e) leak, project-wide contract). Detail
     goes to the CloudWatch print, and the old `error` key is gone."""
     rds = MagicMock()
@@ -829,8 +829,8 @@ def test_aurora_http_endpoint_disabled_gives_enable_hint_without_leak(mock_boto3
 # (unsupported engine / missing write secret / SQL Server master-write): those
 # are checked BEFORE verify_approval, with NO secret fetch and NO connect (so an
 # unauthorized request triggers zero privileged resource access before authz).
-# A genuine connect/execute failure still happens AFTER the consume — detecting
-# it pre-consume would require connecting before authz — an accepted trade-off.
+# A genuine connect/execute failure still happens AFTER the consume: detecting
+# it pre-consume would require connecting before authz, an accepted trade-off.
 
 
 @patch("mcp_servers.operations.tools.execute_sql.verify_approval")
@@ -844,7 +844,7 @@ def test_direct_mysql_write_connect_failure_after_consume_is_accepted_tradeoff(
     """A GENUINE connect failure on an approved MySQL write happens in the
     execute branch AFTER the single consume (the metadata pre-check passed:
     write secret present, engine ok). Detecting it pre-consume would require
-    connecting before authz — a worse posture — so this rare burn is the accepted
+    connecting before authz, a worse posture, so this rare burn is the accepted
     trade-off: verify_approval WAS called. Still: static reason, no str(e) leak."""
     mock_verify.return_value = {"ok": True}
     row = dict(_MYSQL_ROW)
@@ -873,7 +873,7 @@ def test_direct_mssql_master_write_no_db_does_not_consume_approval(
     mock_lookup, mock_cfc, mock_ms, mock_verify
 ):
     """Pre-flight guard: an approved SQL Server write with no db_name is rejected
-    (master-write fail-closed) BEFORE verify_approval — approval not consumed,
+    (master-write fail-closed) BEFORE verify_approval: approval not consumed,
     no connect."""
     row = dict(_MSSQL_ROW)
     row.pop("db_name")
@@ -928,7 +928,7 @@ def test_direct_mysql_write_happy_path_consumes_once_then_executes(
     assert result["status"] == "executed"
     assert result["rows_affected"] == 2
     mock_verify.assert_called_once()
-    assert mock_md.connect.call_count == 1  # single connect — no pre-check probe
+    assert mock_md.connect.call_count == 1  # single connect, no pre-check probe
     adapter.execute_statement.assert_called_once()
 
 
@@ -939,7 +939,7 @@ def test_aurora_data_api_approved_write_consumes_before_execute(
     mock_lookup, mock_boto3, mock_verify
 ):
     """Aurora (Data API) write path is UNCHANGED: verify_approval is still
-    consumed before the Data API execute — no pre-flight connect for the
+    consumed before the Data API execute, no pre-flight connect for the
     data_api path, so its consume position is exactly as before."""
     mock_verify.return_value = {"ok": True}
     mock_lookup.return_value = {
@@ -981,7 +981,7 @@ _NO_ENV_TARGET = {"TARGET_CLUSTER_ARN": "", "TARGET_SECRET_ARN": "", "TARGET_DB_
 def test_no_target_on_the_demo_row_does_not_say_register_it(mock_boto3, mock_lookup):
     """The built-in sample row is registered on purpose and has no live DB.
 
-    It was answered with "not found in registry — register it via /clusters first",
+    It was answered with "not found in registry, register it via /clusters first",
     so a first-run user re-seeds the sample and gets the same message again.
     """
     mock_lookup.return_value = {"engine": "aurora-postgresql", "is_demo": True}

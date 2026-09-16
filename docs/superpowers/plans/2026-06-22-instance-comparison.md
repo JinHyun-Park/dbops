@@ -4,49 +4,49 @@
 
 **Goal:** Add a third Compare mode (`instance`) that compares two instances of one Aurora cluster (writer/reader, reader/reader) across the full per-instance CloudWatch metric set.
 
-**Architecture:** ETL collects per-instance CloudWatch metrics into the existing `metric_snapshots` table tagged with `dimensions={"instance","role"}` (additive, non-breaking — coexists with the cluster-level rows). A cluster's instance list lives on `cluster_meta.instances` (JSONB). The dashboard API gains an `/instances` endpoint and an optional `instance=` filter on `/batch-timeseries`. The Compare page adds an `instance` mode reusing the existing chart grid. Cache-first (≈1-min ETL) gives near-real-time + history in one path.
+**Architecture:** ETL collects per-instance CloudWatch metrics into the existing `metric_snapshots` table tagged with `dimensions={"instance","role"}` (additive, non-breaking: coexists with the cluster-level rows). A cluster's instance list lives on `cluster_meta.instances` (JSONB). The dashboard API gains an `/instances` endpoint and an optional `instance=` filter on `/batch-timeseries`. The Compare page adds an `instance` mode reusing the existing chart grid. Cache-first (≈1-min ETL) gives near-real-time + history in one path.
 
 **Tech Stack:** Python 3.12 Lambdas (data-pipeline ETL, api/dashboard), AWS CDK (Python), RDS Data API → Aurora PG cache, Next.js 16 + Recharts frontend, pytest.
 
 ## Global Constraints
 
-- CDK-only infrastructure — never modify AWS resources directly (AGENTS.md).
+- CDK-only infrastructure: never modify AWS resources directly (AGENTS.md).
 - Non-breaking: existing cluster-level chart queries MUST be unaffected. `_batch_timeseries` groups by `dimensions`, so per-instance rows are excluded with `NOT jsonb_exists(dimensions, 'instance')` when no `instance` is requested.
 - Adding an API route REQUIRES regenerating `frontend/public/openapi.json` via `python3 tools/openapi_gen.py` (the `test_openapi_spec` test gates this).
 - Korean translation scope: DB jargon stays English (Replica Lag, IOPS…); descriptions/empty-states are Korean.
-- Numbers ≥1000 use `fmtDecimal`/`fmtExact`; the existing Compare chart machinery already handles this — reuse it.
-- Commits: conventional subject; NO `Co-Authored-By: Claude` trailer; do NOT reference internal roadmaps/wikis. Frontend commits hit a prettier pre-commit hook — if it reformats, `git add -A` and re-commit (do not chain commit+push).
+- Numbers ≥1000 use `fmtDecimal`/`fmtExact`; the existing Compare chart machinery already handles this: reuse it.
+- Commits: conventional subject; NO `Co-Authored-By: Claude` trailer; do NOT reference internal roadmaps/wikis. Frontend commits hit a prettier pre-commit hook: if it reformats, `git add -A` and re-commit (do not chain commit+push).
 - `cache_execute(sql, params)` is the cache-write callable passed to collectors; named params only (`:name`). RDS Data API SQL: prefer `jsonb_exists(col, 'key')` over the `?` operator.
 
 ---
 
 ## File Structure
 
-**Increment 1 — Collection (data stack)**
+**Increment 1: Collection (data stack)**
 
-- Create: `data-pipeline/schema_migrator/sql/schema_v18.sql` — add `cluster_meta.instances JSONB`.
-- Modify: `data-pipeline/etl_collector/collectors/meta_collector.py` — build + store the instance list.
-- Modify: `data-pipeline/etl_collector/collectors/cw_collector.py` — add `collect_cw_instance_metrics()`.
-- Modify: `data-pipeline/etl_collector/handler.py` — call the new per-instance collector.
+- Create: `data-pipeline/schema_migrator/sql/schema_v18.sql` (add `cluster_meta.instances JSONB`).
+- Modify: `data-pipeline/etl_collector/collectors/meta_collector.py` (build + store the instance list).
+- Modify: `data-pipeline/etl_collector/collectors/cw_collector.py` (add `collect_cw_instance_metrics()`).
+- Modify: `data-pipeline/etl_collector/handler.py` (call the new per-instance collector).
 - Test: `tests/unit/data_pipeline/test_cw_instance_metrics.py`, `tests/unit/data_pipeline/test_meta_instances.py`.
 
-**Increment 2 — API (agent stack)**
+**Increment 2: API (agent stack)**
 
-- Modify: `api/dashboard/handler.py` — `/instances` branch + `_instances()` + `instance=` param on `_batch_timeseries`.
-- Modify: `cdk/stacks/agent_stack.py` — register `GET /api/dashboard/{cluster_id}/instances`.
-- Modify: `frontend/public/openapi.json` — regenerated.
+- Modify: `api/dashboard/handler.py` (`/instances` branch + `_instances()` + `instance=` param on `_batch_timeseries`).
+- Modify: `cdk/stacks/agent_stack.py` (register `GET /api/dashboard/{cluster_id}/instances`).
+- Modify: `frontend/public/openapi.json` (regenerated).
 - Test: `tests/unit/api/test_dashboard_instances.py`.
 
-**Increment 3 — Frontend (Compare)**
+**Increment 3: Frontend (Compare)**
 
-- Modify: `frontend/src/lib/api-client.ts` — `fetchClusterInstances()`, `instance?` on `fetchBatchTimeseries`.
-- Modify: `frontend/src/app/compare/page.tsx` — `instance` mode (cluster picker → A/B instance pickers → chart grid).
+- Modify: `frontend/src/lib/api-client.ts` (`fetchClusterInstances()`, `instance?` on `fetchBatchTimeseries`).
+- Modify: `frontend/src/app/compare/page.tsx`: `instance` mode (cluster picker → A/B instance pickers → chart grid).
 
 ---
 
-## Increment 1 — Per-instance collection
+## Increment 1: Per-instance collection
 
-### Task 1: schema_v18 — `cluster_meta.instances` column
+### Task 1: schema_v18 (`cluster_meta.instances` column)
 
 **Files:**
 
@@ -59,14 +59,14 @@
 - [ ] **Step 1: Write the migration**
 
 ```sql
--- schema_v18 — per-instance comparison: cluster member list on cluster_meta.
+-- schema_v18: per-instance comparison: cluster member list on cluster_meta.
 -- Holds [{"id":"<DBInstanceIdentifier>","role":"writer|reader","class":"db.r6g.large"}]
 -- so the Compare "instance" mode can populate its A/B pickers without a live
 -- RDS describe. Populated each cycle by the meta collector.
 ALTER TABLE cluster_meta ADD COLUMN IF NOT EXISTS instances JSONB;
 ```
 
-- [ ] **Step 2: Verify it parses (no apply yet — migrator runs on deploy)**
+- [ ] **Step 2: Verify it parses (no apply yet, the migrator runs on deploy)**
 
 Run: `python3 -c "import pathlib; print('ok' if 'instances JSONB' in pathlib.Path('data-pipeline/schema_migrator/sql/schema_v18.sql').read_text() else 'missing')"`
 Expected: `ok`
@@ -126,7 +126,7 @@ def test_build_instance_list_empty_on_error():
     rds = MagicMock()
     rds.describe_db_instances.side_effect = RuntimeError("denied")
     members = [{"DBInstanceIdentifier": "w1", "IsClusterWriter": True}]
-    # falls back to role-only entries (class "") — never raises
+    # falls back to role-only entries (class ""): never raises
     out = mc._build_instance_list(rds, "c1", members)
     assert out == [{"id": "w1", "role": "writer", "class": ""}]
 ```
@@ -134,7 +134,7 @@ def test_build_instance_list_empty_on_error():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/unit/data_pipeline/test_meta_instances.py -q`
-Expected: FAIL — `module 'meta_collector' has no attribute '_build_instance_list'`
+Expected: FAIL (`module 'meta_collector' has no attribute '_build_instance_list'`)
 
 - [ ] **Step 3: Add `_build_instance_list` to `meta_collector.py`**
 
@@ -199,7 +199,7 @@ git add data-pipeline/etl_collector/collectors/meta_collector.py tests/unit/data
 git commit -m "feat(etl): collect per-cluster instance list (id/role/class) into cluster_meta"
 ```
 
-### Task 3: cw_collector — per-instance metrics
+### Task 3: cw_collector (per-instance metrics)
 
 **Files:**
 
@@ -266,7 +266,7 @@ def test_no_instances_is_noop():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/unit/data_pipeline/test_cw_instance_metrics.py -q`
-Expected: FAIL — `module 'cw_collector' has no attribute 'collect_cw_instance_metrics'`
+Expected: FAIL (`module 'cw_collector' has no attribute 'collect_cw_instance_metrics'`)
 
 - [ ] **Step 3: Add the per-instance metric set + collector**
 
@@ -380,7 +380,7 @@ In `handler.py`, the `result["meta"] = collect_cluster_meta(...)` block already 
 from collectors.cw_collector import collect_cw_metrics, collect_cw_instance_metrics
 ```
 
-(match the existing import style in handler.py — if it imports `from collectors.cw_collector import collect_cw_metrics`, extend that line.)
+(match the existing import style in handler.py: if it imports `from collectors.cw_collector import collect_cw_metrics`, extend that line.)
 
 After the existing `result["cw"] = collect_cw_metrics(cw_client, cache_execute, cluster_id)` block, add:
 
@@ -395,7 +395,7 @@ After the existing `result["cw"] = collect_cw_metrics(cw_client, cache_execute, 
         print(f"[{cluster_id}] cw_instance error: {e}")
 ```
 
-- [ ] **Step 3: Syntax-check the changed files (no **pycache** concern — data-pipeline)**
+- [ ] **Step 3: Syntax-check the changed files (no **pycache** concern: data-pipeline)**
 
 Run: `python3 -c "import ast; [ast.parse(open(f).read()) for f in ['data-pipeline/etl_collector/handler.py','data-pipeline/etl_collector/collectors/meta_collector.py']]; print('ok')"`
 Expected: `ok`
@@ -429,7 +429,7 @@ Expected: per-instance rows present; `cluster_meta.instances` populated. (Single
 
 ---
 
-## Increment 2 — API
+## Increment 2: API
 
 ### Task 6: `/instances` endpoint + `instance=` filter on batch-timeseries
 
@@ -494,7 +494,7 @@ def test_batch_timeseries_excludes_instance_rows_by_default():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/unit/api/test_dashboard_instances.py -q`
-Expected: FAIL — `_instances` not defined / instance filter missing.
+Expected: FAIL (`_instances` not defined / instance filter missing).
 
 - [ ] **Step 3: Add `_instances()` near `_resource_details`**
 
@@ -575,7 +575,7 @@ and add `instance=instance,` to the `_batch_timeseries(...)` call args.
 Run: `python3 -m pytest tests/unit/api/test_dashboard_instances.py -q`
 Expected: PASS (4 passed)
 
-- [ ] **Step 7: Regression — existing dashboard tests unaffected**
+- [ ] **Step 7: Regression (existing dashboard tests unaffected)**
 
 Run: `python3 -m pytest tests/unit/api -q`
 Expected: PASS (all)
@@ -612,7 +612,7 @@ Find an existing dashboard GET route registration (e.g. `path="/api/dashboard/{c
         )
 ```
 
-(Use the SAME integration object/alias the neighboring dashboard routes use — copy the exact variable name from the adjacent route.)
+(Use the SAME integration object/alias the neighboring dashboard routes use: copy the exact variable name from the adjacent route.)
 
 - [ ] **Step 2: Synthesize to validate the route**
 
@@ -647,13 +647,13 @@ Run: `cd cdk && cdk deploy dbops-dev-agent --require-approval never` (background
 
 - `GET /api/dashboard/<samplepg-id>/instances` → `{"instances":[{id,role,class},...]}`
 - `GET /api/dashboard/<samplepg-id>/batch-timeseries?metrics=cpu&hours=1&instance=<writer-id>` → series for that instance only.
-- `GET .../batch-timeseries?metrics=cpu&hours=1` (no instance) → cluster-level only (no instance series — regression check).
+- `GET .../batch-timeseries?metrics=cpu&hours=1` (no instance) → cluster-level only (no instance series: regression check).
 
 ---
 
-## Increment 3 — Frontend Compare instance mode
+## Increment 3: Frontend Compare instance mode
 
-### Task 9: api-client — instances fetch + instance param
+### Task 9: api-client (instances fetch + instance param)
 
 **Files:**
 
@@ -698,7 +698,7 @@ Expected: no errors.
 
 ```bash
 git add frontend/src/lib/api-client.ts
-git commit -m "feat(compare): api-client — fetchClusterInstances + instance param"
+git commit -m "feat(compare): api-client, fetchClusterInstances + instance param"
 ```
 
 ### Task 10: Compare `instance` mode
@@ -778,9 +778,9 @@ On `/compare`: switch to **인스턴스** mode → pick a cluster (e.g. samplepg
 - Spec §2.2 (per-instance metric set) → Task 3 `CW_INSTANCE_METRICS`. ✓
 - Spec §2.3 (instances on cluster_meta) → Task 1 (column) + Task 2 (populate). ✓
 - Spec §3.2 (API: /instances + instance filter) → Task 6, Task 7. ✓
-- Spec §3.3 (frontend instance mode) → Tasks 9–10. ✓
+- Spec §3.3 (frontend instance mode) → Tasks 9-10. ✓
 - Spec §6 (tests) → Tasks 2,3,6 unit; Tasks 5,8,11 e2e checkpoints. ✓
 
-**Placeholder scan:** none — every code/test step has literal content; mirror-this-pattern steps (Task 9 Step 2, Task 10) point at named existing functions with exact param additions.
+**Placeholder scan:** none: every code/test step has literal content; mirror-this-pattern steps (Task 9 Step 2, Task 10) point at named existing functions with exact param additions.
 
-**Type consistency:** instance row shape `{instance, role}` (Task 3) == filter `dimensions->>'instance'` / `jsonb_exists(dimensions,'instance')` (Task 6) == `_instances` array `{id,role,class}` (Task 2/6) == `ClusterInstance {id,role,class}` (Task 9) == picker options (Task 10). `collect_cw_instance_metrics(cw_client, cache_execute, cluster_id, instances)` signature consistent across Tasks 3–4. ✓
+**Type consistency:** instance row shape `{instance, role}` (Task 3) == filter `dimensions->>'instance'` / `jsonb_exists(dimensions,'instance')` (Task 6) == `_instances` array `{id,role,class}` (Task 2/6) == `ClusterInstance {id,role,class}` (Task 9) == picker options (Task 10). `collect_cw_instance_metrics(cw_client, cache_execute, cluster_id, instances)` signature consistent across Tasks 3-4. ✓

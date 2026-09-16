@@ -1,4 +1,4 @@
-"""ticketing seam — provider resolution + the inert-by-default contract.
+"""ticketing seam: provider resolution + the inert-by-default contract.
 
 The seam must (1) default to a no-op that creates nothing, (2) treat a named
 but unshipped provider as a loud failure rather than a silent drop, and (3) use

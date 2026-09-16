@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
-# Module loading — push api/tasks on sys.path so `import tenancy` resolves
+# Module loading: push api/tasks on sys.path so `import tenancy` resolves
 # ---------------------------------------------------------------------------
 
 _TASKS_DIR = Path(__file__).resolve().parents[3] / "api" / "tasks"
@@ -130,7 +130,7 @@ def test_tasks_list_with_cluster_param_bypasses_filter(monkeypatch):
     mock_table = MagicMock()
     mock_table.query.return_value = {"Items": [{"task_id": "t3", "cluster_id": "c-teamB"}]}
     # Even if visible_set would exclude c-teamB, a ?cluster query is a direct
-    # cluster-scoped GSI lookup. The filter still applies — assert filter is consistent.
+    # cluster-scoped GSI lookup. The filter still applies: assert filter is consistent.
     monkeypatch.setattr(handler.tenancy, "visible_set_from_registry",
                         lambda ev: {"c-open", "c-teamA"})
     with patch.object(handler, "_table", return_value=mock_table):

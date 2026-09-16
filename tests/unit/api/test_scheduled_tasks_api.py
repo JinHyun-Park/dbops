@@ -1,4 +1,4 @@
-"""Scheduled Tasks REST API — list / create / delete."""
+"""Scheduled Tasks REST API: list / create / delete."""
 
 import importlib.util
 import json

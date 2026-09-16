@@ -20,7 +20,7 @@ from mcp_servers.shared.models import QueryResult
 from mcp_servers.shared.schema_diff_util import compute_diff as _compute_diff
 
 # ---------------------------------------------------------------------------
-# _parse_tables — handles dict / JSON string / unsupported shapes
+# _parse_tables: handles dict / JSON string / unsupported shapes
 # ---------------------------------------------------------------------------
 
 
@@ -47,7 +47,7 @@ def test_parse_tables_empty_blob_returns_empty():
 
 
 # ---------------------------------------------------------------------------
-# _compute_diff — the actual structural logic
+# _compute_diff: the actual structural logic
 # ---------------------------------------------------------------------------
 
 
@@ -158,7 +158,7 @@ def test_compute_diff_column_order_irrelevant():
 
 
 # ---------------------------------------------------------------------------
-# get_schema_diff_impl — end-to-end through a mocked cache
+# get_schema_diff_impl: end-to-end through a mocked cache
 # ---------------------------------------------------------------------------
 
 

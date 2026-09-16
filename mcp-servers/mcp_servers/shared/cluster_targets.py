@@ -1,12 +1,12 @@
-"""cluster_targets — resolve the right AWS account+region for a cluster's
+"""cluster_targets: resolve the right AWS account+region for a cluster's
 control-plane (RDS) operations.
 
 The agent write tools (`modify_parameter`, `modify_scaling`,
 `manage_maintenance`, `create_snapshot`, `restore_cluster`) call RDS control
 APIs by cluster IDENTIFIER. A plain `boto3.client("rds")` runs in the runtime
 Lambda's own account+region, so for a fleet registered via hub-spoke role
-chaining it would either fail (the cluster lives in a spoke account) or — worse
-— hit a same-named cluster in the hub account/region.
+chaining it would either fail (the cluster lives in a spoke account) or, worse,
+hit a same-named cluster in the hub account/region.
 
 This module centralizes target resolution the same way `api/clusters`
 (`_session_for`) does for the REST path: look up the cluster's `region` and
@@ -68,7 +68,7 @@ def client_for_cluster(cluster_id: str, service: str):
 def table_name_for_cluster(cluster_id: str) -> str:
     """Real resource name (e.g. the DynamoDB table name) for a `ddb-*` registry
     slug. The slug is a one-way hash of account+region+name, so the real name is
-    NOT recoverable from it — it lives on the registry row as `resource_name`
+    NOT recoverable from it: it lives on the registry row as `resource_name`
     (the SAME row client_for_cluster reads), NOT in the Aurora cluster_meta cache.
     Falls back to cluster_id so a direct, non-slug id still works."""
     return lookup_cluster(cluster_id).get("resource_name") or cluster_id

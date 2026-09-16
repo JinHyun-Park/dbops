@@ -4,9 +4,9 @@ Aggregates the operational state of the things DBOps itself depends on
 so the DBA can answer "is DBOps healthy?" without 4 AWS console tabs.
 
 Surfaces:
-  - Lambdas — the dbops-* function set, last-update + state
-  - Aurora cache — cluster status, engine version, ACU range
-  - DDB tables — sessions / clusters / approvals item-count + state
+  - Lambdas: the dbops-* function set, last-update + state
+  - Aurora cache: cluster status, engine version, ACU range
+  - DDB tables: sessions / clusters / approvals item-count + state
 
 Each section is best-effort: an IAM hiccup against one source doesn't
 500 the whole endpoint, just marks that section with `error`. The UI
@@ -31,7 +31,7 @@ def _resp(status: int, body) -> dict:
         "headers": {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
-            # Generous cache — health state moves slowly, polling every
+            # Generous cache: health state moves slowly, polling every
             # 10s is plenty.
             "Cache-Control": "private, max-age=10",
         },
@@ -66,7 +66,7 @@ def _list_lambdas() -> dict:
         active = sum(1 for f in funcs if f.get("state") == "Active")
         return {"count": len(funcs), "active": active, "items": funcs}
     except ClientError as e:
-        # Public endpoint — return only the (non-sensitive) error code; the full
+        # Public endpoint: return only the (non-sensitive) error code; the full
         # message can carry ARNs / account ids, so log it server-side instead.
         print(f"[health] lambdas summary ClientError: {e}")
         return {"error": e.response.get("Error", {}).get("Code", "ClientError")}
@@ -76,7 +76,7 @@ def _list_lambdas() -> dict:
 
 
 def _aurora_cache() -> dict:
-    """Status of the cache DB (Aurora PostgreSQL Serverless v2) — the
+    """Status of the cache DB (Aurora PostgreSQL Serverless v2): the
     one Aurora cluster DBOps reads/writes to. Identified via env."""
     cluster_arn = os.environ.get("CACHE_DB_CLUSTER_ARN", "")
     if not cluster_arn:

@@ -1,4 +1,4 @@
-"""P2-⑥ — POST /api/scaleout-az (AZ scale-out runbook).
+"""P2-⑥: POST /api/scaleout-az (AZ scale-out runbook).
 
 The route invokes the READ-ONLY plan_az_scaleout tool, then mints one
 add_reader_instance approval (origin="ui") per planned reader. Each approval's
@@ -192,7 +192,7 @@ def test_post_plan_invalid_az_400_no_mint(monkeypatch):
     r = handler.lambda_handler(_event(body={"cluster_id": "c1", "exclude_az": "zzz", "count": 2}), None)
     assert r["statusCode"] == 400
     assert json.loads(r["body"])["error"] == "plan_failed"
-    # only the plan invoke ran — no add_reader_instance approvals minted
+    # only the plan invoke ran: no add_reader_instance approvals minted
     assert _request_approval_calls(lam) == []
     approvals_table.update_item.assert_not_called()
 
@@ -203,7 +203,7 @@ def test_post_partial_mint_failure_partial_success(monkeypatch):
         monkeypatch, _PLAN_2,
         [
             {"status": "pending", "approval_id": "a1", "created_at": "1700000000001"},
-            {},  # mint failure — no crash, reported under failed[]
+            {},  # mint failure: no crash, reported under failed[]
         ],
     )
     r = handler.lambda_handler(_event(body={"cluster_id": "c1", "exclude_az": "ap-northeast-2b", "count": 2}), None)

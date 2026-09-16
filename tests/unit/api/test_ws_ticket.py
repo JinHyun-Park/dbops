@@ -319,7 +319,7 @@ def test_single_use_survives_the_condition_being_removed():
     Measured: deleting the ConditionExpression left every other test in this file
     green, so the condition is NOT the guarantee. DeleteItem on an absent key
     succeeds in real DynamoDB and simply returns no Attributes, and DeleteItem is
-    atomic per item — so of two concurrent handshakes exactly one receives the old
+    atomic per item, so of two concurrent handshakes exactly one receives the old
     image. The guarantee is "an empty old image is a Deny", and that is what this
     test drives, with a table that does NOT honour conditions at all.
     """

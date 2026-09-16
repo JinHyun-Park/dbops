@@ -46,10 +46,10 @@ jobs:
     name: python (pytest + ruff)
     runs-on: ubuntu-latest
     env:
-      # Several tests construct boto3 clients (without mocking) — they fail
+      # Several tests construct boto3 clients (without mocking). They fail
       # locally too on a machine without AWS_DEFAULT_REGION. Pin a value so
       # CI doesn't hit `NoRegionError`. The region itself is meaningless
-      # because no real AWS calls fire — only client construction.
+      # because no real AWS calls fire, only client construction.
       AWS_DEFAULT_REGION: us-east-1
     steps:
       - uses: actions/checkout@v7
@@ -78,7 +78,7 @@ jobs:
       - name: install dev deps
         run: pip install -r requirements-dev.txt
       - name: seed gitignored settings.py from template
-        # CI doesn't have the user's deployment-specific settings.py — copy
+        # CI doesn't have the user's deployment-specific settings.py. Copy
         # the committed template so synth has all required Settings fields.
         run: cp cdk/config/settings.example.py cdk/config/settings.py
       - name: cdk synth smoke test
@@ -87,7 +87,7 @@ jobs:
       # ----- cdk-nag gate (AwsSolutions ruleset) -----
       # Fails the build if any unsuppressed AwsSolutions finding is introduced,
       # so new IaC misconfigurations can't be merged. cdk-nag only runs when
-      # CDK_NAG=1 (app.py gate) — normal deploys are untouched.
+      # CDK_NAG=1 (app.py gate). Normal deploys are untouched.
       - name: install cdk-nag (pinned 2.x via cdk/requirements.txt)
         # cdk-nag MUST stay on the 2.x line: 3.x removed the `NagSuppressions`
         # API that cdk/app.py imports, so synth dies at import with
@@ -110,7 +110,7 @@ jobs:
       - name: stub frontend/out for synth (no frontend build in this job)
         # FrontendStack's BucketDeployment needs frontend/out/ (and the hashed
         # _next/static subtree) to exist at synth time. The frontend build is a
-        # separate job, so stub the minimal asset tree — same as tests/cdk does.
+        # separate job, so stub the minimal asset tree, same as tests/cdk does.
         run: |
           mkdir -p frontend/out/_next/static
           [ -f frontend/out/index.html ] || printf '<!-- synth stub -->\n' > frontend/out/index.html

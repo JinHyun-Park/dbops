@@ -1,10 +1,10 @@
 """Tests for engine-family gating on dashboard RDS-live + health-findings endpoints (Task 8).
 
 Gated endpoints:
-  - /topology          → _topology(cluster_id)        — calls rds.describe_db_clusters
-  - /backups           → _backups(cluster_id)          — calls rds.describe_db_clusters
-  - /capacity-forecast → _capacity_forecast(query, ..) — uses Aurora-cache SQL, not RDS-live
-  - /health-findings   → _health_findings(query, ..)   — SQL query against cache DB findings table
+  - /topology          → _topology(cluster_id):         calls rds.describe_db_clusters
+  - /backups           → _backups(cluster_id):           calls rds.describe_db_clusters
+  - /capacity-forecast → _capacity_forecast(query, ..):  uses Aurora-cache SQL, not RDS-live
+  - /health-findings   → _health_findings(query, ..):    SQL query against cache DB findings table
 
 Non-relational (e.g. dynamodb) clusters must:
   - Never trigger rds.describe_db_clusters for topology/backups.
@@ -23,7 +23,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
-# Module loading — push api/dashboard on sys.path so engine_family resolves
+# Module loading: push api/dashboard on sys.path so engine_family resolves
 # ---------------------------------------------------------------------------
 
 _DASHBOARD_DIR = Path(__file__).resolve().parents[3] / "api" / "dashboard"
@@ -79,7 +79,7 @@ def _rds_describe_response():
 
 
 # ===========================================================================
-# 1. Topology — non-relational (dynamodb) → not_applicable, RDS never called
+# 1. Topology: non-relational (dynamodb) → not_applicable, RDS never called
 # ===========================================================================
 
 def test_topology_dynamodb_returns_not_applicable_no_rds_call(monkeypatch):
@@ -100,7 +100,7 @@ def test_topology_dynamodb_returns_not_applicable_no_rds_call(monkeypatch):
 
 
 # ===========================================================================
-# 2. Backups — non-relational now returns read-only posture (no RDS call)
+# 2. Backups: non-relational now returns read-only posture (no RDS call)
 #    (backup-visibility-multiengine spec: dynamodb=PITR/on-demand, docdb=snapshots)
 # ===========================================================================
 
@@ -199,7 +199,7 @@ def test_backups_documentdb_returns_snapshots_via_docdb_client(monkeypatch):
 
 
 # ===========================================================================
-# 3. Capacity-forecast — non-relational → not_applicable, no SQL executed
+# 3. Capacity-forecast: non-relational → not_applicable, no SQL executed
 # ===========================================================================
 
 def test_capacity_forecast_dynamodb_invalid_metric_returns_unsupported(monkeypatch):
@@ -249,14 +249,14 @@ def test_capacity_forecast_rejects_a_raw_metric_type_as_unknown_metric(monkeypat
 
 
 # ===========================================================================
-# 4. Health-findings — dynamodb now has findings capability → returns data
+# 4. Health-findings: dynamodb now has findings capability → returns data
 # ===========================================================================
 
 def test_health_findings_dynamodb_returns_data(monkeypatch):
     """_health_findings for a dynamodb cluster must now execute SQL and return
     ddb_* findings because CAPABILITIES["dynamodb"]["findings"] = {"ddb"}.
 
-    This test was previously 'returns_empty' — updated when DynamoDB findings
+    This test was previously 'returns_empty', updated when DynamoDB findings
     support was added (Part B capability flag spec)."""
     monkeypatch.setattr(handler, "_registry_engine", lambda cid: "dynamodb")
 
@@ -274,7 +274,7 @@ def test_health_findings_dynamodb_returns_data(monkeypatch):
 
     result = handler._health_findings(_spy_query, "ddb-abc123")
 
-    # DynamoDB now has findings — SQL must be executed and data returned.
+    # DynamoDB now has findings: SQL must be executed and data returned.
     assert len(result["findings"]) == 1
     assert result["findings"][0]["check_type"] == "ddb_throttling"
     assert result["counts"]["warning"] == 1
@@ -284,7 +284,7 @@ def test_health_findings_dynamodb_returns_data(monkeypatch):
 
 
 # ===========================================================================
-# 5. Relational (aurora-postgresql) — all endpoints reach normal path
+# 5. Relational (aurora-postgresql): all endpoints reach normal path
 # ===========================================================================
 
 def test_topology_relational_calls_describe_db_clusters(monkeypatch):
@@ -582,7 +582,7 @@ def test_health_findings_registry_unavailable_fail_closed(monkeypatch):
 
 # ===========================================================================
 # 7. _schema_graph / _redundant_indexes / _table_indexes / _log_insights
-#    — non-relational (dynamodb) → not_applicable, no rds-data/logs client
+#    non-relational (dynamodb) → not_applicable, no rds-data/logs client
 # ===========================================================================
 
 def test_schema_graph_dynamodb_not_applicable(monkeypatch):
@@ -720,7 +720,7 @@ def test_overview_cold_resource_falls_back_to_registry(monkeypatch):
         lambda cid: {"cluster_id": cid, "engine": "dynamodb"},
     )
 
-    # query always returns empty — simulates no cluster_meta row and no metrics
+    # query always returns empty: simulates no cluster_meta row and no metrics
     def _empty_query(sql, params=None):
         return []
 
@@ -752,7 +752,7 @@ def test_overview_cold_resource_no_registry_returns_none(monkeypatch):
 
 def test_overview_hot_resource_relational_unchanged(monkeypatch):
     """When cluster_meta HAS a row, _overview must return that row verbatim
-    regardless of registry content — relational path must be unchanged."""
+    regardless of registry content: relational path must be unchanged."""
     # Make sure registry is never consulted when meta has data
     lookup_called = []
     monkeypatch.setattr(
@@ -834,7 +834,7 @@ def test_health_findings_documentdb_returns_findings_via_capability(monkeypatch)
 
 
 def test_health_findings_relational_unchanged_with_capability(monkeypatch):
-    """_health_findings for relational clusters must still work as before —
+    """_health_findings for relational clusters must still work as before:
     the capability-driven gate must not break the existing relational path."""
     monkeypatch.setattr(handler, "_registry_engine", lambda cid: "aurora-postgresql")
 
@@ -873,7 +873,7 @@ def test_health_findings_registry_unavailable_returns_registry_unavailable_flag(
 
 
 # ===========================================================================
-# 10. _engine_config — engine-level config panel (read-only)
+# 10. _engine_config: engine-level config panel (read-only)
 #     DocumentDB cluster settings + DynamoDB table settings the overview
 #     panels don't already show. Relational → not_applicable (has SettingsPanel).
 # ===========================================================================
@@ -1078,7 +1078,7 @@ def test_engine_config_dynamodb_no_raw_boto_leak_on_error(monkeypatch):
 
 
 # ===========================================================================
-# Engine-config — ElastiCache (replication group): parameter group + key
+# Engine-config, ElastiCache (replication group): parameter group + key
 # params (eviction policy) + maintenance/snapshot/encryption/auth/failover.
 # ===========================================================================
 
@@ -1136,7 +1136,7 @@ def test_engine_config_elasticache_replication_group(monkeypatch):
     assert result["preferred_maintenance_window"] == "sun:05:00-sun:06:00"
     assert result["snapshot_retention_limit"] == 3
     # StorageEncryptionType drives at-rest posture even when the legacy boolean
-    # flag is False (Codex finding) — and the type itself is surfaced.
+    # flag is False (Codex finding), and the type itself is surfaced.
     assert result["at_rest_encryption_enabled"] is True
     assert result["storage_encryption_type"] == "sse-elasticache"
     assert result["transit_encryption_enabled"] is False
@@ -1181,7 +1181,7 @@ def test_engine_config_elasticache_not_found_is_friendly(monkeypatch):
 
 
 # ===========================================================================
-# 11. _endpoints — custom cluster endpoints panel (read-only, relational-only)
+# 11. _endpoints: custom cluster endpoints panel (read-only, relational-only)
 # ===========================================================================
 
 def test_endpoints_relational_lists_builtin_and_custom(monkeypatch):

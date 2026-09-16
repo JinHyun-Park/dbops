@@ -13,7 +13,7 @@
 - **No `Co-Authored-By: Claude` trailer** in any commit (user rule).
 - **READ-ONLY:** the tool runs ONLY a fixed allowlist of inspector commands (Redis: `INFO`, `SLOWLOG GET`, `CLIENT LIST`, `MEMORY STATS`; Memcached: `stats`). No free-form command from the caller; NO `CONFIG SET`/`FLUSH*`/`SLOWLOG RESET`/`CLIENT KILL`. No approval gate (read-only), but engine-gated on `live_read`.
 - **TLS + AUTH:** connect `ssl=True` when `tls_enabled`; AUTH token from a per-cluster Secrets Manager ARN (`auth_secret_arn`, operator-supplied at registration). Token is NEVER logged or echoed in error messages (host name is OK).
-- **Cross-account = code path only:** read the secret + describe the cluster via `session_for(region, spoke_role_arn)` (assume spoke role). Network reachability (VPC peering/PrivateLink) is an operator prerequisite the tool does NOT create — same-account is the validated path.
+- **Cross-account = code path only:** read the secret + describe the cluster via `session_for(region, spoke_role_arn)` (assume spoke role). Network reachability (VPC peering/PrivateLink) is an operator prerequisite the tool does NOT create: same-account is the validated path.
 - **Lazy client import:** `import redis` / `from pymemcache... import Client` INSIDE the factory so the module imports + unit-tests without the lib (mirrors DocDB's lazy `import pymongo`). Factories are module-level `_REDIS_FACTORY`/`_MEMCACHED_FACTORY` hooks tests can patch.
 - **Tool never raises out:** all failures → `{"status": "error"|"unavailable", "reason": ...}`.
 
@@ -23,7 +23,7 @@
 
 **Files:**
 
-- Modify: `api/clusters/handler.py` (`_register_elasticache` — accept + store `auth_secret_arn`)
+- Modify: `api/clusters/handler.py` (`_register_elasticache`: accept + store `auth_secret_arn`)
 - Test: extend `tests/unit/api/test_clusters_elasticache.py`
 
 **Interfaces:**
@@ -126,7 +126,7 @@ pymemcache>=4
 - [ ] **Step 3: Write the failing test.** Create `tests/unit/mcp_servers/operations/test_elasticache_live_read.py`:
 
 ```python
-"""ElastiCache live deep-read tool — read-only, mocked connection."""
+"""ElastiCache live deep-read tool: read-only, mocked connection."""
 import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -236,7 +236,7 @@ Run: `python -m pytest tests/unit/mcp_servers/operations/test_elasticache_live_r
 - [ ] **Step 5: Create `mcp-servers/mcp_servers/operations/tools/elasticache_live_read.py`:**
 
 ```python
-"""ElastiCache live deep-read — read-only Redis/Valkey/Memcached inspector.
+"""ElastiCache live deep-read: read-only Redis/Valkey/Memcached inspector.
 
 Connects over the native protocol from the in-VPC operations MCP Lambda and runs
 a FIXED allowlist of read-only inspector commands (Redis: INFO, SLOWLOG GET,
@@ -410,14 +410,14 @@ def elasticache_live_read_impl(cache, cluster_id=None, sections=None, **_):
 ```
 
 - [ ] **Step 6: Register the tool** in `mcp-servers/mcp_servers/operations/handler.py`:
-  - Import (next to the other tool imports): `from mcp_servers.operations.tools.elasticache_live_read import elasticache_live_read_impl` (match the existing import style — confirm whether they use `from .tools.X import` or `from mcp_servers.operations.tools.X import`).
+  - Import (next to the other tool imports): `from mcp_servers.operations.tools.elasticache_live_read import elasticache_live_read_impl` (match the existing import style: confirm whether they use `from .tools.X import` or `from mcp_servers.operations.tools.X import`).
   - Add to `_ENGINE_GATED_TOOLS`: `"elasticache_live_read": "live_read",`.
   - Add to the `TOOLS` dict:
 
 ```python
     "elasticache_live_read": {
         "impl": elasticache_live_read_impl,
-        "description": "ElastiCache only: live Redis/Valkey/Memcached deep-read — "
+        "description": "ElastiCache only: live Redis/Valkey/Memcached deep-read: "
                        "INFO, SLOWLOG, CLIENT LIST, MEMORY STATS (Redis) or stats "
                        "(Memcached). Read-only; no mutation.",
         "input_schema": {
@@ -433,7 +433,7 @@ def elasticache_live_read_impl(cache, cluster_id=None, sections=None, **_):
     },
 ```
 
-- [ ] **Step 7: Write the engine-gate test.** Add to `tests/unit/mcp_servers/operations/` (mirror the existing docdb/ddb gate test — find `test_*` that exercises `_ENGINE_GATED_TOOLS` / the handler gate). Assert: `elasticache_live_read` against a cluster whose family is NOT elasticache (e.g. `_resolve_family` returns `relational`) → `unsupported_engine`; against an elasticache cluster (family `elasticache`, which has `live_read: True`) → reaches the impl (mock the impl or assert no gate refusal). If the existing gate tests are parametrized, add the new tool to the parametrization.
+- [ ] **Step 7: Write the engine-gate test.** Add to `tests/unit/mcp_servers/operations/` (mirror the existing docdb/ddb gate test: find `test_*` that exercises `_ENGINE_GATED_TOOLS` / the handler gate). Assert: `elasticache_live_read` against a cluster whose family is NOT elasticache (e.g. `_resolve_family` returns `relational`) → `unsupported_engine`; against an elasticache cluster (family `elasticache`, which has `live_read: True`) → reaches the impl (mock the impl or assert no gate refusal). If the existing gate tests are parametrized, add the new tool to the parametrization.
 
 - [ ] **Step 8: Run tests.**
 
@@ -449,7 +449,7 @@ git commit -m "feat(elasticache): live deep-read MCP tool (INFO/SLOWLOG/CLIENT L
 
 ---
 
-### Task 3: CDK — security group egress + IAM
+### Task 3: CDK (security group egress + IAM)
 
 **Files:**
 
@@ -461,7 +461,7 @@ git commit -m "feat(elasticache): live deep-read MCP tool (INFO/SLOWLOG/CLIENT L
 
 - [ ] **Step 1: Read the operations MCP Lambda block** in `cdk/stacks/agent_stack.py` (~lines 143-200): its current SG / `allow_all_outbound`, its `add_to_role_policy` statements (confirm `secretsmanager:GetSecretValue` on `*` at ~194; check for `sts:AssumeRole` and `elasticache:Describe*`). Read the `docdb_mongo_collector` SG block in `data_stack.py` (~244-249) as the SG precedent.
 
-- [ ] **Step 2: Ensure egress to the cache ports.** If the operations Lambda has no explicit SG (uses the default data.vpc SG) and that SG already allows all outbound, no change is needed for egress — but make it explicit + documented: give the operations Lambda a dedicated SG with `allow_all_outbound=True` (mirror `DocDBMongoCollectorSG`), OR if a dedicated SG already exists, confirm `allow_all_outbound=True`. Add a one-line comment that this is for the ElastiCache (6379/11211) + DocDB (27017) native-protocol egress.
+- [ ] **Step 2: Ensure egress to the cache ports.** If the operations Lambda has no explicit SG (uses the default data.vpc SG) and that SG already allows all outbound, no change is needed for egress, but make it explicit + documented: give the operations Lambda a dedicated SG with `allow_all_outbound=True` (mirror `DocDBMongoCollectorSG`), OR if a dedicated SG already exists, confirm `allow_all_outbound=True`. Add a one-line comment that this is for the ElastiCache (6379/11211) + DocDB (27017) native-protocol egress.
 
 ```python
         # (only if no suitable SG exists already)
@@ -473,9 +473,9 @@ git commit -m "feat(elasticache): live deep-read MCP tool (INFO/SLOWLOG/CLIENT L
         # attach ops_mcp_sg to the operations_mcp_lambda (security_groups=[ops_mcp_sg]) if not already VPC+SG configured
 ```
 
-(If the Lambda is already VPC-attached with a working SG that allows outbound, do NOT churn it — just confirm + comment. The ElastiCache cluster's inbound SG is the operator's responsibility and is set up for the live-validation cluster separately.)
+(If the Lambda is already VPC-attached with a working SG that allows outbound, do NOT churn it: just confirm + comment. The ElastiCache cluster's inbound SG is the operator's responsibility and is set up for the live-validation cluster separately.)
 
-- [ ] **Step 3: Add IAM** to the operations MCP Lambda role (only the actions it lacks — read Step 1 findings):
+- [ ] **Step 3: Add IAM** to the operations MCP Lambda role (only the actions it lacks: read Step 1 findings):
 
 ```python
         operations_mcp_lambda.add_to_role_policy(iam.PolicyStatement(
@@ -492,7 +492,7 @@ git commit -m "feat(elasticache): live deep-read MCP tool (INFO/SLOWLOG/CLIENT L
         ))
 ```
 
-(`secretsmanager:GetSecretValue` on `*` already exists per the spec — do NOT duplicate. If `sts:AssumeRole` to the spoke role already exists on this role, skip that statement.)
+(`secretsmanager:GetSecretValue` on `*` already exists per the spec: do NOT duplicate. If `sts:AssumeRole` to the spoke role already exists on this role, skip that statement.)
 
 - [ ] **Step 4: Run synth.**
 
@@ -509,13 +509,13 @@ git commit -m "feat(elasticache): operations MCP egress + IAM for live deep-read
 
 ## Post-implementation (controller, after all tasks reviewed clean)
 
-- Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD` — focus: READ-ONLY (the tool runs only the fixed inspector allowlist; no write/admin command, no caller free-form command); token never logged/echoed; cross-account uses `session_for(spoke_role_arn)` for BOTH describe + secret; engine-gated on `live_read` (FAIL-CLOSED for non-ElastiCache); lazy lib import (module imports without redis); tool never raises out; IAM additions read-only + scoped.
-- Deploy dev: `cdk deploy dbops-dev-agent` (operations MCP Lambda — code + bundle + SG/IAM). The bundle adds redis/pymemcache to the asset. No frontend change.
-- **Live validation (authorized — user's account):**
+- Final whole-branch review (most capable model) over `git merge-base main HEAD..HEAD`, focus: READ-ONLY (the tool runs only the fixed inspector allowlist; no write/admin command, no caller free-form command); token never logged/echoed; cross-account uses `session_for(spoke_role_arn)` for BOTH describe + secret; engine-gated on `live_read` (FAIL-CLOSED for non-ElastiCache); lazy lib import (module imports without redis); tool never raises out; IAM additions read-only + scoped.
+- Deploy dev: `cdk deploy dbops-dev-agent` (operations MCP Lambda: code + bundle + SG/IAM). The bundle adds redis/pymemcache to the asset. No frontend change.
+- **Live validation (authorized: user's account):**
   1. Create a temporary `cache.t4g.micro` Redis (cluster-mode disabled, 1 node, TransitEncryption + AUTH token) reachable by the operations Lambda (in `data.vpc` or a peered/same VPC), tag `dbops:temp-test=ec3`. Store the AUTH token in a Secrets Manager secret. Add an SG ingress rule on 6379 from the operations Lambda's SG.
   2. Register it (admin) with `auth_secret_arn`.
   3. Invoke `elasticache_live_read` (agent chat or direct MCP invoke) → confirm parsed INFO/SLOWLOG/CLIENT LIST/MEMORY STATS.
   4. Generate light load (redis-benchmark / SET-GET loop) → re-invoke → SLOWLOG/stats reflect it.
   5. **Tear down** cluster + secret + SG rule; confirm removal.
-     (If VPC reachability is blocked in practice, fall back to the unit/mock coverage + document — same constraint EC-1/EC-2 noted.)
+     (If VPC reachability is blocked in practice, fall back to the unit/mock coverage + document: same constraint EC-1/EC-2 noted.)
 - Then `superpowers:finishing-a-development-branch`.

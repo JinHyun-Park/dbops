@@ -1,4 +1,4 @@
-"""pg_direct — a tiny direct-PG helper for the one case RDS Data API can't serve.
+"""pg_direct: a tiny direct-PG helper for the one case RDS Data API can't serve.
 
 The platform reaches Aurora exclusively through RDS Data API (cluster-scoped),
 which CANNOT target a specific instance. `prewarm_reader` must connect to a
@@ -7,7 +7,7 @@ a direct driver. pg8000 is a pure-Python PG driver (no C build) bundled into the
 operations Lambda asset via mcp-servers/requirements.txt.
 
 pg8000 is imported lazily inside connect() (like set_docdb_profiler lazy-imports
-pymongo) so this module — and the unit tests — import fine WITHOUT pg8000
+pymongo) so this module (and the unit tests) import fine WITHOUT pg8000
 installed.
 """
 
@@ -31,14 +31,14 @@ def _ssl_context():
 
     FAIL-CLOSED: if the CA bundle is missing we raise rather than downgrade to an
     unverified connection. This path carries DB master credentials to a database
-    instance, so a silent fail-open (CERT_NONE) would be a security regression —
+    instance, so a silent fail-open (CERT_NONE) would be a security regression,
     and it matches set_docdb_profiler, which also hard-requires the CA (tlsCAFile).
     The CDK bundling vendors global-bundle.pem into the operations asset."""
     import ssl
 
     if not os.path.exists(_CA_BUNDLE_PATH):
         raise RuntimeError(
-            "RDS CA bundle (global-bundle.pem) not found in the asset — refusing "
+            "RDS CA bundle (global-bundle.pem) not found in the asset, refusing "
             "an unverified TLS connection to a database instance."
         )
     return ssl.create_default_context(cafile=_CA_BUNDLE_PATH)
@@ -62,7 +62,7 @@ def connect(host, port, database, user, password):
 
 def query(conn, sql, params=None):
     """Run `sql` (pg8000 named `:param` style) and return rows as list[dict].
-    Minimal on purpose — prewarm_reader only needs a handful of small reads."""
+    Minimal on purpose: prewarm_reader only needs a handful of small reads."""
     rows = conn.run(sql, **(params or {}))
     cols = [c["name"] for c in conn.columns]
     return [dict(zip(cols, r, strict=False)) for r in rows]

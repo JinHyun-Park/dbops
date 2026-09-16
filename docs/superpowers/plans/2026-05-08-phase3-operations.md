@@ -1,4 +1,4 @@
-# Phase 3: Operations Automation + Approval Workflow — Implementation Plan
+# Phase 3: Operations Automation + Approval Workflow (Implementation Plan)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 
@@ -38,7 +38,7 @@
 - [ ] Document Cedar policy configuration
 - [ ] Commit
 
-## Task 5: Frontend — Approval Center + Cluster Management
+## Task 5: Frontend (Approval Center + Cluster Management)
 
 - [ ] Create Approval Center page
 - [ ] Create Cluster management page (register/list)

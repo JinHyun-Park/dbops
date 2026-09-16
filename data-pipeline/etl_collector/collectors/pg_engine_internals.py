@@ -4,13 +4,13 @@ Surfaces signals the CloudWatch metrics (cw_collector) don't expose:
   - pg_stat_database: shared-buffers cache hit ratio, transaction rollback ratio,
     cumulative temp-file spill (work_mem pressure).
   - pg_stat_bgwriter: how many checkpoints were *forced* (req) vs scheduled
-    (timed) — a high forced ratio means max_wal_size pressure.
+    (timed). A high forced ratio means max_wal_size pressure.
 
 All metrics are point-in-time gauges/ratios computed from a single source query,
 so neither the collector nor the findings need a previous snapshot. Findings are
 threshold checks on the just-computed values (no delta). Every query is wrapped
 so a partial failure (e.g. pg_stat_bgwriter renamed to pg_stat_checkpointer on
-PG 17) never drops the rest — mirrors the never-raises contract of the other
+PG 17) never drops the rest, mirrors the never-raises contract of the other
 collectors.
 """
 
@@ -26,7 +26,7 @@ WHERE datname NOT IN ('template0', 'template1')
 """
 
 # pg_stat_bgwriter is a single cluster-wide row (≤ PG16; PG17 moved checkpoints
-# to pg_stat_checkpointer — that failure is caught and skipped).
+# to pg_stat_checkpointer, that failure is caught and skipped).
 BGWRITER_SQL = """
 SELECT 100.0 * checkpoints_req / NULLIF(checkpoints_req + checkpoints_timed, 0)
          AS forced_checkpoint_ratio
@@ -118,10 +118,10 @@ def collect_pg_engine_internals(
             if forced > 30:
                 finding("pg_forced_checkpoints_high", "warning", "강제 체크포인트 비율",
                         f"{forced:.1f}%", "≤ 30%",
-                        "강제(req) 체크포인트가 잦습니다 — WAL이 max_wal_size에 자주 도달한다는 신호입니다. "
+                        "강제(req) 체크포인트가 잦습니다. WAL이 max_wal_size에 자주 도달한다는 신호입니다. "
                         "max_wal_size 상향을 검토하세요.")
     except Exception as e:
-        # PG17 renamed this to pg_stat_checkpointer — skip, never raise.
+        # PG17 renamed this to pg_stat_checkpointer: skip, never raise.
         errors.append(f"pg_stat_bgwriter: {e}")
 
     return {"cluster_id": cluster_id, "metrics_inserted": inserted,

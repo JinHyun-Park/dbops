@@ -1,4 +1,4 @@
-"""Tests for plan_az_scaleout (P2-⑥) — READ-ONLY AZ scale-out planner.
+"""Tests for plan_az_scaleout (P2-⑥): READ-ONLY AZ scale-out planner.
 
 Covers: the handler relational engine-gate (unsupported_engine on non-relational,
 impl never runs); exclude_az valid → planned readers round-robin over the healthy
@@ -44,7 +44,7 @@ _3AZ = ["ap-northeast-2a", "ap-northeast-2b", "ap-northeast-2c"]
 def test_gate_relational_only_fail_closed():
     """plan_az_scaleout is positive-gated on scale_instance (relational-only):
     a non-relational / unresolvable cluster gets unsupported_engine and the impl
-    never runs (mirrors the write-tool gate — it's read-only but Aurora-shaped)."""
+    never runs (mirrors the write-tool gate, it's read-only but Aurora-shaped)."""
     os.environ.setdefault("CACHE_DB_CLUSTER_ARN", "arn:aws:rds:ap-northeast-2:0:cluster:test")
     os.environ.setdefault("CACHE_DB_SECRET_ARN", "arn:aws:secretsmanager:ap-northeast-2:0:secret:test")
     os.environ.setdefault("CACHE_DB_NAME", "dbops")

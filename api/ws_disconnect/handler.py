@@ -1,4 +1,4 @@
-"""WebSocket $disconnect — drop the connection row."""
+"""WebSocket $disconnect: drop the connection row."""
 import os
 
 import boto3

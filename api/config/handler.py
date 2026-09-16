@@ -1,13 +1,13 @@
-"""App-config API — DB-backed feature toggles an admin edits from the web UI.
+"""App-config API: DB-backed feature toggles an admin edits from the web UI.
 
 Routes:
-  GET /api/config   — list all known config keys (stored value or default)
-  PUT /api/config   — upsert provided keys (admin-only)
+  GET /api/config:    list all known config keys (stored value or default)
+  PUT /api/config:    upsert provided keys (admin-only)
 
 Values are stored as strings in the dbops-{env}-app-config DynamoDB table
 (PK config_key). A known-keys allowlist lives here so PUT can't write arbitrary
 keys, and each key validates its own value. The API is decoupled from the
-ticketing provider registry: TICKETING_PROVIDER validates FORMAT only — an
+ticketing provider registry: TICKETING_PROVIDER validates FORMAT only. An
 unwired provider name is inert at runtime (get_provider returns _UnwiredProvider).
 """
 
@@ -92,7 +92,7 @@ def _is_admin(event: dict) -> bool:
     # Fail-closed: a request without a parseable "Bearer <jwt>" is NOT admin.
     # The API Gateway JWT authorizer accepts a raw (scheme-less) token and
     # forwards it, so we must not treat unparseable auth as the dev-fallback
-    # admin — only a VALID token with no group claim gets that fallback
+    # admin. Only a VALID token with no group claim gets that fallback
     # (one-admin deploys), matching api/clusters/handler.py and the frontend.
     headers = event.get("headers") or {}
     auth = headers.get("authorization") or headers.get("Authorization") or ""
@@ -102,7 +102,7 @@ def _is_admin(event: dict) -> bool:
     # Empty claims == the token didn't decode (malformed/non-JWT after "Bearer ").
     # The gateway JWT authorizer rejects such tokens, but defense-in-depth: an
     # unparseable token is NOT the dev-fallback (which is a VALID token that
-    # merely lacks a group claim — that always decodes to non-empty claims).
+    # merely lacks a group claim: that always decodes to non-empty claims).
     if not claims:
         return False
     groups = claims.get("cognito:groups") or []

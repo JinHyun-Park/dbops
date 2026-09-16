@@ -51,7 +51,7 @@ def _event(path, cluster_id="c-test", extra_body=None):
 
 
 # ---------------------------------------------------------------------------
-# 403 gate — non-visible cluster_id blocked before dispatch
+# 403 gate: non-visible cluster_id blocked before dispatch
 # ---------------------------------------------------------------------------
 
 
@@ -95,7 +95,7 @@ def test_scaling_403_for_non_visible_cluster(mod, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Visible cluster — gate passes, tool is dispatched
+# Visible cluster: gate passes, tool is dispatched
 # ---------------------------------------------------------------------------
 
 
@@ -111,7 +111,7 @@ def test_visible_cluster_dispatches_tool(mod, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Admin — gate is no-op (cluster_visible returns True for admin)
+# Admin: gate is no-op (cluster_visible returns True for admin)
 # ---------------------------------------------------------------------------
 
 

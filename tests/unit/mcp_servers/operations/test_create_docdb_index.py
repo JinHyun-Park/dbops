@@ -1,4 +1,4 @@
-"""Tests for create_docdb_index — the DocumentDB Mongo-protocol index write.
+"""Tests for create_docdb_index, the DocumentDB Mongo-protocol index write.
 
 Run without pymongo installed (lazy import; patch _CLIENT_FACTORY). _write_creds /
 lookup_cluster are patched so no AWS is touched.
@@ -167,7 +167,7 @@ def test_requires_approval():
 @patch.dict("os.environ", {"APPROVAL_GUARD_BYPASS": "1"})
 def test_executes_when_approved_preserves_key_order():
     """fix #2: keys are passed to create_index as an ORDERED list of (field, dir)
-    tuples, NOT sorted — compound-index order is semantic."""
+    tuples, NOT sorted: compound-index order is semantic."""
     create_spy = MagicMock()
     # request-time list + TOCTOU re-read both empty (no drift).
     with _with_creds(), patch.object(

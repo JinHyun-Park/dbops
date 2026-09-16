@@ -58,7 +58,7 @@ def lambda_handler(event, context):
                CASE WHEN b.baseline_std > 0 THEN (r.current_avg - b.baseline_avg) / b.baseline_std ELSE 0 END as z_score
         FROM recent r JOIN baseline b ON r.cluster_id = b.cluster_id AND r.metric_type = b.metric_type
         WHERE ABS(CASE WHEN b.baseline_std > 0 THEN (r.current_avg - b.baseline_avg) / b.baseline_std ELSE 0 END) > 3
-          -- ponytail: dedup via event_log cooldown — one alert per (cluster,metric)
+          -- ponytail: dedup via event_log cooldown, one alert per (cluster,metric)
           -- per 60min even if the anomaly persists, so a sustained deviation
           -- doesn't spam SNS every run. Reuses the anomaly_<metric> event_type
           -- written below; no new table. Widen the interval if still too chatty.
@@ -91,9 +91,9 @@ def lambda_handler(event, context):
             )
 
             # Record the cooldown row FIRST so a publish failure or a Lambda retry
-            # can't re-alert the same anomaly — the next run's dedup query keys off
+            # can't re-alert the same anomaly: the next run's dedup query keys off
             # this event_log row. Worst case is one missed alert (publish threw
-            # after the row was written) — the safe direction for an alert path.
+            # after the row was written), the safe direction for an alert path.
             cache_query(
                 "INSERT INTO event_log (cluster_id, event_time, event_type, source, message, severity) "
                 "VALUES (:cid, NOW(), :etype, 'dbops-monitor', :msg, :sev)",

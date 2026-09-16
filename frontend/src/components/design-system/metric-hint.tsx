@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { metricDef } from "@/lib/metric-glossary";
 
-// MetricHint — a small "?" affordance that reveals a metric's
+// MetricHint: a small "?" affordance that reveals a metric's
 // definition on hover/focus. Pure CSS-positioned popover (no portal,
 // no library) so it drops into any flex row. Renders nothing if the
 // metric isn't in the glossary, so callers can wire it unconditionally.

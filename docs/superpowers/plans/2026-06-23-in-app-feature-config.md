@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let a DBOps admin toggle opt-in feature settings (ticketing provider, report delivery) from inside the web UI, persisted to DynamoDB, with no redeploy — env vars remain the fallback.
+**Goal:** Let a DBOps admin toggle opt-in feature settings (ticketing provider, report delivery) from inside the web UI, persisted to DynamoDB, with no redeploy: env vars remain the fallback.
 
 **Architecture:** A `dbops-{env}-app-config` DynamoDB key-value table in FoundationStack; an admin-gated `GET/PUT /api/config` Lambda in AgentStack; a cached `get_config(key, default)` read path wired into `ticketing.get_provider` (task_worker) and `report_generator._deliver_report` with **DB value → env var → default** precedence; an admin-only settings page in the frontend.
 
@@ -11,18 +11,18 @@
 ## Global Constraints
 
 - **No `Co-Authored-By: Claude` trailer** in any commit (user rule).
-- **No internal-roadmap / source references** in commit messages or committed docs — this feature's provenance is confidential. Describe it on its own merits (adoption: enable opt-in features without redeploy).
+- **No internal-roadmap / source references** in commit messages or committed docs: this feature's provenance is confidential. Describe it on its own merits (adoption: enable opt-in features without redeploy).
 - **OpenAPI parity:** any new route requires `python tools/openapi_gen.py` regen; `tests/unit/test_openapi_spec.py` enforces it.
 - **CDK-only infra:** all AWS resources via CDK stacks. No AWS CLI/console changes.
 - **Read precedence:** stored DB value → env var of same name → built-in default. A fresh deploy with zero config rows must behave exactly as today.
-- **Fail-safe consumers:** `get_config` must never raise — DDB/permission errors fall back to env/default. Config must never block task completion or report generation.
+- **Fail-safe consumers:** `get_config` must never raise: DDB/permission errors fall back to env/default. Config must never block task completion or report generation.
 - **Admin gate server-side:** writes (and reads) use `_is_admin` with the established dev fallback (no Cognito groups ⇒ admin). A `dbops-viewer` is denied.
 - **Korean UI copy** for explanatory/empty-state text; keep DBA-known English jargon (provider names, "Report delivery") as-is. Match existing `/preferences` page styling and the project design quality bar (no AI-generated feel).
-- **Config holds toggles only, never secrets** — provider credentials stay in Secrets Manager, out of scope.
+- **Config holds toggles only, never secrets**: provider credentials stay in Secrets Manager, out of scope.
 
 ---
 
-### Task 1: Foundation — `app-config` DynamoDB table + grant helpers
+### Task 1: Foundation (`app-config` DynamoDB table + grant helpers)
 
 **Files:**
 
@@ -31,17 +31,17 @@
 
 **Interfaces:**
 
-- Produces: `FoundationStack.app_config_table` (a `dynamodb.Table`); `FoundationStack.grant_app_config_read(fn)` and `FoundationStack.grant_app_config_write(fn)` — each sets the `APP_CONFIG_TABLE` env on `fn` and grants read (or read/write) on the table.
+- Produces: `FoundationStack.app_config_table` (a `dynamodb.Table`); `FoundationStack.grant_app_config_read(fn)` and `FoundationStack.grant_app_config_write(fn)`: each sets the `APP_CONFIG_TABLE` env on `fn` and grants read (or read/write) on the table.
 
 - [ ] **Step 1: Add the table.** In `cdk/stacks/foundation_stack.py`, immediately after the `agent_tasks_table` `add_global_secondary_index(... "recency-index" ...)` call (~line 159), add:
 
 ```python
-        # ===== App Config — in-app, DB-backed feature toggles =====
+        # ===== App Config: in-app, DB-backed feature toggles =====
         # Small key-value store an ADMIN edits from the web UI (GET/PUT
         # /api/config) to flip opt-in features (ticketing provider, report
         # delivery) WITHOUT a redeploy. Lives in foundation so the agent stack
         # (config API + task worker) and the data stack (report generator) can
-        # all reach it without a cross-stack cycle — same rationale as the
+        # all reach it without a cross-stack cycle: same rationale as the
         # agent_tasks_table above. Read precedence at consumers is
         # DB value -> env var -> default, so a fresh deploy with no rows here
         # behaves exactly as the baked-in env defaults.
@@ -87,7 +87,7 @@ def test_app_config_table_present(cdk_app):
     )
 ```
 
-If the `cdk_app` fixture returns only the `app` (not a dict of stacks), adapt: read the fixture's return shape first and either extend it to expose `foundation`, or re-synth a fresh `FoundationStack` inside the test (mirroring the fixture's CWD-swap + settings fallback). Do NOT hardcode the env into the table-name assertion — match on `KeySchema` so the test is env-agnostic.
+If the `cdk_app` fixture returns only the `app` (not a dict of stacks), adapt: read the fixture's return shape first and either extend it to expose `foundation`, or re-synth a fresh `FoundationStack` inside the test (mirroring the fixture's CWD-swap + settings fallback). Do NOT hardcode the env into the table-name assertion: match on `KeySchema` so the test is env-agnostic.
 
 - [ ] **Step 4: Run synth tests.**
 
@@ -103,12 +103,12 @@ git commit -m "feat(config): app-config DynamoDB table + grant helpers (foundati
 
 ---
 
-### Task 2: Config REST API — handler + route + OpenAPI
+### Task 2: Config REST API (handler + route + OpenAPI)
 
 **Files:**
 
 - Create: `api/config/handler.py`
-- Create: `api/config/__init__.py` (empty — match sibling API dirs)
+- Create: `api/config/__init__.py` (empty: match sibling API dirs)
 - Modify: `cdk/stacks/agent_stack.py` (add `ConfigApi` Lambda near the other API lambdas ~line 787; add routes near the tasks routes ~line 1539)
 - Modify: `frontend/public/openapi.json` (regenerated, do not hand-edit)
 - Test: `tests/unit/api/test_config.py`
@@ -121,16 +121,16 @@ git commit -m "feat(config): app-config DynamoDB table + grant helpers (foundati
 - [ ] **Step 1: Write the handler.** Create `api/config/handler.py`:
 
 ```python
-"""App-config API — DB-backed feature toggles an admin edits from the web UI.
+"""App-config API: DB-backed feature toggles an admin edits from the web UI.
 
 Routes:
-  GET /api/config   — list all known config keys (stored value or default)
-  PUT /api/config   — upsert provided keys (admin-only)
+  GET /api/config   - list all known config keys (stored value or default)
+  PUT /api/config   - upsert provided keys (admin-only)
 
 Values are stored as strings in the dbops-{env}-app-config DynamoDB table
 (PK config_key). A known-keys allowlist lives here so PUT can't write arbitrary
 keys, and each key validates its own value. The API is decoupled from the
-ticketing provider registry: TICKETING_PROVIDER validates FORMAT only — an
+ticketing provider registry: TICKETING_PROVIDER validates FORMAT only, so an
 unwired provider name is inert at runtime (get_provider returns _UnwiredProvider).
 """
 
@@ -416,7 +416,7 @@ Expected after handler is in place: PASS (the handler reads `_table()` which is 
 - [ ] **Step 5: Add the CDK Lambda + routes.** In `cdk/stacks/agent_stack.py`, near the other API lambdas (after `tasks_lambda`/`scheduled_tasks_lambda`, ~line 817), add:
 
 ```python
-        # Config API — admin-edits DB-backed feature toggles (ticketing
+        # Config API: admin-edits DB-backed feature toggles (ticketing
         # provider, report delivery) so they flip without a redeploy.
         config_lambda = lambda_.Function(
             self, "ConfigApi",
@@ -431,7 +431,7 @@ Expected after handler is in place: PASS (the handler reads `_table()` which is 
 Then near the tasks-route registrations (~line 1557), add:
 
 ```python
-        # App config — admin-gated DB-backed feature toggles
+        # App config: admin-gated DB-backed feature toggles
         config_integration = integrations.HttpLambdaIntegration("ConfigIntegration", config_lambda)
         self.api.add_routes(
             path="/api/config",
@@ -459,7 +459,7 @@ git commit -m "feat(config): admin-gated GET/PUT /api/config + route + openapi"
 
 ---
 
-### Task 3: Consumer read path — `get_config` wired into ticketing + report_generator
+### Task 3: Consumer read path (`get_config` wired into ticketing + report_generator)
 
 **Files:**
 
@@ -474,7 +474,7 @@ git commit -m "feat(config): admin-gated GET/PUT /api/config + route + openapi"
 **Interfaces:**
 
 - Consumes: `APP_CONFIG_TABLE` env + read grant (`FoundationStack.grant_app_config_read`); the `app-config` table from Task 1.
-- Produces: `get_config(key: str, default: str) -> str` — returns the stored DDB value, else `os.environ.get(key)`, else `default`. Caches per-key for ~60s. Never raises.
+- Produces: `get_config(key: str, default: str) -> str`: returns the stored DDB value, else `os.environ.get(key)`, else `default`. Caches per-key for ~60s. Never raises.
 
 - [ ] **Step 1: Write the failing test for the shared helper.** Create `tests/unit/mcp_servers/shared/test_app_config.py`:
 
@@ -552,7 +552,7 @@ Resolution precedence for a key:
 
 Values are cached per-key for a short TTL so the hot path doesn't hit DDB on
 every call; a freshly-changed setting takes effect within the TTL on a warm
-container. NEVER raises — any DDB/permission error falls back to env/default,
+container. NEVER raises: any DDB/permission error falls back to env/default,
 because this gates opt-in features and must not break the work it wraps.
 """
 
@@ -614,14 +614,14 @@ Then replace the branch:
         name = get_config("TICKETING_PROVIDER", os.environ.get("TICKETING_PROVIDER", "none"))
 ```
 
-(Passing the env value as the default keeps behavior identical when `APP_CONFIG_TABLE` is unset — `get_config` returns env/default.)
+(Passing the env value as the default keeps behavior identical when `APP_CONFIG_TABLE` is unset: `get_config` returns env/default.)
 
 - [ ] **Step 5: Verify ticketing still passes.** If `tests/unit/mcp_servers/workers/test_ticketing.py` exists, run it; the existing `get_provider()` cases must still pass (with `APP_CONFIG_TABLE` unset, `get_config` falls back to env/"none"). If patching is needed because the test imports trigger a DDB call, patch `mcp_servers.shared.app_config._table` or set no `APP_CONFIG_TABLE` (the helper short-circuits when the env is absent).
 
 Run: `python -m pytest tests/unit/mcp_servers/workers/ -q -k ticketing`
 Expected: PASS. If no ticketing test exists, add a minimal one asserting `get_provider()` returns `NoopTicketProvider` when nothing is configured.
 
-- [ ] **Step 6: Add the report_generator local copy.** Create `data-pipeline/report_generator/app_config.py` with the SAME content as Step 2's `mcp-servers/mcp_servers/shared/app_config.py` (verbatim copy — the data-pipeline package shares no layer with mcp-servers, so a small per-Lambda copy follows the existing convention).
+- [ ] **Step 6: Add the report_generator local copy.** Create `data-pipeline/report_generator/app_config.py` with the SAME content as Step 2's `mcp-servers/mcp_servers/shared/app_config.py` (verbatim copy: the data-pipeline package shares no layer with mcp-servers, so a small per-Lambda copy follows the existing convention).
 
 - [ ] **Step 7: Wire report_generator.** In `data-pipeline/report_generator/handler.py`, add near the top imports:
 
@@ -670,7 +670,7 @@ git commit -m "feat(config): consumers read DB-backed toggles (env fallback + ca
 
 ---
 
-### Task 4: Settings UI — admin page + api-client + nav
+### Task 4: Settings UI (admin page + api-client + nav)
 
 **Files:**
 
@@ -682,7 +682,7 @@ git commit -m "feat(config): consumers read DB-backed toggles (env fallback + ca
 
 - Consumes: `GET/PUT /api/config` (Task 2); `authedFetch` + `api()`/`apiUrl()` from `api-client.ts`.
 
-- [ ] **Step 1: Add the api-client functions.** In `frontend/src/lib/api-client.ts`, add (mirroring the existing `authedFetch` mutation pattern — PUT carries the Cognito token automatically):
+- [ ] **Step 1: Add the api-client functions.** In `frontend/src/lib/api-client.ts`, add (mirroring the existing `authedFetch` mutation pattern: PUT carries the Cognito token automatically):
 
 ```typescript
 export interface AppConfigItem {
@@ -730,7 +730,7 @@ export async function updateAppConfig(
     - **Ticketing provider** (`TICKETING_PROVIDER`): a text input (or select) for the provider name; default `none`. Include helper copy (Korean) noting that a provider must be wired in code before a non-`none` value does anything.
   - A "저장" (save) button calls `updateAppConfig({ REPORT_DELIVERY_ENABLED: <bool>, TICKETING_PROVIDER: <string> })`, shows success/error, and updates local state from the response.
   - Show `updated_at` / `updated_by` per setting when present ("마지막 변경: {updated_by}, {updated_at}").
-  - Match the project design quality bar — no placeholder/AI-generated feel; consistent with existing pages.
+  - Match the project design quality bar: no placeholder/AI-generated feel; consistent with existing pages.
 
 Use the `/preferences` page (`frontend/src/app/preferences/page.tsx`) as the structural template for state/loading/error handling.
 
@@ -745,7 +745,7 @@ Expected: build succeeds (static export), no type errors.
 
 ```bash
 git add frontend/src/lib/api-client.ts frontend/src/app/settings/ frontend/src/components
-git commit -m "feat(config): admin settings page — toggle ticketing + report delivery in-app"
+git commit -m "feat(config): admin settings page, toggle ticketing + report delivery in-app"
 ```
 
 ---
