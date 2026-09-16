@@ -3,16 +3,27 @@
 Three DMV reads → the SAME cache tables the MySQL collectors write:
   - session state breakdown (sys.dm_exec_sessions) → metric_snapshots
     conn_active / conn_idle / conn_other. A user session's status is 'running'
-    while it has an active request and 'sleeping' when idle — the exact
+    while it has an active request and 'sleeping' when idle, the exact
     PROCESSLIST 'Query'/'Sleep' distinction the MySQL collector maps.
   - long-running requests (sys.dm_exec_requests) → long_running_queries.
   - blocked requests (blocking_session_id <> 0) → blocking_locks.
 
 UNIT: dm_exec_requests.total_elapsed_time / wait_time are MILLISECONDS (ms)
-→ /1000.0 = seconds. (dm_exec_query_stats is µs — different DMV, see
+→ /1000.0 = seconds. (dm_exec_query_stats is µs, a different DMV, see
 mssql_query_stats.) The >5000 long-running threshold is 5000 ms = 5 s, matching
 the MySQL collector's PROCESSLIST_TIME > 5 (seconds).
+
+LITERALS: all three statement columns here come from sys.dm_exec_sql_text(),
+which returns the statement AS SENT, constants intact. The other two engines do
+not: PostgreSQL hands back pg_stat_statements.query with $N and MySQL hands
+back DIGEST_TEXT with ?, so SQL Server alone can carry user data into columns
+the UI renders verbatim (the long-running panel and the blocking panel, plus
+RCA candidate evidence). Scrubbed at the producer with the same scrubber
+query_stats.query_text uses: redacting in one reader would leave every other
+reader exposed while implying the column was safe.
 """
+
+from mssql_query_stats import scrub_sql_literals
 
 ACTIVITY_SQL = """
 SELECT LOWER(s.status) AS state, COUNT(*) AS cnt
@@ -130,7 +141,7 @@ def collect_mssql_activity(rds_data_client, cache_execute, target_cluster_arn, t
             "state": _str(rec[2]),
             "duration_sec": _double(rec[3]),
             "xact_duration_sec": 0.0,
-            "query_text": _str(rec[4]),
+            "query_text": scrub_sql_literals(_str(rec[4])),
             "wait_event_type": _str(rec[5]),
             "wait_event": "",
             "client_addr": _str(rec[6]),
@@ -144,8 +155,8 @@ def collect_mssql_activity(rds_data_client, cache_execute, target_cluster_arn, t
             "blocked_user": _str(rec[1]),
             "blocking_pid": _long(rec[2]),
             "blocking_user": _str(rec[3]),
-            "blocked_query": _str(rec[4]),
-            "blocking_query": _str(rec[5]),
+            "blocked_query": scrub_sql_literals(_str(rec[4])),
+            "blocking_query": scrub_sql_literals(_str(rec[5])),
             "locktype": _str(rec[6]),
             "blocked_mode": "",
             "blocking_mode": "",
