@@ -1,5 +1,15 @@
 import { test, expect, type Page } from "@playwright/test";
 
+// Korean UI pinned. These specs test BEHAVIOUR, not language: hit-testing, the
+// dropdown's stacking context, the sign-out teardown. They select their targets
+// by Korean text, and i18n resolves the locale from navigator.language with an
+// ENGLISH fallback, so under Playwright's en-US browser every one of those
+// selectors stopped matching the moment the translation landed. Six of them
+// failed 2/2 that way, which is a regression in the SUITE, not the product.
+// Pinning ko-KR keeps them testing what they were written to test; the
+// English-side assertions live in rca-inbox.spec.ts, which pins en-US.
+test.use({ locale: "ko-KR" });
+
 // REAL-input smoke suite. Every interaction here goes through Playwright's
 // hit-tested clicks. If an overlay/stacking bug ever buries a control again
 // (the "menu renders but clicks fall through" class), these fail with

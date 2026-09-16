@@ -176,5 +176,103 @@ test.describe("UI 언어는 브라우저 로케일을 따른다", () => {
       await page.goto("/tasks");
       await expect(page.locator("main h1")).toHaveText(/RCA inbox/);
     });
+
+    // The translation went from 256 keys to 2,110, so the question is no longer
+    // "does the toggle switch" but "does anything still leak Korean". These are
+    // the screens the review named as highest value, plus the two classes that
+    // shipped broken: a render-site constant table, and a caveat composed at
+    // runtime. Asserted by scanning the rendered text for Hangul rather than by
+    // matching a phrase, because a phrase test passes while the string NEXT to
+    // it is still Korean.
+    const HANGUL = /[가-힣]/;
+
+    // Each screen carries an ENGLISH ANCHOR it must show. That replaces an
+    // element-count guard, which was the wrong shape twice over: /forgot is a
+    // minimal form that legitimately renders 3 elements, and a count cannot
+    // tell "rendered nothing" from "rendered Korean". An anchor fails on a
+    // blank or redirected page and the scan fails on a leak, so neither can
+    // pass vacuously.
+    //
+    // /callback is NOT in this list on purpose: it parses the OAuth hash and
+    // navigates away immediately, so there is no stable moment to scan. Its
+    // strings are covered by i18n-check, which now requires a key for every
+    // Korean literal that reaches t().
+    for (const [path, anchor] of [
+      ["/dashboard", /Overview/],
+      ["/tasks", /RCA inbox/],
+      ["/approvals", /Approval/i],
+      ["/alerts", /Alert/i],
+      ["/clusters", /Cluster/i],
+      ["/cost", /Cost/i],
+      ["/simulator", /Simulat/i],
+      ["/forgot", /Reset password|verification code/],
+      ["/reset", /password/i],
+    ] as const) {
+      test(`${path}: 영어 화면에 한글이 남지 않는다`, async ({ page }) => {
+        await page.goto(path);
+        // The anchor proves the page actually rendered ITS OWN content in
+        // English before anything is concluded from the absence of Korean.
+        // filter({ visible: true }): the collapsed sidebar renders a HIDDEN
+        // nav label for every route, so a bare getByText(/Alert/i).first()
+        // resolved to that hidden span and the anchor could never become
+        // visible. The anchor has to be text the operator can actually read.
+        await expect(
+          page.getByText(anchor).filter({ visible: true }).first(),
+          `${path} never rendered its English anchor, so a clean scan below` +
+            " would prove nothing",
+        ).toBeVisible({ timeout: 20_000 });
+
+        // Server-generated prose (an RCA narrative, a finding, a schema note)
+        // is deliberately Korean and no frontend wrap can reach it, so the scan
+        // is limited to the app's own chrome. NOT scoped to <main>: the auth
+        // pages render none, and a main-scoped query matched zero elements
+        // there and passed vacuously.
+        const leaked = await page.evaluate(() => {
+          const sel =
+            "h1, h2, h3, th, label, button, option, [role='tab'], nav a," +
+            " header a, [data-task-row] span";
+          const out: string[] = [];
+          for (const el of Array.from(document.querySelectorAll(sel))) {
+            const txt = (el.textContent || "").trim();
+            if (txt && /[가-힣]/.test(txt)) out.push(txt.slice(0, 80));
+          }
+          return [...new Set(out)];
+        });
+        expect(leaked, `${path} still renders Korean chrome`).toEqual([]);
+      });
+    }
+
+    test("대시보드 탭 라벨이 영문이다", async ({ page }) => {
+      // The exact class that shipped broken: TAB_DEFS is a module-level const
+      // whose Korean reaches the UI as {t(d.label)}, invisible to a scan for
+      // t("..."), so all six rendered Korean with every gate green.
+      await page.goto("/dashboard");
+      const tabs = page.locator("main [role='tab'], main button").filter({
+        hasText: /Overview|개요/,
+      });
+      await expect(tabs.first()).toHaveText(/Overview/);
+    });
+
+    test("RCA 리포트의 단일 샘플 경고가 영문이다", async ({ page }) => {
+      // topCaveats() and coverageGaps() were rendered RAW, so an English
+      // operator read the ranking's own uncertainty caveat in Korean. That
+      // caveat is what stops a lone peak reading as a confirmed cause.
+      await page.goto("/tasks");
+      const rows = page.locator("main [data-task-row]");
+      if ((await rows.count()) === 0) {
+        test.skip(true, "이 배포에 RCA 리포트 행이 없습니다");
+      }
+      await rows.first().click();
+      const body = (await page.locator("main").textContent()) || "";
+      for (const ko of [
+        "1순위 근거가",
+        "구간 평균이 아니라",
+        "확인 불가",
+        "데이터 없음",
+        "근거가 불완전합니다",
+      ]) {
+        expect(body, `report still shows "${ko}"`).not.toContain(ko);
+      }
+    });
   });
 });
