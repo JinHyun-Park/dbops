@@ -35,15 +35,22 @@ export function AuthButton() {
       </span>
       <button
         onClick={() => {
+          // Credentials are dropped by clearTokens() and by nothing else. The
+          // navigation below is a UI concern only, so do not read it as part
+          // of the security boundary.
           clearTokens();
-          // A HARD navigation on purpose, which is why the Next rule is
-          // suppressed rather than obeyed here. router.push() keeps the SPA
-          // alive, so every mounted component holds its in-memory state after
-          // the tokens are gone: the query cache, the shared cluster
-          // selection, and any module that closed over a token. A full load is
-          // the reliable way to drop all of it on sign-out.
-          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-          window.location.href = "/login";
+          // A HARD navigation, for the one reason that holds: router.push()
+          // keeps the SPA mounted, so React component state in every open page
+          // (cluster lists, metrics, chat transcripts) stays on screen behind
+          // the redirect. A full load unmounts all of it.
+          //
+          // `replace` rather than `href =`, which also drops the authenticated
+          // URL from back-history. Not flagged by
+          // @next/next/no-location-assign-relative-destination, which hooks
+          // only `assign()` calls and `href` assignments, so this needs no
+          // suppression, and it matches the two existing call sites in
+          // auth-guard.tsx and agentcore-sse.ts.
+          window.location.replace("/login");
         }}
         className="text-xs text-zinc-500 hover:text-zinc-200 transition-colors"
       >

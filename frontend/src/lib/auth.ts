@@ -100,9 +100,35 @@ export function setTokens(idToken: string, accessToken: string): void {
   }
 }
 
+/** localStorage prefix amazon-cognito-identity-js writes its own cache under:
+ *  `CognitoIdentityServiceProvider.<clientId>.<username>.{idToken,accessToken,
+ *  refreshToken,clockDrift}` plus `...<clientId>.LastAuthUser`. */
+const COGNITO_CACHE_PREFIX = "CognitoIdentityServiceProvider.";
+
 export function clearTokens(): void {
   localStorage.removeItem("dbops_id_token");
   localStorage.removeItem("dbops_access_token");
+  // THE REFRESH TOKEN TOO, or this is not a sign-out. Removing only the two
+  // dbops_* keys left the library's own cache in place, and the silent-refresh
+  // path below is built to read exactly that: pool.getCurrentUser() resolves
+  // from LastAuthUser and getSession() mints a fresh id+access token off the
+  // stored refreshToken. Measured chain: sign out, load /login (public, so
+  // AuthGuard lets it through), then navigate anywhere private and
+  // refreshSession() signs the same user back in with no credentials, for the
+  // refresh token's whole lifetime. On a shared workstation that is the next
+  // person at the keyboard.
+  //
+  // Cleared by prefix rather than by calling the library's signOut(): that
+  // needs getPool(), which awaits a runtime-config fetch and can return no
+  // current user. Either failure would leave the refresh token sitting there,
+  // and a sign-out must not fail open. This needs no config and cannot throw.
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(COGNITO_CACHE_PREFIX)) localStorage.removeItem(key);
+    }
+  } catch {
+    // A storage exception must not abort the logout event below.
+  }
   // On logout/revocation, tell auth-aware singletons to tear down. Without this,
   // the alert-stream WebSocket (authorized only at $connect) would survive up to
   // its 2h TTL, so a logged-out user keeps receiving pushed alerts.
