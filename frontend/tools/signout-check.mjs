@@ -48,22 +48,27 @@ function fakeStorage(seed) {
   );
 }
 
+// Synthetic throughout. The check does not care what the values are, and a
+// public repo is no place for a real Cognito account or a registered cluster
+// id: the first version of this file used both, and the pre-push scan caught
+// the account email as a NEW public exposure.
 const CLIENT = "4abcdef0123456789";
 const SEED = {
   dbops_id_token: "id.jwt",
   dbops_access_token: "access.jwt",
-  [`CognitoIdentityServiceProvider.${CLIENT}.LastAuthUser`]: "e2e@dbops.dev",
-  [`CognitoIdentityServiceProvider.${CLIENT}.e2e@dbops.dev.refreshToken`]:
+  [`CognitoIdentityServiceProvider.${CLIENT}.LastAuthUser`]: "dba@example.com",
+  [`CognitoIdentityServiceProvider.${CLIENT}.dba@example.com.refreshToken`]:
     "REFRESH-SECRET",
-  [`CognitoIdentityServiceProvider.${CLIENT}.e2e@dbops.dev.idToken`]: "id.jwt",
-  [`CognitoIdentityServiceProvider.${CLIENT}.e2e@dbops.dev.accessToken`]:
+  [`CognitoIdentityServiceProvider.${CLIENT}.dba@example.com.idToken`]:
+    "id.jwt",
+  [`CognitoIdentityServiceProvider.${CLIENT}.dba@example.com.accessToken`]:
     "access.jwt",
-  [`CognitoIdentityServiceProvider.${CLIENT}.e2e@dbops.dev.clockDrift`]: "0",
+  [`CognitoIdentityServiceProvider.${CLIENT}.dba@example.com.clockDrift`]: "0",
   // Unrelated per-viewer state. A sign-out that wipes these is too broad: the
   // locale and the saved views are not credentials.
   "dbops.locale": "ko",
   "dbops.tasks.publishedMark": "1757000000000",
-  "dbops.selectedCluster": "pgtsd-demo-aurora-pg",
+  "dbops.selectedCluster": "example-aurora-pg",
 };
 
 const storage = fakeStorage(SEED);
@@ -113,7 +118,7 @@ check(
 );
 check(
   "selected cluster preserved",
-  storage.getItem("dbops.selectedCluster") === "pgtsd-demo-aurora-pg",
+  storage.getItem("dbops.selectedCluster") === "example-aurora-pg",
 );
 check("logout event dispatched once", loggedOut === 1, `got ${loggedOut}`);
 
