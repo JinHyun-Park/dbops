@@ -1147,6 +1147,13 @@ def _handle_seed_sample(table):
         "is_demo": True,
     }
     _put_registry_item(table, item)
+    # Same convenience the register path gets. Without it the sample cluster
+    # lands with metrics but NO alert rule, so the one thing the demo is for,
+    # an alert firing and pulling an automatic RCA behind it, cannot happen on
+    # the cluster the demo hands you. Never raises (see the docstring), and the
+    # insert is NOT EXISTS guarded, which matters here because seeding is
+    # explicitly idempotent and gets re-run.
+    _seed_default_alert_rule(engine_family(seeder.SAMPLE_ENGINE), cluster_id)
     return _resp(201, {
         "status": "seeded",
         "cluster_id": cluster_id,

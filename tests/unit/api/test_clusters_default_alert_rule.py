@@ -214,3 +214,51 @@ def test_metric_names_match_incident_signals():
 
     # Every family the registration dispatch can produce is accounted for.
     assert set(handler._DEFAULT_ALERT_CPU_METRIC) | {"dynamodb"} == set(SIGNAL_SETS)
+
+
+# ---------------------------------------------------------------------------
+# The sample/demo cluster takes the same path
+# ---------------------------------------------------------------------------
+
+def test_seeding_the_sample_cluster_also_seeds_its_alert_rule():
+    """POST /api/clusters/seed-sample writes a registry row of its own instead
+    of going through _handle_register, so it silently missed the rule.
+
+    That is the worst cluster to miss: the demo exists to show an alert firing
+    and pulling an automatic RCA behind it, and the cluster the demo hands you
+    was the one with metrics and no rule to evaluate them against.
+    """
+    with patch.object(handler, "boto3") as fake_boto3, \
+         patch.object(handler.seeder, "seed_demo_data",
+                      return_value={"metric_snapshots": 120}) as seed, \
+         patch.object(handler, "_put_registry_item") as put:
+        resp = handler._handle_seed_sample(_table())
+
+    assert resp["statusCode"] == 201, resp["body"]
+    body = json.loads(resp["body"])
+    assert body["status"] == "seeded"
+    assert seed.called and put.called, "guard: the seed path itself must have run"
+
+    params = _seeded_params(fake_boto3)
+    assert params is not None, "the sample cluster got no default alert rule"
+    # aurora-postgresql is `relational`, whose collector metric is plain `cpu`.
+    assert params["metric"] == "cpu"
+    assert params["cid"] == handler.seeder.SAMPLE_CLUSTER_ID
+    assert params["name"] == "cpu > 80"
+    assert params["threshold"] == 80.0
+    # Seeding is documented as idempotent and IS re-run, so the NOT EXISTS
+    # guard is what keeps a second demo reset from stacking a duplicate rule.
+    assert "NOT EXISTS" in params["__sql__"]
+
+
+def test_a_failed_sample_seed_writes_no_alert_rule():
+    """The mirror case. seed_demo_data raising returns 500 and writes no
+    registry row, so a rule for a cluster that is not registered must not
+    appear either."""
+    with patch.object(handler, "boto3") as fake_boto3, \
+         patch.object(handler.seeder, "seed_demo_data",
+                      side_effect=RuntimeError("relation does not exist")):
+        resp = handler._handle_seed_sample(_table())
+
+    assert resp["statusCode"] == 500
+    assert _seeded_params(fake_boto3) is None
