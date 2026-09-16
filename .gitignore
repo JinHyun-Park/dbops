@@ -43,3 +43,9 @@ agent/_deps/
 # If a NEW context lookup is ever added (from_lookup, SSM, VPC), CI will fail
 # with a missing-context error: add that entry to cdk/cdk.json by hand.
 cdk/cdk.context.json
+
+# Local Codex CLI hook wiring. Machine-specific: hooks.json holds ABSOLUTE
+# paths under the operator's home directory, so a tracked copy publishes a
+# local username from a public repo and breaks on every other machine. The
+# reviewable part of this pipeline is tools/local-tester/, which IS tracked.
+.codex/
