@@ -16,14 +16,28 @@ test.use({ locale: "ko-KR" });
 // REQUEST the page actually issues and on the response field it actually
 // reads, not on the handler, which unit tests already cover.
 
-/** Query params of the next GET /api/tasks the page issues. */
-async function nextTasksQuery(
+/** Wait for a GET /api/tasks whose params satisfy `match`, then return them.
+ *
+ *  Matched on the EXPECTED value rather than taking "the next request": the
+ *  page can have an in-flight load carrying the previous scope when the
+ *  listener attaches, which made the kind spec flaky. It failed once with
+ *  Received "auto_rca,manual_rca" while asserting on the request that follows
+ *  a switch to scheduled_report, and passed on an earlier run. A flaky spec is
+ *  not a gate.
+ *
+ *  This still fails when the param is never sent at all, by timeout, which is
+ *  the defect being covered. */
+async function tasksRequest(
   page: import("@playwright/test").Page,
+  match: (q: URLSearchParams) => boolean,
   act: () => Promise<unknown>,
 ) {
   const [req] = await Promise.all([
     page.waitForRequest(
-      (r) => r.url().includes("/api/tasks") && !r.url().includes("/stats"),
+      (r) =>
+        r.url().includes("/api/tasks") &&
+        !r.url().includes("/stats") &&
+        match(new URL(r.url()).searchParams),
     ),
     act(),
   ]);
@@ -61,18 +75,23 @@ test("종류 범위를 바꾸면 요청에 kind가 실제로 실린다", async (
   // so without this the newest page can be all digests and no reports.
   await expect(select).toHaveValue("rca");
 
-  const toReport = await nextTasksQuery(page, () =>
-    select.selectOption("report"),
+  // Each wait matches on the kind it expects, so a timeout means the page
+  // never sent that value, which is exactly the defect these cover.
+  await tasksRequest(
+    page,
+    (q) => q.get("kind") === "scheduled_report",
+    () => select.selectOption("report"),
   );
-  expect(toReport.get("kind")).toBe("scheduled_report");
-
-  const toAll = await nextTasksQuery(page, () => select.selectOption("all"));
-  expect(toAll.get("kind")).toBeNull();
-
-  const backToRca = await nextTasksQuery(page, () =>
-    select.selectOption("rca"),
+  await tasksRequest(
+    page,
+    (q) => q.get("kind") === null,
+    () => select.selectOption("all"),
   );
-  expect(backToRca.get("kind")).toBe("auto_rca,manual_rca");
+  await tasksRequest(
+    page,
+    (q) => q.get("kind") === "auto_rca,manual_rca",
+    () => select.selectOption("rca"),
+  );
 });
 
 test("이전 기록이 남아 있으면 더 보기가 커서로 다음 페이지를 가져온다", async ({
@@ -92,7 +111,11 @@ test("이전 기록이 남아 있으면 더 보기가 커서로 다음 페이지
   }
 
   const before = await page.locator("main [data-task-row]").count();
-  const q = await nextTasksQuery(page, () => more.click());
+  const q = await tasksRequest(
+    page,
+    (p) => p.has("cursor"),
+    () => more.click(),
+  );
   expect(q.get("cursor"), "더 보기는 커서를 보내야 한다").toBeTruthy();
   // Appends rather than replaces: paging back through history must not throw
   // away what is already on screen.

@@ -18,7 +18,14 @@ inclusion: always
 - **Framework**: Next.js 16 (App Router, Static Export)
 - **UI**: shadcn/ui + Tailwind CSS with custom design system
 - **Charts**: Recharts or Tremor
-- **State**: TanStack Query
+- **State**: no client state library. Server data is fetched per page with
+  plain `fetch` through `src/lib/api-client.ts` and held in component state;
+  the cross-page pieces (the selected cluster, the locale, the RCA inbox
+  watermark) are localStorage plus a custom DOM event, in
+  `src/lib/selected-cluster.ts`, `src/lib/i18n.tsx` and
+  `src/lib/tasks-watermark.ts`. `@tanstack/react-query` was declared as a
+  dependency and never imported, so it was removed; do not reintroduce a
+  query cache here without wiring it.
 - **Auth**: Cognito Hosted UI + Amplify Auth
 - **Hosting**: CloudFront + S3
 

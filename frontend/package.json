@@ -15,7 +15,6 @@
     "signout:check": "node tools/signout-check.mjs"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.101.4",
     "amazon-cognito-identity-js": "^6.3.20",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
