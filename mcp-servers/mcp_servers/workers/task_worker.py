@@ -17,6 +17,7 @@ fast, cheap, and safe to run unattended in a Lambda.
 
 import json
 import os
+import re
 import time
 from decimal import Decimal
 from typing import Optional
@@ -149,6 +150,36 @@ def _finish(task_id, *, status, result=None, summary=None, error=None, ticket_ur
         vals[":r"] = _ddb_safe(result)
         sets.append("#r = :r")
         names["#r"] = "result"
+        # published_at marks AVAILABILITY, not progress: THIS is the write that
+        # puts a readable report on the row, so the stamp belongs here and
+        # nowhere earlier. Not created_at (queued), not started_at (claimed),
+        # and not completed_at, which a `failed` row carries too.
+        #
+        # A `failed` finish passes no result: that is a failure notification, not
+        # a published report, so it stays unstamped. A result that legitimately
+        # found nothing ("뚜렷한 원인 미발견, 수동 점검 권장") IS stamped, because
+        # that is a real outcome the operator needs to read.
+        #
+        # Same convention as created_at / started_at / completed_at in this
+        # table: decimal ms-epoch in a STRING. It is fixed width (13 digits from
+        # 2001 until 2286), so string ordering equals numeric ordering on the
+        # cluster-created-index GSI, which is what lets a reader range-query it
+        # the way alert_evaluator already range-queries created_at. An ISO
+        # timestamp or a number would sort wrongly against the existing rows.
+        # Reuses :ts, so published_at and completed_at are the same instant by
+        # construction rather than two clocks that can disagree.
+        #
+        # The status gate holds the same invariant the READER already asserts:
+        # api/tasks._published_at falls back to completed_at only for a row that
+        # is `done` AND carries a result, "which is what keeps 'new' from ever
+        # meaning 'queued' or 'failed'". No caller passes a result with a
+        # non-done status today, so the gate never fires on the live paths. It is
+        # what keeps a future partial-result failure path from stamping a row the
+        # reader would then surface as a newly arrived report, so it is tested by
+        # calling _finish directly with that pair rather than through a handler
+        # path that cannot produce it.
+        if status == "done":
+            sets.append("published_at = :ts")
     if summary is not None:
         vals[":sum"] = summary
         sets.append("summary = :sum")
@@ -328,6 +359,100 @@ def _narrative(cluster_id: str, rca: dict):
         return None
 
 
+# Measured, not guessed. Over hand-built Korean and English pairs, genuinely
+# different advice ("세션을 종료" vs "인덱스를 추가" after an identical first
+# clause) topped out at 0.5 token overlap, while real paraphrases scored 0.667 to
+# 1.0. Character-level similarity was tried first and REJECTED: it scored a
+# reordered paraphrase at 0.53 and a different-action pair at 0.77, i.e. inverted.
+_DUP_ADVICE_OVERLAP = 0.6
+
+_HANGUL = re.compile(r"[가-힣]+")
+
+
+def _advice_tokens(text: str) -> set:
+    """Comparable content tokens of one piece of advice.
+
+    Set semantics drop word order, which is most of what paraphrasing changes.
+    Two normalizations on top:
+      - a Korean word is cut to its first two syllables, where the stem sits, so
+        "낮추세요" and "낮추십시오" collapse to one token and the model's choice of
+        verb ending stops reading as new information.
+      - a Korean particle stuck on an identifier is stripped, so "work_mem을" and
+        "work_mem" are one token.
+    """
+    out = set()
+    for word in re.sub(r"[^0-9a-z가-힣\s_]+", " ", text.lower()).split():
+        if _HANGUL.fullmatch(word):
+            if len(word) >= 2:
+                out.add(word[:2])
+        else:
+            word = _HANGUL.sub("", word)  # identifier + particle -> identifier
+            if len(word) > 1:
+                out.add(word)
+    return out
+
+
+def _same_advice(a: str, b: str) -> bool:
+    """True when two pieces of advice tell the operator to do the same thing.
+
+    Conservative by construction, because dropping a DIFFERENT recommendation is
+    worse than showing a near-duplicate:
+      1. the identifiers (metric names, parameter names, numbers) must match
+         exactly, because advice about two different knobs can be word-for-word
+         identical apart from the name. Measured: "shared_buffers 값을 늘려 캐시
+         적중률을 높이세요" against the same line with work_mem shares 5 of 7
+         tokens, 0.714, so overlap alone WOULD have eaten one of the two
+         changes.
+      2. then 60% of all tokens have to be shared (see _DUP_ADVICE_OVERLAP).
+
+    Both sides are always Korean prose from the same narrative model, so lexical
+    comparison is comparing like with like.
+    ponytail: lexical ceiling, adequate because it only ever sees one model's
+    output in one language. The upgrade path is Titan embeddings, already wired
+    in incident/tools/similar_incidents.py, if paraphrases stop being lexical.
+    """
+    ta, tb = _advice_tokens(a), _advice_tokens(b)
+    if not ta or not tb:
+        return False
+    if {t for t in ta if t.isascii()} != {t for t in tb if t.isascii()}:
+        return False
+    return len(ta & tb) / len(ta | tb) >= _DUP_ADVICE_OVERLAP
+
+
+def _dedupe_advice(res: dict) -> int:
+    """Drop `recommendations` that restate an earlier one, keeping the first of
+    each duplicate pair, and return how many were dropped.
+
+    Deduped HERE, where the result is assembled, so every reader benefits
+    instead of each UI fixing it for itself. The model restates itself across
+    candidates of the same category, which is the repetition this removes.
+
+    Scope is the model's own list ONLY. It deliberately does NOT compare a
+    recommendation against a candidate's `suggested_action`: those actions are
+    written in English by diagnose_root_cause's collectors while
+    `recommendations` come back in Korean, so a lexical matcher can never pair
+    them, and nothing weaker than cross-language semantics could. Matching
+    across languages by token overlap would risk dropping a DIFFERENT
+    instruction, which is worse than showing a near-duplicate, so the cross-list
+    comparison is not attempted rather than approximated. A per-candidate action
+    also always survives regardless: it is bound to that signal's own evidence
+    row, and a signal with no next step is worse than a repeated bullet.
+    """
+    recs = res.get("recommendations")
+    if not isinstance(recs, list) or not recs:
+        return 0
+    kept = []
+    for rec in recs:
+        text = str(rec)
+        # Compared against what was KEPT, so a third restatement of a line that
+        # was already dropped is still measured against the one line that stays.
+        if any(_same_advice(text, other) for other in kept):
+            continue
+        kept.append(text)
+    res["recommendations"] = kept
+    return len(recs) - len(kept)
+
+
 def _run_rca(cluster_id: str, observed_at: str = ""):
     """Deterministic RCA via the incident diagnose_root_cause tool, with a
     hybrid Korean narrative + recommendations layered on (best-effort LLM).
@@ -361,9 +486,11 @@ def _run_rca(cluster_id: str, observed_at: str = ""):
         narr = _narrative(cluster_id, res)
         if narr:
             res.update(narr)  # adds narrative + recommendations
+            dropped = _dedupe_advice(res)
             steps.append({"step": "서술 생성", "tool": "bedrock",
                           "ms": int((time.time() - t) * 1000),
-                          "detail": "한국어 narrative+권장조치"})
+                          "detail": ("한국어 narrative+권장조치"
+                                     + (f", 중복 권장 {dropped}건 제거" if dropped else ""))})
         else:
             steps.append({"step": "서술 생성", "tool": "bedrock", "ms": 0,
                           "detail": "모델 미설정/실패, 스킵"})

@@ -63,7 +63,9 @@ const QUALIFIED_BY_TEXT: Record<string, string> = {
   peak: "구간 최댓값이 기준을 넘었습니다 (단기 포화)",
 };
 
-function fmtValue(v: unknown): string {
+/** Shared with the report tiers above this panel: one value formatter, so a
+ *  ratio or a count reads identically in the assessment and in the details. */
+export function fmtEvidenceValue(v: unknown): string {
   if (v === null || v === undefined) return "-";
   if (typeof v === "boolean") return v ? "예" : "아니오";
   if (typeof v === "number") {
@@ -151,8 +153,8 @@ export function RcaCandidateDetail({
                     </span>
                     <span className="font-mono text-zinc-300 break-all">
                       {k === "qualified_by"
-                        ? QUALIFIED_BY_TEXT[String(v)] ?? fmtValue(v)
-                        : fmtValue(v)}
+                        ? QUALIFIED_BY_TEXT[String(v)] ?? fmtEvidenceValue(v)
+                        : fmtEvidenceValue(v)}
                     </span>
                   </div>
                 ))}
@@ -179,7 +181,7 @@ export function RcaCandidateDetail({
                         {EVIDENCE_LABEL[k] ?? k}
                       </span>
                       <span className="font-mono text-zinc-300 break-all">
-                        {fmtValue(v)}
+                        {fmtEvidenceValue(v)}
                       </span>
                     </div>
                   ))}
@@ -286,7 +288,7 @@ export function RcaScoringPolicy({
                       {k}
                     </span>
                     <span className="font-mono text-zinc-300 break-all">
-                      {fmtValue(v)}
+                      {fmtEvidenceValue(v)}
                     </span>
                   </div>
                 ))}
@@ -297,4 +299,12 @@ export function RcaScoringPolicy({
       )}
     </div>
   );
+}
+
+/** Korean label for one `evidence` key, falling through to the raw key so a
+ *  measurement the collectors add later is visible immediately. Exported for
+ *  the report's "supporting evidence" block, which builds its observation
+ *  sentences out of the same payload this panel tabulates. */
+export function evidenceLabel(key: string): string {
+  return EVIDENCE_LABEL[key] ?? key;
 }

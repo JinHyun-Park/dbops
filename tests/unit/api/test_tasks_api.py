@@ -1,4 +1,4 @@
-"""Agent Tasks REST API — list / get / create.
+"""Agent Tasks REST API: list / get / create.
 
 Covers the GSI routing (recency vs per-cluster), get 200/404, and POST
 validation (cluster_id required, kind allow-list, registry check) plus the
@@ -59,7 +59,10 @@ def test_list_by_cluster_uses_cluster_gsi():
     with patch.object(handler, "_table", return_value=table):
         resp = handler.lambda_handler(_event("GET", qsp={"cluster": "c1"}), None)
     assert resp["statusCode"] == 200
-    assert table.query.call_args.kwargs["IndexName"] == "cluster-created-index"
+    # call_args_list[0], not call_args: the list route reads twice now, the page
+    # and then the fleet window for the publication high-water mark. The LAST
+    # call is always the fleet read on recency-index.
+    assert table.query.call_args_list[0].kwargs["IndexName"] == "cluster-created-index"
 
 
 def test_get_found_then_404():

@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "i18n:check": "node tools/i18n-check.mjs",
+    "rca:check": "node tools/rca-report-check.mjs",
+    "watermark:check": "node tools/tasks-watermark-check.mjs",
     "e2e": "playwright test",
     "e2e:headed": "playwright test --headed"
   },

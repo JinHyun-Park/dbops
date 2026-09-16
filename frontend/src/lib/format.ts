@@ -116,3 +116,42 @@ export function fmtRelative(iso: string | null | undefined): string {
   if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
   return `${Math.floor(ms / 86_400_000)}d ago`;
 }
+
+/**
+ * Korean relative time from an ms-epoch value (number or the decimal STRING the
+ * agent-tasks table stores). `fmtRelative` above is the English form used in
+ * panel "last refreshed" lines; report arrival times are read as Korean prose
+ * next to Korean copy, so they need the Korean form.
+ *
+ * ponytail: eight panels carry their own private copy of this ("방금" /
+ * "N분 전"), each with slightly different thresholds. This is the shared one;
+ * folding those eight into it is a separate sweep, not this change.
+ */
+export function fmtAgoKo(ms: number | string | null | undefined): string {
+  if (ms === null || ms === undefined || ms === "") return "-";
+  const n = typeof ms === "number" ? ms : Number(ms);
+  if (!Number.isFinite(n)) return "-";
+  const diff = Date.now() - n;
+  if (diff < 0) return "방금";
+  if (diff < 60_000) return "방금";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}분 전`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}시간 전`;
+  return `${Math.floor(diff / 86_400_000)}일 전`;
+}
+
+/** Wall-clock timestamp for a tooltip or a metadata line, from an ms-epoch
+ *  value or an ISO string. The exact instant behind a relative label: a
+ *  relative time alone cannot be compared against a deploy log. */
+export function fmtClockKo(v: number | string | null | undefined): string {
+  if (v === null || v === undefined || v === "") return "-";
+  const n = typeof v === "number" ? v : Number(v);
+  const d = Number.isFinite(n) ? new Date(n) : new Date(String(v));
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleString("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}

@@ -1178,7 +1178,10 @@ export async function patchClusterMeta(
 export interface TraceStep {
   step: string;
   tool: string;
-  ms: number;
+  // NUMBER-SHAPED STRING on GET /api/tasks/{id}: that route dumps the whole
+  // DynamoDB row with default=str, so every Decimal on it arrives as "1900".
+  // Coerce before arithmetic.
+  ms: number | string;
   detail: string;
 }
 
@@ -1197,24 +1200,50 @@ export interface AgentTask {
   kind: string; // auto_rca | manual_rca | scheduled_report
   trigger: string; // alert:{rule_id} | schedule:{id} | manual:{user}
   status: string; // pending | running | done | failed
-  created_at: string; // ms-epoch string
+  created_at: string; // ms-epoch string: when the task was QUEUED
+  // When a READABLE report became available through the read API. ms-epoch
+  // string, null for pending / running / failed and for legacy rows. THIS is
+  // the only definition of "new" (see @/lib/tasks-watermark); created_at and a
+  // status flip are not, and anchor_time below is a different clock entirely.
+  published_at?: string | null;
   started_at?: string;
   completed_at?: string;
   title?: string;
   summary?: string;
   error?: string;
   trace?: TraceStep[];
-  duration_ms?: number;
+  // A real JSON number on the LIST projection (normalized server-side) and a
+  // number-shaped STRING on the single-task read (default=str over a Decimal).
+  // One row type serves both reads, so both shapes are declared here.
+  duration_ms?: number | string | null;
+  // The top-ranked candidate, projected onto the LIST row so the inbox and the
+  // fleet summary can name the leading hypothesis without fetching the whole
+  // report. A HYPOTHESIS: rank order only. There is deliberately no score and
+  // no confidence value here, and neither may be rendered as a percentage.
+  finding?: {
+    category: string;
+    summary: string;
+    candidate_count: number;
+  } | null;
+  // The INCIDENT's clock, hoisted out of result.anchor_time for the list row.
+  // ISO-8601 with offset. Different from published_at: a report published this
+  // morning about yesterday's event has a recent published_at and an old
+  // anchor_time, and both belong on the row.
+  anchor_time?: string | null;
   // RCA kinds carry the deterministic diagnose_root_cause payload.
   result?: {
     status?: string;
     anchor_time?: string;
-    window_minutes?: number;
+    // Also number-shaped strings off the single-task read, like rank and score
+    // below: that is the only route the full `result` comes back from.
+    window_minutes?: number | string;
     candidates?: Array<{
-      rank?: number;
+      rank?: number | string;
       category?: string;
       summary?: string;
-      score?: number;
+      // NEVER rendered as a confidence or a percentage. It is base_weight x
+      // recency x a category factor, an investigation order.
+      score?: number | string;
       when?: string;
       // WHY this candidate scored what it did. The ranker computes
       // base_weight × recency_factor × a per-category magnitude factor, and the
@@ -1325,15 +1354,49 @@ export async function runScenario(id: string): Promise<ScenarioRunResult> {
   return res.json();
 }
 
+/** GET /api/tasks. Every key is always present; nullable ones arrive as an
+ *  explicit null. The page is ASSEMBLED under the caller's tenancy rather than
+ *  filtered after a DynamoDB Limit, and the server's walk spends a bounded page
+ *  budget, so a page can be SHORT, even empty, and still have rows behind it.
+ *  `next_cursor` is the only signal that the history is exhausted: `count`
+ *  never is. */
+export interface TaskInbox {
+  tasks: AgentTask[];
+  count: number;
+  limit: number;
+  /** Resume key for the rows behind this page, or null when the index is
+   *  genuinely exhausted. Opaque: pass it back verbatim as `cursor`, with the
+   *  SAME cluster it was minted under. A non-null cursor on an EMPTY page means
+   *  the walk ran out of budget before reaching rows the caller may see, so
+   *  rendering that page as an empty inbox would contradict the server. */
+  next_cursor: string | null;
+  /** Newest publication instant the caller may see, over the recent fleet
+   *  window. Tenancy-scoped, and its own server-side query rather than a max
+   *  over `tasks`, so a filtered page cannot invent a fleet-wide mark.
+   *  Persist it with advancePublishedMark() after an UNFILTERED load only. */
+  published_high_water_mark: string | null;
+  high_water_mark_window: number;
+}
+
 export async function fetchTasks(params?: {
   cluster?: string;
   status?: string;
+  /** Comma-separated task kinds: auto_rca, manual_rca, scheduled_report. The
+   *  inbox needs this because a recurring digest carries status "done" exactly
+   *  like a report, so `status` cannot separate them, and one hourly schedule
+   *  fills the newest page in a few days. An unknown kind is a 400, not a
+   *  silently dropped filter. */
+  kind?: string;
   limit?: number;
-}): Promise<{ tasks: AgentTask[] }> {
+  /** A previous response's `next_cursor`, verbatim. */
+  cursor?: string;
+}): Promise<TaskInbox> {
   const qs = new URLSearchParams();
   if (params?.cluster) qs.set("cluster", params.cluster);
   if (params?.status) qs.set("status", params.status);
+  if (params?.kind) qs.set("kind", params.kind);
   if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.cursor) qs.set("cursor", params.cursor);
   const q = qs.toString();
   const res = await authedFetch(await api(`/api/tasks${q ? "?" + q : ""}`));
   if (!res.ok) throw new Error(`작업 조회 실패 (상태 ${res.status})`);

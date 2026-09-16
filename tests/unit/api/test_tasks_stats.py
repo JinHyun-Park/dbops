@@ -2,11 +2,21 @@ import importlib
 import json
 from unittest.mock import patch
 
+import pytest
+
 h = importlib.import_module("api.tasks.handler")
 
 
 def _evt(path="/api/tasks/stats", method="GET"):
     return {"rawPath": path, "requestContext": {"http": {"method": method}}}
+
+
+@pytest.fixture(autouse=True)
+def _no_registry_scan(monkeypatch):
+    """Stats counts are tenancy-filtered now, so the route resolves the visible
+    set. None means admin (no filter), which keeps these aggregate assertions
+    about the aggregation and off the network."""
+    monkeypatch.setattr(h.tenancy, "visible_set_from_registry", lambda ev: None)
 
 
 def test_stats_aggregates(monkeypatch):
@@ -16,7 +26,7 @@ def test_stats_aggregates(monkeypatch):
         {"status": "failed", "kind": "auto_rca"},
         {"status": "running", "kind": "scheduled_report"},
     ]
-    with patch.object(h, "_recent_for_stats", return_value=rows):
+    with patch.object(h, "_recent_fleet", return_value=rows):
         resp = h.lambda_handler(_evt(), None)
     assert resp["statusCode"] == 200
     body = json.loads(resp["body"])
@@ -30,7 +40,7 @@ def test_stats_aggregates(monkeypatch):
 
 
 def test_stats_empty_is_zero_safe(monkeypatch):
-    with patch.object(h, "_recent_for_stats", return_value=[]):
+    with patch.object(h, "_recent_fleet", return_value=[]):
         resp = h.lambda_handler(_evt(), None)
     body = json.loads(resp["body"])
     assert body["total"] == 0 and body["success_rate"] == 0 and body["avg_duration_ms"] == 0

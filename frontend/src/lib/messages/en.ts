@@ -89,7 +89,7 @@ export const EN: Record<string, string> = {
 
   // ── PageHeader titles ────────────────────────────────────────────────────
   "Agent가 기억하는 것": "What the agent remembers",
-  "에이전트 작업": "Agent tasks",
+  "RCA 받은함": "RCA inbox",
   "클러스터 레지스트리": "Cluster registry",
   "Aurora / RDS 비용": "Aurora / RDS cost",
   "DBOps 플랫폼 운영 비용": "DBOps platform running cost",
@@ -114,8 +114,10 @@ export const EN: Record<string, string> = {
     "EXPLAIN renders the plan tree directly; AI analysis sends the SQL to the agent and returns a plain-language reading of it.",
   "AgentCore Memory에 저장된 당신의 선호와 사실. 잘못된 정보가 박혀 있으면 여기서 삭제하세요 — 이후 대화부터 다시 학습됩니다.":
     "The preferences and facts AgentCore Memory holds about you. Delete anything wrong here and the agent relearns it from later conversations.",
-  "경보 자동 RCA, 예약, 수동 실행 작업의 기록과 결과. 모든 작업은 읽기 전용 분석입니다 — 변경은 승인 센터를 거칩니다.":
-    "History and results of alert-driven, scheduled and manual agent runs. Every task is read-only analysis; changes go through the approval center.",
+  "클러스터를 하나씩 열지 않고 전체 RCA 리포트를 한 화면에서 읽습니다. 최근 도착한 리포트가 위에 오고, 마지막 방문 이후 도착한 리포트에는 표시가 붙습니다.":
+    "Read every RCA report in one place instead of opening clusters one by one. The newest arrivals come first, and anything published since your last visit on this browser is marked.",
+  "이 브라우저에서 마지막 방문 이후 도착한 리포트 기준입니다. 읽음 여부가 아닙니다.":
+    "Counted against your last visit on this browser. Not a read/unread state.",
   "자연어로 '최근 24h CPU 80% 넘은 클러스터' 처럼 물어보면 즉시 필터 결과를 카드로 보여줍니다. 필터는 편집 + 저장 가능.":
     'Ask in plain language, such as "clusters over 80% CPU in the last 24h", and get the matching clusters as cards. Filters can be edited and saved.',
   "DBOps에서 일어난 모든 쓰기 의사결정의 시간순 기록 — 누가 요청했고 누가 승인했고 언제 실행됐는지. 컴플라이언스 감사와 사후 회고 (post-incident retro) 용도.":
@@ -209,6 +211,8 @@ export const EN: Record<string, string> = {
   "관리자 전용 페이지": "Admins only",
   "저장된 기록이 없습니다": "Nothing stored yet",
   "작업 없음": "No tasks",
+  "이 종류로는 아직 아무것도 없습니다. 범위를 모든 종류로 바꿔 보거나, 위에서 클러스터를 선택해 RCA를 직접 실행할 수 있습니다.":
+    "Nothing of this kind yet. Widen the scope to every kind, or pick a cluster above and run an RCA yourself.",
   "조건을 만족하는 클러스터 없음": "No cluster matches the filter",
   "기록된 활동이 없습니다": "No activity recorded",
   "불러오지 못했습니다": "Could not load",
@@ -375,6 +379,25 @@ export const EN: Record<string, string> = {
   취소됨: "Cancelled",
   "리더 생성 실패": "Reader provisioning failed",
   "예열 실패": "Warmup failed",
+
+  // ── Fleet: new RCA reports summary ───────────────────────────────────────
+  // "가설" stays "hypothesis" on both sides, and no wording here may promote a
+  // rank into a proven cause or a confidence figure.
+  "새 RCA 리포트": "New RCA reports",
+  "첫 방문": "First visit",
+  "새 리포트 없음": "No new reports",
+  "{n}건 신규": "{n} new",
+  "{n}건 이상 신규": "{n}+ new",
+  "받은함 열기": "Open inbox",
+  "유력 가설": "Leading hypothesis",
+  "리포트 도착": "Report arrived",
+  "인시던트 발생": "Incident at",
+  "후보 {n}건 중 1순위": "ranked 1st of {n} candidates",
+  "순위는 조사 우선순위이며 확정된 원인이 아닙니다":
+    "Ranking is an investigation order, not a confirmed cause",
+  "정기 점검 결과이며 원인 분석이 아닙니다":
+    "A scheduled health check, not a root-cause analysis",
+  "아직 읽을 수 있는 리포트가 없습니다": "No readable report yet",
 
   // ── Label maps: compare period shift ─────────────────────────────────────
   "직전 1시간": "Previous 1h",

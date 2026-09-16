@@ -5,8 +5,17 @@ import Link from "next/link";
 import {
   fetchMultiClusterOverview,
   fetchClusters,
+  fetchTasks,
   prefetchDashboard,
+  type TaskInbox,
 } from "@/lib/api-client";
+import {
+  countNewPublications,
+  newestPublished,
+  readPublishedMark,
+} from "@/lib/tasks-watermark";
+import { categoryLabel } from "@/components/rca/rca-candidate-detail";
+import { fmtAgoKo, fmtClockKo } from "@/lib/format";
 import { useSmartPoll } from "@/lib/use-smart-poll";
 import {
   PageHeader,
@@ -421,6 +430,11 @@ export default function FleetPage() {
         </div>
       )}
 
+      {/* What arrived while the operator was away. Compact on purpose: the one
+          canonical list of reports is the inbox at /tasks, and a second list
+          here would be a competing history. */}
+      <NewRcaSummary />
+
       {/* Triage summary band — clickable to filter the table to that bucket. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-4">
         <SummaryChip
@@ -728,6 +742,153 @@ export default function FleetPage() {
         </>
       )}
     </PageBody>
+  );
+}
+
+/**
+ * "New RCA reports": how many readable reports arrived since the operator last
+ * loaded the inbox, plus the single most recent one named well enough to decide
+ * whether to go look now. The link goes to /tasks, the one canonical list.
+ *
+ * THREE THINGS THIS DELIBERATELY DOES NOT DO:
+ *  1. It does not count clusters the caller cannot see. The count is computed
+ *     over GET /api/tasks, which is tenancy-filtered server-side, never over a
+ *     broader fetch reconciled on the client.
+ *  2. It does not advance the inbox watermark. It only READS the mark. If
+ *     rendering this card advanced it, opening /fleet would silently mark
+ *     everything read and the indicator would never appear. Only a successful
+ *     unfiltered load of /tasks may advance it.
+ *  3. It never renders a score, a confidence or a percentage. The finding is a
+ *     hypothesis about where to investigate next, and it says so.
+ */
+function NewRcaSummary() {
+  const t = useT();
+  const [inbox, setInbox] = useState<TaskInbox | null>(null);
+  const [mark, setMark] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    // Unfiltered so the count is fleet-wide (within the caller's tenancy), and
+    // matching the inbox's own page size so both surfaces see the same rows.
+    fetchTasks({ limit: 100 })
+      .then((d) => {
+        setInbox(d);
+        // READ, never write, and re-read on every poll so coming back from
+        // /tasks clears the indicator. Reading it here rather than in a mount
+        // effect also keeps localStorage out of the static export's prerender.
+        setMark(readPublishedMark());
+      })
+      .catch(() => setInbox(null));
+  }, []);
+  useSmartPoll(load, 60000);
+
+  // `tasks` is always present per the contract; the fallback is only so a
+  // stale deployment answering 200 without it cannot throw on the landing page.
+  const rows = useMemo(() => inbox?.tasks ?? [], [inbox]);
+  const latest = useMemo(() => newestPublished(rows), [rows]);
+
+  // A secondary summary that failed to load stays silent rather than putting a
+  // second error banner on a triage page.
+  if (!inbox) return null;
+
+  const firstVisit = mark === null;
+  const newCount = countNewPublications(rows, mark);
+  // The page was trimmed to `limit`, so an all-new full page may be an
+  // undercount. Say "이상" instead of quietly rounding down.
+  const capped = inbox.count >= inbox.limit && newCount === inbox.count;
+  const countLabel = firstVisit
+    ? t("첫 방문")
+    : newCount === 0
+      ? t("새 리포트 없음")
+      : t(capped ? "{n}건 이상 신규" : "{n}건 신규").replace(
+          "{n}",
+          String(newCount),
+        );
+
+  return (
+    <Link
+      href="/tasks"
+      className={`block border px-4 py-3 mb-4 transition-colors ${
+        newCount > 0
+          ? "border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10"
+          : "border-zinc-800 bg-zinc-900/40 hover:bg-zinc-900/70"
+      }`}
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="flex items-baseline gap-2 min-w-0">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 shrink-0">
+            {t("새 RCA 리포트")}
+          </span>
+          <span
+            className={
+              newCount > 0
+                ? "text-sm font-medium text-amber-300"
+                : "text-sm text-zinc-400"
+            }
+          >
+            {countLabel}
+          </span>
+        </span>
+        <span className="text-[11px] text-zinc-500 shrink-0">
+          {t("받은함 열기")} →
+        </span>
+      </div>
+
+      {latest ? (
+        <>
+          <div className="mt-1.5 text-sm truncate">
+            <span className="font-mono text-xs text-zinc-400">
+              {latest.cluster_id}
+            </span>{" "}
+            {latest.finding ? (
+              <>
+                <span className="text-zinc-500">{t("유력 가설")}: </span>
+                <span className="text-zinc-100">
+                  {t(categoryLabel(latest.finding.category))}
+                </span>
+                <span className="text-zinc-400">
+                  {latest.finding.summary ? `, ${latest.finding.summary}` : ""}
+                </span>
+              </>
+            ) : (
+              /* scheduled_report digests rank no candidates, so there is no
+                 hypothesis to name: the producer's own line is the headline. */
+              <span className="text-zinc-300">
+                {latest.summary || latest.title || ""}
+              </span>
+            )}
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-zinc-500">
+            <span>
+              {t("리포트 도착")} {fmtAgoKo(latest.published_at)}
+            </span>
+            {/* A different clock on purpose: a report published minutes ago can
+                be about an incident from yesterday. */}
+            {latest.anchor_time && (
+              <span>
+                {t("인시던트 발생")} {fmtClockKo(latest.anchor_time)}
+              </span>
+            )}
+            {latest.finding && latest.finding.candidate_count > 1 && (
+              <span>
+                {t("후보 {n}건 중 1순위").replace(
+                  "{n}",
+                  String(latest.finding.candidate_count),
+                )}
+              </span>
+            )}
+          </div>
+          {latest.finding && (
+            <div className="mt-1 text-[10px] text-zinc-600">
+              {t("순위는 조사 우선순위이며 확정된 원인이 아닙니다")}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="mt-1.5 text-[11px] text-zinc-500">
+          {t("아직 읽을 수 있는 리포트가 없습니다")}
+        </div>
+      )}
+    </Link>
   );
 }
 
