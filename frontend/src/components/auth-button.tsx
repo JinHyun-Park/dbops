@@ -36,6 +36,13 @@ export function AuthButton() {
       <button
         onClick={() => {
           clearTokens();
+          // A HARD navigation on purpose, which is why the Next rule is
+          // suppressed rather than obeyed here. router.push() keeps the SPA
+          // alive, so every mounted component holds its in-memory state after
+          // the tokens are gone: the query cache, the shared cluster
+          // selection, and any module that closed over a token. A full load is
+          // the reliable way to drop all of it on sign-out.
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
           window.location.href = "/login";
         }}
         className="text-xs text-zinc-500 hover:text-zinc-200 transition-colors"
