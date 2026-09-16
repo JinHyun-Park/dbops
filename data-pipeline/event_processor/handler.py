@@ -139,7 +139,22 @@ def lambda_handler(event, context):
     # Best-effort: an enqueue failure must not break event ingestion, which has
     # already written the row and sent the notification above.
     _RCA_WORTHY = ("failover", "failure", "low storage", "alarm_alarm")
-    if (event_type or "").lower() in _RCA_WORTHY:
+    # An RCA needs a TARGET. Measured on the live deployment: 4 of 21 auto-RCA
+    # tasks ran against cluster_id "unknown", because a CloudWatch alarm whose
+    # configuration carries no DBClusterIdentifier/DBInstanceIdentifier
+    # dimension falls back to that literal. Every one of them came back with
+    # exactly one candidate, the very event that triggered it, because there is
+    # no registered cluster whose signals could be read. The report even said so
+    # itself: "클러스터 식별자가 'unknown'으로 수집되어...".
+    #
+    # The event row above is still written, since the alarm did fire and
+    # recording it is correct. Only the investigation is skipped, because an
+    # investigation with no subject can only rediscover its own trigger.
+    resolved = (cluster_id or "").strip()
+    if resolved in ("", "unknown"):
+        print(f"[event-processor] no auto-RCA for {event_type}: alarm carries no "
+              f"cluster dimension, so there is no target to investigate")
+    elif (event_type or "").lower() in _RCA_WORTHY:
         try:
             from task_enqueue import enqueue_auto_rca
 
