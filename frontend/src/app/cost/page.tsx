@@ -2061,7 +2061,7 @@ function ActivationGuide() {
           </ol>
 
           <div className="px-5 py-3 border-t border-amber-500/20 text-[11px] text-amber-200/70 leading-relaxed">
-            Why this isn't automatic:{" "}
+            Why this isn&apos;t automatic:{" "}
             {t(
               "AWS는 보안상 cost allocation tag 활성화를 관리자 콘솔 액션으로만 허용합니다. CDK도 API도 활성화 자체는 못 합니다. 한 번 활성화하면 이후 모든 DBOps 비용이 자동 attribute 됩니다.",
             )}

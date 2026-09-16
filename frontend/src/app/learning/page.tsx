@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import {
   fetchLearning,
   type AggRow,
-  type RecentCase,
   type RecentStatus,
 } from "@/lib/api-client";
 import { confidence, trackRecordLabel } from "@/lib/remediation";

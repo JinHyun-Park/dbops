@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { fetchHealth, type HealthResponse } from "@/lib/api-client";
 import { useSmartPoll } from "@/lib/use-smart-poll";
 import {

@@ -37,6 +37,13 @@ export default function HomePage() {
   const t = useT();
   const [clusters, setClusters] = useState<ClusterRow[]>([]);
   const [rules, setRules] = useState<AlertRule[]>([]);
+  // Counted when the rules LAND, not during render. Date.now() in a render body
+  // (or in a useMemo, whose body must also be pure) makes the output depend on
+  // the wall clock: this is a static export, so the prerender froze a
+  // build-time value that then hydrated to a different one, which is what
+  // react-hooks/purity objects to. The 24h boundary is naturally evaluated at
+  // the moment the data is fetched.
+  const [recentTriggered, setRecentTriggered] = useState(0);
   const [cost7d, setCost7d] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const onboarding = useOnboarding();
@@ -49,7 +56,18 @@ export default function HomePage() {
     ])
       .then(([cs, rs, costRes]) => {
         if (cs.status === "fulfilled") setClusters(cs.value.clusters || []);
-        if (rs.status === "fulfilled") setRules(rs.value.rules || []);
+        if (rs.status === "fulfilled") {
+          const rows: AlertRule[] = rs.value.rules || [];
+          setRules(rows);
+          const dayAgo = Date.now() - 24 * 3600 * 1000;
+          setRecentTriggered(
+            rows.filter(
+              (r) =>
+                r.last_triggered_at &&
+                new Date(r.last_triggered_at).getTime() > dayAgo,
+            ).length,
+          );
+        }
         if (costRes.status === "fulfilled") setCost7d(costRes.value.total ?? 0);
       })
       .finally(() => setLoading(false));
@@ -58,12 +76,6 @@ export default function HomePage() {
   const total = clusters.length;
   const healthy = clusters.filter((c) => c.status === "available").length;
   const blockingCount = clusters.reduce((s, c) => s + n(c.blocking_count), 0);
-  const recentTriggered = rules.filter((r) => {
-    if (!r.last_triggered_at) return false;
-    return (
-      Date.now() - new Date(r.last_triggered_at).getTime() < 24 * 3600 * 1000
-    );
-  }).length;
   const enabledRules = rules.filter((r) => r.enabled).length;
 
   return (

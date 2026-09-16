@@ -184,8 +184,6 @@ test.describe("UI 언어는 브라우저 로케일을 따른다", () => {
     // runtime. Asserted by scanning the rendered text for Hangul rather than by
     // matching a phrase, because a phrase test passes while the string NEXT to
     // it is still Korean.
-    const HANGUL = /[가-힣]/;
-
     // Each screen carries an ENGLISH ANCHOR it must show. That replaces an
     // element-count guard, which was the wrong shape twice over: /forgot is a
     // minimal form that legitimately renders 3 elements, and a count cannot

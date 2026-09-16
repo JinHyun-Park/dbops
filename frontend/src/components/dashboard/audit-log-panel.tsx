@@ -92,6 +92,13 @@ export function AuditLogPanel({ clusterId }: { clusterId: string }) {
       .then((d) => !cancelled && setEntries(d.audit_entries || []))
       .catch(() => !cancelled && setEntries([]))
       .finally(() => !cancelled && setLoading(false));
+    // The cleanup was MISSING, so `cancelled` never became true and the three
+    // guards above were dead code: a slow response for one cluster could land
+    // after a switch and overwrite the new cluster's rows. prefer-const found
+    // it by flagging a `let` that is never reassigned.
+    return () => {
+      cancelled = true;
+    };
   }, [clusterId, days, filter]);
 
   return (

@@ -177,7 +177,6 @@ import {
   CognitoUserPool,
   CognitoUser,
   AuthenticationDetails,
-  CognitoUserAttribute,
 } from "amazon-cognito-identity-js";
 
 interface PoolConfig {

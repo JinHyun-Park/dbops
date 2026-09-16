@@ -50,7 +50,11 @@ interface Edge {
 
 function buildChains(locks: Lock[]): {
   roots: number[];
-  children: Record<number, Edge[]>;
+  // NOT named `children`: this is the lock graph's adjacency map (holder pid
+  // to the edges waiting on it), and React reserves that prop name. Naming a
+  // DATA prop `children` tripped react/no-children-prop and would shadow real
+  // JSX children if any were ever passed.
+  waitersByHolder: Record<number, Edge[]>;
   pidMeta: Record<number, { user?: string; query?: string }>;
 } {
   const edges: Edge[] = locks.map((l) => ({
@@ -66,12 +70,12 @@ function buildChains(locks: Lock[]): {
     blocking_query: l.blocking_query || "",
   }));
 
-  const children: Record<number, Edge[]> = {};
+  const waitersByHolder: Record<number, Edge[]> = {};
   const blockedSet = new Set<number>();
   const pidMeta: Record<number, { user?: string; query?: string }> = {};
   for (const e of edges) {
-    if (!children[e.holder]) children[e.holder] = [];
-    children[e.holder].push(e);
+    if (!waitersByHolder[e.holder]) waitersByHolder[e.holder] = [];
+    waitersByHolder[e.holder].push(e);
     blockedSet.add(e.waiter);
     if (!pidMeta[e.holder])
       pidMeta[e.holder] = { user: e.blocking_user, query: e.blocking_query };
@@ -80,25 +84,25 @@ function buildChains(locks: Lock[]): {
   }
 
   // Root holders = PIDs that are blocking somebody but never appear as a waiter.
-  const roots = Object.keys(children)
+  const roots = Object.keys(waitersByHolder)
     .map(Number)
     .filter((pid) => !blockedSet.has(pid))
     .sort((a, b) => a - b);
-  return { roots, children, pidMeta };
+  return { roots, waitersByHolder, pidMeta };
 }
 
 function ChainNode({
   pid,
   edge,
   depth,
-  children,
+  waitersByHolder,
   pidMeta,
   visited,
 }: {
   pid: number;
   edge?: Edge;
   depth: number;
-  children: Record<number, Edge[]>;
+  waitersByHolder: Record<number, Edge[]>;
   pidMeta: Record<number, { user?: string; query?: string }>;
   visited: Set<number>;
 }) {
@@ -106,7 +110,7 @@ function ChainNode({
   const cycle = visited.has(pid);
   const nextVisited = new Set(visited);
   nextVisited.add(pid);
-  const kids = children[pid] || [];
+  const kids = waitersByHolder[pid] || [];
   const meta = pidMeta[pid] || {};
   const sev = edge
     ? edge.blocked_duration_sec > 60
@@ -183,7 +187,7 @@ function ChainNode({
             pid={k.waiter}
             edge={k}
             depth={depth + 1}
-            children={children}
+            waitersByHolder={waitersByHolder}
             pidMeta={pidMeta}
             visited={nextVisited}
           />
@@ -282,7 +286,7 @@ export function LocksPanel({ clusterId }: { clusterId: string }) {
                 <ChainNode
                   pid={rootPid}
                   depth={0}
-                  children={graph.children}
+                  waitersByHolder={graph.waitersByHolder}
                   pidMeta={graph.pidMeta}
                   visited={new Set()}
                 />

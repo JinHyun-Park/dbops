@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { parseTokensFromHash, setTokens } from "@/lib/auth";
 import { useT } from "@/lib/i18n";
@@ -32,9 +33,9 @@ export default function CallbackPage() {
         <div className="text-center">
           <div className="text-red-400 text-lg mb-2">{t("로그인 실패")}</div>
           <div className="text-zinc-400 text-sm mb-4">{t(error)}</div>
-          <a href="/" className="text-blue-400 hover:text-blue-300 text-sm">
+          <Link href="/" className="text-blue-400 hover:text-blue-300 text-sm">
             {t("다시 시도")}
-          </a>
+          </Link>
         </div>
       </div>
     );

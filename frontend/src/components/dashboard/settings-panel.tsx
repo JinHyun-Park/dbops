@@ -188,6 +188,11 @@ export function SettingsPanel({
       .then((d) => !cancelled && setSettings(d.settings || []))
       .catch(() => !cancelled && setSettings([]))
       .finally(() => !cancelled && setLoading(false));
+    // Same missing cleanup as audit-log-panel: without it `cancelled` stays
+    // false forever and a stale response overwrites the current cluster.
+    return () => {
+      cancelled = true;
+    };
   }, [clusterId]);
 
   // 파라미터 목록: 별도 sub-view. 백엔드가 값이 설정된 전체 파라미터를

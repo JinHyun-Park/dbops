@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { ApprovalCard } from "@/components/approval/approval-card";
+import {
+  ApprovalCard,
+  type Approval,
+} from "@/components/approval/approval-card";
 import { apiUrl, authedFetch } from "@/lib/api-client";
 import {
   PageHeader,
@@ -12,7 +15,7 @@ import { useT } from "@/lib/i18n";
 
 export default function ApprovalsPage() {
   const t = useT();
-  const [approvals, setApprovals] = useState<any[]>([]);
+  const [approvals, setApprovals] = useState<Approval[]>([]);
   const [filter, setFilter] = useState<"pending" | "approved" | "rejected">(
     "pending",
   );

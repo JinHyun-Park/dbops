@@ -11,7 +11,9 @@ import { useT } from "@/lib/i18n";
 //      `action_type` + `action_details` (object), no risk_level.
 // Render handles both shapes so a single page can mix legacy + new
 // approvals while migration is in flight.
-interface Approval {
+/** Exported so the /approvals page can type its list against the SAME shape
+ *  this card consumes, instead of any[] drifting from it. */
+export interface Approval {
   approval_id: string;
   cluster_id: string;
   approval_status: string;

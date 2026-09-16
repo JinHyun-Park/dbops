@@ -1,11 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  fetchSchemaGraph,
-  type SchemaGraphResponse,
-  type SchemaGraphTable,
-} from "@/lib/api-client";
+import { fetchSchemaGraph, type SchemaGraphResponse } from "@/lib/api-client";
 import {
   PageHeader,
   PageBody,
