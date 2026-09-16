@@ -678,6 +678,11 @@ function TaskRow({
   return (
     <div
       ref={rowRef}
+      // Stable hook for the real-input E2E, same convention as
+      // data-app-header on the shell. Without it a spec can only select rows
+      // by their Tailwind classes, which makes a restyle look like a
+      // regression and left "더 보기 appends rather than replaces" unwritable.
+      data-task-row={task.task_id}
       className={`border bg-zinc-900/40 transition-colors hover:border-zinc-700 ${
         isNew ? "border-amber-500/40" : "border-zinc-800"
       }`}

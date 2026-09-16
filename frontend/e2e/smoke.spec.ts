@@ -35,6 +35,10 @@ test("모든 핵심 페이지가 크래시 없이 렌더된다", async ({ page }
     "/health",
     "/preferences",
     "/ask",
+    // Both were missing from this net: /tasks is the RCA inbox and /scenarios
+    // the demo trigger, so a client crash on either was invisible here.
+    "/tasks",
+    "/scenarios",
   ];
   for (const path of pages) {
     await page.goto(path);
