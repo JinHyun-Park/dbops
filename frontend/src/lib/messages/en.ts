@@ -222,6 +222,10 @@ const EN_UI: Record<string, string> = {
   "관리자 전용 페이지": "Admins only",
   "저장된 기록이 없습니다": "Nothing stored yet",
   "작업 없음": "No tasks",
+  // /settings: the deployment default for prose nobody requested.
+  "자동 리포트 언어": "Automated report language",
+  "사람이 실행한 RCA는 실행한 운영자의 콘솔 언어로 작성됩니다. 이 설정은 경보나 스케줄이 자동으로 만든 RCA와 운영 리포트처럼 요청한 사람이 없는 경우에만 쓰입니다. 모델이 쓴 문장은 나중에 번역할 수 없어서 생성 시점에 언어가 정해집니다.":
+    "An RCA a person runs is written in that operator's console language. This setting applies only where there is no requester: an RCA opened by an alert or a schedule, and the operations reports. Model prose cannot be translated afterwards, so its language is fixed when it is generated.",
   // RCA COVERAGE GAPS AND RANKING CAVEATS. Rendered RAW before this, so an
   // English operator read the single-sample uncertainty caveat in Korean,
   // and that caveat is the mechanism that stops a lone peak reading as a

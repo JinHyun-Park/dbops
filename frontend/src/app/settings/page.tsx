@@ -91,6 +91,7 @@ export default function SettingsPage() {
   // Draft values (controlled)
   const [reportEnabled, setReportEnabled] = useState(false);
   const [ticketingProvider, setTicketingProvider] = useState("none");
+  const [defaultLocale, setDefaultLocale] = useState("ko");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -103,8 +104,10 @@ export default function SettingsPage() {
           (i) => i.key === "REPORT_DELIVERY_ENABLED",
         );
         const ticketItem = d.items.find((i) => i.key === "TICKETING_PROVIDER");
+        const localeItem = d.items.find((i) => i.key === "DEFAULT_LOCALE");
         setReportEnabled(reportItem?.value === "true");
         setTicketingProvider(ticketItem?.value ?? "none");
+        setDefaultLocale(localeItem?.value ?? "ko");
       })
       .catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
@@ -129,6 +132,7 @@ export default function SettingsPage() {
       const data = await updateAppConfig({
         REPORT_DELIVERY_ENABLED: reportEnabled,
         TICKETING_PROVIDER: ticketingProvider.trim() || "none",
+        DEFAULT_LOCALE: defaultLocale,
       });
       setItems(data.items);
       // Sync drafts from the authoritative server response
@@ -136,8 +140,10 @@ export default function SettingsPage() {
         (i) => i.key === "REPORT_DELIVERY_ENABLED",
       );
       const ticketItem = data.items.find((i) => i.key === "TICKETING_PROVIDER");
+      const localeItem = data.items.find((i) => i.key === "DEFAULT_LOCALE");
       setReportEnabled(reportItem?.value === "true");
       setTicketingProvider(ticketItem?.value ?? "none");
+      setDefaultLocale(localeItem?.value ?? "ko");
       setSaveResult("success");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -150,6 +156,7 @@ export default function SettingsPage() {
 
   const reportItem = items.find((i) => i.key === "REPORT_DELIVERY_ENABLED");
   const ticketItem = items.find((i) => i.key === "TICKETING_PROVIDER");
+  const localeItem = items.find((i) => i.key === "DEFAULT_LOCALE");
 
   // ── Admin-only notice ───────────────────────────────────────────────────
 
@@ -256,6 +263,28 @@ export default function SettingsPage() {
                   aria-label="Ticketing provider"
                 />
                 {ticketItem && <Provenance item={ticketItem} />}
+              </div>
+
+              <div>
+                <div className="text-sm text-zinc-200 mb-1">
+                  {t("자동 리포트 언어")}
+                </div>
+                <div className="text-xs text-zinc-500 leading-relaxed max-w-lg mb-3">
+                  {t(
+                    "사람이 실행한 RCA는 실행한 운영자의 콘솔 언어로 작성됩니다. 이 설정은 경보나 스케줄이 자동으로 만든 RCA와 운영 리포트처럼 요청한 사람이 없는 경우에만 쓰입니다. 모델이 쓴 문장은 나중에 번역할 수 없어서 생성 시점에 언어가 정해집니다.",
+                  )}
+                </div>
+                <select
+                  value={defaultLocale}
+                  onChange={(e) => setDefaultLocale(e.target.value)}
+                  disabled={saving}
+                  className="w-full max-w-xs bg-zinc-950 border border-zinc-700 text-zinc-100 text-sm px-3 py-2 focus:outline-none focus:border-emerald-500/60 disabled:opacity-40"
+                  aria-label="Default report language"
+                >
+                  <option value="ko">{t("한국어")}</option>
+                  <option value="en">{t("영어")}</option>
+                </select>
+                {localeItem && <Provenance item={localeItem} />}
               </div>
             </div>
           </Section>

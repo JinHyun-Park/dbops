@@ -161,6 +161,58 @@ for (const file of walk(SRC)) {
     unkeyed.push(`${file.replace(SRC + "/", "")}: ${lit}`);
   }
 }
+// THE OTHER HALF OF THE SAME HOLE, and the more common one.
+//
+// The block above catches a Korean literal that reaches the UI through
+// t(<expression>). It does NOT catch the direct form, t("한글 문자열"), because
+// that literal is not in a display-shaped property. Measured 2026-09-17: two
+// strings added to /settings in this very session were wrapped in t() with no
+// en.ts key, and this check still printed ok. A missing key renders the Korean
+// to an English operator with tsc, the build and this gate all green, which is
+// the failure this file exists to prevent.
+//
+// Matched on the ARGUMENT of a t()/tr() call that is a plain string literal.
+// A t(expr) call is handled above; a template literal cannot be a key at all,
+// because the table is looked up by exact equality, so one is reported too.
+const T_LITERAL =
+  /\bt(?:r)?\(\s*(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)')/g;
+const T_TEMPLATE = /\bt(?:r)?\(\s*`([^`]*[가-힣][^`]*)`/g;
+const unkeyedDirect = [];
+const templated = [];
+for (const file of walk(SRC)) {
+  const body = readFileSync(file, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  const rel = file.replace(SRC + "/", "");
+  for (const m of body.matchAll(T_LITERAL)) {
+    const lit = (m[1] !== undefined ? m[1] : m[2]).replace(/\\"/g, '"');
+    if (!HANGUL.test(lit)) continue;
+    if (keySet.has(lit) || IGNORE.has(lit)) continue;
+    unkeyedDirect.push(`${rel}: ${lit.slice(0, 70)}`);
+  }
+  for (const m of body.matchAll(T_TEMPLATE)) {
+    templated.push(`${rel}: ${m[1].slice(0, 70)}`);
+  }
+}
+if (unkeyedDirect.length) {
+  failed = true;
+  console.error(
+    `i18n-check: ${unkeyedDirect.length} Korean literal(s) passed straight to` +
+      " t() with no en.ts key, so they show Korean on an English browser:",
+  );
+  for (const u of unkeyedDirect) console.error("  " + u);
+}
+if (templated.length) {
+  failed = true;
+  console.error(
+    `i18n-check: ${templated.length} Korean TEMPLATE literal(s) passed to t().` +
+      " The table is looked up by exact equality, so an interpolated key can" +
+      " never match: use a {n} placeholder in the key and .replace() at the" +
+      " call site.",
+  );
+  for (const t of templated) console.error("  " + t);
+}
+
 if (unkeyed.length) {
   failed = true;
   console.error(
