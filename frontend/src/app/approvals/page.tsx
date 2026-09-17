@@ -91,7 +91,13 @@ export default function ApprovalsPage() {
             {t("승인 목록을 불러오지 못했습니다")}
           </div>
           <div className="text-zinc-400">
-            {loadError}.{" "}
+            {/* t() on loadError, not on the literal at the .catch: the fallback
+                "조회 실패" has a key, but t is a hook whose identity settles one
+                tick after mount, so translating inside the effect's callback
+                could capture the pre-resolution translator. Translating HERE
+                is a no-op for an arbitrary server message, which falls back to
+                itself. */}
+            {t(loadError)}.{" "}
             {t(
               "네트워크 또는 인증 문제일 수 있습니다. 빈 목록이 아니라 조회 실패 상태입니다.",
             )}
