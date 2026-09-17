@@ -302,6 +302,36 @@ def _write_nl_summary(cluster_id: str, report_date: str, data: dict) -> str:
     return _template_summary(cluster_id, report_date, data)
 
 
+_LOCALES = ("ko", "en")
+
+# The language of the ONE piece of prose this Lambda generates: the operations
+# summary, which report-viewer.tsx renders raw. Both languages sit together so a
+# reviewer can see on one screen that the English asks for what the Korean asks
+# for. Same shape as task_worker._LANG, for the same reason.
+_SUMMARY_LANG = {
+    "ko": "한국어 3~5문장으로 작성하세요. ",
+    "en": (
+        "Write 3 to 5 sentences in English. Keep metric names, parameter names "
+        "and cluster IDs verbatim, and do not translate an identifier into "
+        "prose. "
+    ),
+}
+
+
+def _report_locale() -> str:
+    """The language the summary is written in.
+
+    This Lambda is SCHEDULED, so there is no caller whose console locale could
+    be read: the deployment default decides, the same DEFAULT_LOCALE an
+    automated RCA uses (see task_worker._task_locale). get_config reads the
+    app-config table over the env var over "ko" and never raises, and anything
+    unrecognised ends at "ko" because Korean is what every deployment ships
+    today.
+    """
+    loc = str(get_config("DEFAULT_LOCALE", "ko") or "").strip().lower()
+    return loc if loc in _LOCALES else "ko"
+
+
 def _build_summary_prompt(cluster_id: str, report_date: str, data: dict) -> str:
     aas = data.get("aas") or {}
     peak = data.get("aas_peak") or {}
@@ -326,7 +356,11 @@ def _build_summary_prompt(cluster_id: str, report_date: str, data: dict) -> str:
 
     return (
         f"당신은 시니어 DBA 입니다. Aurora 클러스터 {cluster_id} 의 지난 24시간 운영 요약을 "
-        "한국어 3~5문장으로 작성하세요. 핵심 변화만 짚고, 평소 운영 범위 안의 수치는 굳이 언급하지 마세요. "
+        # Only the ANSWER-LANGUAGE directive follows the locale. The data labels
+        # below stay Korean: the model reads them, and rewording a tuned prompt
+        # changes the answer, which is not what a language switch asks for.
+        + _SUMMARY_LANG[_report_locale()]
+        + "핵심 변화만 짚고, 평소 운영 범위 안의 수치는 굳이 언급하지 마세요. "
         "리스트/마크다운 헤더 없이 평문으로 쓰세요.\n\n"
         f"## {report_date} 메트릭 요약\n"
         f"- AAS avg={aas.get('avg_aas')}, max={aas.get('max_aas')}, p95={aas.get('p95_aas')}\n"
