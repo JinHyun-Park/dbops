@@ -7,7 +7,8 @@ import { fetchAnomalies } from "@/lib/api-client";
 import { streamChat } from "@/lib/agentcore-sse";
 import { fmtDecimal } from "@/lib/format";
 import { metricDef } from "@/lib/metric-glossary";
-import { useT } from "@/lib/i18n";
+import { useLocale, useT } from "@/lib/i18n";
+import { answerIn } from "@/lib/prompt-lang";
 
 interface Anomaly {
   metric_type: string;
@@ -281,7 +282,7 @@ function AnomalyDetailModal({
   prettyLabel: string;
   onClose: () => void;
 }) {
-  const t = useT();
+  const { t, locale } = useLocale();
   const [insight, setInsight] = useState("");
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState<string | null>(null);
@@ -297,7 +298,9 @@ function AnomalyDetailModal({
     setInsightError(null);
     setInsightLoading(true);
     const message =
-      `이 데이터베이스에서 이상 징후가 감지됐어. **한국어로** 다음 3개 섹션으로 짧고 명확하게 진단해줘:\n` +
+      `이 데이터베이스에서 이상 징후가 감지됐어. ${answerIn(
+        locale,
+      )} 다음 3개 섹션으로 짧고 명확하게 진단해줘:\n` +
       // Cause hints stay engine-neutral: this panel now renders for DocumentDB,
       // DynamoDB and ElastiCache too, and naming planner regressions or lock
       // storms to a Redis operator biases the diagnosis. The agent resolves the

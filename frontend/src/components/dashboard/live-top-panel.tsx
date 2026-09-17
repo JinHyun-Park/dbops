@@ -236,7 +236,9 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
 
               {unavailable ? (
                 <div className="px-3 py-4 border border-zinc-700/60 bg-zinc-900/60 text-sm text-zinc-400">
-                  {data?.reason || t("라이브 조회를 사용할 수 없습니다.")}
+                  {data?.reason
+                    ? t(data.reason)
+                    : t("라이브 조회를 사용할 수 없습니다.")}
                 </div>
               ) : (
                 <>
@@ -385,7 +387,9 @@ export function LiveTopPanel({ clusterId }: { clusterId: string }) {
                           )}
                         </span>
                       ) : buffers.available === false ? (
-                        <span className="text-zinc-500">{buffers.reason}</span>
+                        <span className="text-zinc-500">
+                          {buffers.reason ? t(buffers.reason) : null}
+                        </span>
                       ) : (
                         <div className="space-y-1.5">
                           <div className="font-mono">

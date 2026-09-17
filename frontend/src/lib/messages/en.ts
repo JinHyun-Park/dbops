@@ -32,7 +32,12 @@
  * EXPLAIN, wait events, burn-down, right-sizing, ...) stays in English on both
  * sides.
  */
-export const EN: Record<string, string> = {
+import { EN_SERVER } from "./en-server";
+
+/** Frontend literals. `EN` below spreads `EN_SERVER` in first, so a key that
+ *  appears in both resolves to this file: these are the ones
+ *  `tools/i18n-check.mjs` can actually verify against `src/`. */
+const EN_UI: Record<string, string> = {
   // ── Locale toggle ────────────────────────────────────────────────────────
   언어: "Language",
   한국어: "Korean",
@@ -2801,6 +2806,11 @@ export const EN: Record<string, string> = {
   "근거가 불완전합니다": "The evidence is incomplete",
   "리포트를 불러오지 못했습니다": "Could not load the report",
   평가: "Assessment",
+  // Shown only when the stored narrative is in the OTHER language. The prose
+  // itself is model output, so it is not a key and cannot be translated here;
+  // the reader gets told what they are looking at and why instead.
+  "이 서술과 권장 조치는 {n}로 생성되었습니다. 요청한 운영자의 콘솔 언어로 생성되며(자동 작업은 배포 기본 언어), 저장된 문장은 번역하지 않습니다.":
+    "This narrative and its recommended actions were generated in {n}: the requesting operator's console language, or the deployment default for an automated task. Stored prose is not translated.",
   "근거가 된 관측": "Supporting observations",
   "시각 미기록": "Time not recorded",
   "다음 단계": "Next steps",
@@ -3092,8 +3102,8 @@ export const EN: Record<string, string> = {
   "동작 방식": "How it works",
   "시나리오는 캐시된 신호 테이블(metric_snapshots, event_log, blocking_locks, query_stats, schema_snapshots)에 해당 장애가 관측되었을 때와 같은 행을 기록합니다.":
     "A scenario writes into the cached signal tables (metric_snapshots, event_log, blocking_locks, query_stats, schema_snapshots) the same rows the real failure would have produced.",
-  "그 다음은 전부 실제 경로입니다. 동일한 결정론적 랭커가 동일한 가중치로 신호를 채점하고, 동일한 모델 호출이 한국어 원인 설명과 권장 조치를 생성합니다.":
-    "Everything after that is the real path: the same deterministic ranker scores the signals with the same weights, and the same model call writes the cause narrative and the recommended actions in Korean.",
+  "그 다음은 전부 실제 경로입니다. 동일한 결정론적 랭커가 동일한 가중치로 신호를 채점하고, 동일한 모델 호출이 원인 설명과 권장 조치를 생성합니다.":
+    "Everything after that is the real path: the same deterministic ranker scores the signals with the same weights, and the same model call writes the cause narrative and the recommended actions.",
   "대상 데이터베이스는 건드리지 않습니다. 주입된 행은 RCA 분석 구간({n}분)에서 벗어나면 자동으로 정리됩니다. 한 번에 하나의 시나리오만 실행됩니다.":
     "The target database is never touched. Injected rows are cleaned up once they fall outside the RCA analysis window ({n} min). Only one scenario runs at a time.",
   "대상 클러스터가 설정되지 않아 실행이 비활성화되어 있습니다. cdk/config/settings.py의 SCENARIO_CLUSTER_ID에 등록된 클러스터를 지정하고 agent 스택을 재배포하세요.":
@@ -3159,3 +3169,10 @@ export const EN: Record<string, string> = {
   신규: "New",
   "등록 {n}": "Queued {n}",
 };
+
+/**
+ * The table `translate()` reads. Server-authored prose first, frontend
+ * literals second, so a collision resolves to the frontend entry (the one
+ * `tools/i18n-check.mjs` can verify against `src/`).
+ */
+export const EN: Record<string, string> = { ...EN_SERVER, ...EN_UI };

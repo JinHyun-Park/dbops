@@ -147,7 +147,7 @@ export default function ScenariosPage() {
           </div>
           <div>
             {t(
-              "그 다음은 전부 실제 경로입니다. 동일한 결정론적 랭커가 동일한 가중치로 신호를 채점하고, 동일한 모델 호출이 한국어 원인 설명과 권장 조치를 생성합니다.",
+              "그 다음은 전부 실제 경로입니다. 동일한 결정론적 랭커가 동일한 가중치로 신호를 채점하고, 동일한 모델 호출이 원인 설명과 권장 조치를 생성합니다.",
             )}
           </div>
           <div className="text-zinc-500">
@@ -206,9 +206,9 @@ export default function ScenariosPage() {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="text-sm text-zinc-100">{s.title}</div>
+                    <div className="text-sm text-zinc-100">{t(s.title)}</div>
                     <div className="text-xs text-zinc-500 mt-0.5">
-                      {s.summary}
+                      {t(s.summary)}
                     </div>
                   </div>
                   {/* The category and its base weight, so a viewer can tell

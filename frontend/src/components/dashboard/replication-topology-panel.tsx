@@ -162,7 +162,7 @@ export function ReplicationTopologyPanel({ clusterId }: { clusterId: string }) {
                   : "text-rose-300 border-rose-500/40 bg-rose-500/10"
               }`}
             >
-              {data.error}
+              {t(data.error)}
             </div>
           </div>
         )}

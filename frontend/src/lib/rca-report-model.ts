@@ -139,11 +139,13 @@ export function topCaveats(top: RcaCandidate | undefined): string[] {
  * a rollback would inherit a verification query's implied safety.
  *
  * ponytail: keyword classification, with a deliberate fail-safe bias. Two
- * shapes arrive here: the model's Korean `recommendations`, where the verb is
- * at the END and containment is the only thing that works, and a collector's
- * English `suggested_action`, which is verb-first (see CHECK_LEAD below). In
- * both, a change word beats a check word and an unclassifiable step lands in
- * 조치, so a change can never be labelled read-only. Upgrade path when this
+ * shapes arrive here: the model's `recommendations`, and a collector's
+ * `suggested_action`, which is always English and verb-first (see CHECK_LEAD
+ * below). The model's list follows the task locale, so it arrives Korean, where
+ * the verb is at the END and containment is the only thing that works, or
+ * English, which the English CHANGE_WORDS and CHECK_LEAD below already handle.
+ * In every case a change word beats a check word and an unclassifiable step
+ * lands in 조치, so a change can never be labelled read-only. Upgrade path when this
  * misfiles too often: have the producer emit the class (the collectors write
  * `suggested_action`, so they already know), and keep this only for the
  * model's free-text `recommendations`.
@@ -263,14 +265,20 @@ export interface Step {
  * signal's own next step.
  *
  * The backend dedupes `recommendations` against EACH OTHER only, never against
- * a per-candidate action: those actions are written in English by the
- * collectors while the model answers in Korean, so no lexical matcher can pair
- * them and a cross-language guess could drop a genuinely different
- * instruction. See task_worker._dedupe_advice. So the exact-text `seen` guard
- * below is the only thing standing between the two lists here, and it is
- * enough in practice for the same reason: the two lists are not in the same
- * language. Both survive on purpose; a signal with no next step reads worse
- * than a repeated bullet.
+ * a per-candidate action. That is no longer a language argument: the collectors
+ * write English and the model now answers in the task's own locale, so on an
+ * English task both lists are English and a lexical matcher COULD pair them.
+ * It stays off because the side it would drop is the evidence-bound one (the
+ * backend keeps the first occurrence, so the per-candidate action loses, and a
+ * signal with no next step reads worse than a repeated bullet), and because
+ * each line here carries its source and category, so a near-duplicate reads as
+ * "the same advice, and here is the signal demanding it". See
+ * task_worker._dedupe_advice for the full four grounds.
+ *
+ * The exact-text `seen` guard below is therefore still the only thing standing
+ * between the two lists, and it does MORE work than it used to: two terse
+ * English imperatives match exactly far more often than a Korean line and an
+ * English one ever could, so genuine duplicates now collapse here.
  */
 export function nextSteps(result: RcaResult): Step[] {
   const out: Step[] = [];

@@ -241,7 +241,7 @@ export function LogInsightsPanel({ clusterId }: { clusterId: string }) {
                       : "text-rose-300 border-rose-500/40 bg-rose-500/10"
                   }`}
                 >
-                  <div className="mb-1">{data.error}</div>
+                  <div className="mb-1">{t(data.error)}</div>
                   {isSetup && (
                     <div className="text-[11px] text-zinc-400 mt-2 leading-relaxed">
                       <strong className="text-zinc-200">

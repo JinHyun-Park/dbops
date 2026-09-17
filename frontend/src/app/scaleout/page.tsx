@@ -447,7 +447,9 @@ function AzScaleoutRunbook() {
 
           {result && (
             <div className="mt-4 border border-zinc-800 rounded-lg p-4">
-              <div className="text-sm text-zinc-200 mb-2">{result.message}</div>
+              <div className="text-sm text-zinc-200 mb-2">
+                {t(result.message)}
+              </div>
               {result.instance_class && (
                 <div className="text-xs text-zinc-500 mb-2 font-mono">
                   {t("클래스")} {result.instance_class}
@@ -473,7 +475,8 @@ function AzScaleoutRunbook() {
                 <ul className="text-xs text-rose-300 space-y-1 mb-2">
                   {result.failed.map((f, i) => (
                     <li key={i} className="font-mono">
-                      <span>✗</span> {f.new_instance_id}: {f.reason}
+                      <span>✗</span> {f.new_instance_id}:{" "}
+                      {f.reason ? t(f.reason) : ""}
                     </li>
                   ))}
                 </ul>

@@ -304,8 +304,19 @@ def test_the_page_renders_the_item_title_and_detail_verbatim():
     drop the qualification and put `dropped 1` back on the screen unqualified.
     """
     flat = _flat(_PAGE)
-    assert "{item.title}" in flat, flat[:200]
-    assert "{item.detail}" in flat
+    # The RENDER EXPRESSION, either spelling: i18n wraps these as
+    # {t(item.title)} / {t(item.detail)}, and translate() returns the server
+    # string itself when no en.ts key matches, so the page still shows the
+    # server's own fields rather than DERIVING a title from category plus a
+    # parsed summary, which is the edit that would drop the qualification.
+    #
+    # NOT a bare "item.detail" substring: the guard line one row above is
+    # `{item.detail && (`, so a bare match survives deleting the render
+    # entirely. Measured: replacing the render with {item.category} left a bare
+    # substring assertion passing.
+    for field in ("item.title", "item.detail"):
+        rendered = "{%s}" % field in flat or "{t(%s)}" % field in flat
+        assert rendered, f"{field} is no longer rendered: {flat[:200]}"
     # and the label the server sends is a plain string in those fields, so nothing
     # in the page needs to know the reason to show it.
     assert "_TL_DDL_UNSOUND" not in flat, (

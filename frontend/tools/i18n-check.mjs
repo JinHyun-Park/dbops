@@ -19,13 +19,25 @@ import { fileURLToPath } from "node:url";
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 const MESSAGES = join(SRC, "lib", "messages", "en.ts");
+// The second half of the same table, split off because the orphan check below
+// is exactly wrong for it: its keys are Python literals in api/,
+// data-pipeline/ and mcp-servers/, so none of them appears under src/ and all
+// of them would read as orphans. tests/unit/test_en_server_keys.py runs the
+// mirror-image check where those strings actually live. Both files are kept
+// out of `walk`, so neither can rescue an orphan in the other.
+const SERVER_MESSAGES = join(SRC, "lib", "messages", "en-server.ts");
 
 function walk(dir) {
   const out = [];
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) out.push(...walk(p));
-    else if (/\.(ts|tsx)$/.test(name) && p !== MESSAGES) out.push(p);
+    else if (
+      /\.(ts|tsx)$/.test(name) &&
+      p !== MESSAGES &&
+      p !== SERVER_MESSAGES
+    )
+      out.push(p);
   }
   return out;
 }
@@ -35,41 +47,58 @@ function walk(dir) {
 // built module from a .ts file needs a loader. Stripping comments and matching
 // the key position is the middle ground, and the assertion below catches a
 // parse that came back empty.
-const raw = readFileSync(MESSAGES, "utf8")
-  .replace(/\/\*[\s\S]*?\*\//g, "")
-  .replace(/^\s*\/\/.*$/gm, "");
-// Any indentation, not exactly two spaces: prettier moves a long key onto its
-// own line with deeper indentation, and the old two-space anchor silently
-// skipped 6 real keys, which were precisely the long ones most likely to drift.
-// Single quotes too, which prettier uses for a key containing a double quote.
-const keys = [
-  ...raw.matchAll(
-    /^\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s:"']+)):/gm,
-  ),
-].map((m) =>
-  m[1] !== undefined
-    ? m[1].replace(/\\"/g, '"')
-    : m[2] !== undefined
-      ? m[2].replace(/\\'/g, "'")
-      : m[3],
-);
+function parseKeys(file) {
+  const raw = readFileSync(file, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  // Any indentation, not exactly two spaces: prettier moves a long key onto its
+  // own line with deeper indentation, and the old two-space anchor silently
+  // skipped 6 real keys, which were precisely the long ones most likely to drift.
+  // Single quotes too, which prettier uses for a key containing a double quote.
+  return [
+    ...raw.matchAll(
+      /^\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s:"']+)):/gm,
+    ),
+  ].map((m) =>
+    m[1] !== undefined
+      ? m[1].replace(/\\"/g, '"')
+      : m[2] !== undefined
+        ? m[2].replace(/\\'/g, "'")
+        : m[3],
+  );
+}
+
+const keys = parseKeys(MESSAGES);
+const serverKeys = parseKeys(SERVER_MESSAGES);
 
 if (keys.length === 0) {
   console.error("i18n-check: parsed 0 keys out of en.ts. The parser is wrong.");
+  process.exit(1);
+}
+if (serverKeys.length === 0) {
+  console.error(
+    "i18n-check: parsed 0 keys out of en-server.ts. The parser is wrong.",
+  );
   process.exit(1);
 }
 
 const sources = walk(SRC).map((p) => readFileSync(p, "utf8"));
 const haystack = sources.join("\n");
 
+// Server keys are NOT orphan-checked here (see SERVER_MESSAGES above), but
+// they are duplicate-checked, within their own file and against en.ts. `EN`
+// spreads EN_SERVER first, so a cross-file collision silently shadows the
+// server translation with the frontend one, and nothing else would say so.
 const orphans = keys.filter((k) => !haystack.includes(k));
-const dupes = keys.filter((k, i) => keys.indexOf(k) !== i);
+const allKeys = [...keys, ...serverKeys];
+const dupes = allKeys.filter((k, i) => allKeys.indexOf(k) !== i);
 
 let failed = false;
 if (dupes.length) {
   failed = true;
   console.error(
-    `i18n-check: ${dupes.length} duplicate key(s) in en.ts (the later one wins):`,
+    `i18n-check: ${dupes.length} duplicate key(s) across en.ts and` +
+      " en-server.ts (en.ts wins, so a server translation is shadowed):",
   );
   for (const d of new Set(dupes)) console.error("  " + d);
 }
@@ -118,7 +147,7 @@ const IGNORE = new Set([
   // entry here only because a 활성 key exists for the other, wrapped sites.
 ]);
 
-const keySet = new Set(keys);
+const keySet = new Set(allKeys);
 const unkeyed = [];
 for (const file of walk(SRC)) {
   const body = readFileSync(file, "utf8")
@@ -144,6 +173,7 @@ if (unkeyed.length) {
 if (failed) process.exit(1);
 
 console.log(
-  `i18n-check: ${keys.length} keys, all present in src/, and every t(<expr>)` +
+  `i18n-check: ${keys.length} en.ts keys, all present in src/, plus` +
+    ` ${serverKeys.length} server-authored keys, and every t(<expr>)` +
     " constant has one. ok",
 );

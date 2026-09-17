@@ -9,7 +9,8 @@ import { streamChat } from "@/lib/agentcore-sse";
 import { fmtRelative } from "@/lib/format";
 import { confidence, trackRecordLabel } from "@/lib/remediation";
 import { engineBadge } from "@/lib/engine";
-import { useT } from "@/lib/i18n";
+import { useLocale, useT } from "@/lib/i18n";
+import { answerIn } from "@/lib/prompt-lang";
 
 const SEV_BADGE: Record<HealthFinding["severity"], string> = {
   critical: "bg-rose-500/20 text-rose-300 border border-rose-500/40",
@@ -321,12 +322,12 @@ export function MaintenanceHealthPanel({
                     </span>
                   </div>
                   <div className="text-xs text-zinc-400 mt-1">
-                    <span className="text-zinc-200">{f.value_str}</span>
+                    <span className="text-zinc-200">{t(f.value_str)}</span>
                     <span className="text-zinc-600">, target </span>
-                    <span className="font-mono">{f.threshold_str}</span>
+                    <span className="font-mono">{t(f.threshold_str)}</span>
                   </div>
                   <div className="text-xs text-zinc-300 mt-1 leading-snug">
-                    {f.recommendation}
+                    {t(f.recommendation)}
                   </div>
                   {f.outcome && f.outcome.attempts > 0 && (
                     <div className="mt-1.5">
@@ -375,7 +376,7 @@ function FindingDetailModal({
   engine?: string;
   onClose: () => void;
 }) {
-  const t = useT();
+  const { t, locale } = useLocale();
   const [insight, setInsight] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -406,7 +407,9 @@ function FindingDetailModal({
     const message =
       `너는 시니어 ${
         engineBadge(engine).label
-      } DBA야. 아래 유지보수 항목을 **한국어로** 다음 3개 섹션으로 짧고 명확하게 설명해줘:\n` +
+      } DBA야. 아래 유지보수 항목을 ${answerIn(
+        locale,
+      )} 다음 3개 섹션으로 짧고 명확하게 설명해줘:\n` +
       `1. **왜 중요한지**: 운영 리스크 한 문장.\n` +
       `2. **구체적 조치**: 실행해야 할 정확한 명령어 또는 파라미터 변경. schema.table 이름까지 포함해.\n` +
       `3. **검증 방법**: 조치가 반영됐는지 확인할 쿼리나 점검 한 가지.\n\n` +
@@ -462,9 +465,9 @@ function FindingDetailModal({
               {finding.subject}
             </h2>
             <div className="text-xs text-zinc-400 mt-1">
-              <span className="text-zinc-200">{finding.value_str}</span>
+              <span className="text-zinc-200">{t(finding.value_str)}</span>
               <span className="text-zinc-600">, target </span>
-              <span className="font-mono">{finding.threshold_str}</span>
+              <span className="font-mono">{t(finding.threshold_str)}</span>
             </div>
           </div>
           <button
@@ -482,7 +485,7 @@ function FindingDetailModal({
               {t("초기 권장 조치")}
             </div>
             <div className="text-sm text-zinc-200">
-              {finding.recommendation}
+              {t(finding.recommendation)}
             </div>
           </div>
 

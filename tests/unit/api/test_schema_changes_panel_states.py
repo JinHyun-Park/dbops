@@ -1228,7 +1228,16 @@ def test_the_four_chips_are_rendered_and_fall_back_to_the_unknown_entry():
 def test_the_note_the_server_wrote_is_rendered():
     """Every "this is not an absence of change" sentence the handler composes
     lives in `note`. A payload field nobody renders is not a fix."""
-    assert "{data.note}" in _PANEL
+    # The RENDER EXPRESSION, either spelling. i18n wraps this as
+    # {t(data.note)} and translate() returns the server string itself when no
+    # en.ts key matches, so the field is still rendered.
+    #
+    # NOT a bare "data.note" substring: the guard `{data.note && (` sits right
+    # above, so a bare match survives deleting the render. Measured: replacing
+    # the render with an empty string left a bare substring assertion passing.
+    assert "{data.note}" in _PANEL or "{t(data.note)}" in _PANEL, (
+        "the note the server composed is no longer rendered"
+    )
     got = drive(age_sec=_DEAD)
     assert got["note"], "the never-collected cell has no note to render"
 

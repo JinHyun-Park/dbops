@@ -257,7 +257,7 @@ export function RcaScoringPolicy({
       </button>
       {open && (
         <div className="mt-2 flex flex-col gap-2">
-          {note && <div className="text-[11px] text-zinc-400">{note}</div>}
+          {note && <div className="text-[11px] text-zinc-400">{t(note)}</div>}
           {hasWeights && (
             <div className="flex flex-col gap-0.5">
               {Object.entries(weights!)

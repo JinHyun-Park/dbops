@@ -231,7 +231,7 @@ export function CapacityForecastPanel({
       {data && data.error && (
         <div className="p-5">
           <div className="text-xs text-amber-300 border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-            {data.error}
+            {t(data.error)}
           </div>
         </div>
       )}
@@ -241,7 +241,7 @@ export function CapacityForecastPanel({
       {data && !data.error && refused && (
         <div className="p-5">
           <div className="text-xs text-zinc-400 border border-zinc-700 bg-zinc-900/40 px-3 py-2">
-            {data.reason ??
+            {(data.reason && t(data.reason)) ??
               t("이 지표는 현재 클러스터에서 용량 예측을 제공하지 않습니다.")}
           </div>
         </div>
@@ -346,7 +346,7 @@ export function CapacityForecastPanel({
               bill of health. */}
           {data.reason && (
             <div className="text-[11px] text-zinc-400 border border-zinc-800 bg-zinc-950 px-3 py-2">
-              {data.reason}
+              {t(data.reason)}
             </div>
           )}
 
@@ -407,7 +407,7 @@ export function CapacityForecastPanel({
               .replace("{a}", String(data.days_lookback ?? 30))
               .replace("{b}", String(data.samples))}
             {data.metric_type && `, ${data.metric_type}`}
-            {data.limit_basis && `, ${data.limit_basis}`}
+            {data.limit_basis && `, ${t(data.limit_basis)}`}
             {t(", 단순 선형 회귀 (시즌성/스파이크 미반영)")}
           </div>
         </div>

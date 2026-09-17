@@ -23,6 +23,10 @@
  *  5. reportHeadline() must not call anything a hypothesis that was never
  *     ranked. A scheduled health digest is a digest, and a report with no
  *     candidates has no headline at all.
+ *  6. narrativeLanguage() must name the language a STORED narrative is in, so
+ *     the report can tell a cross-locale reader what they are looking at. The
+ *     stamp wins over the script of the prose, and a report with no narrative
+ *     must claim nothing.
  */
 import assert from "node:assert/strict";
 import {
@@ -35,6 +39,7 @@ import {
   sourceLabel,
   topCaveats,
 } from "../src/lib/rca-report-model.ts";
+import { narrativeLanguage } from "../src/lib/narrative-language.ts";
 
 // 1. Classification, biased so a change can never read as read-only.
 assert.equal(stepKind("현재 blocking 세션을 확인하세요"), "check");
@@ -161,6 +166,36 @@ assert.deepEqual(
   ],
 );
 
+// 4b. The exact-text guard now spans the two lists, which is what changed when
+// the narrative started following the operator's locale. The collectors always
+// write English `suggested_action`; on an English task the model's
+// `recommendations` are English too, so a genuine repeat is byte-identical and
+// collapses here. The backend still does NOT compare the lists (it would drop
+// the evidence-bound side), so this is the only guard, and it is exact, so it
+// can never eat a different instruction.
+const dupe =
+  "Review the schema diff; a recent index change often explains this";
+assert.deepEqual(
+  nextSteps({
+    recommendations: [dupe],
+    candidates: [{ category: "schema_change", suggested_action: dupe }],
+  }).map((s) => [s.text, s.kind, s.from]),
+  [[dupe, "check", "model"]],
+);
+// Different English advice from the two lists both survive, and the read-only
+// check never inherits the change step's kind.
+const both = nextSteps({
+  recommendations: ["Raise work_mem to 16MB"],
+  candidates: [{ category: "schema_change", suggested_action: dupe }],
+});
+assert.deepEqual(
+  both.map((s) => [s.kind, s.from]),
+  [
+    ["change", "model"],
+    ["check", "signal"],
+  ],
+);
+
 // 5. Observations carry their own timestamp and cap at three.
 const obs = observations([
   {
@@ -275,5 +310,50 @@ assert.deepEqual(
   ),
   { kind: "hypothesis", text: "orders 테이블 스키마 변경" },
 );
+
+// 8. narrativeLanguage(): what the cross-locale label is allowed to claim.
+// A fleet-wide inbox holds reports in both languages, and a wrong label is a
+// false statement on the report surface, so the stamp must win and a report
+// with no prose must claim nothing at all.
+assert.equal(
+  narrativeLanguage({ narrative: "CPU 사용률이 급증한 것으로 보입니다." }),
+  "ko",
+);
+assert.equal(
+  narrativeLanguage({ narrative: "CPU utilization appears to have spiked." }),
+  "en",
+);
+// The stamp is authoritative: task_worker writes it from the locale it actually
+// generated in, and an English narrative that quotes a Korean parameter note
+// must still read as English.
+assert.equal(
+  narrativeLanguage({
+    narrative: 'CPU appears to have spiked; the note says "단일 샘플".',
+    narrative_locale: "en",
+  }),
+  "en",
+);
+assert.equal(
+  narrativeLanguage({ narrative: "Looks English.", narrative_locale: "ko" }),
+  "ko",
+);
+// A stamp from some future release is not one of the two console languages, so
+// it falls through to the prose rather than being trusted or rendered.
+assert.equal(
+  narrativeLanguage({ narrative: "급증했습니다.", narrative_locale: "ja" }),
+  "ko",
+);
+// No narrative, no label. A digest and a report whose model call failed both
+// land here, and neither may be labelled.
+for (const empty of [
+  {},
+  null,
+  undefined,
+  { narrative: "" },
+  { narrative: "   " },
+  { narrative_locale: "en" },
+]) {
+  assert.equal(narrativeLanguage(empty), null, JSON.stringify(empty));
+}
 
 console.log("rca-report-check: ok");

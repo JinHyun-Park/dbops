@@ -600,6 +600,17 @@ def lambda_handler(event, context):
             return {"statusCode": 403, "headers": headers,
                     "body": json.dumps({"error": "이 클러스터에 대한 접근 권한이 없습니다."})}
 
+        # The requester's console language, recorded so the worker can GENERATE
+        # the narrative and the recommendations in the language this operator
+        # reads (model prose is not an i18n key, so a render site cannot
+        # translate it afterwards). Allowlisted to the two languages the console
+        # offers, because the value ends up steering a Bedrock prompt: anything
+        # else is DROPPED rather than stored, and a row with no locale makes the
+        # worker fall back to the deployment default, which is Korean unless an
+        # admin changed it. So an older frontend that sends nothing keeps
+        # today's behaviour exactly.
+        locale = (body.get("locale") or "").strip().lower()
+
         now_ms = int(time.time() * 1000)
         new_task_id = str(uuid.uuid4())
         item = {
@@ -612,6 +623,7 @@ def lambda_handler(event, context):
             "created_at": str(now_ms),
             "title": f"수동 RCA ({cluster_id})",
             "ttl": int(time.time()) + TTL_DAYS * 24 * 60 * 60,
+            **({"locale": locale} if locale in ("ko", "en") else {}),
         }
         try:
             _table().put_item(Item=item)

@@ -5,8 +5,10 @@ WHAT IT DOES. Each scenario writes a burst of signal rows into the cache tables
 ``diagnose_root_cause`` already reads, then enqueues an auto-RCA anchored on that
 burst. From there nothing is simulated: the same deterministic ranker scores the same
 signal categories with the same weights, and the same single Bedrock call writes the
-Korean narrative and the recommendations. A presenter gets a real report about a
-synthetic symptom.
+narrative and the recommendations. A presenter gets a real report about a synthetic
+symptom. A scenario enqueues an AUTOMATED task, so the prose comes back in the
+deployment default language (``DEFAULT_LOCALE``, Korean unless an admin changed it),
+not in whichever console pressed the button: see task_worker._task_locale.
 
 WHAT IT DOES NOT DO, and why. It never touches a target database. The registered
 clusters are permanent read-only fixtures shared by every other demo, so a button that

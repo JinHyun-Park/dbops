@@ -372,7 +372,7 @@ function BedrockCostView({
           title={t("Cost allocation 태그가 활성화되어 있지 않습니다")}
           description={
             <>
-              {data.no_data_reason}.
+              {t(data.no_data_reason)}.
               <br />
               <span className="text-zinc-600">
                 {t(
@@ -618,7 +618,7 @@ function PlatformCostView({
         <EmptyState
           eyebrow={t("데이터 없음")}
           title={t("플랫폼 비용 데이터가 없습니다")}
-          description={data.no_data_reason}
+          description={t(data.no_data_reason)}
           primary={{
             href: "https://console.aws.amazon.com/cost-management/home",
             label: "Open Cost Management",
@@ -748,7 +748,7 @@ function PlatformCostView({
             )}
             {data?.note && (
               <p className="text-[11px] text-zinc-600 mt-3 leading-relaxed border-l-2 border-zinc-800 pl-3">
-                {data.note}
+                {t(data.note)}
               </p>
             )}
           </Section>
@@ -810,7 +810,7 @@ function RdsCostView({
           title={t("Aurora / RDS 비용 데이터가 없습니다")}
           description={
             <>
-              {data.no_data_reason}
+              {t(data.no_data_reason)}
               <br />
               <span className="text-zinc-600">
                 {t(
@@ -1138,7 +1138,7 @@ function ElastiCacheCostView({
           title={t("ElastiCache 비용 데이터가 없습니다")}
           description={
             <>
-              {data.no_data_reason}
+              {t(data.no_data_reason)}
               <br />
               <span className="text-zinc-600">
                 {t(
@@ -1592,7 +1592,7 @@ function TokensCostView({
 
           {data?.note && (
             <p className="text-[11px] text-zinc-600 mt-3 leading-relaxed border-l-2 border-zinc-800 pl-3">
-              {data.note}
+              {t(data.note)}
             </p>
           )}
         </>
@@ -1859,7 +1859,7 @@ function CommitmentsCostView({ days }: { days: number }) {
 
       {data?.note && ris.length > 0 && (
         <p className="text-[11px] text-zinc-600 mt-3 leading-relaxed border-l-2 border-zinc-800 pl-3">
-          {data.note}
+          {t(data.note)}
         </p>
       )}
     </>

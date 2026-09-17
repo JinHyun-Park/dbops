@@ -1699,7 +1699,7 @@ function ImpactPanel({
                   <span className="font-mono text-zinc-200 mr-2">
                     {ev.event_type}
                   </span>
-                  <span>{ev.message}</span>
+                  <span>{t(ev.message)}</span>
                 </div>
                 <div className="text-[10px] text-zinc-600 tabular-nums">
                   {fmt(ev.event_time)}
@@ -1729,7 +1729,7 @@ function ImpactPanel({
                   <span className="font-mono text-zinc-500 mr-2">
                     rule#{a.rule_id}
                   </span>
-                  <span>{a.message}</span>
+                  <span>{t(a.message)}</span>
                 </div>
                 <div className="text-[10px] text-zinc-600 tabular-nums">
                   {fmt(a.event_time)}

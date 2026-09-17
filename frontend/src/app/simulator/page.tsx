@@ -347,7 +347,7 @@ function UpgradePanel({
                               )}
                           </td>
                           <td className="py-1.5 text-right font-mono text-zinc-300 tabular-nums align-top">
-                            {m.downtime_text}
+                            {t(m.downtime_text)}
                           </td>
                           <td className="py-1.5 pl-3 align-top">
                             <RiskBadge risk={m.risk} />
@@ -374,7 +374,7 @@ function UpgradePanel({
                                       <span className="text-emerald-500/60 select-none">
                                         -
                                       </span>
-                                      <span>{b}</span>
+                                      <span>{t(b)}</span>
                                     </li>
                                   ))}
                                 </ul>
@@ -413,17 +413,17 @@ function UpgradePanel({
                   <span className="text-emerald-400/80 mr-1">
                     {t("권장 근거")}
                   </span>
-                  {impact.recommendation_reason}
+                  {t(impact.recommendation_reason)}
                 </p>
               )}
               {impact.object_count_basis && (
                 <p className="text-[10px] text-zinc-500">
-                  {impact.object_count_basis}
+                  {t(impact.object_count_basis)}
                 </p>
               )}
               {impact.methodology_note && (
                 <p className="text-[10px] text-zinc-600 leading-relaxed">
-                  {impact.methodology_note}
+                  {t(impact.methodology_note)}
                 </p>
               )}
             </div>
@@ -456,7 +456,7 @@ function UpgradePanel({
                 )}
                 {plan.downtime_text && (
                   <span className="block text-zinc-600">
-                    {t("다운타임 {n}").replace("{n}", plan.downtime_text)}
+                    {t("다운타임 {n}").replace("{n}", t(plan.downtime_text))}
                   </span>
                 )}
               </div>
@@ -470,9 +470,11 @@ function UpgradePanel({
                   <span className="font-mono text-zinc-600 tabular-nums">
                     {String(s.step).padStart(2, "0")}
                   </span>
-                  <span className="text-zinc-200 font-medium">{s.action}</span>
+                  <span className="text-zinc-200 font-medium">
+                    {t(s.action)}
+                  </span>
                   <span className="text-zinc-400 font-mono text-[11px] break-all">
-                    {s.details}
+                    {t(s.details)}
                   </span>
                 </li>
               ))}
@@ -481,7 +483,7 @@ function UpgradePanel({
               <span className="text-zinc-500 uppercase tracking-wider text-[10px] mr-2">
                 Rollback
               </span>
-              {plan.rollback_plan}
+              {t(plan.rollback_plan)}
             </div>
           </div>
         )}
@@ -628,17 +630,17 @@ function ParameterPanel({ clusterId }: { clusterId: string }) {
             )}
             {result.valid === false && result.validation_reason && (
               <div className="sm:col-span-3 text-[11px] text-rose-300 border border-rose-500/30 bg-rose-500/5 px-3 py-1.5">
-                ⚠ {result.validation_reason}
+                ⚠ {t(result.validation_reason)}
               </div>
             )}
             <div className="sm:col-span-3 text-zinc-300 border border-zinc-800 bg-zinc-900/60 px-3 py-2">
               <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
                 Recommendation
               </span>
-              {result.recommendation}
+              {t(result.recommendation)}
               {result.impact_note && (
                 <div className="text-[10px] text-zinc-500 mt-1">
-                  {result.impact_note}
+                  {t(result.impact_note)}
                 </div>
               )}
               <div className="text-[10px] text-zinc-600 mt-1 flex flex-wrap gap-2">
@@ -890,7 +892,7 @@ function ScalingPanel({ clusterId }: { clusterId: string }) {
               pricing={result.unit_pricing}
               dataSource={result.data_source}
             />
-            <div className="text-[11px] text-zinc-500">{result.note}</div>
+            <div className="text-[11px] text-zinc-500">{t(result.note)}</div>
           </div>
         )}
 
@@ -1068,7 +1070,7 @@ function DdlPanel({
               <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
                 Recommendation
               </span>
-              {result.recommendation}
+              {t(result.recommendation)}
             </div>
             {result.basis && result.basis.length > 0 && (
               <div className="border-l-2 border-emerald-500/40 pl-3">
@@ -1082,13 +1084,13 @@ function DdlPanel({
                       className="text-[11px] text-zinc-400 leading-relaxed flex gap-1.5"
                     >
                       <span className="text-emerald-500/60 select-none">-</span>
-                      <span>{b}</span>
+                      <span>{t(b)}</span>
                     </li>
                   ))}
                 </ul>
                 {result.note && (
                   <p className="text-[10px] text-zinc-600 leading-relaxed mt-1.5">
-                    {result.note}
+                    {t(result.note)}
                   </p>
                 )}
               </div>
@@ -1326,7 +1328,7 @@ function ElasticacheNodeResizePanel({ clusterId }: { clusterId: string }) {
             </div>
 
             {result.note && (
-              <div className="text-[11px] text-zinc-500">{result.note}</div>
+              <div className="text-[11px] text-zinc-500">{t(result.note)}</div>
             )}
           </div>
         )}
@@ -1482,9 +1484,9 @@ function RdsRightsizingSimulator({
           (result.status === "error" ||
             result.status === "unsupported_engine") && (
             <div className="p-4 text-xs text-rose-300">
-              {result.message ??
-                result.reason ??
-                t("시뮬레이션에 실패했습니다.")}
+              {t(
+                result.message ?? result.reason ?? "시뮬레이션에 실패했습니다.",
+              )}
             </div>
           )}
 
@@ -1557,7 +1559,8 @@ function RdsRightsizingSimulator({
                       → {result.recommendation.instance_class}
                     </span>
                   )}
-                {result.recommendation?.reason}
+                {result.recommendation?.reason &&
+                  t(result.recommendation.reason)}
               </div>
             </div>
 
@@ -1608,7 +1611,7 @@ function RdsRightsizingSimulator({
 
             {result.cost_impact?.breakdown?.license_note && (
               <div className="text-[11px] text-zinc-500">
-                {result.cost_impact.breakdown.license_note}
+                {t(result.cost_impact.breakdown.license_note)}
               </div>
             )}
 

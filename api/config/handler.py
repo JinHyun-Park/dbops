@@ -46,9 +46,28 @@ def _v_bool(raw) -> str:
     raise ValueError("expected a boolean (true/false)")
 
 
+def _v_locale(raw) -> str:
+    """The two languages the console offers, and nothing else.
+
+    This value ends up selecting a directive inside a Bedrock prompt
+    (task_worker._task_locale), so it is an allowlist, not a format check like
+    TICKETING_PROVIDER above. The worker re-validates it anyway, because a
+    prompt input must not trust a stored row either.
+    """
+    s = str(raw).strip().lower()
+    if s not in ("ko", "en"):
+        raise ValueError("DEFAULT_LOCALE must be ko or en")
+    return s
+
+
 CONFIG_KEYS: dict = {
     "TICKETING_PROVIDER": ("none", _v_ticketing_provider),
     "REPORT_DELIVERY_ENABLED": ("false", _v_bool),
+    # The language an AUTOMATED report is written in. A manual RCA carries the
+    # requester's own console locale on the task row; an auto-RCA has no caller,
+    # so this decides. Default "ko" is what every deployment shipped before the
+    # narrative could follow a locale at all.
+    "DEFAULT_LOCALE": ("ko", _v_locale),
 }
 
 # Caller-safe rejection text per key. The validator's own ValueError message is
@@ -58,6 +77,7 @@ CONFIG_KEYS: dict = {
 _INVALID_VALUE_HINT = {
     "TICKETING_PROVIDER": "[a-z0-9_-] 문자 1~32자여야 합니다.",
     "REPORT_DELIVERY_ENABLED": "true 또는 false여야 합니다.",
+    "DEFAULT_LOCALE": "ko 또는 en이어야 합니다.",
 }
 
 

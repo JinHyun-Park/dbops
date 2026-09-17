@@ -128,10 +128,10 @@ export function RedundantIndexesPanel({ clusterId }: { clusterId: string }) {
         {data?.error && !data?.info && (
           <div className="p-5">
             <div className="text-xs text-rose-300 border border-rose-500/40 bg-rose-500/10 px-3 py-2">
-              {data.error}
+              {t(data.error)}
               {data.message && (
                 <div className="mt-1 text-[11px] text-zinc-400 font-mono">
-                  {data.message}
+                  {t(data.message)}
                 </div>
               )}
             </div>

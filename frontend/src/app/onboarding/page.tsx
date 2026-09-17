@@ -353,12 +353,12 @@ function ConnectionStep({
                   )}
                   {step.error && (
                     <div className="text-rose-300/80 mt-0.5 break-words">
-                      {step.error}
+                      {t(step.error)}
                     </div>
                   )}
                   {step.note && (
                     <div className="text-zinc-500 mt-0.5 break-words leading-relaxed">
-                      {step.note}
+                      {t(step.note)}
                     </div>
                   )}
                 </div>

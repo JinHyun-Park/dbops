@@ -3,7 +3,15 @@
 
 // i18n: `t()` is a hook and this file is not a component, so the error copy
 // goes through `tr()` (the plain `translate()` form). `{n}` is the HTTP status.
+// `tr()` also wraps the server's own prose wherever a handler body's `error` /
+// `detail` / `message` is lifted into the thrown Error, because the table is
+// keyed by the Korean source string. A fixed handler literal translates; an
+// interpolated one misses the lookup and falls back to the Korean, which is the
+// intended behaviour (visible, never blank).
 import { tr } from "@/lib/format";
+// Not for translating: `createTask` has to TELL the backend which language the
+// operator reads, because the RCA prose is generated server-side.
+import { detectLocale } from "@/lib/i18n";
 
 interface RuntimeConfig {
   apiUrl: string;
@@ -1380,12 +1388,16 @@ export async function runScenario(id: string): Promise<ScenarioRunResult> {
     // Another run holds the lock, or the scenario needs a different engine.
     // Both carry an explanation worth showing verbatim.
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || tr("다른 시나리오가 실행 중입니다"));
+    throw new Error(
+      body.error ? tr(body.error) : tr("다른 시나리오가 실행 중입니다"),
+    );
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(
-      body.error || tr("시나리오 실행 실패 (상태 {n})", res.status),
+      body.error
+        ? tr(body.error)
+        : tr("시나리오 실행 실패 (상태 {n})", res.status),
     );
   }
   return res.json();
@@ -1461,13 +1473,20 @@ export async function createTask(
   const res = await authedFetch(await api(`/api/tasks`), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-    body: JSON.stringify({ cluster_id: clusterId, kind }),
+    // `locale` rides the body, not a header: the worker that writes the
+    // narrative runs off the task row asynchronously, so the language has to be
+    // ON the row or it is gone. The backend allowlists it to "ko" | "en".
+    body: JSON.stringify({
+      cluster_id: clusterId,
+      kind,
+      locale: detectLocale(),
+    }),
   });
   if (!res.ok) {
     let msg = tr("작업 생성 실패 (상태 {n})", res.status);
     try {
       const e = await res.json();
-      if (e?.error) msg = e.error;
+      if (e?.error) msg = tr(e.error);
     } catch {
       // keep the status-based message
     }
@@ -1515,7 +1534,7 @@ export async function createSchedule(
     let msg = tr("예약 생성 실패 (상태 {n})", res.status);
     try {
       const e = await res.json();
-      if (e?.error) msg = e.error;
+      if (e?.error) msg = tr(e.error);
     } catch {
       // keep the status-based message
     }
@@ -1614,7 +1633,7 @@ export async function cancelScaleoutOp(
     let msg = tr("취소 실패 (상태 {n})", res.status);
     try {
       const e = await res.json();
-      if (e?.detail || e?.error) msg = e.detail || e.error;
+      if (e?.detail || e?.error) msg = tr(e.detail || e.error);
     } catch {
       // keep the status-based message
     }
@@ -1663,7 +1682,7 @@ export async function scaleoutAz(input: {
     let msg = tr("AZ 스케일아웃 실패 (상태 {n})", res.status);
     try {
       const e = await res.json();
-      if (e?.detail || e?.error) msg = e.detail || e.error;
+      if (e?.detail || e?.error) msg = tr(e.detail || e.error);
     } catch {
       // keep the status-based message
     }
@@ -1946,10 +1965,13 @@ export async function runExplain(
       // fall through to text
     }
     if (res.status === 400 && parsed.error === "sql_error") {
-      throw new ExplainSqlError(parsed.message || "SQL error", parsed.engine);
+      throw new ExplainSqlError(
+        parsed.message ? tr(parsed.message) : "SQL error",
+        parsed.engine,
+      );
     }
     const detail =
-      parsed.message ||
+      (parsed.message && tr(parsed.message)) ||
       (await res.text().catch(() => "")) ||
       `HTTP ${res.status}`;
     throw new Error(`${tr("EXPLAIN 실패")}: ${detail.slice(0, 300)}`);

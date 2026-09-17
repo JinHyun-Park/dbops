@@ -4,7 +4,8 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { streamChat } from "@/lib/agentcore-sse";
-import { useT } from "@/lib/i18n";
+import { useLocale } from "@/lib/i18n";
+import { answerIn } from "@/lib/prompt-lang";
 
 export interface DashboardEvent {
   id?: number | string;
@@ -75,7 +76,7 @@ export function EventDetailModal({
   prettyLabel,
   onClose,
 }: Props) {
-  const t = useT();
+  const { t, locale } = useLocale();
   const [insight, setInsight] = useState("");
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState<string | null>(null);
@@ -97,7 +98,9 @@ export function EventDetailModal({
     setInsightLoading(true);
     const detailJson = JSON.stringify(parsed ?? {}, null, 2).slice(0, 8000);
     const message =
-      `Aurora 클러스터에서 운영 이벤트가 기록됐어. **한국어로** 다음 3개 섹션으로 짧고 명확하게 설명해줘:\n` +
+      `Aurora 클러스터에서 운영 이벤트가 기록됐어. ${answerIn(
+        locale,
+      )} 다음 3개 섹션으로 짧고 명확하게 설명해줘:\n` +
       `1. **무슨 일이 일어났는지**: 한 문장.\n` +
       `2. **영향**: 무엇이 깨지거나 달라질 수 있는지 (1-2문장, 이 클러스터의 런타임 관점에서 구체적으로).\n` +
       `3. **권장 조치**: DBA가 지금 취해야 할 구체적인 행동 한 가지 ` +
@@ -157,7 +160,7 @@ export function EventDetailModal({
             </h2>
             {event.message && (
               <div className="text-xs text-zinc-400 mt-1 leading-snug">
-                {event.message}
+                {t(event.message)}
               </div>
             )}
           </div>

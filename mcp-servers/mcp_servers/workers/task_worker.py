@@ -10,9 +10,12 @@ scheduled reports, and manual runs each just write a pending row; this worker is
 the only thing that executes them. See
 docs/superpowers/specs/2026-06-18-agent-tasks-design.md.
 
-RCA is deterministic: it reuses the incident server's ``diagnose_root_cause``
-tool (the same one the agent calls), so no LLM / model invocation happens here,
-fast, cheap, and safe to run unattended in a Lambda.
+RCA is deterministic at its core: it reuses the incident server's
+``diagnose_root_cause`` tool (the same one the agent calls), so the ranking is
+fast, cheap and safe to run unattended in a Lambda. ONE best-effort Bedrock call
+sits on top of it (``_narrative``), writing the prose assessment and the
+recommendations in the task's own language; it can fail without taking the task
+with it, and the ranked signals ship either way.
 """
 
 import json
@@ -28,10 +31,76 @@ from botocore.exceptions import ClientError
 
 from mcp_servers.incident.tools.diagnose_root_cause import diagnose_root_cause_impl
 from mcp_servers.incident.tools.health_status import get_health_status_impl
+from mcp_servers.shared.app_config import get_config
 from mcp_servers.shared.cache_client import CacheClient
 from mcp_servers.workers.ticketing import get_provider
 
 _DESER = TypeDeserializer()
+
+# The two languages the console offers, and the ONLY two values that may reach a
+# prompt. Exact-match allowlist, not a prefix test: a task row is data, and the
+# language it asks for steers a model prompt, so an unrecognised value is
+# rejected rather than normalised into something that gets interpolated.
+_LOCALES = ("ko", "en")
+
+# Every piece of prose whose language follows the task locale, both languages in
+# one table so a reviewer can check on one screen that the hedge survived the
+# crossing (RISK: a lost "가능성 / likely" is the damage no test catches).
+_LANG = {
+    "ko": {
+        # The output-language directive inside the analysis prompt.
+        "analyze": "한국어로 분석하세요. ",
+        # The trailing clause of the system prompt.
+        "answer": "항상 한국어로 답합니다.",
+        # Trace detail, rendered raw in the RCA report (rca-report.tsx).
+        "trace": "한국어 narrative+권장조치",
+        "dropped": ", 중복 권장 {n}건 제거",
+    },
+    "en": {
+        "analyze": (
+            "Write the analysis in English. Keep the hedging the Korean asks "
+            "for: state what these signals make LIKELY and what to check, "
+            "never assert a confirmed cause. Keep metric names, parameter "
+            "names, SQL and cluster IDs verbatim. "
+        ),
+        "answer": (
+            "Always answers in English, and hedges any cause the signals only "
+            "suggest rather than establish."
+        ),
+        "trace": "English narrative + recommendations",
+        "dropped": ", {n} duplicate recommendation(s) removed",
+    },
+}
+
+
+def _task_locale(row_locale) -> str:
+    """The language this task's narrative and recommendations are GENERATED in.
+
+    FAIL-SAFE TO KOREAN. Korean is what every deployment ships today, and
+    silently switching an existing deployment's report language is not this
+    function's call, so anything unrecognised ends at "ko".
+
+    A MANUAL RCA has a caller: api/tasks stamps the operator's console locale on
+    the row from the POST body. An AUTOMATED RCA has none, because this worker
+    runs off the agent-tasks DynamoDB stream with no request behind it: the
+    alert_evaluator / event_processor / task_scheduler producers enqueue a row
+    with no locale, so the DEPLOYMENT DEFAULT decides. That default is read
+    through get_config, i.e. the app-config table (admin-editable in /settings)
+    over the env var over "ko", and get_config never raises.
+
+    The default is resolved HERE, in the one consumer, on purpose: the four
+    task_enqueue.py copies are a whole-file byte-identical parity family and
+    three of them cannot import mcp_servers, so teaching the producers about a
+    default would mean two more copies of app_config.py to read one string.
+
+    The return value is always a member of _LOCALES, so no caller-supplied text
+    can reach the prompt: the prompt reads _LANG[lang], never the raw value.
+    """
+    loc = str(row_locale or "").strip().lower()
+    if loc in _LOCALES:
+        return loc
+    default = str(get_config("DEFAULT_LOCALE", "ko") or "").strip().lower()
+    return default if default in _LOCALES else "ko"
 
 # Lazily built so a cold container that only handles a malformed record never
 # pays the cache-client init.
@@ -251,9 +320,15 @@ def _history_line(cache, cluster_id: str, category: str) -> str:
     return "과거 효과 이력(조치 성공/시도): " + ", ".join(parts)
 
 
-def _narrative(cluster_id: str, rca: dict):
-    """Hybrid layer: turn the deterministic candidate signals into a Korean
-    root-cause narrative + concrete recommendations via ONE Bedrock call.
+def _narrative(cluster_id: str, rca: dict, lang: str = "ko"):
+    """Hybrid layer: turn the deterministic candidate signals into a root-cause
+    narrative + concrete recommendations via ONE Bedrock call, in `lang`.
+
+    The prose is GENERATED in the operator's language, never translated after
+    the fact: model output is not an i18n key, so the render site cannot look it
+    up. `lang` must already be a member of _LOCALES (see _task_locale); it
+    selects a fixed directive out of _LANG and is never interpolated itself.
+    Defaults to "ko", the same fail-safe _task_locale lands on.
 
     Best-effort: returns None (and the task still completes with the raw
     ranked signals) if the model isn't configured or the call/parse fails. The
@@ -263,6 +338,7 @@ def _narrative(cluster_id: str, rca: dict):
     candidates = rca.get("candidates") if isinstance(rca, dict) else None
     if not model_id or not candidates:
         return None
+    words = _LANG.get(lang) or _LANG["ko"]
 
     lines = [
         f"- [{c.get('category')}] {c.get('summary')} (score {c.get('score')}, {c.get('when')})"
@@ -285,8 +361,15 @@ def _narrative(cluster_id: str, rca: dict):
         + "\n".join(lines)
         + f"\n\n검사한 신호 수: {rca.get('signals_examined', {})}"
         + history_section
-        + "\n\n위 신호만 근거로(신호에 없는 원인은 추측 금지) 한국어로 분석하세요. "
-        "반드시 아래 JSON 형식만 출력하세요:\n"
+        # Only the output-language directive moves. The instruction bodies stay
+        # Korean on purpose, the same call agent/prompts/system_prompt.py makes:
+        # the model follows a Korean instruction to answer in English perfectly
+        # well, and rewriting tuned prompt text is a behaviour change nobody
+        # asked for. It also keeps the hedge ("가장 가능성 높은") in ONE place
+        # instead of two that can drift apart.
+        + "\n\n위 신호만 근거로(신호에 없는 원인은 추측 금지) "
+        + words["analyze"]
+        + "반드시 아래 JSON 형식만 출력하세요:\n"
         '{"narrative": "가장 가능성 높은 근본 원인을 2-3문장으로", '
         '"recommendations": ["구체적이고 실행 가능한 권장 조치", "..."]}'
     )
@@ -296,7 +379,7 @@ def _narrative(cluster_id: str, rca: dict):
             messages=[{"role": "user", "content": [{"text": prompt}]}],
             system=[{"text": (
                 "당신은 Aurora/RDS 데이터베이스 운영(DBA) 전문가입니다. 제공된 신호만으로 "
-                "간결하고 실무적으로 진단하며, 항상 한국어로 답합니다."
+                "간결하고 실무적으로 진단합니다. " + words["answer"]
             )}],
             # NO `temperature`. Claude Sonnet 5 and the rest of the Claude 5 family
             # REJECT it: converse returns ValidationException "`temperature` is
@@ -353,6 +436,14 @@ def _narrative(cluster_id: str, rca: dict):
             out["narrative"] = str(obj["narrative"])
         if isinstance(obj.get("recommendations"), list):
             out["recommendations"] = [str(r) for r in obj["recommendations"] if r]
+        if out:
+            # Stamped on the RESULT, not just asked for on the way in, because a
+            # stored narrative is frozen in the language that produced it and the
+            # task inbox is fleet-wide: two operators with different consoles read
+            # the same row. This tells a reader what they are looking at instead
+            # of making them guess from the characters. Only set when there IS
+            # prose, so the field never claims a language for a missing narrative.
+            out["narrative_locale"] = lang
         return out or None
     except Exception as e:
         print(f"[task-worker] narrative gen failed for {cluster_id}: {type(e).__name__}: {e}")
@@ -405,8 +496,18 @@ def _same_advice(a: str, b: str) -> bool:
          changes.
       2. then 60% of all tokens have to be shared (see _DUP_ADVICE_OVERLAP).
 
-    Both sides are always Korean prose from the same narrative model, so lexical
-    comparison is comparing like with like.
+    Both sides are prose from the same narrative model in the same language,
+    whichever language that task asked for, so lexical comparison is comparing
+    like with like. That is why this stays inside ONE list (see _dedupe_advice).
+
+    IT IS STRICTER ON ENGLISH, deliberately and measurably. Every English token
+    is ASCII, so gate 1 becomes "the entire token sets must be equal" and only a
+    reordered or repunctuated restatement collapses (measured 1.0); a real
+    English paraphrase scores 0.636 and SURVIVES even though the threshold is
+    0.6. Left that way on purpose: relaxing the gate for English would rank
+    "Raise work_mem to 16MB" against "Raise shared_buffers to 16MB" at exactly
+    0.6, i.e. it would start deleting advice about a different knob. Showing a
+    near-duplicate is the cheaper failure.
     ponytail: lexical ceiling, adequate because it only ever sees one model's
     output in one language. The upgrade path is Titan embeddings, already wired
     in incident/tools/similar_incidents.py, if paraphrases stop being lexical.
@@ -428,15 +529,29 @@ def _dedupe_advice(res: dict) -> int:
     candidates of the same category, which is the repetition this removes.
 
     Scope is the model's own list ONLY. It deliberately does NOT compare a
-    recommendation against a candidate's `suggested_action`: those actions are
-    written in English by diagnose_root_cause's collectors while
-    `recommendations` come back in Korean, so a lexical matcher can never pair
-    them, and nothing weaker than cross-language semantics could. Matching
-    across languages by token overlap would risk dropping a DIFFERENT
-    instruction, which is worse than showing a near-duplicate, so the cross-list
-    comparison is not attempted rather than approximated. A per-candidate action
-    also always survives regardless: it is bound to that signal's own evidence
-    row, and a signal with no next step is worse than a repeated bullet.
+    recommendation against a candidate's `suggested_action`, and the reason is
+    NOT that the two lists are in different languages. They used to be, because
+    the collectors write English and this narrative was pinned to Korean; now
+    the narrative follows the task locale, so on an English task both lists are
+    English and _same_advice COULD pair them. The comparison still stays off:
+
+      1. the side that would lose is the evidence-bound one. This keeps the
+         FIRST occurrence, so extended across lists the per-candidate action is
+         what gets dropped, and a signal with no next step is worse than a
+         repeated bullet. That argument never depended on the language.
+      2. the reader is not shown a bare repeat anyway. The UI renders the
+         model's advice and each candidate's action with their source and
+         category attached (rca-report-model.nextSteps), so a near-duplicate
+         reads as "the same advice, and here is the signal demanding it".
+      3. _same_advice requires the ASCII token sets to be EQUAL before it even
+         measures overlap, and the two lists have different authors: the
+         collector text names metric types, the model names parameters and
+         objects. It would rarely fire, so it buys little and risks exactly the
+         deletion the standing rule forbids.
+      4. the cheap guard got stronger for free. nextSteps already drops an
+         EXACT text match across both lists, and two terse English imperatives
+         match exactly far more often than a Korean/English pair ever could, so
+         genuine duplicates now collapse there with no new code.
     """
     recs = res.get("recommendations")
     if not isinstance(recs, list) or not recs:
@@ -453,9 +568,14 @@ def _dedupe_advice(res: dict) -> int:
     return len(recs) - len(kept)
 
 
-def _run_rca(cluster_id: str, observed_at: str = ""):
+def _run_rca(cluster_id: str, observed_at: str = "", locale: str = ""):
     """Deterministic RCA via the incident diagnose_root_cause tool, with a
-    hybrid Korean narrative + recommendations layered on (best-effort LLM).
+    hybrid narrative + recommendations layered on in the task's own language
+    (best-effort LLM).
+
+    `locale` is the requester's console language, carried on the task row by the
+    /tasks POST for a manual run and absent for an automated one; _task_locale
+    resolves the deployment default for that case and fails safe to Korean.
 
     `observed_at` is when the incident was OBSERVED, carried on the task row by the
     producer that enqueued it. It matters because it is not this moment: the RCA used
@@ -471,6 +591,7 @@ def _run_rca(cluster_id: str, observed_at: str = ""):
     meaningfully without the DBA opening the full result. steps is a list of
     trace dicts recording each tool invocation with timing."""
     steps = []
+    lang = _task_locale(locale)
     t = time.time()
     res = diagnose_root_cause_impl(_get_cache(), cluster_id, around_time=observed_at or "")
     cands = res.get("candidates", []) if isinstance(res, dict) else []
@@ -483,14 +604,18 @@ def _run_rca(cluster_id: str, observed_at: str = ""):
                                 else ", 앵커 현재시각"))})
     if isinstance(res, dict):
         t = time.time()
-        narr = _narrative(cluster_id, res)
+        narr = _narrative(cluster_id, res, lang)
         if narr:
-            res.update(narr)  # adds narrative + recommendations
+            res.update(narr)  # adds narrative + recommendations + narrative_locale
             dropped = _dedupe_advice(res)
             steps.append({"step": "서술 생성", "tool": "bedrock",
                           "ms": int((time.time() - t) * 1000),
-                          "detail": ("한국어 narrative+권장조치"
-                                     + (f", 중복 권장 {dropped}건 제거" if dropped else ""))})
+                          # States the language it actually generated in. It is
+                          # rendered raw (rca-report.tsx), so "한국어 ..." on an
+                          # English report would be a false claim in the UI.
+                          "detail": (_LANG[lang]["trace"]
+                                     + (_LANG[lang]["dropped"].replace("{n}", str(dropped))
+                                        if dropped else ""))})
         else:
             steps.append({"step": "서술 생성", "tool": "bedrock", "ms": 0,
                           "detail": "모델 미설정/실패, 스킵"})
@@ -557,7 +682,10 @@ def lambda_handler(event, context):
         try:
             if kind in ("auto_rca", "manual_rca"):
                 result, summary, steps = _run_rca(
-                    cluster_id, observed_at=str(img.get("observed_at") or "")
+                    cluster_id,
+                    observed_at=str(img.get("observed_at") or ""),
+                    # Absent on every automated row: see _task_locale.
+                    locale=str(img.get("locale") or ""),
                 )
             elif kind == "scheduled_report":
                 result, summary, steps = _run_report(cluster_id)

@@ -225,7 +225,7 @@ export function TableSizesPanel({ clusterId }: { clusterId: string }) {
                           )}
                           {expand?.error && (
                             <div className="text-xs text-rose-400 border border-rose-500/40 bg-rose-500/10 px-3 py-2">
-                              {expand.error}
+                              {t(expand.error)}
                             </div>
                           )}
                           {expand?.indexes && expand.indexes.length === 0 && (

@@ -174,7 +174,10 @@ class AgentStack(cdk.Stack):
                 "CACHE_DB_NAME": "dbops",
                 "CLUSTERS_TABLE": foundation.clusters_table.table_name,
                 # Hybrid RCA: a single Bedrock call turns the deterministic
-                # ranked signals into a Korean narrative + recommendations.
+                # ranked signals into a narrative + recommendations, written in
+                # the task's own language: the requesting console's locale for a
+                # manual run, DEFAULT_LOCALE (app-config, Korean unless an admin
+                # changed it) for an automated one. See task_worker._task_locale.
                 #
                 # Its own setting, defaulting to the chat model so existing
                 # deployments keep today's behaviour. Separate because the two calls

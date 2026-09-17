@@ -300,6 +300,7 @@ export default function TimelinePage() {
 }
 
 function TimelineList({ items }: { items: TimelineItem[] }) {
+  const t = useT();
   return (
     <div className="relative">
       {/* Vertical rail */}
@@ -335,7 +336,7 @@ function TimelineList({ items }: { items: TimelineItem[] }) {
               </div>
               {item.detail && (
                 <pre className="text-[11px] text-zinc-400 font-mono whitespace-pre-wrap break-words pl-[2px] mt-1 max-h-32 overflow-y-auto">
-                  {item.detail}
+                  {t(item.detail)}
                 </pre>
               )}
               {item.source && (

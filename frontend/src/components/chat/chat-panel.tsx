@@ -19,7 +19,8 @@ import {
   deleteChatSession,
 } from "@/lib/api-client";
 import { fmtExact } from "@/lib/format";
-import { useT } from "@/lib/i18n";
+import { useLocale } from "@/lib/i18n";
+import { answerIn } from "@/lib/prompt-lang";
 
 interface ClusterRow {
   cluster_id: string;
@@ -332,7 +333,7 @@ function relTime(ms: number): string {
 }
 
 export function ChatPanel() {
-  const t = useT();
+  const { t, locale } = useLocale();
   const [clusters, setClusters] = useState<ClusterRow[]>([]);
   const [clusterId, setClusterId] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -761,7 +762,8 @@ export function ChatPanel() {
     [modelId, persist],
   );
 
-  // Generate a concise Korean title after the first exchange on a throwaway
+  // Generate a concise title, in the console locale, after the first exchange
+  // on a throwaway
   // session so the main conversation memory isn't polluted. Best-effort:
   // failures are silent and the first-message-slice title is kept.
   const generateTitle = useCallback(
@@ -770,7 +772,9 @@ export function ChatPanel() {
       if (assistantText.trim().length < 40) return;
       titleAbortRef.current?.abort();
       const prompt =
-        `이 질문/답변을 6단어 이내의 간결한 한국어 제목으로 요약해줘. 제목 텍스트만 출력. 따옴표, 마크다운, 코드펜스, 접두어 금지.\n\n` +
+        `${answerIn(
+          locale,
+        )} 이 질문/답변을 6단어 이내의 간결한 제목으로 요약해줘. 제목 텍스트만 출력. 따옴표, 마크다운, 코드펜스, 접두어 금지.\n\n` +
         `Q: ${userText}\n\nA: ${assistantText.slice(0, 2000)}`;
       let buffer = "";
       titleAbortRef.current = streamChat(
@@ -822,7 +826,7 @@ export function ChatPanel() {
         },
       );
     },
-    [modelId, persist],
+    [modelId, persist, locale],
   );
 
   // Track activeId in a ref so the unmount cleanup (which can't close over
@@ -989,7 +993,7 @@ export function ChatPanel() {
             const finalAssistant = conv?.messages[conv.messages.length - 1];
             if (finalAssistant && finalAssistant.role === "assistant") {
               generateFollowups(convId, userText, finalAssistant.content);
-              // On the first exchange only, generate a concise Korean title.
+              // On the first exchange only, generate a concise title.
               if (isFirstTurn) {
                 generateTitle(convId, userText, finalAssistant.content);
               }

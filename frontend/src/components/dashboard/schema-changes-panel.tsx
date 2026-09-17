@@ -476,7 +476,7 @@ export function SchemaChangesPanel({ clusterId }: { clusterId: string }) {
 
           {data.note && (
             <div className="px-4 py-2.5 border-t border-zinc-800 text-[11px] leading-relaxed text-zinc-400">
-              {data.note}
+              {t(data.note)}
             </div>
           )}
         </>

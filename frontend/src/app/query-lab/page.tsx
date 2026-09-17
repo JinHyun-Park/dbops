@@ -26,32 +26,49 @@ import { extractSqlBlock, planTotalCost } from "@/lib/query-rewrite";
 import { PageHeader, PageBody } from "@/components/design-system/page-shell";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
-import { useT } from "@/lib/i18n";
+import { useLocale, type Locale } from "@/lib/i18n";
+import { answerIn } from "@/lib/prompt-lang";
 
-const PRESETS = [
+// `prompt` is a function of the locale, not a string, because it is
+// DUAL-PURPOSE: it is both sent to the model and shown to the operator under
+// the preset row, and both have to be in the language the console is in. The
+// body is fixed; only the answer-language directive moves.
+const PRESETS: {
+  label: string;
+  template: string;
+  prompt: (l: Locale) => string;
+}[] = [
   {
     label: "EXPLAIN ANALYZE",
     template: "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) <your-query-here>;",
-    prompt:
-      "**한국어로** 답변해줘. 이 쿼리에 EXPLAIN (ANALYZE, BUFFERS)를 실행하고, plan을 요약 + 가장 비싼 노드 식별 + 개선안을 제시해줘.",
+    prompt: (l) =>
+      `${answerIn(
+        l,
+      )} 답변해줘. 이 쿼리에 EXPLAIN (ANALYZE, BUFFERS)를 실행하고, plan을 요약 + 가장 비싼 노드 식별 + 개선안을 제시해줘.`,
   },
   {
     label: "인덱스 추천",
     template: "SELECT * FROM <your-table> WHERE <conditions>;",
-    prompt:
-      "**한국어로** 답변해줘. 이 쿼리를 분석해서 개선할 수 있는 인덱스를 제안하고, trade-off(쓰기 비용, 스토리지, selectivity)를 설명해줘.",
+    prompt: (l) =>
+      `${answerIn(
+        l,
+      )} 답변해줘. 이 쿼리를 분석해서 개선할 수 있는 인덱스를 제안하고, trade-off(쓰기 비용, 스토리지, selectivity)를 설명해줘.`,
   },
   {
     label: "락 충돌 진단",
     template: "-- the query that was reported as blocked",
-    prompt:
-      "**한국어로** 답변해줘. 이 쿼리가 락 대기 중이라고 보고됐어. 가장 가능성 높은 락 경합 원인을 진단하고 완화책을 제안해줘.",
+    prompt: (l) =>
+      `${answerIn(
+        l,
+      )} 답변해줘. 이 쿼리가 락 대기 중이라고 보고됐어. 가장 가능성 높은 락 경합 원인을 진단하고 완화책을 제안해줘.`,
   },
   {
     label: "성능 개선 리라이트",
     template: "-- original SQL",
-    prompt:
-      "**한국어로** 답변해줘. 이 SQL을 대상 클러스터의 DB 엔진에서(해당 엔진 문법과 기능만 사용) 더 빠르게 돌도록 재작성하고, 각 변경이 왜 도움이 되는지 설명해줘. 정확한 시맨틱은 보존.",
+    prompt: (l) =>
+      `${answerIn(
+        l,
+      )} 답변해줘. 이 SQL을 대상 클러스터의 DB 엔진에서(해당 엔진 문법과 기능만 사용) 더 빠르게 돌도록 재작성하고, 각 변경이 왜 도움이 되는지 설명해줘. 정확한 시맨틱은 보존.`,
   },
 ];
 
@@ -117,7 +134,7 @@ function relTime(ms: number): string {
 }
 
 export default function QueryLabPage() {
-  const t = useT();
+  const { t, locale } = useLocale();
   const { selected: clusterId, setSelected: setClusterId } =
     useSelectedCluster();
   const [analysis, setAnalysis] = useState("");
@@ -128,7 +145,12 @@ export default function QueryLabPage() {
   } | null>(null);
   const [loadingKind, setLoadingKind] = useState<LoadingKind>(null);
   const [tab, setTab] = useState<Tab>("plan");
-  const [presetPrompt, setPresetPrompt] = useState<string>("");
+  // The INDEX, not the composed string: the prompt has to recompose when the
+  // operator flips the locale, or a preset picked in Korean would keep sending
+  // (and displaying) the Korean directive on an English console.
+  const [presetIdx, setPresetIdx] = useState<number | null>(null);
+  const presetPrompt =
+    presetIdx === null ? "" : PRESETS[presetIdx].prompt(locale);
   // AI insight on the current plan (separate stream from the chat-driven
   // "AI 분석" tab: this one consumes the structured plan summary, not the
   // raw SQL).
@@ -270,14 +292,18 @@ export default function QueryLabPage() {
       : "";
     const message = isPg
       ? `너는 시니어 PostgreSQL 성능 전문가야. 아래는 EXPLAIN ANALYZE 결과를 구조화한 요약이야. ` +
-        `**한국어로** 가장 큰 병목 한 가지를 찍고, 구체적인 개선안 2~3가지를 제안해줘 ` +
+        `${answerIn(
+          locale,
+        )} 가장 큰 병목 한 가지를 찍고, 구체적인 개선안 2~3가지를 제안해줘 ` +
         `(인덱스 컬럼 목록, 쿼리 재작성, 스키마 변경, planner 설정 등, 모호한 일반론 금지). ` +
         `답변은 250단어 이하로 간결하게.` +
         sqlBlock +
         `\n\nPlan summary:\n\`\`\`\n${summary}\n\`\`\``
       : `너는 시니어 MySQL(Aurora MySQL) 성능 전문가야. 아래는 EXPLAIN FORMAT=JSON을 구조화한 요약이야. ` +
         `이건 실행하지 않은 플랜이라 모든 행 수가 옵티마이저 추정치이고, 실제 실행시간, 실제 행 수, 버퍼 통계는 없어. ` +
-        `**한국어로** 가장 큰 병목 한 가지를 찍고, 구체적인 개선안 2~3가지를 제안해줘 ` +
+        `${answerIn(
+          locale,
+        )} 가장 큰 병목 한 가지를 찍고, 구체적인 개선안 2~3가지를 제안해줘 ` +
         `(인덱스 컬럼 목록과 순서, 쿼리 재작성, 스키마 변경, 모호한 일반론 금지). ` +
         `MySQL 문법과 기능만 쓰고, 없는 실측치(실행시간, 실제 행 수, 디스크 스필 여부)는 절대 만들어내지 마. ` +
         `답변은 250단어 이하로 간결하게.` +
@@ -296,7 +322,7 @@ export default function QueryLabPage() {
         setInsightLoading(false);
       },
     );
-  }, [explain, clusterId, lastSql, t]);
+  }, [explain, clusterId, lastSql, locale, t]);
 
   const handleBulkReview = useCallback(
     (sqlText: string) => {
@@ -309,7 +335,9 @@ export default function QueryLabPage() {
       setLoadingKind("bulk");
       setTab("analysis");
       const message =
-        `너는 프로덕션 배포 전 SQL 일괄을 검토하는 시니어 DBA야. **한국어로** 답변해줘. ` +
+        `너는 프로덕션 배포 전 SQL 일괄을 검토하는 시니어 DBA야. ${answerIn(
+          locale,
+        )} 답변해줘. ` +
         `아래 statements는 세미콜론으로 구분되어 있어 ` +
         `(문자열 안의 inline ;가 있을 수 있으니 단순 split이 아니라 SQL 파싱 판단을 사용).\n\n` +
         `각 statement마다 마크다운 테이블에 한 행씩 출력:\n` +
@@ -331,7 +359,7 @@ export default function QueryLabPage() {
         },
       );
     },
-    [clusterId, t],
+    [clusterId, locale, t],
   );
 
   const handleAnalyze = useCallback(
@@ -347,7 +375,9 @@ export default function QueryLabPage() {
 
       const intro =
         presetPrompt ||
-        "**한국어로** 답변해줘. 이 SQL을 정확성, 성능, side effect 관점에서 분석하고, plan을 요청했다면 명확하게 요약해줘.";
+        `${answerIn(
+          locale,
+        )} 답변해줘. 이 SQL을 정확성, 성능, side effect 관점에서 분석하고, plan을 요청했다면 명확하게 요약해줘.`;
       const message = `${intro}\n\n\`\`\`sql\n${sql}\n\`\`\``;
 
       streamChat(
@@ -362,7 +392,7 @@ export default function QueryLabPage() {
         },
       );
     },
-    [clusterId, presetPrompt, t],
+    [clusterId, presetPrompt, locale, t],
   );
 
   const handleRewrite = useCallback(
@@ -398,7 +428,7 @@ export default function QueryLabPage() {
           : "대상 클러스터의 DB 엔진";
       const message =
         `너는 ${engineLabel} 성능 전문가야. 아래 SQL을 **${engineLabel}의 문법과 기능만 사용해**(다른 엔진 전용 구문 금지) **시맨틱을 완전히 보존**하면서 성능을 개선하는 재작성안을 제안해줘.\n\n` +
-        `반드시 아래 형식으로 **한국어**로 답변해줘:\n` +
+        `반드시 아래 형식으로 ${answerIn(locale)} 답변해줘:\n` +
         `1. 재작성된 SQL을 \`\`\`sql 블록으로 먼저 출력\n` +
         `2. 변경 근거 (왜 이 방식이 더 빠른지 구체적으로)\n` +
         `3. 주의사항 (시맨틱 변화 가능성, 인덱스 의존성, 엣지 케이스 등)\n\n` +
@@ -478,11 +508,11 @@ export default function QueryLabPage() {
         },
       );
     },
-    [clusterId, explain, t],
+    [clusterId, explain, locale, t],
   );
 
-  const applyPreset = (template: string, prompt: string) => {
-    setPresetPrompt(prompt);
+  const applyPreset = (idx: number, template: string) => {
+    setPresetIdx(idx);
     setAnalysis("");
     navigator.clipboard?.writeText(template).catch(() => {});
   };
@@ -515,10 +545,10 @@ export default function QueryLabPage() {
           )}
         </div>
         <div className="flex flex-wrap gap-2 items-center">
-          {PRESETS.map((p) => (
+          {PRESETS.map((p, i) => (
             <button
               key={p.label}
-              onClick={() => applyPreset(p.template, p.prompt)}
+              onClick={() => applyPreset(i, p.template)}
               className="text-xs px-3 py-1.5 rounded border border-zinc-700 text-zinc-300 hover:border-sky-500 hover:text-sky-400 transition"
             >
               {t(p.label)}
@@ -526,7 +556,7 @@ export default function QueryLabPage() {
           ))}
           {presetPrompt && (
             <button
-              onClick={() => setPresetPrompt("")}
+              onClick={() => setPresetIdx(null)}
               className="text-xs px-3 py-1.5 rounded border border-zinc-700 text-zinc-500 hover:text-zinc-300 ml-auto"
             >
               {t("프리셋 해제")}

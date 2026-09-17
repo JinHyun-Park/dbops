@@ -14,12 +14,27 @@
  *   1. FIRST TWO SECONDS: which cluster, what fired it, the one-sentence
  *      leading hypothesis, when the report arrived, when the incident was, and
  *      a visible qualification when the evidence behind it is incomplete.
- *   2. THREE SHORT BLOCKS: the assessment (the Korean narrative), the
+ *   2. THREE SHORT BLOCKS: the assessment (the model narrative), the
  *      supporting evidence (measurements with their own timestamps, taken from
  *      the evidence payload rather than from prose), and the next steps, split
  *      into read-only checks and operational changes.
  *   3. ONE CLICK AWAY: the alternative hypotheses and the analysis details
  *      (score derivation, weight table, source counts, trace, duration).
+ *
+ * THE CROSS-LOCALE READER. The narrative is GENERATED in the requesting
+ * operator's language, not translated here: model prose is not an i18n key, so
+ * `t()` would miss it and hand it back unchanged. The inbox is fleet-wide, so a
+ * Korean console can open a report an English operator asked for, and the prose
+ * is frozen in the language that produced it. This surface does not rewrite it;
+ * it LABELS it, one line under the assessment heading, whenever
+ * narrativeLanguage() disagrees with the console. Silent mixing is the failure
+ * to avoid, not the foreign language. Re-running the analysis from the RCA
+ * drawer or the chat answers in the reader's own language, which is the escape
+ * hatch, and it costs one ordinary agent turn. A translation call per report
+ * per reader locale is NOT wired: it would be a second Bedrock call of the same
+ * order as the first (the narrative call is budgeted at maxTokens 2000 and was
+ * measured spending 861 and 900) plus a cache column to stop every open paying
+ * again.
  *
  * THE GOVERNING CONSTRAINT: never make the report look more certain than the
  * system is. A recent schema change starts at base weight 5.0 and a slow query
@@ -51,11 +66,16 @@ import {
   evidenceLabel,
   fmtEvidenceValue,
 } from "@/components/rca/rca-candidate-detail";
+import { narrativeLanguage } from "@/lib/narrative-language";
 import { fmtAgoKo, fmtClockKo, fmtExact } from "@/lib/format";
-import { useT } from "@/lib/i18n";
+import { useLocale } from "@/lib/i18n";
 
 export function RcaReport({ row }: { row: AgentTask }) {
-  const t = useT();
+  // `locale` and `ready` as well as `t`: this surface has to compare the
+  // console's language against the stored narrative's, and `ready` keeps the
+  // first paint (which is always "ko", see LocaleProvider) from asserting a
+  // language mismatch that is not there.
+  const { t, locale, ready } = useLocale();
   const [task, setTask] = useState<AgentTask | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -101,6 +121,9 @@ export function RcaReport({ row }: { row: AgentTask }) {
   const narrativeParts = result?.narrative
     ? assessment(String(result.narrative), headline)
     : [];
+  // The language the stored prose is in, and null when there is no prose.
+  const narrLang = narrativeLanguage(result);
+  const otherLanguage = ready && narrLang !== null && narrLang !== locale;
   const obs = observations(candidates);
   const windowMinutes = result?.window_minutes
     ? Number(result.window_minutes)
@@ -193,7 +216,7 @@ export function RcaReport({ row }: { row: AgentTask }) {
             <div key={c}>{t(c)}</div>
           ))}
           {result?.note && (
-            <div className="text-zinc-400">{String(result.note)}</div>
+            <div className="text-zinc-400">{t(String(result.note))}</div>
           )}
         </div>
       )}
@@ -212,8 +235,8 @@ export function RcaReport({ row }: { row: AgentTask }) {
         <dl className="mt-4 grid gap-x-8 gap-y-1 sm:grid-cols-2">
           {reportLines.map((l, i) => (
             <div key={i} className="flex justify-between gap-3 text-[13px]">
-              <dt className="text-zinc-500">{l.label}</dt>
-              <dd className="font-mono text-zinc-200">{l.value}</dd>
+              <dt className="text-zinc-500">{t(l.label)}</dt>
+              <dd className="font-mono text-zinc-200">{t(l.value)}</dd>
             </div>
           ))}
         </dl>
@@ -223,6 +246,13 @@ export function RcaReport({ row }: { row: AgentTask }) {
       {narrativeParts.length > 0 && (
         <section className="mt-5 max-w-[68ch]">
           <h4 className="text-[13px] font-medium text-zinc-300">{t("평가")}</h4>
+          {otherLanguage && (
+            <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+              {t(
+                "이 서술과 권장 조치는 {n}로 생성되었습니다. 요청한 운영자의 콘솔 언어로 생성되며(자동 작업은 배포 기본 언어), 저장된 문장은 번역하지 않습니다.",
+              ).replace("{n}", t(narrLang === "ko" ? "한국어" : "영어"))}
+            </p>
+          )}
           <div className="mt-1.5 space-y-2 text-[15px] leading-[1.7] text-zinc-200">
             {narrativeParts.map((p, i) => (
               <p key={i}>{p}</p>
@@ -439,13 +469,13 @@ export function RcaReport({ row }: { row: AgentTask }) {
                       {i + 1}.
                     </span>
                     <span className="flex-shrink-0 text-zinc-300">
-                      {s.step}
+                      {t(s.step)}
                     </span>
                     <span className="flex-shrink-0 text-zinc-500">
                       {s.tool}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-zinc-500">
-                      {s.detail}
+                      {t(s.detail)}
                     </span>
                     <span className="flex-shrink-0 text-zinc-600">
                       {String(s.ms)}ms

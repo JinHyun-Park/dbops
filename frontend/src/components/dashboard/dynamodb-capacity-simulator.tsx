@@ -82,7 +82,7 @@ export function DynamoDbCapacitySimulator({
               eyebrow={t("데이터 부족")}
               title={t("비용 비교를 위한 데이터가 부족합니다")}
               description={
-                data.no_data_reason ??
+                (data.no_data_reason && t(data.no_data_reason)) ??
                 t("소비 용량 데이터포인트가 충분히 수집되지 않았습니다.")
               }
             />
@@ -95,7 +95,7 @@ export function DynamoDbCapacitySimulator({
               eyebrow={t("미지원")}
               title={t("이 테이블은 비용 비교를 지원하지 않습니다")}
               description={
-                data.unsupported_reason ??
+                (data.unsupported_reason && t(data.unsupported_reason)) ??
                 t("이 테이블 유형은 비용 시뮬레이션을 지원하지 않습니다.")
               }
             />
@@ -229,7 +229,7 @@ export function DynamoDbCapacitySimulator({
                     {data.assumptions.map((a, i) => (
                       <li key={i} className="flex gap-1.5 leading-relaxed">
                         <span className="text-zinc-600 select-none">-</span>
-                        <span>{a}</span>
+                        <span>{t(a)}</span>
                       </li>
                     ))}
                   </ul>
