@@ -204,13 +204,46 @@ def test_the_model_list_is_deduped_in_english_too():
     assert len(res["recommendations"]) == 1
 
 
+def test_the_dedupe_asymmetry_between_the_two_languages_is_pinned():
+    """MEASURED, and stated as a number so relaxing gate 1 is a deliberate act.
+
+    The SAME three-item list (one piece of advice restated, plus one genuinely
+    different item) loses one entry in Korean and none in English: a Korean word
+    is cut to its stem so "높이세요" and "높이십시오" become one token, while every
+    English token is ASCII, so gate 1 degenerates to "the token sets must be
+    equal" and a paraphrase is rejected before it is ever scored.
+
+    Consequence, admitted rather than hidden: within-list dedupe is effectively
+    INERT on an English task, and an English reader sees restatements a Korean
+    reader never saw. It is kept because the alternative deletes advice about a
+    different table or parameter (see _same_advice). If a future change makes
+    the en count non-zero, that trade is being reopened, and this test is where
+    the argument happens.
+    """
+    ko = {"recommendations": [
+        "work_mem 값을 16MB로 높이세요",
+        "work_mem 값을 16MB로 높이십시오",
+        "orders 테이블에 인덱스를 추가하세요",
+    ]}
+    en = {"recommendations": [
+        "Raise work_mem to 16MB to stop sorts spilling",
+        "Increase work_mem to 16MB so sorts stop spilling",
+        "Add an index on orders(created_at)",
+    ]}
+    assert tw._dedupe_advice(ko) == 1
+    assert len(ko["recommendations"]) == 2
+    assert tw._dedupe_advice(en) == 0
+    assert len(en["recommendations"]) == 3
+
+
 def test_an_english_paraphrase_survives_because_the_matcher_is_stricter_there():
     """MEASURED, and the conservative direction. Every English token is ASCII,
-    so the identifier gate becomes "all tokens must be equal": this pair scores
-    0.636 overlap, above the 0.6 threshold, and is still NOT collapsed. Pinned
-    because it is the behaviour an English report actually gets, and because
-    relaxing the gate would put "work_mem" against "shared_buffers" at exactly
-    0.6 and start deleting advice about a different knob."""
+    so the identifier gate becomes "all tokens must be equal", and this pair
+    dies THERE on raise vs increase: its 0.636 overlap, above the 0.6 threshold,
+    is never even reached. Pinned because it is the behaviour an English report
+    actually gets, and because relaxing the gate would put "work_mem" against
+    "shared_buffers" at exactly 0.6 and start deleting advice about a different
+    knob."""
     a = "Raise work_mem to 16MB to stop the sorts spilling to disk"
     b = "Increase work_mem to 16MB so sorts stop spilling to disk"
     res = {"recommendations": [a, b]}

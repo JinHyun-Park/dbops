@@ -191,10 +191,14 @@ export default function SettingsPage() {
         )}
       />
 
-      {/* Load error */}
+      {/* Load error. Wrapped for symmetry with the save path above, but LATENT
+          today, not load-bearing: fetchAppConfig() throws only "admin only" or
+          `config fetch failed: ${status}` and never reads the response body, so
+          no server-authored string can reach here yet. The wrap is what keeps
+          it from becoming the next raw-Korean render site the day it does. */}
       {error && (
         <div className="mb-6 px-3 py-2 border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs">
-          {error}
+          {t(error)}
         </div>
       )}
 
@@ -305,7 +309,14 @@ export default function SettingsPage() {
               </span>
             )}
             {saveResult === "error" && saveError && (
-              <span className="text-xs text-rose-400">{saveError}</span>
+              // Looked up HERE, because the string is authored by the server:
+              // `api/config` returns its rejection hint verbatim (see
+              // `_INVALID_VALUE_HINT`, whose values carry their own key name
+              // precisely so this exact-equality lookup can match). Without
+              // this `t()` the hint's en-server.ts keys are unreachable and an
+              // English console reads Korean, which is the state this shipped
+              // in until 2026-09-17.
+              <span className="text-xs text-rose-400">{t(saveError)}</span>
             )}
           </div>
         </>

@@ -4,7 +4,8 @@ import { useState } from "react";
 import { fmtBytes, fmtDecimal, fmtDuration, fmtNumber } from "@/lib/format";
 import { buildReportMarkdown } from "@/lib/report-download";
 import { apiUrl, authedFetch } from "@/lib/api-client";
-import { useT } from "@/lib/i18n";
+import { useLocale, useT } from "@/lib/i18n";
+import { summaryLanguage } from "@/lib/narrative-language";
 
 interface ReportRow {
   id: number;
@@ -185,10 +186,17 @@ function ReportDetailPanel({
   payload: ReportPayload | null;
   detail: ReportDetail | null;
 }) {
-  const t = useT();
+  // `locale` and `ready` as well as `t`: the summary is frozen model prose, so
+  // this surface has to compare the console's language against the stored
+  // summary's. `ready` keeps the label off the first paint, which
+  // LocaleProvider always renders as "ko" (static export) before the effect
+  // resolves the real locale.
+  const { t, locale, ready } = useLocale();
   const [htmlLoading, setHtmlLoading] = useState(false);
   const [htmlUnavailable, setHtmlUnavailable] = useState(false);
   const isFleet = row.cluster_id === FLEET_ID;
+  const sumLang = summaryLanguage(row.summary);
+  const otherLanguage = ready && sumLang !== null && sumLang !== locale;
   const fleetPayload = isFleet ? parseJson<FleetPayload>(detail?.data) : null;
 
   function handleDownload() {
@@ -274,9 +282,25 @@ function ReportDetailPanel({
           )}
         </div>
         {row.summary && (
-          <p className="mt-4 text-[15px] leading-relaxed text-zinc-200 max-w-3xl whitespace-pre-wrap">
-            {row.summary}
-          </p>
+          <div className="mt-4 max-w-3xl">
+            {otherLanguage && (
+              <p className="mb-1.5 text-[11px] leading-relaxed text-zinc-500">
+                {/* The language NAME is measured from the prose in front of
+                    the reader, so it is always right. The reason clause is
+                    phrased as what the generator is ASKED to do, not as an
+                    invariant about the result: the model can disobey an
+                    English directive and answer in Korean anyway, and a label
+                    that promised "always follows the deployment default"
+                    would then explain a language the row is not in. */}
+                {t(
+                  "이 요약은 {n}로 생성되었습니다. 리포트는 예약 실행이라 요청한 운영자가 없어 배포 기본 언어로 쓰도록 요청하며, 저장된 문장은 번역하지 않습니다.",
+                ).replace("{n}", t(sumLang === "ko" ? "한국어" : "영어"))}
+              </p>
+            )}
+            <p className="text-[15px] leading-relaxed text-zinc-200 whitespace-pre-wrap">
+              {row.summary}
+            </p>
+          </div>
         )}
       </header>
 

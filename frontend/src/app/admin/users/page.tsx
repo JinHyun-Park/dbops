@@ -106,9 +106,15 @@ export default function AdminUsersPage() {
         )}
       />
 
+      {/* Looked up HERE, because the string can be authored by the server:
+          updateUserRole() copies the response body's `error` field verbatim
+          into the thrown message, so whatever api/admin_users returns lands in
+          this node. Every string that handler returns today is English, so the
+          lookup is a no-op fallthrough; it is the wrap that makes a Korean one
+          translatable instead of raw. */}
       {error && (
         <div className="mb-6 px-3 py-2 border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs">
-          {error}
+          {t(error)}
         </div>
       )}
 

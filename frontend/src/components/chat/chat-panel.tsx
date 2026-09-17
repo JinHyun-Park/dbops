@@ -695,9 +695,13 @@ export function ChatPanel() {
       if (assistantText.trim().length < 80) return;
       followupAbortRef.current?.abort();
       setFollowupsLoading(true);
+      // The chips are OUTPUT TEXT the operator reads, so their CONTENT follows
+      // the console language. The JSON contract sentence and its example are
+      // untouched: the parser below depends on them verbatim.
       const prompt =
-        `Suggest 3 short, specific follow-up questions a DBA might ask next, based on the Q&A below. Return ONLY a JSON array of 3 strings, no other text, no markdown, no code fences. Example: ["q1","q2","q3"].\n\n` +
-        `Q: ${userText}\n\nA: ${assistantText.slice(0, 4000)}`;
+        `Suggest 3 short, specific follow-up questions a DBA might ask next, based on the Q&A below. Return ONLY a JSON array of 3 strings, no other text, no markdown, no code fences. Example: ["q1","q2","q3"]. Write the 3 questions themselves ${answerIn(
+          locale,
+        )}.\n\n` + `Q: ${userText}\n\nA: ${assistantText.slice(0, 4000)}`;
       let buffer = "";
       followupAbortRef.current = streamChat(
         prompt,
@@ -759,7 +763,7 @@ export function ChatPanel() {
         },
       );
     },
-    [modelId, persist],
+    [modelId, persist, locale],
   );
 
   // Generate a concise title, in the console locale, after the first exchange

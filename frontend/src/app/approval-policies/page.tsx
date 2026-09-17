@@ -241,9 +241,15 @@ function PolicyForm({
         </div>
       </div>
 
+      {/* Looked up HERE, because the string can be authored by the server:
+          _writePolicy() copies the response body's `error` field verbatim into
+          the thrown message, so api/approval_policies' validation rejections
+          land in this node. All of them are English today, so the lookup is a
+          no-op fallthrough; it is the wrap that makes a Korean one
+          translatable instead of raw. */}
       {error && (
         <div className="mx-5 mb-4 px-3 py-2 border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-mono">
-          {error}
+          {t(error)}
         </div>
       )}
 

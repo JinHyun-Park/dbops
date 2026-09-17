@@ -1464,6 +1464,7 @@ const EN_UI: Record<string, string> = {
   "quick presets: 템플릿을 클립보드에 복사하고 AI 분석 프롬프트를 준비합니다":
     "quick presets: copies the template to your clipboard and arms the AI analysis prompt",
   "프리셋 해제": "Clear preset",
+  "보낼 요청": "Request being sent",
   "현재 편집기의 SQL을 라이브러리에 저장":
     "Save the editor's SQL to the library",
   "먼저 SQL을 작성하거나 EXPLAIN을 실행하세요":
@@ -1510,6 +1511,14 @@ const EN_UI: Record<string, string> = {
   "인덱스 추천": "Index advice",
   "락 충돌 진단": "Lock contention triage",
   "성능 개선 리라이트": "Performance rewrite",
+  "이 쿼리에 EXPLAIN (ANALYZE, BUFFERS)를 실행하고, plan을 요약 + 가장 비싼 노드 식별 + 개선안을 제시해줘.":
+    "Run EXPLAIN (ANALYZE, BUFFERS) on this query, then summarize the plan, name the most expensive node and propose improvements.",
+  "이 쿼리를 분석해서 개선할 수 있는 인덱스를 제안하고, trade-off(쓰기 비용, 스토리지, selectivity)를 설명해줘.":
+    "Analyze this query, propose indexes that would improve it and explain the trade-offs (write cost, storage, selectivity).",
+  "이 쿼리가 락 대기 중이라고 보고됐어. 가장 가능성 높은 락 경합 원인을 진단하고 완화책을 제안해줘.":
+    "This query was reported as waiting on a lock. Diagnose the most likely cause of the contention and propose a mitigation.",
+  "이 SQL을 대상 클러스터의 DB 엔진에서(해당 엔진 문법과 기능만 사용) 더 빠르게 돌도록 재작성하고, 각 변경이 왜 도움이 되는지 설명해줘. 정확한 시맨틱은 보존.":
+    "Rewrite this SQL to run faster on the target cluster's DB engine (using only that engine's syntax and features) and explain why each change helps. Preserve the exact semantics.",
 
   // ── app/runbooks ─────────────────────────────────────────────────────────
   "× 작성 닫기": "× Close form",
@@ -2841,6 +2850,16 @@ const EN_UI: Record<string, string> = {
   "이 리포트는 HTML 미생성": "No HTML was generated for this report",
   "HTML 파일을 새 탭에서 엽니다": "Opens the HTML file in a new tab",
   "HTML 다운로드": "Download HTML",
+  // Shown only when the stored summary is in the OTHER language. Same problem
+  // as the RCA narrative's label above, different cause, and that is why the
+  // wording differs: this report is written by a SCHEDULE, so there is never a
+  // requesting operator and the deployment default is what the generator is
+  // asked for. "asked for", not "always follows": the model can disobey the
+  // English directive and answer in Korean, and a fallback template can too,
+  // so the only invariant here is the language NAME, which is measured from
+  // the stored prose.
+  "이 요약은 {n}로 생성되었습니다. 리포트는 예약 실행이라 요청한 운영자가 없어 배포 기본 언어로 쓰도록 요청하며, 저장된 문장은 번역하지 않습니다.":
+    "This summary was generated in {n}. A report runs on a schedule, so there is no requesting operator and the generator is asked to write in the deployment's default language. Stored prose is not translated afterwards.",
   "Fleet 요약": "Fleet summary",
   "클러스터 수": "Clusters",
   "총 경보": "Total alerts",

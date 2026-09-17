@@ -8,8 +8,13 @@ fixture keys.
 """
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
+
+import pytest
+
+_HANGUL = re.compile(r"[가-힣]")
 
 _HANDLER_PATH = (
     Path(__file__).resolve().parents[3]
@@ -82,7 +87,7 @@ def test_build_fleet_data_totals_and_worst_ordering():
 
 def test_fleet_summary_mentions_counts_and_worst():
     fd = handler._build_fleet_data(_fleet_rows())
-    text = handler._fleet_summary("2026-07-06", fd)
+    text = handler._fleet_summary("2026-07-06", fd, "ko")
     assert "2026-07-06" in text
     assert "클러스터 3대" in text
     assert "경보 10건" in text
@@ -90,11 +95,65 @@ def test_fleet_summary_mentions_counts_and_worst():
     assert "prod-mysql-2" in text  # a worst cluster is named
 
 
+# ---------------------------------------------------------------------------
+# The fleet summary follows the deployment locale.
+#
+# This one has NO Bedrock call in its path: the template IS the fleet row's
+# summary on every run, not just on the days the model is unreachable. So a
+# Korean-only version was wrong on an en deployment every single day, and the
+# frontend's language label sat above it explaining a language it was not in.
+#
+# Asserted in BOTH DIRECTIONS, because a one-direction test ("the Korean summary
+# says 클러스터") passes unchanged on the hardcoded Korean template this change
+# exists to remove.
+# ---------------------------------------------------------------------------
+
+
+def test_the_fleet_summary_follows_the_locale_in_both_directions():
+    fd = handler._build_fleet_data(_fleet_rows())
+    ko = handler._fleet_summary("2026-07-06", fd, "ko")
+    en = handler._fleet_summary("2026-07-06", fd, "en")
+    assert ko != en
+    assert "클러스터 3대, 경보 10건, 슬로우쿼리 7건." in ko
+    assert "Clusters 3, alerts 10, slow queries 7." in en
+    # Every number, every cluster id and the date survive the crossing verbatim.
+    for text in (ko, en):
+        assert "2026-07-06" in text
+        assert "prod-mysql-2" in text and "prod-pg-1" in text
+    # No Korean left in the English one. This is the assertion that scales: it
+    # fails on the next hardcoded Korean fragment added to the template.
+    assert not _HANGUL.search(en), en
+
+
+def test_the_quiet_fleet_branch_follows_the_locale_too():
+    """The other branch, reached whenever no cluster fired an alert, i.e. most
+    days. Testing only the noisy branch leaves half the template hardcoded."""
+    quiet = handler._build_fleet_data([
+        handler._fleet_row("staging-pg-3", "aurora-postgresql",
+                           _report_data("staging-pg-3", 0.2, 0.5, alert_fires=0,
+                                        n_slow=0, delta_bytes=0)),
+    ])
+    ko = handler._fleet_summary("2026-07-06", quiet, "ko")
+    en = handler._fleet_summary("2026-07-06", quiet, "en")
+    assert "주의가 필요한 클러스터는 없습니다." in ko
+    assert "No cluster needs attention." in en
+    assert not _HANGUL.search(en), en
+
+
+@pytest.mark.parametrize("loc", ["", None, "EN", "en-US", "fr", 7])
+def test_an_unrecognised_locale_reads_korean(loc):
+    """Same fail-closed default as handler._report_locale, which is the only
+    producer of this argument: Korean is what every deployment ships, and a
+    value nobody validated does not get to switch a stored summary's language."""
+    text = handler._fleet_summary("2026-07-06", handler._build_fleet_data(_fleet_rows()), loc)
+    assert "클러스터 3대" in text, loc
+
+
 def test_fleet_html_contract_renders_real_ids_and_numbers():
     """Feed the REAL builder output into the REAL HTML builder."""
     fd = handler._build_fleet_data(_fleet_rows())
-    summary = handler._fleet_summary("2026-07-06", fd)
-    html = report_html.build_fleet_report_html("2026-07-06", "daily", summary, fd)
+    summary = handler._fleet_summary("2026-07-06", fd, "ko")
+    html = report_html.build_fleet_report_html("2026-07-06", "daily", summary, fd, "ko")
 
     assert isinstance(html, str) and html.lstrip().startswith("<!doctype html>")
     # Real cluster ids from the data builder must appear in the rendered tables.
@@ -112,6 +171,6 @@ def test_fleet_html_contract_renders_real_ids_and_numbers():
 
 def test_fleet_html_survives_empty_and_missing_keys():
     """Empty fleet_data must not raise (no clusters / missing totals)."""
-    html = report_html.build_fleet_report_html("2026-07-06", "daily", "요약", {})
+    html = report_html.build_fleet_report_html("2026-07-06", "daily", "요약", {}, "ko")
     assert html.lstrip().startswith("<!doctype html>")
     assert "데이터 없음" in html

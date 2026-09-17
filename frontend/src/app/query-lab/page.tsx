@@ -27,50 +27,53 @@ import { PageHeader, PageBody } from "@/components/design-system/page-shell";
 import { useSelectedCluster } from "@/lib/use-selected-cluster";
 import { ClusterPicker } from "@/components/design-system/cluster-picker";
 import { useLocale, type Locale } from "@/lib/i18n";
-import { answerIn } from "@/lib/prompt-lang";
+import { answerIn, labelIn } from "@/lib/prompt-lang";
 
-// `prompt` is a function of the locale, not a string, because it is
-// DUAL-PURPOSE: it is both sent to the model and shown to the operator under
-// the preset row, and both have to be in the language the console is in. The
-// body is fixed; only the answer-language directive moves.
-const PRESETS: {
-  label: string;
-  template: string;
-  prompt: (l: Locale) => string;
-}[] = [
+// `text` is the Korean instruction BODY, and it has TWO audiences that see
+// DIFFERENT strings, which is the whole point of separating it from what is
+// sent:
+//   - the MODEL gets composePresetPrompt(), this body with the answer-language
+//     directive pinned in front of it, always in Korean;
+//   - the OPERATOR gets this body through t(), so an English console reads it
+//     in English.
+// So what the panel shows is never byte-for-byte what goes out, and the label
+// above it says "보낼 요청" (the request being sent) rather than "prompt:",
+// which claimed to be verbatim and was not.
+//
+// The two used to be one string rendered raw, which put six words of English
+// ("**in English** 답변해줘.") in front of a Korean sentence on an English
+// console: the one operator-visible Korean literal in src/ that no gate covered,
+// because i18n-check asks whether a t() call has a key, never whether a literal
+// is wrapped at all. `text` now has a key, and the display prop name is one
+// i18n-check scans, so the gate covers it from here on.
+const PRESETS: { label: string; template: string; text: string }[] = [
   {
     label: "EXPLAIN ANALYZE",
     template: "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) <your-query-here>;",
-    prompt: (l) =>
-      `${answerIn(
-        l,
-      )} 답변해줘. 이 쿼리에 EXPLAIN (ANALYZE, BUFFERS)를 실행하고, plan을 요약 + 가장 비싼 노드 식별 + 개선안을 제시해줘.`,
+    text: "이 쿼리에 EXPLAIN (ANALYZE, BUFFERS)를 실행하고, plan을 요약 + 가장 비싼 노드 식별 + 개선안을 제시해줘.",
   },
   {
     label: "인덱스 추천",
     template: "SELECT * FROM <your-table> WHERE <conditions>;",
-    prompt: (l) =>
-      `${answerIn(
-        l,
-      )} 답변해줘. 이 쿼리를 분석해서 개선할 수 있는 인덱스를 제안하고, trade-off(쓰기 비용, 스토리지, selectivity)를 설명해줘.`,
+    text: "이 쿼리를 분석해서 개선할 수 있는 인덱스를 제안하고, trade-off(쓰기 비용, 스토리지, selectivity)를 설명해줘.",
   },
   {
     label: "락 충돌 진단",
     template: "-- the query that was reported as blocked",
-    prompt: (l) =>
-      `${answerIn(
-        l,
-      )} 답변해줘. 이 쿼리가 락 대기 중이라고 보고됐어. 가장 가능성 높은 락 경합 원인을 진단하고 완화책을 제안해줘.`,
+    text: "이 쿼리가 락 대기 중이라고 보고됐어. 가장 가능성 높은 락 경합 원인을 진단하고 완화책을 제안해줘.",
   },
   {
     label: "성능 개선 리라이트",
     template: "-- original SQL",
-    prompt: (l) =>
-      `${answerIn(
-        l,
-      )} 답변해줘. 이 SQL을 대상 클러스터의 DB 엔진에서(해당 엔진 문법과 기능만 사용) 더 빠르게 돌도록 재작성하고, 각 변경이 왜 도움이 되는지 설명해줘. 정확한 시맨틱은 보존.`,
+    text: "이 SQL을 대상 클러스터의 DB 엔진에서(해당 엔진 문법과 기능만 사용) 더 빠르게 돌도록 재작성하고, 각 변경이 왜 도움이 되는지 설명해줘. 정확한 시맨틱은 보존.",
   },
 ];
+
+/** What is SENT for a preset: the Korean instruction body with the answer
+ *  language pinned in front of it, composed exactly as it always was. */
+function composePresetPrompt(locale: Locale, idx: number): string {
+  return `${answerIn(locale)} 답변해줘. ${PRESETS[idx].text}`;
+}
 
 type Tab = "plan" | "analysis" | "rewrite";
 type LoadingKind = "explain" | "analyze" | "bulk" | "rewrite" | null;
@@ -150,7 +153,7 @@ export default function QueryLabPage() {
   // (and displaying) the Korean directive on an English console.
   const [presetIdx, setPresetIdx] = useState<number | null>(null);
   const presetPrompt =
-    presetIdx === null ? "" : PRESETS[presetIdx].prompt(locale);
+    presetIdx === null ? "" : composePresetPrompt(locale, presetIdx);
   // AI insight on the current plan (separate stream from the chat-driven
   // "AI 분석" tab: this one consumes the structured plan summary, not the
   // raw SQL).
@@ -341,7 +344,11 @@ export default function QueryLabPage() {
         `아래 statements는 세미콜론으로 구분되어 있어 ` +
         `(문자열 안의 inline ;가 있을 수 있으니 단순 split이 아니라 SQL 파싱 판단을 사용).\n\n` +
         `각 statement마다 마크다운 테이블에 한 행씩 출력:\n` +
-        `| # | Statement (앞 80자) | Risk | Notes |\n` +
+        `| # | Statement (${labelIn(
+          locale,
+          "앞 80자",
+          "first 80 chars",
+        )}) | Risk | Notes |\n` +
         `Risk 값: **safe** (read-only / 파라미터 바인딩된 DML), **risky** (대량 스캔, WHERE 누락, ` +
         `락 헤비), **dangerous** (DDL, WHERE 없는 DROP/TRUNCATE/DELETE, hot 테이블에 ALTER TABLE).\n` +
         `Notes는 그 쿼리에 특화된 짧은 한 문장.\n` +
@@ -429,9 +436,24 @@ export default function QueryLabPage() {
       const message =
         `너는 ${engineLabel} 성능 전문가야. 아래 SQL을 **${engineLabel}의 문법과 기능만 사용해**(다른 엔진 전용 구문 금지) **시맨틱을 완전히 보존**하면서 성능을 개선하는 재작성안을 제안해줘.\n\n` +
         `반드시 아래 형식으로 ${answerIn(locale)} 답변해줘:\n` +
-        `1. 재작성된 SQL을 \`\`\`sql 블록으로 먼저 출력\n` +
-        `2. 변경 근거 (왜 이 방식이 더 빠른지 구체적으로)\n` +
-        `3. 주의사항 (시맨틱 변화 가능성, 인덱스 의존성, 엣지 케이스 등)\n\n` +
+        `1. ${labelIn(
+          locale,
+          "재작성된 SQL",
+          "Rewritten SQL",
+        )}을 \`\`\`sql 블록으로 먼저 출력\n` +
+        // "Why it changed" asserted a change that has not happened: this
+        // prompt PROPOSES a rewrite, and 근거 is the rationale for the
+        // proposal. "Rationale" is what the section actually contains.
+        `2. ${labelIn(
+          locale,
+          "변경 근거",
+          "Rationale",
+        )} (왜 이 방식이 더 빠른지 구체적으로)\n` +
+        `3. ${labelIn(
+          locale,
+          "주의사항",
+          "Caveats",
+        )} (시맨틱 변화 가능성, 인덱스 의존성, 엣지 케이스 등)\n\n` +
         `원본 SQL:\n\`\`\`sql\n${sql}\n\`\`\`` +
         planSummary;
 
@@ -563,9 +585,14 @@ export default function QueryLabPage() {
             </button>
           )}
         </div>
-        {presetPrompt && (
+        {presetIdx !== null && (
           <div className="mt-2 text-[11px] text-sky-400 font-mono">
-            prompt: {presetPrompt}
+            {/* NOT labelled `prompt:` any more, because this is not the
+                prompt. What is sent is composePresetPrompt(), the body with
+                the answer-language directive in front of it; what is shown is
+                the body TRANSLATED, which is the right thing for a reader and
+                by definition not verbatim. So the label says what this is. */}
+            {t("보낼 요청")}: {t(PRESETS[presetIdx].text)}
           </div>
         )}
       </div>

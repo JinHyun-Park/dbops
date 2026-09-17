@@ -1,5 +1,7 @@
 /**
- * The ONE place that decides how a model prompt asks for its answer language.
+ * The ONE place that decides how a model prompt asks for its answer language,
+ * and, for a prompt that prescribes its own output text, which language that
+ * text is in. Both helpers share one locale test, so they cannot disagree.
  *
  * Every prompt this app sends is code-authored Korean, and 14 of them used to
  * pin the answer with a literal `**한국어로**`. A user turn beats the system
@@ -32,12 +34,34 @@ import type { Locale } from "./i18n";
  * rewriting a tuned prompt would change the answer.
  */
 export function answerIn(locale: Locale): string {
-  // Normalised the same way `answer_language()` does, so a value that came
-  // from somewhere other than `detectLocale()` (a stored "en-US", a stray
-  // `navigator.language`) still reads as English instead of silently falling
-  // back to Korean. Anything else, including null and undefined at runtime,
-  // is Korean.
-  const isEnglish =
-    typeof locale === "string" && locale.trim().toLowerCase().startsWith("en");
-  return isEnglish ? "**in English**" : "**한국어로**";
+  return isEnglish(locale) ? "**in English**" : "**한국어로**";
+}
+
+/**
+ * A literal the prompt PRESCRIBES as output, in the answer's own language.
+ *
+ * A prompt that dictates output text (a markdown heading the answer must use,
+ * a fixed string the model is told to reply with) has to dictate it in the
+ * language the answer is in. Otherwise `answerIn()` flips the directive and
+ * nothing else, and an English answer comes back with Korean labels embedded
+ * in it: "3. **권장 조치**" over English prose, or the literal "조치 불필요"
+ * as the one sentence a no-impact event returns.
+ *
+ * Only OUTPUT text goes through here. The instruction body around it stays
+ * Korean on purpose, for the reason `answerIn()` documents above.
+ */
+export function labelIn(locale: Locale, ko: string, en: string): string {
+  return isEnglish(locale) ? en : ko;
+}
+
+// Normalised the same way `answer_language()` does, so a value that came from
+// somewhere other than `detectLocale()` (a stored "en-US", a stray
+// `navigator.language`) still reads as English instead of silently falling back
+// to Korean. Anything else, including null and undefined at runtime, is Korean:
+// FAIL-SAFE TO KOREAN, one copy, shared by both helpers above so the directive
+// and the labels it governs can never disagree about the locale.
+function isEnglish(locale: Locale): boolean {
+  return (
+    typeof locale === "string" && locale.trim().toLowerCase().startsWith("en")
+  );
 }

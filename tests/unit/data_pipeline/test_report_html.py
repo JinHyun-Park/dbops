@@ -34,7 +34,7 @@ _DATA = {
 
 
 def test_build_html_is_self_contained_and_has_charts():
-    html = rh.build_report_html("my-cluster", "2026-06-24", "daily", "요약 텍스트", _DATA)
+    html = rh.build_report_html("my-cluster", "2026-06-24", "daily", "요약 텍스트", _DATA, "ko")
     assert html.lstrip().lower().startswith("<!doctype html>")
     assert "my-cluster" in html
     assert "요약 텍스트" in html
@@ -48,7 +48,7 @@ def test_real_data_renders_non_empty_content():
     """Content assertion: real-shaped fixture must produce a polyline (line chart
     drew data), a rect bar with query text, and the rule_id from top_alerts,
     i.e. the HTML is NOT the empty-placeholder shell."""
-    html = rh.build_report_html("my-cluster", "2026-06-24", "daily", "요약 텍스트", _DATA)
+    html = rh.build_report_html("my-cluster", "2026-06-24", "daily", "요약 텍스트", _DATA, "ko")
     # Line chart drew data (AAS series has 3 points >= 2)
     assert "<polyline" in html, "Expected AAS line chart polyline, got placeholder"
     # Bar chart has at least one rect bar (slow queries rendered)
@@ -77,7 +77,7 @@ def test_summary_and_query_text_html_escaped():
         ],
         "connections": {},
     }
-    html = rh.build_report_html("c", "2026-06-24", "daily", evil_summary, evil_data)
+    html = rh.build_report_html("c", "2026-06-24", "daily", evil_summary, evil_data, "ko")
     # Raw injection attempts must not survive
     assert "<script>alert(1)</script>" not in html
     assert "<img src=x onerror=alert(2)>" not in html
@@ -89,7 +89,7 @@ def test_summary_and_query_text_html_escaped():
 
 
 def test_empty_data_still_valid_html_no_crash():
-    html = rh.build_report_html("c", "2026-06-24", "daily", "", {})
+    html = rh.build_report_html("c", "2026-06-24", "daily", "", {}, "ko")
     assert html.lstrip().lower().startswith("<!doctype html>")
     assert "데이터 없음" in html   # placeholder for empty series
 

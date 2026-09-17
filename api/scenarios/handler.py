@@ -10,6 +10,14 @@ symptom. A scenario enqueues an AUTOMATED task, so the prose comes back in the
 deployment default language (``DEFAULT_LOCALE``, Korean unless an admin changed it),
 not in whichever console pressed the button: see task_worker._task_locale.
 
+AND THE PAGE DELIBERATELY DOES NOT WARN ABOUT THAT. Recorded here so it does not get
+re-opened: the report labels its own language at READ time, and only when it actually
+differs from the reader's console (rca-report.tsx for the narrative,
+report-viewer.tsx for the operations summary). A warning on the button would instead
+name a language before the prose exists, would say nothing true to the reader whose
+console already matches, and would go stale the moment an admin flips DEFAULT_LOCALE.
+One sentence attached to the prose beats a hedged one attached to the trigger.
+
 WHAT IT DOES NOT DO, and why. It never touches a target database. The registered
 clusters are permanent read-only fixtures shared by every other demo, so a button that
 could saturate a real instance's CPU or hold a real lock is not a demo, it is an

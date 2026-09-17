@@ -251,3 +251,68 @@ def test_a_locale_outside_the_allowlist_is_rejected_with_no_write(bad):
     # No exception text, and never the rejected value, in the response body.
     assert bad not in r["body"] if bad else True
     assert "ValueError" not in r["body"]
+
+
+# ---------------------------------------------------------------------------
+# The rejection text is a SELF-CONTAINED literal, because en-server.ts looks it
+# up by exact equality on the Korean source string.
+#
+# It used to be composed as f"{key}: " + hint, so the body could never match a
+# key for the bare hint: two entries sat in en-server.ts translating nothing,
+# and DEFAULT_LOCALE (added with the locale control) had no entry at all, so a
+# bad locale answered an English console in Korean. The key name now lives
+# INSIDE each literal and the handler emits it unprefixed, which is also what
+# tests/unit/test_en_server_keys.py requires: a key has to appear verbatim as a
+# Python string literal, which a runtime-composed string never does.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("key,bad", [
+    ("TICKETING_PROVIDER", "Has Space!"),
+    ("REPORT_DELIVERY_ENABLED", "maybe"),
+    ("DEFAULT_LOCALE", "ja"),
+])
+def test_the_rejection_body_is_exactly_the_translatable_literal(key, bad):
+    table = _fake_table()
+    with patch.object(handler, "_table", return_value=table):
+        r = handler.lambda_handler(_event("PUT", {"config": {key: bad}}))
+    assert r["statusCode"] == 400
+    assert table._store == {}
+    error = json.loads(r["body"])["error"]
+    # Verbatim, so translate() can hit it. Not a prefix plus a hint.
+    assert error == handler._INVALID_VALUE_HINT[key]
+    # The key name is carried by the literal, and carried ONCE.
+    assert error.startswith(f"{key}: ")
+    assert error.count(key) == 1
+
+
+def test_every_known_key_has_its_own_rejection_literal():
+    """A new CONFIG_KEYS entry with no hint falls back to a generic composed
+    message, which is the unreachable-key shape this map exists to avoid.
+    DEFAULT_LOCALE shipped in exactly that state."""
+    assert set(handler._INVALID_VALUE_HINT) == set(handler.CONFIG_KEYS)
+
+# ---------------------------------------------------------------------------
+# The RENDER SITE, pinned here because this is the only place that knows the
+# rejection hints are server-authored Korean.
+#
+# `test_en_server_keys.py` proves each hint has an `en-server.ts` key, and the
+# key proves nothing on its own: `translate()` is only reached through `t()`, so
+# a render site that prints the string raw leaves all three keys unreachable.
+# That is exactly the state this feature shipped in until 2026-09-17, and
+# reverting the one-character fix was measured to leave every gate green.
+# ---------------------------------------------------------------------------
+
+_SETTINGS_PAGE = (
+    Path(__file__).resolve().parents[3] / "frontend/src/app/settings/page.tsx"
+)
+
+
+def test_the_settings_page_translates_the_server_authored_rejection():
+    src = _SETTINGS_PAGE.read_text(encoding="utf-8")
+    assert "{t(saveError)}" in src, (
+        "the config rejection hint is server-authored Korean, so the render site "
+        "has to look it up; without t() the en-server.ts keys are dead"
+    )
+    assert "{saveError}" not in src.replace("{t(saveError)}", ""), (
+        "a second, unwrapped render of the same value would reintroduce the bug"
+    )

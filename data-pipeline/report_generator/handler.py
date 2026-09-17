@@ -83,13 +83,17 @@ def lambda_handler(event, context):
     clusters = cache_query("SELECT cluster_id, engine FROM cluster_meta")
     report_date = datetime.utcnow().strftime("%Y-%m-%d")
     report_type = event.get("report_type", "daily")
+    # Resolved ONCE per run and threaded through every producer below. Reading
+    # the config again deeper in the tree would let a mid-run DEFAULT_LOCALE
+    # change ship a single report whose summary, chrome and lang= disagree.
+    locale = _report_locale()
     reports_generated = []
     fleet_rows = []  # compact per-cluster records for the fleet rollup
 
     for cluster in clusters:
         cid = cluster["cluster_id"]
         report_data = _build_report_data(cache_query, cid)
-        summary_text = _write_nl_summary(cid, report_date, report_data)
+        summary_text = _write_nl_summary(cid, report_date, report_data, locale)
         fleet_rows.append(_fleet_row(cid, cluster.get("engine"), report_data))
 
         s3_key = f"reports/{cid}/{report_date}-{report_type}.json"
@@ -111,7 +115,13 @@ def lambda_handler(event, context):
                 html_key = s3_key[:-5] + ".html" if s3_key.endswith(".json") else s3_key + ".html"
                 boto3.client("s3").put_object(
                     Bucket=s3_bucket, Key=html_key,
-                    Body=build_report_html(cid, report_date, report_type, summary_text, report_data),
+                    # Same locale the summary was written in, so the shell
+                    # agrees with the prose it wraps. lang= is NOT taken from
+                    # this value: report_html reads it off the summary text,
+                    # because the model can disobey the directive and this
+                    # value cannot.
+                    Body=build_report_html(cid, report_date, report_type, summary_text,
+                                           report_data, locale),
                     ContentType="text/html; charset=utf-8",
                 )
             except Exception as e:
@@ -142,7 +152,7 @@ def lambda_handler(event, context):
     if fleet_rows:
         try:
             _generate_fleet_rollup(
-                cache_query, s3_bucket, report_date, report_type, fleet_rows
+                cache_query, s3_bucket, report_date, report_type, fleet_rows, locale
             )
             reports_generated.append("*")
         except Exception as e:
@@ -275,13 +285,14 @@ def _build_report_data(cache_query, cluster_id: str) -> dict:
     }
 
 
-def _write_nl_summary(cluster_id: str, report_date: str, data: dict) -> str:
+def _write_nl_summary(cluster_id: str, report_date: str, data: dict, locale: str) -> str:
     """Ask Bedrock to write a 3-5 sentence DBA-readable summary. On any
     error, fall back to a deterministic template so the report row still
-    has a usable summary."""
+    has a usable summary. `locale` reaches BOTH paths: the fallback is what an
+    en deployment actually ships whenever Bedrock throttles."""
     try:
         bedrock = boto3.client("bedrock-runtime")
-        prompt = _build_summary_prompt(cluster_id, report_date, data)
+        prompt = _build_summary_prompt(cluster_id, report_date, data, locale)
         resp = bedrock.invoke_model(
             modelId=SUMMARY_MODEL_ID,
             body=json.dumps({
@@ -299,7 +310,7 @@ def _write_nl_summary(cluster_id: str, report_date: str, data: dict) -> str:
         # back is fine; the structured data column still has the numbers.
         print(f"[report_generator] Bedrock summary failed for {cluster_id}: {e}")
 
-    return _template_summary(cluster_id, report_date, data)
+    return _template_summary(cluster_id, report_date, data, locale)
 
 
 _LOCALES = ("ko", "en")
@@ -317,6 +328,55 @@ _SUMMARY_LANG = {
     ),
 }
 
+# The DETERMINISTIC summary fragments: the per-cluster Bedrock fallback and the
+# fleet rollup, which makes no model call at all. Both used to be Korean on every
+# deployment, so an en deployment's report row carried a language label that
+# described a language the row was not in.
+#
+# One entry per fragment with the two languages on ADJACENT LINES, the same
+# side-by-side shape as _SUMMARY_LANG above and for the same reason: these are
+# code-authored strings, not model prose, so a reviewer has to be able to read
+# one screen and see that the English says what the Korean says. Every metric
+# name, cluster id and number is interpolated verbatim, and DBA-facing jargon
+# (AAS, "Top slow query") stays English in both, this project's standing rule.
+#
+# ponytail: the English counts are phrased label-first ("Clusters 1, alerts 3")
+# rather than "1 clusters", so a fleet of one reads correctly without a
+# pluralisation branch. Upgrade path if the prose ever needs to flow: a plural
+# form per count, which is a real i18n feature and not worth it for four lines.
+_SUMMARY_TEXT = {
+    "head": {"ko": "{cid} 24시간 요약 ({date})",
+             "en": "{cid} 24-hour summary ({date})"},
+    "aas": {"ko": "AAS avg={avg}, max={max}, AAS>{thr} 인 샘플 {n}개.",
+            "en": "AAS avg={avg}, max={max}, samples with AAS>{thr}: {n}."},
+    "slow": {"ko": "Top slow query total {ms}ms 누적.",
+             "en": "Top slow query total {ms}ms cumulative."},
+    "rule": {"ko": "가장 자주 발화한 룰: {rule} ({n}회).",
+             "en": "Most frequently fired rule: {rule} ({n}x)."},
+    # Scoped to EVENTS in both languages on purpose: the branch is "no slow
+    # queries and no alerts", which says nothing about AAS, and the sentence
+    # printed immediately before it can report hundreds of busy samples. An
+    # English "Nothing notable happened." denied that; this does not.
+    "quiet": {"ko": "주목할 만한 이벤트는 없었습니다.",
+              "en": "No notable events."},
+    "fleet_head": {"ko": "Fleet 전체 요약 ({date})",
+                   "en": "Whole-fleet summary ({date})"},
+    "fleet_totals": {"ko": "클러스터 {n}대, 경보 {alerts}건, 슬로우쿼리 {slow}건.",
+                     "en": "Clusters {n}, alerts {alerts}, slow queries {slow}."},
+    # Label-first and number-neutral, the same reason fleet_totals is: a fleet
+    # of one must not read "1 clusters" or "Clusters ...: pg-1".
+    "fleet_worst": {"ko": "주의가 필요한 클러스터: {ids}.",
+                    "en": "Needs attention: {ids}."},
+    "fleet_clean": {"ko": "주의가 필요한 클러스터는 없습니다.",
+                    "en": "No cluster needs attention."},
+}
+
+
+def _s(key: str, loc: str, **kw) -> str:
+    """One deterministic summary fragment. An unrecognised locale reads Korean,
+    the same value _report_locale fails closed to."""
+    return _SUMMARY_TEXT[key].get(loc, _SUMMARY_TEXT[key]["ko"]).format(**kw)
+
 
 def _report_locale() -> str:
     """The language the summary is written in.
@@ -332,7 +392,7 @@ def _report_locale() -> str:
     return loc if loc in _LOCALES else "ko"
 
 
-def _build_summary_prompt(cluster_id: str, report_date: str, data: dict) -> str:
+def _build_summary_prompt(cluster_id: str, report_date: str, data: dict, locale: str) -> str:
     aas = data.get("aas") or {}
     peak = data.get("aas_peak") or {}
     storage = data.get("storage") or {}
@@ -359,7 +419,9 @@ def _build_summary_prompt(cluster_id: str, report_date: str, data: dict) -> str:
         # Only the ANSWER-LANGUAGE directive follows the locale. The data labels
         # below stay Korean: the model reads them, and rewording a tuned prompt
         # changes the answer, which is not what a language switch asks for.
-        + _SUMMARY_LANG[_report_locale()]
+        # The caller resolved `locale` through _report_locale's allowlist; the
+        # .get keeps a bad caller from KeyError-ing the whole report run.
+        + _SUMMARY_LANG.get(locale, _SUMMARY_LANG["ko"])
         + "핵심 변화만 짚고, 평소 운영 범위 안의 수치는 굳이 언급하지 마세요. "
         "리스트/마크다운 헤더 없이 평문으로 쓰세요.\n\n"
         f"## {report_date} 메트릭 요약\n"
@@ -374,26 +436,32 @@ def _build_summary_prompt(cluster_id: str, report_date: str, data: dict) -> str:
     )
 
 
-def _template_summary(cluster_id: str, report_date: str, data: dict) -> str:
-    """Deterministic fallback when Bedrock is unreachable. Less polished
-    than the LLM version but informative."""
+def _template_summary(cluster_id: str, report_date: str, data: dict, locale: str) -> str:
+    """Deterministic fallback when Bedrock is unreachable. Less polished than the
+    LLM version but informative, and in the SAME language as the prose it stands
+    in for: this is what an en deployment actually ships every time Bedrock
+    throttles, so a Korean-only version made the frontend's language label
+    describe a language the row was not in."""
     aas = data.get("aas") or {}
     busy_min = data.get("aas_busy_minutes_above_threshold") or 0
     top = data.get("top_slow_queries") or []
     alerts = data.get("top_alerts") or []
-    pieces = [f"{cluster_id} 24시간 요약 ({report_date})"]
+    pieces = [_s("head", locale, cid=cluster_id, date=report_date)]
     if aas:
-        pieces.append(
-            f"AAS avg={float(aas.get('avg_aas') or 0):.2f}, "
-            f"max={float(aas.get('max_aas') or 0):.2f}, "
-            f"AAS>{data.get('aas_busy_threshold')} 인 샘플 {busy_min}개."
-        )
+        pieces.append(_s(
+            "aas", locale,
+            avg=f"{float(aas.get('avg_aas') or 0):.2f}",
+            max=f"{float(aas.get('max_aas') or 0):.2f}",
+            thr=data.get("aas_busy_threshold"),
+            n=busy_min,
+        ))
     if top:
-        pieces.append(f"Top slow query total {float(top[0].get('total_ms') or 0):.0f}ms 누적.")
+        pieces.append(_s("slow", locale, ms=f"{float(top[0].get('total_ms') or 0):.0f}"))
     if alerts:
-        pieces.append(f"가장 자주 발화한 룰: {alerts[0].get('rule_id')} ({alerts[0].get('fired_count')}회).")
+        pieces.append(_s("rule", locale, rule=alerts[0].get("rule_id"),
+                         n=alerts[0].get("fired_count")))
     if not (top or alerts):
-        pieces.append("주목할 만한 이벤트는 없었습니다.")
+        pieces.append(_s("quiet", locale))
     return " ".join(pieces)
 
 
@@ -444,9 +512,12 @@ def _build_fleet_data(rows: list[dict]) -> dict:
     }
 
 
-def _fleet_summary(report_date: str, fleet_data: dict) -> str:
-    """Deterministic Korean rollup summary, no Bedrock call. Mirrors the
-    _template_summary style."""
+def _fleet_summary(report_date: str, fleet_data: dict, locale: str) -> str:
+    """Deterministic rollup summary, no Bedrock call. Mirrors the
+    _template_summary style, and follows the locale for the same reason: with no
+    model in the path this template is the fleet row's summary on EVERY run, so a
+    Korean-only version was always wrong on an en deployment, not just on the
+    days Bedrock failed."""
     n = fleet_data.get("clusters_total", 0)
     totals = fleet_data.get("totals") or {}
     alerts = totals.get("alerts", 0)
@@ -457,21 +528,21 @@ def _fleet_summary(report_date: str, fleet_data: dict) -> str:
         if int(w.get("alert_count") or 0) > 0
     ]
     pieces = [
-        f"Fleet 전체 요약 ({report_date})",
-        f"클러스터 {n}대, 경보 {alerts}건, 슬로우쿼리 {slow}건.",
+        _s("fleet_head", locale, date=report_date),
+        _s("fleet_totals", locale, n=n, alerts=alerts, slow=slow),
     ]
     if worst:
-        pieces.append(f"주의가 필요한 클러스터: {', '.join(worst[:5])}.")
+        pieces.append(_s("fleet_worst", locale, ids=", ".join(worst[:5])))
     else:
-        pieces.append("주의가 필요한 클러스터는 없습니다.")
+        pieces.append(_s("fleet_clean", locale))
     return " ".join(pieces)
 
 
-def _generate_fleet_rollup(cache_query, s3_bucket, report_date, report_type, fleet_rows):
+def _generate_fleet_rollup(cache_query, s3_bucket, report_date, report_type, fleet_rows, locale):
     """Build + persist the fleet rollup exactly like a cluster report but with
-    cluster_id='*'. Called best-effort by lambda_handler."""
+    cluster_id='*'. Called best-effort by lambda_handler, which owns `locale`."""
     fleet_data = _build_fleet_data(fleet_rows)
-    summary_text = _fleet_summary(report_date, fleet_data)
+    summary_text = _fleet_summary(report_date, fleet_data, locale)
 
     s3_key = f"reports/_fleet/{report_date}-{report_type}.json"
     json_put_ok = False
@@ -489,7 +560,11 @@ def _generate_fleet_rollup(cache_query, s3_bucket, report_date, report_type, fle
             from report_html import build_fleet_report_html
             boto3.client("s3").put_object(
                 Bucket=s3_bucket, Key=s3_key[:-5] + ".html",
-                Body=build_fleet_report_html(report_date, report_type, summary_text, fleet_data),
+                # Shell, summary and lang= all off the ONE locale resolved at
+                # the top of the run: _fleet_summary now follows it too, so the
+                # document is a single language end to end.
+                Body=build_fleet_report_html(report_date, report_type, summary_text,
+                                             fleet_data, locale),
                 ContentType="text/html; charset=utf-8",
             )
         except Exception as e:

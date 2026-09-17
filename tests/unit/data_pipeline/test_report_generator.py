@@ -57,7 +57,7 @@ def _sample_data():
 
 
 def test_template_summary_mentions_cluster_and_aas():
-    text = handler._template_summary("prod-pg-1", "2026-05-28", _sample_data())
+    text = handler._template_summary("prod-pg-1", "2026-05-28", _sample_data(), "ko")
     assert "prod-pg-1" in text
     assert "2026-05-28" in text
     # AAS numbers should appear (rounded to 2dp).
@@ -71,6 +71,7 @@ def test_template_summary_handles_empty_data():
         "c1",
         "2026-05-28",
         {"aas": {}, "top_slow_queries": [], "top_alerts": [], "aas_busy_threshold": 5},
+        "ko",
     )
     # Should not crash on missing fields, and should still say *something*.
     assert "c1" in text
@@ -78,7 +79,7 @@ def test_template_summary_handles_empty_data():
 
 
 def test_build_summary_prompt_includes_signals():
-    prompt = handler._build_summary_prompt("prod-pg-1", "2026-05-28", _sample_data())
+    prompt = handler._build_summary_prompt("prod-pg-1", "2026-05-28", _sample_data(), "ko")
     # Domain expert framing.
     assert "DBA" in prompt or "시니어" in prompt
     # Cluster + date in header.
@@ -96,7 +97,7 @@ def test_build_summary_prompt_handles_no_slow_no_alerts():
     data = _sample_data()
     data["top_slow_queries"] = []
     data["top_alerts"] = []
-    prompt = handler._build_summary_prompt("prod-pg-1", "2026-05-28", data)
+    prompt = handler._build_summary_prompt("prod-pg-1", "2026-05-28", data, "ko")
     assert "(none)" in prompt
 
 
@@ -109,7 +110,7 @@ def test_write_nl_summary_falls_back_on_bedrock_error(mock_boto3):
     mock_bedrock.invoke_model.side_effect = RuntimeError("throttled")
     mock_boto3.client.return_value = mock_bedrock
 
-    text = handler._write_nl_summary("prod-pg-1", "2026-05-28", _sample_data())
+    text = handler._write_nl_summary("prod-pg-1", "2026-05-28", _sample_data(), "ko")
     assert text  # not empty
     assert "prod-pg-1" in text
 
@@ -124,7 +125,7 @@ def test_write_nl_summary_uses_bedrock_text_when_ok(mock_boto3):
     mock_bedrock.invoke_model.return_value = {"body": body_stream}
     mock_boto3.client.return_value = mock_bedrock
 
-    text = handler._write_nl_summary("prod-pg-1", "2026-05-28", _sample_data())
+    text = handler._write_nl_summary("prod-pg-1", "2026-05-28", _sample_data(), "ko")
     assert text == summary
 
 
@@ -138,7 +139,7 @@ def test_write_nl_summary_falls_back_when_bedrock_returns_empty(mock_boto3):
     mock_bedrock.invoke_model.return_value = {"body": body_stream}
     mock_boto3.client.return_value = mock_bedrock
 
-    text = handler._write_nl_summary("prod-pg-1", "2026-05-28", _sample_data())
+    text = handler._write_nl_summary("prod-pg-1", "2026-05-28", _sample_data(), "ko")
     assert text  # not empty, template kicked in
     assert "prod-pg-1" in text
 

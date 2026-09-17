@@ -105,6 +105,77 @@ assert.equal(
   "change",
 );
 
+// 1d. THE LEAD-CLAUSE HOLE, measured 2026-09-17: 5 of 6 realistic English
+// recommendations landed under the READ-ONLY heading. stepKind() takes the lead
+// clause, CHECK_LEAD matches its first verb, and the change verb later in the
+// SAME clause was not a change word, so it returned "check" and the fail-safe
+// `return "change"` was never reached. Every parameter-change verb an English
+// recommendation actually uses (raise, lower, add, apply, set, tune, ...) was
+// missing from CHANGE_WORDS, and 낮추 / 높이 / 설정 were missing from the Korean
+// half, so the same step in Korean read as read-only too.
+for (const text of [
+  "Check the slow query log and lower long_query_time to 1 second",
+  "Review the parameter group and raise work_mem to 16MB",
+  "Verify the current plan, then add an index on orders(created_at)",
+  "Confirm the backup exists and then apply the parameter change",
+  "Monitor connections and raise max_connections if it stays near the cap",
+  "Investigate the blocking chain and kill the blocking session",
+  "Raise work_mem to 16MB",
+  // The same defect in Korean: 확인 led, and 낮추 was not a change word.
+  "슬로우 쿼리 로그를 확인하고 long_query_time을 1초로 낮추세요",
+]) {
+  assert.equal(stepKind(text), "change", text);
+}
+// And the reason `set` and `add` are the two words NOT matched by containment:
+// these are reads whose text contains them inside a longer word.
+assert.equal(stepKind("Review the connection settings"), "check");
+assert.equal(stepKind("Review additional indexes for this table"), "check");
+// `set` needs more than a word boundary, because the producer emits it as a
+// noun head, so the noun phrases are subtracted by name. Both directions:
+assert.equal(stepKind("Set max_connections to 500"), "change");
+assert.equal(
+  stepKind("Review the parameter group and set work_mem to 16MB"),
+  "change",
+);
+assert.equal(stepKind("Review the working set eviction rate"), "check");
+
+// 1e. THE REGRESSION 1d CAUSED, measured 2026-09-17 against the commit before
+// it: anchoring the English half at a clause head fixed 4 steps in the SAFE
+// direction and broke 11 in the UNSAFE one, filing real changes under the
+// read-only heading. An English recommendation names its change in a noun
+// phrase at least as often as in an imperative, and a Latin verb inside Korean
+// prose has no clause head at all. Containment is what catches these, so every
+// one of the 11 is pinned here.
+for (const text of [
+  "Review the schema diff and consider a rollback.",
+  "Inspect the event detail and plan a failover to the reader.",
+  "Verify the index bloat, then a reindex may be required.",
+  "Identify the blocking session and issue a kill on it.",
+  "Review the parameter group before a restart of the writer.",
+  "Examine the instance class and a resize to db.r6g.2xlarge.",
+  "Confirm the engine version and an upgrade to 8.0.39.",
+  "Monitor connections and a scale-out of the reader tier.",
+  // A Latin change verb inside Korean prose. The Korean lead has no English
+  // clause head, so only containment sees these.
+  "차단 세션을 확인하고 kill 하세요",
+  "테이블을 확인하고 vacuum 하세요",
+  // 페일오버 was silently dropped from the Korean list by the 1d edit.
+  "리더 상태를 확인하고 페일오버를 수행하세요",
+  // The Korean parameter-change verbs, as VERB forms, and each one paired with
+  // a LEADING check verb so the unclassifiable fail-safe cannot pass the test
+  // for them. Without the pairing these two pass even with the verb removed,
+  // which is a pin that proves nothing (measured 2026-09-17).
+  "현재 값을 확인하고 work_mem을 16MB로 설정하세요",
+  "통계 상태를 점검하고 테이블 통계를 갱신하세요",
+]) {
+  assert.equal(stepKind(text), "change", text);
+}
+// The mirror of the `set` / `add` noun-head rule, in Korean: 설정 and 갱신 are
+// noun heads at least as often as verb stems, so the bare nouns are NOT change
+// words and these two stay reads.
+assert.equal(stepKind("현재 설정을 확인하세요"), "check");
+assert.equal(stepKind("갱신 이력을 확인하세요"), "check");
+
 // 2. Gaps, which are not counts.
 const gaps = coverageGaps({
   signals_examined: { blocking: 0, events: 2, schema_changes: 0 },
@@ -194,6 +265,20 @@ assert.deepEqual(
     ["change", "model"],
     ["check", "signal"],
   ],
+);
+
+// 4c. And the limit of that guard, which its doc comment used to overstate.
+// Exact equality is defeated by one trailing period, so the near-duplicate
+// DOES reach the reader, one line per source. That is the accepted cost of
+// keeping cross-list dedupe off (the line it would drop is the evidence-bound
+// one), not something the comment may claim is handled.
+const nearly = "Check the current plan with EXPLAIN in Query Lab";
+assert.equal(
+  nextSteps({
+    recommendations: [nearly],
+    candidates: [{ category: "slow_query", suggested_action: nearly + "." }],
+  }).length,
+  2,
 );
 
 // 5. Observations carry their own timestamp and cap at three.

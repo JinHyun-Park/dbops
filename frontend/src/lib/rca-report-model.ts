@@ -138,19 +138,36 @@ export function topCaveats(top: RcaCandidate | undefined): string[] {
  * hypothesis holds, or an operational CHANGE. They must not render as one list:
  * a rollback would inherit a verification query's implied safety.
  *
- * ponytail: keyword classification, with a deliberate fail-safe bias. Two
- * shapes arrive here: the model's `recommendations`, and a collector's
- * `suggested_action`, which is always English and verb-first (see CHECK_LEAD
- * below). The model's list follows the task locale, so it arrives Korean, where
- * the verb is at the END and containment is the only thing that works, or
- * English, which the English CHANGE_WORDS and CHECK_LEAD below already handle.
- * In every case a change word beats a check word and an unclassifiable step
- * lands in 조치, so a change can never be labelled read-only. Upgrade path when this
- * misfiles too often: have the producer emit the class (the collectors write
- * `suggested_action`, so they already know), and keep this only for the
- * model's free-text `recommendations`.
+ * THE FAIL-SAFE DIRECTION, which every edit below has to preserve: filing a
+ * read-only step under 조치 is harmless (a verification query rendered beside
+ * the changes is just a query), while filing a change under the read-only
+ * heading is not, and that asymmetry is the whole reason the two lists are
+ * separate. So an unclassifiable step lands in 조치, and inside the lead clause
+ * a change word beats a check verb.
+ *
+ * ponytail: keyword classification. Two shapes arrive here: the model's
+ * `recommendations`, and a collector's `suggested_action`, which is always
+ * English and verb-first (see CHECK_LEAD below). The model's list follows the
+ * task locale, so it arrives Korean, where the verb is at the END and
+ * containment is the only thing that works, or English.
+ *
+ * It does NOT hold that a change always outranks a check. A step that reads
+ * "check X and lower Y" leads with a check verb and carries its change verb
+ * later in the SAME clause, so CHECK_LEAD decides and the fail-safe `return
+ * "change"` below is never reached. That was true of 5 of 6 realistic English
+ * recommendations (measured 2026-09-17), and of the Korean
+ * "... 확인하고 long_query_time을 1초로 낮추세요" too, because 낮추 was not a
+ * change word. The two lists below are what closes it, and
+ * tools/rca-report-check.mjs pins all of those cases. Upgrade path when this
+ * still misfiles: have the producer emit the class (the collectors write
+ * `suggested_action`, so they already know), and keep this only for the model's
+ * free-text `recommendations`.
  */
-const CHANGE_WORDS = [
+
+// The Korean half, matched by CONTAINMENT. The verb sits at the end of the
+// clause and inflects (낮추세요 / 낮춰 / 낮추는), so the stem is the only stable
+// part there is and a word boundary would fire on none of the endings.
+const CHANGE_WORDS_KO = [
   "롤백",
   "되돌",
   "재시작",
@@ -159,7 +176,6 @@ const CHANGE_WORDS = [
   "중단",
   "종료",
   "취소",
-  "kill",
   "변경",
   "수정",
   "적용",
@@ -173,15 +189,39 @@ const CHANGE_WORDS = [
   "삭제",
   "제거",
   "재색인",
-  "reindex",
-  "vacuum",
-  "failover",
   "페일오버",
   "승인",
   "배포",
-  // The English write verbs this platform actually has tools for. Without them
-  // the lead-clause guard in stepKind() would have nothing to catch an English
-  // change step with.
+  // The parameter-change verbs. Without these a step that leads with a check
+  // verb and ends in the actual change ("... 확인하고 ... 낮추세요") read as
+  // read-only.
+  "낮추",
+  "높이",
+  "올리",
+  "늘리",
+  "줄이",
+  // VERB STEMS, not the bare nouns. "설정" and "갱신" are noun heads at least as
+  // often as verb stems ("현재 설정을 확인하세요" is a read, "갱신 이력을 확인하세요"
+  // is a read), and containment on the bare noun filed both under 조치. The
+  // Korean answer to the same problem English solves for `set` and `add` below:
+  // there the noun phrases are subtracted, here the verb's own 하 is required.
+  "설정하",
+  "갱신하",
+];
+
+// The English half, matched by CONTAINMENT, like the Korean half and for the
+// same reason: the verb inflects ("scaling", "raised", "restarting") and the
+// stem is the stable part. Anchoring these at a clause head was tried and
+// MEASURED WRONG: it dropped 11 real change steps into the read-only heading,
+// the unsafe direction, because an English recommendation names its change in
+// a noun phrase as often as in an imperative ("consider a rollback", "a
+// reindex may be required", "plan a failover to the reader"), and because a
+// Latin verb inside Korean prose ("확인하고 kill 하세요") has no clause head
+// at all.
+//
+// Two words are matched differently, below, because they are the only ones
+// that are also noun heads in this domain.
+const CHANGE_WORDS_EN = [
   "rollback",
   "roll back",
   "restart",
@@ -199,7 +239,54 @@ const CHANGE_WORDS = [
   "migrate",
   "enable",
   "disable",
+  "kill",
+  "reindex",
+  "vacuum",
+  "failover",
+  // The parameter-change verbs, the English mirror of the Korean block above.
+  // These are what an English recommendation actually says, and every one of
+  // them was missing.
+  "raise",
+  "increase",
+  "lower",
+  "decrease",
+  "reduce",
+  "create",
+  "apply",
+  "tune",
+  "adjust",
+  "reconfigure",
+  "rebuild",
+  "stop",
+  "cancel",
+  "approve",
+  "grant",
+  "revoke",
 ];
+
+/**
+ * `set` and `add` cannot be matched by containment: `set` is inside
+ * "settings", "reset" and "offset", `add` inside "additional" and "address".
+ * A word boundary fixes those, but `set` is ALSO a noun head that the
+ * producers actually emit as a READ ("evictions spiking suggests the working
+ * set exceeds capacity"), so the noun phrases are subtracted by name. Keeping
+ * the exception list explicit and two words long is the point: the moment it
+ * needs a third entry, have the producer emit the class instead.
+ */
+const ADD_VERB = /\badd\b/;
+const SET_VERB = /\bset\b/;
+const SET_NOUN =
+  /\b(?:working|result|data|character|replica|row)\s+set\b|\bset\s+of\b/;
+
+/** Any half fires. All of them see the already-lowercased text from stepKind(). */
+function hasChangeWord(s: string): boolean {
+  return (
+    CHANGE_WORDS_KO.some((w) => s.includes(w)) ||
+    CHANGE_WORDS_EN.some((w) => s.includes(w)) ||
+    ADD_VERB.test(s) ||
+    (SET_VERB.test(s) && !SET_NOUN.test(s))
+  );
+}
 
 const CHECK_WORDS = [
   "확인",
@@ -240,12 +327,13 @@ export function stepKind(text: string): "check" | "change" {
   // The lead clause only: everything after the first ";" / ":" / "(" is
   // rationale, and a noun there is not an instruction. The fail-safe bias is
   // kept INSIDE the lead, so a change word there still beats the check verb
-  // ("Check write load / failover" stays a 조치, the conservative direction).
+  // ("Check write load / failover" stays a 조치, the conservative direction,
+  // and so does "Check the slow query log and lower long_query_time").
   const lead = t.split(/[;:(]/, 1)[0];
-  if (CHECK_LEAD.test(lead) && !CHANGE_WORDS.some((w) => lead.includes(w))) {
+  if (CHECK_LEAD.test(lead) && !hasChangeWord(lead)) {
     return "check";
   }
-  if (CHANGE_WORDS.some((w) => t.includes(w))) return "change";
+  if (hasChangeWord(t)) return "change";
   if (CHECK_WORDS.some((w) => t.includes(w))) return "check";
   return "change";
 }
@@ -276,9 +364,13 @@ export interface Step {
  * task_worker._dedupe_advice for the full four grounds.
  *
  * The exact-text `seen` guard below is therefore still the only thing standing
- * between the two lists, and it does MORE work than it used to: two terse
- * English imperatives match exactly far more often than a Korean line and an
- * English one ever could, so genuine duplicates now collapse here.
+ * between the two lists, and it is WEAKER than it looks. Exact equality is
+ * defeated by one trailing period: "Check the current plan with EXPLAIN in
+ * Query Lab." and the same sentence without the period are two different
+ * strings, so both render, one under each source. Only a byte-identical repeat
+ * collapses here. That near-duplicate reaching the reader is the accepted cost
+ * of keeping cross-list dedupe off, for the four grounds above: the line that
+ * would be dropped is the evidence-bound one.
  */
 export function nextSteps(result: RcaResult): Step[] {
   const out: Step[] = [];

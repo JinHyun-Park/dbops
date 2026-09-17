@@ -46,22 +46,36 @@ _LOCALES = ("ko", "en")
 # Every piece of prose whose language follows the task locale, both languages in
 # one table so a reviewer can check on one screen that the hedge survived the
 # crossing (RISK: a lost "가능성 / likely" is the damage no test catches).
+#
+# The two branches may differ in the LANGUAGE DIRECTIVE only, never in what the
+# report contains. The English "analyze" entry is longer because it restates
+# the hedge and the verbatim-identifier rule that the shared Korean prompt body
+# carries implicitly for a model writing Korean; an extra clause that asks for
+# extra CONTENT (a "what to check" line, say) would give the same incident two
+# differently shaped reports depending on who requested it.
 _LANG = {
     "ko": {
         # The output-language directive inside the analysis prompt.
         "analyze": "한국어로 분석하세요. ",
         # The trailing clause of the system prompt.
         "answer": "항상 한국어로 답합니다.",
-        # Trace detail, rendered raw in the RCA report (rca-report.tsx).
+        # Trace detail. rca-report.tsx renders it through t(), NOT raw, so this
+        # ko value needs an en-server.ts key: a ko-locale task is readable on an
+        # en console, and the label is the one part of a frozen Korean report
+        # that can still be translated.
+        # ponytail: the label alone has a key. With duplicates dropped the
+        # rendered detail is label + "dropped", which no exact-equality lookup
+        # can match; upgrade path is a structured trace field, not a key per
+        # count.
         "trace": "한국어 narrative+권장조치",
         "dropped": ", 중복 권장 {n}건 제거",
     },
     "en": {
         "analyze": (
             "Write the analysis in English. Keep the hedging the Korean asks "
-            "for: state what these signals make LIKELY and what to check, "
-            "never assert a confirmed cause. Keep metric names, parameter "
-            "names, SQL and cluster IDs verbatim. "
+            "for: state what these signals make LIKELY, never assert a "
+            "confirmed cause. Keep metric names, parameter names, SQL and "
+            "cluster IDs verbatim. "
         ),
         "answer": (
             "Always answers in English, and hedges any cause the signals only "
@@ -500,14 +514,26 @@ def _same_advice(a: str, b: str) -> bool:
     whichever language that task asked for, so lexical comparison is comparing
     like with like. That is why this stays inside ONE list (see _dedupe_advice).
 
-    IT IS STRICTER ON ENGLISH, deliberately and measurably. Every English token
-    is ASCII, so gate 1 becomes "the entire token sets must be equal" and only a
-    reordered or repunctuated restatement collapses (measured 1.0); a real
-    English paraphrase scores 0.636 and SURVIVES even though the threshold is
-    0.6. Left that way on purpose: relaxing the gate for English would rank
-    "Raise work_mem to 16MB" against "Raise shared_buffers to 16MB" at exactly
-    0.6, i.e. it would start deleting advice about a different knob. Showing a
-    near-duplicate is the cheaper failure.
+    IT IS STRICTER ON ENGLISH, and the measurements say how much. Every English
+    token is ASCII, so gate 1 degenerates to "the entire token sets must be
+    equal" and an English paraphrase dies THERE, without ever being scored: the
+    0.6 threshold is unreachable for pure English, and only a reordered or
+    repunctuated restatement (identical token sets) collapses. Measured:
+    "Raise work_mem to 16MB." against "Increase work_mem to 16MB." scores 0.600
+    overlap and returns False, rejected at gate 1 on raise vs increase.
+
+    The consequence, stated plainly: within-list dedupe is effectively INERT on
+    an English task. Measured on one three-item list holding the same advice
+    twice plus one different item, ko dropped 1 and en dropped 0, so an English
+    reader sees the model's restatements a Korean reader never saw.
+
+    It stays that way anyway. Relaxing gate 1 to identifier-like tokens only
+    would collapse "Add an index on orders(created_at)" against the same line
+    naming users(created_at) at 0.714, deleting advice about a different table,
+    and "Raise work_mem to 16MB" against "Raise shared_buffers to 16MB" scores
+    0.600 for the same reason on a parameter. Deleting different advice is worse
+    than showing a near-duplicate, so the strictness is a deliberate ceiling,
+    not a claim that the dedupe works on English.
     ponytail: lexical ceiling, adequate because it only ever sees one model's
     output in one language. The upgrade path is Titan embeddings, already wired
     in incident/tools/similar_incidents.py, if paraphrases stop being lexical.
@@ -536,22 +562,30 @@ def _dedupe_advice(res: dict) -> int:
     English and _same_advice COULD pair them. The comparison still stays off:
 
       1. the side that would lose is the evidence-bound one. This keeps the
-         FIRST occurrence, so extended across lists the per-candidate action is
-         what gets dropped, and a signal with no next step is worse than a
-         repeated bullet. That argument never depended on the language.
+         FIRST occurrence, and `recommendations` are pushed before
+         `suggested_action`, so extended across lists the per-candidate action
+         is what gets dropped, and a signal with no next step is worse than a
+         repeated bullet. That argument never depended on the language, and
+         after the measurements below it is the load-bearing reason on its own.
       2. the reader is not shown a bare repeat anyway. The UI renders the
          model's advice and each candidate's action with their source and
          category attached (rca-report-model.nextSteps), so a near-duplicate
          reads as "the same advice, and here is the signal demanding it".
-      3. _same_advice requires the ASCII token sets to be EQUAL before it even
-         measures overlap, and the two lists have different authors: the
-         collector text names metric types, the model names parameters and
-         objects. It would rarely fire, so it buys little and risks exactly the
-         deletion the standing rule forbids.
-      4. the cheap guard got stronger for free. nextSteps already drops an
-         EXACT text match across both lists, and two terse English imperatives
-         match exactly far more often than a Korean/English pair ever could, so
-         genuine duplicates now collapse there with no new code.
+      3. it would NOT rarely fire, which is why ground 1 has to carry the
+         decision. _advice_tokens is set-based, so word order does not survive:
+         measured on collector-vs-model text where only a parenthetical is
+         reordered ("Investigate what drove cpu_utilization up around this
+         window (load change, plan regression, runaway query)." against the
+         same line listing the three causes in another order), _same_advice
+         returns True at 1.000 overlap. Turning the comparison on would delete
+         real per-candidate actions readily, not occasionally.
+      4. the cheap guard is weaker than it looks. nextSteps drops an EXACT text
+         match across both lists, and one character defeats it: measured, the
+         model's "Check the current plan with EXPLAIN in Query Lab." and the
+         collector's same sentence without the full stop are not equal and both
+         render, though _same_advice would have paired them at 1.000. So a
+         near-duplicate does reach the reader. That is the accepted cost of
+         ground 1, not a free win.
     """
     recs = res.get("recommendations")
     if not isinstance(recs, list) or not recs:
@@ -610,9 +644,12 @@ def _run_rca(cluster_id: str, observed_at: str = "", locale: str = ""):
             dropped = _dedupe_advice(res)
             steps.append({"step": "서술 생성", "tool": "bedrock",
                           "ms": int((time.time() - t) * 1000),
-                          # States the language it actually generated in. It is
-                          # rendered raw (rca-report.tsx), so "한국어 ..." on an
-                          # English report would be a false claim in the UI.
+                          # States the language it actually generated in, so
+                          # "한국어 ..." on an English report would be a false
+                          # claim in the UI. rca-report.tsx renders it through
+                          # t(), so a ko label read on an en console is
+                          # translated while the FACT it states (the prose is
+                          # Korean) survives: see the en-server.ts key.
                           "detail": (_LANG[lang]["trace"]
                                      + (_LANG[lang]["dropped"].replace("{n}", str(dropped))
                                         if dropped else ""))})

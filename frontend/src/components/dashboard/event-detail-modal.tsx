@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { streamChat } from "@/lib/agentcore-sse";
 import { useLocale } from "@/lib/i18n";
-import { answerIn } from "@/lib/prompt-lang";
+import { answerIn, labelIn } from "@/lib/prompt-lang";
 
 export interface DashboardEvent {
   id?: number | string;
@@ -97,14 +97,40 @@ export function EventDetailModal({
     setInsightError(null);
     setInsightLoading(true);
     const detailJson = JSON.stringify(parsed ?? {}, null, 2).slice(0, 8000);
+    // Two languages in one prompt, on purpose. Everything the prompt
+    // PRESCRIBES AS OUTPUT (the three headings, and the fixed answer string a
+    // no-impact event comes back with) goes through labelIn, because
+    // answerIn() flips the answer language and nothing else: leave those in
+    // Korean and an English answer arrives with Korean headings inside it. The
+    // descriptive clause after each colon stays Korean: it is an instruction to
+    // the model, not output, the model follows a Korean instruction to answer
+    // in English fine, and a second copy would duplicate the hedges it carries
+    // (가장 그럴듯한, 구체적으로) and drift from them. One language per piece of
+    // tuned prompt text is the decision, not an oversight.
     const message =
       `Aurora 클러스터에서 운영 이벤트가 기록됐어. ${answerIn(
         locale,
       )} 다음 3개 섹션으로 짧고 명확하게 설명해줘:\n` +
-      `1. **무슨 일이 일어났는지**: 한 문장.\n` +
-      `2. **영향**: 무엇이 깨지거나 달라질 수 있는지 (1-2문장, 이 클러스터의 런타임 관점에서 구체적으로).\n` +
-      `3. **권장 조치**: DBA가 지금 취해야 할 구체적인 행동 한 가지 ` +
-      `(영향이 없으면 "조치 불필요"라고 답해줘).\n\n` +
+      `1. **${labelIn(
+        locale,
+        "무슨 일이 일어났는지",
+        "What happened",
+      )}**: 한 문장.\n` +
+      `2. **${labelIn(
+        locale,
+        "영향",
+        "Impact",
+      )}**: 무엇이 깨지거나 달라질 수 있는지 (1-2문장, 이 클러스터의 런타임 관점에서 구체적으로).\n` +
+      `3. **${labelIn(
+        locale,
+        "권장 조치",
+        "Recommended action",
+      )}**: DBA가 지금 취해야 할 구체적인 행동 한 가지 ` +
+      `(영향이 없으면 "${labelIn(
+        locale,
+        "조치 불필요",
+        "No action needed",
+      )}"라고 답해줘).\n\n` +
       `Event metadata:\n` +
       `- Cluster: ${clusterId}\n` +
       `- Type: ${event.event_type} (${prettyLabel})\n` +

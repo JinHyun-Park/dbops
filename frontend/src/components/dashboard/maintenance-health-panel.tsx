@@ -10,7 +10,7 @@ import { fmtRelative } from "@/lib/format";
 import { confidence, trackRecordLabel } from "@/lib/remediation";
 import { engineBadge } from "@/lib/engine";
 import { useLocale, useT } from "@/lib/i18n";
-import { answerIn } from "@/lib/prompt-lang";
+import { answerIn, labelIn } from "@/lib/prompt-lang";
 
 const SEV_BADGE: Record<HealthFinding["severity"], string> = {
   critical: "bg-rose-500/20 text-rose-300 border border-rose-500/40",
@@ -387,6 +387,11 @@ function FindingDetailModal({
   // 사용자가 명시적으로 조치를 진행할 때만 chat으로. 거기서 에이전트가
   // request_approval을 호출해 승인 센터에 올린다. "원인+조치"(설명)와
   // "승인 요청 생성"을 분리해, 단순 확인이 승인 센터를 오염시키지 않게 한다.
+  // prompt-lang: delegated. This prompt pins NO answer language on purpose:
+  // it opens /chat, where the agent's own locale-aware system prompt decides,
+  // which is the right outcome for a prompt the operator then keeps talking to.
+  // tools/prompt-lang-check.mjs counts this marker, so removing it fails the
+  // gate rather than quietly turning an unpinned prompt into an unnoticed one.
   const proceedInChat = () => {
     const prompt =
       `${finding.subject} (${finding.check_type}) 항목을 조치하고 싶어. ` +
@@ -410,9 +415,23 @@ function FindingDetailModal({
       } DBA야. 아래 유지보수 항목을 ${answerIn(
         locale,
       )} 다음 3개 섹션으로 짧고 명확하게 설명해줘:\n` +
-      `1. **왜 중요한지**: 운영 리스크 한 문장.\n` +
-      `2. **구체적 조치**: 실행해야 할 정확한 명령어 또는 파라미터 변경. schema.table 이름까지 포함해.\n` +
-      `3. **검증 방법**: 조치가 반영됐는지 확인할 쿼리나 점검 한 가지.\n\n` +
+      // Prescribed headings follow the ANSWER's language; the clause after each
+      // colon stays Korean. See event-detail-modal.tsx for the full reasoning.
+      `1. **${labelIn(
+        locale,
+        "왜 중요한지",
+        "Why it matters",
+      )}**: 운영 리스크 한 문장.\n` +
+      `2. **${labelIn(
+        locale,
+        "구체적 조치",
+        "Concrete action",
+      )}**: 실행해야 할 정확한 명령어 또는 파라미터 변경. schema.table 이름까지 포함해.\n` +
+      `3. **${labelIn(
+        locale,
+        "검증 방법",
+        "How to verify",
+      )}**: 조치가 반영됐는지 확인할 쿼리나 점검 한 가지.\n\n` +
       // 중요: 이 호출은 "설명만" 받는 읽기 전용이다. 도구를 호출하면
       // 에이전트가 request_approval을 자동 실행해 승인 센터에 항목이
       // 쌓인다(사용자는 확인만 하려던 것). 실제 승인 요청은 사용자가

@@ -266,9 +266,15 @@ export const EN_SERVER: Record<string, string> = {
     "The database rejected this statement. Check the SQL syntax and the table and column names it references (the full error is recorded in the server log).",
   "EXPLAIN 실행에 실패했습니다. 클러스터 연결/권한 문제일 수 있으니 잠시 후 다시 시도하고, 계속되면 서버 로그를 확인하세요.":
     "Running EXPLAIN failed. It may be a cluster connection or permission problem, so try again shortly, and check the server log if it keeps happening.",
-  "[a-z0-9_-] 문자 1~32자여야 합니다.":
-    "Has to be 1 to 32 characters from [a-z0-9_-].",
-  "true 또는 false여야 합니다.": "Has to be true or false.",
+  // api/config emits these unprefixed, with the key name inside the literal:
+  // lookup is exact equality, so a body composed as `${key}: ${hint}` could
+  // never match a key for the bare hint.
+  "TICKETING_PROVIDER: [a-z0-9_-] 문자 1~32자여야 합니다.":
+    "TICKETING_PROVIDER: has to be 1 to 32 characters from [a-z0-9_-].",
+  "REPORT_DELIVERY_ENABLED: true 또는 false여야 합니다.":
+    "REPORT_DELIVERY_ENABLED: has to be true or false.",
+  "DEFAULT_LOCALE: ko 또는 en이어야 합니다.":
+    "DEFAULT_LOCALE: has to be ko or en.",
   "허브 계정 ID를 확인하지 못했습니다. 잠시 후 다시 시도하세요.":
     "The hub account ID could not be confirmed. Please try again shortly.",
   // One string, three producers: api/dashboard, api/alerts, api/saved_queries.
@@ -445,6 +451,10 @@ export const EN_SERVER: Record<string, string> = {
   // ── mcp-servers: task_worker trace, incident tools ───────────────────────
   진단: "Diagnose",
   "서술 생성": "Write the narrative",
+  // A ko-locale task is readable on an en console: the narrative itself is
+  // frozen Korean prose, but this LABEL is a fixed literal, so translating it
+  // keeps the fact (the prose is Korean) legible.
+  "한국어 narrative+권장조치": "Korean narrative + recommendations",
   "모델 미설정/실패, 스킵": "No model configured or the call failed, skipped",
   "신호 감지": "Signal detected",
   "자동 수집 신호에서 뚜렷한 원인 미발견, 수동 점검 권장":

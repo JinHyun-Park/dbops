@@ -74,10 +74,18 @@ CONFIG_KEYS: dict = {
 # for CloudWatch only: no exception text may reach a response payload, and a
 # future validator that echoes the rejected value into its message would leak it
 # straight into the browser. Keep this map in step with the validators above.
+#
+# The KEY NAME is inside each literal, and the response emits the value
+# unprefixed, because en-server.ts translates server prose by exact equality on
+# the Korean source string. A body composed as f"{key}: " + hint can never match
+# a key for the bare hint, so the previous shape shipped two entries that
+# translated nothing. A self-contained literal is also what
+# tests/unit/test_en_server_keys.py requires: every key has to appear verbatim
+# as a Python string literal, which a runtime-composed string never does.
 _INVALID_VALUE_HINT = {
-    "TICKETING_PROVIDER": "[a-z0-9_-] 문자 1~32자여야 합니다.",
-    "REPORT_DELIVERY_ENABLED": "true 또는 false여야 합니다.",
-    "DEFAULT_LOCALE": "ko 또는 en이어야 합니다.",
+    "TICKETING_PROVIDER": "TICKETING_PROVIDER: [a-z0-9_-] 문자 1~32자여야 합니다.",
+    "REPORT_DELIVERY_ENABLED": "REPORT_DELIVERY_ENABLED: true 또는 false여야 합니다.",
+    "DEFAULT_LOCALE": "DEFAULT_LOCALE: ko 또는 en이어야 합니다.",
 }
 
 
@@ -215,7 +223,7 @@ def lambda_handler(event, context=None):
             except ValueError as e:
                 print(f"[config] rejected {key}: {e}")
                 return _resp(400, {"error": (
-                    f"{key}: " + _INVALID_VALUE_HINT.get(key, "값이 올바르지 않습니다.")
+                    _INVALID_VALUE_HINT.get(key) or f"{key}: 값이 올바르지 않습니다."
                 )})
 
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
