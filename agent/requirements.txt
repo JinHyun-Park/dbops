@@ -1,4 +1,4 @@
-bedrock-agentcore>=0.1.0
+bedrock-agentcore>=1.19.0
 strands-agents>=1.50.2
 mcp>=1.28.1
 # server.py SigV4-signs requests to the AWS MCP Server (doc tools) with
