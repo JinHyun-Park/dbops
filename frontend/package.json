@@ -16,11 +16,11 @@
     "signout:check": "node tools/signout-check.mjs"
   },
   "dependencies": {
-    "amazon-cognito-identity-js": "^6.3.20",
+    "amazon-cognito-identity-js": "^6.3.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^1.27.0",
-    "next": "16.3.3",
+    "lucide-react": "^1.55.0",
+    "next": "16.4.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-markdown": "^10.1.0",
@@ -36,13 +36,16 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.3",
+    "eslint-config-next": "16.4.1",
     "tailwindcss": "^4",
     "typescript": "^6"
   },
   "overrides": {
     "nanoid": "^3.3.18",
     "postcss": "^8.5.23",
-    "sharp": "^0.35.4"
+    "sharp": "^0.35.5",
+    "source-map-js": "^1.2.2",
+    "postcss-selector-parser": "^6.1.5",
+    "zod": "^4.6.6"
   }
 }
