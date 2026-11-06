@@ -406,8 +406,13 @@ cd cdk && cdk synth --quiet
 Install once per clone, and every commit / push is auto-checked from then on:
 
 ```bash
-# Dev deps (pytest, ruff, pre-commit, CDK synth deps)
-pip install -r requirements-dev.txt
+# Dev deps (pytest, ruff, pre-commit, CDK synth deps) in a repo venv.
+# Python 3.12 matches CI. A uv-managed interpreter is independent of
+# Homebrew, so a brew python bump cannot break it. deploy.sh and the local
+# post-commit tester pick up .venv automatically when it exists.
+uv venv .venv --python 3.12 --python-preference only-managed
+VIRTUAL_ENV=$PWD/.venv uv pip install -r requirements-dev.txt -r cdk/requirements.txt pip
+source .venv/bin/activate
 
 # Install pre-commit hooks (ruff + prettier + tsc --noEmit on TS changes)
 pre-commit install

@@ -13,6 +13,11 @@ set -uo pipefail   # intentionally NOT -e: run every step and record failures
 
 REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$REPO" || exit 0
+# Prefer the repo venv (uv-managed CPython 3.12, CI's version) over the system
+# python3. Homebrew bumps python3 (3.13 -> 3.15 on 2026-11-06) and the new
+# interpreter has none of the test deps, so every commit reported
+# "No module named pytest" as a unit-test FAIL.
+[ -x "$REPO/.venv/bin/python" ] && export PATH="$REPO/.venv/bin:$PATH"
 mkdir -p .omc
 OUT=".omc/tester-findings.md"
 RANGE="${1:-HEAD~1..HEAD}"
@@ -86,8 +91,14 @@ else
 fi
 
 # --- 2) Unit tests -----------------------------------------------------------
-TEST_RAW="$(python3 -m pytest tests/unit -q 2>&1)"; TEST_RC=$?
+# PYTHONDONTWRITEBYTECODE: this runs in the working tree after every commit, and
+# a __pycache__ left under agent/ makes the AgentCore Runtime deploy reject the
+# image (AGENTS.md).
+TEST_RAW="$(PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/unit -q -p no:cacheprovider 2>&1)"; TEST_RC=$?
 TEST_TAIL="$(printf '%s\n' "$TEST_RAW" | tail -1)"
+if printf '%s' "$TEST_RAW" | grep -q 'No module named pytest'; then
+  TEST_TAIL="$TEST_TAIL (repo venv 없음: README Development의 uv venv 설정 참고)"
+fi
 # Use pytest's EXIT CODE, not output text: 0 = all passed; any non-zero (test
 # failures, usage error, no tests collected, interrupted, pytest missing) is
 # NOT a pass: text-grepping for 'failed|error' missed those cases.

@@ -12,6 +12,11 @@ command -v aws >/dev/null 2>&1 || { echo "❌ AWS CLI required."; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Use the repo venv when it exists (README "Development"). On Homebrew the
+# system python3 is externally managed (PEP 668), so the `pip install` below
+# fails there, and cdk.json's `python3 app.py` needs aws-cdk-lib on the path.
+[ -x "$SCRIPT_DIR/.venv/bin/python" ] && export PATH="$SCRIPT_DIR/.venv/bin:$PATH"
+
 # Stack names are f"dbops-{Settings.ENV}-*" (cdk/app.py) and the region comes
 # from Settings.REGION, so read BOTH from settings.py instead of hardcoding dev
 # and ap-northeast-2. Hardcoding meant any other ENV or region got "Web UI: N/A"
