@@ -7,7 +7,7 @@
 # The other MCP servers share the same asset and get these too (harmless, unused).
 # pymongo pin matches docdb_mongo_collector.
 pymongo>=4.17.0
-redis>=8.0.1
+redis>=8.1.0
 pymemcache>=4
 # pg8000: pure-Python PG driver (no C build) for prewarm_reader's direct
 # connection to a reader INSTANCE endpoint (RDS Data API can't target one instance).
@@ -19,8 +19,8 @@ pymysql>=1.1
 # against RDS SQL Server (no Data API). See mssql_direct.py. pyOpenSSL is
 # needed for pytds's TLS handshake (cafile/validate_host); wheels resolve
 # manylinux2014_x86_64 for the Lambda bundling target.
-python-tds>=1.17
-pyOpenSSL>=26.3.0
+python-tds>=1.17.1
+pyOpenSSL>=26.4.0
 # pyOpenSSL imports typing_extensions at runtime; the manylinux/--python-version
 # 3.12 resolve doesn't always pull it (env marker), so pin it explicitly: its
 # absence makes `import OpenSSL` fail and pytds falls back to "no TLS" (fail-closed).
