@@ -115,7 +115,7 @@ Web UI (Next.js, static) ──SSE──▶ AgentCore Runtime (Strands Agent)
 ### Prerequisites
 
 - AWS Account with AdministratorAccess
-- Node.js 20+, Python 3.10+
+- Node.js `^20.19.0 || ^22.13.0 || >=24` (the frontend's ESLint 10 floor, see `engines` in `frontend/package.json`), Python 3.10+
 - AWS CDK CLI (`npm install -g aws-cdk`)
 - **Bedrock model access** enabled for BOTH of:
   - a Claude text model, via the cross-region inference profile for your region
